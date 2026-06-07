@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS images;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS product_versions;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS products;

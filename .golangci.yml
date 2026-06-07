@@ -16,17 +16,46 @@ linters:
   settings:
     depguard:
       rules:
+        domain-stdlib-only:
+          files:
+            - "internal/domain/**"
+          allow:
+            - $gostd
+        usecase-domain-only:
+          files:
+            - "internal/usecase/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/domain
+        adapter-inner-only:
+          files:
+            - "internal/adapter/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/domain
+            - github.com/themis-project/themis/internal/usecase
+        cmd-infrastructure-only:
+          files:
+            - "cmd/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/infrastructure/config
+            - github.com/themis-project/themis/internal/infrastructure/db
+            - github.com/themis-project/themis/internal/infrastructure/http
+            - github.com/themis-project/themis/internal/infrastructure/http/middleware
+            - github.com/themis-project/themis/internal/infrastructure/metrics
+            - github.com/themis-project/themis/internal/infrastructure/queue
         no-format-leakage:
           files:
             - "**/*.go"
-            - "!internal/parser/**"
+            - "!internal/adapter/parser/**"
           deny:
             - pkg: github.com/CycloneDX/cyclonedx-go
-              desc: CycloneDX imports only allowed in internal/parser
+              desc: CycloneDX imports only allowed in internal/adapter/parser
             - pkg: github.com/spdx/tools-golang
-              desc: SPDX imports only allowed in internal/parser
+              desc: SPDX imports only allowed in internal/adapter/parser
             - pkg: github.com/anchore/syft
-              desc: SBOM format libraries only allowed in internal/parser
+              desc: SBOM format libraries only allowed in internal/adapter/parser
 
   exclusions:
     rules:

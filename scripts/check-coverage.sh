@@ -9,10 +9,23 @@ fi
 module="github.com/themis-project/themis"
 
 declare -a domain_pkgs=(
-	domain parser trust enrichment triage queue notify config logging server
+	domain
+	usecase/ingestion
+	usecase/enrichment
+	usecase/triage
+	usecase/watch
+	adapter/parser
+	adapter/trust
+	adapter/notify
 )
 declare -a infra_pkgs=(
-	store api ingestion watch
+	adapter/store
+	adapter/api
+	infrastructure/db
+	infrastructure/queue
+	infrastructure/http
+	infrastructure/config
+	infrastructure/metrics
 )
 
 failed=0
