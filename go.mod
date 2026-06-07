@@ -3,11 +3,13 @@ module github.com/themis-project/themis
 go 1.25.0
 
 require (
+	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/oapi-codegen/oapi-codegen/v2 v2.4.1
+	github.com/roblaszczak/go-cleanarch v1.2.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/tools v0.38.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -15,7 +17,6 @@ require (
 
 require (
 	github.com/dprotaso/go-yit v0.0.0-20220510233725-9ba8df137936 // indirect
-	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/getkin/kin-openapi v0.127.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
