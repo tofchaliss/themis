@@ -1,0 +1,38 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - depguard
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    depguard:
+      rules:
+        no-format-leakage:
+          files:
+            - "**/*.go"
+            - "!internal/parser/**"
+          deny:
+            - pkg: github.com/CycloneDX/cyclonedx-go
+              desc: CycloneDX imports only allowed in internal/parser
+            - pkg: github.com/spdx/tools-golang
+              desc: SPDX imports only allowed in internal/parser
+            - pkg: github.com/anchore/syft
+              desc: SBOM format libraries only allowed in internal/parser
+
+  exclusions:
+    rules:
+      - path: tools.go
+        linters:
+          - depguard
+      - path: _test.go
+        linters:
+          - depguard
