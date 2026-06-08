@@ -34,6 +34,7 @@ Themis is an open-source Go backend security intelligence platform (vulnerabilit
   - git-ingestion: GitHub + GitLab webhook + polling; repo→product/project mapping via config; same artifact trust gate; CI/CD integration feeds richer data to AI layer
   - rate-limiting: per API key token-bucket rate limiting
   - product-component-api: GET /api/v1/products/{id}/components
+  - runtime-observability: configurable log level (env/YAML), dev-friendly console output, OTel trace exporter for pipeline debugging
 - Modified capabilities: artifact-trust (real cosign via sigstore), ci-webhook-api (E2E tests), sbom-ingestion (wired to event-bus)
 - Deferred from Phase 2: Docker Compose, Bitbucket, UI, Redis, RBAC
 

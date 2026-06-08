@@ -290,6 +290,7 @@ checks.
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
 | `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
 | Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
+| Want verbose / debug server logs | No log-level config in Phase 1 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging is planned for Phase 2 (`runtime-observability`) |
 
 ---
 

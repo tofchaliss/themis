@@ -184,6 +184,7 @@ git-triggered ingestion from GitHub and GitLab.
 | upstream-vex-feeds | Pull VEX from Red Hat, Alpine, Ubuntu, SUSE, Wolfi, Rocky Linux |
 | vex-export | Export Themis risk_context as a VEX document |
 | rate-limiting | Per-product API rate limiting |
+| runtime-observability | Configurable log level (`THEMIS_LOG_LEVEL` / YAML), optional dev console encoding, OTel trace exporter wiring for local debugging |
 
 **Key decisions already made:**
 
