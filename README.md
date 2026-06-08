@@ -288,6 +288,8 @@ checks.
 | Server starts but `/readyz` is 503 | DB down or CVE feed not polled yet | Check `checks` in the JSON body; wait for first watch poll |
 | Ingestion succeeds but no vulnerabilities | Catalog has no CVE matches for your PURLs yet | Check `GET /api/v1/components`; wait for CVE watch or see [Testing](#testing-with-your-own-cyclonedx-sbom) |
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
+| `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
+| Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
 
 ---
 
@@ -468,6 +470,90 @@ curl -s -X POST "$BASE_URL/api/v1/vulnerabilities/$FINDING_ID/triage" \
 
 API reference: [`api/openapi.yaml`](api/openapi.yaml). Sample fixture used in tests:
 [`internal/adapter/parser/testdata/cyclonedx-1.6.json`](internal/adapter/parser/testdata/cyclonedx-1.6.json).
+
+### Resetting ingested data (local dev only)
+
+Phase 1 has **no REST API to delete** uploaded SBOMs, scans, or raw findings — that is by design
+(immutable audit evidence). For local testing you can remove rows directly in PostgreSQL.
+
+**Find what to delete** — each API “scan” is a row in `sbom_documents`:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c \
+  "SELECT id, image_digest, format, is_latest, ingested_at
+   FROM sbom_documents ORDER BY ingested_at DESC LIMIT 10;"
+```
+
+**Delete one upload** (replace `SBOM_ID` with the `id` from the query or from
+`GET /api/v1/projects/{id}/scans`):
+
+```sh
+export SBOM_ID="<uuid>"
+
+psql "$THEMIS_DATABASE_DSN" <<EOF
+BEGIN;
+UPDATE sbom_documents SET supersedes_id = NULL WHERE supersedes_id = '$SBOM_ID';
+UPDATE sbom_documents SET supersedes_id = NULL WHERE id = '$SBOM_ID';
+DELETE FROM triage_history WHERE component_vulnerability_id IN (
+  SELECT id FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM intelligence_signals WHERE component_vulnerability_id IN (
+  SELECT id FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM runtime_exposures WHERE component_vulnerability_id IN (
+  SELECT id FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM remediation_actions WHERE component_vulnerability_id IN (
+  SELECT id FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM risk_context WHERE component_vulnerability_id IN (
+  SELECT id FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM vex_assertions WHERE vex_document_id IN (
+  SELECT id FROM vex_documents WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM vex_assertions WHERE component_version_id IN (
+  SELECT id FROM component_versions WHERE sbom_document_id = '$SBOM_ID');
+DELETE FROM vex_documents WHERE sbom_document_id = '$SBOM_ID';
+DELETE FROM component_vulnerabilities WHERE sbom_document_id = '$SBOM_ID';
+DELETE FROM dependency_relationships WHERE sbom_document_id = '$SBOM_ID';
+DELETE FROM component_versions WHERE sbom_document_id = '$SBOM_ID';
+DELETE FROM sbom_documents WHERE id = '$SBOM_ID';
+DELETE FROM ingestion_jobs WHERE payload->>'scan_id' = '$SBOM_ID';
+COMMIT;
+EOF
+```
+
+Shared `components` and `vulnerabilities` (CVE catalog) rows are left in place.
+
+**Clear all ingestion data** (keep products, projects, images, API keys):
+
+```sh
+psql "$THEMIS_DATABASE_DSN" <<'EOF'
+BEGIN;
+TRUNCATE TABLE
+  triage_history,
+  intelligence_signals,
+  runtime_exposures,
+  remediation_actions,
+  risk_context,
+  vex_assertions,
+  vex_documents,
+  component_vulnerabilities,
+  dependency_relationships,
+  component_versions,
+  sbom_documents,
+  ingestion_jobs
+RESTART IDENTITY CASCADE;
+COMMIT;
+EOF
+```
+
+**Full database reset:**
+
+```sh
+dropdb themis && createdb themis
+export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
+make migrate-up
+```
+
+Then recreate your API key, product, project, and image registration from [Getting Started](#getting-started).
+
+Do not use manual SQL deletes in production — they bypass Themis immutability guarantees.
 
 ### Developer test suite
 
