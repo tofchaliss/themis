@@ -36,10 +36,11 @@ func (d *AsyncDispatcher) EnqueueIngestion(ctx context.Context, input domain.Ing
 	if input.IngestionID != "" {
 		job.ID = input.IngestionID
 	}
-	if err := d.Queue.Enqueue(ctx, job); err != nil {
+	id, err := d.Queue.Enqueue(ctx, job)
+	if err != nil {
 		return "", err
 	}
-	return job.ID, nil
+	return id, nil
 }
 
 // EnqueueReenrichVEX schedules asynchronous VEX re-enrichment.
@@ -51,7 +52,8 @@ func (d *AsyncDispatcher) EnqueueReenrichVEX(ctx context.Context, vexDocumentID 
 	if err != nil {
 		return err
 	}
-	return d.Queue.Enqueue(ctx, domain.Job{Type: domain.JobTypeReenrichVEX, Payload: payload})
+	_, err = d.Queue.Enqueue(ctx, domain.Job{Type: domain.JobTypeReenrichVEX, Payload: payload})
+	return err
 }
 func DecodeJobPayload(job domain.Job) (domain.IngestionInput, domain.JobType, error) {
 	var payload jobPayload

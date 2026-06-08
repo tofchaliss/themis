@@ -72,6 +72,18 @@ func TestEnqueueIngestion(t *testing.T) {
 	}
 }
 
+func TestEnqueueIngestionReturnsGeneratedID(t *testing.T) {
+	queue := &memoryQueue{}
+	dispatcher := &ingestion.AsyncDispatcher{Queue: queue}
+	id, err := dispatcher.EnqueueIngestion(context.Background(), domain.IngestionInput{}, domain.JobTypeIngestSBOM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" || id == "00000000-0000-0000-0000-000000000000" {
+		t.Fatalf("id = %q, want generated job id", id)
+	}
+}
+
 func TestEnqueueIngestionNilQueue(t *testing.T) {
 	dispatcher := &ingestion.AsyncDispatcher{}
 	_, err := dispatcher.EnqueueIngestion(context.Background(), domain.IngestionInput{}, domain.JobTypeIngestSBOM)
@@ -204,12 +216,16 @@ type memoryQueue struct {
 	enqueueErr error
 }
 
-func (m *memoryQueue) Enqueue(_ context.Context, job domain.Job) error {
+func (m *memoryQueue) Enqueue(_ context.Context, job domain.Job) (string, error) {
 	if m.enqueueErr != nil {
-		return m.enqueueErr
+		return "", m.enqueueErr
 	}
 	m.last = job
-	return nil
+	if job.ID == "" {
+		job.ID = "generated-job-id"
+	}
+	m.last = job
+	return job.ID, nil
 }
 
 func (m *memoryQueue) Consume(context.Context) (<-chan domain.Job, error) { return nil, nil }

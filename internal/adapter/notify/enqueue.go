@@ -24,11 +24,12 @@ func (e EnqueueSender) Dispatch(ctx context.Context, event domain.NotificationEv
 	if err != nil {
 		return err
 	}
-	return e.Queue.Enqueue(ctx, domain.Job{
+	_, err = e.Queue.Enqueue(ctx, domain.Job{
 		ID:      uuid.NewString(),
 		Type:    domain.JobTypeNotify,
 		Payload: payload,
 	})
+	return err
 }
 
 // FlushDigest enqueues a digest flush job for the given batch key.
@@ -40,9 +41,10 @@ func (e EnqueueSender) FlushDigest(ctx context.Context, batchKey string) error {
 	if err != nil {
 		return err
 	}
-	return e.Queue.Enqueue(ctx, domain.Job{
+	_, err = e.Queue.Enqueue(ctx, domain.Job{
 		ID:      uuid.NewString(),
 		Type:    domain.JobTypeNotify,
 		Payload: payload,
 	})
+	return err
 }

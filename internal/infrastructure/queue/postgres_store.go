@@ -19,8 +19,11 @@ func NewPostgresJobStore(pool *pgxpool.Pool) *PostgresJobStore {
 	return &PostgresJobStore{pool: pool}
 }
 
-func (s *PostgresJobStore) Create(ctx context.Context, jobType string, payload []byte) (string, error) {
-	id := uuid.NewString()
+func (s *PostgresJobStore) Create(ctx context.Context, jobID, jobType string, payload []byte) (string, error) {
+	id := jobID
+	if id == "" {
+		id = uuid.NewString()
+	}
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}

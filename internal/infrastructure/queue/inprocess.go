@@ -79,28 +79,26 @@ func (q *InProcessQueue) SetHandler(handler JobHandler) {
 }
 
 // Enqueue persists and schedules a job for processing.
-func (q *InProcessQueue) Enqueue(ctx context.Context, job domain.Job) error {
+func (q *InProcessQueue) Enqueue(ctx context.Context, job domain.Job) (string, error) {
 	q.mu.RLock()
 	stopping := q.stopping
 	q.mu.RUnlock()
 	if stopping {
-		return ErrQueueStopped
+		return "", ErrQueueStopped
 	}
 
-	if job.ID == "" {
-		id, err := q.cfg.Store.Create(ctx, string(job.Type), job.Payload)
-		if err != nil {
-			return err
-		}
-		job.ID = id
+	id, err := q.cfg.Store.Create(ctx, job.ID, string(job.Type), job.Payload)
+	if err != nil {
+		return "", err
 	}
+	job.ID = id
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return "", ctx.Err()
 	case q.jobs <- job:
 		q.refreshQueueDepth()
-		return nil
+		return job.ID, nil
 	}
 }
 

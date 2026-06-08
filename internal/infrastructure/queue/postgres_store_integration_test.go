@@ -33,7 +33,7 @@ func TestPostgresJobStoreGetAttempts(t *testing.T) {
 	}
 
 	store := queue.NewPostgresJobStore(pool)
-	id, err := store.Create(ctx, string(domain.JobTypeIngestSBOM), []byte(`{}`))
+	id, err := store.Create(ctx, "", string(domain.JobTypeIngestSBOM), []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

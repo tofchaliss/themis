@@ -34,7 +34,7 @@ func TestInProcessQueueProperty(t *testing.T) {
 		goodByID := make(map[string]bool, n)
 		ctx := context.Background()
 		for i := 0; i < n; i++ {
-			id, err := store.Create(ctx, "test", []byte{byte(i)})
+			id, err := store.Create(ctx, "", "test", []byte{byte(i)})
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
@@ -63,7 +63,7 @@ func TestInProcessQueueProperty(t *testing.T) {
 			t.Fatalf("start: %v", err)
 		}
 		for _, id := range ids {
-			if err := q.Enqueue(ctx, domain.Job{ID: id, Type: "test", Payload: []byte("x")}); err != nil {
+			if _, err := q.Enqueue(ctx, domain.Job{ID: id, Type: "test", Payload: []byte("x")}); err != nil {
 				t.Fatalf("enqueue: %v", err)
 			}
 		}

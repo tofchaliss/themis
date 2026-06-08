@@ -69,7 +69,7 @@ func TestInProcessQueueConcurrentPostgres(t *testing.T) {
 	for i := 0; i < total; i++ {
 		go func() {
 			defer wg.Done()
-			if err := q.Enqueue(ctx, domain.Job{
+			if _, err := q.Enqueue(ctx, domain.Job{
 				Type:    domain.JobTypeIngestSBOM,
 				Payload: []byte(`{"batch":"concurrent"}`),
 			}); err != nil {
@@ -135,7 +135,7 @@ func TestInProcessQueueRetryCountsPersisted(t *testing.T) {
 		_ = q.Stop(stopCtx)
 	})
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
