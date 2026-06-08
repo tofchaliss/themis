@@ -1,0 +1,53 @@
+name: Property Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Nightly deep run at 03:17 UTC.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      rapid_checks:
+        description: "Number of rapid examples per property (default 1000)."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: property-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  property:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve example count
+        id: checks
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.rapid_checks }}" ]]; then
+            checks="${{ inputs.rapid_checks }}"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            checks=20000
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            checks=1000
+          else
+            checks=5000
+          fi
+          echo "rapid_checks=$checks" >> "$GITHUB_OUTPUT"
+
+      - name: Run property tests
+        run: make test-property RAPID_CHECKS=${{ steps.checks.outputs.rapid_checks }}

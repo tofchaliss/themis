@@ -129,6 +129,24 @@ func TestBootVerifySchemaFailure(t *testing.T) {
 	}
 }
 
+func TestBootRequiresPgxPoolForDefaultWorkers(t *testing.T) {
+	path := writeConfig(t, "")
+	cfg := bootConfig{
+		configPath: path,
+		hooks: bootHooks{
+			connect: func(context.Context, string, int32) (domain.DatabasePool, error) {
+				return stubPool{}, nil
+			},
+			runMigrations:       func(string, string) error { return nil },
+			verifySchemaVersion: func(string, string) error { return nil },
+		},
+	}
+	_, err := bootWithConfig(context.Background(), zap.NewNop(), cfg)
+	if err == nil {
+		t.Fatal("expected pgx pool type error")
+	}
+}
+
 func TestBootWorkerStartFailure(t *testing.T) {
 	path := writeConfig(t, "")
 	cfg := bootConfig{
@@ -176,6 +194,40 @@ func TestApplicationCloseWorkerFailure(t *testing.T) {
 	defer cancel()
 	if err := app.Close(ctx); err == nil {
 		t.Fatal("expected worker stop error")
+	}
+}
+
+func TestApplicationCloseInProcessWorkers(t *testing.T) {
+	store := queue.NewMemoryJobStore()
+	workers, err := queue.NewInProcessQueue(queue.InProcessConfig{
+		PoolSize: 1,
+		MaxRetry: 1,
+		Store:    store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workers.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zap.NewNop()
+	s := New(":0", logger, ReadinessChecker{
+		DBPing:             func(context.Context) error { return nil },
+		CVEFeedLastSuccess: func() time.Time { return time.Now() },
+	}, time.Second, time.Second)
+
+	app := &Application{
+		Config:     configDefault(t),
+		Logger:     logger,
+		DB:         stubPool{},
+		Workers:    workers,
+		HTTPServer: s,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := app.Close(ctx); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 

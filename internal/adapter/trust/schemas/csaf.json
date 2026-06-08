@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["document"],
+  "properties": {
+    "document": {
+      "type": "object",
+      "required": ["category"],
+      "properties": {
+        "category": { "const": "csaf_vex" }
+      }
+    }
+  },
+  "additionalProperties": true
+}

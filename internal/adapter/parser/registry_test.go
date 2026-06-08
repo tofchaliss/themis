@@ -1,0 +1,347 @@
+package parser
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/themis-project/themis/internal/domain"
+)
+
+func TestCycloneDXAdapterVersions(t *testing.T) {
+	base := cycloneDXFixture(t)
+	for _, version := range []string{"1.4", "1.5", "1.6"} {
+		doc := cloneMap(base)
+		doc["specVersion"] = version
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, version)
+		if err != nil {
+			t.Fatalf("Parse(%s): %v", version, err)
+		}
+		if len(sbom.Components) != 1 {
+			t.Fatalf("components = %d, want 1", len(sbom.Components))
+		}
+	}
+}
+
+func TestCycloneDXAdapterMissingPURLAndMalformed(t *testing.T) {
+	raw := []byte(`{
+		"bomFormat":"CycloneDX","specVersion":"1.4",
+		"components":[
+			{"name":"no-purl","version":"1.0.0"},
+			{"name":"bad-purl","version":"1.0.0","purl":"not-purl"},
+			{"name":"good","version":"2.0.0","purl":"pkg:npm/good@2.0.0"}
+		]
+	}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(sbom.Components))
+	}
+	if len(sbom.Warnings) != 2 {
+		t.Fatalf("warnings = %d, want 2", len(sbom.Warnings))
+	}
+}
+
+func TestCycloneDXAdapterDependenciesAndVulnerabilities(t *testing.T) {
+	raw := []byte(`{
+		"bomFormat":"CycloneDX","specVersion":"1.5",
+		"components":[{"name":"a","version":"1","purl":"pkg:npm/a@1"}],
+		"dependencies":[{"ref":"pkg:npm/a@1","dependsOn":["pkg:npm/b@2"]}],
+		"vulnerabilities":[{"id":"CVE-1","ratings":[{"severity":"medium","score":5.5,"vector":"V"}],"affects":[{"ref":"pkg:npm/a@1"}]}]
+	}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Dependencies) != 1 || sbom.Dependencies[0].RelationshipType != "depends_on" {
+		t.Fatalf("dependencies = %+v", sbom.Dependencies)
+	}
+	if len(sbom.Vulnerabilities) != 1 || sbom.Vulnerabilities[0].CVEID != "CVE-1" {
+		t.Fatalf("vulnerabilities = %+v", sbom.Vulnerabilities)
+	}
+}
+
+func TestCycloneDXAdapterErrors(t *testing.T) {
+	_, err := (CycloneDXAdapter{}).Parse(context.Background(), []byte("{"), "1.4")
+	if err == nil {
+		t.Fatal("expected malformed json error")
+	}
+	_, err = (CycloneDXAdapter{}).Parse(context.Background(), []byte(`{"bomFormat":"Other","specVersion":"1.4"}`), "1.4")
+	if err == nil || !strings.Contains(err.Error(), "bomFormat") {
+		t.Fatalf("expected bomFormat error, got %v", err)
+	}
+	_, err = (CycloneDXAdapter{}).Parse(context.Background(), []byte(`{"bomFormat":"CycloneDX","specVersion":"9.9"}`), "9.9")
+	if err == nil {
+		t.Fatal("expected unsupported version error")
+	}
+}
+
+func TestCycloneDXAdapterUsesDocumentSpecVersion(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"a","purl":"pkg:npm/a@1"}]}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbom.SpecVersion != "1.6" {
+		t.Fatalf("SpecVersion = %q", sbom.SpecVersion)
+	}
+}
+
+func TestCycloneDXAdapterDerivesNameVersionFromPURL(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"purl":"pkg:npm/derived@9.9.9"}]}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbom.Components[0].Name != "derived" || sbom.Components[0].Version != "9.9.9" {
+		t.Fatalf("component = %+v", sbom.Components[0])
+	}
+}
+
+func TestCycloneDXAdapterEmptyRatings(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","vulnerabilities":[{"id":"CVE-2","ratings":[],"affects":[]}]}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbom.Vulnerabilities[0].Severity != "" {
+		t.Fatalf("severity = %q", sbom.Vulnerabilities[0].Severity)
+	}
+}
+
+func TestCycloneDXAdapterSkipsEmptyAffectRef(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","vulnerabilities":[{"id":"CVE-3","ratings":[{"severity":"low","score":1}],"affects":[{"ref":""},{"ref":"pkg:npm/a@1"}]}]}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Vulnerabilities[0].AffectedPURLs) != 1 {
+		t.Fatalf("affected = %v", sbom.Vulnerabilities[0].AffectedPURLs)
+	}
+}
+
+func cycloneDXFixture(t *testing.T) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"bomFormat":   "CycloneDX",
+		"specVersion": "1.4",
+		"components": []map[string]any{
+			{"name": "lodash", "version": "1.0.0", "purl": "pkg:npm/lodash@1.0.0"},
+		},
+	}
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func TestParseFixtureFiles(t *testing.T) {
+	registry := NewRegistry(RegistryConfig{})
+	cycloneRaw, err := os.ReadFile(filepath.Join("testdata", "cyclonedx-1.6.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := registry.Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.6", cycloneRaw)
+	if !outcome.Accepted {
+		t.Fatalf("cyclonedx parse failed: %s", outcome.Message)
+	}
+	counts := InspectCanonicalSBOM(outcome.SBOM)
+	if counts["components"] != 2 || counts["dependencies"] != 1 || counts["vulnerabilities"] != 1 {
+		t.Fatalf("cyclonedx counts = %+v", counts)
+	}
+
+	spdxRaw, err := os.ReadFile(filepath.Join("testdata", "spdx-2.3.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome = registry.Parse(context.Background(), domain.SBOMFormatSPDX, "2.3", spdxRaw)
+	if !outcome.Accepted {
+		t.Fatalf("spdx parse failed: %s", outcome.Message)
+	}
+	counts = InspectCanonicalSBOM(outcome.SBOM)
+	if counts["components"] != 2 || counts["dependencies"] != 1 {
+		t.Fatalf("spdx counts = %+v", counts)
+	}
+}
+
+func TestRunAdapterParseContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+	_, err := runAdapterParse(ctx, slowParseAdapter{}, nil, "")
+	if err == nil {
+		t.Fatal("expected context error")
+	}
+}
+
+type slowParseAdapter struct{}
+
+func (slowParseAdapter) Format() string { return "slow" }
+
+func (slowParseAdapter) Parse(ctx context.Context, _ []byte, _ string) (domain.CanonicalSBOM, error) {
+	select {
+	case <-ctx.Done():
+		return domain.CanonicalSBOM{}, ctx.Err()
+	case <-time.After(time.Second):
+		return domain.CanonicalSBOM{}, nil
+	}
+}
+
+func TestRegistryUnknownFormat(t *testing.T) {
+	outcome := NewRegistry(RegistryConfig{}).Parse(context.Background(), "unknown", "", []byte("{}"))
+	if outcome.Accepted || outcome.HTTPStatus != 422 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if len(outcome.SupportedFormats) != 3 {
+		t.Fatalf("supported formats = %v", outcome.SupportedFormats)
+	}
+}
+
+func TestRegistryComponentLimit(t *testing.T) {
+	components := make([]map[string]string, 3)
+	for i := range components {
+		components[i] = map[string]string{
+			"name":    "c",
+			"version": "1",
+			"purl":    "pkg:npm/c@1",
+		}
+	}
+	raw, err := json.Marshal(map[string]any{
+		"bomFormat": "CycloneDX", "specVersion": "1.4", "components": components,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(RegistryConfig{MaxComponents: 2, ParseTimeout: time.Second})
+	outcome := registry.Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.4", raw)
+	if outcome.Accepted || outcome.Status != domain.ParseStatusRejected {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if !strings.Contains(outcome.Message, "component count") {
+		t.Fatalf("message = %q", outcome.Message)
+	}
+}
+
+func TestRegistryParseTimeout(t *testing.T) {
+	original := runAdapterParse
+	runAdapterParse = func(ctx context.Context, adapter domain.SBOMAdapter, raw []byte, specVersion string) (domain.CanonicalSBOM, error) {
+		timer := time.NewTimer(50 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return domain.CanonicalSBOM{}, ctx.Err()
+		case <-timer.C:
+			return adapter.Parse(ctx, raw, specVersion)
+		}
+	}
+	t.Cleanup(func() { runAdapterParse = original })
+
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"purl":"pkg:npm/a@1"}]}`)
+	registry := NewRegistry(RegistryConfig{ParseTimeout: time.Millisecond})
+	outcome := registry.Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.4", raw)
+	if outcome.Accepted || outcome.Status != domain.ParseStatusFailed {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+func TestRegistryParseDeadlineExceededError(t *testing.T) {
+	original := runAdapterParse
+	runAdapterParse = func(context.Context, domain.SBOMAdapter, []byte, string) (domain.CanonicalSBOM, error) {
+		return domain.CanonicalSBOM{}, context.DeadlineExceeded
+	}
+	t.Cleanup(func() { runAdapterParse = original })
+
+	outcome := NewRegistry(RegistryConfig{}).Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.4", []byte("{}"))
+	if outcome.Status != domain.ParseStatusFailed || outcome.HTTPStatus != 408 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+func TestRegistrySetsSpecVersionFromRequest(t *testing.T) {
+	registry := NewRegistry(RegistryConfig{})
+	registry.adapters[domain.SBOMFormatCycloneDX] = emptySpecVersionAdapter{}
+	outcome := registry.Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.4", []byte("{}"))
+	if !outcome.Accepted || outcome.SBOM.SpecVersion != "1.4" {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+type emptySpecVersionAdapter struct{}
+
+func (emptySpecVersionAdapter) Format() string { return domain.SBOMFormatCycloneDX }
+
+func (emptySpecVersionAdapter) Parse(context.Context, []byte, string) (domain.CanonicalSBOM, error) {
+	return domain.CanonicalSBOM{}, nil
+}
+
+func TestRegistryAdapterParseError(t *testing.T) {
+	outcome := NewRegistry(RegistryConfig{}).Parse(context.Background(), domain.SBOMFormatCycloneDX, "1.4", []byte("{"))
+	if outcome.Accepted || outcome.Status != domain.ParseStatusRejected {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+func TestRegistryDefaultConfig(t *testing.T) {
+	registry := NewRegistry(RegistryConfig{})
+	if registry.config.MaxComponents != defaultMaxComponents {
+		t.Fatalf("MaxComponents = %d", registry.config.MaxComponents)
+	}
+	if registry.config.ParseTimeout != defaultParseTimeout {
+		t.Fatalf("ParseTimeout = %s", registry.config.ParseTimeout)
+	}
+}
+
+func TestRegistrySuccessfulParseSetsFormat(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"purl":"pkg:npm/a@1"}]}`)
+	outcome := NewRegistry(RegistryConfig{}).Parse(context.Background(), domain.SBOMFormatCycloneDX, "", raw)
+	if !outcome.Accepted || outcome.SBOM.Format != domain.SBOMFormatCycloneDX {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+func TestStringsJoinEmpty(t *testing.T) {
+	if stringsJoin(nil) != "" {
+		t.Fatal("expected empty string")
+	}
+}
+
+func TestAdapterFormats(t *testing.T) {
+	if (CycloneDXAdapter{}).Format() != domain.SBOMFormatCycloneDX {
+		t.Fatal("cyclonedx format mismatch")
+	}
+	if (SPDXAdapter{}).Format() != domain.SBOMFormatSPDX {
+		t.Fatal("spdx format mismatch")
+	}
+	if (TrivyAdapter{}).Format() != domain.SBOMFormatTrivy {
+		t.Fatal("trivy format mismatch")
+	}
+}
+
+func TestInspectCanonicalSBOMReadsAllFields(t *testing.T) {
+	counts := InspectCanonicalSBOM(domain.CanonicalSBOM{
+		Format: "cyclonedx", SpecVersion: "1.4",
+		Components: []domain.CanonicalComponent{{PURL: "pkg:npm/a@1", Name: "a", Version: "1", Ecosystem: "npm", Licenses: []string{"MIT"}}},
+		Dependencies:    []domain.CanonicalDependencyEdge{{FromPURL: "a", ToPURL: "b", RelationshipType: "depends_on"}},
+		Vulnerabilities: []domain.CanonicalVulnerability{{CVEID: "CVE-1", Severity: "high", CVSSScore: 1, CVSSVector: "v", AffectedPURLs: []string{"a"}, FixVersions: []string{"2"}}},
+		Warnings:        []string{"warn"},
+	})
+	if counts["components"] != 1 {
+		t.Fatalf("counts = %+v", counts)
+	}
+}

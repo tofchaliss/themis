@@ -103,14 +103,23 @@ Enforced by `go-cleanarch` and `depguard` in `.golangci.yml`. CI fails on any vi
 
 ## Code Quality Gates (every task group)
 
-Every task group must pass all six gates before moving forward:
+Every task group must pass its gates before moving forward. **Coverage is task-wise; the clean rebuild is codebase-wide** — they are separate checks, run in this order:
 
-1. **Build** — `go build ./...` zero errors
-2. **Unit tests** — `go test ./...` all green
-3. **Coverage** — domain/usecase/parser/trust/notify packages at 100%; adapter/store, adapter/api, infrastructure packages at ≥90%
-4. **Dead code** — `make deadcode` zero findings; every exported symbol has a consumer
-5. **Integration tests** — real PostgreSQL; `//go:build integration` tag
-6. **Clean Architecture** — `make clean-arch` zero import direction violations
+### 1. Task-wise gates (packages touched by the group)
+
+Run only what the group's section in `tasks.md` requires, scoped to that group's package(s):
+
+1. **Unit tests** — `go test ./internal/<package>/...`
+2. **Coverage** — `make coverage-pkg PKG=<path>` (e.g. `PKG=usecase/enrichment`; register new packages in `scripts/check-coverage.sh` first). Threshold: 100% for domain/usecase/parser/trust/notify; ≥90% for store/api/infrastructure.
+3. **Dead code** — `make deadcode` when the group lists it
+4. **Integration tests** — `go test -tags=integration ./internal/<package>/...` for the group's integration gate
+5. **Clean Architecture** — `make clean-arch` when the group lists it
+
+Full-repo coverage (`make coverage`) is reserved for final acceptance (Group 15) and CI-style sweeps.
+
+### 2. Full codebase build (always, after task-wise gates pass)
+
+6. **Clean rebuild** — `make verify-build` (`make clean` then `make all`) on the **entire repo**; confirms the binary still builds from scratch after the group's changes.
 
 ---
 

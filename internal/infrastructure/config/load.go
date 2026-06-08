@@ -147,6 +147,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("THEMIS_TRUST_DEFAULT_POLICY"); v != "" {
 		cfg.Trust.DefaultPolicy = TrustPolicyLevel(strings.ToLower(v))
 	}
+	if v := os.Getenv("THEMIS_WEBHOOK_SECRET"); v != "" {
+		cfg.Webhook.Secret = v
+	}
 }
 
 func intFromEnv(v string) int {

@@ -22,6 +22,7 @@ type Config struct {
 	SMTP     SMTPConfig     `yaml:"smtp"`
 	Teams    TeamsConfig    `yaml:"teams"`
 	Trust    TrustConfig    `yaml:"trust"`
+	Webhook  WebhookConfig  `yaml:"webhook"`
 }
 
 // ServerConfig controls the HTTP server.
@@ -82,6 +83,11 @@ type TeamsConfig struct {
 // TrustConfig holds default trust policy settings.
 type TrustConfig struct {
 	DefaultPolicy TrustPolicyLevel `yaml:"default_policy"`
+}
+
+// WebhookConfig controls CI webhook authentication.
+type WebhookConfig struct {
+	Secret string `yaml:"secret"`
 }
 
 // Default returns a Config populated with Phase 1 defaults.

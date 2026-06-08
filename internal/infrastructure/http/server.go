@@ -12,6 +12,7 @@ import (
 
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/infrastructure/http/middleware"
+	"github.com/themis-project/themis/internal/infrastructure/metrics"
 )
 
 // ReadinessChecker provides dependencies for the readiness probe.
@@ -39,6 +40,7 @@ func New(addr string, logger *zap.Logger, readiness ReadinessChecker, readTimeou
 	r.Use(middleware.RequestID)
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
+	r.Handle("/metrics", metrics.Handler())
 	s.router = r
 
 	s.httpServer = &http.Server{
@@ -64,6 +66,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // Handler returns the root HTTP handler (for tests).
 func (s *Server) Handler() http.Handler {
+	return s.router
+}
+
+// Router returns the chi router for mounting additional routes.
+func (s *Server) Router() chi.Router {
 	return s.router
 }
 

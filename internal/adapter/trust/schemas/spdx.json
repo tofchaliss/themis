@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["spdxVersion"],
+  "properties": {
+    "spdxVersion": { "enum": ["SPDX-2.3", "SPDX-3.0"] },
+    "packages": { "type": "array" }
+  },
+  "additionalProperties": true
+}

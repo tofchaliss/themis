@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -23,26 +22,7 @@ func TestMigrationsUpDownAndIdempotent(t *testing.T) {
 		t.Skip("skipping embedded postgres test in short mode")
 	}
 
-	dir := t.TempDir()
-	db := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Username("themis").
-		Password("themis").
-		Database("themis").
-		Version(embeddedpostgres.V16).
-		Port(15433).
-		DataPath(filepath.Join(dir, "data")).
-		RuntimePath(filepath.Join(dir, "runtime")).
-		BinariesPath(filepath.Join(dir, "bin")).
-		CachePath(filepath.Join(dir, "cache")))
-
-	if err := db.Start(); err != nil {
-		t.Fatalf("start embedded postgres: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = db.Stop()
-	})
-
-	dsn := "postgres://themis:themis@localhost:15433/themis?sslmode=disable"
+	dsn := integrationDatabaseDSN(t, 15433)
 	migrationsPath := filepath.Join("..", "..", "..", "migrations")
 
 	files, err := store.ListMigrationFiles(migrationsPath)

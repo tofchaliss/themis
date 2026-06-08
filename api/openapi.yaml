@@ -1,0 +1,998 @@
+openapi: 3.1.0
+info:
+  title: Themis Security Intelligence API
+  version: 1.0.0
+  description: Phase 1 REST API for SBOM/VEX ingestion, vulnerability management, and configuration.
+servers:
+  - url: /api/v1
+paths:
+  /sbom/upload:
+    post:
+      operationId: uploadSBOM
+      summary: Upload an SBOM document for async processing
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SBOMUploadRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [document]
+              properties:
+                document:
+                  type: string
+                  format: binary
+                format:
+                  type: string
+                  enum: [cyclonedx, spdx]
+                spec_version:
+                  type: string
+                image_id:
+                  type: string
+                  format: uuid
+                image_digest:
+                  type: string
+                project_id:
+                  type: string
+                  format: uuid
+      responses:
+        '202':
+          description: Accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '200':
+          description: Idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /vex/upload:
+    post:
+      operationId: uploadVEX
+      summary: Upload a VEX document linked to a parent SBOM
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VEXUploadRequest'
+      responses:
+        '202':
+          description: Accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '200':
+          description: Idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /webhooks/scan:
+    post:
+      operationId: webhookScan
+      summary: CI webhook for scan notifications
+      security:
+        - WebhookSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookScanRequest'
+      responses:
+        '202':
+          description: Accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /ingestions/{id}:
+    get:
+      operationId: getIngestion
+      summary: Get ingestion lifecycle status
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IngestionID'
+      responses:
+        '200':
+          description: Ingestion status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /products:
+    get:
+      operationId: listProducts
+      summary: List products
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Product list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createProduct
+      summary: Register a product
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /products/{id}/projects:
+    get:
+      operationId: listProjects
+      summary: List projects for a product
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createProject
+      summary: Register a project under a product
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /products/{id}/versions:
+    get:
+      operationId: listProductVersions
+      summary: List versions for a product
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Version list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/{id}/scans:
+    get:
+      operationId: listProjectScans
+      summary: List scans for a project
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Scan list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /scans/{id}:
+    get:
+      operationId: getScan
+      summary: Get scan details
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ScanID'
+      responses:
+        '200':
+          description: Scan detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /scans/{id}/vulnerabilities:
+    get:
+      operationId: listScanVulnerabilities
+      summary: List vulnerabilities for a scan
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ScanID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [critical, high, medium, low, none]
+        - name: effective_state
+          in: query
+          schema:
+            type: string
+        - name: cve_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vulnerability list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanVulnerabilityList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /vulnerabilities/{id}/triage:
+    post:
+      operationId: submitTriage
+      summary: Submit a triage decision
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VulnerabilityFindingID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriageRequest'
+      responses:
+        '200':
+          description: Triage recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /vulnerabilities/{id}/triage/history:
+    get:
+      operationId: getTriageHistory
+      summary: Get triage history for a finding
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VulnerabilityFindingID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Triage history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriageHistoryList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /components:
+    get:
+      operationId: listComponents
+      summary: Query the component catalog
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: purl
+          in: query
+          schema:
+            type: string
+        - name: product_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Component list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /cve-watch/findings:
+    get:
+      operationId: listCVEWatchFindings
+      summary: List CVE watch findings
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: product_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: CVE watch findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CVEWatchFindingList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/notifications:
+    get:
+      operationId: getNotificationConfig
+      summary: Get notification routing rules
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Notification configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: updateNotificationConfig
+      summary: Update notification routing rules
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationConfig'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /config/scanners:
+    get:
+      operationId: getScannerConfig
+      summary: Get scanner configuration
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Scanner configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: updateScannerConfig
+      summary: Update scanner configuration
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScannerConfig'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    WebhookSignature:
+      type: apiKey
+      in: header
+      name: X-Themis-Signature
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    ProductID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProjectID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ScanID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IngestionID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VulnerabilityFindingID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotFound:
+      description: Not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    PayloadTooLarge:
+      description: Payload too large
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    UnprocessableEntity:
+      description: Unprocessable entity
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+  schemas:
+    ProblemDetail:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+    PageMeta:
+      type: object
+      properties:
+        next_cursor:
+          type: string
+    SBOMUploadRequest:
+      type: object
+      required: [format, document]
+      properties:
+        format:
+          type: string
+          enum: [cyclonedx, spdx]
+        spec_version:
+          type: string
+        document:
+          type: object
+          additionalProperties: true
+        image_id:
+          type: string
+          format: uuid
+        image_digest:
+          type: string
+        project_id:
+          type: string
+          format: uuid
+        ci_job_id:
+          type: string
+        ci_pipeline_url:
+          type: string
+        supplier_identity:
+          type: string
+    VEXUploadRequest:
+      type: object
+      required: [format, document, sbom_checksum]
+      properties:
+        format:
+          type: string
+        spec_version:
+          type: string
+        document:
+          type: object
+          additionalProperties: true
+        sbom_checksum:
+          type: string
+        supplier_identity:
+          type: string
+    WebhookScanRequest:
+      type: object
+      required: [format, document, image_digest]
+      properties:
+        format:
+          type: string
+        spec_version:
+          type: string
+        document:
+          type: object
+          additionalProperties: true
+        image_digest:
+          type: string
+        image_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        ci_job_id:
+          type: string
+        ci_pipeline_url:
+          type: string
+    IngestionAccepted:
+      type: object
+      required: [ingestion_id, status]
+      properties:
+        ingestion_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        duplicate:
+          type: boolean
+    IngestionStatus:
+      type: object
+      required: [ingestion_id, status]
+      properties:
+        ingestion_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        scan_id:
+          type: string
+          format: uuid
+        stage_detail:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Product:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateProductRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    ProductList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Product'
+    Project:
+      type: object
+      required: [id, product_id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    ProjectList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Project'
+    ProductVersion:
+      type: object
+      required: [id, product_id, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        version:
+          type: string
+        release_status:
+          type: string
+    ProductVersionList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductVersion'
+    ScanSummary:
+      type: object
+      required: [id, project_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        image_digest:
+          type: string
+        format:
+          type: string
+        trust_status:
+          type: string
+        ingested_at:
+          type: string
+          format: date-time
+    ScanList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ScanSummary'
+    ScanDetail:
+      allOf:
+        - $ref: '#/components/schemas/ScanSummary'
+        - type: object
+          properties:
+            vulnerability_counts:
+              type: object
+              additionalProperties:
+                type: integer
+            ingestion_id:
+              type: string
+              format: uuid
+    ScanVulnerability:
+      type: object
+      required: [id, cve_id, severity]
+      properties:
+        id:
+          type: string
+          format: uuid
+        cve_id:
+          type: string
+        severity:
+          type: string
+        effective_state:
+          type: string
+        component_purl:
+          type: string
+    ScanVulnerabilityList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ScanVulnerability'
+    TriageRequest:
+      type: object
+      required: [decision, justification]
+      properties:
+        decision:
+          type: string
+          enum: [false_positive, accepted_risk, confirmed, resolved, escalate]
+        justification:
+          type: string
+        accepted_until:
+          type: string
+          format: date-time
+        assigned_to:
+          type: string
+    TriageResponse:
+      type: object
+      required: [finding_id, effective_state]
+      properties:
+        finding_id:
+          type: string
+          format: uuid
+        effective_state:
+          type: string
+    TriageHistoryEntry:
+      type: object
+      required: [decision, justification, recorded_at]
+      properties:
+        decision:
+          type: string
+        justification:
+          type: string
+        actor:
+          type: string
+        recorded_at:
+          type: string
+          format: date-time
+    TriageHistoryList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/TriageHistoryEntry'
+    Component:
+      type: object
+      required: [purl, name, ecosystem]
+      properties:
+        purl:
+          type: string
+        name:
+          type: string
+        ecosystem:
+          type: string
+        version:
+          type: string
+    ComponentList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Component'
+    CVEWatchFinding:
+      type: object
+      required: [id, cve_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        cve_id:
+          type: string
+        product_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        detected_at:
+          type: string
+          format: date-time
+    CVEWatchFindingList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/CVEWatchFinding'
+    NotificationRule:
+      type: object
+      required: [name, event_type, channel, destination]
+      properties:
+        name:
+          type: string
+        event_type:
+          type: string
+        channel:
+          type: string
+          enum: [email, slack, webhook]
+        destination:
+          type: string
+        enabled:
+          type: boolean
+    NotificationConfig:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRule'
+    ScannerConfig:
+      type: object
+      properties:
+        enabled_formats:
+          type: array
+          items:
+            type: string
+        max_components:
+          type: integer
+        parse_timeout_seconds:
+          type: integer

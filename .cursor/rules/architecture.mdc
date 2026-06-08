@@ -1,0 +1,114 @@
+---
+description: Themis architecture decisions — layers, invariants, and structural constraints (review and update as needed)
+alwaysApply: true
+---
+
+# Themis architecture decisions
+
+Captured from `PROJECT_CONTEXT.md`, `openspec/changes/themis-phase-1/design.md`, and `proposal-initial.md`. Treat as **current intent**; revisit when scope or phase changes.
+
+## Product shape
+
+- **Standalone Go binary** + **PostgreSQL only** (Phase 1). No SQLite, Redis, or UI in Phase 1.
+- **API-only** Phase 1: REST + webhooks + CLI admin. Web UI, Docker stack, Redis queue, full RBAC → later phases.
+- **Open-source distribution**: single binary, migrations in repo, OpenAPI as first-class artifact.
+
+## Clean Architecture (mandatory)
+
+Dependency rule: **imports point inward only**.
+
+```text
+cmd/themis/              → infrastructure/ only (DI root)
+internal/infrastructure/ → all inner layers
+internal/adapter/        → domain/, usecase/
+internal/usecase/        → domain/ only
+internal/domain/         → stdlib only
+```
+
+- Use cases define business rules; **no** HTTP, pgx, SMTP, Prometheus, or OTel imports in `usecase/`.
+- Parsers, stores, notify, trust, API handlers live in `adapter/`.
+- DB, queue, chi router, config, metrics wiring live in `infrastructure/`.
+- Enforced by `make clean-arch`, `depguard`, and CI.
+
+## Three-layer data model
+
+| Layer | Role | Mutation |
+| ----- | ---- | -------- |
+| **L1 — Inventory truth** | SBOMs, components, raw CVE findings (`component_vulnerabilities`) | Append-only; never delete or mutate findings |
+| **L2 — VEX intelligence** | `vex_documents`, `vex_assertions` | Each document immutable; collection grows with new/revoked assertions |
+| **L3 — Temporal context** | `intelligence_signals`, runtime/remediation (Phase 1: VEX-derived only) | TTL/expiry; Phase 2+ adds EPSS/KEV/AI |
+| **Convergence** | `risk_context` | Computed effective state + score; sole “current status” for a finding |
+
+**Phase 1 risk score:** `f(raw_severity, vex_effective_state)` only.
+
+## Core invariants (never violate)
+
+1. **VEX overlay, never delete** — VEX changes `risk_context.effective_state` only; raw rows in `component_vulnerabilities` are preserved forever.
+2. **Transport ≠ domain** — CycloneDX/SPDX/Trivy structs exist only in `adapter/parser/`; core sees `CanonicalSBOM` / canonical components (PURL identity).
+3. **Integrity chain** — VEX → SBOM checksum → image digest; record chain in Phase 1; real signature crypto in Phase 2 (`StubVerifier` today).
+4. **Deduplication** — SBOM: same `(image_digest, checksum_sha256)` is idempotent; different checksum on same image = new scan (`is_latest`). VEX: `(sbom_checksum, checksum_sha256)`. Support `Idempotency-Key` on uploads/webhooks.
+
+## Ingestion architecture
+
+- **Pipeline is not HTTP** — upload, webhook, and future git ingestion all call the same ingestion use case (`IngestSBOM` / `IngestVEX`).
+- **Async by default** — handlers return `202 Accepted`; work runs via `JobQueue`.
+- **Lifecycle:** `RECEIVED → VALIDATING → CORRELATING → ENRICHING → COMPLETED → NOTIFIED` (or `REJECTED` / retryable `FAILED`).
+- **Stages:** trust gate → parse/normalize → correlate/store findings → VEX overlay / risk_context → notify.
+- **L4 triage → L3** — human triage generates `themis_generated` VEX so decisions auto-apply on future ingestions.
+
+## Job queue
+
+- `domain.JobQueue` interface; Phase 1 = **InProcessQueue** (goroutine pool).
+- Phase 3 may swap Redis implementation without changing use cases.
+
+## Trust & auth (Phase 1)
+
+- **Trust policies:** `strict` | `standard` (default) | `permissive`.
+- **Auth:** API keys only (`X-API-Key`, bcrypt-hashed, product-scoped); admin via CLI.
+- **Webhooks:** HMAC-SHA256 (`X-Themis-Signature`).
+- **Signatures:** `SignatureVerifier` interface; Phase 1 stub records trust status without real cosign/sigstore.
+
+## API conventions
+
+- Prefix **`/api/v1/`**; cursor pagination; **RFC 7807** errors.
+- Health: `/healthz`, `/readyz`; metrics: `/metrics` (Prometheus); OTel spans on ingestion pipeline (injected via context/middleware, not from use cases).
+
+## Observability & audit
+
+- Structured logging (zap), Prometheus metrics, OpenTelemetry tracing from day one.
+- Security-sensitive actions → `audit_log` (triage, trust, keys, config).
+
+## Notifications
+
+- Routing via `notification_rules`; channels: email (SMTP), Teams webhook (Phase 1).
+- Events: ingestion complete/reject, triage, VEX update, CVE watch findings (digest batching for watch).
+
+## CVE watch
+
+- Background NVD/OSV polling; match stored catalog; create findings **between builds**; notify per rules.
+
+## Explicit Phase 1 non-goals (defer)
+
+- AI enrichment, EPSS/KEV sync, real cosign verification, git ingestion, Jenkins library, DefectDojo/native UI, Docker production stack, Redis queue, OIDC/RBAC.
+
+## Technology choices
+
+| Area | Choice |
+| ---- | ------ |
+| Language | Go 1.22+ |
+| DB | PostgreSQL + pgx + golang-migrate |
+| HTTP | chi + oapi-codegen from `api/openapi.yaml` |
+| Queue | In-process (interface-backed) |
+| Lint/arch | golangci-lint, depguard, go-cleanarch, deadcode |
+
+## Quality bar (structural)
+
+- Task groups: unit tests + `make coverage-pkg` + gates per `tasks.md`; then **`make verify-build`** on full repo.
+- Coverage: 100% domain/usecase/parser/trust/notify; ≥90% store/api/infrastructure (see `scripts/check-coverage.sh`).
+- Integration tests: `//go:build integration`; prefer `THEMIS_TEST_DATABASE_DSN` over many embedded Postgres instances locally.
+
+## Related docs
+
+- Details and ADR narrative: `openspec/changes/themis-phase-1/design.md`, `proposal-initial.md`
+- Implementation checklist: `openspec/changes/themis-phase-1/tasks.md`
+- Agent workflow: `AGENTS.md`, `.cursor/rules/themis-context.mdc`

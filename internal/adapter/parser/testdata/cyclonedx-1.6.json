@@ -1,0 +1,38 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "components": [
+    {
+      "type": "library",
+      "name": "lodash",
+      "version": "4.17.21",
+      "purl": "pkg:npm/lodash@4.17.21",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "type": "library",
+      "name": "express",
+      "version": "4.18.2",
+      "purl": "pkg:npm/express@4.18.2",
+      "licenses": [{ "license": { "name": "MIT" } }]
+    },
+    {
+      "type": "library",
+      "name": "missing-purl",
+      "version": "1.0.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:npm/express@4.18.2",
+      "dependsOn": ["pkg:npm/lodash@4.17.21"]
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "CVE-2021-23337",
+      "ratings": [{ "severity": "high", "score": 7.2, "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" }],
+      "affects": [{ "ref": "pkg:npm/lodash@4.17.21" }]
+    }
+  ]
+}

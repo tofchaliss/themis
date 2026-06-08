@@ -25,14 +25,16 @@ var expectedTables = []string{
 	"cve_watch_findings",
 	"audit_log",
 	"ingestion_jobs",
+	"triage_history",
+	"system_state",
 }
 
 var expectedIndexes = []string{
 	"components_purl_key",
-	"component_vulnerabilities_component_version_id_vulnerability_id_key",
-	"risk_context_component_vulnerability_id_key",
+	"idx_component_vulnerabilities_pair",
+	"idx_risk_context_component_vuln_id",
 	"idx_risk_context_effective_state",
-	"vulnerabilities_cve_id_key",
+	"idx_vulnerabilities_cve_id",
 	"sbom_documents_image_digest_checksum_sha256_key",
 	"vex_documents_sbom_checksum_checksum_sha256_key",
 }

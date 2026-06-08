@@ -1,0 +1,46 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "fixture-sbom",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-lodash",
+      "name": "lodash",
+      "versionInfo": "4.17.21",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/lodash@4.17.21"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-express",
+      "name": "express",
+      "versionInfo": "4.18.2",
+      "licenseConcluded": "MIT",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/express@4.18.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-no-purl",
+      "name": "orphan",
+      "versionInfo": "0.0.1"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-Package-express",
+      "relatedSpdxElement": "SPDXRef-Package-lodash",
+      "relationshipType": "DEPENDS_ON"
+    }
+  ]
+}

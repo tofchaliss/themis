@@ -11,6 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/themis-project/themis/internal/adapter/store"
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/infrastructure/config"
 	"github.com/themis-project/themis/internal/infrastructure/db"
@@ -27,6 +29,7 @@ var (
 	dbConnect             = db.Connect
 	dbRunMigrations       = db.RunMigrations
 	dbVerifySchemaVersion = db.VerifySchemaVersion
+	newInProcessQueue     = queue.NewInProcessQueue
 )
 
 // Application holds runtime dependencies started by Boot.
@@ -75,7 +78,6 @@ func Boot(ctx context.Context, logger *zap.Logger, opts ...BootOption) (*Applica
 	cfg := bootConfig{
 		configPath:     "themis.yaml",
 		migrationsPath: "migrations",
-		workerPool:     queue.NoopWorkerPool{},
 		hooks:          defaultBootHooks(),
 	}
 	for _, opt := range opts {
@@ -117,6 +119,27 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 	}
 
 	workers := cfg.workerPool
+	var inProcess *queue.InProcessQueue
+	if workers == nil {
+		pgxPool, ok := pool.(*pgxpool.Pool)
+		if !ok {
+			pool.Close()
+			return nil, fmt.Errorf("database pool must be *pgxpool.Pool")
+		}
+
+		var err error
+		inProcess, err = newInProcessQueue(queue.InProcessConfig{
+			PoolSize:  appCfg.Worker.PoolSize,
+			MaxRetry:  appCfg.Worker.MaxRetry,
+			BaseDelay: appCfg.Worker.BaseDelay,
+			Store:     queue.NewPostgresJobStore(pgxPool),
+		})
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("create worker pool: %w", err)
+		}
+		workers = inProcess
+	}
 	if err := workers.Start(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start worker pool: %w", err)
@@ -128,7 +151,6 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 		DB:      pool,
 		Workers: workers,
 	}
-	app.CVEFeedSuccess.Store(time.Now().UTC())
 
 	addr := fmt.Sprintf(":%d", appCfg.Server.Port)
 	app.HTTPServer = New(
@@ -138,6 +160,23 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 		appCfg.Server.ReadTimeout,
 		appCfg.Server.WriteTimeout,
 	)
+
+	if inProcess != nil {
+		if pgxPool, ok := pool.(*pgxpool.Pool); ok {
+			watchRepo := store.NewPostgresWatchRepository(pgxPool)
+			if ts, err := watchRepo.GetLastSuccessTimestamp(ctx); err == nil {
+				app.CVEFeedSuccess.Store(ts)
+			} else {
+				app.CVEFeedSuccess.Store(time.Now().UTC())
+			}
+			MountAPI(ctx, app.HTTPServer.Router(), APIConfig{
+				Pool:           pgxPool,
+				AppConfig:      appCfg,
+				InProcessQueue: inProcess,
+				CVEFeedSuccess: &app.CVEFeedSuccess,
+			})
+		}
+	}
 
 	return app, nil
 }

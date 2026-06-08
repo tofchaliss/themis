@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -f coverage.txt ]]; then
-	echo "coverage.txt not found; run make coverage first" >&2
-	exit 1
-fi
-
 module="github.com/themis-project/themis"
 
 declare -a domain_pkgs=(
@@ -26,9 +21,29 @@ declare -a infra_pkgs=(
 	infrastructure/http
 	infrastructure/config
 	infrastructure/metrics
+	infrastructure/cli
 )
 
 failed=0
+
+threshold_for() {
+	local pkg_path="$1"
+	local pkg
+	for pkg in "${domain_pkgs[@]}"; do
+		if [[ "$pkg" == "$pkg_path" ]]; then
+			echo 100
+			return
+		fi
+	done
+	for pkg in "${infra_pkgs[@]}"; do
+		if [[ "$pkg" == "$pkg_path" ]]; then
+			echo 90
+			return
+		fi
+	done
+	echo "unknown package: ${pkg_path} (register it in scripts/check-coverage.sh)" >&2
+	exit 2
+}
 
 check_threshold() {
 	local pkg_path="$1"
@@ -54,12 +69,79 @@ check_threshold() {
 	fi
 }
 
+coverage_percent_from_profile() {
+	local pkg_path="$1"
+	local prefix="${module}/internal/${pkg_path}/"
+	awk -v prefix="$prefix" '
+		$1 ~ prefix {
+			n = $2
+			c = $3
+			total += n
+			if (c > 0) {
+				covered += n
+			}
+		}
+		END {
+			if (total == 0) {
+				print "0"
+			} else {
+				printf "%.1f", (covered * 100) / total
+			}
+		}
+	' coverage.out
+}
+
+check_threshold_from_profile() {
+	local pkg_path="$1"
+	local threshold="$2"
+	local import_path="${module}/internal/${pkg_path}"
+	local pct
+
+	if [[ ! -f coverage.out ]]; then
+		echo "FAIL ${import_path}: coverage.out not found"
+		failed=1
+		return
+	fi
+
+	pct="$(coverage_percent_from_profile "$pkg_path")"
+
+	if awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= threshold + 0) }'; then
+		echo "OK   ${import_path}: ${pct}% (threshold ${threshold}%)"
+	else
+		echo "FAIL ${import_path}: ${pct}% (threshold ${threshold}%)"
+		failed=1
+	fi
+}
+
+# Task-group mode: check only the package(s) passed as arguments.
+if [[ $# -gt 0 ]]; then
+	for pkg_path in "$@"; do
+		check_threshold "$pkg_path" "$(threshold_for "$pkg_path")"
+	done
+	if [[ "$failed" -ne 0 ]]; then
+		exit 1
+	fi
+	echo "Package coverage threshold(s) satisfied."
+	exit 0
+fi
+
+# Full-repo mode: used by `make coverage` after generating coverage.out.
+if [[ ! -f coverage.txt ]]; then
+	echo "coverage.txt not found; run make coverage first" >&2
+	exit 1
+fi
+
+if [[ ! -f coverage.out ]]; then
+	echo "coverage.out not found; run make coverage first" >&2
+	exit 1
+fi
+
 for pkg in "${domain_pkgs[@]}"; do
-	check_threshold "$pkg" 100
+	check_threshold_from_profile "$pkg" 100
 done
 
 for pkg in "${infra_pkgs[@]}"; do
-	check_threshold "$pkg" 90
+	check_threshold_from_profile "$pkg" 90
 done
 
 if [[ "$failed" -ne 0 ]]; then

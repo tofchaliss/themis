@@ -10,8 +10,8 @@ import (
 )
 
 func TestBinarySchemaVersion(t *testing.T) {
-	if store.BinarySchemaVersion != 9 {
-		t.Fatalf("BinarySchemaVersion = %d, want 9", store.BinarySchemaVersion)
+	if store.BinarySchemaVersion != 12 {
+		t.Fatalf("BinarySchemaVersion = %d, want 12", store.BinarySchemaVersion)
 	}
 }
 
@@ -81,6 +81,12 @@ func TestValidateMigrationSet(t *testing.T) {
 		"000008_operational_tables.down.sql",
 		"000009_indexes.up.sql",
 		"000009_indexes.down.sql",
+		"000010_risk_context_enrichment.up.sql",
+		"000010_risk_context_enrichment.down.sql",
+		"000011_triage_history.up.sql",
+		"000011_triage_history.down.sql",
+		"000012_system_state.up.sql",
+		"000012_system_state.down.sql",
 	}
 
 	if err := store.ValidateMigrationSet(valid); err != nil {
@@ -156,13 +162,13 @@ func TestCompareSchemaVersion(t *testing.T) {
 
 func TestExpectedTablesAndIndexes(t *testing.T) {
 	tables := store.ExpectedTables()
-	if len(tables) != 22 {
-		t.Fatalf("ExpectedTables() len = %d, want 22", len(tables))
+	if len(tables) != 24 {
+		t.Fatalf("ExpectedTables() len = %d, want 24", len(tables))
 	}
 
 	missing := store.MissingTables([]string{"products", "projects"})
-	if len(missing) != 20 {
-		t.Fatalf("MissingTables() len = %d, want 20", len(missing))
+	if len(missing) != 22 {
+		t.Fatalf("MissingTables() len = %d, want 22", len(missing))
 	}
 
 	indexes := store.ExpectedIndexes()

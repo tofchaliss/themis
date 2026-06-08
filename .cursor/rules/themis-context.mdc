@@ -1,0 +1,25 @@
+---
+description: Themis project context — always read PROJECT_CONTEXT.md, README.md, and openspec/ before work
+alwaysApply: true
+---
+
+# Themis context workflow
+
+At the start of every task, use these sources (do not rely on memory alone):
+
+1. **`PROJECT_CONTEXT.md`** — domain model, three-layer data model, Clean Architecture, phase scope, quality gates, VEX invariants, API conventions.
+2. **`README.md`** — build/test commands (`make check`), config env vars, coverage thresholds, repo structure.
+3. **`openspec/`** — guardrails and implementation truth:
+   - `openspec/changes/themis-phase-1/proposal.md` — scope and capabilities
+   - `openspec/changes/themis-phase-1/design.md` — design decisions
+   - `openspec/changes/themis-phase-1/tasks.md` — task groups and gates (mark complete only when gates pass)
+   - `openspec/changes/themis-phase-1/specs/*/spec.md` — per-capability requirements
+
+Also read **`AGENTS.md`** for the full context index.
+
+## Rules
+
+- Stay within **Phase 1** scope unless the user explicitly requests Phase 2/3 work.
+- Follow Clean Architecture import direction; run `make check` before marking tasks done.
+- Never delete or mutate raw `component_vulnerabilities` rows — VEX overlay only.
+- Check the relevant OpenSpec spec before implementing a capability.

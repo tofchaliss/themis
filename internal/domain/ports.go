@@ -22,6 +22,7 @@ const (
 	JobTypeIngestVEX      JobType = "ingest_vex"
 	JobTypeCorrelateVulns JobType = "correlate_vulns"
 	JobTypeReenrichVEX    JobType = "reenrich_vex"
+	JobTypeNotify         JobType = "notify"
 )
 
 // Job is a unit of asynchronous work.

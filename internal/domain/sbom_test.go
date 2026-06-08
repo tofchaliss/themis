@@ -1,0 +1,30 @@
+package domain_test
+
+import (
+	"testing"
+
+	"github.com/themis-project/themis/internal/domain"
+)
+
+func TestSupportedSBOMFormats(t *testing.T) {
+	formats := domain.SupportedSBOMFormats()
+	if len(formats) != 3 {
+		t.Fatalf("SupportedSBOMFormats() len = %d, want 3", len(formats))
+	}
+	want := map[string]bool{
+		domain.SBOMFormatCycloneDX: true,
+		domain.SBOMFormatSPDX:      true,
+		domain.SBOMFormatTrivy:     true,
+	}
+	for _, format := range formats {
+		if !want[format] {
+			t.Fatalf("unexpected format %q", format)
+		}
+	}
+}
+
+func TestParseStatusConstants(t *testing.T) {
+	if domain.ParseStatusAccepted == "" || domain.ParseStatusRejected == "" || domain.ParseStatusFailed == "" {
+		t.Fatal("parse status constants must be non-empty")
+	}
+}
