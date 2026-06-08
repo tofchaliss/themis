@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -125,7 +126,6 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		TrustPolicy:   domain.TrustPolicy(cfg.AppConfig.Trust.DefaultPolicy),
 	})
 
-	r.Use(metrics.StageSpanMiddleware)
 	api.Mount(r, api.MountConfig{
 		Handler: handler,
 		APIKeyAuth: apimiddleware.APIKeyAuth{
@@ -135,5 +135,6 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 			Secret: cfg.AppConfig.Webhook.Secret,
 		},
 		MaxUploadSize: cfg.AppConfig.Upload.MaxSizeBytes,
+		Middleware:    []func(http.Handler) http.Handler{metrics.StageSpanMiddleware},
 	})
 }

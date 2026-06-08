@@ -15,12 +15,17 @@ type MountConfig struct {
 	APIKeyAuth    apimiddleware.APIKeyAuth
 	WebhookAuth   apimiddleware.WebhookAuth
 	MaxUploadSize int64
+	// Middleware runs on /api/v1 only, before auth and handlers.
+	Middleware []func(http.Handler) http.Handler
 }
 
 // Mount registers /api/v1 routes on the router.
 func Mount(r chi.Router, cfg MountConfig) {
 	wrapped := &webhookServer{Handler: cfg.Handler, webhook: cfg.WebhookAuth}
 	r.Route("/api/v1", func(r chi.Router) {
+		for _, mw := range cfg.Middleware {
+			r.Use(mw)
+		}
 		r.Use(apimiddleware.MaxBytes(cfg.MaxUploadSize))
 		r.Use(cfg.APIKeyAuth.Middleware)
 		gen.HandlerFromMux(wrapped, r)
