@@ -230,7 +230,13 @@ func (r *PostgresScanQueryRepository) ListProjectScans(ctx context.Context, proj
 		       COALESCE(j.id::text, '')
 		FROM sbom_documents s
 		JOIN images i ON i.id = s.image_id
-		LEFT JOIN ingestion_jobs j ON j.payload->>'scan_id' = s.id::text
+		LEFT JOIN LATERAL (
+			SELECT id
+			FROM ingestion_jobs
+			WHERE payload->>'scan_id' = s.id::text
+			ORDER BY created_at DESC
+			LIMIT 1
+		) j ON true
 		`+where+`
 		ORDER BY s.ingested_at DESC
 		LIMIT $2
@@ -268,7 +274,13 @@ func (r *PostgresScanQueryRepository) GetScan(ctx context.Context, id string) (d
 		       COALESCE(j.id::text, '')
 		FROM sbom_documents s
 		JOIN images i ON i.id = s.image_id
-		LEFT JOIN ingestion_jobs j ON j.payload->>'scan_id' = s.id::text
+		LEFT JOIN LATERAL (
+			SELECT id
+			FROM ingestion_jobs
+			WHERE payload->>'scan_id' = s.id::text
+			ORDER BY created_at DESC
+			LIMIT 1
+		) j ON true
 		WHERE s.id = $1
 	`, id).Scan(&detail.ID, &detail.ProjectID, &detail.ProductID, &detail.ImageDigest,
 		&detail.Format, &detail.TrustStatus, &detail.IngestedAt, &detail.IngestionID)
