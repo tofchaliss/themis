@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "themis-phase-*"
   workflow_dispatch:
     inputs:
       tag:
@@ -55,8 +56,14 @@ jobs:
       - name: Detect changes
         id: diff
         run: |
-          if git diff --quiet -- CHANGELOG.md; then
+          if [[ ! -f CHANGELOG.md ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          elif git ls-files --error-unmatch CHANGELOG.md &>/dev/null; then
+            if git diff --quiet -- CHANGELOG.md; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
