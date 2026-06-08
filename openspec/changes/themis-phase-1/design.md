@@ -7,6 +7,7 @@ Themis is a greenfield Go backend — a security intelligence platform that inge
 The platform is designed as a standalone binary backed by PostgreSQL. Phase 1 is API-only (no UI). Phase 2 adds AI enrichment and CI/CD git integration. Phase 3 adds Docker production stack and UI. All architectural decisions in Phase 1 must not obstruct these future phases.
 
 **Key constraints:**
+
 - Open-source distribution — single binary, zero-magic setup
 - PostgreSQL as sole data store — no SQLite, no Redis in Phase 1
 - Cosign signature verification is a stub in Phase 1 — real sigstore calls in Phase 2
@@ -18,6 +19,7 @@ The platform is designed as a standalone binary backed by PostgreSQL. Phase 1 is
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Deliver a working Go REST API that ingests SBOM/VEX documents, correlates CVEs, applies VEX overlay, watches for new CVEs, and sends notifications
 - Establish the three-layer data model as the canonical internal representation
 - Define a job queue interface that Phase 3 can swap without touching business logic
@@ -26,6 +28,7 @@ The platform is designed as a standalone binary backed by PostgreSQL. Phase 1 is
 - All 15 acceptance criteria from proposal-initial.md must be met
 
 **Non-Goals:**
+
 - AI enrichment (Phase 2)
 - EPSS / KEV sync (Phase 2)
 - Real cosign cryptographic verification — stub only (Phase 2)
@@ -44,7 +47,7 @@ The platform is designed as a standalone binary backed by PostgreSQL. Phase 1 is
 
 All data is partitioned into three layers with fundamentally different mutation, trust, and caching characteristics:
 
-```
+```text
   LAYER 1 — IMMUTABLE SOFTWARE INVENTORY TRUTH
   ─────────────────────────────────────────────
   Entities: products, product_versions, artifacts, images, sbom_documents,
@@ -83,7 +86,7 @@ All data is partitioned into three layers with fundamentally different mutation,
 
 CycloneDX and SPDX are treated as transport formats only. The platform normalizes all ingested documents into an internal canonical model on arrival. Format-specific structs exist only in adapter/parser packages — never imported by core domain.
 
-```
+```text
   CycloneDX document ──▶ CycloneDX adapter ──▶ CanonicalSBOM (internal)
   SPDX document      ──▶ SPDX adapter      ──▶ CanonicalSBOM (internal)
   Trivy JSON output  ──▶ Trivy adapter      ──▶ CanonicalSBOM (internal)
@@ -99,7 +102,7 @@ CycloneDX and SPDX are treated as transport formats only. The platform normalize
 
 Raw vulnerability findings are immutable evidence. VEX assertions add a contextual layer that changes the *effective state* in `risk_context` — they never suppress or delete the raw finding.
 
-```
+```text
   Raw finding stored:   CVE-2024-1234, component=lodash@4.17.21, severity=HIGH
                         ↑ NEVER changes. NEVER deleted.
 
@@ -148,7 +151,7 @@ type JobQueue interface {
 
 HTTP handlers (upload endpoint, webhook endpoint) call a shared `IngestionService` — they are not the pipeline. This allows Phase 2 to add git ingestion without duplicating the pipeline.
 
-```
+```text
   POST /api/v1/sbom/upload  ──▶ IngestionService.IngestSBOM(ctx, artifact)
   POST /api/v1/webhooks/scan ──▶ IngestionService.IngestSBOM(ctx, artifact)
   Phase 2 Git handler       ──▶ IngestionService.IngestSBOM(ctx, artifact)
@@ -178,7 +181,7 @@ type SignatureVerifier interface {
 
 ### Decision 7: Canonical Entity Model (ADR-5)
 
-```
+```text
   LAYER 1 ENTITIES
   ─────────────────────────────────────────────────────────────────
   products              Organizational grouping
@@ -219,7 +222,7 @@ type SignatureVerifier interface {
 
 ### Decision 8: Deduplication Strategy (ADR-8)
 
-```
+```text
   SBOM dedup key:  UNIQUE(image_digest, checksum_sha256)
   VEX dedup key:   UNIQUE(sbom_checksum, checksum_sha256)
 
@@ -237,7 +240,7 @@ type SignatureVerifier interface {
 
 Every artifact is linked to its source through a verifiable chain:
 
-```
+```text
   image_signature ──verifies──▶ image_digest (SHA-256)
                                      │
   sbom_signature ──verifies──▶  sbom_checksum (SHA-256)
@@ -266,7 +269,7 @@ Phase 1 records this chain. Cryptographic verification of signatures is Phase 2.
 
 Configurable per product with three levels:
 
-```
+```text
   strict      Require signed SBOM, verified supplier, complete provenance.
               Reject unsigned or unverifiable artifacts.
   standard    Accept unsigned with trust_status=unsigned. Require valid schema.
@@ -288,7 +291,7 @@ Configurable per product with three levels:
 
 ### Decision 13: Ingestion Lifecycle States
 
-```
+```text
   RECEIVED → VALIDATING → CORRELATING → ENRICHING → COMPLETED → NOTIFIED
                 │               │
                 ▼               ▼
@@ -316,24 +319,167 @@ Configurable per product with three levels:
 
 ---
 
-### Decision 16: Code Quality Gates — Coverage and Dead Code
+### Decision 16: Clean Architecture
+
+Themis SHALL follow Clean Architecture (Robert C. Martin) as the structural principle for all packages. The Dependency Rule is the single most important constraint: **source code dependencies can only point inward**. An inner layer MUST NOT import anything from an outer layer.
+
+#### The Four Layers
+
+```text
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  LAYER 4 — INFRASTRUCTURE / FRAMEWORKS & DRIVERS                    │
+  │  internal/infrastructure/                                           │
+  │  cmd/                                                               │
+  │                                                                     │
+  │  ┌─────────────────────────────────────────────────────────────┐   │
+  │  │  LAYER 3 — INTERFACE ADAPTERS                               │   │
+  │  │  internal/adapter/                                          │   │
+  │  │                                                             │   │
+  │  │  ┌─────────────────────────────────────────────────────┐   │   │
+  │  │  │  LAYER 2 — USE CASES                                │   │   │
+  │  │  │  internal/usecase/                                  │   │   │
+  │  │  │                                                     │   │   │
+  │  │  │  ┌─────────────────────────────────────────────┐   │   │   │
+  │  │  │  │  LAYER 1 — DOMAIN ENTITIES                  │   │   │   │
+  │  │  │  │  internal/domain/                           │   │   │   │
+  │  │  │  │  Pure types, domain interfaces, no imports  │   │   │   │
+  │  │  │  └─────────────────────────────────────────────┘   │   │   │
+  │  │  └─────────────────────────────────────────────────────┘   │   │
+  │  └─────────────────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  DEPENDENCY RULE: arrows point inward only
+  domain/ ← usecase/ ← adapter/ ← infrastructure/ ← cmd/
+```
+
+#### Layer Definitions
+
+**Layer 1 — Domain (`internal/domain/`)**
+
+- Pure Go types: `CanonicalSBOM`, `CanonicalComponent`, `RiskContext`, `VEXAssertion`, `Vulnerability`, `Product`, `Image`, `EffectiveState`, `TrustStatus`
+- Port interfaces: `SBOMRepository`, `VulnerabilityRepository`, `RiskContextRepository`, `NotificationSender`, `SignatureVerifier`, `JobQueue`
+- Zero external imports — only Go standard library
+- No framework, no DB driver, no HTTP package, no logger
+
+**Layer 2 — Use Cases (`internal/usecase/`)**
+
+- Application business rules organized by capability:
+  - `usecase/ingestion/` — orchestrate trust gate + parse + store + correlate + enrich + notify
+  - `usecase/enrichment/` — VEX overlay, effective state machine, risk score computation
+  - `usecase/triage/` — human triage decisions, VEX generation from L4, history
+  - `usecase/watch/` — CVE feed polling, catalog matching, new finding creation
+- Imports: `internal/domain/` only
+- Defines use case input/output structs (never HTTP request/response types)
+- Zero knowledge of PostgreSQL, HTTP, SMTP, or any framework
+
+**Layer 3 — Interface Adapters (`internal/adapter/`)**
+
+- Translates between use cases and external formats/systems:
+  - `adapter/parser/` — CycloneDX, SPDX, Trivy adapters → `domain.CanonicalSBOM`
+  - `adapter/store/` — PostgreSQL implementations of `domain.*Repository` interfaces
+  - `adapter/notify/` — SMTP and Teams implementations of `domain.NotificationSender`
+  - `adapter/trust/` — `StubVerifier` (Phase 1), future `CosignVerifier` (Phase 2)
+  - `adapter/api/` — HTTP handlers; translate HTTP request → use case input, use case output → HTTP response
+- Imports: `internal/domain/`, `internal/usecase/`
+- MUST NOT import `internal/infrastructure/`
+
+**Layer 4 — Infrastructure (`internal/infrastructure/`)**
+
+- Frameworks and drivers — wires everything together:
+  - `infrastructure/db/` — `pgx` connection pool, `golang-migrate` runner
+  - `infrastructure/queue/` — `InProcessQueue` implementation of `domain.JobQueue`
+  - `infrastructure/http/` — `chi` router setup, middleware registration
+  - `infrastructure/config/` — YAML + env var config loading
+  - `infrastructure/metrics/` — Prometheus registration, OpenTelemetry setup
+- Imports: all inner layers (this is the only layer permitted to import everything)
+- `cmd/themis/main.go` imports `infrastructure/` to wire the dependency graph (DI root)
+
+#### Directory Layout
+
+```text
+themis/
+├── cmd/
+│   └── themis/
+│       └── main.go              ← DI root; wires infra → adapter → usecase → domain
+│
+└── internal/
+    ├── domain/                  ← Layer 1: entities + port interfaces
+    │   ├── sbom.go
+    │   ├── vulnerability.go
+    │   ├── vex.go
+    │   ├── product.go
+    │   ├── risk.go              (RiskContext, EffectiveState, risk score types)
+    │   └── ports.go             (SBOMRepository, JobQueue, NotificationSender, etc.)
+    │
+    ├── usecase/                 ← Layer 2: application business rules
+    │   ├── ingestion/
+    │   ├── enrichment/
+    │   ├── triage/
+    │   └── watch/
+    │
+    ├── adapter/                 ← Layer 3: interface adapters
+    │   ├── parser/              (CycloneDX, SPDX, Trivy)
+    │   ├── store/               (PostgreSQL repo implementations)
+    │   ├── notify/              (SMTP, Teams)
+    │   ├── trust/               (StubVerifier)
+    │   └── api/                 (HTTP handlers + OpenAPI)
+    │
+    └── infrastructure/          ← Layer 4: frameworks & drivers
+        ├── db/
+        ├── queue/
+        ├── http/
+        ├── config/
+        └── metrics/
+```
+
+#### The Dependency Rule — Enforced by Tooling
+
+```text
+  ALLOWED IMPORTS                        FORBIDDEN IMPORTS
+  ───────────────                        ─────────────────
+  domain/     → stdlib only              domain/     → usecase/, adapter/, infrastructure/
+  usecase/    → domain/                  usecase/    → adapter/, infrastructure/
+  adapter/    → domain/, usecase/        adapter/    → infrastructure/
+  infrastructure/ → all inner layers     (no restriction on infrastructure/)
+  cmd/        → infrastructure/ only     cmd/        → usecase/, adapter/, domain/ directly
+```
+
+Enforced via `go-cleanarch` (github.com/roblaszczak/go-cleanarch) and a `depguard` rule in `.golangci.yml`. CI fails on any import direction violation.
+
+**Why Clean Architecture for Themis:**
+
+- Business logic (use cases) is testable without a database, HTTP server, or any framework — pure Go tests with no infrastructure setup
+- Phase 2 and Phase 3 add new adapters (AI client, cosign verifier, Git provider) without touching use cases or domain
+- The `JobQueue` interface in `domain/` means Phase 3 can swap `InProcessQueue` for `RedisQueue` by changing only `infrastructure/queue/` — zero use case changes
+- Protects the VEX overlay semantics and triage state machine from being polluted by framework concerns
+
+---
+
+### Decision 17: Code Quality Gates — Coverage and Dead Code
 
 Every package in Themis MUST meet coverage and dead code thresholds before a task group is considered complete. These are enforced in CI and locally via `make check`.
 
 #### Coverage targets by package type
 
-```
+```text
   PACKAGE TYPE                         MINIMUM COVERAGE    ENFORCEMENT
   ─────────────────────────────────────────────────────────────────────
   Domain / business logic              100%                Hard fail
-    internal/domain/, internal/parser/
-    internal/trust/, internal/enrichment/
-    internal/triage/, internal/queue/
-    internal/notify/ (routing + aggregation)
+    internal/domain/
+    internal/usecase/enrichment/
+    internal/usecase/triage/
+    internal/usecase/ingestion/
+    internal/usecase/watch/
+    internal/adapter/parser/
+    internal/adapter/trust/
+    internal/adapter/notify/ (routing + aggregation)
 
   Infrastructure (DB, HTTP, external)   90%                Hard fail
-    internal/store/, internal/api/
-    internal/ingestion/, internal/watch/
+    internal/adapter/store/
+    internal/adapter/api/
+    internal/infrastructure/db/
+    internal/infrastructure/queue/
+    internal/infrastructure/http/
 
   Generated code (oapi-codegen stubs)  Excluded            N/A
   cmd/main.go entry point              Excluded            N/A
@@ -345,7 +491,7 @@ Rationale: domain packages contain pure business logic with no external dependen
 
 The system SHALL have zero unreachable or unused code at ship time. Every exported function, type, and constant MUST have at least one consumer (test or production caller). This is enforced by:
 
-- `golang.org/x/tools/cmd/deadcode` — static reachability analysis from `main()`; flags functions never called
+- `golang.org/x/tools/cmd/deadcode` — static reachability analysis from `main()`; flags functions never called — static reachability analysis from `main()`; flags functions never called
 - `staticcheck` (already in golangci-lint) — flags unused exports, unreachable statements, redundant code
 - `go vet ./...` — standard Go analysis, catches shadowing, unreachable code, and misuse patterns
 
@@ -414,7 +560,7 @@ check:                 ## Run all quality gates: build + lint + coverage + deadc
 ## Open Questions
 
 | Question | Owner | Target |
-|----------|-------|--------|
+| -------- | ----- | ------ |
 | Which LLM/provider for Phase 2 AI enrichment? (Claude API assumed) | Architecture | Phase 2 OpenSpec |
 | Commit signing (GPG on git commits) — verify in Phase 2 git ingestion? | Security | Phase 2 OpenSpec |
 | SBOM component count limit — what is the right default cap? | Engineering | Phase 1 implementation |

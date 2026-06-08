@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["bomFormat", "specVersion"],
+  "properties": {
+    "bomFormat": { "const": "CycloneDX" },
+    "specVersion": { "enum": ["1.4", "1.5", "1.6"] },
+    "components": { "type": "array" }
+  },
+  "additionalProperties": true
+}

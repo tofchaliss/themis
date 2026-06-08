@@ -1,0 +1,164 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/themis-project/themis/internal/domain"
+)
+
+const cveWatchLastSuccessKey = domain.SystemStateCVEWatchLastSuccess
+
+// PostgresWatchRepository persists CVE watch catalog matches and poll state.
+type PostgresWatchRepository struct {
+	pool         pgQueryPool
+	vulnCatalog  *PostgresVulnerabilityCatalog
+	correlate    *PostgresCorrelationRepository
+	riskContext  *PostgresRiskContextRepository
+}
+
+// NewPostgresWatchRepository creates a PostgreSQL watch repository.
+func NewPostgresWatchRepository(pool pgQueryPool) *PostgresWatchRepository {
+	return &PostgresWatchRepository{
+		pool:        pool,
+		vulnCatalog: NewPostgresVulnerabilityCatalog(pool),
+		correlate:   NewPostgresCorrelationRepository(pool),
+		riskContext: NewPostgresRiskContextRepository(pool),
+	}
+}
+
+func (r *PostgresWatchRepository) ListWatchCatalog(ctx context.Context) ([]domain.WatchCatalogEntry, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT cv.id, c.purl, c.name, c.ecosystem, cv.version,
+		       i.product_id::text,
+		       COALESCE((SELECT p.id::text FROM projects p WHERE p.product_id = i.product_id LIMIT 1), ''),
+		       cv.sbom_document_id::text
+		FROM component_versions cv
+		JOIN components c ON c.id = cv.component_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN images i ON i.id = s.image_id
+		ORDER BY c.purl ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list watch catalog: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []domain.WatchCatalogEntry
+	for rows.Next() {
+		var entry domain.WatchCatalogEntry
+		if err := rows.Scan(
+			&entry.ComponentVersionID,
+			&entry.PURL,
+			&entry.Name,
+			&entry.Ecosystem,
+			&entry.Version,
+			&entry.ProductID,
+			&entry.ProjectID,
+			&entry.SBOMDocumentID,
+		); err != nil {
+			return nil, fmt.Errorf("scan watch catalog entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate watch catalog: %w", err)
+	}
+	return entries, nil
+}
+
+func (r *PostgresWatchRepository) GetLastSuccessTimestamp(ctx context.Context) (time.Time, error) {
+	var ts time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT value FROM system_state WHERE key = $1
+	`, cveWatchLastSuccessKey).Scan(&ts)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get last success timestamp: %w", err)
+	}
+	return ts.UTC(), nil
+}
+
+func (r *PostgresWatchRepository) SetLastSuccessTimestamp(ctx context.Context, ts time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO system_state (key, value, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, cveWatchLastSuccessKey, ts.UTC())
+	if err != nil {
+		return fmt.Errorf("set last success timestamp: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresWatchRepository) UpsertVulnerability(ctx context.Context, record domain.VulnerabilityRecord) (string, error) {
+	return r.vulnCatalog.Upsert(ctx, record)
+}
+
+func (r *PostgresWatchRepository) HasFinding(ctx context.Context, componentVersionID, cveID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM component_vulnerabilities cv
+			JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+			WHERE cv.component_version_id = $1 AND v.cve_id = $2
+		)
+	`, componentVersionID, cveID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("has finding: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *PostgresWatchRepository) CreateWatchFinding(ctx context.Context, input domain.CreateWatchFindingInput) (domain.CreateWatchFindingResult, error) {
+	exists, err := r.HasFinding(ctx, input.ComponentVersionID, input.CVEID)
+	if err != nil {
+		return domain.CreateWatchFindingResult{}, err
+	}
+	if exists {
+		return domain.CreateWatchFindingResult{Created: false}, nil
+	}
+
+	componentVulnID, err := r.correlate.CreateFinding(ctx, input.ComponentVersionID, input.VulnerabilityID, input.SBOMDocumentID)
+	if err != nil {
+		return domain.CreateWatchFindingResult{}, err
+	}
+	if _, err := r.riskContext.CreateForFinding(ctx, componentVulnID, input.Severity); err != nil {
+		return domain.CreateWatchFindingResult{}, err
+	}
+
+	details, err := json.Marshal(map[string]string{
+		"severity":             input.Severity,
+		"component_purl":       input.ComponentPURL,
+		"component_version_id": input.ComponentVersionID,
+		"source":               "cve_watch",
+	})
+	if err != nil {
+		return domain.CreateWatchFindingResult{}, fmt.Errorf("marshal watch finding details: %w", err)
+	}
+
+	var productID any
+	if input.ProductID != "" {
+		productID = input.ProductID
+	}
+	var projectID any
+	if input.ProjectID != "" {
+		projectID = input.ProjectID
+	}
+
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO cve_watch_findings (id, cve_id, product_id, project_id, status, details)
+		VALUES ($1, $2, $3, $4, 'new', $5)
+	`, uuid.NewString(), input.CVEID, productID, projectID, details)
+	if err != nil {
+		return domain.CreateWatchFindingResult{}, fmt.Errorf("insert cve watch finding: %w", err)
+	}
+
+	return domain.CreateWatchFindingResult{
+		ComponentVulnerabilityID: componentVulnID,
+		Created:                  true,
+	}, nil
+}

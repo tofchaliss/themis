@@ -1,20 +1,33 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context shown to AI when creating OpenSpec artifacts.
+context: |
+  Themis — open-source Go backend security intelligence platform (PostgreSQL, Clean Architecture).
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Canonical context sources (read before any work):
+  - PROJECT_CONTEXT.md — domain model, architecture, phase scope, invariants, quality gates
+  - README.md — build/test/config, coverage targets, repo layout
+  - AGENTS.md — agent workflow tying the above to OpenSpec
+  - openspec/changes/themis-phase-1/ — proposal, design, tasks, capability specs
+
+  Current change: themis-phase-1 (Phase 1 only). Do not add Phase 2/3 features without explicit direction.
+
+  Permanent invariants:
+  - Raw component_vulnerabilities rows are never deleted or modified; VEX changes risk_context.effective_state only
+  - Clean Architecture import direction enforced by go-cleanarch + depguard
+  - Six gates per task group: build, unit tests, coverage, dead code, integration tests, clean-arch
+
+rules:
+  proposal:
+    - Align with PROJECT_CONTEXT.md phase scope; include Non-goals for deferred phases
+    - Reference existing ADRs in proposal-initial.md where applicable
+  design:
+    - Follow Clean Architecture layers; document import rules
+    - State which quality gates apply
+  tasks:
+    - Break into task groups matching capabilities in proposal.md
+    - Each group ends with the six mandatory gates from PROJECT_CONTEXT.md
+    - Mark tasks complete only when make check passes
+  specs:
+    - One spec per capability; include acceptance scenarios
+    - Never require Phase 2/3 features in Phase 1 specs
