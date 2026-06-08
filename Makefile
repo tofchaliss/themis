@@ -86,11 +86,16 @@ clean-arch:
 
 check: build lint clean-arch coverage deadcode
 
+# golang-migrate registers the postgres driver only with -tags postgres.
+MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+
 migrate-up:
-	$(GO) run github.com/golang-migrate/migrate/v4/cmd/migrate@latest -path migrations -database "$${THEMIS_DATABASE_DSN}" up
+	@test -n "$${THEMIS_DATABASE_DSN}" || (echo "THEMIS_DATABASE_DSN is required" >&2; exit 1)
+	$(MIGRATE) -path migrations -database "$${THEMIS_DATABASE_DSN}" up
 
 migrate-down:
-	$(GO) run github.com/golang-migrate/migrate/v4/cmd/migrate@latest -path migrations -database "$${THEMIS_DATABASE_DSN}" down
+	@test -n "$${THEMIS_DATABASE_DSN}" || (echo "THEMIS_DATABASE_DSN is required" >&2; exit 1)
+	$(MIGRATE) -path migrations -database "$${THEMIS_DATABASE_DSN}" down
 
 generate-api:
 	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest --config=api/oapi-codegen.yaml api/openapi.yaml
