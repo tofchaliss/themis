@@ -146,40 +146,19 @@ must be set via environment variables — never in config files.
 THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
 ```
 
-**Full reference (`themis.yaml` format):**
+**Quick start:**
 
-```yaml
-server:
-  port: 8080
-  read_timeout: 30s
-  write_timeout: 30s
-
-database:
-  dsn: ""          # override with THEMIS_DATABASE_DSN
-  pool_max: 20
-
-worker_pool:
-  size: 10
-  retry_max: 3
-
-upload:
-  max_size_mb: 50
-  timeout: 5m
-
-nvd:
-  api_key: ""      # override with THEMIS_NVD_API_KEY
-  poll_interval: 6h
-
-smtp:
-  host: ""         # override with THEMIS_SMTP_HOST
-  port: 587
-  # password: set via THEMIS_SMTP_PASSWORD only
-
-teams:
-  # webhook_url: set via THEMIS_TEAMS_WEBHOOK_URL only
-
-trust_policy_default: standard   # strict | standard | permissive
+```sh
+cp themis.yaml.example themis.yaml
+export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
 ```
+
+`THEMIS_DATABASE_DSN` is **required** — with or without `themis.yaml`. The file may leave
+`database.dsn` empty when the DSN is supplied via the environment (recommended for secrets).
+
+Optional: set `THEMIS_CONFIG_PATH` to use a config file somewhere other than `./themis.yaml`.
+
+**Full reference (`themis.yaml` format):** see [`themis.yaml.example`](themis.yaml.example).
 
 ---
 
@@ -201,7 +180,8 @@ schema version is ahead of the binary version.
 ## Running
 
 ```sh
-# Start the server (reads themis.yaml or env vars)
+# Start the server (requires THEMIS_DATABASE_DSN; optionally reads themis.yaml)
+export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
 ./bin/themis
 
 # Health and readiness
@@ -215,6 +195,8 @@ curl http://localhost:8080/metrics
 ---
 
 ## API Key Management
+
+Admin commands use the same config as the server (`themis.yaml` and/or `THEMIS_DATABASE_DSN`).
 
 ```sh
 # Create a product-scoped key

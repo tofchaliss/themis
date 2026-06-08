@@ -1,0 +1,38 @@
+# Copy to themis.yaml and adjust. Sensitive values (DSN, passwords, API keys)
+# must be set via environment variables — never committed in themis.yaml.
+#
+#   cp themis.yaml.example themis.yaml
+#   export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
+#   ./bin/themis
+
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+
+database:
+  dsn: ""          # required: set THEMIS_DATABASE_DSN
+  max_pool_size: 20
+
+worker:
+  pool_size: 10
+  max_retry: 3
+
+upload:
+  max_size_bytes: 52428800   # 50 MiB
+  timeout: 5m
+
+nvd:
+  api_key: ""      # override with THEMIS_NVD_API_KEY
+  poll_interval: 6h
+
+smtp:
+  host: ""         # override with THEMIS_SMTP_HOST
+  port: 587
+  # password: set via THEMIS_SMTP_PASSWORD only
+
+teams:
+  # webhook_url: set via THEMIS_TEAMS_WEBHOOK_URL only
+
+trust:
+  default_policy: standard   # strict | standard | permissive
