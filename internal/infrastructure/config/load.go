@@ -44,7 +44,7 @@ func Load(path string) (Config, error) {
 // Validate checks required fields and value ranges.
 func (c Config) Validate() error {
 	if c.Database.DSN == "" {
-		return fmt.Errorf("%w: database.dsn", ErrMissingRequiredField)
+		return fmt.Errorf("%w: database.dsn (set in themis.yaml or export THEMIS_DATABASE_DSN)", ErrMissingRequiredField)
 	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
