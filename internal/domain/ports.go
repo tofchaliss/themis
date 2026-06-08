@@ -34,7 +34,7 @@ type Job struct {
 
 // JobQueue dispatches background work. Port implemented in infrastructure/queue.
 type JobQueue interface {
-	Enqueue(ctx context.Context, job Job) error
+	Enqueue(ctx context.Context, job Job) (jobID string, err error)
 	Consume(ctx context.Context) (<-chan Job, error)
 	Ack(ctx context.Context, jobID string) error
 }

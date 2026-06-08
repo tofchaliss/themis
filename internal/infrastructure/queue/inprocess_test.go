@@ -82,7 +82,7 @@ func TestInProcessQueueEnqueueConsumeOrdering(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM, Payload: []byte(`{"n":` + string(rune('0'+i)) + `}`)}); err != nil {
+		if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM, Payload: []byte(`{"n":` + string(rune('0'+i)) + `}`)}); err != nil {
 			t.Fatalf("Enqueue() error = %v", err)
 		}
 	}
@@ -134,7 +134,7 @@ func TestInProcessQueueConcurrency(t *testing.T) {
 	})
 
 	for i := 0; i < 20; i++ {
-		if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+		if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -167,7 +167,7 @@ func TestInProcessQueueAckMarksCompleted(t *testing.T) {
 		_ = q.Stop(stopCtx)
 	})
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 	waitForStatusCount(t, store, "completed", 1)
@@ -203,7 +203,7 @@ func TestInProcessQueueRetryAndMaxFailure(t *testing.T) {
 		_ = q.Stop(stopCtx)
 	})
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -241,10 +241,10 @@ func TestInProcessQueueGracefulShutdownDrainsInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +291,7 @@ func TestInProcessQueueLifecycleErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); !errors.Is(err, queue.ErrQueueStopped) {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); !errors.Is(err, queue.ErrQueueStopped) {
 		t.Fatalf("Enqueue() after stop error = %v", err)
 	}
 }
@@ -301,7 +301,7 @@ func TestMemoryJobStoreErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := store.Create(ctx, "ingest_sbom", nil); err == nil {
+	if _, err := store.Create(ctx, "", "ingest_sbom", nil); err == nil {
 		t.Fatal("expected cancelled context error")
 	}
 	if err := store.MarkRunning(ctx, "missing"); err == nil {

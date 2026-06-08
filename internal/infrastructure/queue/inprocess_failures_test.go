@@ -37,7 +37,7 @@ func TestInProcessQueueMarkRunningFailure(t *testing.T) {
 		_ = q.Stop(context.Background())
 	})
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 

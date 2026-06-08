@@ -14,7 +14,7 @@ func TestMemoryJobStoreGetAttempts(t *testing.T) {
 	store := queue.NewMemoryJobStore()
 	ctx := context.Background()
 
-	id, err := store.Create(ctx, string(domain.JobTypeIngestSBOM), nil)
+	id, err := store.Create(ctx, "", string(domain.JobTypeIngestSBOM), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestInProcessQueueDefaults(t *testing.T) {
 		_ = q.Stop(stopCtx)
 	})
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -83,7 +83,7 @@ func TestInProcessQueueEnqueueContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err == nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err == nil {
 		t.Fatal("expected cancelled context error")
 	}
 }
@@ -124,7 +124,7 @@ func TestInProcessQueueStopTimeout(t *testing.T) {
 	if err := q.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,7 +162,7 @@ func TestInProcessQueueFailureSleepCancelled(t *testing.T) {
 		_ = q.Stop(stopCtx)
 	})
 
-	if err := q.Enqueue(context.Background(), domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(context.Background(), domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,7 +192,7 @@ func TestInProcessQueueFailureWhileStopping(t *testing.T) {
 	if err := q.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
+	if _, err := q.Enqueue(ctx, domain.Job{Type: domain.JobTypeIngestSBOM}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +218,7 @@ func TestInProcessQueueDirectAck(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	id, err := store.Create(ctx, string(domain.JobTypeIngestSBOM), nil)
+	id, err := store.Create(ctx, "", string(domain.JobTypeIngestSBOM), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

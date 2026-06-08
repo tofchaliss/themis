@@ -28,12 +28,15 @@ func NewMemoryJobStore() *MemoryJobStore {
 	return &MemoryJobStore{jobs: make(map[string]memoryJobRecord)}
 }
 
-func (s *MemoryJobStore) Create(ctx context.Context, jobType string, payload []byte) (string, error) {
+func (s *MemoryJobStore) Create(ctx context.Context, jobID, jobType string, payload []byte) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
-	id := uuid.NewString()
+	id := jobID
+	if id == "" {
+		id = uuid.NewString()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jobs[id] = memoryJobRecord{

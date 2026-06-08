@@ -14,12 +14,15 @@ type stubQueue struct {
 	err  error
 }
 
-func (q *stubQueue) Enqueue(_ context.Context, job domain.Job) error {
+func (q *stubQueue) Enqueue(_ context.Context, job domain.Job) (string, error) {
 	if q.err != nil {
-		return q.err
+		return "", q.err
 	}
 	q.jobs = append(q.jobs, job)
-	return nil
+	if job.ID == "" {
+		job.ID = "stub-job-id"
+	}
+	return job.ID, nil
 }
 
 func (q *stubQueue) Consume(context.Context) (<-chan domain.Job, error) { return nil, nil }
