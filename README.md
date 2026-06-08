@@ -114,89 +114,178 @@ A complete, self-contained REST API. No external AI, CI/CD, or UI dependencies.
 
 | Requirement | Version | Notes |
 | ----------- | ------- | ----- |
-| Go | 1.22+ | `go version` |
-| PostgreSQL | 14+ | For integration tests and running the server |
-| golangci-lint | latest | `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` |
+| Go | 1.25+ | Must match `go` version in `go.mod` |
+| PostgreSQL | 14+ | Running and reachable before you start Themis |
+| golangci-lint | latest | Only needed for `make check` / contributing |
+
+The binary itself needs no runtime dependencies beyond PostgreSQL.
 
 ---
 
-## Building
+## Getting Started
+
+End-to-end steps to build and run Themis locally.
+
+### 1. Start PostgreSQL
+
+Ensure PostgreSQL is listening (default `localhost:5432`). On macOS with Homebrew:
 
 ```sh
-# Build the binary to bin/themis
-make build
-
-# Build and run all quality gates (lint + clean-arch + coverage + deadcode)
-make check
+brew services start postgresql@16   # or your installed version
+pg_isready -h localhost -p 5432
 ```
 
-The binary requires no runtime dependencies beyond PostgreSQL.
+### 2. Create the database and role
+
+Replace the username and password with values you control. The examples below use
+`themis` / `themis-dev-password` — do **not** copy placeholder values from docs
+without creating matching Postgres roles.
+
+```sh
+psql -U postgres -c "CREATE USER themis WITH PASSWORD 'themis-dev-password';"
+psql -U postgres -c "CREATE DATABASE themis OWNER themis;"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE themis TO themis;"
+```
+
+### 3. Build the binary
+
+```sh
+make build
+```
+
+### 4. Configure Themis
+
+Themis reads `themis.yaml` (optional) and environment variables. Env vars override file
+values. Put secrets (DSN, passwords, API keys) in the environment — never in committed
+config files.
+
+```sh
+cp themis.yaml.example themis.yaml
+export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
+```
+
+`THEMIS_DATABASE_DSN` is **required** whether or not you use `themis.yaml`. Leave
+`database.dsn` empty in the file when using the env var (recommended).
+
+Optional: `export THEMIS_CONFIG_PATH=/path/to/themis.yaml` if the config file is not in
+the current working directory.
+
+Verify the DSN before continuing:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1'
+```
+
+If this fails with `password authentication failed`, fix the Postgres user/password in the
+DSN — Themis will fail the same way.
+
+### 5. Apply database migrations
+
+Themis also runs pending migrations on startup, but applying them explicitly is useful
+for CI and first-time setup:
+
+```sh
+make migrate-up
+```
+
+`make migrate-up` and `make migrate-down` require `THEMIS_DATABASE_DSN` to be exported in
+the same shell (not a typo like `THEMIS_DTABASE_DSN`).
+
+### 6. Start the server
+
+Run from the repo root (so `./migrations` and optional `./themis.yaml` resolve correctly):
+
+```sh
+./bin/themis
+```
+
+On success you should see the HTTP server listening on port `8080` (or the port in
+`themis.yaml`).
+
+### 7. Verify health
+
+```sh
+curl http://localhost:8080/healthz   # liveness — should return {"status":"ok"}
+curl http://localhost:8080/readyz    # readiness — DB + CVE feed checks
+curl http://localhost:8080/metrics   # Prometheus metrics
+```
+
+`/readyz` may report `cve_feed: no successful poll yet` immediately after startup; that is
+normal until the first background NVD/OSV poll completes.
+
+### 8. Create an API key (optional)
+
+Admin commands use the same config (`themis.yaml` and/or `THEMIS_DATABASE_DSN`):
+
+```sh
+./bin/themis admin create-key --product-id <uuid> --expires 90d
+```
+
+API calls then require `X-API-Key: <key>`. Webhooks use HMAC-SHA256 (`X-Themis-Signature`).
 
 ---
 
 ## Configuration
 
-Themis reads configuration from a `themis.yaml` file and environment variables.
-Environment variables override file values. All sensitive values (passwords, keys, URLs)
-must be set via environment variables — never in config files.
+See [Getting Started](#getting-started) for the minimum setup. Full non-secret defaults and
+YAML field names are in [`themis.yaml.example`](themis.yaml.example).
 
-**Minimum required environment variables:**
+| Variable | Required | Purpose |
+| -------- | -------- | ------- |
+| `THEMIS_DATABASE_DSN` | **Yes** | PostgreSQL connection URL |
+| `THEMIS_CONFIG_PATH` | No | Path to YAML config (default: `./themis.yaml`) |
+| `THEMIS_NVD_API_KEY` | No | NVD API key (higher rate limits) |
+| `THEMIS_SMTP_*` | No | Outbound email for notifications |
+| `THEMIS_TEAMS_WEBHOOK_URL` | No | Microsoft Teams webhook |
+| `THEMIS_WEBHOOK_SECRET` | No | HMAC secret for CI webhook ingestion |
 
-```sh
-THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
-```
-
-**Quick start:**
-
-```sh
-cp themis.yaml.example themis.yaml
-export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
-```
-
-`THEMIS_DATABASE_DSN` is **required** — with or without `themis.yaml`. The file may leave
-`database.dsn` empty when the DSN is supplied via the environment (recommended for secrets).
-
-Optional: set `THEMIS_CONFIG_PATH` to use a config file somewhere other than `./themis.yaml`.
-
-**Full reference (`themis.yaml` format):** see [`themis.yaml.example`](themis.yaml.example).
+Environment variables use the `THEMIS_` prefix and override `themis.yaml` values.
 
 ---
 
 ## Database Migrations
 
 ```sh
-# Apply all pending migrations
-THEMIS_DATABASE_DSN="..." make migrate-up
+# Apply all pending migrations (THEMIS_DATABASE_DSN must be exported)
+make migrate-up
 
 # Roll back one migration
-THEMIS_DATABASE_DSN="..." make migrate-down
+make migrate-down
 ```
 
-Migration SQL files live in `migrations/`. Themis refuses to start if the database
-schema version is ahead of the binary version.
+Migration SQL files live in `migrations/`. Themis refuses to start if the database schema
+version is ahead of the binary version. On normal startup, `./bin/themis` applies pending
+migrations automatically after connecting.
 
 ---
 
 ## Running
 
 ```sh
-# Start the server (requires THEMIS_DATABASE_DSN; optionally reads themis.yaml)
-export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
+export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
 ./bin/themis
-
-# Health and readiness
-curl http://localhost:8080/healthz   # liveness
-curl http://localhost:8080/readyz    # readiness (checks DB + CVE feed freshness)
-
-# Prometheus metrics
-curl http://localhost:8080/metrics
 ```
+
+See [Getting Started](#getting-started) for Postgres setup, config, migrations, and health
+checks.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| ------- | ------------- | --- |
+| `missing required configuration field: database.dsn` | `THEMIS_DATABASE_DSN` not exported | `export THEMIS_DATABASE_DSN="postgres://..."` |
+| `password authentication failed for user "user"` | DSN uses README placeholders | Create a matching Postgres role or update the DSN |
+| `THEMIS_DATABASE_DSN is required` from `make migrate-up` | Env var unset or typo | Export `THEMIS_DATABASE_DSN` in the same shell session |
+| `unknown driver postgres` from `make migrate-up` | Old Makefile without postgres build tag | Pull latest `main`; `make migrate-up` uses `-tags postgres` |
+| `connection refused` on `:5432` | Postgres not running | Start Postgres; confirm with `pg_isready` |
+| `failed to open database` / migrate errors | Wrong host, DB name, or SSL mode | Test with `psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1'` |
+| Server starts but `/readyz` is 503 | DB down or CVE feed not polled yet | Check `checks` in the JSON body; wait for first watch poll |
 
 ---
 
 ## API Key Management
-
-Admin commands use the same config as the server (`themis.yaml` and/or `THEMIS_DATABASE_DSN`).
 
 ```sh
 # Create a product-scoped key
@@ -206,8 +295,8 @@ Admin commands use the same config as the server (`themis.yaml` and/or `THEMIS_D
 ./bin/themis admin revoke-key --key-id <id>
 ```
 
-All API calls require `X-API-Key: <key>` in the request header. Webhook endpoints
-use HMAC-SHA256 (`X-Themis-Signature`).
+Requires the same `THEMIS_DATABASE_DSN` (and optional `themis.yaml`) as the server.
+See [Getting Started § 8](#getting-started).
 
 ---
 

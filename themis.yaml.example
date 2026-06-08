@@ -2,7 +2,7 @@
 # must be set via environment variables — never committed in themis.yaml.
 #
 #   cp themis.yaml.example themis.yaml
-#   export THEMIS_DATABASE_DSN="postgres://user:password@localhost:5432/themis?sslmode=disable"
+#   export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
 #   ./bin/themis
 
 server:
