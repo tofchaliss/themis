@@ -70,6 +70,7 @@ type OSVCVEFeedClient interface {
 // WatchRepository persists CVE watch state and findings.
 type WatchRepository interface {
 	ListWatchCatalog(ctx context.Context) ([]WatchCatalogEntry, error)
+	ListVulnerabilityRecords(ctx context.Context) ([]VulnerabilityRecord, error)
 	GetLastSuccessTimestamp(ctx context.Context) (time.Time, error)
 	SetLastSuccessTimestamp(ctx context.Context, ts time.Time) error
 	UpsertVulnerability(ctx context.Context, record VulnerabilityRecord) (string, error)

@@ -74,6 +74,101 @@ func TestRunCycleDuplicateSkipped(t *testing.T) {
 	}
 }
 
+func TestRunCycleNotifyFlushWithoutMatches(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Now().UTC(),
+		catalog: []domain.WatchCatalogEntry{
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+		},
+	}
+	notifier := &recordingNotifier{}
+	svc := &watch.Service{
+		NVD: &stubNVD{records: []domain.FeedVulnerability{
+			{CVEID: "CVE-1", PackageName: "other", Ecosystem: "npm", AffectedVersions: []string{"1"}},
+		}},
+		Repo:   repo,
+		Notify: notifier,
+	}
+	if err := svc.RunCycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repo.createCalls != 0 {
+		t.Fatalf("createCalls = %d, want 0", repo.createCalls)
+	}
+}
+
+func TestRunCycleListStoredError(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Now().UTC(),
+		catalog:     []domain.WatchCatalogEntry{{Name: "lodash", Ecosystem: "npm"}},
+		listStoredErr: errors.New("stored list failed"),
+	}
+	svc := &watch.Service{
+		NVD:  &stubNVD{records: nil},
+		Repo: repo,
+	}
+	if err := svc.RunCycle(context.Background()); err == nil {
+		t.Fatal("expected stored list error")
+	}
+}
+
+func TestRunCycleOSVSupplementQueryError(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Now().UTC(),
+		catalog:     []domain.WatchCatalogEntry{{Name: "lodash", Ecosystem: "npm"}},
+	}
+	svc := &watch.Service{
+		NVD:  &stubNVD{records: nil},
+		OSV:  &stubOSV{err: errors.New("osv supplement failed")},
+		Repo: repo,
+	}
+	if err := svc.RunCycle(context.Background()); err == nil {
+		t.Fatal("expected osv supplement query error")
+	}
+}
+
+func TestRunCycleOSVSupplementUpsertError(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Now().UTC(),
+		catalog: []domain.WatchCatalogEntry{
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+		},
+		upsertErr: errors.New("osv upsert failed"),
+	}
+	svc := &watch.Service{
+		NVD: &stubNVD{records: nil},
+		OSV: &stubOSV{records: []domain.FeedVulnerability{
+			{CVEID: "CVE-1", PackageName: "lodash", Ecosystem: "npm", AffectedVersions: []string{"4.17.20"}},
+		}},
+		Repo: repo,
+	}
+	if err := svc.RunCycle(context.Background()); err == nil {
+		t.Fatal("expected osv supplement upsert error")
+	}
+}
+
+func TestRunCycleStoredCatalogMatch(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Now().UTC().Add(-time.Hour),
+		catalog: []domain.WatchCatalogEntry{
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+		},
+		storedRecords: []domain.VulnerabilityRecord{
+			{ID: "vuln-1", CVEID: "CVE-2021-23337", Ecosystem: "npm", PackageName: "lodash", Severity: "high", AffectedVersions: []string{"< 4.17.21"}},
+		},
+	}
+	svc := &watch.Service{
+		NVD:  &stubNVD{records: nil},
+		Repo: repo,
+	}
+	if err := svc.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle() error = %v", err)
+	}
+	if repo.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", repo.createCalls)
+	}
+}
+
 func TestRunCycleOSVFallback(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC().Add(-time.Hour),
@@ -251,8 +346,9 @@ func TestRunCycleSetSuccessError(t *testing.T) {
 
 func TestRunCycleOSVCatalogListError(t *testing.T) {
 	repo := &memoryWatchRepo{
-		lastSuccess: time.Now().UTC(),
-		listErr:     errors.New("list failed"),
+		lastSuccess:  time.Now().UTC(),
+		listErrOnCall: 2,
+		listErr:       errors.New("list failed"),
 	}
 	svc := &watch.Service{
 		NVD:  &stubNVD{err: errors.New("nvd down")},
@@ -337,12 +433,16 @@ func TestRunCycleMatchedUpsertFailure(t *testing.T) {
 type memoryWatchRepo struct {
 	lastSuccess     time.Time
 	catalog         []domain.WatchCatalogEntry
+	storedRecords   []domain.VulnerabilityRecord
 	existing        map[string]bool
 	createCalls     int
 	setSuccessCalls int
 	setSuccessErr   error
 	getErr          error
+	listCalls       int
+	listErrOnCall   int
 	listErr         error
+	listStoredErr   error
 	upsertErr       error
 	createErr       error
 	hasErr          error
@@ -351,10 +451,18 @@ type memoryWatchRepo struct {
 }
 
 func (m *memoryWatchRepo) ListWatchCatalog(context.Context) ([]domain.WatchCatalogEntry, error) {
-	if m.listErr != nil {
+	m.listCalls++
+	if m.listErr != nil && (m.listErrOnCall == 0 || m.listCalls >= m.listErrOnCall) {
 		return nil, m.listErr
 	}
 	return m.catalog, nil
+}
+
+func (m *memoryWatchRepo) ListVulnerabilityRecords(context.Context) ([]domain.VulnerabilityRecord, error) {
+	if m.listStoredErr != nil {
+		return nil, m.listStoredErr
+	}
+	return m.storedRecords, nil
 }
 
 func (m *memoryWatchRepo) GetLastSuccessTimestamp(context.Context) (time.Time, error) {

@@ -30,6 +30,10 @@ func NewPostgresWatchRepository(pool pgQueryPool) *PostgresWatchRepository {
 	}
 }
 
+func (r *PostgresWatchRepository) ListVulnerabilityRecords(ctx context.Context) ([]domain.VulnerabilityRecord, error) {
+	return r.vulnCatalog.ListForMatching(ctx)
+}
+
 func (r *PostgresWatchRepository) ListWatchCatalog(ctx context.Context) ([]domain.WatchCatalogEntry, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT cv.id, c.purl, c.name, c.ecosystem, cv.version,

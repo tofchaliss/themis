@@ -1,32 +1,34 @@
-package domain_test
+package domain
 
 import (
 	"context"
 	"testing"
-
-	"github.com/themis-project/themis/internal/domain"
 )
 
-func TestStartStageWithoutInjection(t *testing.T) {
-	ctx, end := domain.StartStage(context.Background(), domain.StageParse)
-	end()
+func TestWithStageSpanNil(t *testing.T) {
+	ctx := WithStageSpan(context.Background(), nil)
 	if ctx == nil {
 		t.Fatal("expected context")
 	}
 }
 
-func TestWithStageSpanInvokesFactory(t *testing.T) {
+func TestStartStageWithoutInjector(t *testing.T) {
+	_, end := StartStage(context.Background(), StageParse)
+	end()
+}
+
+func TestStartStageWithInjector(t *testing.T) {
 	called := false
-	ctx := domain.WithStageSpan(context.Background(), func(ctx context.Context, stage string) (context.Context, func()) {
+	ctx := WithStageSpan(context.Background(), func(ctx context.Context, stage string) (context.Context, func()) {
 		called = true
-		if stage != domain.StageTrustGate {
+		if stage != StageCorrelate {
 			t.Fatalf("stage = %q", stage)
 		}
 		return ctx, func() {}
 	})
-	_, end := domain.StartStage(ctx, domain.StageTrustGate)
+	_, end := StartStage(ctx, StageCorrelate)
 	end()
 	if !called {
-		t.Fatal("expected stage span factory to run")
+		t.Fatal("expected span factory to run")
 	}
 }

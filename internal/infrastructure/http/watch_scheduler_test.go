@@ -43,6 +43,10 @@ func (s *schedulerWatchRepo) ListWatchCatalog(context.Context) ([]domain.WatchCa
 	return nil, nil
 }
 
+func (s *schedulerWatchRepo) ListVulnerabilityRecords(context.Context) ([]domain.VulnerabilityRecord, error) {
+	return nil, nil
+}
+
 func (s *schedulerWatchRepo) GetLastSuccessTimestamp(context.Context) (time.Time, error) {
 	return s.lastSuccess, nil
 }

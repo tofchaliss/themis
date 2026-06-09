@@ -28,13 +28,13 @@ func TestNewPostgresStoreConstructors(t *testing.T) {
 }
 
 func TestVersionMatches(t *testing.T) {
-	if !versionMatches(nil, "1.0.0") {
+	if !domain.VersionMatches(nil, "1.0.0") {
 		t.Fatal("empty affected versions should match")
 	}
-	if !versionMatches([]string{"1.0.0"}, "1.0.0") {
+	if !domain.VersionMatches([]string{"1.0.0"}, "1.0.0") {
 		t.Fatal("expected exact match")
 	}
-	if versionMatches([]string{"2.0.0"}, "1.0.0") {
+	if domain.VersionMatches([]string{"2.0.0"}, "1.0.0") {
 		t.Fatal("expected no match")
 	}
 }

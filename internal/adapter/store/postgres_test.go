@@ -62,10 +62,56 @@ func (p seqFakePool) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return p.rows, nil
 }
 
+func TestVulnerabilityIdentityFromDescription(t *testing.T) {
+	eco, name := vulnerabilityIdentity("", "", "npm:lodash@1.0.0")
+	if eco != "npm" || name != "lodash" {
+		t.Fatalf("identity = %q/%q", eco, name)
+	}
+	eco, name = vulnerabilityIdentity("pypi", "requests", "ignored")
+	if eco != "pypi" || name != "requests" {
+		t.Fatalf("structured identity = %q/%q", eco, name)
+	}
+}
+
+func TestPostgresVulnerabilityCatalogFindMatchesFromDescription(t *testing.T) {
+	ctx := context.Background()
+	rows := &fakeRows{data: [][]any{
+		{"id-1", "CVE-1", "high", 7.0, "vector", "", "", []string{"< 2.0.0"}, "npm:lodash@< 2.0.0"},
+	}}
+	pool := storeFakePool{conn: storeFakeConn{}, rows: rows}
+	catalog := &PostgresVulnerabilityCatalog{pool: pool}
+
+	matches, err := catalog.FindMatches(ctx, "npm", "lodash", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].CVEID != "CVE-1" {
+		t.Fatalf("matches = %+v", matches)
+	}
+}
+
+func TestPostgresVulnerabilityCatalogListForMatching(t *testing.T) {
+	ctx := context.Background()
+	rows := &fakeRows{data: [][]any{
+		{"id-1", "CVE-1", "high", 7.0, "vector", "", "", []string{"1.0.0"}, []string{"2.0.0"}, "npm:lodash@1.0.0"},
+		{"id-2", "CVE-2", "low", 1.0, "", "", "", []string{}, []string{}, "not-parseable"},
+	}}
+	pool := storeFakePool{conn: storeFakeConn{}, rows: rows}
+	catalog := &PostgresVulnerabilityCatalog{pool: pool}
+
+	records, err := catalog.ListForMatching(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].PackageName != "lodash" {
+		t.Fatalf("records = %+v", records)
+	}
+}
+
 func TestPostgresVulnerabilityCatalogFindMatches(t *testing.T) {
 	ctx := context.Background()
 	rows := &fakeRows{data: [][]any{
-		{"id-1", "CVE-1", "high", 7.0, "vector", []string{"1.0.0"}},
+		{"id-1", "CVE-1", "high", 7.0, "vector", "npm", "lodash", []string{"1.0.0"}, "npm:lodash@1.0.0"},
 	}}
 	pool := storeFakePool{conn: storeFakeConn{}, rows: rows}
 	catalog := &PostgresVulnerabilityCatalog{pool: pool}

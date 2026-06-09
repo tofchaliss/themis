@@ -10,8 +10,8 @@ import (
 )
 
 func TestBinarySchemaVersion(t *testing.T) {
-	if store.BinarySchemaVersion != 12 {
-		t.Fatalf("BinarySchemaVersion = %d, want 12", store.BinarySchemaVersion)
+	if store.BinarySchemaVersion != 13 {
+		t.Fatalf("BinarySchemaVersion = %d, want 13", store.BinarySchemaVersion)
 	}
 }
 
@@ -87,6 +87,8 @@ func TestValidateMigrationSet(t *testing.T) {
 		"000011_triage_history.down.sql",
 		"000012_system_state.up.sql",
 		"000012_system_state.down.sql",
+		"000013_vulnerability_package_index.up.sql",
+		"000013_vulnerability_package_index.down.sql",
 	}
 
 	if err := store.ValidateMigrationSet(valid); err != nil {
