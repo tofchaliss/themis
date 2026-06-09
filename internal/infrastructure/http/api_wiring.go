@@ -58,6 +58,9 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		BaseDelay:    cfg.AppConfig.Worker.BaseDelay,
 		RecordMetric: metrics.RecordNotification,
 	})
+	osvClient := osv.NewClient(osv.ClientConfig{
+		RateLimiter: osv.NewTokenBucket(cfg.AppConfig.OSV.RateLimitRPS, cfg.AppConfig.OSV.RateLimitRPS),
+	})
 	pipeline := ingestion.NewPipeline(ingestion.Pipeline{
 		Jobs:        jobs,
 		Trust:       trust.GateEvaluator{Gate: gate},
@@ -65,7 +68,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		SBOM:        store.NewPostgresSBOMStore(cfg.Pool),
 		Components:  store.NewPostgresComponentStore(cfg.Pool),
 		Catalog:     store.NewPostgresVulnerabilityCatalog(cfg.Pool),
-		Fetcher:     store.StaticVulnerabilityFetcher{},
+		Fetcher:     osv.ComponentFetcher{Client: osvClient},
 		Correlate:   store.NewPostgresCorrelationRepository(cfg.Pool),
 		Enrichment:  enrichmentSvc,
 		Notify: metrics.InstrumentedNotifier{
@@ -96,9 +99,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 			APIKey:      cfg.AppConfig.NVD.APIKey,
 			RateLimiter: nvd.NewTokenBucket(cfg.AppConfig.NVD.RateLimitRPS, cfg.AppConfig.NVD.RateLimitRPS),
 		}),
-		OSV: osv.NewClient(osv.ClientConfig{
-			RateLimiter: osv.NewTokenBucket(cfg.AppConfig.OSV.RateLimitRPS, cfg.AppConfig.OSV.RateLimitRPS),
-		}),
+		OSV: osvClient,
 		Repo:    watchRepo,
 		Notify:  notify.EnqueueSender{Queue: cfg.InProcessQueue},
 		Metrics: metrics.WatchRecorder{},

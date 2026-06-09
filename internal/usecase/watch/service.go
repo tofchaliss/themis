@@ -37,29 +37,49 @@ func (s *Service) RunCycle(ctx context.Context) error {
 		return fmt.Errorf("get last success timestamp: %w", err)
 	}
 
-	vulns, err := s.fetchVulnerabilities(ctx, since)
-	if err != nil {
-		return err
-	}
-
-	for i, vuln := range vulns {
-		record := feedToRecord(vuln)
-		id, upsertErr := s.Repo.UpsertVulnerability(ctx, record)
-		if upsertErr != nil {
-			return fmt.Errorf("upsert vulnerability %s: %w", vuln.CVEID, upsertErr)
-		}
-		vulns[i].CVEID = record.CVEID
-		_ = id
-	}
-
 	catalog, err := s.Repo.ListWatchCatalog(ctx)
 	if err != nil {
 		return fmt.Errorf("list watch catalog: %w", err)
 	}
 
+	feedVulns, err := s.fetchVulnerabilities(ctx, since)
+	if err != nil {
+		return err
+	}
+
+	for i, vuln := range feedVulns {
+		record := feedToRecord(vuln)
+		id, upsertErr := s.Repo.UpsertVulnerability(ctx, record)
+		if upsertErr != nil {
+			return fmt.Errorf("upsert vulnerability %s: %w", vuln.CVEID, upsertErr)
+		}
+		feedVulns[i].CVEID = record.CVEID
+		_ = id
+	}
+
+	var osvVulns []domain.FeedVulnerability
+	if s.OSV != nil && len(catalog) > 0 {
+		osvVulns, err = s.fetchFromOSV(ctx)
+		if err != nil {
+			return err
+		}
+		for _, vuln := range osvVulns {
+			if _, upsertErr := s.Repo.UpsertVulnerability(ctx, feedToRecord(vuln)); upsertErr != nil {
+				return fmt.Errorf("upsert osv vulnerability %s: %w", vuln.CVEID, upsertErr)
+			}
+		}
+	}
+
+	stored, err := s.Repo.ListVulnerabilityRecords(ctx)
+	if err != nil {
+		return fmt.Errorf("list stored vulnerabilities: %w", err)
+	}
+
+	matchVulns := mergeFeedVulnerabilities(feedVulns, osvVulns, recordsToFeed(stored))
+
 	newByEcosystem := make(map[string]int)
 	batchKey := "cve-watch-" + s.now().Format(time.RFC3339)
-	for _, pair := range MatchCatalog(catalog, vulns) {
+	for _, pair := range MatchCatalog(catalog, matchVulns) {
 		vulnID, upsertErr := s.Repo.UpsertVulnerability(ctx, feedToRecord(pair.Vuln))
 		if upsertErr != nil {
 			return fmt.Errorf("upsert matched vulnerability %s: %w", pair.Vuln.CVEID, upsertErr)

@@ -5,6 +5,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/testutil/gen"
 )
 
@@ -25,14 +26,14 @@ func TestCompareVersionsLawsProperty(t *testing.T) {
 		b := gen.DottedVersion(t)
 		c := gen.DottedVersion(t)
 
-		if compareVersions(a, a) != 0 {
+		if domain.CompareVersions(a, a) != 0 {
 			t.Fatalf("not reflexive: compareVersions(%q,%q) != 0", a, a)
 		}
-		if sign(compareVersions(a, b)) != -sign(compareVersions(b, a)) {
+		if sign(domain.CompareVersions(a, b)) != -sign(domain.CompareVersions(b, a)) {
 			t.Fatalf("not antisymmetric: a=%q b=%q ab=%d ba=%d",
-				a, b, compareVersions(a, b), compareVersions(b, a))
+				a, b, domain.CompareVersions(a, b), domain.CompareVersions(b, a))
 		}
-		if compareVersions(a, b) == 0 && compareVersions(b, c) == 0 && compareVersions(a, c) != 0 {
+		if domain.CompareVersions(a, b) == 0 && domain.CompareVersions(b, c) == 0 && domain.CompareVersions(a, c) != 0 {
 			t.Fatalf("equality not transitive: a=%q b=%q c=%q", a, b, c)
 		}
 	})
@@ -53,7 +54,7 @@ func TestVersionMatchesConsistencyProperty(t *testing.T) {
 			t.Fatalf("exact should match: v=%q", v)
 		}
 
-		cmp := compareVersions(v, bound)
+		cmp := domain.CompareVersions(v, bound)
 		cases := []struct {
 			op   string
 			want bool
