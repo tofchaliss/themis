@@ -422,7 +422,8 @@ This section captures Phase 1 behaviour and debugging lessons from real SBOM bri
 #### How findings are created
 
 1. **Parse** — CycloneDX components become canonical inventory keyed by **PURL** (`ecosystem`, `name`, `version`).
-2. **Correlate (ingest)** — For each component: match the local `vulnerabilities` table; if no hit, query **OSV** and upsert matches into `component_vulnerabilities`.
+2. **Correlate (ingest)** — For each component: match the local `vulnerabilities` table;
+   if no hit, query **OSV** and upsert matches into `component_vulnerabilities`.
 3. **CVE watch** — Background NVD/OSV poll plus correlation against the **full** stored catalog and registered components.
 
 The CycloneDX `vulnerabilities` array in your file is **not** ingested as findings. A large NVD
@@ -503,12 +504,14 @@ curl -s -X POST 'https://api.osv.dev/v1/querybatch' -H 'Content-Type: applicatio
 #### Learnings (avoid repeating the same mistakes)
 
 1. **`202 Accepted` ≠ success** — poll `GET /api/v1/ingestions/{id}`; trust `stage_detail` and `pipeline_status` in `ingestion_jobs`.
-2. **Register the image before upload** — trust gate requires `image_digest` in `images`; `image_id` in the payload must be that row’s UUID.
+2. **Register the image before upload** — trust gate requires `image_digest` in `images`;
+   `image_id` in the payload must be that row’s UUID.
 3. **Upload envelope, not raw SBOM** — wrap CycloneDX in `format` + `document`; never send `image_id: ""`.
 4. **PURL type ≠ OSV ecosystem** — `apk`→`Alpine`, `deb`→`Debian`; unmapped types are skipped, not sent raw to OSV.
 5. **NVD cache size is misleading** — hundreds of CVE rows can still yield zero findings without package-level OSV correlation.
 6. **Re-upload needs a new checksum or delete** — duplicate `(image_digest, checksum_sha256)` skips re-correlation.
-7. **Finding count < component count is normal** — version ranges, missing OSV entries, and unsupported `rpm` packages all reduce matches.
+7. **Finding count < component count is normal** — version ranges, missing OSV entries,
+   and unsupported `rpm` packages all reduce matches.
 
 After fixes on branch `themis-phase-2`, a 77-component Alpine SBOM produced **50 findings** —
 expected partial coverage, not 77/77.

@@ -52,20 +52,44 @@ Phase 2 scope: AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export.
 
 ### AI enrichment
 
-**What:** Call an AI model (OpenAI, Claude, or local Ollama) to generate a contextual
-exploitability assessment for findings with `effective_state=DETECTED` and high severity.
-Store result as an `intelligence_signal` with `source=ai_enrichment`.
+**What:** Answer nine canonical security questions for every high/critical finding using
+a small cybersecurity-specialised model (CyberPal-2.0 via Ollama) grounded in authoritative
+local data (RAG over NVD + OSV + EPSS + KEV + ExploitDB + vendor advisories + past
+decisions). Six specialised AI skill workers with typed JSON I/O:
+
+- CWE Mapper — classifies CVE into CWE taxonomy
+- CVE Summarizer — Q1: why is it vulnerable?
+- Exploitability Analyzer — Q2/Q3/Q4: can it be exploited, is exploit public, KEV-listed?
+- Context Analyzer — Q5: is the vulnerable code path reachable in this service?
+- VEX Recommender — Q8: what VEX status should be assigned? (AI-assisted VEX generation)
+- Remediation Advisor — Q9: what is the safest remediation? (advisory only in Phase 2)
+
+Q6 (runtime protection) and Q7 (customer business impact) are deferred to Phase 3.
+Enrichment is async — the SBOM ingestion critical path returns `202 Accepted` before any
+AI worker starts. The model is never in the critical path.
+
+New data model layers introduced: L1a (Asset & Dependency Graph), L1b (Security Knowledge
+Graph: CVE ↕ CWE ↕ Package ↕ Product ↕ Microservice ↕ Deployment ↕ Customer), L1c
+(Semantic Memory via pgvector), L2 (AI Enrichment output tables).
+
+New intelligence source: ExploitDB (EDB-ID, exploit type, CVE reference).
+
+AI-assisted VEX generation: VEX Recommender output above confidence threshold
+(`config.ai.vex_auto_apply_threshold`, default 0.85) auto-creates draft VEX documents
+with `source=ai_generated`. Human VEX always overrides. VEX precedence:
+human_triage > user_supplied > ai_generated > upstream_vendor.
 
 **Why deferred:** Phase 1 risk scoring is deterministic (`f(severity, vex_state)`). Adding
-AI introduces external dependencies, latency, cost, and non-determinism — not appropriate
-until the deterministic pipeline is stable and tested.
+AI introduces external dependencies, latency, and non-determinism — not appropriate until
+the deterministic pipeline is stable and tested.
 
 **Phase 1 hooks:**
 
 - `EnrichmentResult` domain type is defined and has a `source` field
-- `intelligence_signals` table (L3) exists with `source` column
+- `intelligence_signals` table exists with `source` column
 - `JobQueue` interface means enrichment jobs can be submitted asynchronously without
   touching the ingestion use case
+- `risk_context` has `epss_score`, `kev_listed`, `ai_assessment` columns (populated NULL today)
 
 ---
 

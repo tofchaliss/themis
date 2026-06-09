@@ -30,9 +30,11 @@ next.
 | risk_context | Convergence table — computed effective state combining all three data layers; sole source of truth for a finding's current status |
 | effective_state | Live status of a finding: DETECTED, SUPPRESSED, CONFIRMED, IN_TRIAGE, ACCEPTED_RISK, FALSE_POSITIVE, RESOLVED |
 | VEX overlay | VEX assertions change only `risk_context.effective_state`; raw findings in `component_vulnerabilities` are never deleted or modified |
-| L1 / L2 / L3 | The three data layers (see below) |
+| L0 / L1a / L1b / L1c / L2 / L3 | The five data layers (Phase 2+ model; see below). Phase 1 used a three-layer model (L1/L2/L3) now superseded. |
 | InProcessQueue | Phase 1 goroutine-pool implementation of the `JobQueue` domain interface; swappable to Redis in Phase 3 via the same interface |
-| StubVerifier | Phase 1 implementation of `SignatureVerifier`; records trust status without cryptographic verification; replaced by CosignVerifier in Phase 2 |
+| StubVerifier | Phase 1 implementation of `SignatureVerifier`; records trust status without cryptographic verification; replaced by CosignVerifier in Phase 3 |
+| AIWorkerRuntime | Phase 2 port interface for the AI enrichment backend; implemented by `adapter/ai/` (Ollama/CyberPal-2.0) |
+| SecurityKnowledgeGraph | Phase 2 graph: CVE ↕ CWE ↕ Package ↕ Product ↕ Microservice ↕ Deployment ↕ Customer; blast-radius traversal |
 | CanonicalSBOM | Internal model that all SBOM formats normalise into; only `adapter/parser/` knows about CycloneDX/SPDX/Trivy structs |
 
 ---
@@ -58,39 +60,66 @@ next.
 
 ---
 
-## Three-Layer Data Model
+## Data Model
+
+Phase 1 used a three-layer model (L1 inventory / L2 VEX intelligence / L3 temporal
+signals). Phase 2 introduces a revised five-layer model that accommodates the AI
+enrichment pipeline, the Security Knowledge Graph, and semantic memory.
 
 ```text
-  LAYER 1 — IMMUTABLE SOFTWARE INVENTORY TRUTH
-  ─────────────────────────────────────────────
+  L0  RAW IMMUTABLE INVENTORY
+  ────────────────────────────────────────────────────────────────
   Tables: products, product_versions, artifacts, images, sbom_documents,
           components, component_versions, dependency_relationships,
-          vulnerabilities, component_vulnerabilities
+          vulnerabilities, component_vulnerabilities, vex_documents,
+          vex_assertions, advisory_records
   Rule:   Append-only. Never mutated. Never deleted.
           Content-addressed by SHA-256 digest.
 
-  LAYER 2 — MUTABLE VULNERABILITY INTELLIGENCE
-  ─────────────────────────────────────────────
-  Tables: vex_documents, vex_assertions
-  Rule:   Each document is individually immutable (signed, hashed).
-          The collection evolves as new VEX revisions arrive.
+  L1a ASSET & DEPENDENCY GRAPH                        (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Tables: asset_graph_nodes, asset_graph_edges
+  Nodes:  Component → Microservice → Deployment → Customer
+  Phase 2: SQL graph tables.
+  Phase 3: Apache AGE (Cypher queries).
 
-  LAYER 3 — TEMPORAL EXPLOITABILITY CONTEXT
-  ──────────────────────────────────────────
-  Tables: intelligence_signals, runtime_exposures, remediation_actions
-  Rule:   TTL-based expiry. No inherent provenance.
-          NOW (Phase 1): populated by VEX overlay computation only.
-          Phase 2: EPSS/KEV sync adds scored signals.
-          Phase 3: AI signals.
+  L1b SECURITY KNOWLEDGE GRAPH                        (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Blast-radius graph: CVE ↕ CWE ↕ Package ↕ Product
+                      ↕ Microservice ↕ Deployment ↕ Customer
+  Populated by the Vulnerability Intelligence Collector (L0 → L1b).
+  Enables: "which customers are running the package affected by CVE-X?"
 
-  CONVERGENCE
-  ───────────
-  Table: risk_context
-  Score (Phase 1): f(raw_severity, vex_effective_state)
+  L1c SEMANTIC MEMORY                                 (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Table: embeddings (entity_type, entity_id, vector, model, created_at)
+  Extension: pgvector. Model: CyberPal-2.0 embed or nomic-embed.
+  Embeds: CVE descriptions, VEX justifications, AI summaries,
+          triage decisions. Powers RAG retrieval for AI workers.
+
+  L2  AI ENRICHMENT                                   (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Tables: ai_summaries, ai_cwe_mappings, ai_exploitability,
+          ai_vex_recommendations, ai_remediation_advice
+  Rule:   Immutable per (worker_id, input_hash). Re-run = new row.
+          Confidence < 0.5 → advisory only; not used in scoring.
+
+  L3  HUMAN VALIDATION
+  ────────────────────────────────────────────────────────────────
+  Tables: triage_history (Phase 1), approvals (Phase 2+),
+          vex_overrides (Phase 2+), audit_log (Phase 1)
+  Rule:   Append-only. Every human decision is a permanent record.
+
+  CONVERGENCE → risk_context
+  ────────────────────────────────────────────────────────────────
+  Phase 1 score: f(raw_severity, vex_effective_state)
     CRITICAL→90, HIGH→70, MEDIUM→40, LOW→10, NONE→0
     SUPPRESSED/FALSE_POSITIVE/ACCEPTED_RISK → ×0.1
     CONFIRMED → ×1.2 (capped at 100)
     RESOLVED → 0
+
+  Phase 2 score: h(severity, vex_state, epss_score, kev_flag,
+                   ai_exploitability, ai_reachability_confidence)
 ```
 
 ---
