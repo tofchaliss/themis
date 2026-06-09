@@ -48,5 +48,6 @@ Track progress in `openspec/changes/themis-phase-1/tasks.md`. **Phase 1 complete
 
 ## Related docs
 
-- `proposal-initial.md` — original ADRs and 15 acceptance criteria
+- `docs/acceptance-criteria.md` — 15 acceptance criteria (tested in `tests/acceptance/`)
+- `docs/archive/proposal-initial.md` — original proposal with ADRs (historical reference)
 - `.claude/skills/openspec-*` — OpenSpec workflow skills (propose, apply, explore, archive, sync)

@@ -23,90 +23,9 @@ A single binary backed by PostgreSQL. No agents. No daemons. No lock-in.
 
 ---
 
-## Design Principles
-
-### Clean Architecture
-
-All code follows Robert C. Martin's Clean Architecture. The single most important rule:
-**source code dependencies can only point inward**. Business logic never imports infrastructure.
-
-```text
-  cmd/themis/                  DI root — wires everything, imported by nothing
-  internal/infrastructure/     Layer 4: pgx, chi, config, queue, metrics
-  internal/adapter/            Layer 3: parsers, store, API handlers, notify, trust
-  internal/usecase/            Layer 2: ingestion, enrichment, triage, CVE watch
-  internal/domain/             Layer 1: pure types + port interfaces (stdlib only)
-```
-
-This means:
-
-- Use cases are tested without a database, HTTP server, or any framework
-- A new adapter (AI client, cosign verifier, Git provider) never touches business logic
-- The job queue can be swapped from goroutines to Redis by changing one file
-
-Enforced at compile time by `go-cleanarch` and `depguard`. CI fails on any import violation.
-
-### Three-Layer Data Model
-
-Vulnerability data is partitioned into three layers with different mutation rules:
-
-```text
-  L1 — IMMUTABLE INVENTORY
-       products, images, sbom_documents, components, vulnerabilities
-       Append-only. Never mutated. Never deleted. Content-addressed by SHA-256.
-
-  L2 — MUTABLE INTELLIGENCE
-       vex_documents, vex_assertions
-       Each document is immutable. The collection evolves as new VEX arrives.
-
-  L3 — TEMPORAL SIGNALS
-       intelligence_signals, runtime_exposures
-       Phase 1: VEX-derived only.  Phase 2: EPSS + KEV.  Phase 3: AI signals.
-
-  CONVERGENCE → risk_context
-       Single source of truth for the current state of every (component, CVE) pair.
-```
-
-### VEX Overlay — Raw Findings Are Never Deleted
-
-VEX assertions change only `risk_context.effective_state`. The underlying
-`component_vulnerabilities` record is always preserved. This means:
-
-- A suppressed finding resurfaces immediately if the VEX is revoked
-- Every state transition is auditable and reversible
-- Human triage decisions auto-generate a `vex_document` that applies to future ingestions
-
----
-
-## Phase Roadmap
-
-### Phase 1 — Standalone Go Backend *(current)*
-
-A complete, self-contained REST API. No external AI, CI/CD, or UI dependencies.
-
-- All 8 capabilities listed above
-- API key authentication (product-scoped, bcrypt-hashed)
-- In-process goroutine job queue behind a swappable interface
-- Cosign signature verification stubbed — records trust status without network calls
-- PostgreSQL only, single binary deployment
-
-### Phase 2 — AI Intelligence + CI/CD Integration
-
-- **AI enrichment** — LLM-based vulnerability analysis (Claude API); AI signals in L3
-- **EPSS + KEV** — CISA KEV feed and EPSS scores populate `intelligence_signals`
-- **Real cosign** — sigstore/cosign cryptographic verification replaces the Phase 1 stub
-- **GitHub + GitLab** — auto-ingest SBOM/VEX committed to a repo on push
-- **Upstream VEX feeds** — Red Hat, Alpine, Ubuntu, SUSE, Wolfi, Rocky Linux
-- **Rate limiting** — per-product API rate limits
-
-### Phase 3 — Enterprise Production Stack
-
-- **Docker Compose** — full production stack for self-hosted deployment
-- **Redis job queue** — horizontal scaling; zero business logic change (interface swap)
-- **Web UI** — React SPA for vulnerability management, triage, and reporting
-- **Bitbucket integration** — git ingestion alongside GitHub/GitLab
-- **RBAC + OIDC** — full role-based access control; replaces Phase 1 API keys
-- **themis-cli** — standalone CLI for local SBOM analysis without a running server
+For architecture (Clean Architecture layers, three-layer data model, VEX overlay semantics),
+technology stack, phase roadmap, and quality gates, see [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
+Deferred Phase 2 and Phase 3 items are tracked in [project-backlog.md](project-backlog.md).
 
 ---
 
@@ -294,7 +213,7 @@ checks.
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
 | `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
 | Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
-| Want verbose / debug server logs | No log-level config in Phase 1 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging is planned for Phase 2 (`runtime-observability`) |
+| Want verbose / debug server logs | No log-level config in Phase 1 or 2 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging and OTel trace export are planned for Phase 3 (`runtime-observability`) |
 
 ---
 
@@ -331,7 +250,7 @@ Use this path when you already have a CycloneDX JSON file from your container im
 generated by [Syft](https://github.com/anchore/syft), [Trivy](https://github.com/aquasecurity/trivy),
 or your CI pipeline).
 
-**What your file provides vs what you must supply**
+#### What your file provides vs what you must supply
 
 | From your CycloneDX file | You still provide to Themis |
 | ------------------------ | --------------------------- |
@@ -347,7 +266,7 @@ skipped.
 CVE watch also polls NVD/OSV in the background and correlates against the full stored catalog.
 If you see components but zero findings, check [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros).
 
-**0. Generate an SBOM from your image (if needed)**
+#### 0. Generate an SBOM from your image (if needed)
 
 ```sh
 export IMAGE_REF="myregistry/myapp:1.2.3"
@@ -360,7 +279,7 @@ syft "$IMAGE_REF" -o cyclonedx-json="$SBOM_FILE"
 trivy image --format cyclonedx --output "$SBOM_FILE" "$IMAGE_REF"
 ```
 
-**1. Inspect the file**
+#### 1. Inspect the file
 
 ```sh
 jq -r '.specVersion' "$SBOM_FILE"    # must be 1.4, 1.5, or 1.6
@@ -374,7 +293,7 @@ export IMAGE_DIGEST=$(docker inspect "$IMAGE_REF" --format '{{.Id}}')
 # or: docker image inspect "$IMAGE_REF" --format '{{index .RepoDigests 0}}'
 ```
 
-**3. Create an API key, product, and project**
+#### 3. Create an API key, product, and project
 
 ```sh
 export BASE_URL="http://localhost:8080"
@@ -408,7 +327,7 @@ VALUES (
 EOF
 ```
 
-**5. Upload your CycloneDX file**
+#### 5. Upload your CycloneDX file
 
 Prefer JSON upload (supports `image_id` and `project_id`):
 
@@ -438,7 +357,7 @@ curl -s -X POST "$BASE_URL/api/v1/sbom/upload" \
 
 Expect **202 Accepted** with an `ingestion_id`.
 
-**6. Poll ingestion until complete**
+#### 6. Poll ingestion until complete
 
 ```sh
 export INGESTION_ID="<from upload response>"
@@ -469,7 +388,7 @@ FROM ingestion_jobs WHERE id = '$INGESTION_ID';"
 `image_id`, `project_id`, `image_digest`), not the raw CycloneDX file alone. Build it with the
 `jq` command in step 5; do not send empty strings for UUID fields (`""` causes `422 invalid JSON body`).
 
-**7. Inspect results**
+#### 7. Inspect results
 
 ```sh
 curl -s "$BASE_URL/api/v1/projects/$PROJECT_ID/scans" -H "X-API-Key: $API_KEY" | jq .
@@ -481,7 +400,7 @@ curl -s "$BASE_URL/api/v1/scans/$SCAN_ID/vulnerabilities" -H "X-API-Key: $API_KE
 curl -s "$BASE_URL/api/v1/components?limit=20" -H "X-API-Key: $API_KEY" | jq .
 ```
 
-**8. Triage a finding (optional)**
+#### 8. Triage a finding (optional)
 
 ```sh
 export FINDING_ID=$(curl -s "$BASE_URL/api/v1/scans/$SCAN_ID/vulnerabilities" \
@@ -780,7 +699,7 @@ themis/
 │   │   ├── parser/              CycloneDX, SPDX, Trivy → CanonicalSBOM
 │   │   ├── store/               PostgreSQL implementations of domain repositories
 │   │   ├── notify/              SMTP + Teams delivery, routing rules, digest
-│   │   ├── trust/               StubVerifier (Phase 1); CosignVerifier (Phase 2)
+│   │   ├── trust/               StubVerifier (Phase 1 + 2); CosignVerifier (Phase 3)
 │   │   └── api/                 HTTP handlers, OpenAPI stubs, auth middleware
 │   │
 │   ├── infrastructure/          Layer 4: frameworks and drivers
