@@ -16,6 +16,9 @@ func (f ComponentFetcher) FetchForComponent(ctx context.Context, component domai
 	if f.Client == nil || component.Name == "" {
 		return nil, nil
 	}
+	if _, ok := MapEcosystem(component.Ecosystem); !ok {
+		return nil, nil
+	}
 	feed, err := f.Client.QueryByEcosystem(ctx, component.Ecosystem, []domain.OSVPackageQuery{{Name: component.Name}})
 	if err != nil {
 		return nil, err

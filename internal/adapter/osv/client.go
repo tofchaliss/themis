@@ -54,6 +54,10 @@ func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, package
 	if len(packages) == 0 {
 		return nil, nil
 	}
+	osvEco, ok := MapEcosystem(ecosystem)
+	if !ok {
+		return nil, nil
+	}
 	if err := c.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
@@ -62,7 +66,7 @@ func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, package
 	for _, pkg := range packages {
 		reqBody.Queries = append(reqBody.Queries, batchQuery{
 			Package: packageRef{
-				Ecosystem: mapEcosystem(ecosystem),
+				Ecosystem: osvEco,
 				Name:      pkg.Name,
 			},
 		})
@@ -147,21 +151,6 @@ type osvVuln struct {
 		} `json:"ranges"`
 		Versions []string `json:"versions"`
 	} `json:"affected"`
-}
-
-func mapEcosystem(ecosystem string) string {
-	switch strings.ToLower(ecosystem) {
-	case "npm":
-		return "npm"
-	case "maven":
-		return "Maven"
-	case "pypi", "python":
-		return "PyPI"
-	case "go", "golang":
-		return "Go"
-	default:
-		return ecosystem
-	}
 }
 
 func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerability {

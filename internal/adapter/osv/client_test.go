@@ -10,6 +10,23 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 )
 
+func TestClientQueryByEcosystemSkipsUnsupported(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	t.Cleanup(srv.Close)
+
+	client := osv.NewClient(osv.ClientConfig{BaseURL: srv.URL, RateLimiter: osv.NewTokenBucket(100, 100)})
+	vulns, err := client.QueryByEcosystem(context.Background(), "rpm", []domain.OSVPackageQuery{{Name: "openssl"}})
+	if err != nil {
+		t.Fatalf("QueryByEcosystem() error = %v", err)
+	}
+	if len(vulns) != 0 || called {
+		t.Fatalf("vulns = %#v called = %v", vulns, called)
+	}
+}
+
 func TestClientQueryByEcosystem(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
