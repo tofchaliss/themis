@@ -286,7 +286,11 @@ checks.
 | `connection refused` on `:5432` | Postgres not running | Start Postgres; confirm with `pg_isready` |
 | `failed to open database` / migrate errors | Wrong host, DB name, or SSL mode | Test with `psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1'` |
 | Server starts but `/readyz` is 503 | DB down or CVE feed not polled yet | Check `checks` in the JSON body; wait for first watch poll |
-| Ingestion succeeds but no vulnerabilities | Catalog has no CVE matches for your PURLs yet | Check `GET /api/v1/components`; wait for CVE watch or see [Testing](#testing-with-your-own-cyclonedx-sbom) |
+| Ingestion succeeds but no vulnerabilities | PURL ecosystem not mapped to OSV, or no version match | See [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros); check component ecosystems |
+| Upload returns `422 invalid JSON body` | Malformed JSON or empty/invalid `image_id` / `project_id` UUIDs | Build upload envelope with `jq`; omit UUID fields rather than sending `""` |
+| Ingestion `REJECTED` — `image not found` | `image_digest` not in `images` table | Register image in Postgres (Testing step 4) before upload; digest must match exactly |
+| Ingestion `FAILED` — `sbom_documents_image_id_fkey` | `image_id` in payload does not exist in `images` | Use `image_id` from `SELECT id FROM images WHERE digest = '...'` |
+| Ingestion `FAILED` — `osv api status 400: Invalid ecosystem` | Old binary sent PURL type (e.g. `apk`) to OSV instead of OSV name (`Alpine`) | Pull latest, `make build`, restart; see [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros) |
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
 | `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
 | Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
@@ -335,10 +339,13 @@ or your CI pipeline).
 | `specVersion` (1.4 / 1.5 / 1.6) | `image_id` (registered in Postgres — no REST API in Phase 1) |
 | Optional embedded `vulnerabilities` | `project_id` (from API) and `X-API-Key` |
 
-Findings are created by matching SBOM **components** (by PURL) against the `vulnerabilities`
-catalog in PostgreSQL — not directly from the `vulnerabilities` section inside your CycloneDX
-file. Components without `purl` are skipped. Ingestion can succeed with zero findings if the
-catalog has no matches yet (CVE watch polls NVD/OSV in the background).
+Findings are created by matching SBOM **components** (by PURL) against the local
+`vulnerabilities` catalog and, when needed, **live OSV queries** during ingestion — not from the
+embedded `vulnerabilities` section inside your CycloneDX file. Components without `purl` are
+skipped.
+
+CVE watch also polls NVD/OSV in the background and correlates against the full stored catalog.
+If you see components but zero findings, check [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros).
 
 **0. Generate an SBOM from your image (if needed)**
 
@@ -439,12 +446,28 @@ export INGESTION_ID="<from upload response>"
 until STATUS=$(curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" \
   -H "X-API-Key: $API_KEY" | jq -r .status); \
   [[ "$STATUS" == "NOTIFIED" || "$STATUS" == "COMPLETED" ]]; do
-  echo "status=$STATUS"
+  curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" \
+    -H "X-API-Key: $API_KEY" | jq '{status, stage_detail, scan_id}'
   [[ "$STATUS" == "FAILED" || "$STATUS" == "REJECTED" ]] && break
   sleep 2
 done
 echo "final=$STATUS"
 ```
+
+On failure, `stage_detail` is the authoritative message (trust gate, parse, OSV, or DB constraint).
+You can also inspect Postgres:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c "
+SELECT status, error_message,
+       payload->>'pipeline_status' AS pipeline_status,
+       payload->>'stage_detail' AS stage_detail
+FROM ingestion_jobs WHERE id = '$INGESTION_ID';"
+```
+
+**Upload body shape** — `-d @file.json` must be a JSON **envelope** (`format`, `document`, optional
+`image_id`, `project_id`, `image_digest`), not the raw CycloneDX file alone. Build it with the
+`jq` command in step 5; do not send empty strings for UUID fields (`""` causes `422 invalid JSON body`).
 
 **7. Inspect results**
 
@@ -471,6 +494,105 @@ curl -s -X POST "$BASE_URL/api/v1/vulnerabilities/$FINDING_ID/triage" \
 
 API reference: [`api/openapi.yaml`](api/openapi.yaml). Sample fixture used in tests:
 [`internal/adapter/parser/testdata/cyclonedx-1.6.json`](internal/adapter/parser/testdata/cyclonedx-1.6.json).
+
+### SBOM correlation, OSV, and Linux distros
+
+This section captures Phase 1 behaviour and debugging lessons from real SBOM bring-up (e.g. Alpine
+`apk` SBOMs from Syft/Trivy). Use it before assuming “ingestion worked but Themis is broken.”
+
+#### How findings are created
+
+1. **Parse** — CycloneDX components become canonical inventory keyed by **PURL** (`ecosystem`, `name`, `version`).
+2. **Correlate (ingest)** — For each component: match the local `vulnerabilities` table; if no hit, query **OSV** and upsert matches into `component_vulnerabilities`.
+3. **CVE watch** — Background NVD/OSV poll plus correlation against the **full** stored catalog and registered components.
+
+The CycloneDX `vulnerabilities` array in your file is **not** ingested as findings. A large NVD
+cache with zero overlap on package names is normal until OSV correlation runs.
+
+#### OSV ecosystem mapping (PURL type ≠ OSV name)
+
+Syft/Trivy PURL **types** are not always valid [OSV ecosystem](https://google.github.io/osv.dev/) names.
+Themis maps supported types before calling OSV (`internal/adapter/osv/ecosystem.go`):
+
+| PURL type (in SBOM) | OSV ecosystem | Typical image / SBOM source |
+| ------------------- | ------------- | --------------------------- |
+| `apk` | `Alpine` | Alpine Linux, many minimal/nginx images |
+| `deb` | `Debian` | Debian-based images |
+| `ubuntu` | `Ubuntu` | Ubuntu-based images |
+| `npm` | `npm` | Node.js dependencies |
+| `maven` | `Maven` | Java dependencies |
+| `go` | `Go` | Go modules |
+| `pypi` | `PyPI` | Python packages |
+| `nuget` | `NuGet` | .NET packages |
+| `cargo` | `crates.io` | Rust crates |
+| `gem` | `RubyGems` | Ruby gems |
+
+**Unsupported for OSV (skipped, no live lookup):** `rpm`, `generic`, `oci`, and other types without
+a mapping. This affects **RHEL, Rocky Linux, AlmaLinux, Fedora RPM** SBOMs: components are stored,
+but Phase 1 does not call OSV for `rpm`. Findings may still appear from the local NVD cache when
+CPE/package metadata aligns — often sparse for distro packages.
+
+Sending an unmapped PURL type as-is to OSV (e.g. `apk` instead of `Alpine`) returns
+`400 Invalid ecosystem` and fails ingestion on older binaries. Current code maps or skips.
+
+#### Distro-specific expectations
+
+| Base / scanner output | Dominant PURL types | Phase 1 correlation |
+| --------------------- | ------------------- | ------------------- |
+| **Alpine** (incl. many `nginx` images) | `apk` | OSV `Alpine` — good coverage; finding count < component count is normal |
+| **Debian / Ubuntu** | `deb` / `ubuntu` | OSV `Debian` / `Ubuntu` |
+| **Rocky / RHEL / Alma** | `rpm` | OSV skipped; expect fewer automatic findings until RPM/distro feed support |
+| **Mixed** (app + OS packages) | `npm`, `apk`, `rpm`, … | Each ecosystem handled independently |
+
+**Alpine naming:** PURLs are often `pkg:apk/alpine/openssl@3.x`. Themis may store the name as
+`alpine/openssl` while OSV expects `openssl`. Ingest succeeds; some packages may not match until
+name normalization is improved. Not every component has a CVE at your pinned version.
+
+**Image name ≠ ecosystem** — an `nginx:alpine` image still yields `apk` components from the OS
+layer; correlation follows PURL type, not the image tag.
+
+#### Debugging checklist
+
+Run in order when components exist but findings are missing or ingestion fails:
+
+```sh
+# 1. Component ecosystems (what PURL types dominate?)
+curl -s "$BASE_URL/api/v1/components?limit=200" -H "X-API-Key: $API_KEY" \
+  | jq '[.items[].ecosystem] | group_by(.) | map({ecosystem: .[0], count: length})'
+
+# 2. Ingestion outcome (use latest ingestion_id)
+curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" -H "X-API-Key: $API_KEY" \
+  | jq '{status, stage_detail, scan_id}'
+
+# 3. Counts in Postgres
+psql "$THEMIS_DATABASE_DSN" -c "
+SELECT
+  (SELECT COUNT(*) FROM components) AS components,
+  (SELECT COUNT(*) FROM vulnerabilities) AS cve_catalog,
+  (SELECT COUNT(*) FROM component_vulnerabilities) AS findings;"
+
+# 4. Sanity-check OSV for a sample Alpine package (PURL type vs OSV name)
+curl -s -X POST 'https://api.osv.dev/v1/querybatch' -H 'Content-Type: application/json' \
+  -d '{"queries":[{"package":{"ecosystem":"apk","name":"openssl"}}]}' | jq .message
+# → "Invalid ecosystem" — OSV wants "Alpine", not "apk"
+
+curl -s -X POST 'https://api.osv.dev/v1/querybatch' -H 'Content-Type: application/json' \
+  -d '{"queries":[{"package":{"ecosystem":"Alpine","name":"openssl"}}]}' \
+  | jq '.results[0].vulns | length'
+```
+
+#### Learnings (avoid repeating the same mistakes)
+
+1. **`202 Accepted` ≠ success** — poll `GET /api/v1/ingestions/{id}`; trust `stage_detail` and `pipeline_status` in `ingestion_jobs`.
+2. **Register the image before upload** — trust gate requires `image_digest` in `images`; `image_id` in the payload must be that row’s UUID.
+3. **Upload envelope, not raw SBOM** — wrap CycloneDX in `format` + `document`; never send `image_id: ""`.
+4. **PURL type ≠ OSV ecosystem** — `apk`→`Alpine`, `deb`→`Debian`; unmapped types are skipped, not sent raw to OSV.
+5. **NVD cache size is misleading** — hundreds of CVE rows can still yield zero findings without package-level OSV correlation.
+6. **Re-upload needs a new checksum or delete** — duplicate `(image_digest, checksum_sha256)` skips re-correlation.
+7. **Finding count < component count is normal** — version ranges, missing OSV entries, and unsupported `rpm` packages all reduce matches.
+
+After fixes on branch `themis-phase-2`, a 77-component Alpine SBOM produced **50 findings** —
+expected partial coverage, not 77/77.
 
 ### Resetting ingested data (local dev only)
 
