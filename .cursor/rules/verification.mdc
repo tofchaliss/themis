@@ -1,0 +1,30 @@
+---
+description: Before final answers or marking work done, complete verification.md checklist
+alwaysApply: true
+---
+
+# Verification steering
+
+Before giving a **final answer**, marking a task complete, or opening a PR, read and apply
+[`verification.md`](../../verification.md).
+
+## Required questions
+
+Answer (in your reasoning or response) for every applicable area:
+
+1. **Correctness** — How is correctness verified? (gates, tests, specs, invariants)
+2. **Severity** — How is severity verified? (raw vs effective state, risk score, API counts)
+3. **Observability** — How is observability verified? (health, metrics, audit_log, ingestion status)
+
+If the change does not touch a area, say **N/A** and why.
+
+## Rules
+
+- Cite the verification row (e.g. C2, S3, O2) and the command or test that proves it.
+- Run `make verify-build` after code changes; run task-group gates from `tasks.md` for scoped work.
+- Do not claim Phase 1 completeness without the 15 acceptance criteria mapping (`tests/acceptance/criteria_test.go`).
+- Configurable debug logging is Phase 2 — use ingestion API and `/metrics` for Phase 1 observability gaps.
+
+## Final response
+
+Include a short **Verification** block listing which checklist sections were checked and which commands passed.

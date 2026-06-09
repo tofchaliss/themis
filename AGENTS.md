@@ -8,6 +8,7 @@ Read this file at the start of every session before planning or implementing wor
 | -------- | ------ | ------- |
 | 1 | [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) | Domain model, Clean Architecture, phase scope, invariants, quality gates, API conventions |
 | 2 | [`README.md`](README.md) | Build/run/test commands, config, coverage targets, repo layout, contributing workflow |
+| 2b | [`verification.md`](verification.md) | Pre-answer checklist: correctness, severity, observability — required before final answers |
 | 3 | [`openspec/`](openspec/) | Guardrails, proposals, design decisions, tasks, per-capability specs |
 
 ## OpenSpec layout
