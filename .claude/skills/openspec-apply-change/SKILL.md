@@ -90,6 +90,20 @@ Implement tasks from an OpenSpec change.
    - If all done: suggest archive
    - If paused: explain why and wait for guidance
 
+8. **Update openspec/STATUS.md**
+
+   After each session (completion or pause), update the change's row in
+   `openspec/STATUS.md` so the project view stays current.
+
+   - **Progress**: update to `N/M tasks complete`
+   - **Status**: `In Progress` if partially done; `Complete` if all tasks done
+   - **Blocked On**: if paused due to a blocker, describe it briefly;
+     otherwise clear or keep existing value
+   - Update the `Last updated` date at the top
+
+   If STATUS.md does not exist, create it following the template in the
+   `openspec-propose` skill before writing the entry.
+
 **Output During Implementation**
 
 ```

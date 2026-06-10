@@ -267,3 +267,63 @@ A group is NOT complete until its task-wise gates and the clean rebuild pass. Co
 - [x] 15.12 **Full dead code gate**: `make deadcode` passes with zero findings — no unreachable function, no exported symbol without a consumer, no interface method without an exercised implementation, no commented-out code blocks
 - [x] 15.13 **Full Clean Architecture gate**: `make clean-arch` passes with zero violations across the entire codebase — `internal/domain/` imports stdlib only; `internal/usecase/` imports only `internal/domain/`; `internal/adapter/` imports only `internal/domain/` and `internal/usecase/`; confirmed by `go-cleanarch` and `depguard`
 - [x] 15.14 **Lint gate**: `golangci-lint run` passes with zero errors; `go vet ./...` passes; no CycloneDX/SPDX imports outside `internal/adapter/parser/` confirmed by depguard rule; zero `TODO:` or `FIXME:` comments remaining
+
+---
+
+## Phase 1 status summary
+
+**Original scope (groups 1–15):** **192 / 192 tasks complete** — all gates passed at Phase 1 tag (`themis-phase-1`).
+
+**Post-bring-up hardening (group 16 below):** discovered during real SBOM testing (Alpine/nginx container images, Syft/Trivy output). Tracked separately so distro SBOMs (Alpine, Debian, Rocky/RHEL, etc.) do not repeat zero-finding or ingest-failure traps. Merge target: `themis-phase-2` → `main`.
+
+---
+
+## 16. Post-bring-up hardening (planned)
+
+Correlation, OSV, and Linux-distro SBOM lessons from local verification. See README [SBOM correlation, OSV, and Linux distros](../../../README.md#sbom-correlation-osv-and-linux-distros).
+
+### 16.1 CVE correlation and OSV (ingest + watch)
+
+- [x] 16.1.1 Wire live OSV `ComponentFetcher` in ingestion pipeline (replace no-op `StaticVulnerabilityFetcher`)
+- [x] 16.1.2 CVE watch: correlate against full stored vulnerability catalog, not only current NVD poll batch
+- [x] 16.1.3 CVE watch: supplement each cycle with OSV batch queries for catalog ecosystems
+- [x] 16.1.4 Structured vulnerability matching: `ecosystem` + `package_name` columns (migration `000013`), `PackageIdentityMatch`, version ranges
+- [x] 16.1.5 Map PURL types to OSV ecosystem names (`apk`→`Alpine`, `deb`→`Debian`, etc.); skip unsupported types (`rpm`, `generic`, `oci`) without failing ingest
+- [ ] 16.1.6 Normalize distro package names for OSV queries (e.g. Alpine PURL `alpine/openssl` → OSV `openssl`); extend `PackageIdentityMatch` for suffix alignment
+- [ ] 16.1.7 Integration test: Alpine `apk` SBOM fixture → ingest reaches `NOTIFIED` → non-zero `component_vulnerabilities`
+- [ ] 16.1.8 Integration test: unsupported `rpm` SBOM → ingest succeeds → components stored → OSV skipped (zero or sparse findings documented)
+
+### 16.2 Operator experience and docs
+
+- [x] 16.2.1 README: SBOM upload envelope, ingestion `stage_detail` debugging, trust-gate prerequisites (image digest registration)
+- [x] 16.2.2 README: OSV ecosystem mapping table and per-distro expectations (Alpine, Debian, Rocky/RHEL `rpm`, nginx-on-Alpine)
+- [ ] 16.2.3 REST API to register images (replace manual `INSERT INTO images` SQL documented in README step 4)
+- [ ] 16.2.4 Optional upload helper script or `make upload-sbom` target wrapping `jq` envelope build
+- [ ] 16.2.5 Merge `themis-phase-2` correlation/OSV/README changes to `main` and tag post-hardening release
+
+### 16.3 Quality gates (follow-up)
+
+- [ ] 16.3.1 `make coverage-pkg PKG=adapter/store` ≥ 90% (register packages touched by migration `000013` / vulnerability store if needed)
+- [ ] 16.3.2 `make coverage-pkg PKG=adapter/osv` — register in `scripts/check-coverage.sh` if package grows beyond ad-hoc tests
+- [ ] 16.3.3 Full `make check` on `main` after merge of group 16.1–16.2
+
+---
+
+## Explicitly deferred (Phase 2 / Phase 3 — not Phase 1 tasks)
+
+These are documented in `design.md` and `proposal.md`. Do not add to Phase 1 completion criteria.
+
+| Area | Deferred to | Notes |
+| ---- | ----------- | ----- |
+| AI enrichment (LLM risk analysis) | Phase 2 | L3 signals beyond VEX |
+| EPSS / KEV sync | Phase 2 | Temporal scoring inputs |
+| Real cosign / sigstore verification | Phase 2 | `StubVerifier` today |
+| Git / GitHub / GitLab ingestion | Phase 2 | Same `IngestionService` pipeline |
+| Jenkins shared library / CI automation | Phase 2 | Webhook exists for manual test |
+| React SPA / native UI | Phase 3 | API-only in Phase 1 |
+| Docker production stack / compose | Phase 3 | Standalone binary + Postgres |
+| Redis job queue (durable async) | Phase 3 | `InProcessQueue` today |
+| Row-level security (DB) | Phase 3 | API key scope at query layer |
+| RPM / RHEL / Rocky Linux OSV correlation | Phase 2+ | `rpm` PURL type skipped; sparse NVD CPE match only |
+| Configurable debug log level | Phase 2 | `runtime-observability` change |
+| DefectDojo / external tool UI integrations | Phase 2+ | Out of OpenSpec Phase 1 |

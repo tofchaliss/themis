@@ -16,6 +16,7 @@ At the start of every task, use these sources (do not rely on memory alone):
    - `openspec/changes/themis-phase-1/specs/*/spec.md` — per-capability requirements
 
 Also read **`AGENTS.md`** for the full context index.
+Before final answers, complete **`verification.md`** (correctness, severity, observability).
 
 ## Rules
 

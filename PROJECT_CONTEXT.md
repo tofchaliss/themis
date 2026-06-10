@@ -2,7 +2,21 @@
 
 Themis is an open-source Go backend security intelligence platform. It ingests SBOM and VEX
 documents, correlates vulnerabilities, applies VEX overlay semantics, watches for newly
-disclosed CVEs, and delivers notifications. Built as a standalone binary backed by PostgreSQL.
+disclosed CVEs, and delivers notifications. Standalone binary backed by PostgreSQL.
+
+---
+
+## Current Status
+
+**Phase 1 — nearly complete.** 199 of 208 tasks done. Group 16 (OSV hardening, image
+registration API, coverage cleanup) is in progress. See `project-backlog.md` for what comes
+next.
+
+| Phase | Status | Scope |
+| ----- | ------ | ----- |
+| Phase 1 | In progress (199/208) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/themis-phase-1/` |
+| Phase 2 | Not started | AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export — see `project-backlog.md` |
+| Phase 3 | Not started | Rate limiting, observability, cosign, CI/CD ingestion, Docker, Redis, Web UI, RBAC/OIDC — see `project-backlog.md` |
 
 ---
 
@@ -13,148 +27,236 @@ disclosed CVEs, and delivers notifications. Built as a standalone binary backed 
 | SBOM | Software Bill of Materials — CycloneDX or SPDX format document listing all components in an artifact |
 | VEX | Vulnerability Exploitability eXchange — overlay document that contextualises raw findings without deleting them |
 | PURL | Package URL — canonical component identity used for CVE matching and deduplication |
-| risk_context | The convergence table — computed effective state combining all three data layers |
-| effective_state | The live status of a finding: DETECTED, SUPPRESSED, CONFIRMED, IN_TRIAGE, ACCEPTED_RISK, FALSE_POSITIVE, RESOLVED |
-| VEX overlay | VEX assertions change only effective_state in risk_context; raw findings in component_vulnerabilities are never deleted or modified |
-| L1 / L2 / L3 | The three data layers (see below) |
-| InProcessQueue | Phase 1 goroutine-pool implementation of the JobQueue domain interface |
+| risk_context | Convergence table — computed effective state combining all three data layers; sole source of truth for a finding's current status |
+| effective_state | Live status of a finding: DETECTED, SUPPRESSED, CONFIRMED, IN_TRIAGE, ACCEPTED_RISK, FALSE_POSITIVE, RESOLVED |
+| VEX overlay | VEX assertions change only `risk_context.effective_state`; raw findings in `component_vulnerabilities` are never deleted or modified |
+| L0 / L1a / L1b / L1c / L2 / L3 | The five data layers (Phase 2+ model; see below). Phase 1 used a three-layer model (L1/L2/L3) now superseded. |
+| InProcessQueue | Phase 1 goroutine-pool implementation of the `JobQueue` domain interface; swappable to Redis in Phase 3 via the same interface |
+| StubVerifier | Phase 1 implementation of `SignatureVerifier`; records trust status without cryptographic verification; replaced by CosignVerifier in Phase 3 |
+| AIWorkerRuntime | Phase 2 port interface for the AI enrichment backend; implemented by `adapter/ai/` (Ollama/CyberPal-2.0) |
+| SecurityKnowledgeGraph | Phase 2 graph: CVE ↕ CWE ↕ Package ↕ Product ↕ Microservice ↕ Deployment ↕ Customer; blast-radius traversal |
+| CanonicalSBOM | Internal model that all SBOM formats normalise into; only `adapter/parser/` knows about CycloneDX/SPDX/Trivy structs |
 
 ---
 
-## Three-Layer Data Model (permanent, all phases)
+## Permanent Invariants (never violate)
+
+1. **VEX overlay, never delete** — VEX changes `risk_context.effective_state` only; rows in
+   `component_vulnerabilities` are preserved forever. If VEX is revoked, the finding resurfaces.
+
+2. **Transport ≠ domain** — CycloneDX/SPDX/Trivy structs exist only in `internal/adapter/parser/`;
+   all other packages see only `CanonicalSBOM` and domain types.
+
+3. **Integrity chain** — VEX references SBOM checksum; SBOM references image digest; Themis
+   records this chain. Cryptographic verification of signatures is Phase 2 (StubVerifier today).
+
+4. **Deduplication** — same `(image_digest, checksum_sha256)` on SBOM upload is idempotent;
+   different checksum on same image = new scan with `is_latest=true`. `Idempotency-Key` header
+   on all mutating endpoints.
+
+5. **L4 triage generates L3** — every human triage decision auto-creates a `vex_document` with
+   `source=themis_generated`, which then auto-applies on future ingestions of the same
+   `(component_purl, cve_id)` pair.
+
+---
+
+## Data Model
+
+Phase 1 used a three-layer model (L1 inventory / L2 VEX intelligence / L3 temporal
+signals). Phase 2 introduces a revised five-layer model that accommodates the AI
+enrichment pipeline, the Security Knowledge Graph, and semantic memory.
 
 ```text
-  LAYER 1 — IMMUTABLE SOFTWARE INVENTORY TRUTH
-  ─────────────────────────────────────────────
+  L0  RAW IMMUTABLE INVENTORY
+  ────────────────────────────────────────────────────────────────
   Tables: products, product_versions, artifacts, images, sbom_documents,
           components, component_versions, dependency_relationships,
-          vulnerabilities, component_vulnerabilities
+          vulnerabilities, component_vulnerabilities, vex_documents,
+          vex_assertions, advisory_records
   Rule:   Append-only. Never mutated. Never deleted.
           Content-addressed by SHA-256 digest.
 
-  LAYER 2 — MUTABLE VULNERABILITY INTELLIGENCE
-  ─────────────────────────────────────────────
-  Tables: vex_documents, vex_assertions
-  Rule:   Each document is individually immutable (signed, hashed).
-          The collection evolves as new VEX revisions arrive.
+  L1a ASSET & DEPENDENCY GRAPH                        (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Tables: asset_graph_nodes, asset_graph_edges
+  Nodes:  Component → Microservice → Deployment → Customer
+  Phase 2: SQL graph tables.
+  Phase 3: Apache AGE (Cypher queries).
 
-  LAYER 3 — TEMPORAL EXPLOITABILITY CONTEXT
-  ──────────────────────────────────────────
-  Tables: intelligence_signals, runtime_exposures, remediation_actions
-  Rule:   TTL-based expiry. No inherent provenance.
-          Phase 1: populated by VEX overlay computation only.
-          Phase 2: EPSS/KEV sync adds scored signals.
-          Phase 3: AI signals.
+  L1b SECURITY KNOWLEDGE GRAPH                        (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Blast-radius graph: CVE ↕ CWE ↕ Package ↕ Product
+                      ↕ Microservice ↕ Deployment ↕ Customer
+  Populated by the Vulnerability Intelligence Collector (L0 → L1b).
+  Enables: "which customers are running the package affected by CVE-X?"
 
-  CONVERGENCE
-  ───────────
-  Table:  risk_context — single source of truth for current vulnerability status
-  Score:  Phase 1 = f(raw_severity, vex_effective_state)
-          Phase 2 = f(raw_severity, vex_effective_state, EPSS, KEV)
-          Phase 3 = f(all signals + AI scoring)
+  L1c SEMANTIC MEMORY                                 (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Table: embeddings (entity_type, entity_id, vector, model, created_at)
+  Extension: pgvector. Model: CyberPal-2.0 embed or nomic-embed.
+  Embeds: CVE descriptions, VEX justifications, AI summaries,
+          triage decisions. Powers RAG retrieval for AI workers.
+
+  L2  AI ENRICHMENT                                   (Phase 2+)
+  ────────────────────────────────────────────────────────────────
+  Tables: ai_summaries, ai_cwe_mappings, ai_exploitability,
+          ai_vex_recommendations, ai_remediation_advice
+  Rule:   Immutable per (worker_id, input_hash). Re-run = new row.
+          Confidence < 0.5 → advisory only; not used in scoring.
+
+  L3  HUMAN VALIDATION
+  ────────────────────────────────────────────────────────────────
+  Tables: triage_history (Phase 1), approvals (Phase 2+),
+          vex_overrides (Phase 2+), audit_log (Phase 1)
+  Rule:   Append-only. Every human decision is a permanent record.
+
+  CONVERGENCE → risk_context
+  ────────────────────────────────────────────────────────────────
+  Phase 1 score: f(raw_severity, vex_effective_state)
+    CRITICAL→90, HIGH→70, MEDIUM→40, LOW→10, NONE→0
+    SUPPRESSED/FALSE_POSITIVE/ACCEPTED_RISK → ×0.1
+    CONFIRMED → ×1.2 (capped at 100)
+    RESOLVED → 0
+
+  Phase 2 score: h(severity, vex_state, epss_score, kev_flag,
+                   ai_exploitability, ai_reachability_confidence)
 ```
 
 ---
 
-## Clean Architecture (mandatory, all phases)
+## Clean Architecture
 
 All code follows Robert C. Martin's Clean Architecture. The Dependency Rule is absolute:
 **source code dependencies can only point inward**.
 
 ```text
-  cmd/themis/main.go          ← DI root only; wires everything together
-  internal/infrastructure/    ← Layer 4: pgx, chi, config, queue, metrics
-  internal/adapter/           ← Layer 3: parsers, store, API handlers, notify, trust
-  internal/usecase/           ← Layer 2: ingestion, enrichment, triage, watch
-  internal/domain/            ← Layer 1: pure types + port interfaces (stdlib only)
+  cmd/themis/main.go           DI root only — wires everything, imported by nothing
+  internal/infrastructure/     Layer 4: pgx, chi, config, queue, metrics, CLI
+  internal/adapter/            Layer 3: parsers, store, API handlers, notify, trust, nvd, osv
+  internal/usecase/            Layer 2: ingestion, enrichment, triage, watch
+  internal/domain/             Layer 1: pure types + port interfaces (stdlib only)
 
   IMPORT RULE
-  domain/      → stdlib only
-  usecase/     → domain/ only
-  adapter/     → domain/, usecase/
+  domain/         → stdlib only
+  usecase/        → domain/ only
+  adapter/        → domain/, usecase/
   infrastructure/ → all inner layers
-  cmd/         → infrastructure/ only
+  cmd/            → infrastructure/ only
 ```
 
-Enforced by `go-cleanarch` and `depguard` in `.golangci.yml`. CI fails on any violation.
+Enforced by `go-cleanarch` and `depguard` in `.golangci.yml`. `make clean-arch` fails on
+any violation. CI enforces this on every push.
 
 ---
 
 ## Technology Stack
 
-| Concern | Choice | Notes |
-| ------- | ------ | ----- |
-| Language | Go 1.22+ | Single binary distribution |
-| Database | PostgreSQL only | No SQLite, no Redis in Phase 1 |
-| Router | chi | HTTP routing and middleware |
-| DB driver | pgx/v5 | PostgreSQL driver |
-| Migrations | golang-migrate | SQL files versioned in repo |
-| OpenAPI | oapi-codegen | Generates Go stubs from openapi.yaml |
-| Logging | zap | Structured JSON logs |
-| Metrics | prometheus/client_golang | /metrics endpoint |
-| Tracing | OpenTelemetry | Spans across ingestion pipeline |
-| Lint | golangci-lint + depguard + go-cleanarch | Import direction enforcement |
-| Coverage | go test -coverprofile + scripts/check-coverage.sh | 100% domain, ≥90% infra |
-| Dead code | golang.org/x/tools/cmd/deadcode | Zero tolerance |
-| Job queue | InProcessQueue (goroutine pool) | Phase 1; swappable to Redis in Phase 3 |
-| Sig verify | StubVerifier | Phase 1 stub; real cosign/sigstore in Phase 2 |
+All versions reflect what is in `go.mod` as built.
+
+| Concern | Library | Version |
+| ------- | ------- | ------- |
+| Language | Go | 1.25.0 |
+| Database | PostgreSQL + pgx | pgx/v5 v5.10.0 |
+| Migrations | golang-migrate | v4.19.1 |
+| HTTP router | go-chi/chi | v5.3.0 |
+| OpenAPI stubs | oapi-codegen | v2.4.1 |
+| OpenAPI validation | getkin/kin-openapi | v0.127.0 |
+| JSON schema | santhosh-tekuri/jsonschema | v6.0.2 |
+| Logging | go.uber.org/zap | v1.28.0 |
+| Metrics | prometheus/client_golang | v1.23.2 |
+| Tracing | go.opentelemetry.io/otel | v1.44.0 |
+| Config | gopkg.in/yaml.v3 | v3.0.1 |
+| Crypto | golang.org/x/crypto | v0.46.0 |
+| UUID | google/uuid | v1.6.0 |
+| Clean arch lint | roblaszczak/go-cleanarch | v1.2.1 |
+| Dead code | golang.org/x/tools/cmd/deadcode | via tools.go |
+| Property testing | pgregory.net/rapid | v1.3.0 |
+| Embedded Postgres | fergusstrange/embedded-postgres | v1.34.0 (test only) |
 
 ---
 
-## Code Quality Gates (every task group)
+## Code Structure
 
-Every task group must pass its gates before moving forward. **Coverage is task-wise; the clean rebuild is codebase-wide** — they are separate checks, run in this order:
-
-### 1. Task-wise gates (packages touched by the group)
-
-Run only what the group's section in `tasks.md` requires, scoped to that group's package(s):
-
-1. **Unit tests** — `go test ./internal/<package>/...`
-2. **Coverage** — `make coverage-pkg PKG=<path>` (e.g. `PKG=usecase/enrichment`; register new packages in `scripts/check-coverage.sh` first). Threshold: 100% for domain/usecase/parser/trust/notify; ≥90% for store/api/infrastructure.
-3. **Dead code** — `make deadcode` when the group lists it
-4. **Integration tests** — `go test -tags=integration ./internal/<package>/...` for the group's integration gate
-5. **Clean Architecture** — `make clean-arch` when the group lists it
-
-Full-repo coverage (`make coverage`) is reserved for final acceptance (Group 15) and CI-style sweeps.
-
-### 2. Full codebase build (always, after task-wise gates pass)
-
-6. **Clean rebuild** — `make verify-build` (`make clean` then `make all`) on the **entire repo**; confirms the binary still builds from scratch after the group's changes.
+```text
+themis/
+├── cmd/themis/main.go               DI root
+│
+├── internal/
+│   ├── domain/                      Layer 1 — pure types + port interfaces
+│   │   ├── sbom.go                  CanonicalSBOM, CanonicalComponent, CanonicalDependencyEdge
+│   │   ├── vulnerability.go         Vulnerability, CVE types
+│   │   ├── vex.go                   VEXAssertion, EffectiveState
+│   │   ├── product.go               Product, ProductVersion, Image
+│   │   ├── risk.go                  RiskContext, risk score formula
+│   │   ├── trust.go                 TrustResult, TrustStatus, trust policy types
+│   │   ├── ingestion.go             IngestionJob, lifecycle states
+│   │   ├── triage.go                TriageDecision, triage history types
+│   │   ├── watch.go                 CVEWatchFinding, watch types
+│   │   ├── catalog.go               Component catalog types
+│   │   ├── notification.go          NotificationEvent, routing rule types
+│   │   ├── enrichment.go            EnrichmentResult types
+│   │   ├── job.go                   Job, JobType, JobQueue interface
+│   │   ├── ports.go                 All repository + service interfaces
+│   │   ├── tracing.go               OTel span key types (no OTel import)
+│   │   └── version_match.go         PURL version range matching logic
+│   │
+│   ├── usecase/                     Layer 2 — application business rules
+│   │   ├── ingestion/               Trust gate → parse → store → correlate → enrich → notify
+│   │   ├── enrichment/              VEX overlay, effective state machine, risk score
+│   │   ├── triage/                  Human triage decisions, VEX generation, history
+│   │   └── watch/                   CVE feed orchestration, catalog matching, new findings
+│   │
+│   ├── adapter/                     Layer 3 — interface adapters
+│   │   ├── parser/                  CycloneDX, SPDX, Trivy → CanonicalSBOM + registry
+│   │   ├── store/                   PostgreSQL implementations of all domain repositories
+│   │   ├── notify/                  SMTP + Teams delivery, routing rules, digest, retry
+│   │   ├── trust/                   StubVerifier, hash, schema validation, policy enforcement
+│   │   ├── api/                     HTTP handlers, OpenAPI stubs, auth + HMAC middleware
+│   │   ├── nvd/                     NVD API client + rate limiter
+│   │   └── osv/                     OSV API client, ecosystem mapping, component fetcher
+│   │
+│   ├── infrastructure/              Layer 4 — frameworks and drivers
+│   │   ├── db/                      pgx connection pool, embedded Postgres (tests)
+│   │   ├── queue/                   InProcessQueue, postgres store, backoff, noop
+│   │   ├── http/                    chi router, startup, schedulers (watch, triage expiry)
+│   │   ├── config/                  YAML + env var loading
+│   │   ├── metrics/                 Prometheus registration, OTel setup, middleware
+│   │   └── cli/                     Admin CLI (create-key, revoke-key)
+│   │
+│   └── testutil/                    Shared test data generators (gen.go)
+│
+├── migrations/                      SQL migration files (000001–000013)
+├── api/openapi.yaml                 OpenAPI 3.1 spec (source of truth for handlers)
+├── api/oapi-codegen.yaml            Code generation config
+├── scripts/check-coverage.sh        Per-package coverage threshold enforcement
+└── tests/acceptance/                15 acceptance criteria tests + score oracle
+```
 
 ---
 
-## Phase Roadmap
+## Database Migrations
 
-### Phase 1 — Standalone Go Backend (current)
+13 migrations applied, managed by `golang-migrate`:
 
-**Goal:** Working REST API with no external AI, CI/CD, or UI dependencies.
+| Migration | Content |
+| --------- | ------- |
+| 000001 | L1: products, product_versions, artifacts, images |
+| 000002 | L1: sbom_documents (raw_document JSONB, trust_status, is_latest) |
+| 000003 | L1: components, component_versions, dependency_relationships |
+| 000004 | L1: vulnerabilities, component_vulnerabilities |
+| 000005 | L2: vex_documents, vex_assertions |
+| 000006 | L2: intelligence_signals, runtime_exposures, remediation_actions |
+| 000007 | L3: risk_context (convergence table) |
+| 000008 | Operational: api_keys, notification_rules, cve_watch_findings, audit_log, ingestion_jobs |
+| 000009 | Indexes: purl, component_vuln, risk_context, cve_id, sbom dedup (unique) |
+| 000010 | risk_context enrichment columns |
+| 000011 | triage_history (append-only) |
+| 000012 | system_state (last_success timestamps) |
+| 000013 | vulnerability package index for OSV/NVD matching |
 
-**Capabilities:**
+---
 
-| Capability | Description |
-| ---------- | ----------- |
-| artifact-trust | Schema validation, hash verification, deduplication, provenance check, StubVerifier |
-| sbom-parser | CycloneDX 1.4/1.5/1.6, SPDX 2.3/3.0, Trivy JSON → CanonicalSBOM |
-| sbom-ingestion | POST /api/v1/sbom/upload (202), POST /api/v1/webhooks/scan (HMAC-SHA256), async pipeline, idempotency |
-| sbom-store | Three-layer PostgreSQL schema via golang-migrate, PURL-indexed component catalog |
-| intelligence-enrichment | VEX overlay only; effective state machine; Phase 1 risk score = severity + VEX state |
-| cve-triage | L4 human triage API; themis-generated VEX from decisions; immutable triage history |
-| cve-watch | NVD/OSV scheduled polling (default 6h); PURL+version-range matching; ecosystem-batched queries |
-| notification-service | SMTP + Teams Adaptive Card; configurable routing rules; digest aggregation |
-
-**Key constraints:**
-
-- No AI enrichment — Phase 2
-- No EPSS / KEV signals — Phase 2
-- No real cosign verification — StubVerifier only; real sigstore in Phase 2
-- No CI/CD git integration — Phase 2
-- No web UI — Phase 3
-- No Docker production stack — Phase 3
-- No Redis queue — Phase 3
-- No full RBAC/OIDC — Phase 3
-- API key auth only (`X-API-Key`, bcrypt-hashed, product-scoped)
-
-**Ingestion pipeline lifecycle:**
+## Ingestion Pipeline Lifecycle
 
 ```text
 RECEIVED → VALIDATING → CORRELATING → ENRICHING → COMPLETED → NOTIFIED
@@ -163,88 +265,42 @@ RECEIVED → VALIDATING → CORRELATING → ENRICHING → COMPLETED → NOTIFIED
             REJECTED          FAILED (retryable)
 ```
 
-**OpenSpec artifacts:** `openspec/changes/themis-phase-1/`
+Stages: trust gate → parse/normalize → correlate/store findings → VEX overlay /
+risk_context → notify. The pipeline is not HTTP — upload, webhook, and future git
+ingestion all call the same `IngestionService.IngestSBOM` use case.
 
 ---
 
-### Phase 2 — AI Intelligence + CI/CD Integration
-
-**Goal:** Add AI-driven enrichment, real cosign verification, EPSS/KEV signals, and automated
-git-triggered ingestion from GitHub and GitLab.
-
-**Planned capabilities:**
-
-| Capability | Description |
-| ---------- | ----------- |
-| ai-enrichment | LLM-based vulnerability analysis (Claude API assumed); AI signals populate L3 |
-| epss-kev-sync | EPSS scores + CISA KEV feed populate intelligence_signals in L3 |
-| cosign-verifier | Real sigstore/cosign cryptographic signature verification (replaces StubVerifier via interface swap) |
-| github-integration | GitHub webhook + repo polling; auto-ingest SBOM/VEX pushed to a repo |
-| gitlab-integration | GitLab webhook + repo polling; same pipeline as GitHub |
-| upstream-vex-feeds | Pull VEX from Red Hat, Alpine, Ubuntu, SUSE, Wolfi, Rocky Linux |
-| vex-export | Export Themis risk_context as a VEX document |
-| rate-limiting | Per-product API rate limiting |
-| runtime-observability | Configurable log level (`THEMIS_LOG_LEVEL` / YAML), optional dev console encoding, OTel trace exporter wiring for local debugging |
-
-**Key decisions already made:**
-
-- GitHub + GitLab only in Phase 2; Bitbucket moves to Phase 3
-- Phase 2 is "predominantly AI interfacing" — git integration supports AI by providing the artifact source
-- CI/CD integration means: if a repo has SBOM/VEX committed, Themis auto-downloads and ingests on push
-- Risk score formula gains EPSS and KEV multipliers
-- The `IngestionService` interface (defined in Phase 1) is called by git handlers — no pipeline duplication
-
-**OpenSpec artifacts:** to be created as `openspec/changes/themis-phase-2/`
-
----
-
-### Phase 3 — Enterprise Production Stack
-
-**Goal:** Production-ready deployment, UI, horizontal scaling, and enterprise auth.
-
-**Planned capabilities:**
-
-| Capability | Description |
-| ---------- | ----------- |
-| docker-compose | Full production Docker Compose stack for self-hosted deployment |
-| redis-queue | Swap InProcessQueue for RedisQueue via the JobQueue interface — zero business logic change |
-| web-ui | React SPA dashboard for vulnerability management, triage, and reporting |
-| bitbucket-integration | Bitbucket webhook + repo polling (delayed from Phase 2) |
-| rbac-oidc | Full role-based access control with OIDC/OAuth2; replaces Phase 1 API key auth |
-| ha-deployment | Multi-instance deployment with shared PostgreSQL and Redis |
-| themis-cli | Standalone CLI tool for local SBOM analysis without a running server |
-
-**Key decisions already made:**
-
-- Docker everything moves to Phase 3 entirely
-- Redis queue swap requires only changing `internal/infrastructure/queue/` — use cases unaffected
-- UI requires more design discussion before OpenSpec
-
-**OpenSpec artifacts:** to be created as `openspec/changes/themis-phase-3/`
-
----
-
-## API Conventions (all phases)
+## API Conventions
 
 - **Versioning:** `/api/v1/` prefix; breaking changes get `/api/v2/`
 - **Pagination:** cursor-based on all list endpoints (`?cursor=...&limit=50`)
 - **Errors:** RFC 7807 Problem Details `{type, title, status, detail, instance}`
-- **Async:** upload and webhook endpoints return `202 Accepted`; processing is async via JobQueue
+- **Async:** upload and webhook endpoints return `202 Accepted`
 - **Idempotency:** `Idempotency-Key` header on all mutating endpoints
-- **Auth (Phase 1):** `X-API-Key` header; keys are product-scoped; bcrypt-hashed in DB
+- **Auth:** `X-API-Key` header; keys are product-scoped; bcrypt-hashed in DB; admin via CLI
 - **Webhook auth:** HMAC-SHA256 `X-Themis-Signature` header
 
 ---
 
-## VEX Overlay Semantics (permanent invariant)
+## Code Quality Gates
 
-Raw findings in `component_vulnerabilities` are **never deleted, modified, or suppressed**.
-VEX assertions change only `risk_context.effective_state`. This means:
+Two separate checks, run in this order after every task group:
 
-- A suppressed finding can always resurface if the VEX is revoked
-- Triage history is append-only; the most recent decision wins
-- L4 human triage decisions auto-generate a `vex_document` with `source=themis_generated`
-- Generated VEX auto-applies to future ingestions of the same `(component_purl, cve_id)` pair
+### 1. Task-wise gates (scoped to the group's packages)
+
+1. Unit tests — `go test ./internal/<package>/...`
+2. Coverage — `make coverage-pkg PKG=<path>` (register new packages in `scripts/check-coverage.sh` first)
+3. Dead code — `make deadcode`
+4. Integration tests — `go test -tags=integration ./internal/<package>/...`
+5. Clean Architecture — `make clean-arch`
+
+**Thresholds:** 100% for `domain/`, `usecase/*/`, `adapter/parser/`, `adapter/trust/`,
+`adapter/notify/`; ≥90% for `adapter/store/`, `adapter/api/`, `infrastructure/*/`.
+
+### 2. Full codebase build (always last)
+
+1. `make verify-build` — clean then build entire repo from scratch
 
 ---
 
@@ -258,17 +314,22 @@ standard    Accept unsigned (trust_status=unsigned). Require valid schema.
 permissive  Accept all valid-schema artifacts. For testing/dev only.
 ```
 
-Phase 1: signature fields recorded but not cryptographically verified (StubVerifier).
-Phase 2: real cosign/sigstore verification replaces StubVerifier via interface swap.
+Phase 1 + 2: `StubVerifier` records trust status without real cryptographic verification.
+Phase 3: `CosignVerifier` replaces StubVerifier via the `SignatureVerifier` interface swap.
 
 ---
 
-## Detailed Specifications
+## Reference Documents
 
 | Document | Contents |
 | -------- | -------- |
-| `proposal-initial.md` | Original 9 ADRs, 15 acceptance criteria, 8 capabilities — source of truth for design decisions |
-| `openspec/changes/themis-phase-1/proposal.md` | Phase 1 scope and capability list |
-| `openspec/changes/themis-phase-1/design.md` | 17 design decisions including Clean Architecture and code quality gates |
-| `openspec/changes/themis-phase-1/tasks.md` | ~100 implementation tasks across 15 groups with 6 mandatory gates each |
-| `openspec/changes/themis-phase-1/specs/*/spec.md` | Per-capability requirements and acceptance scenarios |
+| `README.md` | Build, run, config, test instructions and getting-started guide |
+| `project-backlog.md` | All deferred Phase 2 and Phase 3 items with decision rationale |
+| `AGENTS.md` | AI agent workflow: context sources, how-to-work, scope guardrail |
+| `verification.md` | Pre-answer quality checklist (C/S/O rows) |
+| `docs/acceptance-criteria.md` | 15 acceptance criteria tested in `tests/acceptance/criteria_test.go` |
+| `docs/archive/proposal-initial.md` | Original proposal with 9 ADRs — historical reference |
+| `openspec/changes/themis-phase-1/design.md` | 17 design decisions (canonical ADR source) |
+| `openspec/changes/themis-phase-1/tasks.md` | Implementation task checklist with 6-gate progress |
+| `openspec/changes/themis-phase-1/specs/*/spec.md` | Per-capability requirements and scenarios |
+| `tests/acceptance/criteria_test.go` | 15 acceptance criteria test coverage mapping |

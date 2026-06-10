@@ -23,90 +23,9 @@ A single binary backed by PostgreSQL. No agents. No daemons. No lock-in.
 
 ---
 
-## Design Principles
-
-### Clean Architecture
-
-All code follows Robert C. Martin's Clean Architecture. The single most important rule:
-**source code dependencies can only point inward**. Business logic never imports infrastructure.
-
-```text
-  cmd/themis/                  DI root — wires everything, imported by nothing
-  internal/infrastructure/     Layer 4: pgx, chi, config, queue, metrics
-  internal/adapter/            Layer 3: parsers, store, API handlers, notify, trust
-  internal/usecase/            Layer 2: ingestion, enrichment, triage, CVE watch
-  internal/domain/             Layer 1: pure types + port interfaces (stdlib only)
-```
-
-This means:
-
-- Use cases are tested without a database, HTTP server, or any framework
-- A new adapter (AI client, cosign verifier, Git provider) never touches business logic
-- The job queue can be swapped from goroutines to Redis by changing one file
-
-Enforced at compile time by `go-cleanarch` and `depguard`. CI fails on any import violation.
-
-### Three-Layer Data Model
-
-Vulnerability data is partitioned into three layers with different mutation rules:
-
-```text
-  L1 — IMMUTABLE INVENTORY
-       products, images, sbom_documents, components, vulnerabilities
-       Append-only. Never mutated. Never deleted. Content-addressed by SHA-256.
-
-  L2 — MUTABLE INTELLIGENCE
-       vex_documents, vex_assertions
-       Each document is immutable. The collection evolves as new VEX arrives.
-
-  L3 — TEMPORAL SIGNALS
-       intelligence_signals, runtime_exposures
-       Phase 1: VEX-derived only.  Phase 2: EPSS + KEV.  Phase 3: AI signals.
-
-  CONVERGENCE → risk_context
-       Single source of truth for the current state of every (component, CVE) pair.
-```
-
-### VEX Overlay — Raw Findings Are Never Deleted
-
-VEX assertions change only `risk_context.effective_state`. The underlying
-`component_vulnerabilities` record is always preserved. This means:
-
-- A suppressed finding resurfaces immediately if the VEX is revoked
-- Every state transition is auditable and reversible
-- Human triage decisions auto-generate a `vex_document` that applies to future ingestions
-
----
-
-## Phase Roadmap
-
-### Phase 1 — Standalone Go Backend *(current)*
-
-A complete, self-contained REST API. No external AI, CI/CD, or UI dependencies.
-
-- All 8 capabilities listed above
-- API key authentication (product-scoped, bcrypt-hashed)
-- In-process goroutine job queue behind a swappable interface
-- Cosign signature verification stubbed — records trust status without network calls
-- PostgreSQL only, single binary deployment
-
-### Phase 2 — AI Intelligence + CI/CD Integration
-
-- **AI enrichment** — LLM-based vulnerability analysis (Claude API); AI signals in L3
-- **EPSS + KEV** — CISA KEV feed and EPSS scores populate `intelligence_signals`
-- **Real cosign** — sigstore/cosign cryptographic verification replaces the Phase 1 stub
-- **GitHub + GitLab** — auto-ingest SBOM/VEX committed to a repo on push
-- **Upstream VEX feeds** — Red Hat, Alpine, Ubuntu, SUSE, Wolfi, Rocky Linux
-- **Rate limiting** — per-product API rate limits
-
-### Phase 3 — Enterprise Production Stack
-
-- **Docker Compose** — full production stack for self-hosted deployment
-- **Redis job queue** — horizontal scaling; zero business logic change (interface swap)
-- **Web UI** — React SPA for vulnerability management, triage, and reporting
-- **Bitbucket integration** — git ingestion alongside GitHub/GitLab
-- **RBAC + OIDC** — full role-based access control; replaces Phase 1 API keys
-- **themis-cli** — standalone CLI for local SBOM analysis without a running server
+For architecture (Clean Architecture layers, three-layer data model, VEX overlay semantics),
+technology stack, phase roadmap, and quality gates, see [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
+Deferred Phase 2 and Phase 3 items are tracked in [project-backlog.md](project-backlog.md).
 
 ---
 
@@ -286,11 +205,15 @@ checks.
 | `connection refused` on `:5432` | Postgres not running | Start Postgres; confirm with `pg_isready` |
 | `failed to open database` / migrate errors | Wrong host, DB name, or SSL mode | Test with `psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1'` |
 | Server starts but `/readyz` is 503 | DB down or CVE feed not polled yet | Check `checks` in the JSON body; wait for first watch poll |
-| Ingestion succeeds but no vulnerabilities | Catalog has no CVE matches for your PURLs yet | Check `GET /api/v1/components`; wait for CVE watch or see [Testing](#testing-with-your-own-cyclonedx-sbom) |
+| Ingestion succeeds but no vulnerabilities | PURL ecosystem not mapped to OSV, or no version match | See [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros); check component ecosystems |
+| Upload returns `422 invalid JSON body` | Malformed JSON or empty/invalid `image_id` / `project_id` UUIDs | Build upload envelope with `jq`; omit UUID fields rather than sending `""` |
+| Ingestion `REJECTED` — `image not found` | `image_digest` not in `images` table | Register image in Postgres (Testing step 4) before upload; digest must match exactly |
+| Ingestion `FAILED` — `sbom_documents_image_id_fkey` | `image_id` in payload does not exist in `images` | Use `image_id` from `SELECT id FROM images WHERE digest = '...'` |
+| Ingestion `FAILED` — `osv api status 400: Invalid ecosystem` | Old binary sent PURL type (e.g. `apk`) to OSV instead of OSV name (`Alpine`) | Pull latest, `make build`, restart; see [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros) |
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
 | `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
 | Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
-| Want verbose / debug server logs | No log-level config in Phase 1 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging is planned for Phase 2 (`runtime-observability`) |
+| Want verbose / debug server logs | No log-level config in Phase 1 or 2 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging and OTel trace export are planned for Phase 3 (`runtime-observability`) |
 
 ---
 
@@ -327,7 +250,7 @@ Use this path when you already have a CycloneDX JSON file from your container im
 generated by [Syft](https://github.com/anchore/syft), [Trivy](https://github.com/aquasecurity/trivy),
 or your CI pipeline).
 
-**What your file provides vs what you must supply**
+#### What your file provides vs what you must supply
 
 | From your CycloneDX file | You still provide to Themis |
 | ------------------------ | --------------------------- |
@@ -335,12 +258,15 @@ or your CI pipeline).
 | `specVersion` (1.4 / 1.5 / 1.6) | `image_id` (registered in Postgres — no REST API in Phase 1) |
 | Optional embedded `vulnerabilities` | `project_id` (from API) and `X-API-Key` |
 
-Findings are created by matching SBOM **components** (by PURL) against the `vulnerabilities`
-catalog in PostgreSQL — not directly from the `vulnerabilities` section inside your CycloneDX
-file. Components without `purl` are skipped. Ingestion can succeed with zero findings if the
-catalog has no matches yet (CVE watch polls NVD/OSV in the background).
+Findings are created by matching SBOM **components** (by PURL) against the local
+`vulnerabilities` catalog and, when needed, **live OSV queries** during ingestion — not from the
+embedded `vulnerabilities` section inside your CycloneDX file. Components without `purl` are
+skipped.
 
-**0. Generate an SBOM from your image (if needed)**
+CVE watch also polls NVD/OSV in the background and correlates against the full stored catalog.
+If you see components but zero findings, check [SBOM correlation and OSV](#sbom-correlation-osv-and-linux-distros).
+
+#### 0. Generate an SBOM from your image (if needed)
 
 ```sh
 export IMAGE_REF="myregistry/myapp:1.2.3"
@@ -353,7 +279,7 @@ syft "$IMAGE_REF" -o cyclonedx-json="$SBOM_FILE"
 trivy image --format cyclonedx --output "$SBOM_FILE" "$IMAGE_REF"
 ```
 
-**1. Inspect the file**
+#### 1. Inspect the file
 
 ```sh
 jq -r '.specVersion' "$SBOM_FILE"    # must be 1.4, 1.5, or 1.6
@@ -367,7 +293,7 @@ export IMAGE_DIGEST=$(docker inspect "$IMAGE_REF" --format '{{.Id}}')
 # or: docker image inspect "$IMAGE_REF" --format '{{index .RepoDigests 0}}'
 ```
 
-**3. Create an API key, product, and project**
+#### 3. Create an API key, product, and project
 
 ```sh
 export BASE_URL="http://localhost:8080"
@@ -401,7 +327,7 @@ VALUES (
 EOF
 ```
 
-**5. Upload your CycloneDX file**
+#### 5. Upload your CycloneDX file
 
 Prefer JSON upload (supports `image_id` and `project_id`):
 
@@ -431,7 +357,7 @@ curl -s -X POST "$BASE_URL/api/v1/sbom/upload" \
 
 Expect **202 Accepted** with an `ingestion_id`.
 
-**6. Poll ingestion until complete**
+#### 6. Poll ingestion until complete
 
 ```sh
 export INGESTION_ID="<from upload response>"
@@ -439,14 +365,30 @@ export INGESTION_ID="<from upload response>"
 until STATUS=$(curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" \
   -H "X-API-Key: $API_KEY" | jq -r .status); \
   [[ "$STATUS" == "NOTIFIED" || "$STATUS" == "COMPLETED" ]]; do
-  echo "status=$STATUS"
+  curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" \
+    -H "X-API-Key: $API_KEY" | jq '{status, stage_detail, scan_id}'
   [[ "$STATUS" == "FAILED" || "$STATUS" == "REJECTED" ]] && break
   sleep 2
 done
 echo "final=$STATUS"
 ```
 
-**7. Inspect results**
+On failure, `stage_detail` is the authoritative message (trust gate, parse, OSV, or DB constraint).
+You can also inspect Postgres:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c "
+SELECT status, error_message,
+       payload->>'pipeline_status' AS pipeline_status,
+       payload->>'stage_detail' AS stage_detail
+FROM ingestion_jobs WHERE id = '$INGESTION_ID';"
+```
+
+**Upload body shape** — `-d @file.json` must be a JSON **envelope** (`format`, `document`, optional
+`image_id`, `project_id`, `image_digest`), not the raw CycloneDX file alone. Build it with the
+`jq` command in step 5; do not send empty strings for UUID fields (`""` causes `422 invalid JSON body`).
+
+#### 7. Inspect results
 
 ```sh
 curl -s "$BASE_URL/api/v1/projects/$PROJECT_ID/scans" -H "X-API-Key: $API_KEY" | jq .
@@ -458,7 +400,7 @@ curl -s "$BASE_URL/api/v1/scans/$SCAN_ID/vulnerabilities" -H "X-API-Key: $API_KE
 curl -s "$BASE_URL/api/v1/components?limit=20" -H "X-API-Key: $API_KEY" | jq .
 ```
 
-**8. Triage a finding (optional)**
+#### 8. Triage a finding (optional)
 
 ```sh
 export FINDING_ID=$(curl -s "$BASE_URL/api/v1/scans/$SCAN_ID/vulnerabilities" \
@@ -471,6 +413,108 @@ curl -s -X POST "$BASE_URL/api/v1/vulnerabilities/$FINDING_ID/triage" \
 
 API reference: [`api/openapi.yaml`](api/openapi.yaml). Sample fixture used in tests:
 [`internal/adapter/parser/testdata/cyclonedx-1.6.json`](internal/adapter/parser/testdata/cyclonedx-1.6.json).
+
+### SBOM correlation, OSV, and Linux distros
+
+This section captures Phase 1 behaviour and debugging lessons from real SBOM bring-up (e.g. Alpine
+`apk` SBOMs from Syft/Trivy). Use it before assuming “ingestion worked but Themis is broken.”
+
+#### How findings are created
+
+1. **Parse** — CycloneDX components become canonical inventory keyed by **PURL** (`ecosystem`, `name`, `version`).
+2. **Correlate (ingest)** — For each component: match the local `vulnerabilities` table;
+   if no hit, query **OSV** and upsert matches into `component_vulnerabilities`.
+3. **CVE watch** — Background NVD/OSV poll plus correlation against the **full** stored catalog and registered components.
+
+The CycloneDX `vulnerabilities` array in your file is **not** ingested as findings. A large NVD
+cache with zero overlap on package names is normal until OSV correlation runs.
+
+#### OSV ecosystem mapping (PURL type ≠ OSV name)
+
+Syft/Trivy PURL **types** are not always valid [OSV ecosystem](https://google.github.io/osv.dev/) names.
+Themis maps supported types before calling OSV (`internal/adapter/osv/ecosystem.go`):
+
+| PURL type (in SBOM) | OSV ecosystem | Typical image / SBOM source |
+| ------------------- | ------------- | --------------------------- |
+| `apk` | `Alpine` | Alpine Linux, many minimal/nginx images |
+| `deb` | `Debian` | Debian-based images |
+| `ubuntu` | `Ubuntu` | Ubuntu-based images |
+| `npm` | `npm` | Node.js dependencies |
+| `maven` | `Maven` | Java dependencies |
+| `go` | `Go` | Go modules |
+| `pypi` | `PyPI` | Python packages |
+| `nuget` | `NuGet` | .NET packages |
+| `cargo` | `crates.io` | Rust crates |
+| `gem` | `RubyGems` | Ruby gems |
+
+**Unsupported for OSV (skipped, no live lookup):** `rpm`, `generic`, `oci`, and other types without
+a mapping. This affects **RHEL, Rocky Linux, AlmaLinux, Fedora RPM** SBOMs: components are stored,
+but Phase 1 does not call OSV for `rpm`. Findings may still appear from the local NVD cache when
+CPE/package metadata aligns — often sparse for distro packages.
+
+Sending an unmapped PURL type as-is to OSV (e.g. `apk` instead of `Alpine`) returns
+`400 Invalid ecosystem` and fails ingestion on older binaries. Current code maps or skips.
+
+#### Distro-specific expectations
+
+| Base / scanner output | Dominant PURL types | Phase 1 correlation |
+| --------------------- | ------------------- | ------------------- |
+| **Alpine** (incl. many `nginx` images) | `apk` | OSV `Alpine` — good coverage; finding count < component count is normal |
+| **Debian / Ubuntu** | `deb` / `ubuntu` | OSV `Debian` / `Ubuntu` |
+| **Rocky / RHEL / Alma** | `rpm` | OSV skipped; expect fewer automatic findings until RPM/distro feed support |
+| **Mixed** (app + OS packages) | `npm`, `apk`, `rpm`, … | Each ecosystem handled independently |
+
+**Alpine naming:** PURLs are often `pkg:apk/alpine/openssl@3.x`. Themis may store the name as
+`alpine/openssl` while OSV expects `openssl`. Ingest succeeds; some packages may not match until
+name normalization is improved. Not every component has a CVE at your pinned version.
+
+**Image name ≠ ecosystem** — an `nginx:alpine` image still yields `apk` components from the OS
+layer; correlation follows PURL type, not the image tag.
+
+#### Debugging checklist
+
+Run in order when components exist but findings are missing or ingestion fails:
+
+```sh
+# 1. Component ecosystems (what PURL types dominate?)
+curl -s "$BASE_URL/api/v1/components?limit=200" -H "X-API-Key: $API_KEY" \
+  | jq '[.items[].ecosystem] | group_by(.) | map({ecosystem: .[0], count: length})'
+
+# 2. Ingestion outcome (use latest ingestion_id)
+curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" -H "X-API-Key: $API_KEY" \
+  | jq '{status, stage_detail, scan_id}'
+
+# 3. Counts in Postgres
+psql "$THEMIS_DATABASE_DSN" -c "
+SELECT
+  (SELECT COUNT(*) FROM components) AS components,
+  (SELECT COUNT(*) FROM vulnerabilities) AS cve_catalog,
+  (SELECT COUNT(*) FROM component_vulnerabilities) AS findings;"
+
+# 4. Sanity-check OSV for a sample Alpine package (PURL type vs OSV name)
+curl -s -X POST 'https://api.osv.dev/v1/querybatch' -H 'Content-Type: application/json' \
+  -d '{"queries":[{"package":{"ecosystem":"apk","name":"openssl"}}]}' | jq .message
+# → "Invalid ecosystem" — OSV wants "Alpine", not "apk"
+
+curl -s -X POST 'https://api.osv.dev/v1/querybatch' -H 'Content-Type: application/json' \
+  -d '{"queries":[{"package":{"ecosystem":"Alpine","name":"openssl"}}]}' \
+  | jq '.results[0].vulns | length'
+```
+
+#### Learnings (avoid repeating the same mistakes)
+
+1. **`202 Accepted` ≠ success** — poll `GET /api/v1/ingestions/{id}`; trust `stage_detail` and `pipeline_status` in `ingestion_jobs`.
+2. **Register the image before upload** — trust gate requires `image_digest` in `images`;
+   `image_id` in the payload must be that row’s UUID.
+3. **Upload envelope, not raw SBOM** — wrap CycloneDX in `format` + `document`; never send `image_id: ""`.
+4. **PURL type ≠ OSV ecosystem** — `apk`→`Alpine`, `deb`→`Debian`; unmapped types are skipped, not sent raw to OSV.
+5. **NVD cache size is misleading** — hundreds of CVE rows can still yield zero findings without package-level OSV correlation.
+6. **Re-upload needs a new checksum or delete** — duplicate `(image_digest, checksum_sha256)` skips re-correlation.
+7. **Finding count < component count is normal** — version ranges, missing OSV entries,
+   and unsupported `rpm` packages all reduce matches.
+
+After fixes on branch `themis-phase-2`, a 77-component Alpine SBOM produced **50 findings** —
+expected partial coverage, not 77/77.
 
 ### Resetting ingested data (local dev only)
 
@@ -658,7 +702,7 @@ themis/
 │   │   ├── parser/              CycloneDX, SPDX, Trivy → CanonicalSBOM
 │   │   ├── store/               PostgreSQL implementations of domain repositories
 │   │   ├── notify/              SMTP + Teams delivery, routing rules, digest
-│   │   ├── trust/               StubVerifier (Phase 1); CosignVerifier (Phase 2)
+│   │   ├── trust/               StubVerifier (Phase 1 + 2); CosignVerifier (Phase 3)
 │   │   └── api/                 HTTP handlers, OpenAPI stubs, auth middleware
 │   │
 │   ├── infrastructure/          Layer 4: frameworks and drivers

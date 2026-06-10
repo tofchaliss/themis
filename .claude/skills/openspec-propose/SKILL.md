@@ -85,6 +85,55 @@ When ready to implement, run /opsx:apply
    openspec status --change "<name>"
    ```
 
+6. **Update openspec/STATUS.md**
+
+   After all artifacts are created, update the project status file so any agent can
+   discover this change without reading the full openspec directory.
+
+   a. If `openspec/STATUS.md` does not exist, create it with this template:
+
+      ```markdown
+      # Themis — Project Status
+
+      _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
+      Last updated: <today>._
+
+      ---
+
+      ## Active Changes
+
+      | Change | Status | Started | Progress | Blocked On |
+      | --- | --- | --- | --- | --- |
+
+      ## Prerequisite Work
+
+      _None._
+
+      ## Completed Changes
+
+      | Change | Archived | Delivered |
+      | --- | --- | --- |
+
+      ---
+
+      ## Phase Roadmap
+
+      _Add phase entries as changes are proposed and completed._
+      ```
+
+   b. Add a row to the **Active Changes** table:
+      - Change: `<name>`
+      - Status: `Planning`
+      - Started: today's date (YYYY-MM-DD)
+      - Progress: list which artifacts are done vs pending
+        (e.g., `proposal ✓  design ✓  tasks ✗  specs ✗`)
+      - Blocked On: any prerequisites named in `proposal.md`; `—` if none
+
+   c. If `proposal.md` lists prerequisites, add them under **Prerequisite Work**
+      with item-level status rows.
+
+   d. Update the `Last updated` date at the top.
+
 **Output**
 
 After completing all artifacts, summarize:
