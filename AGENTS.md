@@ -15,19 +15,28 @@ Read this file at the start of every session before planning or implementing wor
 
 ```text
 openspec/
-├── config.yaml                                     # OpenSpec schema + project context for artifact generation
-├── changes/themis-phase-2/                         # Active change
-│   ├── proposal.md                                 # Why / what / capabilities (scope boundary)
-│   └── specs/<capability>/spec.md                  # Requirements + acceptance scenarios per capability
-└── changes/archive/2026-06-09-themis-phase-1/      # Archived — reference only
-    ├── proposal.md
-    ├── design.md                                   # 17 Phase 1 ADRs
-    ├── tasks.md                                    # Groups 1–16 (Group 16 has 9 open items)
-    └── specs/<capability>/spec.md
+├── STATUS.md                                       # Project status — read this for current state
+├── config.yaml                                     # OpenSpec schema + project context
+├── changes/
+│   ├── themis-phase-2/                             # Architecture reference (NOT an implementation change)
+│   │   ├── proposal.md                             # Master design: why / capabilities by sub-phase
+│   │   ├── design.md                               # 16 ADRs + open questions OQ-4 to OQ-10
+│   │   └── scenario-fresh-deployment.md            # Cold-start E2E analysis; 10 identified gaps
+│   ├── themis-phase-2a/                            # PLANNED — Signal Foundation (v0.2.0)
+│   │   ├── proposal.md                             # (to be created via /opsx:propose)
+│   │   └── tasks.md                                # (to be created via /opsx:propose)
+│   ├── themis-phase-2b/                            # PLANNED — AI Intelligence (v0.3.0)
+│   ├── themis-phase-2c/                            # PLANNED — AI-Assisted VEX (v0.4.0)
+│   └── archive/2026-06-09-themis-phase-1/          # Archived — reference only
+│       ├── proposal.md
+│       ├── design.md                               # 17 Phase 1 ADRs
+│       ├── tasks.md                                # Groups 1–16 (Group 16 has 9 open items)
+│       └── specs/<capability>/spec.md
 ```
 
-**Current change:** `themis-phase-2`. Do not implement Phase 3 features (rate limiting,
-cosign, CI/CD ingestion, Docker, UI, Redis, RBAC) without explicit user direction.
+**Next implementation change:** `themis-phase-2a` (blocked on Group 16 + v0.1.0).
+Do not implement Phase 3 features (rate limiting, cosign, CI/CD, Docker, UI, Redis, RBAC)
+without explicit user direction.
 
 ## How to work
 
@@ -72,7 +81,16 @@ Track in `project-backlog.md` (§ "Phase 1 — Remaining hardening") and detaile
 | 16.8 | `adapter/osv/` coverage ≥ 90% |
 | 16.9 | Merge to `main`, git tag `v0.1.0`, Phase 1 release notes |
 
-**Phase 2 — Not started.** See `openspec/changes/themis-phase-2/proposal.md`.
+**Phase 2 — Split into three sub-phases. Not started (blocked on Group 16).**
+
+| Sub-phase | Change | Theme | Status |
+| --- | --- | --- | --- |
+| 2a | `themis-phase-2a` | Signal Foundation | Planned — needs `/opsx:propose` |
+| 2b | `themis-phase-2b` | AI Intelligence | Planned — blocked on 2a |
+| 2c | `themis-phase-2c` | AI-Assisted VEX | Planned — blocked on 2b |
+
+Architecture reference: `openspec/changes/themis-phase-2/proposal.md` and `design.md`.
+Full backlog: `project-backlog.md` § "Phase 2 backlog".
 
 ## Related docs
 

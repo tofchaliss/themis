@@ -1,5 +1,21 @@
 # Themis Phase 2 — AI Intelligence + Threat Intelligence
 
+> **Architecture Reference Document.**
+> This document captures the master design for the Phase 2 AI Intelligence layer.
+> It is **not** an implementation task source.
+>
+> Implementation is split into three sub-phase changes:
+>
+> | Sub-phase | Change name | Theme | Depends on |
+> | --- | --- | --- | --- |
+> | 2a | `themis-phase-2a` | Signal Foundation — feeds, graph, VEX export | Group 16 complete |
+> | 2b | `themis-phase-2b` | AI Intelligence — workers, RAG, pgvector | 2a complete |
+> | 2c | `themis-phase-2c` | AI-Assisted VEX — auto-apply, FP, thresholds | 2b + KB seeded |
+>
+> Each sub-phase has its own `proposal.md` and `tasks.md` under
+> `openspec/changes/<name>/`. Refer to `openspec/STATUS.md` for current
+> implementation state.
+
 ## Prerequisites — Phase 1 Group 16 hardening
 
 **Phase 2 implementation must not start until all 9 Group 16 tasks are complete and
@@ -395,126 +411,203 @@ VEX precedence: human_triage > user_supplied > ai_generated > upstream_vendor
 
 The auto-apply threshold is configurable (`config.ai.vex_auto_apply_threshold`, default: `0.85`).
 
-## Capabilities
+## Capabilities by Sub-Phase
 
-### ai-enrichment
+### Phase 2a — Signal Foundation (`themis-phase-2a`)
 
-Three-layer Intelligence Collector:
+Delivers improved risk scoring and team notifications with **no AI dependency**.
+All capabilities in this sub-phase are synchronous and deterministic.
 
-- **Layer 1 (sync)** — deterministic rules: CVSS ≥ 9 ∧ KEV → Critical; CVSS ≥ 9 ∧
-  ExploitPublic → High+; etc. Always runs. Always explainable. No model dependency.
-- **Layer 2 (sync)** — graph reasoning: traverses L1b Knowledge Graph
-  (CVE → Package → Product → Microservice → Deployment → Customer) to compute
-  blast radius and queue deterministic team notifications.
-- **Layer 3 (async)** — seven AI skill workers backed by CyberPal-2.0 / Qwen2.5-7B
-  via Ollama: CWE Mapper, CVE Summarizer, Exploitability Analyzer, Context Analyzer,
-  VEX Recommender, Remediation Advisor, False Positive Analyzer. KB-first optimisation:
-  pgvector similarity ≥ 0.92 skips model call and applies past decision directly.
-  Risk Explanation synthesises all outputs into a human-readable narrative.
-
-Graceful degradation: Layers 1+2 produce a valid risk score with no AI dependency.
-Layer 3 enriches asynchronously. Ollama outage does not degrade ingestion.
-
-New domain entities: Microservice, Deployment, Customer (= internal team/owner that
-owns a deployment and receives notifications), CWERecord, ExploitRecord.
-New intelligence source: ExploitDB (EDB-ID, exploit type, date, CVE reference).
-
-Zero-day handling: for brand-new CVEs with no model training data, the AI workers
-reason from three grounding types — (1) CWE class-level statistics ("CWE-787 in
-kernel space historically exploited in 85% of cases"), (2) CVSS vector analysis
-("AV:L + AC:L + S:C = local privilege escalation with scope change"), and (3) RAG
-retrieval of similar past decisions from L1c. No model retraining is needed for
-new CVEs; the architecture is designed around this constraint.
-
-### epss-kev
+#### epss-kev
 
 Daily sync of CISA KEV (Known Exploited Vulnerabilities) list and FIRST.org EPSS
 probability scores. Updated composite risk score formula:
-`h(severity, vex_state, epss_score, kev_flag, ai_exploitability, ai_reachability_confidence)`.
+`h(severity, vex_state, epss_score, kev_flag)`.
 Stored as `intelligence_signals` with TTL. ExploitDB records also contribute to
-the Exploitability Analyzer worker input.
+Layer 1 rule evaluation.
 
-### upstream-vex-feeds
+#### upstream-vex-feeds
 
-Scheduled fetch of vendor VEX feeds (Red Hat, Alpine, Ubuntu, Debian, SUSE, Wolfi,
-Rocky Linux). Applied as `vex_documents` with `source=upstream_vendor`. PURL-based
-matching. Precedence: human_triage > user_supplied > ai_generated > upstream_vendor.
+Scheduled fetch of vendor VEX feeds. Applied as `vex_documents` with `source=upstream_vendor`.
+Precedence: human_triage > user_supplied > ai_generated > upstream_vendor.
 Idempotent upsert per `(purl, cve_id)`.
 
-### vex-export
+**Phase 2a scope:** Red Hat, Alpine, Rocky Linux, Wolfi — apk and RPM ecosystems only.
+Four-phase PURL normalisation matching (exact → namespace alias → errata version →
+OSV range). See design.md Decision 15 for the full algorithm.
+
+**Core principle:** vendor VEX is the authoritative source for backported patches.
+Distro vendors backport security fixes into older upstream package versions; the
+vendor's `not_affected` assertion must be trusted over any upstream version comparison.
+Once a vendor VEX match is found, do not compare to upstream CVE version ranges.
+
+**Debian/Ubuntu follow-on:** Debian (DSA format, dpkg version ordering) and Ubuntu
+(USN format, per-series version ranges) share the same matcher interface and storage
+model as Phase 2a feeds — they are excluded from 2a scope due to different format
+parsers. Implement as a post-2a increment (see project-backlog.md).
+
+#### intelligence-collector-layers-1-2
+
+- **Layer 1 (sync)** — deterministic rules: CVSS ≥ 9 ∧ KEV → Critical; CVSS ≥ 9 ∧
+  ExploitPublic → High+; EPSS ≥ 0.5 ∧ CVSS ≥ 7.0 → Elevated; etc.
+  Always runs. Always explainable. No model dependency.
+- **Layer 2 (sync)** — graph reasoning: traverses L1b Knowledge Graph
+  (CVE → Package → Product → Microservice → Deployment → Customer) to compute
+  blast radius and queue deterministic team notifications.
+
+New domain entities: `Microservice`, `Deployment`, `Customer` (= internal team/owner
+that owns a deployment and receives notifications), `ExploitRecord`.
+Resolves OQ-9 (Microservice registration workflow).
+
+#### vex-export
 
 `GET /api/v1/products/{id}/versions/{v}/vex` — export the computed `risk_context` as
 a standards-compliant VEX document. Format negotiated via `Accept` header or `?format=`
-parameter (CycloneDX VEX or OpenVEX JSON). Includes AI-generated justification text
-where available. Includes confidence scores in non-normative extensions.
+parameter (CycloneDX VEX or OpenVEX JSON). Human and upstream vendor VEX justification
+text included. AI justification text added in Phase 2c.
+
+#### system-status
+
+`GET /api/v1/status?top=N` — single-call system overview for operators: total
+components registered, total CVE matches, breakdown by severity and triage state,
+and the top-N components with the most open vulnerabilities (name, product, CVE count,
+highest CVSS score, highest CVE ID). Answers "what is in Themis and what's most
+urgent?" without requiring custom queries.
+
+#### sbom-management
+
+`GET /api/v1/sboms` and `GET /api/v1/products/{id}/sboms` — paginated SBOM inventory
+listing: product name, image digest, upload timestamp, component count, is_latest flag.
+
+`DELETE /api/v1/sboms/{id}` — soft-delete a SBOM and archive its associated findings.
+Protected: deleting the most recent SBOM for a product requires `?force=true`. Data
+is never hard-deleted via API — a `deleted_at` tombstone excludes it from all active
+queries while preserving the audit trail (see Decision 18).
+
+#### error-ux
+
+All API error responses adopt a three-field envelope: `code` (machine-readable),
+`message` (plain English explanation), `hint` (actionable next step). No raw database
+errors, Go error strings, or stack traces in any response. Applied to all existing and
+new endpoints (see Decision 19).
+
+---
+
+### Phase 2b — AI Intelligence (`themis-phase-2b`)
+
+Adds the AI reasoning layer on top of the signal foundation from 2a.
+Requires 2a to be complete and healthy before 2b implementation starts.
+
+#### ai-enrichment (Layer 3 + workers + KB)
+
+- **Layer 3 (async)** — seven AI skill workers backed by CyberPal-2.0 / Qwen2.5-7B
+  via Ollama: CWE Mapper, CVE Summarizer, Exploitability Analyzer, Context Analyzer,
+  VEX Recommender, Remediation Advisor, False Positive Analyzer.
+- **KB-first optimisation** — pgvector similarity ≥ 0.92 skips model call and applies
+  past decision directly. Resolves OQ-4 (threshold) and OQ-7 (embedding model).
+- **Risk Explanation** synthesises all worker outputs into a human-readable narrative
+  (headline + 3–5 sentence explanation + urgency rationale).
+
+Graceful degradation: Layers 1+2 (from 2a) produce a valid risk score with no AI
+dependency. Layer 3 enriches asynchronously. Ollama outage does not degrade ingestion.
+
+New intelligence source: GHSA (GitHub Security Advisories) for ecosystem-precise
+fix versions (npm, Go, PyPI, Maven, RubyGems, Cargo, NuGet). New domain entity:
+`CWERecord`. New L1c layer: `pgvector` embeddings for semantic KB retrieval.
+
+Zero-day handling: CWE class-level statistics, CVSS vector analysis, RAG retrieval
+of similar past decisions from L1c. No model retraining required.
+
+---
+
+### Phase 2c — AI-Assisted VEX (`themis-phase-2c`)
+
+Automates the triage feedback loop. Requires 2b to be running and KB to have
+sufficient seeded decisions before thresholds are meaningful.
+
+#### ai-vex-automation
+
+- **VEX auto-apply** — VEX Recommender confidence ≥ threshold auto-creates
+  `vex_document` with `source=ai_generated`. Resolves OQ-5 (threshold, default 0.85).
+- **FP auto-apply** — False Positive Analyzer confidence ≥ threshold auto-sets
+  `effective_state=FALSE_POSITIVE`. Resolves OQ-6 (threshold, default 0.90).
+  Subject to `trust_policy=strict` four-eyes rule (OQ-10).
+- **Auto-suppressed notification** — new `FINDING_AUTO_SUPPRESSED` notification event
+  when AI suppresses a finding. Fixes G4 (silent suppression).
+- **VEX overlay re-trigger** — VEX Generator enqueues a `ReEnrichJob` after creating
+  an AI VEX document so `effective_state` updates immediately. Fixes G1.
+- Confidence thresholds configurable per-org via `config.ai.*_auto_apply_threshold`.
+
+Human VEX assertion ALWAYS overrides AI VEX recommendation.
+VEX precedence: human_triage > user_supplied > ai_generated > upstream_vendor.
+AI-generated justification text now included in VEX export (from 2a vex-export).
 
 ## Impact
 
+Sub-phase annotations: **(2a)** Signal Foundation · **(2b)** AI Intelligence ·
+**(2c)** AI-Assisted VEX
+
 **New packages:**
 
-- `internal/adapter/ai/` — Ollama HTTP client; CyberPal-2.0 adapter; 7 worker
-  implementations; prompt templates; JSON response validators; implements
-  `domain.AIWorkerRuntime` port
-- `internal/adapter/ghsa/` — GitHub Security Advisories API client; GHSA-to-CVE
-  mapping; package ecosystem version ranges (npm, Go, PyPI, Maven, RubyGems, Cargo,
-  NuGet); implements `domain.AdvisorySource` port
-- `internal/adapter/exploitdb/` — ExploitDB CSV ingester (`files_exploits.csv` from
-  the public GitHub mirror); CVE-to-EDB-ID lookup; exploit type mapping; implements
-  `domain.ExploitSource` port (swappable to local mirror in Phase 3)
-- `internal/adapter/epsskev/` — FIRST.org EPSS API client; CISA KEV JSON fetcher;
-  daily scheduler; implements `domain.ThreatSignalFetcher` port
-- `internal/adapter/vexfeed/` — Vendor VEX feed fetcher; PURL matcher; precedence resolver
-- `internal/adapter/assetgraph/` — Asset/dependency graph builder; SQL graph tables;
-  blast-radius traversal; Knowledge Graph edge population
-- `internal/usecase/vexgen/` — AI-assisted VEX document generation; confidence
-  threshold enforcement; precedence rules; draft VEX lifecycle
-- `internal/usecase/remediation/` — Remediation Advisor output storage; advisory
-  display (Phase 2); tracked remediation (Phase 3)
+- `internal/adapter/epsskev/` — FIRST.org EPSS + CISA KEV fetcher; daily scheduler **(2a)**
+- `internal/adapter/exploitdb/` — ExploitDB CSV ingester; CVE-to-EDB-ID lookup **(2a)**
+- `internal/adapter/vexfeed/` — Vendor VEX feed fetcher; PURL matcher; precedence resolver **(2a)**
+- `internal/adapter/assetgraph/` — Microservice/Deployment/Customer graph; blast-radius traversal **(2a)**
+- `internal/usecase/vexgen/` — VEX document generation; precedence rules; draft lifecycle **(2a/2c)**
+- `internal/adapter/ghsa/` — GitHub Security Advisories; GHSA-to-CVE; ecosystem fix versions **(2b)**
+- `internal/adapter/ai/` — Ollama HTTP client; 7 worker implementations; prompt templates **(2b)**
+- `internal/usecase/remediation/` — Remediation Advisor output; advisory display **(2b)**
 
 **Modified packages:**
 
-- `internal/domain/` — new ports: `AIWorkerRuntime`, `ThreatSignalFetcher`; new
-  types: `Microservice`, `Deployment`, `Customer`, `CWERecord`, `ExploitRecord`,
-  `AIEnrichmentResult`, `VEXRecommendation`; updated risk score formula constants
-- `internal/usecase/enrichment/` — updated risk score to incorporate `epss_score`,
-  `kev_flag`, `ai_exploitability` from L2/L3 signals
-- `internal/adapter/api/` — VEX export handler; AI enrichment status endpoints
-- `internal/infrastructure/config/` — new fields: `ai.model_name`, `ai.ollama_endpoint`,
-  `ai.vex_auto_apply_threshold`, `ai.embedding_model`; `exploitdb.source`
-  (`remote` default / `local_mirror` Phase 3), `exploitdb.mirror_path`
-- `cmd/themis/main.go` — registers new schedulers (EPSS/KEV, vendor VEX, AI
-  enrichment); wires AI worker handler; registers pgvector store
+- `internal/domain/` — new types: `Microservice`, `Deployment`, `Customer`,
+  `ExploitRecord` **(2a)**; `CWERecord`, `AIEnrichmentResult`, `VEXRecommendation`,
+  ports `AIWorkerRuntime`, `ThreatSignalFetcher` **(2b)**; risk score formula
+  constants **(2a+2b)**
+- `internal/usecase/enrichment/` — Layer 1 rules **(2a)**; Layer 3 async wiring **(2b)**;
+  VEX overlay re-trigger after AI VEX creation **(2c)**
+- `internal/adapter/api/` — VEX export handler **(2a)**; AI enrichment status endpoints,
+  blast-radius endpoint **(2b)**; auto-suppressed notification event **(2c)**
+- `internal/infrastructure/config/` — EPSS/KEV/ExploitDB config **(2a)**;
+  `ai.model_name`, `ai.ollama_endpoint`, `ai.embedding_model` **(2b)**;
+  `ai.vex_auto_apply_threshold`, `ai.fp_auto_apply_threshold` **(2c)**
+- `cmd/themis/main.go` — EPSS/KEV + vendor VEX schedulers **(2a)**; AI worker
+  handler; pgvector store **(2b)**
 
-**Database migrations (planned):**
+**Database migrations:**
 
-- 000014: `microservices`, `deployments`, `customers` tables; graph edge tables; ExploitDB records
-- 000015: `pgvector` extension; `embeddings` table (`entity_type`, `entity_id`, `vector`, `model`, `created_at`)
-- 000016: `ai_summaries` (+ `risk_explanation` column), `ai_cwe_mappings`,
+- 000014: `microservices`, `deployments`, `customers`, graph edge tables,
+  `exploit_records` — **(2a)**
+- 000015: `pgvector` extension; `embeddings` table — **(2b)**
+  ⚠️ `pgvector` extension must be pre-installed on the PostgreSQL instance
+- 000016: `ai_summaries` (+ `risk_explanation`), `ai_cwe_mappings`,
   `ai_exploitability`, `ai_vex_recommendations`, `ai_remediation_advice`,
-  `ai_fp_analysis` tables
+  `ai_fp_analysis` — **(2b)**
 - 000017: Indexes on `risk_context(epss_score, kev_listed, ai_exploitability)`;
-  `ai_assessment_text` column on `risk_context`
+  `ai_assessment_text` column on `risk_context` — **(2b)**
 
 **New APIs:**
 
-- `GET /api/v1/products/{id}/versions/{v}/vex` — VEX export (CycloneDX or OpenVEX)
-- `GET /api/v1/products/{id}/versions/{v}/findings/{cve_id}/enrichment` — AI enrichment detail for one finding
-- `GET /api/v1/products/{id}/blast-radius` — Knowledge Graph blast-radius traversal result
+- `GET /api/v1/status` — system-wide component + CVE summary; top-N vulnerable components **(2a)**
+- `GET /api/v1/sboms` — paginated list of all ingested SBOMs **(2a)**
+- `GET /api/v1/products/{id}/sboms` — paginated list of SBOMs for one product **(2a)**
+- `DELETE /api/v1/sboms/{id}` — soft-delete SBOM and archive findings **(2a)**
+- `GET /api/v1/products/{id}/versions/{v}/vex` — VEX export **(2a)**
+- `GET /api/v1/products/{id}/blast-radius` — blast-radius traversal **(2a)**
+- `GET /api/v1/products/{id}/versions/{v}/findings/{cve_id}/enrichment` — AI detail **(2b)**
 
 **External dependencies:**
 
-- Ollama HTTP API (local; no auth) — CyberPal-2.0 inference and embedding
-- FIRST.org EPSS API — public, no auth required
-- CISA KEV JSON feed — public, no auth required
-- ExploitDB CSV (`files_exploits.csv`) — downloaded from `offensive-security/exploitdb`
-  GitHub repo; public, no auth; Phase 3 switches to local git mirror via
-  `exploitdb.source=local_mirror`
-- `pgvector` PostgreSQL extension — must be installed on the PostgreSQL instance
+- FIRST.org EPSS API — public, no auth **(2a)**
+- CISA KEV JSON feed — public, no auth **(2a)**
+- ExploitDB CSV (`files_exploits.csv`) from `offensive-security/exploitdb` — public **(2a)**
+- Ollama HTTP API (local; no auth) — CyberPal-2.0 inference + embedding **(2b)**
+- `pgvector` PostgreSQL extension — must be pre-installed **(2b)**
 
 **Deferred to Phase 3:**
 
 - Q6 (runtime protection analysis) — requires WAF/eBPF/network policy data
 - Q7 (customer business impact) — requires deployment criticality matrix and SLA data
 - Apache AGE migration (Cypher queries over the Phase 2 SQL graph)
-- Full Remediation Engine (tracked remediation, ticket integration, notifications)
+- Full Remediation Engine (tracked remediation, ticket integration)
 - Redis-backed job queue (InProcessQueue sufficient for Phase 2 load)

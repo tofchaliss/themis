@@ -85,7 +85,27 @@ Archive a completed change in the experimental workflow.
    mv "<changeRoot>" "<planningHome.changesDir>/archive/YYYY-MM-DD-<name>"
    ```
 
-6. **Display summary**
+6. **Update openspec/STATUS.md**
+
+   After archiving, update the project status file to reflect the completed change.
+
+   a. **Remove** the change's row from the **Active Changes** table.
+
+   b. **Add** a row to the **Completed Changes** table:
+      - Change: `<name>`
+      - Archived: today's date (YYYY-MM-DD)
+      - Delivered: one-line summary of capabilities from `proposal.md`
+        (e.g., `artifact-trust, sbom-parser, sbom-ingestion, ...`)
+
+   c. **Remove** any Prerequisite Work entries that belonged exclusively to
+      this change (leave entries that are still relevant to remaining active changes).
+
+   d. Update the `Last updated` date at the top.
+
+   If STATUS.md does not exist, create it following the template in the
+   `openspec-propose` skill before writing the entry.
+
+7. **Display summary**
 
    Show archive completion summary including:
    - Change name

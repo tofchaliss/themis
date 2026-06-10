@@ -16,14 +16,17 @@ The original `proposal-initial.md` defined:
 **These boundaries were changed during Phase 1 design, then refined further before Phase 2
 started.** The current plan:
 
-- Phase 2 = AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export — pure signal quality, no infra changes
-- Phase 3 = Rate limiting + runtime observability + cosign/sigstore + CI/CD ingestion + deployment + UI + enterprise features
+- Phase 2 = AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export — split into three
+  sub-phases (2a, 2b, 2c) because the full scope is too large to implement reliably as one
+  change and the AI layer depends on signals being healthy before meaningful testing is possible
+- Phase 3 = Rate limiting + runtime observability + cosign/sigstore + CI/CD ingestion +
+  deployment + UI + enterprise features
 
-Rationale: Phase 2 is already significant domain work — AI enrichment introduces a new
-external dependency and non-determinism, EPSS/KEV changes the risk score formula contract,
-and upstream VEX feeds require precedence semantics. Rate limiting, observability wiring,
-cosign, and CI/CD are all infrastructure concerns that are cleaner as a Phase 3 workstream
-once the enriched risk signals are stable and the API contract is settled.
+Rationale for sub-phase split: Phase 2a (signals + graph + VEX export) delivers standalone
+value and validates the data foundation. Phase 2b (AI workers + RAG + pgvector) can only be
+meaningfully tested after EPSS/KEV/ExploitDB are healthy. Phase 2c (auto-apply thresholds)
+requires the KB to be seeded with real analyst decisions before confidence thresholds are
+tunable. Splitting also lets each sub-phase be tagged as a release (v0.2.0, v0.3.0, v0.4.0).
 
 ---
 
@@ -48,100 +51,149 @@ They must be done before Phase 1 is tagged as complete.
 
 ## Phase 2 backlog
 
-Phase 2 scope: AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export.
-
-### AI enrichment
-
-**What:** Answer nine canonical security questions for every high/critical finding using
-a small cybersecurity-specialised model (CyberPal-2.0 via Ollama) grounded in authoritative
-local data (RAG over NVD + OSV + EPSS + KEV + ExploitDB + vendor advisories + past
-decisions). Six specialised AI skill workers with typed JSON I/O:
-
-- CWE Mapper — classifies CVE into CWE taxonomy
-- CVE Summarizer — Q1: why is it vulnerable?
-- Exploitability Analyzer — Q2/Q3/Q4: can it be exploited, is exploit public, KEV-listed?
-- Context Analyzer — Q5: is the vulnerable code path reachable in this service?
-- VEX Recommender — Q8: what VEX status should be assigned? (AI-assisted VEX generation)
-- Remediation Advisor — Q9: what is the safest remediation? (advisory only in Phase 2)
-
-Q6 (runtime protection) and Q7 (customer business impact) are deferred to Phase 3.
-Enrichment is async — the SBOM ingestion critical path returns `202 Accepted` before any
-AI worker starts. The model is never in the critical path.
-
-New data model layers introduced: L1a (Asset & Dependency Graph), L1b (Security Knowledge
-Graph: CVE ↕ CWE ↕ Package ↕ Product ↕ Microservice ↕ Deployment ↕ Customer), L1c
-(Semantic Memory via pgvector), L2 (AI Enrichment output tables).
-
-New intelligence source: ExploitDB (EDB-ID, exploit type, CVE reference).
-
-AI-assisted VEX generation: VEX Recommender output above confidence threshold
-(`config.ai.vex_auto_apply_threshold`, default 0.85) auto-creates draft VEX documents
-with `source=ai_generated`. Human VEX always overrides. VEX precedence:
-human_triage > user_supplied > ai_generated > upstream_vendor.
-
-**Why deferred:** Phase 1 risk scoring is deterministic (`f(severity, vex_state)`). Adding
-AI introduces external dependencies, latency, and non-determinism — not appropriate until
-the deterministic pipeline is stable and tested.
-
-**Phase 1 hooks:**
-
-- `EnrichmentResult` domain type is defined and has a `source` field
-- `intelligence_signals` table exists with `source` column
-- `JobQueue` interface means enrichment jobs can be submitted asynchronously without
-  touching the ingestion use case
-- `risk_context` has `epss_score`, `kev_listed`, `ai_assessment` columns (populated NULL today)
+Phase 2 is split into three sub-phases. Master architecture reference:
+`openspec/changes/themis-phase-2/proposal.md` and `design.md`.
+Current implementation status: `openspec/STATUS.md`.
 
 ---
 
-### EPSS / KEV scoring
+### Phase 2a — Signal Foundation (`themis-phase-2a`) — Planned
 
-**What:** Sync CISA KEV (Known Exploited Vulnerabilities) list and FIRST.org EPSS scores
-on a daily schedule. Store each as an `intelligence_signal` (L3) with TTL. Incorporate
-into `risk_context` score (Phase 1 score formula is `f(severity, vex_state)` only; Phase 2
-adds `g(epss_score, kev_flag, vex_state, severity)`).
+**Gate:** Group 16 complete + `v0.1.0` tagged.
+**Releases as:** v0.2.0
+**OpenSpec change:** `openspec/changes/themis-phase-2a/` (to be created)
 
-**Why deferred:** The L3 table and signal schema exist. Adding EPSS/KEV requires a
-scheduler, HTTP fetch logic, and a score formula change — all are breaking changes to the
-risk score contract, which must be stable before CI/CD consumers depend on it.
+**What:**
+
+- **EPSS/KEV sync** — daily CISA KEV + FIRST.org EPSS fetch; updates
+  `intelligence_signals` with TTL; incorporates into risk score formula
+- **ExploitDB CSV** — ingests `files_exploits.csv` from public GitHub mirror;
+  CVE-to-EDB-ID lookup; feeds Layer 1 `ExploitPublic` rule
+- **GHSA integration** — GitHub Security Advisories for ecosystem-precise fix
+  versions (npm, Go, PyPI, Maven, etc.); extends the Phase 1 correlator
+- **Upstream VEX feeds** — scheduled fetch from Red Hat, Alpine, Rocky Linux, Wolfi;
+  applied as `vex_documents` with `source=upstream_vendor`; four-phase PURL normalisation
+  for apk + RPM ecosystems (see Decision 15); Debian/Ubuntu deferred to follow-on (see below)
+- **Layer 1 deterministic rules** — CVSS ≥ 9 ∧ KEV → Critical; CVSS ≥ 9 ∧
+  ExploitPublic → High+; EPSS ≥ 0.5 ∧ CVSS ≥ 7 → Elevated; etc.
+- **Microservice / Deployment / Customer entities** — new domain entities; registration
+  APIs; resolves OQ-9 (registration workflow)
+- **Layer 2 graph reasoning** — SQL traversal CVE → Package → Product → Microservice
+  → Deployment → Customer; blast-radius scoring; team-level notifications
+- **VEX export** — `GET /api/v1/products/{id}/versions/{v}/vex` CycloneDX or OpenVEX
+- **System status API** — `GET /api/v1/status?top=N`: total components, CVE counts by
+  severity/state, top-N components with most open vulnerabilities (name, product, CVE
+  count, highest CVSS); answers "what is in Themis and what's most urgent?" in one call
+- **SBOM management APIs** — `GET /api/v1/sboms`, `GET /api/v1/products/{id}/sboms`
+  (paginated listings); `DELETE /api/v1/sboms/{id}` (soft-delete with force flag for
+  latest SBOM; `deleted_at` tombstone; audit log entry)
+- **Layman-friendly error responses** — three-field error envelope (`code`, `message`,
+  `hint`) across all API endpoints; no raw DB errors or Go strings in responses
+- **Cold-start fixes** — G2 (EPSS/KEV retroactive score update), G6 (NVD warmup)
+
+**Why deferred from Phase 1:** risk score formula change and graph entity additions
+are breaking changes that require the Phase 1 pipeline to be stable first.
 
 **Phase 1 hooks:**
 
 - `intelligence_signals` table has `signal_type`, `score`, `expires_at` columns
-- `risk_context` has `epss_score`, `kev_listed`, `ai_assessment` columns (populated NULL today)
-- `watch/` use case scheduler pattern can be cloned for EPSS/KEV sync
+- `vex_documents.source` column distinguishes source tiers
+- `watch/` scheduler pattern cloneable for EPSS/KEV + vendor VEX sync
+- `JobQueue` interface for async tasks already in place
+- `risk_context` has `epss_score`, `kev_listed` columns (populated NULL today)
+
+**Database migrations:** 000014 (microservices, deployments, customers, exploit_records),
+000017 (indexes)
+
+**Post-2a follow-on — Debian/Ubuntu VEX feed matching:**
+
+Debian (DSA format, dpkg version ordering with tilde rules and epochs) and Ubuntu
+(USN format, per-series version ranges per `jammy`/`focal`/`noble`) are excluded from
+Phase 2a scope because they use formats and version comparators that differ from
+apk/RPM. The four-phase `Matcher` interface defined in Phase 2a supports adding
+Debian/Ubuntu as new `Matcher` implementations with no changes to the shared matching
+logic or VEX assertion storage. Implement after Phase 2a ships and the apk/RPM path
+is validated in production.
 
 ---
 
-### Upstream VEX feeds
+### Phase 2b — AI Intelligence (`themis-phase-2b`) — Planned
 
-**What:** Periodically fetch vendor VEX feeds and apply them as `vex_documents` with
-`source=upstream_vendor`. Supported vendors: Red Hat, Ubuntu, Alpine, Debian, SUSE, Wolfi,
-Rocky Linux. Match via PURL.
+**Gate:** Phase 2a complete and signal feeds confirmed healthy.
+**Releases as:** v0.3.0
+**OpenSpec change:** `openspec/changes/themis-phase-2b/` (to be created)
 
-**Why deferred:** Requires a scheduled fetch job, PURL-to-vendor-package mapping, and a
-de-duplication strategy (vendor VEX vs. user-supplied VEX — user VEX wins). These need
-careful ordering semantics that Phase 1 has not yet defined.
+**Hardware prerequisites (operator must verify before deploying Phase 2b):**
 
-**Phase 1 hooks:**
+- RAM: 16 GB minimum (Ollama model ~4.5 GB + PostgreSQL ~4 GB + pgvector + OS)
+- GPU: strongly recommended — CPU-only inference is 60–180 s per model call
+  (vs 1–8 s with GPU); CPU-only deployments set `ai.worker_concurrency=1`
+- Disk: NVMe SSD; model weights ~4.5 GB; grow with pgvector KB size
+- CyberPal-2.0 may not be in Ollama's public registry — most deployments will
+  use the automatic Qwen2.5-7B fallback (see design.md Decision 3)
+- PostgreSQL must have the `pgvector` extension installed before migration 000015
 
-- `vex_documents.source` column distinguishes user-supplied vs. upstream
-- PURL-based matching (`adapter/osv/` and `adapter/nvd/`) already handles ecosystem mapping
-- `watch/` scheduler can be extended with a vendor-feed sync task
+**What:**
+
+- **Ollama integration** — HTTP client for CyberPal-2.0 / Qwen2.5-7B; model health check
+- **pgvector + L1c Semantic Memory** — embedding table; HNSW index; nomic-embed-text model
+- **KB-first optimisation** — pgvector similarity ≥ 0.92 → apply past decision, skip model
+- **7 AI skill workers** — CWE Mapper, CVE Summarizer, Exploitability Analyzer, Context
+  Analyzer, VEX Recommender, Remediation Advisor, False Positive Analyzer
+- **Async JobQueue wiring** — AI enrichment jobs triggered for CVSS ≥ 7.0 OR KEV OR ExploitPublic
+- **RAG context assembly** — per-finding context built from L0/L1/external sources + KB
+- **Risk Explanation synthesis** — headline + narrative from all worker outputs
+- **AI enrichment status in API** — `enrichment_status: pending|complete` in findings response
+- **Cold-start fixes** — G1 (VEX overlay re-trigger), G7 (batch throttle), G9 (enrichment_status)
+
+**Why deferred from 2a:** AI workers are only meaningfully testable when EPSS/KEV/ExploitDB
+signals are present. Building 2b on an empty signal foundation makes it impossible to
+distinguish AI errors from missing data errors.
+
+**Phase 2a hooks:**
+
+- Layer 1 + Layer 2 provide the deterministic signals AI workers consume
+- Microservice/Deployment entities provide service descriptions for Context Analyzer
+- `risk_context` has `ai_exploitability`, `ai_reachability_confidence` columns (NULL until 2b)
+
+**Database migrations:** 000015 (pgvector extension + embeddings table),
+000016 (ai_summaries, ai_cwe_mappings, ai_exploitability, ai_vex_recommendations,
+ai_remediation_advice, ai_fp_analysis)
 
 ---
 
-### VEX document export
+### Phase 2c — AI-Assisted VEX (`themis-phase-2c`) — Planned
 
-**What:** `GET /api/v1/products/{id}/versions/{v}/vex` — export the computed risk context
-for a product version as a standards-compliant VEX document (CycloneDX or OpenVEX format).
+**Gate:** Phase 2b running; KB has ≥ 50 seeded analyst decisions (threshold tunable).
+**Releases as:** v0.4.0
+**OpenSpec change:** `openspec/changes/themis-phase-2c/` (to be created)
 
-**Why deferred:** Export is the inverse of ingest; it requires the ingest path (and the
-full risk_context population) to be complete and stable first.
+**What:**
 
-**Phase 1 hooks:**
+- **VEX auto-apply** — VEX Recommender confidence ≥ threshold auto-creates
+  `vex_document(source=ai_generated)`; resolves OQ-5 (default 0.85)
+- **FP auto-apply** — FP Analyzer confidence ≥ threshold auto-sets
+  `effective_state=FALSE_POSITIVE`; resolves OQ-6 (default 0.90)
+- **Four-eyes rule** — `trust_policy=strict` requires human confirmation before
+  auto-apply fires; resolves OQ-10
+- **FINDING_AUTO_SUPPRESSED notification** — new event type when AI suppresses a
+  finding; fixes G4 (silent suppression)
+- **Confidence threshold config** — `config.ai.vex_auto_apply_threshold`,
+  `config.ai.fp_auto_apply_threshold` configurable per deployment
+- **AI justification in VEX export** — enriches the 2a vex-export with AI-generated
+  justification text and confidence scores
 
-- All data needed for the export is already in `risk_context`, `vex_assertions`, `vex_documents`
-- CycloneDX and SPDX structs are already known in `adapter/parser/`; export uses the same types
+**Why after 2b:** Confidence thresholds (0.85, 0.90) are only meaningful when the KB
+has real analyst decisions to retrieve. Tuning auto-apply against an empty KB
+would result in under- or over-suppression — either missing real issues or drowning
+analysts in false positives.
+
+**Phase 2b hooks:**
+
+- VEX Recommender + FP Analyzer workers already produce `auto_apply` bool and
+  `confidence` float in their JSON output
+- `vex_documents.source` enum already includes `ai_generated`
+- `trust_policy` enum in domain already has `strict`, `standard`, `permissive`
 
 ---
 
