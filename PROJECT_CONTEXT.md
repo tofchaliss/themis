@@ -12,11 +12,16 @@ disclosed CVEs, and delivers notifications. Standalone binary backed by PostgreS
 registration API, coverage cleanup) is in progress. See `project-backlog.md` for what comes
 next.
 
+**Phase 2a — Signal Foundation in progress.** ~132/140 tasks done (Groups 1–29 complete;
+Group 30 release gate open). Branch `themis-phase-2`. See `openspec/changes/themis-phase-2a/`.
+
 | Phase | Status | Scope |
 | ----- | ------ | ----- |
 | Phase 1 | In progress (199/208) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/themis-phase-1/` |
-| Phase 2 | Not started | AI enrichment, EPSS/KEV, upstream VEX feeds, VEX export — see `project-backlog.md` |
-| Phase 3 | Not started | Rate limiting, observability, cosign, CI/CD ingestion, Docker, Redis, Web UI, RBAC/OIDC — see `project-backlog.md` |
+| Phase 2a | In progress (~132/140) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX — see `openspec/changes/themis-phase-2a/` |
+| Phase 2b | Planned | AI workers, pgvector, GHSA — blocked on 2a |
+| Phase 2c | Planned | AI-assisted VEX auto-apply — blocked on 2b |
+| Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |
 
 ---
 
@@ -325,6 +330,7 @@ Phase 3: `CosignVerifier` replaces StubVerifier via the `SignatureVerifier` inte
 | -------- | -------- |
 | `README.md` | Build, run, config, test instructions and getting-started guide |
 | `project-backlog.md` | All deferred Phase 2 and Phase 3 items with decision rationale |
+| `docs/phase-2a-capabilities.md` | Phase 2a capability boundary and API list |
 | `AGENTS.md` | AI agent workflow: context sources, how-to-work, scope guardrail |
 | `verification.md` | Pre-answer quality checklist (C/S/O rows) |
 | `docs/acceptance-criteria.md` | 15 acceptance criteria tested in `tests/acceptance/criteria_test.go` |

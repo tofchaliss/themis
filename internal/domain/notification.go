@@ -9,6 +9,7 @@ const (
 	NotificationEventCVEWatchFinding    = "cve_watch_finding"
 	NotificationEventTriageDecision     = "triage_decision"
 	NotificationEventVEXUpdated         = "vex_updated"
+	NotificationEventBlastRadiusTeam    = "blast_radius_team"
 )
 
 // Notification channel identifiers used in routing rules.
@@ -42,7 +43,11 @@ type NotificationEvent struct {
 	IngestionID string
 	Message     string
 	BatchKey    string
-	Findings    []NotificationFinding
+	Findings        []NotificationFinding
+	CustomerID      string
+	CVEID           string
+	ComponentPURL   string
+	BlastRadiusScore float64
 }
 
 // NotificationSender dispatches outbound notifications for domain events.

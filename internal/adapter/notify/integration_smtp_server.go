@@ -1,5 +1,3 @@
-//go:build integration
-
 package notify
 
 import (
@@ -31,16 +29,18 @@ func StartIntegrationSMTPServer(t *testing.T) (host string, port int, received f
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	port, _ = strconv.Atoi(portStr)
 
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go handleIntegrationSMTP(conn, false, &mailReceived)
-		}
-	}()
+	go serveIntegrationSMTP(ln, false, &mailReceived)
 	return host, port, mailReceived.Load
+}
+
+func serveIntegrationSMTP(ln net.Listener, advertiseSTARTTLS bool, received *atomic.Bool) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go handleIntegrationSMTP(conn, advertiseSTARTTLS, received)
+	}
 }
 
 func handleIntegrationSMTP(conn net.Conn, advertiseSTARTTLS bool, received *atomic.Bool) {
@@ -100,8 +100,12 @@ func handleIntegrationSMTP(conn net.Conn, advertiseSTARTTLS bool, received *atom
 	}
 }
 
+var generateTestRSAKey = rsa.GenerateKey
+var createTestCertificate = x509.CreateCertificate
+var parseTestCertificate = x509.ParseCertificate
+
 func integrationMockTLSConfig() *tls.Config {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := generateTestRSAKey(rand.Reader, 2048)
 	if err != nil {
 		return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
 	}
@@ -113,11 +117,11 @@ func integrationMockTLSConfig() *tls.Config {
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
-	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	der, err := createTestCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
 		return &tls.Config{MinVersion: tls.VersionTLS12}
 	}
-	cert, err := x509.ParseCertificate(der)
+	cert, err := parseTestCertificate(der)
 	if err != nil {
 		return &tls.Config{MinVersion: tls.VersionTLS12}
 	}

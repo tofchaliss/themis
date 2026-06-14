@@ -176,6 +176,48 @@ func TestBootOptions(t *testing.T) {
 	}
 }
 
+func TestBootWithConfigMountsAPI(t *testing.T) {
+	path := writeConfig(t, "")
+	workers, err := queue.NewInProcessQueue(queue.InProcessConfig{
+		PoolSize:  1,
+		MaxRetry:  1,
+		BaseDelay: time.Millisecond,
+		Store:     queue.NewMemoryJobStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := bootConfig{
+		configPath: path,
+		workerPool: workers,
+		hooks: bootHooks{
+			connect: func(context.Context, string, int32) (domain.DatabasePool, error) {
+				return bootMountPool{}, nil
+			},
+			runMigrations:       func(string, string) error { return nil },
+			verifySchemaVersion: func(string, string) error { return nil },
+		},
+	}
+	app, err := bootWithConfig(context.Background(), zap.NewNop(), cfg)
+	if err != nil {
+		t.Fatalf("bootWithConfig() error = %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = app.Close(ctx)
+	})
+	if app.HTTPServer == nil || app.HTTPServer.Router() == nil {
+		t.Fatal("expected mounted API router")
+	}
+}
+
+type bootMountPool struct{ mountFakePool }
+
+func (bootMountPool) Ping(context.Context) error { return nil }
+func (bootMountPool) Close()                     {}
+
 func TestApplicationCloseWorkerFailure(t *testing.T) {
 	logger := zap.NewNop()
 	s := New(":0", logger, ReadinessChecker{

@@ -23,6 +23,18 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.Trust.DefaultPolicy != TrustPolicyStandard {
 		t.Fatalf("Trust.DefaultPolicy = %q, want standard", cfg.Trust.DefaultPolicy)
 	}
+	if cfg.EPSSKev.PollInterval != 24*time.Hour {
+		t.Fatalf("EPSSKev.PollInterval = %v, want 24h", cfg.EPSSKev.PollInterval)
+	}
+	if cfg.ExploitDB.CSVURL == "" || cfg.VEXFeed.RHELURL == "" {
+		t.Fatalf("expected Phase 2a feed defaults: exploitdb=%q vexfeed=%q", cfg.ExploitDB.CSVURL, cfg.VEXFeed.RHELURL)
+	}
+	if cfg.Intelligence.BlastRadiusCap != 10 {
+		t.Fatalf("Intelligence.BlastRadiusCap = %d, want 10", cfg.Intelligence.BlastRadiusCap)
+	}
+	if cfg.Log.Level != "info" {
+		t.Fatalf("Log.Level = %q, want info", cfg.Log.Level)
+	}
 }
 
 func TestLoadFromYAML(t *testing.T) {
@@ -110,6 +122,19 @@ func TestAllEnvOverrides(t *testing.T) {
 	t.Setenv("THEMIS_SMTP_USE_TLS", "false")
 	t.Setenv("THEMIS_TEAMS_WEBHOOK_URL", "https://teams.example/webhook")
 	t.Setenv("THEMIS_TRUST_DEFAULT_POLICY", "permissive")
+	t.Setenv("THEMIS_EPSSKEV_EPSS_URL", "https://epss.example/scores.csv.gz")
+	t.Setenv("THEMIS_EPSSKEV_KEV_URL", "https://cisa.example/kev.json")
+	t.Setenv("THEMIS_EPSSKEV_POLL_INTERVAL", "12h")
+	t.Setenv("THEMIS_EXPLOITDB_CSV_URL", "https://exploitdb.example/files.csv")
+	t.Setenv("THEMIS_EXPLOITDB_POLL_INTERVAL", "6h")
+	t.Setenv("THEMIS_VEXFEED_RHEL_URL", "https://redhat.example/csaf/")
+	t.Setenv("THEMIS_VEXFEED_ALPINE_OSV_URL", "https://alpine.example/osv/")
+	t.Setenv("THEMIS_VEXFEED_ROCKY_OSV_URL", "https://rocky.example/osv.json")
+	t.Setenv("THEMIS_VEXFEED_WOLFI_OSV_URL", "https://wolfi.example/security.json")
+	t.Setenv("THEMIS_VEXFEED_POLL_INTERVAL", "8h")
+	t.Setenv("THEMIS_INTELLIGENCE_BLAST_RADIUS_CAP", "12")
+	t.Setenv("THEMIS_LOG_LEVEL", "debug")
+	t.Setenv("THEMIS_GITHUB_TOKEN", "gh-token")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -141,6 +166,24 @@ func TestAllEnvOverrides(t *testing.T) {
 	}
 	if cfg.Trust.DefaultPolicy != TrustPolicyPermissive {
 		t.Fatalf("Trust.DefaultPolicy = %q", cfg.Trust.DefaultPolicy)
+	}
+	if cfg.EPSSKev.EPSSURL != "https://epss.example/scores.csv.gz" || cfg.EPSSKev.PollInterval != 12*time.Hour {
+		t.Fatalf("unexpected epsskev config: %+v", cfg.EPSSKev)
+	}
+	if cfg.ExploitDB.CSVURL != "https://exploitdb.example/files.csv" || cfg.ExploitDB.PollInterval != 6*time.Hour {
+		t.Fatalf("unexpected exploitdb config: %+v", cfg.ExploitDB)
+	}
+	if cfg.VEXFeed.RHELURL != "https://redhat.example/csaf/" || cfg.VEXFeed.PollInterval != 8*time.Hour {
+		t.Fatalf("unexpected vexfeed config: %+v", cfg.VEXFeed)
+	}
+	if cfg.Intelligence.BlastRadiusCap != 12 {
+		t.Fatalf("Intelligence.BlastRadiusCap = %d", cfg.Intelligence.BlastRadiusCap)
+	}
+	if cfg.Log.Level != "debug" {
+		t.Fatalf("Log.Level = %q, want debug", cfg.Log.Level)
+	}
+	if cfg.GitHub.Token != "gh-token" {
+		t.Fatalf("GitHub.Token = %q", cfg.GitHub.Token)
 	}
 }
 

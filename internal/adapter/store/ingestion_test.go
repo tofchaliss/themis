@@ -25,6 +25,21 @@ func TestNewPostgresStoreConstructors(t *testing.T) {
 	if repo := NewPostgresRiskContextRepository(nil); repo == nil {
 		t.Fatal("expected risk context repository")
 	}
+	if repo := NewPostgresEnrichmentRepository(nil); repo == nil {
+		t.Fatal("expected enrichment repository")
+	}
+	if store := NewPostgresExploitStore(nil); store == nil {
+		t.Fatal("expected exploit store")
+	}
+	if store := NewPostgresThreatSignalStore(nil); store == nil {
+		t.Fatal("expected threat signal store")
+	}
+	if repo := NewPostgresVEXExportRepository(nil); repo == nil {
+		t.Fatal("expected vex export repository")
+	}
+	if repo := NewPostgresWatchRepository(nil); repo == nil {
+		t.Fatal("expected watch repository")
+	}
 }
 
 func TestVersionMatches(t *testing.T) {

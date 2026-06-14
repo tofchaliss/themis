@@ -22,9 +22,11 @@ openspec/
 │   │   ├── proposal.md                             # Master design: why / capabilities by sub-phase
 │   │   ├── design.md                               # 16 ADRs + open questions OQ-4 to OQ-10
 │   │   └── scenario-fresh-deployment.md            # Cold-start E2E analysis; 10 identified gaps
-│   ├── themis-phase-2a/                            # PLANNED — Signal Foundation (v0.2.0)
-│   │   ├── proposal.md                             # (to be created via /opsx:propose)
-│   │   └── tasks.md                                # (to be created via /opsx:propose)
+│   ├── themis-phase-2a/                            # COMPLETE — Signal Foundation (v0.2.0)
+│   │   ├── proposal.md
+│   │   ├── design.md
+│   │   ├── tasks.md                                # Groups 1–30 done (30.7–30.8 merge/tag manual)
+│   │   └── specs/<capability>/spec.md
 │   ├── themis-phase-2b/                            # PLANNED — AI Intelligence (v0.3.0)
 │   ├── themis-phase-2c/                            # PLANNED — AI-Assisted VEX (v0.4.0)
 │   └── archive/2026-06-09-themis-phase-1/          # Archived — reference only
@@ -34,7 +36,8 @@ openspec/
 │       └── specs/<capability>/spec.md
 ```
 
-**Next implementation change:** `themis-phase-2a` (blocked on Group 16 + v0.1.0).
+**Active implementation change:** `themis-phase-2b` (planned). Phase 2a implementation complete on branch `themis-phase-2`; merge to `main` and tag `v0.2.0` pending release sequencing (see tasks §30.7–30.8).
+
 Do not implement Phase 3 features (rate limiting, cosign, CI/CD, Docker, UI, Redis, RBAC)
 without explicit user direction.
 
@@ -81,19 +84,23 @@ Track in `project-backlog.md` (§ "Phase 1 — Remaining hardening") and detaile
 | 16.8 | `adapter/osv/` coverage ≥ 90% |
 | 16.9 | Merge to `main`, git tag `v0.1.0`, Phase 1 release notes |
 
-**Phase 2 — Split into three sub-phases. Not started (blocked on Group 16).**
+**Phase 2 — Split into three sub-phases.**
 
 | Sub-phase | Change | Theme | Status |
 | --- | --- | --- | --- |
-| 2a | `themis-phase-2a` | Signal Foundation | Planned — needs `/opsx:propose` |
-| 2b | `themis-phase-2b` | AI Intelligence | Planned — blocked on 2a |
+| 2a | `themis-phase-2a` | Signal Foundation | **In progress (~132/140)** — Groups 1–29 done; Group 30 (release gate) open |
+| 2b | `themis-phase-2b` | AI Intelligence | Planned — blocked on 2a `v0.2.0` |
 | 2c | `themis-phase-2c` | AI-Assisted VEX | Planned — blocked on 2b |
 
-Architecture reference: `openspec/changes/themis-phase-2/proposal.md` and `design.md`.
-Full backlog: `project-backlog.md` § "Phase 2 backlog".
+Phase 2a deliverables (implemented): EPSS/KEV + ExploitDB sync, Layer 1/2 synchronous enrichment,
+composite risk score V2, asset graph registration APIs, upstream vendor VEX (Red Hat/Alpine/Rocky/Wolfi),
+VEX export, system status API, SBOM soft-delete, layman error catalogue. No AI in 2a.
+
+Track tasks: `openspec/changes/themis-phase-2a/tasks.md`. Progress: `openspec/STATUS.md`.
 
 ## Related docs
 
-- `docs/acceptance-criteria.md` — 15 acceptance criteria (tested in `tests/acceptance/`)
+- `docs/phase-2a-capabilities.md` — Phase 2a in/out of scope reference (`v0.2.0`)
+- `docs/acceptance-criteria.md` — AC-1..15 (Phase 1) and AC-16..24 (Phase 2a)
 - `docs/archive/proposal-initial.md` — original proposal with ADRs (historical reference)
 - `.claude/skills/openspec-*` — OpenSpec workflow skills (propose, apply, explore, archive, sync)

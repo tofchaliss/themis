@@ -80,6 +80,12 @@ func (p *Pipeline) run(
 	}
 
 	if existing, err := p.Jobs.Get(ctx, record.ID); err == nil {
+		if existing.IdempotencyKey == "" && input.IdempotencyKey != "" {
+			existing.IdempotencyKey = input.IdempotencyKey
+			if err := p.Jobs.UpdateStatus(ctx, existing.ID, existing.Status, existing.StageDetail, existing.ScanID); err != nil {
+				return domain.IngestionResult{}, err
+			}
+		}
 		record = existing
 		if existing.Status == domain.IngestionStatusNotified ||
 			existing.Status == domain.IngestionStatusCompleted ||

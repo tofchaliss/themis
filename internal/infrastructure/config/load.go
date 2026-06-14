@@ -150,6 +150,51 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("THEMIS_WEBHOOK_SECRET"); v != "" {
 		cfg.Webhook.Secret = v
 	}
+
+	if v := os.Getenv("THEMIS_EPSSKEV_EPSS_URL"); v != "" {
+		cfg.EPSSKev.EPSSURL = v
+	}
+	if v := os.Getenv("THEMIS_EPSSKEV_KEV_URL"); v != "" {
+		cfg.EPSSKev.KEVURL = v
+	}
+	if v := os.Getenv("THEMIS_EPSSKEV_POLL_INTERVAL"); v != "" {
+		cfg.EPSSKev.PollInterval = durationFromEnv(v)
+	}
+
+	if v := os.Getenv("THEMIS_EXPLOITDB_CSV_URL"); v != "" {
+		cfg.ExploitDB.CSVURL = v
+	}
+	if v := os.Getenv("THEMIS_EXPLOITDB_POLL_INTERVAL"); v != "" {
+		cfg.ExploitDB.PollInterval = durationFromEnv(v)
+	}
+
+	if v := os.Getenv("THEMIS_VEXFEED_RHEL_URL"); v != "" {
+		cfg.VEXFeed.RHELURL = v
+	}
+	if v := os.Getenv("THEMIS_VEXFEED_ALPINE_OSV_URL"); v != "" {
+		cfg.VEXFeed.AlpineOSVURL = v
+	}
+	if v := os.Getenv("THEMIS_VEXFEED_ROCKY_OSV_URL"); v != "" {
+		cfg.VEXFeed.RockyOSVURL = v
+	}
+	if v := os.Getenv("THEMIS_VEXFEED_WOLFI_OSV_URL"); v != "" {
+		cfg.VEXFeed.WolfiOSVURL = v
+	}
+	if v := os.Getenv("THEMIS_VEXFEED_POLL_INTERVAL"); v != "" {
+		cfg.VEXFeed.PollInterval = durationFromEnv(v)
+	}
+
+	if v := os.Getenv("THEMIS_INTELLIGENCE_BLAST_RADIUS_CAP"); v != "" {
+		cfg.Intelligence.BlastRadiusCap = intFromEnv(v)
+	}
+
+	if v := os.Getenv("THEMIS_LOG_LEVEL"); v != "" {
+		cfg.Log.Level = strings.ToLower(v)
+	}
+
+	if v := os.Getenv("THEMIS_GITHUB_TOKEN"); v != "" {
+		cfg.GitHub.Token = v
+	}
 }
 
 func intFromEnv(v string) int {

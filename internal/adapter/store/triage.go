@@ -28,7 +28,7 @@ func (r *PostgresTriageRepository) GetFindingScope(ctx context.Context, findingI
 	err := r.pool.QueryRow(ctx, `
 		SELECT i.product_id::text
 		FROM component_vulnerabilities cv
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
 		JOIN images i ON i.id = s.image_id
 		WHERE cv.id = $1
 	`, findingID).Scan(&productID)
@@ -52,7 +52,7 @@ func (r *PostgresTriageRepository) GetFindingContext(ctx context.Context, findin
 		JOIN component_versions cvn ON cvn.id = cv.component_version_id
 		JOIN components c ON c.id = cvn.component_id
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
 		LEFT JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
 		WHERE cv.id = $1
 	`, findingID).Scan(

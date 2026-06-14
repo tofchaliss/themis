@@ -81,27 +81,27 @@ Source: `openspec/changes/themis-phase-2a/proposal.md` and `specs/`.
    Rocky Linux, Wolfi) are applied to existing findings retroactively. A finding that is
    `DETECTED` must transition to `NOT_AFFECTED` within one job-queue cycle after the
    vendor feed syncs — without re-uploading the SBOM.
-   Test: `TestAC17_VendorVEXRetroactiveNotAffected`.
+   Test: `TestAC17_AlpineVendorVEXNotAffected`.
 
 3. **(AC-18)** The four-phase PURL matching algorithm correctly handles Alpine apk build
    revisions and RPM namespace aliases. A Red Hat CSAF advisory using
    `pkg:rpm/redhat/httpd@...` must apply to an SBOM component with namespace `rhel`
    (Phase 2 alias match). An Alpine OSV advisory with range `[1.34.0, 1.35.0-r5)` must
    correctly mark version `1.35.0-r5` as `not_affected` (fixed version is exclusive).
-   Tests: `TestAC18_RPMNamespaceAlias`; `TestAC18_AlpineOSVFixedVersionBoundary`.
+   Tests: `TestAC18_RPMNamespaceAlias`; unit tests in `adapter/vexfeed/` for Alpine fixed boundary.
 
 4. **(AC-19)** Vendor VEX is the authoritative source for backported patches. A package
    version lower than the upstream CVE fix version must be marked `not_affected` when the
    vendor VEX says so. The upstream CVE version range must never be consulted after a
    vendor VEX match. Example: `httpd@2.4.37-51.el8` (RHEL) with Red Hat VEX
    `not_affected` (RHSA-2023:1570) → `NOT_AFFECTED`, not `DETECTED`.
-   Test: `TestAC19_VendorVEXAuthorityBackport`.
+   Test: `TestAC19_HttpdBackportAuthority`.
 
 5. **(AC-20)** Layer 1 deterministic rules and Layer 2 blast-radius score are computed
    synchronously. Both `risk_context.deterministic_level` and
    `risk_context.blast_radius_score` must be non-null on all findings when the
    `202 Accepted` response is returned. Neither value is populated by an async job.
-   Test: `TestAC20_Layer1Layer2SynchronousBeforeAccepted`.
+   Tests: `TestAC20_Layer1SynchronousBeforeAccepted`; `TestAC20_Layer2SynchronousBeforeAccepted`.
 
 6. **(AC-21)** Blast-radius graph traversal correctly identifies all unique Customer nodes
    reachable from a CVE via the asset graph. The `blast_radius_score` multiplier must be
@@ -113,17 +113,19 @@ Source: `openspec/changes/themis-phase-2a/proposal.md` and `specs/`.
    `DELETE /api/v1/sboms/{id}`, the deleted SBOM must be absent from: status counts,
    SBOM listings, blast-radius traversal, VEX export, and top-component rankings. The
    underlying rows are never hard-deleted; the tombstone is the only mechanism.
-   Test: `TestAC22_SoftDeleteDataIsolation` (7-path matrix).
+   Test: `TestAC22_SoftDeleteIsolation`.
 
 8. **(AC-23)** All API error responses use the `{error: {code, message, hint}}` envelope.
    No raw PostgreSQL error strings, Go error strings, constraint names, or stack traces
    appear in any response body — including 500 errors. Every error code in the catalogue
    must be reachable and must return the documented HTTP status.
-   Tests: `TestAC23_ErrorEnvelopeAllCodes`; `TestAC23_NoRawDBErrorLeaks`.
+   Tests: `TestErrorCode_*` (12 codes in `adapter/api/errors_test.go`); `TestAC23_NoRawDBErrorLeaks`.
 
 9. **(AC-24)** VEX export (`GET /api/v1/products/{id}/versions/{v}/vex`) produces a
    standards-compliant document in both CycloneDX 1.5+ and OpenVEX 0.2+ formats. VEX
    precedence is respected in the exported state: a human triage decision must override
    an upstream vendor assertion for the same `(component_purl, cve_id)` pair.
    Non-normative `x-themis-*` extension fields must be present in the CycloneDX output.
-   Tests: `TestAC24_VEXExportCycloneDXValid`; `TestAC24_VEXExportPrecedence`.
+   Test: `TestAC24_VEXExportPrecedence`.
+
+Coverage mapping enforced by `tests/acceptance/criteria_phase2a_test.go` (lists test names via `go test -list`).

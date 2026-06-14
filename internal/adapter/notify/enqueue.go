@@ -32,6 +32,11 @@ func (e EnqueueSender) Dispatch(ctx context.Context, event domain.NotificationEv
 	return err
 }
 
+// NotifyTeam enqueues a blast-radius team notification event.
+func (e EnqueueSender) NotifyTeam(ctx context.Context, event domain.NotificationEvent) error {
+	return e.Dispatch(ctx, event)
+}
+
 // FlushDigest enqueues a digest flush job for the given batch key.
 func (e EnqueueSender) FlushDigest(ctx context.Context, batchKey string) error {
 	if e.Queue == nil || batchKey == "" {

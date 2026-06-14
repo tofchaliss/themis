@@ -95,7 +95,7 @@ func (r *PostgresProductCatalogRepository) GetProduct(ctx context.Context, id st
 	`, id).Scan(&item.ID, &item.Name, &item.Description, &item.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return domain.Product{}, fmt.Errorf("product %q not found", id)
+			return domain.Product{}, domain.ErrProductNotFound
 		}
 		return domain.Product{}, fmt.Errorf("get product: %w", err)
 	}
@@ -219,7 +219,7 @@ func NewPostgresScanQueryRepository(pool pgQueryPool) *PostgresScanQueryReposito
 func (r *PostgresScanQueryRepository) ListProjectScans(ctx context.Context, projectID string, page domain.PageRequest) ([]domain.ScanSummary, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{projectID, limit + 1}
-	where := "WHERE s.project_id = $1"
+	where := "WHERE s.project_id = $1 AND s.deleted_at IS NULL"
 	if page.Cursor != "" {
 		where += " AND s.ingested_at < $3"
 		args = append(args, page.Cursor)
@@ -281,7 +281,7 @@ func (r *PostgresScanQueryRepository) GetScan(ctx context.Context, id string) (d
 			ORDER BY created_at DESC
 			LIMIT 1
 		) j ON true
-		WHERE s.id = $1
+		WHERE s.id = $1 AND s.deleted_at IS NULL
 	`, id).Scan(&detail.ID, &detail.ProjectID, &detail.ProductID, &detail.ImageDigest,
 		&detail.Format, &detail.TrustStatus, &detail.IngestedAt, &detail.IngestionID)
 	if err != nil {
@@ -330,7 +330,7 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 ) ([]domain.ScanVulnerability, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{scanID, limit + 1}
-	where := []string{"cv.sbom_document_id = $1"}
+	where := []string{"cv.sbom_document_id = $1", sbomActiveFilter}
 	argIdx := 3
 	if filter.Severity != "" {
 		where = append(where, fmt.Sprintf("COALESCE(v.severity, 'none') = $%d", argIdx))
@@ -359,7 +359,7 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 		LEFT JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
 		JOIN component_versions cvn ON cvn.id = cv.component_version_id
 		JOIN components c ON c.id = cvn.component_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
 		JOIN images i ON i.id = s.image_id
 		WHERE %s
 		ORDER BY cv.id ASC
@@ -435,7 +435,7 @@ func (r *PostgresComponentCatalogRepository) ListComponents(ctx context.Context,
 		SELECT DISTINCT c.purl, c.name, c.ecosystem, cv.version, i.product_id::text
 		FROM components c
 		JOIN component_versions cv ON cv.component_id = c.id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
 		JOIN images i ON i.id = s.image_id
 		WHERE %s
 		ORDER BY c.purl ASC

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/themis-project/themis/internal/domain"
 )
 
@@ -23,8 +22,8 @@ type PostgresRepository struct {
 }
 
 // NewPostgresRepository creates a PostgreSQL-backed trust repository.
-func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{conn: pool}
+func NewPostgresRepository(conn pgConn) *PostgresRepository {
+	return &PostgresRepository{conn: conn}
 }
 
 func (r *PostgresRepository) FindSBOMByDedupKey(ctx context.Context, imageDigest, checksumSHA256 string) (string, bool, error) {
@@ -87,8 +86,8 @@ type PostgresAuditRecorder struct {
 }
 
 // NewPostgresAuditRecorder creates a PostgreSQL audit recorder.
-func NewPostgresAuditRecorder(pool *pgxpool.Pool) *PostgresAuditRecorder {
-	return &PostgresAuditRecorder{conn: pool}
+func NewPostgresAuditRecorder(conn pgConn) *PostgresAuditRecorder {
+	return &PostgresAuditRecorder{conn: conn}
 }
 
 func (a *PostgresAuditRecorder) Record(ctx context.Context, entry domain.AuditEntry) error {

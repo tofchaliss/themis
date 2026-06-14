@@ -34,6 +34,7 @@ func (r *PostgresIngestionRepository) FindByIdempotencyKey(ctx context.Context, 
 		SELECT id, job_type, status, payload
 		FROM ingestion_jobs
 		WHERE payload->>'idempotency_key' = $1
+		   OR payload->'Input'->>'IdempotencyKey' = $1
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, key).Scan(&id, &jobType, &status, &payloadBytes)
@@ -133,6 +134,16 @@ func decodeIngestionRecord(id, jobType, jobStatus string, payloadBytes []byte) (
 	if len(payloadBytes) > 0 {
 		if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 			return domain.IngestionRecord{}, fmt.Errorf("unmarshal ingestion payload: %w", err)
+		}
+		if payload.IdempotencyKey == "" {
+			var queuePayload struct {
+				Input struct {
+					IdempotencyKey string `json:"IdempotencyKey"`
+				} `json:"Input"`
+			}
+			if err := json.Unmarshal(payloadBytes, &queuePayload); err == nil {
+				payload.IdempotencyKey = queuePayload.Input.IdempotencyKey
+			}
 		}
 	}
 	status := domain.IngestionStatus(payload.PipelineStatus)

@@ -20,11 +20,20 @@ A single binary backed by PostgreSQL. No agents. No daemons. No lock-in.
 | **CVE watch** | Background scheduler polls NVD/OSV every 6 hours; new findings auto-created for matching catalog components |
 | **Human triage** | L4 triage API records decisions; each decision auto-generates a VEX assertion that applies to future ingestions |
 | **Notifications** | SMTP and Microsoft Teams delivery with configurable routing rules and digest aggregation |
+| **Threat signals (Phase 2a)** | Daily EPSS/KEV, ExploitDB, and upstream vendor VEX sync; retroactive re-enrichment of open findings |
+| **Deterministic prioritisation (Phase 2a)** | Layer 1 rules (CVSS, KEV, EPSS, public exploit) set `deterministic_level` at ingest time |
+| **Blast radius (Phase 2a)** | Asset graph (Product → Microservice → Deployment → Customer) drives score multiplier and team routing |
+| **Upstream vendor VEX (Phase 2a)** | Red Hat, Alpine, Rocky, Wolfi feeds matched to SBOM PURLs; sets VEX overlay and `upstream_vex_coverage` |
+| **VEX export (Phase 2a)** | CycloneDX 1.5+ and OpenVEX export per product version; coverage aggregate for upstream vendor VEX |
+| **System status (Phase 2a)** | `GET /api/v1/status` — live component/vuln counts, severity/state breakdown, top-N ranking, `signals_stale` flag |
+| **SBOM management (Phase 2a)** | List SBOMs system-wide or per product; soft-delete with tombstone (`deleted_at`); audit log on delete |
+| **Error UX (Phase 2a)** | Layman-friendly `{error: {code, message, hint}}` envelope on all endpoints; 12 catalogue codes |
 
 ---
 
 For architecture (Clean Architecture layers, three-layer data model, VEX overlay semantics),
 technology stack, phase roadmap, and quality gates, see [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
+Phase 2a capability boundary (in/out of scope): [docs/phase-2a-capabilities.md](docs/phase-2a-capabilities.md).
 Deferred Phase 2 and Phase 3 items are tracked in [project-backlog.md](project-backlog.md).
 
 ---
@@ -150,19 +159,137 @@ ingestion walkthrough.
 
 ## Configuration
 
-See [Getting Started](#getting-started) for the minimum setup. Full non-secret defaults and
-YAML field names are in [`themis.yaml.example`](themis.yaml.example).
+See [Getting Started](#getting-started) for the minimum setup. Copy [`themis.yaml.example`](themis.yaml.example)
+to `themis.yaml` for non-secret defaults. **Secrets** (database DSN, SMTP password, API keys) must
+be set via environment variables — never committed in `themis.yaml`.
+
+Environment variables use the `THEMIS_` prefix and **override** YAML values.
+
+### Core (Phase 1)
 
 | Variable | Required | Purpose |
 | -------- | -------- | ------- |
 | `THEMIS_DATABASE_DSN` | **Yes** | PostgreSQL connection URL |
 | `THEMIS_CONFIG_PATH` | No | Path to YAML config (default: `./themis.yaml`) |
-| `THEMIS_NVD_API_KEY` | No | NVD API key (higher rate limits) |
-| `THEMIS_SMTP_*` | No | Outbound email for notifications |
+| `THEMIS_NVD_API_KEY` | No | NVD API key (higher rate limits for CVE watch) |
+| `THEMIS_SMTP_*` | No | Outbound email for notifications (`HOST`, `PORT`, `USERNAME`, `PASSWORD`, `FROM`, `USE_TLS`) |
 | `THEMIS_TEAMS_WEBHOOK_URL` | No | Microsoft Teams webhook |
 | `THEMIS_WEBHOOK_SECRET` | No | HMAC secret for CI webhook ingestion |
+| `THEMIS_TRUST_DEFAULT_POLICY` | No | Default artifact trust policy: `strict`, `standard`, or `permissive` |
 
-Environment variables use the `THEMIS_` prefix and override `themis.yaml` values.
+YAML keys for the above: `database.dsn`, `nvd.api_key`, `nvd.poll_interval`, `osv.*`, `smtp.*`,
+`teams.webhook_url`, `trust.default_policy`, `webhook.secret` — see `themis.yaml.example`.
+
+### Phase 2a — signal feeds and intelligence
+
+These settings control **background schedulers** that fetch external data and **retroactively update**
+open findings (`ReEnrichJob`) without re-uploading SBOMs. All poll intervals default to **24h** and
+use a simple ticker (not cron expressions).
+
+#### EPSS + KEV (`epsskev` / `THEMIS_EPSSKEV_*`)
+
+| YAML key | Env override | Purpose |
+| -------- | ------------ | ------- |
+| `epsskev.epss_url` | `THEMIS_EPSSKEV_EPSS_URL` | FIRST.org EPSS scores (gzip CSV). Feeds `epss_score` on findings and the V2 risk formula (+30% max). |
+| `epsskev.kev_url` | `THEMIS_EPSSKEV_KEV_URL` | CISA Known Exploited Vulnerabilities JSON. Sets `kev_listed` (+15 risk score, Layer 1 Critical rule). |
+| `epsskev.poll_interval` | `THEMIS_EPSSKEV_POLL_INTERVAL` | How often to sync EPSS/KEV (e.g. `24h`, `12h`). |
+
+#### ExploitDB (`exploitdb` / `THEMIS_EXPLOITDB_*`)
+
+| YAML key | Env override | Purpose |
+| -------- | ------------ | ------- |
+| `exploitdb.csv_url` | `THEMIS_EXPLOITDB_CSV_URL` | ExploitDB `files_exploits.csv` mirror. Populates `exploit_records`; drives `exploit_public` and Layer 1 rules. |
+| `exploitdb.poll_interval` | `THEMIS_EXPLOITDB_POLL_INTERVAL` | ExploitDB sync frequency. |
+
+#### Upstream vendor VEX (`vexfeed` / `THEMIS_VEXFEED_*`)
+
+Themis syncs **four fixed vendor feeds** (not a plug-in list): Red Hat CSAF, Alpine OSV, Rocky OSV,
+and Wolfi OSV. Each URL is configurable (mirrors, air-gapped copies, test fixtures). Matching applies
+to **Alpine (`apk`) and RPM (`rpm`)** PURLs only; namespace aliases include `rhel→redhat`,
+`rocky/linux→rocky`, `alma→almalinux`.
+
+| YAML key | Env override | Purpose |
+| -------- | ------------ | ------- |
+| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | Red Hat CSAF 2.0 advisories (vendor `not_affected` / backport authority for RPM packages). |
+| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine Linux OSV database (version-range matching for `pkg:apk/...`). |
+| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV feed. |
+| `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed. |
+| `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Vendor VEX sync frequency. After sync, affected SBOMs get VEX overlay re-applied. |
+
+There is **no per-feed on/off flag** yet — all four feeds are registered at startup. A failed feed
+logs a warning and leaves cached assertions in place; other feeds continue. See
+[project-backlog.md](project-backlog.md) for planned follow-ups.
+
+#### Intelligence tuning (`intelligence` / `THEMIS_INTELLIGENCE_*`)
+
+| YAML key | Env override | Purpose |
+| -------- | ------------ | ------- |
+| `intelligence.blast_radius_cap` | `THEMIS_INTELLIGENCE_BLAST_RADIUS_CAP` | Number of unique Customers at which the blast-radius score multiplier stops increasing (default **10** → max **2.0×**). |
+
+#### Logging (`log` / `THEMIS_LOG_LEVEL`)
+
+| YAML key | Env override | Purpose |
+| -------- | ------------ | ------- |
+| `log.level` | `THEMIS_LOG_LEVEL` | Structured log verbosity: `debug`, `info`, `warn`, `error`. |
+
+#### Phase 2b placeholder (`github` / `THEMIS_GITHUB_TOKEN`)
+
+| Env override | Purpose |
+| ------------ | ------- |
+| `THEMIS_GITHUB_TOKEN` | GitHub API token for GHSA rate limits — **config wired in Phase 2a; GHSA adapter ships in Phase 2b** (not used yet). |
+
+#### VEX export APIs (Phase 2a)
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `GET /api/v1/products/{id}/versions/{v}/vex?format=cyclonedx\|openvex` | Export computed VEX state for all findings in a product version (default: CycloneDX). Includes `x-themis-epss-score`, `x-themis-kev-listed`, `x-themis-blast-radius` extensions. |
+| `GET /api/v1/products/{id}/versions/{v}/vex-coverage` | Count findings by `upstream_vex_coverage`: `covered`, `not_covered`, `purl_mismatch`. |
+
+VEX precedence in export: `themis_generated` (human triage) > `manual`/`vendor` (user-supplied) > `ai_generated` > `upstream_vendor`.
+
+#### Asset graph APIs (Phase 2a)
+
+Register the Product → Microservice → Deployment → Customer graph manually (no auto-discovery from SBOM metadata in 2a).
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `POST /api/v1/products/{id}/microservices` | Register a microservice under a product |
+| `POST /api/v1/microservices/{id}/deployments` | Link a microservice to a customer deployment |
+| `POST /api/v1/customers` | Register an internal team/owner (not a B2B customer) |
+| `GET /api/v1/products/{id}/blast-radius` | Query blast-radius score and affected teams for a product |
+
+Layer 2 blast-radius runs synchronously at SBOM ingest; empty graph → baseline multiplier `1.0×`; cap at `2.0×` for 10+ unique customers (configurable via `intelligence.blast_radius_cap`).
+
+#### Management APIs (Phase 2a)
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `GET /api/v1/status?top=N` | System-wide overview: component counts, vulnerability breakdown by severity/state, top-N components (default 10, max 50), `signals_stale` when EPSS/KEV sync is overdue |
+| `GET /api/v1/sboms` | Paginated SBOM inventory (cursor + `total`) |
+| `GET /api/v1/products/{id}/sboms` | Product-scoped SBOM list |
+| `DELETE /api/v1/sboms/{id}?force=true` | Soft-delete (`deleted_at` tombstone); `force=true` required when deleting the latest SBOM for an image; writes `SBOM_DELETED` audit entry |
+
+Deleted SBOMs are excluded from status counts, listings, blast-radius, VEX export, and findings queries. Raw `component_vulnerabilities` rows are never hard-deleted via API.
+
+#### Error responses (Phase 2a)
+
+All API errors use a three-field envelope:
+
+```json
+{"error": {"code": "SBOM_NOT_FOUND", "message": "...", "hint": "..."}}
+```
+
+Twelve catalogue codes cover all domain errors (`SBOM_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `CANNOT_DELETE_LATEST_SBOM`, `INVALID_SBOM_FORMAT`, `INTERNAL_ERROR`, etc.). No raw PostgreSQL or Go error strings appear in response bodies.
+
+#### Phase 2a breaking change — risk score formula
+
+Phase 2a replaces the Phase 1 CVSS-only score with a composite formula incorporating EPSS (+30% max), KEV (+15), blast-radius multiplier (1.0–2.0×), and Layer 1 Critical override (score = 100). Any integration that hard-codes Phase 1 score thresholds must recalibrate for `v0.2.0`.
+
+#### Phase 2a not in scope
+
+Deferred to later phases: AI workers (2b), GHSA adapter (2b), Debian/Ubuntu VEX feeds, per-feed on/off flags, image registration API (Phase 1 Group 16), Redis queue, Docker stack, Web UI, RBAC, real cosign verification. See [project-backlog.md](project-backlog.md).
+
+**Implementation status:** Groups 1–29 complete (~132/140 tasks). Group 30 (coverage gates, metrics wiring, `v0.2.0` tag) is next — see [`openspec/STATUS.md`](openspec/STATUS.md).
 
 ---
 
@@ -213,7 +340,7 @@ checks.
 | `unsupported cyclonedx spec version` | SBOM version not 1.4 / 1.5 / 1.6 | Regenerate or set `spec_version` accordingly |
 | `ingestion_id` is `00000000-0000-0000-0000-000000000000` | Known bug in older binaries (empty ID returned) | Pull latest `main`, rebuild; check `ingestion_jobs` table for the real job id |
 | Need to remove a test upload | No delete API in Phase 1 | See [Resetting ingested data](#resetting-ingested-data-local-dev-only) (SQL, local dev only) |
-| Want verbose / debug server logs | No log-level config in Phase 1 or 2 | Use `GET /api/v1/ingestions/{id}`, `/metrics`, and `ingestion_jobs` in Postgres; configurable logging and OTel trace export are planned for Phase 3 (`runtime-observability`) |
+| Want verbose / debug server logs | Default `info`; set `THEMIS_LOG_LEVEL=debug` or `log.level` in `themis.yaml` |
 
 ---
 
@@ -411,6 +538,25 @@ curl -s -X POST "$BASE_URL/api/v1/vulnerabilities/$FINDING_ID/triage" \
   -d '{"decision":"false_positive","justification":"demo triage"}' | jq .
 ```
 
+#### 9. Phase 2a — status, SBOM inventory, graph (optional)
+
+```sh
+# System overview (component counts, top vulnerable components, signals_stale)
+curl -s "$BASE_URL/api/v1/status?top=5" -H "X-API-Key: $API_KEY" | jq .
+
+# List SBOMs
+curl -s "$BASE_URL/api/v1/sboms?limit=20" -H "X-API-Key: $API_KEY" | jq .
+
+# Register asset graph (needed for blast-radius > 1.0×)
+curl -s -X POST "$BASE_URL/api/v1/customers" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Platform Team","contact_email":"platform@example.com"}' | jq .
+
+# Soft-delete an old SBOM (non-latest, or add ?force=true for latest)
+curl -s -X DELETE "$BASE_URL/api/v1/sboms/$SCAN_ID" \
+  -H "X-API-Key: $API_KEY" | jq .
+```
+
 API reference: [`api/openapi.yaml`](api/openapi.yaml). Sample fixture used in tests:
 [`internal/adapter/parser/testdata/cyclonedx-1.6.json`](internal/adapter/parser/testdata/cyclonedx-1.6.json).
 
@@ -518,10 +664,15 @@ expected partial coverage, not 77/77.
 
 ### Resetting ingested data (local dev only)
 
-Phase 1 has **no REST API to delete** uploaded SBOMs, scans, or raw findings — that is by design
-(immutable audit evidence). For local testing you can remove rows directly in PostgreSQL.
+Phase 2a adds **`DELETE /api/v1/sboms/{id}`** for soft-delete (sets `deleted_at`; data hidden from active queries but not hard-deleted). Use `?force=true` when deleting the latest SBOM for an image.
 
-**Find what to delete** — each API “scan” is a row in `sbom_documents`:
+```sh
+# Soft-delete one SBOM (preferred for local dev)
+curl -s -X DELETE "$BASE_URL/api/v1/sboms/$SBOM_ID?force=true" \
+  -H "X-API-Key: $API_KEY" | jq .
+```
+
+For a full wipe you can still use direct SQL (Phase 1 approach). Each API “scan” is a row in `sbom_documents`:
 
 ```sh
 psql "$THEMIS_DATABASE_DSN" -c \
@@ -598,7 +749,7 @@ make migrate-up
 
 Then recreate your API key, product, project, and image registration from [Getting Started](#getting-started).
 
-Do not use manual SQL deletes in production — they bypass Themis immutability guarantees.
+Do not use manual SQL deletes in production — prefer `DELETE /api/v1/sboms/{id}` for operator-initiated removal; hard SQL deletes bypass audit and immutability guarantees.
 
 ### Developer test suite
 

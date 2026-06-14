@@ -10,6 +10,64 @@ import (
 	"github.com/themis-project/themis/internal/usecase/enrichment"
 )
 
+type captureMetrics struct {
+	level string
+	score float64
+	feed  string
+}
+
+func (c *captureMetrics) RecordLayer1Rule(level string)        { c.level = level }
+func (c *captureMetrics) RecordBlastRadiusScore(score float64) { c.score = score }
+func (c *captureMetrics) RecordPURLMismatch(feed string)       { c.feed = feed }
+
+type stubVendorMatcher struct {
+	result enrichment.VendorMatchResult
+}
+
+func (s stubVendorMatcher) Match(string, string, []domain.VendorVEXAssertion) enrichment.VendorMatchResult {
+	return s.result
+}
+
+type stubVendorReader struct {
+	assertions []domain.VendorVEXAssertion
+}
+
+func (s stubVendorReader) ListVendorAssertionsForCVE(context.Context, string) ([]domain.VendorVEXAssertion, error) {
+	return s.assertions, nil
+}
+
+func TestApplyVEXRecordsMetricsOnVendorPURLMismatch(t *testing.T) {
+	metrics := &captureMetrics{}
+	repo := &memoryRepo{
+		findings: []domain.EnrichmentFinding{{
+			ComponentVulnerabilityID: "finding-1",
+			ComponentPURL:            "pkg:rpm/rhel/httpd@1.0",
+			CVEID:                    "CVE-2024-0001",
+			RawSeverity:              "high",
+			CVSSScore:                7.5,
+		}},
+		existing: map[string]domain.RiskContextSnapshot{
+			"finding-1": {EPSSScore: ptrFloat(0.2), KEVListed: true},
+		},
+	}
+	handler := &enrichment.Handler{
+		Repo:    repo,
+		Metrics: metrics,
+		VendorVEX: stubVendorReader{assertions: []domain.VendorVEXAssertion{{
+			Feed: "rhel", CVEID: "CVE-2024-0001", ComponentPURL: "pkg:rpm/debian/httpd@9",
+		}}},
+		VendorMatch: stubVendorMatcher{result: enrichment.VendorMatchResult{PURLMismatch: true}},
+	}
+	if err := handler.ApplyVEX(context.Background(), "sbom-1"); err != nil {
+		t.Fatal(err)
+	}
+	if metrics.level == "" || metrics.score == 0 || metrics.feed != "rhel" {
+		t.Fatalf("metrics = %+v", metrics)
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
+
 func TestApplyVEXCreatesDetectedRiskContext(t *testing.T) {
 	repo := &memoryRepo{
 		findings: []domain.EnrichmentFinding{{
@@ -26,7 +84,15 @@ func TestApplyVEXCreatesDetectedRiskContext(t *testing.T) {
 	if repo.upserts[0].EffectiveState != domain.EffectiveStateDetected {
 		t.Fatalf("state = %q", repo.upserts[0].EffectiveState)
 	}
-	if repo.upserts[0].RiskScore != 70 {
+	if repo.upserts[0].RiskScore != enrichment.ComputeRiskScoreV2(
+		"high",
+		domain.EffectiveStateDetected,
+		nil,
+		false,
+		false,
+		string(domain.DeterministicLevelInformational),
+		domain.RiskScoreBlastRadiusMin,
+	) {
 		t.Fatalf("score = %d", repo.upserts[0].RiskScore)
 	}
 }
@@ -58,7 +124,15 @@ func TestApplyVEXSuppressesWithNotAffectedAssertion(t *testing.T) {
 	if repo.upserts[0].EffectiveState != domain.EffectiveStateSuppressed {
 		t.Fatalf("state = %q", repo.upserts[0].EffectiveState)
 	}
-	if repo.upserts[0].RiskScore != 7 {
+	if repo.upserts[0].RiskScore != enrichment.ComputeRiskScoreV2(
+		"high",
+		domain.EffectiveStateSuppressed,
+		nil,
+		false,
+		false,
+		string(domain.DeterministicLevelInformational),
+		domain.RiskScoreBlastRadiusMin,
+	) {
 		t.Fatalf("score = %d", repo.upserts[0].RiskScore)
 	}
 	if len(audit.entries) != 1 {
@@ -301,6 +375,14 @@ func (m *memoryRepo) SBOMDocumentForVEX(_ context.Context, _ string) (string, er
 		return "", m.sbomForVEXErr
 	}
 	return m.sbomForVEX, nil
+}
+
+func (m *memoryRepo) CountOpenRiskContexts(context.Context) (int, error) { return 0, nil }
+func (m *memoryRepo) ListOpenRiskContexts(context.Context, int, int) ([]domain.OpenRiskContextRow, error) {
+	return nil, nil
+}
+func (m *memoryRepo) UpdateRiskContextSignals(context.Context, domain.OpenRiskContextRow, *float64, bool, bool, domain.DeterministicLevel, int) error {
+	return nil
 }
 
 type memoryAudit struct {

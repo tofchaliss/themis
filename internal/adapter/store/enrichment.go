@@ -23,12 +23,17 @@ func NewPostgresEnrichmentRepository(pool pgQueryPool) *PostgresEnrichmentReposi
 
 func (r *PostgresEnrichmentRepository) ListFindingsForSBOM(ctx context.Context, sbomDocumentID string) ([]domain.EnrichmentFinding, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT cv.id, c.purl, v.cve_id, COALESCE(v.severity, 'unknown')
+		SELECT cv.id, c.purl, v.cve_id, COALESCE(v.severity, 'unknown'),
+		       COALESCE(v.cvss_score, 0), v.id::text, i.product_id::text,
+		       cv.sbom_document_id::text, c.id::text
 		FROM component_vulnerabilities cv
 		JOIN component_versions cvn ON cvn.id = cv.component_version_id
 		JOIN components c ON c.id = cvn.component_id
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
+		JOIN images i ON i.id = sd.image_id
 		WHERE cv.sbom_document_id = $1
+		  AND sd.deleted_at IS NULL
 	`, sbomDocumentID)
 	if err != nil {
 		return nil, fmt.Errorf("list enrichment findings: %w", err)
@@ -38,7 +43,17 @@ func (r *PostgresEnrichmentRepository) ListFindingsForSBOM(ctx context.Context, 
 	var findings []domain.EnrichmentFinding
 	for rows.Next() {
 		var finding domain.EnrichmentFinding
-		if err := rows.Scan(&finding.ComponentVulnerabilityID, &finding.ComponentPURL, &finding.CVEID, &finding.RawSeverity); err != nil {
+		if err := rows.Scan(
+			&finding.ComponentVulnerabilityID,
+			&finding.ComponentPURL,
+			&finding.CVEID,
+			&finding.RawSeverity,
+			&finding.CVSSScore,
+			&finding.VulnerabilityID,
+			&finding.ProductID,
+			&finding.SBOMDocumentID,
+			&finding.ComponentID,
+		); err != nil {
 			return nil, err
 		}
 		findings = append(findings, finding)
@@ -50,7 +65,8 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context
 	rows, err := r.pool.Query(ctx, `
 		SELECT va.id, va.vex_document_id,
 		       COALESCE(c.purl, va.component_purl), v.cve_id, va.status,
-		       COALESCE(va.justification, ''), COALESCE(vd.ingested_at, va.created_at)
+		       COALESCE(va.justification, ''), COALESCE(vd.ingested_at, va.created_at),
+		       COALESCE(vd.source, 'manual')
 		FROM vex_assertions va
 		JOIN vex_documents vd ON vd.id = va.vex_document_id
 		JOIN vulnerabilities v ON v.id = va.vulnerability_id
@@ -76,7 +92,7 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context
 	for rows.Next() {
 		var match domain.VEXAssertionMatch
 		if err := rows.Scan(&match.ID, &match.VEXDocumentID, &match.ComponentPURL, &match.CVEID,
-			&match.Status, &match.Justification, &match.DocumentTime); err != nil {
+			&match.Status, &match.Justification, &match.DocumentTime, &match.Source); err != nil {
 			return nil, err
 		}
 		matches = append(matches, match)
@@ -87,11 +103,14 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context
 func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, componentVulnerabilityID string) (domain.RiskContextSnapshot, error) {
 	var snapshot domain.RiskContextSnapshot
 	var score float64
+	var level *string
+	var blastScore float64
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, component_vulnerability_id, effective_state,
 		       COALESCE(raw_severity, ''), COALESCE(vex_status, ''),
 		       COALESCE(vex_assertion_id::text, ''), COALESCE(suppression_reason, ''),
-		       COALESCE(risk_score, 0)
+		       COALESCE(risk_score, 0), epss_score, kev_listed, exploit_public,
+		       deterministic_level, COALESCE(blast_radius_score, 1.0)
 		FROM risk_context
 		WHERE component_vulnerability_id = $1
 	`, componentVulnerabilityID).Scan(
@@ -103,6 +122,11 @@ func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, compo
 		&snapshot.VEXAssertionID,
 		&snapshot.SuppressionReason,
 		&score,
+		&snapshot.EPSSScore,
+		&snapshot.KEVListed,
+		&snapshot.ExploitPublic,
+		&level,
+		&blastScore,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -111,6 +135,10 @@ func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, compo
 		return domain.RiskContextSnapshot{}, fmt.Errorf("get risk context: %w", err)
 	}
 	snapshot.RiskScore = int(score)
+	if level != nil && *level != "" {
+		snapshot.DeterministicLevel = domain.DeterministicLevel(*level)
+	}
+	snapshot.BlastRadiusScore = blastScore
 	return snapshot, nil
 }
 
@@ -123,9 +151,10 @@ func (r *PostgresEnrichmentRepository) UpsertRiskContext(ctx context.Context, fi
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO risk_context (
 			id, component_vulnerability_id, effective_state, priority, risk_score,
-			raw_severity, vex_status, vex_assertion_id, suppression_reason, triage_notes
+			raw_severity, vex_status, vex_assertion_id, suppression_reason, triage_notes,
+			deterministic_level, blast_radius_score, upstream_vex_coverage
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)
 		ON CONFLICT (component_vulnerability_id) DO UPDATE SET
 			effective_state = EXCLUDED.effective_state,
@@ -135,12 +164,92 @@ func (r *PostgresEnrichmentRepository) UpsertRiskContext(ctx context.Context, fi
 			vex_status = EXCLUDED.vex_status,
 			vex_assertion_id = EXCLUDED.vex_assertion_id,
 			suppression_reason = EXCLUDED.suppression_reason,
+			deterministic_level = EXCLUDED.deterministic_level,
+			blast_radius_score = EXCLUDED.blast_radius_score,
+			upstream_vex_coverage = EXCLUDED.upstream_vex_coverage,
 			updated_at = NOW()
 	`, uuid.NewString(), finding.ComponentVulnerabilityID, snapshot.EffectiveState, priority, snapshot.RiskScore,
 		snapshot.RawSeverity, nullIfEmpty(snapshot.VEXStatus), vexAssertionID, nullIfEmpty(snapshot.SuppressionReason),
-		nullIfEmpty(snapshot.SuppressionReason))
+		nullIfEmpty(snapshot.SuppressionReason), nullIfEmpty(string(snapshot.DeterministicLevel)), snapshot.BlastRadiusScore,
+		nullIfEmpty(string(snapshot.UpstreamVEXCoverage)))
 	if err != nil {
 		return fmt.Errorf("upsert risk context: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresEnrichmentRepository) CountOpenRiskContexts(ctx context.Context) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM risk_context
+		WHERE effective_state IN ('detected', 'in_triage')
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count open risk contexts: %w", err)
+	}
+	return count, nil
+}
+
+func (r *PostgresEnrichmentRepository) ListOpenRiskContexts(ctx context.Context, offset, limit int) ([]domain.OpenRiskContextRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT rc.component_vulnerability_id::text, v.cve_id,
+		       COALESCE(rc.raw_severity, v.severity, 'unknown'), rc.effective_state,
+		       COALESCE(v.cvss_score, 0),
+		       COALESCE(rc.blast_radius_score, 1.0)
+		FROM risk_context rc
+		JOIN component_vulnerabilities cv ON cv.id = rc.component_vulnerability_id
+		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+		WHERE rc.effective_state IN ('detected', 'in_triage')
+		ORDER BY rc.component_vulnerability_id
+		OFFSET $1 LIMIT $2
+	`, offset, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list open risk contexts: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.OpenRiskContextRow
+	for rows.Next() {
+		var row domain.OpenRiskContextRow
+		if err := rows.Scan(
+			&row.ComponentVulnerabilityID,
+			&row.CVEID,
+			&row.RawSeverity,
+			&row.EffectiveState,
+			&row.CVSSScore,
+			&row.BlastRadiusScore,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresEnrichmentRepository) UpdateRiskContextSignals(
+	ctx context.Context,
+	row domain.OpenRiskContextRow,
+	epssScore *float64,
+	kevListed bool,
+	exploitPublic bool,
+	deterministicLevel domain.DeterministicLevel,
+	riskScore int,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE risk_context
+		SET epss_score = $2,
+		    kev_listed = $3,
+		    exploit_public = $4,
+		    deterministic_level = $5,
+		    risk_score = $6,
+		    updated_at = NOW()
+		WHERE component_vulnerability_id = $1
+	`, row.ComponentVulnerabilityID, epssScore, kevListed, exploitPublic, nullIfEmpty(string(deterministicLevel)), riskScore)
+	if err != nil {
+		return fmt.Errorf("update risk context signals: %w", err)
 	}
 	return nil
 }

@@ -139,6 +139,8 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 			return nil, fmt.Errorf("create worker pool: %w", err)
 		}
 		workers = inProcess
+	} else if q, ok := workers.(*queue.InProcessQueue); ok {
+		inProcess = q
 	}
 	if err := workers.Start(ctx); err != nil {
 		pool.Close()
@@ -162,15 +164,15 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 	)
 
 	if inProcess != nil {
-		if pgxPool, ok := pool.(*pgxpool.Pool); ok {
-			watchRepo := store.NewPostgresWatchRepository(pgxPool)
+		if mountPool, ok := pool.(dbPool); ok {
+			watchRepo := store.NewPostgresWatchRepository(mountPool)
 			if ts, err := watchRepo.GetLastSuccessTimestamp(ctx); err == nil {
 				app.CVEFeedSuccess.Store(ts)
 			} else {
 				app.CVEFeedSuccess.Store(time.Now().UTC())
 			}
 			MountAPI(ctx, app.HTTPServer.Router(), APIConfig{
-				Pool:           pgxPool,
+				Pool:           mountPool,
 				AppConfig:      appCfg,
 				InProcessQueue: inProcess,
 				CVEFeedSuccess: &app.CVEFeedSuccess,
@@ -197,20 +199,31 @@ func (a *Application) Close(ctx context.Context) error {
 
 var shutdownHTTPServer = (*Server).Shutdown
 
+var bootFn = Boot
+
 // Run is the DI entry point used by cmd/themis. It wires infrastructure and blocks until shutdown.
 func Run(ctx context.Context) error {
-	logger, err := NewLogger("themis")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = logger.Sync() }()
-
 	configPath := os.Getenv("THEMIS_CONFIG_PATH")
 	if configPath == "" {
 		configPath = "themis.yaml"
 	}
 
-	app, err := Boot(ctx, logger, WithConfigPath(configPath))
+	logLevel := os.Getenv("THEMIS_LOG_LEVEL")
+	if logLevel == "" {
+		if cfg, err := config.Load(configPath); err == nil && cfg.Log.Level != "" {
+			logLevel = cfg.Log.Level
+		} else {
+			logLevel = "info"
+		}
+	}
+
+	logger, err := NewLoggerWithLevel("themis", logLevel)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = logger.Sync() }()
+
+	app, err := bootFn(ctx, logger, WithConfigPath(configPath))
 	if err != nil {
 		return err
 	}
