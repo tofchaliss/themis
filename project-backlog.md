@@ -57,13 +57,48 @@ Current implementation status: `openspec/STATUS.md`.
 
 ---
 
-### Phase 2a — Signal Foundation (`themis-phase-2a`) — Planned
+### Phase 2a — Signal Foundation (`themis-phase-2a`) — In Progress
 
 **Gate:** Group 16 complete + `v0.1.0` tagged.
 **Releases as:** v0.2.0
-**OpenSpec change:** `openspec/changes/themis-phase-2a/` (to be created)
+**OpenSpec change:** `openspec/changes/themis-phase-2a/`
+**Progress:** ~132/140 tasks (Groups 1–29 complete; Group 30 open). See `openspec/STATUS.md`.
 
-**What:**
+**Implemented (Groups 17–29):**
+
+- Domain types, migrations 000014–000019, Phase 2a config structs + env overrides
+- **EPSS/KEV sync** — daily FIRST.org EPSS + CISA KEV fetch; `epss_kev_signals` table;
+  retroactive `ReEnrichJob`; stale flag after 25h; `signals_stale` on status API
+- **ExploitDB CSV** — `files_exploits.csv`; `exploit_records`; Layer 1 `ExploitPublic` rule
+- **Layer 1 deterministic rules** — CVSS/KEV/EPSS/ExploitPublic → `deterministic_level`
+- **Asset graph** — Microservice / Deployment / Customer entities + registration APIs
+- **Layer 2 blast-radius** — graph traversal, score multiplier, team notifications,
+  `GET /api/v1/products/{id}/blast-radius`
+- **Composite risk score V2** — EPSS +30%, KEV +15, blast-radius multiplier, Critical override
+  (**BREAKING** vs Phase 1 score thresholds)
+- **Upstream VEX feeds** — Red Hat (CSAF), Alpine / Rocky / Wolfi (OSV); four-phase PURL
+  matcher (apk + RPM); `upstream_vex_coverage` on `risk_context`; daily poll scheduler
+- **VEX export** — `GET .../versions/{v}/vex` (CycloneDX 1.5+ / OpenVEX 0.2+);
+  `GET .../vex-coverage`; precedence human > user > AI > upstream vendor
+- **System status API** — `GET /api/v1/status?top=N` (live counts, top-N, `signals_stale`)
+- **SBOM management** — `GET /api/v1/sboms`, `GET /api/v1/products/{id}/sboms`,
+  `DELETE /api/v1/sboms/{id}?force=true` (soft-delete + audit log)
+- **Error UX** — `{error: {code, message, hint}}` envelope on all endpoints; 12 catalogue codes
+- **Acceptance gates** — AC-16..AC-24 integration tests; feed resilience FR1–FR8 mapped
+
+**Still open (Group 30 — release gate):**
+
+- Final coverage verification for all new packages
+- Prometheus metrics wiring (`themis_epsskev_*`, `themis_vexfeed_*`, `themis_blast_radius_score`, etc.)
+- `verification.md` + `docs/acceptance-criteria.md` sync; `AGENTS.md` status update
+- Merge to `main`, tag `v0.2.0`, release notes
+
+**Deferred from Phase 2a scope (see follow-ons below):**
+
+- **GHSA integration** — config key `THEMIS_GITHUB_TOKEN` wired; adapter ships in Phase 2b
+- **Debian/Ubuntu VEX feed matching** — separate matchers; apk/RPM path first
+
+**What (original scope reference):**
 
 - **EPSS/KEV sync** — daily CISA KEV + FIRST.org EPSS fetch; updates
   `intelligence_signals` with TTL; incorporates into risk score formula
@@ -102,8 +137,17 @@ are breaking changes that require the Phase 1 pipeline to be stable first.
 - `JobQueue` interface for async tasks already in place
 - `risk_context` has `epss_score`, `kev_listed` columns (populated NULL today)
 
-**Database migrations:** 000014 (microservices, deployments, customers, exploit_records),
-000017 (indexes)
+**Database migrations:** 000014–000019 (graph entities, `epss_kev_signals`, Phase 2a
+`risk_context` columns, indexes, SBOM soft-delete, vendor VEX feed tables)
+
+**Post-2a follow-on — Vendor VEX feed operations:**
+
+| Item | Why deferred | Phase 1 / 2a hooks |
+| ---- | ------------ | -------------------- |
+| Per-feed enable/disable (`vexfeed.rhel_enabled`, etc.) | Phase 2a wires all four feeds; operators may want to disable Wolfi/Rocky in non-RHEL shops | `VEXFeedConfig` URLs already per-feed; add bool flags in config + skip in `api_wiring.go` |
+| Red Hat CSAF directory crawl | Default `rhel_url` points at the CSAF advisories *directory*; production may need a manifest/bundle URL or crawler over individual `.json` files | `URLFeedSource` + `ParseCSAF` accept single-document bodies today |
+| Cron-style `sync_schedule` (vs poll interval) | Schedulers use `time.NewTicker` + `poll_interval` (same as EPSS/ExploitDB); cron strings not implemented | `StartVEXFeedScheduler`, `StartEPSSKevScheduler` |
+| README + `themis.yaml.example` Phase 2a config docs | Operator discoverability | **Done** — see README Configuration and `themis.yaml.example` |
 
 **Post-2a follow-on — Debian/Ubuntu VEX feed matching:**
 

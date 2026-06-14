@@ -11,7 +11,7 @@ import (
 )
 
 // BinarySchemaVersion is the highest migration version embedded in this binary.
-const BinarySchemaVersion uint = 13
+const BinarySchemaVersion uint = 19
 
 // ErrSchemaAhead indicates the database schema is newer than this binary supports.
 var ErrSchemaAhead = errors.New("database schema version is ahead of binary version")

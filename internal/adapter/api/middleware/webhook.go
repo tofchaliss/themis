@@ -4,23 +4,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 )
-
-func writeProblem(w http.ResponseWriter, r *http.Request, status int, title, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":     "https://themis.dev/problems/error",
-		"title":    title,
-		"status":   status,
-		"detail":   detail,
-		"instance": r.URL.Path,
-	})
-}
 
 func defaultWebhookVerify(secret string, r *http.Request) bool {
 	signature := strings.TrimSpace(r.Header.Get("X-Themis-Signature"))

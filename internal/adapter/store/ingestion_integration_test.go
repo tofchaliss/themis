@@ -4,14 +4,10 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -339,18 +335,4 @@ func seedBaseData(t *testing.T, ctx context.Context, pool *pgxpool.Pool, product
 	`, imageID, artifactID, productID, digest); err != nil {
 		t.Fatalf("insert image: %v", err)
 	}
-}
-
-func applyIntegrationMigrations(dsn, migrationsPath string) error {
-	m, err := migrate.New("file://"+migrationsPath, dsn)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_, _ = m.Close()
-	}()
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return err
-	}
-	return nil
 }

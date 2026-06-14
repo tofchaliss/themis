@@ -79,6 +79,18 @@ func TestEnqueueSenderQueueError(t *testing.T) {
 	}
 }
 
+func TestEnqueueSenderNotifyTeam(t *testing.T) {
+	queue := &stubQueue{}
+	sender := EnqueueSender{Queue: queue}
+	event := domain.NotificationEvent{Type: domain.NotificationEventTriageDecision, Message: "team blast"}
+	if err := sender.NotifyTeam(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.jobs) != 1 {
+		t.Fatalf("jobs=%+v", queue.jobs)
+	}
+}
+
 func TestEnqueueSenderMarshalError(t *testing.T) {
 	orig := marshalJobPayload
 	marshalJobPayload = func(any) ([]byte, error) { return nil, errors.New("marshal failed") }

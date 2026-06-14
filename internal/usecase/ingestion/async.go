@@ -55,6 +55,26 @@ func (d *AsyncDispatcher) EnqueueReenrichVEX(ctx context.Context, vexDocumentID 
 	_, err = d.Queue.Enqueue(ctx, domain.Job{Type: domain.JobTypeReenrichVEX, Payload: payload})
 	return err
 }
+
+// EnqueueApplyVEXForSBOMs schedules VEX overlay re-application for SBOM documents.
+func (d *AsyncDispatcher) EnqueueApplyVEXForSBOMs(ctx context.Context, sbomDocumentIDs []string) error {
+	if d == nil || d.Queue == nil {
+		return fmt.Errorf("job queue unavailable")
+	}
+	for _, sbomID := range sbomDocumentIDs {
+		if sbomID == "" {
+			continue
+		}
+		payload, err := JSONMarshalHook(map[string]string{"sbom_document_id": sbomID})
+		if err != nil {
+			return err
+		}
+		if _, err := d.Queue.Enqueue(ctx, domain.Job{Type: domain.JobTypeApplyVEXSBOM, Payload: payload}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func DecodeJobPayload(job domain.Job) (domain.IngestionInput, domain.JobType, error) {
 	var payload jobPayload
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {

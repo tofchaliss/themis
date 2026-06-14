@@ -192,6 +192,44 @@ func TestRecordCVEWatchNewFindingsIncrements(t *testing.T) {
 	}
 }
 
+func TestPhase2aMetricsRegistered(t *testing.T) {
+	metrics.RegisterPhase2a()
+	metrics.EPSSKevMetrics{}.RecordSync("epss", "success")
+	metrics.EPSSKevMetrics{}.SetStale(true)
+	metrics.EPSSKevMetrics{}.RecordReEnrichBatches(2)
+	metrics.VEXFeedMetrics{}.RecordSync("rhel", "success")
+	metrics.VEXFeedMetrics{}.RecordAssertions("alpine", "exact", 3)
+	metrics.VEXFeedMetrics{}.RecordPURLMismatch("alpine")
+	metrics.EnrichmentMetrics{}.RecordLayer1Rule("Critical")
+	metrics.EnrichmentMetrics{}.RecordBlastRadiusScore(1.5)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metrics.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body, err := io.ReadAll(rec.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"themis_epsskev_sync_total",
+		"themis_epsskev_stale",
+		"themis_reenrichjob_batches_total",
+		"themis_vexfeed_sync_total",
+		"themis_vexfeed_assertions_total",
+		"themis_vexfeed_purl_mismatch_total",
+		"themis_layer1_rules_fired_total",
+		"themis_blast_radius_score",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics body missing %q", want)
+		}
+	}
+}
+
 func TestDomainStartStageNoOpWithoutInjection(t *testing.T) {
 	ctx, end := domain.StartStage(context.Background(), domain.StageParse)
 	end()

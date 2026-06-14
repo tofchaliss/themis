@@ -2,21 +2,28 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/themis-project/themis/internal/adapter/api"
 	apimiddleware "github.com/themis-project/themis/internal/adapter/api/middleware"
+	"github.com/themis-project/themis/internal/adapter/assetgraph"
+	"github.com/themis-project/themis/internal/adapter/epsskev"
+	"github.com/themis-project/themis/internal/adapter/exploitdb"
 	"github.com/themis-project/themis/internal/adapter/notify"
 	"github.com/themis-project/themis/internal/adapter/nvd"
 	"github.com/themis-project/themis/internal/adapter/osv"
 	"github.com/themis-project/themis/internal/adapter/parser"
 	"github.com/themis-project/themis/internal/adapter/store"
 	"github.com/themis-project/themis/internal/adapter/trust"
+	"github.com/themis-project/themis/internal/adapter/vexfeed"
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/infrastructure/config"
 	"github.com/themis-project/themis/internal/infrastructure/metrics"
@@ -24,15 +31,23 @@ import (
 	"github.com/themis-project/themis/internal/usecase/enrichment"
 	"github.com/themis-project/themis/internal/usecase/ingestion"
 	"github.com/themis-project/themis/internal/usecase/triage"
+	"github.com/themis-project/themis/internal/usecase/vexgen"
 	"github.com/themis-project/themis/internal/usecase/watch"
 )
 
 // APIConfig configures REST API mounting.
 type APIConfig struct {
-	Pool           *pgxpool.Pool
+	Pool           dbPool
 	AppConfig      config.Config
 	InProcessQueue *queue.InProcessQueue
 	CVEFeedSuccess *atomic.Value
+}
+
+type dbPool interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // MountAPI wires adapter handlers onto the HTTP router.
@@ -42,7 +57,58 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	audit := trust.NewPostgresAuditRecorder(cfg.Pool)
 	gate := &trust.Gate{Verifier: trust.StubVerifier{}, Repo: trustRepo, Audit: audit}
 	enrichmentRepo := store.NewPostgresEnrichmentRepository(cfg.Pool)
-	enrichmentSvc := &enrichment.Handler{Repo: enrichmentRepo, Audit: audit}
+	graphStore := assetgraph.NewPostgresStore(cfg.Pool)
+	vendorVEXStore := vexfeed.NewPostgresAssertionStore(cfg.Pool)
+	vendorMatcher := vexfeed.EnrichmentMatcher{Inner: vexfeed.DefaultMatcher{
+		Logger: vexfeed.SlogMismatchLogger{},
+	}}
+	enrichmentSvc := &enrichment.Handler{
+		Repo:        enrichmentRepo,
+		Audit:       audit,
+		Layer2:      graphStore,
+		TeamNotify:  notify.EnqueueSender{Queue: cfg.InProcessQueue},
+		VendorVEX:   vexfeed.EnrichmentAssertionReader{Store: vendorVEXStore},
+		VendorMatch: vendorMatcher,
+		Metrics:     metrics.EnrichmentMetrics{},
+	}
+	threatSignals := store.NewPostgresThreatSignalStore(cfg.Pool)
+	exploitStore := store.NewPostgresExploitStore(cfg.Pool)
+	signalSources := store.CombinedSignalReader{Threat: threatSignals, Exploit: exploitStore}
+	dispatcher := &ingestion.AsyncDispatcher{Queue: cfg.InProcessQueue}
+	epssKevClient := epsskev.NewClient(epsskev.ClientConfig{
+		EPSSURL: cfg.AppConfig.EPSSKev.EPSSURL,
+		KEVURL:  cfg.AppConfig.EPSSKev.KEVURL,
+	})
+	metrics.RegisterPhase2a()
+	epssKevSvc := &epsskev.Service{
+		Fetcher:      epssKevClient,
+		Store:        threatSignals,
+		ReEnrich:     dispatcher,
+		OpenFindings: enrichmentRepo,
+		Metrics:      metrics.EPSSKevMetrics{},
+	}
+	StartEPSSKevScheduler(ctx, epssKevSvc, cfg.AppConfig.EPSSKev.PollInterval)
+	exploitDBClient := exploitdb.NewClient(exploitdb.ClientConfig{CSVURL: cfg.AppConfig.ExploitDB.CSVURL})
+	exploitDBSvc := &exploitdb.Service{
+		Source:       exploitDBClient,
+		Store:        exploitStore,
+		ReEnrich:     dispatcher,
+		OpenFindings: enrichmentRepo,
+	}
+	StartExploitDBScheduler(ctx, exploitDBSvc, cfg.AppConfig.ExploitDB.PollInterval)
+	vexHTTP := &vexfeed.HTTPFetcher{}
+	vexFeedSvc := &vexfeed.Service{
+		Feeds: []vexfeed.FeedSource{
+			vexfeed.URLFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELURL, Kind: "csaf", Fetcher: vexHTTP},
+			vexfeed.URLFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Kind: "osv", Fetcher: vexHTTP},
+			vexfeed.URLFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Kind: "osv", Fetcher: vexHTTP},
+			vexfeed.URLFeedSource{Name_: "wolfi", URL: cfg.AppConfig.VEXFeed.WolfiOSVURL, Kind: "osv", Fetcher: vexHTTP},
+		},
+		Store:    vendorVEXStore,
+		ReEnrich: dispatcher,
+		Metrics:  metrics.VEXFeedMetrics{},
+	}
+	StartVEXFeedScheduler(ctx, vexFeedSvc, cfg.AppConfig.VEXFeed.PollInterval)
 	notificationRules := store.NewPostgresNotificationConfigRepository(cfg.Pool)
 	notifySvc := notify.NewService(notify.ServiceConfig{
 		Rules: notificationRules,
@@ -77,12 +143,28 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		},
 	})
 	ingestJobs := ingestion.JobHandler(pipeline, enrichmentSvc)
+	signalsJobs := ingestion.SignalsJobHandler(enrichmentSvc, signalSources)
 	notifyJobs := notify.JobHandler(notifySvc)
 	cfg.InProcessQueue.SetHandler(metrics.InstrumentJobHandler(func(ctx context.Context, job domain.Job) error {
-		if job.Type == domain.JobTypeNotify {
+		switch job.Type {
+		case domain.JobTypeNotify:
 			return notifyJobs(ctx, job)
+		case domain.JobTypeReEnrichSignals:
+			return signalsJobs(ctx, job)
+		case domain.JobTypeApplyVEXSBOM:
+			var payload struct {
+				SBOMDocumentID string `json:"sbom_document_id"`
+			}
+			if err := json.Unmarshal(job.Payload, &payload); err != nil {
+				return fmt.Errorf("decode apply vex payload: %w", err)
+			}
+			if enrichmentSvc == nil {
+				return fmt.Errorf("enrichment service unavailable")
+			}
+			return enrichmentSvc.ApplyVEX(ctx, payload.SBOMDocumentID)
+		default:
+			return ingestJobs(ctx, job)
 		}
-		return ingestJobs(ctx, job)
 	}))
 
 	triageRepo := store.NewPostgresTriageRepository(cfg.Pool)
@@ -90,6 +172,12 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Repo:  triageRepo,
 		VEX:   store.NewPostgresTriageVEXGenerator(cfg.Pool),
 		Audit: audit,
+	}
+	vexExportRepo := store.NewPostgresVEXExportRepository(cfg.Pool)
+	vexExportSvc := &vexgen.Handler{
+		Repo:        vexExportRepo,
+		VendorVEX:   vexfeed.EnrichmentAssertionReader{Store: vendorVEXStore},
+		VendorMatch: vendorMatcher,
 	}
 	StartTriageExpiryScheduler(ctx, triageHandler, time.Hour)
 
@@ -114,7 +202,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	handler := api.NewHandler(api.Dependencies{
 		Ingestion:     pipeline,
 		Jobs:          jobs,
-		Dispatcher:    &ingestion.AsyncDispatcher{Queue: cfg.InProcessQueue},
+		Dispatcher:    dispatcher,
 		Catalog:       store.NewPostgresProductCatalogRepository(cfg.Pool),
 		Scans:         store.NewPostgresScanQueryRepository(cfg.Pool),
 		Components:    store.NewPostgresComponentCatalogRepository(cfg.Pool),
@@ -123,6 +211,12 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Scanners:      store.NewPostgresScannerConfigRepository(cfg.Pool),
 		Triage:        triageHandler,
 		TriageRepo:    triageRepo,
+		Graph:         graphStore,
+		VEXExport:     vexExportSvc,
+		Status:        store.NewPostgresSystemStatusRepository(cfg.Pool),
+		SBOMMgmt:      store.NewPostgresSBOMManagementRepository(cfg.Pool),
+		ThreatSignals: threatSignals,
+		Audit:         audit,
 		MaxUpload:     cfg.AppConfig.Upload.MaxSizeBytes,
 		TrustPolicy:   domain.TrustPolicy(cfg.AppConfig.Trust.DefaultPolicy),
 	})

@@ -101,3 +101,10 @@ func testServer(t *testing.T, readiness ReadinessChecker) *Server {
 	logger := zap.NewNop()
 	return New(":0", logger, readiness, time.Second, time.Second)
 }
+
+func TestServerRouter(t *testing.T) {
+	s := testServer(t, ReadinessChecker{})
+	if s.Router() == nil {
+		t.Fatal("expected router")
+	}
+}

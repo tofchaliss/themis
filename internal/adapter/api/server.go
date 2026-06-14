@@ -8,23 +8,30 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/usecase/ingestion"
 	"github.com/themis-project/themis/internal/usecase/triage"
+	"github.com/themis-project/themis/internal/usecase/vexgen"
 )
 
 // Dependencies wires handler ports.
 type Dependencies struct {
-	Ingestion   ingestion.Service
-	Jobs        domain.IngestionRepository
-	Dispatcher  domain.IngestionAsyncDispatcher
-	Catalog     domain.ProductCatalogRepository
-	Scans       domain.ScanQueryRepository
-	Components  domain.ComponentCatalogRepository
-	Watch       domain.CVEWatchFindingRepository
+	Ingestion     ingestion.Service
+	Jobs          domain.IngestionRepository
+	Dispatcher    domain.IngestionAsyncDispatcher
+	Catalog       domain.ProductCatalogRepository
+	Scans         domain.ScanQueryRepository
+	Components    domain.ComponentCatalogRepository
+	Watch         domain.CVEWatchFindingRepository
 	Notifications domain.NotificationConfigRepository
-	Scanners    domain.ScannerConfigRepository
-	Triage      triage.Service
-	TriageRepo  domain.TriageRepository
-	MaxUpload   int64
-	TrustPolicy domain.TrustPolicy
+	Scanners      domain.ScannerConfigRepository
+	Triage        triage.Service
+	TriageRepo    domain.TriageRepository
+	Graph         domain.GraphStore
+	VEXExport     vexgen.Service
+	Status        domain.SystemStatusRepository
+	SBOMMgmt      domain.SBOMManagementRepository
+	ThreatSignals domain.ThreatSignalStore
+	Audit         domain.AuditRecorder
+	MaxUpload     int64
+	TrustPolicy   domain.TrustPolicy
 }
 
 // Handler implements the generated OpenAPI interface.

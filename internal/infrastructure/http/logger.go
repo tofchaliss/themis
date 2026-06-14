@@ -1,13 +1,30 @@
 package httpserver
 
 import (
+	"strings"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-// NewLogger builds a JSON logger with Themis standard fields.
+// NewLogger builds a JSON logger with Themis standard fields at info level.
 func NewLogger(component string) (*zap.Logger, error) {
+	return NewLoggerWithLevel(component, "info")
+}
+
+// NewLoggerWithLevel builds a JSON logger at the requested level (debug|info|warn|error).
+func NewLoggerWithLevel(component, level string) (*zap.Logger, error) {
 	cfg := zap.NewProductionConfig()
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	case "warn":
+		cfg.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
+	case "error":
+		cfg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	default:
+		cfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	}
 	return newLogger(cfg, component)
 }
 

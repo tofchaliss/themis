@@ -178,11 +178,44 @@ func TestSubmitTriageValidation(t *testing.T) {
 	}
 }
 
-func TestProblemDetailShape(t *testing.T) {
+func TestErrorEnvelopeShape(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
 	api.WriteProblem(rec, req, http.StatusNotFound, "Not Found", "missing")
-	assertProblem(t, rec, http.StatusNotFound)
+	assertAPIError(t, rec, http.StatusNotFound, "PRODUCT_NOT_FOUND")
+}
+
+func assertAPIError(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Message == "" || body.Error.Hint == "" {
+		t.Fatalf("error = %+v", body.Error)
+	}
+	if code != "" && body.Error.Code != code {
+		t.Fatalf("code = %q want %q", body.Error.Code, code)
+	}
+}
+
+func assertProblem(t *testing.T, rec *httptest.ResponseRecorder, status int) {
+	assertAPIError(t, rec, status, "")
+	if rec.Body.Len() == 0 {
+		t.Fatal("empty body")
+	}
 }
 
 func mountTestAPI(handler *api.Handler, keys domain.APIKeyRepository) http.Handler {
@@ -198,20 +231,6 @@ func mountTestAPIWithLimit(handler *api.Handler, keys domain.APIKeyRepository, m
 		MaxUploadSize: max,
 	})
 	return r
-}
-
-func assertProblem(t *testing.T, rec *httptest.ResponseRecorder, status int) {
-	t.Helper()
-	if rec.Header().Get("Content-Type") != "application/problem+json" {
-		t.Fatalf("content-type = %q", rec.Header().Get("Content-Type"))
-	}
-	var problem api.ProblemDetail
-	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
-		t.Fatal(err)
-	}
-	if problem.Status != status || problem.Title == "" {
-		t.Fatalf("problem = %+v", problem)
-	}
 }
 
 func emptyKeyRepo() domain.APIKeyRepository { return &fakeKeys{} }

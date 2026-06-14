@@ -32,7 +32,7 @@ Ask these questions before claiming the system or change is correct.
 | C8 | **How is idempotent SBOM ingestion verified?** | Same `(image_digest, checksum)` returns existing scan | `TestE2E_DuplicateSBOMIdempotency`; `sbom-ingestion` spec |
 | C9 | **How is the Phase 2a composite risk score formula verified?** | Property test agrees with independent oracle implementation for all valid inputs | `go test ./tests/acceptance/... -run TestCompositeScoreOracleProperty` |
 | C10 | **How is Layer 1 sync-before-202 verified?** | Integration test: POST SBOM → `202 Accepted` → immediate query shows non-null `deterministic_level` on every finding | `TestE2E_Layer1SynchronousBeforeAccepted` |
-| C11 | **How is soft-deleted SBOM data isolation verified?** | 7-path matrix: status counts, SBOM list, product SBOM list, blast-radius, VEX export, top-components, findings all exclude deleted data | `TestSoftDelete_DataIsolation` (integration); negative test `TestSoftDelete_StoreFilterNotCallerFilter` |
+| C11 | **How is soft-deleted SBOM data isolation verified?** | 7-path matrix: status counts, SBOM list, product SBOM list, blast-radius, VEX export, top-components, findings all exclude deleted data | `TestAC22_SoftDeleteIsolation` (integration); negative test `TestSoftDelete_StoreFilterNotCallerFilter` |
 | C12 | **How is PURL mismatch always-logged verified?** | Log capture test: simulate all-four-phases-fail → assert structured INFO log with `sbom_purl`, `vex_purl`, `cve_id` fields present | `TestVEXFeed_PURLMismatchAlwaysLogged` |
 | C13 | **How is the Alpine OSV fixed-version boundary verified?** | Unit test: installed version == fixed version → `not_affected` (fixed is exclusive in `[introduced, fixed)`) | `TestPhase4_AlpineNotInRange_FixedVersion` |
 | C14 | **How is ReEnrichJob idempotency verified?** | Run the same ReEnrichJob twice with identical signal data → `risk_context` row unchanged on second run; no duplicate rows inserted | `TestReEnrichJob_Idempotent` |
@@ -106,7 +106,7 @@ Ask these questions before claiming the system is observable, debuggable, or aud
 | O11 | **How is blast-radius score distribution observable?** | Histogram of `blast_radius_score` values written to `risk_context` at enrichment time | `themis_blast_radius_score` histogram; `go test ./internal/infrastructure/metrics/... -run TestBlastRadiusMetric` |
 | O12 | **How is log-level debug mode verified?** | `THEMIS_LOG_LEVEL=debug` emits per-PURL normalisation attempts and Layer 1 rule firings; `info` level emits only sync summaries | Manual smoke: `THEMIS_LOG_LEVEL=debug ./bin/themis`; unit test: `TestLogLevel_DebugEmitsPURLDetail` |
 | O13 | **How is vendor VEX feed sync observability verified?** | Per-feed counters for new assertions, updated assertions, parse errors, and sync duration | `themis_vexfeed_sync_total{feed,status}`; `themis_vexfeed_assertions_total{feed,match_type}` |
-| O14 | **How is SBOM soft-delete auditable?** | Every deletion writes an `audit_log` row (api_key_id, timestamp, action=`SBOM_DELETED`, sbom_id); query confirms entry present | `TestSoftDelete_AuditLogWritten`; `SELECT * FROM audit_log WHERE action='SBOM_DELETED'` |
+| O14 | **How is SBOM soft-delete auditable?** | Every deletion writes an `audit_log` row (api_key_id, timestamp, action=`SBOM_DELETED`, sbom_id); query confirms entry present | `TestO14_SBOMDeleteAuditLog`; `SELECT * FROM audit_log WHERE action='SBOM_DELETED'` |
 
 **Expected metric names (non-exhaustive):**
 
@@ -157,35 +157,38 @@ curl -s http://localhost:8080/metrics | grep themis_
 
 Full CycloneDX upload walkthrough: [README.md § Testing](README.md#testing).
 
-**Phase 2a smoke — signal feeds and graph:**
+**Phase 2a smoke — signal feeds, status, and graph:**
+
+Note: EPSS/KEV/ExploitDB/vendor VEX sync runs on daily schedulers at startup — no admin trigger endpoint yet. Wait for the first poll cycle or run integration tests locally.
 
 ```sh
-# Trigger EPSS/KEV sync manually (once scheduler is wired)
-curl -s -X POST http://localhost:8080/api/v1/admin/sync/epsskev \
+# System status (live SQL; top-N components; signals_stale when EPSS/KEV overdue)
+curl -s "http://localhost:8080/api/v1/status?top=5" \
   -H "X-API-Key: $THEMIS_API_KEY" | jq .
 
-# Check status with EPSS/KEV signal counts
-curl -s "http://localhost:8080/api/v1/status?top=5" \
+# SBOM inventory
+curl -s "http://localhost:8080/api/v1/sboms?limit=10" \
   -H "X-API-Key: $THEMIS_API_KEY" | jq .
 
 # Register graph entities
 curl -s -X POST http://localhost:8080/api/v1/customers \
   -H "X-API-Key: $THEMIS_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{"name":"Platform Team","contact_email":"platform@example.com"}' | jq .
 
-# Export VEX for a product
+# Export VEX for a product version
 curl -s "http://localhost:8080/api/v1/products/{id}/versions/{v}/vex?format=cyclonedx" \
   -H "X-API-Key: $THEMIS_API_KEY" | jq '.vulnerabilities | length'
 
-# Check VEX coverage
+# VEX coverage aggregate
 curl -s "http://localhost:8080/api/v1/products/{id}/versions/{v}/vex-coverage" \
   -H "X-API-Key: $THEMIS_API_KEY" | jq .
 
-# Verify PURL mismatch metrics
-curl -s http://localhost:8080/metrics | grep themis_vexfeed_purl_mismatch
+# Error envelope example (missing API key → MISSING_API_KEY)
+curl -s "http://localhost:8080/api/v1/status" | jq .
 
-# Debug PURL normalisation for a specific SBOM (requires debug log level)
-THEMIS_LOG_LEVEL=debug ./bin/themis 2>&1 | grep purl_mismatch
+# Metrics (Group 30 wires remaining Phase 2a counters)
+curl -s http://localhost:8080/metrics | grep themis_
 ```
 
 ---

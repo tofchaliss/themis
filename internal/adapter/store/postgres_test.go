@@ -4,12 +4,93 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/themis-project/themis/internal/domain"
 )
+
+func assignScanValue(dest any, value any) error {
+	switch ptr := dest.(type) {
+	case *string:
+		if value == nil {
+			*ptr = ""
+		} else {
+			*ptr = value.(string)
+		}
+	case **string:
+		if value == nil {
+			*ptr = nil
+		} else if s, ok := value.(*string); ok {
+			*ptr = s
+		} else {
+			v := value.(string)
+			*ptr = &v
+		}
+	case *[]byte:
+		if value == nil {
+			*ptr = nil
+		} else {
+			*ptr = value.([]byte)
+		}
+	case *time.Time:
+		if value == nil {
+			*ptr = time.Time{}
+		} else if t, ok := value.(*time.Time); ok {
+			*ptr = *t
+		} else {
+			*ptr = value.(time.Time)
+		}
+	case **time.Time:
+		if value == nil {
+			*ptr = nil
+		} else if t, ok := value.(*time.Time); ok {
+			*ptr = t
+		} else {
+			v := value.(time.Time)
+			*ptr = &v
+		}
+	case *int:
+		if value == nil {
+			*ptr = 0
+		} else {
+			*ptr = value.(int)
+		}
+	case *bool:
+		if value == nil {
+			*ptr = false
+		} else {
+			*ptr = value.(bool)
+		}
+	case *float64:
+		if value == nil {
+			*ptr = 0
+		} else {
+			*ptr = value.(float64)
+		}
+	case **float64:
+		if value == nil {
+			*ptr = nil
+		} else if f, ok := value.(*float64); ok {
+			*ptr = f
+		} else {
+			v := value.(float64)
+			*ptr = &v
+		}
+	case *[]string:
+		if value == nil {
+			*ptr = nil
+		} else {
+			*ptr = value.([]string)
+		}
+	default:
+		return fmt.Errorf("unsupported scan destination %T", dest)
+	}
+	return nil
+}
 
 type scanRow struct {
 	values []any
@@ -17,11 +98,8 @@ type scanRow struct {
 
 func (r scanRow) Scan(dest ...any) error {
 	for i, d := range dest {
-		switch ptr := d.(type) {
-		case *string:
-			*ptr = r.values[i].(string)
-		case *[]byte:
-			*ptr = r.values[i].([]byte)
+		if err := assignScanValue(d, r.values[i]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -142,13 +220,8 @@ func (r *fakeRows) Next() bool {
 func (r *fakeRows) Scan(dest ...any) error {
 	row := r.data[r.idx-1]
 	for i, value := range row {
-		switch d := dest[i].(type) {
-		case *string:
-			*d = value.(string)
-		case *float64:
-			*d = value.(float64)
-		case *[]string:
-			*d = value.([]string)
+		if err := assignScanValue(dest[i], value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -160,8 +233,9 @@ func (r *fakeRows) Values() ([]any, error)                     { return nil, nil
 func (r *fakeRows) Conn() *pgx.Conn                            { return nil }
 
 type storeFakeConn struct {
-	queryErr error
-	execErr  error
+	queryErr      error
+	execErr       error
+	rowsAffected  int64
 }
 
 func (f storeFakeConn) QueryRow(context.Context, string, ...any) pgx.Row {
@@ -169,7 +243,73 @@ func (f storeFakeConn) QueryRow(context.Context, string, ...any) pgx.Row {
 }
 
 func (f storeFakeConn) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, f.execErr
+	if f.execErr != nil {
+		return pgconn.CommandTag{}, f.execErr
+	}
+	return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", f.rowsAffected)), nil
+}
+
+type execResult struct {
+	tag pgconn.CommandTag
+	err error
+}
+
+type scriptedFakePool struct {
+	queryRowResults []pgx.Row
+	queryResults    []pgx.Rows
+	execResults     []execResult
+	qrIdx           int
+	qIdx            int
+	eIdx            int
+}
+
+func (p *scriptedFakePool) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	if p.qrIdx >= len(p.queryRowResults) {
+		return errRow{err: errors.New("unexpected QueryRow")}
+	}
+	row := p.queryRowResults[p.qrIdx]
+	p.qrIdx++
+	return row
+}
+
+func (p *scriptedFakePool) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	if p.qIdx >= len(p.queryResults) {
+		return errRows{err: errors.New("unexpected Query")}, errors.New("unexpected Query")
+	}
+	rows := p.queryResults[p.qIdx]
+	p.qIdx++
+	if rows == nil {
+		return errRows{err: errors.New("query failed")}, errors.New("query failed")
+	}
+	return rows, nil
+}
+
+func (p *scriptedFakePool) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	if p.eIdx >= len(p.execResults) {
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
+	result := p.execResults[p.eIdx]
+	p.eIdx++
+	return result.tag, result.err
+}
+
+func (p *scriptedFakePool) addQueryRow(values ...any) {
+	p.queryRowResults = append(p.queryRowResults, scanRow{values: values})
+}
+
+func (p *scriptedFakePool) addQueryRowErr(err error) {
+	p.queryRowResults = append(p.queryRowResults, errRow{err: err})
+}
+
+func (p *scriptedFakePool) addQuery(data [][]any) {
+	p.queryResults = append(p.queryResults, &fakeRows{data: data})
+}
+
+func (p *scriptedFakePool) addExec(rowsAffected int64, err error) {
+	p.execResults = append(p.execResults, execResult{
+		tag: pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", rowsAffected)),
+		err: err,
+	})
 }
 
 type storeFakePool struct {
@@ -191,6 +331,20 @@ func (p storeFakePool) Query(context.Context, string, ...any) (pgx.Rows, error) 
 	}
 	return p.rows, nil
 }
+
+type failingRows struct {
+	err error
+}
+
+func (f failingRows) Close()                                       {}
+func (f failingRows) Err() error                                   { return f.err }
+func (f failingRows) Next() bool                                   { return false }
+func (f failingRows) Scan(...any) error                            { return f.err }
+func (failingRows) CommandTag() pgconn.CommandTag              { return pgconn.CommandTag{} }
+func (failingRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (failingRows) RawValues() [][]byte                          { return nil }
+func (f failingRows) Values() ([]any, error)                     { return nil, f.err }
+func (f failingRows) Conn() *pgx.Conn                            { return nil }
 
 type errRows struct {
 	err error

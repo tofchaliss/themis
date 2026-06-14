@@ -37,6 +37,11 @@ func TestRunAdminCLIIntegration(t *testing.T) {
 	t.Setenv("THEMIS_DATABASE_DSN", dsn)
 	t.Setenv("THEMIS_CONFIG_PATH", filepath.Join(t.TempDir(), "missing.yaml"))
 
+	migrationsPath := filepath.Join("..", "..", "..", "migrations")
+	if err := applyIntegrationMigrations(dsn, migrationsPath); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
 	ctx := context.Background()
 	if err := cli.RunAdmin(ctx, []string{"create-key", "--admin", "--name", "cli-admin"}); err != nil {
 		t.Fatalf("create-key cli: %v", err)

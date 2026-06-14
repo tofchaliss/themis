@@ -29,6 +29,16 @@ func Mount(r chi.Router, cfg MountConfig) {
 		r.Use(apimiddleware.MaxBytes(cfg.MaxUploadSize))
 		r.Use(cfg.APIKeyAuth.Middleware)
 		gen.HandlerFromMux(wrapped, r)
+		r.Post("/products/{id}/microservices", cfg.Handler.CreateMicroservice)
+		r.Post("/microservices/{id}/deployments", cfg.Handler.CreateDeployment)
+		r.Post("/customers", cfg.Handler.CreateCustomer)
+		r.Get("/products/{id}/blast-radius", cfg.Handler.GetProductBlastRadius)
+		r.Get("/products/{id}/versions/{v}/vex", cfg.Handler.GetProductVersionVEX)
+		r.Get("/products/{id}/versions/{v}/vex-coverage", cfg.Handler.GetProductVersionVEXCoverage)
+		r.Get("/status", cfg.Handler.GetStatus)
+		r.Get("/sboms", cfg.Handler.ListSBOMs)
+		r.Get("/products/{id}/sboms", cfg.Handler.ListProductSBOMs)
+		r.Delete("/sboms/{id}", cfg.Handler.DeleteSBOM)
 	})
 }
 

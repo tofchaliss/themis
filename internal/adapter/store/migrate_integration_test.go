@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,8 +22,11 @@ func TestMigrationsUpDownAndIdempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping embedded postgres test in short mode")
 	}
+	if os.Getenv("THEMIS_TEST_DATABASE_DSN") != "" {
+		t.Skip("migration up/down test requires an isolated postgres instance")
+	}
 
-	dsn := integrationDatabaseDSN(t, 15433)
+	dsn := startEmbeddedPostgres(t, 15499)
 	migrationsPath := filepath.Join("..", "..", "..", "migrations")
 
 	files, err := store.ListMigrationFiles(migrationsPath)

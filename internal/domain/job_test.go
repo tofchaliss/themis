@@ -28,6 +28,8 @@ func TestJobTypes(t *testing.T) {
 		domain.JobTypeCorrelateVulns,
 		domain.JobTypeReenrichVEX,
 		domain.JobTypeNotify,
+		domain.JobTypeSyncVEXFeed,
+		domain.JobTypeApplyVEXSBOM,
 	}
 	for _, jobType := range types {
 		if jobType == "" {

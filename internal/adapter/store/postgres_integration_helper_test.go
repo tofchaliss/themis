@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,12 +14,18 @@ import (
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/themis-project/themis/internal/adapter/store"
 )
 
 var (
-	sharedPostgresDSN  string
-	sharedPostgresStop func() error
+	sharedPostgresDSN    string
+	sharedPostgresStop   func() error
+	sharedPostgresFailed bool
 )
 
 func isTestListMode() bool {
@@ -58,12 +65,26 @@ func TestMain(m *testing.M) {
 		})
 
 	dbInstance := embeddedpostgres.NewDatabase(cfg)
-	if err := dbInstance.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "shared postgres unavailable, falling back to per-test instances: %v\n", err)
+	startErr := make(chan error, 1)
+	go func() { startErr <- dbInstance.Start() }()
+	select {
+	case err := <-startErr:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shared postgres unavailable, skipping integration DB tests: %v\n", err)
+			sharedPostgresFailed = true
+			os.Exit(m.Run())
+		}
+	case <-time.After(30 * time.Second):
+		fmt.Fprintf(os.Stderr, "shared postgres start timed out, skipping integration DB tests\n")
+		sharedPostgresFailed = true
 		os.Exit(m.Run())
 	}
 	sharedPostgresDSN = "postgres://themis:themis@localhost:15432/themis?sslmode=disable"
 	sharedPostgresStop = dbInstance.Stop
+	migrationsPath := filepath.Join("..", "..", "..", "migrations")
+	if err := runIntegrationMigrationsUp(sharedPostgresDSN, migrationsPath); err != nil {
+		panic(fmt.Errorf("apply shared integration migrations: %w", err))
+	}
 
 	code := m.Run()
 	_ = dbInstance.Stop()
@@ -75,6 +96,9 @@ func integrationDatabaseDSN(t *testing.T, port uint32) string {
 	t.Helper()
 	if dsn := os.Getenv("THEMIS_TEST_DATABASE_DSN"); dsn != "" {
 		return dsn
+	}
+	if sharedPostgresFailed {
+		t.Skip("embedded postgres unavailable (set THEMIS_TEST_DATABASE_DSN for external Postgres)")
 	}
 	if sharedPostgresDSN != "" {
 		return sharedPostgresDSN
@@ -134,4 +158,29 @@ func startEmbeddedPostgres(t *testing.T, port uint32) string {
 	}
 	t.Skipf("embedded postgres unavailable (set THEMIS_TEST_DATABASE_DSN for external Postgres): %v", lastErr)
 	return ""
+}
+
+func runIntegrationMigrationsUp(dsn, migrationsPath string) error {
+	m, err := migrate.New("file://"+migrationsPath, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = m.Close()
+	}()
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return err
+	}
+	version, dirty, err := m.Version()
+	if err != nil {
+		return err
+	}
+	return store.CompareSchemaVersion(version, dirty, store.BinarySchemaVersion)
+}
+
+func applyIntegrationMigrations(dsn, migrationsPath string) error {
+	if dsn == sharedPostgresDSN && sharedPostgresDSN != "" {
+		return nil
+	}
+	return runIntegrationMigrationsUp(dsn, migrationsPath)
 }

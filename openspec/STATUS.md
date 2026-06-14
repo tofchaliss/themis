@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-10._
+Last updated: 2026-06-14._
 
 ---
 
@@ -10,8 +10,8 @@ Last updated: 2026-06-10._
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2a | Planned | — | not started | Group 16 complete + v0.1.0 tagged |
-| themis-phase-2b | Planned | — | not started | themis-phase-2a complete |
+| themis-phase-2a | Complete | 2026-06-10 | 140/140 tasks (merge/tag pending) | — |
+| themis-phase-2b | Planned | — | not started | themis-phase-2a merge |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
@@ -45,7 +45,7 @@ Last updated: 2026-06-10._
 | Phase | Change | Theme | State |
 | --- | --- | --- | --- |
 | Phase 1 | themis-phase-1 | Core intelligence platform — Go REST API + PostgreSQL | Complete (archived 2026-06-09) |
-| Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Planned |
+| Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Complete (140/140; v0.2.0 tag pending) |
 | Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned |
 | Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned |
 | Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |

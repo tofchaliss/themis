@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/themis-project/themis/internal/domain"
 )
 
@@ -42,7 +44,7 @@ func (r *PostgresWatchRepository) ListWatchCatalog(ctx context.Context) ([]domai
 		       cv.sbom_document_id::text
 		FROM component_versions cv
 		JOIN components c ON c.id = cv.component_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
+		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
 		JOIN images i ON i.id = s.image_id
 		ORDER BY c.purl ASC
 	`)
@@ -80,6 +82,9 @@ func (r *PostgresWatchRepository) GetLastSuccessTimestamp(ctx context.Context) (
 		SELECT value FROM system_state WHERE key = $1
 	`, cveWatchLastSuccessKey).Scan(&ts)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, nil
+		}
 		return time.Time{}, fmt.Errorf("get last success timestamp: %w", err)
 	}
 	return ts.UTC(), nil

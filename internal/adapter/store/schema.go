@@ -27,6 +27,13 @@ var expectedTables = []string{
 	"ingestion_jobs",
 	"triage_history",
 	"system_state",
+	"microservices",
+	"customers",
+	"deployments",
+	"asset_graph_nodes",
+	"asset_graph_edges",
+	"exploit_records",
+	"epss_kev_signals",
 }
 
 var expectedIndexes = []string{
@@ -37,6 +44,9 @@ var expectedIndexes = []string{
 	"idx_vulnerabilities_cve_id",
 	"sbom_documents_image_digest_checksum_sha256_key",
 	"vex_documents_sbom_checksum_checksum_sha256_key",
+	"idx_epss_kev_signals_kev_listed",
+	"idx_asset_graph_edges_from_type",
+	"idx_sbom_documents_active",
 }
 
 // ExpectedTables returns the Layer 1–3 and operational tables created by migrations.

@@ -23,6 +23,12 @@ type Config struct {
 	Teams    TeamsConfig    `yaml:"teams"`
 	Trust    TrustConfig    `yaml:"trust"`
 	Webhook  WebhookConfig  `yaml:"webhook"`
+	EPSSKev  EPSSKevConfig  `yaml:"epsskev"`
+	ExploitDB ExploitDBConfig `yaml:"exploitdb"`
+	VEXFeed  VEXFeedConfig  `yaml:"vexfeed"`
+	Intelligence IntelligenceConfig `yaml:"intelligence"`
+	Log      LogConfig      `yaml:"log"`
+	GitHub   GitHubConfig   `yaml:"github"`
 }
 
 // ServerConfig controls the HTTP server.
@@ -90,6 +96,43 @@ type WebhookConfig struct {
 	Secret string `yaml:"secret"`
 }
 
+// EPSSKevConfig controls EPSS and KEV feed sync.
+type EPSSKevConfig struct {
+	EPSSURL      string        `yaml:"epss_url"`
+	KEVURL       string        `yaml:"kev_url"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+}
+
+// ExploitDBConfig controls ExploitDB CSV sync.
+type ExploitDBConfig struct {
+	CSVURL       string        `yaml:"csv_url"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+}
+
+// VEXFeedConfig controls vendor VEX feed sync.
+type VEXFeedConfig struct {
+	RHELURL      string        `yaml:"rhel_url"`
+	AlpineOSVURL string        `yaml:"alpine_osv_url"`
+	RockyOSVURL  string        `yaml:"rocky_osv_url"`
+	WolfiOSVURL  string        `yaml:"wolfi_osv_url"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+}
+
+// IntelligenceConfig controls blast-radius and enrichment tuning.
+type IntelligenceConfig struct {
+	BlastRadiusCap int `yaml:"blast_radius_cap"`
+}
+
+// LogConfig controls structured logging behaviour.
+type LogConfig struct {
+	Level string `yaml:"level"`
+}
+
+// GitHubConfig holds GitHub API credentials (GHSA adapter in Phase 2b).
+type GitHubConfig struct {
+	Token string `yaml:"token"`
+}
+
 // Default returns a Config populated with Phase 1 defaults.
 func Default() Config {
 	return Config{
@@ -125,6 +168,28 @@ func Default() Config {
 		},
 		Trust: TrustConfig{
 			DefaultPolicy: TrustPolicyStandard,
+		},
+		EPSSKev: EPSSKevConfig{
+			EPSSURL:      "https://epss.cyentia.com/epss_scores-current.csv.gz",
+			KEVURL:       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+			PollInterval: 24 * time.Hour,
+		},
+		ExploitDB: ExploitDBConfig{
+			CSVURL:       "https://raw.githubusercontent.com/offensive-security/exploitdb/master/files_exploits.csv",
+			PollInterval: 24 * time.Hour,
+		},
+		VEXFeed: VEXFeedConfig{
+			RHELURL:      "https://access.redhat.com/security/data/csaf/v2/advisories/",
+			AlpineOSVURL: "https://gitlab.alpinelinux.org/alpine/infra/osv-db/-/raw/main/v1/",
+			RockyOSVURL:  "https://apollo.build.resf.org/vulns/rocky-linux-osv.json",
+			WolfiOSVURL:  "https://packages.wolfi.dev/os/security.json",
+			PollInterval: 24 * time.Hour,
+		},
+		Intelligence: IntelligenceConfig{
+			BlastRadiusCap: 10,
+		},
+		Log: LogConfig{
+			Level: "info",
 		},
 	}
 }

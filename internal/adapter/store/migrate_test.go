@@ -10,8 +10,8 @@ import (
 )
 
 func TestBinarySchemaVersion(t *testing.T) {
-	if store.BinarySchemaVersion != 13 {
-		t.Fatalf("BinarySchemaVersion = %d, want 13", store.BinarySchemaVersion)
+	if store.BinarySchemaVersion != 19 {
+		t.Fatalf("BinarySchemaVersion = %d, want 19", store.BinarySchemaVersion)
 	}
 }
 
@@ -89,6 +89,18 @@ func TestValidateMigrationSet(t *testing.T) {
 		"000012_system_state.down.sql",
 		"000013_vulnerability_package_index.up.sql",
 		"000013_vulnerability_package_index.down.sql",
+		"000014_phase2a_asset_graph.up.sql",
+		"000014_phase2a_asset_graph.down.sql",
+		"000015_epss_kev_signals.up.sql",
+		"000015_epss_kev_signals.down.sql",
+		"000016_risk_context_phase2a.up.sql",
+		"000016_risk_context_phase2a.down.sql",
+		"000017_phase2a_indexes.up.sql",
+		"000017_phase2a_indexes.down.sql",
+		"000018_sbom_soft_delete.up.sql",
+		"000018_sbom_soft_delete.down.sql",
+		"000019_vendor_vex_feed.up.sql",
+		"000019_vendor_vex_feed.down.sql",
 	}
 
 	if err := store.ValidateMigrationSet(valid); err != nil {
@@ -164,23 +176,23 @@ func TestCompareSchemaVersion(t *testing.T) {
 
 func TestExpectedTablesAndIndexes(t *testing.T) {
 	tables := store.ExpectedTables()
-	if len(tables) != 24 {
-		t.Fatalf("ExpectedTables() len = %d, want 24", len(tables))
+	if len(tables) != 31 {
+		t.Fatalf("ExpectedTables() len = %d, want 31", len(tables))
 	}
 
 	missing := store.MissingTables([]string{"products", "projects"})
-	if len(missing) != 22 {
-		t.Fatalf("MissingTables() len = %d, want 22", len(missing))
+	if len(missing) != 29 {
+		t.Fatalf("MissingTables() len = %d, want 29", len(missing))
 	}
 
 	indexes := store.ExpectedIndexes()
-	if len(indexes) != 7 {
-		t.Fatalf("ExpectedIndexes() len = %d, want 7", len(indexes))
+	if len(indexes) != 10 {
+		t.Fatalf("ExpectedIndexes() len = %d, want 10", len(indexes))
 	}
 
 	missingIndexes := store.MissingIndexes([]string{indexes[0]})
-	if len(missingIndexes) != 6 {
-		t.Fatalf("MissingIndexes() len = %d, want 6", len(missingIndexes))
+	if len(missingIndexes) != 9 {
+		t.Fatalf("MissingIndexes() len = %d, want 9", len(missingIndexes))
 	}
 }
 

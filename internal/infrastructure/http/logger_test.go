@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestNewLogger(t *testing.T) {
@@ -14,6 +15,33 @@ func TestNewLogger(t *testing.T) {
 	}
 	if logger == nil {
 		t.Fatal("expected logger")
+	}
+}
+
+func TestNewLoggerWithLevel(t *testing.T) {
+	logger, err := NewLoggerWithLevel("test", "debug")
+	if err != nil {
+		t.Fatalf("NewLoggerWithLevel() error = %v", err)
+	}
+	if !logger.Core().Enabled(zap.DebugLevel) {
+		t.Fatal("expected debug level enabled")
+	}
+	for _, tc := range []struct {
+		level string
+		check zapcore.Level
+	}{
+		{"warn", zap.WarnLevel},
+		{"error", zap.ErrorLevel},
+		{"info", zap.InfoLevel},
+		{"unknown", zap.InfoLevel},
+	} {
+		logger, err := NewLoggerWithLevel("test", tc.level)
+		if err != nil {
+			t.Fatalf("level %q: %v", tc.level, err)
+		}
+		if !logger.Core().Enabled(tc.check) {
+			t.Fatalf("level %q: expected %v enabled", tc.level, tc.check)
+		}
 	}
 }
 

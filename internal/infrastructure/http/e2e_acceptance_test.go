@@ -211,6 +211,28 @@ func effectiveState(v scanVuln) string {
 	return *v.EffectiveState
 }
 
+func vexDocument(cveID, purl, status, justification string) []byte {
+	doc := map[string]any{
+		"@context": "https://openvex.dev/ns",
+		"statements": []map[string]any{{
+			"vulnerability": map[string]string{"name": cveID},
+			"products":      []map[string]string{{"@id": purl}},
+			"status":        status,
+			"justification": justification,
+		}},
+	}
+	raw, _ := json.Marshal(doc)
+	return raw
+}
+
+func vulnRefs(v scanVuln) (cveID, purl string) {
+	purl = "pkg:npm/lodash@4.17.21"
+	if v.ComponentPurl != nil && *v.ComponentPurl != "" {
+		purl = *v.ComponentPurl
+	}
+	return v.CveID, purl
+}
+
 // Task 15.1: SBOM upload → COMPLETED → vulnerabilities with effective_state=detected.
 func TestE2E_SBOMPipelineDetected(t *testing.T) {
 	env := newE2EEnv(t)
@@ -262,12 +284,17 @@ func TestE2E_VEXSuppressionPreservesFinding(t *testing.T) {
 	}
 	findingID := vulns[0].ID
 	var rawSeverity string
-	if err := env.pool.QueryRow(env.ctx, `SELECT severity FROM component_vulnerabilities WHERE id = $1`, findingID).Scan(&rawSeverity); err != nil {
+	if err := env.pool.QueryRow(env.ctx, `
+		SELECT v.severity FROM component_vulnerabilities cv
+		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+		WHERE cv.id = $1
+	`, findingID).Scan(&rawSeverity); err != nil {
 		t.Fatal(err)
 	}
 
 	checksum := env.sbomChecksum(t, scanID)
-	vexDoc := []byte(`{"@context":"https://openvex.dev/ns","statements":[{"vulnerability":{"name":"CVE-2021-23337"},"products":[{"@id":"pkg:npm/lodash@4.17.21"}],"status":"not_affected","justification":"component_not_present"}]}`)
+	cveID, purl := vulnRefs(vulns[0])
+	vexDoc := vexDocument(cveID, purl, "not_affected", "component_not_present")
 	env.uploadVEX(t, checksum, vexDoc)
 
 	after := env.scanVulnerabilities(t, scanID)
@@ -278,7 +305,11 @@ func TestE2E_VEXSuppressionPreservesFinding(t *testing.T) {
 		t.Fatalf("effective_state=%q want suppressed", effectiveState(after[0]))
 	}
 	var stillThere string
-	if err := env.pool.QueryRow(env.ctx, `SELECT severity FROM component_vulnerabilities WHERE id = $1`, findingID).Scan(&stillThere); err != nil {
+	if err := env.pool.QueryRow(env.ctx, `
+		SELECT v.severity FROM component_vulnerabilities cv
+		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+		WHERE cv.id = $1
+	`, findingID).Scan(&stillThere); err != nil {
 		t.Fatal(err)
 	}
 	if stillThere != rawSeverity {
@@ -339,8 +370,19 @@ func TestE2E_TriageGeneratedVEXAutoApply(t *testing.T) {
 	if len(secondVulns) == 0 {
 		t.Fatal("expected second scan vulnerabilities")
 	}
-	if effectiveState(secondVulns[0]) != domain.EffectiveStateSuppressed {
-		t.Fatalf("second scan effective_state=%q want suppressed", effectiveState(secondVulns[0]))
+	triagedCVE := vulns[0].CveID
+	var matchedSecond scanVuln
+	for _, v := range secondVulns {
+		if v.CveID == triagedCVE {
+			matchedSecond = v
+			break
+		}
+	}
+	if matchedSecond.ID == "" {
+		t.Fatalf("expected finding for triaged CVE %q on second scan", triagedCVE)
+	}
+	if effectiveState(matchedSecond) != domain.EffectiveStateSuppressed {
+		t.Fatalf("second scan effective_state=%q want suppressed", effectiveState(matchedSecond))
 	}
 }
 
@@ -393,14 +435,15 @@ func TestE2E_VEXRevokeResurface(t *testing.T) {
 	findingID := vulns[0].ID
 	checksum := env.sbomChecksum(t, scanID)
 
-	suppressDoc := []byte(`{"@context":"https://openvex.dev/ns","statements":[{"vulnerability":{"name":"CVE-2021-23337"},"products":[{"@id":"pkg:npm/lodash@4.17.21"}],"status":"not_affected","justification":"not present"}]}`)
+	cveID, purl := vulnRefs(vulns[0])
+	suppressDoc := vexDocument(cveID, purl, "not_affected", "not present")
 	env.uploadVEX(t, checksum, suppressDoc)
 	afterSuppress := env.scanVulnerabilities(t, scanID)
 	if effectiveState(afterSuppress[0]) != domain.EffectiveStateSuppressed {
 		t.Fatalf("after suppress effective_state=%q", effectiveState(afterSuppress[0]))
 	}
 
-	revokeDoc := []byte(`{"@context":"https://openvex.dev/ns","statements":[{"vulnerability":{"name":"CVE-2021-23337"},"products":[{"@id":"pkg:npm/lodash@4.17.21"}],"status":"under_investigation"}]}`)
+	revokeDoc := vexDocument(cveID, purl, "under_investigation", "")
 	env.uploadVEX(t, checksum, revokeDoc)
 	afterRevoke := env.scanVulnerabilities(t, scanID)
 	if effectiveState(afterRevoke[0]) != domain.EffectiveStateDetected {
