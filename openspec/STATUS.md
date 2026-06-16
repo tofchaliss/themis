@@ -51,3 +51,5 @@ Last updated: 2026-06-14._
 | Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |
 
 Architecture reference for Phases 2a–2c: `openspec/changes/themis-phase-2/`
+
+Cross-phase intelligence source tier classification: `openspec/intel-source-tiers.md`

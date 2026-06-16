@@ -359,3 +359,39 @@ Groups 27 and 28 can proceed in parallel once 18 is done.
 - [x] 30.7 Merge `themis-phase-2` branch to `main`
 - [x] 30.8 Git tag `v0.2.0`
 - [x] 30.9 Write Phase 2a release notes (new capabilities, new API endpoints, breaking change: risk score formula)
+
+## 31. Phase 2a — Feed reliability and signal-quality gaps (BLOCKING)
+
+Identified during intel-source-tiers cross-check (`openspec/intel-source-tiers.md`).
+All items below must complete before Phase 2b begins.
+
+### 31a. OSV / Alpine CVE normalization
+
+- [ ] 31.1 Normalize `ALPINE-CVE-*` IDs to `CVE-*` in `mapOSVVuln`
+  (`internal/adapter/osv/`) so EPSS/KEV joins succeed for Alpine findings.
+  Currently 592/592 Alpine findings show `with_epss: 0` because the ID form never
+  matches the `epss_kev_signals` table (row 2.1 gap).
+- [ ] 31.2 Fix `ParseOSVFeed.firstCVE()` Alpine ID extraction to strip the
+  `ALPINE-CVE-` prefix and return the canonical `CVE-*` form before the EPSS lookup.
+- [ ] 31.3 Fix OSV CVSS vector parsing: `fmt.Sscanf("%f")` fails on the full
+  `CVSS:3.1/AV:N/...` string — base score is always 0. Replace with a proper CVSS
+  vector parser or substring extraction so scores are populated (row 2.1 gap).
+
+### 31b. Vendor feed URL fixes
+
+- [ ] 31.4 Alpine OSV default URL returns HTTP 302 (GitLab login redirect); update
+  default URL to the public GCS zip endpoint and wire `ZipOSVFeedSource` if not
+  already present (row 2.4 gap).
+- [ ] 31.5 Rocky Linux OSV default URL returns HTTP 404; update default URL to the
+  public GCS zip endpoint (row 2.5 gap).
+- [ ] 31.6 Red Hat CSAF default URL returns an HTML directory listing; implement
+  `CSAFDirectoryFeedSource` to crawl the advisory index and fetch individual CSAF
+  files (row 2.3 gap). Vendor VEX row 3.2 is unblocked once this lands.
+
+### 31c. ExploitDB signal wiring
+
+- [ ] 31.7 Expose ExploitDB exploit records in the scan findings API response so
+  `exploit_public` signal is visible to consumers (row 2.7 gap — adapter exists,
+  API surface incomplete).
+- [ ] 31.8 Wire `themis_exploitdb_sync_total` Prometheus counter in the ExploitDB
+  scheduler — metric was listed in Group 30.2 but not yet emitted (Group 30 note).

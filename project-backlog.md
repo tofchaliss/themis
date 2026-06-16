@@ -30,6 +30,147 @@ tunable. Splitting also lets each sub-phase be tagged as a release (v0.2.0, v0.3
 
 ---
 
+## Intelligence Source Tiers — Reference
+
+**Canonical classification of all Themis intelligence sources by importance tier.**
+Reference document: `openspec/intel-source-tiers.md`.
+All feed adapters and schedulers must emit errors at the tier level defined there.
+
+| Tier | Name | Failure behaviour |
+| ---- | ---- | ----------------- |
+| 1 | Critical — Mandatory | `ERROR` + `signals_stale=true` + operator notification |
+| 2 | Strongly Recommended | `WARN` + `degraded_feeds[]` in status API |
+| 3 | AI Enrichment Gold | `INFO` + metric counter, no status API impact |
+| 4 | Future / Planned | `DEBUG` only — not yet implemented |
+
+See `openspec/intel-source-tiers.md` for the complete source list, Prometheus metric
+convention, status API response shape, and Go code conventions per tier.
+
+---
+
+## ⚠️ HIGHEST PRIORITY — Core Data Model Restructure (`themis-core-model`)
+
+**Decided: 2026-06-16. All decisions confirmed. Must complete before any other open item —
+Group 16, Group 30, Phase 2b planning, and all post-2a follow-ons gate behind this.**
+
+### Why now
+
+The current model conflates two distinct concerns inside `sbom_documents`:
+
+- **Composition** — what is in the artifact (stable; determined by the image digest)
+- **Vulnerability scan** — what was found at a point in time by a specific scanner
+  (temporal; evolves as CVE databases are updated)
+
+This conflation causes three concrete problems that compound with each phase built on top:
+
+1. **Silent triage loss on rescan.** `risk_context` keys off
+   `component_vulnerability_id`, which is tied to a specific scan document row. Every
+   rescan creates new `component_vulnerabilities` rows → new `risk_context` rows →
+   all previous `accepted_risk` / `false_positive` decisions are silently orphaned.
+2. **`is_latest` / `supersedes_id` anti-pattern.** The linked-list chain on
+   `sbom_documents` makes it impossible to cleanly answer "how many scans exist for
+   this artifact?" and is not used consistently across the codebase.
+3. **Phase 2b lock-in.** AI workers in Phase 2b will reference
+   `component_vulnerability_id → sbom_document_id`. After Phase 2b ships, fixing
+   `risk_context` means migrating all AI enrichment output tables too.
+
+### Confirmed decisions (no open questions)
+
+| # | Question | Decision |
+| - | -------- | -------- |
+| Q1 | Does `version` always require a `project` parent? | **Yes — mandatory.** A default project is auto-created on product registration. `version.project_id NOT NULL` always. No optional FK. |
+| Q2 | Is `artifact.image_digest` globally UNIQUE? | **Yes — globally.** Same digest = same physical content = same artifact. One artifact can only belong to one version. No join table needed. |
+
+### New entity hierarchy
+
+```text
+product
+  └── project  (product_id)               ← unchanged
+        └── version  (project_id)          ← was: version.product_id
+              └── artifact  (version_id,   ← merges current artifact + images tables
+                              image_digest TEXT UNIQUE)
+                    │
+                    ├── sbom         (artifact_id)            1 per artifact
+                    │     └── component_versions  (sbom_id)
+                    │     └── dependency_relationships (sbom_id)
+                    │
+                    └── scan_report  (artifact_id, scanner)   N per artifact
+                          └── component_vulnerabilities (scan_report_id)
+                                └── risk_context  ← PK moves to (artifact_id, purl, cve_id)
+```
+
+`sbom` = the bill of materials (what is installed — stable for a given digest; Layer 0
+immutable inventory). `scan_report` = one scanner's findings at one point in time
+(temporal; ordered by `scanned_at DESC`). "Latest scan" = `ORDER BY scanned_at DESC
+LIMIT 1` — no `is_latest` flag needed.
+
+### Tables replaced / merged
+
+| Old table | New table | Change |
+| --------- | --------- | ------ |
+| `product_versions` | `versions` | `project_id FK` replaces `product_id FK` |
+| `artifacts` + `images` | `artifacts` | Merged into one table; `image_digest` moves here; `images` table dropped |
+| `sbom_documents` | `sboms` + `scan_reports` | Split: composition → `sboms`; temporal scan → `scan_reports` |
+
+### FK column renames (same logic, different target table)
+
+| Column | Was | Now |
+| ------ | --- | --- |
+| `component_versions.sbom_document_id` | `sbom_documents` | `sboms` |
+| `dependency_relationships.sbom_document_id` | `sbom_documents` | `sboms` |
+| `component_vulnerabilities.sbom_document_id` | `sbom_documents` | `scan_reports` |
+| `vex_documents.sbom_document_id` | `sbom_documents` (nullable since mig 000019) | `artifacts` |
+
+### `risk_context` key change — the triage persistence fix
+
+```text
+Before: UNIQUE component_vulnerability_id   ← tied to one scan document row; lost on rescan
+After:  PRIMARY KEY (artifact_id, component_purl, cve_id)   ← identity-based; survives rescans
+```
+
+A triage decision means "for CVE-X in component pkg:apk/busybox@1.36 running in this
+artifact, we accept the risk." That identity does not change when the artifact is
+rescanned. The new PK makes this explicit.
+
+### Eliminated anti-patterns
+
+- `sbom_documents.is_latest` — **removed.** Latest scan = `ORDER BY scanned_at DESC LIMIT 1`.
+- `sbom_documents.supersedes_id` — **removed.** No more linked-list chain.
+
+### What does NOT change (entire Phase 2a intelligence layer preserved)
+
+All Phase 2a business logic — EPSS/KEV sync, ExploitDB, Layer 1 deterministic rules,
+Layer 2 blast-radius, VEX matching algorithms, VEX export — is unchanged. Only the FK
+traversal is updated (different column names pointing to new tables).
+
+Tables that survive without structural change: `vulnerabilities`, `epss_kev_signals`,
+`exploit_records`, `vex_assertions`, `triage_history`, `audit_log`, `api_keys`,
+`notification_rules`, `ingestion_jobs`, `system_state`, `microservices`, `deployments`,
+`customers`, `asset_graph_nodes`, `asset_graph_edges`, `intelligence_signals`,
+`runtime_exposures`, `remediation_actions`.
+
+### Implementation scope
+
+- Replace migrations 000001–000004 with new migrations for `versions`, `artifacts`,
+  `sboms`, `scan_reports`; adjust FK references in migrations 000005–000019 (additive
+  ALTER TABLE changes per affected table — no data mutations)
+- ~24 non-test `.go` files updated: domain types, store layer, use cases, adapters,
+  API handlers (FK column rename propagation only — no algorithm changes)
+- ~30 test files updated: SQL fixture references to `sbom_document_id`, `image_id`
+- `risk_context` store queries updated for new PK shape
+- Ingestion use case: one ingest call produces one `sboms` row + one `scan_reports` row
+  (split from current single `sbom_documents` insert)
+
+### Impact on Group 16 items
+
+- **16.4** (`POST /api/v1/products/{id}/images`) — replaces with `POST /api/v1/products/{id}/artifacts`
+  under the new merged table; same intent, updated path and payload.
+- **16.10** (`POST /api/v1/products/{id}/versions`) — `product_versions` becomes `versions`
+  with `project_id` FK; endpoint becomes `POST /api/v1/projects/{id}/versions`. The auto-create
+  default project on product registration satisfies the single-project case without SQL workarounds.
+
+---
+
 ## Phase 1 — Remaining hardening (Group 16)
 
 These are post-completion tasks that close gaps found after the main Phase 1 build.
@@ -155,7 +296,8 @@ are breaking changes that require the Phase 1 pipeline to be stable first.
 
 **How to fix vendor VEX feed fetch (Alpine / Rocky / RHEL):**
 
-Themis `URLFeedSource` does one `GET` and expects a single JSON/CSAF document. Default URLs are directories, login redirects, or dead links — not documents.
+Themis `URLFeedSource` does one `GET` and expects a single JSON/CSAF document. Default URLs are
+directories, login redirects, or dead links — not documents.
 
 | Feed | Broken default | Working source (verified) | Code / config fix |
 | ---- | -------------- | ------------------------- | ----------------- |
@@ -164,7 +306,8 @@ Themis `URLFeedSource` does one `GET` and expects a single JSON/CSAF document. D
 | **RHEL** | Directory URL → 301 + HTML index | `https://security.access.redhat.com/data/csaf/v2/advisories/` returns HTML listing of `*.json` files | Add `CSAFDirectoryFeedSource`: fetch index, parse advisory links, fetch each CSAF JSON, merge via existing `ParseCSAF`. Cannot fix with URL override alone. |
 | **Wolfi** | — | `https://packages.wolfi.dev/os/security.json` (200) | No change — already works. |
 
-**Operator workaround (until code ships):** none for Alpine/RHEL/Rocky — all require fetch-model changes. Wolfi-only sync does not cover `apk` SBOMs.
+**Operator workaround (until code ships):** none for Alpine/RHEL/Rocky — all require fetch-model
+changes. Wolfi-only sync does not cover `apk` SBOMs.
 
 **After feeds load — still required for Alpine SBOM end-to-end:**
 
@@ -199,7 +342,10 @@ is validated in production.
 | ---- | --------------------- | -------------------- |
 | Parse CVSS vector strings from OSV `severity[].score` | OSV (Alpine, npm, GHSA, etc.) returns `CVSS:3.1/AV:N/...` vectors, not numeric scores. `mapOSVVuln` in `adapter/osv/client.go` uses `fmt.Sscanf("%f")` and only accepts plain floats — real feed data leaves `vulnerabilities.cvss_score = 0` and `severity = unknown`. `GET /api/v1/status?top=N` then reports `highest_cvss_score: 0` in `top_components` even when `vulnerability_count` is correct (status reads raw catalog CVSS, not composite `risk_score`). Layer 1 rules and enrichment fallbacks also miss CVSS-derived severity until fixed. | `ComponentFetcher` + `mapOSVVuln`; `vulnerabilities.cvss_score` / `cvss_vector` columns; status query `MAX(v.cvss_score)` in `adapter/store/status.go`; unit test uses simplified numeric `"7.5"` score only |
 
-**Fix:** In `internal/adapter/osv/client.go`, detect vector-form scores (prefix `CVSS:`), compute or look up the base score (CVSS v3/v4 parser or NVD backfill), store numeric score and vector on upsert. Optionally accept `CVSS_V4` severity type. Re-upsert or migration backfill for existing catalog rows.
+**Fix:** In `internal/adapter/osv/client.go`, detect vector-form scores (prefix `CVSS:`), compute or
+look up the base score (CVSS v3/v4 parser or NVD backfill), store numeric score and vector on
+upsert. Optionally accept `CVSS_V4` severity type. Re-upsert or migration backfill for existing
+catalog rows.
 
 **Post-2a follow-on — OSV Alpine CVE ID normalization:**
 
@@ -207,7 +353,13 @@ is validated in production.
 | ---- | --------------------- | -------------------- |
 | Normalize OSV Alpine IDs (`ALPINE-CVE-YYYY-NNNN`) to canonical `CVE-YYYY-NNNN` | Alpine OSV returns vulnerability IDs with an `ALPINE-` prefix. `mapOSVVuln` stores them as-is in `vulnerabilities.cve_id`. EPSS, KEV, and ExploitDB feeds key on standard `CVE-*` IDs — `GetEPSSForCVE` / `IsKEVListed` / `HasPublicExploit` in `ReEnrichSignalsBatch` do exact-match lookup and miss every Alpine finding. Observed on real Alpine SBOM bring-up: 592/592 export IDs prefixed `ALPINE`, `with_epss: 0` and `with_kev: 0` in VEX export despite successful sync metrics (`themis_epsskev_sync_total{status="success"}`, `themis_reenrichjob_batches_total ≥ 1`). Vendor VEX and CVE watch correlation may also fail to join on the same CVE across sources. | `mapOSVVuln` in `adapter/osv/client.go`; `vulnerabilities.cve_id` (unique constraint); `ReEnrichSignalsBatch` + `CombinedSignalReader`; `epss_kev_signals.cve_id`; VEX export `x-themis-epss-score` / `x-themis-kev-listed` via `risk_context` |
 
-**Fix:** In `mapOSVVuln` (or a shared `NormalizeCVEID` helper in `domain/`), strip known OSV ecosystem prefixes (`ALPINE-`, and similar) when the remainder is a valid `CVE-*` ID; store canonical `cve_id` on upsert. Optionally retain the OSV-native ID in `description` or a future alias column. Add lookup fallback in signal readers (`GetEPSSForCVE`) for defence in depth. Backfill existing `ALPINE-CVE-*` rows via one-off migration or re-ingest. **Companion fix:** CVSS vector parsing (above) — both gaps must land for Alpine SBOMs to show non-zero risk and EPSS in VEX export.
+**Fix:** In `mapOSVVuln` (or a shared `NormalizeCVEID` helper in `domain/`), strip known OSV
+ecosystem prefixes (`ALPINE-`, and similar) when the remainder is a valid `CVE-*` ID; store
+canonical `cve_id` on upsert. Optionally retain the OSV-native ID in `description` or a future
+alias column. Add lookup fallback in signal readers (`GetEPSSForCVE`) for defence in depth.
+Backfill existing `ALPINE-CVE-*` rows via one-off migration or re-ingest. **Companion fix:** CVSS
+vector parsing (above) — both gaps must land for Alpine SBOMs to show non-zero risk and EPSS in
+VEX export.
 
 **Post-2a follow-on — Operator onboarding (product / image model):**
 
@@ -244,9 +396,12 @@ Integration tests (AC-16..24) use synthetic CVE IDs and stub feeds — they do n
 | G7 | Status CVSS | `top_components[].highest_cvss_score > 0` when findings exist | **Fail** — same CVSS gap |
 | G8 | Layer 1 visible | Scan or export shows non-`informational` `deterministic_level` where KEV/EPSS/CVSS warrant | **Fail** — blocked by G4/G5 |
 
-**Code fixes required to clear G2–G8 on Alpine:** vendor feed fetch (zip/crawl — see above), `ParseOSVFeed.firstCVE()`, `mapOSVVuln` CVE normalization, OSV CVSS vector parsing; optional Group 16.1 (package names) for higher vendor match rate.
+**Code fixes required to clear G2–G8 on Alpine:** vendor feed fetch (zip/crawl — see above),
+`ParseOSVFeed.firstCVE()`, `mapOSVVuln` CVE normalization, OSV CVSS vector parsing; optional
+Group 16.1 (package names) for higher vendor match rate.
 
-**Operator-only workarounds until code ships:** SQL for product version (G3); no workaround for G2/G4/G5/G6/G7/G8 on Alpine OSV findings.
+**Operator-only workarounds until code ships:** SQL for product version (G3); no workaround for
+G2/G4/G5/G6/G7/G8 on Alpine OSV findings.
 
 ---
 
@@ -521,7 +676,7 @@ They are captured here as unscheduled proposals.
 | Item | Original location | Notes |
 | ---- | ----------------- | ----- |
 | Dependency graph visualisation | proposal ADR §7 | Requires UI (Phase 3 minimum) |
-| SBOM diff (two versions of same image) | proposal ADR §8 | Data is available; API endpoint not planned |
+| Scan comparison (two `scan_reports` for same artifact) | proposal ADR §8 | Becomes `GET /api/v1/artifacts/{id}/scan-reports/{a}/diff?compare_to={b}` once `themis-core-model` lands; natural with the `scan_reports` table — no schema change required |
 | Policy-as-code (OPA integration) | proposal ADR §9 | Replaces or extends trust policies in Phase 3+ |
 | Notification webhook outbound (POST to 3rd party) | proposal feature | Currently SMTP + Teams only |
 | CSV/Excel vulnerability export | proposal feature | Low priority; VEX export (Phase 2) covers the main case |
