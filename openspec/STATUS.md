@@ -9,9 +9,8 @@ Last updated: 2026-06-17._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-v0-2-1 | Ready for release | 2026-06-17 | 36/37 tasks | Merge/tag v0.2.1 (7.7 manual) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Planned | — | not started | `themis-core-model` + v0.2.1 |
+| themis-phase-2b | Planned | — | not started | `themis-core-model` (v0.2.1 archived) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
@@ -21,8 +20,8 @@ Last updated: 2026-06-17._
   `is_latest` anti-pattern; adds `version.project_id` FK. Gates Group 16, Phase 2b, and all
   post-2a follow-ons. Full detail: `project-backlog.md` §Core Data Model Restructure.
 
-> Group 31 and the Group 16 hardening remainder are now scoped into the **`themis-v0-2-1`**
-> change (proposal/design/specs/tasks complete; ready to implement).
+> Group 31 and the Group 16 hardening remainder shipped in **`themis-v0-2-1`** (archived
+> 2026-06-17, 36/37 tasks; only the manual merge-to-`main` + tag `v0.2.1` step, 7.7, remains).
 
 - **Group 16 hardening remainder (targets v0.2.1)** — the original "gate before tagging `v0.1.0`"
   framing is retired: `v0.1.0` was tagged retroactively on the Phase 1 commit (2026-06-17,
@@ -64,6 +63,7 @@ Last updated: 2026-06-17._
 
 | Change | Archived | Delivered |
 | --- | --- | --- |
+| themis-v0-2-1 | 2026-06-17 | Alpine signal reliability: canonical CVE-ID normalization (`domain.NormalizeCVEID`), OSV CVSS vector parsing, Alpine package-name normalization, `ZipOSVFeedSource` + `CSAFDirectoryFeedSource` vendor feeds, `exploit_public`/enrichment on findings API, `themis_exploitdb_sync_total` metric, component-mismatch correlation logging, Group 31 + Group 16 remainder; 9 spec requirements synced. Merge/tag `v0.2.1` (7.7) still manual |
 | themis-phase-2a | 2026-06-17 | EPSS/KEV sync, ExploitDB CSV, Layer 1 rules, asset graph, blast-radius, composite risk score V2, upstream vendor VEX (RHEL/Alpine/Rocky/Wolfi), VEX export, system status API, SBOM management, error UX, AC-16..AC-24, FR1–FR8; v0.2.0 merged to main (PR #16) |
 | themis-phase-1 | 2026-06-09 | artifact-trust, sbom-parser, sbom-ingestion, sbom-store, intelligence-enrichment, cve-triage, cve-watch, notification-service; v0.1.0 (retroactive tag on Phase 1 commit, 2026-06-17) |
 
