@@ -309,7 +309,7 @@ are breaking changes that require the Phase 1 pipeline to be stable first.
 
 | Item | Why deferred | Phase 1 / 2a hooks |
 | ---- | ------------ | -------------------- |
-| Per-feed enable/disable (`vexfeed.rhel_enabled`, etc.) | Phase 2a wires all four feeds; operators may want to disable Wolfi/Rocky in non-RHEL shops | `VEXFeedConfig` URLs already per-feed; add bool flags in config + skip in `api_wiring.go` |
+| Per-feed enable/disable (`vexfeed.rhel_enabled`, etc.) — **now folded into `themis-feed-registry`** (see Candidate change below) | Phase 2a wires all four feeds; operators may want to disable Wolfi/Rocky in non-RHEL shops | `VEXFeedConfig` URLs already per-feed; add bool flags in config + skip in `api_wiring.go` |
 | Red Hat CSAF directory crawl | Default `rhel_url` points at the CSAF advisories *directory*; production may need a manifest/bundle URL or crawler over individual `.json` files | `URLFeedSource` + `ParseCSAF` accept single-document bodies today |
 | Alpine vendor OSV feed URL returns 302 | Default `alpine_osv_url` (`gitlab.alpinelinux.org/.../v1/`) redirects to GitLab sign-in (HTTP 302), not public JSON. Observed: `themis_vexfeed_sync_total{feed="alpine",status="error"}` while Wolfi succeeds. `vex-coverage` stays `{covered:0, not_covered:N}` for Alpine SBOMs. | `URLFeedSource` in `api_wiring.go`; `themis.yaml.example` `alpine_osv_url` |
 | Rocky vendor OSV feed URL 404 | Default `rocky_osv_url` (`apollo.build.resf.org/vulns/rocky-linux-osv.json`) returns HTTP 404. Working sources exist elsewhere (see fix below). | `rocky_osv_url` default in `config.go` / `themis.yaml.example` |
@@ -493,6 +493,83 @@ VEX-export-without-SQL fix — these land with `themis-core-model` in v0.3.0.
 **Why a separate patch:** ships the Alpine/feed correctness fixes to operators sooner,
 without waiting for the breaking `themis-core-model` restructure and Phase 2b. `v0.2.1`
 can be cut as soon as Group 31 + the Group 16 hardening remainder are green.
+
+---
+
+### Candidate change — Feed observability (`themis-feed-observability`) — Proposed
+
+**Type:** additive new capability (schema change — new table). Targets v0.3.0-era.
+**Problem:** feed failures are easily missed. Today the only user-visible feed health is
+`signals_stale` for EPSS/KEV, and it is **pull-only** (`GET /api/v1/status`). Vendor VEX and
+ExploitDB sync failures persist nothing — they produce a single `WARN`/`ERROR` log line per
+8–24h cycle plus a Prometheus counter that only helps if the operator scrapes it and wrote an
+alert rule. The `degraded_feeds[]` design in `openspec/intel-source-tiers.md` was specced but
+never implemented.
+
+**Current state (verified in code):**
+
+| Feed (tier) | Persisted status | In `/status` API | Metric | Notification |
+| ----------- | ---------------- | ---------------- | ------ | ------------ |
+| EPSS / KEV (T1) | `epss_kev_signals.stale` + 25 h TTL on `fetched_at` | `signals_stale` | `themis_epsskev_sync_total`, `themis_epsskev_stale` | none |
+| Vendor VEX RHEL/Alpine/Rocky/Wolfi (T2) | none | none | `themis_vexfeed_sync_total` | none |
+| ExploitDB (T2) | none | none | none (wired in v0.2.1, Group 31.8) | none |
+
+**Proposed scope:**
+
+- **Persist per-feed health** — new `feed_health` table (`feed`, `tier`, `last_success_at`,
+  `consecutive_failures`, `last_error`, `last_attempt_at`). Each scheduler upserts on every
+  cycle. Replaces the derived-only EPSS/KEV staleness with real, queryable history.
+- **Surface in status API** — implement `degraded_feeds[]` on `GET /api/v1/status` per the
+  tier doc, so one call shows every feed's health (not just EPSS/KEV).
+- **Push, don't just store** — reuse the existing `NotificationSender` (SMTP/Teams) to send a
+  `FEED_STALE` / `FEED_DEGRADED` alert when a Tier-1 feed goes stale or any feed fails N
+  consecutive cycles. Turns a buried 24 h log into an actual notification (the "won't miss
+  it" fix). Threshold + routing configurable.
+- Optional: degraded signal on `/readyz` when a Tier-1 feed is stale.
+
+**Hooks:** `NotificationSender` already exists (SMTP + Teams); per-tier error behavior is
+defined in `openspec/intel-source-tiers.md`; metric names already registered.
+**Why deferred from v0.2.1:** v0.2.1 is a non-breaking patch; the `feed_health` table is a
+schema change and the notification path is new behaviour.
+
+---
+
+### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — Proposed
+
+**Type:** additive capability + config-shape change. Targets v0.3.0-era.
+**Problem:** the feed set is fixed. `VEXFeedConfig` is hardcoded struct fields
+(`RHELURL`, `AlpineOSVURL`, `RockyOSVURL`, `WolfiOSVURL`). Operators can **override** each
+URL and poll interval (`themis.yaml` / env) but **cannot add, remove, or disable** a feed.
+
+**Proposed scope:**
+
+- Refactor vendor feed config from fixed fields to a **feed registry**: built-in defaults
+  plus a user **delta list** in `themis.yaml`, merged by `name` (add custom feed, override a
+  default, or disable one). Example:
+
+  ```yaml
+  vexfeed:
+    feeds:
+      - name: my-distro-osv
+        type: zip-osv          # url | zip-osv | csaf-dir
+        url: https://.../all.zip
+        ecosystem: mydistro
+        tier: 2
+        enabled: true
+        poll_interval: 12h
+      - name: rocky-osv         # override/disable a default by name
+        enabled: false
+  ```
+
+- Each entry carries its **tier**, so the error/observability behaviour from
+  `themis-feed-observability` applies automatically to custom feeds.
+- Subsumes the existing "Per-feed enable/disable" follow-on (see Vendor VEX feed operations
+  table above) — that item folds into this registry model.
+- Builds on the `ZipOSVFeedSource` / `CSAFDirectoryFeedSource` source abstraction introduced
+  in v0.2.1 (the `type` field selects the fetch model).
+
+**Why deferred from v0.2.1:** changes the config contract (`vexfeed` shape) and is broader
+than the bug-fix scope; sequence it after v0.2.1 lands the source abstractions it builds on.
 
 ---
 
