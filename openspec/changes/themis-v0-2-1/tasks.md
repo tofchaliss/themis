@@ -95,4 +95,4 @@ E2E gate) → 7 (quality gates + docs). Each group ends with the standard gates
 - [x] 7.5 Update README (feed source config, backfill step, new findings-API enrichment
   fields) and `docs/` as needed
 - [x] 7.6 `make verify-build` (`make clean && make all`) passes on the full repo
-- [x] 7.7 Write `v0.2.1` release notes (`docs/release-notes-v0.2.1.md`); merge to `main`; tag `v0.2.1` *(merge/tag manual)*
+- [ ] 7.7 Write `v0.2.1` release notes (`docs/release-notes-v0.2.1.md`); merge to `main`; tag `v0.2.1` *(release notes done; merge/tag manual pending)*
