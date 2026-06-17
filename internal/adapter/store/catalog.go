@@ -353,7 +353,9 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	}
 	query := fmt.Sprintf(`
 		SELECT cv.id, v.cve_id, COALESCE(v.severity, 'unknown'),
-		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), i.product_id::text
+		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), i.product_id::text,
+		       rc.exploit_public, rc.risk_score, rc.epss_score, rc.kev_listed,
+		       rc.deterministic_level, rc.blast_radius_score, rc.upstream_vex_coverage
 		FROM component_vulnerabilities cv
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
 		LEFT JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
@@ -374,8 +376,28 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	var items []domain.ScanVulnerability
 	for rows.Next() {
 		var item domain.ScanVulnerability
-		if err := rows.Scan(&item.ID, &item.CVEID, &item.Severity, &item.EffectiveState, &item.ComponentPURL, &item.ProductID); err != nil {
+		var exploitPublic *bool
+		var riskScore, epssScore, blastRadius *float64
+		var kevListed *bool
+		var deterministicLevel, upstreamVEX *string
+		if err := rows.Scan(
+			&item.ID, &item.CVEID, &item.Severity, &item.EffectiveState, &item.ComponentPURL, &item.ProductID,
+			&exploitPublic, &riskScore, &epssScore, &kevListed,
+			&deterministicLevel, &blastRadius, &upstreamVEX,
+		); err != nil {
 			return nil, domain.PageResult{}, err
+		}
+		if exploitPublic != nil || riskScore != nil || epssScore != nil || kevListed != nil ||
+			deterministicLevel != nil || blastRadius != nil || upstreamVEX != nil {
+			item.Enrichment = &domain.ScanVulnerabilityEnrichment{
+				ExploitPublic:       exploitPublic,
+				RiskScore:           riskScore,
+				EPSSScore:           epssScore,
+				KEVListed:           kevListed,
+				DeterministicLevel:  deterministicLevel,
+				BlastRadiusScore:    blastRadius,
+				UpstreamVEXCoverage: upstreamVEX,
+			}
 		}
 		items = append(items, item)
 	}

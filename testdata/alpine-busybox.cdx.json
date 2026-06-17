@@ -1,0 +1,19 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "busybox",
+      "version": "1.36.1-r19",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r19"
+    },
+    {
+      "type": "library",
+      "name": "ssl_client",
+      "version": "1.36.1-r19",
+      "purl": "pkg:apk/alpine/ssl_client@1.36.1-r19"
+    }
+  ]
+}

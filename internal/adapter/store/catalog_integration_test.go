@@ -81,7 +81,7 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 	digest := "sha256:catalog-integration"
 	imageID := uuid.NewString()
 	artifactID := uuid.NewString()
-	seedBaseData(t, ctx, pool, product.ID, artifactID, imageID, digest)
+	seedImageForProduct(t, ctx, pool, product.ID, artifactID, imageID, digest)
 	if _, err := pool.Exec(ctx, `UPDATE images SET product_id = $1 WHERE id = $2`, product.ID, imageID); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 		t.Fatalf("GetProjectProductID() = %q err=%v", pid, err)
 	}
 
-	comps, _, err := components.ListComponents(ctx, "lodash", product.ID, domain.PageRequest{Limit: 10})
+	comps, _, err := components.ListComponents(ctx, "pkg:npm/lodash@4.17.21", product.ID, domain.PageRequest{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListComponents() error = %v", err)
 	}

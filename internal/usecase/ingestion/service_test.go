@@ -110,6 +110,18 @@ func TestPipelineStoreRetryableFailure(t *testing.T) {
 	}
 }
 
+func TestPipelineFetcherEmitsCorrelationSummary(t *testing.T) {
+	fetcher := &summaryFetcher{}
+	pipeline := newTestPipeline(&memoryJobs{})
+	pipeline.Fetcher = fetcher
+	if _, err := pipeline.IngestSBOM(context.Background(), baseSBOMInput()); err != nil {
+		t.Fatal(err)
+	}
+	if !fetcher.emitted {
+		t.Fatal("expected EmitCorrelationSummary to be called")
+	}
+}
+
 func TestPipelineCorrelationNoMatches(t *testing.T) {
 	pipeline := newTestPipeline(&memoryJobs{})
 	pipeline.Catalog = memoryCatalog{matches: nil}
@@ -521,6 +533,79 @@ func TestPipelineAlreadyProcessed(t *testing.T) {
 	}
 }
 
+func TestPipelineBackfillIdempotencyKey(t *testing.T) {
+	jobs := &memoryJobs{
+		records: map[string]domain.IngestionRecord{
+			"ing-1": {ID: "ing-1", Status: domain.IngestionStatusReceived},
+		},
+	}
+	pipeline := newTestPipeline(jobs)
+	input := baseSBOMInput()
+	input.IngestionID = "ing-1"
+	input.IdempotencyKey = "new-key"
+	result, err := pipeline.IngestSBOM(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.IngestionStatusNotified {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPipelineAlreadyProcessedRejected(t *testing.T) {
+	jobs := &memoryJobs{
+		records: map[string]domain.IngestionRecord{
+			"ing-rejected": {ID: "ing-rejected", Status: domain.IngestionStatusRejected, ScanID: "scan-1"},
+		},
+	}
+	pipeline := newTestPipeline(jobs)
+	input := baseSBOMInput()
+	input.IngestionID = "ing-rejected"
+	result, err := pipeline.IngestSBOM(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Duplicate || result.Status != domain.IngestionStatusRejected {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPipelineAlreadyProcessedNotified(t *testing.T) {
+	jobs := &memoryJobs{
+		records: map[string]domain.IngestionRecord{
+			"ing-notified": {ID: "ing-notified", Status: domain.IngestionStatusNotified, ScanID: "scan-1"},
+		},
+	}
+	pipeline := newTestPipeline(jobs)
+	input := baseSBOMInput()
+	input.IngestionID = "ing-notified"
+	result, err := pipeline.IngestSBOM(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Duplicate || result.Status != domain.IngestionStatusNotified {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPipelineBackfillIdempotencyKeyUpdateError(t *testing.T) {
+	jobs := &memoryJobs{
+		records: map[string]domain.IngestionRecord{
+			"ing-1": {ID: "ing-1", Status: domain.IngestionStatusReceived},
+		},
+		updateErr:    errors.New("update failed"),
+		updateFailOn: 1,
+	}
+	pipeline := newTestPipeline(jobs)
+	input := baseSBOMInput()
+	input.IngestionID = "ing-1"
+	input.IdempotencyKey = "new-key"
+	_, err := pipeline.IngestSBOM(context.Background(), input)
+	if err == nil {
+		t.Fatal("expected update error")
+	}
+}
+
 func TestPipelineNilEnrichment(t *testing.T) {
 	pipeline := newTestPipeline(&memoryJobs{})
 	pipeline.Enrichment = nil
@@ -773,6 +858,15 @@ func (c memoryCatalog) Upsert(_ context.Context, record domain.VulnerabilityReco
 }
 
 type staticFetcher struct{}
+
+type summaryFetcher struct {
+	staticFetcher
+	emitted bool
+}
+
+func (s *summaryFetcher) EmitCorrelationSummary() {
+	s.emitted = true
+}
 
 func (staticFetcher) FetchForComponent(_ context.Context, component domain.CanonicalComponent) ([]domain.VulnerabilityRecord, error) {
 	return []domain.VulnerabilityRecord{

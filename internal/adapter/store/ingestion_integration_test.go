@@ -321,6 +321,19 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	}
 }
 
+func seedImageForProduct(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID, artifactID, imageID, digest string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image')`, artifactID); err != nil {
+		t.Fatalf("insert artifact: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO images (id, artifact_id, product_id, repository, digest)
+		VALUES ($1, $2, $3, 'themis/app', $4)
+	`, imageID, artifactID, productID, digest); err != nil {
+		t.Fatalf("insert image: %v", err)
+	}
+}
+
 func seedBaseData(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID, artifactID, imageID, digest string) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, `INSERT INTO products (id, name) VALUES ($1, 'integration-product')`, productID); err != nil {

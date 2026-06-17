@@ -94,14 +94,15 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Store:        exploitStore,
 		ReEnrich:     dispatcher,
 		OpenFindings: enrichmentRepo,
+		Metrics:      metrics.ExploitDBMetrics{},
 	}
 	StartExploitDBScheduler(ctx, exploitDBSvc, cfg.AppConfig.ExploitDB.PollInterval)
 	vexHTTP := &vexfeed.HTTPFetcher{}
 	vexFeedSvc := &vexfeed.Service{
 		Feeds: []vexfeed.FeedSource{
-			vexfeed.URLFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELURL, Kind: "csaf", Fetcher: vexHTTP},
-			vexfeed.URLFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Kind: "osv", Fetcher: vexHTTP},
-			vexfeed.URLFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Kind: "osv", Fetcher: vexHTTP},
+			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELURL, Fetcher: vexHTTP},
+			vexfeed.ZipOSVFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Fetcher: vexHTTP},
+			vexfeed.ZipOSVFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Fetcher: vexHTTP},
 			vexfeed.URLFeedSource{Name_: "wolfi", URL: cfg.AppConfig.VEXFeed.WolfiOSVURL, Kind: "osv", Fetcher: vexHTTP},
 		},
 		Store:    vendorVEXStore,
@@ -134,7 +135,10 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		SBOM:        store.NewPostgresSBOMStore(cfg.Pool),
 		Components:  store.NewPostgresComponentStore(cfg.Pool),
 		Catalog:     store.NewPostgresVulnerabilityCatalog(cfg.Pool),
-		Fetcher:     osv.ComponentFetcher{Client: osvClient},
+		Fetcher: &osv.ComponentFetcher{
+			Client: osvClient,
+			Logger: osv.SlogCorrelationLogger{},
+		},
 		Correlate:   store.NewPostgresCorrelationRepository(cfg.Pool),
 		Enrichment:  enrichmentSvc,
 		Notify: metrics.InstrumentedNotifier{

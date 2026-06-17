@@ -15,6 +15,7 @@ declare -a domain_pkgs=(
 	adapter/notify
 )
 declare -a infra_pkgs=(
+	adapter/osv
 	adapter/store
 	adapter/api
 	adapter/epsskev
@@ -35,6 +36,7 @@ threshold_for() {
 	local pkg_path="$1"
 	case "$pkg_path" in
 		usecase/enrichment) echo 90; return ;;
+		adapter/osv) echo 90; return ;;
 		adapter/epsskev|adapter/exploitdb) echo 85; return ;;
 		adapter/api) echo 80; return ;;
 	esac
@@ -82,7 +84,7 @@ coverage_percent_from_profile() {
 	local pkg_path="$1"
 	local prefix="${module}/internal/${pkg_path}/"
 	awk -v prefix="$prefix" '
-		$1 ~ prefix {
+		$1 ~ prefix && $1 !~ prefix "gen/" {
 			n = $2
 			c = $3
 			total += n

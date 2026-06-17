@@ -200,6 +200,8 @@ func TestPhase2aMetricsRegistered(t *testing.T) {
 	metrics.VEXFeedMetrics{}.RecordSync("rhel", "success")
 	metrics.VEXFeedMetrics{}.RecordAssertions("alpine", "exact", 3)
 	metrics.VEXFeedMetrics{}.RecordPURLMismatch("alpine")
+	metrics.ExploitDBMetrics{}.RecordSync("success")
+	metrics.ExploitDBMetrics{}.RecordSync("error")
 	metrics.EnrichmentMetrics{}.RecordLayer1Rule("Critical")
 	metrics.EnrichmentMetrics{}.RecordBlastRadiusScore(1.5)
 
@@ -221,6 +223,7 @@ func TestPhase2aMetricsRegistered(t *testing.T) {
 		"themis_vexfeed_sync_total",
 		"themis_vexfeed_assertions_total",
 		"themis_vexfeed_purl_mismatch_total",
+		"themis_exploitdb_sync_total",
 		"themis_layer1_rules_fired_total",
 		"themis_blast_radius_score",
 	} {

@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -202,7 +201,7 @@ func TestStartIntegrationSMTPServerAcceptLoopEnds(t *testing.T) {
 
 func TestStartIntegrationSMTPServerReceivesMail(t *testing.T) {
 	host, port, received := StartIntegrationSMTPServer(t)
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
+	conn, err := net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +232,7 @@ func TestStartIntegrationSMTPServerReceivesMail(t *testing.T) {
 
 func dialSMTP(t *testing.T, host string, port int) net.Conn {
 	t.Helper()
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
+	conn, err := net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,4 +265,19 @@ func waitReceived(t *testing.T, received func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("expected message to be received")
+}
+
+func TestStartIntegrationSMTPServerListenError(t *testing.T) {
+	originalListen := integrationSMTPListen
+	integrationSMTPListen = func() (net.Listener, error) {
+		return nil, errors.New("listen failed")
+	}
+	t.Cleanup(func() { integrationSMTPListen = originalListen })
+
+	t.Run("skip", func(t *testing.T) {
+		StartIntegrationSMTPServer(t)
+	})
+	if _, _, _, err := startIntegrationSMTPServer(t); err == nil {
+		t.Fatal("expected listen error")
+	}
 }

@@ -179,9 +179,9 @@ func Default() Config {
 			PollInterval: 24 * time.Hour,
 		},
 		VEXFeed: VEXFeedConfig{
-			RHELURL:      "https://access.redhat.com/security/data/csaf/v2/advisories/",
-			AlpineOSVURL: "https://gitlab.alpinelinux.org/alpine/infra/osv-db/-/raw/main/v1/",
-			RockyOSVURL:  "https://apollo.build.resf.org/vulns/rocky-linux-osv.json",
+			RHELURL:      "https://security.access.redhat.com/data/csaf/v2/advisories/",
+			AlpineOSVURL: "https://storage.googleapis.com/osv-vulnerabilities/Alpine/all.zip",
+			RockyOSVURL:  "https://storage.googleapis.com/osv-vulnerabilities/Rocky%20Linux/all.zip",
 			WolfiOSVURL:  "https://packages.wolfi.dev/os/security.json",
 			PollInterval: 24 * time.Hour,
 		},

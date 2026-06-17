@@ -210,9 +210,9 @@ to **Alpine (`apk`) and RPM (`rpm`)** PURLs only; namespace aliases include `rhe
 
 | YAML key | Env override | Purpose |
 | -------- | ------------ | ------- |
-| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | Red Hat CSAF 2.0 advisories (vendor `not_affected` / backport authority for RPM packages). |
-| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine Linux OSV database (version-range matching for `pkg:apk/...`). |
-| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV feed. |
+| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | Red Hat CSAF 2.0 advisory directory (HTML index; crawler fetches each `.json` advisory). |
+| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine OSV GCS zip (`all.zip`); parsed entry-by-entry. |
+| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV GCS zip (`all.zip`). |
 | `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed. |
 | `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Vendor VEX sync frequency. After sync, affected SBOMs get VEX overlay re-applied. |
 
@@ -289,9 +289,38 @@ Phase 2a replaces the Phase 1 CVSS-only score with a composite formula incorpora
 
 Deferred to later phases: AI workers (2b), GHSA adapter (2b), Debian/Ubuntu VEX feeds, per-feed on/off flags, image registration API (Phase 1 Group 16), Redis queue, Docker stack, Web UI, RBAC, real cosign verification. See [project-backlog.md](project-backlog.md).
 
-**Implementation status:** All 140 tasks complete (Groups 17–30); `v0.2.0` merged to `main`
-(PR #16); Phase 2a archived 2026-06-17. Group 31 (8 feed-reliability tasks) is the blocking
-gate before Phase 2b starts — see [`openspec/STATUS.md`](openspec/STATUS.md).
+**Implementation status:** `v0.2.0` merged and archived (Phase 2a). **`v0.2.1`** (OpenSpec change
+[`themis-v0-2-1`](openspec/changes/themis-v0-2-1/)) is the active maintenance release — Alpine/Rocky/RHEL
+signal and vendor-feed fixes. See [`openspec/STATUS.md`](openspec/STATUS.md).
+
+### v0.2.1 — Alpine signal reliability (non-breaking patch)
+
+No schema migrations. After upgrading the binary:
+
+1. **Backfill canonical CVE IDs** (once, if you ingested Alpine SBOMs before v0.2.1):
+
+   ```sh
+   psql "$THEMIS_DATABASE_DSN" -f scripts/backfill-alpine-cve-ids.sql
+   ```
+
+   Wait for the next EPSS/KEV/ExploitDB sync (or restart) so `ReEnrichJob` repopulates signals.
+
+2. **Vendor VEX default URLs** now use working public sources (GCS zip for Alpine/Rocky, CSAF
+   directory crawl for Red Hat). Override via `THEMIS_VEXFEED_*` if needed — see
+   [`themis.yaml.example`](themis.yaml.example).
+
+3. **Scan findings API** — `GET /api/v1/scans/{id}/vulnerabilities` includes an additive
+   `enrichment` object (`epss_score`, `kev_listed`, `exploit_public`, `risk_score`,
+   `deterministic_level`, `blast_radius_score`, `upstream_vex_coverage`).
+
+4. **Upload helper** — `./scripts/upload-sbom.sh -f sbom.json -i "$IMAGE_ID"` (requires
+   `THEMIS_API_KEY`).
+
+5. **New metric** — `themis_exploitdb_sync_total{status}`.
+
+6. **Alpine E2E gate** — after upload + sync warm-up, run
+   `./scripts/alpine-e2e-gate.sh` (or `./scripts/run-alpine-e2e-local.sh` for a full local
+   bootstrap). See `project-backlog.md` § Alpine E2E bring-up gate.
 
 ---
 

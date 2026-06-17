@@ -138,6 +138,11 @@ type VulnerabilityFetcher interface {
 	FetchForComponent(ctx context.Context, component CanonicalComponent) ([]VulnerabilityRecord, error)
 }
 
+// CorrelationSummaryEmitter flushes deferred OSV correlation skip summaries.
+type CorrelationSummaryEmitter interface {
+	EmitCorrelationSummary()
+}
+
 // CorrelationRepository links components to vulnerabilities within an SBOM.
 type CorrelationRepository interface {
 	CreateFinding(ctx context.Context, componentVersionID, vulnerabilityID, sbomDocumentID string) (string, error)

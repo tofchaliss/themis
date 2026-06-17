@@ -211,15 +211,53 @@ func TestEnqueueReenrichVEXEnqueueError(t *testing.T) {
 	}
 }
 
+func TestEnqueueApplyVEXForSBOMs(t *testing.T) {
+	queue := &memoryQueue{}
+	dispatcher := &ingestion.AsyncDispatcher{Queue: queue}
+	if err := dispatcher.EnqueueApplyVEXForSBOMs(context.Background(), []string{"", "sbom-1", "sbom-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if queue.count != 2 {
+		t.Fatalf("jobs = %d, want 2", queue.count)
+	}
+}
+
+func TestEnqueueApplyVEXForSBOMsNilQueue(t *testing.T) {
+	dispatcher := &ingestion.AsyncDispatcher{}
+	if err := dispatcher.EnqueueApplyVEXForSBOMs(context.Background(), []string{"sbom-1"}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueApplyVEXForSBOMsMarshalError(t *testing.T) {
+	original := ingestion.JSONMarshalHook
+	ingestion.JSONMarshalHook = func(any) ([]byte, error) { return nil, errors.New("marshal failed") }
+	t.Cleanup(func() { ingestion.JSONMarshalHook = original })
+
+	dispatcher := &ingestion.AsyncDispatcher{Queue: &memoryQueue{}}
+	if err := dispatcher.EnqueueApplyVEXForSBOMs(context.Background(), []string{"sbom-1"}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueApplyVEXForSBOMsEnqueueError(t *testing.T) {
+	dispatcher := &ingestion.AsyncDispatcher{Queue: &memoryQueue{enqueueErr: errors.New("queue full")}}
+	if err := dispatcher.EnqueueApplyVEXForSBOMs(context.Background(), []string{"sbom-1"}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 type memoryQueue struct {
 	last       domain.Job
 	enqueueErr error
+	count      int
 }
 
 func (m *memoryQueue) Enqueue(_ context.Context, job domain.Job) (string, error) {
 	if m.enqueueErr != nil {
 		return "", m.enqueueErr
 	}
+	m.count++
 	m.last = job
 	if job.ID == "" {
 		job.ID = "generated-job-id"

@@ -18,6 +18,13 @@
 
 ## Prerequisites — Phase 1 Group 16 hardening
 
+> **Superseded (2026-06-17).** This gate was not enforced in practice: Phase 2a shipped
+> and was tagged `v0.2.0` before Group 16 finished. `v0.1.0` was later tagged retroactively
+> on the Phase 1 commit. The Group 16 hardening remainder now targets the `v0.2.1`
+> maintenance release, and the registration endpoints (16.4, 16.10) moved to
+> `themis-core-model`. See `project-backlog.md` § "Release versioning — reconciliation".
+> The original prerequisite text is kept below for historical reference.
+
 **Phase 2 implementation must not start until all 9 Group 16 tasks are complete and
 `v0.1.0` is tagged.** These are post-bring-up hardening items that close gaps in the
 Phase 1 ingestion pipeline. They are tracked in `project-backlog.md` (§ "Phase 1 —

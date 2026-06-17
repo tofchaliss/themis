@@ -8,14 +8,25 @@ import (
 
 func TestMapEcosystem(t *testing.T) {
 	tests := map[string]string{
-		"npm":    "npm",
-		"maven":  "Maven",
-		"pypi":   "PyPI",
-		"go":     "Go",
-		"nuget":  "NuGet",
-		"deb":    "Debian",
-		"apk":    "Alpine",
-		"cargo":  "crates.io",
+		"npm":       "npm",
+		"maven":     "Maven",
+		"pypi":      "PyPI",
+		"python":    "PyPI",
+		"go":        "Go",
+		"golang":    "Go",
+		"nuget":     "NuGet",
+		"gem":       "RubyGems",
+		"rubygems":  "RubyGems",
+		"deb":       "Debian",
+		"debian":    "Debian",
+		"apk":       "Alpine",
+		"alpine":    "Alpine",
+		"ubuntu":    "Ubuntu",
+		"cargo":     "crates.io",
+		"composer":  "Packagist",
+		"packagist": "Packagist",
+		"hex":       "Hex",
+		"pub":       "Pub",
 	}
 	for in, want := range tests {
 		got, ok := osv.MapEcosystem(in)

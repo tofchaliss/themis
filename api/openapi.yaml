@@ -859,6 +859,29 @@ components:
           type: string
         component_purl:
           type: string
+        enrichment:
+          $ref: '#/components/schemas/ScanVulnerabilityEnrichment'
+    ScanVulnerabilityEnrichment:
+      type: object
+      properties:
+        exploit_public:
+          type: boolean
+        risk_score:
+          type: number
+          format: double
+        epss_score:
+          type: number
+          format: double
+        kev_listed:
+          type: boolean
+        deterministic_level:
+          type: string
+        blast_radius_score:
+          type: number
+          format: double
+        upstream_vex_coverage:
+          type: string
+          enum: [covered, not_covered, purl_mismatch]
     ScanVulnerabilityList:
       allOf:
         - $ref: '#/components/schemas/PageMeta'

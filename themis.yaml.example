@@ -54,9 +54,9 @@ exploitdb:
 
 vexfeed:
   # Upstream vendor VEX — stored as vex_documents (source=upstream_vendor); four feeds fixed in code
-  rhel_url: https://access.redhat.com/security/data/csaf/v2/advisories/      # Red Hat CSAF 2.0
-  alpine_osv_url: https://gitlab.alpinelinux.org/alpine/infra/osv-db/-/raw/main/v1/  # Alpine OSV
-  rocky_osv_url: https://apollo.build.resf.org/vulns/rocky-linux-osv.json    # Rocky Linux OSV
+  rhel_url: https://security.access.redhat.com/data/csaf/v2/advisories/   # Red Hat CSAF directory
+  alpine_osv_url: https://storage.googleapis.com/osv-vulnerabilities/Alpine/all.zip
+  rocky_osv_url: https://storage.googleapis.com/osv-vulnerabilities/Rocky%20Linux/all.zip
   wolfi_osv_url: https://packages.wolfi.dev/os/security.json                 # Wolfi OSV
   poll_interval: 24h
 

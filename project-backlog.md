@@ -48,10 +48,16 @@ convention, status API response shape, and Go code conventions per tier.
 
 ---
 
-## ⚠️ HIGHEST PRIORITY — Core Data Model Restructure (`themis-core-model`)
+## HIGHEST PRIORITY (schema work) — Core Data Model Restructure (`themis-core-model`)
 
-**Decided: 2026-06-16. All decisions confirmed. Must complete before any other open item —
-Group 16, Group 30, Phase 2b planning, and all post-2a follow-ons gate behind this.**
+**Decided: 2026-06-16. All decisions confirmed. This is the next breaking change and ships as
+`v0.3.0` together with Phase 2b.**
+
+It gates everything that depends on the schema: the artifact/version registration endpoints
+(Group 16.4 / 16.10), the G3 "VEX export without SQL" fix, and Phase 2b planning. It does
+**not** gate the `v0.2.1` maintenance release — Group 31 feed fixes and the Group 16 hardening
+remainder (16.1–16.3, 16.5–16.8) touch no schema and ship first, ahead of this restructure.
+See "Release versioning — reconciliation" below.
 
 ### Why now
 
@@ -171,23 +177,44 @@ Tables that survive without structural change: `vulnerabilities`, `epss_kev_sign
 
 ---
 
-## Phase 1 — Remaining hardening (Group 16)
+## Release versioning — reconciliation (2026-06-17)
 
-These are post-completion tasks that close gaps found after the main Phase 1 build.
-They must be done before Phase 1 is tagged as complete.
+Phase 2a was tagged `v0.2.0` before Phase 1's Group 16 hardening finished, which
+stranded the planned `v0.1.0` milestone *below* an already-published release. This was
+reconciled as follows:
+
+- **`v0.1.0`** — created retroactively on the Phase 1 completion commit (`a94f3ba`,
+  PR #10), replacing the old `themis-phase-1` tag. Tag history now reads
+  `v0.1.0 → v0.2.0`. `v0.1.0` is **done** — it is no longer a future gate.
+- **`v0.2.0`** — Phase 2a Signal Foundation (released).
+- **`v0.2.1`** — new maintenance release: Group 31 feed-reliability fixes + the Group 16
+  hardening remainder (see below). No breaking changes.
+- **`v0.3.0`** — `themis-core-model` (breaking schema restructure) + Phase 2b.
+- **`v0.4.0`** — Phase 2c.
+
+Nothing below `v0.2.0` will ever be tagged again.
+
+---
+
+## Group 16 — Phase 1 hardening remainder (now targets v0.2.1)
+
+These post-completion tasks close gaps found after the main Phase 1 build. The original
+"gate before tagging `v0.1.0`" framing is retired (`v0.1.0` is tagged). The hardening
+tasks now ship in the **v0.2.1** maintenance release; the two new registration endpoints
+moved under `themis-core-model` because that change redefines both.
 
 | # | Task | Status |
 | - | ---- | ------ |
-| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | Open |
-| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | Open |
-| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | Open |
-| 16.4 | REST endpoint: `POST /api/v1/products/{id}/images` to register image before SBOM upload | Open |
-| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | Open |
-| 16.6 | `make check` run clean after all Group 16 items | Open |
-| 16.7 | Coverage: `adapter/store/` reaches ≥90% | Open |
-| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | Open |
-| 16.9 | Git tag `v0.1.0` and Phase 1 release notes | Open |
-| 16.10 | REST endpoint: `POST /api/v1/products/{id}/versions` (and optional link to artifact/image on SBOM upload) — today VEX export requires manual SQL to create `product_versions` and set `artifacts.product_version_id` | Open |
+| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | **Done** (v0.2.1) |
+| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | **Done** (`TestV021AlpineSBOMOSVCorrelation`) |
+| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | **Done** (`TestV021RPMSBOMIngestSkipsUnsupportedOSV`) |
+| 16.4 | REST endpoint to register an artifact before SBOM upload | **Moved → `themis-core-model`** (`POST /api/v1/products/{id}/artifacts`) |
+| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | **Done** (`scripts/upload-sbom.sh`, `scripts/alpine-e2e-gate.sh`) |
+| 16.6 | `make check` run clean after all hardening items | **Done** (v0.2.1) |
+| 16.7 | Coverage: `adapter/store/` reaches ≥90% | **Done** (91.6%) |
+| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | **Done** (93.6%) |
+| 16.9 | Git tag `v0.1.0` and Phase 1 release notes | **Done** (retroactive tag, 2026-06-17) |
+| 16.10 | REST endpoint to register a version | **Moved → `themis-core-model`** (`POST /api/v1/projects/{id}/versions`) |
 
 ---
 
@@ -201,7 +228,8 @@ Current implementation status: `openspec/STATUS.md`.
 
 ### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
-**Gate:** Group 16 complete + `v0.1.0` tagged.
+**Gate:** none outstanding (shipped ahead of the Group 16 hardening; see Release
+versioning reconciliation above).
 **Released as:** v0.2.0 (merged to `main` 2026-06-17; PR #16)
 **OpenSpec change:** `openspec/changes/archive/2026-06-17-themis-phase-2a/`
 **Progress:** 140/140 tasks complete (Groups 17–30). Archived.
@@ -281,7 +309,7 @@ are breaking changes that require the Phase 1 pipeline to be stable first.
 
 | Item | Why deferred | Phase 1 / 2a hooks |
 | ---- | ------------ | -------------------- |
-| Per-feed enable/disable (`vexfeed.rhel_enabled`, etc.) | Phase 2a wires all four feeds; operators may want to disable Wolfi/Rocky in non-RHEL shops | `VEXFeedConfig` URLs already per-feed; add bool flags in config + skip in `api_wiring.go` |
+| Per-feed enable/disable (`vexfeed.rhel_enabled`, etc.) — **now folded into `themis-feed-registry`** (see Candidate change below) | Phase 2a wires all four feeds; operators may want to disable Wolfi/Rocky in non-RHEL shops | `VEXFeedConfig` URLs already per-feed; add bool flags in config + skip in `api_wiring.go` |
 | Red Hat CSAF directory crawl | Default `rhel_url` points at the CSAF advisories *directory*; production may need a manifest/bundle URL or crawler over individual `.json` files | `URLFeedSource` + `ParseCSAF` accept single-document bodies today |
 | Alpine vendor OSV feed URL returns 302 | Default `alpine_osv_url` (`gitlab.alpinelinux.org/.../v1/`) redirects to GitLab sign-in (HTTP 302), not public JSON. Observed: `themis_vexfeed_sync_total{feed="alpine",status="error"}` while Wolfi succeeds. `vex-coverage` stays `{covered:0, not_covered:N}` for Alpine SBOMs. | `URLFeedSource` in `api_wiring.go`; `themis.yaml.example` `alpine_osv_url` |
 | Rocky vendor OSV feed URL 404 | Default `rocky_osv_url` (`apollo.build.resf.org/vulns/rocky-linux-osv.json`) returns HTTP 404. Working sources exist elsewhere (see fix below). | `rocky_osv_url` default in `config.go` / `themis.yaml.example` |
@@ -432,18 +460,120 @@ Reference: `openspec/intel-source-tiers.md`.
 
 #### Alpine E2E bring-up gate (G1–G8)
 
-All failures clear once Group 31 lands:
+**v0.2.1 code landed** (OpenSpec `themis-v0-2-1`); verified 2026-06-17 via integration tests
+(`TestV021*`) + local `./scripts/run-alpine-e2e-local.sh` (G2 metrics) + `./scripts/alpine-e2e-gate.sh`:
 
-| Check | Now | Unblocked by |
-| ----- | --- | ------------ |
-| G1 EPSS/KEV sync | PASS | — |
-| G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | 31.4 / 31.5 / 31.6 |
-| G3 VEX export without manual SQL | **FAIL** | Group 16.10 |
-| G4 EPSS on Alpine findings | **FAIL** | 31.1 / 31.2 |
-| G5 Risk scores > 0 | **FAIL** | 31.3 |
-| G6 Vendor VEX coverage > 0 | **FAIL** | 31.4–31.6 |
-| G7 Status `highest_cvss_score > 0` | **FAIL** | 31.3 |
-| G8 Layer 1 `deterministic_level` non-informational | **FAIL** | G4 + G5 |
+| Check | Pre-v0.2.1 | v0.2.1 (expected after deploy + backfill) | Verified 2026-06-17 |
+| ----- | ---------- | ------------------------------------------- | ------------------- |
+| G1 EPSS/KEV sync | PASS | PASS | **PASS** (metrics; local run may need ≥120s warm-up) |
+| G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | **PASS** (zip + CSAF directory sources) | **PASS** (`themis_vexfeed_sync_total{feed="alpine",status="success"}`) |
+| G3 VEX export without manual SQL | **FAIL** | **FAIL** — still requires `themis-core-model` | **FAIL** (404 without product-version wiring) |
+| G4 EPSS on Alpine findings | **FAIL** | **PASS** (CVE normalize + backfill + re-enrich) | **PASS** (`TestV021AlpineEPSSAfterReEnrich`) |
+| G5 Risk scores > 0 | **FAIL** | **PASS** (CVSS vector parsing) | **PASS** (integration + OSV CVSS unit tests) |
+| G6 Vendor VEX coverage > 0 | **FAIL** | **PASS** (after G2 + PURL match) | **PASS** (`TestV021ZipVendorVEXFeedLoadsAssertions`) |
+| G7 Status `highest_cvss_score > 0` | **FAIL** | **PASS** | **PASS** (CVSS vector parsing in `mapOSVVuln`) |
+| G8 Layer 1 `deterministic_level` non-informational | **FAIL** | **PASS** (after G4 + G5) | **PASS** (integration re-enrich with KEV/EPSS stubs) |
+
+**Operator checklist:** `./scripts/run-alpine-e2e-local.sh` (embedded Postgres + server) or
+`./scripts/alpine-e2e-gate.sh` against an existing deployment after Alpine SBOM upload.
+
+---
+
+### v0.2.1 — Maintenance release (feed reliability + Phase 1 hardening) — Planned
+
+**Type:** patch release on the v0.2.x line. No breaking changes, no schema changes.
+**Releases as:** v0.2.1
+**Contents:**
+
+- **Group 31 (8 tasks)** — feed-reliability and signal-quality fixes (Alpine CVE ID
+  normalization, OSV CVSS vector parsing, vendor feed URLs, ExploitDB API/metric wiring).
+  Clears Alpine E2E gate checks G2, G4–G8.
+- **Group 16 hardening remainder** — 16.1 Alpine package-name normalization, 16.2/16.3
+  integration tests, 16.5 upload helper, 16.6 `make check`, 16.7/16.8 coverage gates.
+
+**Excluded (require breaking change):** 16.4 / 16.10 registration endpoints and the G3
+VEX-export-without-SQL fix — these land with `themis-core-model` in v0.3.0.
+
+**Why a separate patch:** ships the Alpine/feed correctness fixes to operators sooner,
+without waiting for the breaking `themis-core-model` restructure and Phase 2b. `v0.2.1`
+can be cut as soon as Group 31 + the Group 16 hardening remainder are green.
+
+---
+
+### Candidate change — Feed observability (`themis-feed-observability`) — Proposed
+
+**Type:** additive new capability (schema change — new table). Targets v0.3.0-era.
+**Problem:** feed failures are easily missed. Today the only user-visible feed health is
+`signals_stale` for EPSS/KEV, and it is **pull-only** (`GET /api/v1/status`). Vendor VEX and
+ExploitDB sync failures persist nothing — they produce a single `WARN`/`ERROR` log line per
+8–24h cycle plus a Prometheus counter that only helps if the operator scrapes it and wrote an
+alert rule. The `degraded_feeds[]` design in `openspec/intel-source-tiers.md` was specced but
+never implemented.
+
+**Current state (verified in code):**
+
+| Feed (tier) | Persisted status | In `/status` API | Metric | Notification |
+| ----------- | ---------------- | ---------------- | ------ | ------------ |
+| EPSS / KEV (T1) | `epss_kev_signals.stale` + 25 h TTL on `fetched_at` | `signals_stale` | `themis_epsskev_sync_total`, `themis_epsskev_stale` | none |
+| Vendor VEX RHEL/Alpine/Rocky/Wolfi (T2) | none | none | `themis_vexfeed_sync_total` | none |
+| ExploitDB (T2) | none | none | none (wired in v0.2.1, Group 31.8) | none |
+
+**Proposed scope:**
+
+- **Persist per-feed health** — new `feed_health` table (`feed`, `tier`, `last_success_at`,
+  `consecutive_failures`, `last_error`, `last_attempt_at`). Each scheduler upserts on every
+  cycle. Replaces the derived-only EPSS/KEV staleness with real, queryable history.
+- **Surface in status API** — implement `degraded_feeds[]` on `GET /api/v1/status` per the
+  tier doc, so one call shows every feed's health (not just EPSS/KEV).
+- **Push, don't just store** — reuse the existing `NotificationSender` (SMTP/Teams) to send a
+  `FEED_STALE` / `FEED_DEGRADED` alert when a Tier-1 feed goes stale or any feed fails N
+  consecutive cycles. Turns a buried 24 h log into an actual notification (the "won't miss
+  it" fix). Threshold + routing configurable.
+- Optional: degraded signal on `/readyz` when a Tier-1 feed is stale.
+
+**Hooks:** `NotificationSender` already exists (SMTP + Teams); per-tier error behavior is
+defined in `openspec/intel-source-tiers.md`; metric names already registered.
+**Why deferred from v0.2.1:** v0.2.1 is a non-breaking patch; the `feed_health` table is a
+schema change and the notification path is new behaviour.
+
+---
+
+### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — Proposed
+
+**Type:** additive capability + config-shape change. Targets v0.3.0-era.
+**Problem:** the feed set is fixed. `VEXFeedConfig` is hardcoded struct fields
+(`RHELURL`, `AlpineOSVURL`, `RockyOSVURL`, `WolfiOSVURL`). Operators can **override** each
+URL and poll interval (`themis.yaml` / env) but **cannot add, remove, or disable** a feed.
+
+**Proposed scope:**
+
+- Refactor vendor feed config from fixed fields to a **feed registry**: built-in defaults
+  plus a user **delta list** in `themis.yaml`, merged by `name` (add custom feed, override a
+  default, or disable one). Example:
+
+  ```yaml
+  vexfeed:
+    feeds:
+      - name: my-distro-osv
+        type: zip-osv          # url | zip-osv | csaf-dir
+        url: https://.../all.zip
+        ecosystem: mydistro
+        tier: 2
+        enabled: true
+        poll_interval: 12h
+      - name: rocky-osv         # override/disable a default by name
+        enabled: false
+  ```
+
+- Each entry carries its **tier**, so the error/observability behaviour from
+  `themis-feed-observability` applies automatically to custom feeds.
+- Subsumes the existing "Per-feed enable/disable" follow-on (see Vendor VEX feed operations
+  table above) — that item folds into this registry model.
+- Builds on the `ZipOSVFeedSource` / `CSAFDirectoryFeedSource` source abstraction introduced
+  in v0.2.1 (the `type` field selects the fetch model).
+
+**Why deferred from v0.2.1:** changes the config contract (`vexfeed` shape) and is broader
+than the bug-fix scope; sequence it after v0.2.1 lands the source abstractions it builds on.
 
 ---
 

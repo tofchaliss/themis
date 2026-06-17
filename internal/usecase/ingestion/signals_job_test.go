@@ -2,6 +2,7 @@ package ingestion_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/themis-project/themis/internal/domain"
@@ -10,10 +11,14 @@ import (
 )
 
 type queueStub struct {
-	jobs []domain.Job
+	jobs       []domain.Job
+	enqueueErr error
 }
 
 func (q *queueStub) Enqueue(_ context.Context, job domain.Job) (string, error) {
+	if q.enqueueErr != nil {
+		return "", q.enqueueErr
+	}
 	q.jobs = append(q.jobs, job)
 	return "job-id", nil
 }
@@ -44,5 +49,51 @@ func TestSignalsJobHandler(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("SignalsJobHandler() error = %v", err)
+	}
+}
+
+func TestSignalsJobHandlerErrors(t *testing.T) {
+	handler := ingestion.SignalsJobHandler(nil, nil)
+	if err := handler(context.Background(), domain.Job{Payload: []byte("{")}); err == nil {
+		t.Fatal("expected decode error")
+	}
+	if err := handler(context.Background(), domain.Job{Payload: []byte(`{"offset":0,"limit":1}`)}); err == nil {
+		t.Fatal("expected nil enrichment error")
+	}
+}
+
+func TestEnqueueReEnrichSignalsBatchesNilQueue(t *testing.T) {
+	dispatcher := &ingestion.AsyncDispatcher{}
+	if err := dispatcher.EnqueueReEnrichSignalsBatches(context.Background(), 100); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueReEnrichSignalsBatchesZeroTotal(t *testing.T) {
+	queue := &queueStub{}
+	dispatcher := &ingestion.AsyncDispatcher{Queue: queue}
+	if err := dispatcher.EnqueueReEnrichSignalsBatches(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.jobs) != 0 {
+		t.Fatalf("jobs = %d", len(queue.jobs))
+	}
+}
+
+func TestEnqueueReEnrichSignalsBatchesMarshalError(t *testing.T) {
+	original := ingestion.JSONMarshalHook
+	ingestion.JSONMarshalHook = func(any) ([]byte, error) { return nil, errors.New("marshal failed") }
+	t.Cleanup(func() { ingestion.JSONMarshalHook = original })
+
+	dispatcher := &ingestion.AsyncDispatcher{Queue: &queueStub{}}
+	if err := dispatcher.EnqueueReEnrichSignalsBatches(context.Background(), 100); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEnqueueReEnrichSignalsBatchesEnqueueError(t *testing.T) {
+	dispatcher := &ingestion.AsyncDispatcher{Queue: &queueStub{enqueueErr: errors.New("queue full")}}
+	if err := dispatcher.EnqueueReEnrichSignalsBatches(context.Background(), 100); err == nil {
+		t.Fatal("expected error")
 	}
 }
