@@ -9,7 +9,7 @@ Last updated: 2026-06-17._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-v0-2-1 | Planning complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (32 tasks) | — (ready to implement) |
+| themis-v0-2-1 | Planning complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (37 tasks) | — (ready to implement) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
 | themis-phase-2b | Planned | — | not started | `themis-core-model` + v0.2.1 |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |

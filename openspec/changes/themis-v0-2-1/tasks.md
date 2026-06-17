@@ -51,6 +51,21 @@ E2E gate) → 7 (quality gates + docs). Each group ends with the standard gates
   scheduler (`internal/infrastructure/metrics/` + scheduler) (Group 31.8)
 - [ ] 4.4 `make check` passes
 
+## 4b. Component-mismatch correlation logging
+
+- [ ] 4b.1 Add a `CorrelationLogger` seam (interface + `NoOp` default + slog impl) in
+  `internal/adapter/osv/`, following the `vexfeed.MismatchLogger` pattern; wire it into
+  `ComponentFetcher` at the DI root (`api_wiring.go`) (D5)
+- [ ] 4b.2 Log every mismatch/drop site in `component_fetcher.go` with structured fields
+  (purl, ecosystem, name, version, reason): unsupported ecosystem → `DEBUG`; empty/malformed
+  PURL → `WARN`; identity mismatch → `DEBUG`; version non-match → `DEBUG`
+- [ ] 4b.3 Emit one aggregate skip summary per ingest at `INFO` (count grouped by ecosystem)
+  so unsupported-ecosystem skips are visible without per-component noise
+- [ ] 4b.4 Unit tests with a capture logger: assert each reason is logged at the specified
+  level and the aggregate summary is emitted; assert logging does not change which findings
+  are produced
+- [ ] 4b.5 `make check` passes
+
 ## 5. Backfill existing catalog rows
 
 - [ ] 5.1 Idempotent, batched backfill that canonicalizes existing `ALPINE-CVE-*` rows in

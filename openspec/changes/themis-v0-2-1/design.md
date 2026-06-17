@@ -96,6 +96,30 @@ additive `enrichment` object on `ScanVulnerability`. Register
 
 - **Additive only:** new response fields and a new metric — no breaking contract change.
 
+### D5 — Component-mismatch logging seam in OSV correlation
+
+Today `osv.ComponentFetcher` drops components silently at four points (unsupported ecosystem,
+empty/malformed name, package-identity mismatch, version non-match) and the ingestion
+correlation path injects no logger — so components vanish invisibly. Introduce a small logging
+seam following the existing `vexfeed.MismatchLogger` pattern: a `CorrelationLogger` interface
+(with a `NoOp` default and an slog-backed implementation) passed into `ComponentFetcher`, plus
+an aggregate skip summary emitted once per ingest.
+
+- **Levels (see spec):** unsupported ecosystem → per-component `DEBUG` + one `INFO` aggregate
+  per ingest; malformed/empty PURL → `WARN`; identity/version non-match → `DEBUG`; stage-abort
+  errors → `ERROR` (unchanged). This keeps expected skips (e.g. hundreds of rpm components)
+  out of the default INFO stream while still surfacing one visible summary and flagging real
+  data-quality problems.
+- **Why a seam, not direct slog in the adapter:** keeps the adapter testable (capture logger in
+  unit tests, matching `vexfeed`), avoids a hard slog dependency in pure-ish code, and lets the
+  DI root choose the logger.
+- **Logging-stack consistency:** the codebase mixes `zap` (infrastructure/HTTP) and `slog`
+  (adapters). v0.2.1 stays on the per-adapter `slog` seam (consistent with `vexfeed`/`notify`);
+  unifying zap/slog is out of scope and tracked separately (see Risks / Open Questions).
+- **Alternative considered:** thread the use-case logger into `ingestion.service`. Rejected for
+  v0.2.1 — larger blast radius into the use-case layer; the adapter seam covers every mismatch
+  site with the smallest change.
+
 ## Risks / Trade-offs
 
 - **Over-stripping CVE prefixes** → only strip when the remainder matches the strict
@@ -123,3 +147,5 @@ shape changed, so rollback is clean (canonicalized CVE IDs remain valid `CVE-*`)
   v3-only numeric score? (Lean: v3 numeric now, v4 vector-store + follow-up.)
 - Backfill mechanism: one-off SQL migration-style script vs an admin CLI subcommand vs
   relying on natural re-ingest. (Lean: idempotent script invoked once; documented in README.)
+- Logging-stack unification (`zap` infrastructure vs `slog` adapters) — defer to a dedicated
+  change? (Lean: yes; v0.2.1 only adds the `slog` correlation seam, consistent with `vexfeed`.)

@@ -21,6 +21,10 @@ of the breaking `themis-core-model` restructure (`v0.3.0`).
   the `themis_exploitdb_sync_total` Prometheus counter (Group 31.7, 31.8).
 - **OSV correlation hardening** — normalize Alpine package names for OSV queries; add
   integration coverage for Alpine and rpm SBOM ingest (Group 16.1, 16.2, 16.3).
+- **Component-mismatch logging** — every silent component drop in OSV correlation
+  (unsupported ecosystem, malformed PURL, identity/version non-match) is logged with
+  structured fields at tier-appropriate levels, plus an aggregate skip summary per ingest, so
+  no component disappears invisibly.
 - **Quality gates** — upload helper script; `make check` clean; `adapter/store/` and
   `adapter/osv/` coverage ≥ 90% (Group 16.5–16.8).
 
