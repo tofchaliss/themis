@@ -68,21 +68,25 @@ without explicit user direction.
 
 ## Implementation status
 
-**Phase 1 — Group 16 hardening (9 tasks open):** Must be completed before tagging `v0.1.0`.
-Track in `project-backlog.md` (§ "Phase 1 — Remaining hardening") and detailed sub-tasks in
-`openspec/changes/archive/2026-06-09-themis-phase-1/tasks.md` §16.
+**Phase 1 — Group 16 hardening remainder (targets v0.2.1):** `v0.1.0` is already tagged
+(retroactively on the Phase 1 commit, replacing `themis-phase-1`), so the old "gate before
+`v0.1.0`" framing is retired. The hardening tasks ship in the `v0.2.1` maintenance release;
+the two registration endpoints moved to `themis-core-model`.
+Track in `project-backlog.md` (§ "Group 16 — Phase 1 hardening remainder") and detailed
+sub-tasks in `openspec/changes/archive/2026-06-09-themis-phase-1/tasks.md` §16.
 
-| # | Task |
-| --- | --- |
-| 16.1 | Normalise Alpine package names for OSV queries (`so:` prefix, `py3-foo` → `python3-foo`) |
-| 16.2 | Integration test: Alpine SBOM ingest → non-zero `component_vulnerabilities` |
-| 16.3 | Integration test: rpm SBOM → ingest succeeds, OSV skip logged cleanly |
-| 16.4 | `POST /api/v1/products/{id}/images` — image registration endpoint |
-| 16.5 | Upload helper script (`make upload-sbom` or curl wrapper) |
-| 16.6 | `make check` passes clean after all Group 16 items |
-| 16.7 | `adapter/store/` coverage ≥ 90% |
-| 16.8 | `adapter/osv/` coverage ≥ 90% |
-| 16.9 | Merge to `main`, git tag `v0.1.0`, Phase 1 release notes |
+| # | Task | Target |
+| --- | --- | --- |
+| 16.1 | Normalise Alpine package names for OSV queries (`so:` prefix, `py3-foo` → `python3-foo`) | v0.2.1 |
+| 16.2 | Integration test: Alpine SBOM ingest → non-zero `component_vulnerabilities` | v0.2.1 |
+| 16.3 | Integration test: rpm SBOM → ingest succeeds, OSV skip logged cleanly | v0.2.1 |
+| 16.4 | Artifact registration endpoint | → `themis-core-model` |
+| 16.5 | Upload helper script (`make upload-sbom` or curl wrapper) | v0.2.1 |
+| 16.6 | `make check` passes clean after all hardening items | v0.2.1 |
+| 16.7 | `adapter/store/` coverage ≥ 90% | v0.2.1 |
+| 16.8 | `adapter/osv/` coverage ≥ 90% | v0.2.1 |
+| 16.9 | Tag `v0.1.0` + Phase 1 release notes | **Done** |
+| 16.10 | Version registration endpoint | → `themis-core-model` |
 
 **Phase 2 — Split into three sub-phases.**
 

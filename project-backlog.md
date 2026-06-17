@@ -171,23 +171,44 @@ Tables that survive without structural change: `vulnerabilities`, `epss_kev_sign
 
 ---
 
-## Phase 1 — Remaining hardening (Group 16)
+## Release versioning — reconciliation (2026-06-17)
 
-These are post-completion tasks that close gaps found after the main Phase 1 build.
-They must be done before Phase 1 is tagged as complete.
+Phase 2a was tagged `v0.2.0` before Phase 1's Group 16 hardening finished, which
+stranded the planned `v0.1.0` milestone *below* an already-published release. This was
+reconciled as follows:
+
+- **`v0.1.0`** — created retroactively on the Phase 1 completion commit (`a94f3ba`,
+  PR #10), replacing the old `themis-phase-1` tag. Tag history now reads
+  `v0.1.0 → v0.2.0`. `v0.1.0` is **done** — it is no longer a future gate.
+- **`v0.2.0`** — Phase 2a Signal Foundation (released).
+- **`v0.2.1`** — new maintenance release: Group 31 feed-reliability fixes + the Group 16
+  hardening remainder (see below). No breaking changes.
+- **`v0.3.0`** — `themis-core-model` (breaking schema restructure) + Phase 2b.
+- **`v0.4.0`** — Phase 2c.
+
+Nothing below `v0.2.0` will ever be tagged again.
+
+---
+
+## Group 16 — Phase 1 hardening remainder (now targets v0.2.1)
+
+These post-completion tasks close gaps found after the main Phase 1 build. The original
+"gate before tagging `v0.1.0`" framing is retired (`v0.1.0` is tagged). The hardening
+tasks now ship in the **v0.2.1** maintenance release; the two new registration endpoints
+moved under `themis-core-model` because that change redefines both.
 
 | # | Task | Status |
 | - | ---- | ------ |
-| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | Open |
-| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | Open |
-| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | Open |
-| 16.4 | REST endpoint: `POST /api/v1/products/{id}/images` to register image before SBOM upload | Open |
-| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | Open |
-| 16.6 | `make check` run clean after all Group 16 items | Open |
-| 16.7 | Coverage: `adapter/store/` reaches ≥90% | Open |
-| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | Open |
-| 16.9 | Git tag `v0.1.0` and Phase 1 release notes | Open |
-| 16.10 | REST endpoint: `POST /api/v1/products/{id}/versions` (and optional link to artifact/image on SBOM upload) — today VEX export requires manual SQL to create `product_versions` and set `artifacts.product_version_id` | Open |
+| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | Open → v0.2.1 |
+| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | Open → v0.2.1 |
+| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | Open → v0.2.1 |
+| 16.4 | REST endpoint to register an artifact before SBOM upload | **Moved → `themis-core-model`** (`POST /api/v1/products/{id}/artifacts`) |
+| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | Open → v0.2.1 |
+| 16.6 | `make check` run clean after all hardening items | Open → v0.2.1 |
+| 16.7 | Coverage: `adapter/store/` reaches ≥90% | Open → v0.2.1 |
+| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | Open → v0.2.1 |
+| 16.9 | Git tag `v0.1.0` and Phase 1 release notes | **Done** (retroactive tag, 2026-06-17) |
+| 16.10 | REST endpoint to register a version | **Moved → `themis-core-model`** (`POST /api/v1/projects/{id}/versions`) |
 
 ---
 
@@ -201,7 +222,8 @@ Current implementation status: `openspec/STATUS.md`.
 
 ### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
-**Gate:** Group 16 complete + `v0.1.0` tagged.
+**Gate:** none outstanding (shipped ahead of the Group 16 hardening; see Release
+versioning reconciliation above).
 **Released as:** v0.2.0 (merged to `main` 2026-06-17; PR #16)
 **OpenSpec change:** `openspec/changes/archive/2026-06-17-themis-phase-2a/`
 **Progress:** 140/140 tasks complete (Groups 17–30). Archived.
@@ -438,12 +460,33 @@ All failures clear once Group 31 lands:
 | ----- | --- | ------------ |
 | G1 EPSS/KEV sync | PASS | — |
 | G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | 31.4 / 31.5 / 31.6 |
-| G3 VEX export without manual SQL | **FAIL** | Group 16.10 |
+| G3 VEX export without manual SQL | **FAIL** | `themis-core-model` (version registration endpoint) |
 | G4 EPSS on Alpine findings | **FAIL** | 31.1 / 31.2 |
 | G5 Risk scores > 0 | **FAIL** | 31.3 |
 | G6 Vendor VEX coverage > 0 | **FAIL** | 31.4–31.6 |
 | G7 Status `highest_cvss_score > 0` | **FAIL** | 31.3 |
 | G8 Layer 1 `deterministic_level` non-informational | **FAIL** | G4 + G5 |
+
+---
+
+### v0.2.1 — Maintenance release (feed reliability + Phase 1 hardening) — Planned
+
+**Type:** patch release on the v0.2.x line. No breaking changes, no schema changes.
+**Releases as:** v0.2.1
+**Contents:**
+
+- **Group 31 (8 tasks)** — feed-reliability and signal-quality fixes (Alpine CVE ID
+  normalization, OSV CVSS vector parsing, vendor feed URLs, ExploitDB API/metric wiring).
+  Clears Alpine E2E gate checks G2, G4–G8.
+- **Group 16 hardening remainder** — 16.1 Alpine package-name normalization, 16.2/16.3
+  integration tests, 16.5 upload helper, 16.6 `make check`, 16.7/16.8 coverage gates.
+
+**Excluded (require breaking change):** 16.4 / 16.10 registration endpoints and the G3
+VEX-export-without-SQL fix — these land with `themis-core-model` in v0.3.0.
+
+**Why a separate patch:** ships the Alpine/feed correctness fixes to operators sooner,
+without waiting for the breaking `themis-core-model` restructure and Phase 2b. `v0.2.1`
+can be cut as soon as Group 31 + the Group 16 hardening remainder are green.
 
 ---
 
