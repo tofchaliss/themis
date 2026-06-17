@@ -9,8 +9,9 @@ Last updated: 2026-06-17._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
+| themis-v0-2-1 | Planning complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (32 tasks) | — (ready to implement) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Planned | — | not started | Group 31 (8 tasks) + `themis-core-model` |
+| themis-phase-2b | Planned | — | not started | `themis-core-model` + v0.2.1 |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
@@ -19,6 +20,9 @@ Last updated: 2026-06-17._
   item. Splits `sbom_documents` into `sboms` + `scan_reports`; fixes silent triage loss; removes
   `is_latest` anti-pattern; adds `version.project_id` FK. Gates Group 16, Phase 2b, and all
   post-2a follow-ons. Full detail: `project-backlog.md` §Core Data Model Restructure.
+
+> Group 31 and the Group 16 hardening remainder are now scoped into the **`themis-v0-2-1`**
+> change (proposal/design/specs/tasks complete; ready to implement).
 
 - **Group 16 hardening remainder (targets v0.2.1)** — the original "gate before tagging `v0.1.0`"
   framing is retired: `v0.1.0` was tagged retroactively on the Phase 1 commit (2026-06-17,
