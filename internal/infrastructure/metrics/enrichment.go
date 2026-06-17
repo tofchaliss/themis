@@ -39,6 +39,7 @@ func RegisterEnrichment() {
 func RegisterPhase2a() {
 	RegisterEPSSKev()
 	RegisterVEXFeed()
+	RegisterExploitDB()
 	RegisterEnrichment()
 }
 

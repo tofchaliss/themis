@@ -20,6 +20,12 @@ func TestPhase2aConstants(t *testing.T) {
 }
 
 func TestComputeBlastRadiusScore(t *testing.T) {
+	if domain.ComputeBlastRadiusScore(0) != domain.RiskScoreBlastRadiusMin {
+		t.Fatalf("0 customers score = %v", domain.ComputeBlastRadiusScore(0))
+	}
+	if domain.ComputeBlastRadiusScore(1) != domain.RiskScoreBlastRadiusMin {
+		t.Fatalf("1 customer score = %v", domain.ComputeBlastRadiusScore(1))
+	}
 	if domain.ComputeBlastRadiusScore(5) != 1.4 {
 		t.Fatalf("5 customers score = %v", domain.ComputeBlastRadiusScore(5))
 	}

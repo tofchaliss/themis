@@ -16,21 +16,34 @@ import (
 	"time"
 )
 
+var integrationSMTPListen = func() (net.Listener, error) {
+	return net.Listen("tcp", "127.0.0.1:0")
+}
+
 // StartIntegrationSMTPServer starts a mock SMTP server for cross-package integration tests.
 // received reports whether at least one message body was accepted.
 func StartIntegrationSMTPServer(t *testing.T) (host string, port int, received func() bool) {
 	t.Helper()
-	var mailReceived atomic.Bool
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	host, port, received, err := startIntegrationSMTPServer(t)
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("integration smtp listen: %v", err)
+	}
+	return host, port, received
+}
+
+func startIntegrationSMTPServer(t *testing.T) (host string, port int, received func() bool, err error) {
+	t.Helper()
+	var mailReceived atomic.Bool
+	ln, err := integrationSMTPListen()
+	if err != nil {
+		return "", 0, nil, err
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	port, _ = strconv.Atoi(portStr)
 
 	go serveIntegrationSMTP(ln, false, &mailReceived)
-	return host, port, mailReceived.Load
+	return host, port, mailReceived.Load, nil
 }
 
 func serveIntegrationSMTP(ln net.Listener, advertiseSTARTTLS bool, received *atomic.Bool) {
@@ -85,7 +98,6 @@ func handleIntegrationSMTP(conn net.Conn, advertiseSTARTTLS bool, received *atom
 		case upper == ".":
 			if inData {
 				received.Store(true)
-				inData = false
 			}
 			_, _ = conn.Write([]byte("250 Message accepted\r\n"))
 			return

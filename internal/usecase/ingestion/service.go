@@ -294,6 +294,9 @@ func (p *Pipeline) correlateComponents(
 			}
 		}
 	}
+	if reporter, ok := p.Fetcher.(domain.CorrelationSummaryEmitter); ok {
+		reporter.EmitCorrelationSummary()
+	}
 	return nil
 }
 

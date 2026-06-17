@@ -126,13 +126,29 @@ func uuidPtr(id string) *openapi_types.UUID {
 func toScanVulnerabilityList(items []domain.ScanVulnerability, page domain.PageResult) gen.ScanVulnerabilityList {
 	out := make([]gen.ScanVulnerability, 0, len(items))
 	for _, item := range items {
-		out = append(out, gen.ScanVulnerability{
+		sv := gen.ScanVulnerability{
 			Id:             parseUUID(item.ID),
 			CveId:          item.CVEID,
 			Severity:       item.Severity,
 			EffectiveState: ptrString(item.EffectiveState),
 			ComponentPurl:  ptrString(item.ComponentPURL),
-		})
+		}
+		if item.Enrichment != nil {
+			enrichment := &gen.ScanVulnerabilityEnrichment{
+				ExploitPublic:      item.Enrichment.ExploitPublic,
+				RiskScore:          item.Enrichment.RiskScore,
+				EpssScore:          item.Enrichment.EPSSScore,
+				KevListed:          item.Enrichment.KEVListed,
+				DeterministicLevel: item.Enrichment.DeterministicLevel,
+				BlastRadiusScore:   item.Enrichment.BlastRadiusScore,
+			}
+			if item.Enrichment.UpstreamVEXCoverage != nil {
+				v := gen.ScanVulnerabilityEnrichmentUpstreamVexCoverage(*item.Enrichment.UpstreamVEXCoverage)
+				enrichment.UpstreamVexCoverage = &v
+			}
+			sv.Enrichment = enrichment
+		}
+		out = append(out, sv)
 	}
 	resp := gen.ScanVulnerabilityList{Items: &out}
 	if page.NextCursor != "" {

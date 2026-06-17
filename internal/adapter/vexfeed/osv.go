@@ -56,14 +56,11 @@ type osvEntry struct {
 
 func (e osvEntry) firstCVE() string {
 	for _, alias := range e.Aliases {
-		if strings.HasPrefix(strings.ToUpper(alias), "CVE-") {
-			return strings.ToUpper(alias)
+		if normalized := domain.NormalizeCVEID(alias); strings.HasPrefix(strings.ToUpper(normalized), "CVE-") {
+			return normalized
 		}
 	}
-	if strings.HasPrefix(strings.ToUpper(e.ID), "CVE-") {
-		return strings.ToUpper(e.ID)
-	}
-	return ""
+	return domain.NormalizeCVEID(e.ID)
 }
 
 type osvAffected struct {

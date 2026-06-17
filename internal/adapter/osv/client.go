@@ -67,7 +67,7 @@ func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, package
 		reqBody.Queries = append(reqBody.Queries, batchQuery{
 			Package: packageRef{
 				Ecosystem: osvEco,
-				Name:      pkg.Name,
+				Name:      normalizePackageName(ecosystem, pkg.Name),
 			},
 		})
 	}
@@ -131,8 +131,9 @@ type batchResponse struct {
 }
 
 type osvVuln struct {
-	ID       string `json:"id"`
-	Summary  string `json:"summary"`
+	ID       string   `json:"id"`
+	Aliases  []string `json:"aliases"`
+	Summary  string   `json:"summary"`
 	Severity []struct {
 		Type  string `json:"type"`
 		Score string `json:"score"`
@@ -154,23 +155,8 @@ type osvVuln struct {
 }
 
 func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerability {
-	severity := "unknown"
-	score := 0.0
-	for _, item := range vuln.Severity {
-		if strings.EqualFold(item.Type, "CVSS_V3") {
-			_, _ = fmt.Sscanf(item.Score, "%f", &score)
-			break
-		}
-	}
-	if score >= 9 {
-		severity = "critical"
-	} else if score >= 7 {
-		severity = "high"
-	} else if score >= 4 {
-		severity = "medium"
-	} else if score > 0 {
-		severity = "low"
-	}
+	score, vector := extractCVSSFromSeverity(vuln.Severity)
+	severity := severityFromScore(score)
 
 	affected := extractAffectedVersions(vuln)
 	fixes := extractFixVersions(vuln)
@@ -178,22 +164,26 @@ func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerab
 		affected = []string{"unknown"}
 	}
 
-	cveID := vuln.ID
-	if strings.HasPrefix(strings.ToUpper(cveID), "CVE-") {
-		// keep
-	} else if strings.Contains(strings.ToUpper(cveID), "CVE-") {
-		cveID = strings.ToUpper(cveID)
-	}
-
 	return domain.FeedVulnerability{
-		CVEID:            cveID,
+		CVEID:            resolveCVEID(vuln),
 		Severity:         severity,
 		CVSSScore:        score,
+		CVSSVector:       vector,
 		Ecosystem:        ecosystem,
 		PackageName:      packageName,
 		AffectedVersions: affected,
 		FixVersions:      fixes,
 	}
+}
+
+func resolveCVEID(vuln osvVuln) string {
+	for _, alias := range vuln.Aliases {
+		normalized := domain.NormalizeCVEID(alias)
+		if strings.HasPrefix(strings.ToUpper(normalized), "CVE-") {
+			return normalized
+		}
+	}
+	return domain.NormalizeCVEID(vuln.ID)
 }
 
 func extractAffectedVersions(vuln osvVuln) []string {

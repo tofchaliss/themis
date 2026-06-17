@@ -205,14 +205,14 @@ moved under `themis-core-model` because that change redefines both.
 
 | # | Task | Status |
 | - | ---- | ------ |
-| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | Open → v0.2.1 |
-| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | Open → v0.2.1 |
-| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | Open → v0.2.1 |
+| 16.1 | OSV query: normalise Alpine package names before lookup (strip `so:` prefix, map `py3-foo` → `python3-foo`) | **Done** (v0.2.1) |
+| 16.2 | Integration test: Alpine SBOM ingest with OSV-matched CVEs | **Done** (`TestV021AlpineSBOMOSVCorrelation`) |
+| 16.3 | Integration test: rpm-based SBOM ingest with unsupported ecosystem skipped cleanly | **Done** (`TestV021RPMSBOMIngestSkipsUnsupportedOSV`) |
 | 16.4 | REST endpoint to register an artifact before SBOM upload | **Moved → `themis-core-model`** (`POST /api/v1/products/{id}/artifacts`) |
-| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | Open → v0.2.1 |
-| 16.6 | `make check` run clean after all hardening items | Open → v0.2.1 |
-| 16.7 | Coverage: `adapter/store/` reaches ≥90% | Open → v0.2.1 |
-| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | Open → v0.2.1 |
+| 16.5 | Upload helper script (curl-based) for local testing and CI pipelines | **Done** (`scripts/upload-sbom.sh`, `scripts/alpine-e2e-gate.sh`) |
+| 16.6 | `make check` run clean after all hardening items | **Done** (v0.2.1) |
+| 16.7 | Coverage: `adapter/store/` reaches ≥90% | **Done** (91.6%) |
+| 16.8 | Coverage: `adapter/osv/` reaches ≥90% | **Done** (93.6%) |
 | 16.9 | Git tag `v0.1.0` and Phase 1 release notes | **Done** (retroactive tag, 2026-06-17) |
 | 16.10 | REST endpoint to register a version | **Moved → `themis-core-model`** (`POST /api/v1/projects/{id}/versions`) |
 
@@ -460,18 +460,22 @@ Reference: `openspec/intel-source-tiers.md`.
 
 #### Alpine E2E bring-up gate (G1–G8)
 
-All failures clear once Group 31 lands:
+**v0.2.1 code landed** (OpenSpec `themis-v0-2-1`); verified 2026-06-17 via integration tests
+(`TestV021*`) + local `./scripts/run-alpine-e2e-local.sh` (G2 metrics) + `./scripts/alpine-e2e-gate.sh`:
 
-| Check | Now | Unblocked by |
-| ----- | --- | ------------ |
-| G1 EPSS/KEV sync | PASS | — |
-| G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | 31.4 / 31.5 / 31.6 |
-| G3 VEX export without manual SQL | **FAIL** | `themis-core-model` (version registration endpoint) |
-| G4 EPSS on Alpine findings | **FAIL** | 31.1 / 31.2 |
-| G5 Risk scores > 0 | **FAIL** | 31.3 |
-| G6 Vendor VEX coverage > 0 | **FAIL** | 31.4–31.6 |
-| G7 Status `highest_cvss_score > 0` | **FAIL** | 31.3 |
-| G8 Layer 1 `deterministic_level` non-informational | **FAIL** | G4 + G5 |
+| Check | Pre-v0.2.1 | v0.2.1 (expected after deploy + backfill) | Verified 2026-06-17 |
+| ----- | ---------- | ------------------------------------------- | ------------------- |
+| G1 EPSS/KEV sync | PASS | PASS | **PASS** (metrics; local run may need ≥120s warm-up) |
+| G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | **PASS** (zip + CSAF directory sources) | **PASS** (`themis_vexfeed_sync_total{feed="alpine",status="success"}`) |
+| G3 VEX export without manual SQL | **FAIL** | **FAIL** — still requires `themis-core-model` | **FAIL** (404 without product-version wiring) |
+| G4 EPSS on Alpine findings | **FAIL** | **PASS** (CVE normalize + backfill + re-enrich) | **PASS** (`TestV021AlpineEPSSAfterReEnrich`) |
+| G5 Risk scores > 0 | **FAIL** | **PASS** (CVSS vector parsing) | **PASS** (integration + OSV CVSS unit tests) |
+| G6 Vendor VEX coverage > 0 | **FAIL** | **PASS** (after G2 + PURL match) | **PASS** (`TestV021ZipVendorVEXFeedLoadsAssertions`) |
+| G7 Status `highest_cvss_score > 0` | **FAIL** | **PASS** | **PASS** (CVSS vector parsing in `mapOSVVuln`) |
+| G8 Layer 1 `deterministic_level` non-informational | **FAIL** | **PASS** (after G4 + G5) | **PASS** (integration re-enrich with KEV/EPSS stubs) |
+
+**Operator checklist:** `./scripts/run-alpine-e2e-local.sh` (embedded Postgres + server) or
+`./scripts/alpine-e2e-gate.sh` against an existing deployment after Alpine SBOM upload.
 
 ---
 

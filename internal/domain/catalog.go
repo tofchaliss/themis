@@ -50,6 +50,17 @@ type ScanDetail struct {
 	VulnerabilityCounts map[string]int
 }
 
+// ScanVulnerabilityEnrichment holds Phase 2a signal fields from risk_context.
+type ScanVulnerabilityEnrichment struct {
+	ExploitPublic       *bool
+	RiskScore           *float64
+	EPSSScore           *float64
+	KEVListed           *bool
+	DeterministicLevel  *string
+	BlastRadiusScore    *float64
+	UpstreamVEXCoverage *string
+}
+
 // ScanVulnerability is a correlated finding for a scan.
 type ScanVulnerability struct {
 	ID             string
@@ -58,6 +69,7 @@ type ScanVulnerability struct {
 	EffectiveState string
 	ComponentPURL  string
 	ProductID      string
+	Enrichment     *ScanVulnerabilityEnrichment
 }
 
 // CatalogComponent is a component catalog entry.
