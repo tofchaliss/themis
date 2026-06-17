@@ -25,14 +25,29 @@ Archive: `openspec/changes/archive/2026-06-09-themis-phase-1/`
 - StubVerifier for cosign (real verification deferred to Phase 3)
 - No AI, no EPSS, no KEV in Phase 1
 
-**Group 16 hardening (9 tasks OPEN — gate for v0.1.0 and Phase 2 start):**
-16.1 Alpine PURL normalisation, 16.2 Alpine integration test, 16.3 rpm integration test,
-16.4 image registration endpoint, 16.5 upload helper, 16.6 `make check` clean,
-16.7 store coverage ≥ 90%, 16.8 osv coverage ≥ 90%, 16.9 tag v0.1.0.
+Tagged **`v0.1.0`** retroactively on the Phase 1 commit `a94f3ba` (2026-06-17, replaced the
+`themis-phase-1` tag).
 
-## Phase 2 — AI Intelligence Layer (NOT STARTED)
+**Group 16 hardening remainder (targets v0.2.1):** the old "gate for v0.1.0 / Phase 2 start"
+framing is retired (v0.1.0 is tagged; Phase 2a already shipped). 16.1 Alpine PURL
+normalisation, 16.2 Alpine integration test, 16.3 rpm integration test, 16.5 upload helper,
+16.6 `make check` clean, 16.7 store coverage ≥ 90%, 16.8 osv coverage ≥ 90% → all target
+**v0.2.1**. 16.4 artifact + 16.10 version registration endpoints → moved to `themis-core-model`.
+16.9 tag v0.1.0 → **done**.
 
-Active change: `openspec/changes/themis-phase-2/`
+## Phase 2a — Signal Foundation (COMPLETE — archived 2026-06-17, v0.2.0)
+
+Archive: `openspec/changes/archive/2026-06-17-themis-phase-2a/`. No AI. Delivered: EPSS/KEV
+sync, ExploitDB CSV, Layer 1 deterministic rules, Layer 2 blast-radius, composite risk score
+V2 (BREAKING), upstream vendor VEX (Red Hat/Alpine/Rocky/Wolfi), VEX export, system status API,
+SBOM soft-delete management, layman error envelope. Canonical specs now live in `openspec/specs/`.
+
+**Open before Phase 2b:** `themis-core-model` (HIGHEST PRIORITY schema restructure),
+Group 31 (8 feed-reliability tasks → v0.2.1), Group 16 remainder (→ v0.2.1).
+
+## Phase 2b/2c — AI Intelligence + AI-Assisted VEX (PLANNED)
+
+Architecture reference (still active, not implemented): `openspec/changes/themis-phase-2/`.
 
 **The defining theme is AI enrichment and signal aggregation.**
 

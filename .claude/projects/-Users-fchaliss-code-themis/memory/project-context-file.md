@@ -13,7 +13,7 @@ Single entry point for AI agents. Contains:
 
 - Context source priority table
 - OpenSpec layout (current change + archive path)
-- Group 16 open task table (9 tasks; gate before Phase 2 starts)
+- Group 16 hardening remainder (targets v0.2.1; v0.1.0 already tagged, Phase 2a shipped)
 - Permanent invariants (never violate)
 - How-to-work workflow
 
@@ -41,11 +41,14 @@ code structure tree.
 | File | Purpose |
 | ---- | ------- |
 | `config.yaml` | OpenSpec schema |
-| `changes/themis-phase-2/proposal.md` | Phase 2 scope, capabilities, prerequisites |
+| `specs/` | Canonical capability specs (source of truth, 17 caps, Phase 1 + 2a merged) |
+| `STATUS.md` | Phase status, release-tags table, prerequisite gates |
+| `intel-source-tiers.md` | 4-tier intelligence source classification + checklist |
+| `changes/themis-phase-2/proposal.md` | Phase 2 scope, capabilities (reference doc) |
 | `changes/themis-phase-2/design.md` | 16 ADRs; open questions OQ-4 through OQ-10 |
 | `changes/themis-phase-2/scenario-fresh-deployment.md` | Cold-start gap analysis |
+| `changes/archive/2026-06-17-themis-phase-2a/tasks.md` | Phase 2a history; Group 31 §31 |
 | `changes/archive/2026-06-09-themis-phase-1/tasks.md` | Phase 1 history; Group 16 §16 |
-| `changes/archive/2026-06-09-themis-phase-1/design.md` | Phase 1 ADRs (reference) |
 
 ## Workflow
 
