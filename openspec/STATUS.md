@@ -74,3 +74,7 @@ Last updated: 2026-06-17._
 Architecture reference for Phases 2a–2c: `openspec/changes/themis-phase-2/`
 
 Cross-phase intelligence source tier classification: `openspec/intel-source-tiers.md`
+
+Canonical capability specs (source of truth, Phase 1 + 2a merged): `openspec/specs/`
+(17 capabilities). Seeded 2026-06-17 when `themis-phase-2a` was archived with spec sync;
+future changes update this tree via `openspec archive`.

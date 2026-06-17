@@ -88,15 +88,16 @@ Track in `project-backlog.md` (§ "Phase 1 — Remaining hardening") and detaile
 
 | Sub-phase | Change | Theme | Status |
 | --- | --- | --- | --- |
-| 2a | `themis-phase-2a` | Signal Foundation | **In progress (~132/140)** — Groups 1–29 done; Group 30 (release gate) open |
-| 2b | `themis-phase-2b` | AI Intelligence | Planned — blocked on 2a `v0.2.0` |
+| 2a | `themis-phase-2a` | Signal Foundation | **Complete (140/148)** — archived 2026-06-17; `v0.2.0`; Group 31 (8 feed-reliability tasks) open as Phase 2b gate |
+| 2b | `themis-phase-2b` | AI Intelligence | Planned — blocked on Group 31 + `themis-core-model` |
 | 2c | `themis-phase-2c` | AI-Assisted VEX | Planned — blocked on 2b |
 
 Phase 2a deliverables (implemented): EPSS/KEV + ExploitDB sync, Layer 1/2 synchronous enrichment,
 composite risk score V2, asset graph registration APIs, upstream vendor VEX (Red Hat/Alpine/Rocky/Wolfi),
 VEX export, system status API, SBOM soft-delete, layman error catalogue. No AI in 2a.
 
-Track tasks: `openspec/changes/themis-phase-2a/tasks.md`. Progress: `openspec/STATUS.md`.
+Track tasks: `openspec/changes/archive/2026-06-17-themis-phase-2a/tasks.md`. Progress: `openspec/STATUS.md`.
+Canonical specs (Phase 1 + 2a merged): `openspec/specs/` (17 capabilities).
 
 ## Related docs
 

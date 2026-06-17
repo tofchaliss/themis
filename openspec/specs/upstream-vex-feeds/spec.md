@@ -1,5 +1,8 @@
-## ADDED Requirements
+# upstream-vex-feeds Specification
 
+## Purpose
+TBD - created by archiving change themis-phase-2a. Update Purpose after archive.
+## Requirements
 ### Requirement: Vendor VEX feed ingestion
 The system SHALL fetch, parse, and store VEX advisories from the following vendor
 feeds on a daily schedule: Red Hat (CSAF 2.0), Alpine Linux (OSV), Rocky Linux
@@ -75,9 +78,9 @@ a four-phase algorithm. Each match SHALL record a `match_type` field on
 ---
 
 ### Requirement: Vendor VEX authority — no upstream version comparison after match
-Once a vendor VEX assertion is matched by any phase of the four-phase algorithm,
-the system SHALL accept the vendor's assertion status without performing any
-additional comparison against upstream CVE version ranges. Vendor VEX is the
+The system SHALL treat a matched vendor VEX assertion as authoritative and SHALL NOT
+perform any additional comparison against upstream CVE version ranges once the
+assertion is matched by any phase of the four-phase algorithm. Vendor VEX is the
 authoritative source for backported patches.
 
 #### Scenario: Vendor not_affected accepted for backported package
@@ -91,8 +94,8 @@ authoritative source for backported patches.
 ---
 
 ### Requirement: Retroactive ReEnrichJob after vendor VEX sync
-After storing new or updated `vex_assertions` rows from a vendor feed sync,
-the system SHALL enqueue a `ReEnrichJob` for every `risk_context` row where
+The system SHALL enqueue a `ReEnrichJob` after storing new or updated `vex_assertions`
+rows from a vendor feed sync, covering every `risk_context` row where
 `(component_purl_normalised, cve_id)` matches a newly added or changed assertion.
 
 #### Scenario: Existing DETECTED finding suppressed after vendor VEX sync
@@ -124,3 +127,4 @@ row with one of three values: `covered`, `not_covered`, or `purl_mismatch`.
 - **WHEN** `GET /api/v1/products/{id}/versions/{v}/vex-coverage` is called
 - **THEN** the response SHALL include integer counts for `covered`,
   `not_covered`, and `purl_mismatch` across all findings for that product version
+

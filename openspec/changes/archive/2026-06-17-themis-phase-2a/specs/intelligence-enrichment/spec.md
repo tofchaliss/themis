@@ -1,4 +1,11 @@
-## MODIFIED Requirements
+## REMOVED Requirements
+
+### Requirement: Phase 1 risk score computation
+**Reason**: Replaced by the Phase 2a composite risk score formula, which incorporates
+EPSS, KEV, public-exploit, and blast-radius signals in addition to CVSS severity and
+VEX state. The Phase 1 CVSS-only formula no longer exists.
+
+## ADDED Requirements
 
 ### Requirement: Phase 2a composite risk score computation
 The system SHALL compute a `risk_score` (integer 0–100) for each `risk_context`
