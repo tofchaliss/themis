@@ -199,12 +199,12 @@ Current implementation status: `openspec/STATUS.md`.
 
 ---
 
-### Phase 2a — Signal Foundation (`themis-phase-2a`) — In Progress
+### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
 **Gate:** Group 16 complete + `v0.1.0` tagged.
-**Releases as:** v0.2.0
-**OpenSpec change:** `openspec/changes/themis-phase-2a/`
-**Progress:** ~132/140 tasks (Groups 1–29 complete; Group 30 open). See `openspec/STATUS.md`.
+**Released as:** v0.2.0 (merged to `main` 2026-06-17; PR #16)
+**OpenSpec change:** `openspec/changes/archive/2026-06-17-themis-phase-2a/`
+**Progress:** 140/140 tasks complete (Groups 17–30). Archived.
 
 **Implemented (Groups 17–29):**
 
@@ -227,13 +227,8 @@ Current implementation status: `openspec/STATUS.md`.
   `DELETE /api/v1/sboms/{id}?force=true` (soft-delete + audit log)
 - **Error UX** — `{error: {code, message, hint}}` envelope on all endpoints; 12 catalogue codes
 - **Acceptance gates** — AC-16..AC-24 integration tests; feed resilience FR1–FR8 mapped
-
-**Still open (Group 30 — release gate):**
-
-- Final coverage verification for all new packages
-- Prometheus metrics wiring (`themis_epsskev_*`, `themis_vexfeed_*`, `themis_blast_radius_score`, etc.)
-- `verification.md` + `docs/acceptance-criteria.md` sync; `AGENTS.md` status update
-- Merge to `main`, tag `v0.2.0`, release notes
+- **Group 30 complete** — coverage gates, Prometheus metrics wiring, `verification.md` sync,
+  `AGENTS.md` update, release notes, merge to `main`, `v0.2.0` tag
 
 **Deferred from Phase 2a scope (see follow-ons below):**
 
@@ -405,9 +400,56 @@ G2/G4/G5/G6/G7/G8 on Alpine OSV findings.
 
 ---
 
+### Pre-Phase 2b Gate — Feed Reliability and Signal Quality (Group 31 — 8 tasks BLOCKING)
+
+Identified during the intel-source-tiers cross-check after Phase 2a was declared complete.
+All 8 tasks must close before Phase 2b implementation begins. Tracked in
+`openspec/changes/archive/2026-06-17-themis-phase-2a/tasks.md` §31.
+Reference: `openspec/intel-source-tiers.md`.
+
+#### 31a — OSV / Alpine CVE normalization
+
+| # | Task | Root cause |
+| - | ---- | ---------- |
+| 31.1 | Normalize `ALPINE-CVE-*` IDs to `CVE-*` in `mapOSVVuln` (`internal/adapter/osv/`) | 592/592 Alpine findings show `with_epss: 0` — EPSS/KEV join never matches `ALPINE-CVE-*` form |
+| 31.2 | Fix `ParseOSVFeed.firstCVE()` to strip `ALPINE-CVE-` prefix | Alpine advisories silently dropped because `firstCVE()` only accepts `CVE-*` prefix |
+| 31.3 | Fix OSV CVSS vector parsing — replace `fmt.Sscanf("%f")` with proper vector parser | `CVSS:3.1/AV:N/...` strings not parsed; all CVSS scores = 0; Layer 1/G5/G7 blocked |
+
+#### 31b — Vendor feed URL fixes
+
+| # | Task | Root cause |
+| - | ---- | ---------- |
+| 31.4 | Alpine OSV: update default URL to GCS zip; wire `ZipOSVFeedSource` | Default URL returns HTTP 302 (GitLab login redirect) |
+| 31.5 | Rocky Linux OSV: update default URL to GCS zip | Default URL returns HTTP 404 |
+| 31.6 | Red Hat CSAF: implement `CSAFDirectoryFeedSource` to crawl advisory index | Default URL returns HTML directory listing; cannot fix with URL override alone |
+
+#### 31c — ExploitDB signal wiring
+
+| # | Task | Root cause |
+| - | ---- | ---------- |
+| 31.7 | Expose `exploit_public` in scan findings API response | Adapter exists; `exploit_public` invisible to operators via primary API |
+| 31.8 | Wire `themis_exploitdb_sync_total` Prometheus counter in ExploitDB scheduler | Listed in Group 30.2 but counter not emitted; sync success unverifiable via `/metrics` |
+
+#### Alpine E2E bring-up gate (G1–G8)
+
+All failures clear once Group 31 lands:
+
+| Check | Now | Unblocked by |
+| ----- | --- | ------------ |
+| G1 EPSS/KEV sync | PASS | — |
+| G2 Vendor VEX sync (Alpine/Rocky/RHEL) | **FAIL** | 31.4 / 31.5 / 31.6 |
+| G3 VEX export without manual SQL | **FAIL** | Group 16.10 |
+| G4 EPSS on Alpine findings | **FAIL** | 31.1 / 31.2 |
+| G5 Risk scores > 0 | **FAIL** | 31.3 |
+| G6 Vendor VEX coverage > 0 | **FAIL** | 31.4–31.6 |
+| G7 Status `highest_cvss_score > 0` | **FAIL** | 31.3 |
+| G8 Layer 1 `deterministic_level` non-informational | **FAIL** | G4 + G5 |
+
+---
+
 ### Phase 2b — AI Intelligence (`themis-phase-2b`) — Planned
 
-**Gate:** Phase 2a complete and signal feeds confirmed healthy.
+**Gate:** Phase 2a archived + Group 31 complete + signal feeds confirmed healthy (G1–G8 pass).
 **Releases as:** v0.3.0
 **OpenSpec change:** `openspec/changes/themis-phase-2b/` (to be created)
 

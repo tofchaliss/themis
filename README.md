@@ -289,7 +289,9 @@ Phase 2a replaces the Phase 1 CVSS-only score with a composite formula incorpora
 
 Deferred to later phases: AI workers (2b), GHSA adapter (2b), Debian/Ubuntu VEX feeds, per-feed on/off flags, image registration API (Phase 1 Group 16), Redis queue, Docker stack, Web UI, RBAC, real cosign verification. See [project-backlog.md](project-backlog.md).
 
-**Implementation status:** Groups 1–29 complete (~132/140 tasks). Group 30 (coverage gates, metrics wiring, `v0.2.0` tag) is next — see [`openspec/STATUS.md`](openspec/STATUS.md).
+**Implementation status:** All 140 tasks complete (Groups 17–30); `v0.2.0` merged to `main`
+(PR #16); Phase 2a archived 2026-06-17. Group 31 (8 feed-reliability tasks) is the blocking
+gate before Phase 2b starts — see [`openspec/STATUS.md`](openspec/STATUS.md).
 
 ---
 
