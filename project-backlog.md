@@ -48,10 +48,16 @@ convention, status API response shape, and Go code conventions per tier.
 
 ---
 
-## ⚠️ HIGHEST PRIORITY — Core Data Model Restructure (`themis-core-model`)
+## HIGHEST PRIORITY (schema work) — Core Data Model Restructure (`themis-core-model`)
 
-**Decided: 2026-06-16. All decisions confirmed. Must complete before any other open item —
-Group 16, Group 30, Phase 2b planning, and all post-2a follow-ons gate behind this.**
+**Decided: 2026-06-16. All decisions confirmed. This is the next breaking change and ships as
+`v0.3.0` together with Phase 2b.**
+
+It gates everything that depends on the schema: the artifact/version registration endpoints
+(Group 16.4 / 16.10), the G3 "VEX export without SQL" fix, and Phase 2b planning. It does
+**not** gate the `v0.2.1` maintenance release — Group 31 feed fixes and the Group 16 hardening
+remainder (16.1–16.3, 16.5–16.8) touch no schema and ship first, ahead of this restructure.
+See "Release versioning — reconciliation" below.
 
 ### Why now
 
