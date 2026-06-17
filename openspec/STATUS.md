@@ -32,32 +32,33 @@ Last updated: 2026-06-17._
 
   | # | Task | Status |
   | --- | --- | --- |
-  | 16.1 | Normalise Alpine package names for OSV queries | Open → v0.2.1 |
-  | 16.2 | Integration test: Alpine SBOM ingest | Open → v0.2.1 |
-  | 16.3 | Integration test: rpm SBOM | Open → v0.2.1 |
+  | 16.1 | Normalise Alpine package names for OSV queries | **Done** (v0.2.1) |
+  | 16.2 | Integration test: Alpine SBOM ingest | **Done** (`TestV021AlpineSBOMOSVCorrelation`) |
+  | 16.3 | Integration test: rpm SBOM | **Done** (`TestV021RPMSBOMIngestSkipsUnsupportedOSV`) |
   | 16.4 | Artifact registration endpoint | Moved → `themis-core-model` |
-  | 16.5 | Upload helper script | Open → v0.2.1 |
-  | 16.6 | `make check` passes clean | Open → v0.2.1 |
-  | 16.7 | `adapter/store/` coverage ≥ 90% | Open → v0.2.1 |
-  | 16.8 | `adapter/osv/` coverage ≥ 90% | Open → v0.2.1 |
+  | 16.5 | Upload helper script | **Done** (`scripts/upload-sbom.sh`, `scripts/alpine-e2e-gate.sh`) |
+  | 16.6 | `make check` passes clean | **Done** (v0.2.1) |
+  | 16.7 | `adapter/store/` coverage ≥ 90% | **Done** (91.6%) |
+  | 16.8 | `adapter/osv/` coverage ≥ 90% | **Done** (93.6%) |
   | 16.9 | Tag `v0.1.0` + Phase 1 release notes | **Done** (retroactive tag) |
   | 16.10 | Version registration endpoint | Moved → `themis-core-model` |
 
-- **Group 31 — Feed reliability and signal-quality (8 tasks open; targets v0.2.1)** — must
-  complete before Phase 2b begins. All are Phase 2a runtime failures found during live Alpine
-  SBOM bring-up. Ships in the `v0.2.1` maintenance release alongside the Group 16 remainder.
+- **Group 31 — Feed reliability and signal-quality (8 tasks complete on branch; targets v0.2.1)** —
+  completed in `themis-v0-2-1`; these fixes remain a Phase 2b prerequisite until
+  `v0.2.1` is merged/tagged from `themis-phase-2`.
+  All originated from Phase 2a runtime failures found during live Alpine SBOM bring-up.
   Full detail: `openspec/changes/archive/2026-06-17-themis-phase-2a/tasks.md` §31.
 
   | # | Task | Status |
   | --- | --- | --- |
-  | 31.1 | Normalize `ALPINE-CVE-*` IDs to `CVE-*` in `mapOSVVuln` | Open |
-  | 31.2 | Fix `ParseOSVFeed.firstCVE()` Alpine prefix strip | Open |
-  | 31.3 | Fix OSV CVSS vector parsing (`fmt.Sscanf` bug) | Open |
-  | 31.4 | Alpine OSV URL fix — HTTP 302 → GCS zip | Open |
-  | 31.5 | Rocky Linux OSV URL fix — HTTP 404 → GCS zip | Open |
-  | 31.6 | Red Hat CSAF — implement `CSAFDirectoryFeedSource` | Open |
-  | 31.7 | Expose `exploit_public` in scan findings API | Open |
-  | 31.8 | Wire `themis_exploitdb_sync_total` Prometheus counter | Open |
+  | 31.1 | Normalize `ALPINE-CVE-*` IDs to `CVE-*` in `mapOSVVuln` | **Done** (v0.2.1) |
+  | 31.2 | Fix `ParseOSVFeed.firstCVE()` Alpine prefix strip | **Done** (v0.2.1) |
+  | 31.3 | Fix OSV CVSS vector parsing (`fmt.Sscanf` bug) | **Done** (v0.2.1) |
+  | 31.4 | Alpine OSV URL fix — HTTP 302 → GCS zip | **Done** (v0.2.1) |
+  | 31.5 | Rocky Linux OSV URL fix — HTTP 404 → GCS zip | **Done** (v0.2.1) |
+  | 31.6 | Red Hat CSAF — implement `CSAFDirectoryFeedSource` | **Done** (v0.2.1) |
+  | 31.7 | Expose `exploit_public` in scan findings API | **Done** (v0.2.1) |
+  | 31.8 | Wire `themis_exploitdb_sync_total` Prometheus counter | **Done** (v0.2.1) |
 
 ## Completed Changes
 
