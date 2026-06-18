@@ -89,6 +89,12 @@ This conflation causes three concrete problems that compound with each phase bui
 
 ### New entity hierarchy
 
+> **Refined in the `themis-core-model` design (2026-06-18):** `sbom` is keyed
+> `(artifact_id, sbom_checksum)`, not strictly 1-per-artifact — see design decision D9
+> (handles multi-tool/corrected SBOMs without orphaning findings). Other refinements there:
+> D10 latest-scan invariant, D11 denormalized version-qualified purl+cve, D12 ingest
+> idempotency, D13 squashed migration baseline + schema-skew guard.
+
 ```text
 product
   └── project  (product_id)               ← unchanged

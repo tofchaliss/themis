@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-17._
+Last updated: 2026-06-17 (themis-core-model proposed)._
 
 ---
 
@@ -9,16 +9,21 @@ Last updated: 2026-06-17._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
+| themis-core-model | Planning complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (9 groups) | — (ready to implement; merges first under v0.3.0) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Planned | — | not started | `themis-core-model` (v0.2.1 archived) |
+| themis-phase-2b | Planned | — | not started | `themis-core-model` (planned; v0.2.1 archived) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
 
-- **`themis-core-model` restructure (HIGHEST PRIORITY)** — must complete before any other open
-  item. Splits `sbom_documents` into `sboms` + `scan_reports`; fixes silent triage loss; removes
-  `is_latest` anti-pattern; adds `version.project_id` FK. Gates Group 16, Phase 2b, and all
-  post-2a follow-ons. Full detail: `project-backlog.md` §Core Data Model Restructure.
+- **`themis-core-model` restructure (HIGHEST PRIORITY)** — **planning complete 2026-06-17**
+  (proposal/design/specs/tasks; ready to implement). Splits `sbom_documents` into `sboms` +
+  `scan_reports`; fixes silent triage loss via `risk_context` identity PK; removes
+  `is_latest`/`supersedes_id`; merges `artifacts`+`images`; adds `version.project_id` FK; folds
+  in the moved Group 16 registration endpoints. **Greenfield migration — no data backfill; dev
+  DBs re-init.** Gates Phase 2b; merges first under the `v0.3.0` line. Change:
+  `openspec/changes/themis-core-model/`. Full background: `project-backlog.md` §Core Data Model
+  Restructure.
 
 > Group 31 and the Group 16 hardening remainder shipped in **`themis-v0-2-1`** (archived
 > 2026-06-17, 36/37 tasks; only the manual merge-to-`main` + tag `v0.2.1` step, 7.7, remains).
