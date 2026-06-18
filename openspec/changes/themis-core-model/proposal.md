@@ -29,9 +29,14 @@ change ahead of) Phase 2b.
 - **BREAKING — `version.project_id` (NOT NULL) replaces `version.product_id`.** A default
   project is auto-created on product registration so the single-project case needs no manual
   step. `product_versions` becomes `versions`.
-- **BREAKING — `risk_context` primary key becomes `(artifact_id, component_purl, cve_id)`**
-  instead of `component_vulnerability_id`. Identity-based, so triage decisions survive
-  rescans. This is the triage-persistence fix.
+- **BREAKING — Durable-Enrichment Identity Contract.** `risk_context` and the other durable
+  Layer-2/3 judgment tables — `triage_history`, `remediation_actions`, `intelligence_signals`
+  (and `runtime_exposures`, with its `environment` dimension) — are re-keyed on the stable
+  identity `(artifact_id, component_purl, cve_id)` instead of the per-scan
+  `component_vulnerability_id`, so triage, remediation status, and enrichment survive rescans.
+  Only the raw finding (`component_vulnerabilities`) stays per-scan. This is the triage-persistence
+  fix generalized to the whole judgment family, and the clean base Phase 2b's AI tables build on
+  (see design D15).
 - **BREAKING — Remove `is_latest` and `supersedes_id`.** "Latest scan" =
   `ORDER BY scanned_at DESC LIMIT 1`.
 - **FK column renames** (same logic, new target tables): `component_versions.sbom_document_id`
@@ -44,9 +49,14 @@ change ahead of) Phase 2b.
 - **Registration endpoints** (moved here from Phase 1 Group 16, because this change redefines
   both tables): `POST /api/v1/products/{id}/artifacts` (16.4) and
   `POST /api/v1/projects/{id}/versions` (16.10).
-- **Unchanged:** the entire Phase 2a intelligence layer — EPSS/KEV sync, ExploitDB, Layer 1
-  deterministic rules, Layer 2 blast-radius, VEX matching, VEX export. Only FK traversal
-  (column names / target tables) is updated; no algorithm changes.
+- **Unchanged (algorithms):** the entire Phase 2a intelligence *logic* — EPSS/KEV sync,
+  ExploitDB, Layer 1 deterministic rules, Layer 2 blast-radius, VEX matching, VEX export — is
+  unchanged. The Layer-2/3 tables it writes are re-keyed per the identity contract above, but no
+  algorithm changes.
+- **Phase 2b is additive on this base:** the AI tables (`ai_summaries`, `ai_cwe_mappings`,
+  `ai_exploitability`, `ai_vex_recommendations`, `ai_remediation_advice`, `ai_fp_analysis`) +
+  pgvector KB + JobQueue wiring add on top with **zero ALTERs to core-model tables** — the success
+  test for "this layer makes everything clean".
 
 ## Capabilities
 
@@ -62,9 +72,10 @@ change ahead of) Phase 2b.
   `scan_reports`; `artifacts`/`images` merged with a globally-unique `image_digest`;
   `versions.project_id` replaces `product_versions.product_id`; FK columns re-pointed; the
   `is_latest`/`supersedes_id` chain removed.
-- `cve-triage`: triage decisions persist across rescans because `risk_context` is keyed on
-  artifact-relative identity `(artifact_id, component_purl, cve_id)` rather than a per-scan
-  `component_vulnerability_id`.
+- `cve-triage`: triage decisions and history persist across rescans because `risk_context` and
+  `triage_history` are keyed on artifact-relative identity `(artifact_id, component_purl, cve_id)`
+  rather than a per-scan `component_vulnerability_id` (the Durable-Enrichment Identity Contract,
+  design D15, which also re-keys `remediation_actions` / `intelligence_signals`).
 - `sbom-ingestion`: a single ingest produces one `sboms` row (composition) and one
   `scan_reports` row (the scan), instead of one `sbom_documents` row.
 - `sbom-management`: SBOM/scan listing and soft-delete operate over the split model; "latest"
@@ -79,9 +90,13 @@ change ahead of) Phase 2b.
   `watch`), ingestion use case (split insert), `vexgen`/`watch` use cases, API handlers,
   `vexfeed` store, asset-graph blast-radius, DI wiring — FK column/table rename propagation +
   the ingestion split + `risk_context` PK query changes.
+- **Durable enrichment re-keying (D15):** `triage_history`, `remediation_actions`,
+  `intelligence_signals` (and `runtime_exposures` + `environment`) move off
+  `component_vulnerability_id` onto `(artifact_id, component_purl, cve_id)`; their store layers
+  and indexes change accordingly. Guarantees Phase 2b's `ai_*` tables are additive (zero ALTERs).
 - **Tests (~23+ files):** SQL fixtures referencing `sbom_document_id` / `image_id`;
-  `risk_context` store tests for the new PK; new registration-endpoint tests; triage-survives-
-  rescan integration test.
+  `risk_context` store tests for the new PK; enrichment-survives-rescan integration tests (triage
+  and remediation status); an additivity assertion; new registration-endpoint tests.
 - **API:** additive registration endpoints; SBOM/scan response fields that exposed `is_latest`
   are re-derived. **BREAKING** for any integration that assumed the old table/column shape.
 - **Docs:** README registration walkthrough (replaces manual `INSERT INTO images`), reset SQL,

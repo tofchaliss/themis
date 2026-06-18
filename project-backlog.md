@@ -620,7 +620,10 @@ distinguish AI errors from missing data errors.
 
 - Layer 1 + Layer 2 provide the deterministic signals AI workers consume
 - Microservice/Deployment entities provide service descriptions for Context Analyzer
-- `risk_context` has `ai_exploitability`, `ai_reachability_confidence` columns (NULL until 2b)
+- `risk_context` and the durable enrichment family key on the stable identity
+  `(artifact_id, component_purl, cve_id)` after `themis-core-model` (D15), so AI enrichment
+  attaches additively — Phase 2b adds the `ai_exploitability` / `ai_reachability_confidence`
+  columns (they do **not** exist yet; no core-model table needs ALTER to add them)
 
 **Database migrations:** 000015 (pgvector extension + embeddings table),
 000016 (ai_summaries, ai_cwe_mappings, ai_exploitability, ai_vex_recommendations,

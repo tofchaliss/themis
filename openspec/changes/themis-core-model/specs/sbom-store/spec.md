@@ -31,6 +31,37 @@ artifact). `component_versions` and `dependency_relationships` SHALL reference `
 - **THEN** each `component_vulnerabilities` row SHALL reference the `scan_reports` row for that
   scan via `scan_report_id`
 
+### Requirement: Durable enrichment is keyed on stable identity
+The system SHALL key durable Layer-2/3 judgment records on the stable identity
+`(artifact_id, component_purl, cve_id)` rather than on the per-scan `component_vulnerability_id`,
+so that judgments survive rescans and are not recomputed. This SHALL apply to `risk_context`,
+`triage_history`, `remediation_actions`, and `intelligence_signals`. `runtime_exposures` SHALL key
+on `(artifact_id, component_purl, cve_id, environment)`. Only the raw finding
+(`component_vulnerabilities`) remains per-scan. The contract SHALL hold for any future enrichment
+table: artifact-specific judgments key on the stable identity; CVE-global knowledge keys on
+`cve_id`.
+
+#### Scenario: Remediation status survives a rescan
+- **WHEN** a remediation action for a finding is `in_progress` and the artifact is rescanned
+- **THEN** the system SHALL retain the `in_progress` `remediation_actions` row against
+  `(artifact_id, component_purl, cve_id)` rather than resetting it for the new scan's finding row
+
+#### Scenario: Triage history is continuous across rescans
+- **WHEN** a finding's `(artifact_id, component_purl, cve_id)` has triage history and the artifact
+  is rescanned
+- **THEN** the system SHALL return the full prior `triage_history` for that identity, not a
+  history fragmented per scan
+
+#### Scenario: Intelligence signals attach to the stable identity
+- **WHEN** an enrichment signal is recorded for a finding and the artifact is later rescanned
+- **THEN** the signal SHALL remain associated with `(artifact_id, component_purl, cve_id)` and be
+  visible on the latest scan's finding without recomputation
+
+#### Scenario: Future enrichment tables follow the contract
+- **WHEN** a new durable enrichment table is added (e.g. a Phase 2b AI output table)
+- **THEN** it SHALL key artifact-specific judgments on `(artifact_id, component_purl, cve_id)` and
+  CVE-global knowledge on `cve_id`, and SHALL NOT key on the per-scan `component_vulnerability_id`
+
 ### Requirement: Current findings are scoped to the latest scan report
 The system SHALL define an artifact's "current findings" as exactly the
 `component_vulnerabilities` whose `scan_report_id` is the latest `scan_reports` row for the

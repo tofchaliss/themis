@@ -286,6 +286,60 @@ over — cross-build persistence is provided by the `themis_generated` VEX overl
   is the VEX overlay's job, not `risk_context`. Stating both mechanisms and their scopes prevents
   "triage looks lost" confusion.
 
+### D15 — Durable-Enrichment Identity Contract (generalizes D3; the Phase 2b foundation)
+
+D3 re-keyed `risk_context`, but the per-scan orphaning bug it removes is **not unique to
+`risk_context`**. Four existing Layer-2/3 tables key on the per-scan `component_vulnerability_id`
+today — `triage_history`, `remediation_actions`, `intelligence_signals`, `runtime_exposures` —
+and Phase 2b adds **six** more (`ai_summaries`, `ai_cwe_mappings`, `ai_exploitability`,
+`ai_vex_recommendations`, `ai_remediation_advice`, `ai_fp_analysis`) plus the pgvector KB. Fixing
+only `risk_context` would leave the bug in four tables and bless the broken pattern for six
+expensive AI tables. Core-model therefore establishes a contract for the **whole judgment
+family**, because the next layer (AI) *is* durable enrichment.
+
+**The contract — every Layer-2/3 row is classified into one identity:**
+
+| Identity | Key | Tables |
+| -------- | --- | ------ |
+| **Per-scan, re-derived** (cheap, recomputed each correlation) | `scan_report_id` / the finding | `component_vulnerabilities` (the raw finding only) |
+| **Identity-scoped, durable judgment** (survives rescan; never recomputed) | `(artifact_id, component_purl, cve_id)` | `risk_context`, `triage_history`, `remediation_actions`, `intelligence_signals`, **and all 6 future `ai_*` tables** |
+| **CVE-global knowledge** (reusable across all artifacts) | `cve_id` (or `cve_id, component_purl` versionless) | future `ai_summaries`, `ai_cwe_mappings`; the KB-cache reuse axis (similarity ≥ 0.92) |
+
+- **`runtime_exposures` carries an `environment` dimension** → key
+  `(artifact_id, component_purl, cve_id, environment)`, or treat as derived context; decided at
+  implementation. It is the one table the per-customer/per-environment question (D8) touches.
+
+**Why this is the Phase 2b foundation (two failure modes it prevents):**
+
+1. **Cost.** AI enrichment is 60–180 s/model call. If `ai_exploitability` keyed on the per-scan
+   finding, **every rescan would orphan all AI output and re-run all 7 workers**. Identity-scoped
+   keying means a rescan reuses prior AI enrichment; only genuinely new `(artifact, purl, cve)`
+   identities trigger model calls — which is also exactly what the KB-first cache assumes.
+2. **Async race vs D10.** AI jobs are async (JobQueue, ~120 s). If a rescan lands mid-flight, D10
+   ("current findings = latest scan") makes any enrichment that keys on the *old* finding attach
+   to a now-stale row and vanish from the API. Identity-scoped keying makes enrichment attach to
+   the stable identity, so it surfaces regardless of which scan is current. **D11's denormalized
+   `(component_purl, cve_id)` on the finding is precisely what lets the latest-scan findings JOIN
+   identity-scoped enrichment** — D11 generalizes from "triage join" to "all enrichment join".
+
+**Additivity assertion (the success test):** with this contract, **Phase 2b is purely additive** —
+new `ai_*` tables + pgvector + JobQueue wiring, with **zero ALTERs to core-model tables**. (Note:
+the backlog memory claims `risk_context` already has `ai_exploitability` /
+`ai_reachability_confidence` columns "NULL until 2b" — it does **not**; only the Phase 2a columns
+exist. Core-model does not pre-add them; it guarantees they can be added additively in 2b.)
+
+- **Alternative considered:** leave the existing four tables per-scan and re-key only
+  `risk_context`. Rejected — `remediation_actions.status` (pending→in_progress→completed) would
+  silently reset on every rescan, and `intelligence_signals` is where AI output lands; both are
+  durable judgments by construction.
+- **Version granularity must stay consistent (links D11):** identity-scoped rows use the
+  *version-qualified* `component_purl`; CVE-global knowledge uses *versionless* `cve_id` /
+  package. The asset/knowledge-graph `Package` nodes must map cleanly to one of these so AI
+  write-back through the graph does not impedance-mismatch.
+- **KB layering:** the pgvector KB (L1c) sits *above* artifact identity — a global semantic store
+  that *produces* decisions which are then *applied* to identity-scoped rows. Clean as long as the
+  identity keys beneath it are clean, which is the point of this contract.
+
 ## Risks / Trade-offs
 
 - **Wide rename surface (~23 non-test + ~23 test files)** → mechanical FK column/table renames;
