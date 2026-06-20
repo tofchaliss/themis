@@ -17,10 +17,10 @@ func TestPostgresEnrichmentRepository(t *testing.T) {
 	level := "High"
 
 	findingsRows := &fakeRows{data: [][]any{
-		{"cv-1", "pkg:npm/a@1", "CVE-1", "high", 7.5, "vuln-1", "prod-1", "sbom-1", "comp-1"},
+		{"cv-1", "pkg:npm/a@1", "CVE-1", "high", 7.5, "vuln-1", "prod-1", "scan-1", "art-1", "comp-1"},
 	}}
 	findingsPool := storeFakePool{conn: storeFakeConn{}, rows: findingsRows}
-	findings, err := NewPostgresEnrichmentRepository(findingsPool).ListFindingsForSBOM(ctx, "sbom-1")
+	findings, err := NewPostgresEnrichmentRepository(findingsPool).ListFindingsForArtifact(ctx, "art-1")
 	if err != nil || len(findings) != 1 || findings[0].CVEID != "CVE-1" {
 		t.Fatalf("findings=%+v err=%v", findings, err)
 	}
@@ -29,31 +29,31 @@ func TestPostgresEnrichmentRepository(t *testing.T) {
 		{"va-1", "vex-1", "pkg:npm/a@1", "CVE-1", "not_affected", "fixed", now, "manual"},
 	}}
 	assertionPool := storeFakePool{conn: storeFakeConn{}, rows: assertionRows}
-	assertions, err := NewPostgresEnrichmentRepository(assertionPool).ListAssertionsForSBOM(ctx, "sbom-1")
+	assertions, err := NewPostgresEnrichmentRepository(assertionPool).ListAssertionsForArtifact(ctx, "sbom-1")
 	if err != nil || len(assertions) != 1 || assertions[0].Status != "not_affected" {
 		t.Fatalf("assertions=%+v err=%v", assertions, err)
 	}
 
 	riskPool := seqFakePool{conn: &seqFakeConn{
 		rows: []pgx.Row{scanRow{values: []any{
-			"rc-1", "cv-1", "open", "high", "not_affected", "va-1", "justified",
+			"open", "high", "not_affected", "va-1", "justified",
 			float64(70), epss, true, true, level, 1.5,
 		}}},
 	}}
-	snapshot, err := NewPostgresEnrichmentRepository(riskPool).GetRiskContext(ctx, "cv-1")
+	snapshot, err := NewPostgresEnrichmentRepository(riskPool).GetRiskContext(ctx, "art-1", "pkg:npm/a@1", "CVE-1")
 	if err != nil || snapshot.RiskScore != 70 || snapshot.DeterministicLevel != domain.DeterministicLevelHigh {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 
 	emptyRiskPool := storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}
-	emptySnapshot, err := NewPostgresEnrichmentRepository(emptyRiskPool).GetRiskContext(ctx, "missing")
-	if err != nil || emptySnapshot.ID != "" {
+	emptySnapshot, err := NewPostgresEnrichmentRepository(emptyRiskPool).GetRiskContext(ctx, "art-x", "pkg:x", "CVE-x")
+	if err != nil || emptySnapshot.EffectiveState != "" {
 		t.Fatalf("snapshot=%+v err=%v", emptySnapshot, err)
 	}
 
 	upsertPool := storeFakePool{conn: storeFakeConn{}}
 	err = NewPostgresEnrichmentRepository(upsertPool).UpsertRiskContext(ctx,
-		domain.EnrichmentFinding{ComponentVulnerabilityID: "cv-1", RawSeverity: "high"},
+		domain.EnrichmentFinding{ArtifactID: "art-1", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1", RawSeverity: "high"},
 		domain.RiskContextSnapshot{
 			EffectiveState: "open", RawSeverity: "high", RiskScore: 70,
 			VEXStatus: "not_affected", VEXAssertionID: "va-1",
@@ -74,7 +74,7 @@ func TestPostgresEnrichmentRepository(t *testing.T) {
 	}
 
 	openRows := &fakeRows{data: [][]any{
-		{"cv-1", "CVE-1", "high", "detected", 7.5, 1.2},
+		{"art-1", "pkg:npm/a@1", "CVE-1", "high", "detected", 7.5, 1.2},
 	}}
 	openPool := storeFakePool{conn: storeFakeConn{}, rows: openRows}
 	openRowsOut, err := NewPostgresEnrichmentRepository(openPool).ListOpenRiskContexts(ctx, 0, 0)
@@ -85,7 +85,7 @@ func TestPostgresEnrichmentRepository(t *testing.T) {
 	updatePool := storeFakePool{conn: storeFakeConn{}}
 	score := 0.5
 	err = NewPostgresEnrichmentRepository(updatePool).UpdateRiskContextSignals(ctx,
-		domain.OpenRiskContextRow{ComponentVulnerabilityID: "cv-1"},
+		domain.OpenRiskContextRow{ArtifactID: "art-1", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1"},
 		&score, true, false, domain.DeterministicLevelCritical, 90,
 	)
 	if err != nil {
@@ -95,13 +95,13 @@ func TestPostgresEnrichmentRepository(t *testing.T) {
 	vexPool := seqFakePool{conn: &seqFakeConn{
 		rows: []pgx.Row{scanRow{values: []any{"sbom-1"}}},
 	}}
-	sbomID, err := NewPostgresEnrichmentRepository(vexPool).SBOMDocumentForVEX(ctx, "vex-1")
+	sbomID, err := NewPostgresEnrichmentRepository(vexPool).ArtifactForVEX(ctx, "vex-1")
 	if err != nil || sbomID != "sbom-1" {
 		t.Fatalf("sbomID=%q err=%v", sbomID, err)
 	}
 
 	queryErr := storeFakePool{conn: storeFakeConn{queryErr: errors.New("query failed")}}
-	if _, err := NewPostgresEnrichmentRepository(queryErr).ListFindingsForSBOM(ctx, "sbom-1"); err == nil {
+	if _, err := NewPostgresEnrichmentRepository(queryErr).ListFindingsForArtifact(ctx, "sbom-1"); err == nil {
 		t.Fatal("expected list findings error")
 	}
 }
@@ -163,7 +163,7 @@ func TestPostgresSBOMStoreSaveVEXWithAssertions(t *testing.T) {
 
 	store := &PostgresSBOMStore{pool: pool}
 	id, err := store.SaveVEX(ctx, domain.SaveVEXInput{
-		Format: "openvex", RawDocument: raw, SBOMDocumentID: "sbom-1",
+		Format: "openvex", RawDocument: raw, ArtifactID: "art-1",
 		TrustResult: domain.TrustResult{Status: domain.TrustStatusVerified},
 	})
 	if err != nil || id == "" {

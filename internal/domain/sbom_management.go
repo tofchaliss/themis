@@ -9,7 +9,8 @@ import (
 var (
 	// ErrSBOMNotFound indicates the SBOM does not exist or was soft-deleted.
 	ErrSBOMNotFound = errors.New("sbom not found")
-	// ErrCannotDeleteLatestSBOM indicates is_latest=true without force=true.
+	// ErrCannotDeleteLatestSBOM indicates the target is the latest scan (by
+	// scanned_at DESC) and force=true was not supplied.
 	ErrCannotDeleteLatestSBOM = errors.New("cannot delete latest sbom without force")
 )
 
@@ -17,17 +18,17 @@ const AuditActionSBOMDeleted = "SBOM_DELETED"
 
 // SBOMListEntry is a row in SBOM list endpoints.
 type SBOMListEntry struct {
-	ID                   string
-	ProductID            string
-	ProductName          string
-	ProductVersion       string
-	ImageName            string
-	ImageDigest          string
-	Format               string
-	ComponentCount       int
-	VulnerabilityCount   int
-	UploadedAt           time.Time
-	IsLatest             bool
+	ID                 string
+	ProductID          string
+	ProductName        string
+	ProductVersion     string
+	ImageName          string
+	ImageDigest        string
+	Format             string
+	ComponentCount     int
+	VulnerabilityCount int
+	UploadedAt         time.Time
+	IsLatest           bool
 }
 
 // SBOMDeleteSummary describes archived data after soft-delete.

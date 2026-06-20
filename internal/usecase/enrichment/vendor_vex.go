@@ -8,11 +8,11 @@ import (
 
 // VendorMatchResult is the outcome of four-phase upstream VEX matching.
 type VendorMatchResult struct {
-	Matched        bool
-	PURLMismatch   bool
-	MatchType      domain.VEXMatchType
-	Status         string
-	Assertion      domain.VendorVEXAssertion
+	Matched         bool
+	PURLMismatch    bool
+	MatchType       domain.VEXMatchType
+	Status          string
+	Assertion       domain.VendorVEXAssertion
 	UpstreamVEXPURL string
 }
 

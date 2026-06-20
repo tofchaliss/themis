@@ -29,6 +29,8 @@ func Mount(r chi.Router, cfg MountConfig) {
 		r.Use(apimiddleware.MaxBytes(cfg.MaxUploadSize))
 		r.Use(cfg.APIKeyAuth.Middleware)
 		gen.HandlerFromMux(wrapped, r)
+		r.Post("/projects/{id}/versions", cfg.Handler.CreateVersion)
+		r.Post("/products/{id}/artifacts", cfg.Handler.RegisterArtifact)
 		r.Post("/products/{id}/microservices", cfg.Handler.CreateMicroservice)
 		r.Post("/microservices/{id}/deployments", cfg.Handler.CreateDeployment)
 		r.Post("/customers", cfg.Handler.CreateCustomer)

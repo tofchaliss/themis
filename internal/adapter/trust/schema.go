@@ -14,10 +14,10 @@ import (
 var schemaFS embed.FS
 
 var (
-	schemaOnce     sync.Once
-	schemaByFormat map[string]*jsonschema.Schema
-	schemaErr      error
-	readSchemaFile = schemaFS.ReadFile
+	schemaOnce        sync.Once
+	schemaByFormat    map[string]*jsonschema.Schema
+	schemaErr         error
+	readSchemaFile    = schemaFS.ReadFile
 	addSchemaResource = func(compiler *jsonschema.Compiler, path string, doc any) error {
 		return compiler.AddResource(path, doc)
 	}

@@ -92,7 +92,7 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 	auth := func(req *http.Request) { req.Header.Set("X-API-Key", integrationAPIKey) }
 
 	productID := createProduct(t, client, server.URL, auth)
-	projectID := createProject(t, client, server.URL, auth, productID)
+	projectID := defaultProjectID(t, ctx, pool, productID)
 
 	return &e2eEnv{
 		t:         t,
@@ -106,7 +106,7 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 	}
 }
 
-func (e *e2eEnv) uploadSBOM(t *testing.T, digest, imageID, idempotencyKey string) (ingestionID string, statusCode int) {
+func (e *e2eEnv) uploadSBOM(t *testing.T, digest, artifactID, idempotencyKey string) (ingestionID string, statusCode int) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "adapter", "parser", "testdata", "cyclonedx-1.6.json"))
 	if err != nil {
@@ -120,7 +120,7 @@ func (e *e2eEnv) uploadSBOM(t *testing.T, digest, imageID, idempotencyKey string
 		"format":       "cyclonedx",
 		"spec_version": "1.6",
 		"document":     document,
-		"image_id":     imageID,
+		"artifact_id":  artifactID,
 		"project_id":   e.projectID,
 		"image_digest": digest,
 		"ci_job_id":    "e2e-job",
@@ -190,18 +190,22 @@ type scanVuln struct {
 func (e *e2eEnv) sbomChecksum(t *testing.T, scanID string) string {
 	t.Helper()
 	var checksum string
-	if err := e.pool.QueryRow(e.ctx, `SELECT checksum_sha256 FROM sbom_documents WHERE id = $1`, scanID).Scan(&checksum); err != nil {
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT sb.sbom_checksum
+		FROM scan_reports sr
+		JOIN sboms sb ON sb.id = sr.sbom_id
+		WHERE sr.id = $1
+	`, scanID).Scan(&checksum); err != nil {
 		t.Fatal(err)
 	}
 	return checksum
 }
 
+// seedImage registers an artifact for the given digest via the REST endpoint and returns its
+// id (used as artifact_id in the upload envelope).
 func (e *e2eEnv) seedImage(t *testing.T, digest string) string {
 	t.Helper()
-	imageID := uuid.NewString()
-	artifactID := uuid.NewString()
-	seedImage(t, e.ctx, e.pool, e.productID, artifactID, imageID, digest)
-	return imageID
+	return registerArtifact(t, e.client, e.serverURL, e.auth, e.productID, digest)
 }
 
 func effectiveState(v scanVuln) string {
@@ -400,7 +404,7 @@ func TestE2E_DuplicateSBOMIdempotency(t *testing.T) {
 	waitForIngestion(t, env.client, env.serverURL, env.auth, firstID)
 
 	var sbomCount int
-	if err := env.pool.QueryRow(env.ctx, `SELECT COUNT(*) FROM sbom_documents`).Scan(&sbomCount); err != nil {
+	if err := env.pool.QueryRow(env.ctx, `SELECT COUNT(*) FROM scan_reports`).Scan(&sbomCount); err != nil {
 		t.Fatal(err)
 	}
 
@@ -413,11 +417,11 @@ func TestE2E_DuplicateSBOMIdempotency(t *testing.T) {
 	}
 
 	var sbomCountAfter int
-	if err := env.pool.QueryRow(env.ctx, `SELECT COUNT(*) FROM sbom_documents`).Scan(&sbomCountAfter); err != nil {
+	if err := env.pool.QueryRow(env.ctx, `SELECT COUNT(*) FROM scan_reports`).Scan(&sbomCountAfter); err != nil {
 		t.Fatal(err)
 	}
 	if sbomCountAfter != sbomCount {
-		t.Fatalf("sbom_documents count changed: %d -> %d", sbomCount, sbomCountAfter)
+		t.Fatalf("scan_reports count changed: %d -> %d", sbomCount, sbomCountAfter)
 	}
 }
 

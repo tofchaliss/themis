@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -21,20 +22,22 @@ func NewPostgresEnrichmentRepository(pool pgQueryPool) *PostgresEnrichmentReposi
 	return &PostgresEnrichmentRepository{pool: pool}
 }
 
-func (r *PostgresEnrichmentRepository) ListFindingsForSBOM(ctx context.Context, sbomDocumentID string) ([]domain.EnrichmentFinding, error) {
+// ListFindingsForArtifact returns the artifact's current findings — the
+// component_vulnerabilities of its latest non-deleted scan (D10, via v_latest_findings).
+func (r *PostgresEnrichmentRepository) ListFindingsForArtifact(ctx context.Context, artifactID string) ([]domain.EnrichmentFinding, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT cv.id, c.purl, v.cve_id, COALESCE(v.severity, 'unknown'),
-		       COALESCE(v.cvss_score, 0), v.id::text, i.product_id::text,
-		       cv.sbom_document_id::text, c.id::text
-		FROM component_vulnerabilities cv
-		JOIN component_versions cvn ON cvn.id = cv.component_version_id
+		SELECT lf.id, lf.component_purl, lf.cve_id, COALESCE(v.severity, 'unknown'),
+		       COALESCE(v.cvss_score, 0), v.id::text, proj.product_id::text,
+		       lf.scan_report_id::text, lf.artifact_id::text, c.id::text
+		FROM v_latest_findings lf
+		JOIN vulnerabilities v ON v.id = lf.vulnerability_id
+		JOIN component_versions cvn ON cvn.id = lf.component_version_id
 		JOIN components c ON c.id = cvn.component_id
-		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
-		JOIN images i ON i.id = sd.image_id
-		WHERE cv.sbom_document_id = $1
-		  AND sd.deleted_at IS NULL
-	`, sbomDocumentID)
+		JOIN artifacts a ON a.id = lf.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
+		WHERE lf.artifact_id = $1
+	`, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("list enrichment findings: %w", err)
 	}
@@ -51,7 +54,8 @@ func (r *PostgresEnrichmentRepository) ListFindingsForSBOM(ctx context.Context, 
 			&finding.CVSSScore,
 			&finding.VulnerabilityID,
 			&finding.ProductID,
-			&finding.SBOMDocumentID,
+			&finding.ScanReportID,
+			&finding.ArtifactID,
 			&finding.ComponentID,
 		); err != nil {
 			return nil, err
@@ -61,10 +65,16 @@ func (r *PostgresEnrichmentRepository) ListFindingsForSBOM(ctx context.Context, 
 	return findings, rows.Err()
 }
 
-func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context, sbomDocumentID string) ([]domain.VEXAssertionMatch, error) {
+// ListAssertionsForArtifact returns VEX assertions applicable to an artifact: those
+// from VEX documents bound to the artifact, plus themis_generated assertions whose
+// (version-qualified) purl matches one of the artifact's current findings.
+func (r *PostgresEnrichmentRepository) ListAssertionsForArtifact(ctx context.Context, artifactID string) ([]domain.VEXAssertionMatch, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT va.id, va.vex_document_id,
-		       COALESCE(c.purl, va.component_purl), v.cve_id, va.status,
+		       COALESCE(
+		           CASE WHEN cvn.version IS NULL OR cvn.version = '' THEN c.purl
+		                ELSE c.purl || '@' || cvn.version END,
+		           va.component_purl), v.cve_id, va.status,
 		       COALESCE(va.justification, ''), COALESCE(vd.ingested_at, va.created_at),
 		       COALESCE(vd.source, 'manual')
 		FROM vex_assertions va
@@ -72,17 +82,14 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context
 		JOIN vulnerabilities v ON v.id = va.vulnerability_id
 		LEFT JOIN component_versions cvn ON cvn.id = va.component_version_id
 		LEFT JOIN components c ON c.id = cvn.component_id
-		WHERE vd.sbom_document_id = $1
+		WHERE vd.artifact_id = $1
 		   OR (
 		       vd.source = 'themis_generated'
 		       AND COALESCE(va.component_purl, c.purl) IN (
-		           SELECT c2.purl
-		           FROM component_versions cvn2
-		           JOIN components c2 ON c2.id = cvn2.component_id
-		           WHERE cvn2.sbom_document_id = $1
+		           SELECT lf.component_purl FROM v_latest_findings lf WHERE lf.artifact_id = $1
 		       )
 		   )
-	`, sbomDocumentID)
+	`, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("list vex assertions: %w", err)
 	}
@@ -100,22 +107,20 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForSBOM(ctx context.Context
 	return matches, rows.Err()
 }
 
-func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, componentVulnerabilityID string) (domain.RiskContextSnapshot, error) {
+func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, artifactID, componentPURL, cveID string) (domain.RiskContextSnapshot, error) {
 	var snapshot domain.RiskContextSnapshot
 	var score float64
 	var level *string
 	var blastScore float64
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, component_vulnerability_id, effective_state,
+		SELECT effective_state,
 		       COALESCE(raw_severity, ''), COALESCE(vex_status, ''),
 		       COALESCE(vex_assertion_id::text, ''), COALESCE(suppression_reason, ''),
 		       COALESCE(risk_score, 0), epss_score, kev_listed, exploit_public,
 		       deterministic_level, COALESCE(blast_radius_score, 1.0)
 		FROM risk_context
-		WHERE component_vulnerability_id = $1
-	`, componentVulnerabilityID).Scan(
-		&snapshot.ID,
-		&snapshot.ComponentVulnerabilityID,
+		WHERE artifact_id = $1 AND component_purl = $2 AND cve_id = $3
+	`, artifactID, componentPURL, cveID).Scan(
 		&snapshot.EffectiveState,
 		&snapshot.RawSeverity,
 		&snapshot.VEXStatus,
@@ -129,7 +134,7 @@ func (r *PostgresEnrichmentRepository) GetRiskContext(ctx context.Context, compo
 		&blastScore,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.RiskContextSnapshot{}, nil
 		}
 		return domain.RiskContextSnapshot{}, fmt.Errorf("get risk context: %w", err)
@@ -150,13 +155,13 @@ func (r *PostgresEnrichmentRepository) UpsertRiskContext(ctx context.Context, fi
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO risk_context (
-			id, component_vulnerability_id, effective_state, priority, risk_score,
+			artifact_id, component_purl, cve_id, effective_state, priority, risk_score,
 			raw_severity, vex_status, vex_assertion_id, suppression_reason, triage_notes,
 			deterministic_level, blast_radius_score, upstream_vex_coverage
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		)
-		ON CONFLICT (component_vulnerability_id) DO UPDATE SET
+		ON CONFLICT (artifact_id, component_purl, cve_id) DO UPDATE SET
 			effective_state = EXCLUDED.effective_state,
 			priority = EXCLUDED.priority,
 			risk_score = EXCLUDED.risk_score,
@@ -168,7 +173,7 @@ func (r *PostgresEnrichmentRepository) UpsertRiskContext(ctx context.Context, fi
 			blast_radius_score = EXCLUDED.blast_radius_score,
 			upstream_vex_coverage = EXCLUDED.upstream_vex_coverage,
 			updated_at = NOW()
-	`, uuid.NewString(), finding.ComponentVulnerabilityID, snapshot.EffectiveState, priority, snapshot.RiskScore,
+	`, finding.ArtifactID, finding.ComponentPURL, finding.CVEID, snapshot.EffectiveState, priority, snapshot.RiskScore,
 		snapshot.RawSeverity, nullIfEmpty(snapshot.VEXStatus), vexAssertionID, nullIfEmpty(snapshot.SuppressionReason),
 		nullIfEmpty(snapshot.SuppressionReason), nullIfEmpty(string(snapshot.DeterministicLevel)), snapshot.BlastRadiusScore,
 		nullIfEmpty(string(snapshot.UpstreamVEXCoverage)))
@@ -196,15 +201,14 @@ func (r *PostgresEnrichmentRepository) ListOpenRiskContexts(ctx context.Context,
 		limit = 500
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT rc.component_vulnerability_id::text, v.cve_id,
+		SELECT rc.artifact_id::text, rc.component_purl, rc.cve_id,
 		       COALESCE(rc.raw_severity, v.severity, 'unknown'), rc.effective_state,
 		       COALESCE(v.cvss_score, 0),
 		       COALESCE(rc.blast_radius_score, 1.0)
 		FROM risk_context rc
-		JOIN component_vulnerabilities cv ON cv.id = rc.component_vulnerability_id
-		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+		JOIN vulnerabilities v ON v.cve_id = rc.cve_id
 		WHERE rc.effective_state IN ('detected', 'in_triage')
-		ORDER BY rc.component_vulnerability_id
+		ORDER BY rc.artifact_id, rc.component_purl, rc.cve_id
 		OFFSET $1 LIMIT $2
 	`, offset, limit)
 	if err != nil {
@@ -215,7 +219,8 @@ func (r *PostgresEnrichmentRepository) ListOpenRiskContexts(ctx context.Context,
 	for rows.Next() {
 		var row domain.OpenRiskContextRow
 		if err := rows.Scan(
-			&row.ComponentVulnerabilityID,
+			&row.ArtifactID,
+			&row.ComponentPURL,
 			&row.CVEID,
 			&row.RawSeverity,
 			&row.EffectiveState,
@@ -240,32 +245,32 @@ func (r *PostgresEnrichmentRepository) UpdateRiskContextSignals(
 ) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE risk_context
-		SET epss_score = $2,
-		    kev_listed = $3,
-		    exploit_public = $4,
-		    deterministic_level = $5,
-		    risk_score = $6,
+		SET epss_score = $4,
+		    kev_listed = $5,
+		    exploit_public = $6,
+		    deterministic_level = $7,
+		    risk_score = $8,
 		    updated_at = NOW()
-		WHERE component_vulnerability_id = $1
-	`, row.ComponentVulnerabilityID, epssScore, kevListed, exploitPublic, nullIfEmpty(string(deterministicLevel)), riskScore)
+		WHERE artifact_id = $1 AND component_purl = $2 AND cve_id = $3
+	`, row.ArtifactID, row.ComponentPURL, row.CVEID, epssScore, kevListed, exploitPublic, nullIfEmpty(string(deterministicLevel)), riskScore)
 	if err != nil {
 		return fmt.Errorf("update risk context signals: %w", err)
 	}
 	return nil
 }
 
-func (r *PostgresEnrichmentRepository) SBOMDocumentForVEX(ctx context.Context, vexDocumentID string) (string, error) {
-	var sbomDocumentID string
+func (r *PostgresEnrichmentRepository) ArtifactForVEX(ctx context.Context, vexDocumentID string) (string, error) {
+	var artifactID string
 	err := r.pool.QueryRow(ctx, `
-		SELECT sbom_document_id::text FROM vex_documents WHERE id = $1
-	`, vexDocumentID).Scan(&sbomDocumentID)
+		SELECT COALESCE(artifact_id::text, '') FROM vex_documents WHERE id = $1
+	`, vexDocumentID).Scan(&artifactID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("vex document %q not found", vexDocumentID)
 		}
 		return "", fmt.Errorf("lookup vex document: %w", err)
 	}
-	return sbomDocumentID, nil
+	return artifactID, nil
 }
 
 // PostgresVEXAssertionWriter persists parsed VEX assertions.
@@ -278,7 +283,7 @@ func NewPostgresVEXAssertionWriter(pool pgPool) *PostgresVEXAssertionWriter {
 	return &PostgresVEXAssertionWriter{pool: pool}
 }
 
-func (w *PostgresVEXAssertionWriter) SyncAssertions(ctx context.Context, vexDocumentID, sbomDocumentID string, assertions []domain.ParsedVEXAssertion) error {
+func (w *PostgresVEXAssertionWriter) SyncAssertions(ctx context.Context, vexDocumentID, artifactID string, assertions []domain.ParsedVEXAssertion) error {
 	if _, err := w.pool.Exec(ctx, `DELETE FROM vex_assertions WHERE vex_document_id = $1`, vexDocumentID); err != nil {
 		return fmt.Errorf("clear vex assertions: %w", err)
 	}
@@ -287,15 +292,19 @@ func (w *PostgresVEXAssertionWriter) SyncAssertions(ctx context.Context, vexDocu
 		if err != nil {
 			return err
 		}
-		componentVersionID, err := w.lookupComponentVersionID(ctx, sbomDocumentID, assertion.ComponentPURL)
+		componentVersionID, err := w.lookupComponentVersionID(ctx, artifactID, assertion.ComponentPURL)
 		if err != nil {
 			return err
 		}
+		var cvnID any
+		if componentVersionID != "" {
+			cvnID = componentVersionID
+		}
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO vex_assertions (
-				id, vex_document_id, vulnerability_id, component_version_id, status, justification
-			) VALUES ($1, $2, $3, $4, $5, $6)
-		`, uuid.NewString(), vexDocumentID, vulnID, componentVersionID, assertion.Status, assertion.Justification); err != nil {
+				id, vex_document_id, vulnerability_id, component_version_id, component_purl, status, justification
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, uuid.NewString(), vexDocumentID, vulnID, cvnID, assertion.ComponentPURL, assertion.Status, assertion.Justification); err != nil {
 			return fmt.Errorf("insert vex assertion: %w", err)
 		}
 	}
@@ -306,7 +315,7 @@ func (w *PostgresVEXAssertionWriter) lookupVulnerabilityID(ctx context.Context, 
 	var id string
 	err := w.pool.QueryRow(ctx, `SELECT id::text FROM vulnerabilities WHERE cve_id = $1`, cveID).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("vulnerability %q not found for vex assertion", cveID)
 		}
 		return "", err
@@ -314,18 +323,22 @@ func (w *PostgresVEXAssertionWriter) lookupVulnerabilityID(ctx context.Context, 
 	return id, nil
 }
 
-func (w *PostgresVEXAssertionWriter) lookupComponentVersionID(ctx context.Context, sbomDocumentID, purl string) (string, error) {
+// lookupComponentVersionID resolves a component version for a purl among the
+// artifact's SBOM compositions. Best-effort: returns "" (NULL) when not found so a
+// VEX referencing a component absent from the SBOM still records its assertion.
+func (w *PostgresVEXAssertionWriter) lookupComponentVersionID(ctx context.Context, artifactID, purl string) (string, error) {
 	var id string
 	err := w.pool.QueryRow(ctx, `
 		SELECT cvn.id::text
 		FROM component_versions cvn
 		JOIN components c ON c.id = cvn.component_id
-		WHERE cvn.sbom_document_id = $1 AND c.purl = $2
+		JOIN sboms s ON s.id = cvn.sbom_id
+		WHERE s.artifact_id = $1 AND (c.purl = $2 OR c.purl || '@' || cvn.version = $2)
 		LIMIT 1
-	`, sbomDocumentID, purl).Scan(&id)
+	`, artifactID, purl).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return "", fmt.Errorf("component %q not found in sbom %q", purl, sbomDocumentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
 		}
 		return "", err
 	}

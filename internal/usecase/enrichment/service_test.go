@@ -46,9 +46,7 @@ func TestApplyVEXRecordsMetricsOnVendorPURLMismatch(t *testing.T) {
 			RawSeverity:              "high",
 			CVSSScore:                7.5,
 		}},
-		existing: map[string]domain.RiskContextSnapshot{
-			"finding-1": {EPSSScore: ptrFloat(0.2), KEVListed: true},
-		},
+		existing: domain.RiskContextSnapshot{EPSSScore: ptrFloat(0.2), KEVListed: true},
 	}
 	handler := &enrichment.Handler{
 		Repo:    repo,
@@ -178,9 +176,7 @@ func TestApplyVEXMostRecentAssertionWins(t *testing.T) {
 			{VEXDocumentID: "vex-old", ComponentPURL: "pkg:npm/lodash@1.0.0", CVEID: "CVE-2024-0001", Status: domain.VEXStatusNotAffected, DocumentTime: older},
 			{VEXDocumentID: "vex-new", ComponentPURL: "pkg:npm/lodash@1.0.0", CVEID: "CVE-2024-0001", Status: domain.VEXStatusUnderInvestigation, DocumentTime: newer},
 		},
-		existing: map[string]domain.RiskContextSnapshot{
-			"finding-1": {EffectiveState: domain.EffectiveStateSuppressed, RawSeverity: "high"},
-		},
+		existing: domain.RiskContextSnapshot{EffectiveState: domain.EffectiveStateSuppressed, RawSeverity: "high"},
 	}
 	audit := &memoryAudit{}
 	handler := &enrichment.Handler{Repo: repo, Audit: audit}
@@ -203,13 +199,11 @@ func TestApplyVEXRevokesToDetected(t *testing.T) {
 			CVEID:                    "CVE-2024-0001",
 			RawSeverity:              "high",
 		}},
-		existing: map[string]domain.RiskContextSnapshot{
-			"finding-1": {
-				EffectiveState:   domain.EffectiveStateSuppressed,
-				RawSeverity:      "high",
-				VEXAssertionID:   "assert-old",
-				SuppressionReason: "old",
-			},
+		existing: domain.RiskContextSnapshot{
+			EffectiveState:    domain.EffectiveStateSuppressed,
+			RawSeverity:       "high",
+			VEXAssertionID:    "assert-old",
+			SuppressionReason: "old",
 		},
 	}
 	audit := &memoryAudit{}
@@ -270,7 +264,7 @@ func TestReenrichVEXLookupError(t *testing.T) {
 func TestApplyVEXWithoutAuditRecorder(t *testing.T) {
 	handler := &enrichment.Handler{Repo: &memoryRepo{
 		findings: []domain.EnrichmentFinding{{ComponentVulnerabilityID: "f1", RawSeverity: "low"}},
-		existing: map[string]domain.RiskContextSnapshot{"f1": {EffectiveState: domain.EffectiveStateDetected}},
+		existing: domain.RiskContextSnapshot{EffectiveState: domain.EffectiveStateDetected},
 	}}
 	if err := handler.ApplyVEX(context.Background(), "sbom-1"); err != nil {
 		t.Fatal(err)
@@ -314,9 +308,7 @@ func TestApplyVEXAuditIncludesVEXDocument(t *testing.T) {
 			ID: "a1", VEXDocumentID: "vex-9", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1",
 			Status: domain.VEXStatusAffected, DocumentTime: now,
 		}},
-		existing: map[string]domain.RiskContextSnapshot{
-			"finding-1": {EffectiveState: domain.EffectiveStateDetected, RawSeverity: "high"},
-		},
+		existing: domain.RiskContextSnapshot{EffectiveState: domain.EffectiveStateDetected, RawSeverity: "high"},
 	}, Audit: &memoryAudit{}}
 	if err := handler.ApplyVEX(context.Background(), "sbom-1"); err != nil {
 		t.Fatal(err)
@@ -324,10 +316,10 @@ func TestApplyVEXAuditIncludesVEXDocument(t *testing.T) {
 }
 
 type memoryRepo struct {
-	findings     []domain.EnrichmentFinding
-	assertions   []domain.VEXAssertionMatch
-	existing     map[string]domain.RiskContextSnapshot
-	upserts      []domain.RiskContextSnapshot
+	findings      []domain.EnrichmentFinding
+	assertions    []domain.VEXAssertionMatch
+	existing      domain.RiskContextSnapshot
+	upserts       []domain.RiskContextSnapshot
 	getErr        error
 	findingsErr   error
 	assertionsErr error
@@ -337,29 +329,26 @@ type memoryRepo struct {
 	lastSBOM      string
 }
 
-func (m *memoryRepo) ListFindingsForSBOM(_ context.Context, sbomDocumentID string) ([]domain.EnrichmentFinding, error) {
+func (m *memoryRepo) ListFindingsForArtifact(_ context.Context, artifactID string) ([]domain.EnrichmentFinding, error) {
 	if m.findingsErr != nil {
 		return nil, m.findingsErr
 	}
-	m.lastSBOM = sbomDocumentID
+	m.lastSBOM = artifactID
 	return m.findings, nil
 }
 
-func (m *memoryRepo) ListAssertionsForSBOM(context.Context, string) ([]domain.VEXAssertionMatch, error) {
+func (m *memoryRepo) ListAssertionsForArtifact(context.Context, string) ([]domain.VEXAssertionMatch, error) {
 	if m.assertionsErr != nil {
 		return nil, m.assertionsErr
 	}
 	return m.assertions, nil
 }
 
-func (m *memoryRepo) GetRiskContext(_ context.Context, findingID string) (domain.RiskContextSnapshot, error) {
+func (m *memoryRepo) GetRiskContext(_ context.Context, _, _, _ string) (domain.RiskContextSnapshot, error) {
 	if m.getErr != nil {
 		return domain.RiskContextSnapshot{}, m.getErr
 	}
-	if snapshot, ok := m.existing[findingID]; ok {
-		return snapshot, nil
-	}
-	return domain.RiskContextSnapshot{}, nil
+	return m.existing, nil
 }
 
 func (m *memoryRepo) UpsertRiskContext(_ context.Context, _ domain.EnrichmentFinding, snapshot domain.RiskContextSnapshot) error {
@@ -370,7 +359,7 @@ func (m *memoryRepo) UpsertRiskContext(_ context.Context, _ domain.EnrichmentFin
 	return nil
 }
 
-func (m *memoryRepo) SBOMDocumentForVEX(_ context.Context, _ string) (string, error) {
+func (m *memoryRepo) ArtifactForVEX(_ context.Context, _ string) (string, error) {
 	if m.sbomForVEXErr != nil {
 		return "", m.sbomForVEXErr
 	}

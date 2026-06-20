@@ -16,10 +16,10 @@ const cveWatchLastSuccessKey = domain.SystemStateCVEWatchLastSuccess
 
 // PostgresWatchRepository persists CVE watch catalog matches and poll state.
 type PostgresWatchRepository struct {
-	pool         pgQueryPool
-	vulnCatalog  *PostgresVulnerabilityCatalog
-	correlate    *PostgresCorrelationRepository
-	riskContext  *PostgresRiskContextRepository
+	pool        pgQueryPool
+	vulnCatalog *PostgresVulnerabilityCatalog
+	correlate   *PostgresCorrelationRepository
+	riskContext *PostgresRiskContextRepository
 }
 
 // NewPostgresWatchRepository creates a PostgreSQL watch repository.
@@ -38,14 +38,20 @@ func (r *PostgresWatchRepository) ListVulnerabilityRecords(ctx context.Context) 
 
 func (r *PostgresWatchRepository) ListWatchCatalog(ctx context.Context) ([]domain.WatchCatalogEntry, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT cv.id, c.purl, c.name, c.ecosystem, cv.version,
-		       i.product_id::text,
-		       COALESCE((SELECT p.id::text FROM projects p WHERE p.product_id = i.product_id LIMIT 1), ''),
-		       cv.sbom_document_id::text
-		FROM component_versions cv
-		JOIN components c ON c.id = cv.component_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
-		JOIN images i ON i.id = s.image_id
+		WITH latest_scans AS (
+			SELECT DISTINCT ON (artifact_id) id, sbom_id, artifact_id
+			FROM scan_reports WHERE deleted_at IS NULL
+			ORDER BY artifact_id, scanned_at DESC, id DESC
+		)
+		SELECT cvn.id, c.purl, c.name, c.ecosystem, cvn.version,
+		       proj.product_id::text, proj.id::text,
+		       ls.artifact_id::text, ls.id::text
+		FROM component_versions cvn
+		JOIN latest_scans ls ON ls.sbom_id = cvn.sbom_id
+		JOIN components c ON c.id = cvn.component_id
+		JOIN artifacts a ON a.id = ls.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		ORDER BY c.purl ASC
 	`)
 	if err != nil {
@@ -64,7 +70,8 @@ func (r *PostgresWatchRepository) ListWatchCatalog(ctx context.Context) ([]domai
 			&entry.Version,
 			&entry.ProductID,
 			&entry.ProjectID,
-			&entry.SBOMDocumentID,
+			&entry.ArtifactID,
+			&entry.ScanReportID,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch catalog entry: %w", err)
 		}
@@ -131,11 +138,17 @@ func (r *PostgresWatchRepository) CreateWatchFinding(ctx context.Context, input 
 		return domain.CreateWatchFindingResult{Created: false}, nil
 	}
 
-	componentVulnID, err := r.correlate.CreateFinding(ctx, input.ComponentVersionID, input.VulnerabilityID, input.SBOMDocumentID)
+	componentVulnID, err := r.correlate.CreateFinding(ctx, domain.CreateFindingInput{
+		ComponentVersionID: input.ComponentVersionID,
+		VulnerabilityID:    input.VulnerabilityID,
+		ScanReportID:       input.ScanReportID,
+		ComponentPURL:      input.ComponentPURL,
+		CVEID:              input.CVEID,
+	})
 	if err != nil {
 		return domain.CreateWatchFindingResult{}, err
 	}
-	if _, err := r.riskContext.CreateForFinding(ctx, componentVulnID, input.Severity); err != nil {
+	if err := r.riskContext.CreateForFinding(ctx, input.ArtifactID, input.ComponentPURL, input.CVEID, input.Severity); err != nil {
 		return domain.CreateWatchFindingResult{}, err
 	}
 

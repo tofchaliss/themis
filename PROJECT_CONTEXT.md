@@ -8,18 +8,23 @@ disclosed CVEs, and delivers notifications. Standalone binary backed by PostgreS
 
 ## Current Status
 
-**Phase 1 — nearly complete.** 199 of 208 tasks done. Group 16 (OSV hardening, image
-registration API, coverage cleanup) is in progress. See `project-backlog.md` for what comes
-next.
+**Phase 1 — shipped** as `v0.1.0` (archived). **Phase 2a — shipped** as `v0.2.0` (archived);
+`v0.2.1` maintenance release archived. See `project-backlog.md` for deferred items.
 
-**Phase 2a — Signal Foundation in progress.** ~132/140 tasks done (Groups 1–29 complete;
-Group 30 release gate open). Branch `themis-phase-2`. See `openspec/changes/themis-phase-2a/`.
+**Core-model restructure (`v0.3.0`) — implementation complete.** The `themis-core-model` change
+(`sbom_documents` → `sboms` + `scan_reports`; merged `artifacts`/`images`; `versions.project_id`;
+`risk_context` + judgment tables re-keyed on `(artifact_id, component_purl, cve_id)`; schema-skew
+guard) is implemented — 57/58 tasks done (only 9.6, tag `v0.3.0`, deferred until Phase 2b is
+ready). All gates green (unit, coverage, integration, clean-arch, verify-build). Branch
+`themis-phase-2`. This is the settled base Phase 2b builds on. See
+`openspec/changes/themis-core-model/`.
 
 | Phase | Status | Scope |
 | ----- | ------ | ----- |
-| Phase 1 | In progress (199/208) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/themis-phase-1/` |
-| Phase 2a | In progress (~132/140) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX — see `openspec/changes/themis-phase-2a/` |
-| Phase 2b | Planned | AI workers, pgvector, GHSA — blocked on 2a |
+| Phase 1 | Shipped (`v0.1.0`) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/archive/` |
+| Phase 2a | Shipped (`v0.2.0` / `v0.2.1`) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX |
+| core-model | Implementation complete (`v0.3.0`, 57/58) | Schema restructure + Durable-Enrichment Identity Contract — see `openspec/changes/themis-core-model/` |
+| Phase 2b | Ready to start (unblocked) | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
 | Phase 2c | Planned | AI-assisted VEX auto-apply — blocked on 2b |
 | Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |
 
@@ -72,14 +77,28 @@ signals). Phase 2 introduces a revised five-layer model that accommodates the AI
 enrichment pipeline, the Security Knowledge Graph, and semantic memory.
 
 ```text
-  L0  RAW IMMUTABLE INVENTORY
+  L0  RAW IMMUTABLE INVENTORY                          (v0.3.0 core-model)
   ────────────────────────────────────────────────────────────────
-  Tables: products, product_versions, artifacts, images, sbom_documents,
+  Tables: products, projects, versions, artifacts,
+          sboms, scan_reports,
           components, component_versions, dependency_relationships,
           vulnerabilities, component_vulnerabilities, vex_documents,
-          vex_assertions, advisory_records
+          vex_assertions
   Rule:   Append-only. Never mutated. Never deleted.
           Content-addressed by SHA-256 digest.
+  Core-model split (themis-core-model, v0.3.0):
+    • sboms        = uploaded composition, keyed (artifact_id, sbom_checksum).
+    • scan_reports = one correlation run's findings at a point in time
+                     (N per artifact; "latest" = ORDER BY scanned_at DESC —
+                     no is_latest / supersedes_id).
+    • artifacts    merges the old artifacts+images; image_digest is globally UNIQUE.
+    • versions     replaces product_versions, parented by a project
+                     (versions.project_id NOT NULL; default project auto-created).
+    • component_vulnerabilities carries denormalized version-qualified
+      component_purl + cve_id (the per-scan raw finding).
+    • Durable Layer-2/3 judgment tables (risk_context, triage_history,
+      remediation_actions, intelligence_signals, runtime_exposures) key on the
+      stable identity (artifact_id, component_purl, cve_id) — triage survives rescans.
 
   L1a ASSET & DEPENDENCY GRAPH                        (Phase 2+)
   ────────────────────────────────────────────────────────────────
@@ -241,23 +260,18 @@ themis/
 
 ## Database Migrations
 
-13 migrations applied, managed by `golang-migrate`:
+Managed by `golang-migrate`. **v0.3.0 (`themis-core-model`) squashes the prior
+000001–000019 chain into a single greenfield baseline** — `000001_v030_baseline` —
+which defines the whole schema coherently, plus the `v_latest_findings` view and a
+startup schema-skew guard. There is **no in-place upgrade** from a pre-v0.3.0
+database: drop and recreate, then `make migrate-up` (see README § Full database reset).
 
 | Migration | Content |
 | --------- | ------- |
-| 000001 | L1: products, product_versions, artifacts, images |
-| 000002 | L1: sbom_documents (raw_document JSONB, trust_status, is_latest) |
-| 000003 | L1: components, component_versions, dependency_relationships |
-| 000004 | L1: vulnerabilities, component_vulnerabilities |
-| 000005 | L2: vex_documents, vex_assertions |
-| 000006 | L2: intelligence_signals, runtime_exposures, remediation_actions |
-| 000007 | L3: risk_context (convergence table) |
-| 000008 | Operational: api_keys, notification_rules, cve_watch_findings, audit_log, ingestion_jobs |
-| 000009 | Indexes: purl, component_vuln, risk_context, cve_id, sbom dedup (unique) |
-| 000010 | risk_context enrichment columns |
-| 000011 | triage_history (append-only) |
-| 000012 | system_state (last_success timestamps) |
-| 000013 | vulnerability package index for OSV/NVD matching |
+| 000001_v030_baseline | products, projects, versions, artifacts (merged, unique `image_digest`); sboms + scan_reports; components, component_versions, dependency_relationships; vulnerabilities, component_vulnerabilities (denormalized `component_purl`/`cve_id`); vex_documents (→artifacts), vex_assertions; risk_context PK `(artifact_id, component_purl, cve_id)`; triage_history / remediation_actions / intelligence_signals / runtime_exposures re-keyed on the same identity; operational + Phase 2a tables (asset graph, epss_kev_signals, exploit_records, system_state); indexes; `v_latest_findings` view |
+
+`BinarySchemaVersion = 1`. A database left at the old version (≥2) fails startup
+loudly via the schema-shape guard with a "re-initialise your database" message.
 
 ---
 

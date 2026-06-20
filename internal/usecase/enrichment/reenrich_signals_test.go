@@ -30,25 +30,25 @@ func (s signalStub) HasPublicExploit(_ context.Context, cveID string) (bool, err
 }
 
 type reenrichRepo struct {
-	rows       []domain.OpenRiskContextRow
-	lastScore  int
-	lastKEV    bool
+	rows      []domain.OpenRiskContextRow
+	lastScore int
+	lastKEV   bool
 }
 
-func (r *reenrichRepo) ListFindingsForSBOM(context.Context, string) ([]domain.EnrichmentFinding, error) {
+func (r *reenrichRepo) ListFindingsForArtifact(context.Context, string) ([]domain.EnrichmentFinding, error) {
 	return nil, nil
 }
-func (r *reenrichRepo) ListAssertionsForSBOM(context.Context, string) ([]domain.VEXAssertionMatch, error) {
+func (r *reenrichRepo) ListAssertionsForArtifact(context.Context, string) ([]domain.VEXAssertionMatch, error) {
 	return nil, nil
 }
-func (r *reenrichRepo) GetRiskContext(context.Context, string) (domain.RiskContextSnapshot, error) {
+func (r *reenrichRepo) GetRiskContext(context.Context, string, string, string) (domain.RiskContextSnapshot, error) {
 	return domain.RiskContextSnapshot{}, nil
 }
 func (r *reenrichRepo) UpsertRiskContext(context.Context, domain.EnrichmentFinding, domain.RiskContextSnapshot) error {
 	return nil
 }
-func (r *reenrichRepo) SBOMDocumentForVEX(context.Context, string) (string, error) { return "", nil }
-func (r *reenrichRepo) CountOpenRiskContexts(context.Context) (int, error)        { return len(r.rows), nil }
+func (r *reenrichRepo) ArtifactForVEX(context.Context, string) (string, error) { return "", nil }
+func (r *reenrichRepo) CountOpenRiskContexts(context.Context) (int, error)         { return len(r.rows), nil }
 func (r *reenrichRepo) ListOpenRiskContexts(_ context.Context, offset, limit int) ([]domain.OpenRiskContextRow, error) {
 	if offset >= len(r.rows) {
 		return nil, nil
@@ -84,7 +84,7 @@ func TestComputeRiskScoreWithSignalsKEV(t *testing.T) {
 
 func TestReEnrichSignalsBatchExploitPublic(t *testing.T) {
 	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{
-		ComponentVulnerabilityID: "cv-1",
+		ComponentPURL: "cv-1",
 		CVEID:                    "CVE-2024-0001",
 		RawSeverity:              "high",
 		EffectiveState:           domain.EffectiveStateDetected,
@@ -117,7 +117,7 @@ func (errSignalStub) HasPublicExploit(context.Context, string) (bool, error) {
 }
 
 func TestReEnrichSignalsBatchSignalError(t *testing.T) {
-	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
+	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, errSignalStub{}); err == nil {
 		t.Fatal("expected signal error")
@@ -131,7 +131,7 @@ func (errEPSSSignal) GetEPSSForCVE(context.Context, string) (*float64, error) {
 }
 
 func TestReEnrichSignalsBatchEPSSError(t *testing.T) {
-	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
+	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, errEPSSSignal{}); err == nil {
 		t.Fatal("expected epss error")
@@ -141,11 +141,13 @@ func TestReEnrichSignalsBatchEPSSError(t *testing.T) {
 type errKEVSignal struct{}
 
 func (errKEVSignal) GetEPSSForCVE(context.Context, string) (*float64, error) { return nil, nil }
-func (errKEVSignal) IsKEVListed(context.Context, string) (bool, error)       { return false, context.Canceled }
-func (errKEVSignal) HasPublicExploit(context.Context, string) (bool, error)  { return false, nil }
+func (errKEVSignal) IsKEVListed(context.Context, string) (bool, error) {
+	return false, context.Canceled
+}
+func (errKEVSignal) HasPublicExploit(context.Context, string) (bool, error) { return false, nil }
 
 func TestReEnrichSignalsBatchKEVError(t *testing.T) {
-	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
+	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, errKEVSignal{}); err == nil {
 		t.Fatal("expected kev error")
@@ -161,7 +163,7 @@ func (errExploitSignal) HasPublicExploit(context.Context, string) (bool, error) 
 }
 
 func TestReEnrichSignalsBatchExploitError(t *testing.T) {
-	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
+	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, errExploitSignal{}); err == nil {
 		t.Fatal("expected exploit error")
@@ -177,7 +179,7 @@ func (r *errUpdateRepo) UpdateRiskContextSignals(context.Context, domain.OpenRis
 }
 
 func TestReEnrichSignalsBatchUpdateError(t *testing.T) {
-	repo := &errUpdateRepo{reenrichRepo: &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}}
+	repo := &errUpdateRepo{reenrichRepo: &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, signalStub{}); err == nil {
 		t.Fatal("expected update error")
@@ -201,7 +203,7 @@ func TestReEnrichSignalsBatchListError(t *testing.T) {
 }
 
 func TestReEnrichSignalsBatchNilSignals(t *testing.T) {
-	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentVulnerabilityID: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
+	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{ComponentPURL: "cv-1", CVEID: "CVE-1", RawSeverity: "high", EffectiveState: domain.EffectiveStateDetected}}}
 	handler := &enrichment.Handler{Repo: repo}
 	if err := handler.ReEnrichSignalsBatch(context.Background(), 0, 500, nil); err != nil {
 		t.Fatal(err)
@@ -211,7 +213,7 @@ func TestReEnrichSignalsBatchNilSignals(t *testing.T) {
 func TestReEnrichSignalsBatch(t *testing.T) {
 	epss := 0.6
 	repo := &reenrichRepo{rows: []domain.OpenRiskContextRow{{
-		ComponentVulnerabilityID: "cv-1",
+		ComponentPURL: "cv-1",
 		CVEID:                    "CVE-2024-0001",
 		RawSeverity:              "high",
 		EffectiveState:           domain.EffectiveStateDetected,

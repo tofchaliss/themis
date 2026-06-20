@@ -32,7 +32,7 @@ func TestCatalogEndpointsSuccess(t *testing.T) {
 	catalog := &richCatalog{
 		products: []domain.Product{{ID: testProductID, Name: "themis", Description: "desc", CreatedAt: now}},
 		projects: []domain.Project{{ID: testProjectID, ProductID: testProductID, Name: "core", CreatedAt: now}},
-		versions: []domain.ProductVersion{{ID: "v1", ProductID: testProductID, Version: "1.0.0", ReleaseStatus: "released", CreatedAt: now}},
+		versions: []domain.ProductVersion{{ID: "v1", ProjectID: testProjectID, Version: "1.0.0", ReleaseStatus: "released", CreatedAt: now}},
 	}
 	scans := &richScans{
 		projectProductID: testProductID,
@@ -307,7 +307,7 @@ func TestIngestionUploadPaths(t *testing.T) {
 	r := mountTestAPI(handler, adminKeyRepo(t))
 
 	// JSON upload with optional fields
-	body := `{"format":"cyclonedx","document":{"k":"v"},"image_id":"` + testProductID + `","project_id":"` + testProjectID + `","ci_job_id":"42","ci_pipeline_url":"https://ci","supplier_identity":"vendor"}`
+	body := `{"format":"cyclonedx","document":{"k":"v"},"artifact_id":"` + testProductID + `","project_id":"` + testProjectID + `","ci_job_id":"42","ci_pipeline_url":"https://ci","supplier_identity":"vendor"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sbom/upload", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret")
 	rec := httptest.NewRecorder()
@@ -433,7 +433,7 @@ func TestWebhookValidationErrors(t *testing.T) {
 func TestScanAuthorizationPaths(t *testing.T) {
 	scans := &richScans{
 		projectProductID: testProductID,
-		detail: domain.ScanDetail{ScanSummary: domain.ScanSummary{ID: testScanID, ProductID: testProductID}},
+		detail:           domain.ScanDetail{ScanSummary: domain.ScanSummary{ID: testScanID, ProductID: testProductID}},
 	}
 	handler := api.NewHandler(api.Dependencies{Scans: scans})
 	r := mountTestAPI(handler, productKeyRepo(t, "99999999-9999-4999-8999-999999999999"))
@@ -773,7 +773,7 @@ func TestUploadSBOMJSONPayloadTooLarge(t *testing.T) {
 
 func TestProductVersionsPagination(t *testing.T) {
 	catalog := &richCatalog{
-		versions: []domain.ProductVersion{{ID: "v1", ProductID: testProductID, Version: "1.0.0"}},
+		versions: []domain.ProductVersion{{ID: "v1", ProjectID: testProjectID, Version: "1.0.0"}},
 		page:     domain.PageResult{NextCursor: "v-next"},
 	}
 	handler := api.NewHandler(api.Dependencies{Catalog: catalog})
@@ -972,15 +972,17 @@ func (f *failDispatcher) EnqueueIngestion(context.Context, domain.IngestionInput
 }
 
 type richCatalog struct {
-	products          []domain.Product
-	projects          []domain.Project
-	versions          []domain.ProductVersion
-	page              domain.PageResult
-	listProductsErr   error
-	listProjectsErr   error
-	createProjectErr  error
-	listVersionsErr   error
-	createProductErr  error
+	products            []domain.Product
+	projects            []domain.Project
+	versions            []domain.ProductVersion
+	page                domain.PageResult
+	listProductsErr     error
+	listProjectsErr     error
+	createProjectErr    error
+	listVersionsErr     error
+	createProductErr    error
+	createVersionErr    error
+	registerArtifactErr error
 }
 
 func (c *richCatalog) CreateProduct(_ context.Context, name, description string) (domain.Product, error) {
@@ -1023,6 +1025,20 @@ func (c *richCatalog) ListProductVersions(_ context.Context, _ string, _ domain.
 		return nil, domain.PageResult{}, c.listVersionsErr
 	}
 	return c.versions, c.page, nil
+}
+
+func (c *richCatalog) CreateVersion(_ context.Context, projectID, version string) (domain.ProductVersion, error) {
+	if c.createVersionErr != nil {
+		return domain.ProductVersion{}, c.createVersionErr
+	}
+	return domain.ProductVersion{ID: "v-new", ProjectID: projectID, Version: version}, nil
+}
+
+func (c *richCatalog) RegisterArtifact(_ context.Context, _, version, imageDigest, _ string) (domain.Artifact, error) {
+	if c.registerArtifactErr != nil {
+		return domain.Artifact{}, c.registerArtifactErr
+	}
+	return domain.Artifact{ID: "art-new", VersionID: "v-new", ImageDigest: imageDigest}, nil
 }
 
 type richScans struct {
@@ -1136,7 +1152,9 @@ func (r *richTriageRepo) GetFindingScope(_ context.Context, _ string) (string, e
 func (r *richTriageRepo) GetFindingContext(_ context.Context, _ string) (domain.TriageFindingContext, error) {
 	return domain.TriageFindingContext{FindingID: testFindingID, RawSeverity: "high"}, nil
 }
-func (r *richTriageRepo) AppendHistory(_ context.Context, _ domain.TriageHistoryRecord) error { return nil }
+func (r *richTriageRepo) AppendHistory(_ context.Context, _ domain.TriageHistoryRecord) error {
+	return nil
+}
 func (r *richTriageRepo) UpdateRiskContext(_ context.Context, _ domain.RiskContextTriageUpdate) error {
 	return nil
 }

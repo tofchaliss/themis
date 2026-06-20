@@ -64,7 +64,7 @@ func TestPostgresSBOMManagementSoftDelete(t *testing.T) {
 	ctx := context.Background()
 
 	successPool := &scriptedFakePool{}
-	successPool.addQueryRow(false, nil)
+	successPool.addQueryRow(false, nil, "sbom-1")
 	successPool.addQueryRow(5, 2)
 	successPool.addExec(1, nil)
 	summary, err := NewPostgresSBOMManagementRepository(successPool).SoftDeleteSBOM(ctx, "sbom-1", true)
@@ -79,21 +79,21 @@ func TestPostgresSBOMManagementSoftDelete(t *testing.T) {
 
 	deletedAt := time.Now().UTC()
 	alreadyDeleted := seqFakePool{conn: &seqFakeConn{
-		rows: []pgx.Row{scanRow{values: []any{false, deletedAt}}},
+		rows: []pgx.Row{scanRow{values: []any{false, deletedAt, "sbom-1"}}},
 	}}
 	if _, err := NewPostgresSBOMManagementRepository(alreadyDeleted).SoftDeleteSBOM(ctx, "sbom-1", false); !errors.Is(err, domain.ErrSBOMNotFound) {
 		t.Fatalf("err=%v", err)
 	}
 
 	latestPool := seqFakePool{conn: &seqFakeConn{
-		rows: []pgx.Row{scanRow{values: []any{true, nil}}},
+		rows: []pgx.Row{scanRow{values: []any{true, nil, "sbom-1"}}},
 	}}
 	if _, err := NewPostgresSBOMManagementRepository(latestPool).SoftDeleteSBOM(ctx, "sbom-1", false); !errors.Is(err, domain.ErrCannotDeleteLatestSBOM) {
 		t.Fatalf("err=%v", err)
 	}
 
 	noRowsPool := &scriptedFakePool{}
-	noRowsPool.addQueryRow(false, nil)
+	noRowsPool.addQueryRow(false, nil, "sbom-1")
 	noRowsPool.addQueryRow(1, 0)
 	noRowsPool.addExec(0, nil)
 	if _, err := NewPostgresSBOMManagementRepository(noRowsPool).SoftDeleteSBOM(ctx, "sbom-1", true); !errors.Is(err, domain.ErrSBOMNotFound) {

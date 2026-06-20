@@ -16,20 +16,24 @@ const (
 
 const AuditActionTriageDecision = "TRIAGE_DECISION"
 
-// TriageFindingContext holds finding metadata needed for triage and VEX generation.
+// TriageFindingContext holds finding metadata needed for triage and VEX generation,
+// including the stable identity (ArtifactID, ComponentPURL, CVEID).
 type TriageFindingContext struct {
 	FindingID      string
+	ArtifactID     string
 	ComponentPURL  string
 	CVEID          string
-	SBOMDocumentID string
 	SBOMChecksum   string
 	RawSeverity    string
 	EffectiveState string
 }
 
-// TriageHistoryRecord is an append-only triage decision row.
+// TriageHistoryRecord is an append-only triage decision row, keyed on the stable
+// identity so history is continuous across rescans (D15).
 type TriageHistoryRecord struct {
-	FindingID     string
+	ArtifactID    string
+	ComponentPURL string
+	CVEID         string
 	Decision      string
 	Justification string
 	Actor         string
@@ -38,9 +42,12 @@ type TriageHistoryRecord struct {
 	RecordedAt    time.Time
 }
 
-// RiskContextTriageUpdate applies a human triage outcome to risk_context.
+// RiskContextTriageUpdate applies a human triage outcome to risk_context, keyed on
+// the stable identity (artifact_id, component_purl, cve_id).
 type RiskContextTriageUpdate struct {
-	FindingID      string
+	ArtifactID     string
+	ComponentPURL  string
+	CVEID          string
 	EffectiveState string
 	TriagedBy      string
 	TriagedAt      time.Time

@@ -60,7 +60,7 @@ func toProjectList(items []domain.Project, page domain.PageResult) gen.ProjectLi
 func toProductVersion(v domain.ProductVersion) gen.ProductVersion {
 	return gen.ProductVersion{
 		Id:            parseUUID(v.ID),
-		ProductId:     parseUUID(v.ProductID),
+		ProjectId:     parseUUID(v.ProjectID),
 		Version:       v.Version,
 		ReleaseStatus: ptrString(v.ReleaseStatus),
 	}
@@ -111,7 +111,7 @@ func toScanDetail(s domain.ScanDetail) gen.ScanDetail {
 		TrustStatus:         ptrString(s.TrustStatus),
 		IngestedAt:          ptrTime(s.IngestedAt),
 		VulnerabilityCounts: &counts,
-		IngestionId:          uuidPtr(s.IngestionID),
+		IngestionId:         uuidPtr(s.IngestionID),
 	}
 }
 

@@ -76,10 +76,10 @@ type AuditEntry struct {
 }
 
 const (
-	AuditActionArtifactAccepted  = "ARTIFACT_ACCEPTED"
-	AuditActionArtifactRejected  = "ARTIFACT_REJECTED"
-	AuditActionArtifactWarning   = "ARTIFACT_WARNING"
-	AuditActionSignatureFailure  = "SIGNATURE_FAILURE"
+	AuditActionArtifactAccepted = "ARTIFACT_ACCEPTED"
+	AuditActionArtifactRejected = "ARTIFACT_REJECTED"
+	AuditActionArtifactWarning  = "ARTIFACT_WARNING"
+	AuditActionSignatureFailure = "SIGNATURE_FAILURE"
 )
 
 // SignatureVerifier validates artifact signatures. Phase 1 uses a stub implementation.

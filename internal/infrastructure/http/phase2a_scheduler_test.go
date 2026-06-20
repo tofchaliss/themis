@@ -82,7 +82,7 @@ type stubExploitStore struct{}
 
 func (stubExploitStore) UpsertExploits(context.Context, []domain.ExploitRecord) error { return nil }
 func (stubExploitStore) HasPublicExploit(context.Context, string) (bool, error)       { return false, nil }
-func (stubExploitStore) CountExploits(context.Context) (int, error)                     { return 0, nil }
+func (stubExploitStore) CountExploits(context.Context) (int, error)                   { return 0, nil }
 
 type stubEPSSFetcher struct{}
 
@@ -91,12 +91,12 @@ func (stubEPSSFetcher) FetchKEV(context.Context) ([]domain.KEVSignal, error)   {
 
 type stubEPSSStore struct{}
 
-func (stubEPSSStore) UpsertEPSS(context.Context, []domain.EPSSSignal) error { return nil }
+func (stubEPSSStore) UpsertEPSS(context.Context, []domain.EPSSSignal) error   { return nil }
 func (stubEPSSStore) UpsertKEV(context.Context, []domain.KEVSignal) error     { return nil }
 func (stubEPSSStore) ListKEVCVEIDs(context.Context) ([]string, error)         { return nil, nil }
 func (stubEPSSStore) MarkStale(context.Context, bool) error                   { return nil }
 func (stubEPSSStore) SignalsStale(context.Context) (bool, error)              { return false, nil }
 func (stubEPSSStore) GetEPSSForCVE(context.Context, string) (*float64, error) { return nil, nil }
 func (stubEPSSStore) IsKEVListed(context.Context, string) (bool, error)       { return false, nil }
-func (stubEPSSStore) CountEPSSRows(context.Context) (int, error)               { return 0, nil }
+func (stubEPSSStore) CountEPSSRows(context.Context) (int, error)              { return 0, nil }
 func (stubEPSSStore) LastSuccessfulFetch(context.Context) (time.Time, error)  { return time.Time{}, nil }

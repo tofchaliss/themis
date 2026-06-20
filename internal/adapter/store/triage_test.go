@@ -24,7 +24,7 @@ func TestPostgresTriageRepository(t *testing.T) {
 
 	contextPool := seqFakePool{conn: &seqFakeConn{
 		rows: []pgx.Row{scanRow{values: []any{
-			"cv-1", "pkg:npm/a@1", "CVE-1", "sbom-1", "checksum", "high", "detected",
+			"cv-1", "art-1", "pkg:npm/a@1", "CVE-1", "checksum", "high", "detected",
 		}}},
 	}}
 	finding, err := NewPostgresTriageRepository(contextPool).GetFindingContext(ctx, "cv-1")
@@ -34,7 +34,8 @@ func TestPostgresTriageRepository(t *testing.T) {
 
 	appendPool := storeFakePool{conn: storeFakeConn{}}
 	if err := NewPostgresTriageRepository(appendPool).AppendHistory(ctx, domain.TriageHistoryRecord{
-		FindingID: "cv-1", Decision: "accepted_risk", Justification: "low impact",
+		ArtifactID: "art-1", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1",
+		Decision: "accepted_risk", Justification: "low impact",
 		Actor: "alice", RecordedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -52,7 +53,8 @@ func TestPostgresTriageRepository(t *testing.T) {
 
 	updatePool := storeFakePool{conn: storeFakeConn{}}
 	if err := NewPostgresTriageRepository(updatePool).UpdateRiskContext(ctx, domain.RiskContextTriageUpdate{
-		FindingID: "cv-1", EffectiveState: "accepted_risk", TriagedBy: "alice",
+		ArtifactID: "art-1", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1",
+		EffectiveState: "accepted_risk", TriagedBy: "alice",
 		TriagedAt: now, RiskScore: 30,
 	}); err != nil {
 		t.Fatal(err)
@@ -97,7 +99,7 @@ func TestPostgresTriageVEXGenerator(t *testing.T) {
 	vexID, err := NewPostgresTriageVEXGenerator(pool).CreateFromDecision(ctx, domain.GeneratedVEXInput{
 		Issuer: "alice", DocumentTime: now,
 		Finding: domain.TriageFindingContext{
-			FindingID: "cv-1", SBOMDocumentID: "sbom-1", SBOMChecksum: "checksum",
+			FindingID: "cv-1", ArtifactID: "art-1", SBOMChecksum: "checksum",
 		},
 		Assertion: domain.ParsedVEXAssertion{
 			CVEID: "CVE-1", ComponentPURL: "pkg:npm/a@1", Status: "not_affected", Justification: "fixed",
@@ -142,8 +144,9 @@ func TestLookupHelpersTriage(t *testing.T) {
 	if _, err := lookupVulnerabilityID(ctx, storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}, "CVE-404"); err == nil {
 		t.Fatal("expected vulnerability not found")
 	}
-	if _, err := lookupComponentVersionID(ctx, storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}, "sbom-1", "missing"); err == nil {
-		t.Fatal("expected component not found")
+	// Best-effort: a component not found returns ("", nil), not an error.
+	if id, err := lookupComponentVersionID(ctx, storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}, "art-1", "missing"); err != nil || id != "" {
+		t.Fatalf("expected empty id and no error, got id=%q err=%v", id, err)
 	}
 }
 

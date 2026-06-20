@@ -15,7 +15,7 @@ func TestPostgresWatchRepository(t *testing.T) {
 	now := time.Now().UTC()
 
 	catalogRows := &fakeRows{data: [][]any{
-		{"cvn-1", "pkg:npm/a@1", "a", "npm", "1.0.0", "prod-1", "proj-1", "sbom-1"},
+		{"cvn-1", "pkg:npm/a@1", "a", "npm", "1.0.0", "prod-1", "proj-1", "art-1", "scan-1"},
 	}}
 	catalogPool := storeFakePool{conn: storeFakeConn{}, rows: catalogRows}
 	entries, err := NewPostgresWatchRepository(catalogPool).ListWatchCatalog(ctx)
@@ -89,7 +89,7 @@ func TestPostgresWatchRepositoryCreateWatchFinding(t *testing.T) {
 	createPool.addExec(1, nil)
 	result, err = NewPostgresWatchRepository(createPool).CreateWatchFinding(ctx, domain.CreateWatchFindingInput{
 		ComponentVersionID: "cvn-1", CVEID: "CVE-2", VulnerabilityID: "vuln-2",
-		SBOMDocumentID: "sbom-1", Severity: "high", ProductID: "prod-1", ProjectID: "proj-1",
+		ScanReportID: "scan-1", ArtifactID: "art-1", Severity: "high", ProductID: "prod-1", ProjectID: "proj-1",
 		ComponentPURL: "pkg:npm/a@1",
 	})
 	if err != nil || !result.Created || result.ComponentVulnerabilityID != "cv-1" {

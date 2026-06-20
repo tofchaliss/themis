@@ -2,6 +2,17 @@ package domain
 
 import "strings"
 
+// VersionedPURL returns the version-qualified PURL used as the stable finding
+// identity (D11), reconstructed from a versionless PURL and a version — e.g.
+// VersionedPURL("pkg:apk/busybox", "1.36") = "pkg:apk/busybox@1.36". An empty
+// version yields the PURL unchanged.
+func VersionedPURL(purl, version string) string {
+	if version == "" {
+		return purl
+	}
+	return purl + "@" + version
+}
+
 // NormalizeEcosystem maps feed and PURL ecosystem names to a canonical lowercase key.
 func NormalizeEcosystem(ecosystem string) string {
 	switch strings.ToLower(strings.TrimSpace(ecosystem)) {

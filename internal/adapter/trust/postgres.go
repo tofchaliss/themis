@@ -29,9 +29,13 @@ func NewPostgresRepository(conn pgConn) *PostgresRepository {
 func (r *PostgresRepository) FindSBOMByDedupKey(ctx context.Context, imageDigest, checksumSHA256 string) (string, bool, error) {
 	var id string
 	err := r.conn.QueryRow(ctx, `
-		SELECT id::text
-		FROM sbom_documents
-		WHERE image_digest = $1 AND checksum_sha256 = $2
+		SELECT sr.id::text
+		FROM scan_reports sr
+		JOIN sboms sb ON sb.id = sr.sbom_id
+		JOIN artifacts a ON a.id = sr.artifact_id
+		WHERE a.image_digest = $1 AND sb.sbom_checksum = $2 AND sr.deleted_at IS NULL
+		ORDER BY sr.scanned_at DESC
+		LIMIT 1
 	`, imageDigest, checksumSHA256).Scan(&id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -61,7 +65,7 @@ func (r *PostgresRepository) FindVEXByDedupKey(ctx context.Context, sbomChecksum
 func (r *PostgresRepository) ImageDigestExists(ctx context.Context, digest string) (bool, error) {
 	var exists bool
 	err := r.conn.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM images WHERE digest = $1)
+		SELECT EXISTS(SELECT 1 FROM artifacts WHERE image_digest = $1)
 	`, digest).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("image digest exists: %w", err)
@@ -72,7 +76,7 @@ func (r *PostgresRepository) ImageDigestExists(ctx context.Context, digest strin
 func (r *PostgresRepository) SBOMChecksumExists(ctx context.Context, checksum string) (bool, error) {
 	var exists bool
 	err := r.conn.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM sbom_documents WHERE checksum_sha256 = $1)
+		SELECT EXISTS(SELECT 1 FROM sboms WHERE sbom_checksum = $1)
 	`, checksum).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("sbom checksum exists: %w", err)

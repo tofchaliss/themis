@@ -338,6 +338,12 @@ func (f *fakeCatalog) ListProjects(context.Context, string, domain.PageRequest) 
 func (f *fakeCatalog) ListProductVersions(context.Context, string, domain.PageRequest) ([]domain.ProductVersion, domain.PageResult, error) {
 	return nil, domain.PageResult{}, nil
 }
+func (f *fakeCatalog) CreateVersion(_ context.Context, projectID, version string) (domain.ProductVersion, error) {
+	return domain.ProductVersion{ID: "v-new", ProjectID: projectID, Version: version}, nil
+}
+func (f *fakeCatalog) RegisterArtifact(_ context.Context, _, _, imageDigest, _ string) (domain.Artifact, error) {
+	return domain.Artifact{ID: "art-new", ImageDigest: imageDigest}, nil
+}
 
 type fakeTriageRepo struct {
 	productID string

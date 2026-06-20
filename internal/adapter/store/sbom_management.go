@@ -38,10 +38,10 @@ func (r *PostgresSBOMManagementRepository) ListProductSBOMs(ctx context.Context,
 func (r *PostgresSBOMManagementRepository) listSBOMs(ctx context.Context, productID string, page domain.PageRequest) ([]domain.SBOMListEntry, int, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{}
-	where := []string{"s.deleted_at IS NULL"}
+	where := []string{"sr.deleted_at IS NULL"}
 	argIdx := 1
 	if productID != "" {
-		where = append(where, fmt.Sprintf("i.product_id = $%d", argIdx))
+		where = append(where, fmt.Sprintf("proj.product_id = $%d", argIdx))
 		args = append(args, productID)
 		argIdx++
 	}
@@ -52,7 +52,7 @@ func (r *PostgresSBOMManagementRepository) listSBOMs(ctx context.Context, produc
 			if err != nil {
 				return nil, 0, domain.PageResult{}, fmt.Errorf("invalid cursor: %w", err)
 			}
-			where = append(where, fmt.Sprintf("(s.ingested_at, s.id) < ($%d::timestamptz, $%d::uuid)", argIdx, argIdx+1))
+			where = append(where, fmt.Sprintf("(sr.scanned_at, sr.id) < ($%d::timestamptz, $%d::uuid)", argIdx, argIdx+1))
 			args = append(args, cursorTime, parts[1])
 			argIdx += 2
 		}
@@ -64,19 +64,26 @@ func (r *PostgresSBOMManagementRepository) listSBOMs(ctx context.Context, produc
 		return nil, 0, domain.PageResult{}, err
 	}
 	query := fmt.Sprintf(`
-		SELECT s.id::text, i.product_id::text, p.name,
-		       COALESCE(pv.version, ''),
-		       COALESCE(NULLIF(i.repository, ''), i.digest),
-		       s.image_digest, s.format, s.is_latest, s.ingested_at,
-		       (SELECT COUNT(*) FROM component_versions cv WHERE cv.sbom_document_id = s.id),
-		       (SELECT COUNT(*) FROM component_vulnerabilities cv WHERE cv.sbom_document_id = s.id)
-		FROM sbom_documents s
-		JOIN images i ON i.id = s.image_id
-		JOIN products p ON p.id = i.product_id
-		LEFT JOIN artifacts a ON a.id = i.artifact_id
-		LEFT JOIN product_versions pv ON pv.id = a.product_version_id
+		SELECT sr.id::text, proj.product_id::text, p.name,
+		       COALESCE(ver.version, ''),
+		       COALESCE(NULLIF(a.repository, ''), a.image_digest),
+		       sr.image_digest, sb.format,
+		       (sr.id = (
+		           SELECT sr2.id FROM scan_reports sr2
+		           WHERE sr2.artifact_id = sr.artifact_id AND sr2.deleted_at IS NULL
+		           ORDER BY sr2.scanned_at DESC, sr2.id DESC LIMIT 1
+		       )) AS is_latest,
+		       sr.scanned_at,
+		       (SELECT COUNT(*) FROM component_versions cv WHERE cv.sbom_id = sr.sbom_id),
+		       (SELECT COUNT(*) FROM component_vulnerabilities cv WHERE cv.scan_report_id = sr.id)
+		FROM scan_reports sr
+		JOIN sboms sb ON sb.id = sr.sbom_id
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
+		JOIN products p ON p.id = proj.product_id
 		WHERE %s
-		ORDER BY s.ingested_at DESC, s.id DESC
+		ORDER BY sr.scanned_at DESC, sr.id DESC
 		LIMIT $%d
 	`, strings.Join(where, " AND "), limitArg)
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -113,15 +120,17 @@ func (r *PostgresSBOMManagementRepository) countActiveSBOMs(ctx context.Context,
 	var count int
 	if productID == "" {
 		err := r.pool.QueryRow(ctx, `
-			SELECT COUNT(*) FROM sbom_documents WHERE deleted_at IS NULL
+			SELECT COUNT(*) FROM scan_reports WHERE deleted_at IS NULL
 		`).Scan(&count)
 		return count, err
 	}
 	err := r.pool.QueryRow(ctx, `
 		SELECT COUNT(*)
-		FROM sbom_documents s
-		JOIN images i ON i.id = s.image_id
-		WHERE s.deleted_at IS NULL AND i.product_id = $1
+		FROM scan_reports sr
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
+		WHERE sr.deleted_at IS NULL AND proj.product_id = $1
 	`, productID).Scan(&count)
 	return count, err
 }
@@ -129,9 +138,17 @@ func (r *PostgresSBOMManagementRepository) countActiveSBOMs(ctx context.Context,
 func (r *PostgresSBOMManagementRepository) SoftDeleteSBOM(ctx context.Context, id string, force bool) (domain.SBOMDeleteSummary, error) {
 	var isLatest bool
 	var deletedAt *time.Time
+	var sbomID string
 	err := r.pool.QueryRow(ctx, `
-		SELECT is_latest, deleted_at FROM sbom_documents WHERE id = $1
-	`, id).Scan(&isLatest, &deletedAt)
+		SELECT
+			(sr.id = (
+				SELECT sr2.id FROM scan_reports sr2
+				WHERE sr2.artifact_id = sr.artifact_id AND sr2.deleted_at IS NULL
+				ORDER BY sr2.scanned_at DESC, sr2.id DESC LIMIT 1
+			)),
+			sr.deleted_at, sr.sbom_id::text
+		FROM scan_reports sr WHERE sr.id = $1
+	`, id).Scan(&isLatest, &deletedAt, &sbomID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return domain.SBOMDeleteSummary{}, domain.ErrSBOMNotFound
@@ -148,14 +165,14 @@ func (r *PostgresSBOMManagementRepository) SoftDeleteSBOM(ctx context.Context, i
 	var componentCount, findingCount int
 	if err := r.pool.QueryRow(ctx, `
 		SELECT
-			(SELECT COUNT(*) FROM component_versions WHERE sbom_document_id = $1),
-			(SELECT COUNT(*) FROM component_vulnerabilities WHERE sbom_document_id = $1)
-	`, id).Scan(&componentCount, &findingCount); err != nil {
+			(SELECT COUNT(*) FROM component_versions WHERE sbom_id = $1),
+			(SELECT COUNT(*) FROM component_vulnerabilities WHERE scan_report_id = $2)
+	`, sbomID, id).Scan(&componentCount, &findingCount); err != nil {
 		return domain.SBOMDeleteSummary{}, fmt.Errorf("count sbom data: %w", err)
 	}
 
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE sbom_documents SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+		UPDATE scan_reports SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
 	`, id)
 	if err != nil {
 		return domain.SBOMDeleteSummary{}, fmt.Errorf("soft delete sbom: %w", err)

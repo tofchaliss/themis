@@ -10,7 +10,7 @@ import (
 
 // Service applies VEX overlays and recomputes risk_context.
 type Service interface {
-	ApplyVEX(ctx context.Context, sbomDocumentID string) error
+	ApplyVEX(ctx context.Context, artifactID string) error
 	ReenrichVEX(ctx context.Context, vexDocumentID string) error
 }
 
@@ -28,13 +28,14 @@ type Handler struct {
 
 var _ Service = (*Handler)(nil)
 
-// ApplyVEX creates or updates risk_context rows for every finding on an SBOM.
-func (h *Handler) ApplyVEX(ctx context.Context, sbomDocumentID string) error {
-	findings, err := h.Repo.ListFindingsForSBOM(ctx, sbomDocumentID)
+// ApplyVEX creates or updates risk_context rows for every current finding of an
+// artifact (its latest scan).
+func (h *Handler) ApplyVEX(ctx context.Context, artifactID string) error {
+	findings, err := h.Repo.ListFindingsForArtifact(ctx, artifactID)
 	if err != nil {
 		return err
 	}
-	assertions, err := h.Repo.ListAssertionsForSBOM(ctx, sbomDocumentID)
+	assertions, err := h.Repo.ListAssertionsForArtifact(ctx, artifactID)
 	if err != nil {
 		return err
 	}
@@ -61,13 +62,13 @@ func (h *Handler) ApplyVEX(ctx context.Context, sbomDocumentID string) error {
 	return nil
 }
 
-// ReenrichVEX recomputes risk_context for the SBOM referenced by a VEX document.
+// ReenrichVEX recomputes risk_context for the artifact referenced by a VEX document.
 func (h *Handler) ReenrichVEX(ctx context.Context, vexDocumentID string) error {
-	sbomDocumentID, err := h.Repo.SBOMDocumentForVEX(ctx, vexDocumentID)
+	artifactID, err := h.Repo.ArtifactForVEX(ctx, vexDocumentID)
 	if err != nil {
 		return err
 	}
-	return h.ApplyVEX(ctx, sbomDocumentID)
+	return h.ApplyVEX(ctx, artifactID)
 }
 
 func (h *Handler) applyFinding(ctx context.Context, finding domain.EnrichmentFinding, index map[string][]domain.VEXAssertionMatch, vendorAssertions []domain.VendorVEXAssertion) error {
@@ -92,7 +93,7 @@ func (h *Handler) applyFinding(ctx context.Context, finding domain.EnrichmentFin
 		}
 	}
 
-	previous, err := h.Repo.GetRiskContext(ctx, finding.ComponentVulnerabilityID)
+	previous, err := h.Repo.GetRiskContext(ctx, finding.ArtifactID, finding.ComponentPURL, finding.CVEID)
 	if err != nil {
 		return err
 	}
@@ -120,19 +121,18 @@ func (h *Handler) applyFinding(ctx context.Context, finding domain.EnrichmentFin
 		blast.Score,
 	)
 	snapshot := domain.RiskContextSnapshot{
-		ComponentVulnerabilityID: finding.ComponentVulnerabilityID,
-		EffectiveState:           nextState,
-		RawSeverity:              finding.RawSeverity,
-		VEXStatus:                vexStatus,
-		VEXAssertionID:           assertionID,
-		SuppressionReason:        suppressionReason,
-		RiskScore:                score,
-		EPSSScore:                previous.EPSSScore,
-		KEVListed:                previous.KEVListed,
-		ExploitPublic:            previous.ExploitPublic,
-		DeterministicLevel:       level,
-		BlastRadiusScore:         blast.Score,
-		UpstreamVEXCoverage:      coverage,
+		EffectiveState:      nextState,
+		RawSeverity:         finding.RawSeverity,
+		VEXStatus:           vexStatus,
+		VEXAssertionID:      assertionID,
+		SuppressionReason:   suppressionReason,
+		RiskScore:           score,
+		EPSSScore:           previous.EPSSScore,
+		KEVListed:           previous.KEVListed,
+		ExploitPublic:       previous.ExploitPublic,
+		DeterministicLevel:  level,
+		BlastRadiusScore:    blast.Score,
+		UpstreamVEXCoverage: coverage,
 	}
 	if err := h.Repo.UpsertRiskContext(ctx, finding, snapshot); err != nil {
 		return err
@@ -168,9 +168,9 @@ func (h *Handler) applyFinding(ctx context.Context, finding domain.EnrichmentFin
 			ResourceType: "component_vulnerability",
 			ResourceID:   finding.ComponentVulnerabilityID,
 			Details: map[string]string{
-				"previous_state": previous.EffectiveState,
-				"new_state":      nextState,
-				"trigger":        trigger,
+				"previous_state":  previous.EffectiveState,
+				"new_state":       nextState,
+				"trigger":         trigger,
 				"vex_document_id": vexDocID,
 			},
 		})

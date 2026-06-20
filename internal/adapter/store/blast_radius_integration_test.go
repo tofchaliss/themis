@@ -97,7 +97,7 @@ func TestAC21_BlastRadiusCap(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
@@ -109,9 +109,9 @@ func TestAC21_BlastRadiusCap(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(rc.blast_radius_score), 0)
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
-		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
-		WHERE sd.image_digest = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
+		WHERE sr.image_digest = $1
 	`, digest).Scan(&total, &max); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestAC20_Layer2SynchronousBeforeAccepted(t *testing.T) {
 			RawDocument: raw, ImageDigest: digest, CIJobID: "ac20-l2", SupplierIdentity: "team-a", Actor: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -212,9 +212,9 @@ func TestAC20_Layer2SynchronousBeforeAccepted(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE rc.blast_radius_score IS NULL)
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
-		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
-		WHERE sd.image_digest = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
+		WHERE sr.image_digest = $1
 	`, digest).Scan(&missing); err != nil {
 		t.Fatal(err)
 	}
@@ -280,17 +280,17 @@ func TestSoftDelete_ExcludedFromBlastRadius(t *testing.T) {
 			RawDocument: raw, ImageDigest: digest, SupplierIdentity: "team-a", Actor: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE sbom_documents SET deleted_at = NOW() WHERE id = $1`, result.ScanID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE scan_reports SET deleted_at = NOW() WHERE id = $1`, result.ScanID); err != nil {
 		t.Fatal(err)
 	}
 
-	findings, err := enrichmentRepo.ListFindingsForSBOM(ctx, result.ScanID)
+	findings, err := enrichmentRepo.ListFindingsForArtifact(ctx, artifactID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,13 +304,13 @@ func TestSoftDelete_ExcludedFromBlastRadius(t *testing.T) {
 		FROM component_vulnerabilities cv
 		JOIN components c ON c.id = (SELECT component_id FROM component_versions WHERE id = cv.component_version_id)
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		WHERE cv.sbom_document_id = $1 LIMIT 1
+		WHERE cv.scan_report_id = $1 LIMIT 1
 	`, result.ScanID).Scan(&componentID, &vulnID); err != nil {
 		t.Fatal(err)
 	}
 
 	blast, err := graph.ComputeBlastRadius(ctx, domain.EnrichmentFinding{
-		SBOMDocumentID:  result.ScanID,
+		ScanReportID:    result.ScanID,
 		ProductID:       productID,
 		ComponentID:     componentID,
 		VulnerabilityID: vulnID,

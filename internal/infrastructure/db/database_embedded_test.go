@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,5 +65,33 @@ func TestConnectRunMigrationsAndVerify(t *testing.T) {
 
 	if err := RunMigrations(dsn, migrationsPath); err != nil {
 		t.Fatalf("RunMigrations second time error = %v", err)
+	}
+
+	// 8.8 — schema-skew guard (D13/H5): the freshly migrated v0.3.0 schema passes...
+	if err := VerifySchemaShape(ctx, pool); err != nil {
+		t.Fatalf("VerifySchemaShape() on fresh schema error = %v", err)
+	}
+
+	// ...but a database still carrying a pre-v0.3.0 legacy table fails loudly with the
+	// "re-initialise your database" guidance instead of running against the old schema.
+	if _, err := pool.Exec(ctx, `CREATE TABLE sbom_documents (id UUID PRIMARY KEY)`); err != nil {
+		t.Fatalf("seed legacy table: %v", err)
+	}
+	err = VerifySchemaShape(ctx, pool)
+	if err == nil {
+		t.Fatal("VerifySchemaShape() accepted a legacy pre-v0.3.0 schema, want error")
+	}
+	if !strings.Contains(err.Error(), "sbom_documents") || !strings.Contains(err.Error(), "Re-initialise your database") {
+		t.Fatalf("schema-skew error = %q, want legacy-table + re-initialise guidance", err)
+	}
+	if _, err := pool.Exec(ctx, `DROP TABLE sbom_documents`); err != nil {
+		t.Fatalf("drop legacy table: %v", err)
+	}
+
+	// A pool that can no longer query the catalog surfaces the error instead of
+	// silently passing the guard.
+	pool.Close()
+	if err := VerifySchemaShape(ctx, pool); err == nil {
+		t.Fatal("VerifySchemaShape() on a closed pool returned nil, want query error")
 	}
 }

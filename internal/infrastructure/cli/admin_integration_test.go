@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -153,6 +153,12 @@ func (c *integrationCatalog) ListProjects(_ context.Context, productID string, _
 }
 func (c *integrationCatalog) ListProductVersions(context.Context, string, domain.PageRequest) ([]domain.ProductVersion, domain.PageResult, error) {
 	return nil, domain.PageResult{}, nil
+}
+func (c *integrationCatalog) CreateVersion(_ context.Context, projectID, version string) (domain.ProductVersion, error) {
+	return domain.ProductVersion{ID: "v-new", ProjectID: projectID, Version: version}, nil
+}
+func (c *integrationCatalog) RegisterArtifact(_ context.Context, _, _, imageDigest, _ string) (domain.Artifact, error) {
+	return domain.Artifact{ID: "art-new", ImageDigest: imageDigest}, nil
 }
 
 func integrationDatabaseDSN(t *testing.T, port uint32) string {

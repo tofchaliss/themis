@@ -71,9 +71,11 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 	projects, _, err := catalog.ListProjects(ctx, product.ID, domain.PageRequest{Limit: 10})
-	if err != nil || len(projects) != 1 {
+	// 2 projects: the auto-created default project + the "main" project just created.
+	if err != nil || len(projects) != 2 {
 		t.Fatalf("ListProjects() = %+v err=%v", projects, err)
 	}
+	_ = project
 	if _, _, err := catalog.ListProductVersions(ctx, product.ID, domain.PageRequest{}); err != nil {
 		t.Fatalf("ListProductVersions() error = %v", err)
 	}
@@ -82,9 +84,6 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 	imageID := uuid.NewString()
 	artifactID := uuid.NewString()
 	seedImageForProduct(t, ctx, pool, product.ID, artifactID, imageID, digest)
-	if _, err := pool.Exec(ctx, `UPDATE images SET product_id = $1 WHERE id = $2`, product.ID, imageID); err != nil {
-		t.Fatal(err)
-	}
 
 	raw, err := os.ReadFile(filepath.Join("..", "parser", "testdata", "cyclonedx-1.6.json"))
 	if err != nil {
@@ -117,7 +116,7 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 		Enrichment: enrichmentSvc,
 		Notify:     notify.IngestionNotifier{},
 	})
-	sbomResult, err := pipeline.IngestSBOM(ctx, domain.IngestionInput{
+	_, err = pipeline.IngestSBOM(ctx, domain.IngestionInput{
 		RawArtifact: domain.RawArtifact{
 			Kind:             domain.ArtifactKindSBOM,
 			Format:           domain.SBOMFormatCycloneDX,
@@ -128,16 +127,19 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 		ProjectID:   project.ID,
 	})
 	if err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
 
+	// Re-point the artifact's version to the test's project so project-scoped scan
+	// queries resolve it (scan → artifact → version → project).
 	if _, err := pool.Exec(ctx, `
-		UPDATE sbom_documents SET project_id = $1 WHERE id = $2
-	`, project.ID, sbomResult.ScanID); err != nil {
+		UPDATE versions SET project_id = $1
+		WHERE id = (SELECT version_id FROM artifacts WHERE id = $2)
+	`, project.ID, artifactID); err != nil {
 		t.Fatal(err)
 	}
 

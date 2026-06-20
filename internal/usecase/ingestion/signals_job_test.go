@@ -23,7 +23,7 @@ func (q *queueStub) Enqueue(_ context.Context, job domain.Job) (string, error) {
 	return "job-id", nil
 }
 func (q *queueStub) Consume(context.Context) (<-chan domain.Job, error) { return nil, nil }
-func (q *queueStub) Ack(context.Context, string) error                   { return nil }
+func (q *queueStub) Ack(context.Context, string) error                  { return nil }
 
 func TestEnqueueReEnrichSignalsBatches(t *testing.T) {
 	queue := &queueStub{}

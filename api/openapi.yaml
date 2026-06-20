@@ -33,7 +33,7 @@ paths:
                   enum: [cyclonedx, spdx]
                 spec_version:
                   type: string
-                image_id:
+                artifact_id:
                   type: string
                   format: uuid
                 image_digest:
@@ -633,7 +633,7 @@ components:
         document:
           type: object
           additionalProperties: true
-        image_id:
+        artifact_id:
           type: string
           format: uuid
         image_digest:
@@ -675,7 +675,7 @@ components:
           additionalProperties: true
         image_digest:
           type: string
-        image_id:
+        artifact_id:
           type: string
           format: uuid
         project_id:
@@ -783,12 +783,12 @@ components:
                 $ref: '#/components/schemas/Project'
     ProductVersion:
       type: object
-      required: [id, product_id, version]
+      required: [id, project_id, version]
       properties:
         id:
           type: string
           format: uuid
-        product_id:
+        project_id:
           type: string
           format: uuid
         version:

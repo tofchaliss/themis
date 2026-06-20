@@ -81,3 +81,12 @@ func TestVersionMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestVersionedPURL(t *testing.T) {
+	if got := VersionedPURL("pkg:apk/busybox", "1.36"); got != "pkg:apk/busybox@1.36" {
+		t.Fatalf("VersionedPURL with version = %q, want pkg:apk/busybox@1.36", got)
+	}
+	if got := VersionedPURL("pkg:apk/busybox", ""); got != "pkg:apk/busybox" {
+		t.Fatalf("VersionedPURL empty version = %q, want pkg:apk/busybox", got)
+	}
+}

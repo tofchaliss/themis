@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,14 +27,16 @@ func NewPostgresTriageRepository(pool pgQueryPool) *PostgresTriageRepository {
 func (r *PostgresTriageRepository) GetFindingScope(ctx context.Context, findingID string) (string, error) {
 	var productID string
 	err := r.pool.QueryRow(ctx, `
-		SELECT i.product_id::text
+		SELECT proj.product_id::text
 		FROM component_vulnerabilities cv
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
-		JOIN images i ON i.id = s.image_id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id AND sr.deleted_at IS NULL
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		WHERE cv.id = $1
 	`, findingID).Scan(&productID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("finding %q not found", findingID)
 		}
 		return "", fmt.Errorf("get finding scope: %w", err)
@@ -45,27 +48,27 @@ func (r *PostgresTriageRepository) GetFindingContext(ctx context.Context, findin
 	var finding domain.TriageFindingContext
 	var effectiveState string
 	err := r.pool.QueryRow(ctx, `
-		SELECT cv.id, c.purl, v.cve_id, s.id::text, s.checksum_sha256,
+		SELECT cv.id, sr.artifact_id::text, cv.component_purl, cv.cve_id, sb.sbom_checksum,
 		       COALESCE(rc.raw_severity, v.severity, 'unknown'),
 		       COALESCE(rc.effective_state, 'detected')
 		FROM component_vulnerabilities cv
-		JOIN component_versions cvn ON cvn.id = cv.component_version_id
-		JOIN components c ON c.id = cvn.component_id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id AND sr.deleted_at IS NULL
+		JOIN sboms sb ON sb.id = sr.sbom_id
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
-		LEFT JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		LEFT JOIN risk_context rc ON rc.artifact_id = sr.artifact_id
+			AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		WHERE cv.id = $1
 	`, findingID).Scan(
 		&finding.FindingID,
+		&finding.ArtifactID,
 		&finding.ComponentPURL,
 		&finding.CVEID,
-		&finding.SBOMDocumentID,
 		&finding.SBOMChecksum,
 		&finding.RawSeverity,
 		&effectiveState,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.TriageFindingContext{}, fmt.Errorf("finding %q not found", findingID)
 		}
 		return domain.TriageFindingContext{}, fmt.Errorf("get finding context: %w", err)
@@ -77,11 +80,11 @@ func (r *PostgresTriageRepository) GetFindingContext(ctx context.Context, findin
 func (r *PostgresTriageRepository) AppendHistory(ctx context.Context, record domain.TriageHistoryRecord) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO triage_history (
-			id, component_vulnerability_id, decision, justification, actor,
+			id, artifact_id, component_purl, cve_id, decision, justification, actor,
 			accepted_until, assigned_to, recorded_at
-		) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)
-	`, uuid.NewString(), record.FindingID, record.Decision, record.Justification,
-		record.Actor, record.AcceptedUntil, record.AssignedTo, record.RecordedAt)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10)
+	`, uuid.NewString(), record.ArtifactID, record.ComponentPURL, record.CVEID, record.Decision,
+		record.Justification, record.Actor, record.AcceptedUntil, record.AssignedTo, record.RecordedAt)
 	if err != nil {
 		return fmt.Errorf("append triage history: %w", err)
 	}
@@ -91,16 +94,20 @@ func (r *PostgresTriageRepository) AppendHistory(ctx context.Context, record dom
 func (r *PostgresTriageRepository) ListHistory(ctx context.Context, findingID string, page domain.PageRequest) ([]domain.TriageHistoryEntry, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{findingID, limit + 1}
-	where := "WHERE component_vulnerability_id = $1"
+	cursor := ""
 	if page.Cursor != "" {
-		where += " AND recorded_at < $3::timestamptz"
+		cursor = " AND th.recorded_at < $3::timestamptz"
 		args = append(args, page.Cursor)
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT decision, justification, actor, COALESCE(assigned_to, ''), recorded_at
-		FROM triage_history
-		`+where+`
-		ORDER BY recorded_at DESC
+		SELECT th.decision, th.justification, th.actor, COALESCE(th.assigned_to, ''), th.recorded_at
+		FROM triage_history th
+		JOIN component_vulnerabilities cv ON cv.id = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		WHERE th.artifact_id = sr.artifact_id
+		  AND th.component_purl = cv.component_purl
+		  AND th.cve_id = cv.cve_id`+cursor+`
+		ORDER BY th.recorded_at DESC
 		LIMIT $2
 	`, args...)
 	if err != nil {
@@ -130,16 +137,16 @@ func (r *PostgresTriageRepository) ListHistory(ctx context.Context, findingID st
 func (r *PostgresTriageRepository) UpdateRiskContext(ctx context.Context, update domain.RiskContextTriageUpdate) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE risk_context
-		SET effective_state = $2,
-		    triaged_by = $3,
-		    triaged_at = $4,
-		    assigned_to = NULLIF($5, ''),
-		    accepted_until = $6,
-		    risk_score = $7,
+		SET effective_state = $4,
+		    triaged_by = $5,
+		    triaged_at = $6,
+		    assigned_to = NULLIF($7, ''),
+		    accepted_until = $8,
+		    risk_score = $9,
 		    updated_at = NOW()
-		WHERE component_vulnerability_id = $1
-	`, update.FindingID, update.EffectiveState, update.TriagedBy, update.TriagedAt,
-		update.AssignedTo, update.AcceptedUntil, update.RiskScore)
+		WHERE artifact_id = $1 AND component_purl = $2 AND cve_id = $3
+	`, update.ArtifactID, update.ComponentPURL, update.CVEID, update.EffectiveState,
+		update.TriagedBy, update.TriagedAt, update.AssignedTo, update.AcceptedUntil, update.RiskScore)
 	if err != nil {
 		return fmt.Errorf("update risk context from triage: %w", err)
 	}
@@ -148,8 +155,10 @@ func (r *PostgresTriageRepository) UpdateRiskContext(ctx context.Context, update
 
 func (r *PostgresTriageRepository) ListExpiredAcceptedRiskFindings(ctx context.Context, now time.Time) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT th.component_vulnerability_id::text
+		SELECT DISTINCT lf.id::text
 		FROM triage_history th
+		JOIN v_latest_findings lf ON lf.artifact_id = th.artifact_id
+			AND lf.component_purl = th.component_purl AND lf.cve_id = th.cve_id
 		WHERE th.decision = 'accepted_risk'
 		  AND th.accepted_until IS NOT NULL
 		  AND th.accepted_until < $1
@@ -173,14 +182,18 @@ func (r *PostgresTriageRepository) ListExpiredAcceptedRiskFindings(ctx context.C
 func (r *PostgresTriageRepository) LatestDecision(ctx context.Context, findingID string) (string, error) {
 	var decision string
 	err := r.pool.QueryRow(ctx, `
-		SELECT decision
-		FROM triage_history
-		WHERE component_vulnerability_id = $1
-		ORDER BY recorded_at DESC
+		SELECT th.decision
+		FROM triage_history th
+		JOIN component_vulnerabilities cv ON cv.id = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		WHERE th.artifact_id = sr.artifact_id
+		  AND th.component_purl = cv.component_purl
+		  AND th.cve_id = cv.cve_id
+		ORDER BY th.recorded_at DESC
 		LIMIT 1
 	`, findingID).Scan(&decision)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
 		return "", fmt.Errorf("latest triage decision: %w", err)
@@ -207,15 +220,15 @@ func (g *PostgresTriageVEXGenerator) CreateFromDecision(ctx context.Context, inp
 	vexID := uuid.NewString()
 	_, err = g.pool.Exec(ctx, `
 		INSERT INTO vex_documents (
-			id, sbom_document_id, sbom_checksum, checksum_sha256, format, spec_version,
+			id, artifact_id, sbom_checksum, checksum_sha256, format, spec_version,
 			supplier_identity, signature_verified, trust_status, raw_document,
 			source, issuer, ingested_at
 		) VALUES (
-			$1, $2, $3, $4, 'openvex', '0.2.0',
+			$1, NULLIF($2, '')::uuid, $3, $4, 'openvex', '0.2.0',
 			$5, FALSE, 'unsigned', $6::jsonb,
 			'themis_generated', $5, $7
 		)
-	`, vexID, input.Finding.SBOMDocumentID, input.Finding.SBOMChecksum, checksum,
+	`, vexID, input.Finding.ArtifactID, input.Finding.SBOMChecksum, checksum,
 		input.Issuer, raw, input.DocumentTime)
 	if err != nil {
 		return "", fmt.Errorf("insert themis generated vex: %w", err)
@@ -225,9 +238,13 @@ func (g *PostgresTriageVEXGenerator) CreateFromDecision(ctx context.Context, inp
 	if err != nil {
 		return "", err
 	}
-	componentVersionID, err := lookupComponentVersionID(ctx, g.pool, input.Finding.SBOMDocumentID, input.Assertion.ComponentPURL)
+	componentVersionID, err := lookupComponentVersionID(ctx, g.pool, input.Finding.ArtifactID, input.Assertion.ComponentPURL)
 	if err != nil {
 		return "", err
+	}
+	var cvnID any
+	if componentVersionID != "" {
+		cvnID = componentVersionID
 	}
 
 	assertionID := uuid.NewString()
@@ -236,7 +253,7 @@ func (g *PostgresTriageVEXGenerator) CreateFromDecision(ctx context.Context, inp
 			id, vex_document_id, vulnerability_id, component_version_id,
 			component_purl, status, justification, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, assertionID, vexID, vulnID, componentVersionID, input.Assertion.ComponentPURL,
+	`, assertionID, vexID, vulnID, cvnID, input.Assertion.ComponentPURL,
 		input.Assertion.Status, input.Assertion.Justification, input.DocumentTime)
 	if err != nil {
 		return "", fmt.Errorf("insert themis generated vex assertion: %w", err)
@@ -246,9 +263,9 @@ func (g *PostgresTriageVEXGenerator) CreateFromDecision(ctx context.Context, inp
 
 func buildThemisGeneratedVEX(input domain.GeneratedVEXInput) ([]byte, string, error) {
 	doc := map[string]any{
-		"@context": "https://openvex.dev/ns/v0.2.0",
-		"@id":      fmt.Sprintf("themis:triage:%s:%d", input.Finding.FindingID, input.DocumentTime.UnixNano()),
-		"author":   input.Issuer,
+		"@context":  "https://openvex.dev/ns/v0.2.0",
+		"@id":       fmt.Sprintf("themis:triage:%s:%d", input.Finding.FindingID, input.DocumentTime.UnixNano()),
+		"author":    input.Issuer,
 		"timestamp": input.DocumentTime.UTC().Format(time.RFC3339),
 		"statements": []map[string]any{
 			{
@@ -273,7 +290,7 @@ func lookupVulnerabilityID(ctx context.Context, pool pgQueryPool, cveID string) 
 	var id string
 	err := pool.QueryRow(ctx, `SELECT id::text FROM vulnerabilities WHERE cve_id = $1`, cveID).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("vulnerability %q not found for vex assertion", cveID)
 		}
 		return "", err
@@ -281,18 +298,21 @@ func lookupVulnerabilityID(ctx context.Context, pool pgQueryPool, cveID string) 
 	return id, nil
 }
 
-func lookupComponentVersionID(ctx context.Context, pool pgQueryPool, sbomDocumentID, purl string) (string, error) {
+// lookupComponentVersionID resolves a component version for a purl among the
+// artifact's SBOM compositions. Best-effort: returns "" (NULL) when not found.
+func lookupComponentVersionID(ctx context.Context, pool pgQueryPool, artifactID, purl string) (string, error) {
 	var id string
 	err := pool.QueryRow(ctx, `
 		SELECT cvn.id::text
 		FROM component_versions cvn
 		JOIN components c ON c.id = cvn.component_id
-		WHERE cvn.sbom_document_id = $1 AND c.purl = $2
+		JOIN sboms s ON s.id = cvn.sbom_id
+		WHERE s.artifact_id = $1 AND (c.purl = $2 OR c.purl || '@' || cvn.version = $2)
 		LIMIT 1
-	`, sbomDocumentID, purl).Scan(&id)
+	`, artifactID, purl).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return "", fmt.Errorf("component %q not found in sbom %q", purl, sbomDocumentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
 		}
 		return "", err
 	}

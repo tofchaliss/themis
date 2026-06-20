@@ -109,7 +109,7 @@ func TestV021AlpineSBOMOSVCorrelation(t *testing.T) {
 			SupplierIdentity: "test", Actor: "test", ProductOwner: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
@@ -180,7 +180,7 @@ func TestV021RPMSBOMIngestSkipsUnsupportedOSV(t *testing.T) {
 			SupplierIdentity: "test", Actor: "test", ProductOwner: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
@@ -239,7 +239,7 @@ func TestV021AlpineEPSSAfterReEnrich(t *testing.T) {
 			SupplierIdentity: "test", Actor: "test", ProductOwner: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
@@ -268,7 +268,8 @@ func TestV021AlpineEPSSAfterReEnrich(t *testing.T) {
 		SELECT rc.epss_score, rc.kev_listed
 		FROM component_vulnerabilities cv
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		WHERE v.cve_id = 'CVE-2024-0001'
 	`).Scan(&epssScore, &kevListed)
 	if err != nil {

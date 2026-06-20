@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -22,6 +23,9 @@ func NewPostgresProductCatalogRepository(pool pgQueryPool) *PostgresProductCatal
 	return &PostgresProductCatalogRepository{pool: pool}
 }
 
+// defaultProjectName is the slug of the auto-created default project (D5).
+const defaultProjectName = "default"
+
 func (r *PostgresProductCatalogRepository) CreateProduct(ctx context.Context, name, description string) (domain.Product, error) {
 	id := uuid.NewString()
 	err := r.pool.QueryRow(ctx, `
@@ -32,7 +36,99 @@ func (r *PostgresProductCatalogRepository) CreateProduct(ctx context.Context, na
 	if err != nil {
 		return domain.Product{}, fmt.Errorf("create product: %w", err)
 	}
+	if _, err := r.ensureDefaultProject(ctx, id); err != nil {
+		return domain.Product{}, err
+	}
 	return domain.Product{ID: id, Name: name, Description: description}, nil
+}
+
+// ensureDefaultProject returns the product's default project, creating it if absent
+// (idempotent — reused, never duplicated).
+func (r *PostgresProductCatalogRepository) ensureDefaultProject(ctx context.Context, productID string) (string, error) {
+	id := uuid.NewString()
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO projects (id, product_id, name, is_default)
+		VALUES ($1, $2, $3, TRUE)
+		ON CONFLICT (product_id, name) DO UPDATE SET name = projects.name
+		RETURNING id
+	`, id, productID, defaultProjectName).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("ensure default project: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PostgresProductCatalogRepository) CreateVersion(ctx context.Context, projectID, version string) (domain.ProductVersion, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)`, projectID).Scan(&exists); err != nil {
+		return domain.ProductVersion{}, fmt.Errorf("lookup project: %w", err)
+	}
+	if !exists {
+		return domain.ProductVersion{}, domain.ErrProjectNotFound
+	}
+	id := uuid.NewString()
+	var createdAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO versions (id, project_id, version)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (project_id, version) DO NOTHING
+		RETURNING id, created_at
+	`, id, projectID, version).Scan(&id, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ProductVersion{}, domain.ErrVersionConflict
+	}
+	if err != nil {
+		return domain.ProductVersion{}, fmt.Errorf("create version: %w", err)
+	}
+	return domain.ProductVersion{ID: id, ProjectID: projectID, Version: version, ReleaseStatus: "draft", CreatedAt: createdAt}, nil
+}
+
+func (r *PostgresProductCatalogRepository) RegisterArtifact(ctx context.Context, productID, version, imageDigest, repository string) (domain.Artifact, error) {
+	// Duplicate digest maps to the existing artifact (digest is globally unique).
+	var existing domain.Artifact
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, version_id, artifact_type, image_digest, COALESCE(repository, '')
+		FROM artifacts WHERE image_digest = $1
+	`, imageDigest).Scan(&existing.ID, &existing.VersionID, &existing.ArtifactType, &existing.ImageDigest, &existing.Repository)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.Artifact{}, fmt.Errorf("lookup artifact: %w", err)
+	}
+
+	if _, err := r.GetProduct(ctx, productID); err != nil {
+		return domain.Artifact{}, err
+	}
+	projectID, err := r.ensureDefaultProject(ctx, productID)
+	if err != nil {
+		return domain.Artifact{}, err
+	}
+	if version == "" {
+		version = "latest"
+	}
+	versionID := uuid.NewString()
+	if err := r.pool.QueryRow(ctx, `
+		INSERT INTO versions (id, project_id, version)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (project_id, version) DO UPDATE SET version = versions.version
+		RETURNING id
+	`, versionID, projectID, version).Scan(&versionID); err != nil {
+		return domain.Artifact{}, fmt.Errorf("resolve version: %w", err)
+	}
+
+	artifactID := uuid.NewString()
+	if err := r.pool.QueryRow(ctx, `
+		INSERT INTO artifacts (id, version_id, artifact_type, image_digest, repository)
+		VALUES ($1, $2, 'image', $3, NULLIF($4, ''))
+		RETURNING id
+	`, artifactID, versionID, imageDigest, repository).Scan(&artifactID); err != nil {
+		return domain.Artifact{}, fmt.Errorf("register artifact: %w", err)
+	}
+	return domain.Artifact{
+		ID: artifactID, VersionID: versionID, ArtifactType: "image",
+		ImageDigest: imageDigest, Repository: repository,
+	}, nil
 }
 
 func (r *PostgresProductCatalogRepository) ListProducts(ctx context.Context, page domain.PageRequest, productScope string) ([]domain.Product, domain.PageResult, error) {
@@ -160,16 +256,17 @@ func (r *PostgresProductCatalogRepository) ListProjects(ctx context.Context, pro
 func (r *PostgresProductCatalogRepository) ListProductVersions(ctx context.Context, productID string, page domain.PageRequest) ([]domain.ProductVersion, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{productID, limit + 1}
-	where := "WHERE product_id = $1"
+	where := "WHERE p.product_id = $1"
 	if page.Cursor != "" {
-		where += " AND version > $3"
+		where += " AND v.version > $3"
 		args = append(args, page.Cursor)
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, version, release_status, released_at, created_at
-		FROM product_versions
+		SELECT v.id, v.project_id, v.version, v.release_status, v.released_at, v.created_at
+		FROM versions v
+		JOIN projects p ON p.id = v.project_id
 		`+where+`
-		ORDER BY version ASC
+		ORDER BY v.version ASC
 		LIMIT $2
 	`, args...)
 	if err != nil {
@@ -180,7 +277,7 @@ func (r *PostgresProductCatalogRepository) ListProductVersions(ctx context.Conte
 	var items []domain.ProductVersion
 	for rows.Next() {
 		var item domain.ProductVersion
-		if err := rows.Scan(&item.ID, &item.ProductID, &item.Version, &item.ReleaseStatus, &item.ReleasedAt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Version, &item.ReleaseStatus, &item.ReleasedAt, &item.CreatedAt); err != nil {
 			return nil, domain.PageResult{}, err
 		}
 		items = append(items, item)
@@ -219,26 +316,29 @@ func NewPostgresScanQueryRepository(pool pgQueryPool) *PostgresScanQueryReposito
 func (r *PostgresScanQueryRepository) ListProjectScans(ctx context.Context, projectID string, page domain.PageRequest) ([]domain.ScanSummary, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{projectID, limit + 1}
-	where := "WHERE s.project_id = $1 AND s.deleted_at IS NULL"
+	where := "WHERE proj.id = $1 AND sr.deleted_at IS NULL"
 	if page.Cursor != "" {
-		where += " AND s.ingested_at < $3"
+		where += " AND sr.scanned_at < $3"
 		args = append(args, page.Cursor)
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT s.id, COALESCE(s.project_id::text, ''), i.product_id::text,
-		       s.image_digest, s.format, s.trust_status, s.ingested_at,
+		SELECT sr.id, proj.id::text, proj.product_id::text,
+		       sr.image_digest, sb.format, sr.trust_status, sr.scanned_at,
 		       COALESCE(j.id::text, '')
-		FROM sbom_documents s
-		JOIN images i ON i.id = s.image_id
+		FROM scan_reports sr
+		JOIN sboms sb ON sb.id = sr.sbom_id
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		LEFT JOIN LATERAL (
 			SELECT id
 			FROM ingestion_jobs
-			WHERE payload->>'scan_id' = s.id::text
+			WHERE payload->>'scan_id' = sr.id::text
 			ORDER BY created_at DESC
 			LIMIT 1
 		) j ON true
 		`+where+`
-		ORDER BY s.ingested_at DESC
+		ORDER BY sr.scanned_at DESC
 		LIMIT $2
 	`, args...)
 	if err != nil {
@@ -269,19 +369,22 @@ func (r *PostgresScanQueryRepository) ListProjectScans(ctx context.Context, proj
 func (r *PostgresScanQueryRepository) GetScan(ctx context.Context, id string) (domain.ScanDetail, error) {
 	var detail domain.ScanDetail
 	err := r.pool.QueryRow(ctx, `
-		SELECT s.id, COALESCE(s.project_id::text, ''), i.product_id::text,
-		       s.image_digest, s.format, s.trust_status, s.ingested_at,
+		SELECT sr.id, proj.id::text, proj.product_id::text,
+		       sr.image_digest, sb.format, sr.trust_status, sr.scanned_at,
 		       COALESCE(j.id::text, '')
-		FROM sbom_documents s
-		JOIN images i ON i.id = s.image_id
+		FROM scan_reports sr
+		JOIN sboms sb ON sb.id = sr.sbom_id
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		LEFT JOIN LATERAL (
 			SELECT id
 			FROM ingestion_jobs
-			WHERE payload->>'scan_id' = s.id::text
+			WHERE payload->>'scan_id' = sr.id::text
 			ORDER BY created_at DESC
 			LIMIT 1
 		) j ON true
-		WHERE s.id = $1 AND s.deleted_at IS NULL
+		WHERE sr.id = $1 AND sr.deleted_at IS NULL
 	`, id).Scan(&detail.ID, &detail.ProjectID, &detail.ProductID, &detail.ImageDigest,
 		&detail.Format, &detail.TrustStatus, &detail.IngestedAt, &detail.IngestionID)
 	if err != nil {
@@ -303,7 +406,7 @@ func (r *PostgresScanQueryRepository) countSeverities(ctx context.Context, scanI
 		SELECT COALESCE(v.severity, 'none'), COUNT(*)
 		FROM component_vulnerabilities cv
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		WHERE cv.sbom_document_id = $1
+		WHERE cv.scan_report_id = $1
 		GROUP BY COALESCE(v.severity, 'none')
 	`, scanID)
 	if err != nil {
@@ -330,7 +433,7 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 ) ([]domain.ScanVulnerability, domain.PageResult, error) {
 	limit := normalizeLimit(page.Limit)
 	args := []any{scanID, limit + 1}
-	where := []string{"cv.sbom_document_id = $1", sbomActiveFilter}
+	where := []string{"cv.scan_report_id = $1"}
 	argIdx := 3
 	if filter.Severity != "" {
 		where = append(where, fmt.Sprintf("COALESCE(v.severity, 'none') = $%d", argIdx))
@@ -353,16 +456,19 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	}
 	query := fmt.Sprintf(`
 		SELECT cv.id, v.cve_id, COALESCE(v.severity, 'unknown'),
-		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), i.product_id::text,
+		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), proj.product_id::text,
 		       rc.exploit_public, rc.risk_score, rc.epss_score, rc.kev_listed,
 		       rc.deterministic_level, rc.blast_radius_score, rc.upstream_vex_coverage
 		FROM component_vulnerabilities cv
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id AND sr.deleted_at IS NULL
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		LEFT JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		LEFT JOIN risk_context rc ON rc.artifact_id = sr.artifact_id
+			AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		JOIN component_versions cvn ON cvn.id = cv.component_version_id
 		JOIN components c ON c.id = cvn.component_id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
-		JOIN images i ON i.id = s.image_id
+		JOIN artifacts a ON a.id = sr.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		WHERE %s
 		ORDER BY cv.id ASC
 		LIMIT $2
@@ -445,7 +551,7 @@ func (r *PostgresComponentCatalogRepository) ListComponents(ctx context.Context,
 		argIdx++
 	}
 	if productID != "" {
-		where = append(where, fmt.Sprintf("i.product_id = $%d", argIdx))
+		where = append(where, fmt.Sprintf("proj.product_id = $%d", argIdx))
 		args = append(args, productID)
 		argIdx++
 	}
@@ -454,11 +560,14 @@ func (r *PostgresComponentCatalogRepository) ListComponents(ctx context.Context,
 		args = append(args, page.Cursor)
 	}
 	query := fmt.Sprintf(`
-		SELECT DISTINCT c.purl, c.name, c.ecosystem, cv.version, i.product_id::text
+		SELECT DISTINCT c.purl, c.name, c.ecosystem, cv.version, proj.product_id::text
 		FROM components c
 		JOIN component_versions cv ON cv.component_id = c.id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id AND s.deleted_at IS NULL
-		JOIN images i ON i.id = s.image_id
+		JOIN sboms s ON s.id = cv.sbom_id
+		JOIN scan_reports sr ON sr.sbom_id = s.id AND sr.deleted_at IS NULL
+		JOIN artifacts a ON a.id = s.artifact_id
+		JOIN versions ver ON ver.id = a.version_id
+		JOIN projects proj ON proj.id = ver.project_id
 		WHERE %s
 		ORDER BY c.purl ASC
 		LIMIT $1

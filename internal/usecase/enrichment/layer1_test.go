@@ -172,7 +172,7 @@ func TestHandlerUsesCustomLayer3(t *testing.T) {
 	called := false
 	repo := &layer3Repo{}
 	handler := &enrichment.Handler{
-		Repo: repo,
+		Repo:   repo,
 		Layer3: layer3Stub{fn: func() { called = true }},
 	}
 	if err := handler.ApplyVEX(context.Background(), "sbom-1"); err != nil {
@@ -198,29 +198,29 @@ type layer3Repo struct {
 	findings []domain.EnrichmentFinding
 }
 
-func (r *layer3Repo) ListFindingsForSBOM(context.Context, string) ([]domain.EnrichmentFinding, error) {
+func (r *layer3Repo) ListFindingsForArtifact(context.Context, string) ([]domain.EnrichmentFinding, error) {
 	if len(r.findings) > 0 {
 		return r.findings, nil
 	}
 	return []domain.EnrichmentFinding{{
 		ComponentVulnerabilityID: "cv-1",
-		ComponentPURL:          "pkg:npm/a@1.0.0",
-		CVEID:                  "CVE-2024-0001",
-		RawSeverity:            "high",
-		CVSSScore:              7.5,
+		ComponentPURL:            "pkg:npm/a@1.0.0",
+		CVEID:                    "CVE-2024-0001",
+		RawSeverity:              "high",
+		CVSSScore:                7.5,
 	}}, nil
 }
-func (r *layer3Repo) ListAssertionsForSBOM(context.Context, string) ([]domain.VEXAssertionMatch, error) {
+func (r *layer3Repo) ListAssertionsForArtifact(context.Context, string) ([]domain.VEXAssertionMatch, error) {
 	return nil, nil
 }
-func (r *layer3Repo) GetRiskContext(context.Context, string) (domain.RiskContextSnapshot, error) {
+func (r *layer3Repo) GetRiskContext(context.Context, string, string, string) (domain.RiskContextSnapshot, error) {
 	return domain.RiskContextSnapshot{}, nil
 }
 func (r *layer3Repo) UpsertRiskContext(context.Context, domain.EnrichmentFinding, domain.RiskContextSnapshot) error {
 	return nil
 }
-func (r *layer3Repo) SBOMDocumentForVEX(context.Context, string) (string, error) { return "", nil }
-func (r *layer3Repo) CountOpenRiskContexts(context.Context) (int, error)           { return 0, nil }
+func (r *layer3Repo) ArtifactForVEX(context.Context, string) (string, error) { return "", nil }
+func (r *layer3Repo) CountOpenRiskContexts(context.Context) (int, error)         { return 0, nil }
 func (r *layer3Repo) ListOpenRiskContexts(context.Context, int, int) ([]domain.OpenRiskContextRow, error) {
 	return nil, nil
 }

@@ -15,7 +15,7 @@ func TestSubmitFalsePositiveCreatesVEX(t *testing.T) {
 	handler := &triage.Handler{
 		Repo: &memoryRepo{finding: domain.TriageFindingContext{
 			FindingID: "f1", ComponentPURL: "pkg:npm/a@1", CVEID: "CVE-1",
-			SBOMDocumentID: "sbom-1", SBOMChecksum: "abc", RawSeverity: "high",
+			ArtifactID: "sbom-1", SBOMChecksum: "abc", RawSeverity: "high",
 			EffectiveState: domain.EffectiveStateDetected,
 		}},
 		VEX: vex,
@@ -160,7 +160,7 @@ func TestSubmitAllDecisionVEXStatuses(t *testing.T) {
 		handler := &triage.Handler{
 			Repo: &memoryRepo{finding: domain.TriageFindingContext{
 				FindingID: "f1", ComponentPURL: "pkg:a", CVEID: "CVE-1",
-				SBOMDocumentID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
+				ArtifactID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
 			}},
 			VEX: vex,
 		}
@@ -188,7 +188,7 @@ func TestSubmitRepoGetFindingError(t *testing.T) {
 
 func TestSubmitAppendHistoryError(t *testing.T) {
 	handler := &triage.Handler{Repo: &memoryRepo{
-		finding: domain.TriageFindingContext{FindingID: "f1", RawSeverity: "high"},
+		finding:   domain.TriageFindingContext{FindingID: "f1", RawSeverity: "high"},
 		appendErr: errors.New("append failed"),
 	}}
 	_, err := handler.Submit(context.Background(), domain.TriageDecision{
@@ -202,7 +202,7 @@ func TestSubmitAppendHistoryError(t *testing.T) {
 
 func TestSubmitUpdateRiskError(t *testing.T) {
 	handler := &triage.Handler{Repo: &memoryRepo{
-		finding: domain.TriageFindingContext{FindingID: "f1", RawSeverity: "high"},
+		finding:   domain.TriageFindingContext{FindingID: "f1", RawSeverity: "high"},
 		updateErr: errors.New("update failed"),
 	}, VEX: &memoryVEX{}}
 	_, err := handler.Submit(context.Background(), domain.TriageDecision{
@@ -218,7 +218,7 @@ func TestSubmitVEXError(t *testing.T) {
 	handler := &triage.Handler{
 		Repo: &memoryRepo{finding: domain.TriageFindingContext{
 			FindingID: "f1", ComponentPURL: "pkg:a", CVEID: "CVE-1",
-			SBOMDocumentID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
+			ArtifactID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
 		}},
 		VEX: &memoryVEX{err: errors.New("vex failed")},
 	}
@@ -319,7 +319,7 @@ func TestSubmitAcceptedRiskVEX(t *testing.T) {
 	handler := &triage.Handler{
 		Repo: &memoryRepo{finding: domain.TriageFindingContext{
 			FindingID: "f1", ComponentPURL: "pkg:a", CVEID: "CVE-1",
-			SBOMDocumentID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
+			ArtifactID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
 		}},
 		VEX: vex,
 	}
@@ -339,7 +339,7 @@ func TestSubmitAuditOnStateChange(t *testing.T) {
 	handler := &triage.Handler{
 		Repo: &memoryRepo{finding: domain.TriageFindingContext{
 			FindingID: "f1", ComponentPURL: "pkg:a", CVEID: "CVE-1",
-			SBOMDocumentID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
+			ArtifactID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
 			EffectiveState: domain.EffectiveStateDetected,
 		}},
 		VEX:   &memoryVEX{},
@@ -402,7 +402,7 @@ func TestSubmitSameStateSkipsTransitionAudit(t *testing.T) {
 	handler := &triage.Handler{
 		Repo: &memoryRepo{finding: domain.TriageFindingContext{
 			FindingID: "f1", ComponentPURL: "pkg:a", CVEID: "CVE-1",
-			SBOMDocumentID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
+			ArtifactID: "sbom", SBOMChecksum: "x", RawSeverity: "high",
 			EffectiveState: domain.EffectiveStateConfirmed,
 		}},
 		VEX:   &memoryVEX{},

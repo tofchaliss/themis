@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,12 +92,10 @@ func TestAPIFlowIntegrationPostgres(t *testing.T) {
 	}
 
 	productID := createProduct(t, client, server.URL, authHeader)
-	projectID := createProject(t, client, server.URL, authHeader, productID)
+	projectID := defaultProjectID(t, ctx, pool, productID)
 
 	digest := "sha256:api-integration"
-	imageID := uuid.NewString()
-	artifactID := uuid.NewString()
-	seedImage(t, ctx, pool, productID, artifactID, imageID, digest)
+	artifactID := registerArtifact(t, client, server.URL, authHeader, productID, digest)
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "adapter", "parser", "testdata", "cyclonedx-1.6.json"))
 	if err != nil {
@@ -111,7 +109,7 @@ func TestAPIFlowIntegrationPostgres(t *testing.T) {
 		"format":       "cyclonedx",
 		"spec_version": "1.6",
 		"document":     document,
-		"image_id":     imageID,
+		"artifact_id":  artifactID,
 		"project_id":   projectID,
 		"image_digest": digest,
 		"ci_job_id":    "integration-job",
@@ -197,23 +195,6 @@ func createProduct(t *testing.T, client *http.Client, baseURL string, auth func(
 	return product.ID
 }
 
-func createProject(t *testing.T, client *http.Client, baseURL string, auth func(*http.Request), productID string) string {
-	t.Helper()
-	body, _ := json.Marshal(map[string]string{"name": "integration-project"})
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/products/"+productID+"/projects", bytes.NewReader(body))
-	auth(req)
-	req.Header.Set("Content-Type", "application/json")
-	resp := mustDo(t, client, req)
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create project status=%d body=%s", resp.StatusCode, readBody(t, resp))
-	}
-	var project struct {
-		ID string `json:"id"`
-	}
-	decodeJSON(t, resp, &project)
-	return project.ID
-}
-
 func waitForIngestion(t *testing.T, client *http.Client, baseURL string, auth func(*http.Request), ingestionID string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -293,18 +274,38 @@ func insertIntegrationAPIKey(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	}
 }
 
-func seedImage(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID, artifactID, imageID, digest string) {
+// registerArtifact registers an artifact by image digest via the v0.3.0 REST endpoint
+// (POST /api/v1/products/{id}/artifacts) and returns its id. The endpoint auto-creates the
+// product's default project + "latest" version, so the artifact's scans surface under the
+// default project.
+func registerArtifact(t *testing.T, client *http.Client, baseURL string, auth func(*http.Request), productID, digest string) string {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image') ON CONFLICT DO NOTHING`, artifactID); err != nil {
-		t.Fatalf("insert artifact: %v", err)
+	body, _ := json.Marshal(map[string]string{
+		"image_digest": digest,
+		"repository":   "themis/integration",
+	})
+	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/products/"+productID+"/artifacts", bytes.NewReader(body))
+	auth(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp := mustDo(t, client, req)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register artifact status=%d body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO images (id, artifact_id, product_id, repository, digest)
-		VALUES ($1, $2, $3, 'themis/integration', $4)
-		ON CONFLICT DO NOTHING
-	`, imageID, artifactID, productID, digest); err != nil {
-		t.Fatalf("insert image: %v", err)
+	var out struct {
+		ID string `json:"id"`
 	}
+	decodeJSON(t, resp, &out)
+	return out.ID
+}
+
+// defaultProjectID returns the auto-created default project for a product.
+func defaultProjectID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID string) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id FROM projects WHERE product_id = $1 AND is_default LIMIT 1`, productID).Scan(&id); err != nil {
+		t.Fatalf("resolve default project: %v", err)
+	}
+	return id
 }
 
 func seedVulnerabilityCatalog(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

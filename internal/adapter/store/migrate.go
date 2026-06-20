@@ -11,7 +11,9 @@ import (
 )
 
 // BinarySchemaVersion is the highest migration version embedded in this binary.
-const BinarySchemaVersion uint = 19
+// v0.3.0 squashes the prior 000001–000019 chain into a single greenfield baseline
+// (themis-core-model, D13), so the baseline version is 1.
+const BinarySchemaVersion uint = 1
 
 // ErrSchemaAhead indicates the database schema is newer than this binary supports.
 var ErrSchemaAhead = errors.New("database schema version is ahead of binary version")

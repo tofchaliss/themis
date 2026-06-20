@@ -267,4 +267,4 @@ func (m *memoryQueue) Enqueue(_ context.Context, job domain.Job) (string, error)
 }
 
 func (m *memoryQueue) Consume(context.Context) (<-chan domain.Job, error) { return nil, nil }
-func (m *memoryQueue) Ack(context.Context, string) error                 { return nil }
+func (m *memoryQueue) Ack(context.Context, string) error                  { return nil }

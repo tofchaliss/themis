@@ -97,7 +97,7 @@ func TestSerializeOpenVEX(t *testing.T) {
 
 func TestExportCoverageAggregate(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"},
 		findings: []domain.VEXExportFinding{
 			{RiskContextSnapshot: domain.RiskContextSnapshot{UpstreamVEXCoverage: domain.UpstreamVEXCoverageCovered}},
 			{RiskContextSnapshot: domain.RiskContextSnapshot{UpstreamVEXCoverage: domain.UpstreamVEXCoverageNotCovered}},
@@ -113,10 +113,10 @@ func TestExportCoverageAggregate(t *testing.T) {
 
 func TestExportVEXPrecedenceInDocument(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"},
 		findings: []domain.VEXExportFinding{{
 			EnrichmentFinding: domain.EnrichmentFinding{
-				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-1", SBOMDocumentID: "sbom-1",
+				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-1", ArtifactID: "sbom-1",
 			},
 			RiskContextSnapshot: domain.RiskContextSnapshot{VEXStatus: domain.VEXStatusAffected},
 		}},
@@ -157,10 +157,10 @@ func TestExportProductNotFound(t *testing.T) {
 
 func TestExportVEXWithVendorMatch(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "3.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "3.0.0"},
 		findings: []domain.VEXExportFinding{{
 			EnrichmentFinding: domain.EnrichmentFinding{
-				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-V", SBOMDocumentID: "sbom-v",
+				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-V", ArtifactID: "sbom-v",
 			},
 		}},
 	}
@@ -179,7 +179,7 @@ func TestExportVEXWithVendorMatch(t *testing.T) {
 }
 
 func TestExportCoverageVersionNotFound(t *testing.T) {
-	repo := &memoryExportRepo{version: domain.ProductVersion{ProductID: "prod-1", Version: "1.0.0"}}
+	repo := &memoryExportRepo{version: domain.ProductVersion{ProjectID: "prod-1", Version: "1.0.0"}}
 	svc := &vexgen.Handler{Repo: repo}
 	_, err := svc.ExportCoverage(context.Background(), "prod-1", "9.9.9")
 	if !errors.Is(err, domain.ErrProductVersionNotFound) {
@@ -189,9 +189,9 @@ func TestExportCoverageVersionNotFound(t *testing.T) {
 
 func TestEntryFromFindingWithoutWinner(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "4.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "4.0.0"},
 		findings: []domain.VEXExportFinding{{
-			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:generic/a@1", CVEID: "CVE-X", SBOMDocumentID: "sbom-x"},
+			EnrichmentFinding:   domain.EnrichmentFinding{ComponentPURL: "pkg:generic/a@1", CVEID: "CVE-X", ArtifactID: "sbom-x"},
 			RiskContextSnapshot: domain.RiskContextSnapshot{VEXStatus: domain.VEXStatusAffected, RiskScore: 5},
 		}},
 	}
@@ -222,8 +222,8 @@ func (stubVendorMatcher) Match(string, string, []domain.VendorVEXAssertion) enri
 
 func TestExportCoverageRepoError(t *testing.T) {
 	repo := &memoryExportRepo{
-		version:      domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"},
-		findingsErr:  errors.New("db down"),
+		version:     domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"},
+		findingsErr: errors.New("db down"),
 	}
 	svc := &vexgen.Handler{Repo: repo}
 	_, err := svc.ExportCoverage(context.Background(), "prod-1", "1.0.0")
@@ -234,7 +234,7 @@ func TestExportCoverageRepoError(t *testing.T) {
 
 func TestBuildEntriesListFindingsError(t *testing.T) {
 	repo := &memoryExportRepo{
-		version:     domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"},
+		version:     domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"},
 		findingsErr: errors.New("list failed"),
 	}
 	svc := &vexgen.Handler{Repo: repo}
@@ -255,10 +255,10 @@ func TestEnsureProductExistsError(t *testing.T) {
 
 func TestVendorAssertionMatchFallbackStatus(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "5.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "5.0.0"},
 		findings: []domain.VEXExportFinding{{
 			EnrichmentFinding: domain.EnrichmentFinding{
-				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-V2", SBOMDocumentID: "sbom-v2",
+				ComponentPURL: "pkg:rpm/redhat/httpd@1.0", CVEID: "CVE-V2", ArtifactID: "sbom-v2",
 			},
 		}},
 	}
@@ -298,7 +298,7 @@ func TestParseExportFormat(t *testing.T) {
 
 func TestExportVEXOpenVEXFormat(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "2.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "2.0.0"},
 	}
 	svc := &vexgen.Handler{Repo: repo}
 	body, err := svc.ExportVEX(context.Background(), "prod-1", "2.0.0", domain.VEXExportFormatOpenVEX)
@@ -364,11 +364,11 @@ func (m *memoryExportRepo) ProductExists(context.Context, string) (bool, error) 
 	if m.productExists {
 		return true, nil
 	}
-	return m.version.ProductID != "", nil
+	return m.version.ProjectID != "", nil
 }
 
 func (m *memoryExportRepo) GetProductVersion(_ context.Context, productID, version string) (domain.ProductVersion, error) {
-	if m.version.ProductID == "" || m.version.Version != version {
+	if m.version.ProjectID == "" || m.version.Version != version {
 		return domain.ProductVersion{}, domain.ErrProductVersionNotFound
 	}
 	return m.version, nil
@@ -381,7 +381,7 @@ func (m *memoryExportRepo) ListFindingsForProductVersion(context.Context, string
 	return m.findings, nil
 }
 
-func (m *memoryExportRepo) ListAssertionsForSBOM(_ context.Context, sbomID string) ([]domain.VEXAssertionMatch, error) {
+func (m *memoryExportRepo) ListAssertionsForArtifact(_ context.Context, sbomID string) ([]domain.VEXAssertionMatch, error) {
 	if m.assertionsErr != nil {
 		return nil, m.assertionsErr
 	}
@@ -417,9 +417,9 @@ func TestExportCoverageExistsError(t *testing.T) {
 
 func TestEntryFromFindingResolveJustification(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "9.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "9.0.0"},
 		findings: []domain.VEXExportFinding{{
-			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-9", SBOMDocumentID: "sbom-9"},
+			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-9", ArtifactID: "sbom-9"},
 		}},
 		assertions: map[string][]domain.VEXAssertionMatch{
 			"sbom-9": {{
@@ -437,7 +437,7 @@ func TestEntryFromFindingResolveJustification(t *testing.T) {
 
 func TestExportCoverageListError(t *testing.T) {
 	repo := &memoryExportRepo{
-		version:     domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"},
+		version:     domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"},
 		findingsErr: errors.New("list findings failed"),
 	}
 	svc := &vexgen.Handler{Repo: repo}
@@ -449,9 +449,9 @@ func TestExportCoverageListError(t *testing.T) {
 
 func TestEntryFromFindingDefaultStatus(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "10.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "10.0.0"},
 		findings: []domain.VEXExportFinding{{
-			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-10", SBOMDocumentID: "sbom-10"},
+			EnrichmentFinding:   domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-10", ArtifactID: "sbom-10"},
 			RiskContextSnapshot: domain.RiskContextSnapshot{},
 		}},
 	}
@@ -464,10 +464,10 @@ func TestEntryFromFindingDefaultStatus(t *testing.T) {
 
 func TestBuildEntriesCacheHits(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "11.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "11.0.0"},
 		findings: []domain.VEXExportFinding{
-			{EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/a@1", CVEID: "CVE-A", SBOMDocumentID: "sbom-shared"}},
-			{EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-B", SBOMDocumentID: "sbom-shared"}},
+			{EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/a@1", CVEID: "CVE-A", ArtifactID: "sbom-shared"}},
+			{EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-B", ArtifactID: "sbom-shared"}},
 		},
 		assertions: map[string][]domain.VEXAssertionMatch{
 			"sbom-shared": {
@@ -489,7 +489,7 @@ func (stubVendorMatcherNoMatch) Match(string, string, []domain.VendorVEXAssertio
 }
 
 func TestExportCoverageSecondVersionLookupError(t *testing.T) {
-	base := &memoryExportRepo{version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"}}
+	base := &memoryExportRepo{version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"}}
 	repo := &flakyVersionRepo{memoryExportRepo: base, versionFailOnSecond: true}
 	svc := &vexgen.Handler{Repo: repo}
 	_, err := svc.ExportCoverage(context.Background(), "prod-1", "1.0.0")
@@ -499,7 +499,7 @@ func TestExportCoverageSecondVersionLookupError(t *testing.T) {
 }
 
 func TestExportVEXSecondVersionLookupError(t *testing.T) {
-	base := &memoryExportRepo{version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "1.0.0"}}
+	base := &memoryExportRepo{version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "1.0.0"}}
 	repo := &flakyVersionRepo{memoryExportRepo: base, versionFailOnSecond: true}
 	svc := &vexgen.Handler{Repo: repo}
 	_, err := svc.ExportVEX(context.Background(), "prod-1", "1.0.0", domain.VEXExportFormatCycloneDX)
@@ -510,8 +510,8 @@ func TestExportVEXSecondVersionLookupError(t *testing.T) {
 
 func TestBuildEntriesAssertionsError(t *testing.T) {
 	repo := &memoryExportRepo{
-		version:       domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "6.0.0"},
-		findings:      []domain.VEXExportFinding{{EnrichmentFinding: domain.EnrichmentFinding{SBOMDocumentID: "sbom-e"}}},
+		version:       domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "6.0.0"},
+		findings:      []domain.VEXExportFinding{{EnrichmentFinding: domain.EnrichmentFinding{ArtifactID: "sbom-e"}}},
 		assertionsErr: errors.New("assertions failed"),
 	}
 	svc := &vexgen.Handler{Repo: repo}
@@ -523,9 +523,9 @@ func TestBuildEntriesAssertionsError(t *testing.T) {
 
 func TestBuildEntriesVendorError(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "7.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "7.0.0"},
 		findings: []domain.VEXExportFinding{{
-			EnrichmentFinding: domain.EnrichmentFinding{CVEID: "CVE-E", SBOMDocumentID: "sbom-e2"},
+			EnrichmentFinding: domain.EnrichmentFinding{CVEID: "CVE-E", ArtifactID: "sbom-e2"},
 		}},
 	}
 	svc := &vexgen.Handler{Repo: repo, VendorVEX: errVendorReader{err: errors.New("vendor failed")}, VendorMatch: stubVendorMatcher{}}
@@ -537,9 +537,9 @@ func TestBuildEntriesVendorError(t *testing.T) {
 
 func TestEntryFromFindingUsesResolveEffectiveState(t *testing.T) {
 	repo := &memoryExportRepo{
-		version: domain.ProductVersion{ID: "pv-1", ProductID: "prod-1", Version: "8.0.0"},
+		version: domain.ProductVersion{ID: "pv-1", ProjectID: "prod-1", Version: "8.0.0"},
 		findings: []domain.VEXExportFinding{{
-			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-8", SBOMDocumentID: "sbom-8"},
+			EnrichmentFinding: domain.EnrichmentFinding{ComponentPURL: "pkg:a/b@1", CVEID: "CVE-8", ArtifactID: "sbom-8"},
 		}},
 		assertions: map[string][]domain.VEXAssertionMatch{
 			"sbom-8": {{

@@ -64,15 +64,11 @@ func TestAC22_SoftDeleteIsolation(t *testing.T) {
 			RawDocument: raw, ImageDigest: digest, SupplierIdentity: "team-a", Actor: "test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE sbom_documents SET is_latest = FALSE WHERE id = $1`, result.ScanID); err != nil {
-		t.Fatal(err)
-	}
-
 	statusRepo := store.NewPostgresSystemStatusRepository(pool)
 	sbomRepo := store.NewPostgresSBOMManagementRepository(pool)
 	scans := store.NewPostgresScanQueryRepository(pool)
@@ -86,7 +82,7 @@ func TestAC22_SoftDeleteIsolation(t *testing.T) {
 		t.Fatalf("expected seeded data in status: %+v", before)
 	}
 
-	summary, err := sbomRepo.SoftDeleteSBOM(ctx, result.ScanID, false)
+	summary, err := sbomRepo.SoftDeleteSBOM(ctx, result.ScanID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,17 +141,11 @@ func TestAC22_SoftDeleteIsolation(t *testing.T) {
 	}
 
 	vexExport := store.NewPostgresVEXExportRepository(pool)
+	// Rename the artifact's version to a stable label for export lookup.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO product_versions (id, product_id, version, release_status)
-		VALUES ($1, $2, '1.0.0', 'released') ON CONFLICT DO NOTHING
-	`, uuid.NewString(), productID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE artifacts SET product_version_id = (
-			SELECT id FROM product_versions WHERE product_id = $1 LIMIT 1
-		) WHERE id = $2
-	`, productID, artifactID); err != nil {
+		UPDATE versions SET version = '1.0.0'
+		WHERE id = (SELECT version_id FROM artifacts WHERE id = $1)
+	`, artifactID); err != nil {
 		t.Fatal(err)
 	}
 	vexSvc := &vexgen.Handler{
@@ -190,18 +180,12 @@ func TestO14_SBOMDeleteAuditLog(t *testing.T) {
 	digest := "sha256:o14-audit"
 	seedBaseData(t, ctx, pool, productID, artifactID, imageID, digest)
 
-	var sbomID string
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO sbom_documents (id, image_id, image_digest, checksum_sha256, format, spec_version, raw_document, trust_status, is_latest)
-		VALUES ($1, $2, $3, $4, 'cyclonedx', '1.6', '{}'::jsonb, 'unsigned', FALSE)
-		RETURNING id::text
-	`, uuid.NewString(), imageID, digest, "checksum-o14").Scan(&sbomID); err != nil {
-		t.Fatal(err)
-	}
+	// The deletable "sbom" unit is a scan_reports row.
+	_, sbomID := seedScan(t, ctx, pool, artifactID)
 
 	audit := trust.NewPostgresAuditRecorder(pool)
 	sbomRepo := store.NewPostgresSBOMManagementRepository(pool)
-	if _, err := sbomRepo.SoftDeleteSBOM(ctx, sbomID, false); err != nil {
+	if _, err := sbomRepo.SoftDeleteSBOM(ctx, sbomID, true); err != nil {
 		t.Fatal(err)
 	}
 	keyID := uuid.NewString()

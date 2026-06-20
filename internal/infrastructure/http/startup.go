@@ -23,12 +23,14 @@ type bootHooks struct {
 	connect             func(ctx context.Context, dsn string, maxPoolSize int32) (domain.DatabasePool, error)
 	runMigrations       func(dsn, migrationsPath string) error
 	verifySchemaVersion func(dsn, migrationsPath string) error
+	verifySchemaShape   func(ctx context.Context, pool *pgxpool.Pool) error
 }
 
 var (
 	dbConnect             = db.Connect
 	dbRunMigrations       = db.RunMigrations
 	dbVerifySchemaVersion = db.VerifySchemaVersion
+	dbVerifySchemaShape   = db.VerifySchemaShape
 	newInProcessQueue     = queue.NewInProcessQueue
 )
 
@@ -94,6 +96,7 @@ func defaultBootHooks() bootHooks {
 		},
 		runMigrations:       dbRunMigrations,
 		verifySchemaVersion: dbVerifySchemaVersion,
+		verifySchemaShape:   dbVerifySchemaShape,
 	}
 }
 
@@ -116,6 +119,13 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 	if err := cfg.hooks.verifySchemaVersion(appCfg.Database.DSN, cfg.migrationsPath); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("verify schema version: %w", err)
+	}
+
+	if pgxPool, ok := pool.(*pgxpool.Pool); ok {
+		if err := cfg.hooks.verifySchemaShape(ctx, pgxPool); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("verify schema shape: %w", err)
+		}
 	}
 
 	workers := cfg.workerPool

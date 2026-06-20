@@ -10,8 +10,8 @@ import (
 )
 
 func TestBinarySchemaVersion(t *testing.T) {
-	if store.BinarySchemaVersion != 19 {
-		t.Fatalf("BinarySchemaVersion = %d, want 19", store.BinarySchemaVersion)
+	if store.BinarySchemaVersion != 1 {
+		t.Fatalf("BinarySchemaVersion = %d, want 1", store.BinarySchemaVersion)
 	}
 }
 
@@ -63,44 +63,8 @@ func TestSortVersions(t *testing.T) {
 
 func TestValidateMigrationSet(t *testing.T) {
 	valid := []string{
-		"000001_layer1_products_artifacts.up.sql",
-		"000001_layer1_products_artifacts.down.sql",
-		"000002_layer1_sbom_documents.up.sql",
-		"000002_layer1_sbom_documents.down.sql",
-		"000003_layer1_components.up.sql",
-		"000003_layer1_components.down.sql",
-		"000004_layer1_vulnerabilities.up.sql",
-		"000004_layer1_vulnerabilities.down.sql",
-		"000005_layer2_vex.up.sql",
-		"000005_layer2_vex.down.sql",
-		"000006_layer2_intelligence.up.sql",
-		"000006_layer2_intelligence.down.sql",
-		"000007_layer3_risk_context.up.sql",
-		"000007_layer3_risk_context.down.sql",
-		"000008_operational_tables.up.sql",
-		"000008_operational_tables.down.sql",
-		"000009_indexes.up.sql",
-		"000009_indexes.down.sql",
-		"000010_risk_context_enrichment.up.sql",
-		"000010_risk_context_enrichment.down.sql",
-		"000011_triage_history.up.sql",
-		"000011_triage_history.down.sql",
-		"000012_system_state.up.sql",
-		"000012_system_state.down.sql",
-		"000013_vulnerability_package_index.up.sql",
-		"000013_vulnerability_package_index.down.sql",
-		"000014_phase2a_asset_graph.up.sql",
-		"000014_phase2a_asset_graph.down.sql",
-		"000015_epss_kev_signals.up.sql",
-		"000015_epss_kev_signals.down.sql",
-		"000016_risk_context_phase2a.up.sql",
-		"000016_risk_context_phase2a.down.sql",
-		"000017_phase2a_indexes.up.sql",
-		"000017_phase2a_indexes.down.sql",
-		"000018_sbom_soft_delete.up.sql",
-		"000018_sbom_soft_delete.down.sql",
-		"000019_vendor_vex_feed.up.sql",
-		"000019_vendor_vex_feed.down.sql",
+		"000001_v030_baseline.up.sql",
+		"000001_v030_baseline.down.sql",
 	}
 
 	if err := store.ValidateMigrationSet(valid); err != nil {
@@ -108,7 +72,7 @@ func TestValidateMigrationSet(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
+		name  string
 		files []string
 	}{
 		{name: "empty", files: nil},
@@ -158,13 +122,13 @@ func TestListMigrationFiles(t *testing.T) {
 }
 
 func TestCompareSchemaVersion(t *testing.T) {
-	if err := store.CompareSchemaVersion(9, false, store.BinarySchemaVersion); err != nil {
+	if err := store.CompareSchemaVersion(store.BinarySchemaVersion, false, store.BinarySchemaVersion); err != nil {
 		t.Fatalf("matching version: %v", err)
 	}
-	if err := store.CompareSchemaVersion(1, false, store.BinarySchemaVersion); err != nil {
+	if err := store.CompareSchemaVersion(0, false, store.BinarySchemaVersion); err != nil {
 		t.Fatalf("older version: %v", err)
 	}
-	if err := store.CompareSchemaVersion(2, true, store.BinarySchemaVersion); err == nil {
+	if err := store.CompareSchemaVersion(store.BinarySchemaVersion, true, store.BinarySchemaVersion); err == nil {
 		t.Fatal("expected dirty error")
 	}
 
@@ -193,6 +157,16 @@ func TestExpectedTablesAndIndexes(t *testing.T) {
 	missingIndexes := store.MissingIndexes([]string{indexes[0]})
 	if len(missingIndexes) != 9 {
 		t.Fatalf("MissingIndexes() len = %d, want 9", len(missingIndexes))
+	}
+
+	// LegacyTables drives the D13 schema-skew guard: their presence in a live database
+	// means it was not re-initialised for the v0.3.0 core-model.
+	legacy := store.LegacyTables()
+	if len(legacy) == 0 {
+		t.Fatal("LegacyTables() returned no pre-v0.3.0 tables")
+	}
+	if got := store.PresentLegacyTables([]string{"products", legacy[0]}); len(got) != 1 || got[0] != legacy[0] {
+		t.Fatalf("PresentLegacyTables() = %v, want [%s]", got, legacy[0])
 	}
 }
 

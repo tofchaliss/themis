@@ -22,7 +22,8 @@ type FeedVulnerability struct {
 	FixVersions      []string
 }
 
-// WatchCatalogEntry is a component version tracked for CVE watch matching.
+// WatchCatalogEntry is a component version (of an artifact's latest scan) tracked
+// for CVE watch matching.
 type WatchCatalogEntry struct {
 	ComponentVersionID string
 	PURL               string
@@ -31,14 +32,17 @@ type WatchCatalogEntry struct {
 	Version            string
 	ProductID          string
 	ProjectID          string
-	SBOMDocumentID     string
+	ArtifactID         string
+	ScanReportID       string
 }
 
-// CreateWatchFindingInput persists a CVE watch match.
+// CreateWatchFindingInput persists a CVE watch match against a scan report, using
+// the version-qualified ComponentPURL for the stable risk_context identity.
 type CreateWatchFindingInput struct {
 	ComponentVersionID string
 	VulnerabilityID    string
-	SBOMDocumentID     string
+	ScanReportID       string
+	ArtifactID         string
 	CVEID              string
 	Severity           string
 	ProductID          string
