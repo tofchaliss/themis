@@ -22,7 +22,7 @@ func TestComputeBlastRadiusMissingFields(t *testing.T) {
 
 func TestSbomActiveMissing(t *testing.T) {
 	store := NewPostgresStore(&mockPool{row: mockRow{err: pgx.ErrNoRows}})
-	active, err := store.sbomActive(context.Background(), "missing")
+	active, err := store.scanActive(context.Background(), "missing")
 	if err != nil || active {
 		t.Fatalf("sbomActive() = %v, %v", active, err)
 	}

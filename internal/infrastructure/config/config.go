@@ -13,22 +13,22 @@ const (
 
 // Config holds all runtime settings for Themis.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Worker   WorkerConfig   `yaml:"worker"`
-	Upload   UploadConfig   `yaml:"upload"`
-	NVD      NVDConfig      `yaml:"nvd"`
-	OSV      OSVConfig      `yaml:"osv"`
-	SMTP     SMTPConfig     `yaml:"smtp"`
-	Teams    TeamsConfig    `yaml:"teams"`
-	Trust    TrustConfig    `yaml:"trust"`
-	Webhook  WebhookConfig  `yaml:"webhook"`
-	EPSSKev  EPSSKevConfig  `yaml:"epsskev"`
-	ExploitDB ExploitDBConfig `yaml:"exploitdb"`
-	VEXFeed  VEXFeedConfig  `yaml:"vexfeed"`
+	Server       ServerConfig       `yaml:"server"`
+	Database     DatabaseConfig     `yaml:"database"`
+	Worker       WorkerConfig       `yaml:"worker"`
+	Upload       UploadConfig       `yaml:"upload"`
+	NVD          NVDConfig          `yaml:"nvd"`
+	OSV          OSVConfig          `yaml:"osv"`
+	SMTP         SMTPConfig         `yaml:"smtp"`
+	Teams        TeamsConfig        `yaml:"teams"`
+	Trust        TrustConfig        `yaml:"trust"`
+	Webhook      WebhookConfig      `yaml:"webhook"`
+	EPSSKev      EPSSKevConfig      `yaml:"epsskev"`
+	ExploitDB    ExploitDBConfig    `yaml:"exploitdb"`
+	VEXFeed      VEXFeedConfig      `yaml:"vexfeed"`
 	Intelligence IntelligenceConfig `yaml:"intelligence"`
-	Log      LogConfig      `yaml:"log"`
-	GitHub   GitHubConfig   `yaml:"github"`
+	Log          LogConfig          `yaml:"log"`
+	GitHub       GitHubConfig       `yaml:"github"`
 }
 
 // ServerConfig controls the HTTP server.

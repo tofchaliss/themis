@@ -79,6 +79,41 @@ func defaultReadSchemaVersion(dsn, migrationsPath string) (uint, bool, error) {
 	return m.Version()
 }
 
+// VerifySchemaShape asserts the connected database matches the v0.3.0 core-model
+// schema shape (all expected tables present, no legacy pre-v0.3.0 tables). It is
+// the schema-skew guard (D13): a database that was not re-initialised for the
+// core-model restructure fails startup loudly with an actionable message instead
+// of running the new binary against an incompatible schema.
+func VerifySchemaShape(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("nil database pool")
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT table_name
+		FROM information_schema.tables
+		WHERE table_schema = 'public'
+		  AND table_type = 'BASE TABLE'`)
+	if err != nil {
+		return fmt.Errorf("list public tables: %w", err)
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("scan table name: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate public tables: %w", err)
+	}
+
+	return store.VerifySchemaShape(tables)
+}
+
 // Ping checks database connectivity.
 func Ping(ctx context.Context, pool *pgxpool.Pool) error {
 	if pool == nil {

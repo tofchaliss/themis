@@ -11,6 +11,12 @@ var ErrProductNotFound = errors.New("product not found")
 // ErrProductVersionNotFound indicates the product version does not exist.
 var ErrProductVersionNotFound = errors.New("product version not found")
 
+// ErrProjectNotFound indicates the project id does not exist.
+var ErrProjectNotFound = errors.New("project not found")
+
+// ErrVersionConflict indicates a duplicate version under the same project.
+var ErrVersionConflict = errors.New("version already exists for project")
+
 // VEXExportFormat selects the export serialiser.
 type VEXExportFormat string
 
@@ -50,5 +56,5 @@ type VEXExportRepository interface {
 	ProductExists(ctx context.Context, productID string) (bool, error)
 	GetProductVersion(ctx context.Context, productID, version string) (ProductVersion, error)
 	ListFindingsForProductVersion(ctx context.Context, productVersionID string) ([]VEXExportFinding, error)
-	ListAssertionsForSBOM(ctx context.Context, sbomDocumentID string) ([]VEXAssertionMatch, error)
+	ListAssertionsForArtifact(ctx context.Context, artifactID string) ([]VEXAssertionMatch, error)
 }

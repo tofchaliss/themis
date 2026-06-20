@@ -7,8 +7,8 @@ import (
 )
 
 type openVEXDocument struct {
-	Context    string            `json:"@context"`
-	ID         string            `json:"@id"`
+	Context    string             `json:"@context"`
+	ID         string             `json:"@id"`
 	Statements []openVEXStatement `json:"statements"`
 }
 

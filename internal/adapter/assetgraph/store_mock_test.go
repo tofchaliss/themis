@@ -114,7 +114,7 @@ func (m *mockRows) Scan(dest ...any) error {
 	return nil
 }
 func (m *mockRows) Values() ([]any, error) { return nil, nil }
-func (m *mockRows) RawValues() [][]byte      { return nil }
+func (m *mockRows) RawValues() [][]byte    { return nil }
 
 func (m *mockPool) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	if m.queryErr != nil {
@@ -304,7 +304,7 @@ func TestComputeBlastRadiusSyncError(t *testing.T) {
 		},
 	})
 	_, err := store.ComputeBlastRadius(context.Background(), domain.EnrichmentFinding{
-		VulnerabilityID: "v1", ProductID: "p1", ComponentID: "c1", SBOMDocumentID: "sbom-1",
+		VulnerabilityID: "v1", ProductID: "p1", ComponentID: "c1", ScanReportID: "sbom-1",
 	})
 	if err == nil {
 		t.Fatal("expected sync error")
@@ -317,7 +317,7 @@ func TestComputeBlastRadiusDeletedSBOM(t *testing.T) {
 		VulnerabilityID: "vuln-1",
 		ProductID:       "prod-1",
 		ComponentID:     "comp-1",
-		SBOMDocumentID:  "sbom-1",
+		ScanReportID:  "sbom-1",
 	})
 	if err != nil || result.Score != 1.0 {
 		t.Fatalf("ComputeBlastRadius() = %+v, %v", result, err)
@@ -326,7 +326,7 @@ func TestComputeBlastRadiusDeletedSBOM(t *testing.T) {
 
 func TestSbomActiveEmptyID(t *testing.T) {
 	store := NewPostgresStore(&mockPool{})
-	active, err := store.sbomActive(context.Background(), "")
+	active, err := store.scanActive(context.Background(), "")
 	if err != nil || !active {
 		t.Fatalf("sbomActive() = %v, %v", active, err)
 	}
@@ -334,7 +334,7 @@ func TestSbomActiveEmptyID(t *testing.T) {
 
 func TestSbomActiveLookupError(t *testing.T) {
 	store := NewPostgresStore(&mockPool{row: mockRow{err: errors.New("db down")}})
-	_, err := store.sbomActive(context.Background(), "sbom-1")
+	_, err := store.scanActive(context.Background(), "sbom-1")
 	if err == nil {
 		t.Fatal("expected lookup error")
 	}
@@ -371,7 +371,7 @@ func TestCustomersFromProductRowsError(t *testing.T) {
 func TestComputeBlastRadiusFullMock(t *testing.T) {
 	store := NewPostgresStore(&mockPool{
 		rows: []mockRow{
-			{val: false},    // sbomActive deleted_at IS NOT NULL -> false
+			{val: false}, // sbomActive deleted_at IS NOT NULL -> false
 			{val: "node-cve"},
 			{val: "node-pkg"},
 			{val: "node-prod"},
@@ -384,7 +384,7 @@ func TestComputeBlastRadiusFullMock(t *testing.T) {
 		VulnerabilityID: "vuln-1",
 		ProductID:       "prod-1",
 		ComponentID:     "comp-1",
-		SBOMDocumentID:  "sbom-1",
+		ScanReportID:  "sbom-1",
 	})
 	if err != nil {
 		t.Fatal(err)

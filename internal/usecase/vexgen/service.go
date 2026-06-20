@@ -83,13 +83,13 @@ func (h *Handler) buildEntries(ctx context.Context, productID, version string) (
 	entries := make([]domain.VEXExportEntry, 0, len(findings))
 
 	for _, finding := range findings {
-		assertions, ok := assertionCache[finding.SBOMDocumentID]
+		assertions, ok := assertionCache[finding.ArtifactID]
 		if !ok {
-			assertions, err = h.Repo.ListAssertionsForSBOM(ctx, finding.SBOMDocumentID)
+			assertions, err = h.Repo.ListAssertionsForArtifact(ctx, finding.ArtifactID)
 			if err != nil {
 				return nil, err
 			}
-			assertionCache[finding.SBOMDocumentID] = assertions
+			assertionCache[finding.ArtifactID] = assertions
 		}
 		key := assertionKey(finding.ComponentPURL, finding.CVEID)
 		matches := filterAssertions(assertions, key)

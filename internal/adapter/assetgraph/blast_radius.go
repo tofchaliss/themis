@@ -17,7 +17,7 @@ func (s *PostgresStore) ComputeBlastRadius(ctx context.Context, finding domain.E
 	if finding.ProductID == "" || finding.VulnerabilityID == "" || finding.ComponentID == "" {
 		return domain.BlastRadiusResult{Score: domain.RiskScoreBlastRadiusMin}, nil
 	}
-	active, err := s.sbomActive(ctx, finding.SBOMDocumentID)
+	active, err := s.scanActive(ctx, finding.ScanReportID)
 	if err != nil {
 		return domain.BlastRadiusResult{}, err
 	}
@@ -57,19 +57,19 @@ func (s *PostgresStore) Enrich(ctx context.Context, finding domain.EnrichmentFin
 	return s.ComputeBlastRadius(ctx, finding)
 }
 
-func (s *PostgresStore) sbomActive(ctx context.Context, sbomDocumentID string) (bool, error) {
-	if sbomDocumentID == "" {
+func (s *PostgresStore) scanActive(ctx context.Context, scanReportID string) (bool, error) {
+	if scanReportID == "" {
 		return true, nil
 	}
 	var deleted bool
 	err := s.pool.QueryRow(ctx, `
-		SELECT deleted_at IS NOT NULL FROM sbom_documents WHERE id = $1
-	`, sbomDocumentID).Scan(&deleted)
+		SELECT deleted_at IS NOT NULL FROM scan_reports WHERE id = $1
+	`, scanReportID).Scan(&deleted)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return false, nil
 		}
-		return false, fmt.Errorf("lookup sbom active state: %w", err)
+		return false, fmt.Errorf("lookup scan active state: %w", err)
 	}
 	return !deleted, nil
 }

@@ -208,8 +208,8 @@ type fakeRows struct {
 	idx  int
 }
 
-func (r *fakeRows) Close()                                       {}
-func (r *fakeRows) Err() error                                   { return nil }
+func (r *fakeRows) Close()     {}
+func (r *fakeRows) Err() error { return nil }
 func (r *fakeRows) Next() bool {
 	if r.idx >= len(r.data) {
 		return false
@@ -226,16 +226,16 @@ func (r *fakeRows) Scan(dest ...any) error {
 	}
 	return nil
 }
-func (r *fakeRows) CommandTag() pgconn.CommandTag              { return pgconn.CommandTag{} }
+func (r *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *fakeRows) RawValues() [][]byte                          { return nil }
-func (r *fakeRows) Values() ([]any, error)                     { return nil, nil }
-func (r *fakeRows) Conn() *pgx.Conn                            { return nil }
+func (r *fakeRows) Values() ([]any, error)                       { return nil, nil }
+func (r *fakeRows) Conn() *pgx.Conn                              { return nil }
 
 type storeFakeConn struct {
-	queryErr      error
-	execErr       error
-	rowsAffected  int64
+	queryErr     error
+	execErr      error
+	rowsAffected int64
 }
 
 func (f storeFakeConn) QueryRow(context.Context, string, ...any) pgx.Row {
@@ -336,11 +336,11 @@ type failingRows struct {
 	err error
 }
 
-func (f failingRows) Close()                                       {}
-func (f failingRows) Err() error                                   { return f.err }
-func (f failingRows) Next() bool                                   { return false }
-func (f failingRows) Scan(...any) error                            { return f.err }
-func (failingRows) CommandTag() pgconn.CommandTag              { return pgconn.CommandTag{} }
+func (f failingRows) Close()                                     {}
+func (f failingRows) Err() error                                 { return f.err }
+func (f failingRows) Next() bool                                 { return false }
+func (f failingRows) Scan(...any) error                          { return f.err }
+func (failingRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (failingRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (failingRows) RawValues() [][]byte                          { return nil }
 func (f failingRows) Values() ([]any, error)                     { return nil, f.err }
@@ -354,7 +354,7 @@ func (errRows) Close()                                       {}
 func (errRows) Err() error                                   { return nil }
 func (errRows) Next() bool                                   { return false }
 func (errRows) Scan(...any) error                            { return errors.New("scan") }
-func (errRows) CommandTag() pgconn.CommandTag              { return pgconn.CommandTag{} }
+func (errRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (errRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (errRows) RawValues() [][]byte                          { return nil }
 func (e errRows) Values() ([]any, error)                     { return nil, e.err }
@@ -362,7 +362,7 @@ func (e errRows) Conn() *pgx.Conn                            { return nil }
 
 func TestPostgresSBOMStoreErrors(t *testing.T) {
 	ctx := context.Background()
-	pool := storeFakePool{conn: storeFakeConn{execErr: errors.New("exec failed")}}
+	pool := storeFakePool{conn: storeFakeConn{queryErr: errors.New("query failed"), execErr: errors.New("exec failed")}}
 	store := &PostgresSBOMStore{pool: pool}
 
 	if _, err := store.SaveSBOM(ctx, domain.SaveSBOMInput{Format: "cyclonedx", RawDocument: []byte("{}")}); err == nil {
@@ -374,7 +374,7 @@ func TestPostgresSBOMStoreErrors(t *testing.T) {
 
 	findPool := storeFakePool{conn: storeFakeConn{queryErr: errors.New("query failed")}}
 	findStore := &PostgresSBOMStore{pool: findPool}
-	if _, err := findStore.FindDocumentIDByChecksum(ctx, "abc"); err == nil {
+	if _, err := findStore.FindArtifactBySBOMChecksum(ctx, "abc"); err == nil {
 		t.Fatal("expected find sbom error")
 	}
 }
@@ -422,7 +422,7 @@ func TestPostgresCorrelationRepositoryErrors(t *testing.T) {
 	pool := storeFakePool{conn: storeFakeConn{queryErr: errors.New("query failed"), execErr: errors.New("exec failed")}}
 	repo := &PostgresCorrelationRepository{pool: pool}
 
-	if _, err := repo.CreateFinding(ctx, "a", "b", "c"); err == nil {
+	if _, err := repo.CreateFinding(ctx, domain.CreateFindingInput{ComponentVersionID: "a", VulnerabilityID: "b", ScanReportID: "c"}); err == nil {
 		t.Fatal("expected create finding error")
 	}
 	if _, err := repo.ListFindings(ctx, "scan"); err == nil {
@@ -434,7 +434,7 @@ func TestPostgresRiskContextRepositoryErrors(t *testing.T) {
 	ctx := context.Background()
 	pool := storeFakePool{conn: storeFakeConn{execErr: errors.New("exec failed")}}
 	repo := &PostgresRiskContextRepository{pool: pool}
-	if _, err := repo.CreateForFinding(ctx, "finding", "high"); err == nil {
+	if err := repo.CreateForFinding(ctx, "art", "pkg:a@1", "CVE-1", "high"); err == nil {
 		t.Fatal("expected create risk context error")
 	}
 }
@@ -521,8 +521,8 @@ func TestPostgresSBOMStoreSuccess(t *testing.T) {
 	id, err := sbomStore.SaveSBOM(ctx, domain.SaveSBOMInput{
 		Format: "cyclonedx", RawDocument: []byte("{}"), TrustResult: domain.TrustResult{Status: domain.TrustStatusVerified},
 	})
-	if err != nil || id == "" {
-		t.Fatalf("SaveSBOM() id=%q err=%v", id, err)
+	if err != nil || id.ScanReportID == "" {
+		t.Fatalf("SaveSBOM() id=%+v err=%v", id, err)
 	}
 	vexID, err := sbomStore.SaveVEX(ctx, domain.SaveVEXInput{
 		Format: "openvex", RawDocument: []byte("{}"), TrustResult: domain.TrustResult{Status: domain.TrustStatusVerified},
@@ -534,13 +534,13 @@ func TestPostgresSBOMStoreSuccess(t *testing.T) {
 	findPool := seqFakePool{conn: &seqFakeConn{rows: []pgx.Row{
 		scanRow{values: []any{"doc-1"}},
 	}}}
-	found, err := (&PostgresSBOMStore{pool: findPool}).FindDocumentIDByChecksum(ctx, "abc")
+	found, err := (&PostgresSBOMStore{pool: findPool}).FindArtifactBySBOMChecksum(ctx, "abc")
 	if err != nil || found != "doc-1" {
 		t.Fatalf("found=%q err=%v", found, err)
 	}
 
 	notFoundPool := storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}
-	if _, err := (&PostgresSBOMStore{pool: notFoundPool}).FindDocumentIDByChecksum(ctx, "missing"); err == nil {
+	if _, err := (&PostgresSBOMStore{pool: notFoundPool}).FindArtifactBySBOMChecksum(ctx, "missing"); err == nil {
 		t.Fatal("expected not found error")
 	}
 }
@@ -589,14 +589,14 @@ func TestPostgresCorrelationRepositorySuccess(t *testing.T) {
 	createPool := seqFakePool{conn: &seqFakeConn{rows: []pgx.Row{
 		scanRow{values: []any{"finding-1"}},
 	}}}
-	id, err := (&PostgresCorrelationRepository{pool: createPool}).CreateFinding(ctx, "cv", "vuln", "sbom")
+	id, err := (&PostgresCorrelationRepository{pool: createPool}).CreateFinding(ctx, domain.CreateFindingInput{ComponentVersionID: "cv", VulnerabilityID: "vuln", ScanReportID: "sbom"})
 	if err != nil || id != "finding-1" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
 
 	listPool := seqFakePool{rows: &fakeRows{data: [][]any{
-		{"finding-1", "high"},
-		{"finding-2", "unknown"},
+		{"finding-1", "art-1", "pkg:a@1", "CVE-1", "high"},
+		{"finding-2", "art-1", "pkg:b@1", "CVE-2", "unknown"},
 	}}}
 	findings, err := (&PostgresCorrelationRepository{pool: listPool}).ListFindings(ctx, "sbom")
 	if err != nil || len(findings) != 2 {
@@ -607,9 +607,9 @@ func TestPostgresCorrelationRepositorySuccess(t *testing.T) {
 func TestPostgresRiskContextRepositorySuccess(t *testing.T) {
 	ctx := context.Background()
 	pool := storeFakePool{conn: storeFakeConn{}}
-	id, err := (&PostgresRiskContextRepository{pool: pool}).CreateForFinding(ctx, "finding-1", "high")
-	if err != nil || id == "" {
-		t.Fatalf("id=%q err=%v", id, err)
+	err := (&PostgresRiskContextRepository{pool: pool}).CreateForFinding(ctx, "art-1", "pkg:a@1", "CVE-1", "high")
+	if err != nil {
+		t.Fatalf("err=%v", err)
 	}
 }
 

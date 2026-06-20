@@ -56,7 +56,7 @@ func (s *PostgresAssertionStore) UpsertAssertions(ctx context.Context, feed stri
 		var docID string
 		err = tx.QueryRow(ctx, `
 			INSERT INTO vex_documents (
-				id, sbom_document_id, sbom_checksum, checksum_sha256, format, source, raw_document
+				id, artifact_id, sbom_checksum, checksum_sha256, format, source, raw_document
 			) VALUES ($1, NULL, $2, $3, 'csaf', $4, $5)
 			ON CONFLICT (sbom_checksum, checksum_sha256) DO UPDATE SET
 				raw_document = EXCLUDED.raw_document,
@@ -147,11 +147,10 @@ func (s *PostgresAssertionStore) ListAssertionsForSBOMCVEs(ctx context.Context, 
 
 func (s *PostgresAssertionStore) FindSBOMDocumentIDsForCVE(ctx context.Context, cveID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT cv.sbom_document_id::text
-		FROM component_vulnerabilities cv
-		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
-		WHERE v.cve_id = $1 AND sd.deleted_at IS NULL
+		SELECT DISTINCT lf.artifact_id::text
+		FROM v_latest_findings lf
+		JOIN vulnerabilities v ON v.id = lf.vulnerability_id
+		WHERE v.cve_id = $1
 	`, cveID)
 	if err != nil {
 		return nil, err

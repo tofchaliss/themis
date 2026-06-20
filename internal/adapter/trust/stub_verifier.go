@@ -14,7 +14,7 @@ type StubVerifier struct{}
 func (StubVerifier) Verify(_ context.Context, artifact domain.RawArtifact) (domain.TrustResult, error) {
 	result := domain.TrustResult{
 		SignatureVerified: false,
-		ChecksumSHA256:  checksumSHA256(artifact.RawDocument),
+		ChecksumSHA256:    checksumSHA256(artifact.RawDocument),
 	}
 	if strings.TrimSpace(artifact.Signature) == "" {
 		result.Status = domain.TrustStatusUnsigned

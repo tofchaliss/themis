@@ -1,14 +1,18 @@
 package store
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
 var expectedTables = []string{
 	"products",
 	"projects",
-	"product_versions",
+	"versions",
 	"artifacts",
-	"images",
-	"sbom_documents",
+	"sboms",
+	"scan_reports",
 	"components",
 	"component_versions",
 	"dependency_relationships",
@@ -36,22 +40,36 @@ var expectedTables = []string{
 	"epss_kev_signals",
 }
 
+// legacyTables are pre-v0.3.0 tables. Their presence means the database was not
+// re-initialised for the core-model restructure and the binary would run against
+// an incompatible schema.
+var legacyTables = []string{
+	"sbom_documents",
+	"images",
+	"product_versions",
+}
+
 var expectedIndexes = []string{
 	"components_purl_key",
+	"artifacts_image_digest_key",
+	"sboms_artifact_id_sbom_checksum_key",
 	"idx_component_vulnerabilities_pair",
-	"idx_risk_context_component_vuln_id",
+	"idx_component_vulnerabilities_scan_report_id",
 	"idx_risk_context_effective_state",
 	"idx_vulnerabilities_cve_id",
-	"sbom_documents_image_digest_checksum_sha256_key",
-	"vex_documents_sbom_checksum_checksum_sha256_key",
+	"idx_scan_reports_active",
 	"idx_epss_kev_signals_kev_listed",
 	"idx_asset_graph_edges_from_type",
-	"idx_sbom_documents_active",
 }
 
 // ExpectedTables returns the Layer 1–3 and operational tables created by migrations.
 func ExpectedTables() []string {
 	return slices.Clone(expectedTables)
+}
+
+// LegacyTables returns pre-v0.3.0 tables whose presence indicates an un-migrated schema.
+func LegacyTables() []string {
+	return slices.Clone(legacyTables)
 }
 
 // ExpectedIndexes returns indexes required by the schema contract.
@@ -91,4 +109,47 @@ func MissingIndexes(existing []string) []string {
 	}
 	slices.Sort(missing)
 	return missing
+}
+
+// PresentLegacyTables returns the pre-v0.3.0 tables found among existing.
+func PresentLegacyTables(existing []string) []string {
+	present := make(map[string]struct{}, len(existing))
+	for _, name := range existing {
+		present[name] = struct{}{}
+	}
+
+	var found []string
+	for _, table := range legacyTables {
+		if _, ok := present[table]; ok {
+			found = append(found, table)
+		}
+	}
+	slices.Sort(found)
+	return found
+}
+
+// reinitialiseHint is the actionable message returned when a schema-skew is detected.
+const reinitialiseHint = "this binary requires the v0.3.0 core-model schema; " +
+	"in-place upgrade from the pre-v0.3.0 sbom_documents model is not supported. " +
+	"Re-initialise your database: drop and recreate it, then run migrations " +
+	"(see README § Full database reset)"
+
+// VerifySchemaShape asserts that the connected database matches the v0.3.0 schema
+// shape: all expected core-model tables present and no legacy tables remaining.
+// It fails loudly with an actionable message when an un-reinitialised pre-v0.3.0
+// database is detected (D13 schema-skew guard).
+func VerifySchemaShape(existing []string) error {
+	if legacy := PresentLegacyTables(existing); len(legacy) > 0 {
+		return fmt.Errorf(
+			"incompatible database schema: legacy pre-v0.3.0 tables present (%s); %s",
+			strings.Join(legacy, ", "), reinitialiseHint,
+		)
+	}
+	if missing := MissingTables(existing); len(missing) > 0 {
+		return fmt.Errorf(
+			"incompatible database schema: missing core-model tables (%s); %s",
+			strings.Join(missing, ", "), reinitialiseHint,
+		)
+	}
+	return nil
 }

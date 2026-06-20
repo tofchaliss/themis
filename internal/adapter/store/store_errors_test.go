@@ -47,7 +47,7 @@ func TestStoreErrorPaths(t *testing.T) {
 		t.Fatal("expected save scanner config error")
 	}
 
-	if _, err := NewPostgresEnrichmentRepository(queryErr).GetRiskContext(ctx, "cv-1"); err == nil {
+	if _, err := NewPostgresEnrichmentRepository(queryErr).GetRiskContext(ctx, "art", "purl", "cve"); err == nil {
 		t.Fatal("expected get risk context error")
 	}
 	if err := NewPostgresEnrichmentRepository(execErr).UpsertRiskContext(ctx,
@@ -60,25 +60,28 @@ func TestStoreErrorPaths(t *testing.T) {
 		t.Fatal("expected count open risk contexts error")
 	}
 	if err := NewPostgresEnrichmentRepository(execErr).UpdateRiskContextSignals(ctx,
-		domain.OpenRiskContextRow{ComponentVulnerabilityID: "cv-1"}, nil, false, false, "", 0,
+		domain.OpenRiskContextRow{ArtifactID: "cv-1"}, nil, false, false, "", 0,
 	); err == nil {
 		t.Fatal("expected update risk context signals error")
 	}
-	if _, err := NewPostgresEnrichmentRepository(queryErr).SBOMDocumentForVEX(ctx, "vex-1"); err == nil {
+	if _, err := NewPostgresEnrichmentRepository(queryErr).ArtifactForVEX(ctx, "vex-1"); err == nil {
 		t.Fatal("expected sbom document for vex error")
 	}
-	if _, err := NewPostgresEnrichmentRepository(storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}).SBOMDocumentForVEX(ctx, "missing"); err == nil {
+	if _, err := NewPostgresEnrichmentRepository(storeFakePool{conn: storeFakeConn{queryErr: pgx.ErrNoRows}}).ArtifactForVEX(ctx, "missing"); err == nil {
 		t.Fatal("expected vex document not found")
 	}
 
+	// A component absent from the artifact's SBOMs is best-effort: the assertion is
+	// still recorded with a NULL component_version_id (no error).
 	missingComponent := &scriptedFakePool{}
-	missingComponent.addExec(1, nil)
-	missingComponent.addQueryRow("vuln-1")
-	missingComponent.addQueryRowErr(pgx.ErrNoRows)
-	if err := NewPostgresVEXAssertionWriter(missingComponent).SyncAssertions(ctx, "vex-1", "sbom-1", []domain.ParsedVEXAssertion{{
+	missingComponent.addExec(1, nil)               // delete existing assertions
+	missingComponent.addQueryRow("vuln-1")         // vulnerability lookup
+	missingComponent.addQueryRowErr(pgx.ErrNoRows) // component version lookup → NULL
+	missingComponent.addExec(1, nil)               // insert assertion with NULL component_version_id
+	if err := NewPostgresVEXAssertionWriter(missingComponent).SyncAssertions(ctx, "vex-1", "art-1", []domain.ParsedVEXAssertion{{
 		CVEID: "CVE-1", ComponentPURL: "pkg:npm/missing@1",
-	}}); err == nil {
-		t.Fatal("expected component lookup error")
+	}}); err != nil {
+		t.Fatalf("expected best-effort success, got %v", err)
 	}
 
 	if _, err := NewPostgresExploitStore(queryErr).HasPublicExploit(ctx, "CVE-1"); err == nil {
@@ -137,7 +140,7 @@ func TestStoreErrorPaths(t *testing.T) {
 	insertErrPool.addExec(0, errors.New("insert vex failed"))
 	if _, err := NewPostgresTriageVEXGenerator(insertErrPool).CreateFromDecision(ctx, domain.GeneratedVEXInput{
 		Issuer: "alice", DocumentTime: time.Now().UTC(),
-		Finding: domain.TriageFindingContext{FindingID: "cv-1", SBOMDocumentID: "sbom-1", SBOMChecksum: "sum"},
+		Finding:   domain.TriageFindingContext{FindingID: "cv-1", ArtifactID: "sbom-1", SBOMChecksum: "sum"},
 		Assertion: domain.ParsedVEXAssertion{CVEID: "CVE-1", ComponentPURL: "pkg:npm/a@1", Status: "fixed"},
 	}); err == nil {
 		t.Fatal("expected create from decision error")
@@ -151,7 +154,7 @@ func TestStoreErrorPaths(t *testing.T) {
 	createWatchErr.addQueryRow(false)
 	createWatchErr.addQueryRowErr(errors.New("create finding failed"))
 	if _, err := NewPostgresWatchRepository(createWatchErr).CreateWatchFinding(ctx, domain.CreateWatchFindingInput{
-		ComponentVersionID: "cvn-1", CVEID: "CVE-1", VulnerabilityID: "vuln-1", SBOMDocumentID: "sbom-1",
+		ComponentVersionID: "cvn-1", CVEID: "CVE-1", VulnerabilityID: "vuln-1", ArtifactID: "sbom-1",
 	}); err == nil {
 		t.Fatal("expected create watch finding error")
 	}
@@ -163,7 +166,7 @@ func TestStoreErrorPaths(t *testing.T) {
 	}
 
 	softDeleteErr := &scriptedFakePool{}
-	softDeleteErr.addQueryRow(false, nil)
+	softDeleteErr.addQueryRow(false, nil, "sbom-1")
 	softDeleteErr.addQueryRowErr(errors.New("count failed"))
 	if _, err := NewPostgresSBOMManagementRepository(softDeleteErr).SoftDeleteSBOM(ctx, "sbom-1", true); err == nil {
 		t.Fatal("expected soft delete count error")
@@ -189,7 +192,7 @@ func TestMapSeverityToPriorityDefault(t *testing.T) {
 func TestPostgresSBOMStoreSaveVEXParseError(t *testing.T) {
 	store := NewPostgresSBOMStore(storeFakePool{conn: storeFakeConn{}})
 	if _, err := store.SaveVEX(context.Background(), domain.SaveVEXInput{
-		Format: "openvex", RawDocument: []byte("{"), SBOMDocumentID: "sbom-1",
+		Format: "openvex", RawDocument: []byte("{"), ArtifactID: "sbom-1",
 	}); err == nil {
 		t.Fatal("expected parse vex error")
 	}

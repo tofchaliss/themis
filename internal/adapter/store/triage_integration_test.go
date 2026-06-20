@@ -91,7 +91,7 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
@@ -104,7 +104,8 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 	err = pool.QueryRow(ctx, `
 		SELECT cv.id::text, rc.effective_state, rc.raw_severity
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		LIMIT 1
 	`).Scan(&findingID, &effectiveState, &rawSeverity)
 	if err != nil {
@@ -143,7 +144,7 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 
 	var historyCount int
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM triage_history WHERE component_vulnerability_id = $1
+		SELECT COUNT(*) FROM triage_history th JOIN component_vulnerabilities cv ON cv.id = $1 JOIN scan_reports sr ON sr.id = cv.scan_report_id WHERE th.artifact_id = sr.artifact_id AND th.component_purl = cv.component_purl AND th.cve_id = cv.cve_id
 	`, findingID).Scan(&historyCount); err != nil {
 		t.Fatal(err)
 	}
@@ -153,16 +154,8 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 
 	secondDigest := "sha256:triage-integration-2"
 	secondArtifact := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image')`, secondArtifact); err != nil {
-		t.Fatal(err)
-	}
 	secondImage := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO images (id, artifact_id, product_id, repository, digest)
-		VALUES ($1, $2, $3, 'themis/app', $4)
-	`, secondImage, secondArtifact, productID, secondDigest); err != nil {
-		t.Fatal(err)
-	}
+	seedImageForProduct(t, ctx, pool, productID, secondArtifact, secondImage, secondDigest)
 
 	_, err = pipeline.IngestSBOM(ctx, domain.IngestionInput{
 		RawArtifact: domain.RawArtifact{
@@ -177,7 +170,7 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     secondImage,
+		ArtifactID:  secondArtifact,
 	})
 	if err != nil {
 		t.Fatalf("second IngestSBOM() error = %v", err)
@@ -187,10 +180,9 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 	err = pool.QueryRow(ctx, `
 		SELECT rc.effective_state
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
-		JOIN sbom_documents s ON s.id = cv.sbom_document_id
-		JOIN images i ON i.id = s.image_id
-		WHERE i.digest = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
+		WHERE sr.image_digest = $1
 		LIMIT 1
 	`, secondDigest).Scan(&secondState)
 	if err != nil {
@@ -201,7 +193,7 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 	}
 
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM triage_history WHERE component_vulnerability_id = $1
+		SELECT COUNT(*) FROM triage_history th JOIN component_vulnerabilities cv ON cv.id = $1 JOIN scan_reports sr ON sr.id = cv.scan_report_id WHERE th.artifact_id = sr.artifact_id AND th.component_purl = cv.component_purl AND th.cve_id = cv.cve_id
 	`, findingID).Scan(&historyCount); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +215,7 @@ func TestTriageFlowIntegrationPostgres(t *testing.T) {
 		t.Fatalf("ProcessExpiredAcceptedRisk: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		SELECT effective_state FROM risk_context WHERE component_vulnerability_id = $1
+		SELECT rc.effective_state FROM risk_context rc JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id WHERE cv.id = $1
 	`, findingID).Scan(&effectiveState); err != nil {
 		t.Fatal(err)
 	}

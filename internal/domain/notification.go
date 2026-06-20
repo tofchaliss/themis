@@ -35,18 +35,18 @@ type NotificationFinding struct {
 
 // NotificationEvent is the payload evaluated by routing rules and delivered to channels.
 type NotificationEvent struct {
-	Type        string
-	ProductID   string
-	ProjectID   string
-	ProductName string
-	ScanID      string
-	IngestionID string
-	Message     string
-	BatchKey    string
-	Findings        []NotificationFinding
-	CustomerID      string
-	CVEID           string
-	ComponentPURL   string
+	Type             string
+	ProductID        string
+	ProjectID        string
+	ProductName      string
+	ScanID           string
+	IngestionID      string
+	Message          string
+	BatchKey         string
+	Findings         []NotificationFinding
+	CustomerID       string
+	CVEID            string
+	ComponentPURL    string
 	BlastRadiusScore float64
 }
 

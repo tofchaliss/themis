@@ -40,7 +40,9 @@ func (h *Handler) Submit(ctx context.Context, decision domain.TriageDecision) (d
 	effectiveState := MapDecisionToEffectiveState(decision.Decision)
 	now := time.Now().UTC()
 	record := domain.TriageHistoryRecord{
-		FindingID:     decision.FindingID,
+		ArtifactID:    finding.ArtifactID,
+		ComponentPURL: finding.ComponentPURL,
+		CVEID:         finding.CVEID,
 		Decision:      decision.Decision,
 		Justification: strings.TrimSpace(decision.Justification),
 		Actor:         decision.Actor,
@@ -54,7 +56,9 @@ func (h *Handler) Submit(ctx context.Context, decision domain.TriageDecision) (d
 
 	score := ComputeRiskScore(finding.RawSeverity, effectiveState)
 	update := domain.RiskContextTriageUpdate{
-		FindingID:      decision.FindingID,
+		ArtifactID:     finding.ArtifactID,
+		ComponentPURL:  finding.ComponentPURL,
+		CVEID:          finding.CVEID,
 		EffectiveState: effectiveState,
 		TriagedBy:      decision.Actor,
 		TriagedAt:      now,
@@ -150,7 +154,9 @@ func (h *Handler) ProcessExpiredAcceptedRisk(ctx context.Context, now time.Time)
 			continue
 		}
 		if err := h.Repo.UpdateRiskContext(ctx, domain.RiskContextTriageUpdate{
-			FindingID:      findingID,
+			ArtifactID:     finding.ArtifactID,
+			ComponentPURL:  finding.ComponentPURL,
+			CVEID:          finding.CVEID,
 			EffectiveState: domain.EffectiveStateDetected,
 			TriagedBy:      "triage-expiry",
 			TriagedAt:      now,

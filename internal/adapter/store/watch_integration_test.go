@@ -73,13 +73,7 @@ func TestWatchCycleIntegrationPostgres(t *testing.T) {
 
 	componentID := uuid.NewString()
 	versionID := uuid.NewString()
-	sbomID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (id, image_id, format, checksum_sha256, image_digest, trust_status, raw_document)
-		VALUES ($1, $2, 'cyclonedx', 'abc', $3, 'verified', '{}')
-	`, sbomID, imageID, digest); err != nil {
-		t.Fatal(err)
-	}
+	sbomID, _ := seedScan(t, ctx, pool, artifactID)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO components (id, purl, ecosystem, name)
 		VALUES ($1, 'pkg:npm/lodash', 'npm', 'lodash')
@@ -87,7 +81,7 @@ func TestWatchCycleIntegrationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_versions (id, component_id, version, sbom_document_id)
+		INSERT INTO component_versions (id, component_id, version, sbom_id)
 		VALUES ($1, $2, '4.17.20', $3)
 	`, versionID, componentID, sbomID); err != nil {
 		t.Fatal(err)
@@ -223,13 +217,7 @@ func TestWatchCycleIntegrationPostgresOSVFallback(t *testing.T) {
 
 	componentID := uuid.NewString()
 	versionID := uuid.NewString()
-	sbomID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (id, image_id, format, checksum_sha256, image_digest, trust_status, raw_document)
-		VALUES ($1, $2, 'cyclonedx', 'def', $3, 'verified', '{}')
-	`, sbomID, imageID, digest); err != nil {
-		t.Fatal(err)
-	}
+	sbomID, _ := seedScan(t, ctx, pool, artifactID)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO components (id, purl, ecosystem, name)
 		VALUES ($1, 'pkg:npm/lodash', 'npm', 'lodash')
@@ -237,15 +225,15 @@ func TestWatchCycleIntegrationPostgresOSVFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_versions (id, component_id, version, sbom_document_id)
+		INSERT INTO component_versions (id, component_id, version, sbom_id)
 		VALUES ($1, $2, '4.17.20', $3)
 	`, versionID, componentID, sbomID); err != nil {
 		t.Fatal(err)
 	}
 
 	svc := &watch.Service{
-		NVD: nvd.NewClient(nvd.ClientConfig{BaseURL: nvdSrv.URL, RateLimiter: nvd.NewTokenBucket(100, 100)}),
-		OSV: osv.NewClient(osv.ClientConfig{BaseURL: osvSrv.URL, RateLimiter: osv.NewTokenBucket(100, 100)}),
+		NVD:  nvd.NewClient(nvd.ClientConfig{BaseURL: nvdSrv.URL, RateLimiter: nvd.NewTokenBucket(100, 100)}),
+		OSV:  osv.NewClient(osv.ClientConfig{BaseURL: osvSrv.URL, RateLimiter: osv.NewTokenBucket(100, 100)}),
 		Repo: store.NewPostgresWatchRepository(pool),
 	}
 	if err := svc.RunCycle(ctx); err != nil {
@@ -327,13 +315,7 @@ func TestE2EWatchCycleWithSMTPIntegrationPostgres(t *testing.T) {
 
 	componentID := uuid.NewString()
 	versionID := uuid.NewString()
-	sbomID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (id, image_id, format, checksum_sha256, image_digest, trust_status, raw_document)
-		VALUES ($1, $2, 'cyclonedx', 'abc', $3, 'verified', '{}')
-	`, sbomID, imageID, digest); err != nil {
-		t.Fatal(err)
-	}
+	sbomID, _ := seedScan(t, ctx, pool, artifactID)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO components (id, purl, ecosystem, name)
 		VALUES ($1, 'pkg:npm/lodash', 'npm', 'lodash')
@@ -341,7 +323,7 @@ func TestE2EWatchCycleWithSMTPIntegrationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_versions (id, component_id, version, sbom_document_id)
+		INSERT INTO component_versions (id, component_id, version, sbom_id)
 		VALUES ($1, $2, '4.17.20', $3)
 	`, versionID, componentID, sbomID); err != nil {
 		t.Fatal(err)

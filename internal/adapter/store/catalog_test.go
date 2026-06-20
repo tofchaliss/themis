@@ -59,7 +59,10 @@ func TestCatalogConstructors(t *testing.T) {
 
 func TestPostgresProductCatalogCreateProduct(t *testing.T) {
 	pool := seqFakePool{conn: &seqFakeConn{
-		rows: []pgx.Row{scanRow{values: []any{time.Now().UTC()}}},
+		rows: []pgx.Row{
+			scanRow{values: []any{time.Now().UTC()}}, // INSERT products RETURNING created_at
+			scanRow{values: []any{"proj-default"}},   // ensureDefaultProject RETURNING id
+		},
 		exec: storeFakeConn{},
 	}}
 	repo := NewPostgresProductCatalogRepository(pool)

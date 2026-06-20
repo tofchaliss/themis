@@ -18,6 +18,8 @@ type ErrorCode string
 const (
 	CodeSBOMNotFound           ErrorCode = "SBOM_NOT_FOUND"
 	CodeProductNotFound        ErrorCode = "PRODUCT_NOT_FOUND"
+	CodeProjectNotFound        ErrorCode = "PROJECT_NOT_FOUND"
+	CodeVersionConflict        ErrorCode = "VERSION_CONFLICT"
 	CodeImageNotFound          ErrorCode = "IMAGE_NOT_FOUND"
 	CodeCustomerNotFound       ErrorCode = "CUSTOMER_NOT_FOUND"
 	CodeCannotDeleteLatestSBOM ErrorCode = "CANNOT_DELETE_LATEST_SBOM"
@@ -43,6 +45,14 @@ var errorCatalogue = map[ErrorCode]catalogEntry{
 	CodeProductNotFound: {
 		Message: "We couldn't find a product with that ID.",
 		Hint:    "Use GET /api/v1/products to list registered products.",
+	},
+	CodeProjectNotFound: {
+		Message: "We couldn't find a project with that ID.",
+		Hint:    "Create the project (or use the product's default project) before adding versions.",
+	},
+	CodeVersionConflict: {
+		Message: "A version with that name already exists for this project.",
+		Hint:    "Choose a different version name, or use the existing version.",
 	},
 	CodeImageNotFound: {
 		Message: "That image hasn't been registered yet.",
@@ -126,6 +136,10 @@ func MapError(err error) (ErrorCode, int) {
 		return CodeSBOMNotFound, http.StatusNotFound
 	case errors.Is(err, domain.ErrProductNotFound), errors.Is(err, domain.ErrProductVersionNotFound):
 		return CodeProductNotFound, http.StatusNotFound
+	case errors.Is(err, domain.ErrProjectNotFound):
+		return CodeProjectNotFound, http.StatusNotFound
+	case errors.Is(err, domain.ErrVersionConflict):
+		return CodeVersionConflict, http.StatusConflict
 	case errors.Is(err, assetgraph.ErrProductNotFound):
 		return CodeProductNotFound, http.StatusNotFound
 	case errors.Is(err, assetgraph.ErrCustomerNotFound):

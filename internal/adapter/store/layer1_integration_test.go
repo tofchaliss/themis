@@ -68,7 +68,7 @@ func TestAC20_Layer1SynchronousBeforeAccepted(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
@@ -81,9 +81,9 @@ func TestAC20_Layer1SynchronousBeforeAccepted(t *testing.T) {
 		SELECT COUNT(*),
 		       COUNT(*) FILTER (WHERE rc.deterministic_level IS NULL OR rc.deterministic_level = '')
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
-		JOIN sbom_documents sd ON sd.id = cv.sbom_document_id
-		WHERE sd.image_digest = $1
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
+		WHERE sr.image_digest = $1
 	`, digest).Scan(&total, &missing); err != nil {
 		t.Fatal(err)
 	}

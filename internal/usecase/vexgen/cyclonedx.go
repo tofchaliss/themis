@@ -7,21 +7,21 @@ import (
 )
 
 type cycloneDXDocument struct {
-	BOMFormat        string                  `json:"bomFormat"`
-	SpecVersion      string                  `json:"specVersion"`
-	Version          int                     `json:"version"`
-	Vulnerabilities  []cycloneDXVulnerability `json:"vulnerabilities"`
+	BOMFormat       string                   `json:"bomFormat"`
+	SpecVersion     string                   `json:"specVersion"`
+	Version         int                      `json:"version"`
+	Vulnerabilities []cycloneDXVulnerability `json:"vulnerabilities"`
 }
 
 type cycloneDXVulnerability struct {
-	BOMRef         string                 `json:"bom-ref"`
-	ID             string                 `json:"id"`
-	Analysis       cycloneDXAnalysis      `json:"analysis"`
-	Ratings        []cycloneDXRating      `json:"ratings,omitempty"`
-	XThemisEPSS    *float64               `json:"x-themis-epss-score,omitempty"`
-	XThemisKEV     *bool                  `json:"x-themis-kev-listed,omitempty"`
-	XThemisBlast   *int                   `json:"x-themis-blast-radius,omitempty"`
-	XThemisSource  string                 `json:"x-themis-vex-source,omitempty"`
+	BOMRef        string            `json:"bom-ref"`
+	ID            string            `json:"id"`
+	Analysis      cycloneDXAnalysis `json:"analysis"`
+	Ratings       []cycloneDXRating `json:"ratings,omitempty"`
+	XThemisEPSS   *float64          `json:"x-themis-epss-score,omitempty"`
+	XThemisKEV    *bool             `json:"x-themis-kev-listed,omitempty"`
+	XThemisBlast  *int              `json:"x-themis-blast-radius,omitempty"`
+	XThemisSource string            `json:"x-themis-vex-source,omitempty"`
 }
 
 type cycloneDXAnalysis struct {

@@ -14,7 +14,7 @@ func TestRunCycleNVDSuccess(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1", ProductID: "prod-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1", ProductID: "prod-1"},
 		},
 	}
 	metrics := &memoryMetrics{}
@@ -56,7 +56,7 @@ func TestRunCycleDuplicateSkipped(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC().Add(-time.Hour),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 		existing: map[string]bool{"cv-1:CVE-2021-23337": true},
 	}
@@ -78,7 +78,7 @@ func TestRunCycleNotifyFlushWithoutMatches(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 	}
 	notifier := &recordingNotifier{}
@@ -99,8 +99,8 @@ func TestRunCycleNotifyFlushWithoutMatches(t *testing.T) {
 
 func TestRunCycleListStoredError(t *testing.T) {
 	repo := &memoryWatchRepo{
-		lastSuccess: time.Now().UTC(),
-		catalog:     []domain.WatchCatalogEntry{{Name: "lodash", Ecosystem: "npm"}},
+		lastSuccess:   time.Now().UTC(),
+		catalog:       []domain.WatchCatalogEntry{{Name: "lodash", Ecosystem: "npm"}},
 		listStoredErr: errors.New("stored list failed"),
 	}
 	svc := &watch.Service{
@@ -131,7 +131,7 @@ func TestRunCycleOSVSupplementUpsertError(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 		upsertErr: errors.New("osv upsert failed"),
 	}
@@ -151,7 +151,7 @@ func TestRunCycleStoredCatalogMatch(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC().Add(-time.Hour),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 		storedRecords: []domain.VulnerabilityRecord{
 			{ID: "vuln-1", CVEID: "CVE-2021-23337", Ecosystem: "npm", PackageName: "lodash", Severity: "high", AffectedVersions: []string{"< 4.17.21"}},
@@ -173,7 +173,7 @@ func TestRunCycleOSVFallback(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC().Add(-time.Hour),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 	}
 	osv := &stubOSV{records: []domain.FeedVulnerability{
@@ -201,8 +201,8 @@ func TestRunCycleFailureDoesNotUpdateTimestamp(t *testing.T) {
 		getErr:      errors.New("db down"),
 	}
 	svc := &watch.Service{
-		NVD: &stubNVD{records: nil},
-		Repo: repo,
+		NVD:     &stubNVD{records: nil},
+		Repo:    repo,
 		Metrics: &memoryMetrics{},
 	}
 	err := svc.RunCycle(context.Background())
@@ -220,8 +220,8 @@ func TestRunCycleBothFeedsFail(t *testing.T) {
 		catalog:     []domain.WatchCatalogEntry{{Name: "lodash", Ecosystem: "npm"}},
 	}
 	svc := &watch.Service{
-		NVD: &stubNVD{err: errors.New("nvd down")},
-		OSV: &stubOSV{err: errors.New("osv down")},
+		NVD:  &stubNVD{err: errors.New("nvd down")},
+		OSV:  &stubOSV{err: errors.New("osv down")},
 		Repo: repo,
 	}
 	if err := svc.RunCycle(context.Background()); err == nil {
@@ -255,7 +255,7 @@ func TestRunCycleCreateNotCreated(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 	}
 	repo.createHook = func() domain.CreateWatchFindingResult {
@@ -277,7 +277,7 @@ func TestRunCycleOSVOnly(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "4.17.20", ArtifactID: "sbom-1"},
 		},
 	}
 	svc := &watch.Service{
@@ -306,7 +306,7 @@ func TestRunCycleRepoErrors(t *testing.T) {
 
 	repo = &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
-		catalog:     []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", SBOMDocumentID: "sbom-1"}},
+		catalog:     []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", ArtifactID: "sbom-1"}},
 		hasErr:      errors.New("has"),
 	}
 	svc.Repo = repo
@@ -316,7 +316,7 @@ func TestRunCycleRepoErrors(t *testing.T) {
 
 	repo = &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
-		catalog:     []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", SBOMDocumentID: "sbom-1"}},
+		catalog:     []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", ArtifactID: "sbom-1"}},
 		createErr:   errors.New("create"),
 	}
 	svc.Repo = repo
@@ -346,7 +346,7 @@ func TestRunCycleSetSuccessError(t *testing.T) {
 
 func TestRunCycleOSVCatalogListError(t *testing.T) {
 	repo := &memoryWatchRepo{
-		lastSuccess:  time.Now().UTC(),
+		lastSuccess:   time.Now().UTC(),
 		listErrOnCall: 2,
 		listErr:       errors.New("list failed"),
 	}
@@ -408,7 +408,7 @@ func TestRunCycleMatchedUpsertFailure(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC(),
 		catalog: []domain.WatchCatalogEntry{
-			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", SBOMDocumentID: "sbom-1"},
+			{ComponentVersionID: "cv-1", Name: "lodash", Ecosystem: "npm", Version: "1", ArtifactID: "sbom-1"},
 		},
 	}
 	upserts := 0

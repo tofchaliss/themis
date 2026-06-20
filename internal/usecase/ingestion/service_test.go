@@ -310,6 +310,36 @@ func TestPipelineIngestVEXSaveError(t *testing.T) {
 	}
 }
 
+func TestPipelineSBOMSaveDuplicate(t *testing.T) {
+	// SaveSBOM reports an idempotent re-submission (D12): the scan already exists, so
+	// the pipeline returns it without re-correlating or appending a phantom scan.
+	pipeline := newTestPipeline(&memoryJobs{})
+	pipeline.SBOM = duplicateSBOMStore{scanID: "dup-scan"}
+	result, err := pipeline.IngestSBOM(context.Background(), baseSBOMInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.IngestionStatusNotified || result.ScanID != "dup-scan" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPipelineIngestVEXEnrichmentUnavailable(t *testing.T) {
+	pipeline := newTestPipeline(&memoryJobs{})
+	pipeline.Enrichment = nil
+	input := baseSBOMInput()
+	input.Kind = domain.ArtifactKindVEX
+	input.Format = "openvex"
+	input.SBOMChecksum = "sha256:sbom"
+	result, err := pipeline.IngestVEX(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.IngestionStatusRejected || result.Retryable {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestPipelineSkipUnknownComponentPURL(t *testing.T) {
 	pipeline := newTestPipeline(&memoryJobs{})
 	pipeline.Components = memoryComponents{versions: map[string]string{}}
@@ -654,7 +684,7 @@ func baseSBOMInput() domain.IngestionInput {
 			ImageDigest: "sha256:abc",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     "image-1",
+		ArtifactID:  "image-1",
 	}
 }
 
@@ -726,7 +756,7 @@ func (m *memoryJobs) Get(_ context.Context, id string) (domain.IngestionRecord, 
 	return record, nil
 }
 
-func (m *memoryJobs) CreateFinding(_ context.Context, _, _, _ string) (string, error) {
+func (m *memoryJobs) CreateFinding(_ context.Context, _ domain.CreateFindingInput) (string, error) {
 	if m.createFindingErr != nil {
 		return "", m.createFindingErr
 	}
@@ -742,13 +772,6 @@ func (m *memoryJobs) ListFindings(_ context.Context, _ string) ([]domain.Compone
 		return m.findings, nil
 	}
 	return m.correlateFindings, nil
-}
-
-func (m *memoryJobs) CreateForFinding(_ context.Context, componentVulnerabilityID, _ string) (string, error) {
-	if m.createRiskErr != nil {
-		return "", m.createRiskErr
-	}
-	return "risk-" + componentVulnerabilityID, nil
 }
 
 type fixedTrust struct {
@@ -787,16 +810,32 @@ type memorySBOMStore struct {
 	id string
 }
 
-func (s memorySBOMStore) SaveSBOM(_ context.Context, _ domain.SaveSBOMInput) (string, error) {
-	return s.id, nil
+func (s memorySBOMStore) SaveSBOM(_ context.Context, _ domain.SaveSBOMInput) (domain.SaveSBOMResult, error) {
+	return domain.SaveSBOMResult{SBOMID: s.id, ScanReportID: s.id}, nil
 }
 
 func (s memorySBOMStore) SaveVEX(_ context.Context, _ domain.SaveVEXInput) (string, error) {
 	return "vex-1", nil
 }
 
-func (s memorySBOMStore) FindDocumentIDByChecksum(_ context.Context, _ string) (string, error) {
+func (s memorySBOMStore) FindArtifactBySBOMChecksum(_ context.Context, _ string) (string, error) {
 	return s.id, nil
+}
+
+type duplicateSBOMStore struct {
+	scanID string
+}
+
+func (s duplicateSBOMStore) SaveSBOM(_ context.Context, _ domain.SaveSBOMInput) (domain.SaveSBOMResult, error) {
+	return domain.SaveSBOMResult{SBOMID: s.scanID, ScanReportID: s.scanID, Duplicate: true}, nil
+}
+
+func (s duplicateSBOMStore) SaveVEX(_ context.Context, _ domain.SaveVEXInput) (string, error) {
+	return "vex-1", nil
+}
+
+func (s duplicateSBOMStore) FindArtifactBySBOMChecksum(_ context.Context, _ string) (string, error) {
+	return s.scanID, nil
 }
 
 type failingSBOMStore struct {
@@ -804,15 +843,15 @@ type failingSBOMStore struct {
 	findErr error
 }
 
-func (s failingSBOMStore) SaveSBOM(_ context.Context, _ domain.SaveSBOMInput) (string, error) {
-	return "", s.err
+func (s failingSBOMStore) SaveSBOM(_ context.Context, _ domain.SaveSBOMInput) (domain.SaveSBOMResult, error) {
+	return domain.SaveSBOMResult{}, s.err
 }
 
 func (s failingSBOMStore) SaveVEX(_ context.Context, _ domain.SaveVEXInput) (string, error) {
 	return "", s.err
 }
 
-func (s failingSBOMStore) FindDocumentIDByChecksum(_ context.Context, _ string) (string, error) {
+func (s failingSBOMStore) FindArtifactBySBOMChecksum(_ context.Context, _ string) (string, error) {
 	return "", s.findErr
 }
 

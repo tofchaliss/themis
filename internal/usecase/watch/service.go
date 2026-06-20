@@ -96,12 +96,13 @@ func (s *Service) RunCycle(ctx context.Context) error {
 		result, createErr := s.Repo.CreateWatchFinding(ctx, domain.CreateWatchFindingInput{
 			ComponentVersionID: pair.Entry.ComponentVersionID,
 			VulnerabilityID:    vulnID,
-			SBOMDocumentID:     pair.Entry.SBOMDocumentID,
+			ScanReportID:       pair.Entry.ScanReportID,
+			ArtifactID:         pair.Entry.ArtifactID,
 			CVEID:              pair.Vuln.CVEID,
 			Severity:           pair.Vuln.Severity,
 			ProductID:          pair.Entry.ProductID,
 			ProjectID:          pair.Entry.ProjectID,
-			ComponentPURL:      pair.Entry.PURL,
+			ComponentPURL:      domain.VersionedPURL(pair.Entry.PURL, pair.Entry.Version),
 		})
 		if createErr != nil {
 			return fmt.Errorf("create watch finding: %w", createErr)

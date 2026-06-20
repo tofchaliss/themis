@@ -164,8 +164,8 @@ func (h *Handler) WebhookScan(w http.ResponseWriter, r *http.Request) {
 		},
 		TrustPolicy: h.trustPolicy(),
 	}
-	if req.ImageId != nil {
-		input.ImageID = req.ImageId.String()
+	if req.ArtifactId != nil {
+		input.ArtifactID = req.ArtifactId.String()
 	}
 	if req.ProjectId != nil {
 		input.ProjectID = req.ProjectId.String()
@@ -216,19 +216,19 @@ func (h *Handler) buildSBOMInput(req gen.SBOMUploadRequest, raw []byte, idempote
 	}
 	input := domain.IngestionInput{
 		RawArtifact: domain.RawArtifact{
-			Kind:             domain.ArtifactKindSBOM,
-			Format:           string(req.Format),
-			SpecVersion:      specVersion,
-			RawDocument:      raw,
-			Actor:            "api",
+			Kind:        domain.ArtifactKindSBOM,
+			Format:      string(req.Format),
+			SpecVersion: specVersion,
+			RawDocument: raw,
+			Actor:       "api",
 		},
 		TrustPolicy: h.trustPolicy(),
 	}
 	if idempotency != nil {
 		input.IdempotencyKey = string(*idempotency)
 	}
-	if req.ImageId != nil {
-		input.ImageID = req.ImageId.String()
+	if req.ArtifactId != nil {
+		input.ArtifactID = req.ArtifactId.String()
 	}
 	if req.ProjectId != nil {
 		input.ProjectID = req.ProjectId.String()

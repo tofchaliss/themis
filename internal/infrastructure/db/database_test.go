@@ -53,6 +53,12 @@ func TestPingNilPool(t *testing.T) {
 	}
 }
 
+func TestVerifySchemaShapeNilPool(t *testing.T) {
+	if err := VerifySchemaShape(context.Background(), nil); err == nil {
+		t.Fatal("expected nil pool error")
+	}
+}
+
 func TestVerifySchemaVersionBranches(t *testing.T) {
 	orig := readSchemaVersion
 	t.Cleanup(func() { readSchemaVersion = orig })

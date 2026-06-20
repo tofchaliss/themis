@@ -99,4 +99,4 @@ migrate-down:
 	$(MIGRATE) -path migrations -database "$${THEMIS_DATABASE_DSN}" down
 
 generate-api:
-	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest --config=api/oapi-codegen.yaml api/openapi.yaml
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/oapi-codegen.yaml api/openapi.yaml

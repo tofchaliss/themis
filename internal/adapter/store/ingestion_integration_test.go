@@ -67,7 +67,7 @@ func TestIngestionPipelineIntegrationPostgres(t *testing.T) {
 		}},
 		Correlate:  store.NewPostgresCorrelationRepository(pool),
 		Enrichment: &enrichment.Handler{Repo: store.NewPostgresEnrichmentRepository(pool), Audit: audit},
-		Notify:    notify.IngestionNotifier{},
+		Notify:     notify.IngestionNotifier{},
 	})
 
 	input := domain.IngestionInput{
@@ -85,7 +85,7 @@ func TestIngestionPipelineIntegrationPostgres(t *testing.T) {
 		},
 		IdempotencyKey: "integration-key-1",
 		TrustPolicy:    domain.TrustPolicyStandard,
-		ImageID:        imageID,
+		ArtifactID:     artifactID,
 	}
 
 	result, err := pipeline.IngestSBOM(ctx, input)
@@ -137,7 +137,7 @@ func TestIngestionPipelineIntegrationPostgres(t *testing.T) {
 	}
 
 	var sbomChecksum string
-	if err := pool.QueryRow(ctx, `SELECT checksum_sha256 FROM sbom_documents WHERE id = $1`, result.ScanID).Scan(&sbomChecksum); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT s.sbom_checksum FROM scan_reports sr JOIN sboms s ON s.id = sr.sbom_id WHERE sr.id = $1`, result.ScanID).Scan(&sbomChecksum); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	})
 	if err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
@@ -241,8 +241,8 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT rc.effective_state
 		FROM risk_context rc
-		JOIN component_vulnerabilities cv ON cv.id = rc.component_vulnerability_id
-		WHERE cv.sbom_document_id = $1
+		JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id
+		WHERE cv.scan_report_id = $1
 		LIMIT 1
 	`, sbomResult.ScanID).Scan(&effectiveState); err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	}
 
 	var sbomChecksum string
-	if err := pool.QueryRow(ctx, `SELECT checksum_sha256 FROM sbom_documents WHERE id = $1`, sbomResult.ScanID).Scan(&sbomChecksum); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT s.sbom_checksum FROM scan_reports sr JOIN sboms s ON s.id = sr.sbom_id WHERE sr.id = $1`, sbomResult.ScanID).Scan(&sbomChecksum); err != nil {
 		t.Fatal(err)
 	}
 
@@ -275,9 +275,9 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT rc.effective_state, rc.raw_severity, v.severity
 		FROM risk_context rc
-		JOIN component_vulnerabilities cv ON cv.id = rc.component_vulnerability_id
+		JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		WHERE cv.sbom_document_id = $1
+		WHERE cv.scan_report_id = $1
 		LIMIT 1
 	`, sbomResult.ScanID).Scan(&effectiveState, new(string), new(string)); err != nil {
 		t.Fatal(err)
@@ -303,8 +303,8 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `
 		SELECT rc.effective_state FROM risk_context rc
-		JOIN component_vulnerabilities cv ON cv.id = rc.component_vulnerability_id
-		WHERE cv.sbom_document_id = $1 LIMIT 1
+		JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id
+		WHERE cv.scan_report_id = $1 LIMIT 1
 	`, sbomResult.ScanID).Scan(&effectiveState); err != nil {
 		t.Fatal(err)
 	}
@@ -321,17 +321,28 @@ func TestEnrichmentVEXOverlayIntegrationPostgres(t *testing.T) {
 	}
 }
 
+// seedImageForProduct creates a project → version → artifact chain for an existing
+// product (v0.3.0 model). imageID is retained for call-site compatibility but the
+// artifact is the unit of identity (image_digest globally unique).
 func seedImageForProduct(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID, artifactID, imageID, digest string) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image')`, artifactID); err != nil {
-		t.Fatalf("insert artifact: %v", err)
+	projectID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO projects (id, product_id, name, is_default) VALUES ($1, $2, $3, FALSE)`,
+		projectID, productID, "proj-"+artifactID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	versionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO versions (id, project_id, version) VALUES ($1, $2, $3)`,
+		versionID, projectID, "v-"+artifactID); err != nil {
+		t.Fatalf("insert version: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO images (id, artifact_id, product_id, repository, digest)
-		VALUES ($1, $2, $3, 'themis/app', $4)
-	`, imageID, artifactID, productID, digest); err != nil {
-		t.Fatalf("insert image: %v", err)
+		INSERT INTO artifacts (id, version_id, artifact_type, image_digest, repository)
+		VALUES ($1, $2, 'image', $3, 'themis/app')
+	`, artifactID, versionID, digest); err != nil {
+		t.Fatalf("insert artifact: %v", err)
 	}
+	_ = imageID
 }
 
 func seedBaseData(t *testing.T, ctx context.Context, pool *pgxpool.Pool, productID, artifactID, imageID, digest string) {
@@ -339,13 +350,5 @@ func seedBaseData(t *testing.T, ctx context.Context, pool *pgxpool.Pool, product
 	if _, err := pool.Exec(ctx, `INSERT INTO products (id, name) VALUES ($1, 'integration-product')`, productID); err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image')`, artifactID); err != nil {
-		t.Fatalf("insert artifact: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO images (id, artifact_id, product_id, repository, digest)
-		VALUES ($1, $2, $3, 'themis/app', $4)
-	`, imageID, artifactID, productID, digest); err != nil {
-		t.Fatalf("insert image: %v", err)
-	}
+	seedImageForProduct(t, ctx, pool, productID, artifactID, imageID, digest)
 }

@@ -168,7 +168,7 @@ func TestAC16_KEVRetroactiveScoreIncrease(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
@@ -184,7 +184,8 @@ func TestAC16_KEVRetroactiveScoreIncrease(t *testing.T) {
 		SELECT cv.id::text, v.cve_id, rc.risk_score::int, rc.kev_listed, cv.detected_at
 		FROM component_vulnerabilities cv
 		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		WHERE v.cve_id = 'CVE-2021-23337'
 		LIMIT 1
 	`).Scan(&findingID, &cveID, &initialScore, &kevListed, &detectedAt)
@@ -237,7 +238,8 @@ func TestAC16_KEVRetroactiveScoreIncrease(t *testing.T) {
 	err = pool.QueryRow(ctx, `
 		SELECT rc.risk_score::int, rc.kev_listed, cv.detected_at
 		FROM component_vulnerabilities cv
-		JOIN risk_context rc ON rc.component_vulnerability_id = cv.id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		JOIN risk_context rc ON rc.artifact_id = sr.artifact_id AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
 		WHERE cv.id = $1
 	`, findingID).Scan(&updatedScore, &updatedKEV, &stillAt)
 	if err != nil {
@@ -333,7 +335,7 @@ func TestReEnrichJob_Idempotent(t *testing.T) {
 			Actor:            "integration-test",
 		},
 		TrustPolicy: domain.TrustPolicyStandard,
-		ImageID:     imageID,
+		ArtifactID:  artifactID,
 	}); err != nil {
 		t.Fatalf("IngestSBOM() error = %v", err)
 	}
@@ -381,7 +383,9 @@ func TestReEnrichJob_Idempotent(t *testing.T) {
 		SELECT rc.risk_score::int, rc.kev_listed, COALESCE(rc.deterministic_level, ''),
 		       COALESCE(rc.blast_radius_score, 1.0), rc.epss_score IS NOT NULL
 		FROM risk_context rc
-		WHERE rc.component_vulnerability_id = $1
+		JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id
+		JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id
+		WHERE cv.id = $1
 	`, findingID).Scan(&before.score, &before.kev, &before.level, &before.blast, &before.epssPresent); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +399,9 @@ func TestReEnrichJob_Idempotent(t *testing.T) {
 		SELECT rc.risk_score::int, rc.kev_listed, COALESCE(rc.deterministic_level, ''),
 		       COALESCE(rc.blast_radius_score, 1.0), rc.epss_score IS NOT NULL
 		FROM risk_context rc
-		WHERE rc.component_vulnerability_id = $1
+		JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id
+		JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id
+		WHERE cv.id = $1
 	`, findingID).Scan(&after.score, &after.kev, &after.level, &after.blast, &after.epssPresent); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +410,7 @@ func TestReEnrichJob_Idempotent(t *testing.T) {
 	}
 
 	var rowCount int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM risk_context WHERE component_vulnerability_id = $1`, findingID).Scan(&rowCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM risk_context rc JOIN scan_reports sr ON sr.artifact_id = rc.artifact_id JOIN component_vulnerabilities cv ON cv.scan_report_id = sr.id AND cv.component_purl = rc.component_purl AND cv.cve_id = rc.cve_id WHERE cv.id = $1`, findingID).Scan(&rowCount); err != nil {
 		t.Fatal(err)
 	}
 	if rowCount != 1 {
@@ -420,7 +426,7 @@ func TestReEnrichJob_BatchCap1200(t *testing.T) {
 	imageID := uuid.NewString()
 	artifactID := uuid.NewString()
 	seedBaseData(t, ctx, pool, productID, artifactID, imageID, "sha256:batch-cap-1200")
-	seedBulkOpenFindings(t, ctx, pool, imageID, 1200)
+	seedBulkOpenFindings(t, ctx, pool, artifactID, 1200)
 
 	enrichmentRepo := store.NewPostgresEnrichmentRepository(pool)
 	var openCount int
@@ -501,19 +507,13 @@ func TestReEnrichJob_BatchCap1200(t *testing.T) {
 	}
 }
 
-func seedBulkOpenFindings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, imageID string, count int) {
+func seedBulkOpenFindings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, artifactID string, count int) {
 	t.Helper()
-	sbomID := uuid.NewString()
+	sbomID, scanReportID := seedScan(t, ctx, pool, artifactID)
 	vulnID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (
-			id, image_id, image_digest, checksum_sha256, format, spec_version, raw_document, trust_status, is_latest
-		) VALUES ($1, $2, 'sha256:bulk-open', 'checksum-bulk-open', 'cyclonedx', '1.6', '{}', 'unsigned', true)
-	`, sbomID, imageID); err != nil {
-		t.Fatalf("insert sbom: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
 		INSERT INTO vulnerabilities (id, cve_id, severity) VALUES ($1, 'CVE-BULK-OPEN', 'high')
+		ON CONFLICT (cve_id) DO NOTHING
 	`, vulnID); err != nil {
 		t.Fatalf("insert vulnerability: %v", err)
 	}
@@ -525,26 +525,26 @@ func seedBulkOpenFindings(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		t.Fatalf("insert components: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_versions (id, component_id, version, sbom_document_id)
+		INSERT INTO component_versions (id, component_id, version, sbom_id)
 		SELECT gen_random_uuid(), c.id, '1.0.0', $1
 		FROM components c WHERE c.purl LIKE 'pkg:npm/bulk-%';
 	`, sbomID); err != nil {
 		t.Fatalf("insert component_versions: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_vulnerabilities (id, component_version_id, vulnerability_id, sbom_document_id)
-		SELECT gen_random_uuid(), cvn.id, $2, $1
-		FROM component_versions cvn WHERE cvn.sbom_document_id = $1;
-	`, sbomID, vulnID); err != nil {
+		INSERT INTO component_vulnerabilities (id, component_version_id, vulnerability_id, scan_report_id, component_purl, cve_id)
+		SELECT gen_random_uuid(), cvn.id, $2, $1, c.purl || '@1.0.0', 'CVE-BULK-OPEN'
+		FROM component_versions cvn JOIN components c ON c.id = cvn.component_id
+		WHERE cvn.sbom_id = $3;
+	`, scanReportID, vulnID, sbomID); err != nil {
 		t.Fatalf("insert component_vulnerabilities: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO risk_context (
-			id, component_vulnerability_id, effective_state, priority, risk_score, raw_severity
-		)
-		SELECT gen_random_uuid(), cv.id, 'detected', 'high', 70, 'high'
-		FROM component_vulnerabilities cv WHERE cv.sbom_document_id = $1;
-	`, sbomID); err != nil {
+		INSERT INTO risk_context (artifact_id, component_purl, cve_id, effective_state, priority, risk_score, raw_severity)
+		SELECT $1, c.purl || '@1.0.0', 'CVE-BULK-OPEN', 'detected', 'high', 70, 'high'
+		FROM component_versions cvn JOIN components c ON c.id = cvn.component_id
+		WHERE cvn.sbom_id = $2;
+	`, artifactID, sbomID); err != nil {
 		t.Fatalf("insert risk_context: %v", err)
 	}
 }

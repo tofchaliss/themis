@@ -150,8 +150,8 @@ func TestBootRequiresPgxPoolForDefaultWorkers(t *testing.T) {
 func TestBootWorkerStartFailure(t *testing.T) {
 	path := writeConfig(t, "")
 	cfg := bootConfig{
-		configPath:     path,
-		workerPool:     failingWorkerStartPool{},
+		configPath: path,
+		workerPool: failingWorkerStartPool{},
 		hooks: bootHooks{
 			connect: func(context.Context, string, int32) (domain.DatabasePool, error) {
 				return stubPool{}, nil

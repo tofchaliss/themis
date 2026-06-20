@@ -83,8 +83,8 @@ func (mountEmptyRows) Close()                                       {}
 func (mountEmptyRows) Err() error                                   { return nil }
 func (mountEmptyRows) Next() bool                                   { return false }
 func (mountEmptyRows) Scan(...any) error                            { return errors.New("scan") }
-func (mountEmptyRows) CommandTag() pgconn.CommandTag              { return pgconn.CommandTag{} }
+func (mountEmptyRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (mountEmptyRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (mountEmptyRows) RawValues() [][]byte                          { return nil }
-func (mountEmptyRows) Values() ([]any, error)                     { return nil, nil }
-func (mountEmptyRows) Conn() *pgx.Conn                            { return nil }
+func (mountEmptyRows) Values() ([]any, error)                       { return nil, nil }
+func (mountEmptyRows) Conn() *pgx.Conn                              { return nil }

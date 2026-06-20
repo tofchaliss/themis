@@ -17,6 +17,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/adapter/store"
@@ -113,7 +114,10 @@ func resetIntegrationDatabase(t *testing.T, pool *pgxpool.Pool) {
 		DO $$
 		DECLARE r RECORD;
 		BEGIN
-			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+			FOR r IN (
+				SELECT tablename FROM pg_tables
+				WHERE schemaname = 'public' AND tablename <> 'schema_migrations'
+			) LOOP
 				EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
 			END LOOP;
 		END $$;
@@ -158,6 +162,91 @@ func startEmbeddedPostgres(t *testing.T, port uint32) string {
 	}
 	t.Skipf("embedded postgres unavailable (set THEMIS_TEST_DATABASE_DSN for external Postgres): %v", lastErr)
 	return ""
+}
+
+// seedScan creates one sboms row + one scan_reports row for an artifact and returns both ids.
+func seedScan(t *testing.T, ctx context.Context, pool *pgxpool.Pool, artifactID string) (sbomID, scanReportID string) {
+	t.Helper()
+	sbomID = uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sboms (id, artifact_id, sbom_checksum, format, raw_document)
+		VALUES ($1, $2, $3, 'cyclonedx', '{}')
+	`, sbomID, artifactID, "sum-"+sbomID); err != nil {
+		t.Fatalf("seed sbom: %v", err)
+	}
+	scanReportID = uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO scan_reports (id, sbom_id, artifact_id, image_digest, scan_checksum)
+		SELECT $1, $2, $3, a.image_digest, $4 FROM artifacts a WHERE a.id = $3
+	`, scanReportID, sbomID, artifactID, "scan-"+scanReportID); err != nil {
+		t.Fatalf("seed scan report: %v", err)
+	}
+	return sbomID, scanReportID
+}
+
+// addFinding seeds a component + version + vulnerability + component_vulnerabilities row
+// (with denormalized version-qualified component_purl + cve_id) on an existing scan, plus an
+// identity-keyed risk_context row. Returns the version-qualified PURL so callers can assert by
+// the stable identity (artifactID, versionedPURL, cveID). effectiveState defaults to "detected".
+func addFinding(t *testing.T, ctx context.Context, pool *pgxpool.Pool, artifactID, sbomID, scanReportID, basePURL, version, cveID, severity, effectiveState string) (versionedPURL string) {
+	t.Helper()
+	if effectiveState == "" {
+		effectiveState = "detected"
+	}
+	versionedPURL = basePURL
+	if version != "" {
+		versionedPURL = basePURL + "@" + version
+	}
+
+	var componentID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO components (id, purl, name, ecosystem)
+		VALUES ($1, $2, $3, 'apk')
+		ON CONFLICT (purl) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id
+	`, uuid.NewString(), basePURL, basePURL).Scan(&componentID); err != nil {
+		t.Fatalf("seed component: %v", err)
+	}
+	componentVersionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_versions (id, component_id, version, sbom_id)
+		VALUES ($1, $2, $3, $4)
+	`, componentVersionID, componentID, version, sbomID); err != nil {
+		t.Fatalf("seed component version: %v", err)
+	}
+
+	var vulnID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO vulnerabilities (id, cve_id, severity)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (cve_id) DO UPDATE SET severity = EXCLUDED.severity
+		RETURNING id
+	`, uuid.NewString(), cveID, severity).Scan(&vulnID); err != nil {
+		t.Fatalf("seed vulnerability: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_vulnerabilities (id, component_version_id, vulnerability_id, scan_report_id, component_purl, cve_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, uuid.NewString(), componentVersionID, vulnID, scanReportID, versionedPURL, cveID); err != nil {
+		t.Fatalf("seed finding: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO risk_context (artifact_id, component_purl, cve_id, effective_state, priority, risk_score, raw_severity)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (artifact_id, component_purl, cve_id) DO UPDATE SET effective_state = EXCLUDED.effective_state
+	`, artifactID, versionedPURL, cveID, effectiveState, severity, 40, severity); err != nil {
+		t.Fatalf("seed risk context: %v", err)
+	}
+	return versionedPURL
+}
+
+// seedFinding is a convenience wrapper: one scan with a single finding. Returns the scan
+// report id and the version-qualified PURL.
+func seedFinding(t *testing.T, ctx context.Context, pool *pgxpool.Pool, artifactID, basePURL, version, cveID, severity, effectiveState string) (scanReportID, versionedPURL string) {
+	t.Helper()
+	sbomID, scanReportID := seedScan(t, ctx, pool, artifactID)
+	versionedPURL = addFinding(t, ctx, pool, artifactID, sbomID, scanReportID, basePURL, version, cveID, severity, effectiveState)
+	return scanReportID, versionedPURL
 }
 
 func runIntegrationMigrationsUp(dsn, migrationsPath string) error {

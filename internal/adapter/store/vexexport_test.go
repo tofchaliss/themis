@@ -52,7 +52,7 @@ func TestPostgresVEXExportRepository(t *testing.T) {
 		{"va-1", "vex-1", "pkg:npm/a@1", "CVE-1", "not_affected", "fixed", created, "manual"},
 	}}
 	assertionPool := storeFakePool{conn: storeFakeConn{}, rows: assertionRows}
-	assertions, err := NewPostgresVEXExportRepository(assertionPool).ListAssertionsForSBOM(ctx, "sbom-1")
+	assertions, err := NewPostgresVEXExportRepository(assertionPool).ListAssertionsForArtifact(ctx, "sbom-1")
 	if err != nil || len(assertions) != 1 {
 		t.Fatalf("assertions=%+v err=%v", assertions, err)
 	}

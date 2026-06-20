@@ -165,13 +165,13 @@ func (p *Pipeline) ingestSBOMStages(ctx context.Context, input *domain.Ingestion
 
 	ctx, endCorrelate := domain.StartStage(ctx, domain.StageCorrelate)
 	defer endCorrelate()
-	documentID, err := p.SBOM.SaveSBOM(ctx, domain.SaveSBOMInput{
-		ImageID:          input.ImageID,
-		ProjectID:        input.ProjectID,
+	saved, err := p.SBOM.SaveSBOM(ctx, domain.SaveSBOMInput{
+		ArtifactID:       input.ArtifactID,
 		ImageDigest:      input.ImageDigest,
-		ChecksumSHA256:   outcome.Result.ChecksumSHA256,
+		SBOMChecksum:     outcome.Result.ChecksumSHA256,
 		Format:           input.Format,
 		SpecVersion:      input.SpecVersion,
+		Scanner:          parseOutcome.SBOM.Format,
 		TrustResult:      outcome.Result,
 		RawDocument:      input.RawDocument,
 		Canonical:        parseOutcome.SBOM,
@@ -182,25 +182,35 @@ func (p *Pipeline) ingestSBOMStages(ctx context.Context, input *domain.Ingestion
 	if err != nil {
 		return "", stageError(domain.IngestionStatusCorrelating, err, true)
 	}
+	scanReportID := saved.ScanReportID
+	if saved.Duplicate {
+		// Idempotent re-submission (D12): the scan already exists with its findings;
+		// do not re-correlate or append a phantom scan.
+		return scanReportID, nil
+	}
 
-	componentVersions, err := p.Components.UpsertFromCanonical(ctx, documentID, parseOutcome.SBOM)
+	componentVersions, err := p.Components.UpsertFromCanonical(ctx, saved.SBOMID, parseOutcome.SBOM)
 	if err != nil {
 		return "", stageError(domain.IngestionStatusCorrelating, err, true)
 	}
-	if err := p.correlateComponents(ctx, parseOutcome.SBOM, componentVersions, documentID); err != nil {
+	if err := p.correlateComponents(ctx, parseOutcome.SBOM, componentVersions, scanReportID); err != nil {
 		return "", err
 	}
 
-	if err := p.transition(ctx, record.ID, domain.IngestionStatusEnriching, "risk context", documentID); err != nil {
+	if err := p.transition(ctx, record.ID, domain.IngestionStatusEnriching, "risk context", scanReportID); err != nil {
 		return "", err
 	}
 	ctx, endEnrich := domain.StartStage(ctx, domain.StageEnrich)
-	if err := p.applyEnrichment(ctx, documentID, false); err != nil {
+	if p.Enrichment == nil {
 		endEnrich()
-		return "", err
+		return "", stageError(domain.IngestionStatusEnriching, fmt.Errorf("enrichment service unavailable"), false)
+	}
+	if err := p.Enrichment.ApplyVEX(ctx, input.ArtifactID); err != nil {
+		endEnrich()
+		return "", stageError(domain.IngestionStatusEnriching, err, true)
 	}
 	endEnrich()
-	return documentID, nil
+	return scanReportID, nil
 }
 
 func (p *Pipeline) ingestVEXStages(ctx context.Context, input *domain.IngestionInput, record *domain.IngestionRecord) (string, error) {
@@ -218,13 +228,13 @@ func (p *Pipeline) ingestVEXStages(ctx context.Context, input *domain.IngestionI
 		return outcome.DuplicateID, nil
 	}
 
-	sbomDocumentID, err := p.SBOM.FindDocumentIDByChecksum(ctx, input.SBOMChecksum)
+	artifactID, err := p.SBOM.FindArtifactBySBOMChecksum(ctx, input.SBOMChecksum)
 	if err != nil {
 		return "", stageError(domain.IngestionStatusCorrelating, err, false)
 	}
 
 	documentID, err := p.SBOM.SaveVEX(ctx, domain.SaveVEXInput{
-		SBOMDocumentID:   sbomDocumentID,
+		ArtifactID:       artifactID,
 		SBOMChecksum:     input.SBOMChecksum,
 		ChecksumSHA256:   outcome.Result.ChecksumSHA256,
 		Format:           input.Format,
@@ -241,35 +251,23 @@ func (p *Pipeline) ingestVEXStages(ctx context.Context, input *domain.IngestionI
 		return "", err
 	}
 	ctx, endEnrich := domain.StartStage(ctx, domain.StageEnrich)
-	if err := p.applyEnrichment(ctx, documentID, true); err != nil {
+	if p.Enrichment == nil {
 		endEnrich()
-		return "", err
+		return "", stageError(domain.IngestionStatusEnriching, fmt.Errorf("enrichment service unavailable"), false)
+	}
+	if err := p.Enrichment.ReenrichVEX(ctx, documentID); err != nil {
+		endEnrich()
+		return "", stageError(domain.IngestionStatusEnriching, err, true)
 	}
 	endEnrich()
 	return documentID, nil
-}
-
-func (p *Pipeline) applyEnrichment(ctx context.Context, documentID string, reenrich bool) error {
-	if p.Enrichment == nil {
-		return stageError(domain.IngestionStatusEnriching, fmt.Errorf("enrichment service unavailable"), false)
-	}
-	var err error
-	if reenrich {
-		err = p.Enrichment.ReenrichVEX(ctx, documentID)
-	} else {
-		err = p.Enrichment.ApplyVEX(ctx, documentID)
-	}
-	if err != nil {
-		return stageError(domain.IngestionStatusEnriching, err, true)
-	}
-	return nil
 }
 
 func (p *Pipeline) correlateComponents(
 	ctx context.Context,
 	sbom domain.CanonicalSBOM,
 	componentVersions map[string]string,
-	documentID string,
+	scanReportID string,
 ) error {
 	for _, component := range sbom.Components {
 		componentVersionID, ok := componentVersions[component.PURL]
@@ -280,6 +278,7 @@ func (p *Pipeline) correlateComponents(
 		if err != nil {
 			return stageError(domain.IngestionStatusCorrelating, err, true)
 		}
+		versionedPURL := domain.VersionedPURL(component.PURL, component.Version)
 		for _, vuln := range matches {
 			vulnID := vuln.ID
 			if vulnID == "" {
@@ -289,7 +288,13 @@ func (p *Pipeline) correlateComponents(
 					return stageError(domain.IngestionStatusCorrelating, upsertErr, true)
 				}
 			}
-			if _, err := p.Correlate.CreateFinding(ctx, componentVersionID, vulnID, documentID); err != nil {
+			if _, err := p.Correlate.CreateFinding(ctx, domain.CreateFindingInput{
+				ComponentVersionID: componentVersionID,
+				VulnerabilityID:    vulnID,
+				ScanReportID:       scanReportID,
+				ComponentPURL:      versionedPURL,
+				CVEID:              vuln.CVEID,
+			}); err != nil {
 				return stageError(domain.IngestionStatusCorrelating, err, true)
 			}
 		}
@@ -321,7 +326,6 @@ func (p *Pipeline) localMatches(ctx context.Context, component domain.CanonicalC
 	}
 	return fetched, nil
 }
-
 
 func (p *Pipeline) transition(ctx context.Context, id string, status domain.IngestionStatus, detail, scanID string) error {
 	if err := p.Jobs.UpdateStatus(ctx, id, status, detail, scanID); err != nil {

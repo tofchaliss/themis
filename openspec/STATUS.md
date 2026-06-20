@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-17 (themis-core-model proposed)._
+Last updated: 2026-06-20 (themis-core-model implementation complete)._
 
 ---
 
@@ -9,9 +9,9 @@ Last updated: 2026-06-17 (themis-core-model proposed)._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-core-model | Planning complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (9 groups) | — (ready to implement; merges first under v0.3.0) |
+| themis-core-model | Implementation complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (57/58; only 9.6 release-tag open) — code, all gates (unit/coverage/integration/clean-arch/verify-build) green | — (ready to archive; tag `v0.3.0` only once Phase 2b is ready, per 9.6) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Planned | — | not started | `themis-core-model` (planned; v0.2.1 archived) |
+| themis-phase-2b | Ready to start | — | not started | — (`themis-core-model` schema/identity base implemented — unblocked) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work

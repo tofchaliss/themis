@@ -19,53 +19,27 @@ func TestAC24_VEXExportPrecedence(t *testing.T) {
 	pool, ctx := setupEPSSKevIntegration(t, 15471)
 	productID := uuid.NewString()
 	artifactID := uuid.NewString()
-	imageID := uuid.NewString()
+	projectID := uuid.NewString()
 	versionID := uuid.NewString()
-	sbomID := uuid.NewString()
-	componentID := uuid.NewString()
-	findingID := uuid.NewString()
-	vulnID := uuid.NewString()
 	cveID := "CVE-2024-VEX-24"
 	version := "1.0.0"
+	digest := "sha256:ac24-vex"
 
-	seedBaseData(t, ctx, pool, productID, artifactID, imageID, "sha256:ac24-vex")
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO product_versions (id, product_id, version, release_status)
-		VALUES ($1, $2, $3, 'released')
-	`, versionID, productID, version); err != nil {
+	// product → default project → version 1.0.0 → artifact
+	if _, err := pool.Exec(ctx, `INSERT INTO products (id, name) VALUES ($1, 'vex-export-product')`, productID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE artifacts SET product_version_id = $1 WHERE id = $2`, versionID, artifactID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO projects (id, product_id, name, is_default) VALUES ($1, $2, 'default', TRUE)`, projectID, productID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (id, image_id, image_digest, checksum_sha256, format, spec_version, raw_document, trust_status, is_latest)
-		VALUES ($1, $2, 'sha256:ac24-vex', 'checksum-ac24', 'cyclonedx', '1.6', '{}', 'unsigned', true)
-	`, sbomID, imageID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO versions (id, project_id, version) VALUES ($1, $2, $3)`, versionID, projectID, version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO components (id, purl, name, ecosystem) VALUES ($1, 'pkg:rpm/redhat/httpd@2.4.37-51.el8', 'httpd', 'rpm')
-	`, componentID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, version_id, artifact_type, image_digest, repository) VALUES ($1, $2, 'image', $3, 'themis/app')`, artifactID, versionID, digest); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_versions (id, component_id, version, sbom_document_id)
-		VALUES ($1, $2, '2.4.37-51.el8', $3)
-	`, uuid.NewString(), componentID, sbomID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO vulnerabilities (id, cve_id, severity) VALUES ($1, $2, 'high')
-	`, vulnID, cveID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO component_vulnerabilities (id, component_version_id, vulnerability_id, sbom_document_id)
-		VALUES ($1, (SELECT id FROM component_versions WHERE sbom_document_id = $2 LIMIT 1), $3, $2)
-	`, findingID, sbomID, vulnID); err != nil {
-		t.Fatal(err)
-	}
+
+	_, purl := seedFinding(t, ctx, pool, artifactID, "pkg:rpm/redhat/httpd", "2.4.37-51.el8", cveID, "high", "")
 
 	vendorStore := vexfeed.NewPostgresAssertionStore(pool)
 	if _, err := vendorStore.UpsertAssertions(ctx, "rhel", []domain.VendorVEXAssertion{{
@@ -76,17 +50,22 @@ func TestAC24_VEXExportPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// human-triage themis_generated VEX (highest precedence) bound to the artifact.
+	var vulnDBID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM vulnerabilities WHERE cve_id = $1`, cveID).Scan(&vulnDBID); err != nil {
+		t.Fatal(err)
+	}
 	vexDocID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO vex_documents (id, sbom_document_id, sbom_checksum, checksum_sha256, format, source, raw_document)
+		INSERT INTO vex_documents (id, artifact_id, sbom_checksum, checksum_sha256, format, source, raw_document)
 		VALUES ($1, $2, 'triage-ac24', 'checksum-triage', 'openvex', 'themis_generated', '{}')
-	`, vexDocID, sbomID); err != nil {
+	`, vexDocID, artifactID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO vex_assertions (id, vex_document_id, vulnerability_id, status, justification, component_purl)
-		VALUES ($1, $2, $3, 'not_affected', 'human triage backport', 'pkg:rpm/redhat/httpd@2.4.37-51.el8')
-	`, uuid.NewString(), vexDocID, vulnID); err != nil {
+		VALUES ($1, $2, $3, 'not_affected', 'human triage backport', $4)
+	`, uuid.NewString(), vexDocID, vulnDBID, purl); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,7 +76,7 @@ func TestAC24_VEXExportPrecedence(t *testing.T) {
 		VendorVEX:   vexfeed.EnrichmentAssertionReader{Store: vendorStore},
 		VendorMatch: matcher,
 	}
-	if err := handler.ApplyVEX(ctx, sbomID); err != nil {
+	if err := handler.ApplyVEX(ctx, artifactID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,9 +95,9 @@ func TestAC24_VEXExportPrecedence(t *testing.T) {
 			Analysis struct {
 				State string `json:"state"`
 			} `json:"analysis"`
-			XEPSS    *float64 `json:"x-themis-epss-score"`
-			XKEV     *bool    `json:"x-themis-kev-listed"`
-			XBlast   *int     `json:"x-themis-blast-radius"`
+			XEPSS  *float64 `json:"x-themis-epss-score"`
+			XKEV   *bool    `json:"x-themis-kev-listed"`
+			XBlast *int     `json:"x-themis-blast-radius"`
 		} `json:"vulnerabilities"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {

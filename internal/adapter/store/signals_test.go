@@ -28,7 +28,7 @@ func (s stubThreatSignalStore) GetEPSSForCVE(context.Context, string) (*float64,
 func (s stubThreatSignalStore) IsKEVListed(context.Context, string) (bool, error) {
 	return s.kev, s.kevErr
 }
-func (s stubThreatSignalStore) CountEPSSRows(context.Context) (int, error)       { return 0, nil }
+func (s stubThreatSignalStore) CountEPSSRows(context.Context) (int, error) { return 0, nil }
 func (s stubThreatSignalStore) LastSuccessfulFetch(context.Context) (time.Time, error) {
 	return time.Time{}, nil
 }
@@ -48,7 +48,7 @@ func TestCombinedSignalReader(t *testing.T) {
 	ctx := context.Background()
 	score := 0.75
 	reader := CombinedSignalReader{
-		Threat: stubThreatSignalStore{epss: &score, kev: true},
+		Threat:  stubThreatSignalStore{epss: &score, kev: true},
 		Exploit: stubExploitStore{has: true},
 	}
 	gotEPSS, err := reader.GetEPSSForCVE(ctx, "CVE-1")

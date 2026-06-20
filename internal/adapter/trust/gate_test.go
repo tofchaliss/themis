@@ -336,11 +336,11 @@ func TestGateVEXIntegrityRepositoryError(t *testing.T) {
 		Repo:     &vexChainFailRepository{MemoryRepository: repo},
 	}
 	artifact := domain.RawArtifact{
-		Kind:           domain.ArtifactKindVEX,
-		Format:         "openvex",
-		SpecVersion:    "1.0.0",
-		RawDocument:    []byte(openvexDoc),
-		SBOMChecksum:   "sbom-checksum",
+		Kind:         domain.ArtifactKindVEX,
+		Format:       "openvex",
+		SpecVersion:  "1.0.0",
+		RawDocument:  []byte(openvexDoc),
+		SBOMChecksum: "sbom-checksum",
 	}
 	outcome := gate.Evaluate(context.Background(), artifact, domain.TrustPolicyStandard)
 	if outcome.Accepted {
@@ -471,7 +471,7 @@ func TestGateIntegrityRepositoryError(t *testing.T) {
 	repo := NewMemoryRepository()
 	gate := &Gate{
 		Verifier: StubVerifier{},
-		Repo: &integrityFailRepository{MemoryRepository: repo},
+		Repo:     &integrityFailRepository{MemoryRepository: repo},
 	}
 	artifact := baseSBOM(cycloneDoc)
 	artifact.ImageDigest = "sha256:abc"

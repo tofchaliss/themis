@@ -38,34 +38,34 @@ func TestGateIntegrationPostgres(t *testing.T) {
 	}
 
 	productID := uuid.NewString()
-	imageID := uuid.NewString()
 	artifactID := uuid.NewString()
+	projectID := uuid.NewString()
+	versionID := uuid.NewString()
 	digest := "sha256:integration"
 	doc := []byte(cycloneDoc)
 	checksum := checksumSHA256(doc)
+	sbomDocID := uuid.NewString()
+	// FindSBOMByDedupKey resolves the *scan report* for a (digest, checksum); the gate's
+	// DuplicateID is therefore the scan_reports id.
 	sbomID := uuid.NewString()
 
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO products (id, name) VALUES ($1, 'integration-product')
-	`, productID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO products (id, name) VALUES ($1, 'integration-product')`, productID); err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO artifacts (id, artifact_type) VALUES ($1, 'image')
-	`, artifactID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO projects (id, product_id, name, is_default) VALUES ($1, $2, 'default', TRUE)`, projectID, productID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO versions (id, project_id, version) VALUES ($1, $2, 'latest')`, versionID, projectID); err != nil {
+		t.Fatalf("insert version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO artifacts (id, version_id, artifact_type, image_digest, repository) VALUES ($1, $2, 'image', $3, 'themis/app')`, artifactID, versionID, digest); err != nil {
 		t.Fatalf("insert artifact: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO images (id, artifact_id, product_id, repository, digest)
-		VALUES ($1, $2, $3, 'themis/app', $4)
-	`, imageID, artifactID, productID, digest); err != nil {
-		t.Fatalf("insert image: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO sbom_documents (id, image_id, image_digest, checksum_sha256, format, raw_document)
-		VALUES ($1, $2, $3, $4, 'cyclonedx', $5::jsonb)
-	`, sbomID, imageID, digest, checksum, doc); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sboms (id, artifact_id, sbom_checksum, format, raw_document) VALUES ($1, $2, $3, 'cyclonedx', $4::jsonb)`, sbomDocID, artifactID, checksum, doc); err != nil {
 		t.Fatalf("insert sbom: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_reports (id, sbom_id, artifact_id, image_digest, scan_checksum) VALUES ($1, $2, $3, $4, $5)`, sbomID, sbomDocID, artifactID, digest, checksum); err != nil {
+		t.Fatalf("insert scan report: %v", err)
 	}
 
 	repo := NewPostgresRepository(pool)
@@ -123,9 +123,9 @@ func TestGateIntegrationPostgres(t *testing.T) {
 	vexDoc := []byte(openvexDoc)
 	vexChecksum := checksumSHA256(vexDoc)
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO vex_documents (id, sbom_document_id, sbom_checksum, checksum_sha256, format, raw_document)
+		INSERT INTO vex_documents (id, artifact_id, sbom_checksum, checksum_sha256, format, raw_document)
 		VALUES ($1, $2, $3, $4, 'openvex', $5::jsonb)
-	`, uuid.NewString(), sbomID, checksum, vexChecksum, vexDoc); err != nil {
+	`, uuid.NewString(), artifactID, checksum, vexChecksum, vexDoc); err != nil {
 		t.Fatalf("insert vex: %v", err)
 	}
 

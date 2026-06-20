@@ -22,14 +22,26 @@ type Project struct {
 	CreatedAt   time.Time
 }
 
-// ProductVersion tracks release lines for a product.
+// ProductVersion tracks release lines, parented by a project (versions table).
 type ProductVersion struct {
 	ID            string
-	ProductID     string
+	ProjectID     string
 	Version       string
 	ReleaseStatus string
 	ReleasedAt    *time.Time
 	CreatedAt     time.Time
+}
+
+// Artifact is a registered scan target identified by its globally-unique image
+// digest (the merged artifacts+images entity). It belongs to exactly one version.
+type Artifact struct {
+	ID           string
+	VersionID    string
+	ArtifactType string
+	ImageDigest  string
+	Repository   string
+	Tag          string
+	CreatedAt    time.Time
 }
 
 // ScanSummary is an SBOM ingestion record exposed as a scan.
@@ -173,14 +185,22 @@ const ScopeReadOnly = "read"
 // ProductScopePrefix prefixes product-scoped keys.
 const ProductScopePrefix = "product:"
 
-// ProductCatalogRepository manages products, projects, and versions.
+// ProductCatalogRepository manages products, projects, versions, and artifacts.
 type ProductCatalogRepository interface {
+	// CreateProduct creates a product and its auto-created default project.
 	CreateProduct(ctx context.Context, name, description string) (Product, error)
 	ListProducts(ctx context.Context, page PageRequest, productScope string) ([]Product, PageResult, error)
 	GetProduct(ctx context.Context, id string) (Product, error)
 	CreateProject(ctx context.Context, productID, name, description string) (Project, error)
 	ListProjects(ctx context.Context, productID string, page PageRequest) ([]Project, PageResult, error)
 	ListProductVersions(ctx context.Context, productID string, page PageRequest) ([]ProductVersion, PageResult, error)
+	// CreateVersion creates a version under a project (ErrProjectNotFound /
+	// ErrVersionConflict).
+	CreateVersion(ctx context.Context, projectID, version string) (ProductVersion, error)
+	// RegisterArtifact registers an artifact by image_digest under the product's
+	// default project, resolving (or creating) the target version. A duplicate
+	// digest returns the existing artifact (digest is globally unique).
+	RegisterArtifact(ctx context.Context, productID, version, imageDigest, repository string) (Artifact, error)
 }
 
 // ScanQueryRepository reads scan and vulnerability data.
