@@ -72,7 +72,7 @@ func (r *PostgresEnrichmentRepository) ListAssertionsForArtifact(ctx context.Con
 	rows, err := r.pool.Query(ctx, `
 		SELECT va.id, va.vex_document_id,
 		       COALESCE(
-		           CASE WHEN cvn.version IS NULL OR cvn.version = '' THEN c.purl
+		           CASE WHEN cvn.version IS NULL OR cvn.version = '' OR c.purl LIKE '%@%' THEN c.purl
 		                ELSE c.purl || '@' || cvn.version END,
 		           va.component_purl), v.cve_id, va.status,
 		       COALESCE(va.justification, ''), COALESCE(vd.ingested_at, va.created_at),

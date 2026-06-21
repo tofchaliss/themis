@@ -57,6 +57,36 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+// TestCompareVersionsNumericAndApk locks in the two ordering bugs the lexical
+// comparator had: multi-digit minor versions and Alpine apk "-rN" suffixes.
+func TestCompareVersionsNumericAndApk(t *testing.T) {
+	tests := []struct {
+		left, right string
+		want        int
+	}{
+		{"8.14.1", "8.9.0", 1},          // 14 > 9 numerically (lexical wrongly said <)
+		{"8.9.0", "8.14.1", -1},         // antisymmetric
+		{"8.14.1-r2", "8.5.0-r0", 1},    // multi-digit minor with apk revision
+		{"8.14.1-r2", "8.14.1-r10", -1}, // r10 newer than r2 (numeric revision)
+		{"8.14.1-r2", "8.14.1", 1},      // a revision is newer than none
+		{"8.14.1", "8.14.1-r2", -1},
+		{"1.0a", "1.0b", -1},  // letter run compare
+		{"1.0a", "1.0", 1},    // numeric/none then letter remainder is newer
+		{"1.0", "1.0a", -1},   // mirror
+		{"10", "9", 1},        // multi-digit run length
+		{"1.2", "1.2a", -1},   // left exhausts, right has letter remainder
+		{"1.a", "1.0", -1},    // same position: numeric (right) outranks letter (left)
+		{"1.0", "1.a", 1},     // mirror of the type-mismatch branch
+		{"01.0", "1.0", 0},    // leading zeros ignored
+		{"1.2.3", "1.2.3", 0}, // equal
+	}
+	for _, tc := range tests {
+		if got := CompareVersions(tc.left, tc.right); got != tc.want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", tc.left, tc.right, got, tc.want)
+		}
+	}
+}
+
 func TestVersionMatches(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -73,6 +103,23 @@ func TestVersionMatches(t *testing.T) {
 		{"less or equal", []string{"<= 2.0.0"}, "2.0.0", true},
 		{"greater or equal", []string{">= 1.0.0"}, "1.0.0", true},
 		{"greater than", []string{"> 1.0.0"}, "1.0.1", true},
+		// AND within a group: both bounds of a range must hold.
+		{"range inside", []string{">= 1.0.0, < 2.0.0"}, "1.5.0", true},
+		{"range above fixed", []string{">= 1.0.0, < 2.0.0"}, "2.0.0", false},
+		{"range below introduced", []string{">= 1.0.0, < 2.0.0"}, "0.9.0", false},
+		// OR across groups: any group may match.
+		{"two groups second matches", []string{">= 1.0.0, < 2.0.0", ">= 3.0.0, < 4.0.0"}, "3.1.0", true},
+		{"two groups none match", []string{">= 1.0.0, < 2.0.0", ">= 3.0.0, < 4.0.0"}, "2.5.0", false},
+		// Sentinels.
+		{"none matches nothing", []string{"none"}, "1.0.0", false},
+		{"star matches", []string{"*"}, "1.0.0", true},
+		// Empty sub-constraint (trailing comma) is skipped, not failed.
+		{"trailing comma", []string{">= 1.0.0, "}, "1.5.0", true},
+		// Exact version that does not equal -> no match (default branch).
+		{"exact mismatch", []string{"2.0.0"}, "1.0.0", false},
+		// Regression: a single range must NOT be satisfied by its lower bound
+		// alone. curl 8.14.1 vs CVE-2014-0138 (affected >= 7, fixed in 7.36).
+		{"curl over-match regression", []string{">= 7.0.0, < 7.36.0"}, "8.14.1", false},
 	}
 	for _, tc := range tests {
 		got := VersionMatches(tc.affected, tc.version)
@@ -88,5 +135,16 @@ func TestVersionedPURL(t *testing.T) {
 	}
 	if got := VersionedPURL("pkg:apk/busybox", ""); got != "pkg:apk/busybox" {
 		t.Fatalf("VersionedPURL empty version = %q, want pkg:apk/busybox", got)
+	}
+	// Idempotent: a purl that already carries a version (real Syft/Trivy form,
+	// with qualifiers) must not be double-versioned.
+	already := "pkg:apk/alpine/curl@8.14.1-r2?arch=x86_64&distro=3.20.2"
+	if got := VersionedPURL(already, "8.14.1-r2"); got != already {
+		t.Fatalf("VersionedPURL already-versioned = %q, want unchanged %q", got, already)
+	}
+	// Scoped npm namespaces encode @ as %40, so a versionless scoped purl still
+	// gets its version appended.
+	if got := VersionedPURL("pkg:npm/%40babel/core", "7.0.0"); got != "pkg:npm/%40babel/core@7.0.0" {
+		t.Fatalf("VersionedPURL scoped npm = %q, want pkg:npm/%%40babel/core@7.0.0", got)
 	}
 }

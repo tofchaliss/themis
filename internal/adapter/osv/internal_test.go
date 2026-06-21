@@ -11,6 +11,107 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 )
 
+func TestExtractAffectedVersionsPairsEventsAndFiltersPackage(t *testing.T) {
+	// One advisory affecting curl (fixed in 7.36.0-r0) plus a second entry for a
+	// different package with an open range — the open range must not leak into
+	// curl's constraints.
+	vuln := osvVuln{
+		Affected: []struct {
+			Package struct {
+				Ecosystem string `json:"ecosystem"`
+				Name      string `json:"name"`
+			} `json:"package"`
+			Ranges []struct {
+				Events []osvRangeEvent `json:"events"`
+			} `json:"ranges"`
+			Versions []string `json:"versions"`
+		}{
+			{
+				Package: struct {
+					Ecosystem string `json:"ecosystem"`
+					Name      string `json:"name"`
+				}{Ecosystem: "Alpine", Name: "curl"},
+				Ranges: []struct {
+					Events []osvRangeEvent `json:"events"`
+				}{{Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "7.36.0-r0"}}}},
+			},
+			{
+				Package: struct {
+					Ecosystem string `json:"ecosystem"`
+					Name      string `json:"name"`
+				}{Ecosystem: "Alpine", Name: "libcurl"},
+				Ranges: []struct {
+					Events []osvRangeEvent `json:"events"`
+				}{{Events: []osvRangeEvent{{Introduced: "0"}}}}, // open, all-versions
+			},
+		},
+	}
+
+	affected := extractAffectedVersions(vuln, "Alpine", "curl")
+	if len(affected) != 1 || affected[0] != "< 7.36.0-r0" {
+		t.Fatalf("affected = %#v, want [\"< 7.36.0-r0\"] (libcurl open range filtered out)", affected)
+	}
+	// The bounded range must NOT match a much newer version (the reported bug).
+	if domain.VersionMatches(affected, "8.14.1-r2") {
+		t.Fatal("curl 8.14.1-r2 must not match a CVE fixed in 7.36.0-r0")
+	}
+	// A genuinely affected old version still matches.
+	if !domain.VersionMatches(affected, "7.10.0-r0") {
+		t.Fatal("curl 7.10.0-r0 should match a CVE fixed in 7.36.0-r0")
+	}
+}
+
+func TestExtractAffectedVersionsFallbacks(t *testing.T) {
+	mk := func(eco, name string, events []osvRangeEvent, versions []string) osvVuln {
+		v := osvVuln{}
+		var item struct {
+			Package struct {
+				Ecosystem string `json:"ecosystem"`
+				Name      string `json:"name"`
+			} `json:"package"`
+			Ranges []struct {
+				Events []osvRangeEvent `json:"events"`
+			} `json:"ranges"`
+			Versions []string `json:"versions"`
+		}
+		item.Package.Ecosystem = eco
+		item.Package.Name = name
+		if events != nil {
+			item.Ranges = []struct {
+				Events []osvRangeEvent `json:"events"`
+			}{{Events: events}}
+		}
+		item.Versions = versions
+		v.Affected = append(v.Affected, item)
+		return v
+	}
+
+	// No affected entry aligns to the queried package -> preserve recall (*).
+	if got := extractAffectedVersions(mk("Alpine", "openssl", []osvRangeEvent{{Fixed: "1"}}, nil), "Alpine", "curl"); len(got) != 1 || got[0] != "*" {
+		t.Fatalf("unmatched package = %#v, want [*]", got)
+	}
+	// Matched package, explicit no-constraint entry -> all versions (*).
+	if got := extractAffectedVersions(mk("Alpine", "curl", nil, nil), "Alpine", "curl"); len(got) != 1 || got[0] != "*" {
+		t.Fatalf("no-constraint = %#v, want [*]", got)
+	}
+	// Matched package, unfixed open range -> all versions from 0 (*).
+	if got := extractAffectedVersions(mk("Alpine", "curl", []osvRangeEvent{{Introduced: "0"}}, nil), "Alpine", "curl"); len(got) != 1 || got[0] != "*" {
+		t.Fatalf("open range = %#v, want [*]", got)
+	}
+	// Matched package, introduced+last_affected -> bounded group with lower bound.
+	if got := extractAffectedVersions(mk("Alpine", "curl", []osvRangeEvent{{Introduced: "1.0"}, {LastAffected: "2.0"}}, nil), "Alpine", "curl"); len(got) != 1 || got[0] != ">= 1.0, <= 2.0" {
+		t.Fatalf("last_affected = %#v, want [\">= 1.0, <= 2.0\"]", got)
+	}
+	// Matched package, explicit versions list.
+	if got := extractAffectedVersions(mk("Alpine", "curl", nil, []string{"1.2.3"}), "Alpine", "curl"); len(got) != 1 || got[0] != "1.2.3" {
+		t.Fatalf("versions = %#v, want [1.2.3]", got)
+	}
+	// Matched package, range present but no events -> fail closed (none).
+	if got := extractAffectedVersions(mk("Alpine", "curl", []osvRangeEvent{}, nil), "Alpine", "curl"); len(got) != 1 || got[0] != "none" {
+		t.Fatalf("eventless range = %#v, want [none]", got)
+	}
+}
+
 func TestCaptureCorrelationLogger(t *testing.T) {
 	log := &CaptureCorrelationLogger{}
 	log.LogUnsupportedEcosystem("", "", "", "")
