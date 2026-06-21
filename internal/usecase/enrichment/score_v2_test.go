@@ -126,6 +126,44 @@ func TestFormula_EPSSAdjustment(t *testing.T) {
 	}
 }
 
+// TestFormula_SeverityDiscriminatesWithoutSignals is the regression guard for the
+// saturation bug: with no threat signals (EPSS 0, no KEV, blast 1.0×) the score
+// must equal the plain severity base, NOT collapse every medium+ finding to 100.
+func TestFormula_SeverityDiscriminatesWithoutSignals(t *testing.T) {
+	cases := map[string]int{
+		"low":      10,
+		"medium":   40,
+		"high":     70,
+		"critical": 90,
+	}
+	for severity, want := range cases {
+		got := enrichment.ComputeRiskScoreV2(
+			severity,
+			domain.EffectiveStateDetected,
+			nil,   // no EPSS
+			false, // no KEV
+			false,
+			string(domain.DeterministicLevelInformational),
+			1.0, // neutral blast radius
+		)
+		if got != want {
+			t.Fatalf("plain %s with no signals = %d, want %d (must not saturate)", severity, got, want)
+		}
+	}
+}
+
+// TestFormula_BlastRadiusIsMultiplier confirms blast radius scales the score
+// rather than adding a second base term.
+func TestFormula_BlastRadiusIsMultiplier(t *testing.T) {
+	at1 := enrichment.ComputeRiskScoreV2("low", domain.EffectiveStateDetected, nil, false, false,
+		string(domain.DeterministicLevelInformational), 1.0)
+	at2 := enrichment.ComputeRiskScoreV2("low", domain.EffectiveStateDetected, nil, false, false,
+		string(domain.DeterministicLevelInformational), 2.0)
+	if at1 != 10 || at2 != 20 {
+		t.Fatalf("blast multiplier: 1.0×=%d (want 10), 2.0×=%d (want 20)", at1, at2)
+	}
+}
+
 func TestFormula_HighScenarioFromSpec(t *testing.T) {
 	epss := 0.8
 	got := enrichment.ComputeRiskScoreV2(

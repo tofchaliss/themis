@@ -129,9 +129,16 @@ func TestEPSSAdjustmentBounds(t *testing.T) {
 			return
 		}
 
+		// EPSS adds at most +30% of base, but the score caps at 100 — so near the
+		// cap the observed delta is bounded by the headroom above the zero-EPSS
+		// score, not the full base×epss×0.3. (This case only surfaces now that the
+		// formula discriminates severities; under the old saturating formula every
+		// high-base finding already hit 100 with and without EPSS, so the test
+		// short-circuited at withZero == withEPSS above.)
 		delta := withEPSS - withZero
-		minDelta := int(math.Floor(base * epss * domain.RiskScoreEPSSMultiplierMax))
-		maxDelta := int(math.Ceil(base * epss * domain.RiskScoreEPSSMultiplierMax))
+		bounded := math.Min(base*epss*domain.RiskScoreEPSSMultiplierMax, 100-float64(withZero))
+		minDelta := int(math.Floor(bounded))
+		maxDelta := int(math.Ceil(bounded))
 		if delta < minDelta || delta > maxDelta {
 			t.Fatalf("EPSS delta %d outside [%d,%d] for base=%v epss=%v", delta, minDelta, maxDelta, base, epss)
 		}
