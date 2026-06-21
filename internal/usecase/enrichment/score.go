@@ -7,14 +7,20 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 )
 
-// ComputeRiskScoreV2 applies the Phase 2a composite formula:
+// ComputeRiskScoreV2 applies the Phase 2a composite formula. Blast radius is a
+// multiplier on the severity base only (1.0× adds nothing); EPSS (+30% of base
+// max) and KEV (+15) are additive bumps; a Critical deterministic level is a hard
+// override to 100. Keeping EPSS/KEV additive (not folded into the blast multiplier)
+// means their contribution is independent of blast — and scoring base once, not
+// three times, keeps severities discriminated: a plain medium with no threat
+// signals scores 40, not 100.
 //
-//	base      = f(raw_severity, effective_state)
-//	layer1    = 100 when deterministic_level is Critical, else base
-//	epss_adj  = base × (1 + epss_score × 0.3); NULL epss_score is treated as 0.0
+//	base      = f(raw_severity, effective_state); 0 ⇒ score 0
+//	Critical override: deterministic_level == Critical ⇒ score 100
+//	blast     = blast_radius_score (1.0–2.0×; ≤0 defaults to 1.0)
+//	epss_adj  = base × epss_score × 0.3  (NULL/0 ⇒ 0; max +30% of base)
 //	kev_adj   = +15 when kev_listed
-//	blast_adj = base × blast_radius_score (defaults to 1.0 when unset)
-//	final     = min(100, round(layer1 + epss_adj + kev_adj + blast_adj))
+//	final     = min(100, round(base × blast + epss_adj + kev_adj))
 func ComputeRiskScoreV2(
 	rawSeverity, effectiveState string,
 	epssScore *float64,
@@ -28,25 +34,22 @@ func ComputeRiskScoreV2(
 	if base == 0 {
 		return 0
 	}
-
-	layer1 := base
 	if strings.EqualFold(strings.TrimSpace(deterministicLevel), string(domain.DeterministicLevelCritical)) {
-		layer1 = 100
+		return 100
 	}
 
-	epssAdj := base * (1 + epssValue(epssScore)*domain.RiskScoreEPSSMultiplierMax)
+	if blastRadiusScore <= 0 {
+		blastRadiusScore = domain.RiskScoreBlastRadiusMin
+	}
+
+	epssAdj := base * epssValue(epssScore) * domain.RiskScoreEPSSMultiplierMax
 
 	kevAdj := 0.0
 	if kevListed {
 		kevAdj = float64(domain.RiskScoreKEVAdjustment)
 	}
 
-	if blastRadiusScore <= 0 {
-		blastRadiusScore = domain.RiskScoreBlastRadiusMin
-	}
-	blastAdj := base * blastRadiusScore
-
-	final := layer1 + epssAdj + kevAdj + blastAdj
+	final := base*blastRadiusScore + epssAdj + kevAdj
 	return int(math.Min(100, math.Round(final)))
 }
 

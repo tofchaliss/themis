@@ -115,6 +115,24 @@ func TestPhase4_AlpineInRange(t *testing.T) {
 	}
 }
 
+// TestPhase4_AlpineWithQualifiers locks in the real-world Syft/Trivy purl shape:
+// the apk purl carries ?arch=...&distro=... qualifiers after the version. The
+// matcher must strip those so the name parses as "busybox" (not
+// "busybox@...?arch=...") and the version compares cleanly.
+func TestPhase4_AlpineWithQualifiers(t *testing.T) {
+	got := matcher().Match(
+		"pkg:apk/alpine/busybox@1.35.0-r5?arch=x86_64&distro=3.20.2",
+		"CVE-2023-0001",
+		assertions(domain.VendorVEXAssertion{
+			CVEID: "CVE-2023-0001", Ecosystem: "Alpine", PackageName: "busybox",
+			Introduced: "0", Fixed: "1.35.0-r6", Status: domain.VEXStatusAffected,
+		}),
+	)
+	if !got.Matched || got.MatchType != domain.VEXMatchTypeRangeMatched || got.ResolvedStatus != domain.VEXStatusAffected {
+		t.Fatalf("Match() with qualifiers = %+v, want matched/range/affected", got)
+	}
+}
+
 func TestPhase4_AlpineNotInRange_Fixed(t *testing.T) {
 	got := matcher().Match(
 		"pkg:apk/alpine/busybox@1.35.0-r6",

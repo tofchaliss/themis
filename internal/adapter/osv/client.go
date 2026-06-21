@@ -144,25 +144,25 @@ type osvVuln struct {
 			Name      string `json:"name"`
 		} `json:"package"`
 		Ranges []struct {
-			Events []struct {
-				Introduced   string `json:"introduced"`
-				Fixed        string `json:"fixed"`
-				LastAffected string `json:"last_affected"`
-			} `json:"events"`
+			Events []osvRangeEvent `json:"events"`
 		} `json:"ranges"`
 		Versions []string `json:"versions"`
 	} `json:"affected"`
+}
+
+type osvRangeEvent struct {
+	Introduced   string `json:"introduced"`
+	Fixed        string `json:"fixed"`
+	LastAffected string `json:"last_affected"`
 }
 
 func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerability {
 	score, vector := extractCVSSFromSeverity(vuln.Severity)
 	severity := severityFromScore(score)
 
-	affected := extractAffectedVersions(vuln)
-	fixes := extractFixVersions(vuln)
-	if len(affected) == 0 {
-		affected = []string{"unknown"}
-	}
+	osvEcosystem, _ := MapEcosystem(ecosystem)
+	affected := extractAffectedVersions(vuln, osvEcosystem, packageName)
+	fixes := extractFixVersions(vuln, osvEcosystem, packageName)
 
 	return domain.FeedVulnerability{
 		CVEID:            resolveCVEID(vuln),
@@ -186,34 +186,113 @@ func resolveCVEID(vuln osvVuln) string {
 	return domain.NormalizeCVEID(vuln.ID)
 }
 
-func extractAffectedVersions(vuln osvVuln) []string {
-	var affected []string
+// extractAffectedVersions turns the OSV `affected` block into constraint groups
+// for domain.VersionMatches. It only reads entries for the queried package
+// (advisories often list several packages/distros), pairs each range's ordered
+// introduced/fixed/last_affected events into a single AND group (e.g.
+// ">= 1.0.0, < 2.0.0"), and refuses to fall back to a match-all "unknown" when a
+// range is present but unparseable — that fail-open default was a primary cause
+// of inflated finding counts on apk SBOMs.
+func extractAffectedVersions(vuln osvVuln, osvEcosystem, packageName string) []string {
+	var groups []string
+	matchedPackage := false
 	for _, item := range vuln.Affected {
-		if len(item.Versions) > 0 {
-			affected = append(affected, item.Versions...)
+		if !affectedItemMatches(item.Package.Ecosystem, item.Package.Name, osvEcosystem, packageName) {
+			continue
 		}
-		for _, rng := range item.Ranges {
-			for _, event := range rng.Events {
-				if event.Introduced != "" && event.Fixed != "" {
-					affected = append(affected, ">= "+event.Introduced, "< "+event.Fixed)
-				} else if event.Fixed != "" {
-					affected = append(affected, "< "+event.Fixed)
-				} else if event.LastAffected != "" {
-					affected = append(affected, "<= "+event.LastAffected)
-				}
+		matchedPackage = true
+		for _, v := range item.Versions {
+			if v = strings.TrimSpace(v); v != "" {
+				groups = append(groups, v)
 			}
 		}
+		for _, rng := range item.Ranges {
+			if g := rangeConstraintGroup(rng.Events); g != "" {
+				groups = append(groups, g)
+			}
+		}
+		// An affected entry with neither ranges nor explicit versions means the
+		// whole package is affected (OSV semantics) — keep that as match-all.
+		if len(item.Versions) == 0 && len(item.Ranges) == 0 {
+			groups = append(groups, "*")
+		}
 	}
-	return affected
+	switch {
+	case !matchedPackage:
+		// OSV returned this advisory for the queried package but no affected
+		// entry aligned to it (e.g. the name is spelled differently). Preserve
+		// recall — a false positive is safer than hiding a real finding.
+		return []string{"*"}
+	case len(groups) == 0:
+		// Matched the package but every range was unusable. Do not claim all
+		// versions are affected.
+		return []string{"none"}
+	default:
+		return groups
+	}
 }
 
-func extractFixVersions(vuln osvVuln) []string {
+// rangeConstraintGroup pairs an OSV range's ordered events into one AND group.
+// An `introduced` opens the range; a `fixed`/`last_affected` closes it. A range
+// left open (introduced with no fix) affects everything from the introduced
+// version onward.
+func rangeConstraintGroup(events []osvRangeEvent) string {
+	var bounds []string
+	introduced := ""
+	open := false
+	closeRange := func(upper string) {
+		if introduced != "" && introduced != "0" {
+			bounds = append(bounds, ">= "+introduced)
+		}
+		bounds = append(bounds, upper)
+		introduced = ""
+		open = false
+	}
+	for _, e := range events {
+		switch {
+		case e.Introduced != "":
+			introduced = strings.TrimSpace(e.Introduced)
+			open = true
+		case e.Fixed != "":
+			closeRange("< " + strings.TrimSpace(e.Fixed))
+		case e.LastAffected != "":
+			closeRange("<= " + strings.TrimSpace(e.LastAffected))
+		}
+	}
+	if open {
+		if introduced != "" && introduced != "0" {
+			bounds = append(bounds, ">= "+introduced)
+		} else {
+			bounds = append(bounds, "*") // introduced "0", no fix → all versions
+		}
+	}
+	return strings.Join(bounds, ", ")
+}
+
+// affectedItemMatches reports whether an OSV affected entry belongs to the
+// queried package. Name match is required; ecosystem must match when both sides
+// declare one (advisories may omit it).
+func affectedItemMatches(itemEcosystem, itemName, osvEcosystem, packageName string) bool {
+	if !strings.EqualFold(strings.TrimSpace(itemName), strings.TrimSpace(packageName)) {
+		return false
+	}
+	if itemEcosystem != "" && osvEcosystem != "" &&
+		!strings.EqualFold(strings.TrimSpace(itemEcosystem), strings.TrimSpace(osvEcosystem)) {
+		return false
+	}
+	return true
+}
+
+func extractFixVersions(vuln osvVuln, osvEcosystem, packageName string) []string {
 	var fixes []string
 	for _, item := range vuln.Affected {
+		if !affectedItemMatches(item.Package.Ecosystem, item.Package.Name, osvEcosystem, packageName) {
+			continue
+		}
 		for _, rng := range item.Ranges {
 			for _, event := range rng.Events {
 				if event.Fixed != "" && event.Fixed != "0" {
-					fixes = append(fixes, event.Fixed)
+					fixes = append(fixes, strings.TrimSpace(event.Fixed))
 				}
 			}
 		}

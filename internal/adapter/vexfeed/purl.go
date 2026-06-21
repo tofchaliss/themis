@@ -39,7 +39,7 @@ func parsePURL(purl string) parsedPURL {
 		}
 	}
 	base := path[:at]
-	version := path[at+1:]
+	version := stripPURLQualifiers(path[at+1:])
 	lastSlash := strings.LastIndex(base, "/")
 	if lastSlash < 0 {
 		return parsedPURL{Type: typ, Name: base, Version: version}
@@ -50,6 +50,17 @@ func parsePURL(purl string) parsedPURL {
 		Name:      base[lastSlash+1:],
 		Version:   version,
 	}
+}
+
+// stripPURLQualifiers removes the PURL qualifier (?key=val) and subpath (#path)
+// from a version segment. Real SBOM purls carry these after the version
+// (pkg:apk/alpine/curl@8.14.1-r2?arch=x86_64&distro=3.20.2); leaving them in
+// would defeat version comparison against clean vendor-advisory purls.
+func stripPURLQualifiers(version string) string {
+	if i := strings.IndexAny(version, "?#"); i >= 0 {
+		return version[:i]
+	}
+	return version
 }
 
 func buildPURL(p parsedPURL) string {
