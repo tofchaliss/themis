@@ -560,6 +560,10 @@ old Alpine E2E gate checks G5/G7/G8 for OSV-origin findings.
 CVE ID normalization" follow-ons above (those landed in v0.2.1 but only cover OSV-supplied
 vectors, not NVD backfill).
 
+> **Consolidated → CR-5** (with CR-4 distro severity + CR-2 correlation) in the
+> "Layer-0 Correctness & Observability Refactor (CR-1 … CR-10)" section below — the single
+> source of truth for execution; the `themis-nvd-cvss-backfill` name is retained here for history.
+
 ---
 
 ### DEFECT D-FEED-1 — Vendor "VEX" feeders conflate three feed classes; OSV/RHSA correlation data is miscategorised as VEX overlay (architectural)
@@ -670,6 +674,8 @@ not in the VEX overlay (Layer 2/3 exploitability context).
 #### Sequencing & relationships
 
 - **Next change cycle** — after v0.2.1 testing closes. Candidate change name: `themis-feed-layering`.
+  **Consolidated → CR-4** (with CR-2 correlation core + CR-3 provenance) in the Layer-0 Refactor
+  section below (single source of truth for execution).
 - **Strongly consider folding the distro-OSV-as-correlation work into [D-CVSS-1]'s
   `themis-nvd-cvss-backfill`** — they fix the same apk/rpm severity gap from two angles (NVD
   by-CVE backfill vs distro feed as authoritative correlation). Decide whether one change or two.
@@ -799,6 +805,8 @@ already in `internal/adapter/osv/cvss.go` where a vector is present but a base s
   tests, all in `nvd/client.go`). Candidate change name: `themis-nvd-feeder-fix`, or fold into
   `themis-nvd-cvss-backfill` (Finding 3 is literally the same NVD-CVSS work; #1/#2 are cheap to
   carry along).
+- **Consolidated → CR-6** (Findings 1 & 2, on the CR-1 unified version engine) and **CR-5**
+  (Finding 3, CVSS multi-version parse) in the Layer-0 Refactor section below (single source of truth).
 - Cross-refs: [D-CVSS-1] (NVD CVSS), [D-FEED-1] (distro feeds as the *other* apk/rpm severity
   source), and the OSV over-match fix in commit `f6b4d97` (the template for Finding 1).
 
@@ -934,11 +942,386 @@ while the rest of the system logs in a different format, at a fixed level, or no
 #### Sequencing & relationships
 
 - **Next change cycle.** Candidate change name: `themis-logging-architecture` (or `themis-observability`).
+  **Consolidated → CR-7** in the Layer-0 Refactor section below (single source of truth for execution).
 - **Foundation for `themis-feed-observability`** (persisted `feed_health` + notifications) — that
   candidate assumes logs/metrics exist to build on; land the logging port first or together.
 - Cross-refs: this is the diagnosis layer for **D-CVSS-1 / D-FEED-1 / D-NVD-1** (without logs,
   those feeder bugs are hard to confirm in the field); complements the existing Prometheus
   `themis_*_sync_total` metrics (metrics say *how many*, logs say *what/why*).
+
+---
+
+## Layer-0 Correctness & Observability Refactor (CR-1 … CR-10)
+
+**Status:** PLAN — no code changes until each CR is approved and scheduled.
+**Created:** 2026-06-21 (v0.3.0 Layer-0 audit).
+**Scope:** the correlation/feeder/observability core that determines whether Themis tells the
+truth and whether operators can see it. Excludes Phase 2b AI work (separate track).
+**Relationship to the DEFECT entries above:** this section is the structural **parent** of
+D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1 and of the feeder candidate changes below. Those are the
+symptoms; the CRs here fix the causes. This is the single source of truth for execution.
+
+### Why this refactor exists
+
+The audit found a cluster of "rudimentary" bugs that defeat the product's purpose (tell users
+what is vulnerable, accurately, and let them see the system working):
+
+- **Over-matching** — NVD CPE ranges drop the lower bound; everything below the upper bound is
+  flagged (D-NVD-1). The identical bug was fixed in OSV but not NVD.
+- **Miscategorised feeds** — OSV distro feeds and RHSA advisories (correlation data) are ingested
+  as "vendor VEX," and their severity/fixed data is discarded (D-FEED-1).
+- **All-zero risk** — apk/rpm findings have `severity=unknown`, `cvss_score=0`, `risk_score=0`
+  (D-CVSS-1).
+- **Silent runtime** — feed fetches, correlation, jobs, and startup failures emit no logs; the
+  configured logger reaches almost nothing (D-LOG-1).
+
+These are not independent. They share **three structural root causes**:
+
+| Root cause | Evidence | Consequence |
+| ---------- | -------- | ----------- |
+| **R1. Version logic is forked** — 3 comparators + 3 range builders, no shared code | `domain.CompareVersions`; `vexfeed.compareAlpineVersion`; `vexfeed.compareRPMEVR`; `osv.rangeConstraintGroup`; `nvd.cpeAffectedVersions`; `vexfeed.alpineRangeStatus` | A fix in one path (OSV) never reaches the others (NVD); the same apk/rpm version is compared by different rules depending on code path |
+| **R2. Multiple correlation engines** — ingest vs watch vs vexfeed-overlay each match independently | `ingestion.correlateComponents`→`FetchForComponent`; `watch.MatchCatalog` over NVD+OSV; `vexfeed.matchAlpineOSV` | Two+ sources of truth, no provenance, no merge; feeds land in the wrong layer |
+| **R3. Observability is an afterthought** — logger configured but not propagated; second `slog.Default()` system; feeders swallow errors | `startup.go` builds zap; nothing downstream takes it; `osv`/`vexfeed` use `slog.Default()`; schedulers `_,_ = svc.RunSync` | Operators cannot see or debug any of the above |
+
+Fixing symptoms without R1/R2/R3 guarantees the next divergent bug.
+
+### Guiding principles
+
+1. **One way to do each thing.** One version engine, one correlation core, one logger.
+2. **Provenance over guessing.** Every finding records who found it; conflicts resolve by explicit
+   precedence, not by whichever code path ran last.
+3. **Right data in the right layer.** Correlation creates findings; VEX only adjusts
+   `effective_state`. Never blur them.
+4. **Visible by default.** Every external fetch and state transition is observable.
+5. **Extend, don't rewrite.** Keep the v0.3.0 schema/identity contract and Clean Architecture; add
+   columns and ports, do not restructure.
+6. **Property-tested invariants.** Anything that compares versions or merges sources gets property
+   tests, not just examples.
+
+### What is KEPT AS-IS (explicitly not changing)
+
+- **Clean Architecture + dependency rule** and the `make clean-arch` / `depguard` gates.
+- **v0.3.0 core schema**: `sboms` + `scan_reports` split; the Durable-Enrichment Identity Contract
+  `(artifact_id, component_purl, cve_id)` (D15); `v_latest_findings`. CRs add columns, never
+  restructure these.
+- **VEX overlay invariant** — raw `component_vulnerabilities` are never deleted; VEX changes only
+  `risk_context.effective_state`.
+- **CanonicalSBOM normalization + parser registry** pattern.
+- **Idempotency** (D12), the trust gate, the async ingestion lifecycle.
+- **Composite risk score V2** formula (corrected this cycle) and EPSS/KEV/ExploitDB enrichment.
+- **API surface + error envelope** — changes additive (new fields), no breaking renames.
+- **Property-based testing harness** and per-package coverage thresholds.
+
+### Target architecture (the deep change)
+
+Today (simplified):
+
+```text
+ingest ──> correlateComponents ──> OSV.dev live ─┐
+                                                 ├─> component_vulnerabilities  (no source)
+watch  ──> MatchCatalog ──> NVD + OSV ───────────┘
+vexfeed ─> matchAlpineOSV/RPM/CSAF ──> vex_assertions ──(range math as "VEX")──> risk_context
+                                  (3 comparators, 3 range builders, slog.Default, errors dropped)
+```
+
+Target:
+
+```text
+                         ┌──────────────────── domain ────────────────────┐
+                         │  VersionConstraintSet + CompareVersions(eco,a,b) │  (CR-1: one engine)
+                         │  Logger port                                     │  (CR-7)
+                         │  Finding{...,Source,SourceSeverity,SourceFixed}  │  (CR-3: provenance)
+                         └──────────────────────────────────────────────────┘
+        CorrelationSource port (CR-2)                 VEX overlay (unchanged invariant)
+        ├─ OSV.dev live (apk/npm/...)                 └─ Red Hat CSAF VEX only (CR-4)
+        ├─ NVD (CPE, by-CVE backfill)  (CR-5/6)            (true exploitability context)
+        ├─ distro OSV (Alpine/Rocky/Wolfi)  (CR-4)
+        └─ RHSA advisories (rpm)  (CR-4)
+                    │  (all emit canonical constraints + severity + fixed, with Source)
+                    ▼
+        Correlator use case (CR-2) ── merge by precedence ──> component_vulnerabilities (Source)
+                    │                                                   │
+                    ▼                                                   ▼
+        enrichment (risk score, EPSS/KEV)                       risk_context (effective_state)
+                    │
+        observability: every fetch/merge/transition logged (CR-7) + feed_health surface (CR-8)
+```
+
+Key moves: **(a)** one version engine in `domain`; **(b)** one `Correlator` over a
+`CorrelationSource` port with provenance + precedence; **(c)** distro/RHSA become *correlation
+sources*, not VEX; **(d)** a `domain.Logger` port propagated everywhere; **(e)** feed health
+surfaced to operators.
+
+### Change Requests
+
+Each CR: **Root cause → Keep/Change → Behavior on inputs → Architecture impact → Testing →
+Risk/Deps → Maps to**.
+
+#### CR-1 — Unify version semantics (one constraint model + ecosystem-aware comparator)
+
+- **Root cause:** R1. Three comparators and three range builders diverge.
+- **Change:** Introduce in `domain`: a `VersionConstraintSet` value object (AND-within-group,
+  OR-across-groups — the semantics already in `VersionMatches`) and
+  `CompareVersions(ecosystem, a, b)` dispatching to generic / **apk** (`-rN` revisions) / **rpm**
+  (epoch:version-release, `~` pre-release) rules. All range producers
+  (`osv.rangeConstraintGroup`, `nvd.cpeAffectedVersions`, `vexfeed.alpineRangeStatus`,
+  `vexfeed.compareRPMEVR`) become thin adapters that build the canonical model; all matchers call
+  the one engine.
+- **Keep:** the existing `VersionMatches` public behavior/semantics; the rpmvercmp-style numeric
+  handling already added.
+- **Behavior on inputs:** CPE `[2.0,2.5)` + installed `1.0` → was match (lower bound dropped) →
+  now no match. apk `1.36.1-r2` vs introduced `1.36.1-r5` → compared by apk rules on every path.
+  rpm `0:1.2-3.el8` with `~`/epoch → consistent ordering everywhere.
+- **Architecture impact:** new `domain/version/` (or extend `version_match.go`); ecosystem passed
+  into comparison. No schema change.
+- **Testing:** *unit/property* — comparator laws per ecosystem; constraint-set truth table;
+  round-trip of OSV/NVD/CPE inputs → canonical set; port the real bug counterexamples (CPE
+  `[2.0,2.5)`+1.0; apk `-rN`) as regression cases. *Integration* — exercised via CR-2/6.
+- **Risk/Deps:** foundational, no deps. Risk: changing comparison could shift existing matches —
+  mitigated by keeping `VersionMatches` semantics + golden corpus diff (CR-10).
+- **Maps to:** root of D-NVD-1; substrate for D-FEED-1/D-CVSS-1.
+
+#### CR-2 — Single correlation core with a source port + provenance
+
+- **Root cause:** R2. Ingest and watch correlate via separate code with separate matching.
+- **Change:** Define `domain.CorrelationSource` (`LiveQuery(component)` and `BulkFeed()` shapes)
+  implemented by OSV.dev, NVD, distro-OSV, RHSA. A `usecase/correlation` `Correlator` runs all
+  applicable sources, matches via **CR-1**, and **merges** per **CR-3** precedence into
+  `component_vulnerabilities`. Ingest and watch both call the Correlator — one match path.
+- **Keep:** ingest lifecycle, watch cadence, the catalog table, `CreateFinding` (extended with
+  `source`).
+- **Behavior on inputs:** Alpine apk matched by OSV.dev + distro-OSV → one merged finding with the
+  higher-confidence source's severity/fixed, `source` recorded. npm → OSV.dev + NVD merge
+  deterministically. Same bytes re-uploaded → idempotent.
+- **Architecture impact:** new `usecase/correlation`; adapters expose `CorrelationSource`; both
+  ingest and watch depend on the Correlator.
+- **Testing:** *unit* — merge/precedence (table + property: order-independent); per-source mapping.
+  *integration* — Alpine SBOM with stub OSV.dev + stub distro-OSV → one merged set with
+  provenance; watch produces same shape; conflicts resolve by precedence; idempotent re-run.
+- **Risk/Deps:** depends on CR-1, CR-3. Largest CR. Risk: finding-set change — mitigated by golden
+  corpus (CR-10) + shadow-run/compare before cutover.
+- **Maps to:** R2; enables D-FEED-1, D-NVD-1, D-CVSS-1.
+
+#### CR-3 — Finding provenance + multi-source merge model
+
+- **Root cause:** R2. No `source` on findings; conflicts silent.
+- **Change:** Add to `component_vulnerabilities` (and the canonical finding): `source`
+  (`osv` | `nvd` | `distro_osv:<feed>` | `rhsa` | `scanner:<tool>`), `source_severity`,
+  `source_cvss_score`, `source_cvss_vector`, `source_fixed_version`. Define precedence (distro-
+  authoritative > OSV.dev > NVD for distro packages; OSV.dev/NVD for app ecosystems). Keep the
+  identity PK; `source` is descriptive (one finding per identity, attributed to the winning source,
+  with a record of others via an optional `finding_sources` side table).
+- **Keep:** identity contract (D15); VEX overlay invariant.
+- **Behavior on inputs:** a finding answers "who says so and what did they say"; disagreements are
+  visible, not silently overwritten.
+- **Architecture impact:** additive migration; domain `Finding` gains fields; store upsert
+  extended.
+- **Testing:** *unit* — precedence resolution; source-field serialization. *integration* —
+  migration up/down; two sources for one identity → winning source persisted, others recorded;
+  API exposes `source`.
+- **Risk/Deps:** additive schema. Fold into v0.3.0 baseline before tag if timing allows, else new
+  migration. Risk: low.
+- **Maps to:** foundation for CR-2/CR-4; the provenance need from the correlator-vs-aggregator
+  discussion.
+
+#### CR-4 — Feed taxonomy + re-layering (VEX vs correlation)  (= D-FEED-1)
+
+- **Root cause:** R2 + miscategorisation. OSV distro + RHSA treated as VEX.
+- **Change:** Config: split `rhel_url` → `rhel_vex_url` (overlay) + `rhel_csaf_url` (correlation);
+  reclassify `*_osv_url` as **correlation** feeds. Route distro-OSV + RHSA through the **Correlator**
+  (CR-2) as sources carrying severity + fixed. Keep **only** Red Hat CSAF VEX on the overlay. Fix
+  the `csaf.go` `"known affected"` → not_affected typo.
+- **Keep:** the VEX overlay machinery (now fed only by true VEX); `upstream_vex_coverage` (now
+  meaning real VEX coverage).
+- **Behavior on inputs:** Alpine apk → distro-OSV findings with severity/fixed (was overlay-only,
+  severity discarded). rpm → RHSA findings (was: OSV.dev skips rpm). Red Hat CSAF VEX
+  `not_affected` → suppresses via overlay (was never ingested).
+- **Architecture impact:** config shape change (folds in `themis-feed-registry`: feed *class*
+  becomes a field); feeds become correlation sources.
+- **Testing:** *unit* — feed→finding mapping per source; CSAF status mapping incl. typo fix;
+  config parse. *integration* — RHSA fixture → rpm findings; distro-OSV → apk findings w/ severity;
+  CSAF VEX → overlay not_affected; `vex-coverage` reflects only VEX.
+- **Risk/Deps:** depends on CR-2/CR-3. Config migration (keep old key as deprecated alias one
+  release). Risk: medium.
+- **Maps to:** D-FEED-1 (absorbs `themis-feed-layering` + `themis-feed-registry`).
+
+#### CR-5 — CVSS/severity enrichment pipeline  (= D-CVSS-1)
+
+- **Root cause:** apk/rpm findings have no CVSS; NVD has no by-CVE backfill; distro severity
+  discarded.
+- **Change:** (a) NVD client `FetchByCVEID` + rate-limited backfill job for
+  `cvss_score=0 OR severity='unknown'`; (b) consume distro-feed severity via CR-4; (c) parse all
+  CVSS metric versions (v3.1→v3.0→v2.0, optional v4.0); (d) interim non-zero **risk floor** for
+  vendor-VEX-confirmed / KEV-listed findings.
+- **Keep:** the risk score V2 formula; ReEnrichJob.
+- **Behavior on inputs:** Alpine SBOM after backfill → `cvss_score>0`, severity populated,
+  `risk_score` spreads; `top_components[].highest_cvss_score>0`.
+- **Architecture impact:** new NVD method + backfill scheduler + metric; no schema change beyond
+  CR-3.
+- **Testing:** *unit* — CVSS multi-version parse; backfill selection; floor logic. *integration* —
+  zero-CVSS catalog → backfill → ReEnrich spreads risk; G5/G7/G8 pass for OSV-origin findings.
+- **Risk/Deps:** depends on CR-1/2/3/4; `THEMIS_NVD_API_KEY` recommended.
+- **Maps to:** D-CVSS-1 (absorbs `themis-nvd-cvss-backfill`).
+
+#### CR-6 — NVD CPE feeder correctness  (= D-NVD-1)
+
+- **Root cause:** R1 (range over-match) + ecosystem misclassification.
+- **Change:** Rebuild NVD range extraction on the **CR-1** constraint model (one AND group,
+  `versionStartExcluding` supported, lower bound preserved); remove the `vendor==product → "npm"`
+  guess (unmapped vendors handled explicitly + logged); expose NVD as a `CorrelationSource` (CR-2).
+- **Keep:** the NVD client transport/rate limiter.
+- **Behavior on inputs:** CPE `[2.0,2.5)` matches only `[2.0,2.5)`; `openssl:openssl` no longer
+  npm.
+- **Testing:** *unit/property* — CPE→constraint mapping (reuse CR-1 corpus); ecosystem table.
+  *integration* — watch finding counts drop to the true set on a known catalog.
+- **Risk/Deps:** depends on CR-1; reachable via CR-2.
+- **Maps to:** D-NVD-1 (absorbs `themis-nvd-feeder-fix`; Finding 3 → CR-5).
+
+#### CR-7 — Observability: logging architecture  (= D-LOG-1)
+
+- **Root cause:** R3.
+- **Change:** Add a `domain.Logger` port (Debug/Info/Warn/Error + structured fields), implement
+  over zap in `infrastructure`, **inject via DI** into schedulers, feed services, the Correlator,
+  use cases, and feed clients. Retire ad-hoc `slog.Default()` (or bridge slog→zap) so one
+  format/level honors `THEMIS_LOG_LEVEL`. Log: every feeder cycle success/failure (with counts),
+  correlation match/skip, job start/success/failure, DB connect + migration applied, config
+  loaded + overrides + disabled feeds, startup failures (structured, before returning).
+- **Keep:** zap backend; `THEMIS_LOG_LEVEL` semantics.
+- **Behavior on inputs:** a failed feed, failed job, or failed startup each emit a structured
+  ERROR; `THEMIS_LOG_LEVEL=debug` affects all logs uniformly.
+- **Architecture impact:** `domain.Logger` interface (no zap/slog import in domain/usecase —
+  clean-arch preserved); DI wiring in `api_wiring.go`.
+- **Testing:** *unit* — capture logger asserts per-feeder success/failure; level filtering.
+  *integration* — failing stub scheduler → ERROR emitted; clean-arch gate green.
+- **Risk/Deps:** independent foundation; can land first. Risk: low.
+- **Maps to:** D-LOG-1 (absorbs `themis-logging-architecture`).
+
+#### CR-8 — Operator-facing feed health surface  (= `themis-feed-observability`)
+
+- **Root cause:** R3 — even with logs, there is no API/state view of feed health.
+- **Change:** `feed_health` table (`feed`, `class`, `tier`, `last_success_at`,
+  `consecutive_failures`, `last_error`, `last_attempt_at`), upserted each cycle; `degraded_feeds[]`
+  on `GET /api/v1/status`; per-tier signal on `/readyz`; optional `FEED_DEGRADED` notification.
+- **Keep:** existing `themis_*_sync_total` metrics; `signals_stale`.
+- **Behavior on inputs:** one API call shows every feed line's health, not just EPSS/KEV.
+- **Architecture impact:** additive table + status/readyz wiring; reuses `NotificationSender`.
+- **Testing:** *unit* — health upsert + degraded computation. *integration* — failing feed →
+  `degraded_feeds[]` populated; migration up/down.
+- **Risk/Deps:** depends on CR-7 (shared logging) and the feed-class field from CR-4.
+- **Maps to:** `themis-feed-observability` (reconciles `themis-feed-registry`).
+
+#### CR-9 — Parser integrity + scanner-findings decision
+
+- **Root cause:** parser correctness bugs + dead data paths.
+- **Change:** Fix Trivy **one-component-per-result** bug (iterate packages, not first vuln);
+  handle CycloneDX/SPDX **bom-ref ≠ purl** for dependency edges; unify **PURL qualifier/subpath
+  normalization** (one helper, parser + matcher). **Decide** the parsed-`Vulnerabilities`
+  question: either *import* scanner findings as a `CorrelationSource` (`scanner:<tool>` via CR-3)
+  or *remove* the dead parsing — no silent middle.
+- **Keep:** CanonicalSBOM + registry; component-by-PURL identity.
+- **Behavior on inputs:** Trivy scan of an N-package image → N components (was 1); CycloneDX with
+  non-purl bom-refs → correct or explicitly-skipped edges; decided, documented embedded-vuln
+  behavior.
+- **Architecture impact:** parser fixes; optional new `scanner` CorrelationSource if import chosen.
+- **Testing:** *unit/fuzz* — parsers never panic, idempotent, correct component counts; qualifier
+  round-trip. *integration* — Trivy/CycloneDX/SPDX fixtures → expected inventory + (if imported)
+  findings with `source=scanner:*`.
+- **Risk/Deps:** depends on CR-3 if importing. Risk: low–medium (import decision is a product
+  call — see Open decisions).
+- **Maps to:** the SBOM-vs-image-scan / correlator-vs-aggregator discussion.
+
+#### CR-10 — Quality gates: regression corpus + acceptance oracle expansion
+
+- **Root cause:** the bugs shipped because tests used synthetic data and per-path logic was
+  untested against real feeds.
+- **Change:** Build a **golden corpus** of real (sanitised) inputs — Alpine/RPM/npm SBOMs, OSV zip
+  slices, NVD CPE samples, CSAF VEX + RHSA advisories — and a **before/after finding-set diff**
+  harness so any correlation change is reviewed as an explicit delta. Expand the acceptance oracle
+  (G1–G8) to OSV-origin severity, provenance, feed re-layering. Add property tests for CR-1/CR-2;
+  fuzz for parsers (CR-9).
+- **Keep:** the `rapid` harness, coverage thresholds, the 6-gate sequence.
+- **Testing:** this IS testing; the corpus diff is a required review artifact for CR-2/CR-4/CR-6.
+- **Risk/Deps:** spans all CRs; start early so CR-1/CR-2 land against it.
+- **Maps to:** quality assurance for the whole plan.
+
+### Behavior-on-inputs matrix (end-state, after all CRs)
+
+| Input | Today | After refactor |
+| ----- | ----- | -------------- |
+| Alpine apk SBOM | findings from OSV.dev only; severity/risk all 0; distro data in overlay | merged OSV.dev + distro-OSV findings with severity + fixed; risk spreads; `source` recorded |
+| RPM SBOM | OSV skipped → near-zero findings | RHSA + Rocky-OSV correlation → real findings |
+| npm SBOM | OSV.dev + NVD (NVD over-matches) | OSV.dev + NVD merged, correct ranges, provenance |
+| Trivy image scan | 1 component per result; vulns parsed then dropped | N components; decided import (provenance) or removed |
+| CPE `[2.0,2.5)` + v1.0 | false match | no match |
+| Duplicate re-upload | idempotent | idempotent (unchanged) |
+| Red Hat CSAF VEX `not_affected` | never ingested | overlay suppresses finding |
+| Feed outage | silent; cached data; no signal | ERROR log + `degraded_feeds[]` + metric |
+| `THEMIS_LOG_LEVEL=debug` | affects zap slice only | affects all logs uniformly |
+
+### Testing strategy (cross-cutting)
+
+1. **Unit (per-package thresholds):** pure logic — version engine, constraint sets,
+   merge/precedence, CVSS parse, feed mappers, parsers. Property tests for all comparison/merge
+   invariants.
+2. **Integration (`//go:build integration`, embedded Postgres):** each `CorrelationSource` end to
+   end; multi-source merge + provenance; feed re-layering; migrations up/down; logging assertions;
+   `degraded_feeds[]`.
+3. **Acceptance (oracle):** extend G1–G8 to OSV-origin severity, provenance, correlator-vs-overlay
+   separation; score oracle stays green.
+4. **Regression corpus (CR-10):** golden real-world inputs + finding-set diff; required review
+   artifact for any correlation-affecting CR; seeded with the exact counterexamples behind D-NVD-1.
+5. **Gate sequence (unchanged):** build → unit → coverage → deadcode → integration → clean-arch →
+   verify-build, per CR.
+
+### Sequencing & release mapping
+
+| Phase | CRs | Theme | Gate to next phase |
+| ----- | --- | ----- | ------------------ |
+| **A — Foundations** | CR-1, CR-3, CR-7, CR-10 (seed) | version engine, provenance schema, logging, corpus | foundations green; corpus baseline captured |
+| **B — Correlation core** | CR-2, CR-6, CR-4 | one correlator, NVD fix, feed re-layering | corpus diff reviewed; no unexpected finding-set drift |
+| **C — Enrichment & visibility** | CR-5, CR-8, CR-9 | CVSS backfill, feed health surface, parser integrity | G1–G8 pass on real Alpine/RPM SBOMs |
+
+- **v0.3.0 (current line):** fold CR-3's additive columns in before tag if timing allows (else a
+  new migration). CR-1/CR-7 safe to land early.
+- **Next minor (post-v0.2.1):** Phase A + B. **Following minor:** Phase C; clears the Phase 2b
+  feed-health/signal-quality gate.
+- Each CR maps to an `openspec/changes/<name>/` change for execution.
+
+### Backward compatibility & data migration
+
+- **Schema:** all changes additive; existing rows valid; `source` backfilled as `legacy` then
+  recomputed on next scan/backfill.
+- **Config:** `rhel_url` kept as a deprecated alias for `rhel_csaf_url` for one release with a
+  startup WARN (now that logging exists — CR-7).
+- **API:** new fields additive; `vex-coverage` semantics tighten (document in release notes).
+- **No in-place pre-v0.3.0 upgrade** assumption unchanged.
+
+### Risks & mitigations
+
+| Risk | Mitigation |
+| ---- | ---------- |
+| Correlation changes shift finding sets unexpectedly | CR-10 golden-corpus diff as required review; shadow-run new Correlator and compare before cutover |
+| Version-engine change alters existing correct matches | keep `VersionMatches` semantics; property + corpus regression |
+| Scope creep across 10 CRs | strict phase gates; each CR independently shippable behind the foundations |
+| Schema change late in v0.3.0 | additive only; can defer to a follow-on migration |
+| Mid-cycle disruption to v0.2.1 testing | plan only now; no code until v0.2.1 testing closes |
+
+### Open product decisions (need sign-off before the relevant CR)
+
+1. **CR-9 — scanner findings:** import Trivy/Grype findings as a `CorrelationSource` (correlator
+   **and** aggregator), or remove the dead parsing (pure correlator)?
+2. **CR-3 — provenance precedence:** confirm the source ranking (proposed: distro-authoritative >
+   OSV.dev > NVD for distro packages; OSV.dev/NVD for app ecosystems).
+3. **CR-3 timing:** fold columns into the v0.3.0 baseline before tag, or ship as a new migration?
+
+### Definition of done
+
+- R1/R2/R3 eliminated: one version engine, one correlator with provenance, one observable logger.
+- D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1 closed with tests.
+- Golden corpus in CI; G1–G8 pass on real Alpine **and** RPM SBOMs.
+- All six gates green for every CR; clean-arch preserved (no zap/slog in domain/usecase).
+- Operators can answer "is my feeder working and what did it find" from `/status`, `/metrics`, and
+  logs without a proxy or SQL.
 
 ---
 
@@ -964,6 +1347,10 @@ can be cut as soon as Group 31 + the Group 16 hardening remainder are green.
 ---
 
 ### Candidate change — Feed observability (`themis-feed-observability`) — Proposed
+
+> **Consolidated → CR-8** in the Layer-0 Refactor section above (built on the CR-7 logging
+> foundation and the CR-4 feed-class field) — the single source of truth for execution; this
+> section is retained for the detailed problem analysis below.
 
 **Type:** additive new capability (schema change — new table). Targets v0.3.0-era.
 **Problem:** feed failures are easily missed. Today the only user-visible feed health is
@@ -1002,6 +1389,10 @@ schema change and the notification path is new behaviour.
 ---
 
 ### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — Proposed
+
+> **Consolidated → reconciled in CR-4 + CR-8** in the Layer-0 Refactor section above (feed
+> *class* — `vex` / `osv` / `csaf-advisory` — becomes a first-class config field as part of the
+> feed re-layering). Single source of truth for execution; this section retained for detail.
 
 **Type:** additive capability + config-shape change. Targets v0.3.0-era.
 **Problem:** the feed set is fixed. `VEXFeedConfig` is hardcoded struct fields
