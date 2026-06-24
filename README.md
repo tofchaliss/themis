@@ -318,23 +318,32 @@ use a simple ticker (not cron expressions).
 | `exploitdb.csv_url` | `THEMIS_EXPLOITDB_CSV_URL` | ExploitDB `files_exploits.csv` mirror. Populates `exploit_records`; drives `exploit_public` and Layer 1 rules. |
 | `exploitdb.poll_interval` | `THEMIS_EXPLOITDB_POLL_INTERVAL` | ExploitDB sync frequency. |
 
-#### Upstream vendor VEX (`vexfeed` / `THEMIS_VEXFEED_*`)
+#### Upstream vendor feeds (`vexfeed` / `THEMIS_VEXFEED_*`)
 
-Themis syncs **four fixed vendor feeds** (not a plug-in list): Red Hat CSAF, Alpine OSV, Rocky OSV,
-and Wolfi OSV. Each URL is configurable (mirrors, air-gapped copies, test fixtures). Matching applies
-to **Alpine (`apk`) and RPM (`rpm`)** PURLs only; namespace aliases include `rhel→redhat`,
-`rocky/linux→rocky`, `alma→almalinux`.
+Themis separates **true vendor VEX** (exploitability overlay) from **advisory / vulnerability-DB
+feeds** (correlation), per the Layer-0 refactor (CR-4):
+
+- **VEX overlay** — Red Hat CSAF **VEX** (`rhel_vex_url`) only. Adjusts `risk_context.effective_state`
+  and `upstream_vex_coverage`; never creates findings.
+- **Correlation sources** — Alpine / Rocky / Wolfi **OSV** and Red Hat CSAF **advisories**
+  (`rhel_csaf_url`). These create/enrich findings (carrying severity + fixed version, with
+  provenance `distro_osv`/`rhsa`) through the unified Correlator. Matching applies to **Alpine
+  (`apk`) and RPM (`rpm`)** PURLs.
 
 | YAML key | Env override | Purpose |
 | -------- | ------------ | ------- |
-| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | Red Hat CSAF 2.0 advisory directory (HTML index; crawler fetches each `.json` advisory). |
-| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine OSV GCS zip (`all.zip`); parsed entry-by-entry. |
-| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV GCS zip (`all.zip`). |
-| `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed. |
-| `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Vendor VEX sync frequency. After sync, affected artifacts get VEX overlay re-applied. |
+| `vexfeed.rhel_vex_url` | `THEMIS_VEXFEED_RHEL_VEX_URL` | Red Hat CSAF **VEX** directory → VEX overlay. |
+| `vexfeed.rhel_csaf_url` | `THEMIS_VEXFEED_RHEL_CSAF_URL` | Red Hat CSAF **advisories** directory → rpm correlation source (NEVRA fixed-version ranges). |
+| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | **Deprecated** alias for `rhel_csaf_url` (kept one release). |
+| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine OSV GCS zip (`all.zip`) → apk correlation source. |
+| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV GCS zip (`all.zip`) → rpm correlation source. |
+| `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed → apk correlation source. |
+| `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Sync frequency. After sync, the correlation index is rebuilt and affected artifacts get the VEX overlay re-applied. |
 
-There is **no per-feed on/off flag** — all four feeds are registered at startup. A failed feed
-logs a warning and leaves cached assertions in place; other feeds continue.
+There is **no per-feed on/off flag yet** — the feed set is registered at startup (a user-defined
+feed registry is a tracked follow-on). A failed feed logs a structured warning, records degraded
+health (surfaced as `degraded_feeds[]` on `GET /api/v1/status`), and leaves cached data in place;
+other feeds continue.
 
 #### Other tuning
 
@@ -820,8 +829,8 @@ Themis maps supported types before calling OSV (`internal/adapter/osv/ecosystem.
 **Unsupported for OSV (skipped, no live lookup):** `rpm`, `generic`, `oci`, and other types without
 a mapping. This affects **RHEL, Rocky Linux, AlmaLinux, Fedora RPM** SBOMs: components are stored,
 but OSV is not called for `rpm`. Findings may still appear from the local NVD cache when
-CPE/package metadata aligns — often sparse for distro packages. (Upstream vendor VEX still matches
-RPM PURLs — see [Upstream vendor VEX](#upstream-vendor-vex-vexfeed--themis_vexfeed_).)
+CPE/package metadata aligns — often sparse for distro packages. (Distro OSV + RHSA advisories also
+correlate RPM/apk PURLs — see [Upstream vendor feeds](#upstream-vendor-feeds-vexfeed--themis_vexfeed_).)
 
 #### Distro-specific expectations
 
