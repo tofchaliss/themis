@@ -22,14 +22,17 @@ func (r *PostgresCorrelationRepository) CreateFinding(ctx context.Context, input
 	id := uuid.NewString()
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO component_vulnerabilities (
-			id, component_version_id, vulnerability_id, scan_report_id, component_purl, cve_id
+			id, component_version_id, vulnerability_id, scan_report_id, component_purl, cve_id,
+			source, source_severity, source_cvss_score, source_cvss_vector, source_fixed_version
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (component_version_id, vulnerability_id, scan_report_id)
 		DO UPDATE SET detected_at = component_vulnerabilities.detected_at
 		RETURNING id
 	`, id, input.ComponentVersionID, input.VulnerabilityID, input.ScanReportID,
-		input.ComponentPURL, input.CVEID).Scan(&id)
+		input.ComponentPURL, input.CVEID,
+		domain.DefaultFindingSource(input.Source), input.SourceSeverity,
+		input.SourceCVSSScore, input.SourceCVSSVector, input.SourceFixedVersion).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("insert component vulnerability: %w", err)
 	}

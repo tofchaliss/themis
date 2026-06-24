@@ -60,13 +60,14 @@ func TestStripErrataRevision(t *testing.T) {
 }
 
 func TestCompareRPMEVREpoch(t *testing.T) {
-	if compareRPMEVR("1:2.0-1", "0:3.0-1") <= 0 {
+	// rpm comparison is now the single domain engine (CR-1).
+	if domain.CompareVersionsEco("rpm", "1:2.0-1", "0:3.0-1") <= 0 {
 		t.Fatal("expected higher epoch to win")
 	}
-	if compareVersionSegment("10", "2") <= 0 {
+	if domain.CompareVersionsEco("rpm", "10", "2") <= 0 {
 		t.Fatal("expected numeric compare")
 	}
-	if compareVersionSegment("alpha", "beta") >= 0 {
+	if domain.CompareVersionsEco("rpm", "alpha", "beta") >= 0 {
 		t.Fatal("expected string compare")
 	}
 }

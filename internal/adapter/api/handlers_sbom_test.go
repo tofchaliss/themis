@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,50 @@ func TestGetStatusTopClamping(t *testing.T) {
 	if status.topN != 50 {
 		t.Fatalf("topN = %d, want 50", status.topN)
 	}
+}
+
+func TestGetStatusDegradedFeeds(t *testing.T) {
+	handler := api.NewHandler(api.Dependencies{
+		Status:        &fakeStatusRepo{},
+		ThreatSignals: &fakeThreatSignals{},
+		FeedHealth:    fakeFeedHealth{degraded: []string{"alpine", "rocky"}},
+	})
+	r := mountTestAPI(handler, adminKeyRepo(t))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"degraded_feeds":["alpine","rocky"]`) {
+		t.Fatalf("degraded_feeds missing: %s", rec.Body.String())
+	}
+}
+
+func TestGetStatusFeedHealthError(t *testing.T) {
+	handler := api.NewHandler(api.Dependencies{
+		Status:        &fakeStatusRepo{},
+		ThreatSignals: &fakeThreatSignals{},
+		FeedHealth:    fakeFeedHealth{err: errors.New("db down")},
+	})
+	r := mountTestAPI(handler, adminKeyRepo(t))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
+	}
+}
+
+type fakeFeedHealth struct {
+	degraded []string
+	err      error
+}
+
+func (f fakeFeedHealth) DegradedFeeds(context.Context) ([]string, error) {
+	return f.degraded, f.err
 }
 
 func TestDeleteSBOMForceGuard(t *testing.T) {

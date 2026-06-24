@@ -53,7 +53,30 @@ The binary itself needs no runtime dependencies beyond PostgreSQL.
 
 ## Getting Started
 
-End-to-end steps to build and run Themis locally.
+This is the **canonical end-to-end guide** — a single from-scratch path that takes you
+from an empty machine to an ingested, verified SBOM. Run the steps in order; each later step
+reuses the shell variables exported earlier. Deeper references: [Testing with your own
+CycloneDX SBOM](#testing-with-your-own-cyclonedx-sbom) (SBOM generation + correlation
+nuances), [End-to-end verification](#end-to-end-verification--cross-check-the-whole-pipeline)
+(per-stage "what good looks like"), and [Resetting ingested data](#resetting-ingested-data-local-dev-only).
+
+> **Re-running after a code change?** Always **rebuild the binary (Step 3) before resetting
+> the database (Step 2b).** Running an old binary against a fresh DB re-creates stale data.
+> There is **no in-place upgrade** from a pre-`v0.3.0` database — reset and re-ingest.
+
+### 0. Set your variables once
+
+Fill these in; every later command reuses them.
+
+```sh
+export BASE_URL="http://localhost:8080"
+export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
+export SBOM_FILE="./myapp.cyclonedx.json"        # your CycloneDX file
+export IMAGE_REF="myregistry/myapp:1.2.3"        # the image it describes
+```
+
+Do **not** copy the placeholder password — use a value you control and create a matching
+Postgres role (Step 2a).
 
 ### 1. Start PostgreSQL
 
@@ -64,11 +87,7 @@ brew services start postgresql@16   # or your installed version
 pg_isready -h localhost -p 5432
 ```
 
-### 2. Create the database and role
-
-Replace the username and password with values you control. The examples below use
-`themis` / `themis-dev-password` — do **not** copy placeholder values from docs
-without creating matching Postgres roles.
+### 2a. Create the database and role (first-time setup)
 
 ```sh
 psql -U postgres -c "CREATE USER themis WITH PASSWORD 'themis-dev-password';"
@@ -76,10 +95,32 @@ psql -U postgres -c "CREATE DATABASE themis OWNER themis;"
 psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE themis TO themis;"
 ```
 
+Verify the DSN connects before continuing (Themis will fail the same way if it can't):
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1;'
+```
+
+### 2b. Reset an existing database (clean slate)
+
+Skip on first-time setup. To start fresh on a database that already has data — **required**
+when moving from a pre-`v0.3.0` schema, or to pick up correctness fixes that only apply to
+newly ingested data — stop the server, then wipe the schema. This needs **no superuser**
+(the `themis` role owns its objects) and clears `schema_migrations`, so the legacy
+"no migration found for version N" error cannot recur:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+```
+
+This destroys all ingested data and **prior triage decisions do not carry over**. To keep
+products/keys and clear only ingestion data instead, see
+[Resetting ingested data](#resetting-ingested-data-local-dev-only).
+
 ### 3. Build the binary
 
 ```sh
-make build
+make build                  # produces ./bin/themis
 ```
 
 ### 4. Configure Themis
@@ -90,35 +131,22 @@ config files.
 
 ```sh
 cp themis.yaml.example themis.yaml
-export THEMIS_DATABASE_DSN="postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable"
 ```
 
-`THEMIS_DATABASE_DSN` is **required** whether or not you use `themis.yaml`. Leave
-`database.dsn` empty in the file when using the env var (recommended).
-
-Optional: `export THEMIS_CONFIG_PATH=/path/to/themis.yaml` if the config file is not in
-the current working directory.
-
-Verify the DSN before continuing:
-
-```sh
-psql "$THEMIS_DATABASE_DSN" -c 'SELECT 1'
-```
-
-If this fails with `password authentication failed`, fix the Postgres user/password in the
-DSN — Themis will fail the same way.
+`THEMIS_DATABASE_DSN` (Step 0) is **required** whether or not you use `themis.yaml`. Leave
+`database.dsn` empty in the file when using the env var (recommended). Optional:
+`export THEMIS_CONFIG_PATH=/path/to/themis.yaml` if the config file is not in the working directory.
 
 ### 5. Apply database migrations
 
-Themis also runs pending migrations on startup, but applying them explicitly is useful
-for CI and first-time setup:
+Themis also runs pending migrations on startup, but applying them explicitly is useful for
+CI and first-time setup. Both `make migrate-up` and `make migrate-down` require
+`THEMIS_DATABASE_DSN` in the same shell:
 
 ```sh
 make migrate-up
+psql "$THEMIS_DATABASE_DSN" -c "SELECT version, dirty FROM schema_migrations;"   # → 1, f
 ```
-
-`make migrate-up` and `make migrate-down` require `THEMIS_DATABASE_DSN` to be exported in
-the same shell.
 
 ### 6. Start the server
 
@@ -128,34 +156,121 @@ Run from the repo root (so `./migrations` and optional `./themis.yaml` resolve c
 ./bin/themis
 ```
 
-On success you should see the HTTP server listening on port `8080` (or the port in
-`themis.yaml`).
+On success the HTTP server listens on port `8080` (or the port in `themis.yaml`).
 
 ### 7. Verify health
 
 ```sh
-curl http://localhost:8080/healthz   # liveness — should return {"status":"ok"}
-curl http://localhost:8080/readyz    # readiness — DB + CVE feed checks
-curl http://localhost:8080/metrics   # Prometheus metrics
+curl -s "$BASE_URL/healthz"          # liveness — {"status":"ok"}
+curl -s "$BASE_URL/readyz" | jq .    # readiness — checks.database = "ok"
+curl -s -o /dev/null -w "%{http_code}\n" "$BASE_URL/metrics"   # → 200
 ```
 
 `/readyz` may report `cve_feed: no successful poll yet` immediately after startup; that is
-normal until the first background NVD/OSV poll completes.
+normal until the first background NVD/OSV poll completes, and does not block ingestion.
 
 ### 8. Create an API key
-
-Admin commands use the same config (`themis.yaml` and/or `THEMIS_DATABASE_DSN`):
 
 ```sh
 # --admin for local testing (all endpoints); use --product-id <uuid> in production
 ./bin/themis admin create-key --admin --expires 90d
+export API_KEY="<key from output>"
 ```
 
-API calls then require `X-API-Key: <key>`. Webhooks use HMAC-SHA256 (`X-Themis-Signature`).
+API calls then require `X-API-Key: $API_KEY`. Webhooks use HMAC-SHA256 (`X-Themis-Signature`).
 
-See [Testing with your own CycloneDX SBOM](#testing-with-your-own-cyclonedx-sbom) for the full
-ingestion walkthrough, and [End-to-end verification](#end-to-end-verification--cross-check-the-whole-pipeline)
-to cross-check every stage.
+### 9. Create a product (auto-creates a default project + `latest` version)
+
+```sh
+export PRODUCT_ID=$(curl -s -X POST "$BASE_URL/api/v1/products" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"my-app","description":"from my image"}' | jq -r .id)
+echo "PRODUCT_ID=$PRODUCT_ID"
+```
+
+### 10. Register the artifact (must exist before upload)
+
+The trust gate requires the `image_digest` to be registered first; the returned `id` is the
+`artifact_id` you upload against (re-registering the same digest is idempotent — the digest
+is globally unique).
+
+```sh
+export IMAGE_DIGEST=$(docker inspect "$IMAGE_REF" --format '{{.Id}}')   # or any sha256:<64hex> for testing
+
+export ARTIFACT_ID=$(curl -s -X POST "$BASE_URL/api/v1/products/$PRODUCT_ID/artifacts" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg d "$IMAGE_DIGEST" --arg repo "$(echo "$IMAGE_REF" | cut -d: -f1)" \
+    '{image_digest:$d, version:"latest", repository:$repo}')" | jq -r .id)
+echo "ARTIFACT_ID=$ARTIFACT_ID"
+```
+
+### 11. Upload the SBOM (envelope, not the raw file)
+
+```sh
+export SPEC_VERSION=$(jq -r '.specVersion // "1.6"' "$SBOM_FILE")     # must be 1.4 / 1.5 / 1.6
+
+export INGESTION_ID=$(curl -s -X POST "$BASE_URL/api/v1/sbom/upload" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: upload-$(date +%s)" \
+  -d "$(jq -n \
+    --slurpfile doc "$SBOM_FILE" \
+    --arg spec "$SPEC_VERSION" \
+    --arg artifact_id "$ARTIFACT_ID" \
+    --arg digest "$IMAGE_DIGEST" \
+    '{format:"cyclonedx", spec_version:$spec, document:$doc[0],
+      artifact_id:$artifact_id, image_digest:$digest, ci_job_id:"getting-started"}')" \
+  | jq -r .ingestion_id)
+echo "INGESTION_ID=$INGESTION_ID"
+```
+
+Expect **202 Accepted** with an `ingestion_id`. A `202` means *queued*, not done — always
+poll (Step 12). Re-uploading the **same bytes** is idempotent: it returns the existing scan
+and does **not** re-correlate (so to re-run after a code change, reset first — Step 2b).
+
+### 12. Poll until the pipeline reaches a terminal state
+
+```sh
+until S=$(curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" -H "X-API-Key: $API_KEY" | jq -r .status); \
+  [[ "$S" =~ ^(NOTIFIED|COMPLETED|FAILED|REJECTED)$ ]]; do
+  curl -s "$BASE_URL/api/v1/ingestions/$INGESTION_ID" -H "X-API-Key: $API_KEY" | jq '{status, stage_detail}'
+  sleep 2
+done
+echo "final=$S"
+```
+
+On `FAILED`/`REJECTED`, `stage_detail` is the authoritative reason (trust gate, parse, OSV,
+or DB constraint) — see [Troubleshooting](#troubleshooting).
+
+### 13. Inspect and verify the results
+
+```sh
+export PROJECT_ID=$(curl -s "$BASE_URL/api/v1/products/$PRODUCT_ID/projects" -H "X-API-Key: $API_KEY" | jq -r '.items[0].id')
+export SCAN_ID=$(curl -s "$BASE_URL/api/v1/projects/$PROJECT_ID/scans" -H "X-API-Key: $API_KEY" | jq -r '.items[0].id')
+
+curl -s "$BASE_URL/api/v1/scans/$SCAN_ID/vulnerabilities" -H "X-API-Key: $API_KEY" | jq '.items | length'
+curl -s "$BASE_URL/api/v1/status?top=10" -H "X-API-Key: $API_KEY" | jq .
+```
+
+Sanity checks (see [End-to-end verification](#end-to-end-verification--cross-check-the-whole-pipeline)
+for the full per-stage criteria):
+
+| Check | Command | Expected |
+| ----- | ------- | -------- |
+| Findings are sane (not over-matched) | `… /status?top=10 \| jq '.top_components[] \| {name, vulnerability_count}'` | Plausible counts; no long-fixed CVEs on modern versions |
+| Component identity is a valid PURL | `psql "$THEMIS_DATABASE_DSN" -c "SELECT component_purl FROM component_vulnerabilities LIMIT 5;"` | A single `@version`, no doubled `…@v?...@v` |
+| Risk scores discriminate | `… /scans/$SCAN_ID/vulnerabilities \| jq '[.items[].enrichment.risk_score] \| unique'` | A range of values, not all `100` |
+
+### 14. Confirm feeds and enrichment (background tickers)
+
+```sh
+curl -s "$BASE_URL/metrics" | grep -E 'themis_(epsskev_sync_total|epsskev_stale|exploitdb_sync_total|vexfeed_sync_total|reenrichjob_batches_total)'
+curl -s "$BASE_URL/api/v1/status?top=10" -H "X-API-Key: $API_KEY" | jq '{signals_stale}'   # want false once EPSS/KEV synced
+```
+
+Feeds sync on startup then on their interval; `ReEnrichJob` back-fills open findings — no
+re-upload needed. For coverage of upstream vendor VEX, check
+`GET /api/v1/products/$PRODUCT_ID/versions/latest/vex-coverage` (expect `covered > 0` for
+apk/rpm SBOMs).
 
 ---
 
@@ -203,30 +318,39 @@ use a simple ticker (not cron expressions).
 | `exploitdb.csv_url` | `THEMIS_EXPLOITDB_CSV_URL` | ExploitDB `files_exploits.csv` mirror. Populates `exploit_records`; drives `exploit_public` and Layer 1 rules. |
 | `exploitdb.poll_interval` | `THEMIS_EXPLOITDB_POLL_INTERVAL` | ExploitDB sync frequency. |
 
-#### Upstream vendor VEX (`vexfeed` / `THEMIS_VEXFEED_*`)
+#### Upstream vendor feeds (`vexfeed` / `THEMIS_VEXFEED_*`)
 
-Themis syncs **four fixed vendor feeds** (not a plug-in list): Red Hat CSAF, Alpine OSV, Rocky OSV,
-and Wolfi OSV. Each URL is configurable (mirrors, air-gapped copies, test fixtures). Matching applies
-to **Alpine (`apk`) and RPM (`rpm`)** PURLs only; namespace aliases include `rhel→redhat`,
-`rocky/linux→rocky`, `alma→almalinux`.
+Themis separates **true vendor VEX** (exploitability overlay) from **advisory / vulnerability-DB
+feeds** (correlation), per the Layer-0 refactor (CR-4):
+
+- **VEX overlay** — Red Hat CSAF **VEX** (`rhel_vex_url`) only. Adjusts `risk_context.effective_state`
+  and `upstream_vex_coverage`; never creates findings.
+- **Correlation sources** — Alpine / Rocky / Wolfi **OSV** and Red Hat CSAF **advisories**
+  (`rhel_csaf_url`). These create/enrich findings (carrying severity + fixed version, with
+  provenance `distro_osv`/`rhsa`) through the unified Correlator. Matching applies to **Alpine
+  (`apk`) and RPM (`rpm`)** PURLs.
 
 | YAML key | Env override | Purpose |
 | -------- | ------------ | ------- |
-| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | Red Hat CSAF 2.0 advisory directory (HTML index; crawler fetches each `.json` advisory). |
-| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine OSV GCS zip (`all.zip`); parsed entry-by-entry. |
-| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV GCS zip (`all.zip`). |
-| `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed. |
-| `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Vendor VEX sync frequency. After sync, affected artifacts get VEX overlay re-applied. |
+| `vexfeed.rhel_vex_url` | `THEMIS_VEXFEED_RHEL_VEX_URL` | Red Hat CSAF **VEX** directory → VEX overlay. |
+| `vexfeed.rhel_csaf_url` | `THEMIS_VEXFEED_RHEL_CSAF_URL` | Red Hat CSAF **advisories** directory → rpm correlation source (NEVRA fixed-version ranges). |
+| `vexfeed.rhel_url` | `THEMIS_VEXFEED_RHEL_URL` | **Deprecated** alias for `rhel_csaf_url` (kept one release). |
+| `vexfeed.alpine_osv_url` | `THEMIS_VEXFEED_ALPINE_OSV_URL` | Alpine OSV GCS zip (`all.zip`) → apk correlation source. |
+| `vexfeed.rocky_osv_url` | `THEMIS_VEXFEED_ROCKY_OSV_URL` | Rocky Linux OSV GCS zip (`all.zip`) → rpm correlation source. |
+| `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed → apk correlation source. |
+| `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Sync frequency. After sync, the correlation index is rebuilt and affected artifacts get the VEX overlay re-applied. |
 
-There is **no per-feed on/off flag** — all four feeds are registered at startup. A failed feed
-logs a warning and leaves cached assertions in place; other feeds continue.
+There is **no per-feed on/off flag yet** — the feed set is registered at startup (a user-defined
+feed registry is a tracked follow-on). A failed feed logs a structured warning, records degraded
+health (surfaced as `degraded_feeds[]` on `GET /api/v1/status`), and leaves cached data in place;
+other feeds continue.
 
 #### Other tuning
 
 | YAML key | Env override | Purpose |
 | -------- | ------------ | ------- |
 | `intelligence.blast_radius_cap` | `THEMIS_INTELLIGENCE_BLAST_RADIUS_CAP` | Unique-customer count at which the blast-radius multiplier stops increasing (default **10** → max **2.0×**). |
-| _(none)_ | `THEMIS_GITHUB_TOKEN` | GitHub API token for GHSA rate limits — **config wired; GHSA adapter not used yet** (ships with the AI layer). |
+| *(none)* | `THEMIS_GITHUB_TOKEN` | GitHub API token for GHSA rate limits — **config wired; GHSA adapter not used yet** (ships with the AI layer). |
 
 **Risk score** is a composite: severity baseline, EPSS (+30% max), KEV (+15), the blast-radius
 multiplier (1.0–2.0×), and a Layer 1 Critical override (`score = 100`). Integrations that hard-code
@@ -365,6 +489,10 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/v1/products  
 ```
 
 ### Testing with your own CycloneDX SBOM
+
+> The canonical end-to-end path (setup → upload → verify) is [Getting
+> Started](#getting-started). This section is a **deep-dive reference** for generating an SBOM
+> and understanding correlation — read it alongside Getting Started Steps 9–14, not instead of them.
 
 Use this path when you already have a CycloneDX JSON file from your container image (e.g.
 generated by [Syft](https://github.com/anchore/syft), [Trivy](https://github.com/aquasecurity/trivy),
@@ -701,8 +829,8 @@ Themis maps supported types before calling OSV (`internal/adapter/osv/ecosystem.
 **Unsupported for OSV (skipped, no live lookup):** `rpm`, `generic`, `oci`, and other types without
 a mapping. This affects **RHEL, Rocky Linux, AlmaLinux, Fedora RPM** SBOMs: components are stored,
 but OSV is not called for `rpm`. Findings may still appear from the local NVD cache when
-CPE/package metadata aligns — often sparse for distro packages. (Upstream vendor VEX still matches
-RPM PURLs — see [Upstream vendor VEX](#upstream-vendor-vex-vexfeed--themis_vexfeed_).)
+CPE/package metadata aligns — often sparse for distro packages. (Distro OSV + RHSA advisories also
+correlate RPM/apk PURLs — see [Upstream vendor feeds](#upstream-vendor-feeds-vexfeed--themis_vexfeed_).)
 
 #### Distro-specific expectations
 

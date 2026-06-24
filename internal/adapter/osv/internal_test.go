@@ -2,7 +2,6 @@ package osv
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -133,8 +132,8 @@ func TestNoOpCorrelationLogger(t *testing.T) {
 	l.LogSkipSummary(map[string]int{"rpm": 1})
 }
 
-func TestSlogCorrelationLogger(t *testing.T) {
-	var l SlogCorrelationLogger
+func TestLoggerCorrelation(t *testing.T) {
+	var l LoggerCorrelation // nil Log → NopLogger, no panic
 	l.LogUnsupportedEcosystem("p", "apk", "n", "v")
 	l.LogMalformedPURL("p", "apk", "n", "v", "malformed_purl")
 	l.LogIdentityMismatch("p", "apk", "n", "v", "other", "CVE-1")
@@ -142,7 +141,7 @@ func TestSlogCorrelationLogger(t *testing.T) {
 	l.LogSkipSummary(nil)
 	l.LogSkipSummary(map[string]int{"rpm": 2})
 
-	withLogger := SlogCorrelationLogger{Logger: slog.Default()}
+	withLogger := LoggerCorrelation{Log: domain.NopLogger{}}
 	withLogger.LogUnsupportedEcosystem("p", "apk", "n", "v")
 }
 

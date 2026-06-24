@@ -14,30 +14,21 @@ type trivyDocument struct {
 }
 
 type trivyResult struct {
-	Target          string              `json:"Target"`
-	Type            string              `json:"Type"`
+	Target          string               `json:"Target"`
+	Type            string               `json:"Type"`
 	Vulnerabilities []trivyVulnerability `json:"Vulnerabilities"`
 }
 
+// trivyVulnerability carries only the package identity Themis needs to build the
+// component inventory. Trivy's scanner-reported CVE / severity / fix fields are
+// intentionally NOT ingested as findings — Themis re-correlates each component
+// against its own feeds (CR-9: pure re-correlator).
 type trivyVulnerability struct {
-	VulnerabilityID  string         `json:"VulnerabilityID"`
-	Severity         string         `json:"Severity"`
-	FixedVersion     string         `json:"FixedVersion"`
-	PkgName          string         `json:"PkgName"`
-	InstalledVersion string         `json:"InstalledVersion"`
-	CVSS             trivyCVSSBlock `json:"CVSS"`
+	PkgName          string `json:"PkgName"`
+	InstalledVersion string `json:"InstalledVersion"`
 }
 
-type trivyCVSSBlock struct {
-	NVD trivyCVSSScore `json:"nvd"`
-}
-
-type trivyCVSSScore struct {
-	V3Score  float64 `json:"V3Score"`
-	V3Vector string  `json:"V3Vector"`
-}
-
-// TrivyAdapter parses Trivy JSON scan output.
+// TrivyAdapter parses Trivy JSON scan output into the component inventory.
 type TrivyAdapter struct{}
 
 func (TrivyAdapter) Format() string { return domain.SBOMFormatTrivy }
@@ -48,66 +39,54 @@ func (TrivyAdapter) Parse(_ context.Context, raw []byte, _ string) (domain.Canon
 		return domain.CanonicalSBOM{}, fmt.Errorf("invalid trivy json: %w", err)
 	}
 
-	sbom := domain.CanonicalSBOM{
-		Format:      domain.SBOMFormatTrivy,
-		SpecVersion: "1",
+	sbom := domain.CanonicalSBOM{Format: domain.SBOMFormatTrivy, SpecVersion: "1"}
+	seen := map[string]struct{}{}
+	addComponent := func(purl string) {
+		if purl == "" {
+			return
+		}
+		if _, ok := seen[purl]; ok {
+			return
+		}
+		seen[purl] = struct{}{}
+		ecosystem, _ := ecosystemFromPURL(purl)
+		name, version := nameVersionFromPURL(purl)
+		sbom.Components = append(sbom.Components, domain.CanonicalComponent{
+			PURL:      purl,
+			Name:      name,
+			Version:   version,
+			Ecosystem: ecosystem,
+		})
 	}
-	seenComponents := map[string]struct{}{}
 
 	for _, result := range doc.Results {
-		componentPURL := trivyComponentPURL(result)
-		if componentPURL != "" {
-			if _, ok := seenComponents[componentPURL]; !ok {
-				seenComponents[componentPURL] = struct{}{}
-				ecosystem, _ := ecosystemFromPURL(componentPURL)
-				name, version := nameVersionFromPURL(componentPURL)
-				sbom.Components = append(sbom.Components, domain.CanonicalComponent{
-					PURL:      componentPURL,
-					Name:      name,
-					Version:   version,
-					Ecosystem: ecosystem,
-				})
-			}
+		if result.Type == "" {
+			continue
 		}
-
+		// One component per DISTINCT package in the result. The previous parser
+		// took only the first vulnerability's PkgName and attributed the whole
+		// result to it, hiding every other package in a Trivy scan (CR-9).
+		pkgFound := false
 		for _, vuln := range result.Vulnerabilities {
-			affected := componentPURL
-			if affected == "" {
-				affected = buildPURL(result.Type, vuln.PkgName, vuln.InstalledVersion)
+			purl := buildPURL(result.Type, vuln.PkgName, vuln.InstalledVersion)
+			if purl != "" {
+				pkgFound = true
 			}
-			severity := strings.ToLower(vuln.Severity)
-			if severity == "" {
-				severity = "unknown"
-				sbom.Warnings = append(sbom.Warnings, fmt.Sprintf(
-					"unknown severity for vulnerability %s", vuln.VulnerabilityID,
-				))
-			}
-			fixVersions := []string{}
-			if vuln.FixedVersion != "" {
-				fixVersions = []string{vuln.FixedVersion}
-			}
-			sbom.Vulnerabilities = append(sbom.Vulnerabilities, domain.CanonicalVulnerability{
-				CVEID:         vuln.VulnerabilityID,
-				Severity:      severity,
-				CVSSScore:     vuln.CVSS.NVD.V3Score,
-				CVSSVector:    vuln.CVSS.NVD.V3Vector,
-				AffectedPURLs: []string{affected},
-				FixVersions:   fixVersions,
-			})
+			addComponent(purl) // empty (no PkgName) is dropped by addComponent
+		}
+		if !pkgFound {
+			addComponent(trivyTargetPURL(result))
 		}
 	}
 
 	return sbom, nil
 }
 
-func trivyComponentPURL(result trivyResult) string {
+// trivyTargetPURL derives an artifact-level component purl from the result Target
+// when the result lists no packages.
+func trivyTargetPURL(result trivyResult) string {
 	if result.Type == "" {
 		return ""
-	}
-	for _, vuln := range result.Vulnerabilities {
-		if vuln.PkgName != "" {
-			return buildPURL(result.Type, vuln.PkgName, vuln.InstalledVersion)
-		}
 	}
 	target := strings.TrimSpace(result.Target)
 	if target == "" {

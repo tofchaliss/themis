@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-20 (themis-core-model implementation complete)._
+Last updated: 2026-06-24 (Layer-0 refactor CR-1…CR-10 implemented)._
 
 ---
 
@@ -9,9 +9,10 @@ Last updated: 2026-06-20 (themis-core-model implementation complete)._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-core-model | Implementation complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (57/58; only 9.6 release-tag open) — code, all gates (unit/coverage/integration/clean-arch/verify-build) green | — (ready to archive; tag `v0.3.0` only once Phase 2b is ready, per 9.6) |
+| themis-core-model | **Released (v0.3.0)** | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (58/58; 9.6 tag `v0.3.0` done 2026-06-24) — code, all gates green | — (tagged v0.3.0; ready to archive) |
+| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged to `themis-phase-2` (PR #24) and tagged `v0.3.0`; all gates green (build/unit/coverage[thresholds]/deadcode/integration/clean-arch). Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md` §"Implementation status & unfinished tasks". | — (remaining: operational G1–G8 on real SBOMs; user-defined feed registry) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Ready to start | — | not started | — (`themis-core-model` schema/identity base implemented — unblocked) |
+| themis-phase-2b | Ready to start (unblocked) | — | not started — targets v0.4.0 | — (core-model + Layer-0 refactor released in v0.3.0; D-CVSS-1 fixed — unblocked) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
@@ -80,9 +81,10 @@ Last updated: 2026-06-20 (themis-core-model implementation complete)._
 | --- | --- | --- |
 | `v0.1.0` | `a94f3ba` (PR #10) | Phase 1 core platform — tagged retroactively 2026-06-17 (replaced `themis-phase-1`) |
 | `v0.2.0` | `d02883c` (PR #15) | Phase 2a Signal Foundation |
-| `v0.2.1` | — (planned) | Maintenance: Group 31 feed fixes + Group 16 hardening remainder |
-| `v0.3.0` | — (planned) | `themis-core-model` (breaking) + Phase 2b AI Intelligence |
-| `v0.4.0` | — (planned) | Phase 2c AI-Assisted VEX |
+| `v0.2.1` | `5e77d2b` | Maintenance: Group 31 feed fixes + Group 16 hardening remainder |
+| `v0.3.0` | `themis-phase-2` HEAD (2026-06-24) | `themis-core-model` (breaking) + Layer-0 Correctness & Observability refactor (CR-1…CR-10) |
+| `v0.4.0` | — (planned) | Phase 2b AI Intelligence |
+| `v0.5.0` | — (planned) | Phase 2c AI-Assisted VEX |
 
 ## Phase Roadmap
 
@@ -90,9 +92,10 @@ Last updated: 2026-06-20 (themis-core-model implementation complete)._
 | --- | --- | --- | --- |
 | Phase 1 | themis-phase-1 | Core intelligence platform — Go REST API + PostgreSQL | Complete (archived 2026-06-09; v0.1.0) |
 | Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Complete (archived 2026-06-17; v0.2.0) |
-| — | (maintenance) | v0.2.1 — feed reliability + Phase 1 hardening | Planned (Group 31 + Group 16 remainder) |
-| Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned (blocked: Group 31 + core-model) |
-| Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned |
+| — | (maintenance) | v0.2.1 — feed reliability + Phase 1 hardening | Released (v0.2.1) |
+| core-model + Layer-0 | themis-core-model + CR-1…CR-10 | Schema restructure (breaking) + correlation/feeder/observability refactor | **Released (v0.3.0, 2026-06-24)** |
+| Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned (unblocked) — targets v0.4.0 |
+| Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned — targets v0.5.0 |
 | Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |
 
 Architecture reference for Phases 2a–2c: `openspec/changes/themis-phase-2/`

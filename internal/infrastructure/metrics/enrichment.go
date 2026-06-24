@@ -41,6 +41,7 @@ func RegisterPhase2a() {
 	RegisterVEXFeed()
 	RegisterExploitDB()
 	RegisterEnrichment()
+	RegisterCVSSBackfill()
 }
 
 // EnrichmentMetrics implements enrichment.MetricsRecorder.

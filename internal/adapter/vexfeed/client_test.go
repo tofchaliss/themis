@@ -2,7 +2,6 @@ package vexfeed_test
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -163,6 +162,10 @@ type captureLogger struct {
 func (l *captureLogger) Warn(string, ...any) { l.warned = true }
 func (l *captureLogger) Error(string, ...any) {}
 
-func TestSlogMismatchLogger(t *testing.T) {
-	vexfeed.SlogMismatchLogger{Logger: slog.Default()}.LogPURLMismatch("CVE-1", "sbom", "vex")
+func TestLoggerMismatchAndSync(t *testing.T) {
+	vexfeed.LoggerMismatch{Log: domain.NopLogger{}}.LogPURLMismatch("CVE-1", "sbom", "vex")
+	vexfeed.LoggerMismatch{}.LogPURLMismatch("CVE-1", "sbom", "vex") // nil Log → NopLogger
+	sync := vexfeed.LoggerSync{Log: domain.NopLogger{}}
+	sync.Warn("vendor vex feed fetch failed", "feed", "alpine", "error", "boom")
+	sync.Error("vendor vex feed error", "feed", "rocky")
 }

@@ -10,7 +10,7 @@ func VersionMatches(affected []string, version string) bool {
 // PackageMatches reports whether a feed vulnerability applies to a catalog entry.
 func PackageMatches(vuln domain.FeedVulnerability, entry domain.WatchCatalogEntry) bool {
 	return domain.PackageIdentityMatch(vuln.Ecosystem, vuln.PackageName, entry.Ecosystem, entry.Name) &&
-		domain.VersionMatches(vuln.AffectedVersions, entry.Version)
+		domain.VersionMatchesEco(entry.Ecosystem, vuln.AffectedVersions, entry.Version)
 }
 
 // GroupByEcosystem batches catalog entries by ecosystem.

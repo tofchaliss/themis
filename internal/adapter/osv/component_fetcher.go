@@ -8,10 +8,13 @@ import (
 
 // ComponentFetcher queries OSV when the local vulnerability cache has no matches.
 type ComponentFetcher struct {
-	Client      *Client
-	Logger      CorrelationLogger
-	skipCounts  map[string]int
+	Client     *Client
+	Logger     CorrelationLogger
+	skipCounts map[string]int
 }
+
+// Name is the provenance label for OSV.dev-correlated findings (domain.CorrelationSource).
+func (f *ComponentFetcher) Name() string { return domain.FindingSourceOSV }
 
 // EmitCorrelationSummary flushes deferred skip summaries (implements domain.CorrelationSummaryEmitter).
 func (f *ComponentFetcher) EmitCorrelationSummary() {
@@ -58,7 +61,7 @@ func (f *ComponentFetcher) FetchForComponent(ctx context.Context, component doma
 			logger.LogIdentityMismatch(purl, component.Ecosystem, component.Name, component.Version, item.PackageName, item.CVEID)
 			continue
 		}
-		if !domain.VersionMatches(item.AffectedVersions, component.Version) {
+		if !domain.VersionMatchesEco(component.Ecosystem, item.AffectedVersions, component.Version) {
 			logger.LogVersionNoMatch(purl, component.Ecosystem, component.Name, component.Version, item.CVEID)
 			continue
 		}
@@ -71,6 +74,7 @@ func (f *ComponentFetcher) FetchForComponent(ctx context.Context, component doma
 			PackageName:      item.PackageName,
 			AffectedVersions: item.AffectedVersions,
 			FixVersions:      item.FixVersions,
+			Source:           domain.DefaultFindingSource(item.Source),
 		})
 	}
 	return out, nil

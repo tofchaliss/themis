@@ -107,7 +107,7 @@ func (m *DefaultMatcher) matchRPM(sbom parsedPURL, assertion domain.VendorVEXAss
 	if sbomNorm.Name == vexNorm.Name && namespacesEquivalent(sbomNorm.Namespace, vexNorm.Namespace) {
 		installedEVR := stripErrataRevision(sbomNorm.Version)
 		assertionEVR := stripErrataRevision(vexNorm.Version)
-		cmp := compareRPMEVR(installedEVR, assertionEVR)
+		cmp := domain.CompareVersionsEco("rpm", installedEVR, assertionEVR)
 		if cmp >= 0 {
 			return matchedOutcome(assertion, domain.VEXMatchTypeVersionInherited, assertion.Status)
 		}
@@ -155,14 +155,14 @@ func alpineRangeStatus(installed, introduced, fixed string) string {
 	if introduced != "" && !strings.Contains(introduced, "-r") && strings.Contains(installed, "-r") {
 		installedForIntroduced = stripAlpineBuildRevision(installed)
 	}
-	if introduced != "" && compareAlpineVersion(installedForIntroduced, introduced) < 0 {
+	if introduced != "" && domain.CompareVersionsEco("apk", installedForIntroduced, introduced) < 0 {
 		return domain.VEXStatusNotAffected
 	}
 	installedForFixed := installed
 	if fixed != "" && !strings.Contains(fixed, "-r") && strings.Contains(installed, "-r") {
 		installedForFixed = stripAlpineBuildRevision(installed)
 	}
-	if fixed != "" && compareAlpineVersion(installedForFixed, fixed) >= 0 {
+	if fixed != "" && domain.CompareVersionsEco("apk", installedForFixed, fixed) >= 0 {
 		return domain.VEXStatusNotAffected
 	}
 	return domain.VEXStatusAffected

@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,18 +11,59 @@ import (
 	"github.com/themis-project/themis/internal/adapter/vexfeed"
 	"github.com/themis-project/themis/internal/domain"
 	httpserver "github.com/themis-project/themis/internal/infrastructure/http"
+	"github.com/themis-project/themis/internal/usecase/enrichment"
 )
+
+func TestStartCVSSBackfillSchedulerNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	httpserver.StartCVSSBackfillScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+}
+
+func TestStartCVSSBackfillSchedulerRuns(t *testing.T) {
+	// nil Fetcher/Catalog → RunBackfill is a no-op success.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	httpserver.StartCVSSBackfillScheduler(ctx, &enrichment.CVSSBackfillService{}, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+	time.Sleep(25 * time.Millisecond)
+}
+
+func TestStartCVSSBackfillSchedulerFailure(t *testing.T) {
+	svc := &enrichment.CVSSBackfillService{
+		Fetcher: failBackfillCatalog{},
+		Catalog: failBackfillCatalog{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	httpserver.StartCVSSBackfillScheduler(ctx, svc, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+	time.Sleep(25 * time.Millisecond)
+}
+
+// failBackfillCatalog errors on listing so RunBackfill returns an error (exercises
+// the scheduler failure branch). It also satisfies the fetcher interface.
+type failBackfillCatalog struct{}
+
+func (failBackfillCatalog) ListCVEsNeedingCVSS(context.Context, int, time.Time) ([]string, error) {
+	return nil, errors.New("db down")
+}
+func (failBackfillCatalog) ApplyCVSS(context.Context, string, string, float64, string) error {
+	return nil
+}
+func (failBackfillCatalog) MarkCVSSChecked(context.Context, string) error { return nil }
+func (failBackfillCatalog) FetchByCVEID(context.Context, string) (domain.CVSSData, bool, error) {
+	return domain.CVSSData{}, false, nil
+}
 
 func TestStartVEXFeedSchedulerNilService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	httpserver.StartVEXFeedScheduler(ctx, nil, time.Millisecond)
+	httpserver.StartVEXFeedScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 }
 
 func TestStartExploitDBSchedulerNilService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	httpserver.StartExploitDBScheduler(ctx, nil, time.Millisecond)
+	httpserver.StartExploitDBScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 }
 
 func TestStartVEXFeedSchedulerRuns(t *testing.T) {
@@ -31,7 +73,7 @@ func TestStartVEXFeedSchedulerRuns(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	httpserver.StartVEXFeedScheduler(ctx, svc, 10*time.Millisecond)
+	httpserver.StartVEXFeedScheduler(ctx, svc, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 	time.Sleep(35 * time.Millisecond)
 }
 
@@ -42,7 +84,7 @@ func TestStartExploitDBSchedulerRuns(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	httpserver.StartExploitDBScheduler(ctx, svc, 10*time.Millisecond)
+	httpserver.StartExploitDBScheduler(ctx, svc, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 	time.Sleep(35 * time.Millisecond)
 }
 
@@ -53,9 +95,46 @@ func TestStartEPSSKevSchedulerRuns(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	httpserver.StartEPSSKevScheduler(ctx, svc, 10*time.Millisecond)
+	httpserver.StartEPSSKevScheduler(ctx, svc, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 	time.Sleep(35 * time.Millisecond)
 }
+
+func TestStartCorrelationFeedSchedulerNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	httpserver.StartCorrelationFeedScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+	httpserver.StartCorrelationFeedScheduler(ctx, &vexfeed.CorrelationLoader{}, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+}
+
+func TestStartCorrelationFeedSchedulerRuns(t *testing.T) {
+	src := vexfeed.NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
+	loader := &vexfeed.CorrelationLoader{Source: src, Feeds: []vexfeed.FeedSource{
+		vexfeed.StaticFeedSource{FeedName: "alpine", Assertions: []domain.VendorVEXAssertion{
+			{Feed: "alpine", CVEID: "CVE-1", Ecosystem: "Alpine", PackageName: "busybox", Introduced: "0", Fixed: "2.0"},
+		}},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	httpserver.StartCorrelationFeedScheduler(ctx, loader, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+	time.Sleep(35 * time.Millisecond)
+}
+
+func TestStartCorrelationFeedSchedulerRefreshFailure(t *testing.T) {
+	loader := &vexfeed.CorrelationLoader{
+		Source: vexfeed.NewAssertionCorrelationSource("x"),
+		Feeds:  []vexfeed.FeedSource{vexfeed.StaticFeedSource{FeedName: "rocky", Err: errTestFeed}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	httpserver.StartCorrelationFeedScheduler(ctx, loader, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
+	time.Sleep(25 * time.Millisecond)
+}
+
+var errTestFeed = errorString("feed down")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
 
 type stubVEXStore struct{}
 

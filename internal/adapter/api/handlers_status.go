@@ -36,6 +36,17 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		signalsStale = stale
 	}
+	degradedFeeds := []string{}
+	if h.deps.FeedHealth != nil {
+		feeds, err := h.deps.FeedHealth.DegradedFeeds(r.Context())
+		if err != nil {
+			RespondError(w, r, err)
+			return
+		}
+		if feeds != nil {
+			degradedFeeds = feeds
+		}
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"as_of": status.AsOf,
 		"components": map[string]int{
@@ -49,8 +60,9 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 			"by_severity":    status.Vulnerabilities.BySeverity,
 			"by_state":       status.Vulnerabilities.ByState,
 		},
-		"top_components":  toTopComponents(status.TopComponents),
-		"signals_stale":   signalsStale,
+		"top_components": toTopComponents(status.TopComponents),
+		"signals_stale":  signalsStale,
+		"degraded_feeds": degradedFeeds,
 	})
 }
 

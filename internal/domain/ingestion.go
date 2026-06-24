@@ -64,6 +64,9 @@ type VulnerabilityRecord struct {
 	PackageName      string
 	AffectedVersions []string
 	FixVersions      []string
+	// Source records which feed produced this record (CR-3 provenance); empty for
+	// records read back from the local catalog with no recorded origin.
+	Source string
 }
 
 // SaveSBOMInput persists a parsed SBOM composition (one `sboms` row keyed
@@ -152,6 +155,19 @@ type VulnerabilityFetcher interface {
 	FetchForComponent(ctx context.Context, component CanonicalComponent) ([]VulnerabilityRecord, error)
 }
 
+// CorrelationSource is one feed that can answer "which CVEs affect this component"
+// as a live per-component query (CR-2). The single Correlator runs every
+// applicable source, tags each record with the source name (CR-3 provenance), and
+// merges results by distro-authoritative precedence — so ingest no longer has a
+// bespoke per-feed match path. Implemented by OSV.dev today; NVD-by-CVE and the
+// distro feeds (CR-4/CR-5) plug in as additional sources with no caller changes.
+type CorrelationSource interface {
+	VulnerabilityFetcher
+	// Name is the provenance label applied to records this source produces
+	// (e.g. domain.FindingSourceOSV).
+	Name() string
+}
+
 // CorrelationSummaryEmitter flushes deferred OSV correlation skip summaries.
 type CorrelationSummaryEmitter interface {
 	EmitCorrelationSummary()
@@ -166,6 +182,12 @@ type CreateFindingInput struct {
 	ScanReportID       string
 	ComponentPURL      string
 	CVEID              string
+	// Provenance (CR-3): which source produced this finding and what it asserted.
+	Source             string
+	SourceSeverity     string
+	SourceCVSSScore    float64
+	SourceCVSSVector   string
+	SourceFixedVersion string
 }
 
 // CorrelationRepository links components to vulnerabilities within a scan report.

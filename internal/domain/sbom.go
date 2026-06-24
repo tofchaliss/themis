@@ -34,24 +34,19 @@ type CanonicalDependencyEdge struct {
 	RelationshipType string
 }
 
-// CanonicalVulnerability is a normalized vulnerability record.
-type CanonicalVulnerability struct {
-	CVEID         string
-	Severity      string
-	CVSSScore     float64
-	CVSSVector    string
-	AffectedPURLs []string
-	FixVersions   []string
-}
-
 // CanonicalSBOM is the format-neutral normalized SBOM model.
+//
+// CR-9: scanner-reported vulnerabilities embedded in an uploaded SBOM/scan are
+// NOT carried here. Themis is a re-correlator — findings are created by matching
+// components against its own feeds, not by trusting the scanner's vuln list — so
+// the previously-parsed-then-dropped vulnerability section has been removed
+// rather than left as dead data.
 type CanonicalSBOM struct {
-	Format          string
-	SpecVersion     string
-	Components      []CanonicalComponent
-	Dependencies    []CanonicalDependencyEdge
-	Vulnerabilities []CanonicalVulnerability
-	Warnings        []string
+	Format       string
+	SpecVersion  string
+	Components   []CanonicalComponent
+	Dependencies []CanonicalDependencyEdge
+	Warnings     []string
 }
 
 // ParseOutcome is returned by the parser registry to callers.

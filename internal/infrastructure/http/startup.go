@@ -16,6 +16,7 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/infrastructure/config"
 	"github.com/themis-project/themis/internal/infrastructure/db"
+	"github.com/themis-project/themis/internal/infrastructure/logging"
 	"github.com/themis-project/themis/internal/infrastructure/queue"
 )
 
@@ -186,6 +187,7 @@ func bootWithConfig(ctx context.Context, logger *zap.Logger, cfg bootConfig) (*A
 				AppConfig:      appCfg,
 				InProcessQueue: inProcess,
 				CVEFeedSuccess: &app.CVEFeedSuccess,
+				Logger:         logging.NewFromZap(logger),
 			})
 		}
 	}
