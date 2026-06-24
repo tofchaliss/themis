@@ -246,10 +246,6 @@ func TestCycloneDXLicenseHelpers(t *testing.T) {
 	if len(licenses) != 1 {
 		t.Fatalf("licenses = %v", licenses)
 	}
-	sev, score, vector := firstCycloneDXRating([]cycloneDXRating{{Severity: "high", Score: 1.2, Vector: "V"}})
-	if sev != "high" || score != 1.2 || vector != "V" {
-		t.Fatalf("rating = %q %v %q", sev, score, vector)
-	}
 	if err := validateCycloneDXVersion("1.4"); err != nil {
 		t.Fatal(err)
 	}

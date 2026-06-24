@@ -26,8 +26,8 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.EPSSKev.PollInterval != 24*time.Hour {
 		t.Fatalf("EPSSKev.PollInterval = %v, want 24h", cfg.EPSSKev.PollInterval)
 	}
-	if cfg.ExploitDB.CSVURL == "" || cfg.VEXFeed.RHELURL == "" {
-		t.Fatalf("expected Phase 2a feed defaults: exploitdb=%q vexfeed=%q", cfg.ExploitDB.CSVURL, cfg.VEXFeed.RHELURL)
+	if cfg.ExploitDB.CSVURL == "" || cfg.VEXFeed.RHELVEXURL == "" || cfg.VEXFeed.RHELCSAFURL == "" {
+		t.Fatalf("expected feed defaults: exploitdb=%q rhel_vex=%q rhel_csaf=%q", cfg.ExploitDB.CSVURL, cfg.VEXFeed.RHELVEXURL, cfg.VEXFeed.RHELCSAFURL)
 	}
 	if cfg.Intelligence.BlastRadiusCap != 10 {
 		t.Fatalf("Intelligence.BlastRadiusCap = %d, want 10", cfg.Intelligence.BlastRadiusCap)
@@ -176,6 +176,10 @@ func TestAllEnvOverrides(t *testing.T) {
 	if cfg.VEXFeed.RHELURL != "https://redhat.example/csaf/" || cfg.VEXFeed.PollInterval != 8*time.Hour {
 		t.Fatalf("unexpected vexfeed config: %+v", cfg.VEXFeed)
 	}
+	// CR-4: with no explicit rhel_csaf_url, the deprecated rhel_url folds into it.
+	if cfg.VEXFeed.RHELCSAFURL != "https://redhat.example/csaf/" {
+		t.Fatalf("rhel_url alias did not fold into rhel_csaf_url: %q", cfg.VEXFeed.RHELCSAFURL)
+	}
 	if cfg.Intelligence.BlastRadiusCap != 12 {
 		t.Fatalf("Intelligence.BlastRadiusCap = %d", cfg.Intelligence.BlastRadiusCap)
 	}
@@ -184,6 +188,27 @@ func TestAllEnvOverrides(t *testing.T) {
 	}
 	if cfg.GitHub.Token != "gh-token" {
 		t.Fatalf("GitHub.Token = %q", cfg.GitHub.Token)
+	}
+}
+
+// TestVEXFeedExplicitCSAFAndVEXURLs covers the CR-4 env branches: an explicit
+// rhel_csaf_url is NOT overridden by the deprecated rhel_url, and rhel_vex_url
+// is independent.
+func TestVEXFeedExplicitCSAFAndVEXURLs(t *testing.T) {
+	t.Setenv("THEMIS_DATABASE_DSN", "postgres://u:p@localhost:5432/db")
+	t.Setenv("THEMIS_VEXFEED_RHEL_VEX_URL", "https://redhat.example/vex/")
+	t.Setenv("THEMIS_VEXFEED_RHEL_CSAF_URL", "https://redhat.example/advisories/")
+	t.Setenv("THEMIS_VEXFEED_RHEL_URL", "https://legacy.example/csaf/")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VEXFeed.RHELVEXURL != "https://redhat.example/vex/" {
+		t.Fatalf("rhel_vex_url = %q", cfg.VEXFeed.RHELVEXURL)
+	}
+	if cfg.VEXFeed.RHELCSAFURL != "https://redhat.example/advisories/" {
+		t.Fatalf("explicit rhel_csaf_url overridden by alias: %q", cfg.VEXFeed.RHELCSAFURL)
 	}
 }
 

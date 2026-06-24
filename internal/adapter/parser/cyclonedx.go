@@ -10,18 +10,18 @@ import (
 )
 
 type cycloneDXDocument struct {
-	BOMFormat   string              `json:"bomFormat"`
-	SpecVersion string              `json:"specVersion"`
-	Components  []cycloneDXComponent `json:"components"`
+	BOMFormat    string                `json:"bomFormat"`
+	SpecVersion  string                `json:"specVersion"`
+	Components   []cycloneDXComponent  `json:"components"`
 	Dependencies []cycloneDXDependency `json:"dependencies"`
-	Vulnerabilities []cycloneDXVulnerability `json:"vulnerabilities"`
 }
 
 type cycloneDXComponent struct {
-	Name     string              `json:"name"`
-	Version  string              `json:"version"`
-	PURL     string              `json:"purl"`
-	Licenses []cycloneDXLicense  `json:"licenses"`
+	BOMRef   string             `json:"bom-ref"`
+	Name     string             `json:"name"`
+	Version  string             `json:"version"`
+	PURL     string             `json:"purl"`
+	Licenses []cycloneDXLicense `json:"licenses"`
 }
 
 type cycloneDXLicense struct {
@@ -36,22 +36,6 @@ type cycloneDXLicenseChoice struct {
 type cycloneDXDependency struct {
 	Ref       string   `json:"ref"`
 	DependsOn []string `json:"dependsOn"`
-}
-
-type cycloneDXVulnerability struct {
-	ID      string                 `json:"id"`
-	Ratings []cycloneDXRating      `json:"ratings"`
-	Affects []cycloneDXAffect      `json:"affects"`
-}
-
-type cycloneDXRating struct {
-	Severity string  `json:"severity"`
-	Score    float64 `json:"score"`
-	Vector   string  `json:"vector"`
-}
-
-type cycloneDXAffect struct {
-	Ref string `json:"ref"`
 }
 
 // CycloneDXAdapter parses CycloneDX JSON documents.
@@ -80,6 +64,11 @@ func (CycloneDXAdapter) Parse(_ context.Context, raw []byte, specVersion string)
 		SpecVersion: version,
 	}
 
+	// refToPURL resolves a dependency reference (a bom-ref, which is NOT always a
+	// purl) to the component's purl. Dependency edges reference bom-refs; mapping
+	// them keeps the dependency graph keyed on purl identity (CR-9).
+	refToPURL := map[string]string{}
+
 	for _, component := range doc.Components {
 		if component.PURL == "" {
 			sbom.Warnings = append(sbom.Warnings, fmt.Sprintf(
@@ -107,6 +96,10 @@ func (CycloneDXAdapter) Parse(_ context.Context, raw []byte, specVersion string)
 				versionInfo = parsedVersion
 			}
 		}
+		if component.BOMRef != "" {
+			refToPURL[component.BOMRef] = component.PURL
+		}
+		refToPURL[component.PURL] = component.PURL
 		sbom.Components = append(sbom.Components, domain.CanonicalComponent{
 			PURL:      component.PURL,
 			Name:      name,
@@ -116,31 +109,32 @@ func (CycloneDXAdapter) Parse(_ context.Context, raw []byte, specVersion string)
 		})
 	}
 
+	resolveRef := func(ref string) string {
+		if purl, ok := refToPURL[ref]; ok {
+			return purl
+		}
+		if strings.HasPrefix(ref, "pkg:") {
+			return ref
+		}
+		return ""
+	}
+
 	for _, dep := range doc.Dependencies {
+		from := resolveRef(dep.Ref)
+		if from == "" {
+			continue
+		}
 		for _, to := range dep.DependsOn {
+			toPURL := resolveRef(to)
+			if toPURL == "" {
+				continue
+			}
 			sbom.Dependencies = append(sbom.Dependencies, domain.CanonicalDependencyEdge{
-				FromPURL:         dep.Ref,
-				ToPURL:           to,
+				FromPURL:         from,
+				ToPURL:           toPURL,
 				RelationshipType: "depends_on",
 			})
 		}
-	}
-
-	for _, vuln := range doc.Vulnerabilities {
-		severity, score, vector := firstCycloneDXRating(vuln.Ratings)
-		affected := make([]string, 0, len(vuln.Affects))
-		for _, affect := range vuln.Affects {
-			if affect.Ref != "" {
-				affected = append(affected, affect.Ref)
-			}
-		}
-		sbom.Vulnerabilities = append(sbom.Vulnerabilities, domain.CanonicalVulnerability{
-			CVEID:         vuln.ID,
-			Severity:      severity,
-			CVSSScore:     score,
-			CVSSVector:    vector,
-			AffectedPURLs: affected,
-		})
 	}
 
 	return sbom, nil
@@ -168,9 +162,3 @@ func cycloneDXLicenses(licenses []cycloneDXLicense) []string {
 	return out
 }
 
-func firstCycloneDXRating(ratings []cycloneDXRating) (severity string, score float64, vector string) {
-	if len(ratings) == 0 {
-		return "", 0, ""
-	}
-	return ratings[0].Severity, ratings[0].Score, ratings[0].Vector
-}

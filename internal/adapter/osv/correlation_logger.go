@@ -1,7 +1,7 @@
 package osv
 
 import (
-	"log/slog"
+	"github.com/themis-project/themis/internal/domain"
 )
 
 // CorrelationLogger records OSV correlation skip and mismatch events.
@@ -24,45 +24,47 @@ func (NoOpCorrelationLogger) LogIdentityMismatch(string, string, string, string,
 func (NoOpCorrelationLogger) LogVersionNoMatch(string, string, string, string, string) {}
 func (NoOpCorrelationLogger) LogSkipSummary(map[string]int)                            {}
 
-// SlogCorrelationLogger logs correlation events via slog.
-type SlogCorrelationLogger struct {
-	Logger *slog.Logger
+// LoggerCorrelation logs correlation skip/mismatch events through the unified
+// domain logging port (CR-7) rather than slog.Default(). Skip events are
+// debug-level (high volume), malformed purls warn, and the per-cycle skip
+// summary is info — all governed by THEMIS_LOG_LEVEL through one backend.
+type LoggerCorrelation struct {
+	Log domain.Logger
 }
 
-func (l SlogCorrelationLogger) log() *slog.Logger {
-	if l.Logger != nil {
-		return l.Logger
-	}
-	return slog.Default()
-}
+func (l LoggerCorrelation) log() domain.Logger { return domain.LoggerOrNop(l.Log) }
 
-func (l SlogCorrelationLogger) LogUnsupportedEcosystem(purl, ecosystem, name, version string) {
+func (l LoggerCorrelation) LogUnsupportedEcosystem(purl, ecosystem, name, version string) {
 	l.log().Debug("osv correlation skip",
-		"reason", "unsupported_ecosystem", "purl", purl, "ecosystem", ecosystem, "name", name, "version", version)
+		domain.LogString("reason", "unsupported_ecosystem"), domain.LogString("purl", purl),
+		domain.LogString("ecosystem", ecosystem), domain.LogString("name", name), domain.LogString("version", version))
 }
 
-func (l SlogCorrelationLogger) LogMalformedPURL(purl, ecosystem, name, version, reason string) {
+func (l LoggerCorrelation) LogMalformedPURL(purl, ecosystem, name, version, reason string) {
 	l.log().Warn("osv correlation skip",
-		"reason", reason, "purl", purl, "ecosystem", ecosystem, "name", name, "version", version)
+		domain.LogString("reason", reason), domain.LogString("purl", purl),
+		domain.LogString("ecosystem", ecosystem), domain.LogString("name", name), domain.LogString("version", version))
 }
 
-func (l SlogCorrelationLogger) LogIdentityMismatch(purl, ecosystem, name, version, osvPkg, cveID string) {
+func (l LoggerCorrelation) LogIdentityMismatch(purl, ecosystem, name, version, osvPkg, cveID string) {
 	l.log().Debug("osv correlation skip",
-		"reason", "identity_mismatch", "purl", purl, "ecosystem", ecosystem, "name", name,
-		"version", version, "osv_package", osvPkg, "cve_id", cveID)
+		domain.LogString("reason", "identity_mismatch"), domain.LogString("purl", purl),
+		domain.LogString("ecosystem", ecosystem), domain.LogString("name", name),
+		domain.LogString("version", version), domain.LogString("osv_package", osvPkg), domain.LogString("cve_id", cveID))
 }
 
-func (l SlogCorrelationLogger) LogVersionNoMatch(purl, ecosystem, name, version, cveID string) {
+func (l LoggerCorrelation) LogVersionNoMatch(purl, ecosystem, name, version, cveID string) {
 	l.log().Debug("osv correlation skip",
-		"reason", "version_no_match", "purl", purl, "ecosystem", ecosystem, "name", name,
-		"version", version, "cve_id", cveID)
+		domain.LogString("reason", "version_no_match"), domain.LogString("purl", purl),
+		domain.LogString("ecosystem", ecosystem), domain.LogString("name", name),
+		domain.LogString("version", version), domain.LogString("cve_id", cveID))
 }
 
-func (l SlogCorrelationLogger) LogSkipSummary(counts map[string]int) {
+func (l LoggerCorrelation) LogSkipSummary(counts map[string]int) {
 	if len(counts) == 0 {
 		return
 	}
-	l.log().Info("osv correlation skip summary", "ecosystems", counts)
+	l.log().Info("osv correlation skip summary", domain.LogAny("ecosystems", counts))
 }
 
 // CaptureCorrelationLogger records correlation events for tests.

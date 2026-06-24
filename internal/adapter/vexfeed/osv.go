@@ -24,9 +24,11 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 		if cveID == "" {
 			continue
 		}
+		entryVector := entry.cvssVector()
 		for _, affected := range entry.Affected {
 			eco := affected.Package.Ecosystem
 			name := affected.Package.Name
+			severity := affected.DatabaseSpecific.severityWord()
 			for _, r := range affected.Ranges {
 				if r.Type != "ECOSYSTEM" && r.Type != "" {
 					continue
@@ -41,6 +43,8 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 					Status:      domain.VEXStatusAffected,
 					Introduced:  introduced,
 					Fixed:       fixed,
+					Severity:    severity,
+					CVSSVector:  entryVector,
 				})
 			}
 		}
@@ -49,9 +53,36 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 }
 
 type osvEntry struct {
-	ID         string         `json:"id"`
-	Aliases    []string       `json:"aliases"`
-	Affected   []osvAffected  `json:"affected"`
+	ID       string        `json:"id"`
+	Aliases  []string      `json:"aliases"`
+	Affected []osvAffected `json:"affected"`
+	Severity []osvSeverity `json:"severity"`
+}
+
+type osvSeverity struct {
+	Type  string `json:"type"`
+	Score string `json:"score"`
+}
+
+// cvssVector returns the first CVSS vector in the entry's severity block, if any.
+// The textual severity word comes from each affected entry's database_specific
+// block (where distro OSV feeds put it).
+func (e osvEntry) cvssVector() string {
+	for _, s := range e.Severity {
+		t := strings.ToUpper(s.Type)
+		if (t == "CVSS_V3" || t == "CVSS_V4" || t == "CVSSV3") && strings.HasPrefix(s.Score, "CVSS:") {
+			return s.Score
+		}
+	}
+	return ""
+}
+
+type osvDatabaseSpecific struct {
+	Severity string `json:"severity"`
+}
+
+func (d osvDatabaseSpecific) severityWord() string {
+	return strings.ToLower(strings.TrimSpace(d.Severity))
 }
 
 func (e osvEntry) firstCVE() string {
@@ -68,7 +99,8 @@ type osvAffected struct {
 		Ecosystem string `json:"ecosystem"`
 		Name      string `json:"name"`
 	} `json:"package"`
-	Ranges []osvRange `json:"ranges"`
+	Ranges           []osvRange          `json:"ranges"`
+	DatabaseSpecific osvDatabaseSpecific `json:"database_specific"`
 }
 
 type osvRange struct {

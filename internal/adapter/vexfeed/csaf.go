@@ -34,14 +34,17 @@ func ParseCSAFAdvisory(raw []byte, advisoryID string) ([]domain.VendorVEXAsserti
 				if purl == "" {
 					continue
 				}
-				status := mapCSAFCategory(prod.Category)
+				name, ecosystem, fixed := csafProductFields(purl, prod.Category)
 				out = append(out, domain.VendorVEXAssertion{
 					AdvisoryID:    id,
 					Feed:          "rhel",
 					CVEID:         cveID,
 					ComponentPURL: purl,
-					Status:        status,
+					Status:        mapCSAFCategory(prod.Category),
 					Justification: prod.Category,
+					PackageName:   name,
+					Ecosystem:     ecosystem,
+					Fixed:         fixed,
 				})
 			}
 		}
@@ -49,11 +52,30 @@ func ParseCSAFAdvisory(raw []byte, advisoryID string) ([]domain.VendorVEXAsserti
 	return out, nil
 }
 
+// csafProductFields extracts the package identity from a CSAF product_id purl so
+// RHSA advisories can be consumed as a correlation source (CR-4). For a "fixed"
+// product, the purl version is the FIXED NEVRA — versions below it are affected —
+// so it is returned as the fixed bound; other categories yield no range (they are
+// dropped by the correlation source rather than over-matching). Non-purl product
+// ids yield empty fields (no correlation finding).
+func csafProductFields(productID, category string) (name, ecosystem, fixed string) {
+	p := parsePURL(productID)
+	if p.Type == "" || p.Name == "" {
+		return "", "", ""
+	}
+	name = p.Name
+	ecosystem = p.Type
+	if strings.EqualFold(strings.TrimSpace(category), "fixed") {
+		fixed = p.Version
+	}
+	return name, ecosystem, fixed
+}
+
 func mapCSAFCategory(category string) string {
 	switch strings.ToLower(category) {
-	case "fixed", "known_not_affected", "known affected":
+	case "fixed", "known_not_affected", "known not affected":
 		return domain.VEXStatusNotAffected
-	case "known_affected", "affected":
+	case "known_affected", "known affected", "affected":
 		return domain.VEXStatusAffected
 	default:
 		if strings.Contains(strings.ToLower(category), "not_affected") {
@@ -115,6 +137,7 @@ func ParseCSAFAdvisoryVulnerabilities(raw []byte, advisoryID string) ([]domain.V
 				if purl == "" {
 					continue
 				}
+				name, ecosystem, fixed := csafProductFields(purl, category)
 				out = append(out, domain.VendorVEXAssertion{
 					AdvisoryID:    id,
 					Feed:          "rhel",
@@ -122,6 +145,9 @@ func ParseCSAFAdvisoryVulnerabilities(raw []byte, advisoryID string) ([]domain.V
 					ComponentPURL: purl,
 					Status:        status,
 					Justification: category,
+					PackageName:   name,
+					Ecosystem:     ecosystem,
+					Fixed:         fixed,
 				})
 			}
 		}

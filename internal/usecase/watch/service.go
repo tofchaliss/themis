@@ -13,13 +13,17 @@ const cycleStatusFailure = "failure"
 
 // Service orchestrates CVE feed polling and catalog matching.
 type Service struct {
-	NVD       domain.NVDCVEFeedClient
-	OSV       domain.OSVCVEFeedClient
-	Repo      domain.WatchRepository
-	Notify    domain.NotificationSender
-	Metrics   domain.WatchMetricsRecorder
-	Clock     func() time.Time
-	OnSuccess func(time.Time)
+	NVD     domain.NVDCVEFeedClient
+	OSV     domain.OSVCVEFeedClient
+	Repo    domain.WatchRepository
+	Notify  domain.NotificationSender
+	Metrics domain.WatchMetricsRecorder
+	// Correlator (CR-2) re-correlates each catalog component through the shared
+	// CorrelationSource core (the in-memory distro index), so periodic watch picks
+	// up distro findings via the same engine ingest uses. Optional; nil skips it.
+	Correlator domain.VulnerabilityFetcher
+	Clock      func() time.Time
+	OnSuccess  func(time.Time)
 }
 
 // RunCycle fetches CVEs, matches the catalog, creates findings, and updates poll state.
@@ -80,53 +84,32 @@ func (s *Service) RunCycle(ctx context.Context) error {
 	newByEcosystem := make(map[string]int)
 	batchKey := "cve-watch-" + s.now().Format(time.RFC3339)
 	for _, pair := range MatchCatalog(catalog, matchVulns) {
-		vulnID, upsertErr := s.Repo.UpsertVulnerability(ctx, feedToRecord(pair.Vuln))
-		if upsertErr != nil {
-			return fmt.Errorf("upsert matched vulnerability %s: %w", pair.Vuln.CVEID, upsertErr)
-		}
-
-		exists, existsErr := s.Repo.HasFinding(ctx, pair.Entry.ComponentVersionID, pair.Vuln.CVEID)
-		if existsErr != nil {
-			return fmt.Errorf("check existing finding: %w", existsErr)
-		}
-		if exists {
-			continue
-		}
-
-		result, createErr := s.Repo.CreateWatchFinding(ctx, domain.CreateWatchFindingInput{
-			ComponentVersionID: pair.Entry.ComponentVersionID,
-			VulnerabilityID:    vulnID,
-			ScanReportID:       pair.Entry.ScanReportID,
-			ArtifactID:         pair.Entry.ArtifactID,
-			CVEID:              pair.Vuln.CVEID,
-			Severity:           pair.Vuln.Severity,
-			ProductID:          pair.Entry.ProductID,
-			ProjectID:          pair.Entry.ProjectID,
-			ComponentPURL:      domain.VersionedPURL(pair.Entry.PURL, pair.Entry.Version),
-		})
-		if createErr != nil {
-			return fmt.Errorf("create watch finding: %w", createErr)
-		}
-		if !result.Created {
-			continue
-		}
-
-		newByEcosystem[pair.Entry.Ecosystem]++
-		if s.Notify != nil {
-			_ = s.Notify.Dispatch(ctx, domain.NotificationEvent{
-				Type:      domain.NotificationEventCVEWatchFinding,
-				ProductID: pair.Entry.ProductID,
-				ProjectID: pair.Entry.ProjectID,
-				BatchKey:  batchKey,
-				Findings: []domain.NotificationFinding{{
-					CVEID:          pair.Vuln.CVEID,
-					ComponentPURL:  pair.Entry.PURL,
-					Severity:       pair.Vuln.Severity,
-					EffectiveState: domain.EffectiveStateDetected,
-				}},
-			})
+		if err := s.createWatchFinding(ctx, pair.Entry, pair.Vuln, batchKey, newByEcosystem); err != nil {
+			return err
 		}
 	}
+
+	// CR-2: re-correlate each catalog component through the shared Correlator so
+	// the periodic watch also surfaces distro-index findings (deduped by HasFinding).
+	if s.Correlator != nil {
+		for _, entry := range catalog {
+			records, corrErr := s.Correlator.FetchForComponent(ctx, domain.CanonicalComponent{
+				PURL:      entry.PURL,
+				Name:      entry.Name,
+				Version:   entry.Version,
+				Ecosystem: entry.Ecosystem,
+			})
+			if corrErr != nil {
+				return fmt.Errorf("correlate watch component %s: %w", entry.PURL, corrErr)
+			}
+			for _, rec := range records {
+				if err := s.createWatchFinding(ctx, entry, feedFromRecord(rec), batchKey, newByEcosystem); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	if s.Notify != nil {
 		_ = s.Notify.FlushDigest(ctx, batchKey)
 	}
@@ -145,6 +128,60 @@ func (s *Service) RunCycle(ctx context.Context) error {
 		s.OnSuccess(now)
 	}
 	status = cycleStatusSuccess
+	return nil
+}
+
+// createWatchFinding upserts the matched vulnerability and creates a watch
+// finding for it (deduped via HasFinding), recording provenance and notifying.
+// Shared by the bulk MatchCatalog pass and the CR-2 Correlator pass.
+func (s *Service) createWatchFinding(ctx context.Context, entry domain.WatchCatalogEntry, vuln domain.FeedVulnerability, batchKey string, newByEcosystem map[string]int) error {
+	vulnID, err := s.Repo.UpsertVulnerability(ctx, feedToRecord(vuln))
+	if err != nil {
+		return fmt.Errorf("upsert matched vulnerability %s: %w", vuln.CVEID, err)
+	}
+	exists, err := s.Repo.HasFinding(ctx, entry.ComponentVersionID, vuln.CVEID)
+	if err != nil {
+		return fmt.Errorf("check existing finding: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	result, err := s.Repo.CreateWatchFinding(ctx, domain.CreateWatchFindingInput{
+		ComponentVersionID: entry.ComponentVersionID,
+		VulnerabilityID:    vulnID,
+		ScanReportID:       entry.ScanReportID,
+		ArtifactID:         entry.ArtifactID,
+		CVEID:              vuln.CVEID,
+		Severity:           vuln.Severity,
+		ProductID:          entry.ProductID,
+		ProjectID:          entry.ProjectID,
+		ComponentPURL:      domain.VersionedPURL(entry.PURL, entry.Version),
+		Source:             domain.DefaultFindingSource(vuln.Source),
+		SourceCVSSScore:    vuln.CVSSScore,
+		SourceCVSSVector:   vuln.CVSSVector,
+		SourceFixedVersion: firstFixVersion(vuln.FixVersions),
+	})
+	if err != nil {
+		return fmt.Errorf("create watch finding: %w", err)
+	}
+	if !result.Created {
+		return nil
+	}
+	newByEcosystem[entry.Ecosystem]++
+	if s.Notify != nil {
+		_ = s.Notify.Dispatch(ctx, domain.NotificationEvent{
+			Type:      domain.NotificationEventCVEWatchFinding,
+			ProductID: entry.ProductID,
+			ProjectID: entry.ProjectID,
+			BatchKey:  batchKey,
+			Findings: []domain.NotificationFinding{{
+				CVEID:          vuln.CVEID,
+				ComponentPURL:  entry.PURL,
+				Severity:       vuln.Severity,
+				EffectiveState: domain.EffectiveStateDetected,
+			}},
+		})
+	}
 	return nil
 }
 
@@ -211,5 +248,13 @@ func feedToRecord(vuln domain.FeedVulnerability) domain.VulnerabilityRecord {
 		PackageName:      vuln.PackageName,
 		AffectedVersions: affected,
 		FixVersions:      fixes,
+		Source:           vuln.Source,
 	}
+}
+
+func firstFixVersion(fixes []string) string {
+	if len(fixes) > 0 {
+		return fixes[0]
+	}
+	return ""
 }

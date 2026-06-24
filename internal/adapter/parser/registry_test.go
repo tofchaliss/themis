@@ -52,12 +52,11 @@ func TestCycloneDXAdapterMissingPURLAndMalformed(t *testing.T) {
 	}
 }
 
-func TestCycloneDXAdapterDependenciesAndVulnerabilities(t *testing.T) {
+func TestCycloneDXAdapterDependencies(t *testing.T) {
 	raw := []byte(`{
 		"bomFormat":"CycloneDX","specVersion":"1.5",
 		"components":[{"name":"a","version":"1","purl":"pkg:npm/a@1"}],
-		"dependencies":[{"ref":"pkg:npm/a@1","dependsOn":["pkg:npm/b@2"]}],
-		"vulnerabilities":[{"id":"CVE-1","ratings":[{"severity":"medium","score":5.5,"vector":"V"}],"affects":[{"ref":"pkg:npm/a@1"}]}]
+		"dependencies":[{"ref":"pkg:npm/a@1","dependsOn":["pkg:npm/b@2"]}]
 	}`)
 	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.5")
 	if err != nil {
@@ -66,8 +65,49 @@ func TestCycloneDXAdapterDependenciesAndVulnerabilities(t *testing.T) {
 	if len(sbom.Dependencies) != 1 || sbom.Dependencies[0].RelationshipType != "depends_on" {
 		t.Fatalf("dependencies = %+v", sbom.Dependencies)
 	}
-	if len(sbom.Vulnerabilities) != 1 || sbom.Vulnerabilities[0].CVEID != "CVE-1" {
-		t.Fatalf("vulnerabilities = %+v", sbom.Vulnerabilities)
+	if sbom.Dependencies[0].FromPURL != "pkg:npm/a@1" || sbom.Dependencies[0].ToPURL != "pkg:npm/b@2" {
+		t.Fatalf("edge = %+v", sbom.Dependencies[0])
+	}
+}
+
+// TestCycloneDXAdapterBomRefDependencies locks in the CR-9 fix: dependency edges
+// reference bom-refs that are not purls; they must resolve to component purls.
+func TestCycloneDXAdapterBomRefDependencies(t *testing.T) {
+	raw := []byte(`{
+		"bomFormat":"CycloneDX","specVersion":"1.5",
+		"components":[
+			{"bom-ref":"ref-a","name":"a","version":"1","purl":"pkg:npm/a@1"},
+			{"bom-ref":"ref-b","name":"b","version":"2","purl":"pkg:npm/b@2"}
+		],
+		"dependencies":[{"ref":"ref-a","dependsOn":["ref-b","ref-unknown"]}]
+	}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Dependencies) != 1 {
+		t.Fatalf("want 1 resolvable edge, got %+v", sbom.Dependencies)
+	}
+	edge := sbom.Dependencies[0]
+	if edge.FromPURL != "pkg:npm/a@1" || edge.ToPURL != "pkg:npm/b@2" {
+		t.Fatalf("bom-ref not resolved to purl: %+v", edge)
+	}
+}
+
+// TestCycloneDXAdapterSkipsUnresolvableDependencyFrom exercises the path where a
+// dependency's from-ref resolves to nothing (unknown, non-purl bom-ref): no edge.
+func TestCycloneDXAdapterSkipsUnresolvableDependencyFrom(t *testing.T) {
+	raw := []byte(`{
+		"bomFormat":"CycloneDX","specVersion":"1.5",
+		"components":[{"bom-ref":"ref-b","name":"b","version":"2","purl":"pkg:npm/b@2"}],
+		"dependencies":[{"ref":"unknown-ref","dependsOn":["ref-b"]}]
+	}`)
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Dependencies) != 0 {
+		t.Fatalf("want 0 edges (unresolvable from), got %+v", sbom.Dependencies)
 	}
 }
 
@@ -108,25 +148,17 @@ func TestCycloneDXAdapterDerivesNameVersionFromPURL(t *testing.T) {
 	}
 }
 
-func TestCycloneDXAdapterEmptyRatings(t *testing.T) {
-	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","vulnerabilities":[{"id":"CVE-2","ratings":[],"affects":[]}]}`)
+// TestCycloneDXAdapterIgnoresEmbeddedVulnerabilities confirms the CR-9 decision:
+// a CycloneDX document's embedded vulnerabilities section is not ingested (Themis
+// re-correlates), so it produces no findings and does not error.
+func TestCycloneDXAdapterIgnoresEmbeddedVulnerabilities(t *testing.T) {
+	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"name":"a","version":"1","purl":"pkg:npm/a@1"}],"vulnerabilities":[{"id":"CVE-2","ratings":[{"severity":"low","score":1}],"affects":[{"ref":"pkg:npm/a@1"}]}]}`)
 	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sbom.Vulnerabilities[0].Severity != "" {
-		t.Fatalf("severity = %q", sbom.Vulnerabilities[0].Severity)
-	}
-}
-
-func TestCycloneDXAdapterSkipsEmptyAffectRef(t *testing.T) {
-	raw := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","vulnerabilities":[{"id":"CVE-3","ratings":[{"severity":"low","score":1}],"affects":[{"ref":""},{"ref":"pkg:npm/a@1"}]}]}`)
-	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "1.4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sbom.Vulnerabilities[0].AffectedPURLs) != 1 {
-		t.Fatalf("affected = %v", sbom.Vulnerabilities[0].AffectedPURLs)
+	if len(sbom.Components) != 1 {
+		t.Fatalf("components = %d", len(sbom.Components))
 	}
 }
 
@@ -160,7 +192,7 @@ func TestParseFixtureFiles(t *testing.T) {
 		t.Fatalf("cyclonedx parse failed: %s", outcome.Message)
 	}
 	counts := InspectCanonicalSBOM(outcome.SBOM)
-	if counts["components"] != 2 || counts["dependencies"] != 1 || counts["vulnerabilities"] != 1 {
+	if counts["components"] != 2 || counts["dependencies"] != 1 {
 		t.Fatalf("cyclonedx counts = %+v", counts)
 	}
 
@@ -336,10 +368,9 @@ func TestAdapterFormats(t *testing.T) {
 func TestInspectCanonicalSBOMReadsAllFields(t *testing.T) {
 	counts := InspectCanonicalSBOM(domain.CanonicalSBOM{
 		Format: "cyclonedx", SpecVersion: "1.4",
-		Components: []domain.CanonicalComponent{{PURL: "pkg:npm/a@1", Name: "a", Version: "1", Ecosystem: "npm", Licenses: []string{"MIT"}}},
-		Dependencies:    []domain.CanonicalDependencyEdge{{FromPURL: "a", ToPURL: "b", RelationshipType: "depends_on"}},
-		Vulnerabilities: []domain.CanonicalVulnerability{{CVEID: "CVE-1", Severity: "high", CVSSScore: 1, CVSSVector: "v", AffectedPURLs: []string{"a"}, FixVersions: []string{"2"}}},
-		Warnings:        []string{"warn"},
+		Components:   []domain.CanonicalComponent{{PURL: "pkg:npm/a@1", Name: "a", Version: "1", Ecosystem: "npm", Licenses: []string{"MIT"}}},
+		Dependencies: []domain.CanonicalDependencyEdge{{FromPURL: "a", ToPURL: "b", RelationshipType: "depends_on"}},
+		Warnings:     []string{"warn"},
 	})
 	if counts["components"] != 1 {
 		t.Fatalf("counts = %+v", counts)

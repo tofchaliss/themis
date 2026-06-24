@@ -2,6 +2,7 @@
 -- There is no in-place downgrade; this exists so `migrate down` returns to a
 -- clean database for local/CI re-initialisation.
 
+DROP TABLE IF EXISTS feed_health CASCADE;
 DROP TABLE IF EXISTS epss_kev_signals CASCADE;
 DROP TABLE IF EXISTS exploit_records CASCADE;
 DROP TABLE IF EXISTS asset_graph_edges CASCADE;

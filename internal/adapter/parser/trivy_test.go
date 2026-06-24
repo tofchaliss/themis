@@ -5,21 +5,14 @@ import (
 	"testing"
 )
 
-func TestTrivyAdapterMapsVulnerabilities(t *testing.T) {
+func TestTrivyAdapterBuildsComponents(t *testing.T) {
 	raw := []byte(`{
 		"Results":[
 			{
 				"Target":"node_modules/lodash (npm)",
 				"Type":"npm",
 				"Vulnerabilities":[
-					{
-						"VulnerabilityID":"CVE-2021-23337",
-						"Severity":"HIGH",
-						"FixedVersion":"4.17.22",
-						"PkgName":"lodash",
-						"InstalledVersion":"4.17.21",
-						"CVSS":{"nvd":{"V3Score":7.2,"V3Vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}}
-					}
+					{"VulnerabilityID":"CVE-2021-23337","Severity":"HIGH","FixedVersion":"4.17.22","PkgName":"lodash","InstalledVersion":"4.17.21"}
 				]
 			}
 		]
@@ -28,15 +21,25 @@ func TestTrivyAdapterMapsVulnerabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sbom.Vulnerabilities) != 1 {
-		t.Fatalf("vulnerabilities = %+v", sbom.Vulnerabilities)
-	}
-	v := sbom.Vulnerabilities[0]
-	if v.CVEID != "CVE-2021-23337" || v.Severity != "high" || v.CVSSScore != 7.2 || len(v.FixVersions) != 1 {
-		t.Fatalf("vuln = %+v", v)
-	}
 	if len(sbom.Components) != 1 || sbom.Components[0].PURL != "pkg:npm/lodash@4.17.21" {
 		t.Fatalf("components = %+v", sbom.Components)
+	}
+}
+
+// TestTrivyAdapterMultiplePackagesPerResult locks in the CR-9 fix: a result with
+// several packages yields one component each, not just the first.
+func TestTrivyAdapterMultiplePackagesPerResult(t *testing.T) {
+	raw := []byte(`{"Results":[{"Target":"app","Type":"npm","Vulnerabilities":[
+		{"VulnerabilityID":"CVE-1","PkgName":"lodash","InstalledVersion":"4.17.21"},
+		{"VulnerabilityID":"CVE-2","PkgName":"express","InstalledVersion":"4.18.2"},
+		{"VulnerabilityID":"CVE-3","PkgName":"lodash","InstalledVersion":"4.17.21"}
+	]}]}`)
+	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Components) != 2 {
+		t.Fatalf("want 2 distinct components, got %+v", sbom.Components)
 	}
 }
 
@@ -45,36 +48,22 @@ func TestTrivyAdapterEmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sbom.Components) != 0 || len(sbom.Vulnerabilities) != 0 {
+	if len(sbom.Components) != 0 {
 		t.Fatalf("sbom = %+v", sbom)
 	}
 }
 
-func TestTrivyAdapterUnknownSeverity(t *testing.T) {
-	raw := []byte(`{"Results":[{"Target":"app","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-1","PkgName":"x","InstalledVersion":"1"}]}]}`)
+func TestTrivyAdapterDedupesComponentsAcrossResults(t *testing.T) {
+	raw := []byte(`{"Results":[
+		{"Target":"a","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-1","PkgName":"lodash","InstalledVersion":"1.0.0"}]},
+		{"Target":"b","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-2","PkgName":"lodash","InstalledVersion":"1.0.0"}]}
+	]}`)
 	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sbom.Vulnerabilities[0].Severity != "unknown" {
-		t.Fatalf("severity = %q", sbom.Vulnerabilities[0].Severity)
-	}
-	if len(sbom.Warnings) != 1 {
-		t.Fatalf("warnings = %v", sbom.Warnings)
-	}
-}
-
-func TestTrivyAdapterBuildsAffectedWhenComponentMissing(t *testing.T) {
-	raw := []byte(`{"Results":[{"Type":"","Vulnerabilities":[{"VulnerabilityID":"CVE-4","Severity":"LOW","PkgName":"lib","InstalledVersion":"1.0"}]}]}`)
-	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sbom.Components) != 0 {
-		t.Fatalf("components = %+v", sbom.Components)
-	}
-	if len(sbom.Vulnerabilities) != 1 || sbom.Vulnerabilities[0].AffectedPURLs[0] != "" {
-		t.Fatalf("vuln = %+v", sbom.Vulnerabilities[0])
+	if len(sbom.Components) != 1 {
+		t.Fatalf("components = %d", len(sbom.Components))
 	}
 }
 
@@ -89,20 +78,30 @@ func TestTrivyAdapterTargetWithoutVulnerabilities(t *testing.T) {
 	}
 }
 
-func TestTrivyAdapterDedupesComponents(t *testing.T) {
-	raw := []byte(`{"Results":[
-		{"Target":"a","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-1","Severity":"LOW","PkgName":"lodash","InstalledVersion":"1.0.0"}]},
-		{"Target":"b","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-2","Severity":"LOW","PkgName":"lodash","InstalledVersion":"1.0.0"}]}
-	]}`)
+func TestTrivyAdapterEmptyTypeSkipped(t *testing.T) {
+	raw := []byte(`{"Results":[{"Type":"","Vulnerabilities":[{"VulnerabilityID":"CVE-4","PkgName":"lib","InstalledVersion":"1.0"}]}]}`)
 	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sbom.Components) != 1 {
-		t.Fatalf("components = %d", len(sbom.Components))
+	if len(sbom.Components) != 0 {
+		t.Fatalf("components = %+v", sbom.Components)
 	}
-	if len(sbom.Vulnerabilities) != 2 {
-		t.Fatalf("vulnerabilities = %d", len(sbom.Vulnerabilities))
+}
+
+func TestTrivyAdapterSkipsEmptyPkgName(t *testing.T) {
+	// A result mixing a packaged vuln with an empty-PkgName entry: the empty one
+	// is skipped, the packaged one yields a component (exercises the inner skip).
+	raw := []byte(`{"Results":[{"Target":"app","Type":"npm","Vulnerabilities":[
+		{"VulnerabilityID":"CVE-1","PkgName":"","InstalledVersion":""},
+		{"VulnerabilityID":"CVE-2","PkgName":"lodash","InstalledVersion":"1.0.0"}
+	]}]}`)
+	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sbom.Components) != 1 || sbom.Components[0].PURL != "pkg:npm/lodash@1.0.0" {
+		t.Fatalf("components = %+v", sbom.Components)
 	}
 }
 
@@ -113,33 +112,14 @@ func TestTrivyAdapterMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestTrivyComponentPURLFromTarget(t *testing.T) {
-	purl := trivyComponentPURL(trivyResult{Target: "my-app (npm)", Type: "npm"})
-	if purl != "pkg:npm/my-app" {
-		t.Fatalf("purl = %q", purl)
+func TestTrivyTargetPURL(t *testing.T) {
+	if got := trivyTargetPURL(trivyResult{Target: "my-app (npm)", Type: "npm"}); got != "pkg:npm/my-app" {
+		t.Fatalf("purl = %q", got)
 	}
-}
-
-func TestTrivyComponentPURLEmptyType(t *testing.T) {
-	if purl := trivyComponentPURL(trivyResult{Target: "app"}); purl != "" {
-		t.Fatalf("purl = %q", purl)
+	if got := trivyTargetPURL(trivyResult{Target: "app"}); got != "" {
+		t.Fatalf("empty type purl = %q", got)
 	}
-}
-
-func TestTrivyComponentPURLFromTypeOnly(t *testing.T) {
-	purl := trivyComponentPURL(trivyResult{Type: "npm", Target: ""})
-	if purl != "pkg:npm/npm" {
-		t.Fatalf("purl = %q", purl)
-	}
-}
-
-func TestTrivyAffectedPURLWithoutComponent(t *testing.T) {
-	raw := []byte(`{"Results":[{"Target":"","Type":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-2","PkgName":"lib","InstalledVersion":"1.2.3"}]}]}`)
-	sbom, err := (TrivyAdapter{}).Parse(context.Background(), raw, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sbom.Vulnerabilities[0].AffectedPURLs[0] != "pkg:npm/lib@1.2.3" {
-		t.Fatalf("affected = %v", sbom.Vulnerabilities[0].AffectedPURLs)
+	if got := trivyTargetPURL(trivyResult{Type: "npm", Target: ""}); got != "pkg:npm/npm" {
+		t.Fatalf("type-only purl = %q", got)
 	}
 }

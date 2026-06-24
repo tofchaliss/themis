@@ -172,7 +172,10 @@ CREATE TABLE vulnerabilities (
     fix_versions TEXT[] NOT NULL DEFAULT '{}',
     reference_urls TEXT[] NOT NULL DEFAULT '{}',
     published_at TIMESTAMPTZ,
-    discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- CR-5: when the NVD-by-CVE CVSS backfill last checked this row, so genuinely
+    -- un-scored (very recent) CVEs are retried with a back-off rather than looped.
+    cvss_checked_at TIMESTAMPTZ
 );
 
 -- component_vulnerabilities: the raw finding. The only per-scan judgment row.
@@ -186,6 +189,14 @@ CREATE TABLE component_vulnerabilities (
     scan_report_id UUID NOT NULL REFERENCES scan_reports(id),
     component_purl TEXT NOT NULL,
     cve_id TEXT NOT NULL,
+    -- CR-3 finding provenance: which source produced this finding and what it
+    -- asserted, so multiple correlation sources can be merged by explicit
+    -- precedence. 'legacy' marks pre-provenance / backfilled rows.
+    source TEXT NOT NULL DEFAULT 'legacy',
+    source_severity TEXT NOT NULL DEFAULT '',
+    source_cvss_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    source_cvss_vector TEXT NOT NULL DEFAULT '',
+    source_fixed_version TEXT NOT NULL DEFAULT '',
     detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (component_version_id, vulnerability_id, scan_report_id)
 );
@@ -396,6 +407,19 @@ CREATE TABLE system_state (
 
 INSERT INTO system_state (key, value)
 VALUES ('cve_watch_last_success', NOW());
+
+-- feed_health (CR-8): operator-facing per-feed health, upserted on every sync
+-- cycle. Drives degraded_feeds[] on GET /api/v1/status so every feed line's
+-- status is visible, not just EPSS/KEV staleness.
+CREATE TABLE feed_health (
+    feed TEXT PRIMARY KEY,
+    class TEXT NOT NULL DEFAULT '',
+    tier INTEGER NOT NULL DEFAULT 0,
+    last_success_at TIMESTAMPTZ,
+    last_attempt_at TIMESTAMPTZ,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT ''
+);
 
 -- ---------------------------------------------------------------------------
 -- Phase 2a: asset graph + threat-signal entities (unchanged logic)

@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/themis-project/themis/internal/domain"
 	httpserver "github.com/themis-project/themis/internal/infrastructure/http"
 )
 
 func TestStartEPSSKevSchedulerNilService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	httpserver.StartEPSSKevScheduler(ctx, nil, time.Millisecond)
+	httpserver.StartEPSSKevScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 }

@@ -288,12 +288,21 @@ func (p *Pipeline) correlateComponents(
 					return stageError(domain.IngestionStatusCorrelating, upsertErr, true)
 				}
 			}
+			fixedVersion := ""
+			if len(vuln.FixVersions) > 0 {
+				fixedVersion = vuln.FixVersions[0]
+			}
 			if _, err := p.Correlate.CreateFinding(ctx, domain.CreateFindingInput{
 				ComponentVersionID: componentVersionID,
 				VulnerabilityID:    vulnID,
 				ScanReportID:       scanReportID,
 				ComponentPURL:      versionedPURL,
 				CVEID:              vuln.CVEID,
+				Source:             domain.DefaultFindingSource(vuln.Source),
+				SourceSeverity:     vuln.Severity,
+				SourceCVSSScore:    vuln.CVSSScore,
+				SourceCVSSVector:   vuln.CVSSVector,
+				SourceFixedVersion: fixedVersion,
 			}); err != nil {
 				return stageError(domain.IngestionStatusCorrelating, err, true)
 			}

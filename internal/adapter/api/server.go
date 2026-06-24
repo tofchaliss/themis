@@ -29,6 +29,7 @@ type Dependencies struct {
 	Status        domain.SystemStatusRepository
 	SBOMMgmt      domain.SBOMManagementRepository
 	ThreatSignals domain.ThreatSignalStore
+	FeedHealth    domain.FeedHealthReader
 	Audit         domain.AuditRecorder
 	MaxUpload     int64
 	TrustPolicy   domain.TrustPolicy

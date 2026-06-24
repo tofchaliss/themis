@@ -144,6 +144,11 @@ func (r *PostgresWatchRepository) CreateWatchFinding(ctx context.Context, input 
 		ScanReportID:       input.ScanReportID,
 		ComponentPURL:      input.ComponentPURL,
 		CVEID:              input.CVEID,
+		Source:             domain.DefaultFindingSource(input.Source),
+		SourceSeverity:     input.Severity,
+		SourceCVSSScore:    input.SourceCVSSScore,
+		SourceCVSSVector:   input.SourceCVSSVector,
+		SourceFixedVersion: input.SourceFixedVersion,
 	})
 	if err != nil {
 		return domain.CreateWatchFindingResult{}, err

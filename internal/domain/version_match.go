@@ -18,6 +18,18 @@ func VersionedPURL(purl, version string) string {
 	return purl + "@" + version
 }
 
+// StripPURLVersionQualifiers removes the PURL qualifier (?key=val) and subpath
+// (#path) that real SBOM purls append after the version — e.g.
+// "8.14.1-r2?arch=x86_64&distro=3.20.2" → "8.14.1-r2". One shared helper for the
+// parser and the vendor-VEX matcher so version comparison never trips on
+// qualifiers (CR-9).
+func StripPURLVersionQualifiers(version string) string {
+	if i := strings.IndexAny(version, "?#"); i >= 0 {
+		return version[:i]
+	}
+	return version
+}
+
 // NormalizeEcosystem maps feed and PURL ecosystem names to a canonical lowercase key.
 func NormalizeEcosystem(ecosystem string) string {
 	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
@@ -73,25 +85,34 @@ func PackageIdentityMatch(recordEcosystem, recordName, componentEcosystem, compo
 // range is present but yields no usable bound, so a parse gap fails closed rather
 // than claiming every version is affected).
 func VersionMatches(affected []string, version string) bool {
+	return VersionMatchesEco("", affected, version)
+}
+
+// VersionMatchesEco is VersionMatches with ecosystem-aware ordering: every
+// comparator inside a group is evaluated with CompareVersionsEco so apk (-rN) and
+// rpm (epoch/release/~) versions compare by their own rules on every code path.
+// An empty ecosystem falls back to the generic numeric-aware comparator, so
+// VersionMatches behaviour is unchanged.
+func VersionMatchesEco(ecosystem string, affected []string, version string) bool {
 	if len(affected) == 0 {
 		return true
 	}
 	for _, group := range affected {
-		if matchConstraintGroup(group, version) {
+		if matchConstraintGroup(ecosystem, group, version) {
 			return true
 		}
 	}
 	return false
 }
 
-func matchConstraintGroup(group, version string) bool {
+func matchConstraintGroup(ecosystem, group, version string) bool {
 	matched := false
 	for _, raw := range strings.Split(group, ",") {
 		candidate := strings.TrimSpace(raw)
 		if candidate == "" {
 			continue
 		}
-		if !matchConstraint(candidate, version) {
+		if !matchConstraint(ecosystem, candidate, version) {
 			return false
 		}
 		matched = true
@@ -100,20 +121,20 @@ func matchConstraintGroup(group, version string) bool {
 }
 
 // matchConstraint evaluates a single comparator, exact version, or wildcard.
-func matchConstraint(candidate, version string) bool {
+func matchConstraint(ecosystem, candidate, version string) bool {
 	switch {
 	case candidate == "none":
 		return false
 	case candidate == "*", candidate == "unknown", candidate == version:
 		return true
 	case strings.HasPrefix(candidate, "<="):
-		return CompareVersions(version, strings.TrimSpace(candidate[2:])) <= 0
+		return CompareVersionsEco(ecosystem, version, strings.TrimSpace(candidate[2:])) <= 0
 	case strings.HasPrefix(candidate, ">="):
-		return CompareVersions(version, strings.TrimSpace(candidate[2:])) >= 0
+		return CompareVersionsEco(ecosystem, version, strings.TrimSpace(candidate[2:])) >= 0
 	case strings.HasPrefix(candidate, "<"):
-		return CompareVersions(version, strings.TrimSpace(candidate[1:])) < 0
+		return CompareVersionsEco(ecosystem, version, strings.TrimSpace(candidate[1:])) < 0
 	case strings.HasPrefix(candidate, ">"):
-		return CompareVersions(version, strings.TrimSpace(candidate[1:])) > 0
+		return CompareVersionsEco(ecosystem, version, strings.TrimSpace(candidate[1:])) > 0
 	default:
 		return false
 	}
