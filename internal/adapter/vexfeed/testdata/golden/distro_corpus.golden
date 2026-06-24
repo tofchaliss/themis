@@ -1,0 +1,4 @@
+pkg:apk/busybox@1.36.1-r0|CVE-2024-A|distro_osv
+pkg:apk/curl@8.0.0|CVE-2024-D|distro_osv
+pkg:apk/openssl@3.0.5|CVE-2024-B|distro_osv
+pkg:rpm/httpd@2.4.37-30.el8|CVE-2024-C|distro_osv

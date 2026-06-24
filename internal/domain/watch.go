@@ -20,6 +20,8 @@ type FeedVulnerability struct {
 	PackageName      string
 	AffectedVersions []string
 	FixVersions      []string
+	// Source records which feed produced this record (CR-3 provenance).
+	Source string
 }
 
 // WatchCatalogEntry is a component version (of an artifact's latest scan) tracked
@@ -48,6 +50,11 @@ type CreateWatchFindingInput struct {
 	ProductID          string
 	ProjectID          string
 	ComponentPURL      string
+	// Provenance (CR-3): which source produced this watch finding and what it asserted.
+	Source             string
+	SourceCVSSScore    float64
+	SourceCVSSVector   string
+	SourceFixedVersion string
 }
 
 // CreateWatchFindingResult reports whether a new finding row was created.

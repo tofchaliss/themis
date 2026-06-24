@@ -204,6 +204,8 @@ func TestPhase2aMetricsRegistered(t *testing.T) {
 	metrics.ExploitDBMetrics{}.RecordSync("error")
 	metrics.EnrichmentMetrics{}.RecordLayer1Rule("Critical")
 	metrics.EnrichmentMetrics{}.RecordBlastRadiusScore(1.5)
+	metrics.CVSSBackfillMetrics{}.RecordBackfill("updated")
+	metrics.CVSSBackfillMetrics{}.RecordBackfill("checked")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)

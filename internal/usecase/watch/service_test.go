@@ -52,6 +52,71 @@ func TestRunCycleNVDSuccess(t *testing.T) {
 	}
 }
 
+type stubCorrelator struct {
+	records []domain.VulnerabilityRecord
+	err     error
+}
+
+func (s stubCorrelator) FetchForComponent(context.Context, domain.CanonicalComponent) ([]domain.VulnerabilityRecord, error) {
+	return s.records, s.err
+}
+
+// TestRunCycleCorrelatorPath covers the CR-2 cutover: each catalog component is
+// re-correlated through the shared Correlator (distro index) and yields findings.
+func TestRunCycleCorrelatorPath(t *testing.T) {
+	repo := &memoryWatchRepo{
+		lastSuccess: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		catalog: []domain.WatchCatalogEntry{
+			{ComponentVersionID: "cv-1", PURL: "pkg:apk/busybox", Name: "busybox", Ecosystem: "apk", Version: "1.36.0", ArtifactID: "sbom-1", ProductID: "prod-1"},
+		},
+	}
+	svc := &watch.Service{
+		OSV:  &stubOSV{},
+		Repo: repo,
+		Correlator: stubCorrelator{records: []domain.VulnerabilityRecord{
+			{CVEID: "CVE-2024-1", Severity: "high", Ecosystem: "apk", PackageName: "busybox", Source: domain.FindingSourceDistroOSV},
+		}},
+		Clock: func() time.Time { return time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC) },
+	}
+	if err := svc.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle() error = %v", err)
+	}
+	if repo.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1 from correlator", repo.createCalls)
+	}
+}
+
+func TestRunCycleCorrelatorError(t *testing.T) {
+	repo := &memoryWatchRepo{
+		catalog: []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", PURL: "pkg:apk/busybox", Name: "busybox", Ecosystem: "apk", Version: "1.36.0"}},
+	}
+	svc := &watch.Service{
+		OSV:        &stubOSV{},
+		Repo:       repo,
+		Correlator: stubCorrelator{err: errors.New("correlator down")},
+		Clock:      func() time.Time { return time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC) },
+	}
+	if err := svc.RunCycle(context.Background()); err == nil {
+		t.Fatal("expected correlator error to propagate")
+	}
+}
+
+func TestRunCycleCorrelatorCreateError(t *testing.T) {
+	repo := &memoryWatchRepo{
+		catalog:   []domain.WatchCatalogEntry{{ComponentVersionID: "cv-1", PURL: "pkg:apk/busybox", Name: "busybox", Ecosystem: "apk", Version: "1.36.0"}},
+		createErr: errors.New("create failed"),
+	}
+	svc := &watch.Service{
+		OSV:        &stubOSV{},
+		Repo:       repo,
+		Correlator: stubCorrelator{records: []domain.VulnerabilityRecord{{CVEID: "CVE-1", Ecosystem: "apk", PackageName: "busybox"}}},
+		Clock:      func() time.Time { return time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC) },
+	}
+	if err := svc.RunCycle(context.Background()); err == nil {
+		t.Fatal("expected create error from correlator path")
+	}
+}
+
 func TestRunCycleDuplicateSkipped(t *testing.T) {
 	repo := &memoryWatchRepo{
 		lastSuccess: time.Now().UTC().Add(-time.Hour),

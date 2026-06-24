@@ -42,6 +42,13 @@ type VendorVEXAssertion struct {
 	Fixed         string
 	PackageName   string
 	Ecosystem     string
+	// Severity carried from the source feed (CR-4): distro OSV records often carry
+	// severity in database_specific/severity, which was previously discarded. Used
+	// when a distro feed is consumed as a correlation source so findings are not
+	// left severity=unknown (D-FEED-1 / D-CVSS-1).
+	Severity   string
+	CVSSScore  float64
+	CVSSVector string
 }
 
 // Phase 2a composite risk score formula constants.
@@ -52,6 +59,14 @@ const (
 	RiskScoreBlastRadiusMax    = 2.0
 	RiskScoreBlastRadiusCap    = 10
 	BlastRadiusTraversalDepth  = 7
+)
+
+// CR-5 interim risk floors for findings whose severity is still unknown (no CVSS
+// yet) but which carry a confirming threat signal — so an actively-exploited or
+// confirmed-vulnerable finding never scores 0 while awaiting CVSS backfill.
+const (
+	RiskScoreUnknownKEVFloor       = 50 // KEV = actively exploited in the wild
+	RiskScoreUnknownConfirmedFloor = 25 // public exploit or vendor-confirmed affected
 )
 
 // ComputeBlastRadiusScore maps unique Customer count to a 1.0–2.0 multiplier.

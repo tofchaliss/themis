@@ -487,7 +487,11 @@ Reference: `openspec/intel-source-tiers.md`.
 
 ### DEFECT D-CVSS-1 — CVSS/severity never enriched for OSV-origin (apk/rpm) findings (BLOCKING Phase 2b)
 
-**Status:** Open — **must be fixed before Phase 2b (AI knowledge layer).**
+**Status:** ✅ RESOLVED (2026-06-24) — implemented as **CR-5** (NVD `FetchByCVEID` CVSS
+backfill + ReEnrich propagation + interim risk floor) and **CR-4** (distro feeds now carry
+severity into correlation findings). All gates green on branch `themis-phase-2`. Phase 2b is
+unblocked. *Remaining: G1–G8 verification on a real Alpine/RPM deployment (operational E2E).*
+The original analysis below is retained for history.
 **Severity:** High (functional — blocks prioritisation for the primary Alpine/apk use case).
 **Found:** 2026-06-21, during the v0.3.0 Layer 0 audit (the same audit that fixed the
 correlation over-match, the double-versioned `component_purl`, and risk-score saturation —
@@ -568,8 +572,11 @@ vectors, not NVD backfill).
 
 ### DEFECT D-FEED-1 — Vendor "VEX" feeders conflate three feed classes; OSV/RHSA correlation data is miscategorised as VEX overlay (architectural)
 
-**Status:** Open — **next change cycle** (do **not** pull into the v0.2.1 testing cycle now in
-progress; this is a design/layering change, not a patch).
+**Status:** ✅ RESOLVED (2026-06-24) — implemented as **CR-4** (feed taxonomy split
+`rhel_vex_url`/`rhel_csaf_url`; Alpine/Rocky/Wolfi OSV + RHSA advisories re-layered as
+correlation sources carrying severity + fixed version; overlay now carries only true Red Hat
+CSAF VEX; `csaf.go` "known affected" typo fixed; RHSA NEVRA range extraction). All gates green
+on branch `themis-phase-2`. The original analysis below is retained for history.
 **Severity:** High (architectural / correctness) — Themis currently consumes **zero true
 vendor VEX**, runs a second hidden correlation engine inside the VEX overlay, and discards the
 distro-authoritative data that would resolve [D-CVSS-1]. Not a crash; a wrong-by-design data flow.
@@ -702,8 +709,11 @@ not in the VEX overlay (Layer 2/3 exploitability context).
 
 ### DEFECT D-NVD-1 — NVD CPE feeder over-matches version ranges and misclassifies ecosystem (Layer-0 correctness)
 
-**Status:** Open — **next change cycle** (do **not** pull into the v0.2.1 testing cycle now in
-progress).
+**Status:** ✅ RESOLVED (2026-06-24) — implemented as **CR-1** (unified version engine:
+`BuildConstraintGroup` keeps the lower bound as one AND group; `versionStartExcluding` honored)
+and **CR-6** (NVD CPE rebuilt on that engine; `vendor==product → npm` guess removed). Finding 3
+(multi-version CVSS parse v3.1→v3.0→v2.0) landed in **CR-5/CR-6**. All gates green on branch
+`themis-phase-2`. The original analysis below is retained for history.
 **Severity:** High for the over-match (#1); Medium for the ecosystem and CVSS-coverage issues
 (#2, #3). #1 is the **same over-match class already fixed in the OSV feeder** during the v0.3.0
 Layer-0 audit (see commit `f6b4d97`, "fix Layer 0 vulnerability correlation and identity") — but
@@ -822,9 +832,13 @@ already in `internal/adapter/osv/cvss.go` where a vector is present but a base s
 
 ### DEFECT D-LOG-1 — Logging architecture is configured but barely propagated; most modules are silent at runtime (observability)
 
-**Status:** Open — **next change cycle.** Logging additions are low-risk/additive, but the fix
-is an architecture change (unify loggers + propagate through a port), so it is scoped as its own
-change, not pulled into the v0.2.1 testing cycle now in progress.
+**Status:** ✅ RESOLVED (2026-06-24) — implemented as **CR-7**: a `domain.Logger` port over zap,
+DI-injected into the schedulers, feed services, correlator, and feed clients; all four feed
+schedulers now log per-cycle success/failure; the vexfeed `SyncLogger` is wired; `slog.Default()`
+is retired from osv/vexfeed (clean-arch preserved — no zap/slog in domain/usecase). All gates
+green on branch `themis-phase-2`. *Note: `adapter/notify` still uses an injected `*slog.Logger`
+(discard default) — not a `slog.Default()` leak; full unification onto the port is optional.*
+The original analysis below is retained for history.
 **Severity:** High (operability) — operators cannot tell what Themis is doing. The system
 surfaces *composition* data (what is in the SBOM) but there is no runtime log of whether feeds
 fetched, whether correlation/enrichment ran, whether jobs failed, or what config is live. This
@@ -953,13 +967,67 @@ while the rest of the system logs in a different format, at a fixed level, or no
 
 ## Layer-0 Correctness & Observability Refactor (CR-1 … CR-10)
 
-**Status:** PLAN — no code changes until each CR is approved and scheduled.
+**Status:** ✅ IMPLEMENTED (2026-06-24) — all of CR-1 … CR-10 are coded on branch
+`themis-phase-2`; every gate is green (build → unit → coverage [all per-package thresholds] →
+deadcode → integration → clean-arch → verify-build). **Not yet committed or tagged.** See
+"Implementation status & unfinished tasks" immediately below for the per-CR result and the short
+list of what genuinely remains.
 **Created:** 2026-06-21 (v0.3.0 Layer-0 audit).
 **Scope:** the correlation/feeder/observability core that determines whether Themis tells the
 truth and whether operators can see it. Excludes Phase 2b AI work (separate track).
 **Relationship to the DEFECT entries above:** this section is the structural **parent** of
 D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1 and of the feeder candidate changes below. Those are the
 symptoms; the CRs here fix the causes. This is the single source of truth for execution.
+
+### Implementation status & unfinished tasks (2026-06-24)
+
+All ten CRs are implemented on branch `themis-phase-2`; all gates green; **not yet committed or
+tagged**. The four root causes (R1 forked version logic, R2 multiple correlation engines, R3
+observability afterthought) are eliminated.
+
+| CR | Result |
+| -- | ------ |
+| CR-1 unify version semantics | ✅ Done. `domain` engine: `CompareVersionsEco` (generic/apk/rpm incl. rpmvercmp `~`), `VersionConstraintSet`, `BuildConstraintGroup`. osv/nvd/vexfeed/watch all call it; 3 forked vexfeed comparators deleted. 100% domain coverage + property tests. |
+| CR-2 single correlator + source port | ✅ Done. `domain.CorrelationSource` + `usecase/correlation.Correlator` (multi-source, provenance tagging, precedence merge, deterministic order). Wired into ingest **and** watch (watch re-correlates catalog components through the shared distro index). 100% covered + order-independence property test. |
+| CR-3 finding provenance | ✅ Done. `source`/`source_severity`/`source_cvss_score`/`source_cvss_vector`/`source_fixed_version` columns folded into the v0.3.0 baseline; distro-authoritative precedence (strict total order); tagged at both feeds; populated at ingest + watch; persisted; unit + integration tests. |
+| CR-4 feed taxonomy + re-layering | ✅ Done. Config split `rhel_vex_url` (overlay) + `rhel_csaf_url` (correlation), `rhel_url` deprecated alias; Alpine/Rocky/Wolfi OSV + RHSA advisories are correlation sources (severity + fixed); overlay = true VEX only; `csaf.go` typo fixed; **RHSA NEVRA range extraction** done. |
+| CR-5 CVSS/severity enrichment | ✅ Done. NVD `FetchByCVEID` + `CVSSBackfillService` (back-off via `cvss_checked_at` column) + catalog→risk_context propagation + re-enrich trigger + `themis_cvss_backfill_total` metric + interim risk floor. *Operational E2E (G1–G8 on real SBOMs) still to confirm on a deployment.* |
+| CR-6 NVD CPE correctness | ✅ Done (with CR-1). Lower bound preserved, `versionStartExcluding`, no `vendor==product→npm`, multi-version CVSS. |
+| CR-7 observability / logging | ✅ Done. `domain.Logger` port over zap, DI-injected; schedulers/feeders log success/failure; `slog.Default()` retired in osv/vexfeed; feed-health surface (CR-8). |
+| CR-8 operator feed-health surface | ✅ Done. `feed_health` table (baseline up/down) + recorder wired into all schedulers + `degraded_feeds[]` on `GET /api/v1/status`. |
+| CR-9 parser integrity | ✅ Done. Trivy one-component-per-package, CycloneDX bom-ref→purl edges, shared PURL-qualifier helper, dead `CanonicalSBOM.Vulnerabilities` parsing removed (decision: pure re-correlator). |
+| CR-10 regression corpus + property tests | ✅ Done (core). `internal/testutil/findingset` diff harness + golden distro corpus; property tests for CR-1 (comparator laws, range over-match) and CR-2 (merge order-independence); parser robustness already covered. *Corpus may be expanded with real sanitised feed slices over time.* |
+
+**Open product decisions — RESOLVED (signed off 2026-06-24):**
+
+1. CR-9 scanner findings → **remove the dead parsing** (Themis stays a pure re-correlator).
+2. CR-3 precedence → **distro-authoritative** (distro feed > OSV.dev > NVD for apk/rpm; OSV.dev/NVD for app ecosystems).
+3. CR-3 timing → **fold the new columns into the v0.3.0 baseline** migration.
+
+**Unfinished tasks (what genuinely remains):**
+
+1. **Commit + tag** — the work is staged on `themis-phase-2`, not yet committed; tag `v0.3.0`
+   (core-model + this refactor) per the release plan.
+2. **Real-SBOM E2E (G1–G8)** — verify on a deployment with live Alpine **and** RPM SBOMs +
+   reachable feeds + NVD key. Unit/integration prove the logic; the live bring-up is unverified
+   in-repo (it is the refactor's one operational Definition-of-done item).
+3. **User-defined feed registry** (`themis-feed-registry`, below) — CR-4 delivered the feed
+   *class* taxonomy but **not** the `vexfeed.feeds:` delta list to add/remove/disable arbitrary
+   feeds. Feeds are still fixed in DI (no per-feed on/off). Tracked as a follow-on candidate.
+4. **Corpus expansion (CR-10)** — seed the golden corpus with real sanitised Alpine/RPM/npm
+   SBOMs, OSV zip slices, NVD CPE samples, and CSAF/RHSA fixtures (the synthetic boundary matrix
+   is in; real feed slices are the enrichment).
+5. **`adapter/notify` logger unification (CR-7, optional)** — notify uses an injected
+   `*slog.Logger` (discard default); migrating it onto `domain.Logger` would make logging fully
+   uniform. Not a `slog.Default()` leak.
+6. **OpenSpec formalization (docs)** — this refactor was executed as CRs in this backlog, not as
+   an `openspec/changes/` change. Optional follow-up: create `themis-layer0-refactor` (or fold
+   into `themis-core-model`), sync spec deltas for `upstream-vex-feeds` / `intelligence-enrichment`
+   / `cve-watch` / `sbom-parser`, and archive. README / `themis.yaml.example` / `PROJECT_CONTEXT.md`
+   / `openspec/STATUS.md` are already updated (2026-06-24).
+
+Pre-existing, out of refactor scope: 3 `deadcode` findings on `enrichment/metrics.go`
+`NoOpMetricsRecorder` (present on `HEAD` before this work).
 
 ### Why this refactor exists
 
@@ -1306,22 +1374,22 @@ Risk/Deps → Maps to**.
 | Schema change late in v0.3.0 | additive only; can defer to a follow-on migration |
 | Mid-cycle disruption to v0.2.1 testing | plan only now; no code until v0.2.1 testing closes |
 
-### Open product decisions (need sign-off before the relevant CR)
+### Open product decisions — RESOLVED (2026-06-24)
 
-1. **CR-9 — scanner findings:** import Trivy/Grype findings as a `CorrelationSource` (correlator
-   **and** aggregator), or remove the dead parsing (pure correlator)?
-2. **CR-3 — provenance precedence:** confirm the source ranking (proposed: distro-authoritative >
-   OSV.dev > NVD for distro packages; OSV.dev/NVD for app ecosystems).
-3. **CR-3 timing:** fold columns into the v0.3.0 baseline before tag, or ship as a new migration?
+1. **CR-9 — scanner findings:** ✅ **remove the dead parsing** (Themis stays a pure re-correlator).
+2. **CR-3 — provenance precedence:** ✅ **distro-authoritative** (distro feed > OSV.dev > NVD for
+   distro packages; OSV.dev/NVD for app ecosystems) — implemented as a strict total order.
+3. **CR-3 timing:** ✅ **fold columns into the v0.3.0 baseline** migration.
 
 ### Definition of done
 
-- R1/R2/R3 eliminated: one version engine, one correlator with provenance, one observable logger.
-- D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1 closed with tests.
-- Golden corpus in CI; G1–G8 pass on real Alpine **and** RPM SBOMs.
-- All six gates green for every CR; clean-arch preserved (no zap/slog in domain/usecase).
-- Operators can answer "is my feeder working and what did it find" from `/status`, `/metrics`, and
-  logs without a proxy or SQL.
+- ✅ R1/R2/R3 eliminated: one version engine, one correlator with provenance, one observable logger.
+- ✅ D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1 closed with tests.
+- ✅ Golden corpus + finding-set diff harness in the test suite; property tests for CR-1/CR-2.
+  ⏳ **G1–G8 on real Alpine + RPM SBOMs** is the one outstanding (operational E2E) item.
+- ✅ All six gates green for every CR; clean-arch preserved (no zap/slog in domain/usecase).
+- ✅ Operators can answer "is my feeder working and what did it find" from `/status`
+  (`degraded_feeds[]`), `/metrics` (`themis_cvss_backfill_total` etc.), and structured logs.
 
 ---
 
@@ -1346,11 +1414,13 @@ can be cut as soon as Group 31 + the Group 16 hardening remainder are green.
 
 ---
 
-### Candidate change — Feed observability (`themis-feed-observability`) — Proposed
+### Candidate change — Feed observability (`themis-feed-observability`) — ✅ DONE (CR-8, 2026-06-24)
 
-> **Consolidated → CR-8** in the Layer-0 Refactor section above (built on the CR-7 logging
-> foundation and the CR-4 feed-class field) — the single source of truth for execution; this
-> section is retained for the detailed problem analysis below.
+> **Implemented as CR-8** (2026-06-24): `feed_health` table (folded into the v0.3.0 baseline,
+> up + down), a recorder wired into every feed scheduler (success resets / failure increments the
+> streak), and `degraded_feeds[]` on `GET /api/v1/status`. The detailed problem analysis below is
+> retained for history. *Optional remaining polish: a `FEED_DEGRADED` push notification and a
+> `/readyz` per-tier signal (the table + status surface are in).*
 
 **Type:** additive new capability (schema change — new table). Targets v0.3.0-era.
 **Problem:** feed failures are easily missed. Today the only user-visible feed health is
@@ -1388,11 +1458,13 @@ schema change and the notification path is new behaviour.
 
 ---
 
-### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — Proposed
+### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — ⏳ PARTIAL
 
-> **Consolidated → reconciled in CR-4 + CR-8** in the Layer-0 Refactor section above (feed
-> *class* — `vex` / `osv` / `csaf-advisory` — becomes a first-class config field as part of the
-> feed re-layering). Single source of truth for execution; this section retained for detail.
+> **Partially done (2026-06-24).** CR-4 delivered the feed *class* taxonomy (`rhel_vex_url` vs
+> `rhel_csaf_url`; OSV feeds reclassified as correlation sources). **Still pending:** the
+> user-defined `vexfeed.feeds:` delta list to **add / remove / disable** arbitrary feeds — feeds
+> are still hardcoded in DI (no per-feed on/off flag). This remaining slice is the user-facing
+> registry below.
 
 **Type:** additive capability + config-shape change. Targets v0.3.0-era.
 **Problem:** the feed set is fixed. `VEXFeedConfig` is hardcoded struct fields
@@ -1434,9 +1506,10 @@ than the bug-fix scope; sequence it after v0.2.1 lands the source abstractions i
 ### Phase 2b — AI Intelligence (`themis-phase-2b`) — Planned
 
 **Gate:** Phase 2a archived, Group 31 complete, signal feeds confirmed healthy (G1–G8 pass),
-and **DEFECT D-CVSS-1 fixed** (CVSS/severity backfill for OSV-origin findings — see the
-Pre-Phase 2b section above; AI workers must not be seeded against an all-`unknown`/all-`0`
-signal corpus).
+and **DEFECT D-CVSS-1 fixed** — ✅ **D-CVSS-1 is now fixed (CR-5, 2026-06-24)** and the whole
+Layer-0 refactor (CR-1…CR-10) has landed, so the AI workers will be seeded against real
+severity/CVSS rather than an all-`unknown`/all-`0` corpus. The remaining gate item is the
+operational G1–G8 confirmation on a real deployment. **Phase 2b is effectively unblocked.**
 **Releases as:** v0.3.0
 **OpenSpec change:** `openspec/changes/themis-phase-2b/` (to be created)
 

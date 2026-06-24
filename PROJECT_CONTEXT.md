@@ -19,11 +19,22 @@ ready). All gates green (unit, coverage, integration, clean-arch, verify-build).
 `themis-phase-2`. This is the settled base Phase 2b builds on. See
 `openspec/changes/themis-core-model/`.
 
+**Layer-0 Correctness & Observability refactor (CR-1…CR-10) — implemented (2026-06-24).** The
+correlation/feeder/observability core was rebuilt on the `v0.3.0` base: one version engine
+(`CompareVersionsEco`), one `Correlator` over a `CorrelationSource` port with finding provenance
+and distro-authoritative merge, distro/RHSA feeds re-layered from the VEX overlay into correlation
+(severity + fixed version), an NVD-by-CVE CVSS backfill, a `domain.Logger` port, and a
+`feed_health`/`degraded_feeds[]` surface. This closes defects D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1.
+All gates green on branch `themis-phase-2`; not yet committed/tagged. Remaining: commit + tag
+`v0.3.0`, operational G1–G8 verification on real SBOMs, and the user-defined feed registry. See
+`project-backlog.md` §"Layer-0 Correctness & Observability Refactor".
+
 | Phase | Status | Scope |
 | ----- | ------ | ----- |
 | Phase 1 | Shipped (`v0.1.0`) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/archive/` |
 | Phase 2a | Shipped (`v0.2.0` / `v0.2.1`) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX |
 | core-model | Implementation complete (`v0.3.0`, 57/58) | Schema restructure + Durable-Enrichment Identity Contract — see `openspec/changes/themis-core-model/` |
+| Layer-0 refactor | Implemented (2026-06-24) | CR-1…CR-10: version engine, single correlator + provenance, feed re-layering, CVSS backfill, logging port, feed health — closes D-CVSS-1/D-FEED-1/D-NVD-1/D-LOG-1 |
 | Phase 2b | Ready to start (unblocked) | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
 | Phase 2c | Planned | AI-assisted VEX auto-apply — blocked on 2b |
 | Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |

@@ -109,9 +109,17 @@ type ExploitDBConfig struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 }
 
-// VEXFeedConfig controls vendor VEX feed sync.
+// VEXFeedConfig controls vendor feed sync. CR-4 separates true vendor VEX (the
+// exploitability overlay) from advisory/vulnerability-DB feeds (correlation):
+//   - rhel_vex_url  → Red Hat CSAF VEX, applied as the VEX overlay
+//   - rhel_csaf_url → Red Hat CSAF advisories, consumed as a correlation source
+//   - *_osv_url     → distro OSV vulnerability DBs, consumed as correlation sources
+//
+// rhel_url is a deprecated alias for rhel_csaf_url (kept one release).
 type VEXFeedConfig struct {
-	RHELURL      string        `yaml:"rhel_url"`
+	RHELVEXURL   string        `yaml:"rhel_vex_url"`
+	RHELCSAFURL  string        `yaml:"rhel_csaf_url"`
+	RHELURL      string        `yaml:"rhel_url"` // deprecated: alias for rhel_csaf_url
 	AlpineOSVURL string        `yaml:"alpine_osv_url"`
 	RockyOSVURL  string        `yaml:"rocky_osv_url"`
 	WolfiOSVURL  string        `yaml:"wolfi_osv_url"`
@@ -179,7 +187,8 @@ func Default() Config {
 			PollInterval: 24 * time.Hour,
 		},
 		VEXFeed: VEXFeedConfig{
-			RHELURL:      "https://security.access.redhat.com/data/csaf/v2/advisories/",
+			RHELVEXURL:   "https://security.access.redhat.com/data/csaf/v2/vex/",
+			RHELCSAFURL:  "https://security.access.redhat.com/data/csaf/v2/advisories/",
 			AlpineOSVURL: "https://storage.googleapis.com/osv-vulnerabilities/Alpine/all.zip",
 			RockyOSVURL:  "https://storage.googleapis.com/osv-vulnerabilities/Rocky%20Linux/all.zip",
 			WolfiOSVURL:  "https://packages.wolfi.dev/os/security.json",

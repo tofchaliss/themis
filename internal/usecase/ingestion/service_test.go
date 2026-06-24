@@ -420,7 +420,8 @@ func TestPipelineTransitionErrors(t *testing.T) {
 
 func TestPipelineCorrelateMatchWithoutID(t *testing.T) {
 	pipeline := newTestPipeline(&memoryJobs{})
-	pipeline.Catalog = memoryCatalog{matches: []domain.VulnerabilityRecord{{CVEID: "CVE-1", Severity: "high", AffectedVersions: []string{"1.0.0"}}}}
+	// FixVersions present exercises the CR-3 source_fixed_version provenance branch.
+	pipeline.Catalog = memoryCatalog{matches: []domain.VulnerabilityRecord{{CVEID: "CVE-1", Severity: "high", AffectedVersions: []string{"1.0.0"}, FixVersions: []string{"2.0.0"}}}}
 	result, err := pipeline.IngestSBOM(context.Background(), baseSBOMInput())
 	if err != nil {
 		t.Fatal(err)

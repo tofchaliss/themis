@@ -28,6 +28,7 @@ import (
 	"github.com/themis-project/themis/internal/infrastructure/config"
 	"github.com/themis-project/themis/internal/infrastructure/metrics"
 	"github.com/themis-project/themis/internal/infrastructure/queue"
+	"github.com/themis-project/themis/internal/usecase/correlation"
 	"github.com/themis-project/themis/internal/usecase/enrichment"
 	"github.com/themis-project/themis/internal/usecase/ingestion"
 	"github.com/themis-project/themis/internal/usecase/triage"
@@ -41,6 +42,8 @@ type APIConfig struct {
 	AppConfig      config.Config
 	InProcessQueue *queue.InProcessQueue
 	CVEFeedSuccess *atomic.Value
+	// Logger is the unified domain logging port (CR-7). When nil a NopLogger is used.
+	Logger domain.Logger
 }
 
 type dbPool interface {
@@ -52,6 +55,13 @@ type dbPool interface {
 
 // MountAPI wires adapter handlers onto the HTTP router.
 func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
+	appLog := domain.LoggerOrNop(cfg.Logger)
+	feedHealth := store.NewPostgresFeedHealthStore(cfg.Pool)
+	vulnCatalog := store.NewPostgresVulnerabilityCatalog(cfg.Pool)
+	nvdClient := nvd.NewClient(nvd.ClientConfig{
+		APIKey:      cfg.AppConfig.NVD.APIKey,
+		RateLimiter: nvd.NewTokenBucket(cfg.AppConfig.NVD.RateLimitRPS, cfg.AppConfig.NVD.RateLimitRPS),
+	})
 	jobs := store.NewPostgresIngestionRepository(cfg.Pool)
 	trustRepo := trust.NewPostgresRepository(cfg.Pool)
 	audit := trust.NewPostgresAuditRecorder(cfg.Pool)
@@ -60,7 +70,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	graphStore := assetgraph.NewPostgresStore(cfg.Pool)
 	vendorVEXStore := vexfeed.NewPostgresAssertionStore(cfg.Pool)
 	vendorMatcher := vexfeed.EnrichmentMatcher{Inner: vexfeed.DefaultMatcher{
-		Logger: vexfeed.SlogMismatchLogger{},
+		Logger: vexfeed.LoggerMismatch{Log: appLog},
 	}}
 	enrichmentSvc := &enrichment.Handler{
 		Repo:        enrichmentRepo,
@@ -87,7 +97,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		OpenFindings: enrichmentRepo,
 		Metrics:      metrics.EPSSKevMetrics{},
 	}
-	StartEPSSKevScheduler(ctx, epssKevSvc, cfg.AppConfig.EPSSKev.PollInterval)
+	StartEPSSKevScheduler(ctx, epssKevSvc, cfg.AppConfig.EPSSKev.PollInterval, appLog, feedHealth)
 	exploitDBClient := exploitdb.NewClient(exploitdb.ClientConfig{CSVURL: cfg.AppConfig.ExploitDB.CSVURL})
 	exploitDBSvc := &exploitdb.Service{
 		Source:       exploitDBClient,
@@ -96,20 +106,35 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		OpenFindings: enrichmentRepo,
 		Metrics:      metrics.ExploitDBMetrics{},
 	}
-	StartExploitDBScheduler(ctx, exploitDBSvc, cfg.AppConfig.ExploitDB.PollInterval)
+	StartExploitDBScheduler(ctx, exploitDBSvc, cfg.AppConfig.ExploitDB.PollInterval, appLog, feedHealth)
 	vexHTTP := &vexfeed.HTTPFetcher{}
+	// CR-4: the VEX overlay carries ONLY true Red Hat CSAF VEX (exploitability
+	// context). Distro OSV vulnerability DBs move to the correlation source below.
 	vexFeedSvc := &vexfeed.Service{
 		Feeds: []vexfeed.FeedSource{
-			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELURL, Fetcher: vexHTTP},
-			vexfeed.ZipOSVFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Fetcher: vexHTTP},
-			vexfeed.ZipOSVFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Fetcher: vexHTTP},
-			vexfeed.URLFeedSource{Name_: "wolfi", URL: cfg.AppConfig.VEXFeed.WolfiOSVURL, Kind: "osv", Fetcher: vexHTTP},
+			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELVEXURL, Fetcher: vexHTTP},
 		},
 		Store:    vendorVEXStore,
 		ReEnrich: dispatcher,
+		Logger:   vexfeed.LoggerSync{Log: appLog},
 		Metrics:  metrics.VEXFeedMetrics{},
 	}
-	StartVEXFeedScheduler(ctx, vexFeedSvc, cfg.AppConfig.VEXFeed.PollInterval)
+	StartVEXFeedScheduler(ctx, vexFeedSvc, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
+	// CR-4: Alpine/Rocky/Wolfi OSV feeds are correlation sources (affected ranges +
+	// severity + fixed), not VEX. A background loader refreshes the in-memory index.
+	distroSource := vexfeed.NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
+	StartCorrelationFeedScheduler(ctx, &vexfeed.CorrelationLoader{
+		Feeds: []vexfeed.FeedSource{
+			vexfeed.ZipOSVFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Fetcher: vexHTTP},
+			vexfeed.ZipOSVFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Fetcher: vexHTTP},
+			vexfeed.URLFeedSource{Name_: "wolfi", URL: cfg.AppConfig.VEXFeed.WolfiOSVURL, Kind: "osv", Fetcher: vexHTTP},
+			// CR-4: Red Hat CSAF advisories as an rpm correlation source (NEVRA
+			// fixed-version ranges), distinct from the true-VEX overlay above.
+			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELCSAFURL, Fetcher: vexHTTP},
+		},
+		Source: distroSource,
+		Logger: appLog,
+	}, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
 	notificationRules := store.NewPostgresNotificationConfigRepository(cfg.Pool)
 	notifySvc := notify.NewService(notify.ServiceConfig{
 		Rules: notificationRules,
@@ -128,17 +153,25 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	osvClient := osv.NewClient(osv.ClientConfig{
 		RateLimiter: osv.NewTokenBucket(cfg.AppConfig.OSV.RateLimitRPS, cfg.AppConfig.OSV.RateLimitRPS),
 	})
+	// CR-2/CR-4: a single Correlator over CorrelationSource feeds — OSV.dev live
+	// query plus the in-memory distro OSV index — is the one match path ingest
+	// uses. Merge is distro-authoritative (CR-3) so a distro verdict outranks
+	// OSV.dev for apk/rpm packages.
+	correlator := correlation.NewCorrelator(appLog,
+		&osv.ComponentFetcher{
+			Client: osvClient,
+			Logger: osv.LoggerCorrelation{Log: appLog},
+		},
+		distroSource,
+	)
 	pipeline := ingestion.NewPipeline(ingestion.Pipeline{
 		Jobs:       jobs,
 		Trust:      trust.GateEvaluator{Gate: gate},
 		Parser:     parser.RegistryPort{Registry: parser.NewRegistry(parser.RegistryConfig{})},
 		SBOM:       store.NewPostgresSBOMStore(cfg.Pool),
 		Components: store.NewPostgresComponentStore(cfg.Pool),
-		Catalog:    store.NewPostgresVulnerabilityCatalog(cfg.Pool),
-		Fetcher: &osv.ComponentFetcher{
-			Client: osvClient,
-			Logger: osv.SlogCorrelationLogger{},
-		},
+		Catalog:    vulnCatalog,
+		Fetcher:    correlator,
 		Correlate:  store.NewPostgresCorrelationRepository(cfg.Pool),
 		Enrichment: enrichmentSvc,
 		Notify: metrics.InstrumentedNotifier{
@@ -187,11 +220,12 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 
 	watchRepo := store.NewPostgresWatchRepository(cfg.Pool)
 	watchSvc := &watch.Service{
-		NVD: nvd.NewClient(nvd.ClientConfig{
-			APIKey:      cfg.AppConfig.NVD.APIKey,
-			RateLimiter: nvd.NewTokenBucket(cfg.AppConfig.NVD.RateLimitRPS, cfg.AppConfig.NVD.RateLimitRPS),
-		}),
-		OSV:     osvClient,
+		NVD: nvdClient,
+		OSV: osvClient,
+		// CR-2: a distro-only Correlator re-correlates catalog components against the
+		// in-memory distro index each cycle (OSV.dev/NVD already covered by the bulk
+		// fetch above — no duplicate network query).
+		Correlator: correlation.NewCorrelator(appLog, distroSource),
 		Repo:    watchRepo,
 		Notify:  notify.EnqueueSender{Queue: cfg.InProcessQueue},
 		Metrics: metrics.WatchRecorder{},
@@ -201,7 +235,18 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 			}
 		},
 	}
-	StartWatchScheduler(ctx, watchSvc, cfg.AppConfig.NVD.PollInterval)
+	StartWatchScheduler(ctx, watchSvc, cfg.AppConfig.NVD.PollInterval, appLog, feedHealth)
+
+	// CR-5: backfill CVSS for apk/rpm catalog rows that arrived without it, from
+	// the NVD by-CVE endpoint, then re-enrich so risk scores spread.
+	StartCVSSBackfillScheduler(ctx, &enrichment.CVSSBackfillService{
+		Fetcher:   nvdClient,
+		Catalog:   vulnCatalog,
+		ReEnrich:  dispatcher,
+		OpenCount: enrichmentRepo,
+		Metrics:   metrics.CVSSBackfillMetrics{},
+		Logger:    appLog,
+	}, cfg.AppConfig.NVD.PollInterval, appLog, feedHealth)
 
 	handler := api.NewHandler(api.Dependencies{
 		Ingestion:     pipeline,
@@ -220,6 +265,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Status:        store.NewPostgresSystemStatusRepository(cfg.Pool),
 		SBOMMgmt:      store.NewPostgresSBOMManagementRepository(cfg.Pool),
 		ThreatSignals: threatSignals,
+		FeedHealth:    feedHealth,
 		Audit:         audit,
 		MaxUpload:     cfg.AppConfig.Upload.MaxSizeBytes,
 		TrustPolicy:   domain.TrustPolicy(cfg.AppConfig.Trust.DefaultPolicy),

@@ -28,11 +28,11 @@ func ComputeRiskScoreV2(
 	deterministicLevel string,
 	blastRadiusScore float64,
 ) int {
-	_ = exploitPublic
-
 	base := float64(ComputeRiskScore(rawSeverity, effectiveState))
 	if base == 0 {
-		return 0
+		// CR-5: severity unknown (no CVSS yet). Don't hide a finding that carries a
+		// confirming signal behind a 0 while CVSS backfill is pending.
+		return unknownSeverityFloor(effectiveState, kevListed, exploitPublic)
 	}
 	if strings.EqualFold(strings.TrimSpace(deterministicLevel), string(domain.DeterministicLevelCritical)) {
 		return 100
@@ -51,6 +51,26 @@ func ComputeRiskScoreV2(
 
 	final := base*blastRadiusScore + epssAdj + kevAdj
 	return int(math.Min(100, math.Round(final)))
+}
+
+// unknownSeverityFloor returns a non-zero interim risk score for a finding with
+// unknown severity that still carries a confirming signal (CR-5). Dismissed
+// states (suppressed / false_positive / accepted_risk / not_affected / resolved)
+// never receive a floor — a human or vendor has already de-prioritised them.
+func unknownSeverityFloor(effectiveState string, kevListed, exploitPublic bool) int {
+	switch strings.ToLower(strings.TrimSpace(effectiveState)) {
+	case domain.EffectiveStateSuppressed, domain.EffectiveStateFalsePositive,
+		domain.EffectiveStateAcceptedRisk, domain.EffectiveStateNotAffected, domain.EffectiveStateResolved:
+		return 0
+	}
+	switch {
+	case kevListed:
+		return domain.RiskScoreUnknownKEVFloor
+	case exploitPublic, strings.EqualFold(strings.TrimSpace(effectiveState), domain.EffectiveStateConfirmed):
+		return domain.RiskScoreUnknownConfirmedFloor
+	default:
+		return 0
+	}
 }
 
 // ComputeRiskScore applies the Phase 1 severity × effective-state formula.

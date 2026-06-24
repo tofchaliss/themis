@@ -338,6 +338,44 @@ func TestCoreModelAdditivityAttachesToLatestFinding(t *testing.T) {
 	}
 }
 
+// CR-3 — finding provenance: an ingested finding records the source that produced
+// it (here the local catalog hit) and what that source asserted, never the
+// pre-provenance 'legacy' default.
+func TestCoreModelFindingProvenance(t *testing.T) {
+	ctx, pool := coreModelConnect(t, 15468)
+	coreModelSeedLodashCVE(t, ctx, pool)
+	pipeline, _ := coreModelPipeline(pool)
+
+	productID := uuid.NewString()
+	artifactID := uuid.NewString()
+	digest := "sha256:coremodel-provenance"
+	seedBaseData(t, ctx, pool, productID, artifactID, uuid.NewString(), digest)
+
+	result := coreModelIngest(t, ctx, pipeline, artifactID, digest, coreModelFixture(t), "provenance-1")
+	if result.Status != domain.IngestionStatusNotified {
+		t.Fatalf("ingest status = %s", result.Status)
+	}
+
+	var source, sourceSeverity string
+	if err := pool.QueryRow(ctx, `
+		SELECT cv.source, cv.source_severity
+		FROM component_vulnerabilities cv
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id
+		WHERE sr.artifact_id = $1 AND cv.cve_id = 'CVE-2021-23337'
+	`, artifactID).Scan(&source, &sourceSeverity); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if source == domain.FindingSourceLegacy || source == "" {
+		t.Fatalf("finding source not recorded: %q", source)
+	}
+	if source != domain.FindingSourceCatalog {
+		t.Fatalf("catalog-matched finding source = %q, want %q", source, domain.FindingSourceCatalog)
+	}
+	if sourceSeverity != "high" {
+		t.Fatalf("source_severity = %q, want high", sourceSeverity)
+	}
+}
+
 // 8.4 — latest-scan counts (D10/H2): N rescans of one artifact yield latest-scan-only
 // counts, not N×. v_latest_findings (and everything routed through it) sees one scan.
 func TestCoreModelLatestScanCounts(t *testing.T) {

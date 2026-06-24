@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-20 (themis-core-model implementation complete)._
+Last updated: 2026-06-24 (Layer-0 refactor CR-1…CR-10 implemented)._
 
 ---
 
@@ -9,9 +9,10 @@ Last updated: 2026-06-20 (themis-core-model implementation complete)._
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-core-model | Implementation complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (57/58; only 9.6 release-tag open) — code, all gates (unit/coverage/integration/clean-arch/verify-build) green | — (ready to archive; tag `v0.3.0` only once Phase 2b is ready, per 9.6) |
+| themis-core-model | Implementation complete | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (57/58; only 9.6 release-tag open) — code, all gates green | — (ready to archive; tag `v0.3.0` only once Phase 2b is ready, per 9.6) |
+| Layer-0 refactor (CR-1…CR-10) | **Implemented (2026-06-24)** | 2026-06-23 | all 10 CRs coded on branch `themis-phase-2`; all gates green (build/unit/coverage[thresholds]/deadcode/integration/clean-arch). **Not committed/tagged.** Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md` §"Implementation status & unfinished tasks". | — (remaining: commit/tag `v0.3.0`; operational G1–G8 on real SBOMs; user-defined feed registry) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Ready to start | — | not started | — (`themis-core-model` schema/identity base implemented — unblocked) |
+| themis-phase-2b | Ready to start (unblocked) | — | not started | — (core-model + Layer-0 refactor landed; D-CVSS-1 fixed — unblocked) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work

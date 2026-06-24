@@ -3,6 +3,8 @@ package parser
 import (
 	"fmt"
 	"strings"
+
+	"github.com/themis-project/themis/internal/domain"
 )
 
 func ecosystemFromPURL(purl string) (string, bool) {
@@ -40,7 +42,7 @@ func nameVersionFromPURL(purl string) (name, version string) {
 	if at < 0 {
 		return path, ""
 	}
-	return path[:at], path[at+1:]
+	return path[:at], domain.StripPURLVersionQualifiers(path[at+1:])
 }
 
 func buildPURL(ecosystem, name, version string) string {

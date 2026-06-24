@@ -6,6 +6,7 @@ module="github.com/themis-project/themis"
 declare -a domain_pkgs=(
 	domain
 	usecase/ingestion
+	usecase/correlation
 	usecase/enrichment
 	usecase/triage
 	usecase/vexgen

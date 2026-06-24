@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// CVSSData is a CVE's CVSS verdict, used by the CR-5 NVD-by-CVE backfill to fill
+// severity/score/vector for catalog rows that came from feeds without CVSS
+// (apk/rpm OSV findings).
+type CVSSData struct {
+	Severity string
+	Score    float64
+	Vector   string
+}
+
 var cveCanonicalRE = regexp.MustCompile(`^CVE-\d{4}-\d+$`)
 
 // NormalizeCVEID returns canonical CVE-* form when id uses a known OSV distro prefix

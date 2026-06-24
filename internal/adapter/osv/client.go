@@ -173,6 +173,7 @@ func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerab
 		PackageName:      packageName,
 		AffectedVersions: affected,
 		FixVersions:      fixes,
+		Source:           domain.FindingSourceOSV,
 	}
 }
 

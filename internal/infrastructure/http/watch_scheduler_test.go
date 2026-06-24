@@ -13,7 +13,7 @@ import (
 func TestStartWatchSchedulerNilService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	httpserver.StartWatchScheduler(ctx, nil, time.Millisecond)
+	httpserver.StartWatchScheduler(ctx, nil, time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 }
 
 func TestStartWatchSchedulerRuns(t *testing.T) {
@@ -28,7 +28,7 @@ func TestStartWatchSchedulerRuns(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	httpserver.StartWatchScheduler(ctx, svc, 10*time.Millisecond)
+	httpserver.StartWatchScheduler(ctx, svc, 10*time.Millisecond, domain.NopLogger{}, domain.NopFeedHealthRecorder{})
 	time.Sleep(35 * time.Millisecond)
 	if calls == 0 {
 		t.Fatal("expected watch cycle to run")

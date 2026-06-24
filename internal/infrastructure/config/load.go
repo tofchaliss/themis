@@ -168,8 +168,21 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.ExploitDB.PollInterval = durationFromEnv(v)
 	}
 
+	if v := os.Getenv("THEMIS_VEXFEED_RHEL_VEX_URL"); v != "" {
+		cfg.VEXFeed.RHELVEXURL = v
+	}
+	csafExplicit := false
+	if v := os.Getenv("THEMIS_VEXFEED_RHEL_CSAF_URL"); v != "" {
+		cfg.VEXFeed.RHELCSAFURL = v
+		csafExplicit = true
+	}
 	if v := os.Getenv("THEMIS_VEXFEED_RHEL_URL"); v != "" {
+		// rhel_url is the deprecated alias for rhel_csaf_url (CR-4): it points the
+		// advisories (correlation) URL unless rhel_csaf_url was set explicitly.
 		cfg.VEXFeed.RHELURL = v
+		if !csafExplicit {
+			cfg.VEXFeed.RHELCSAFURL = v
+		}
 	}
 	if v := os.Getenv("THEMIS_VEXFEED_ALPINE_OSV_URL"); v != "" {
 		cfg.VEXFeed.AlpineOSVURL = v
