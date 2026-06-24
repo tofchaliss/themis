@@ -2,3 +2,6 @@
 /coverage.out
 /coverage.txt
 *.test
+
+# rapid property-test failure replay files (transient)
+**/testdata/rapid/

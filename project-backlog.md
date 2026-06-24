@@ -193,10 +193,13 @@ reconciled as follows:
   PR #10), replacing the old `themis-phase-1` tag. Tag history now reads
   `v0.1.0 → v0.2.0`. `v0.1.0` is **done** — it is no longer a future gate.
 - **`v0.2.0`** — Phase 2a Signal Foundation (released).
-- **`v0.2.1`** — new maintenance release: Group 31 feed-reliability fixes + the Group 16
-  hardening remainder (see below). No breaking changes.
-- **`v0.3.0`** — `themis-core-model` (breaking schema restructure) + Phase 2b.
-- **`v0.4.0`** — Phase 2c.
+- **`v0.2.1`** — maintenance release: Group 31 feed-reliability fixes + the Group 16
+  hardening remainder. No breaking changes. (Released.)
+- **`v0.3.0`** — **released 2026-06-24:** `themis-core-model` (breaking schema restructure) **+
+  the Layer-0 Correctness & Observability refactor (CR-1…CR-10)**. *(Re-scoped: Phase 2b was
+  originally bundled here but moved to `v0.4.0` so the Layer-0 hardening could ship first.)*
+- **`v0.4.0`** — Phase 2b (AI Intelligence).
+- **`v0.5.0`** — Phase 2c (AI-Assisted VEX).
 
 Nothing below `v0.2.0` will ever be tagged again.
 
@@ -969,9 +972,9 @@ while the rest of the system logs in a different format, at a fixed level, or no
 
 **Status:** ✅ IMPLEMENTED (2026-06-24) — all of CR-1 … CR-10 are coded on branch
 `themis-phase-2`; every gate is green (build → unit → coverage [all per-package thresholds] →
-deadcode → integration → clean-arch → verify-build). **Not yet committed or tagged.** See
-"Implementation status & unfinished tasks" immediately below for the per-CR result and the short
-list of what genuinely remains.
+deadcode → integration → clean-arch → verify-build). **Merged to `themis-phase-2` (PR #24) and
+released as part of `v0.3.0` (2026-06-24).** See "Implementation status & unfinished tasks"
+immediately below for the per-CR result and the short list of what genuinely remains.
 **Created:** 2026-06-21 (v0.3.0 Layer-0 audit).
 **Scope:** the correlation/feeder/observability core that determines whether Themis tells the
 truth and whether operators can see it. Excludes Phase 2b AI work (separate track).
@@ -1006,8 +1009,8 @@ observability afterthought) are eliminated.
 
 **Unfinished tasks (what genuinely remains):**
 
-1. **Commit + tag** — the work is staged on `themis-phase-2`, not yet committed; tag `v0.3.0`
-   (core-model + this refactor) per the release plan.
+1. ✅ **Commit + tag — DONE (2026-06-24).** Merged to `themis-phase-2` (PR #24) and tagged
+   `v0.3.0` (core-model + this refactor). Phase 2b/2c re-numbered to `v0.4.0`/`v0.5.0`.
 2. **Real-SBOM E2E (G1–G8)** — verify on a deployment with live Alpine **and** RPM SBOMs +
    reachable feeds + NVD key. Unit/integration prove the logic; the live bring-up is unverified
    in-repo (it is the refactor's one operational Definition-of-done item).
@@ -1510,7 +1513,7 @@ and **DEFECT D-CVSS-1 fixed** — ✅ **D-CVSS-1 is now fixed (CR-5, 2026-06-24)
 Layer-0 refactor (CR-1…CR-10) has landed, so the AI workers will be seeded against real
 severity/CVSS rather than an all-`unknown`/all-`0` corpus. The remaining gate item is the
 operational G1–G8 confirmation on a real deployment. **Phase 2b is effectively unblocked.**
-**Releases as:** v0.3.0
+**Releases as:** v0.4.0
 **OpenSpec change:** `openspec/changes/themis-phase-2b/` (to be created)
 
 **Hardware prerequisites (operator must verify before deploying Phase 2b):**
@@ -1558,7 +1561,7 @@ ai_remediation_advice, ai_fp_analysis)
 ### Phase 2c — AI-Assisted VEX (`themis-phase-2c`) — Planned
 
 **Gate:** Phase 2b running; KB has ≥ 50 seeded analyst decisions (threshold tunable).
-**Releases as:** v0.4.0
+**Releases as:** v0.5.0
 **OpenSpec change:** `openspec/changes/themis-phase-2c/` (to be created)
 
 **What:**

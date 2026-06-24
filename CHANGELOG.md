@@ -5,7 +5,46 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [themis-phase-1] - 2026-06-08
+## [0.3.0] - 2026-06-24
+### Changed
+- themis-core-model: add D15 Durable-Enrichment Identity Contract. (@invalid-email-address)
+- themis-core-model: implement v0.3.0 schema restructure (Groups 1-9) (@invalid-email-address)
+- themis-core-model: fix Layer 0 vulnerability correlation and identity (v0.3.0) (@invalid-email-address)
+- themis-core-model: fix composite risk score saturation (v0.3.0) (@invalid-email-address)
+- docs(backlog): add Layer-0 feeder + observability defects for next cycle
+- docs(backlog): consolidate Layer-0 refactor plan (CR-1..CR-10) into backlog
+- docs(readme): canonical from-scratch getting-started runbook
+- refactor(layer-0): unify version/correlation/observability core (CR-1..CR-10)
+- docs: reconcile backlog/status/README to the finished Layer-0 refactor
+
+## [0.2.1] - 2026-06-18
+### Changed
+- Add CHANGELOG.md and fix changelog workflow first-run detection. (@invalid-email-address)
+- Fix CVE correlation by wiring OSV and structured package matching. (@invalid-email-address)
+- Map PURL ecosystems to OSV names and skip unsupported feeds. (@invalid-email-address)
+- Document SBOM correlation, OSV mapping, and Linux distro debugging in README. (@invalid-email-address)
+- Add verification checklist and Phase 1 post-bring-up task tracking. (@invalid-email-address)
+- Archive Phase 1 OpenSpec, establish Phase 2 planning baseline (@invalid-email-address)
+- Document Phase 2 architecture: AI intelligence pipeline and threat intelligence design. (@invalid-email-address)
+- Add Phase 2a Signal Foundation OpenSpec planning artifacts. (@invalid-email-address)
+- Complete Phase 2a Signal Foundation for v0.2.0 release. (@invalid-email-address)
+- Document Alpine SBOM bring-up gaps and Phase 2a follow-ons in backlog. (@invalid-email-address)
+- Add intel-source-tiers reference and Phase 2a blocking feed-reliability tasks. (@invalid-email-address)
+- Archive Phase 2a: update STATUS.md, backlog, and README for post-2a state. (@invalid-email-address)
+- Archive themis-phase-2a and establish canonical openspec/specs/ tree. (@invalid-email-address)
+- Reconcile release versioning: v0.1.0 retag + v0.2.1 maintenance line. (@invalid-email-address)
+- Sync repo memory snapshot with current phase/release state. (@invalid-email-address)
+- Tighten core-model gating: it gates schema-dependent items, not v0.2.1. (@invalid-email-address)
+- Propose themis-v0-2-1: maintenance release (feed reliability + Phase 1 hardening). (@invalid-email-address)
+- Backlog: add feed-observability and feed-registry candidate changes. (@invalid-email-address)
+- v0.2.1: add component-mismatch correlation logging (D5, group 4b) (@invalid-email-address)
+- Complete v0.2.1 Alpine signal reliability patch. (@invalid-email-address)
+- Sync v0.2.1 status tracking with implemented scope. (@invalid-email-address)
+- Archive themis-v0-2-1 and sync canonical specs. (@invalid-email-address)
+- Propose themis-core-model: greenfield schema restructure (v0.3.0). (@invalid-email-address)
+- v0.2.1: harden Alpine backfill and upload-sbom helper scripts. (@invalid-email-address)
+
+## [0.1.0] - 2026-06-08
 ### Added
 - Initial commit (@tofchaliss)
 - Initial setup of project files and directory structure. (@invalid-email-address)

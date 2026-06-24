@@ -11,32 +11,29 @@ disclosed CVEs, and delivers notifications. Standalone binary backed by PostgreS
 **Phase 1 — shipped** as `v0.1.0` (archived). **Phase 2a — shipped** as `v0.2.0` (archived);
 `v0.2.1` maintenance release archived. See `project-backlog.md` for deferred items.
 
-**Core-model restructure (`v0.3.0`) — implementation complete.** The `themis-core-model` change
+**`v0.3.0` — shipped (2026-06-24).** Tag `v0.3.0` bundles the `themis-core-model` restructure
 (`sbom_documents` → `sboms` + `scan_reports`; merged `artifacts`/`images`; `versions.project_id`;
 `risk_context` + judgment tables re-keyed on `(artifact_id, component_purl, cve_id)`; schema-skew
-guard) is implemented — 57/58 tasks done (only 9.6, tag `v0.3.0`, deferred until Phase 2b is
-ready). All gates green (unit, coverage, integration, clean-arch, verify-build). Branch
-`themis-phase-2`. This is the settled base Phase 2b builds on. See
-`openspec/changes/themis-core-model/`.
+guard) **plus** the Layer-0 Correctness & Observability refactor (below). Breaking schema — no
+in-place upgrade from a pre-`v0.3.0` database. All gates green; merged to `themis-phase-2` and
+tagged. See `openspec/changes/themis-core-model/`.
 
-**Layer-0 Correctness & Observability refactor (CR-1…CR-10) — implemented (2026-06-24).** The
-correlation/feeder/observability core was rebuilt on the `v0.3.0` base: one version engine
+**Layer-0 Correctness & Observability refactor (CR-1…CR-10) — shipped in `v0.3.0`.** The
+correlation/feeder/observability core was rebuilt on the core-model base: one version engine
 (`CompareVersionsEco`), one `Correlator` over a `CorrelationSource` port with finding provenance
 and distro-authoritative merge, distro/RHSA feeds re-layered from the VEX overlay into correlation
 (severity + fixed version), an NVD-by-CVE CVSS backfill, a `domain.Logger` port, and a
 `feed_health`/`degraded_feeds[]` surface. This closes defects D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1.
-All gates green on branch `themis-phase-2`; not yet committed/tagged. Remaining: commit + tag
-`v0.3.0`, operational G1–G8 verification on real SBOMs, and the user-defined feed registry. See
-`project-backlog.md` §"Layer-0 Correctness & Observability Refactor".
+Remaining (post-release follow-ups): operational G1–G8 verification on real SBOMs, and the
+user-defined feed registry. See `project-backlog.md` §"Layer-0 Correctness & Observability Refactor".
 
 | Phase | Status | Scope |
 | ----- | ------ | ----- |
 | Phase 1 | Shipped (`v0.1.0`) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/archive/` |
 | Phase 2a | Shipped (`v0.2.0` / `v0.2.1`) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX |
-| core-model | Implementation complete (`v0.3.0`, 57/58) | Schema restructure + Durable-Enrichment Identity Contract — see `openspec/changes/themis-core-model/` |
-| Layer-0 refactor | Implemented (2026-06-24) | CR-1…CR-10: version engine, single correlator + provenance, feed re-layering, CVSS backfill, logging port, feed health — closes D-CVSS-1/D-FEED-1/D-NVD-1/D-LOG-1 |
-| Phase 2b | Ready to start (unblocked) | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
-| Phase 2c | Planned | AI-assisted VEX auto-apply — blocked on 2b |
+| core-model + Layer-0 refactor | **Shipped (`v0.3.0`, 2026-06-24)** | Schema restructure + Durable-Enrichment Identity Contract; CR-1…CR-10 (version engine, single correlator + provenance, feed re-layering, CVSS backfill, logging port, feed health) — closes D-CVSS-1/D-FEED-1/D-NVD-1/D-LOG-1 |
+| Phase 2b | Ready to start (unblocked) — targets `v0.4.0` | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
+| Phase 2c | Planned — targets `v0.5.0` | AI-assisted VEX auto-apply — blocked on 2b |
 | Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |
 
 ---
