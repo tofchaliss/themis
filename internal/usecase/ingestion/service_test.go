@@ -702,7 +702,6 @@ type memoryJobs struct {
 	findKeyErr        error
 	listErr           error
 	createFindingErr  error
-	createRiskErr     error
 }
 
 func (m *memoryJobs) FindByIdempotencyKey(_ context.Context, key string) (domain.IngestionRecord, bool, error) {

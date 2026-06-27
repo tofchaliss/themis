@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 )
 
 const defaultBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+
+// nvdMaxAttempts bounds retries when NVD throttles (HTTP 429/503 — the Cloudflare
+// challenge page) or a transient network error occurs.
+const nvdMaxAttempts = 3
 
 // ClientConfig configures the NVD HTTP client.
 type ClientConfig struct {
@@ -31,6 +36,7 @@ type Client struct {
 	httpClient   *http.Client
 	limiter      *TokenBucket
 	resultsLimit int
+	sleep        func(context.Context, time.Duration) error
 }
 
 // NewClient creates an NVD feed client with token-bucket rate limiting.
@@ -57,7 +63,105 @@ func NewClient(cfg ClientConfig) *Client {
 		httpClient:   httpClient,
 		limiter:      limiter,
 		resultsLimit: limit,
+		sleep:        sleepContext,
 	}
+}
+
+// get performs a rate-limited GET against NVD with bounded retry/backoff on
+// transient throttling (HTTP 429/503 — NVD's Cloudflare challenge — plus 502/504)
+// and transient network errors, honouring Retry-After. It returns the body and
+// status code; non-transient statuses (including 404) are returned to the caller
+// without retry so each path can interpret them.
+func (c *Client) get(ctx context.Context, reqURL string) ([]byte, int, error) {
+	var lastErr error
+	for attempt := 0; attempt < nvdMaxAttempts; attempt++ {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, 0, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		if c.apiKey != "" {
+			req.Header.Set("apiKey", c.apiKey)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt+1 < nvdMaxAttempts {
+				if waitErr := c.sleep(ctx, backoffDelay(attempt, 0)); waitErr != nil {
+					return nil, 0, waitErr
+				}
+				continue
+			}
+			return nil, 0, err
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, resp.StatusCode, readErr
+		}
+		if isTransientNVDStatus(resp.StatusCode) && attempt+1 < nvdMaxAttempts {
+			lastErr = nvdStatusError(resp.StatusCode, body)
+			if waitErr := c.sleep(ctx, backoffDelay(attempt, retryAfter)); waitErr != nil {
+				return nil, 0, waitErr
+			}
+			continue
+		}
+		return body, resp.StatusCode, nil
+	}
+	return nil, 0, lastErr
+}
+
+// isTransientNVDStatus reports whether an NVD response status warrants a retry.
+func isTransientNVDStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable,
+		http.StatusBadGateway, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// backoffDelay returns the wait before the next attempt: Retry-After when the
+// server supplied it, else exponential (1s, 2s, 4s…) capped at 30s.
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		return retryAfter
+	}
+	d := time.Duration(1<<uint(attempt)) * time.Second
+	if d > 30*time.Second {
+		d = 30 * time.Second
+	}
+	return d
+}
+
+// parseRetryAfter reads a delta-seconds Retry-After header (NVD/Cloudflare form).
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
+}
+
+// nvdStatusError wraps a non-success NVD response, collapsing whitespace and
+// truncating the body so a multi-kilobyte Cloudflare 503 challenge page does not
+// flood the logs on every throttled CVE.
+func nvdStatusError(status int, body []byte) error {
+	snippet := strings.Join(strings.Fields(string(body)), " ")
+	const maxLen = 160
+	if len(snippet) > maxLen {
+		snippet = snippet[:maxLen] + "…"
+	}
+	return fmt.Errorf("nvd api status %d: %s", status, snippet)
 }
 
 // FetchModifiedSince returns CVEs modified after since.
@@ -88,35 +192,18 @@ func (c *Client) FetchByCVEID(ctx context.Context, cveID string) (domain.CVSSDat
 	if cveID == "" {
 		return domain.CVSSData{}, false, nil
 	}
-	if err := c.limiter.Wait(ctx); err != nil {
-		return domain.CVSSData{}, false, err
-	}
 
 	query := url.Values{}
 	query.Set("cveId", cveID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"?"+query.Encode(), nil)
+	body, status, err := c.get(ctx, c.baseURL+"?"+query.Encode())
 	if err != nil {
 		return domain.CVSSData{}, false, err
 	}
-	if c.apiKey != "" {
-		req.Header.Set("apiKey", c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return domain.CVSSData{}, false, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return domain.CVSSData{}, false, err
-	}
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return domain.CVSSData{}, false, nil
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return domain.CVSSData{}, false, fmt.Errorf("nvd api status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	if status < 200 || status >= 300 {
+		return domain.CVSSData{}, false, nvdStatusError(status, body)
 	}
 
 	var payload nvdResponse
@@ -134,36 +221,18 @@ func (c *Client) FetchByCVEID(ctx context.Context, cveID string) (domain.CVSSDat
 }
 
 func (c *Client) fetchPage(ctx context.Context, since, end time.Time, startIndex int) ([]domain.FeedVulnerability, int, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
-		return nil, 0, err
-	}
-
 	query := url.Values{}
 	query.Set("lastModStartDate", since.UTC().Format("2006-01-02T15:04:05.000"))
 	query.Set("lastModEndDate", end.UTC().Format("2006-01-02T15:04:05.000"))
 	query.Set("startIndex", fmt.Sprintf("%d", startIndex))
 	query.Set("resultsPerPage", fmt.Sprintf("%d", c.resultsLimit))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"?"+query.Encode(), nil)
+	body, status, err := c.get(ctx, c.baseURL+"?"+query.Encode())
 	if err != nil {
 		return nil, 0, err
 	}
-	if c.apiKey != "" {
-		req.Header.Set("apiKey", c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, 0, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, 0, fmt.Errorf("nvd api status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	if status < 200 || status >= 300 {
+		return nil, 0, nvdStatusError(status, body)
 	}
 
 	var payload nvdResponse

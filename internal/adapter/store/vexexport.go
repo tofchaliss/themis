@@ -83,15 +83,15 @@ func (r *PostgresVEXExportRepository) ListFindingsForProductVersion(ctx context.
 		var level *string
 		var coverage string
 		if err := rows.Scan(
-			&item.EnrichmentFinding.ComponentVulnerabilityID,
-			&item.EnrichmentFinding.ComponentPURL,
-			&item.EnrichmentFinding.CVEID,
+			&item.ComponentVulnerabilityID,
+			&item.ComponentPURL,
+			&item.CVEID,
 			&item.EnrichmentFinding.RawSeverity,
 			&item.CVSSScore,
 			&item.VulnerabilityID,
 			&item.ProductID,
 			&item.ScanReportID,
-			&item.EnrichmentFinding.ArtifactID,
+			&item.ArtifactID,
 			&item.ComponentID,
 			&item.EffectiveState,
 			&item.RiskContextSnapshot.RawSeverity,
