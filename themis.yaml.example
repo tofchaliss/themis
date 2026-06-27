@@ -25,6 +25,10 @@ upload:
 nvd:
   api_key: ""      # override with THEMIS_NVD_API_KEY
   poll_interval: 6h
+  # rate_limit_rps: 0   # 0 = auto, NVD-compliant (≈1.5/s with an API key, ≈0.15/s
+  #                     # without). Set a positive value to override. NVD's limits
+  #                     # are 50 req / 30s with a key, 5 req / 30s without; a higher
+  #                     # rate trips NVD's Cloudflare throttle (HTTP 503).
 
 smtp:
   host: ""         # override with THEMIS_SMTP_HOST
@@ -49,7 +53,7 @@ epsskev:
 
 exploitdb:
   # Public ExploitDB mirror — populates exploit_records; drives ExploitPublic Layer 1 rule
-  csv_url: https://raw.githubusercontent.com/offensive-security/exploitdb/master/files_exploits.csv
+  csv_url: https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv
   poll_interval: 24h
 
 vexfeed:

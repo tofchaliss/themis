@@ -81,7 +81,7 @@ Operators should be informed; hard failures should not block new ingestions._
 | Alpine OSV | `https://storage.googleapis.com/osv-vulnerabilities/Alpine/all.zip` | Vendor advisories for Alpine Linux packages | 2a (working URL; default URL returns 302) |
 | Rocky Linux OSV | `https://storage.googleapis.com/osv-vulnerabilities/Rocky%20Linux/all.zip` | Vendor advisories for Rocky Linux packages | 2a (working URL; default URL returns 404) |
 | Wolfi OSV | `https://packages.wolfi.dev/os/security.json` | Vendor advisories for Wolfi/Chainguard packages | 2a — works today |
-| ExploitDB CSV | `https://raw.githubusercontent.com/offensive-security/exploitdb/master/files_exploits.csv` | Public proof-of-concept exploit index | 2a |
+| ExploitDB CSV | `https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv` | Public proof-of-concept exploit index | 2a (GitHub `offensive-security` mirror archived → 404; moved to GitLab `main`) |
 | Ubuntu Security Notices (USN) | `https://usn.ubuntu.com` | Vendor advisories for Ubuntu packages (dpkg ecosystem) | Post-2a — needs `dpkg` version comparator |
 | SUSE Security Advisories | `https://www.suse.com/security/cve/` | Vendor advisories for SUSE/openSUSE packages | Post-2a |
 | Debian Security Advisories (DSA) | `https://www.debian.org/security/` | Vendor advisories for Debian packages | Post-2a — needs tilde-epoch version ordering |

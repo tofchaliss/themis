@@ -35,3 +35,16 @@ func NormalizeCVEID(id string) string {
 	}
 	return id
 }
+
+// NormalizeSeverity canonicalises a feed-supplied severity for the vulnerability
+// catalog: surrounding whitespace is trimmed and a blank value maps to "unknown".
+// Without this the catalog stores an empty string for feed records that carry no
+// severity (e.g. an Alpine OSV entry with no database_specific.severity), and
+// COALESCE(v.severity, 'unknown') cannot fold "" — it only replaces SQL NULL — so
+// those findings surface as a stray empty "" bucket in GET /api/v1/status.
+func NormalizeSeverity(s string) string {
+	if trimmed := strings.TrimSpace(s); trimmed != "" {
+		return trimmed
+	}
+	return "unknown"
+}

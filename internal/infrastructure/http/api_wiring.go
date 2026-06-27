@@ -53,15 +53,49 @@ type dbPool interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// nvdRateLimit returns an NVD-compliant request rate (requests/second) for the
+// shared NVD client. NVD's published limits are 5 requests per rolling 30s
+// without an API key and 50 per 30s with one; a positive nvd.rate_limit_rps
+// overrides. The previous default of 5 req/s (~150 req/30s) tripped NVD's
+// Cloudflare throttle, returning HTTP 503 challenge pages for every backfill
+// and watch fetch.
+func nvdRateLimit(cfg config.NVDConfig) float64 {
+	if cfg.RateLimitRPS > 0 {
+		return cfg.RateLimitRPS
+	}
+	if cfg.APIKey != "" {
+		return 1.5 // ≈45 req/30s — under the 50/30s keyed limit
+	}
+	return 0.15 // ≈4.5 req/30s — under the 5/30s unkeyed limit
+}
+
+// presentOrAbsent reports whether a secret is set without revealing its value,
+// for safe startup logging.
+func presentOrAbsent(secret string) string {
+	if secret != "" {
+		return "present"
+	}
+	return "absent"
+}
+
 // MountAPI wires adapter handlers onto the HTTP router.
 func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	appLog := domain.LoggerOrNop(cfg.Logger)
 	feedHealth := store.NewPostgresFeedHealthStore(cfg.Pool)
 	vulnCatalog := store.NewPostgresVulnerabilityCatalog(cfg.Pool)
+	nvdRate := nvdRateLimit(cfg.AppConfig.NVD)
 	nvdClient := nvd.NewClient(nvd.ClientConfig{
-		APIKey:      cfg.AppConfig.NVD.APIKey,
-		RateLimiter: nvd.NewTokenBucket(cfg.AppConfig.NVD.RateLimitRPS, cfg.AppConfig.NVD.RateLimitRPS),
+		APIKey: cfg.AppConfig.NVD.APIKey,
+		// Capacity 1 — no burst that would immediately blow NVD's rolling window.
+		RateLimiter: nvd.NewTokenBucket(nvdRate, 1),
 	})
+	// Make the live NVD config observable at startup (D-LOG-1) so operators can
+	// confirm the API key and rate were actually loaded — without ever logging the
+	// key value itself.
+	appLog.Info("nvd client configured",
+		domain.LogString("api_key", presentOrAbsent(cfg.AppConfig.NVD.APIKey)),
+		domain.LogAny("rate_limit_rps", nvdRate),
+		domain.LogString("poll_interval", cfg.AppConfig.NVD.PollInterval.String()))
 	jobs := store.NewPostgresIngestionRepository(cfg.Pool)
 	trustRepo := trust.NewPostgresRepository(cfg.Pool)
 	audit := trust.NewPostgresAuditRecorder(cfg.Pool)
