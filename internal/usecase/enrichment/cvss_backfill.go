@@ -2,6 +2,7 @@ package enrichment
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/themis-project/themis/internal/domain"
@@ -19,6 +20,10 @@ import (
 const (
 	defaultCVSSBackfillLimit      = 200
 	defaultCVSSBackfillRetryAfter = 7 * 24 * time.Hour
+	// maxConsecutiveCVSSFetchErrors aborts a cycle once NVD has failed this many
+	// times in a row, so a sustained outage/throttle records one feed failure
+	// instead of a per-CVE warning storm across the whole batch.
+	maxConsecutiveCVSSFetchErrors = 8
 )
 
 // CVSSFetcher fetches a single CVE's CVSS verdict (implemented by the NVD client).
@@ -91,14 +96,22 @@ func (s *CVSSBackfillService) RunBackfill(ctx context.Context) (CVSSBackfillResu
 		return CVSSBackfillResult{}, err
 	}
 	result := CVSSBackfillResult{Candidates: len(cveIDs)}
+	consecutiveErrors := 0
+	aborted := false
 	for _, cveID := range cveIDs {
 		data, found, fetchErr := s.Fetcher.FetchByCVEID(ctx, cveID)
 		if fetchErr != nil {
 			result.Errors++
+			consecutiveErrors++
 			metrics.RecordBackfill("error")
 			log.Warn("cvss backfill fetch failed", domain.LogString("cve_id", cveID), domain.LogErr(fetchErr))
+			if consecutiveErrors >= maxConsecutiveCVSSFetchErrors {
+				aborted = true
+				break
+			}
 			continue
 		}
+		consecutiveErrors = 0
 		if found {
 			if err := s.Catalog.ApplyCVSS(ctx, cveID, data.Severity, data.Score, data.Vector); err != nil {
 				return result, err
@@ -114,6 +127,8 @@ func (s *CVSSBackfillService) RunBackfill(ctx context.Context) (CVSSBackfillResu
 		metrics.RecordBackfill("checked")
 	}
 
+	// Re-enrich any rows that did land before reporting an abort, so partial
+	// progress is not lost.
 	if result.Updated > 0 && s.ReEnrich != nil && s.OpenCount != nil {
 		total, err := s.OpenCount.CountOpenRiskContexts(ctx)
 		if err != nil {
@@ -122,6 +137,9 @@ func (s *CVSSBackfillService) RunBackfill(ctx context.Context) (CVSSBackfillResu
 		if err := s.ReEnrich.EnqueueReEnrichSignalsBatches(ctx, total); err != nil {
 			return result, err
 		}
+	}
+	if aborted {
+		return result, fmt.Errorf("cvss backfill aborted after %d consecutive NVD fetch failures (NVD unavailable or throttling)", consecutiveErrors)
 	}
 	log.Info("cvss backfill completed",
 		domain.LogInt("candidates", result.Candidates),

@@ -25,3 +25,21 @@ func TestNormalizeCVEID(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSeverity(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"high", "high"},
+		{"CRITICAL", "CRITICAL"}, // case preserved; read queries LOWER() it
+		{"", "unknown"},
+		{"   ", "unknown"},
+		{"  medium  ", "medium"},
+		{"unknown", "unknown"},
+	}
+	for _, tc := range tests {
+		if got := domain.NormalizeSeverity(tc.in); got != tc.want {
+			t.Errorf("NormalizeSeverity(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

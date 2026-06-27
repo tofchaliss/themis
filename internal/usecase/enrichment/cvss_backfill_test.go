@@ -98,6 +98,34 @@ func TestCVSSBackfillRun(t *testing.T) {
 	}
 }
 
+func TestCVSSBackfillAbortsAfterConsecutiveFetchFailures(t *testing.T) {
+	// 12 candidates, all failing: the cycle must abort once NVD has failed
+	// enough times in a row instead of logging a warning for every candidate.
+	candidates := make([]string, 12)
+	errOn := map[string]bool{}
+	for i := range candidates {
+		id := "CVE-X-" + string(rune('A'+i))
+		candidates[i] = id
+		errOn[id] = true
+	}
+	catalog := &stubCVSSCatalog{candidates: candidates}
+	svc := &enrichment.CVSSBackfillService{
+		Fetcher: stubCVSSFetcher{errOn: errOn},
+		Catalog: catalog,
+	}
+
+	result, err := svc.RunBackfill(context.Background())
+	if err == nil {
+		t.Fatal("expected abort error after consecutive NVD failures")
+	}
+	if result.Errors != 8 {
+		t.Fatalf("expected to stop at 8 consecutive errors, got %d", result.Errors)
+	}
+	if result.Updated != 0 || result.Checked != 0 {
+		t.Fatalf("no rows should have landed: %+v", result)
+	}
+}
+
 func TestCVSSBackfillNoUpdatesSkipsReEnrich(t *testing.T) {
 	catalog := &stubCVSSCatalog{candidates: []string{"CVE-2"}}
 	reenrich := &stubReEnrich{}

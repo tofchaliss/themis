@@ -100,13 +100,13 @@ func (r *PostgresSystemStatusRepository) GetSystemStatus(ctx context.Context, to
 
 func (r *PostgresSystemStatusRepository) severityBreakdown(ctx context.Context) (map[string]int, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT LOWER(COALESCE(v.severity, 'unknown')), COUNT(*)
+		SELECT LOWER(COALESCE(NULLIF(v.severity, ''), 'unknown')), COUNT(*)
 		FROM v_latest_findings lf
 		JOIN vulnerabilities v ON v.id = lf.vulnerability_id
 		LEFT JOIN risk_context rc ON rc.artifact_id = lf.artifact_id
 			AND rc.component_purl = lf.component_purl AND rc.cve_id = lf.cve_id
 		WHERE COALESCE(rc.effective_state, 'detected') NOT IN ('not_affected', 'false_positive')
-		GROUP BY LOWER(COALESCE(v.severity, 'unknown'))
+		GROUP BY LOWER(COALESCE(NULLIF(v.severity, ''), 'unknown'))
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("severity breakdown: %w", err)
@@ -152,7 +152,7 @@ func (r *PostgresSystemStatusRepository) topComponents(ctx context.Context, topN
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.name, cv.version, c.purl, p.name,
 		       COUNT(*) AS vuln_count,
-		       MAX(CASE LOWER(COALESCE(v.severity, 'unknown'))
+		       MAX(CASE LOWER(COALESCE(NULLIF(v.severity, ''), 'unknown'))
 		           WHEN 'critical' THEN 4 WHEN 'high' THEN 3
 		           WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END) AS sev_rank,
 		       MAX(COALESCE(v.cvss_score, 0)) AS max_cvss,

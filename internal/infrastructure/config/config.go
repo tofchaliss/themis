@@ -163,7 +163,11 @@ func Default() Config {
 			Timeout:      5 * time.Minute,
 		},
 		NVD: NVDConfig{
-			RateLimitRPS: 5,
+			// 0 = auto: the wiring picks an NVD-compliant rate by key presence
+			// (≈1.5 req/s with an API key, ≈0.15 req/s without). A positive value
+			// here overrides. The old default of 5 req/s (~150 req/30s) tripped
+			// NVD's Cloudflare throttle (HTTP 503).
+			RateLimitRPS: 0,
 			PollInterval: 6 * time.Hour,
 		},
 		OSV: OSVConfig{
@@ -183,7 +187,7 @@ func Default() Config {
 			PollInterval: 24 * time.Hour,
 		},
 		ExploitDB: ExploitDBConfig{
-			CSVURL:       "https://raw.githubusercontent.com/offensive-security/exploitdb/master/files_exploits.csv",
+			CSVURL:       "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv",
 			PollInterval: 24 * time.Hour,
 		},
 		VEXFeed: VEXFeedConfig{

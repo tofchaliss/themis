@@ -55,6 +55,34 @@ func TestMountAPIWiring(t *testing.T) {
 	})
 }
 
+func TestNVDRateLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.NVDConfig
+		want float64
+	}{
+		{"explicit override wins", config.NVDConfig{RateLimitRPS: 3, APIKey: "k"}, 3},
+		{"keyed auto", config.NVDConfig{APIKey: "k"}, 1.5},
+		{"unkeyed auto", config.NVDConfig{}, 0.15},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nvdRateLimit(tc.cfg); got != tc.want {
+				t.Fatalf("nvdRateLimit(%+v) = %v, want %v", tc.cfg, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPresentOrAbsent(t *testing.T) {
+	if got := presentOrAbsent("some-secret"); got != "present" {
+		t.Fatalf("present case = %q", got)
+	}
+	if got := presentOrAbsent(""); got != "absent" {
+		t.Fatalf("absent case = %q", got)
+	}
+}
+
 type mountFakePool struct{}
 
 func (mountFakePool) QueryRow(context.Context, string, ...any) pgx.Row {
