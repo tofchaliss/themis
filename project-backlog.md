@@ -235,6 +235,57 @@ Current implementation status: `openspec/STATUS.md`.
 
 ---
 
+### KNOWN GAP — Red Hat CSAF VEX overlay never ingests (confirmed 2026-06-28)
+
+**Severity:** value-add accuracy gap (not a correctness bug). Distinct from, and a
+follow-on to, the release-stream fix (PR #30, which removes the el8↔el9 cross-stream
+false positives — the actual correctness bug).
+
+**Symptom:** `vex_assertions` is empty (0 rows) on a fully-correlated deployment;
+`upstream_vex_coverage` is `not_covered` on every finding; no finding ever carries
+`source = rhsa`. So Red Hat's authoritative vendor verdicts never reach findings —
+e.g. CVE-2022-29458 / ncurses shows NVD **High** instead of Red Hat **Low /
+"Not affected"** (vulnerable code is the build-time `tic`, not `libncurses`).
+
+**Root cause:** `vexfeed.CSAFDirectoryFeedSource.Fetch` (`adapter/vexfeed/csaf_directory.go`)
+is a **one-level** crawler: it GETs the index URL and regex-scrapes `href="*.json"`
+(`csafAdvisoryLinkRE`). But Red Hat's CSAF repos serve a *fancy-index* HTML listing of
+**year subdirectories** (`1999/` … `2026/`) with **zero** top-level `.json` links, so
+`extractCSAFLinks` returns nothing → 0 docs parsed → 0 assertions. Confirmed empirically:
+`curl .../data/csaf/v2/vex/ | grep -c 'href="[^"]*\.json"'` → `0`; links are all `YYYY/`.
+The **same crawler backs both** `rhel_vex_url` (the VEX overlay) **and** `rhel_csaf_url`
+(the RHEL-advisory rpm correlation source in `api_wiring.go`), so **both have always been
+empty**. (Recursing per-file is infeasible: the tree is hundreds of thousands of docs.)
+
+**Related (downstream, do second):** even once data lands, the `namespaceAliases` table
+(`adapter/vexfeed/normalize.go`) only maps `rhel→redhat`, `alma→almalinux`; a Rocky
+component (`pkg:rpm/rocky/…`) is `namespacesEquivalent("rocky","redhat") = false`, so
+Red Hat verdicts still won't match. Add `rocky→redhat` and `alma→redhat` (RHEL clones are
+1:1 rebuilds; same NEVRA = same build) **scoped to the overlay**, after ingestion works.
+
+**Fix options:**
+
+- **Option B — on-demand Red Hat Security Data API (recommended).** Mirror the existing
+  CVSS-backfill pattern (`usecase/enrichment/cvss_backfill.go`): for each distinct
+  RPM-family CVE in open findings, query `access.redhat.com/hydra/rest/securitydata/cve/{CVE}.json`,
+  then apply per EL stream — vendor `threat_severity` (often lower than NVD), `package_state.fix_state`
+  (`Not affected` → suppress; `Will not fix`/`Affected` → keep + contextualise), and the
+  `affected_release` fixed NEVRA. Bounded by distinct-CVE count (≈363 on the test SBOM),
+  rate-limitable, cacheable. Solves the ncurses case directly.
+- **Option A — bulk CSAF archive ingestion.** Replace the crawler: download
+  `archive_latest.tar.zst`, zstd-decompress + untar, `ParseCSAF` each doc into `vex_assertions`.
+  Complete offline overlay but heavy (new zstd+tar dependency, gigabytes, hundreds of
+  thousands of docs; needs year/product scoping).
+
+**Hooks already in place:** `ParseCSAF` (single-doc parser), `vexfeed.Service` + `Store`
+(`PostgresAssertionStore` → `vex_assertions`/`vex_documents`), `EnrichmentAssertionReader`,
+`StartVEXFeedScheduler`. For Option B: the per-CVE enrichment/backfill scheduler pattern.
+
+**Supersedes** the thin "Red Hat CSAF directory crawl" row in the *Post-2a follow-on —
+Vendor VEX feed operations* table below. **Target:** v0.3.x correlation-accuracy follow-on.
+
+---
+
 ### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
 **Gate:** none outstanding (shipped ahead of the Group 16 hardening; see Release

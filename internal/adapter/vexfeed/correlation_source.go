@@ -71,8 +71,28 @@ func (s *AssertionCorrelationSource) FetchForComponent(_ context.Context, compon
 		return nil, nil
 	}
 
+	compStream := domain.RPMReleaseMajor(component.Version)
+
 	var out []domain.VulnerabilityRecord
 	for _, a := range matches {
+		// Release-stream guard: RPM maintenance streams are independent, so an
+		// el8 package is never fixed by an el9 build. Reject assertions from a
+		// different stream before the version compare — otherwise "6.1.el8" <
+		// "6.2.el9" reads as affected (a cross-stream false positive). An unknown
+		// stream on either side falls through to the version math (no false
+		// negatives), so apk and tag-less RPM versions are unaffected.
+		if compStream != "" {
+			asrtStream := domain.RPMReleaseMajor(a.Ecosystem)
+			if asrtStream == "" {
+				asrtStream = domain.RPMReleaseMajor(a.Fixed)
+			}
+			if asrtStream == "" {
+				asrtStream = domain.RPMReleaseMajor(a.Introduced)
+			}
+			if asrtStream != "" && asrtStream != compStream {
+				continue
+			}
+		}
 		group := domain.BuildConstraintGroup(a.Introduced, "", "", a.Fixed)
 		affected := []string{group}
 		if group == "" {
