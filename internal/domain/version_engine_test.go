@@ -89,6 +89,50 @@ func TestCompareVersionsEcoRPM(t *testing.T) {
 	}
 }
 
+// TestCompareVersionsEcoRPMRealRockyShapes locks in the exact version strings seen
+// in a real Trivy Rocky-8 SBOM (epoch-prefixed NEVRA, modular +el8.X versions)
+// against the format Rocky OSV publishes (explicit "0:" epoch). A regression here
+// would silently mis-mark RPM findings affected/patched.
+func TestCompareVersionsEcoRPMRealRockyShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want int
+	}{
+		// device-mapper-libs: Trivy carries the epoch in the version (epoch 8).
+		{"epoch equal NEVRA", "8:1.02.181-15.el8_10.3", "8:1.02.181-15.el8_10.3", 0},
+		{"epoch 8 vs implicit 0", "8:1.02.181-15.el8_10.3", "1.02.181-15.el8_10.3", 1},
+		{"installed patch < fixed patch", "8:1.02.181-15.el8_10.1", "8:1.02.181-15.el8_10.3", -1},
+		// Rocky OSV writes an explicit "0:" epoch; Trivy omits it for epoch 0.
+		{"explicit 0 epoch == none (modular)", "0:2.5.1-10.module+el8.9.0+1531+a18208f5", "2.5.1-10.module+el8.9.0+1531+a18208f5", 0},
+		// httpd modular: release 65 newer than 43 across el8 streams.
+		{"modular release newer", "2.4.37-65.module+el8.10.0+40053+5a18018e.7", "2.4.37-43.module+el8.8.0+1234+abcd.1", 1},
+		{"el8_10 micro-release ordering", "32:9.11.36-16.el8_10.7", "32:9.11.36-16.el8_10.6", 1},
+	}
+	for _, tc := range tests {
+		if got := CompareVersionsEco("rpm", tc.a, tc.b); got != tc.want {
+			t.Errorf("%s: CompareVersionsEco(rpm, %q, %q) = %d, want %d", tc.name, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestRPMConstraintSetRockyFixed mirrors how a Rocky OSV "fixed" range correlates:
+// introduced "0" + a fixed NEVRA → installed < fixed is affected, >= fixed is
+// patched. Uses the real device-mapper-libs epoch-8 NEVRA.
+func TestRPMConstraintSetRockyFixed(t *testing.T) {
+	group := BuildConstraintGroup("0", "", "", "8:1.02.181-15.el8_10.3")
+	set := VersionConstraintSet{Ecosystem: "rpm", Groups: []string{group}}
+	if !set.Matches("8:1.02.181-15.el8_10.1") {
+		t.Fatal("older patch level must be affected (< fixed)")
+	}
+	if set.Matches("8:1.02.181-15.el8_10.3") {
+		t.Fatal("the fixed NEVRA itself must be patched (>= fixed)")
+	}
+	if set.Matches("8:1.02.181-16.el8_10.0") {
+		t.Fatal("a newer release must be patched")
+	}
+}
+
 func TestStripPURLVersionQualifiers(t *testing.T) {
 	tests := map[string]string{
 		"8.14.1-r2?arch=x86_64&distro=3.20.2": "8.14.1-r2",

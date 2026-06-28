@@ -233,20 +233,18 @@ func TestComponentFetcherPaths(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"results": [{
-				"vulns": [{
-					"id": "CVE-2024-1000",
-					"severity": [{"type": "CVSS_V3", "score": "7.5"}],
-					"affected": [{
-						"package": {"ecosystem": "Alpine", "name": "busybox"},
-						"versions": ["1.0"]
-					}]
-				}, {
-					"id": "CVE-2024-1002",
-					"affected": [{
-						"package": {"ecosystem": "Alpine", "name": "busybox"},
-						"versions": ["9.9"]
-					}]
+			"vulns": [{
+				"id": "CVE-2024-1000",
+				"severity": [{"type": "CVSS_V3", "score": "7.5"}],
+				"affected": [{
+					"package": {"ecosystem": "Alpine", "name": "busybox"},
+					"versions": ["1.0"]
+				}]
+			}, {
+				"id": "CVE-2024-1002",
+				"affected": [{
+					"package": {"ecosystem": "Alpine", "name": "busybox"},
+					"versions": ["9.9"]
 				}]
 			}]
 		}`))
@@ -289,7 +287,7 @@ func TestClientQueryByEcosystemEdgeCases(t *testing.T) {
 
 	srvOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"results":[{"vulns":[{"id":"CVE-2024-2000","severity":[{"type":"CVSS_V3","score":"4.0"}],"affected":[{"package":{"ecosystem":"Alpine","name":"zlib"},"ranges":[{"events":[{"introduced":"0","fixed":"1.1"}]}]}]}]}]}`))
+		_, _ = w.Write([]byte(`{"vulns":[{"id":"CVE-2024-2000","severity":[{"type":"CVSS_V3","score":"4.0"}],"affected":[{"package":{"ecosystem":"Alpine","name":"zlib"},"ranges":[{"events":[{"introduced":"0","fixed":"1.1"}]}]}]}]}`))
 	}))
 	t.Cleanup(srvOK.Close)
 	client = NewClient(ClientConfig{BaseURL: srvOK.URL, RateLimiter: NewTokenBucket(100, 100)})
@@ -300,7 +298,7 @@ func TestClientQueryByEcosystemEdgeCases(t *testing.T) {
 
 	srvEvents := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"results":[{"vulns":[{"id":"CVE-2024-2001","affected":[{"package":{"ecosystem":"Alpine","name":"curl"},"ranges":[{"events":[{"last_affected":"1.2"}]}]}]}]}]}`))
+		_, _ = w.Write([]byte(`{"vulns":[{"id":"CVE-2024-2001","affected":[{"package":{"ecosystem":"Alpine","name":"curl"},"ranges":[{"events":[{"last_affected":"1.2"}]}]}]}]}`))
 	}))
 	t.Cleanup(srvEvents.Close)
 	client = NewClient(ClientConfig{BaseURL: srvEvents.URL, RateLimiter: NewTokenBucket(100, 100)})
