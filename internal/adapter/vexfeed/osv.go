@@ -20,9 +20,15 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 	}
 	var out []domain.VendorVEXAssertion
 	for _, entry := range entries {
-		cveID := entry.firstCVE()
-		if cveID == "" {
-			continue
+		cves := entry.cveIDs()
+		if len(cves) == 0 {
+			// No canonical CVE anywhere (aliases/upstream/related/id). Keep the
+			// advisory-keyed finding rather than dropping it, but it won't enrich.
+			if id := domain.NormalizeCVEID(entry.ID); id != "" {
+				cves = []string{id}
+			} else {
+				continue
+			}
 		}
 		entryVector := entry.cvssVector()
 		for _, affected := range entry.Affected {
@@ -34,18 +40,23 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 					continue
 				}
 				introduced, fixed := r.bounds()
-				out = append(out, domain.VendorVEXAssertion{
-					AdvisoryID:  entry.ID,
-					Feed:        feed,
-					CVEID:       cveID,
-					Ecosystem:   eco,
-					PackageName: name,
-					Status:      domain.VEXStatusAffected,
-					Introduced:  introduced,
-					Fixed:       fixed,
-					Severity:    severity,
-					CVSSVector:  entryVector,
-				})
+				// A distro advisory (e.g. an RLSA) bundles several CVEs; emit one
+				// assertion per CVE so findings are canonical-CVE-keyed, not
+				// advisory-keyed (which the CVSS/EPSS/KEV enrichment can't join).
+				for _, cveID := range cves {
+					out = append(out, domain.VendorVEXAssertion{
+						AdvisoryID:  entry.ID,
+						Feed:        feed,
+						CVEID:       cveID,
+						Ecosystem:   eco,
+						PackageName: name,
+						Status:      domain.VEXStatusAffected,
+						Introduced:  introduced,
+						Fixed:       fixed,
+						Severity:    severity,
+						CVSSVector:  entryVector,
+					})
+				}
 			}
 		}
 	}
@@ -55,6 +66,8 @@ func ParseOSVFeed(raw []byte, feed string) ([]domain.VendorVEXAssertion, error) 
 type osvEntry struct {
 	ID       string        `json:"id"`
 	Aliases  []string      `json:"aliases"`
+	Related  []string      `json:"related"`
+	Upstream []string      `json:"upstream"`
 	Affected []osvAffected `json:"affected"`
 	Severity []osvSeverity `json:"severity"`
 }
@@ -85,13 +98,27 @@ func (d osvDatabaseSpecific) severityWord() string {
 	return strings.ToLower(strings.TrimSpace(d.Severity))
 }
 
-func (e osvEntry) firstCVE() string {
-	for _, alias := range e.Aliases {
-		if normalized := domain.NormalizeCVEID(alias); strings.HasPrefix(strings.ToUpper(normalized), "CVE-") {
-			return normalized
+// cveIDs returns every distinct canonical CVE referenced by the entry, scanning
+// aliases, upstream, and related (distros differ: Alpine/GHSA put the CVE in
+// aliases, Rocky/RLSA put it in upstream) plus the entry id itself. An advisory
+// that bundles several CVEs yields all of them.
+func (e osvEntry) cveIDs() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		n := domain.NormalizeCVEID(id)
+		if strings.HasPrefix(strings.ToUpper(n), "CVE-") && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
 		}
 	}
-	return domain.NormalizeCVEID(e.ID)
+	for _, group := range [][]string{e.Aliases, e.Upstream, e.Related} {
+		for _, id := range group {
+			add(id)
+		}
+	}
+	add(e.ID)
+	return out
 }
 
 type osvAffected struct {

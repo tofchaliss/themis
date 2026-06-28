@@ -12,7 +12,11 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 )
 
-const defaultBaseURL = "https://api.osv.dev/v1/querybatch"
+// /v1/query returns full vulnerability records (aliases, severity, affected
+// ranges) for a package. The previous /v1/querybatch endpoint returns only vuln
+// IDs, which left findings keyed by the OSV id (GHSA-…) with no severity and no
+// version range — so they could never resolve to a canonical CVE or be enriched.
+const defaultBaseURL = "https://api.osv.dev/v1/query"
 
 // ClientConfig configures the OSV HTTP client.
 type ClientConfig struct {
@@ -49,7 +53,11 @@ func NewClient(cfg ClientConfig) *Client {
 	}
 }
 
-// QueryByEcosystem batch-queries OSV for packages in an ecosystem.
+// QueryByEcosystem queries OSV for each package in an ecosystem via /v1/query,
+// which returns full records (so the canonical CVE alias, severity, and version
+// ranges are available). /v1/query is single-package, so a multi-package call
+// (the watch fallback) issues one rate-limited request per package; the common
+// ingest path queries one package at a time already.
 func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, packages []domain.OSVPackageQuery) ([]domain.FeedVulnerability, error) {
 	if len(packages) == 0 {
 		return nil, nil
@@ -58,19 +66,26 @@ func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, package
 	if !ok {
 		return nil, nil
 	}
+	var out []domain.FeedVulnerability
+	for _, pkg := range packages {
+		vulns, err := c.queryPackage(ctx, ecosystem, osvEco, pkg.Name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, vulns...)
+	}
+	return out, nil
+}
+
+// queryPackage issues one /v1/query for a single package. It queries by the
+// normalized name but tags results with the caller's original name so the
+// downstream identity match is unchanged.
+func (c *Client) queryPackage(ctx context.Context, ecosystem, osvEco, name string) ([]domain.FeedVulnerability, error) {
 	if err := c.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
 
-	reqBody := batchRequest{Queries: make([]batchQuery, 0, len(packages))}
-	for _, pkg := range packages {
-		reqBody.Queries = append(reqBody.Queries, batchQuery{
-			Package: packageRef{
-				Ecosystem: osvEco,
-				Name:      normalizePackageName(ecosystem, pkg.Name),
-			},
-		})
-	}
+	reqBody := queryRequest{Package: packageRef{Ecosystem: osvEco, Name: normalizePackageName(ecosystem, name)}}
 	encoded, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
@@ -96,26 +111,19 @@ func (c *Client) QueryByEcosystem(ctx context.Context, ecosystem string, package
 		return nil, fmt.Errorf("osv api status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var payload batchResponse
+	var payload queryResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("decode osv response: %w", err)
 	}
 
-	var out []domain.FeedVulnerability
-	for i, result := range payload.Results {
-		name := packages[i].Name
-		for _, vuln := range result.Vulns {
-			out = append(out, mapOSVVuln(vuln, ecosystem, name))
-		}
+	out := make([]domain.FeedVulnerability, 0, len(payload.Vulns))
+	for _, vuln := range payload.Vulns {
+		out = append(out, mapOSVVuln(vuln, ecosystem, name))
 	}
 	return out, nil
 }
 
-type batchRequest struct {
-	Queries []batchQuery `json:"queries"`
-}
-
-type batchQuery struct {
+type queryRequest struct {
 	Package packageRef `json:"package"`
 }
 
@@ -124,15 +132,15 @@ type packageRef struct {
 	Name      string `json:"name"`
 }
 
-type batchResponse struct {
-	Results []struct {
-		Vulns []osvVuln `json:"vulns"`
-	} `json:"results"`
+type queryResponse struct {
+	Vulns []osvVuln `json:"vulns"`
 }
 
 type osvVuln struct {
 	ID       string   `json:"id"`
 	Aliases  []string `json:"aliases"`
+	Related  []string `json:"related"`
+	Upstream []string `json:"upstream"`
 	Summary  string   `json:"summary"`
 	Severity []struct {
 		Type  string `json:"type"`
@@ -177,11 +185,16 @@ func mapOSVVuln(vuln osvVuln, ecosystem, packageName string) domain.FeedVulnerab
 	}
 }
 
+// resolveCVEID prefers a canonical CVE from aliases, then upstream/related
+// (distros vary on where they record it), falling back to the OSV id only when
+// no CVE is referenced anywhere.
 func resolveCVEID(vuln osvVuln) string {
-	for _, alias := range vuln.Aliases {
-		normalized := domain.NormalizeCVEID(alias)
-		if strings.HasPrefix(strings.ToUpper(normalized), "CVE-") {
-			return normalized
+	for _, group := range [][]string{vuln.Aliases, vuln.Upstream, vuln.Related} {
+		for _, id := range group {
+			normalized := domain.NormalizeCVEID(id)
+			if strings.HasPrefix(strings.ToUpper(normalized), "CVE-") {
+				return normalized
+			}
 		}
 	}
 	return domain.NormalizeCVEID(vuln.ID)
