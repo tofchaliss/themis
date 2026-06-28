@@ -116,6 +116,33 @@ func TestCompareVersionsEcoRPMRealRockyShapes(t *testing.T) {
 	}
 }
 
+// TestRPMReleaseMajor locks the release-stream extraction used to stop el8
+// packages matching el9/el10 fix versions (the cross-stream false-positive class).
+func TestRPMReleaseMajor(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"6.1-10.20180224.el8", "8"},
+		{"0:6.2-10.20210508.el9_6.2", "9"},
+		{"2.4.37-65.module+el8.10.0+40053+5a18018e.7", "8"},
+		{"8:1.02.181-15.el8_10.3", "8"},
+		{"1.02.181-15.el10_0.1", "10"},
+		{"Rocky Linux:8", "8"},
+		{"Rocky Linux:9", "9"},
+		{"AlmaLinux:9", "9"},
+		{"Red Hat Enterprise Linux 8", "8"},
+		{"Rocky Linux", ""}, // distro but no release major
+		{"rpm", ""},
+		{"1.36.1-r2", ""},    // apk version
+		{"Alpine:v3.18", ""}, // apk ecosystem — trailing 18 must NOT read as a stream
+		{"4.17.21", ""},      // generic semver
+		{"", ""},
+	}
+	for _, tc := range tests {
+		if got := RPMReleaseMajor(tc.in); got != tc.want {
+			t.Errorf("RPMReleaseMajor(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestRPMConstraintSetRockyFixed mirrors how a Rocky OSV "fixed" range correlates:
 // introduced "0" + a fixed NEVRA → installed < fixed is affected, >= fixed is
 // patched. Uses the real device-mapper-libs epoch-8 NEVRA.

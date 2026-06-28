@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -52,6 +53,43 @@ func ClassifyEcosystem(ecosystem string) VersionClass {
 	default:
 		return VersionClassGeneric
 	}
+}
+
+// rpmElTag matches an RPM dist-tag release major: ".el8", "+el8", "_el8" or a
+// leading "el8" (e.g. "6.2-10.20210508.el9_6.2" → "9",
+// "2.4.37-65.module+el8.10.0" → "8", "8:1.02.181-15.el8_10.3" → "8").
+var rpmElTag = regexp.MustCompile(`(?:^|[._+])el(\d+)`)
+
+// rpmEcosystemMajor matches a trailing release major on a distro ecosystem label
+// ("Rocky Linux:8" → "8", "Rocky Linux 9" → "9", "AlmaLinux:9" → "9").
+var rpmEcosystemMajor = regexp.MustCompile(`(\d+)\s*$`)
+
+// RPMReleaseMajor extracts the RHEL-family release stream major ("8", "9", …)
+// from either an RPM NEVRA/dist-tag or an OSV/distro ecosystem label. It returns
+// "" when no stream is present, so apk/Alpine versions, generic versions, and
+// tag-less RPM versions stay unconstrained.
+//
+// Release streams are independent maintenance lines: an el8 package is never
+// fixed by an el9 build, so correlation must not compare an installed version in
+// one stream against a fixed version in another (cross-stream false match).
+func RPMReleaseMajor(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	if m := rpmElTag.FindStringSubmatch(s); m != nil {
+		return m[1]
+	}
+	// Only trust a trailing number when the label names an RPM-family distro, so
+	// arbitrary version digits are never mistaken for a release stream.
+	if strings.Contains(s, "rocky") || strings.Contains(s, "alma") ||
+		strings.Contains(s, "rhel") || strings.Contains(s, "red hat") ||
+		strings.Contains(s, "centos") || strings.Contains(s, "fedora") {
+		if m := rpmEcosystemMajor.FindStringSubmatch(s); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }
 
 // CompareVersionsEco compares two versions using the ordering rules of the given

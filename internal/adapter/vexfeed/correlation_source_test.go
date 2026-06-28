@@ -89,6 +89,42 @@ func TestAssertionCorrelationSourceFetch(t *testing.T) {
 	}
 }
 
+// TestAssertionCorrelationSourceRejectsCrossStream is the regression for the
+// el8-vs-el9 cross-stream false positive: an el8 component must never match an
+// el9-only fix (the real CVE-2022-29458 / ncurses case), but must still match a
+// genuine el8 assertion whose fix is above the installed version.
+func TestAssertionCorrelationSourceRejectsCrossStream(t *testing.T) {
+	src := NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
+	src.Load([]domain.VendorVEXAssertion{
+		// Only an el9 fix exists for this CVE (el8 is "not affected" upstream).
+		{Feed: "rocky", CVEID: "CVE-2022-29458", Ecosystem: "Rocky Linux:9",
+			PackageName: "ncurses", Introduced: "0", Fixed: "0:6.2-10.20210508.el9_6.2"},
+		// A genuine el8 fix for a different CVE, above the installed build.
+		{Feed: "rocky", CVEID: "CVE-2024-EL8", Ecosystem: "Rocky Linux:8",
+			PackageName: "ncurses", Introduced: "0", Fixed: "0:6.1-12.20180224.el8"},
+	})
+
+	got, _ := src.FetchForComponent(context.Background(), domain.CanonicalComponent{
+		Ecosystem: "rpm", Name: "rocky/ncurses", Version: "6.1-10.20180224.el8",
+	})
+
+	var sawEl9, sawEl8 bool
+	for _, r := range got {
+		switch r.CVEID {
+		case "CVE-2022-29458":
+			sawEl9 = true
+		case "CVE-2024-EL8":
+			sawEl8 = true
+		}
+	}
+	if sawEl9 {
+		t.Fatalf("el8 component matched an el9-only fix (cross-stream false positive): %+v", got)
+	}
+	if !sawEl8 {
+		t.Fatalf("el8 component should match the genuine el8 assertion: %+v", got)
+	}
+}
+
 func TestAssertionCorrelationSourceMatchAll(t *testing.T) {
 	src := NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
 	// introduced "0" with no fix → affects all versions.
