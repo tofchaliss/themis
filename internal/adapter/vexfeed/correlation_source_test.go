@@ -125,6 +125,29 @@ func TestAssertionCorrelationSourceRejectsCrossStream(t *testing.T) {
 	}
 }
 
+// TestAssertionCorrelationSourceCrossStreamFromPURL reproduces the runtime hole:
+// the installed version field carries no ".elN" dist tag (only the purl does) and
+// the el9 fix lives in an entry whose ecosystem label is coarse ("Rocky Linux").
+// The stream must still be read — from the purl for the component, from the fixed
+// NEVRA for the assertion — so the el9 fix is rejected for an el8 package.
+func TestAssertionCorrelationSourceCrossStreamFromPURL(t *testing.T) {
+	src := NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
+	src.Load([]domain.VendorVEXAssertion{
+		{Feed: "rocky", CVEID: "CVE-2022-29458", Ecosystem: "Rocky Linux",
+			PackageName: "ncurses", Introduced: "0", Fixed: "0:6.2-10.20210508.el9_6.2"},
+	})
+	got, _ := src.FetchForComponent(context.Background(), domain.CanonicalComponent{
+		Ecosystem: "rpm", Name: "rocky/ncurses",
+		Version: "6.1-10.20180224", // NB: no .el8 here — only the purl carries it
+		PURL:    "pkg:rpm/rocky/ncurses@6.1-10.20180224.el8?arch=x86_64&distro=rocky-8.9",
+	})
+	for _, r := range got {
+		if r.CVEID == "CVE-2022-29458" {
+			t.Fatalf("el8 component (stream from purl) matched an el9 fix: %+v", got)
+		}
+	}
+}
+
 func TestAssertionCorrelationSourceMatchAll(t *testing.T) {
 	src := NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
 	// introduced "0" with no fix → affects all versions.
