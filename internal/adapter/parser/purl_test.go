@@ -44,6 +44,16 @@ func TestNameVersionFromPURL(t *testing.T) {
 	if name != "" || version != "" {
 		t.Fatalf("nameVersionFromPURL(bad) = (%q, %q)", name, version)
 	}
+	// Percent-encoded segments are decoded ("%2B%2B" → "++").
+	name, version = nameVersionFromPURL("pkg:rpm/rocky/libstdc%2B%2B@8.5.0-28.el8_10?arch=x86_64")
+	if name != "rocky/libstdc++" || version != "8.5.0-28.el8_10" {
+		t.Fatalf("nameVersionFromPURL(encoded) = (%q, %q)", name, version)
+	}
+	// Invalid percent-encoding falls back to the raw segment (no panic, no error).
+	name, version = nameVersionFromPURL("pkg:rpm/rocky/bad%zz@1%gg")
+	if name != "rocky/bad%zz" || version != "1%gg" {
+		t.Fatalf("nameVersionFromPURL(invalid encoding) = (%q, %q)", name, version)
+	}
 }
 
 func TestBuildPURL(t *testing.T) {

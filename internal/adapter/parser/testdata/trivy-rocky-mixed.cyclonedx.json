@@ -1,0 +1,104 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "component": {
+      "bom-ref": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp",
+      "type": "container",
+      "name": "registry.example.com/oamp:1.0",
+      "purl": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "u-spring-1",
+      "type": "library",
+      "name": "spring-beans",
+      "version": "6.2.11",
+      "purl": "pkg:maven/org.springframework/spring-beans@6.2.11"
+    },
+    {
+      "bom-ref": "u-spring-2",
+      "type": "library",
+      "name": "spring-beans",
+      "version": "6.2.11",
+      "purl": "pkg:maven/org.springframework/spring-beans@6.2.11"
+    },
+    {
+      "bom-ref": "pkg:maven/com.example/kafka@0.1.0",
+      "type": "library",
+      "name": "kafka",
+      "version": "0.1.0",
+      "purl": "pkg:maven/com.example/kafka@0.1.0"
+    },
+    {
+      "bom-ref": "u-pyyaml",
+      "type": "library",
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "purl": "pkg:pypi/pyyaml@6.0.3"
+    },
+    {
+      "bom-ref": "pkg:pypi/urllib3@1.26.20",
+      "type": "library",
+      "name": "urllib3",
+      "version": "1.26.20",
+      "purl": "pkg:pypi/urllib3@1.26.20"
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/libstdc%2B%2B@8.5.0-28.el8_10?arch=x86_64&distro=rocky-8.9",
+      "type": "library",
+      "name": "libstdc++",
+      "version": "8.5.0-28.el8_10",
+      "purl": "pkg:rpm/rocky/libstdc%2B%2B@8.5.0-28.el8_10?arch=x86_64&distro=rocky-8.9"
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/device-mapper-libs@1.02.181-15.el8_10.3?arch=x86_64&distro=rocky-8.9&epoch=8",
+      "type": "library",
+      "name": "device-mapper-libs",
+      "version": "8:1.02.181-15.el8_10.3",
+      "purl": "pkg:rpm/rocky/device-mapper-libs@1.02.181-15.el8_10.3?arch=x86_64&distro=rocky-8.9&epoch=8"
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/httpd@2.4.37-65.module%2Bel8.10.0%2B40053%2B5a18018e.7?arch=x86_64&distro=rocky-8.9&modularitylabel=httpd%3A2.4%3A8100020251222072617%3Ae155f54d",
+      "type": "library",
+      "name": "httpd",
+      "version": "2.4.37-65.module+el8.10.0+40053+5a18018e.7",
+      "purl": "pkg:rpm/rocky/httpd@2.4.37-65.module%2Bel8.10.0%2B40053%2B5a18018e.7?arch=x86_64&distro=rocky-8.9&modularitylabel=httpd%3A2.4%3A8100020251222072617%3Ae155f54d"
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/perl-Text-Tabs%2BWrap@2013.0523-395.el8?arch=noarch&distro=rocky-8.9",
+      "type": "library",
+      "purl": "pkg:rpm/rocky/perl-Text-Tabs%2BWrap@2013.0523-395.el8?arch=noarch&distro=rocky-8.9"
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/gpg-pubkey@2f86d6a1-5cf7cefb?arch=None&distro=rocky-8.9",
+      "type": "library",
+      "name": "gpg-pubkey",
+      "version": "2f86d6a1-5cf7cefb",
+      "purl": "pkg:rpm/rocky/gpg-pubkey@2f86d6a1-5cf7cefb?arch=None&distro=rocky-8.9"
+    },
+    {
+      "bom-ref": "os-rocky",
+      "type": "operating-system",
+      "name": "rocky",
+      "version": "8.9"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp",
+      "dependsOn": [
+        "u-spring-1",
+        "pkg:maven/com.example/kafka@0.1.0",
+        "pkg:pypi/pyyaml@6.0.3"
+      ]
+    },
+    {
+      "ref": "u-spring-1",
+      "dependsOn": []
+    }
+  ],
+  "vulnerabilities": []
+}

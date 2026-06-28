@@ -162,6 +162,88 @@ func TestCycloneDXAdapterIgnoresEmbeddedVulnerabilities(t *testing.T) {
 	}
 }
 
+// TestCycloneDXAdapterGoldenRockyMixed is the golden-corpus regression for a real
+// Trivy Rocky-8 CycloneDX SBOM. It locks the parser's handling of the awkward
+// shapes that file exercises: mixed UUID/purl bom-refs, percent-encoded rpm names,
+// epoch-prefixed and modular RPM versions, duplicate purls across bom-refs, a
+// no-purl operating-system component, and an empty embedded vulnerabilities array.
+func TestCycloneDXAdapterGoldenRockyMixed(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "trivy-rocky-mixed.cyclonedx.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbom, err := (CycloneDXAdapter{}).Parse(context.Background(), raw, "")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// 11 components in the file; the no-purl operating-system one is skipped.
+	if len(sbom.Components) != 10 {
+		t.Fatalf("components = %d, want 10", len(sbom.Components))
+	}
+	sawOSWarning := false
+	for _, w := range sbom.Warnings {
+		if strings.Contains(w, "rocky") {
+			sawOSWarning = true
+		}
+	}
+	if !sawOSWarning {
+		t.Fatalf("expected a skip warning for the no-purl OS component; warnings=%v", sbom.Warnings)
+	}
+
+	byName := map[string]domain.CanonicalComponent{}
+	names := make([]string, 0, len(sbom.Components))
+	purlCounts := map[string]int{}
+	ecosystems := map[string]int{}
+	for _, c := range sbom.Components {
+		byName[c.Name] = c
+		names = append(names, c.Name)
+		purlCounts[c.PURL]++
+		ecosystems[c.Ecosystem]++
+	}
+
+	// libstdc++ keeps its decoded name from the JSON field (not the %2B%2B purl).
+	if byName["libstdc++"].Ecosystem != "rpm" {
+		t.Fatalf("libstdc++ missing/wrong ecosystem: %+v", byName["libstdc++"])
+	}
+	// device-mapper-libs keeps the epoch-prefixed NEVRA for rpm comparison.
+	if got := byName["device-mapper-libs"].Version; got != "8:1.02.181-15.el8_10.3" {
+		t.Fatalf("device-mapper-libs version = %q", got)
+	}
+	// httpd modular version survives intact.
+	if got := byName["httpd"].Version; got != "2.4.37-65.module+el8.10.0+40053+5a18018e.7" {
+		t.Fatalf("httpd version = %q", got)
+	}
+	// The component with no name/version falls back to the purl, percent-decoded
+	// ("%2B"→"+"). The namespace is retained here and stripped later by the distro
+	// correlation source; what matters is that the encoding is resolved.
+	if _, ok := byName["rocky/perl-Text-Tabs+Wrap"]; !ok {
+		t.Fatalf("perl-Text-Tabs+Wrap not derived/decoded from purl; names=%v", names)
+	}
+	// Duplicate purl across two bom-refs is preserved (deduped later at identity).
+	if purlCounts["pkg:maven/org.springframework/spring-beans@6.2.11"] != 2 {
+		t.Fatalf("expected spring-beans purl twice, got %d", purlCounts["pkg:maven/org.springframework/spring-beans@6.2.11"])
+	}
+	if ecosystems["rpm"] == 0 || ecosystems["pypi"] == 0 || ecosystems["maven"] == 0 {
+		t.Fatalf("missing expected ecosystems: %v", ecosystems)
+	}
+
+	// Dependency edges resolve both a UUID bom-ref ("u-spring-1") and a purl
+	// bom-ref to purls.
+	var sawUUIDResolved, sawPurlResolved bool
+	for _, e := range sbom.Dependencies {
+		switch e.ToPURL {
+		case "pkg:maven/org.springframework/spring-beans@6.2.11":
+			sawUUIDResolved = true
+		case "pkg:maven/com.example/kafka@0.1.0":
+			sawPurlResolved = true
+		}
+	}
+	if !sawUUIDResolved || !sawPurlResolved {
+		t.Fatalf("dependency refs not resolved (uuid=%v purl=%v): %+v", sawUUIDResolved, sawPurlResolved, sbom.Dependencies)
+	}
+}
+
 func cycloneDXFixture(t *testing.T) map[string]any {
 	t.Helper()
 	return map[string]any{
