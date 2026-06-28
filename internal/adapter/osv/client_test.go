@@ -14,15 +14,13 @@ func TestClientAlpineCVENormalizationAndCVSSVector(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"results": [{
-				"vulns": [{
-					"id": "ALPINE-CVE-2024-0001",
-					"aliases": ["CVE-2024-0001"],
-					"severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
-					"affected": [{
-						"package": {"ecosystem": "Alpine", "name": "busybox"},
-						"ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.36.1-r0"}]}]
-					}]
+			"vulns": [{
+				"id": "ALPINE-CVE-2024-0001",
+				"aliases": ["CVE-2024-0001"],
+				"severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+				"affected": [{
+					"package": {"ecosystem": "Alpine", "name": "busybox"},
+					"ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.36.1-r0"}]}]
 				}]
 			}]
 		}`))
@@ -45,6 +43,50 @@ func TestClientAlpineCVENormalizationAndCVSSVector(t *testing.T) {
 	}
 	if vulns[0].Severity != "critical" {
 		t.Fatalf("Severity = %q", vulns[0].Severity)
+	}
+}
+
+func TestClientResolvesCVEFromGHSAAlias(t *testing.T) {
+	// /v1/query returns the full GHSA record whose aliases carry the canonical CVE
+	// (the urllib3 case). querybatch used to return only the id, leaving findings
+	// keyed by GHSA-… with no severity/ranges.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"vulns":[{
+			"id":"GHSA-gm62-xv2j-4w53",
+			"aliases":["CVE-2025-66418"],
+			"severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"}],
+			"affected":[{"package":{"ecosystem":"PyPI","name":"urllib3"},"ranges":[{"events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]
+		}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	client := osv.NewClient(osv.ClientConfig{BaseURL: srv.URL, RateLimiter: osv.NewTokenBucket(100, 100)})
+	vulns, err := client.QueryByEcosystem(context.Background(), "pypi", []domain.OSVPackageQuery{{Name: "urllib3"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vulns) != 1 || vulns[0].CVEID != "CVE-2025-66418" {
+		t.Fatalf("expected canonical CVE-2025-66418, got %#v", vulns)
+	}
+	if vulns[0].Severity == "unknown" {
+		t.Fatalf("severity should be populated from the full record, got %q", vulns[0].Severity)
+	}
+}
+
+func TestClientResolvesCVEFromUpstream(t *testing.T) {
+	// Distro records place the CVE in upstream, not aliases.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"vulns":[{"id":"RLSA-2023:1670","upstream":["CVE-2023-25690"],"affected":[{"package":{"ecosystem":"PyPI","name":"x"},"ranges":[{"events":[{"introduced":"0"},{"fixed":"1.0"}]}]}]}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	client := osv.NewClient(osv.ClientConfig{BaseURL: srv.URL, RateLimiter: osv.NewTokenBucket(100, 100)})
+	vulns, err := client.QueryByEcosystem(context.Background(), "pypi", []domain.OSVPackageQuery{{Name: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vulns) != 1 || vulns[0].CVEID != "CVE-2023-25690" {
+		t.Fatalf("expected CVE-2023-25690 from upstream, got %#v", vulns)
 	}
 }
 

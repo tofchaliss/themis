@@ -36,22 +36,20 @@ func TestV021AlpineSBOMOSVCorrelation(t *testing.T) {
 	osvSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"results": []map[string]any{{
-				"vulns": []map[string]any{{
-					"id":      "ALPINE-CVE-2024-0001",
-					"aliases": []string{"CVE-2024-0001"},
-					"severity": []map[string]string{{
-						"type":  "CVSS_V3",
-						"score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-					}},
-					"affected": []map[string]any{{
-						"package": map[string]string{"ecosystem": "Alpine", "name": "busybox"},
-						"ranges": []map[string]any{{
-							"events": []map[string]string{
-								{"introduced": "0"},
-								{"fixed": "1.36.1-r0"},
-							},
-						}},
+			"vulns": []map[string]any{{
+				"id":      "ALPINE-CVE-2024-0001",
+				"aliases": []string{"CVE-2024-0001"},
+				"severity": []map[string]string{{
+					"type":  "CVSS_V3",
+					"score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+				}},
+				"affected": []map[string]any{{
+					"package": map[string]string{"ecosystem": "Alpine", "name": "busybox"},
+					"ranges": []map[string]any{{
+						"events": []map[string]string{
+							{"introduced": "0"},
+							{"fixed": "1.36.1-r0"},
+						},
 					}},
 				}},
 			}},

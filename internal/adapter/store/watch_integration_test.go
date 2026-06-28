@@ -195,14 +195,12 @@ func TestWatchCycleIntegrationPostgresOSVFallback(t *testing.T) {
 	osvSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"results": [{
-				"vulns": [{
-					"id": "CVE-2021-23337",
-					"severity": [{"type": "CVSS_V3", "score": "7.5"}],
-					"affected": [{
-						"package": {"ecosystem": "npm", "name": "lodash"},
-						"ranges": [{"events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]
-					}]
+			"vulns": [{
+				"id": "CVE-2021-23337",
+				"severity": [{"type": "CVSS_V3", "score": "7.5"}],
+				"affected": [{
+					"package": {"ecosystem": "npm", "name": "lodash"},
+					"ranges": [{"events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]
 				}]
 			}]
 		}`))
