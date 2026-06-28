@@ -71,23 +71,32 @@ func (s *AssertionCorrelationSource) FetchForComponent(_ context.Context, compon
 		return nil, nil
 	}
 
+	// Installed release stream: read from the version, falling back to the purl.
+	// Trivy sometimes drops the ".elN" dist tag from the version field but always
+	// keeps it in the purl (e.g. version "6.1-10.20180224", purl
+	// "…ncurses@6.1-10.20180224.el8?…"), so the version alone is not reliable.
 	compStream := domain.RPMReleaseMajor(component.Version)
+	if compStream == "" {
+		compStream = domain.RPMReleaseMajor(component.PURL)
+	}
 
 	var out []domain.VulnerabilityRecord
 	for _, a := range matches {
 		// Release-stream guard: RPM maintenance streams are independent, so an
 		// el8 package is never fixed by an el9 build. Reject assertions from a
 		// different stream before the version compare — otherwise "6.1.el8" <
-		// "6.2.el9" reads as affected (a cross-stream false positive). An unknown
+		// "6.2.el9" reads as affected (a cross-stream false positive). The
+		// assertion's stream comes from its FIXED NEVRA first — its own ".elN" tag
+		// is authoritative; the ecosystem label can be coarse or absent. Unknown
 		// stream on either side falls through to the version math (no false
 		// negatives), so apk and tag-less RPM versions are unaffected.
 		if compStream != "" {
-			asrtStream := domain.RPMReleaseMajor(a.Ecosystem)
-			if asrtStream == "" {
-				asrtStream = domain.RPMReleaseMajor(a.Fixed)
-			}
+			asrtStream := domain.RPMReleaseMajor(a.Fixed)
 			if asrtStream == "" {
 				asrtStream = domain.RPMReleaseMajor(a.Introduced)
+			}
+			if asrtStream == "" {
+				asrtStream = domain.RPMReleaseMajor(a.Ecosystem)
 			}
 			if asrtStream != "" && asrtStream != compStream {
 				continue
