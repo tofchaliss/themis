@@ -21,6 +21,7 @@ import (
 	"github.com/themis-project/themis/internal/adapter/nvd"
 	"github.com/themis-project/themis/internal/adapter/osv"
 	"github.com/themis-project/themis/internal/adapter/parser"
+	"github.com/themis-project/themis/internal/adapter/redhat"
 	"github.com/themis-project/themis/internal/adapter/store"
 	"github.com/themis-project/themis/internal/adapter/trust"
 	"github.com/themis-project/themis/internal/adapter/vexfeed"
@@ -281,6 +282,21 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Metrics:   metrics.CVSSBackfillMetrics{},
 		Logger:    appLog,
 	}, cfg.AppConfig.NVD.PollInterval, appLog, feedHealth)
+
+	// Red Hat VEX overlay (Option B): on-demand Security Data API per open RPM CVE
+	// → vex_assertions (the working alternative to the empty CSAF directory crawler).
+	// A "Not affected" verdict for the component's exact EL stream surfaces as a
+	// visible, human-overridable overlay signal (vendor severity + rationale carried
+	// in the justification); Themis never auto-rescopes severity.
+	metrics.RegisterRedHatVEX()
+	StartRedHatVEXScheduler(ctx, &enrichment.RedHatVEXService{
+		Fetcher:  redhat.NewClient(redhat.ClientConfig{RateLimiter: nvd.NewTokenBucket(2, 2)}),
+		Findings: enrichmentRepo,
+		Store:    vendorVEXStore,
+		ReEnrich: dispatcher,
+		Metrics:  metrics.RedHatVEXMetrics{},
+		Logger:   appLog,
+	}, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
 
 	handler := api.NewHandler(api.Dependencies{
 		Ingestion:     pipeline,
