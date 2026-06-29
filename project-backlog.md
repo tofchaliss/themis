@@ -237,6 +237,19 @@ Current implementation status: `openspec/STATUS.md`.
 
 ### KNOWN GAP — Red Hat CSAF VEX overlay never ingests (confirmed 2026-06-28)
 
+**Status:** ✅ RESOLVED via **Option B** (v0.3.5) — on-demand Red Hat Security Data API
+(`adapter/redhat` + `usecase/enrichment.RedHatVEXService`), the backlog-recommended approach
+below. For each open RPM-family CVE, Themis fetches
+`access.redhat.com/hydra/rest/securitydata/cve/{CVE}.json`, resolves the verdict for the
+component's exact EL stream (CPE→major), and writes a VEX-overlay assertion keyed to the
+finding's PURL so the existing matcher applies it: `fix_state: "Not affected"` →
+`effective_state=not_affected` (a visible, human-overridable signal — the ncurses
+CVE-2022-29458 case), `affected_release` → the back-ported fix NEVRA, and `threat_severity` +
+statement → the justification. Severity is context only (no auto-rescore; the analyst decides).
+The exact-PURL approach made the `namespaceAliases` `rocky/alma→redhat` change unnecessary (no
+over-suppression risk). The broken `CSAFDirectoryFeedSource` crawler analysis below is retained
+for history.
+
 **Severity:** value-add accuracy gap (not a correctness bug). Distinct from, and a
 follow-on to, the release-stream fix (PR #30, which removes the el8↔el9 cross-stream
 false positives — the actual correctness bug).

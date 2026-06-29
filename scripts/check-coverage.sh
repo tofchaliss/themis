@@ -21,6 +21,7 @@ declare -a infra_pkgs=(
 	adapter/api
 	adapter/epsskev
 	adapter/exploitdb
+	adapter/redhat
 	adapter/assetgraph
 	adapter/vexfeed
 	infrastructure/db
@@ -38,7 +39,7 @@ threshold_for() {
 	case "$pkg_path" in
 		usecase/enrichment) echo 90; return ;;
 		adapter/osv) echo 90; return ;;
-		adapter/epsskev|adapter/exploitdb) echo 85; return ;;
+		adapter/epsskev|adapter/exploitdb|adapter/redhat) echo 85; return ;;
 		adapter/api) echo 80; return ;;
 	esac
 	for pkg in "${domain_pkgs[@]}"; do
