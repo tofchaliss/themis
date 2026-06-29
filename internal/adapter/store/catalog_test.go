@@ -203,8 +203,8 @@ func TestPostgresScanQueryGetScan(t *testing.T) {
 
 func TestPostgresScanQueryListScanVulnerabilities(t *testing.T) {
 	rows := &fakeRows{data: [][]any{
-		{"cv-1", "CVE-1", "high", "open", "pkg:npm/a@1", "prod-1"},
-		{"cv-2", "CVE-2", "low", "not_affected", "pkg:npm/b@1", "prod-1"},
+		{"cv-1", "CVE-1", "high", "open", "pkg:npm/a@1", "prod-1", "1.0.0", "1.2.3"},
+		{"cv-2", "CVE-2", "low", "not_affected", "pkg:npm/b@1", "prod-1", "2.0.0", ""},
 	}}
 	pool := storeFakePool{conn: storeFakeConn{}, rows: rows}
 	items, page, err := NewPostgresScanQueryRepository(pool).ListScanVulnerabilities(
@@ -214,6 +214,9 @@ func TestPostgresScanQueryListScanVulnerabilities(t *testing.T) {
 	)
 	if err != nil || len(items) != 1 || page.NextCursor != "cv-1" {
 		t.Fatalf("items=%+v page=%+v err=%v", items, page, err)
+	}
+	if items[0].InstalledVersion != "1.0.0" || items[0].FixedVersion != "1.2.3" {
+		t.Fatalf("installed/fixed = %q/%q", items[0].InstalledVersion, items[0].FixedVersion)
 	}
 }
 

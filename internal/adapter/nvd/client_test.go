@@ -118,15 +118,20 @@ func TestClientFetchByCVEID(t *testing.T) {
 	}
 }
 
-func TestClientFetchByCVEIDNotFound(t *testing.T) {
+func TestClientFetchByCVEIDEmptyResultIsTransient(t *testing.T) {
+	// An empty vulnerabilities array on a 2xx is a throttle/transient response, not
+	// a verdict that NVD has no CVSS — a well-formed cveId always resolves to a
+	// record. It must return an error (not found=false) so the CR-5 backfill retries
+	// next cycle instead of marking the CVE checked and suppressing it for the whole
+	// back-off window. The genuine "CVE does not exist" path is 404 (test below).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"totalResults": 0, "vulnerabilities": []}`))
 	}))
 	t.Cleanup(srv.Close)
 	client := nvd.NewClient(nvd.ClientConfig{BaseURL: srv.URL, RateLimiter: nvd.NewTokenBucket(100, 100)})
-	if _, found, err := client.FetchByCVEID(context.Background(), "CVE-1999-9999"); err != nil || found {
-		t.Fatalf("not-found found=%v err=%v", found, err)
+	if _, found, err := client.FetchByCVEID(context.Background(), "CVE-1999-9999"); err == nil || found {
+		t.Fatalf("empty 200 must be transient error: found=%v err=%v", found, err)
 	}
 }
 

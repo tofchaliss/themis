@@ -127,11 +127,13 @@ func toScanVulnerabilityList(items []domain.ScanVulnerability, page domain.PageR
 	out := make([]gen.ScanVulnerability, 0, len(items))
 	for _, item := range items {
 		sv := gen.ScanVulnerability{
-			Id:             parseUUID(item.ID),
-			CveId:          item.CVEID,
-			Severity:       item.Severity,
-			EffectiveState: ptrString(item.EffectiveState),
-			ComponentPurl:  ptrString(item.ComponentPURL),
+			Id:               parseUUID(item.ID),
+			CveId:            item.CVEID,
+			Severity:         item.Severity,
+			EffectiveState:   ptrString(item.EffectiveState),
+			ComponentPurl:    ptrString(item.ComponentPURL),
+			InstalledVersion: ptrString(item.InstalledVersion),
+			FixedVersion:     ptrString(item.FixedVersion),
 		}
 		if item.Enrichment != nil {
 			enrichment := &gen.ScanVulnerabilityEnrichment{

@@ -338,12 +338,14 @@ type ScanSummary struct {
 
 // ScanVulnerability defines model for ScanVulnerability.
 type ScanVulnerability struct {
-	ComponentPurl  *string                      `json:"component_purl,omitempty"`
-	CveId          string                       `json:"cve_id"`
-	EffectiveState *string                      `json:"effective_state,omitempty"`
-	Enrichment     *ScanVulnerabilityEnrichment `json:"enrichment,omitempty"`
-	Id             openapi_types.UUID           `json:"id"`
-	Severity       string                       `json:"severity"`
+	ComponentPurl    *string                      `json:"component_purl,omitempty"`
+	CveId            string                       `json:"cve_id"`
+	EffectiveState   *string                      `json:"effective_state,omitempty"`
+	Enrichment       *ScanVulnerabilityEnrichment `json:"enrichment,omitempty"`
+	FixedVersion     *string                      `json:"fixed_version,omitempty"`
+	Id               openapi_types.UUID           `json:"id"`
+	InstalledVersion *string                      `json:"installed_version,omitempty"`
+	Severity         string                       `json:"severity"`
 }
 
 // ScanVulnerabilityEnrichment defines model for ScanVulnerabilityEnrichment.

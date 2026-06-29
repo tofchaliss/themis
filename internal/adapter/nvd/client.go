@@ -211,10 +211,18 @@ func (c *Client) FetchByCVEID(ctx context.Context, cveID string) (domain.CVSSDat
 		return domain.CVSSData{}, false, fmt.Errorf("decode nvd response: %w", err)
 	}
 	if len(payload.Vulnerabilities) == 0 {
-		return domain.CVSSData{}, false, nil
+		// A well-formed cveId always resolves to a record at NVD; an empty result on
+		// a 2xx is a transient/throttled response (NVD returns empty 200s or
+		// Cloudflare interstitials under load, especially unkeyed), not a verdict of
+		// "NVD has no CVSS". Return a transient error so the CR-5 backfill retries it
+		// next cycle instead of marking it checked and suppressing it for the whole
+		// back-off window — which is how a throttle storm poisoned hundreds of rows.
+		return domain.CVSSData{}, false, fmt.Errorf("nvd returned no record for %s (transient/throttled response)", cveID)
 	}
 	severity, score, vector := extractNVDCVSS(payload.Vulnerabilities[0].CVE)
 	if score <= 0 && severity == "unknown" {
+		// Record present but genuinely unscored (e.g. awaiting NVD analysis): a real
+		// "no CVSS yet" miss, so the backfill may mark it checked and back off.
 		return domain.CVSSData{}, false, nil
 	}
 	return domain.CVSSData{Severity: severity, Score: score, Vector: vector}, true, nil
