@@ -5,10 +5,15 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-06-29
+### Fixed
+- fix(correlation): distro-authoritative identity + NVD backfill robustness + remediation surfacing (@invalid-email-address)
+
 ## [0.3.2] - 2026-06-28
 ### Changed
 - test(correlation): golden Trivy/Rocky SBOM fixture + rpm-shape regressions (@invalid-email-address)
 - docs(backlog): record the empty Red Hat CSAF VEX overlay gap (@invalid-email-address)
+- release: v0.3.2 — correlation correctness (canonical CVE + el8/el9 streams) + feeder resilience (@invalid-email-address)
 
 ### Fixed
 - fix(feeds): post-v0.3.0 feed resilience and severity-bucket fixes (@invalid-email-address)
