@@ -457,6 +457,7 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	query := fmt.Sprintf(`
 		SELECT cv.id, v.cve_id, COALESCE(v.severity, 'unknown'),
 		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), proj.product_id::text,
+		       COALESCE(cvn.version, ''), COALESCE(cv.source_fixed_version, ''),
 		       rc.exploit_public, rc.risk_score, rc.epss_score, rc.kev_listed,
 		       rc.deterministic_level, rc.blast_radius_score, rc.upstream_vex_coverage
 		FROM component_vulnerabilities cv
@@ -488,6 +489,7 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 		var deterministicLevel, upstreamVEX *string
 		if err := rows.Scan(
 			&item.ID, &item.CVEID, &item.Severity, &item.EffectiveState, &item.ComponentPURL, &item.ProductID,
+			&item.InstalledVersion, &item.FixedVersion,
 			&exploitPublic, &riskScore, &epssScore, &kevListed,
 			&deterministicLevel, &blastRadius, &upstreamVEX,
 		); err != nil {

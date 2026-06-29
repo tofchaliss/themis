@@ -39,6 +39,38 @@ func TestPackageIdentityMatch(t *testing.T) {
 	}
 }
 
+// TestPackageIdentityMatchDistroAuthoritative locks in the el8 openssl over-match
+// fix: an upstream NVD catalog row (stored ecosystem-less, "openssl:openssl") must
+// NOT name-match an rpm/apk component, because a distro component's CVEs come only
+// from its backport-aware distro feed. Genuine same-distro-class rows still match,
+// and app ecosystems keep the looser blank-ecosystem name match.
+func TestPackageIdentityMatchDistroAuthoritative(t *testing.T) {
+	tests := []struct {
+		name                          string
+		recEco, recName, compEco, comp string
+		want                          bool
+	}{
+		// The bug: empty-ecosystem NVD openssl flagged every upstream CVE on el8.
+		{"nvd empty-eco rejected for rpm", "", "openssl", "rpm", "openssl", false},
+		{"nvd empty-eco rejected for apk", "", "openssl", "apk", "openssl", false},
+		// Genuine distro-feed rows (same class) still match — rpm/rocky/redhat all RPM.
+		{"rpm record matches rpm component", "rpm", "openssl", "rpm", "openssl", true},
+		{"rocky record matches rpm component", "rocky", "openssl", "rpm", "openssl", true},
+		{"alpine record matches apk component", "alpine", "busybox", "apk", "busybox", true},
+		// Cross-distro-class never matches (apk fix never applies to rpm).
+		{"apk record rejected for rpm component", "apk", "openssl", "rpm", "openssl", false},
+		// App ecosystems keep the looser blank-record-ecosystem name match unchanged.
+		{"npm component keeps blank-eco name match", "", "lodash", "npm", "lodash", true},
+		{"generic component keeps blank-eco name match", "", "lodash", "", "lodash", true},
+	}
+	for _, tc := range tests {
+		if got := PackageIdentityMatch(tc.recEco, tc.recName, tc.compEco, tc.comp); got != tc.want {
+			t.Errorf("%s: PackageIdentityMatch(%q,%q,%q,%q) = %v, want %v",
+				tc.name, tc.recEco, tc.recName, tc.compEco, tc.comp, got, tc.want)
+		}
+	}
+}
+
 func TestCompareVersions(t *testing.T) {
 	if CompareVersions("1.0.0", "1.0.0") != 0 {
 		t.Fatal("expected equal versions")

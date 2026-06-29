@@ -45,10 +45,23 @@ func NormalizeEcosystem(ecosystem string) string {
 }
 
 // PackageIdentityMatch reports whether a CVE record applies to a component package name.
+//
+// Distro-authoritative identity: a distro (apk/rpm) component's vulnerabilities
+// come only from its own backport-aware distro feed, never from upstream NVD CPE
+// ranges. NVD stores e.g. "openssl:openssl" with no ecosystem, which would
+// otherwise name-match an rpm/apk "openssl" and flag every upstream openssl CVE on
+// a build whose fix the vendor backported (the el8 openssl over-match). So when the
+// component is distro-class, the record must share that distro class — an empty or
+// cross-class (upstream) record ecosystem is rejected. App ecosystems keep the
+// looser name match (record ecosystem may be blank).
 func PackageIdentityMatch(recordEcosystem, recordName, componentEcosystem, componentName string) bool {
 	recEco := NormalizeEcosystem(recordEcosystem)
 	compEco := NormalizeEcosystem(componentEcosystem)
-	if recEco != "" && compEco != "" && recEco != compEco {
+	if compClass := ClassifyEcosystem(compEco); compClass != VersionClassGeneric {
+		if ClassifyEcosystem(recEco) != compClass {
+			return false
+		}
+	} else if recEco != "" && compEco != "" && recEco != compEco {
 		return false
 	}
 	recName := strings.ToLower(strings.TrimSpace(recordName))

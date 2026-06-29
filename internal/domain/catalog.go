@@ -75,13 +75,15 @@ type ScanVulnerabilityEnrichment struct {
 
 // ScanVulnerability is a correlated finding for a scan.
 type ScanVulnerability struct {
-	ID             string
-	CVEID          string
-	Severity       string
-	EffectiveState string
-	ComponentPURL  string
-	ProductID      string
-	Enrichment     *ScanVulnerabilityEnrichment
+	ID               string
+	CVEID            string
+	Severity         string
+	EffectiveState   string
+	ComponentPURL    string
+	ProductID        string
+	InstalledVersion string
+	FixedVersion     string
+	Enrichment       *ScanVulnerabilityEnrichment
 }
 
 // CatalogComponent is a component catalog entry.

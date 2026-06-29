@@ -859,6 +859,16 @@ components:
           type: string
         component_purl:
           type: string
+        installed_version:
+          type: string
+          description: Version of the component installed in the artifact.
+        fixed_version:
+          type: string
+          description: >-
+            Version that remediates this CVE for the installed component, from the
+            authoritative correlation source (for distro packages, the vendor's
+            backported fix NEVRA in the same release stream). Empty when no fix has
+            been published.
         enrichment:
           $ref: '#/components/schemas/ScanVulnerabilityEnrichment'
     ScanVulnerabilityEnrichment:
