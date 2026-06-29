@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/themis-project/themis/internal/adapter/store"
+	"github.com/themis-project/themis/internal/domain"
 )
 
 func TestCVSSBackfillCatalogMethods(t *testing.T) {
@@ -77,5 +78,61 @@ func TestCVSSBackfillCatalogMethods(t *testing.T) {
 	}
 	if len(candidates) != 0 {
 		t.Fatalf("candidates after apply+check = %v, want 0", candidates)
+	}
+}
+
+// TestUpsertVulnerabilityPreservesCVSS locks in the v0.3.4 clobber fix: a feed
+// re-correlation that carries no numeric CVSS (e.g. a distro OSV watch cycle) must
+// NOT overwrite a real CVSS already in the catalog from the NVD-by-CVE backfill —
+// otherwise the score reverts to 0/unknown and the cvss_checked_at back-off blocks
+// re-filling it. A feed that DOES carry a better score still overwrites.
+func TestUpsertVulnerabilityPreservesCVSS(t *testing.T) {
+	ctx, pool := coreModelConnect(t, 15481)
+	catalog := store.NewPostgresVulnerabilityCatalog(pool)
+
+	// Backfilled NVD CVSS lands first.
+	if _, err := catalog.Upsert(ctx, domain.VulnerabilityRecord{
+		CVEID: "CVE-2024-8001", Severity: "high", CVSSScore: 7.5, CVSSVector: "CVSS:3.1/AV:N",
+		Ecosystem: "rpm", PackageName: "openssl", AffectedVersions: []string{"< 2.0"}, FixVersions: []string{"2.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Distro re-correlation with no numeric CVSS must NOT wipe it — but DOES refresh
+	// the correlation metadata (fixed version).
+	if _, err := catalog.Upsert(ctx, domain.VulnerabilityRecord{
+		CVEID: "CVE-2024-8001", Severity: "", CVSSScore: 0, CVSSVector: "",
+		Ecosystem: "rpm", PackageName: "openssl", AffectedVersions: []string{"< 3.0"},
+		FixVersions: []string{"0:1.1.1k-16.el8_10"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var severity, vector string
+	var score float64
+	var fixes []string
+	if err := pool.QueryRow(ctx, `SELECT severity, cvss_score, cvss_vector, fix_versions
+		FROM vulnerabilities WHERE cve_id = 'CVE-2024-8001'`).Scan(&severity, &score, &vector, &fixes); err != nil {
+		t.Fatal(err)
+	}
+	if severity != "high" || score != 7.5 || vector != "CVSS:3.1/AV:N" {
+		t.Fatalf("CVSS clobbered: severity=%q score=%v vector=%q", severity, score, vector)
+	}
+	if len(fixes) != 1 || fixes[0] != "0:1.1.1k-16.el8_10" {
+		t.Fatalf("correlation metadata not refreshed: fix_versions=%v", fixes)
+	}
+
+	// A real new CVSS (e.g. an NVD re-score) DOES overwrite.
+	if _, err := catalog.Upsert(ctx, domain.VulnerabilityRecord{
+		CVEID: "CVE-2024-8001", Severity: "critical", CVSSScore: 9.8, CVSSVector: "CVSS:3.1/AV:N/AC:L",
+		Ecosystem: "rpm", PackageName: "openssl",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT severity, cvss_score FROM vulnerabilities WHERE cve_id = 'CVE-2024-8001'`).Scan(&severity, &score); err != nil {
+		t.Fatal(err)
+	}
+	if severity != "critical" || score != 9.8 {
+		t.Fatalf("real CVSS did not overwrite: severity=%q score=%v", severity, score)
 	}
 }
