@@ -5,7 +5,14 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-06-29
+### Fixed
+- fix(correlation): preserve backfilled CVSS in catalog upsert (no clobber with empty/zero)
+
 ## [0.3.3] - 2026-06-29
+### Changed
+- release: v0.3.3 — distro-authoritative correlation + NVD backfill robustness + remediation surfacing (@invalid-email-address)
+
 ### Fixed
 - fix(correlation): distro-authoritative identity + NVD backfill robustness + remediation surfacing (@invalid-email-address)
 
