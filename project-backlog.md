@@ -286,6 +286,49 @@ Vendor VEX feed operations* table below. **Target:** v0.3.x correlation-accuracy
 
 ---
 
+### KNOWN GAP — OSV.dev app-ecosystem version-range quirks (found 2026-06-29, during v0.3.3 E2E)
+
+**Severity:** correctness (over-match) for application ecosystems (pypi/npm/…), **distinct
+from** the distro (apk/rpm) work in v0.3.3. Surfaced when the new findings API exposed
+`fixed_version` (v0.3.3 item 3): two OSV.dev-correlated pypi findings on the Rocky-8 test
+SBOM are wrong, both from version-range handling the unified engine does not cover for the
+`OSV.dev live` (`source = osv`) path.
+
+**Symptoms (verified on the fresh v0.3.3 scan):**
+
+- **GIT-range over-match.** `CVE-2016-10745` (Jinja2, fixed upstream in **2.8.1**, 2016) is
+  flagged on installed **Jinja2 3.1.6** (2025) — a clear false positive — and its
+  `fixed_version` surfaces as a **git commit SHA** (`9b53045c…`), not a semver. The OSV
+  record expresses the affected range as a `GIT` range (commit introduced/fixed) rather than
+  a `SEMVER`/`ECOSYSTEM` range; the live OSV path does not resolve GIT ranges to versions, so
+  the range is mishandled and the commit hash leaks through as the "fix".
+- **Major-line crossing.** `CVE-2026-21441` flags urllib3 **1.26.20** with `fixed_version`
+  **2.6.3** — the 1.26.x maintenance line is independent of 2.x (same shape as the el8/el9
+  stream problem, but for a Python package), so a 2.x fix should not mark a 1.26.x install
+  affected unless the OSV record lists a 1.26.x range too.
+
+**Root cause (to verify in code):** the OSV.dev live path (`adapter/osv/client.go` /
+`component_fetcher.go`) maps OSV `ranges` to the canonical constraint set assuming
+`SEMVER`/`ECOSYSTEM` events; `GIT`-type ranges (and multi-line packages where a fix exists per
+major line) are not handled — there is no commit→version resolution and no per-line scoping.
+The distro feeds avoid this (NEVRA + the `RPMReleaseMajor` stream guard from v0.3.2); app
+ecosystems have no equivalent.
+
+**Fix options:**
+
+- Skip / ignore `GIT`-type OSV ranges (or resolve the commit to a release tag) so a commit
+  SHA never becomes a `fixed_version` and a GIT-only record never over-matches a semver
+  install — fail closed (no match) when only a GIT range is present, mirroring the distro
+  `none` sentinel.
+- For multi-line packages, only mark affected when the installed version's own line has a
+  matching introduced/fixed pair (a general analogue of the RPM release-stream guard).
+
+**Hooks:** `domain.BuildConstraintGroup` / `VersionConstraintSet` (CR-1), the OSV range parse
+in `adapter/osv/client.go`, and the `osv` provenance source. **Target:** v0.3.x app-ecosystem
+correlation-accuracy follow-on (alongside the Red Hat VEX overlay gap above).
+
+---
+
 ### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
 **Gate:** none outstanding (shipped ahead of the Group 16 hardening; see Release
