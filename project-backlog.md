@@ -342,6 +342,60 @@ correlation-accuracy follow-on (alongside the Red Hat VEX overlay gap above).
 
 ---
 
+### KNOWN CHARACTERISTIC — RPM module fan-out vs Red Hat per-subpackage VEX (confirmed 2026-06-30, v0.3.5 E2E)
+
+**Status:** expected behavior, **not a bug.** Documented so the `not_covered` state on module
+subpackages is not re-investigated as a Red Hat VEX overlay failure. Decision (2026-06-30): keep
+`not_covered` as the honest state — do **not** fabricate a vendor verdict from Red Hat's silence.
+
+**Symptom (verified on the live Rocky-8 deployment):** for a module-scoped CVE, every binary
+subpackage built from the module shows `upstream_vex_coverage: not_covered`, e.g. CVE-2026-48962
+appears on 9 `perl-*` findings (perl-File-Path, perl-HTTP-Tiny, perl-Scalar-List-Utils,
+perl-Term-ANSIColor, perl-MIME-Base64, perl-Data-Dumper, perl-Pod-Usage, perl-Pod-Escapes,
+perl-constant) all `not_covered`, while `perl-IO-Compress` is `covered`.
+
+**Why (two feeds, two granularities):**
+
+- **Rocky OSV** records the CVE against the perl **module/SRPM**, so the Correlator fans it out to
+  *every* binary subpackage built from that module → findings on all siblings.
+- **Red Hat Security Data API** tracks the CVE only under the genuinely-vulnerable subpackage
+  (`affected_release` el8: `perl-IO-Compress-0:2.081-2.el8_10`) plus the module stream
+  (`perl:5.32-8100020260616084412…`). It publishes **no** `package_state`/`affected_release` for
+  the other subpackages.
+- `domain.RedHatCVEReport.VerdictForStream` does an **exact** package-name match
+  (`internal/domain/redhat_vex.go`), so the fanned-out siblings get `Covered=false` → no overlay
+  assertion → `not_covered`. The exact-match path is correct; `perl-IO-Compress` is `covered`.
+
+**Why we don't "fix" it by inferring a verdict:** Red Hat's *silence* on a subpackage is not a
+"Not affected" statement — inferring one would be a fabricated suppression, exactly the false-positive
+risk the overlay design avoids (Themis surfaces vendor signals; it never auto-rescopes severity).
+`not_covered` is the truthful state: the vendor made no per-subpackage statement.
+
+**Verify the cycle ran (discriminating check):** `perl-IO-Compress` must be `covered` with a
+`Red Hat: … on RHEL-8 …` justification:
+
+```sh
+psql "$THEMIS_DATABASE_DSN" -c "
+SELECT rc.component_purl, rc.upstream_vex_coverage, va.status
+FROM risk_context rc
+LEFT JOIN vex_assertions va ON va.component_purl = rc.component_purl AND va.cve_id = rc.cve_id
+WHERE rc.cve_id = 'CVE-2026-48962' AND rc.component_purl LIKE '%perl-IO-Compress%';"
+```
+
+**Deferred enhancements (not scheduled; both were considered and declined on 2026-06-30):**
+
+- *Module-aware overlay* — when Red Hat's CVE doc carries a *module* `affected_release` for the
+  stream (e.g. `perl:5.32`), attach an informational, context-only overlay to module-member
+  siblings pointing at the module RHSA. Flips `not_covered → covered` as a breadcrumb but cannot
+  reliably prove "fixed" (the component NEVRA's `.module+elN.M.0+<build>+<hash>` token is not
+  directly comparable to the module context build `8100020260616084412`), so it adds little over
+  honest `not_covered`. Hooks: `VerdictForStream` + `RedHatVEXService.buildAssertion`.
+- *Distro-layer fix* — stop the Correlator propagating a module-scoped CVE to siblings that don't
+  contain the vulnerable code. Most correct but highest regression risk (touches the Correlator and
+  distro-OSV mapping across all RPM modules: perl, httpd, …).
+
+---
+
 ### Phase 2a — Signal Foundation (`themis-phase-2a`) — Complete (Archived 2026-06-17)
 
 **Gate:** none outstanding (shipped ahead of the Group 16 hardening; see Release
