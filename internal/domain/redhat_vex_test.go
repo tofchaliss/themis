@@ -86,20 +86,67 @@ func TestVerdictForStreamHyphenatedPackage(t *testing.T) {
 	}
 }
 
-func TestRedHatCPEMajor(t *testing.T) {
+func TestRedHatMainStreamMajor(t *testing.T) {
 	tests := map[string]string{
-		"cpe:/o:redhat:enterprise_linux:8":  "8",
-		"cpe:/a:redhat:enterprise_linux:9":  "9",
-		"cpe:/a:redhat:rhel_e4s:9.0":        "9",
-		"cpe:/a:redhat:rhel_eus:8.6":        "8",
-		"cpe:/o:redhat:enterprise_linux:10": "10",
-		"cpe:/o:redhat:openshift:4.14":      "", // not an EL stream
-		"":                                  "",
+		"cpe:/o:redhat:enterprise_linux:8":      "8",
+		"cpe:/a:redhat:enterprise_linux:9":      "9",
+		"cpe:/o:redhat:enterprise_linux:10":     "10",
+		"cpe:/a:redhat:enterprise_linux:10.1":   "10",
+		"cpe:/a:redhat:enterprise_linux:8::crb": "8", // CodeReady Builder is still main-stream 8
+		// Minor-version-locked backport streams are NOT the main stream → excluded.
+		"cpe:/a:redhat:rhel_e4s:9.0":              "",
+		"cpe:/a:redhat:rhel_eus:8.6":              "",
+		"cpe:/a:redhat:rhel_aus:8.4":              "",
+		"cpe:/a:redhat:rhel_tus:8.8":              "",
+		"cpe:/o:redhat:enterprise_linux_eus:10.0": "",
+		"cpe:/o:redhat:openshift:4.14":            "", // not an EL stream
+		"":                                        "",
 	}
 	for in, want := range tests {
-		if got := redHatCPEMajor(in); got != want {
-			t.Errorf("redHatCPEMajor(%q) = %q, want %q", in, got, want)
+		if got := redHatMainStreamMajor(in); got != want {
+			t.Errorf("redHatMainStreamMajor(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestVerdictForStreamIgnoresMinorLockedBackports reproduces the libtiff
+// CVE-2026-4775 false-resolution: Red Hat ships the el8 main-stream fix at
+// release 37 (el8_10) but also older AUS/TUS/E4S backports (el8_6.2 release 21,
+// el8_8.2 release 29) listed AFTER it. The verdict must resolve to the main-stream
+// 37 fix, never the el8_8.2 backport — otherwise an el8_10 install at release 36
+// (36 > 29) is falsely "fixed".
+func TestVerdictForStreamIgnoresMinorLockedBackports(t *testing.T) {
+	report := RedHatCVEReport{
+		AffectedReleases: []RedHatAffectedRelease{
+			{PackageNEVRA: "libtiff-0:4.0.9-37.el8_10", CPE: "cpe:/a:redhat:enterprise_linux:8", Advisory: "RHSA-2026:16055"},
+			{PackageNEVRA: "libtiff-0:4.0.9-21.el8_6.2", CPE: "cpe:/a:redhat:rhel_aus:8.6", Advisory: "RHSA-2026:19657"},
+			{PackageNEVRA: "libtiff-0:4.0.9-29.el8_8.2", CPE: "cpe:/a:redhat:rhel_e4s:8.8", Advisory: "RHSA-2026:19604"},
+		},
+	}
+	v := report.VerdictForStream("libtiff", "8")
+	if !v.Covered || v.FixedEVR != "0:4.0.9-37.el8_10" || v.Advisory != "RHSA-2026:16055" {
+		t.Fatalf("must resolve the main-stream el8_10 fix, got %+v", v)
+	}
+}
+
+// TestVerdictForStreamPicksMaxMainStreamFix verifies that when Red Hat ships more
+// than one main-stream fix (different z-streams, e.g. el9_7.3 then el9_8), the
+// verdict keeps the highest EVR so an install must clear every published fix.
+func TestVerdictForStreamPicksMaxMainStreamFix(t *testing.T) {
+	report := RedHatCVEReport{
+		AffectedReleases: []RedHatAffectedRelease{
+			{PackageNEVRA: "libtiff-0:4.4.0-15.el9_7.3", CPE: "cpe:/a:redhat:enterprise_linux:9", Advisory: "RHSA-2026:12271"},
+			{PackageNEVRA: "libtiff-0:4.4.0-18.el9_8", CPE: "cpe:/a:redhat:enterprise_linux:9", Advisory: "RHSA-2026:19363"},
+		},
+	}
+	v := report.VerdictForStream("libtiff", "9")
+	if v.FixedEVR != "0:4.4.0-18.el9_8" || v.Advisory != "RHSA-2026:19363" {
+		t.Fatalf("must keep the highest main-stream fix, got %+v", v)
+	}
+	// Re-ordering the entries must not change the result (order-independent max).
+	report.AffectedReleases[0], report.AffectedReleases[1] = report.AffectedReleases[1], report.AffectedReleases[0]
+	if v := report.VerdictForStream("libtiff", "9"); v.FixedEVR != "0:4.4.0-18.el9_8" {
+		t.Fatalf("max must be order-independent, got %+v", v)
 	}
 }
 

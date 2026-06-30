@@ -49,9 +49,18 @@ type RedHatStreamVerdict struct {
 }
 
 // VerdictForStream resolves Red Hat's verdict for packageName on the given RHEL
-// major stream ("8", "9", …) — an EXACT stream match (an el8 build is only
-// suppressed by a RHEL-8 "Not affected", never a RHEL-9 one). It combines
-// package_state (fix posture) with affected_release (the back-ported fix NEVRA).
+// major stream ("8", "9", …), scoped to the MAIN enterprise_linux:N stream only.
+//
+// Stream matching is exact at the major level (an el8 build is only suppressed by
+// a RHEL-8 "Not affected", never a RHEL-9 one) AND restricted to the main stream:
+// the minor-version-locked backport lines (rhel_aus/rhel_eus/rhel_e4s/rhel_tus and
+// enterprise_linux_eus) are independent maintenance lines whose release numbers are
+// NOT comparable to a rolling install. Comparing a main el8_10 install against an
+// el8_8.2 AUS backport produced a false "fixed" (installed release 36 > backport
+// release 29) that hid a live vulnerability. Rocky/Alma/CentOS and mainstream RHEL
+// all track the main stream, so the overlay resolves against it alone; among the
+// main-stream fixes it keeps the highest EVR (conservative — never resolves a finding
+// that is below any published main-stream fix).
 func (r RedHatCVEReport) VerdictForStream(packageName, major string) RedHatStreamVerdict {
 	if strings.TrimSpace(packageName) == "" || strings.TrimSpace(major) == "" {
 		return RedHatStreamVerdict{}
@@ -61,7 +70,7 @@ func (r RedHatCVEReport) VerdictForStream(packageName, major string) RedHatStrea
 		if !strings.EqualFold(strings.TrimSpace(ps.PackageName), packageName) {
 			continue
 		}
-		if redHatCPEMajor(ps.CPE) != major {
+		if redHatMainStreamMajor(ps.CPE) != major {
 			continue
 		}
 		out.Covered = true
@@ -71,7 +80,7 @@ func (r RedHatCVEReport) VerdictForStream(packageName, major string) RedHatStrea
 		}
 	}
 	for _, ar := range r.AffectedReleases {
-		if redHatCPEMajor(ar.CPE) != major {
+		if redHatMainStreamMajor(ar.CPE) != major {
 			continue
 		}
 		evr, ok := redHatNEVRAEVR(ar.PackageNEVRA, packageName)
@@ -79,27 +88,31 @@ func (r RedHatCVEReport) VerdictForStream(packageName, major string) RedHatStrea
 			continue
 		}
 		out.Covered = true
-		out.FixedEVR = evr
-		out.Advisory = ar.Advisory
+		// Keep the highest main-stream fix so an install must clear every published
+		// main-stream fix to count as fixed (errs toward over-reporting, never hiding).
+		if out.FixedEVR == "" || compareRPMVersion(evr, out.FixedEVR) > 0 {
+			out.FixedEVR = evr
+			out.Advisory = ar.Advisory
+		}
 	}
 	return out
 }
 
-// redHatCPEMajor extracts the RHEL major from a Red Hat product CPE
-// (cpe:/o:redhat:enterprise_linux:8 → "8"; cpe:/a:redhat:rhel_e4s:9.0 → "9").
-// Returns "" when no enterprise-linux/RHEL stream is present.
-func redHatCPEMajor(cpe string) string {
+// redHatMainStreamMajor extracts the RHEL major from a Red Hat product CPE only for
+// the MAIN "enterprise_linux:N" stream (cpe:/o:redhat:enterprise_linux:8 → "8";
+// cpe:/a:redhat:enterprise_linux:10.1 → "10"; cpe:/a:redhat:enterprise_linux:8::crb
+// → "8"). It returns "" for the minor-version-locked backport streams — rhel_aus,
+// rhel_eus, rhel_e4s, rhel_tus and enterprise_linux_eus — and for non-EL products
+// (openshift, …). Those lines must never be compared against a rolling main-stream
+// install (the el8_10-vs-el8_8.2 cross-stream false "fixed"); see VerdictForStream.
+func redHatMainStreamMajor(cpe string) string {
 	cpe = strings.ToLower(strings.TrimSpace(cpe))
-	if cpe == "" {
+	const marker = "enterprise_linux:"
+	i := strings.Index(cpe, marker)
+	if i < 0 {
 		return ""
 	}
-	for _, marker := range []string{"enterprise_linux:", "rhel_e4s:", "rhel_eus:", "rhel_aus:", "rhel_tus:"} {
-		if i := strings.Index(cpe, marker); i >= 0 {
-			rest := cpe[i+len(marker):]
-			return leadingDigits(rest)
-		}
-	}
-	return ""
+	return leadingDigits(cpe[i+len(marker):])
 }
 
 // redHatNEVRAEVR returns the epoch:version-release of a Red Hat affected_release

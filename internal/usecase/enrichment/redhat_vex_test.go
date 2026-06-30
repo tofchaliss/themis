@@ -246,6 +246,67 @@ func TestRPMPurlHelpers(t *testing.T) {
 	if got := rpmInstalledVersion("pkg:rpm/rocky/openssl"); got != "" {
 		t.Fatalf("versionless = %q", got)
 	}
+	// "@" present but the version segment is empty (qualifiers only).
+	if got := rpmInstalledVersion("pkg:rpm/rocky/openssl@?arch=x86_64"); got != "" {
+		t.Fatalf("empty version = %q", got)
+	}
+	// The epoch is carried as a purl qualifier and folded back into the EVR.
+	if got := rpmInstalledVersion("pkg:rpm/rocky/libpng@1.6.34-10.el8_10?arch=x86_64&distro=rocky-8.9&epoch=2"); got != "2:1.6.34-10.el8_10" {
+		t.Fatalf("epoch qualifier = %q, want 2:1.6.34-10.el8_10", got)
+	}
+	// An epoch already present in @version is not double-prefixed.
+	if got := rpmInstalledVersion("pkg:rpm/rocky/openssl@0:1.1.1k-15.el8_10?epoch=9"); got != "0:1.1.1k-15.el8_10" {
+		t.Fatalf("explicit epoch = %q, want 0:1.1.1k-15.el8_10", got)
+	}
+}
+
+// TestRedHatVEXMinorStreamFalseResolutionRegression locks in the v0.3.6 fix for the
+// libtiff CVE-2026-4775 false "resolved": Red Hat lists the el8 main-stream fix
+// (release 37, el8_10) plus older minor-locked AUS/E4S backports (release 21/29).
+// An el8_10 install at release 36 must resolve to AFFECTED against the main-stream
+// 37 — not "fixed" against the trailing el8_8.2 backport (36 > 29). The libpng row
+// additionally exercises the epoch-qualifier fix (epoch 2 install vs epoch 2 fix).
+func TestRedHatVEXMinorStreamFalseResolutionRegression(t *testing.T) {
+	rows := []domain.OpenRiskContextRow{
+		// libtiff: no epoch anywhere; the dangerous case that surfaced as "resolved".
+		rpmRow("art-1", "pkg:rpm/rocky/libtiff@4.0.9-36.el8_10?arch=x86_64&distro=rocky-8.9", "CVE-2026-4775"),
+		// libpng: epoch carried as a purl qualifier; below the main-stream fix.
+		rpmRow("art-1", "pkg:rpm/rocky/libpng@1.6.34-10.el8_10?arch=x86_64&distro=rocky-8.9&epoch=2", "CVE-2026-33416"),
+	}
+	reports := map[string]domain.RedHatCVEReport{
+		"CVE-2026-4775": {CVEID: "CVE-2026-4775", ThreatSeverity: "Important", AffectedReleases: []domain.RedHatAffectedRelease{
+			{PackageNEVRA: "libtiff-0:4.0.9-37.el8_10", CPE: "cpe:/a:redhat:enterprise_linux:8", Advisory: "RHSA-2026:16055"},
+			{PackageNEVRA: "libtiff-0:4.0.9-21.el8_6.2", CPE: "cpe:/a:redhat:rhel_aus:8.6", Advisory: "RHSA-2026:19657"},
+			{PackageNEVRA: "libtiff-0:4.0.9-29.el8_8.2", CPE: "cpe:/a:redhat:rhel_e4s:8.8", Advisory: "RHSA-2026:19604"},
+		}},
+		"CVE-2026-33416": {CVEID: "CVE-2026-33416", ThreatSeverity: "Moderate", AffectedReleases: []domain.RedHatAffectedRelease{
+			{PackageNEVRA: "libpng-2:1.6.34-11.el8_10", CPE: "cpe:/o:redhat:enterprise_linux:8", Advisory: "RHSA-2026:29898"},
+			{PackageNEVRA: "libpng-2:1.6.34-8.el8_8.3", CPE: "cpe:/o:redhat:rhel_e4s:8.8", Advisory: "RHSA-2026:29900"},
+		}},
+	}
+	store := &stubAssertionWriter{}
+	svc := &RedHatVEXService{Fetcher: &stubRHFetcher{reports: reports}, Findings: stubFindings{rows: rows}, Store: store}
+
+	res, err := svc.RunCycle(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Fixed != 0 {
+		t.Fatalf("no finding may resolve to fixed, got %d", res.Fixed)
+	}
+	if res.Affected != 2 || len(store.got) != 2 {
+		t.Fatalf("both must be affected: res=%+v assertions=%d", res, len(store.got))
+	}
+	byPkg := map[string]domain.VendorVEXAssertion{}
+	for _, a := range store.got {
+		byPkg[a.PackageName] = a
+	}
+	if a := byPkg["libtiff"]; a.Status != domain.VEXStatusAffected || a.Fixed != "0:4.0.9-37.el8_10" {
+		t.Fatalf("libtiff must be affected vs the main-stream fix, got %+v", a)
+	}
+	if a := byPkg["libpng"]; a.Status != domain.VEXStatusAffected || a.Fixed != "2:1.6.34-11.el8_10" {
+		t.Fatalf("libpng must be affected vs the main-stream fix, got %+v", a)
+	}
 }
 
 func TestRedHatVEXConfigAndEdgeCases(t *testing.T) {
