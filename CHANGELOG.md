@@ -5,9 +5,19 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-06-30
+### Changed
+- docs(backlog): record RPM module fan-out vs Red Hat per-subpackage VEX as known characteristic
+
+### Fixed
+- fix(vex): scope Red Hat verdicts to main enterprise_linux stream + read epoch qualifier
+
 ## [0.3.5] - 2026-06-29
 ### Added
-- feat(vex): Red Hat VEX overlay via on-demand Security Data API (Option B)
+- feat(vex): Red Hat VEX overlay via on-demand Security Data API (Option B) (@invalid-email-address)
+
+### Changed
+- release: v0.3.5 — Red Hat VEX overlay (on-demand Security Data API) (@invalid-email-address)
 
 ## [0.3.4] - 2026-06-29
 ### Changed

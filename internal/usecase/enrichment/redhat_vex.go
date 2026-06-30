@@ -316,16 +316,41 @@ func rpmPackageName(purl string) string {
 	return rest
 }
 
-// rpmInstalledVersion extracts the version segment from an rpm PURL:
+// rpmInstalledVersion extracts the epoch:version-release from an rpm PURL:
 // "pkg:rpm/rocky/openssl@1.1.1k-15.el8_10?arch=x86_64" → "1.1.1k-15.el8_10".
+// The epoch is usually absent from @version and carried as an "epoch=" qualifier
+// ("pkg:rpm/rocky/libpng@1.6.34-10.el8_10?arch=x86_64&epoch=2" → "2:1.6.34-10.el8_10");
+// it is folded back in so the comparison against an epoch-qualified Red Hat fix is
+// correct — without it an epoch-2 install reads as epoch 0 and never resolves.
 func rpmInstalledVersion(purl string) string {
 	at := strings.Index(purl, "@")
 	if at < 0 {
 		return ""
 	}
 	v := purl[at+1:]
+	qualifiers := ""
 	if i := strings.IndexAny(v, "?#"); i >= 0 {
+		qualifiers = v[i+1:]
 		v = v[:i]
 	}
+	if v == "" {
+		return ""
+	}
+	if !strings.Contains(v, ":") {
+		if epoch := rpmEpochQualifier(qualifiers); epoch != "" {
+			v = epoch + ":" + v
+		}
+	}
 	return v
+}
+
+// rpmEpochQualifier returns the value of the "epoch=" purl qualifier, if present
+// ("arch=x86_64&epoch=2" → "2").
+func rpmEpochQualifier(qualifiers string) string {
+	for _, q := range strings.Split(qualifiers, "&") {
+		if name, val, ok := strings.Cut(q, "="); ok && strings.EqualFold(strings.TrimSpace(name), "epoch") {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
 }
