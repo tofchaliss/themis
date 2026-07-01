@@ -72,6 +72,9 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
+          # Tag pushes check out a detached HEAD, so the base branch must be explicit
+          # (otherwise the action fails with "'base' input must be supplied").
+          base: main
           commit-message: "chore: update CHANGELOG.md"
           title: "chore: update CHANGELOG.md"
           body: |
