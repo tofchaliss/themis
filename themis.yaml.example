@@ -65,6 +65,22 @@ vexfeed:
   rocky_osv_url: https://storage.googleapis.com/osv-vulnerabilities/Rocky%20Linux/all.zip  # rpm correlation
   wolfi_osv_url: https://packages.wolfi.dev/os/security.json                 # apk correlation
   poll_interval: 24h
+  # Feed registry (optional): a delta list merged over the built-in defaults by name.
+  # Built-in names: rhel-vex (overlay); rhel-csaf, alpine, rocky, wolfi (correlation).
+  # Add a custom feed, override a built-in's fields, or disable one (enabled: false).
+  # feeds:
+  #   - name: rocky            # disable a built-in by name
+  #     enabled: false
+  #   - name: my-distro        # add a custom correlation feed
+  #     type: zip-osv          # url | zip-osv | csaf-dir
+  #     class: correlation     # correlation (default) | overlay
+  #     url: https://example.com/osv/all.zip
+  #     ecosystem: mydistro    # informational label
+  #     enabled: true
+  #   - name: my-url-feed
+  #     type: url
+  #     kind: osv              # for type=url: csaf | osv (default osv)
+  #     url: https://example.com/security.json
 
 intelligence:
   # Unique Customer count at which blast-radius score multiplier caps (default 10 → 2.0×)

@@ -340,10 +340,26 @@ feeds** (correlation), per the Layer-0 refactor (CR-4):
 | `vexfeed.wolfi_osv_url` | `THEMIS_VEXFEED_WOLFI_OSV_URL` | Wolfi OSV security feed → apk correlation source. |
 | `vexfeed.poll_interval` | `THEMIS_VEXFEED_POLL_INTERVAL` | Sync frequency. After sync, the correlation index is rebuilt and affected artifacts get the VEX overlay re-applied. |
 
-There is **no per-feed on/off flag yet** — the feed set is registered at startup (a user-defined
-feed registry is a tracked follow-on). A failed feed logs a structured warning, records degraded
-health (surfaced as `degraded_feeds[]` on `GET /api/v1/status`), and leaves cached data in place;
-other feeds continue.
+**Feed registry (`vexfeed.feeds`).** Beyond overriding the built-in URLs, a `feeds:` delta list
+lets you **add, override, or disable** feeds. It is merged over the built-in defaults **by name**
+(built-ins: `rhel-vex` [overlay]; `rhel-csaf`, `alpine`, `rocky`, `wolfi` [correlation]). Each entry
+takes `type` (`url` | `zip-osv` | `csaf-dir`), `class` (`correlation` default, or `overlay`),
+`url`, `kind` (for `type: url`), and `enabled` (set `false` to disable a built-in). See
+[`themis.yaml.example`](themis.yaml.example).
+
+```yaml
+vexfeed:
+  feeds:
+    - name: rocky            # disable a built-in by name
+      enabled: false
+    - name: my-distro        # add a custom correlation feed
+      type: zip-osv
+      url: https://example.com/osv/all.zip
+      ecosystem: mydistro
+```
+
+A failed feed logs a structured warning, records degraded health (surfaced as `degraded_feeds[]`
+on `GET /api/v1/status`), and leaves cached data in place; other feeds continue.
 
 #### Other tuning
 
@@ -414,7 +430,7 @@ Go error strings appear in response bodies.
 #### Not yet implemented
 
 Deferred to later work (see [project-backlog.md](project-backlog.md)): AI workers + knowledge graph,
-GHSA adapter, Debian/Ubuntu vendor VEX feeds, per-feed on/off flags, Redis queue, Docker stack,
+GHSA adapter, Debian/Ubuntu vendor VEX feeds, Redis queue, Docker stack,
 Web UI, RBAC, real cosign verification.
 
 ---

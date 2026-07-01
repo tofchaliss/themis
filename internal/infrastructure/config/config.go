@@ -124,6 +124,26 @@ type VEXFeedConfig struct {
 	RockyOSVURL  string        `yaml:"rocky_osv_url"`
 	WolfiOSVURL  string        `yaml:"wolfi_osv_url"`
 	PollInterval time.Duration `yaml:"poll_interval"`
+	// Feeds is an optional user delta list merged over the built-in defaults by
+	// name: add a custom feed, override a built-in's fields, or disable one
+	// (`enabled: false`). Built-in names: rhel-vex (overlay), rhel-csaf, alpine,
+	// rocky, wolfi (correlation). Existing configs that only set the *_url fields
+	// keep working unchanged.
+	Feeds []FeedConfig `yaml:"feeds"`
+}
+
+// FeedConfig is one entry in the `vexfeed.feeds` delta list. Name is required and is
+// the merge key. The remaining fields override the matching built-in default, or
+// define a new feed when the name is unknown. Enabled is a pointer so an unset flag
+// (leave the default's state) is distinguishable from an explicit `false` (disable).
+type FeedConfig struct {
+	Name      string `yaml:"name"`
+	Type      string `yaml:"type"`      // url | zip-osv | csaf-dir
+	Class     string `yaml:"class"`     // correlation (default) | overlay
+	URL       string `yaml:"url"`       // override / set the feed URL
+	Kind      string `yaml:"kind"`      // for type=url: csaf | osv (default osv)
+	Ecosystem string `yaml:"ecosystem"` // informational label for custom feeds
+	Enabled   *bool  `yaml:"enabled"`   // nil = keep default; false = disable
 }
 
 // IntelligenceConfig controls blast-radius and enrichment tuning.

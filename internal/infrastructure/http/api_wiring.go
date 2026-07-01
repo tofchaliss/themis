@@ -143,30 +143,26 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 	}
 	StartExploitDBScheduler(ctx, exploitDBSvc, cfg.AppConfig.ExploitDB.PollInterval, appLog, feedHealth)
 	vexHTTP := &vexfeed.HTTPFetcher{}
-	// CR-4: the VEX overlay carries ONLY true Red Hat CSAF VEX (exploitability
-	// context). Distro OSV vulnerability DBs move to the correlation source below.
+	// themis-feed-registry: resolve the feed set from built-in defaults + the user
+	// vexfeed.feeds delta list. CR-4 classes are preserved — overlay feeds carry
+	// true Red Hat CSAF VEX; correlation feeds are distro OSV + RHSA advisories.
+	overlayFeeds, correlationFeeds, feedWarnings := ResolveVEXFeeds(cfg.AppConfig.VEXFeed, vexHTTP)
+	for _, warn := range feedWarnings {
+		appLog.Warn(warn)
+	}
 	vexFeedSvc := &vexfeed.Service{
-		Feeds: []vexfeed.FeedSource{
-			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELVEXURL, Fetcher: vexHTTP},
-		},
+		Feeds:    overlayFeeds,
 		Store:    vendorVEXStore,
 		ReEnrich: dispatcher,
 		Logger:   vexfeed.LoggerSync{Log: appLog},
 		Metrics:  metrics.VEXFeedMetrics{},
 	}
 	StartVEXFeedScheduler(ctx, vexFeedSvc, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
-	// CR-4: Alpine/Rocky/Wolfi OSV feeds are correlation sources (affected ranges +
-	// severity + fixed), not VEX. A background loader refreshes the in-memory index.
+	// A background loader refreshes the in-memory correlation index from the
+	// correlation-class feeds (Alpine/Rocky/Wolfi OSV + Red Hat CSAF advisories).
 	distroSource := vexfeed.NewAssertionCorrelationSource(domain.FindingSourceDistroOSV)
 	StartCorrelationFeedScheduler(ctx, &vexfeed.CorrelationLoader{
-		Feeds: []vexfeed.FeedSource{
-			vexfeed.ZipOSVFeedSource{Name_: "alpine", URL: cfg.AppConfig.VEXFeed.AlpineOSVURL, Fetcher: vexHTTP},
-			vexfeed.ZipOSVFeedSource{Name_: "rocky", URL: cfg.AppConfig.VEXFeed.RockyOSVURL, Fetcher: vexHTTP},
-			vexfeed.URLFeedSource{Name_: "wolfi", URL: cfg.AppConfig.VEXFeed.WolfiOSVURL, Kind: "osv", Fetcher: vexHTTP},
-			// CR-4: Red Hat CSAF advisories as an rpm correlation source (NEVRA
-			// fixed-version ranges), distinct from the true-VEX overlay above.
-			vexfeed.CSAFDirectoryFeedSource{Name_: "rhel", URL: cfg.AppConfig.VEXFeed.RHELCSAFURL, Fetcher: vexHTTP},
-		},
+		Feeds:  correlationFeeds,
 		Source: distroSource,
 		Logger: appLog,
 	}, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
