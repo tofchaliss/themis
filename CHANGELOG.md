@@ -5,12 +5,21 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.6] - 2026-06-30
+## [0.3.7] - 2026-07-01
 ### Changed
-- docs(backlog): record RPM module fan-out vs Red Hat per-subpackage VEX as known characteristic
+- release: v0.3.7 — OSV GIT-range over-match fix
 
 ### Fixed
-- fix(vex): scope Red Hat verdicts to main enterprise_linux stream + read epoch qualifier
+- fix(osv): skip GIT-type ranges so commit hashes never become version bounds
+
+## [0.3.6] - 2026-07-01
+### Changed
+- docs(backlog): record RPM module fan-out vs Red Hat per-subpackage VEX as known characteristic (@invalid-email-address)
+- release: v0.3.6 — Red Hat VEX minor-stream false-resolution fix (@invalid-email-address)
+- docs: bring backlog + STATUS + PROJECT_CONTEXT current to the v0.3.x line (@invalid-email-address)
+
+### Fixed
+- fix(vex): scope Red Hat verdicts to main enterprise_linux stream + read epoch qualifier (@invalid-email-address)
 
 ## [0.3.5] - 2026-06-29
 ### Added
