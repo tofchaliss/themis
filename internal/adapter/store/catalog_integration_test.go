@@ -161,6 +161,44 @@ func TestCatalogRepositoriesIntegrationPostgres(t *testing.T) {
 		t.Fatalf("GetProjectProductID() = %q err=%v", pid, err)
 	}
 
+	// Scoped vulnerability listings roll up the latest scan per artifact (v_latest_findings).
+	prodScoped, _, err := scans.ListScopedVulnerabilities(ctx,
+		domain.FindingScope{Kind: domain.FindingScopeProduct, ProductID: product.ID},
+		domain.ScanVulnerabilityFilter{Severity: "high"}, domain.PageRequest{Limit: 10})
+	if err != nil || len(prodScoped) == 0 {
+		t.Fatalf("ListScopedVulnerabilities(product) = %+v err=%v", prodScoped, err)
+	}
+	projScoped, _, err := scans.ListScopedVulnerabilities(ctx,
+		domain.FindingScope{Kind: domain.FindingScopeProject, ProjectID: project.ID},
+		domain.ScanVulnerabilityFilter{CVEID: "CVE-2021-23337"}, domain.PageRequest{Limit: 10})
+	if err != nil || len(projScoped) == 0 {
+		t.Fatalf("ListScopedVulnerabilities(project) = %+v err=%v", projScoped, err)
+	}
+	var versionName string
+	if err := pool.QueryRow(ctx,
+		`SELECT version FROM versions WHERE id = (SELECT version_id FROM artifacts WHERE id = $1)`,
+		artifactID).Scan(&versionName); err != nil {
+		t.Fatalf("lookup version: %v", err)
+	}
+	verScoped, _, err := scans.ListScopedVulnerabilities(ctx,
+		domain.FindingScope{Kind: domain.FindingScopeVersion, ProductID: product.ID, Version: versionName},
+		domain.ScanVulnerabilityFilter{}, domain.PageRequest{Limit: 10})
+	if err != nil || len(verScoped) == 0 {
+		t.Fatalf("ListScopedVulnerabilities(version=%s) = %+v err=%v", versionName, verScoped, err)
+	}
+	// Exercise the effective_state + cursor filter branches (result may be empty).
+	if _, _, err := scans.ListScopedVulnerabilities(ctx,
+		domain.FindingScope{Kind: domain.FindingScopeProduct, ProductID: product.ID},
+		domain.ScanVulnerabilityFilter{EffectiveState: "detected"},
+		domain.PageRequest{Cursor: "00000000-0000-4000-8000-000000000000", Limit: 10}); err != nil {
+		t.Fatalf("ListScopedVulnerabilities(filter branches): %v", err)
+	}
+	// An unknown scope kind is rejected.
+	if _, _, err := scans.ListScopedVulnerabilities(ctx,
+		domain.FindingScope{Kind: "bogus"}, domain.ScanVulnerabilityFilter{}, domain.PageRequest{}); err == nil {
+		t.Fatal("ListScopedVulnerabilities(unknown scope) must error")
+	}
+
 	comps, _, err := components.ListComponents(ctx, "pkg:npm/lodash@4.17.21", product.ID, domain.PageRequest{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListComponents() error = %v", err)

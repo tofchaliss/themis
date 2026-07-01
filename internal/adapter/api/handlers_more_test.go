@@ -115,6 +115,9 @@ func (f *fakeScans) GetScan(context.Context, string) (domain.ScanDetail, error) 
 func (f *fakeScans) ListScanVulnerabilities(context.Context, string, domain.ScanVulnerabilityFilter, domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
 	return nil, domain.PageResult{}, nil
 }
+func (f *fakeScans) ListScopedVulnerabilities(context.Context, domain.FindingScope, domain.ScanVulnerabilityFilter, domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+	return nil, domain.PageResult{}, nil
+}
 func (f *fakeScans) GetProjectProductID(context.Context, string) (string, error) { return "", errNotFound }
 
 type fakeComponents struct{}

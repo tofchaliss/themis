@@ -461,9 +461,21 @@ the stale `fixed` auto-correct (no manual SQL). See `docs/release-notes-v0.3.6.m
 
 ---
 
-### ENHANCEMENT — Scoped vulnerability-listing endpoints (product / project / version) (targets v0.3.8)
+### ENHANCEMENT — Scoped vulnerability-listing endpoints (product / project / version) (v0.3.8)
 
-**Status:** proposed (2026-06-30). Today the only raw per-finding list is **scan-scoped**
+**Status:** ✅ **DONE in v0.3.8.** Added `GET /api/v1/products/{id}/vulnerabilities`,
+`GET /api/v1/projects/{id}/vulnerabilities`, and `GET /api/v1/products/{id}/versions/{v}/vulnerabilities`
+(manual routes in `internal/adapter/api/mount.go`, alongside the vex/blast-radius endpoints),
+returning the existing `ScanVulnerabilityList` shape with the same `severity`/`effective_state`/`cve_id`
+filters + cursor pagination. Store: `PostgresScanQueryRepository.ListScopedVulnerabilities` drives off
+`v_latest_findings` (latest scan per artifact) with a one-line scope predicate
+(`proj.product_id` / `ver.project_id` / `proj.product_id + ver.version`); the SELECT/joins/row-scan are
+shared with `ListScanVulnerabilities` (`scanVulnerabilitySelect`/`scanVulnerabilityJoins`/
+`collectScanVulnerabilities`/`appendVulnerabilityFilters`). Per-artifact rows (the risk_context
+identity); an optional `?dedupe=true` to collapse to unique CVEs is a deferred follow-on. Original
+proposal below.
+
+**Status (original):** proposed (2026-06-30). Today the only raw per-finding list is **scan-scoped**
 (`GET /api/v1/scans/{id}/vulnerabilities`). There is no endpoint returning the rich findings list
 for a product, project, or version — callers must resolve the latest scan first (via
 `GET /projects/{id}/scans` → `.items[0]`), or use the VEX-format export

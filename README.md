@@ -389,6 +389,9 @@ Blast-radius runs synchronously at SBOM ingest; empty graph → baseline multipl
 | `POST /api/v1/products/{id}/artifacts` | Register an artifact by `image_digest` (returns the existing one for a duplicate digest — digest is globally unique). Auto-creates a default project + `latest` version. |
 | `POST /api/v1/projects/{id}/versions` | Create a version under a project |
 | `GET /api/v1/status?top=N` | System overview: component counts, vuln breakdown by severity/state, top-N components (default 10, max 50), `signals_stale` when EPSS/KEV sync is overdue |
+| `GET /api/v1/products/{id}/vulnerabilities` | Findings across every artifact under a product (latest scan per artifact). Same shape/filters as the scan endpoint: `?severity=`, `?effective_state=`, `?cve_id=`, cursor `?limit=`/`?cursor=`. |
+| `GET /api/v1/projects/{id}/vulnerabilities` | Findings across every artifact under a project |
+| `GET /api/v1/products/{id}/versions/{v}/vulnerabilities` | Findings for one product version |
 | `GET /api/v1/sboms` | Paginated SBOM inventory (cursor + `total`) |
 | `GET /api/v1/products/{id}/sboms` | Product-scoped SBOM list |
 | `DELETE /api/v1/sboms/{id}?force=true` | Soft-delete (`deleted_at` tombstone); `force=true` required when deleting the latest scan for an artifact; writes a `SBOM_DELETED` audit entry |
