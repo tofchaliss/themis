@@ -5,12 +5,16 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-07-01
+### Added
+- feat(api): scoped vulnerability-listing endpoints (product/project/version)
+
 ## [0.3.7] - 2026-07-01
 ### Changed
-- release: v0.3.7 — OSV GIT-range over-match fix
+- release: v0.3.7 — OSV GIT-range over-match fix (@invalid-email-address)
 
 ### Fixed
-- fix(osv): skip GIT-type ranges so commit hashes never become version bounds
+- fix(osv): skip GIT-type ranges so commit hashes never become version bounds (@invalid-email-address)
 
 ## [0.3.6] - 2026-07-01
 ### Changed

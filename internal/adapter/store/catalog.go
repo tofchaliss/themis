@@ -425,6 +425,26 @@ func (r *PostgresScanQueryRepository) countSeverities(ctx context.Context, scanI
 	return out, rows.Err()
 }
 
+// scanVulnerabilitySelect is the finding projection shared by the scan- and
+// scope-scoped queries (order matches collectScanVulnerabilities' Scan).
+const scanVulnerabilitySelect = `cv.id, v.cve_id, COALESCE(v.severity, 'unknown'),
+	       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), proj.product_id::text,
+	       COALESCE(cvn.version, ''), COALESCE(cv.source_fixed_version, ''),
+	       rc.exploit_public, rc.risk_score, rc.epss_score, rc.kev_listed,
+	       rc.deterministic_level, rc.blast_radius_score, rc.upstream_vex_coverage`
+
+// scanVulnerabilityJoins are the joins hanging off component_vulnerabilities cv +
+// scan_reports sr, shared by the scan- and scope-scoped finding queries.
+const scanVulnerabilityJoins = `
+	JOIN vulnerabilities v ON v.id = cv.vulnerability_id
+	LEFT JOIN risk_context rc ON rc.artifact_id = sr.artifact_id
+		AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
+	JOIN component_versions cvn ON cvn.id = cv.component_version_id
+	JOIN components c ON c.id = cvn.component_id
+	JOIN artifacts a ON a.id = sr.artifact_id
+	JOIN versions ver ON ver.id = a.version_id
+	JOIN projects proj ON proj.id = ver.project_id`
+
 func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	ctx context.Context,
 	scanID string,
@@ -434,7 +454,74 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 	limit := normalizeLimit(page.Limit)
 	args := []any{scanID, limit + 1}
 	where := []string{"cv.scan_report_id = $1"}
-	argIdx := 3
+	where, args = appendVulnerabilityFilters(where, args, filter, page.Cursor)
+	query := fmt.Sprintf(`
+		SELECT `+scanVulnerabilitySelect+`
+		FROM component_vulnerabilities cv
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id AND sr.deleted_at IS NULL`+
+		scanVulnerabilityJoins+`
+		WHERE %s
+		ORDER BY cv.id ASC
+		LIMIT $2
+	`, strings.Join(where, " AND "))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, domain.PageResult{}, fmt.Errorf("list scan vulnerabilities: %w", err)
+	}
+	defer rows.Close()
+	return collectScanVulnerabilities(rows, limit)
+}
+
+// ListScopedVulnerabilities lists the current findings (latest scan per artifact,
+// via v_latest_findings) rolled up to a product, project, or product version. The
+// same CVE/component may appear once per artifact under the scope (the risk_context
+// identity), which is intentional — each artifact is a distinct deployment.
+func (r *PostgresScanQueryRepository) ListScopedVulnerabilities(
+	ctx context.Context,
+	scope domain.FindingScope,
+	filter domain.ScanVulnerabilityFilter,
+	page domain.PageRequest,
+) ([]domain.ScanVulnerability, domain.PageResult, error) {
+	limit := normalizeLimit(page.Limit)
+	var args []any
+	var where []string
+	switch scope.Kind {
+	case domain.FindingScopeProduct:
+		args = []any{scope.ProductID, limit + 1}
+		where = []string{"proj.product_id = $1"}
+	case domain.FindingScopeProject:
+		args = []any{scope.ProjectID, limit + 1}
+		where = []string{"ver.project_id = $1"}
+	case domain.FindingScopeVersion:
+		args = []any{scope.ProductID, limit + 1, scope.Version}
+		where = []string{"proj.product_id = $1", "ver.version = $3"}
+	default:
+		return nil, domain.PageResult{}, fmt.Errorf("unknown finding scope %q", scope.Kind)
+	}
+	where, args = appendVulnerabilityFilters(where, args, filter, page.Cursor)
+	query := fmt.Sprintf(`
+		SELECT `+scanVulnerabilitySelect+`
+		FROM v_latest_findings f
+		JOIN component_vulnerabilities cv ON cv.id = f.id
+		JOIN scan_reports sr ON sr.id = cv.scan_report_id`+
+		scanVulnerabilityJoins+`
+		WHERE %s
+		ORDER BY cv.id ASC
+		LIMIT $2
+	`, strings.Join(where, " AND "))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, domain.PageResult{}, fmt.Errorf("list scoped vulnerabilities: %w", err)
+	}
+	defer rows.Close()
+	return collectScanVulnerabilities(rows, limit)
+}
+
+// appendVulnerabilityFilters adds the shared severity/effective_state/cve_id/cursor
+// predicates (placeholders continue after the args already bound by the caller's
+// base WHERE, so $2 stays reserved for the LIMIT).
+func appendVulnerabilityFilters(where []string, args []any, filter domain.ScanVulnerabilityFilter, cursor string) ([]string, []any) {
+	argIdx := len(args) + 1
 	if filter.Severity != "" {
 		where = append(where, fmt.Sprintf("COALESCE(v.severity, 'none') = $%d", argIdx))
 		args = append(args, filter.Severity)
@@ -450,36 +537,16 @@ func (r *PostgresScanQueryRepository) ListScanVulnerabilities(
 		args = append(args, filter.CVEID)
 		argIdx++
 	}
-	if page.Cursor != "" {
+	if cursor != "" {
 		where = append(where, fmt.Sprintf("cv.id > $%d", argIdx))
-		args = append(args, page.Cursor)
+		args = append(args, cursor)
 	}
-	query := fmt.Sprintf(`
-		SELECT cv.id, v.cve_id, COALESCE(v.severity, 'unknown'),
-		       COALESCE(rc.effective_state, 'open'), COALESCE(c.purl, ''), proj.product_id::text,
-		       COALESCE(cvn.version, ''), COALESCE(cv.source_fixed_version, ''),
-		       rc.exploit_public, rc.risk_score, rc.epss_score, rc.kev_listed,
-		       rc.deterministic_level, rc.blast_radius_score, rc.upstream_vex_coverage
-		FROM component_vulnerabilities cv
-		JOIN scan_reports sr ON sr.id = cv.scan_report_id AND sr.deleted_at IS NULL
-		JOIN vulnerabilities v ON v.id = cv.vulnerability_id
-		LEFT JOIN risk_context rc ON rc.artifact_id = sr.artifact_id
-			AND rc.component_purl = cv.component_purl AND rc.cve_id = cv.cve_id
-		JOIN component_versions cvn ON cvn.id = cv.component_version_id
-		JOIN components c ON c.id = cvn.component_id
-		JOIN artifacts a ON a.id = sr.artifact_id
-		JOIN versions ver ON ver.id = a.version_id
-		JOIN projects proj ON proj.id = ver.project_id
-		WHERE %s
-		ORDER BY cv.id ASC
-		LIMIT $2
-	`, strings.Join(where, " AND "))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, domain.PageResult{}, fmt.Errorf("list scan vulnerabilities: %w", err)
-	}
-	defer rows.Close()
+	return where, args
+}
 
+// collectScanVulnerabilities scans finding rows (limit+1 fetched) into the paged
+// result, deriving the next cursor from the last row over the limit.
+func collectScanVulnerabilities(rows pgx.Rows, limit int) ([]domain.ScanVulnerability, domain.PageResult, error) {
 	var items []domain.ScanVulnerability
 	for rows.Next() {
 		var item domain.ScanVulnerability

@@ -210,7 +210,33 @@ type ScanQueryRepository interface {
 	ListProjectScans(ctx context.Context, projectID string, page PageRequest) ([]ScanSummary, PageResult, error)
 	GetScan(ctx context.Context, id string) (ScanDetail, error)
 	ListScanVulnerabilities(ctx context.Context, scanID string, filter ScanVulnerabilityFilter, page PageRequest) ([]ScanVulnerability, PageResult, error)
+	// ListScopedVulnerabilities lists the current findings (latest scan per artifact,
+	// via v_latest_findings) for a product, project, or product version.
+	ListScopedVulnerabilities(ctx context.Context, scope FindingScope, filter ScanVulnerabilityFilter, page PageRequest) ([]ScanVulnerability, PageResult, error)
 	GetProjectProductID(ctx context.Context, projectID string) (string, error)
+}
+
+// FindingScopeKind selects the level a scoped vulnerability query rolls findings up to.
+type FindingScopeKind string
+
+const (
+	// FindingScopeProduct lists findings across every artifact under a product.
+	FindingScopeProduct FindingScopeKind = "product"
+	// FindingScopeProject lists findings across every artifact under a project.
+	FindingScopeProject FindingScopeKind = "project"
+	// FindingScopeVersion lists findings for one product version.
+	FindingScopeVersion FindingScopeKind = "version"
+)
+
+// FindingScope identifies the set of latest-scan findings to list. ProductID is set
+// for product and version scopes, ProjectID for project scope, and Version pins a
+// product version. Findings are listed per-artifact (the risk_context identity), so
+// the same CVE on the same component may appear once per artifact under a product.
+type FindingScope struct {
+	Kind      FindingScopeKind
+	ProductID string
+	ProjectID string
+	Version   string
 }
 
 // ScanVulnerabilityFilter narrows vulnerability list queries.

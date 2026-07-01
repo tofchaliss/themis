@@ -1071,6 +1071,12 @@ func (s *richScans) ListScanVulnerabilities(_ context.Context, _ string, _ domai
 	}
 	return s.vulnerabilities, s.page, nil
 }
+func (s *richScans) ListScopedVulnerabilities(_ context.Context, _ domain.FindingScope, _ domain.ScanVulnerabilityFilter, _ domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+	if s.listVulnErr != nil {
+		return nil, domain.PageResult{}, s.listVulnErr
+	}
+	return s.vulnerabilities, s.page, nil
+}
 func (s *richScans) GetProjectProductID(_ context.Context, _ string) (string, error) {
 	if s.projectProductErr != nil {
 		return "", s.projectProductErr
