@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-24 (Layer-0 refactor CR-1…CR-10 implemented)._
+Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.3.6 in review, PR #39)._
 
 ---
 
@@ -82,7 +82,12 @@ Last updated: 2026-06-24 (Layer-0 refactor CR-1…CR-10 implemented)._
 | `v0.1.0` | `a94f3ba` (PR #10) | Phase 1 core platform — tagged retroactively 2026-06-17 (replaced `themis-phase-1`) |
 | `v0.2.0` | `d02883c` (PR #15) | Phase 2a Signal Foundation |
 | `v0.2.1` | `5e77d2b` | Maintenance: Group 31 feed fixes + Group 16 hardening remainder |
-| `v0.3.0` | `themis-phase-2` HEAD (2026-06-24) | `themis-core-model` (breaking) + Layer-0 Correctness & Observability refactor (CR-1…CR-10) |
+| `v0.3.0` | `469dd8c` (2026-06-24) | `themis-core-model` (breaking) + Layer-0 Correctness & Observability refactor (CR-1…CR-10) |
+| `v0.3.2` | `4feae12` | Correlation correctness (canonical CVE-ID keying + el8/el9 release-stream scoping) + feeder resilience |
+| `v0.3.3` | `711b0ac` | Distro-authoritative correlation identity + NVD by-CVE backfill robustness + `fixed_version`/`installed_version` on findings API |
+| `v0.3.4` | `7e6c077` | Preserve backfilled CVSS in the catalog upsert (no clobber to `unknown`/0 on re-correlation) |
+| `v0.3.5` | `62e0acc` (PR #38) | Red Hat VEX overlay via on-demand Security Data API (Option B) |
+| `v0.3.6` | — (in review, PR #39) | Red Hat VEX minor-stream false-resolution fix (main-stream scoping + `epoch=` qualifier) |
 | `v0.4.0` | — (planned) | Phase 2b AI Intelligence |
 | `v0.5.0` | — (planned) | Phase 2c AI-Assisted VEX |
 
@@ -94,6 +99,7 @@ Last updated: 2026-06-24 (Layer-0 refactor CR-1…CR-10 implemented)._
 | Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Complete (archived 2026-06-17; v0.2.0) |
 | — | (maintenance) | v0.2.1 — feed reliability + Phase 1 hardening | Released (v0.2.1) |
 | core-model + Layer-0 | themis-core-model + CR-1…CR-10 | Schema restructure (breaking) + correlation/feeder/observability refactor | **Released (v0.3.0, 2026-06-24)** |
+| — | (maintenance) | v0.3.2–v0.3.6 — correlation/VEX correctness on the v0.3.x line (canonical CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream false-resolution fix) | v0.3.2–v0.3.5 released; **v0.3.6 in review (PR #39)** |
 | Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned (unblocked) — targets v0.4.0 |
 | Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned — targets v0.5.0 |
 | Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |

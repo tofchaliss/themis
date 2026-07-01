@@ -198,10 +198,27 @@ reconciled as follows:
 - **`v0.3.0`** — **released 2026-06-24:** `themis-core-model` (breaking schema restructure) **+
   the Layer-0 Correctness & Observability refactor (CR-1…CR-10)**. *(Re-scoped: Phase 2b was
   originally bundled here but moved to `v0.4.0` so the Layer-0 hardening could ship first.)*
+- **`v0.3.2`** — correlation correctness (canonical CVE-ID keying + el8/el9 release-stream
+  scoping) + post-v0.3.0 feeder resilience. (Released.)
+- **`v0.3.3`** — distro-authoritative correlation identity (`PackageIdentityMatch` tightened, fixes
+  the empty-ecosystem NVD over-match) + NVD by-CVE backfill robustness (throttle → transient) +
+  remediation (`fixed_version`/`installed_version`) surfaced on the findings API. (Released.)
+- **`v0.3.4`** — preserve backfilled CVSS in the catalog upsert (conditional `ON CONFLICT`; no
+  clobber to `unknown`/0 on re-correlation). (Released.)
+- **`v0.3.5`** — Red Hat VEX overlay via on-demand Security Data API (Option B);
+  `adapter/redhat` + `usecase/enrichment.RedHatVEXService`. (Released.)
+- **`v0.3.6`** — Red Hat VEX minor-stream false-resolution fix: scope verdicts to the main
+  `enterprise_linux:N` stream + read the `epoch=` PURL qualifier (stops false `resolved` on
+  vulnerable RPMs). **In review — PR #39.**
 - **`v0.4.0`** — Phase 2b (AI Intelligence).
 - **`v0.5.0`** — Phase 2c (AI-Assisted VEX).
 
 Nothing below `v0.2.0` will ever be tagged again.
+
+> Maintenance releases on the v0.3.x line (v0.3.2–v0.3.6) are non-breaking correctness/feature
+> patches shipped from `main`; each has `docs/release-notes-v0.3.x.md` and a regenerated
+> `CHANGELOG.md` section. The `openspec/STATUS.md` and `PROJECT_CONTEXT.md` "Current Status"
+> tables still name `v0.3.0` as the head of the line and are due a refresh to v0.3.6.
 
 ---
 
@@ -393,6 +410,73 @@ WHERE rc.cve_id = 'CVE-2026-48962' AND rc.component_purl LIKE '%perl-IO-Compress
 - *Distro-layer fix* — stop the Correlator propagating a module-scoped CVE to siblings that don't
   contain the vulnerable code. Most correct but highest regression risk (touches the Correlator and
   distro-OSV mapping across all RPM modules: perl, httpd, …).
+
+---
+
+### DEFECT (RESOLVED v0.3.6) — Red Hat VEX overlay falsely "resolved" RPM findings via minor-stream backports
+
+**Status:** ✅ RESOLVED in v0.3.6 (PR #39). Security-critical correctness bug in the v0.3.5 Red Hat
+VEX overlay: genuinely-vulnerable RPM findings were marked `fixed` → `effective_state=resolved`
+(risk 0), **hiding live vulnerabilities** — the dangerous (under-reporting) failure direction.
+
+**Symptom (live Rocky-8 deployment, 2026-06-30):** **25 findings** falsely resolved — 11 `python3`,
+6 `openssh`, `libtiff`/`compat-libtiff3`, `glib2`, `libxml2`, … — each an `el8_10` install exactly
+one release below the correct main-stream fix (e.g. libtiff `4.0.9-36.el8_10` vs fix
+`4.0.9-37.el8_10`). Metric read `themis_redhat_vex_total{status="fixed"}=25, affected=7,
+not_affected=0`; every `resolved` row had `installed < source_fixed_version`.
+
+**Root cause:** `RedHatCVEReport.VerdictForStream` collapsed every `el8.*` CPE to major `"8"` (the
+old `redHatCPEMajor` matched `enterprise_linux:` and `rhel_aus/eus/e4s/tus:` alike) and kept the
+**last** `affected_release` it iterated — almost always an older minor-version-locked backport (e.g.
+`4.0.9-29.el8_8.2`, the 8.8 E4S line). Comparing a rolling `el8_10` install (release 36) against
+that backport (release 29) gave `installed >= fixed` → false `fixed`. A latent second bug masked it
+for epoch-bearing packages: the `epoch=` PURL qualifier was dropped by `rpmInstalledVersion`, so an
+epoch-2 install read as epoch 0 (libpng accidentally read "affected" for the wrong reason). The
+minor-locked AUS/EUS/E4S/TUS streams are independent maintenance lines whose release numbers are not
+comparable to a rolling install — the same class as the el8↔el9 cross-stream guard, one level deeper.
+
+**Fix (v0.3.6):** `VerdictForStream` resolves against the **main `enterprise_linux:N` stream only**
+(new `redHatMainStreamMajor`, excluding AUS/EUS/E4S/TUS and `enterprise_linux_eus`) and keeps the
+**highest** main-stream fix EVR (order-independent, conservative — an install must clear every
+published main-stream fix). `rpmInstalledVersion` folds the `epoch=` qualifier back into the EVR.
+After the fix the main-stream fix EVR equals the distro feed's `source_fixed_version` (Rocky/Alma
+rebuild RHEL 1:1), so the 25 resolve to `affected` → `confirmed`. Tests use real Red Hat fixtures
+(libtiff false-resolution, el9 multi-z-stream max-fix, libpng epoch path). **Deploy:** rebuild +
+restart; `UpsertAssertions` deletes-and-replaces the Red Hat feed's assertions on the next cycle, so
+the stale `fixed` auto-correct (no manual SQL). See `docs/release-notes-v0.3.6.md`. **Hooks:**
+`domain/redhat_vex.go` (`VerdictForStream`, `redHatMainStreamMajor`),
+`usecase/enrichment/redhat_vex.go` (`rpmInstalledVersion`).
+
+---
+
+### ENHANCEMENT — Scoped vulnerability-listing endpoints (product / project / version) (targets v0.3.7)
+
+**Status:** proposed (2026-06-30). Today the only raw per-finding list is **scan-scoped**
+(`GET /api/v1/scans/{id}/vulnerabilities`). There is no endpoint returning the rich findings list
+for a product, project, or version — callers must resolve the latest scan first (via
+`GET /projects/{id}/scans` → `.items[0]`), or use the VEX-format export
+(`GET /products/{id}/versions/{v}/vex`, different shape).
+
+**Proposed:** add `GET /products/{id}/vulnerabilities`, `GET /projects/{id}/vulnerabilities`, and
+`GET /products/{id}/versions/{v}/vulnerabilities`, all returning the existing
+`ScanVulnerabilityList` shape with the same `severity` / `effective_state` / `cve_id` filters +
+cursor pagination.
+
+**Why it is small:** `PostgresScanQueryRepository.ListScanVulnerabilities` (`adapter/store/catalog.go`)
+already joins `component_vulnerabilities → scan_reports → vulnerabilities → risk_context →
+component_versions → components → artifacts → versions → projects` and already maps the rich DTO.
+The only scope restriction is one line — `WHERE cv.scan_report_id = $1`. Scoping by level is a
+one-line WHERE swap (`a.version_id` / `ver.project_id` / `proj.product_id`) plus a
+latest-scan-per-artifact filter, which the `v_latest_findings` view already encodes. Work: generalize
+the store query to a scope param, 3 thin handlers + routes (`mount.go`), OpenAPI + `make
+generate-api`, handler/store tests. **Non-breaking, no schema change** (~half-day with gates).
+
+**Decision:** product/project span multiple artifacts, so the same `(component_purl, cve_id)` can
+appear per-artifact (each a distinct deployment). Default to per-artifact rows (truthful — that is
+the `risk_context` identity); optional `?dedupe=true` collapses to unique CVEs. For a version
+(usually one artifact) it is moot. **Hooks:**
+`PostgresScanQueryRepository.ListScanVulnerabilities`, `v_latest_findings`, `api.Handler`,
+`internal/adapter/api/mount.go`, `api/openapi.yaml`.
 
 ---
 
