@@ -1730,13 +1730,23 @@ schema change and the notification path is new behaviour.
 
 ---
 
-### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — ⏳ PARTIAL
+### Candidate change — Feed registry / user-defined feeds (`themis-feed-registry`) — ✅ DONE (v0.3.9)
 
-> **Partially done (2026-06-24).** CR-4 delivered the feed *class* taxonomy (`rhel_vex_url` vs
-> `rhel_csaf_url`; OSV feeds reclassified as correlation sources). **Still pending:** the
-> user-defined `vexfeed.feeds:` delta list to **add / remove / disable** arbitrary feeds — feeds
-> are still hardcoded in DI (no per-feed on/off flag). This remaining slice is the user-facing
-> registry below.
+> **Complete (v0.3.9).** CR-4 delivered the feed *class* taxonomy (`rhel_vex_url` vs
+> `rhel_csaf_url`; OSV feeds reclassified as correlation sources); v0.3.9 adds the user-facing
+> `vexfeed.feeds:` delta list. `config.FeedConfig` + `httpserver.ResolveVEXFeeds` merge built-in
+> defaults (derived from the legacy `*_url` fields, so existing configs are unchanged) with the
+> delta list **by name** — add a custom feed, override a built-in's fields, or disable one
+> (`enabled: false`). `type` (`url`/`zip-osv`/`csaf-dir`) selects the source constructor; `class`
+> (`correlation` default, or `overlay`) routes it to the correlation loader vs the VEX overlay
+> service; unknown-type / missing-URL enabled feeds are skipped with a logged warning.
+> `api_wiring.go` consumes the resolved lists. Built-in names: `rhel-vex` (overlay); `rhel-csaf`,
+> `alpine`, `rocky`, `wolfi` (correlation). See `docs/release-notes-v0.3.9.md`. Original proposal
+> retained below.
+>
+> **Prior status — Partially done (2026-06-24).** CR-4 delivered the feed *class* taxonomy; the
+> user-defined `vexfeed.feeds:` delta list (add/remove/disable) was still pending — feeds were
+> hardcoded in DI. Now shipped in v0.3.9.
 
 **Type:** additive capability + config-shape change. Targets v0.3.0-era.
 **Problem:** the feed set is fixed. `VEXFeedConfig` is hardcoded struct fields
