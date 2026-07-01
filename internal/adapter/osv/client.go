@@ -146,16 +146,28 @@ type osvVuln struct {
 		Type  string `json:"type"`
 		Score string `json:"score"`
 	} `json:"severity"`
-	Affected []struct {
-		Package struct {
-			Ecosystem string `json:"ecosystem"`
-			Name      string `json:"name"`
-		} `json:"package"`
-		Ranges []struct {
-			Events []osvRangeEvent `json:"events"`
-		} `json:"ranges"`
-		Versions []string `json:"versions"`
-	} `json:"affected"`
+	Affected []osvAffected `json:"affected"`
+}
+
+// osvAffected is one OSV `affected` entry: the package plus its version ranges and
+// explicit version list.
+type osvAffected struct {
+	Package  osvPackage `json:"package"`
+	Ranges   []osvRange `json:"ranges"`
+	Versions []string   `json:"versions"`
+}
+
+// osvPackage identifies the affected package (ecosystem + name).
+type osvPackage struct {
+	Ecosystem string `json:"ecosystem"`
+	Name      string `json:"name"`
+}
+
+// osvRange is one version range: its type (SEMVER / ECOSYSTEM / GIT) and its
+// ordered introduced/fixed/last_affected events.
+type osvRange struct {
+	Type   string          `json:"type"`
+	Events []osvRangeEvent `json:"events"`
 }
 
 type osvRangeEvent struct {
@@ -221,6 +233,9 @@ func extractAffectedVersions(vuln osvVuln, osvEcosystem, packageName string) []s
 			}
 		}
 		for _, rng := range item.Ranges {
+			if isUnusableRangeType(rng.Type) {
+				continue
+			}
 			if g := rangeConstraintGroup(rng.Events); g != "" {
 				groups = append(groups, g)
 			}
@@ -304,6 +319,9 @@ func extractFixVersions(vuln osvVuln, osvEcosystem, packageName string) []string
 			continue
 		}
 		for _, rng := range item.Ranges {
+			if isUnusableRangeType(rng.Type) {
+				continue
+			}
 			for _, event := range rng.Events {
 				if event.Fixed != "" && event.Fixed != "0" {
 					fixes = append(fixes, strings.TrimSpace(event.Fixed))
@@ -312,4 +330,17 @@ func extractFixVersions(vuln osvVuln, osvEcosystem, packageName string) []string
 		}
 	}
 	return fixes
+}
+
+// isUnusableRangeType reports whether an OSV range type carries no usable version
+// bound. GIT ranges express introduced/fixed as commit hashes, not versions —
+// feeding them to rangeConstraintGroup produces a bogus constraint (a low semver
+// like "3.1.6" sorts below a hex commit id, so it matches "< 9b53045c…") and leaks
+// the commit hash as a "fixed" version. OSV always attaches a SEMVER/ECOSYSTEM
+// range (or an explicit versions list) when an ecosystem fix exists — e.g. the
+// Jinja2 CVE-2016-10745 record carries both a GIT range and "ECOSYSTEM < 2.8.1" —
+// so skipping GIT ranges is safe; an entry left with no usable range fails closed
+// via the existing "none" sentinel rather than over-matching on commit hashes.
+func isUnusableRangeType(rangeType string) bool {
+	return strings.EqualFold(strings.TrimSpace(rangeType), "GIT")
 }

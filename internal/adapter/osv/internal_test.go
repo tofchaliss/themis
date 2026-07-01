@@ -15,33 +15,14 @@ func TestExtractAffectedVersionsPairsEventsAndFiltersPackage(t *testing.T) {
 	// different package with an open range — the open range must not leak into
 	// curl's constraints.
 	vuln := osvVuln{
-		Affected: []struct {
-			Package struct {
-				Ecosystem string `json:"ecosystem"`
-				Name      string `json:"name"`
-			} `json:"package"`
-			Ranges []struct {
-				Events []osvRangeEvent `json:"events"`
-			} `json:"ranges"`
-			Versions []string `json:"versions"`
-		}{
+		Affected: []osvAffected{
 			{
-				Package: struct {
-					Ecosystem string `json:"ecosystem"`
-					Name      string `json:"name"`
-				}{Ecosystem: "Alpine", Name: "curl"},
-				Ranges: []struct {
-					Events []osvRangeEvent `json:"events"`
-				}{{Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "7.36.0-r0"}}}},
+				Package: osvPackage{Ecosystem: "Alpine", Name: "curl"},
+				Ranges:  []osvRange{{Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "7.36.0-r0"}}}},
 			},
 			{
-				Package: struct {
-					Ecosystem string `json:"ecosystem"`
-					Name      string `json:"name"`
-				}{Ecosystem: "Alpine", Name: "libcurl"},
-				Ranges: []struct {
-					Events []osvRangeEvent `json:"events"`
-				}{{Events: []osvRangeEvent{{Introduced: "0"}}}}, // open, all-versions
+				Package: osvPackage{Ecosystem: "Alpine", Name: "libcurl"},
+				Ranges:  []osvRange{{Events: []osvRangeEvent{{Introduced: "0"}}}}, // open, all-versions
 			},
 		},
 	}
@@ -62,27 +43,14 @@ func TestExtractAffectedVersionsPairsEventsAndFiltersPackage(t *testing.T) {
 
 func TestExtractAffectedVersionsFallbacks(t *testing.T) {
 	mk := func(eco, name string, events []osvRangeEvent, versions []string) osvVuln {
-		v := osvVuln{}
-		var item struct {
-			Package struct {
-				Ecosystem string `json:"ecosystem"`
-				Name      string `json:"name"`
-			} `json:"package"`
-			Ranges []struct {
-				Events []osvRangeEvent `json:"events"`
-			} `json:"ranges"`
-			Versions []string `json:"versions"`
+		item := osvAffected{
+			Package:  osvPackage{Ecosystem: eco, Name: name},
+			Versions: versions,
 		}
-		item.Package.Ecosystem = eco
-		item.Package.Name = name
 		if events != nil {
-			item.Ranges = []struct {
-				Events []osvRangeEvent `json:"events"`
-			}{{Events: events}}
+			item.Ranges = []osvRange{{Events: events}}
 		}
-		item.Versions = versions
-		v.Affected = append(v.Affected, item)
-		return v
+		return osvVuln{Affected: []osvAffected{item}}
 	}
 
 	// No affected entry aligns to the queried package -> preserve recall (*).
@@ -108,6 +76,56 @@ func TestExtractAffectedVersionsFallbacks(t *testing.T) {
 	// Matched package, range present but no events -> fail closed (none).
 	if got := extractAffectedVersions(mk("Alpine", "curl", []osvRangeEvent{}, nil), "Alpine", "curl"); len(got) != 1 || got[0] != "none" {
 		t.Fatalf("eventless range = %#v, want [none]", got)
+	}
+}
+
+func TestExtractAffectedVersionsSkipsGITRanges(t *testing.T) {
+	// Jinja2 CVE-2016-10745 (PYSEC-2019-220) shape: a GIT range carrying commit
+	// hashes alongside the real ECOSYSTEM fix. The GIT range must be ignored —
+	// otherwise "< <commit-sha>" over-matches modern semver (3.1.6 sorts below a
+	// hex id) and the hash leaks as a fixed version.
+	vuln := osvVuln{
+		Affected: []osvAffected{{
+			Package: osvPackage{Ecosystem: "PyPI", Name: "jinja2"},
+			Ranges: []osvRange{
+				{Type: "GIT", Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "9b53045c34e61013dc8f09b7e52a555fa16bed16"}}},
+				{Type: "ECOSYSTEM", Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "2.8.1"}}},
+			},
+		}},
+	}
+	affected := extractAffectedVersions(vuln, "PyPI", "jinja2")
+	if len(affected) != 1 || affected[0] != "< 2.8.1" {
+		t.Fatalf("affected = %#v, want [\"< 2.8.1\"] (GIT range skipped)", affected)
+	}
+	if domain.VersionMatches(affected, "3.1.6") {
+		t.Fatal("jinja2 3.1.6 must not match a CVE fixed in 2.8.1 (GIT range must not over-match)")
+	}
+	if !domain.VersionMatches(affected, "2.7.0") {
+		t.Fatal("jinja2 2.7.0 should still match a CVE fixed in 2.8.1")
+	}
+	if fixes := extractFixVersions(vuln, "PyPI", "jinja2"); len(fixes) != 1 || fixes[0] != "2.8.1" {
+		t.Fatalf("fixes = %#v, want [2.8.1] (commit hash excluded)", fixes)
+	}
+
+	// A GIT-only entry with no usable ECOSYSTEM range fails closed (none) and leaks
+	// no fix; an explicit versions list is still honoured.
+	gitOnly := osvVuln{Affected: []osvAffected{{
+		Package: osvPackage{Ecosystem: "PyPI", Name: "jinja2"},
+		Ranges:  []osvRange{{Type: "git", Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "9b53045c"}}}},
+	}}}
+	if got := extractAffectedVersions(gitOnly, "PyPI", "jinja2"); len(got) != 1 || got[0] != "none" {
+		t.Fatalf("git-only = %#v, want [none] (fail closed)", got)
+	}
+	if got := extractFixVersions(gitOnly, "PyPI", "jinja2"); len(got) != 0 {
+		t.Fatalf("git-only fixes = %#v, want [] (no commit-hash leak)", got)
+	}
+	gitOnlyWithVersions := osvVuln{Affected: []osvAffected{{
+		Package:  osvPackage{Ecosystem: "PyPI", Name: "jinja2"},
+		Ranges:   []osvRange{{Type: "GIT", Events: []osvRangeEvent{{Introduced: "0"}, {Fixed: "9b53045c"}}}},
+		Versions: []string{"2.7.0"},
+	}}}
+	if got := extractAffectedVersions(gitOnlyWithVersions, "PyPI", "jinja2"); len(got) != 1 || got[0] != "2.7.0" {
+		t.Fatalf("git-only+versions = %#v, want [2.7.0]", got)
 	}
 }
 

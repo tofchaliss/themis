@@ -318,6 +318,12 @@ Vendor VEX feed operations* table below. **Target:** v0.3.x correlation-accuracy
 
 ### KNOWN GAP — OSV.dev app-ecosystem version-range quirks (found 2026-06-29, during v0.3.3 E2E)
 
+**Status:** GIT-range over-match ✅ **RESOLVED in v0.3.7**; major-line crossing **reclassified**
+(not a Themis bug — see Resolution). The OSV `ranges[].type` is now read: `GIT` ranges are
+skipped so a commit SHA never becomes a version bound or a `fixed_version`, and a GIT-only entry
+fails closed via the existing `none` sentinel (an explicit `versions` list is still honoured).
+Verified against the real OSV `/v1/query` records for Jinja2 (`PYSEC-2019-220`) and urllib3.
+
 **Severity:** correctness (over-match) for application ecosystems (pypi/npm/…), **distinct
 from** the distro (apk/rpm) work in v0.3.3. Surfaced when the new findings API exposed
 `fixed_version` (v0.3.3 item 3): two OSV.dev-correlated pypi findings on the Rocky-8 test
@@ -344,18 +350,24 @@ major line) are not handled — there is no commit→version resolution and no p
 The distro feeds avoid this (NEVRA + the `RPMReleaseMajor` stream guard from v0.3.2); app
 ecosystems have no equivalent.
 
-**Fix options:**
+**Resolution (v0.3.7):**
 
-- Skip / ignore `GIT`-type OSV ranges (or resolve the commit to a release tag) so a commit
-  SHA never becomes a `fixed_version` and a GIT-only record never over-matches a semver
-  install — fail closed (no match) when only a GIT range is present, mirroring the distro
-  `none` sentinel.
-- For multi-line packages, only mark affected when the installed version's own line has a
-  matching introduced/fixed pair (a general analogue of the RPM release-stream guard).
+- **GIT-range over-match — fixed.** `osvRange` now carries `type`; `isUnusableRangeType` skips
+  `GIT` ranges in both `extractAffectedVersions` and `extractFixVersions` (`adapter/osv/client.go`).
+  OSV always attaches a `SEMVER`/`ECOSYSTEM` range or an explicit `versions` list when an
+  ecosystem fix exists (Jinja2 `PYSEC-2019-220` carries both a `GIT` range and `ECOSYSTEM < 2.8.1`),
+  so this is safe; a GIT-only entry with no versions list fails closed (`none`).
+- **Major-line crossing — reclassified as OSV data-faithfulness, not a Themis bug.** Verified on
+  the real OSV `/v1/query` records: multi-line packages (urllib3 `CVE-2024-37891`) are published as
+  **separate `affected` entries** (`< 1.26.19` and `>= 2.0.0, < 2.2.2`), which the existing code
+  already turns into correct OR-groups — `1.26.20` matches neither. A residual over-match only
+  arises when OSV itself gives an unbounded `introduced:0 → fixed:X.Y.Z`, i.e. Themis is faithfully
+  applying OSV's own range. Adding a "major-line suppression" heuristic was **declined**: it would
+  hide real findings, contradicting this file's deliberate recall-first stance ("a false positive
+  is safer than hiding a real finding"). If OSV's range is wrong, the fix belongs upstream in OSV.
 
-**Hooks:** `domain.BuildConstraintGroup` / `VersionConstraintSet` (CR-1), the OSV range parse
-in `adapter/osv/client.go`, and the `osv` provenance source. **Target:** v0.3.x app-ecosystem
-correlation-accuracy follow-on (alongside the Red Hat VEX overlay gap above).
+**Hooks:** the OSV range parse in `adapter/osv/client.go` (`osvRange.Type`, `isUnusableRangeType`,
+`extractAffectedVersions`, `extractFixVersions`); `domain.VersionMatches` for the constraint match.
 
 ---
 
@@ -449,7 +461,7 @@ the stale `fixed` auto-correct (no manual SQL). See `docs/release-notes-v0.3.6.m
 
 ---
 
-### ENHANCEMENT — Scoped vulnerability-listing endpoints (product / project / version) (targets v0.3.7)
+### ENHANCEMENT — Scoped vulnerability-listing endpoints (product / project / version) (targets v0.3.8)
 
 **Status:** proposed (2026-06-30). Today the only raw per-finding list is **scan-scoped**
 (`GET /api/v1/scans/{id}/vulnerabilities`). There is no endpoint returning the rich findings list
