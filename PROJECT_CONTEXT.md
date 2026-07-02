@@ -27,22 +27,24 @@ and distro-authoritative merge, distro/RHSA feeds re-layered from the VEX overla
 Remaining (post-release follow-ups): operational G1–G8 verification on real SBOMs, and the
 user-defined feed registry. See `project-backlog.md` §"Layer-0 Correctness & Observability Refactor".
 
-**v0.3.x maintenance line (2026-06-28 → 2026-06-30).** Non-breaking correctness/feature patches
-shipped from `main` on the v0.3.0 schema (no migrations): `v0.3.2` (canonical CVE-ID keying +
+**v0.3.x maintenance line (2026-06-28 → 2026-07-01) — complete.** Non-breaking correctness/feature
+patches shipped from `main` on the v0.3.0 schema (no migrations): `v0.3.2` (canonical CVE-ID keying +
 el8/el9 release-stream scoping + feeder resilience), `v0.3.3` (distro-authoritative
 `PackageIdentityMatch` + NVD backfill robustness + `fixed_version`/`installed_version` on the
 findings API), `v0.3.4` (preserve backfilled CVSS in the catalog upsert), `v0.3.5` (Red Hat VEX
-overlay via the on-demand Security Data API), and **`v0.3.6` — in review (PR #39)** (Red Hat VEX
-minor-stream false-resolution fix: scope verdicts to the main `enterprise_linux:N` stream + read the
-`epoch=` PURL qualifier). Each has a `docs/release-notes-v0.3.x.md`. Next proposed: `v0.3.7` —
-scoped vulnerability-listing endpoints (product/project/version). See `project-backlog.md`.
+overlay via the on-demand Security Data API), `v0.3.6` (Red Hat VEX minor-stream false-resolution
+fix: main `enterprise_linux:N` stream scoping + `epoch=` PURL qualifier), `v0.3.7` (OSV GIT-range
+over-match fix — skip GIT-type ranges so commit hashes never become version bounds), `v0.3.8`
+(scoped vulnerability-listing endpoints — product/project/version), and `v0.3.9` (feed registry —
+user-defined `vexfeed.feeds` delta list). Each has a `docs/release-notes-v0.3.x.md`. All released
+(tags `v0.3.2`→`v0.3.9`). See `project-backlog.md`.
 
 | Phase | Status | Scope |
 | ----- | ------ | ----- |
 | Phase 1 | Shipped (`v0.1.0`) | Go REST API, PostgreSQL, 8 capabilities — see `openspec/changes/archive/` |
 | Phase 2a | Shipped (`v0.2.0` / `v0.2.1`) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX |
 | core-model + Layer-0 refactor | **Shipped (`v0.3.0`, 2026-06-24)** | Schema restructure + Durable-Enrichment Identity Contract; CR-1…CR-10 (version engine, single correlator + provenance, feed re-layering, CVSS backfill, logging port, feed health) — closes D-CVSS-1/D-FEED-1/D-NVD-1/D-LOG-1 |
-| v0.3.x maintenance | Released `v0.3.2`–`v0.3.5`; **`v0.3.6` in review (PR #39)** | Correlation/VEX correctness on the v0.3.0 schema (no migrations): CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream fix |
+| v0.3.x maintenance | **Released `v0.3.2`–`v0.3.9`** | Correlation/VEX correctness + ergonomics on the v0.3.0 schema (no migrations): CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream fix, OSV GIT-range fix, scoped vuln endpoints, feed registry |
 | Phase 2b | Ready to start (unblocked) — targets `v0.4.0` | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
 | Phase 2c | Planned — targets `v0.5.0` | AI-assisted VEX auto-apply — blocked on 2b |
 | Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |
