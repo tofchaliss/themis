@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.10] - 2026-07-02
 ### Changed
-- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9
+- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9 (@invalid-email-address)
+- release: v0.3.10 — archive themis-core-model; docs current to v0.3.9 (@invalid-email-address)
 
 ## [0.3.9] - 2026-07-01
 ### Added
