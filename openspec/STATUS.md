@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.3.6 in review, PR #39)._
+Last updated: 2026-07-02 (v0.3.2–v0.3.9 released; themis-core-model 58/58 — ready to archive)._
 
 ---
 
@@ -9,22 +9,18 @@ Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| themis-core-model | **Released (v0.3.0)** | 2026-06-17 | proposal ✓  design ✓  specs ✓  tasks ✓ (58/58; 9.6 tag `v0.3.0` done 2026-06-24) — code, all gates green | — (tagged v0.3.0; ready to archive) |
-| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged to `themis-phase-2` (PR #24) and tagged `v0.3.0`; all gates green (build/unit/coverage[thresholds]/deadcode/integration/clean-arch). Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md` §"Implementation status & unfinished tasks". | — (remaining: operational G1–G8 on real SBOMs; user-defined feed registry) |
+| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (user-defined feed registry shipped v0.3.9; only operational G1–G8 verification on real SBOMs remains) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
 | themis-phase-2b | Ready to start (unblocked) | — | not started — targets v0.4.0 | — (core-model + Layer-0 refactor released in v0.3.0; D-CVSS-1 fixed — unblocked) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
 
-- **`themis-core-model` restructure (HIGHEST PRIORITY)** — **planning complete 2026-06-17**
-  (proposal/design/specs/tasks; ready to implement). Splits `sbom_documents` into `sboms` +
-  `scan_reports`; fixes silent triage loss via `risk_context` identity PK; removes
-  `is_latest`/`supersedes_id`; merges `artifacts`+`images`; adds `version.project_id` FK; folds
-  in the moved Group 16 registration endpoints. **Greenfield migration — no data backfill; dev
-  DBs re-init.** Gates Phase 2b; merges first under the `v0.3.0` line. Change:
-  `openspec/changes/themis-core-model/`. Full background: `project-backlog.md` §Core Data Model
-  Restructure.
+- **`themis-core-model` restructure — ✅ DONE (released v0.3.0; archived 2026-07-02).** Split
+  `sbom_documents` into `sboms` + `scan_reports`; `risk_context` identity PK; removed
+  `is_latest`/`supersedes_id`; merged `artifacts`+`images`; `version.project_id` FK; Group 16
+  registration endpoints. 58/58 tasks; delta specs synced to `openspec/specs/`. Archived at
+  `openspec/changes/archive/2026-07-02-themis-core-model/`. No longer gates Phase 2b (unblocked).
 
 > Group 31 and the Group 16 hardening remainder shipped in **`themis-v0-2-1`** (archived
 > 2026-06-17, 36/37 tasks; only the manual merge-to-`main` + tag `v0.2.1` step, 7.7, remains).
@@ -69,6 +65,7 @@ Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.
 
 | Change | Archived | Delivered |
 | --- | --- | --- |
+| themis-core-model | 2026-07-02 | Core data-model restructure (breaking, v0.3.0): `sboms` + `scan_reports` split, merged `artifacts` (unique `image_digest`), `versions.project_id`, `risk_context` identity PK `(artifact_id, component_purl, cve_id)` + Durable-Enrichment Identity Contract (D15), `v_latest_findings` view, schema-skew guard, artifact/version registration endpoints. 58/58 tasks; delta specs (artifact-registration, cve-triage, sbom-ingestion, sbom-management, sbom-store) synced to main specs |
 | themis-v0-2-1 | 2026-06-17 | Alpine signal reliability: canonical CVE-ID normalization (`domain.NormalizeCVEID`), OSV CVSS vector parsing, Alpine package-name normalization, `ZipOSVFeedSource` + `CSAFDirectoryFeedSource` vendor feeds, `exploit_public`/enrichment on findings API, `themis_exploitdb_sync_total` metric, component-mismatch correlation logging, Group 31 + Group 16 remainder; 9 spec requirements synced. Merge/tag `v0.2.1` (7.7) still manual |
 | themis-phase-2a | 2026-06-17 | EPSS/KEV sync, ExploitDB CSV, Layer 1 rules, asset graph, blast-radius, composite risk score V2, upstream vendor VEX (RHEL/Alpine/Rocky/Wolfi), VEX export, system status API, SBOM management, error UX, AC-16..AC-24, FR1–FR8; v0.2.0 merged to main (PR #16) |
 | themis-phase-1 | 2026-06-09 | artifact-trust, sbom-parser, sbom-ingestion, sbom-store, intelligence-enrichment, cve-triage, cve-watch, notification-service; v0.1.0 (retroactive tag on Phase 1 commit, 2026-06-17) |
@@ -87,7 +84,10 @@ Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.
 | `v0.3.3` | `711b0ac` | Distro-authoritative correlation identity + NVD by-CVE backfill robustness + `fixed_version`/`installed_version` on findings API |
 | `v0.3.4` | `7e6c077` | Preserve backfilled CVSS in the catalog upsert (no clobber to `unknown`/0 on re-correlation) |
 | `v0.3.5` | `62e0acc` (PR #38) | Red Hat VEX overlay via on-demand Security Data API (Option B) |
-| `v0.3.6` | — (in review, PR #39) | Red Hat VEX minor-stream false-resolution fix (main-stream scoping + `epoch=` qualifier) |
+| `v0.3.6` | `e6b5faa` (PR #39) | Red Hat VEX minor-stream false-resolution fix (main-stream scoping + `epoch=` qualifier) |
+| `v0.3.7` | `6fc334f` (PR #41) | OSV GIT-range over-match fix (skip GIT-type ranges; no commit-hash version bounds) |
+| `v0.3.8` | `29943cf` (PR #42) | Scoped vulnerability-listing endpoints (product / project / version) |
+| `v0.3.9` | `5d5ee3c` (PR #44) | Feed registry — user-defined `vexfeed.feeds` delta list |
 | `v0.4.0` | — (planned) | Phase 2b AI Intelligence |
 | `v0.5.0` | — (planned) | Phase 2c AI-Assisted VEX |
 
@@ -99,7 +99,7 @@ Last updated: 2026-06-30 (v0.3.x maintenance line: v0.3.2–v0.3.5 released; v0.
 | Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Complete (archived 2026-06-17; v0.2.0) |
 | — | (maintenance) | v0.2.1 — feed reliability + Phase 1 hardening | Released (v0.2.1) |
 | core-model + Layer-0 | themis-core-model + CR-1…CR-10 | Schema restructure (breaking) + correlation/feeder/observability refactor | **Released (v0.3.0, 2026-06-24)** |
-| — | (maintenance) | v0.3.2–v0.3.6 — correlation/VEX correctness on the v0.3.x line (canonical CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream false-resolution fix) | v0.3.2–v0.3.5 released; **v0.3.6 in review (PR #39)** |
+| — | (maintenance) | v0.3.2–v0.3.9 — correlation/VEX correctness + ergonomics on the v0.3.0 schema (canonical CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream fix, OSV GIT-range fix, scoped vuln endpoints, feed registry) | **v0.3.2–v0.3.9 released** |
 | Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned (unblocked) — targets v0.4.0 |
 | Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned — targets v0.5.0 |
 | Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |

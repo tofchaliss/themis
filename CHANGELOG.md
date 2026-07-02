@@ -5,9 +5,16 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-07-02
+### Changed
+- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9
+
 ## [0.3.9] - 2026-07-01
 ### Added
-- feat(feeds): user-defined feed registry (vexfeed.feeds delta list)
+- feat(feeds): user-defined feed registry (vexfeed.feeds delta list) (@invalid-email-address)
+
+### Changed
+- release: v0.3.9 — feed registry (user-defined feeds) (@invalid-email-address)
 
 ## [0.3.8] - 2026-07-01
 ### Added

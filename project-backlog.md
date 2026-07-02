@@ -209,16 +209,23 @@ reconciled as follows:
   `adapter/redhat` + `usecase/enrichment.RedHatVEXService`. (Released.)
 - **`v0.3.6`** — Red Hat VEX minor-stream false-resolution fix: scope verdicts to the main
   `enterprise_linux:N` stream + read the `epoch=` PURL qualifier (stops false `resolved` on
-  vulnerable RPMs). **In review — PR #39.**
+  vulnerable RPMs). (Released; PR #39.)
+- **`v0.3.7`** — OSV GIT-range over-match fix: skip `GIT`-type OSV ranges so commit hashes never
+  become version bounds or `fixed_version` (Jinja2 CVE-2016-10745 false positive). (Released; PR #41.)
+- **`v0.3.8`** — scoped vulnerability-listing endpoints (`GET /products|projects/{id}/vulnerabilities`,
+  `.../versions/{v}/vulnerabilities`) reusing the scan-findings shape via `v_latest_findings`.
+  (Released; PR #42.)
+- **`v0.3.9`** — feed registry: user-defined `vexfeed.feeds` delta list (add / override / disable
+  feeds by name) merged over built-in defaults. (Released; PR #44.)
 - **`v0.4.0`** — Phase 2b (AI Intelligence).
 - **`v0.5.0`** — Phase 2c (AI-Assisted VEX).
 
 Nothing below `v0.2.0` will ever be tagged again.
 
-> Maintenance releases on the v0.3.x line (v0.3.2–v0.3.6) are non-breaking correctness/feature
-> patches shipped from `main`; each has `docs/release-notes-v0.3.x.md` and a regenerated
-> `CHANGELOG.md` section. The `openspec/STATUS.md` and `PROJECT_CONTEXT.md` "Current Status"
-> tables still name `v0.3.0` as the head of the line and are due a refresh to v0.3.6.
+> The v0.3.x maintenance line (v0.3.2–v0.3.9) is **complete and released** — non-breaking
+> correctness/feature patches shipped from `main` on the v0.3.0 schema (no migrations); each has a
+> `docs/release-notes-v0.3.x.md` and a `CHANGELOG.md` section. `openspec/STATUS.md` and
+> `PROJECT_CONTEXT.md` were refreshed to v0.3.9 on 2026-07-02.
 
 ---
 
@@ -1869,6 +1876,88 @@ analysts in false positives.
   `confidence` float in their JSON output
 - `vex_documents.source` enum already includes `ai_generated`
 - `trust_policy` enum in domain already has `strict`, `standard`, `permissive`
+
+---
+
+## Architecture — deep-module deepening opportunities
+
+> Tracked from the `/improve-codebase-architecture` review (2026-07-02). These are **deepening**
+> refactors — turn a shallow, scattered concept into a **deep module** (a lot of behaviour behind a
+> small **interface**, at a clean **seam**, tested through that interface). Vocabulary: module,
+> interface, depth, seam, adapter, leverage, locality, deletion test. None are blocking; revisit as
+> the surrounding code is touched. **This list will grow during Phase 2b** (the AI workers + KB add
+> new seams — record deepening candidates here as they surface).
+
+Ranked by real friction (correctness first, then boilerplate). IDs `AD-n` for cross-referencing.
+
+### AD-1 — PURL identity smeared across ~6 parsers (Strong; correctness)
+
+**Friction:** there is no single *parsed PURL* concept; six modules each re-parse `pkg:` strings and
+they **disagree**, so a parsing fix lands in one and the others drift (this is how the `epoch=`
+qualifier fix in v0.3.6 touched only `rpmInstalledVersion`).
+
+- `internal/adapter/parser/purl.go` — `ecosystemFromPURL`, `nameVersionFromPURL`, `decodePURLSegment`
+  (the only one that percent-decodes, `libstdc%2B%2B` → `libstdc++`).
+- `internal/adapter/vexfeed/purl.go` — `parsePURL` (only one modelling `{Type,Namespace,Name,Version}`;
+  no percent-decode, no epoch fold).
+- `internal/usecase/enrichment/redhat_vex.go` — `rpmPackageName`, `rpmInstalledVersion`,
+  `rpmEpochQualifier` (only place that folds the `epoch=` qualifier into the version).
+- `internal/domain/version_match.go` (`StripPURLVersionQualifiers`, `VersionedPURL`),
+  `internal/domain/version_engine.go` (`RPMReleaseMajor`) — pure/tested, but *which field feeds
+  `RPMReleaseMajor` is decided divergently at the call sites* (`vexfeed/correlation_source.go` uses a
+  5-way fallback; `redhat_vex.go` feeds only the PURL).
+
+**Deletion test:** concentrates — a genuine normalized-identity concept exists and is scattered.
+**Deepening:** one `domain.PURL` (`ParsePURL(s) → {Ecosystem, Namespace, Name, Epoch, Version,
+Release, StreamMajor, Qualifiers}`); every parser becomes one call. Mirrors the CR-1
+`version_engine` unification. **Leverage:** one interface, 6 call sites. **Locality:** epoch/decode/
+stream bugs concentrate.
+
+### AD-2 — VEX-overlay effective-state policy spread across 4 modules (Strong; correctness)
+
+**Friction:** deciding a finding's `effective_state` (suppressed/resolved/confirmed) crosses four
+seams, so a policy change ("not_affected requires a justification", "fixed must clear the stream
+check") touches three at once. The libtiff false-resolution (v0.3.6) required tracing all four.
+
+- `internal/adapter/vexfeed/matcher.go` — `matchRPM`/`matchAlpineOSV`/`alpineRangeStatus` compute a
+  status into `MatchOutcome.ResolvedStatus`.
+- `internal/domain/redhat_vex.go` — `VerdictForStream` (Covered/NotAffected/FixedEVR).
+- `internal/usecase/enrichment/redhat_vex.go` — `buildAssertion` re-decides Fixed/Affected with its
+  own version compare.
+- `internal/usecase/enrichment/service.go` — `SourceRank` (precedence), `PickWinningAssertion`,
+  `ResolveEffectiveState` (status → state, source-conditional).
+
+**Leaky seam:** `MatchOutcome` carries the rich result, but `vendorAssertionMatch` discards it and
+rebuilds a flattened `VEXAssertionMatch` — the matcher's answer doesn't survive its own interface.
+**Deletion test:** concentrates. **Deepening:** one policy module `Resolve(finding, assertions) →
+(effective_state, reason)`; the interface becomes the test surface for VEX policy.
+
+### AD-3 — Eight near-identical feed schedulers → one deep scheduler (Worth exploring; boilerplate)
+
+**Friction:** `internal/infrastructure/http/{correlation_feed, cvss_backfill, epsskev, exploitdb,
+redhat_vex, vexfeed, watch}_scheduler.go` are 45–52 lines and structurally byte-identical (nil-guard,
+`LoggerOrNop`, `FeedHealthRecorderOrNop`, interval default, run-once-then-tick, error→`RecordFeedFailure`
+/ info→`RecordFeedSuccess`). Only four things vary: service type, method name
+(`RunSync`/`RunCycle`/`RunBackfill`/`Refresh`), feed-name literal, logged fields. `triage_scheduler.go`
+is the lone genuine variant (no health/logging) and stays.
+
+**Deletion test:** moves (pure boilerplate — per-feed logic already lives in the services).
+**Deepening:** `StartFeedScheduler(ctx, name, interval, log, health, cycle func(ctx)(result, error))`;
+each feed becomes a one-line cycle func. Highest-confidence, most mechanical win. **Locality:** fix the
+ticker/health loop once; delete ~7 shallow modules; one scheduler test instead of seven.
+
+### AD-4 — Store finding projection: positional SELECT↔Scan contract (Worth exploring; silent-corruption risk)
+
+**Friction:** `internal/adapter/store/catalog.go` — `scanVulnerabilitySelect` lists 15 columns that
+must line up **positionally** with 15 `rows.Scan` targets in `collectScanVulnerabilities` and the
+`domain.ScanVulnerability` field order (the comment "order matches … Scan" admits the compiler can't
+enforce it). Adjacent same-typed pointers (`*bool` exploit/kev; `*float64` risk/epss/blast) mean a
+reorder or inserted column compiles clean and silently mis-populates. (The `select`/`joins` consts are
+already shared across both query methods — good; only the string-list ↔ scan-slice coupling remains.)
+
+**Deletion test:** concentrates (mildly). **Deepening:** scan into a `findingRow` struct by column
+name (`pgx.RowToStructByName`) so the column name is the contract, not argument order. **Wins:**
+removes a silent-corruption seam; column set defined once, by name.
 
 ---
 

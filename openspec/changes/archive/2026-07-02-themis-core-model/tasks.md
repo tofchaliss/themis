@@ -214,5 +214,8 @@ are dropped and re-initialised. Each group ends with the standard gates (unit te
 - [x] 9.5 `scripts/check-coverage.sh` — no package targets shifted (no new packages); store/api
   coverage hold their thresholds against the v0.3.0 schema (store 90.4%, api 80.3%), no
   re-baselining needed.
-- [ ] 9.6 Coordinate with `themis-phase-2b` (this change merges first under the `v0.3.0` line);
-  do not tag `v0.3.0` until Phase 2b is ready
+- [x] 9.6 **Superseded (2026-06-24):** re-scoped so `v0.3.0` shipped standalone — `v0.3.0` was
+  tagged 2026-06-24 (core-model + Layer-0 refactor CR-1…CR-10), and Phase 2b moved to `v0.4.0`
+  so the Layer-0 hardening could ship first. The original "do not tag `v0.3.0` until Phase 2b is
+  ready" no longer applies. All 58 tasks complete; the v0.3.x maintenance line (v0.3.2→v0.3.9) has
+  since shipped on the v0.3.0 schema (no migrations). Change ready to archive.
