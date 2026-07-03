@@ -115,7 +115,7 @@ These REFINE D-ARCH-1 / D-SCHEMA-1 / D-STATUS-2 / D-API-1 / D-SCOPE-3 (deltas at
 Two points surfaced that REOPEN earlier decisions and must be resolved before the proposal is
 final. Insight captured; final answers pending a deeper session.
 
-### OQ-GRAIN — enrichment grain / dedup identity (reopens D-SCHEMA-1)
+### OQ-GRAIN — enrichment grain / dedup identity — RESOLVED (D-GRAIN-1)
 
 The CVE Summarizer's context (D-HASH-1: `cve_id`, description, cvss, severity, CWE candidates, epss,
 kev, exploit_public) is **artifact-independent** — all CVE-level facts + global signals. So the
@@ -125,30 +125,69 @@ component_purl, cve_id)`. themis-ai enriches VULNERABILITIES; it does NOT need (
 identical. The backend maps CVE → findings and fans the result out.
 
 - **Refines D-SCHEMA-1:** key `ai.analyses` on the CVE-context (`cve_id`, `worker_type`,
-  `model_version`, `prompt_version`, `input_context_hash`) — **drop `artifact_id`**. Otherwise the
-  same CVE-context in N SBOMs = N identical Ollama calls (N-fold waste).
-- **Open sub-decision — CVE-grain vs (CVE + component-version)-grain:** a pure CVE summary reusable
-  across every package instance, OR add `component_purl` to the context so the summary can name the
-  package ("…in openssl 1.1.1"). Both are artifact-independent; this only sets how coarse the dedup
-  is. Leaning CVE-grain for the v0.4.0 Summarizer (matches D-HASH-1); revisit for later workers.
-- **Open — fan-out correctness:** if enrichment is per-CVE and stored once, confirm the transparency
-  JOIN never over-applies a summary to a component the CVE affects differently. (Fine for a CVE-level
-  summary; matters more if summaries become component-specific.)
+  `model_version`, `prompt_version`, `input_context_hash`) — **drop `artifact_id`** (and
+  `component_purl`, per D-GRAIN-1). Otherwise the same CVE-context in N SBOMs = N identical Ollama
+  calls (N-fold waste).
+- **D-GRAIN-1 — CVE-grain (drop `component_purl` too). LOCKS the sub-decision.** The fix-version test
+  resolves to *no* once D-FOOTPRINT-1 owns version-actionability: every field of the D-CONTRACT-1
+  typed output (`summary`, `primary_weakness` CWE, `key_factors`) is **CVE-level**, so a
+  component-version key would store byte-identical rows under different keys — pure inference waste on
+  a serialized CPU 7B model. Key `ai.analyses` on
+  `(cve_id, worker_type, model_version, prompt_version, input_context_hash)`; matches D-HASH-1's
+  CVE-level semantic inputs exactly. **This reverses the earlier "leaning component-version"** — the
+  footprint decoupling removed the summary's need to name a fix version. Revisit per worker: a future
+  component-specific worker (e.g. reachability) can add `component_purl` to its OWN key via the
+  generic table's `worker_type` discriminator, without touching the Summarizer's grain.
+- **Fan-out correctness — RESOLVED.** One CVE-intrinsic summary stored once and fanned to every
+  finding sharing `cve_id` is safe: the summary describes the *flaw* (what it is, its CWE, its
+  exploitability signals — all CVE-global), not the deployment. Component-specific concerns are a
+  later-worker problem, isolated by `worker_type`.
 
-### OQ-QUEUE — queue, write-back, and storage homes (refines D-TRIGGER-2 / D-STORE-1 / D-MEMORY-1)
+### OQ-QUEUE — queue, write-back, storage homes — RESOLVED (D-QUEUE-1)
 
-The work items are **unique CVE-contexts** (per OQ-GRAIN), so a queue is the natural fan-in point.
-Placement must preserve the single-writer border (D-SEAM-1):
+The work items are **unique CVE-contexts** (per D-GRAIN-1). Resolved (grilling 2026-07-03) to a
+level-triggered reconcile over a read-only view — the backend writes NOTHING AI-related, not even a
+status.
 
-- **Queue ownership (open):** (a) **themis-ai-internal** — themis-ai reconciles the read-only
-  `v_ai_enrich_context` view into its OWN work queue (backend writes NOTHING AI-specific; the seam
-  stays view-only) — *lean*; OR (b) a **backend-owned `public.ai_enrich_queue`** the backend fills
-  and themis-ai reconciles (reads, never drains → single-writer preserved). (a) keeps the seam
-  cleanest; (b) is more explicit and lower-latency. This reopens whether migration `000002` has a
-  trigger/queue table at all — the D-TRIGGER-2 "no trigger, reconcile-by-hash over the view" dissolve
-  vs a queue.
-- **Write-back:** themis-ai writes `ai.analyses` (results + reproducibility) + `ai.cve_status`
-  (lifecycle) in the `ai` schema (its own writes). Backend reads for transparency (JOIN `cve_id`).
+- **D-QUEUE-1 — Level-triggered reconcile over a read-only view; NO queue/trigger table.** Three
+  locked pieces:
+  1. **Reconcile, not a backend queue (Q1 = option B).** themis-ai runs a loop every N s (poll
+     interval; `LISTEN/NOTIFY` deferred to v0.4.1) computing
+     `work = v_ai_enrich_context(eligible) − ai.analyses(done @ current hash) − ai.finding_status(terminal)`.
+     The set-difference UNIFIES dispatch + D-HASH-1 idempotency + re-enrichment in one query;
+     self-healing (a missed/crashed pass is re-picked next tick). **Scales on the cheap axis:** at
+     4 SBOM × 100 comp the reconcile is ~1–5 ms over ~400 rows / ~hundreds of distinct eligible CVEs;
+     the only real cost is the one-time cold-drain of Ollama calls, which is identical under ANY queue
+     design — **grain (D-GRAIN-1), not the queue, sets inference cost.** A watermark
+     (`max(signals.updated_at)` on the view, to skip unchanged CVEs) is a v0.4.1 lever for
+     tens-of-thousands-of-CVE deployments; not needed now.
+  2. **Gate in the view (Q2 = option i).** `v_ai_enrich_context` = one row per **distinct `cve_id`
+     present in `v_latest_findings`** (in-inventory, any `effective_state`) passing the D-TRIGGER-1
+     gate (`severity High OR kev_listed OR exploit_public`). Columns = the D-HASH-1 semantic inputs at
+     CVE-grain (`cve_id, description, cvss_score, cvss_vector, severity, cwe_ids[], epss_score,
+     kev_listed, exploit_public`). Eligibility is defined ONCE, backend-authoritative; themis-ai never
+     re-implements the gate → no drift; **the view's row-set IS the eligibility contract** (thread ③).
+  3. **One `ai.finding_status` table = claim + lifecycle (Q3).** Keyed on the CVE-context; claimed by
+     `INSERT … ON CONFLICT DO NOTHING` (the unique constraint IS the lock → atomic, concurrency-safe
+     for free even though D-CONCURRENCY-1 sets concurrency=1 for v0.4.0). Transitions
+     `enriching → enriched | invalid_output (TERMINAL, filtered next pass) | backend_unavailable
+     (TRANSIENT, retried)`. Lives entirely in `ai`. One mechanism = claim + lifecycle +
+     terminal-exclusion + in-flight idempotency; no separate lock/queue table.
+- **Falls out — closes threads ② and ③:**
+  - **Migration `000002` (Go / `public`)** = `v_ai_enrich_context` view + `CREATE SCHEMA ai` + role
+    grants. **No queue table, no trigger** — resolves the D-SCOPE-3 / D-TRIGGER-2 open item. The
+    `ai.analyses` + `ai.finding_status` tables are themis-ai's Alembic (D-STORE-1).
+  - **Role grants (thread ②):** `themis_ai` = `SELECT` on `v_ai_enrich_context` (only) + `ALL` on
+    schema `ai`; `backend` = `ALL` on `public` + `SELECT` on `ai.analyses` / `ai.finding_status` (the
+    transparency JOIN). Structurally enforces D-SEAM-1 — no grant lets themis-ai write `public`, none
+    lets the backend write `ai`.
+  - **Contract test (thread ③):** the seam contract = (1) the `v_ai_enrich_context` column schema +
+    (2) the `ai.analyses` typed-output JSON schema. Golden fixtures both sides validate in CI. No
+    queue-message schema (there is no queue).
+- **Refines D-STATUS-2:** `queued` is now **DERIVED** at read time (`eligible in view` minus a
+  `ai.finding_status` row) — the backend writes NO status. `disabled`/`ineligible` still derived; all
+  persisted states live in `ai.finding_status` (themis-ai-written). Supersedes the earlier
+  `ai.cve_status` name → **`ai.finding_status`**.
 - **Three storage homes (resolves the "L2 is derived" confusion):**
   1. **Findings** → backend `public` (exists today).
   2. **AI results** → `ai` schema, per **CVE-context** — STORED, authoritative. The *per-finding* L2
@@ -156,8 +195,45 @@ Placement must preserve the single-writer border (D-SEAM-1):
   3. **Agentic memory (P3)** → themis-ai's OWN store (pgvector / vector DB), v0.4.1 — a different
      data type (embeddings/learning), NOT the shared Postgres.
 
-**Status:** OPEN — lock OQ-GRAIN's dedup key + OQ-QUEUE's ownership in a follow-on session before
-`openspec-propose`.
+**Status:** BOTH OPEN QUESTIONS **RESOLVED** (grilling 2026-07-03) — OQ-GRAIN → D-GRAIN-1 (CVE-grain);
+OQ-QUEUE → D-QUEUE-1 (level-triggered reconcile over a view, no queue table); footprint → D-FOOTPRINT-1.
+**Ready for `openspec-propose`** — break the backend half into tasks (migration 000002 = view +
+`CREATE SCHEMA ai` + grants; transparency API; contract; restructure), tagged v0.4.0.
+
+## Footprint decision — decouple affected-releases from AI (explore 2026-07-03)
+
+Surfaced while grilling OQ-GRAIN: the temptation to add an "affected footprint" attribute to the CVE
+(which project/release/versions are affected) and feed it into the Summarizer. Rejected — it
+re-couples a CVE-stable output to deployment-volatile input. Resolved cleanly by keeping the footprint
+100% backend-owned and out of the prompt.
+
+- **D-FOOTPRINT-1 — Affected-releases footprint = backend-owned INVERSE query, never an AI input.**
+  "Where is CVE-X live across my inventory?" is answered by a deterministic backend endpoint
+  (leaning `GET /api/v1/vulnerabilities/{cve_id}/releases`) — the **inverse of the v0.3.8 scoped
+  listings** (product/project/version → findings), over the SAME `v_latest_findings` view with a
+  `WHERE cve_id = $1` swap. It is NOT materialized (no `affected_footprint` column) and NOT fed to the
+  LLM. Four reasons: (1) the footprint is deployment-volatile — in the prompt it makes
+  `input_context_hash` (D-HASH-1) churn on every ingest → constant re-enrichment, killing the
+  enrich-once property; (2) it is exact SQL — an LLM miscounts/paraphrases a precise fact-set; (3) a
+  wrong footprint (the correlation engine's known FP/FN modes — el8/el9 v0.3.2, OSV GIT v0.3.7, RH VEX
+  minor-stream v0.3.6) would be amplified as confident prose the AI cannot self-detect; (4)
+  product-scoped API keys make cross-product footprint a DISCLOSURE question, best answered
+  deterministically, never inside a summary. The AI summary stays **CVE-intrinsic**; the transparency
+  API JOINs summary (`ai` schema) ⋈ footprint (`public`, computed on read) at read time. **Backend
+  owns full data; zero overlays; the query is AI-independent and MAY ship before/without v0.4.0** (it
+  de-risks the slice). Open sub-decisions (small):
+  - **(a) Row grain** — per-`(release, component_purl)` (truthful — a CVE can hit a release via >1
+    component) with `?dedupe=release`, mirroring the v0.3.8 `?dedupe`. *Lean per-(release,component).*
+  - **(b) State filter** — return ALL rows each carrying `effective_state` (recall-first — "affected"
+    is the caller's filter, not a hidden one) vs only-live states. *Lean return-all-with-state.*
+  - **(c) Input key** — canonical `cve_id`; resolve to `vulnerabilities.id` internally; not-found →
+    empty list vs `404`.
+  - **(d) Row fields** — product/project/version + `component_purl` + `effective_state` +
+    `fixed_version`/`installed_version` (already available since v0.3.3) — enough to render "on 1.36,
+    fix in 1.37".
+  - **(e) Scoping / disclosure** — *the non-obvious one:* product-scoped API key — does a CVE query
+    span ALL products or filter to the key's product? Resolve deterministically here (the reason
+    footprint must stay out of the AI summary).
 
 ## Decisions locked (2026-07-01 — harness internals; now owned by `themis-ai`)
 
@@ -313,9 +389,11 @@ Placement must preserve the single-writer border (D-SEAM-1):
 
 ## Deferred to v0.4.1+
 
-pgvector / knowledge base · LLM-as-judge & semantic eval scoring · GHSA feed · external-hosted
-runtimes / router · finer Ollama duration splits as metric labels · CWE Mapper + Exploitability
-Analyzer workers.
+Full roadmap: **[`NEXT-STAGE.md`](NEXT-STAGE.md)** (v0.4.1 deepening · v0.5.0 Phase 2c AI-assisted VEX
+· GHSA separate track). In brief: agentic memory / pgvector KB / RAG (P3) · 6 more workers (CWE
+Mapper, Exploitability, Context, VEX Recommender, Remediation, FP) · `LISTEN/NOTIFY` latency ·
+reconcile watermark · notification wiring · LLM-as-judge / semantic eval · transparency `?history` ·
+CyberPal-2.0 + external runtimes / router · finer Ollama duration splits as metric labels.
 
 ## Related artifacts
 
@@ -326,6 +404,8 @@ Analyzer workers.
   "AI enrichment via an external framework over a Postgres seam".
 - `contract/` (root, to create) — the seam source-of-truth: `schema/` (JSON Schema), `SEAM.md`,
   `contract_test/` (golden fixtures both sides validate).
+- [`NEXT-STAGE.md`](NEXT-STAGE.md) (root) — the v0.4.1+ roadmap (everything deferred beyond the
+  v0.4.0 slice: memory/RAG, more workers, latency/scale, Phase 2c AI-assisted VEX, GHSA).
 - `openspec/changes/themis-phase-2/{proposal,design}.md` — architecture reference (aspirational
   master; the thin v0.4.0 slice + two-system split supersede its in-process framing).
 
