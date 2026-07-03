@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-07-02 (v0.3.2–v0.3.9 released; themis-core-model 58/58 — ready to archive)._
+Last updated: 2026-07-03 (themis-ai-1 planning complete — tasks.md authored, 46 tasks; ready for `/opsx:apply`)._
 
 ---
 
@@ -11,7 +11,8 @@ Last updated: 2026-07-02 (v0.3.2–v0.3.9 released; themis-core-model 58/58 — 
 | --- | --- | --- | --- | --- |
 | Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (user-defined feed registry shipped v0.3.9; only operational G1–G8 verification on real SBOMs remains) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| themis-phase-2b | Ready to start (unblocked) | — | not started — targets v0.4.0 | — (core-model + Layer-0 refactor released in v0.3.0; D-CVSS-1 fixed — unblocked) |
+| **themis-ai-1** | **Planning complete — ready to implement** | 2026-07-02 | proposal ✓  design ✓  spec ✓  **tasks ✓ (46 tasks, 9 groups)** | All open questions resolved (D-GRAIN-1 CVE-grain · D-QUEUE-1 reconcile-over-view, no queue table · D-FOOTPRINT-1 backend inverse query). Next: `/opsx:apply` — restructure → footprint endpoint → contract → migration `000002` → transparency API → `themis-ai` framework, tagged v0.4.0. Supersedes the `themis-phase-2b` slot below |
+| themis-phase-2b | Superseded → `themis-ai-1` | — | — | folded into `themis-ai-1` (basic AI use case, v0.4.0) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
 ## Prerequisite Work
