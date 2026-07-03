@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-07-03 (themis-ai-1 open questions closed — D-GRAIN-1, D-QUEUE-1, D-FOOTPRINT-1; ready for task breakdown)._
+Last updated: 2026-07-03 (themis-ai-1 planning complete — tasks.md authored, 46 tasks; ready for `/opsx:apply`)._
 
 ---
 
@@ -11,7 +11,7 @@ Last updated: 2026-07-03 (themis-ai-1 open questions closed — D-GRAIN-1, D-QUE
 | --- | --- | --- | --- | --- |
 | Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (user-defined feed registry shipped v0.3.9; only operational G1–G8 verification on real SBOMs remains) |
 | themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| **themis-ai-1** | Proposing — **ready for task breakdown** | 2026-07-02 | proposal ✓  design ✓  spec ✓ (consolidated from `phase-2b-grilling.md` + `themis-ai-use-cases.md`) | **All open questions resolved** — D-GRAIN-1 (CVE-grain), D-QUEUE-1 (level-triggered reconcile over a view; no queue table; `ai.finding_status` = claim + lifecycle), D-FOOTPRINT-1 (backend inverse query). Next: `openspec-propose` the backend half (restructure + migration `000002` + transparency API + footprint endpoint + contract), tagged v0.4.0. Supersedes the `themis-phase-2b` slot below |
+| **themis-ai-1** | **Planning complete — ready to implement** | 2026-07-02 | proposal ✓  design ✓  spec ✓  **tasks ✓ (46 tasks, 9 groups)** | All open questions resolved (D-GRAIN-1 CVE-grain · D-QUEUE-1 reconcile-over-view, no queue table · D-FOOTPRINT-1 backend inverse query). Next: `/opsx:apply` — restructure → footprint endpoint → contract → migration `000002` → transparency API → `themis-ai` framework, tagged v0.4.0. Supersedes the `themis-phase-2b` slot below |
 | themis-phase-2b | Superseded → `themis-ai-1` | — | — | folded into `themis-ai-1` (basic AI use case, v0.4.0) |
 | themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
 
