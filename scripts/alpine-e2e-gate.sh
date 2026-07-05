@@ -7,7 +7,7 @@ usage() {
   cat <<'EOF'
 Usage: alpine-e2e-gate.sh [options]
 
-Checks G1–G8 from project-backlog.md (Alpine E2E bring-up gate).
+Checks G1–G8 from docs/current-changes/project-backlog.md (Alpine E2E bring-up gate).
 
 Environment / flags:
   BASE_URL          Server base URL (default: http://localhost:8080)

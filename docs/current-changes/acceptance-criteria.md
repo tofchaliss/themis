@@ -2,11 +2,11 @@
 
 **Phase 1 (AC-1..15):** Contractual requirements for `v0.1.0`.
 Tested in `tests/acceptance/criteria_test.go`.
-Source: [`docs/archive/proposal-initial.md`](archive/proposal-initial.md) § Acceptance Criteria.
+Source: [`archive/proposal-initial.md`](../archive/proposal-initial.md) § Acceptance Criteria.
 
 **Phase 2a (AC-16..24):** Contractual requirements for `v0.2.0`.
 Tested in `tests/acceptance/criteria_phase2a_test.go`.
-Source: `openspec/changes/themis-phase-2a/proposal.md` and `specs/`.
+Source: `openspec/changes/archive/2026-06-17-themis-phase-2a/proposal.md` and `specs/`.
 
 ---
 

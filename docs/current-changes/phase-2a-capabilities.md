@@ -2,7 +2,7 @@
 
 Reference for what Themis **does** and **does not** include in Phase 2a.
 Implementation status: **~132/140 tasks** (Groups 1–29 complete; Group 30 release gate open).
-OpenSpec: `openspec/changes/themis-phase-2a/`.
+OpenSpec: `openspec/changes/archive/2026-06-17-themis-phase-2a/`.
 
 ---
 
@@ -73,4 +73,4 @@ Test name mapping enforced by `tests/acceptance/criteria_phase2a_test.go`.
 ## Next: Group 30
 
 Coverage gates, Prometheus metrics wiring, doc sync, merge + tag `v0.2.0`.
-See `openspec/changes/themis-phase-2a/tasks.md` §30.
+See `openspec/changes/archive/2026-06-17-themis-phase-2a/tasks.md` §30.

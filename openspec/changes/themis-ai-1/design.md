@@ -1,6 +1,6 @@
 # Design — themis-ai-1 (Basic AI Enrichment)
 
-> Full decision log: [`phase-2b-grilling.md`](../../../phase-2b-grilling.md) (38 decisions +
+> Full decision log: [`phase-2b-grilling.md`](../../../docs/current-changes/phase-2b-grilling.md) (38 decisions +
 > 2 open questions). This is the consolidated architecture; the grilling doc is authoritative for
 > the per-decision detail and supersede history.
 
