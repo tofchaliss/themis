@@ -224,7 +224,7 @@ Nothing below `v0.2.0` will ever be tagged again.
 
 > The v0.3.x maintenance line (v0.3.2–v0.3.9) is **complete and released** — non-breaking
 > correctness/feature patches shipped from `main` on the v0.3.0 schema (no migrations); each has a
-> `docs/release-notes-v0.3.x.md` and a `CHANGELOG.md` section. `openspec/STATUS.md` and
+> `docs/release-notes/release-notes-v0.3.x.md` and a `CHANGELOG.md` section. `openspec/STATUS.md` and
 > `PROJECT_CONTEXT.md` were refreshed to v0.3.9 on 2026-07-02.
 
 ---
@@ -462,7 +462,7 @@ After the fix the main-stream fix EVR equals the distro feed's `source_fixed_ver
 rebuild RHEL 1:1), so the 25 resolve to `affected` → `confirmed`. Tests use real Red Hat fixtures
 (libtiff false-resolution, el9 multi-z-stream max-fix, libpng epoch path). **Deploy:** rebuild +
 restart; `UpsertAssertions` deletes-and-replaces the Red Hat feed's assertions on the next cycle, so
-the stale `fixed` auto-correct (no manual SQL). See `docs/release-notes-v0.3.6.md`. **Hooks:**
+the stale `fixed` auto-correct (no manual SQL). See `docs/release-notes/release-notes-v0.3.6.md`. **Hooks:**
 `domain/redhat_vex.go` (`VerdictForStream`, `redHatMainStreamMajor`),
 `usecase/enrichment/redhat_vex.go` (`rpmInstalledVersion`).
 
@@ -1748,7 +1748,7 @@ schema change and the notification path is new behaviour.
 > (`correlation` default, or `overlay`) routes it to the correlation loader vs the VEX overlay
 > service; unknown-type / missing-URL enabled feeds are skipped with a logged warning.
 > `api_wiring.go` consumes the resolved lists. Built-in names: `rhel-vex` (overlay); `rhel-csaf`,
-> `alpine`, `rocky`, `wolfi` (correlation). See `docs/release-notes-v0.3.9.md`. Original proposal
+> `alpine`, `rocky`, `wolfi` (correlation). See `docs/release-notes/release-notes-v0.3.9.md`. Original proposal
 > retained below.
 >
 > **Prior status — Partially done (2026-06-24).** CR-4 delivered the feed *class* taxonomy; the

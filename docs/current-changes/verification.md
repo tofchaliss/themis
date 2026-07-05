@@ -8,9 +8,7 @@ that verifies the claim, the work is not done.
 
 ## Before you answer
 
-1. Read the relevant OpenSpec spec:
-   - Phase 1: `openspec/changes/archive/2026-06-09-themis-phase-1/specs/<capability>/spec.md`
-   - Phase 2a: `openspec/changes/themis-phase-2a/specs/<capability>/spec.md`
+1. Read the relevant OpenSpec spec (canonical, Phase 1 + 2a merged): `openspec/specs/<capability>/spec.md`
 2. Run structural gates for touched packages (see [Correctness](#correctness))
 3. State which checklist sections you verified and which you skipped (with reason)
 
@@ -27,7 +25,7 @@ Ask these questions before claiming the system or change is correct.
 | C3 | **How are domain invariants verified?** | Raw findings never deleted/mutated; VEX only changes `risk_context.effective_state` | `openspec/.../intelligence-enrichment/spec.md`; integration tests in `internal/adapter/store/`, `internal/usecase/enrichment/` |
 | C4 | **How is Clean Architecture verified?** | Imports point inward only | `make clean-arch` |
 | C5 | **How is the ingestion pipeline verified end-to-end?** | Upload → job COMPLETED → findings → risk_context → audit_log | `go test -tags=integration ./internal/infrastructure/http/...` (E2E tests); Group 7/8 gates in `tasks.md` |
-| C6 | **How are acceptance criteria covered?** | AC-1..15 (Phase 1); AC-16..24 (Phase 2a) — each maps to ≥1 integration/E2E test | `go test -tags=integration ./tests/acceptance/...`; `docs/acceptance-criteria.md` |
+| C6 | **How are acceptance criteria covered?** | AC-1..15 (Phase 1); AC-16..24 (Phase 2a) — each maps to ≥1 integration/E2E test | `go test -tags=integration ./tests/acceptance/...`; `acceptance-criteria.md` |
 | C7 | **How is API shape correctness verified?** | Handlers match OpenAPI | `api/openapi.yaml`; `internal/adapter/api/handlers_*_test.go` |
 | C8 | **How is idempotent SBOM ingestion verified?** | Same `(image_digest, checksum)` returns existing scan | `TestE2E_DuplicateSBOMIdempotency`; `sbom-ingestion` spec |
 | C9 | **How is the Phase 2a composite risk score formula verified?** | Property test agrees with independent oracle implementation for all valid inputs | `go test ./tests/acceptance/... -run TestCompositeScoreOracleProperty` |
@@ -155,7 +153,7 @@ curl -s http://localhost:8080/readyz | jq .
 curl -s http://localhost:8080/metrics | grep themis_
 ```
 
-Full CycloneDX upload walkthrough: [README.md § Testing](README.md#testing).
+Full CycloneDX upload walkthrough: [README.md § Testing](../../README.md#testing).
 
 **Phase 2a smoke — signal feeds, status, and graph:**
 

@@ -30,8 +30,8 @@ A single binary backed by PostgreSQL. No agents. No daemons. No lock-in.
 | **Error UX** | Layman-friendly `{error: {code, message, hint}}` envelope on all endpoints; 12 catalogue codes |
 
 For architecture (Clean Architecture layers, the data model, VEX overlay semantics), technology
-stack, roadmap, and quality gates, see [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Deferred items are
-tracked in [project-backlog.md](project-backlog.md).
+stack, roadmap, and quality gates, see [PROJECT_CONTEXT.md](docs/current-changes/PROJECT_CONTEXT.md). Deferred items are
+tracked in [project-backlog.md](docs/current-changes/project-backlog.md).
 
 > **Schema line:** the current schema is the `v0.3.0` core model (`sboms` + `scan_reports`, merged
 > `artifacts`, identity-keyed `risk_context`). There is **no in-place upgrade** from a pre-`v0.3.0`
@@ -429,7 +429,7 @@ Go error strings appear in response bodies.
 
 #### Not yet implemented
 
-Deferred to later work (see [project-backlog.md](project-backlog.md)): AI workers + knowledge graph,
+Deferred to later work (see [project-backlog.md](docs/current-changes/project-backlog.md)): AI workers + knowledge graph,
 GHSA adapter, Debian/Ubuntu vendor VEX feeds, Redis queue, Docker stack,
 Web UI, RBAC, real cosign verification.
 
@@ -1095,7 +1095,7 @@ themis/
 ├── api/openapi.yaml              OpenAPI 3.1 specification
 ├── scripts/check-coverage.sh     per-package coverage threshold enforcement
 ├── Makefile
-└── PROJECT_CONTEXT.md            full design reference
+└── docs/current-changes/PROJECT_CONTEXT.md   full design reference
 ```
 
 ---

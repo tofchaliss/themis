@@ -16,7 +16,7 @@ disclosed CVEs, and delivers notifications. Standalone binary backed by PostgreS
 `risk_context` + judgment tables re-keyed on `(artifact_id, component_purl, cve_id)`; schema-skew
 guard) **plus** the Layer-0 Correctness & Observability refactor (below). Breaking schema — no
 in-place upgrade from a pre-`v0.3.0` database. All gates green; merged to `themis-phase-2` and
-tagged. See `openspec/changes/themis-core-model/`.
+tagged. See `openspec/changes/archive/2026-07-02-themis-core-model/`.
 
 **Layer-0 Correctness & Observability refactor (CR-1…CR-10) — shipped in `v0.3.0`.** The
 correlation/feeder/observability core was rebuilt on the core-model base: one version engine
@@ -36,7 +36,7 @@ overlay via the on-demand Security Data API), `v0.3.6` (Red Hat VEX minor-stream
 fix: main `enterprise_linux:N` stream scoping + `epoch=` PURL qualifier), `v0.3.7` (OSV GIT-range
 over-match fix — skip GIT-type ranges so commit hashes never become version bounds), `v0.3.8`
 (scoped vulnerability-listing endpoints — product/project/version), and `v0.3.9` (feed registry —
-user-defined `vexfeed.feeds` delta list). Each has a `docs/release-notes-v0.3.x.md`. All released
+user-defined `vexfeed.feeds` delta list). Each has a `docs/release-notes/release-notes-v0.3.x.md`. All released
 (tags `v0.3.2`→`v0.3.9`). See `project-backlog.md`.
 
 | Phase | Status | Scope |
@@ -45,7 +45,7 @@ user-defined `vexfeed.feeds` delta list). Each has a `docs/release-notes-v0.3.x.
 | Phase 2a | Shipped (`v0.2.0` / `v0.2.1`) | EPSS/KEV, ExploitDB, vendor VEX, graph, VEX export, status/SBOM APIs, error UX |
 | core-model + Layer-0 refactor | **Shipped (`v0.3.0`, 2026-06-24)** | Schema restructure + Durable-Enrichment Identity Contract; CR-1…CR-10 (version engine, single correlator + provenance, feed re-layering, CVSS backfill, logging port, feed health) — closes D-CVSS-1/D-FEED-1/D-NVD-1/D-LOG-1 |
 | v0.3.x maintenance | **Released `v0.3.2`–`v0.3.9`** | Correlation/VEX correctness + ergonomics on the v0.3.0 schema (no migrations): CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream fix, OSV GIT-range fix, scoped vuln endpoints, feed registry |
-| Phase 2b | Ready to start (unblocked) — targets `v0.4.0` | AI workers, pgvector KB, GHSA — additive on the `v0.3.0` identity base (zero core-model ALTERs) |
+| Phase 2b (`themis-ai-1`) | Planning complete — targets `v0.4.0` | Thin slice: advisory **CVE Summarizer** (1 worker, Ollama `qwen2.5:7b`) over a Postgres seam, advisory-only; pgvector KB / extra workers / GHSA deferred to v0.4.1+ (see `NEXT-STAGE.md`). Additive on the `v0.3.0` identity base (zero core-model ALTERs) |
 | Phase 2c | Planned — targets `v0.5.0` | AI-assisted VEX auto-apply — blocked on 2b |
 | Phase 3 | Not started | Rate limiting, Docker, Web UI, Redis, RBAC/OIDC — see `project-backlog.md` |
 
@@ -270,7 +270,7 @@ themis/
 │   │
 │   └── testutil/                    Shared test data generators (gen.go)
 │
-├── migrations/                      SQL migration files (000001–000013)
+├── migrations/                      SQL migrations (single squashed v0.3.0 baseline)
 ├── api/openapi.yaml                 OpenAPI 3.1 spec (source of truth for handlers)
 ├── api/oapi-codegen.yaml            Code generation config
 ├── scripts/check-coverage.sh        Per-package coverage threshold enforcement
@@ -364,13 +364,13 @@ Phase 3: `CosignVerifier` replaces StubVerifier via the `SignatureVerifier` inte
 | Document | Contents |
 | -------- | -------- |
 | `README.md` | Build, run, config, test instructions and getting-started guide |
-| `project-backlog.md` | All deferred Phase 2 and Phase 3 items with decision rationale |
-| `docs/phase-2a-capabilities.md` | Phase 2a capability boundary and API list |
-| `AGENTS.md` | AI agent workflow: context sources, how-to-work, scope guardrail |
-| `verification.md` | Pre-answer quality checklist (C/S/O rows) |
-| `docs/acceptance-criteria.md` | 15 acceptance criteria tested in `tests/acceptance/criteria_test.go` |
+| `docs/current-changes/project-backlog.md` | All deferred Phase 2 and Phase 3 items with decision rationale |
+| `docs/current-changes/phase-2a-capabilities.md` | Phase 2a capability boundary and API list |
+| `docs/current-changes/AGENTS.md` | AI agent workflow: context sources, how-to-work, scope guardrail |
+| `docs/current-changes/verification.md` | Pre-answer quality checklist (C/S/O rows) |
+| `docs/current-changes/acceptance-criteria.md` | 15 acceptance criteria tested in `tests/acceptance/criteria_test.go` |
 | `docs/archive/proposal-initial.md` | Original proposal with 9 ADRs — historical reference |
-| `openspec/changes/themis-phase-1/design.md` | 17 design decisions (canonical ADR source) |
-| `openspec/changes/themis-phase-1/tasks.md` | Implementation task checklist with 6-gate progress |
-| `openspec/changes/themis-phase-1/specs/*/spec.md` | Per-capability requirements and scenarios |
+| `openspec/specs/*/spec.md` | Canonical capability specs (Phase 1 + 2a merged; 18 capabilities) — source of truth |
+| `openspec/STATUS.md` | Authoritative project status: active changes, releases, phase roadmap |
+| `openspec/changes/archive/2026-06-09-themis-phase-1/design.md` | 17 Phase 1 design decisions (historical ADR source) |
 | `tests/acceptance/criteria_test.go` | 15 acceptance criteria test coverage mapping |
