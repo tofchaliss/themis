@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.11] - 2026-07-06
 ### Changed
-- docs: consolidate under docs/ (Kubernetes/Istio-style layout) + refresh stale context
+- proposal(themis-ai-1): consolidate basic AI enrichment (CVE Summarizer) (@invalid-email-address)
+- design(themis-ai-1): resolve open questions (grain, queue, footprint) + next-stage roadmap (@invalid-email-address)
+- propose(themis-ai-1): task breakdown — 46 tasks, apply-ready (@invalid-email-address)
+- docs: consolidate under docs/ with K8s/Istio-style layout + refresh stale context (@invalid-email-address)
+- release: v0.3.11 — docs consolidation (K8s/Istio layout) + context refresh (@invalid-email-address)
 
 ## [0.3.10] - 2026-07-02
 ### Changed
-- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9
+- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9 (@invalid-email-address)
+- release: v0.3.10 — archive themis-core-model; docs current to v0.3.9 (@invalid-email-address)
 
 ## [0.3.9] - 2026-07-01
 ### Added
