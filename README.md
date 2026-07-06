@@ -39,6 +39,19 @@ tracked in [project-backlog.md](docs/current-changes/project-backlog.md).
 
 ---
 
+## Documentation
+
+All project documentation lives under [`docs/`](docs/), organised by purpose:
+
+| Area | Location | Contents |
+| ---- | -------- | -------- |
+| Architecture & context | [`docs/current-changes/`](docs/current-changes/) | [`PROJECT_CONTEXT.md`](docs/current-changes/PROJECT_CONTEXT.md) (data model, Clean Architecture, invariants, quality gates), [`project-backlog.md`](docs/current-changes/project-backlog.md) (deferred work), in-flight design discussion, the agent guide, and the verification checklist |
+| Release notes | [`docs/release-notes/`](docs/release-notes/) | Per-version notes (`release-notes-v0.2.0` … `v0.3.11`) |
+| Decision records | [`docs/architecture/`](docs/architecture/) | Architecture Decision Records (ADRs) |
+| Historical | [`docs/archive/`](docs/archive/) | Original proposal (9 ADRs) and superseded material |
+
+---
+
 ## Prerequisites
 
 | Requirement | Version | Notes |

@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-07-03 (themis-ai-1 planning complete — tasks.md authored, 46 tasks; ready for `/opsx:apply`)._
+Last updated: 2026-07-06 (v0.3.11 — docs consolidated under `docs/` into a Kubernetes/Istio-style layout + context refresh; themis-ai-1 planning complete, ready for `/opsx:apply`)._
 
 ---
 
@@ -89,6 +89,8 @@ Last updated: 2026-07-03 (themis-ai-1 planning complete — tasks.md authored, 4
 | `v0.3.7` | `6fc334f` (PR #41) | OSV GIT-range over-match fix (skip GIT-type ranges; no commit-hash version bounds) |
 | `v0.3.8` | `29943cf` (PR #42) | Scoped vulnerability-listing endpoints (product / project / version) |
 | `v0.3.9` | `5d5ee3c` (PR #44) | Feed registry — user-defined `vexfeed.feeds` delta list |
+| `v0.3.10` | `79bfb84` | Housekeeping — archive `themis-core-model`, sync delta specs into `openspec/specs/`, refresh status/context docs to v0.3.9 |
+| `v0.3.11` | (PR #47) | Housekeeping — consolidate docs under `docs/` (release-notes / current-changes / architecture) + refresh stale context |
 | `v0.4.0` | — (planned) | Phase 2b AI Intelligence |
 | `v0.5.0` | — (planned) | Phase 2c AI-Assisted VEX |
 
