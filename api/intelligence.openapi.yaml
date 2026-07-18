@@ -1,0 +1,101 @@
+openapi: 3.0.3
+info:
+  title: Themis Intelligence API
+  version: 1.0.0
+  description: >
+    Intelligence Gateway (Phase-3 greenfield, Δ1) — the reactive capability surface.
+    Invoke a named AI capability by id against a subject identifier; the Gateway grounds
+    it via read-API Knowledge Providers, runs the engine, validates in three stages, and
+    returns a structured advisory Proposal — or 204 No Content when it declines ("no
+    proposal", a first-class safe outcome). Advisory only: the caller records it;
+    Intelligence owns no truth.
+servers:
+  - url: /api/v1
+paths:
+  /capabilities/{id}/invoke:
+    post:
+      operationId: invokeCapability
+      summary: Invoke a named capability reactively (synchronous).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvokeRequest'
+      responses:
+        '200':
+          description: A validated advisory Proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '204':
+          description: No proposal (declined, ungrounded, or unavailable) — a safe outcome.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    InvokeRequest:
+      type: object
+      required: [finding_id]
+      properties:
+        finding_id:
+          type: string
+          description: The subject Finding identifier to ground and recommend on.
+        correlation_id:
+          type: string
+          description: Optional correlation id for telemetry; generated if absent.
+    Proposal:
+      type: object
+      properties:
+        capability:
+          type: string
+        finding_id:
+          type: string
+        stance:
+          type: string
+        confidence:
+          type: number
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+        reasoning:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        correlation_id:
+          type: string
+    Evidence:
+      type: object
+      properties:
+        kind:
+          type: string
+        ref:
+          type: string
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string

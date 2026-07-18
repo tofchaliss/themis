@@ -1,0 +1,25 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "name": "sample-spdx",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-openssl",
+      "name": "openssl",
+      "versionInfo": "3.0.11",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:deb/debian/openssl@3.0.11" }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-zlib",
+      "name": "zlib",
+      "versionInfo": "1.3",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:deb/debian/zlib@1.3" }
+      ]
+    }
+  ],
+  "relationships": [
+    { "spdxElementId": "SPDXRef-openssl", "relatedSpdxElement": "SPDXRef-zlib", "relationshipType": "DEPENDS_ON" }
+  ]
+}

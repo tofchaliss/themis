@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS releases;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS products;

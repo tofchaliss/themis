@@ -13,10 +13,14 @@ COVERAGE_TXT := coverage.txt
 GO_BUILD_FLAGS ?=
 GO_TEST_FLAGS ?=
 
-COVERAGE_PKGS := ./internal/domain/... ./internal/usecase/... ./internal/adapter/... ./internal/infrastructure/... ./tests/acceptance/...
+COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/... ./internal/domain/... ./internal/usecase/... ./internal/adapter/... ./internal/infrastructure/... ./tests/acceptance/...
 
-.PHONY: all build clean tidy test test-integration test-property lint coverage coverage-pkg deadcode clean-arch check \
-	migrate-up migrate-down generate-api verify-build
+.PHONY: all build clean tidy test test-integration test-property lint coverage coverage-pkg deadcode clean-arch arch-test check \
+	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence verify-build
+
+# Greenfield context-first trees under internal/ (ring names domain/app/adapters).
+# Add a context here as it is scaffolded.
+GREENFIELD_CONTEXTS := evidence registry knowledge governance communication intelligence
 
 .DEFAULT_GOAL := build
 
@@ -84,8 +88,21 @@ clean-arch:
 		-interfaces adapter \
 		-infrastructure infrastructure \
 		./internal
+	@# Greenfield contexts are context-first (domain/app/adapters); go-cleanarch's
+	@# flat model can't mix naming schemes in one run, so check each context tree.
+	@for ctx in $(GREENFIELD_CONTEXTS); do \
+		echo "[cleanarch] context internal/$$ctx"; \
+		$(GO) run github.com/roblaszczak/go-cleanarch \
+			-domain domain -application app -interfaces adapters \
+			./internal/$$ctx || exit 1; \
+	done
 
-check: build lint clean-arch coverage deadcode
+# Module-wide architecture test: context-first ring direction + no cross-context
+# imports (rules go-cleanarch's flat model cannot express). See tests/architecture.
+arch-test:
+	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
+
+check: build lint clean-arch arch-test coverage deadcode
 
 # golang-migrate registers the postgres driver only with -tags postgres.
 MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
@@ -100,3 +117,34 @@ migrate-down:
 
 generate-api:
 	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/oapi-codegen.yaml api/openapi.yaml
+
+# Evidence context (greenfield) API codegen — spec-first, own gen package.
+generate-api-evidence:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/evidence.oapi-codegen.yaml api/evidence.openapi.yaml
+
+# Registry supporting context (greenfield) API codegen — spec-first, own gen package.
+generate-api-registry:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/registry.oapi-codegen.yaml api/registry.openapi.yaml
+
+# Knowledge context (greenfield) read-API codegen — spec-first, own gen package.
+generate-api-knowledge:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/knowledge.oapi-codegen.yaml api/knowledge.openapi.yaml
+
+# Governance context (greenfield) triage + read-API codegen — spec-first, own gen package.
+generate-api-governance:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/governance.oapi-codegen.yaml api/governance.openapi.yaml
+
+# Communication context (greenfield) publish-trigger + read/preview API codegen — spec-first.
+generate-api-communication:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/communication.oapi-codegen.yaml api/communication.openapi.yaml
+
+# Intelligence Gateway (greenfield) reactive invoke API codegen — spec-first.
+generate-api-intelligence:
+	$(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1 --config=api/intelligence.oapi-codegen.yaml api/intelligence.openapi.yaml
+
+# End-to-end smoke test for the Evidence service (embedded Postgres; no Docker).
+# Drop your SBOM at tests/e2e/testdata/sample.sbom.json, or point at your own:
+#   EVIDENCE_E2E_SBOM=/path/to/your.sbom.json make e2e-evidence
+#   EVIDENCE_E2E_FORMAT=spdx make e2e-evidence
+e2e-evidence:
+	$(GO) test -tags=e2e -count=1 -v ./tests/e2e/...

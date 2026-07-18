@@ -1,0 +1,164 @@
+openapi: 3.0.3
+info:
+  title: Themis Registry API
+  version: 1.0.0
+  description: >
+    Registry supporting context (Phase-3 greenfield) — register the
+    Product → Project → Release structural identity hierarchy and look up Releases.
+    Identity + structure only; no security state (Governance owns that).
+servers:
+  - url: /api/v1
+paths:
+  /products:
+    post:
+      operationId: registerProduct
+      summary: Register a product; returns a stable Product ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterProductRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /projects:
+    post:
+      operationId: registerProject
+      summary: Register a project under a product; returns a stable Project ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterProjectRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /releases:
+    post:
+      operationId: registerRelease
+      summary: Register a release under a project; returns a stable Release ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterReleaseRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listReleases
+      summary: List the releases of a project.
+      parameters:
+        - name: project
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Release'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}:
+    get:
+      operationId: getRelease
+      summary: Get a release by ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+        '404':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    RegisterProductRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    RegisterProjectRequest:
+      type: object
+      required: [product_id, name]
+      properties:
+        product_id:
+          type: string
+        name:
+          type: string
+    RegisterReleaseRequest:
+      type: object
+      required: [project_id, version]
+      properties:
+        project_id:
+          type: string
+        version:
+          type: string
+    RegisterResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    Release:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        version:
+          type: string
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string

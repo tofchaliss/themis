@@ -8,6 +8,78 @@ A single binary backed by PostgreSQL. No agents. No daemons. No lock-in.
 
 ---
 
+## Phase-3 Greenfield Rebuild (current direction)
+
+Themis is being rebuilt as a set of **independently-deployable, Domain-Driven bounded-context services** —
+the **sole go-forward**. The single-binary architecture documented below is **frozen at v0.3.x** and kept
+as reference. The rebuild is tracked in [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md)
+(read this first when resuming), the per-context decision records
+[`docs/engineering/decisions/`](docs/engineering/decisions/), the tech stack
+[`docs/engineering/STACK.md`](docs/engineering/STACK.md), the cross-cutting rules
+[`docs/engineering/CONVENTIONS.md`](docs/engineering/CONVENTIONS.md), and the open backlog
+[`docs/engineering/PHASE3-BACKLOG.md`](docs/engineering/PHASE3-BACKLOG.md).
+
+The pipeline is **Evidence → Knowledge → Governance → Communication**, over a **Shared Kernel / Registry**
+foundation, with a supporting **Intelligence Gateway** (optional AI) beside it. Each context is its own
+`cmd/` binary + Postgres schema and collaborates only via events + read APIs (no shared tables):
+
+| Service | Command | Default port | Role | State |
+| ------- | ------- | ------------ | ---- | ----- |
+| Registry | `cmd/registry` | `:8082` | Product → Project → Release identity | ✅ implemented |
+| Evidence | `cmd/evidence` | `:8081` | SBOM/VEX ingestion, immutable evidence + inventory | ✅ implemented |
+| Governance | `cmd/governance` | `:8083` | Findings + Enterprise Positions (the authority) | ✅ implemented |
+| Communication | `cmd/communication` | `:8084` | Publications (VEX / advisory / report) | ✅ implemented |
+| Intelligence | `cmd/intelligence` | `:8086` | **Optional** AI Gateway — advisory Proposals | ✅ Δ1 (reactive) |
+
+Knowledge/Faultline is implemented under `internal/knowledge`; its standalone service wiring lands with the
+**M5 event bus**, which also carries the cross-context events (today each context relays to a logging
+stand-in). Build and gate the whole greenfield tree:
+
+```sh
+go build ./...     # builds every service
+make check         # build · lint · clean-arch · arch-test · coverage (+ integration) · deadcode
+```
+
+Every option for every service is documented inline in [`deploy/node.env.example`](deploy/node.env.example).
+
+### Intelligence Gateway (AI enrichment) — optional and disable-able
+
+`cmd/intelligence` is a **stateless** service that turns a Governance Finding into an **advisory** position
+recommendation (affected / not-affected triage), returned as a structured Proposal that **a human still
+decides** — the AI never establishes truth. It is **entirely optional**: the pipeline is fully correct with
+AI off (disabled ≡ unavailable).
+
+- **Disabled (default):** don't run `cmd/intelligence`; leave `THEMIS_GOVERNANCE_AI_ENABLED` unset. Governance
+  wires a no-op advisor and never calls out — zero AI footprint.
+- **Enabled:** run `cmd/intelligence`, and on the Governance service set `THEMIS_GOVERNANCE_AI_ENABLED=1` +
+  `THEMIS_INTELLIGENCE_URL=http://localhost:8086`. A human then triggers a recommendation with
+  `POST /api/v1/findings/{id}/recommend` (records an AI proposal, never auto-accepted).
+
+The model provider is config-selected:
+
+- **Fake provider (no model):** `THEMIS_INTELLIGENCE_PROVIDER=fake` — smoke-test the service + pipeline with
+  no Ollama running.
+- **Ollama (real, local-first):** `THEMIS_OLLAMA_URL` + `THEMIS_INTELLIGENCE_MODEL` (default `llama3.1:8b`).
+  On macOS run Ollama **natively** for Metal GPU acceleration (a container on a Mac is CPU-only); in a cluster
+  run the Ollama container as its own Service. Design: `docs/engineering/decisions/EDR-INTELLIGENCE-01.md`
+  (Revision 2) + `docs/engineering/THEMIS-AI-HARNESS.md`.
+
+Reactive smoke test (fake provider — proves the service + 3-stage validation are wired; it returns **204 No
+Content** because the fake's canned output does not match the subject, and every "no proposal" is a safe
+outcome; use Ollama with real grounding for a **200** Proposal):
+
+```sh
+THEMIS_INTELLIGENCE_PROVIDER=fake go run ./cmd/intelligence &     # listens on :8086
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  localhost:8086/api/v1/capabilities/recommend_position/invoke \
+  -H 'Content-Type: application/json' -d '{"finding_id":"any-id"}'
+```
+
+Real grounding additionally needs the Governance + Knowledge read APIs reachable (`THEMIS_GOVERNANCE_URL`,
+`THEMIS_KNOWLEDGE_URL`) so the Gateway can assemble the Finding + Faultline context.
+
+---
+
 ## What Themis Does
 
 | Capability | Description |
