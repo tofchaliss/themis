@@ -1010,6 +1010,11 @@ informational. Cheap; no schema change (the columns already exist).
 **Phase-3 note:** in the go-forward this belongs on the Knowledge feed-ACL registry (feeds already carry a
 `class` = overlay/correlation; add `tier`), driving feed health/staleness. Cross-ref `PHASE3-BACKLOG.md` §C.
 
+**Go-forward status:** ✅ **realized in `phase3-knowledge-feeds`** (2026-07-23) — `Registry.Tier(source)`
+classifies every feed, and `domain.FeedObservation.Evaluate` gives a tier-differentiated verdict
+(Tier-1 → stale + escalate, Tier-2 → degraded, Tier-3 → informational). The **v0.3.x monolith** wiring of
+this policy into `feed_health` / `signals_stale` here remains open.
+
 **Cross-refs:** [D-FEED-1] (the feed-taxonomy split / CR-4), and the source-tier reference table in
 `openspec/intel-source-tiers.md`.
 
@@ -1194,6 +1199,10 @@ the ~200 severities that filled in post-ingest were genuine v3.1 backfills.
 
 **Phase-3 note:** the same v4.0 gap will affect Phase-3 **Knowledge** (feed ACLs + `Reconcile` headline
 severity by source precedence). Tracked as a cross-ref in `docs/engineering/PHASE3-BACKLOG.md` §C.
+
+**Go-forward status:** ✅ **realized in `phase3-knowledge-feeds`** (2026-07-23) — the Knowledge NVD client
+reads `cvssMetricV40` in the precedence `v3.1 → v3.0 → v4.0 → v2` (Primary > Secondary), so a v4.0-only CVE
+resolves to a real severity. The **v0.3.x monolith** fix in `internal/adapter/nvd`+`osv` here remains open.
 
 **Cross-refs:** [D-NVD-1] (Finding 3 = the v3.1→v3.0→v2 parse this extends), [D-CVSS-1] (OSV-origin CVSS
 enrichment / CR-5 backfill + back-off), [D-FEED-1] (distro feeds as the *other* apk/rpm severity source).

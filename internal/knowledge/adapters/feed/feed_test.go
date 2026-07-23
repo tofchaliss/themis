@@ -21,7 +21,7 @@ func golden(t *testing.T, name string) []byte {
 
 func TestRegistry_Sources(t *testing.T) {
 	got := feed.NewRegistry().Sources()
-	want := []string{"epsskev", "exploitdb", "nvd", "osv", "redhat", "vexfeed"}
+	want := []string{"epsskev", "exploitdb", "nvd", "osv", "redhat", "scanner", "vexfeed"}
 	if len(got) != len(want) {
 		t.Fatalf("sources = %v, want %v", got, want)
 	}
