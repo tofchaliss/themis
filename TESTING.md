@@ -92,6 +92,13 @@ over its HTTP API.
 Exercises the frozen `cmd/themis` monolith (setup in [INSTALLATION.md § Part B](INSTALLATION.md#part-b--v03x-single-binary-cmdthemis)).
 Reuse the shell variables across steps.
 
+> **One-command release smoke test:** [`scripts/release-smoke-test.sh`](scripts/release-smoke-test.sh) runs
+> this whole flow automatically — build → **fresh DB** → run → register + upload `scripts/oamp.json` → poll
+> ingestion → verify components → list vulnerabilities (baseline snapshot). It is destructive (drops the
+> database) and long-running (~1–3 min); run it in the background. Then re-run
+> [`scripts/list-open-vulns.sh`](scripts/list-open-vulns.sh) after a delay to watch CVE severities enrich over
+> time via its snapshot diff. The manual steps below are the same flow, unrolled.
+
 ```sh
 export BASE_URL="http://localhost:8080"
 export API_KEY="<from: ./bin/themis admin create-key --admin --expires 90d>"
