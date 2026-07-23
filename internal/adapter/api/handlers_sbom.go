@@ -43,6 +43,11 @@ func (h *Handler) ListProductSBOMs(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSBOM handles DELETE /api/v1/sboms/{id}.
 func (h *Handler) DeleteSBOM(w http.ResponseWriter, r *http.Request) {
+	principal, ok := AuthFromContext(r.Context())
+	if !ok || !AuthorizeWriteConfig(principal) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "write scope required; read-only keys cannot delete SBOMs")
+		return
+	}
 	if h.deps.SBOMMgmt == nil {
 		WriteCatalogError(w, http.StatusInternalServerError, CodeInternalError)
 		return
@@ -64,7 +69,7 @@ func (h *Handler) DeleteSBOM(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Audit != nil {
 		details := map[string]string{"sbom_id": summary.SBOMID}
 		actor := "system"
-		if principal, ok := AuthFromContext(r.Context()); ok && principal.KeyID != "" {
+		if principal.KeyID != "" {
 			actor = "api_key:" + principal.KeyID
 			details["api_key_id"] = principal.KeyID
 		}
@@ -77,10 +82,10 @@ func (h *Handler) DeleteSBOM(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"sbom_id":          summary.SBOMID,
-		"component_count":  summary.ComponentCount,
-		"finding_count":    summary.FindingCount,
-		"deleted":          true,
+		"sbom_id":         summary.SBOMID,
+		"component_count": summary.ComponentCount,
+		"finding_count":   summary.FindingCount,
+		"deleted":         true,
 	})
 }
 
@@ -101,16 +106,16 @@ func writeSBOMList(w http.ResponseWriter, items []domain.SBOMListEntry, total in
 	sboms := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		sboms = append(sboms, map[string]any{
-			"id":                   item.ID,
-			"product_name":         item.ProductName,
-			"product_version":      item.ProductVersion,
-			"image_name":           item.ImageName,
-			"image_digest":         item.ImageDigest,
-			"format":               item.Format,
-			"component_count":      item.ComponentCount,
-			"vulnerability_count":  item.VulnerabilityCount,
-			"uploaded_at":          item.UploadedAt,
-			"is_latest":            item.IsLatest,
+			"id":                  item.ID,
+			"product_name":        item.ProductName,
+			"product_version":     item.ProductVersion,
+			"image_name":          item.ImageName,
+			"image_digest":        item.ImageDigest,
+			"format":              item.Format,
+			"component_count":     item.ComponentCount,
+			"vulnerability_count": item.VulnerabilityCount,
+			"uploaded_at":         item.UploadedAt,
+			"is_latest":           item.IsLatest,
 		})
 	}
 	var nextCursor any

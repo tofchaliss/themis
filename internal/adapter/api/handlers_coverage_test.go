@@ -1051,6 +1051,7 @@ type richScans struct {
 	listScansErr      error
 	getScanErr        error
 	listVulnErr       error
+	gotLimit          int
 }
 
 func (s *richScans) ListProjectScans(_ context.Context, _ string, _ domain.PageRequest) ([]domain.ScanSummary, domain.PageResult, error) {
@@ -1071,7 +1072,8 @@ func (s *richScans) ListScanVulnerabilities(_ context.Context, _ string, _ domai
 	}
 	return s.vulnerabilities, s.page, nil
 }
-func (s *richScans) ListScopedVulnerabilities(_ context.Context, _ domain.FindingScope, _ domain.ScanVulnerabilityFilter, _ domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+func (s *richScans) ListScopedVulnerabilities(_ context.Context, _ domain.FindingScope, _ domain.ScanVulnerabilityFilter, page domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+	s.gotLimit = page.Limit
 	if s.listVulnErr != nil {
 		return nil, domain.PageResult{}, s.listVulnErr
 	}

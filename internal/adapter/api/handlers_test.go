@@ -98,9 +98,9 @@ func TestWebhookInvalidSignature(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{Dispatcher: &fakeDispatcher{}})
 	r := chi.NewRouter()
 	api.Mount(r, api.MountConfig{
-		Handler:     handler,
-		APIKeyAuth:  apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
-		WebhookAuth: apimiddleware.WebhookAuth{Secret: "topsecret"},
+		Handler:       handler,
+		APIKeyAuth:    apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
+		WebhookAuth:   apimiddleware.WebhookAuth{Secret: "topsecret"},
 		MaxUploadSize: 1024,
 	})
 
@@ -118,9 +118,9 @@ func TestWebhookAccepted(t *testing.T) {
 	body := []byte(`{"format":"cyclonedx","document":{},"image_digest":"sha256:abc"}`)
 	r := chi.NewRouter()
 	api.Mount(r, api.MountConfig{
-		Handler:     handler,
-		APIKeyAuth:  apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
-		WebhookAuth: apimiddleware.WebhookAuth{Secret: "topsecret"},
+		Handler:       handler,
+		APIKeyAuth:    apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
+		WebhookAuth:   apimiddleware.WebhookAuth{Secret: "topsecret"},
 		MaxUploadSize: 1024,
 	})
 
@@ -300,8 +300,8 @@ func (f *fakeJobs) Get(context.Context, string) (domain.IngestionRecord, error) 
 }
 
 type fakeCatalog struct {
-	products         []domain.Product
-	listProductsErr  error
+	products        []domain.Product
+	listProductsErr error
 }
 
 func (f *fakeCatalog) CreateProduct(context.Context, string, string) (domain.Product, error) {
@@ -371,8 +371,10 @@ type fakeKeys struct {
 	keys []domain.APIKeyRecord
 }
 
-func (f *fakeKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) { return f.keys, nil }
-func (f *fakeKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error)  { return f.keys, nil }
+func (f *fakeKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) {
+	return f.keys, nil
+}
+func (f *fakeKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error) { return f.keys, nil }
 func (f *fakeKeys) Create(context.Context, domain.APIKeyCreateInput) (domain.APIKeyRecord, error) {
 	return domain.APIKeyRecord{}, nil
 }

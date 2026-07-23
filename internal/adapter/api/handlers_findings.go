@@ -76,8 +76,11 @@ func scopedVulnerabilityRequest(r *http.Request) (domain.ScanVulnerabilityFilter
 		EffectiveState: q.Get("effective_state"),
 		CVEID:          q.Get("cve_id"),
 	}
-	page := domain.PageRequest{Cursor: q.Get("cursor")}
-	if n, err := strconv.Atoi(q.Get("limit")); err == nil {
+	page := domain.PageRequest{Cursor: q.Get("cursor"), Limit: 50}
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+		if n > 100 {
+			n = 100
+		}
 		page.Limit = n
 	}
 	return filter, page

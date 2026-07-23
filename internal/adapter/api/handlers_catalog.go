@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/themis-project/themis/internal/adapter/api/gen"
 	"github.com/themis-project/themis/internal/domain"

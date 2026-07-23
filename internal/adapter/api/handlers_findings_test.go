@@ -16,6 +16,22 @@ func scopedVulnFixture() *richScans {
 	}
 }
 
+func TestScopedVulnerabilitiesDefaultLimit(t *testing.T) {
+	scans := scopedVulnFixture()
+	handler := api.NewHandler(api.Dependencies{Scans: scans})
+	r := mountTestAPI(handler, adminKeyRepo(t))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/products/"+testProductID+"/vulnerabilities", nil)
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if scans.gotLimit != 50 {
+		t.Fatalf("scoped-vuln default limit = %d, want 50", scans.gotLimit)
+	}
+}
+
 func TestScopedVulnerabilitiesUnauthorized(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{Scans: scopedVulnFixture()})
 	r := mountTestAPI(handler, emptyKeyRepo())

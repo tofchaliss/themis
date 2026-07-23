@@ -94,15 +94,19 @@ type fakeNotifications struct {
 	rules []domain.NotificationRule
 }
 
-func (f *fakeNotifications) ListRules(context.Context) ([]domain.NotificationRule, error) { return f.rules, nil }
-func (f *fakeNotifications) ReplaceRules(context.Context, []domain.NotificationRule) error { return nil }
+func (f *fakeNotifications) ListRules(context.Context) ([]domain.NotificationRule, error) {
+	return f.rules, nil
+}
+func (f *fakeNotifications) ReplaceRules(context.Context, []domain.NotificationRule) error {
+	return nil
+}
 
 type fakeScanners struct {
 	settings domain.ScannerSettings
 }
 
 func (f *fakeScanners) Get(context.Context) (domain.ScannerSettings, error) { return f.settings, nil }
-func (f *fakeScanners) Save(context.Context, domain.ScannerSettings) error    { return nil }
+func (f *fakeScanners) Save(context.Context, domain.ScannerSettings) error  { return nil }
 
 type fakeScans struct{}
 
@@ -118,7 +122,9 @@ func (f *fakeScans) ListScanVulnerabilities(context.Context, string, domain.Scan
 func (f *fakeScans) ListScopedVulnerabilities(context.Context, domain.FindingScope, domain.ScanVulnerabilityFilter, domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
 	return nil, domain.PageResult{}, nil
 }
-func (f *fakeScans) GetProjectProductID(context.Context, string) (string, error) { return "", errNotFound }
+func (f *fakeScans) GetProjectProductID(context.Context, string) (string, error) {
+	return "", errNotFound
+}
 
 type fakeComponents struct{}
 
@@ -131,7 +137,6 @@ type fakeWatch struct{}
 func (f *fakeWatch) ListFindings(context.Context, string, string, domain.PageRequest) ([]domain.CVEWatchFinding, domain.PageResult, error) {
 	return nil, domain.PageResult{}, nil
 }
-
 
 func TestUpdateNotificationConfigRequiresAdmin(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{Notifications: &fakeNotifications{}})

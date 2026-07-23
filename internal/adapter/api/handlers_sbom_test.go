@@ -143,9 +143,9 @@ func (f *fakeStatusRepo) GetSystemStatus(_ context.Context, topN int) (domain.Sy
 
 type fakeThreatSignals struct{}
 
-func (fakeThreatSignals) UpsertEPSS(context.Context, []domain.EPSSSignal) error { return nil }
-func (fakeThreatSignals) UpsertKEV(context.Context, []domain.KEVSignal) error   { return nil }
-func (fakeThreatSignals) ListKEVCVEIDs(context.Context) ([]string, error)       { return nil, nil }
+func (fakeThreatSignals) UpsertEPSS(context.Context, []domain.EPSSSignal) error   { return nil }
+func (fakeThreatSignals) UpsertKEV(context.Context, []domain.KEVSignal) error     { return nil }
+func (fakeThreatSignals) ListKEVCVEIDs(context.Context) ([]string, error)         { return nil, nil }
 func (fakeThreatSignals) MarkStale(context.Context, bool) error                   { return nil }
 func (fakeThreatSignals) SignalsStale(context.Context) (bool, error)              { return false, nil }
 func (fakeThreatSignals) GetEPSSForCVE(context.Context, string) (*float64, error) { return nil, nil }
