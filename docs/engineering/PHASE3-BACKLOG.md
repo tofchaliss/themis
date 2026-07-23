@@ -49,6 +49,12 @@ M5 event bus, the full-pipeline e2e, and the per-context follow-ups below.
   `ChangedVulnSource` ports (currently fakeable ports only). The G3 feed **ACLs already do the translation**;
   this is just the fetch adapters. Plugs into `internal/knowledge/adapters` behind the discovery/watch ports.
 
+- [ ] **Knowledge — CVSS v4.0 in feed ACLs + Reconcile.** The feed ACLs and `Reconcile` headline-severity
+  selection must parse **CVSS 4.0** (NVD `cvssMetricV40`; OSV v4.0 vectors), else recent CVEs land
+  `severity=unknown` / `risk=0` — the go-forward equivalent of the v0.3.x **D-NVD-2** gap (root cause + fix in
+  `docs/current-changes/project-backlog.md`). Fold v4.0 into the source precedence when the real feed clients
+  (above) land; prefer `v3.1 → v3.0 → v4.0 → v2`, Primary over Secondary.
+
 - [ ] **Governance — structured AI-proposal fields.** Δ1 records an AI recommendation via existing fields
   (actor `{ai, "recommend_position@v1"}` = provenance; confidence + reasoning in the rationale). The additive
   follow-up gives `GovernanceProposal` first-class **confidence / evidence-refs / source (capability+version)**

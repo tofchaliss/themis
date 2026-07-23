@@ -28,6 +28,26 @@ Base path `/api/v1`; auth via `X-API-Key` (webhooks use HMAC-SHA256 `X-Themis-Si
 | **Status** | `GET /status?top=N` (component/vuln counts, severity/state breakdown, `signals_stale`) |
 | **Health** | `GET /healthz` · `GET /readyz` · `GET /metrics` (no auth) |
 
+### Vulnerability-listing filters & pagination
+
+The four `.../vulnerabilities` endpoints share query parameters:
+
+- `effective_state` — one of `detected`, `confirmed`, `in_triage`, `accepted_risk`, `false_positive`,
+  `resolved`, `not_affected`, `suppressed`. Filter to the **open** set (`detected` / `confirmed` / `in_triage`)
+  to list actionable findings.
+- `severity` — `critical` | `high` | `medium` | `low` | `none` | `unknown`.
+- `cve_id` — exact CVE match.
+- `limit` + `cursor` — page size and opaque cursor; the response returns `next_cursor` when more remain.
+
+Each item carries `cve_id`, `severity`, `effective_state`, `component_purl`, `installed_version`,
+`fixed_version`, and an `enrichment` block (`risk_score`, `epss_score`, `kev_listed`, `exploit_public`,
+`deterministic_level`, `blast_radius_score`, `upstream_vex_coverage`).
+
+> **Helper scripts:** [`scripts/list-open-vulns.sh`](scripts/list-open-vulns.sh) auto-discovers an API key +
+> product ids and prints the open findings (with a day-over-day snapshot diff);
+> [`scripts/upload-sbom.sh`](scripts/upload-sbom.sh) uploads an SBOM against a registered artifact
+> (`-i <artifact_id> -d <digest>`). See [TESTING.md](TESTING.md) for the full walkthrough.
+
 ### Error envelope
 
 ```json

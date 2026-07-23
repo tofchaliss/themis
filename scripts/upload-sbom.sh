@@ -8,7 +8,7 @@ Usage: upload-sbom.sh -f SBOM.json -i IMAGE_ID -d DIGEST [options]
 
 Required:
   -f PATH    CycloneDX or SPDX SBOM file
-  -i UUID    Registered image ID (see README — insert into images until 16.4 lands)
+  -i UUID    Registered artifact ID (from POST /api/v1/products/{id}/artifacts → .id)
   -d DIGEST  Image digest (must match images.digest), e.g. sha256:abc...
 
 Optional:
@@ -89,7 +89,7 @@ payload="$(jq -n \
     format: $format,
     spec_version: $spec,
     document: $doc[0],
-    image_id: $image_id,
+    artifact_id: $image_id,
     image_digest: $image_digest
   } + (if $project_id != "" then {project_id: $project_id} else {} end)')"
 

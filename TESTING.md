@@ -138,6 +138,11 @@ curl -s "$BASE_URL/api/v1/status?top=10" -H "X-API-Key: $API_KEY" | jq .
 
 On `FAILED`/`REJECTED`, `stage_detail` is the authoritative reason (trust gate, parse, OSV, or DB constraint).
 
+> **Helper scripts** wrap this flow: [`scripts/upload-sbom.sh`](scripts/upload-sbom.sh) `-f <sbom> -i
+> <artifact_id> -d <digest>` posts + reports the ingestion; [`scripts/list-open-vulns.sh`](scripts/list-open-vulns.sh)
+> auto-discovers an API key + product ids and prints the **open** findings (filtered by `effective_state`) with a
+> day-over-day snapshot diff. See [API.md](API.md#vulnerability-listing-filters--pagination) for the filters.
+
 ### What "good" looks like
 
 | Field (`GET /status`) | Ready value |

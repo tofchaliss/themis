@@ -986,6 +986,39 @@ not in the VEX overlay (Layer 2/3 exploitability context).
 
 ---
 
+### DEFECT D-FEED-2 — Intel source-tier taxonomy is docs-only; feed failure behaviour is not tier-differentiated
+
+**Status:** 🔶 OPEN (found 2026-07-23, during the feed end-to-end verification —
+`docs/current-changes/FEED-E2E-VERIFICATION.md`).
+
+**Severity:** Low (operability) — not currently biting (all feeds healthy), but a **tier-3** "gold" feed
+failing (e.g. ExploitDB) surfaces identically to a **tier-1** critical feed failing, so operators cannot triage
+a degraded signal by importance.
+
+**Symptom:** `openspec/intel-source-tiers.md` defines a 4-tier feed classification with differentiated failure
+behaviour (tier 1 → `signals_stale` + notify; tier 2 → `WARN` + `degraded_feeds[]`; tier 3 → `INFO` only), but
+the taxonomy is **never applied in code** — every feed is treated identically.
+
+**Root cause:** the `feed_health` table has `class`/`tier` columns, but [RecordFeedSuccess] / [RecordFeedFailure]
+never write them, and both [DegradedFeeds] (`WHERE consecutive_failures > 0`) and `SignalsStale` are
+**tier-agnostic**. No Go code references a feed tier (grep for `tier`: zero matches).
+
+**Fix:** record each feed's tier (config- or ACL-driven) on `feed_health`, then make `DegradedFeeds` and the
+`signals_stale` computation tier-aware — a tier-1 failure escalates (stale + notify), a tier-3 failure stays
+informational. Cheap; no schema change (the columns already exist).
+
+**Phase-3 note:** in the go-forward this belongs on the Knowledge feed-ACL registry (feeds already carry a
+`class` = overlay/correlation; add `tier`), driving feed health/staleness. Cross-ref `PHASE3-BACKLOG.md` §C.
+
+**Cross-refs:** [D-FEED-1] (the feed-taxonomy split / CR-4), and the source-tier reference table in
+`openspec/intel-source-tiers.md`.
+
+[RecordFeedSuccess]: internal/adapter/store/feed_health.go#L28
+[RecordFeedFailure]: internal/adapter/store/feed_health.go#L46
+[DegradedFeeds]: internal/adapter/store/feed_health.go#L66
+
+---
+
 ### DEFECT D-NVD-1 — NVD CPE feeder over-matches version ranges and misclassifies ecosystem (Layer-0 correctness)
 
 **Status:** ✅ RESOLVED (2026-06-24) — implemented as **CR-1** (unified version engine:
@@ -1106,6 +1139,68 @@ already in `internal/adapter/osv/cvss.go` where a vector is present but a base s
 [mapNVDCVE]: internal/adapter/nvd/client.go#L161
 [nvdCVE metrics]: internal/adapter/nvd/client.go#L142-L151
 [rangeConstraintGroup]: internal/adapter/osv/client.go#L239
+
+---
+
+### DEFECT D-NVD-2 — CVSS v4.0 not parsed (NVD + OSV) → recent CVEs land severity=unknown / risk=0 (Layer-0 signal quality)
+
+**Status:** 🔶 OPEN (found 2026-07-23). Direct successor to **[D-NVD-1] Finding 3 / CR-5**, which extended the
+NVD CVSS parse to `v3.1 → v3.0 → v2.0` but **never added v4.0**. NVD/CNAs are now scoring recent CVEs with
+**CVSS 4.0**, so the same `unknown`/`0` symptom D-NVD-1 Finding 3 fixed for v3.0/v2 has returned for v4.0.
+
+**Severity:** Medium (signal quality) — affected CVEs show `severity=unknown`, `cvss_score=0`, and therefore
+`risk_score=0`, even though NVD/OSV **do** carry a valid CVSS 4.0 base score. They do **not** self-heal via the
+NVD-by-CVE backfill (see "Why it won't self-heal").
+
+**Found:** 2026-07-23, ingesting a real Trivy CycloneDX 1.6 SBOM (the `oamp` container). Of the 228 findings,
+the only remaining `unknown`-severity ones were **5 distinct CVEs / 7 findings**, all PyPI (pip, aiosmtplib):
+`CVE-2025-8869`, `CVE-2026-1703`, `CVE-2026-3219`, `CVE-2026-6357`, `CVE-2026-53533`. A bucket query confirmed
+**100%** of the unknowns carry a `CVSS:4.0/...` vector (no "missing data" cases).
+
+**Symptom:** `vulnerabilities` row has `severity=unknown`, `cvss_score=0.0`, but `cvss_vector` is present and
+begins `CVSS:4.0/...`; `epss_score` is populated (EPSS is a separate FIRST.org feed keyed by CVE, independent
+of CVSS), so the finding shows an EPSS but no severity and `risk=0`.
+
+**Root cause (two code paths):**
+
+1. **NVD-by-CVE backfill** — [extractNVDCVSS] reads `cvssMetricV31 → cvssMetricV30 → cvssMetricV2` and has no
+   `cvssMetricV40` branch; the response metrics struct ([nvdCVE metrics v3-only]) has no `CVSSMetricV40`
+   field. A CVE NVD scored **solely** under v4.0 returns `("unknown", 0, "")`.
+2. **OSV correlation** (how PyPI/apk/rpm findings get CVSS) — [osv cvssV3BaseScore] implements the **v3.1
+   base-score formula only**. `parseCVSSScore` passes a `CVSS:4.0/...` vector to it, `parseCVSSMetrics` fails,
+   and it returns `(0, vector)`: the vector is stored but the score is 0.
+
+**Evidence:** the live NVD API for `CVE-2025-8869` returns `metrics: { cvssMetricV40 (baseScore 5.9, MEDIUM,
+type=Secondary), ssvcV203 }` with `vulnStatus=Deferred` — **no v3.1 at all**. NVD has the severity; Themis
+just never reads that key.
+
+**Why it won't self-heal:** the CVSS backfill records `cvss_checked_at=NOW()` after a check that found no v3
+metric, then backs off (the D-CVSS-1/CR-5 retry guard). The CVE stays `unknown` until the code reads v4.0 (or
+NVD adds a v3.1 *primary* score — unlikely for new CVEs). This is a **code gap, not a timing/back-off issue**;
+the ~200 severities that filled in post-ingest were genuine v3.1 backfills.
+
+**Fix:**
+
+- **NVD client (cheap, high value):** add an `nvdCVSSMetricV40` type (`cvssData.baseScore` + `baseSeverity` +
+  `vectorString`) to the metrics struct and a branch in `extractNVDCVSS`. NVD supplies the **computed** score,
+  so the existing backfill fills these directly. Suggested precedence **`v3.1 → v3.0 → v4.0 → v2`** (v3.1-first
+  for cross-fleet comparability; v4.0 as the fallback when it is the only score), preferring **Primary** over
+  **Secondary** within a version. Add a test on `CVE-2025-8869`'s shape (v4.0-only, Secondary).
+- **OSV path (harder):** OSV provides only the vector, not a score; a true v4.0 base score needs the v4.0
+  **MacroVector** lookup table. Largely mitigated once (1) lands — the NVD backfill supplies the score. If a
+  standalone OSV scorer is wanted, vendor a v4.0 base-score calculator.
+- **Residual (by design):** a CVE in NVD status `Received`/`Awaiting Analysis` has **no** CVSS from anyone yet
+  → legitimately `unknown`. Fall back to distro/vendor severity (OSV / Red Hat) + EPSS/KEV as risk inputs.
+
+**Phase-3 note:** the same v4.0 gap will affect Phase-3 **Knowledge** (feed ACLs + `Reconcile` headline
+severity by source precedence). Tracked as a cross-ref in `docs/engineering/PHASE3-BACKLOG.md` §C.
+
+**Cross-refs:** [D-NVD-1] (Finding 3 = the v3.1→v3.0→v2 parse this extends), [D-CVSS-1] (OSV-origin CVSS
+enrichment / CR-5 backfill + back-off), [D-FEED-1] (distro feeds as the *other* apk/rpm severity source).
+
+[extractNVDCVSS]: internal/adapter/nvd/client.go#L346
+[nvdCVE metrics v3-only]: internal/adapter/nvd/client.go#L273-L275
+[osv cvssV3BaseScore]: internal/adapter/osv/cvss.go#L27
 
 ---
 
