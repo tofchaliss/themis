@@ -149,7 +149,9 @@ func TestCVSSBackfillNoUpdatesSkipsReEnrich(t *testing.T) {
 
 type captureBackfillMetrics struct{ statuses []string }
 
-func (c *captureBackfillMetrics) RecordBackfill(status string) { c.statuses = append(c.statuses, status) }
+func (c *captureBackfillMetrics) RecordBackfill(status string) {
+	c.statuses = append(c.statuses, status)
+}
 
 func TestCVSSBackfillCustomFieldsAndMetrics(t *testing.T) {
 	catalog := &stubCVSSCatalog{candidates: []string{"CVE-1"}}

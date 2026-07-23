@@ -43,3 +43,26 @@ func TestWriteScopedMutationsRejectReadOnlyKey(t *testing.T) {
 		}
 	})
 }
+
+// With no authenticated principal at all, uploads report 401 and delete 403.
+func TestMutationsRejectMissingAuth(t *testing.T) {
+	handler := api.NewHandler(api.Dependencies{})
+	bare := func(method, path string) *http.Request {
+		return httptest.NewRequest(method, path, http.NoBody)
+	}
+	recSBOM := httptest.NewRecorder()
+	handler.UploadSBOM(recSBOM, bare(http.MethodPost, "/api/v1/sbom/upload"), gen.UploadSBOMParams{})
+	if recSBOM.Code != http.StatusUnauthorized {
+		t.Fatalf("UploadSBOM status=%d, want 401", recSBOM.Code)
+	}
+	recVEX := httptest.NewRecorder()
+	handler.UploadVEX(recVEX, bare(http.MethodPost, "/api/v1/vex/upload"), gen.UploadVEXParams{})
+	if recVEX.Code != http.StatusUnauthorized {
+		t.Fatalf("UploadVEX status=%d, want 401", recVEX.Code)
+	}
+	recDel := httptest.NewRecorder()
+	handler.DeleteSBOM(recDel, bare(http.MethodDelete, "/api/v1/sboms/x"))
+	if recDel.Code != http.StatusForbidden {
+		t.Fatalf("DeleteSBOM status=%d, want 403", recDel.Code)
+	}
+}

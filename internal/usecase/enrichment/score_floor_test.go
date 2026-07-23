@@ -12,10 +12,10 @@ import (
 // but stays 0 when dismissed or signal-free.
 func TestUnknownSeverityRiskFloor(t *testing.T) {
 	cases := []struct {
-		name          string
-		state         string
-		kev, exploit  bool
-		want          int
+		name         string
+		state        string
+		kev, exploit bool
+		want         int
 	}{
 		{"unknown no signal → 0", domain.EffectiveStateDetected, false, false, 0},
 		{"unknown + KEV → KEV floor", domain.EffectiveStateDetected, true, false, domain.RiskScoreUnknownKEVFloor},
