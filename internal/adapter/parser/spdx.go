@@ -31,13 +31,13 @@ type spdxExternalRef struct {
 }
 
 type spdx23Relation struct {
-	SPDXElementID       string `json:"spdxElementId"`
-	RelatedSPDXElement  string `json:"relatedSpdxElement"`
-	RelationshipType    string `json:"relationshipType"`
+	SPDXElementID      string `json:"spdxElementId"`
+	RelatedSPDXElement string `json:"relatedSpdxElement"`
+	RelationshipType   string `json:"relationshipType"`
 }
 
 type spdx30Document struct {
-	SPDXVersion string        `json:"spdxVersion"`
+	SPDXVersion string          `json:"spdxVersion"`
 	Elements    []spdx30Element `json:"elements"`
 }
 

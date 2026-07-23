@@ -39,6 +39,7 @@ func NewRegistry(cfg RegistryConfig) *Registry {
 			domain.SBOMFormatCycloneDX: CycloneDXAdapter{},
 			domain.SBOMFormatSPDX:      SPDXAdapter{},
 			domain.SBOMFormatTrivy:     TrivyAdapter{},
+			domain.SBOMFormatGrype:     GrypeAdapter{},
 		},
 		config: cfg,
 	}

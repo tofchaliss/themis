@@ -7,6 +7,7 @@ const (
 	SBOMFormatCycloneDX = "cyclonedx"
 	SBOMFormatSPDX      = "spdx"
 	SBOMFormatTrivy     = "trivy"
+	SBOMFormatGrype     = "grype"
 )
 
 // ParseStatus tracks parser outcomes aligned with ingestion lifecycle states.
@@ -67,5 +68,5 @@ type SBOMAdapter interface {
 
 // SupportedSBOMFormats lists registered parser formats.
 func SupportedSBOMFormats() []string {
-	return []string{SBOMFormatCycloneDX, SBOMFormatSPDX, SBOMFormatTrivy}
+	return []string{SBOMFormatCycloneDX, SBOMFormatSPDX, SBOMFormatTrivy, SBOMFormatGrype}
 }
