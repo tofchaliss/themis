@@ -149,7 +149,10 @@ func TestWatchCycleIntegrationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if storedTS.IsZero() || !lastSuccess.Equal(storedTS) {
+	// Postgres TIMESTAMPTZ has microsecond precision, so the stored value loses
+	// the sub-microsecond nanoseconds of the in-memory time; compare within a
+	// tolerance rather than for exact equality.
+	if storedTS.IsZero() || lastSuccess.Sub(storedTS).Abs() > time.Millisecond {
 		t.Fatalf("last success = %v stored = %v", lastSuccess, storedTS)
 	}
 

@@ -27,7 +27,15 @@ func TestInProcessQueueConcurrentPostgres(t *testing.T) {
 	dsn := startEmbeddedPostgres(t, 15434)
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, dsn)
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse pool config: %v", err)
+	}
+	// Embedded Postgres runs with max_connections=10; cap the pool below that so
+	// concurrent enqueues queue on the pool instead of exhausting the server
+	// (pgxpool defaults MaxConns to NumCPU, which can exceed the server limit).
+	poolCfg.MaxConns = 5
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		t.Fatalf("connect database: %v", err)
 	}
@@ -101,7 +109,15 @@ func TestInProcessQueueRetryCountsPersisted(t *testing.T) {
 	dsn := startEmbeddedPostgres(t, 15435)
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, dsn)
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse pool config: %v", err)
+	}
+	// Embedded Postgres runs with max_connections=10; cap the pool below that so
+	// concurrent enqueues queue on the pool instead of exhausting the server
+	// (pgxpool defaults MaxConns to NumCPU, which can exceed the server limit).
+	poolCfg.MaxConns = 5
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		t.Fatalf("connect database: %v", err)
 	}
