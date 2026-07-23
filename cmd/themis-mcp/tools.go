@@ -13,6 +13,7 @@ import (
 // always registered; mutating tools are registered only when readOnly is false.
 func registerTools(s *mcp.Server, c *client, readOnly bool) {
 	registerReadTools(s, c)
+	registerPromptsAndResources(s, c)
 	if !readOnly {
 		registerWriteTools(s, c)
 	}
@@ -20,14 +21,23 @@ func registerTools(s *mcp.Server, c *client, readOnly bool) {
 
 // --- result / annotation helpers -------------------------------------------
 
-// jsonText renders a raw JSON body as pretty-printed text content. This is the
-// standard output for every tool: the LLM consumes Themis JSON directly.
+// jsonText renders a raw JSON body as pretty-printed text content and, when the
+// body is a JSON object, also as StructuredContent so MCP hosts get a typed
+// value rather than only a text blob.
 func jsonText(raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+	res := &mcp.CallToolResult{}
 	var pretty bytes.Buffer
 	if json.Indent(&pretty, raw, "", "  ") == nil {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: pretty.String()}}}, nil, nil
+		res.Content = []mcp.Content{&mcp.TextContent{Text: pretty.String()}}
+	} else {
+		res.Content = []mcp.Content{&mcp.TextContent{Text: string(raw)}}
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}, nil, nil
+	// StructuredContent must marshal to a JSON object, so only set it for objects.
+	var structured map[string]any
+	if json.Unmarshal(raw, &structured) == nil && structured != nil {
+		res.StructuredContent = structured
+	}
+	return res, nil, nil
 }
 
 func boolPtr(b bool) *bool { return &b }
