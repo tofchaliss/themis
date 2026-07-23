@@ -68,10 +68,10 @@ func TestBuildEmailBodyDigest(t *testing.T) {
 
 func TestBuildTeamsCard(t *testing.T) {
 	card := buildTeamsCard(domain.NotificationEvent{
-		Type: domain.NotificationEventTriageDecision,
+		Type:        domain.NotificationEventTriageDecision,
 		ProductName: "Payments",
-		Message: "false positive recorded",
-		Findings: []domain.NotificationFinding{{CVEID: "CVE-9", Severity: "HIGH", EffectiveState: "suppressed"}},
+		Message:     "false positive recorded",
+		Findings:    []domain.NotificationFinding{{CVEID: "CVE-9", Severity: "HIGH", EffectiveState: "suppressed"}},
 	})
 	attachments, ok := card["attachments"].([]map[string]any)
 	if !ok || len(attachments) == 0 {

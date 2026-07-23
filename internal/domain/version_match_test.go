@@ -46,9 +46,9 @@ func TestPackageIdentityMatch(t *testing.T) {
 // and app ecosystems keep the looser blank-ecosystem name match.
 func TestPackageIdentityMatchDistroAuthoritative(t *testing.T) {
 	tests := []struct {
-		name                          string
+		name                           string
 		recEco, recName, compEco, comp string
-		want                          bool
+		want                           bool
 	}{
 		// The bug: empty-ecosystem NVD openssl flagged every upstream CVE on el8.
 		{"nvd empty-eco rejected for rpm", "", "openssl", "rpm", "openssl", false},

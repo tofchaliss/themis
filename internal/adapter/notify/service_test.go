@@ -78,7 +78,7 @@ func TestDispatchNoMatchingRules(t *testing.T) {
 func TestDispatchUnsupportedChannel(t *testing.T) {
 	var recorded []string
 	svc := testService(t, &stubRules{rules: []domain.NotificationRule{{
-		Name: "bad", EventType: domain.NotificationEventIngestionCompleted, Channel: "pagerduty", Destination: "x", Enabled: true,
+		Name: "bad", EventType: domain.NotificationEventIngestionCompleted, Channel: "carrier_pigeon", Destination: "x", Enabled: true,
 	}}}, func(s *Service) {
 		s.recordMetric = func(channel, status string) { recorded = append(recorded, channel+":"+status) }
 	})
@@ -207,9 +207,13 @@ func TestDispatchTeamsRetryAndFailure(t *testing.T) {
 	}
 }
 
-func TestDispatchSlackSkipped(t *testing.T) {
+func TestDispatchSlackDelivers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
 	svc := testService(t, &stubRules{rules: []domain.NotificationRule{{
-		Name: "slack", EventType: domain.NotificationEventIngestionCompleted, Channel: domain.NotificationChannelSlack, Destination: "#sec", Enabled: true,
+		Name: "slack", EventType: domain.NotificationEventIngestionCompleted, Channel: domain.NotificationChannelSlack, Destination: server.URL, Enabled: true,
 	}}})
 	if err := svc.Dispatch(context.Background(), domain.NotificationEvent{Type: domain.NotificationEventIngestionCompleted}); err != nil {
 		t.Fatal(err)
@@ -248,7 +252,7 @@ func TestDispatchMultipleRulesReturnsFirstError(t *testing.T) {
 	defer server.Close()
 
 	svc := testService(t, &stubRules{rules: []domain.NotificationRule{
-		{Name: "bad", EventType: domain.NotificationEventIngestionCompleted, Channel: "pagerduty", Destination: "x", Enabled: true},
+		{Name: "bad", EventType: domain.NotificationEventIngestionCompleted, Channel: "carrier_pigeon", Destination: "x", Enabled: true},
 		{Name: "teams", EventType: domain.NotificationEventIngestionCompleted, Channel: domain.NotificationChannelWebhook, Destination: server.URL, Enabled: true},
 	}})
 	err := svc.Dispatch(context.Background(), domain.NotificationEvent{Type: domain.NotificationEventIngestionCompleted})

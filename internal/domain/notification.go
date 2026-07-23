@@ -14,9 +14,11 @@ const (
 
 // Notification channel identifiers used in routing rules.
 const (
-	NotificationChannelEmail   = "email"
-	NotificationChannelSlack   = "slack"
-	NotificationChannelWebhook = "webhook"
+	NotificationChannelEmail          = "email"
+	NotificationChannelSlack          = "slack"
+	NotificationChannelWebhook        = "webhook"
+	NotificationChannelGenericWebhook = "generic_webhook"
+	NotificationChannelPagerDuty      = "pagerduty"
 )
 
 // NotificationRuleFilter scopes routing rules to products and severities.
