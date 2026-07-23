@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 )
 
 type authContextKey struct{}
+type clientIPContextKey struct{}
 
 // WithAuth stores the authenticated principal on the context.
 func WithAuth(ctx context.Context, principal domain.AuthPrincipal) context.Context {
@@ -22,6 +24,39 @@ func WithAuth(ctx context.Context, principal domain.AuthPrincipal) context.Conte
 func AuthFromContext(ctx context.Context) (domain.AuthPrincipal, bool) {
 	principal, ok := ctx.Value(authContextKey{}).(domain.AuthPrincipal)
 	return principal, ok
+}
+
+// WithClientIP stores the request's client IP on the context (no-op if empty).
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	if ip == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, clientIPContextKey{}, ip)
+}
+
+// ClientIPFromContext returns the captured client IP, or "".
+func ClientIPFromContext(ctx context.Context) string {
+	ip, _ := ctx.Value(clientIPContextKey{}).(string)
+	return ip
+}
+
+// ClientIP extracts a validated client IP from a request: the first
+// X-Forwarded-For entry if valid, otherwise the RemoteAddr host.
+func ClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		first := strings.TrimSpace(strings.Split(xff, ",")[0])
+		if net.ParseIP(first) != nil {
+			return first
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if net.ParseIP(host) != nil {
+		return host
+	}
+	return ""
 }
 
 // APIKeyAuth validates X-API-Key headers.
@@ -62,7 +97,8 @@ func (a APIKeyAuth) Middleware(next http.Handler) http.Handler {
 				continue
 			}
 			principal := domain.AuthPrincipal{KeyID: key.ID, Scopes: key.Scopes}
-			next.ServeHTTP(w, r.WithContext(WithAuth(r.Context(), principal)))
+			ctx := WithClientIP(WithAuth(r.Context(), principal), ClientIP(r))
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		writeProblem(w, r, http.StatusUnauthorized, "Unauthorized", "invalid API key")

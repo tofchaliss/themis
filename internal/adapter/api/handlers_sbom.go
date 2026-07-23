@@ -79,6 +79,7 @@ func (h *Handler) DeleteSBOM(w http.ResponseWriter, r *http.Request) {
 			ResourceType: "sbom_document",
 			ResourceID:   summary.SBOMID,
 			Details:      details,
+			SourceIP:     ClientIPFromContext(r.Context()),
 		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{

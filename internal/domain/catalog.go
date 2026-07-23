@@ -131,6 +131,7 @@ type TriageDecision struct {
 	AcceptedUntil  *time.Time
 	AssignedTo     string
 	Actor          string
+	SourceIP       string
 	EffectiveState string
 }
 
