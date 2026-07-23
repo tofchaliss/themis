@@ -3,5 +3,22 @@
 /coverage.txt
 *.test
 
+# compiled greenfield service binaries (build artifacts, e.g. `go build -o evidence ./cmd/evidence`)
+/themis
+/registry
+/evidence
+/knowledge
+/governance
+/communication
+/intelligence
+
+# local agent / editor tooling + settings (not versioned)
+/.claude/
+/.agents/
+/skills-lock.json
+
 # rapid property-test failure replay files (transient)
 **/testdata/rapid/
+
+# release-smoke-test.sh runtime log (transient)
+/themis-smoke.log

@@ -1,0 +1,209 @@
+openapi: 3.0.3
+info:
+  title: Themis Evidence API
+  version: 1.0.0
+  description: >
+    Evidence context (Phase-3 greenfield) — register immutable evidence documents
+    (SBOM/VEX) and read back their facts and canonical inventory.
+servers:
+  - url: /api/v1
+paths:
+  /evidence:
+    post:
+      operationId: registerEvidence
+      summary: Register an evidence document; returns a stable Evidence ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterEvidenceRequest'
+      responses:
+        '201':
+          description: Registered (new).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterEvidenceResponse'
+        '200':
+          description: Already registered (idempotent — byte-identical upload).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterEvidenceResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listEvidence
+      summary: List evidence filed against a release.
+      parameters:
+        - name: release
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvidenceSummary'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /evidence/{id}:
+    get:
+      operationId: getEvidence
+      summary: Get evidence facts by ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceFacts'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /evidence/{id}/inventory:
+    get:
+      operationId: getEvidenceInventory
+      summary: Get the canonical component inventory by evidence ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inventory'
+        '404':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    RegisterEvidenceRequest:
+      type: object
+      required: [kind, subject_release_id, document]
+      properties:
+        kind:
+          type: string
+          enum: [sbom, vex, scanner-report]
+        format:
+          type: string
+          enum: [cyclonedx, spdx]
+        spec_version:
+          type: string
+        subject_release_id:
+          type: string
+        expected_checksum:
+          type: string
+        provenance_source:
+          type: string
+        provenance_image_digest:
+          type: string
+        document:
+          type: string
+          description: The raw evidence document (UTF-8 text, e.g. an SBOM JSON).
+    RegisterEvidenceResponse:
+      type: object
+      required: [id, created]
+      properties:
+        id:
+          type: string
+        created:
+          type: boolean
+    EvidenceFacts:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        subject_release_id:
+          type: string
+        fingerprint:
+          type: string
+        trust_status:
+          type: string
+        provenance_source:
+          type: string
+        provenance_image_digest:
+          type: string
+        filed_at:
+          type: string
+          format: date-time
+    EvidenceSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        fingerprint:
+          type: string
+        filed_at:
+          type: string
+          format: date-time
+    Inventory:
+      type: object
+      properties:
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/Component'
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyEdge'
+    Component:
+      type: object
+      properties:
+        purl:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        ecosystem:
+          type: string
+    DependencyEdge:
+      type: object
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        relationship:
+          type: string
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string
+        supported_formats:
+          type: array
+          items:
+            type: string

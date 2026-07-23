@@ -45,6 +45,174 @@ linters:
             - github.com/themis-project/themis/internal/infrastructure/http/middleware
             - github.com/themis-project/themis/internal/infrastructure/metrics
             - github.com/themis-project/themis/internal/infrastructure/queue
+        kernel-value-stdlib-only:
+          files:
+            - "internal/kernel/value/**"
+          allow:
+            - $gostd
+        kernel-id-deps:
+          files:
+            - "internal/kernel/id/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+        kernel-event-deps:
+          files:
+            - "internal/kernel/event/**"
+          allow:
+            - $gostd
+            - github.com/santhosh-tekuri/jsonschema/v6
+        evidence-domain-inner:
+          files:
+            - "internal/evidence/domain/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+        evidence-app-domain-only:
+          files:
+            - "internal/evidence/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/evidence/domain
+        evidence-no-cross-context:
+          files:
+            - "internal/evidence/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: Evidence must not import Knowledge — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: Evidence must not import Governance — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: Evidence must not import Communication — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: Evidence must not import Intelligence — collaborate via events + read APIs
+        knowledge-domain-inner:
+          files:
+            - "internal/knowledge/domain/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+        knowledge-app-domain-only:
+          files:
+            - "internal/knowledge/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/knowledge/domain
+        knowledge-no-cross-context:
+          files:
+            - "internal/knowledge/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: Knowledge must not import Evidence — read the inventory via Evidence's read API, not its packages
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: Knowledge must not import Governance — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: Knowledge must not import Communication — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: Knowledge must not import Intelligence — proposals arrive via the intake port
+        governance-domain-inner:
+          files:
+            - "internal/governance/domain/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+        governance-app-domain-only:
+          files:
+            - "internal/governance/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/governance/domain
+        governance-no-cross-context:
+          files:
+            - "internal/governance/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: Governance must not import Evidence — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: Governance must not import Knowledge — react to ComponentMatched/FaultlineEnriched events + reference a Faultline by id, never import its packages
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: Governance must not import Communication — publish Position events + read API, do not import it
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: Governance must not import Intelligence — AI proposals arrive via the RaiseProposal port
+        communication-domain-inner:
+          files:
+            - "internal/communication/domain/**"
+          allow:
+            - $gostd
+        communication-app-domain-only:
+          files:
+            - "internal/communication/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/communication/domain
+        communication-no-cross-context:
+          files:
+            - "internal/communication/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: Communication must not import Evidence — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: Communication must not import Knowledge — collaborate via events + read APIs
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: Communication must not import Governance — consume Position events + fetch via the read API, never import its packages
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: Communication must not import Intelligence — collaborate via events + read APIs
+        intelligence-domain-inner:
+          files:
+            - "internal/intelligence/domain/**"
+          allow:
+            - $gostd
+            - github.com/santhosh-tekuri/jsonschema/v6
+            - github.com/themis-project/themis/internal/kernel
+        intelligence-app-domain-only:
+          files:
+            - "internal/intelligence/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/intelligence/domain
+        intelligence-no-cross-context:
+          files:
+            - "internal/intelligence/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: Intelligence must not import Evidence — read enterprise knowledge via read-API clients only
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: Intelligence must not import Knowledge — ground via the Knowledge read API (decode into its own view types)
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: Intelligence must not import Governance — ground via the Governance read API; proposals return to the caller
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: Intelligence must not import Communication — collaborate via events + read APIs
+        registry-domain-inner:
+          files:
+            - "internal/registry/domain/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+        registry-app-domain-only:
+          files:
+            - "internal/registry/app/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/registry/domain
+        registry-no-cross-context:
+          files:
+            - "internal/registry/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: Registry must not import Evidence — it is a foundation beneath the pipeline
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: Registry must not import Knowledge — it is a foundation beneath the pipeline
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: Registry must not import Governance — it is a foundation beneath the pipeline
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: Registry must not import Communication — it is a foundation beneath the pipeline
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: Registry must not import Intelligence — it is a foundation beneath the pipeline
         no-format-leakage:
           files:
             - "**/*.go"

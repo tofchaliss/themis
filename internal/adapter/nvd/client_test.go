@@ -88,6 +88,34 @@ func TestClientFetchRangeAndCVSSFallback(t *testing.T) {
 	}
 }
 
+// TestClientFetchCVSSv40 covers the D-NVD-2 fix: a CVE NVD scores solely under CVSS 4.0
+// (cvssMetricV40) is now read instead of returning severity=unknown/score=0.
+func TestClientFetchCVSSv40(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"totalResults": 1,
+			"vulnerabilities": [{"cve": {
+				"id": "CVE-2025-8869",
+				"metrics": {"cvssMetricV40": [{"cvssData": {"baseScore": 5.9, "vectorString": "CVSS:4.0/AV:N", "baseSeverity": "MEDIUM"}}]},
+				"configurations": [{"nodes": [{"cpeMatch": [{"vulnerable": true, "criteria": "cpe:2.3:a:pypa:pip:*:*:*:*:*:*:*:*"}]}]}]
+			}}]
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+	client := nvd.NewClient(nvd.ClientConfig{BaseURL: srv.URL, RateLimiter: nvd.NewTokenBucket(100, 100)})
+	vulns, err := client.FetchModifiedSince(context.Background(), time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("FetchModifiedSince() error = %v", err)
+	}
+	if len(vulns) != 1 {
+		t.Fatalf("want 1 vuln, got %#v", vulns)
+	}
+	if v := vulns[0]; v.Severity != "medium" || v.CVSSScore != 5.9 || v.CVSSVector != "CVSS:4.0/AV:N" {
+		t.Fatalf("v4.0 CVSS not read (D-NVD-2): %+v", v)
+	}
+}
+
 func TestClientFetchByCVEID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("cveId") != "CVE-2020-0001" {

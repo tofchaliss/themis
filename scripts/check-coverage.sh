@@ -4,6 +4,24 @@ set -euo pipefail
 module="github.com/themis-project/themis"
 
 declare -a domain_pkgs=(
+	kernel/value
+	kernel/id
+	kernel/event
+	registry/domain
+	registry/app
+	knowledge/domain
+	knowledge/app
+	governance/domain
+	governance/app
+	communication/domain
+	communication/app
+	intelligence/domain
+	intelligence/app
+	evidence/domain
+	evidence/app
+	evidence/adapters/parser
+	evidence/adapters/trust
+	evidence/adapters/subjectref
 	domain
 	usecase/ingestion
 	usecase/correlation
@@ -16,6 +34,29 @@ declare -a domain_pkgs=(
 	adapter/notify
 )
 declare -a infra_pkgs=(
+	evidence/adapters/http
+	evidence/adapters/store
+	knowledge/adapters/feed
+	knowledge/adapters/store
+	knowledge/adapters/evidence
+	knowledge/adapters/http
+	governance/adapters/store
+	governance/adapters/http
+	governance/adapters/inbound
+	governance/adapters/intelligence
+	communication/adapters/serializer
+	communication/adapters/store
+	communication/adapters/governance
+	communication/adapters/inbound
+	communication/adapters/http
+	communication/adapters/delivery
+	intelligence/adapters/provider
+	intelligence/adapters/engine
+	intelligence/adapters/readapi
+	intelligence/adapters/http
+	platform/observability
+	registry/adapters/store
+	registry/adapters/http
 	adapter/osv
 	adapter/store
 	adapter/api
@@ -41,6 +82,15 @@ threshold_for() {
 		adapter/osv) echo 90; return ;;
 		adapter/epsskev|adapter/exploitdb|adapter/redhat) echo 85; return ;;
 		adapter/api) echo 80; return ;;
+		# Evidence/registry stores: behavior proven by integration tests (idempotency,
+		# concurrency, outbox retry, FK membership, migration up/down); remaining
+		# uncovered lines are DB-error branches needing pool-fault injection (an
+		# injectable pgxpool interface — follow-up).
+		evidence/adapters/store) echo 80; return ;;
+		registry/adapters/store) echo 80; return ;;
+		knowledge/adapters/store) echo 80; return ;;
+		governance/adapters/store) echo 80; return ;;
+		communication/adapters/store) echo 80; return ;;
 	esac
 	for pkg in "${domain_pkgs[@]}"; do
 		if [[ "$pkg" == "$pkg_path" ]]; then

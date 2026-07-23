@@ -1,0 +1,9 @@
+{
+  "id": "CVE-2024-1234",
+  "observed_at": "2024-05-01T00:00:00Z",
+  "base_score": 7.5,
+  "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+  "base_severity": "HIGH",
+  "affected": ["<3.0.11"],
+  "fixed": ["3.0.11"]
+}

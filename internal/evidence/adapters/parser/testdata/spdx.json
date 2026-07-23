@@ -1,0 +1,27 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-app",
+      "name": "app",
+      "versionInfo": "1.0.0",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:deb/debian/app@1.0.0" }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-openssl",
+      "name": "openssl",
+      "versionInfo": "3.0.11",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:deb/debian/openssl@3.0.11" }
+      ]
+    },
+    { "SPDXID": "SPDXRef-nopurl", "name": "nopurl", "versionInfo": "2.0.0", "externalRefs": [] }
+  ],
+  "relationships": [
+    { "spdxElementId": "SPDXRef-app", "relatedSpdxElement": "SPDXRef-openssl", "relationshipType": "DEPENDS_ON" },
+    { "spdxElementId": "SPDXRef-app", "relatedSpdxElement": "SPDXRef-missing", "relationshipType": "DEPENDS_ON" },
+    { "spdxElementId": "SPDXRef-app", "relatedSpdxElement": "SPDXRef-openssl", "relationshipType": "CONTAINS" }
+  ]
+}

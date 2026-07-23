@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: Themis Governance API
+  version: 1.0.0
+  description: >
+    Governance context (Phase-3 greenfield) — the authority surface. Read Findings
+    (release-scoped concerns) with their Enterprise Position history and Governance
+    Proposals, and drive the governed decision workflow (raise / accept / reject a
+    proposal, and Finding lifecycle transitions). AI and automation may propose only;
+    accepting or rejecting requires an authorized human (or a Governance-owned policy).
+servers:
+  - url: /api/v1
+paths:
+  /findings:
+    get:
+      operationId: getFindingByKey
+      summary: Get a Finding by its (Release, Faultline) business key.
+      parameters:
+        - name: release
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: faultline
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}:
+    get:
+      operationId: getFinding
+      summary: Get a Finding by its identity (with Position history + Proposals).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/position:
+    get:
+      operationId: getPosition
+      summary: Get a Finding's current (or a specific) Enterprise Position version.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+        - name: version
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/proposals:
+    post:
+      operationId: raiseProposal
+      summary: Raise a Governance Proposal against a Finding (proposer only, no authority).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RaiseProposalRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RaiseProposalResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/proposals/{proposalId}/accept:
+    post:
+      operationId: acceptProposal
+      summary: Accept a proposal, establishing a new Enterprise Position (authorized decider only).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+        - $ref: '#/components/parameters/ProposalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '204':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/proposals/{proposalId}/reject:
+    post:
+      operationId: rejectProposal
+      summary: Reject a proposal (authorized decider only).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+        - $ref: '#/components/parameters/ProposalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '204':
+          description: Rejected.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/resolve:
+    post:
+      operationId: resolveFinding
+      summary: Close a Finding's concern (reopenable).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204':
+          description: Resolved.
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/reopen:
+    post:
+      operationId: reopenFinding
+      summary: Reopen a Monitoring/Resolved Finding for further investigation.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204':
+          description: Reopened.
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/archive:
+    post:
+      operationId: archiveFinding
+      summary: Archive a Finding (terminal — release retired).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204':
+          description: Archived.
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/recommend:
+    post:
+      operationId: recommendPosition
+      summary: On-demand — ask the Intelligence Gateway for an advisory position recommendation. Records an AI proposal (never auto-accepted); AI absence/failure yields 204.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '201':
+          description: An advisory AI proposal was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RaiseProposalResponse'
+        '204':
+          description: No proposal (AI disabled, unavailable, or declined) — a safe outcome.
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/posture:
+    get:
+      operationId: getReleasePosture
+      summary: List all Findings + current Positions for a Release (posture rollup).
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PostureEntry'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /faultlines/{faultlineId}/blast-radius:
+    get:
+      operationId: getBlastRadius
+      summary: List the Releases affected by a Faultline (blast-radius rollup).
+      parameters:
+        - name: faultlineId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/Problem'
+components:
+  parameters:
+    FindingId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    FindingView:
+      type: object
+      properties:
+        id:
+          type: string
+        release_id:
+          type: string
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        stage:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/Component'
+        current_position:
+          $ref: '#/components/schemas/PositionView'
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PositionView'
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalView'
+    PositionView:
+      type: object
+      properties:
+        version:
+          type: integer
+        stance:
+          type: string
+        rationale:
+          type: string
+        actor_kind:
+          type: string
+        actor_id:
+          type: string
+        accepted_proposal_id:
+          type: string
+        faultline_ref:
+          type: string
+        established_at:
+          type: string
+          format: date-time
+    ProposalView:
+      type: object
+      properties:
+        id:
+          type: string
+        proposer_kind:
+          type: string
+        proposer_id:
+          type: string
+        stance:
+          type: string
+        rationale:
+          type: string
+        raised_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        decided_kind:
+          type: string
+        decided_id:
+          type: string
+    Component:
+      type: object
+      properties:
+        purl:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        ecosystem:
+          type: string
+    PostureEntry:
+      type: object
+      properties:
+        finding_id:
+          type: string
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        stage:
+          type: string
+        stance:
+          type: string
+        has_position:
+          type: boolean
+    RaiseProposalRequest:
+      type: object
+      required: [stance]
+      properties:
+        stance:
+          type: string
+        rationale:
+          type: string
+        proposer_kind:
+          type: string
+          description: human | ai (defaults to human). system/policy are internal only.
+        proposer_id:
+          type: string
+    RaiseProposalResponse:
+      type: object
+      properties:
+        proposal_id:
+          type: string
+    DecisionRequest:
+      type: object
+      required: [actor_id]
+      properties:
+        actor_id:
+          type: string
+        actor_kind:
+          type: string
+          description: human (default). Only a human decider is accepted via the API.
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string

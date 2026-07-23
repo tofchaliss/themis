@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/kernel/event/envelope.schema.json",
+  "title": "Themis integration-event envelope",
+  "description": "The stable contract wrapping every domain event crossing a bounded-context boundary (BCK-0046).",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "occurred_at",
+    "source_context",
+    "subject",
+    "schema_ref",
+    "correlation_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source_context": { "type": "string", "minLength": 1 },
+    "subject": { "type": "string", "minLength": 1 },
+    "schema_ref": { "type": "string", "minLength": 1 },
+    "correlation_id": { "type": "string", "minLength": 1 },
+    "payload": {
+      "description": "Opaque domain payload owned by the publishing context."
+    }
+  }
+}

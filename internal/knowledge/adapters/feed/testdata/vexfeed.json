@@ -1,0 +1,8 @@
+{
+  "vulnerability": "CVE-2024-1234",
+  "observed_at": "2024-05-06T00:00:00Z",
+  "statements": [
+    {"product": "openssl", "status": "not_affected", "justification": "vulnerable_code_not_in_execute_path"},
+    {"product": "zlib", "status": "affected", "justification": ""}
+  ]
+}

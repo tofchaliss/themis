@@ -1,7 +1,13 @@
 # Themis — Project Status
 
 _Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-07-06 (v0.3.11 — docs consolidated under `docs/` into a Kubernetes/Istio-style layout + context refresh; themis-ai-1 planning complete, ready for `/opsx:apply`)._
+Last updated: 2026-07-18 (**Phase-3 greenfield pivot** — the DDD bounded-context rebuild, per the
+architecture book `docs/architecture/` Books I–III + the 69 ADRs `docs/adr/`, is the **sole go-forward**;
+the current architecture is **frozen at v0.3.x**. `themis-ai-1` and `themis-phase-2` archived as
+superseded. **Grilling phase complete: all six context EDRs done** (`docs/engineering/decisions/`), and
+**all six OpenSpec changes scaffolded** — `phase3-shared-kernel` (M2), `phase3-evidence` (M6),
+`phase3-knowledge` (M7), `phase3-governance` (M8), `phase3-communication` (M9), `phase3-intelligence` (M4).
+Implementation next, in dependency order. See `docs/engineering/PHASE3-STATUS.md`.)_
 
 ---
 
@@ -9,11 +15,17 @@ Last updated: 2026-07-06 (v0.3.11 — docs consolidated under `docs/` into a Kub
 
 | Change | Status | Started | Progress | Blocked On |
 | --- | --- | --- | --- | --- |
-| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (user-defined feed registry shipped v0.3.9; only operational G1–G8 verification on real SBOMs remains) |
-| themis-phase-2 | Architecture Reference | 2026-06-09 | proposal ✓  design ✓  scenario ✓ | — (reference doc, not implemented) |
-| **themis-ai-1** | **Planning complete — ready to implement** | 2026-07-02 | proposal ✓  design ✓  spec ✓  **tasks ✓ (46 tasks, 9 groups)** | All open questions resolved (D-GRAIN-1 CVE-grain · D-QUEUE-1 reconcile-over-view, no queue table · D-FOOTPRINT-1 backend inverse query). Next: `/opsx:apply` — restructure → footprint endpoint → contract → migration `000002` → transparency API → `themis-ai` framework, tagged v0.4.0. Supersedes the `themis-phase-2b` slot below |
-| themis-phase-2b | Superseded → `themis-ai-1` | — | — | folded into `themis-ai-1` (basic AI use case, v0.4.0) |
-| themis-phase-2c | Planned | — | not started | themis-phase-2b complete + KB seeded |
+| **phase3-shared-kernel** (M2) | **Implemented — 20/20 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-16 | `internal/kernel/{value,id,event}` + `internal/registry/{domain,app,adapters}` + `cmd/registry`; `make check` green — value/id/event + registry domain/app 100%, registry store 89.2%, http 92.7%; `ReleaseExists` backs Evidence's `SubjectRef` | — |
+| **phase3-evidence** (M6) | **Implemented — 7/7 groups, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-15 | full context (`internal/evidence` + `internal/kernel/value` + `cmd/evidence`); tests green, coverage 100% (domain/app/parser/trust/subjectref) · store 84.5% · http 95.7%; blueprints 01–06 written | SubjectRef still uses the stub; `phase3-shared-kernel` now provides `registry.ReleaseExists` — swapping the stub for a registry-backed adapter is the remaining wiring step |
+| **phase3-knowledge** (M7) | **Implemented — 25/25 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-16 | full context `internal/knowledge/{domain,app,adapters}` (Faultline aggregate + deterministic reconciliation [rapid property], 6 feed ACLs, Postgres aggregate + outbox, correlation via Evidence read-API client + `ComponentMatched`, watch/discovery ports, read API + reconciler); domain/app 100%, adapters 83–98% | feed-fetch HTTP clients are ports awaiting real OSV/NVD adapters |
+| **phase3-governance** (M8) | **Implemented — 24/24 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-17 | full context `internal/governance/{domain,app,adapters}` + `cmd/governance` (Finding aggregate + reopenable lifecycle + append-only Position versions + Governance Proposals [rapid property], inbound Knowledge seam consumer → find-or-create Finding / auto-raise proposal [never auto-decide], authority line + policy auto-accept, Postgres aggregate + outbox + projections + relay, spec-first triage/read API, reconciler); domain/app/inbound 100%, store 80.5%, http 97.9% | Communication consumes `PositionEstablished`/`PositionRevised` (next: M9) |
+| **phase3-communication** (M9) | **Implemented — 22/22 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-18 | full context `internal/communication/{domain,app,adapters}` + `cmd/communication` (Publication aggregate [immutable content + mutable delivery status + append-and-supersede, capped/regenerable payload], deterministic materialization with the **stance-equality invariant**, 6-serializer registry [OpenVEX/CycloneDX-VEX/CSAF/markdown/json-report/text], inbound Governance Position-event consumer → publishable-positions queue [Positions only, no auto-publish], human-triggered `CreatePublication` + supersede, Postgres aggregate + outbox + projections + relay, delivery worker [exactly-once off pending status] + retention/pruning + reconciler, spec-first publish/read/preview API); domain/app 100%, adapters 81–100% | terminal — **pipeline complete** (Evidence→Knowledge→Governance→Communication) |
+| **phase3-intelligence** (M4) | **Δ1 Implemented — 37/37 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-18 | `EDR-INTELLIGENCE-01` Rev 2 (D1–D13); the reactive walking skeleton — `internal/intelligence/{domain,app,adapters}` + `cmd/intelligence` (stateless) + Governance caller seam (`adapters/intelligence` client + no-op + on-demand `POST /findings/{id}/recommend`); `recommend_position` affected/not-affected triage, Ollama (OpenAI-compat) + fake provider, 3-stage validation, disable gate (D13); `make check` green. Δ2–Δ4 (typed dispatch/admission, Python+RAG, autonomy+LLMOps) remain | — |
+| **phase3-knowledge-feeds** (M7 follow-on) | **Implemented — 19/19 tasks, gated** (branch `phase3-evidence`) | 2026-07-23 | Makes the Knowledge feed layer production-real + closes the go-forward feed gaps found in the feed e2e verification (`docs/current-changes/FEED-E2E-VERIFICATION.md`): real **OSV query-by-package** + **NVD modified-since** fetch clients (behind M7's ports), **CVSS v4.0** in the vuln-facts ACL + `Reconcile` (go-forward **D-NVD-2**), **source-tier taxonomy** → tier-aware feed health (go-forward **D-FEED-2**), and **scanner reports as advisory source Proposals** (EDR-KNOWLEDGE-01 D5/D6). 5 task groups | `phase3-knowledge` (done); group 4 needs an Evidence `scanner-report` kind |
+| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (current arch frozen at v0.3.x) |
+| ~~themis-phase-2~~ | **Archived — superseded** (2026-07-14) | — | superseded by `docs/architecture/` + `docs/adr/`; reference input for Phase-3 grilling | archived → `changes/archive/2026-07-14-themis-phase-2/` |
+| ~~themis-ai-1~~ | **Archived — superseded** (2026-07-14) | — | never built; AI design folded into Phase-3 Intelligence (M4, INT ADRs) | archived → `changes/archive/2026-07-14-themis-ai-1/` |
+| ~~themis-phase-2b / 2c~~ | **Superseded by greenfield** | — | 2b folded into `themis-ai-1` (archived); 2c → Phase-3 Governance/Intelligence roadmap | — |
 
 ## Prerequisite Work
 

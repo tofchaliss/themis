@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: Themis Knowledge API
+  version: 1.0.0
+  description: >
+    Knowledge context (Phase-3 greenfield) — read the enterprise Faultline cards (the
+    reconciled view + source-proposal provenance) and the affected-releases rollup.
+    Read-only: cards evolve via feeds/correlation, not this API.
+servers:
+  - url: /api/v1
+paths:
+  /faultlines:
+    get:
+      operationId: getFaultlineByCVE
+      summary: Get a Faultline by canonical CVE.
+      parameters:
+        - name: cve
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultlineView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /faultlines/{id}:
+    get:
+      operationId: getFaultlineById
+      summary: Get a Faultline by its identity.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultlineView'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /faultlines/{id}/releases:
+    get:
+      operationId: getFaultlineReleases
+      summary: List the releases affected by a Faultline (rollup projection).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+components:
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    FaultlineView:
+      type: object
+      properties:
+        id:
+          type: string
+        cve:
+          type: string
+        stage:
+          type: string
+        view:
+          $ref: '#/components/schemas/EnterpriseView'
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalProvenance'
+    EnterpriseView:
+      type: object
+      properties:
+        severity:
+          type: string
+        cvss_score:
+          type: number
+        cvss_vector:
+          type: string
+        severity_source:
+          type: string
+        affected_ranges:
+          type: array
+          items:
+            type: string
+        fixed_versions:
+          type: array
+          items:
+            type: string
+        epss:
+          type: number
+        kev:
+          type: boolean
+        exploit_public:
+          type: boolean
+    ProposalProvenance:
+      type: object
+      properties:
+        source:
+          type: string
+        kind:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string

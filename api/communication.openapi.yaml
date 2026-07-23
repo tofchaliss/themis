@@ -1,0 +1,215 @@
+openapi: 3.0.3
+info:
+  title: Themis Communication API
+  version: 1.0.0
+  description: >
+    Communication context (Phase-3 greenfield) — the publication surface. Trigger the
+    materialization of an Enterprise Position into an audience artifact (human-triggered —
+    no automation), read recorded Publications and their (regenerable) payloads, list the
+    publishable-positions worklist, and preview a Position render without recording. The
+    artifact's stance is always fixed by the Position (never reinterpreted).
+servers:
+  - url: /api/v1
+paths:
+  /publications:
+    post:
+      operationId: createPublication
+      summary: Trigger materialization of a Position into a recorded Publication (human-triggered).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePublicationRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePublicationResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listPublications
+      summary: List recorded Publications for a Release.
+      parameters:
+        - name: release
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicationView'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /publications/{id}:
+    get:
+      operationId: getPublication
+      summary: Get a recorded Publication (payload regenerated if pruned).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /previews:
+    post:
+      operationId: previewPublication
+      summary: Render a Position into an artifact without recording a Publication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewRequest'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /publishable-positions:
+    get:
+      operationId: getPublishableQueue
+      summary: The analyst worklist — Positions ready to publish or gone stale.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueueEntryView'
+        '500':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: Error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    CreatePublicationRequest:
+      type: object
+      required: [finding_id, artifact_type, format]
+      properties:
+        finding_id:
+          type: string
+        artifact_type:
+          type: string
+          description: vex | advisory | notification | audit_report
+        format:
+          type: string
+          description: openvex | cyclonedx-vex | csaf | markdown | json-report | text
+        audience:
+          type: string
+        channel:
+          type: string
+    CreatePublicationResponse:
+      type: object
+      properties:
+        publication_id:
+          type: string
+    PreviewRequest:
+      type: object
+      required: [finding_id, artifact_type, format]
+      properties:
+        finding_id:
+          type: string
+        artifact_type:
+          type: string
+        format:
+          type: string
+    PreviewResponse:
+      type: object
+      properties:
+        payload:
+          type: string
+    PublicationView:
+      type: object
+      properties:
+        id:
+          type: string
+        artifact_type:
+          type: string
+        stance:
+          type: string
+        format:
+          type: string
+        audience:
+          type: string
+        channel:
+          type: string
+        position_version:
+          type: integer
+        release_id:
+          type: string
+        finding_id:
+          type: string
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        delivery_status:
+          type: string
+        superseded:
+          type: boolean
+        payload:
+          type: string
+    QueueEntryView:
+      type: object
+      properties:
+        finding_id:
+          type: string
+        release_id:
+          type: string
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        version:
+          type: integer
+        stance:
+          type: string
+        stale:
+          type: boolean
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string
