@@ -322,7 +322,7 @@ func TestRegistryUnknownFormat(t *testing.T) {
 	if outcome.Accepted || outcome.HTTPStatus != 422 {
 		t.Fatalf("outcome = %+v", outcome)
 	}
-	if len(outcome.SupportedFormats) != 4 {
+	if len(outcome.SupportedFormats) != 5 {
 		t.Fatalf("supported formats = %v", outcome.SupportedFormats)
 	}
 }

@@ -8,14 +8,15 @@ import (
 
 func TestSupportedSBOMFormats(t *testing.T) {
 	formats := domain.SupportedSBOMFormats()
-	if len(formats) != 4 {
-		t.Fatalf("SupportedSBOMFormats() len = %d, want 4", len(formats))
+	if len(formats) != 5 {
+		t.Fatalf("SupportedSBOMFormats() len = %d, want 5", len(formats))
 	}
 	want := map[string]bool{
 		domain.SBOMFormatCycloneDX: true,
 		domain.SBOMFormatSPDX:      true,
 		domain.SBOMFormatTrivy:     true,
 		domain.SBOMFormatGrype:     true,
+		domain.SBOMFormatSyft:      true,
 	}
 	for _, format := range formats {
 		if !want[format] {
