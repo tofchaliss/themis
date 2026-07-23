@@ -272,6 +272,7 @@ type nvdCVE struct {
 	Metrics struct {
 		CVSSMetricV31 []nvdCVSSMetricV3 `json:"cvssMetricV31"`
 		CVSSMetricV30 []nvdCVSSMetricV3 `json:"cvssMetricV30"`
+		CVSSMetricV40 []nvdCVSSMetricV3 `json:"cvssMetricV40"`
 		CVSSMetricV2  []nvdCVSSMetricV2 `json:"cvssMetricV2"`
 	} `json:"metrics"`
 }
@@ -343,9 +344,10 @@ func mapNVDCVE(cve nvdCVE) []domain.FeedVulnerability {
 }
 
 // extractNVDCVSS reads CVSS severity/score/vector in precedence order
-// v3.1 → v3.0 → v2.0, taking the first metric present. Previously only
-// cvssMetricV31 was read, so CVEs scored solely under v3.0 or v2.0 came back
-// severity=unknown/score=0 even though NVD had scored them (D-NVD-1 Finding 3).
+// v3.1 → v3.0 → v4.0 → v2.0, taking the first metric present. cvssMetricV40 was
+// added (D-NVD-2): recent CVEs NVD scores solely under CVSS 4.0 previously came back
+// severity=unknown/score=0. v3.1 stays first for cross-fleet comparability; v4.0 is the
+// fallback when it is the only score. (D-NVD-1 Finding 3 had added v3.0/v2.0.)
 func extractNVDCVSS(cve nvdCVE) (severity string, score float64, vector string) {
 	if len(cve.Metrics.CVSSMetricV31) > 0 {
 		m := cve.Metrics.CVSSMetricV31[0].CVSSData
@@ -353,6 +355,10 @@ func extractNVDCVSS(cve nvdCVE) (severity string, score float64, vector string) 
 	}
 	if len(cve.Metrics.CVSSMetricV30) > 0 {
 		m := cve.Metrics.CVSSMetricV30[0].CVSSData
+		return normalizeNVDSeverity(m.BaseSeverity, m.BaseScore), m.BaseScore, m.VectorString
+	}
+	if len(cve.Metrics.CVSSMetricV40) > 0 {
+		m := cve.Metrics.CVSSMetricV40[0].CVSSData
 		return normalizeNVDSeverity(m.BaseSeverity, m.BaseScore), m.BaseScore, m.VectorString
 	}
 	if len(cve.Metrics.CVSSMetricV2) > 0 {

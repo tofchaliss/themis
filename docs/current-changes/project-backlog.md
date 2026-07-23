@@ -1202,7 +1202,14 @@ severity by source precedence). Tracked as a cross-ref in `docs/engineering/PHAS
 
 **Go-forward status:** ✅ **realized in `phase3-knowledge-feeds`** (2026-07-23) — the Knowledge NVD client
 reads `cvssMetricV40` in the precedence `v3.1 → v3.0 → v4.0 → v2` (Primary > Secondary), so a v4.0-only CVE
-resolves to a real severity. The **v0.3.x monolith** fix in `internal/adapter/nvd`+`osv` here remains open.
+resolves to a real severity.
+
+**v0.3.x monolith:** ✅ the **NVD side is now fixed too** (2026-07-23) — `internal/adapter/nvd/client.go`
+`extractNVDCVSS` reads `cvssMetricV40` in precedence `v3.1 → v3.0 → v4.0 → v2` (test `TestClientFetchCVSSv40`).
+Verified live: 4/5 v4.0-only CVEs in the oamp scan resolved (`unknown → medium/low`); findings `unknown` 7 → 1
+(the 1 residual is a CVE NVD has not scored, not a code gap). Only the harder OSV vector-computation path
+(`internal/adapter/osv/cvss.go`) is left, and it is **not needed for NVD-scored CVEs** — the backfill supplies
+the score.
 
 **Cross-refs:** [D-NVD-1] (Finding 3 = the v3.1→v3.0→v2 parse this extends), [D-CVSS-1] (OSV-origin CVSS
 enrichment / CR-5 backfill + back-off), [D-FEED-1] (distro feeds as the *other* apk/rpm severity source).
