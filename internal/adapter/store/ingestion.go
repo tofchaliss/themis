@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -101,18 +102,36 @@ func (r *PostgresIngestionRepository) UpdateStatus(ctx context.Context, id strin
 func (r *PostgresIngestionRepository) Get(ctx context.Context, id string) (domain.IngestionRecord, error) {
 	var jobType, status string
 	var payloadBytes []byte
+	var createdAt time.Time
+	var startedAt, completedAt *time.Time
 	err := r.pool.QueryRow(ctx, `
-		SELECT job_type, status, payload
+		SELECT job_type, status, payload, created_at, started_at, completed_at
 		FROM ingestion_jobs
 		WHERE id = $1
-	`, id).Scan(&jobType, &status, &payloadBytes)
+	`, id).Scan(&jobType, &status, &payloadBytes, &createdAt, &startedAt, &completedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return domain.IngestionRecord{}, fmt.Errorf("ingestion %q not found", id)
 		}
 		return domain.IngestionRecord{}, fmt.Errorf("get ingestion job: %w", err)
 	}
-	return decodeIngestionRecord(id, jobType, status, payloadBytes)
+	record, err := decodeIngestionRecord(id, jobType, status, payloadBytes)
+	if err != nil {
+		return domain.IngestionRecord{}, err
+	}
+	record.CreatedAt = firstTime(startedAt, &createdAt)
+	record.UpdatedAt = firstTime(completedAt, startedAt, &createdAt)
+	return record, nil
+}
+
+// firstTime returns the first non-nil, non-zero time from candidates.
+func firstTime(candidates ...*time.Time) time.Time {
+	for _, c := range candidates {
+		if c != nil && !c.IsZero() {
+			return *c
+		}
+	}
+	return time.Time{}
 }
 
 func encodeIngestionPayload(record domain.IngestionRecord) ([]byte, error) {

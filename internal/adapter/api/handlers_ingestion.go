@@ -205,7 +205,7 @@ func (h *Handler) GetIngestion(w http.ResponseWriter, r *http.Request, id gen.In
 		Status:      string(record.Status),
 		StageDetail: ptrString(record.StageDetail),
 		StartedAt:   ptrTime(record.CreatedAt),
-		UpdatedAt:   ptrTime(record.CreatedAt),
+		UpdatedAt:   ptrTime(record.UpdatedAt),
 	}
 	if record.ScanID != "" {
 		scanID := parseUUID(record.ScanID)
