@@ -44,6 +44,10 @@ M5 event bus, the full-pipeline e2e, and the per-context follow-ups below.
 
 ## C. Deferred follow-ups inside completed contexts
 
+> **The Knowledge feed items below are promoted to `openspec/changes/phase3-knowledge-feeds`** (real OSV/NVD
+> fetch clients + CVSS 4.0 + source tiers + scanner-report Proposals — realizing the go-forward D-NVD-2 /
+> D-FEED-2). The remaining items stay open here.
+
 - [ ] **Knowledge — real feed-fetch HTTP clients.** The scheduled discovery/watch use real **OSV
   query-by-package** + **NVD modified-since** clients behind the existing `PackageVulnSource` /
   `ChangedVulnSource` ports (currently fakeable ports only). The G3 feed **ACLs already do the translation**;
