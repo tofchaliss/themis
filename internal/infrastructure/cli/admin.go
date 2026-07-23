@@ -143,6 +143,7 @@ func CreateKey(
 	record, err := keys.Create(ctx, domain.APIKeyCreateInput{
 		Name:      name,
 		KeyHash:   keyHash,
+		KeyPrefix: domain.APIKeyPrefix(rawKey),
 		Scopes:    scopes,
 		ExpiresAt: expiresAt,
 	})

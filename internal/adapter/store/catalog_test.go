@@ -328,10 +328,10 @@ func TestPostgresScannerConfigRepository(t *testing.T) {
 	}
 }
 
-func TestPostgresAPIKeyFindByHashPrefix(t *testing.T) {
-	repo := &PostgresAPIKeyRepository{pool: storeFakePool{conn: storeFakeConn{}}}
-	if _, err := repo.FindByHashPrefix(context.Background()); err == nil {
-		t.Fatal("expected not implemented error")
+func TestPostgresAPIKeyFindByPrefixQueryError(t *testing.T) {
+	repo := &PostgresAPIKeyRepository{pool: storeFakePool{conn: storeFakeConn{queryErr: errors.New("boom")}}}
+	if _, err := repo.FindByPrefix(context.Background(), "abcd1234"); err == nil {
+		t.Fatal("expected query error")
 	}
 }
 

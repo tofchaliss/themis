@@ -371,8 +371,14 @@ type fakeKeys struct {
 	keys []domain.APIKeyRecord
 }
 
-func (f *fakeKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) {
-	return f.keys, nil
+func (f *fakeKeys) FindByPrefix(_ context.Context, prefix string) ([]domain.APIKeyRecord, error) {
+	var out []domain.APIKeyRecord
+	for _, k := range f.keys {
+		if k.KeyPrefix == prefix {
+			out = append(out, k)
+		}
+	}
+	return out, nil
 }
 func (f *fakeKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error) { return f.keys, nil }
 func (f *fakeKeys) Create(context.Context, domain.APIKeyCreateInput) (domain.APIKeyRecord, error) {

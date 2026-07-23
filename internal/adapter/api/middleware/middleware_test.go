@@ -22,8 +22,21 @@ type staticKeys struct {
 	err  error
 }
 
-func (s *staticKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) { return s.keys, s.err }
-func (s *staticKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error)  { return s.keys, s.err }
+func (s *staticKeys) FindByPrefix(_ context.Context, prefix string) ([]domain.APIKeyRecord, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	var out []domain.APIKeyRecord
+	for _, k := range s.keys {
+		if k.KeyPrefix == prefix {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+func (s *staticKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error) {
+	return s.keys, s.err
+}
 func (s *staticKeys) Create(context.Context, domain.APIKeyCreateInput) (domain.APIKeyRecord, error) {
 	return domain.APIKeyRecord{}, nil
 }
