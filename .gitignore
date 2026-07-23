@@ -19,3 +19,6 @@
 
 # rapid property-test failure replay files (transient)
 **/testdata/rapid/
+
+# release-smoke-test.sh runtime log (transient)
+/themis-smoke.log
