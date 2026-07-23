@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/themis-project/themis/internal/adapter/api/gen"
+	"github.com/themis-project/themis/internal/domain"
 )
 
 // TestEnumsMatchGeneratedAPI is a drift guard: the MCP server mirrors a few
@@ -12,11 +13,9 @@ import (
 // file — imports the generated types and fails if the server ever adds or
 // renames a value, so the mirrored lists cannot silently fall out of sync.
 func TestEnumsMatchGeneratedAPI(t *testing.T) {
-	genFormats := []string{
-		string(gen.SBOMUploadRequestFormatCyclonedx),
-		string(gen.SBOMUploadRequestFormatSpdx),
-	}
-	assertSameSet(t, "sbom formats", sbomFormats, genFormats)
+	// SBOM formats mirror the parser registry (domain.SupportedSBOMFormats), not
+	// the OpenAPI enum, which is advisory and lists only cyclonedx/spdx.
+	assertSameSet(t, "sbom formats", sbomFormats, domain.SupportedSBOMFormats())
 
 	genDecisions := []string{
 		string(gen.FalsePositive),

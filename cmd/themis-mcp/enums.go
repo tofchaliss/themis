@@ -5,7 +5,8 @@ package main
 // imported — the drift guard in enums_test.go asserts they stay in lockstep
 // with the generated types in internal/adapter/api/gen.
 var (
-	sbomFormats          = []string{"cyclonedx", "spdx"}
+	// sbomFormats mirrors domain.SupportedSBOMFormats() (the parser registry).
+	sbomFormats          = []string{"cyclonedx", "spdx", "trivy", "grype", "syft"}
 	triageDecisions      = []string{"false_positive", "accepted_risk", "confirmed", "resolved", "escalate"}
 	notificationChannels = []string{"email", "slack", "webhook"}
 )

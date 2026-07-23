@@ -196,7 +196,7 @@ func registerWriteTools(s *mcp.Server, c *client) {
 
 	// --- SBOM ingestion (additive evidence) ----------------------------------
 	type uploadSBOMArgs struct {
-		Format           string         `json:"format" jsonschema:"SBOM format: cyclonedx or spdx"`
+		Format           string         `json:"format" jsonschema:"SBOM format: cyclonedx, spdx, trivy, grype, or syft"`
 		Document         map[string]any `json:"document,omitempty" jsonschema:"the SBOM as a JSON object (mutually exclusive with document_path)"`
 		DocumentPath     string         `json:"document_path,omitempty" jsonschema:"path to a local SBOM JSON file to read instead of inlining document"`
 		ArtifactID       string         `json:"artifact_id,omitempty" jsonschema:"the registered artifact UUID this SBOM describes"`
