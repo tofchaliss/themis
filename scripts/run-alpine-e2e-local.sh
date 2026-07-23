@@ -6,6 +6,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Resolve the Go toolchain portably (was hardcoded to /opt/homebrew/bin/go).
+GO="${GO:-$(command -v go || true)}"
+if [[ -z "$GO" ]]; then
+  for d in /opt/homebrew/bin /usr/local/go/bin /usr/lib/go/bin; do
+    [[ -x "$d/go" ]] && { GO="$d/go"; break; }
+  done
+fi
+[[ -n "$GO" ]] || { echo "go toolchain not found; set GO=/path/to/go" >&2; exit 1; }
+
 PORT="${THEMIS_E2E_PG_PORT:-15450}"
 HTTP_PORT="${THEMIS_E2E_HTTP_PORT:-8080}"
 BASE_URL="http://127.0.0.1:${HTTP_PORT}"
@@ -61,7 +70,7 @@ func main() {
 }
 EOF
 
-/opt/homebrew/bin/go run "${WORKDIR}/embeddedpg.go" "$PORT" "$WORKDIR/pg" >"${WORKDIR}/pg.out" &
+"$GO" run "${WORKDIR}/embeddedpg.go" "$PORT" "$WORKDIR/pg" >"${WORKDIR}/pg.out" &
 PG_PID=$!
 for _ in $(seq 1 45); do
   if grep -q '^postgres://' "${WORKDIR}/pg.out" 2>/dev/null; then

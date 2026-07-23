@@ -422,7 +422,7 @@ func TestWebhookValidationErrors(t *testing.T) {
 
 	body := []byte(`{"format":"cyclonedx","document":{},"image_digest":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -595,7 +595,7 @@ func TestWebhookInvalidJSON(t *testing.T) {
 	r := mountTestAPI(handler, adminKeyRepo(t))
 	body := []byte(`{`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -733,7 +733,7 @@ func TestWebhookWithOptionalFields(t *testing.T) {
 		MaxUploadSize: 1024,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
@@ -1051,6 +1051,7 @@ type richScans struct {
 	listScansErr      error
 	getScanErr        error
 	listVulnErr       error
+	gotLimit          int
 }
 
 func (s *richScans) ListProjectScans(_ context.Context, _ string, _ domain.PageRequest) ([]domain.ScanSummary, domain.PageResult, error) {
@@ -1071,7 +1072,8 @@ func (s *richScans) ListScanVulnerabilities(_ context.Context, _ string, _ domai
 	}
 	return s.vulnerabilities, s.page, nil
 }
-func (s *richScans) ListScopedVulnerabilities(_ context.Context, _ domain.FindingScope, _ domain.ScanVulnerabilityFilter, _ domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+func (s *richScans) ListScopedVulnerabilities(_ context.Context, _ domain.FindingScope, _ domain.ScanVulnerabilityFilter, page domain.PageRequest) ([]domain.ScanVulnerability, domain.PageResult, error) {
+	s.gotLimit = page.Limit
 	if s.listVulnErr != nil {
 		return nil, domain.PageResult{}, s.listVulnErr
 	}

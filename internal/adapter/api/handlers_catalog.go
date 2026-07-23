@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/themis-project/themis/internal/adapter/api/gen"
 	"github.com/themis-project/themis/internal/domain"
@@ -314,6 +314,7 @@ func (h *Handler) SubmitTriage(w http.ResponseWriter, r *http.Request, id gen.Vu
 		AcceptedUntil: req.AcceptedUntil,
 		AssignedTo:    derefString(req.AssignedTo),
 		Actor:         principal.KeyID,
+		SourceIP:      ClientIPFromContext(ctx),
 	})
 	if err != nil {
 		WriteProblem(w, r, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())

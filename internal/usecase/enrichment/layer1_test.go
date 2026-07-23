@@ -220,7 +220,7 @@ func (r *layer3Repo) UpsertRiskContext(context.Context, domain.EnrichmentFinding
 	return nil
 }
 func (r *layer3Repo) ArtifactForVEX(context.Context, string) (string, error) { return "", nil }
-func (r *layer3Repo) CountOpenRiskContexts(context.Context) (int, error)         { return 0, nil }
+func (r *layer3Repo) CountOpenRiskContexts(context.Context) (int, error)     { return 0, nil }
 func (r *layer3Repo) ListOpenRiskContexts(context.Context, int, int) ([]domain.OpenRiskContextRow, error) {
 	return nil, nil
 }

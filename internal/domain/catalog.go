@@ -131,6 +131,7 @@ type TriageDecision struct {
 	AcceptedUntil  *time.Time
 	AssignedTo     string
 	Actor          string
+	SourceIP       string
 	EffectiveState string
 }
 
@@ -159,6 +160,7 @@ type APIKeyRecord struct {
 	ID        string
 	Name      string
 	KeyHash   string
+	KeyPrefix string
 	Scopes    []string
 	ExpiresAt *time.Time
 	RevokedAt *time.Time
@@ -168,6 +170,7 @@ type APIKeyRecord struct {
 type APIKeyCreateInput struct {
 	Name      string
 	KeyHash   string
+	KeyPrefix string
 	Scopes    []string
 	ExpiresAt *time.Time
 }
@@ -186,6 +189,20 @@ const ScopeReadOnly = "read"
 
 // ProductScopePrefix prefixes product-scoped keys.
 const ProductScopePrefix = "product:"
+
+// APIKeyPrefixLen is the number of leading raw-key characters stored in plaintext
+// (indexed) so authentication can look up the candidate key by prefix instead of
+// bcrypt-scanning every active key.
+const APIKeyPrefixLen = 8
+
+// APIKeyPrefix returns the indexed lookup prefix of a raw API key, or "" when the
+// key is shorter than APIKeyPrefixLen (legacy or malformed keys have no prefix).
+func APIKeyPrefix(rawKey string) string {
+	if len(rawKey) < APIKeyPrefixLen {
+		return ""
+	}
+	return rawKey[:APIKeyPrefixLen]
+}
 
 // ProductCatalogRepository manages products, projects, versions, and artifacts.
 type ProductCatalogRepository interface {
@@ -270,7 +287,7 @@ type ScannerConfigRepository interface {
 
 // APIKeyRepository validates and manages caller credentials.
 type APIKeyRepository interface {
-	FindByHashPrefix(ctx context.Context) ([]APIKeyRecord, error)
+	FindByPrefix(ctx context.Context, prefix string) ([]APIKeyRecord, error)
 	FindActiveKeys(ctx context.Context) ([]APIKeyRecord, error)
 	Create(ctx context.Context, input APIKeyCreateInput) (APIKeyRecord, error)
 	Revoke(ctx context.Context, keyID string) error

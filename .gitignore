@@ -5,3 +5,6 @@
 
 # rapid property-test failure replay files (transient)
 **/testdata/rapid/
+/themis-mcp
+/themis
+*.pdf

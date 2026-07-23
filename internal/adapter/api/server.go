@@ -31,6 +31,7 @@ type Dependencies struct {
 	ThreatSignals domain.ThreatSignalStore
 	FeedHealth    domain.FeedHealthReader
 	Audit         domain.AuditRecorder
+	FeedSyncer    domain.FeedSyncer
 	MaxUpload     int64
 	TrustPolicy   domain.TrustPolicy
 }

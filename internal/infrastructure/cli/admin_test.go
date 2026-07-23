@@ -18,12 +18,18 @@ type memoryAPIKeys struct {
 	records []domain.APIKeyRecord
 }
 
-func (m *memoryAPIKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) {
-	return m.records, nil
+func (m *memoryAPIKeys) FindByPrefix(_ context.Context, prefix string) ([]domain.APIKeyRecord, error) {
+	var out []domain.APIKeyRecord
+	for _, r := range m.records {
+		if r.KeyPrefix == prefix {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
-func (m *memoryAPIKeys) FindActiveKeys(ctx context.Context) ([]domain.APIKeyRecord, error) {
-	return m.FindByHashPrefix(ctx)
+func (m *memoryAPIKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error) {
+	return m.records, nil
 }
 
 func (m *memoryAPIKeys) Create(_ context.Context, input domain.APIKeyCreateInput) (domain.APIKeyRecord, error) {
@@ -31,6 +37,7 @@ func (m *memoryAPIKeys) Create(_ context.Context, input domain.APIKeyCreateInput
 		ID:        "key-1",
 		Name:      input.Name,
 		KeyHash:   input.KeyHash,
+		KeyPrefix: input.KeyPrefix,
 		Scopes:    input.Scopes,
 		ExpiresAt: input.ExpiresAt,
 	}

@@ -1,15 +1,10 @@
 package enrichment
 
-// MetricsRecorder records Phase 2a enrichment observability counters.
+// MetricsRecorder records Phase 2a enrichment observability counters. A nil
+// recorder is tolerated by the handler (see recordMetrics), so no no-op
+// implementation is needed.
 type MetricsRecorder interface {
 	RecordLayer1Rule(level string)
 	RecordBlastRadiusScore(score float64)
 	RecordPURLMismatch(feed string)
 }
-
-// NoOpMetricsRecorder ignores enrichment metrics.
-type NoOpMetricsRecorder struct{}
-
-func (NoOpMetricsRecorder) RecordLayer1Rule(string)        {}
-func (NoOpMetricsRecorder) RecordBlastRadiusScore(float64) {}
-func (NoOpMetricsRecorder) RecordPURLMismatch(string)      {}

@@ -21,6 +21,8 @@ func TestParseRobustnessProperty(t *testing.T) {
 			domain.SBOMFormatCycloneDX,
 			domain.SBOMFormatSPDX,
 			domain.SBOMFormatTrivy,
+			domain.SBOMFormatGrype,
+			domain.SBOMFormatSyft,
 			"bogus",
 		}).Draw(t, "format")
 		specVersion := rapid.SampledFrom([]string{"", "1.6", "1.5", "2.3", "3.0", "1", "99"}).Draw(t, "spec")

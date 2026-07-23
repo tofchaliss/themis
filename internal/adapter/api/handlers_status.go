@@ -70,14 +70,14 @@ func toTopComponents(items []domain.TopComponentEntry) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		out = append(out, map[string]any{
-			"name":                 item.Name,
-			"version":              item.Version,
-			"purl":                 item.PURL,
-			"product_name":         item.ProductName,
-			"vulnerability_count":  item.VulnerabilityCount,
-			"highest_severity":     item.HighestSeverity,
-			"highest_cvss_score":   item.HighestCVSSScore,
-			"highest_cve_id":       item.HighestCVEID,
+			"name":                item.Name,
+			"version":             item.Version,
+			"purl":                item.PURL,
+			"product_name":        item.ProductName,
+			"vulnerability_count": item.VulnerabilityCount,
+			"highest_severity":    item.HighestSeverity,
+			"highest_cvss_score":  item.HighestCVSSScore,
+			"highest_cve_id":      item.HighestCVEID,
 		})
 	}
 	return out

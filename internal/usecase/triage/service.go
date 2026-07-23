@@ -102,6 +102,7 @@ func (h *Handler) Submit(ctx context.Context, decision domain.TriageDecision) (d
 			Action:       domain.AuditActionTriageDecision,
 			ResourceType: "component_vulnerability",
 			ResourceID:   decision.FindingID,
+			SourceIP:     decision.SourceIP,
 			Details: map[string]string{
 				"decision":      decision.Decision,
 				"justification": record.Justification,
@@ -114,6 +115,7 @@ func (h *Handler) Submit(ctx context.Context, decision domain.TriageDecision) (d
 				Action:       domain.AuditActionRiskStateTransition,
 				ResourceType: "component_vulnerability",
 				ResourceID:   decision.FindingID,
+				SourceIP:     decision.SourceIP,
 				Details: map[string]string{
 					"previous_state": finding.EffectiveState,
 					"new_state":      effectiveState,

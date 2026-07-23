@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gates: build, vet, lint, architecture, dead code, and unit tests.
+  # No database required.
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: golangci-lint (incl. depguard layer rules)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.6.0
+
+      - name: Clean Architecture (import direction)
+        run: make clean-arch
+
+      - name: Dead code
+        run: make deadcode
+
+      - name: Unit tests
+        run: go test ./...
+
+  # Integration + coverage: boots embedded Postgres per package and enforces the
+  # per-package coverage thresholds (scripts/check-coverage.sh).
+  integration-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Coverage (integration, per-package thresholds)
+        run: make coverage

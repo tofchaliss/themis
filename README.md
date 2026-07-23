@@ -190,7 +190,9 @@ normal until the first background NVD/OSV poll completes, and does not block ing
 export API_KEY="<key from output>"
 ```
 
-API calls then require `X-API-Key: $API_KEY`. Webhooks use HMAC-SHA256 (`X-Themis-Signature`).
+API calls then require `X-API-Key: $API_KEY`. Webhooks are replay-protected: send an
+`X-Themis-Timestamp` header (Unix seconds, within 5 minutes of the server clock) and
+`X-Themis-Signature` = HMAC-SHA256 of `<timestamp>.<raw-body>`.
 
 ### 9. Create a product (auto-creates a default project + `latest` version)
 
@@ -505,6 +507,64 @@ See [Getting Started](#getting-started) for Postgres setup, config, migrations, 
 
 Requires the same `THEMIS_DATABASE_DSN` (and optional `themis.yaml`) as the server.
 See [Getting Started § 8](#8-create-an-api-key).
+
+---
+
+## MCP Server (LLM access)
+
+`themis-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Themis to
+LLM clients (Claude Code / Claude Desktop and any MCP host) as tools. It is a standalone API client — it drives a
+running Themis over `/api/v1` and needs no database access of its own. Full reference:
+[`cmd/themis-mcp/README.md`](cmd/themis-mcp/README.md).
+
+### Build
+
+```sh
+go build -o bin/themis-mcp ./cmd/themis-mcp
+```
+
+### Configure
+
+A running server (see [Running](#running)) and an API key (see [API Key Management](#api-key-management)) are
+required; only the `themis_health` tool works without a key.
+
+| Setting | How | Default |
+| ------- | --- | ------- |
+| Themis base URL | `THEMIS_BASE_URL` / `--base-url` | `http://localhost:8080` |
+| API key | `THEMIS_API_KEY` | *(required for `/api/v1` tools)* |
+| Read-only mode | `THEMIS_MCP_READ_ONLY=1` / `--read-only` | off |
+| Transport | `--http :9000` for HTTP; omit for stdio | stdio |
+| HTTP timeout | `--timeout` | `60s` |
+
+### Run
+
+Stdio (a local client launches the binary):
+
+```sh
+claude mcp add themis \
+  --env THEMIS_API_KEY=<key> \
+  --env THEMIS_BASE_URL=http://localhost:8080 \
+  -- /path/to/bin/themis-mcp
+```
+
+Streamable HTTP (networked / shared gateway — put your own auth in front of it):
+
+```sh
+THEMIS_API_KEY=<key> ./bin/themis-mcp --http :9000
+```
+
+### Tools
+
+34 tools (21 in `--read-only`): status, products/projects/versions, artifacts, scans, findings, components,
+CVE-watch, SBOM list/upload, ingestion polling (with a wait-for-terminal helper), blast radius, VEX
+export/coverage, config, and the state-changing triage / VEX-upload / SBOM-delete / config-update paths. Read
+tools are annotated `readOnlyHint`; tools that change finding state or remove data are annotated
+`destructiveHint` so clients can prompt before calling them.
+
+> **Advisory-only (D-WRITE-1).** Themis holds that a finding's state should change only with a human in the
+> loop. The triage, VEX-upload, and SBOM-delete tools cross that line: they are enabled here but flagged
+> `destructiveHint`, attributed to the server's own API key in `audit_log`, and disabled entirely by
+> `--read-only`. Treat them as human-authorized actions.
 
 ---
 
@@ -1068,6 +1128,7 @@ build → unit tests → coverage → dead code → integration tests → clean 
 ```text
 themis/
 ├── cmd/themis/main.go            DI root — wires all layers together
+├── cmd/themis-mcp/               MCP server — exposes the REST API to LLM clients
 │
 ├── internal/
 │   ├── domain/                   Layer 1: pure types + port interfaces (stdlib only)

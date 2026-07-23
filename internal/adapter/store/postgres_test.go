@@ -491,7 +491,7 @@ func TestPostgresIngestionRepositorySuccess(t *testing.T) {
 	}
 	updatePool := seqFakePool{conn: &seqFakeConn{
 		rows: []pgx.Row{
-			scanRow{values: []any{"ingest_sbom", "running", getPayload}},
+			scanRow{values: []any{"ingest_sbom", "running", getPayload, time.Unix(1000, 0), nil, nil}},
 		},
 	}}
 	updateRepo := &PostgresIngestionRepository{pool: updatePool}
@@ -500,7 +500,7 @@ func TestPostgresIngestionRepositorySuccess(t *testing.T) {
 	}
 
 	getPool := seqFakePool{conn: &seqFakeConn{rows: []pgx.Row{
-		scanRow{values: []any{"ingest_sbom", "completed", getPayload}},
+		scanRow{values: []any{"ingest_sbom", "completed", getPayload, time.Unix(2000, 0), nil, nil}},
 	}}}
 	got, err := (&PostgresIngestionRepository{pool: getPool}).Get(ctx, "job-2")
 	if err != nil || got.Status != domain.IngestionStatusEnriching {

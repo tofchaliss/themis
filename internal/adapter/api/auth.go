@@ -18,6 +18,11 @@ func AuthFromContext(ctx context.Context) (domain.AuthPrincipal, bool) {
 	return middleware.AuthFromContext(ctx)
 }
 
+// ClientIPFromContext returns the captured client IP, or "".
+func ClientIPFromContext(ctx context.Context) string {
+	return middleware.ClientIPFromContext(ctx)
+}
+
 // AuthorizeProduct returns false when the principal cannot access a product.
 func AuthorizeProduct(principal domain.AuthPrincipal, productID string) bool {
 	if hasScope(principal.Scopes, domain.ScopeAdmin) {
@@ -35,6 +40,11 @@ func AuthorizeWriteConfig(principal domain.AuthPrincipal) bool {
 		return true
 	}
 	return !hasScope(principal.Scopes, domain.ScopeReadOnly)
+}
+
+// AuthorizeAdmin returns true only for admin-scoped keys (global operations).
+func AuthorizeAdmin(principal domain.AuthPrincipal) bool {
+	return hasScope(principal.Scopes, domain.ScopeAdmin)
 }
 
 func hasScope(scopes []string, target string) bool {

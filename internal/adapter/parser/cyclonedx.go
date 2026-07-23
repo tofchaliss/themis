@@ -161,4 +161,3 @@ func cycloneDXLicenses(licenses []cycloneDXLicense) []string {
 	}
 	return out
 }
-

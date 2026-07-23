@@ -1,7 +1,9 @@
-export PATH := /opt/homebrew/bin:$(PATH)
-
-# Prefer Homebrew Go (1.25+) over legacy /usr/local/go installs.
-GO ?= $(shell PATH="/opt/homebrew/bin:$$PATH" command -v go 2>/dev/null || command -v go)
+# Resolve the Go toolchain portably: whatever is on PATH, else common install
+# locations (Homebrew on macOS, /usr/local/go and others on Linux).
+GO ?= $(shell command -v go 2>/dev/null || \
+	for d in /opt/homebrew/bin /usr/local/go/bin /usr/lib/go/bin; do \
+		[ -x $$d/go ] && { echo $$d/go; break; }; \
+	done)
 MODULE := github.com/themis-project/themis
 BIN_DIR := bin
 BINARY := $(BIN_DIR)/themis

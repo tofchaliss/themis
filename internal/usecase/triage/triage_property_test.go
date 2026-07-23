@@ -37,7 +37,7 @@ func TestTriageStateMachineProperty(t *testing.T) {
 			FindingID:      "f1",
 			ComponentPURL:  "pkg:npm/a@1",
 			CVEID:          "CVE-1",
-			ArtifactID: "sbom-1",
+			ArtifactID:     "sbom-1",
 			SBOMChecksum:   "checksum",
 			RawSeverity:    rawSev,
 			EffectiveState: domain.EffectiveStateDetected,

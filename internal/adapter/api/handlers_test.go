@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,6 +19,14 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/usecase/triage"
 )
+
+// signWebhookReq applies the replay-protected webhook signature (timestamp +
+// HMAC over "<ts>.<body>") to a request.
+func signWebhookReq(req *http.Request, secret string, body []byte) {
+	ts := time.Now().Unix()
+	req.Header.Set("X-Themis-Timestamp", strconv.FormatInt(ts, 10))
+	req.Header.Set("X-Themis-Signature", apimiddleware.SignWebhook(secret, ts, body))
+}
 
 func TestUploadSBOMRequiresAPIKey(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{})
@@ -98,9 +107,9 @@ func TestWebhookInvalidSignature(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{Dispatcher: &fakeDispatcher{}})
 	r := chi.NewRouter()
 	api.Mount(r, api.MountConfig{
-		Handler:     handler,
-		APIKeyAuth:  apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
-		WebhookAuth: apimiddleware.WebhookAuth{Secret: "topsecret"},
+		Handler:       handler,
+		APIKeyAuth:    apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
+		WebhookAuth:   apimiddleware.WebhookAuth{Secret: "topsecret"},
 		MaxUploadSize: 1024,
 	})
 
@@ -118,14 +127,14 @@ func TestWebhookAccepted(t *testing.T) {
 	body := []byte(`{"format":"cyclonedx","document":{},"image_digest":"sha256:abc"}`)
 	r := chi.NewRouter()
 	api.Mount(r, api.MountConfig{
-		Handler:     handler,
-		APIKeyAuth:  apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
-		WebhookAuth: apimiddleware.WebhookAuth{Secret: "topsecret"},
+		Handler:       handler,
+		APIKeyAuth:    apimiddleware.APIKeyAuth{Keys: adminKeyRepo(t)},
+		WebhookAuth:   apimiddleware.WebhookAuth{Secret: "topsecret"},
 		MaxUploadSize: 1024,
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
@@ -300,8 +309,8 @@ func (f *fakeJobs) Get(context.Context, string) (domain.IngestionRecord, error) 
 }
 
 type fakeCatalog struct {
-	products         []domain.Product
-	listProductsErr  error
+	products        []domain.Product
+	listProductsErr error
 }
 
 func (f *fakeCatalog) CreateProduct(context.Context, string, string) (domain.Product, error) {
@@ -371,8 +380,16 @@ type fakeKeys struct {
 	keys []domain.APIKeyRecord
 }
 
-func (f *fakeKeys) FindByHashPrefix(context.Context) ([]domain.APIKeyRecord, error) { return f.keys, nil }
-func (f *fakeKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error)  { return f.keys, nil }
+func (f *fakeKeys) FindByPrefix(_ context.Context, prefix string) ([]domain.APIKeyRecord, error) {
+	var out []domain.APIKeyRecord
+	for _, k := range f.keys {
+		if k.KeyPrefix == prefix {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+func (f *fakeKeys) FindActiveKeys(context.Context) ([]domain.APIKeyRecord, error) { return f.keys, nil }
 func (f *fakeKeys) Create(context.Context, domain.APIKeyCreateInput) (domain.APIKeyRecord, error) {
 	return domain.APIKeyRecord{}, nil
 }

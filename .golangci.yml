@@ -37,6 +37,7 @@ linters:
         cmd-infrastructure-only:
           files:
             - "cmd/**"
+            - "!cmd/themis-mcp/**"
           allow:
             - $gostd
             - github.com/themis-project/themis/internal/infrastructure/config
@@ -45,6 +46,14 @@ linters:
             - github.com/themis-project/themis/internal/infrastructure/http/middleware
             - github.com/themis-project/themis/internal/infrastructure/metrics
             - github.com/themis-project/themis/internal/infrastructure/queue
+        # The MCP server is a standalone API client (talks to Themis over HTTP),
+        # so it may import the MCP SDK but must stay decoupled from the core layers.
+        themis-mcp-sdk-only:
+          files:
+            - "cmd/themis-mcp/**"
+          allow:
+            - $gostd
+            - github.com/modelcontextprotocol/go-sdk
         no-format-leakage:
           files:
             - "**/*.go"

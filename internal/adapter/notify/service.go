@@ -113,8 +113,11 @@ func (s *Service) deliverRule(ctx context.Context, rule domain.NotificationRule,
 	case domain.NotificationChannelWebhook:
 		return s.deliverTeams(ctx, rule.Destination, event)
 	case domain.NotificationChannelSlack:
-		s.logger.Info("slack channel not implemented in phase 1", "rule", rule.Name)
-		return nil
+		return s.deliverSlack(ctx, rule.Destination, event)
+	case domain.NotificationChannelGenericWebhook:
+		return s.deliverGenericWebhook(ctx, rule.Destination, event)
+	case domain.NotificationChannelPagerDuty:
+		return s.deliverPagerDuty(ctx, rule.Destination, event)
 	default:
 		return fmt.Errorf("unsupported notification channel %q", rule.Channel)
 	}

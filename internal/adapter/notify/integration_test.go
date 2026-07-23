@@ -50,9 +50,9 @@ func TestNotificationServiceIntegration(t *testing.T) {
 		SMTP: SMTPSettings{
 			Host: host, Port: smtpPort, From: "alerts@themis.local", UseTLS: false,
 		},
-		MaxRetry:     1,
-		BaseDelay:    time.Millisecond,
-		Logger:       slog.New(slog.NewTextHandler(&logBuf, nil)),
+		MaxRetry:  1,
+		BaseDelay: time.Millisecond,
+		Logger:    slog.New(slog.NewTextHandler(&logBuf, nil)),
 		RecordMetric: func(channelType, status string) {
 			metricCalls = append(metricCalls, struct {
 				channel string

@@ -19,7 +19,10 @@ func (h *Handler) UploadSBOM(w http.ResponseWriter, r *http.Request, params gen.
 		WriteProblem(w, r, http.StatusUnauthorized, "Unauthorized", "missing authentication")
 		return
 	}
-	_ = principal
+	if !AuthorizeWriteConfig(principal) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "write scope required; read-only keys cannot ingest")
+		return
+	}
 
 	var req gen.SBOMUploadRequest
 	contentType := r.Header.Get("Content-Type")
@@ -89,8 +92,13 @@ func (h *Handler) UploadSBOM(w http.ResponseWriter, r *http.Request, params gen.
 
 func (h *Handler) UploadVEX(w http.ResponseWriter, r *http.Request, params gen.UploadVEXParams) {
 	ctx := r.Context()
-	if _, ok := AuthFromContext(ctx); !ok {
+	principal, ok := AuthFromContext(ctx)
+	if !ok {
 		WriteProblem(w, r, http.StatusUnauthorized, "Unauthorized", "missing authentication")
+		return
+	}
+	if !AuthorizeWriteConfig(principal) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "write scope required; read-only keys cannot upload VEX")
 		return
 	}
 	var req gen.VEXUploadRequest
@@ -197,7 +205,7 @@ func (h *Handler) GetIngestion(w http.ResponseWriter, r *http.Request, id gen.In
 		Status:      string(record.Status),
 		StageDetail: ptrString(record.StageDetail),
 		StartedAt:   ptrTime(record.CreatedAt),
-		UpdatedAt:   ptrTime(record.CreatedAt),
+		UpdatedAt:   ptrTime(record.UpdatedAt),
 	}
 	if record.ScanID != "" {
 		scanID := parseUUID(record.ScanID)

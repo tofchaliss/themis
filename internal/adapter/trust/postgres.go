@@ -123,10 +123,14 @@ func recordAudit(ctx context.Context, conn pgConn, entry domain.AuditEntry) erro
 		}
 	}
 
+	var sourceIP *string
+	if entry.SourceIP != "" {
+		sourceIP = &entry.SourceIP
+	}
 	_, err = conn.Exec(ctx, `
-		INSERT INTO audit_log (actor, action, resource_type, resource_id, details)
-		VALUES ($1, $2, $3, $4, $5::jsonb)
-	`, entry.Actor, entry.Action, entry.ResourceType, resourceID, details)
+		INSERT INTO audit_log (actor, action, resource_type, resource_id, details, source_ip)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+	`, entry.Actor, entry.Action, entry.ResourceType, resourceID, details, sourceIP)
 	if err != nil {
 		return fmt.Errorf("insert audit log: %w", err)
 	}

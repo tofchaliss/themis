@@ -73,32 +73,9 @@ func unknownSeverityFloor(effectiveState string, kevListed, exploitPublic bool) 
 	}
 }
 
-// ComputeRiskScore applies the Phase 1 severity × effective-state formula.
+// ComputeRiskScore applies the Phase 1 severity × effective-state formula. It
+// delegates to the canonical domain.ComputeRiskScore so enrichment and triage
+// cannot drift.
 func ComputeRiskScore(rawSeverity, effectiveState string) int {
-	base := baseScore(rawSeverity)
-	switch strings.ToLower(effectiveState) {
-	case domain.EffectiveStateSuppressed, domain.EffectiveStateFalsePositive, domain.EffectiveStateAcceptedRisk, domain.EffectiveStateNotAffected:
-		return int(math.Round(float64(base) * 0.1))
-	case domain.EffectiveStateConfirmed:
-		return int(math.Min(100, math.Round(float64(base)*1.2)))
-	case domain.EffectiveStateResolved:
-		return 0
-	default:
-		return base
-	}
-}
-
-func baseScore(rawSeverity string) int {
-	switch strings.ToLower(strings.TrimSpace(rawSeverity)) {
-	case "critical":
-		return 90
-	case "high":
-		return 70
-	case "medium":
-		return 40
-	case "low":
-		return 10
-	default:
-		return 0
-	}
+	return domain.ComputeRiskScore(rawSeverity, effectiveState)
 }

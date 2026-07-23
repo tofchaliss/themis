@@ -26,7 +26,7 @@ func (q *stubQueue) Enqueue(_ context.Context, job domain.Job) (string, error) {
 }
 
 func (q *stubQueue) Consume(context.Context) (<-chan domain.Job, error) { return nil, nil }
-func (q *stubQueue) Ack(context.Context, string) error                    { return nil }
+func (q *stubQueue) Ack(context.Context, string) error                  { return nil }
 
 func TestEnqueueSenderDispatch(t *testing.T) {
 	queue := &stubQueue{}

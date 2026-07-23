@@ -8,13 +8,13 @@ import (
 
 func TestNormalizeEventType(t *testing.T) {
 	cases := map[string]string{
-		"ingestion":                          domain.NotificationEventIngestionCompleted,
-		"INGESTION_COMPLETE":               domain.NotificationEventIngestionCompleted,
+		"ingestion":          domain.NotificationEventIngestionCompleted,
+		"INGESTION_COMPLETE": domain.NotificationEventIngestionCompleted,
 		domain.NotificationEventIngestionRejected: domain.NotificationEventIngestionRejected,
 		domain.NotificationEventCVEWatchFinding:   domain.NotificationEventCVEWatchFinding,
 		domain.NotificationEventTriageDecision:    domain.NotificationEventTriageDecision,
 		domain.NotificationEventVEXUpdated:        domain.NotificationEventVEXUpdated,
-		"custom":                             "custom",
+		"custom":                                  "custom",
 	}
 	for in, want := range cases {
 		if got := normalizeEventType(in); got != want {
