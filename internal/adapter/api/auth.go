@@ -42,6 +42,11 @@ func AuthorizeWriteConfig(principal domain.AuthPrincipal) bool {
 	return !hasScope(principal.Scopes, domain.ScopeReadOnly)
 }
 
+// AuthorizeAdmin returns true only for admin-scoped keys (global operations).
+func AuthorizeAdmin(principal domain.AuthPrincipal) bool {
+	return hasScope(principal.Scopes, domain.ScopeAdmin)
+}
+
 func hasScope(scopes []string, target string) bool {
 	for _, scope := range scopes {
 		if scope == target {

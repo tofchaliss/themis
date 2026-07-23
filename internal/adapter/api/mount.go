@@ -34,6 +34,7 @@ func Mount(r chi.Router, cfg MountConfig) {
 		r.Post("/products/{id}/microservices", cfg.Handler.CreateMicroservice)
 		r.Post("/microservices/{id}/deployments", cfg.Handler.CreateDeployment)
 		r.Post("/customers", cfg.Handler.CreateCustomer)
+		r.Post("/admin/feeds/{feed}/sync", cfg.Handler.TriggerFeedSync)
 		r.Get("/products/{id}/blast-radius", cfg.Handler.GetProductBlastRadius)
 		r.Get("/products/{id}/vulnerabilities", cfg.Handler.ListProductVulnerabilities)
 		r.Get("/projects/{id}/vulnerabilities", cfg.Handler.ListProjectVulnerabilities)

@@ -257,9 +257,9 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		// in-memory distro index each cycle (OSV.dev/NVD already covered by the bulk
 		// fetch above — no duplicate network query).
 		Correlator: correlation.NewCorrelator(appLog, distroSource),
-		Repo:    watchRepo,
-		Notify:  notify.EnqueueSender{Queue: cfg.InProcessQueue},
-		Metrics: metrics.WatchRecorder{},
+		Repo:       watchRepo,
+		Notify:     notify.EnqueueSender{Queue: cfg.InProcessQueue},
+		Metrics:    metrics.WatchRecorder{},
 		OnSuccess: func(ts time.Time) {
 			if cfg.CVEFeedSuccess != nil {
 				cfg.CVEFeedSuccess.Store(ts)
@@ -294,6 +294,13 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		Logger:   appLog,
 	}, cfg.AppConfig.VEXFeed.PollInterval, appLog, feedHealth)
 
+	adminFeedSyncer := feedSyncer{fns: map[string]func(context.Context) error{
+		"epsskev":   func(c context.Context) error { runEPSSKevCycle(c, epssKevSvc, appLog, feedHealth); return nil },
+		"exploitdb": func(c context.Context) error { runExploitDBCycle(c, exploitDBSvc, appLog, feedHealth); return nil },
+		"vexfeed":   func(c context.Context) error { runVEXFeedCycle(c, vexFeedSvc, appLog, feedHealth); return nil },
+		"watch":     func(c context.Context) error { runWatchCycle(c, watchSvc, appLog, feedHealth); return nil },
+	}}
+
 	handler := api.NewHandler(api.Dependencies{
 		Ingestion:     pipeline,
 		Jobs:          jobs,
@@ -313,6 +320,7 @@ func MountAPI(ctx context.Context, r chi.Router, cfg APIConfig) {
 		ThreatSignals: threatSignals,
 		FeedHealth:    feedHealth,
 		Audit:         audit,
+		FeedSyncer:    adminFeedSyncer,
 		MaxUpload:     cfg.AppConfig.Upload.MaxSizeBytes,
 		TrustPolicy:   domain.TrustPolicy(cfg.AppConfig.Trust.DefaultPolicy),
 	})
