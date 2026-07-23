@@ -3,11 +3,9 @@ package middleware_test
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -191,6 +189,7 @@ func TestWebhookAuthReadBodyError(t *testing.T) {
 	auth := middleware.WebhookAuth{Secret: "topsecret"}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/hook", errReader{})
+	req.Header.Set("X-Themis-Timestamp", strconv.FormatInt(time.Now().Unix(), 10))
 	req.Header.Set("X-Themis-Signature", "abc")
 	auth.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -201,14 +200,13 @@ func TestWebhookAuthReadBodyError(t *testing.T) {
 func TestWebhookAuthValidDefaultVerify(t *testing.T) {
 	secret := "topsecret"
 	body := []byte(`{"ok":true}`)
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write(body)
-	signature := hex.EncodeToString(mac.Sum(nil))
+	ts := time.Now().Unix()
 
 	auth := middleware.WebhookAuth{Secret: secret}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/hook", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", signature)
+	req.Header.Set("X-Themis-Timestamp", strconv.FormatInt(ts, 10))
+	req.Header.Set("X-Themis-Signature", middleware.SignWebhook(secret, ts, body))
 	auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	})).ServeHTTP(rec, req)

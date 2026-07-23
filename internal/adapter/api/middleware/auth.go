@@ -136,22 +136,29 @@ func (a APIKeyAuth) match(keys []domain.APIKeyRecord, raw string, onlyLegacy boo
 	return domain.AuthPrincipal{}, false
 }
 
-// WebhookAuth validates HMAC signatures for CI webhooks.
+// WebhookAuth validates replay-protected HMAC signatures for CI webhooks.
 type WebhookAuth struct {
 	Secret string
+	Now    func() time.Time
 	Verify func(secret string, r *http.Request) bool
 }
 
 // Middleware validates webhook signatures.
 func (w WebhookAuth) Middleware(next http.Handler) http.Handler {
+	now := w.Now
+	if now == nil {
+		now = time.Now
+	}
+	verify := w.Verify
+	if verify == nil {
+		verify = func(secret string, r *http.Request) bool {
+			return verifyWebhook(secret, r, now())
+		}
+	}
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if w.Secret == "" {
 			writeProblem(rw, r, http.StatusUnauthorized, "Unauthorized", "webhook secret not configured")
 			return
-		}
-		verify := w.Verify
-		if verify == nil {
-			verify = defaultWebhookVerify
 		}
 		if !verify(w.Secret, r) {
 			writeProblem(rw, r, http.StatusUnauthorized, "Unauthorized", "invalid webhook signature")

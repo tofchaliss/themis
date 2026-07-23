@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,6 +19,14 @@ import (
 	"github.com/themis-project/themis/internal/domain"
 	"github.com/themis-project/themis/internal/usecase/triage"
 )
+
+// signWebhookReq applies the replay-protected webhook signature (timestamp +
+// HMAC over "<ts>.<body>") to a request.
+func signWebhookReq(req *http.Request, secret string, body []byte) {
+	ts := time.Now().Unix()
+	req.Header.Set("X-Themis-Timestamp", strconv.FormatInt(ts, 10))
+	req.Header.Set("X-Themis-Signature", apimiddleware.SignWebhook(secret, ts, body))
+}
 
 func TestUploadSBOMRequiresAPIKey(t *testing.T) {
 	handler := api.NewHandler(api.Dependencies{})
@@ -125,7 +134,7 @@ func TestWebhookAccepted(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {

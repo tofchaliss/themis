@@ -190,7 +190,9 @@ normal until the first background NVD/OSV poll completes, and does not block ing
 export API_KEY="<key from output>"
 ```
 
-API calls then require `X-API-Key: $API_KEY`. Webhooks use HMAC-SHA256 (`X-Themis-Signature`).
+API calls then require `X-API-Key: $API_KEY`. Webhooks are replay-protected: send an
+`X-Themis-Timestamp` header (Unix seconds, within 5 minutes of the server clock) and
+`X-Themis-Signature` = HMAC-SHA256 of `<timestamp>.<raw-body>`.
 
 ### 9. Create a product (auto-creates a default project + `latest` version)
 

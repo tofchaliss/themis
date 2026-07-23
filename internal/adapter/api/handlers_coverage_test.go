@@ -422,7 +422,7 @@ func TestWebhookValidationErrors(t *testing.T) {
 
 	body := []byte(`{"format":"cyclonedx","document":{},"image_digest":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -595,7 +595,7 @@ func TestWebhookInvalidJSON(t *testing.T) {
 	r := mountTestAPI(handler, adminKeyRepo(t))
 	body := []byte(`{`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -733,7 +733,7 @@ func TestWebhookWithOptionalFields(t *testing.T) {
 		MaxUploadSize: 1024,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/scan", bytes.NewReader(body))
-	req.Header.Set("X-Themis-Signature", api.SignHMAC("topsecret", body))
+	signWebhookReq(req, "topsecret", body)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
