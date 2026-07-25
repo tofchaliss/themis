@@ -27,6 +27,10 @@ type Metadata struct {
 	Model         string
 	TokensUsed    int
 	Duration      time.Duration
+	// DecidedBy records which plan step produced the recommendation — "rule:<stance>"
+	// (a deterministic short-circuit) or "llm:<stance>" (the model). It is the
+	// testability hook for the two-step plan and the metric source for can't-determine.
+	DecidedBy string
 }
 
 // Proposal is Intelligence's only output: a structured, schema-validated advisory

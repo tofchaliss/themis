@@ -70,6 +70,90 @@ func TestOllamaProviderHappy(t *testing.T) {
 	}
 }
 
+func TestOllamaProviderAPIKey(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{}"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	// With a key → Authorization: Bearer <key> (OpenAI / LM Studio / vLLM auth).
+	p := NewOllamaProvider(srv.URL, "m", srv.Client()).WithAPIKey("sk-secret")
+	if _, err := p.Complete(context.Background(), app.CompletionRequest{Prompt: "hi"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if gotAuth != "Bearer sk-secret" {
+		t.Errorf("Authorization = %q, want Bearer sk-secret", gotAuth)
+	}
+
+	// Without a key → no Authorization header (Ollama's default needs none).
+	gotAuth = "sentinel"
+	if _, err := NewOllamaProvider(srv.URL, "m", srv.Client()).Complete(context.Background(), app.CompletionRequest{Prompt: "hi"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("no key must send no Authorization header, got %q", gotAuth)
+	}
+}
+
+func TestOllamaResponseFormat(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody = nil
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{}"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	rf := func(mode string, schema string) map[string]any {
+		p := NewOllamaProvider(srv.URL, "m", srv.Client()).WithResponseFormat(mode)
+		if _, err := p.Complete(context.Background(), app.CompletionRequest{Prompt: "hi", JSONSchema: schema}); err != nil {
+			t.Fatalf("Complete(%q): %v", mode, err)
+		}
+		if gotBody["response_format"] == nil {
+			return nil
+		}
+		return gotBody["response_format"].(map[string]any)
+	}
+	const schema = `{"type":"object"}`
+
+	if got := rf("", schema); got == nil || got["type"] != "json_object" {
+		t.Errorf(`default → %v, want json_object`, got)
+	}
+	if got := rf("json_object", schema); got["type"] != "json_object" {
+		t.Errorf("json_object → %v", got)
+	}
+	if got := rf("json_schema", schema); got == nil || got["type"] != "json_schema" || got["json_schema"] == nil {
+		t.Errorf("json_schema → %v, want type json_schema + schema", got)
+	}
+	if got := rf("text", schema); got["type"] != "text" {
+		t.Errorf("text → %v", got)
+	}
+	if got := rf("none", schema); got != nil {
+		t.Errorf("none → %v, want omitted", got)
+	}
+	if got := rf("json_object", ""); got != nil {
+		t.Errorf("no schema must omit response_format, got %v", got)
+	}
+}
+
+func TestStripCodeFences(t *testing.T) {
+	cases := map[string]string{
+		"```json\n{\"a\":1}\n```": `{"a":1}`, // language tag dropped
+		"```\n{\"a\":1}\n```":     `{"a":1}`, // bare fence
+		"```{\"a\":1}\n```":       `{"a":1}`, // first line already content → not dropped
+		`{"a":1}`:                 `{"a":1}`, // unfenced → unchanged
+	}
+	for in, want := range cases {
+		if got := stripCodeFences(in); got != want {
+			t.Errorf("stripCodeFences(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestOllamaProviderErrors(t *testing.T) {
 	cases := []struct {
 		name    string

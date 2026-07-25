@@ -62,7 +62,11 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	if err != nil || !produced {
 		return "", false, nil // disabled ≡ unavailable — a safe no-proposal outcome
 	}
-	rationale := fmt.Sprintf("AI recommendation (confidence %.2f): %s", rec.Confidence, rec.Reasoning)
+	provenance := ""
+	if rec.DecidedBy != "" {
+		provenance = " [" + rec.DecidedBy + "]"
+	}
+	rationale := fmt.Sprintf("AI recommendation%s (confidence %.2f): %s", provenance, rec.Confidence, rec.Reasoning)
 	proposer := domain.Actor{Kind: domain.ActorAI, ID: rec.Capability}
 	pid, err := s.RaiseProposal(ctx, findingID, proposer, domain.Stance(rec.Stance), rationale)
 	if err != nil {

@@ -85,6 +85,10 @@ vexfeed:
 intelligence:
   # Unique Customer count at which blast-radius score multiplier caps (default 10 → 2.0×)
   blast_radius_cap: 10
+  # Phase-3 Gateway (greenfield): optional LLM bearer token for an authenticated
+  # OpenAI-compatible server (OpenAI, LM Studio "Require API Key", vLLM). Set the real value
+  # via THEMIS_LLM_API_KEY in the environment — never commit it here.
+  llm_api_key: ""
 
 log:
   level: info   # override with THEMIS_LOG_LEVEL (debug|info|warn|error)

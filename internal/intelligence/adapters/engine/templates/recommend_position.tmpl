@@ -16,13 +16,16 @@ affected by a specific vulnerability, and explain why.
 - public_exploit: {{.Faultline.ExploitPublic}}
 - fixed_versions: {{range .Faultline.FixedVersions}}{{.}} {{end}}
 - affected_ranges: {{range .Faultline.AffectedRanges}}{{.}} {{end}}
-
+{{if .Precedents}}
+## Prior enterprise decisions on this CVE (other releases — consider for consistency, do not blindly copy)
+{{range .Precedents}}- release {{.ReleaseID}}: {{.Stance}} — {{.Rationale}}
+{{end}}{{end}}
 ## Instructions
 Respond with a single JSON object ONLY (no prose), matching exactly:
-{"finding_id":"{{.Finding.ID}}","recommended_stance":"affected|not_affected|mitigated","confidence":0.0,"evidence":[{"kind":"...","ref":"..."}],"reasoning":"..."}
+{"finding_id":"{{.Finding.ID}}","recommended_stance":"affected|not_affected|mitigated|insufficient","confidence":0.0,"evidence":[{"kind":"...","ref":"..."}],"reasoning":"..."}
 
 Rules:
-- recommended_stance must be one of: affected, not_affected, mitigated.
+- recommended_stance must be one of: affected, not_affected, mitigated, or insufficient (use insufficient when the evidence is not enough to determine — an honest "no recommendation").
 - confidence is a number between 0 and 1.
 - Cite evidence only using identifiers shown above: the finding_id, the faultline id {{.Faultline.ID}}, the cve {{.Faultline.CVE}}, or a component purl. Do not invent identifiers.
 - finding_id must equal {{.Finding.ID}}.

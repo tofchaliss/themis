@@ -55,6 +55,23 @@ curl -s -X POST localhost:8086/api/v1/capabilities/recommend_position/invoke \
 > ([API.md](API.md)). The **automated** grounding→validation→proposal path is fully proven without any of
 > this — see `go test ./internal/intelligence/...` (`e2e_test.go` drives the whole stack over httptest).
 
+**Automated real-model check.** `make e2e-llm` runs `recommend_position` over a **real** OpenAI-compatible
+server and asserts the output passes validation (`200` with an `llm:<stance>` provenance, or an honest `204`).
+The provider is a pure OpenAI-compatible client, so it works with **Ollama**, **LM Studio**, or **vLLM** — but
+they differ on two knobs the provider now supports: an optional bearer token (`THEMIS_LLM_API_KEY`) and the
+structured-output mode (`THEMIS_LLM_RESPONSE_FORMAT`: empty `json_object` for Ollama; `json_schema` for LM
+Studio / OpenAI; `text`; `none`). It **skips** when no server is up, so it never blocks CI:
+
+```sh
+# Ollama:
+THEMIS_LLM_URL=http://localhost:11434 THEMIS_LLM_MODEL=llama3.1:8b make e2e-llm
+# LM Studio (Require-API-Key ON; bind may be a LAN IP, not localhost; needs json_schema):
+THEMIS_LLM_URL=http://<host>:1234 THEMIS_LLM_MODEL=<model> \
+  THEMIS_LLM_API_KEY=<key> THEMIS_LLM_RESPONSE_FORMAT=json_schema make e2e-llm
+```
+
+Verified 2026-07-25 against LM Studio (WhiteRabbitNeo-V3-7B) → a validated `affected` proposal in ~16s.
+
 **3. The human-triggered Governance seam.** A human asks Governance for an AI recommendation; Governance
 (when AI is enabled) invokes the Gateway and records an **advisory AI proposal** — never auto-accepted:
 
@@ -76,6 +93,34 @@ curl -s localhost:8083/api/v1/findings/$FINDING | jq '.proposals'   # inspect th
 **4. Disable gate.** With `THEMIS_GOVERNANCE_AI_ENABLED` unset (or `cmd/intelligence` not running),
 `POST /findings/{id}/recommend` returns `204`, no proposal is recorded, and Governance makes **zero**
 outbound calls — the pipeline is unchanged. "Off", "down", and "declined" all collapse to the same `204`.
+
+**5. Δ2 — the two-step `[Rule → LLM]` recommendation (deterministic-first).** `recommend_position` now runs a
+**version-range rule first** and calls the model only when the rule can't decide:
+
+- **Provably out of range → deterministic `not_affected`; the model is never called.** The response carries
+  `"decided_by":"rule:not_affected"`. Fastest proof — no model, no services:
+
+  ```sh
+  go test ./internal/kernel/value/ ./internal/intelligence/...   # version-range engine + the whole Δ2 flow
+  ```
+
+  Over the wire, this needs grounding where the installed component version is **outside** the Faultline's
+  `affected_ranges` (e.g. component `pkg:golang/x@2.0.0` vs range `<1.2`). The model may return `affected` and
+  the Gateway still answers `not_affected` — the rule wins. `internal/intelligence/adapters/http/e2e_test.go`
+  (`TestE2ERuleShortCircuitsOverTheWire`) drives exactly this over httptest.
+- **In range / unknown ecosystem / no range → the model runs** (item 2); the response carries
+  `"decided_by":"llm:<stance>"`.
+- **Honest "can't determine".** When the model declines (`recommended_stance:"insufficient"`) or the facts are
+  too thin, the Gateway returns **`204`** — a first-class **non-error** "no recommendation", distinct from AI
+  being off. The recorded Governance rationale keeps the provenance, e.g. `AI recommendation [llm:affected] …`.
+- **Richer grounding (precedent).** On the model path the Gateway also pulls our **own past Positions on the
+  same CVE** from other releases (composed from Governance's `blast-radius` + `find-by-key`) and labels them
+  into the prompt as *context, not instruction*. A rule short-circuit pulls **no** precedent (no wasted read).
+- **Admission gate.** Before the model is called the prompt is **secret/PII-redacted**, the path is marked
+  **local-only**, and a **runaway-prompt / timeout guard** turns an oversize prompt or a hung provider into a
+  safe `insufficient` (never a hang). The per-call cost (`InputBytes`, tokens, duration) is metered on the
+  telemetry record. Budget *enforcement* + data-classification are deliberately deferred (see
+  `PHASE3-BACKLOG.md` G-AI-4 / G-AI-5).
 
 ### Other services (per-context APIs)
 

@@ -1,6 +1,6 @@
 # Phase-3 Greenfield — Pending & Deferred Work (single backlog)
 
-**Updated:** 2026-07-18 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
+**Updated:** 2026-07-24 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
 Status of what **is** done lives in `PHASE3-STATUS.md`; this file is only the open work. Each item states
 **what**, **why it's open**, **where it plugs in**, and its **dependency**.
 
@@ -23,7 +23,13 @@ M5 event bus, the full-pipeline e2e, and the per-context follow-ups below.
   engine (DSPy/LangGraph, a service behind the engine port) + RAG/Knowledge Engine (pgvector); **Δ4**
   autonomous engine + push seam + the LLMOps plane (prompt registry, golden datasets, A/B, model registry,
   capability promotion) + the operational store. Each additive behind the Δ1 seams; each safe because the
-  plane is disable-able.
+  plane is disable-able. **Δ2 is grilled + scaffolded (2026-07-24):** `EDR-INTELLIGENCE-01` **Revision 3**
+  (Δ2 concrete cut, grounded component decisions C1–C7) + `openspec/changes/phase3-intelligence-d2`
+  (proposal/design/tasks, 9 task groups) — **IMPLEMENTED + gated (9/9 groups, `make check` green, 2026-07-24)**.
+  The grill narrowed Δ2 scope: budget =
+  **meter only** (enforcement → G-AI-4), admission = **local-only** (classification/clearance → G-AI-5); plus
+  the two-step `[Rule → LLM]` plan, the honest `insufficient` outcome, precedent-Positions grounding, and a
+  which-step-decided provenance stamp.
 
 - [ ] **M5 — Event Infrastructure (the shared outbox bus)** — not yet a scaffolded change. Today each context
   writes to its own transactional outbox and a relay drives a **logging-stand-in `Publisher`**; there is no
@@ -90,6 +96,84 @@ M5 event bus, the full-pipeline e2e, and the per-context follow-ups below.
   branches via an **injectable `pgxpool` interface** (fault injection). Behavior is already proven by the
   embedded-Postgres integration tests; only error-path lines remain. The store tier is intentionally set to
   80% until this lands.
+
+- [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.** _(Gap surfaced in the
+  M4 Δ2 grill, 2026-07-24.)_ When `recommend_position` runs against a CVE our feeds have **not yet ingested**,
+  there is no _Information_ to reason over — and without an affected range even the version-range step can't
+  run — so the capability returns a safe **"insufficient data — no recommendation"** (the Δ2 decision, Option
+  A). The interesting gap: **today there is no on-demand path to go fetch a brand-new CVE's facts.** Go-forward
+  design (from the grill): the AI may emit a structured **"need more data on CVE-X"** flag — itself
+  _Information_, never a write — that the **Knowledge/feeds side** consumes to gather (a web-intel **crawler =
+  a new feed source**, producing source Proposals like any other feed). This keeps the **Information vs
+  Enterprise Knowledge** boundary intact (**Domain Invariant 3 — "Gathering Is Not Knowing"**,
+  `Book-II-Domain-Chapter-02`): the AI only _asks_; only Knowledge reconciliation (or a feed) turns gathered
+  Information into the CVE card. **Why open:** needs (a) a crawler / on-demand feed source on the Knowledge
+  side (feeds are scheduled OSV/NVD _pull_ today — no on-demand or web-intel source) and (b) the Intelligence
+  "need-more-data" capability output + its push seam (Δ4-class). **Where it plugs in:** `internal/knowledge/
+  adapters/feed` (new on-demand/crawler source behind the existing Proposal machinery) + an Intelligence
+  capability output + a Knowledge proposal-intake push. **Dep:** builds on the Δ2 two-step `recommend_position`
+  together with the M7 feed ACL/Proposal machinery; the AI push seam is the same one deferred to Δ4. **Scope:** design in
+  the Δ2 EDR addendum, build Δ3+.
+
+- [ ] **G-AI-2 — "Can't determine" is a first-class improvement signal, not just a safe answer.** _(Gap
+  surfaced in the M4 Δ2 grill, 2026-07-24.)_ Per the **deterministic-first + honest** principle, when neither
+  the rules nor the LLM can settle a question the capability returns an explicit **"can't determine — no
+  recommendation"** (a valid outcome, never an error). Δ2 only _returns_ it. The gap: this honest non-answer
+  is a **high-value signal** that later stages should act on — (a) **track it as a metric** (can't-determine
+  rate per capability / model / CVE class), (b) **escalate** (retry with a larger or different model, or a
+  stronger engine — the _upgrade_ counterpart to D4's degrade-not-fail model routing), and (c) **feed the
+  evaluation loop** (INT-0065 / D9) so a capability that says "can't tell" too often gets its model/prompt
+  version tuned. None of that machinery exists yet (Δ1/Δ2 are stateless — no metrics store, no eval loop, no
+  multi-model escalation). **Why open:** needs OTel metrics (§D), the Δ4 evaluation / LLMOps plane, and
+  model-escalation routing (D6 / INT-0062). **Where it plugs in:** Intelligence telemetry (OTel metrics) + the
+  eval loop + the model router. **Dep:** builds on the Δ2 "can't determine" outcome; needs §D observability
+  metrics together with the Δ4 eval/LLMOps plane. **Scope:** define the outcome in Δ2; build the
+  metric/escalation/feedback in Δ3–Δ4.
+
+- [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
+  2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
+  other releases, handed to the AI **clearly labeled** (which release, component version, decision + rationale)
+  so the AI and the human weigh relevance themselves — a cheap on-demand read-API pull, done only when
+  reasoning reaches the LLM step. The gap: **automatically rank or filter that precedent by how close each past
+  release is to the one under judgment** (the release-to-release _delta_) — a decision on a near-identical
+  release (same component version + usage) should carry weight; one on a very different release should be
+  down-weighted or dropped, not blindly trusted. This needs real **release-comparison machinery** (component /
+  usage deltas across Releases) that does not exist yet, and it overlaps the semantic "similar findings"
+  retrieval (RAG, Δ3). **Why open:** no release-diff capability today; ranking-by-similarity is Δ3 RAG-class.
+  **Where it plugs in:** Intelligence Context Construction (grounding assembly) together with a Registry /
+  Evidence release-comparison read-API and Δ3 RAG. **Dep:** builds on the Δ2 labeled-precedent grounding; needs
+  release-diff together with Δ3 retrieval. **Scope:** Δ2 hands labeled precedent as-is; rank-by-delta is Δ3+.
+
+- [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.** _(Gap surfaced in the M4 Δ2 grill,
+  2026-07-24.)_ Δ2 builds the **meter** (per-call time / input-size / token count recorded via telemetry) plus
+  one **runaway guard** (a per-request timeout + a cap on prompt input size) — nothing more. The actual
+  **budget-enforcement logic** — the four EDR scopes (per-run / per-context / autonomous-pool / global,
+  D4/INT-0064), the _degrade-not-fail_ model-downgrade behavior (D4/INT-0062), and where the thresholds sit —
+  is **postponed as a later decision**, because Δ2 runs a **free local model** where hard caps are not yet
+  meaningful. The point of Δ2 is that the **metrics are ready** so the enforcement decision has real data the
+  moment paid/cloud models arrive. **Why open:** enforcement only bites with paid providers (Δ3+); needs the
+  operational store + Governance-owned budget policy config (D4) that the stateless Δ2 gateway does not have.
+  **Where it plugs in:** the Intelligence pre-invocation admission step (the "gate") together with telemetry
+  (§D metrics) and config (R2). **Dep:** builds on the Δ2 meter + runaway guard; needs paid-provider routing
+  together with the operational store and budget-policy config. **Scope:** meter + runaway guard in Δ2; full
+  budget enforcement/policy Δ3+.
+
+- [ ] **G-AI-5 — Data-classification / provider-clearance admission deferred; Δ2 is a minimal local-only
+  gate.** _(Gap surfaced in the M4 Δ2 grill, 2026-07-24.)_ Δ2's pre-invocation gate is deliberately minimal
+  because the model is **local / on-prem — nothing leaves the building**, so INT-0069's strongest rule ("the
+  most sensitive data stays local-only") is satisfied by default. Δ2 does: (1) **authorize** the
+  caller/capability request (authn/authz), (2) **scrub secrets / PII** from both the prompt and the telemetry
+  (the same redaction discipline as Communication), and (3) **hard-mark the path "local-only"** so nothing can
+  accidentally reach a cloud provider. The gap: the **full data-classification → provider-clearance machinery**
+  (D10 / INT-0069) — classify each assembled context by sensitivity, route each class only to providers cleared
+  for it, honor regulatory / residency limits, and output-filter provider responses before validation — is
+  **deferred to when cloud/paid providers exist** (Δ3+), because classification only changes routing once there
+  is a non-local destination. **Why open:** no cloud provider in Δ2 → classification has no routing effect yet;
+  needs provider-clearance policy config (Governance-owned) together with multiple providers. **Where it plugs
+  in:** the Intelligence pre-invocation admission step (the same "gate" as G-AI-4 budget) together with
+  provider-clearance config (R2) and the model router (D6). **Dep:** builds on the Δ2 minimal gate; needs
+  multiple providers together with clearance policy. **Scope:** minimal local-only gate in Δ2; full
+  classification / clearance Δ3+.
 
 ---
 

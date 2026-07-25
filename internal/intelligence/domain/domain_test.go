@@ -51,8 +51,9 @@ func TestRecommendPositionV1(t *testing.T) {
 	if c.ID != "recommend_position" || c.Version != "v1" {
 		t.Fatalf("unexpected id/version: %s@%s", c.ID, c.Version)
 	}
-	if len(c.Plan) != 1 || c.Plan[0].Engine != EngineLLM || c.Plan[0].Prompt != "recommend_position" {
-		t.Errorf("Δ1 plan must be a single LLM step, got %+v", c.Plan)
+	if len(c.Plan) != 2 || c.Plan[0].Engine != EngineRule ||
+		c.Plan[1].Engine != EngineLLM || c.Plan[1].Prompt != "recommend_position" {
+		t.Errorf("Δ2 plan must be [rule → llm], got %+v", c.Plan)
 	}
 	if len(c.Needs) != 2 || c.Needs[0] != NeedFinding || c.Needs[1] != NeedFaultline {
 		t.Errorf("grounding needs = %v, want [finding faultline]", c.Needs)

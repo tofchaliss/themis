@@ -83,6 +83,9 @@ components:
           type: string
         model:
           type: string
+        decided_by:
+          type: string
+          description: Which plan step decided — "rule:<stance>" or "llm:<stance>".
         correlation_id:
           type: string
     Evidence:

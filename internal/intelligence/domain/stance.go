@@ -12,6 +12,11 @@ const (
 	StanceAffected    Stance = "affected"
 	StanceNotAffected Stance = "not_affected"
 	StanceMitigated   Stance = "mitigated"
+	// StanceInsufficient is the honest "can't determine — no recommendation" answer
+	// (Δ2). It is a first-class, non-error outcome, NOT a disposition: it is never
+	// Recommendable and never becomes a Proposal — the Gateway returns it as a terminal
+	// "no proposal" that a human still handles, distinct from AI being switched off.
+	StanceInsufficient Stance = "insufficient"
 )
 
 // Recommendable reports whether s is a disposition an AI capability may propose.

@@ -45,20 +45,26 @@ type Engine interface {
 	Execute(ctx context.Context, in ExecInput) (EngineResult, error)
 }
 
-// ExecInput is a rendered plan step ready to run.
+// ExecInput is a plan step ready to run. The LLM engine consumes the pre-rendered
+// Prompt; the Rule engine (Δ2) reads the assembled grounding in Context. Carrying both
+// keeps one Engine port across engine kinds without a rendered prompt for rule steps.
 type ExecInput struct {
 	Prompt      string
 	JSONSchema  string
 	Temperature float64
 	Routing     domain.RoutingRequirements
+	Context     domain.AssembledContext // grounding — read by deterministic engines (Rule)
 }
 
-// EngineResult is the raw model output plus provenance for telemetry (D9).
+// EngineResult is one engine's output. A generative engine (LLM) fills Raw + provenance
+// for 3-stage validation; a deterministic engine (Rule, Δ2) fills Decision when it
+// reaches a certain conclusion, or leaves it nil to defer to the next plan step.
 type EngineResult struct {
 	Raw        string
 	Provider   string
 	Model      string
 	TokensUsed int
+	Decision   *domain.RuleDecision // non-nil = a deterministic decision; nil = deferred / LLM path
 }
 
 // PromptRenderer builds the provider-facing prompt for a capability from the
@@ -79,4 +85,28 @@ type FindingReader interface {
 // Knowledge's read API into the domain's own view type.
 type FaultlineReader interface {
 	GetFaultline(ctx context.Context, faultlineID string) (domain.FaultlineView, error)
+}
+
+// PrecedentReader is a Knowledge Provider (D5, Δ2 C6): reads our own past Enterprise
+// Positions on the same CVE (Faultline) from OTHER releases, for richer LLM grounding.
+// It is pulled lazily — only when the plan reaches the LLM step — so a rule short-circuit
+// costs no read; a read failure degrades to no precedent (never blocks the recommendation).
+type PrecedentReader interface {
+	GetPrecedents(ctx context.Context, faultlineID, excludeReleaseID string) ([]domain.PrecedentPosition, error)
+}
+
+// Authorizer is the pre-invocation authorization check (D10, Δ2 C7). A non-nil error
+// rejects the request BEFORE any grounding or provider call. Δ2 wires no authorizer
+// (nil = allow-all), because caller identity is a deployment seam (auth middleware) — the
+// same hook shape as Governance's decider. A real deployment supplies one.
+type Authorizer interface {
+	Authorize(ctx context.Context, capabilityID, subjectFindingID string) error
+}
+
+// Redactor scrubs secrets / PII from the prompt before it reaches a provider (D10 C7) —
+// the same redaction discipline as Communication. Δ2 is local-only, so this is
+// defense-in-depth; it becomes load-bearing when cloud providers arrive (G-AI-5). nil =
+// no redaction.
+type Redactor interface {
+	Redact(text string) string
 }

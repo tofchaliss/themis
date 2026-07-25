@@ -72,7 +72,8 @@ func TestRecommendPositionProduced(t *testing.T) {
 	repo := newRepo()
 	id := seedFinding(t, repo)
 	adv := &fakeAdvisor{produced: true, rec: app.Recommendation{
-		Stance: "affected", Confidence: 0.8, Reasoning: "KEV-listed, no fix", Capability: "recommend_position@v1",
+		Stance: "affected", Confidence: 0.8, Reasoning: "KEV-listed, no fix",
+		Capability: "recommend_position@v1", DecidedBy: "llm:affected",
 	}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
 

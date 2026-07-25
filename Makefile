@@ -148,3 +148,12 @@ generate-api-intelligence:
 #   EVIDENCE_E2E_FORMAT=spdx make e2e-evidence
 e2e-evidence:
 	$(GO) test -tags=e2e -count=1 -v ./tests/e2e/...
+
+# Opt-in REAL-LLM e2e for the Intelligence Gateway: recommend_position against a running
+# OpenAI-compatible model server. The provider is a pure OpenAI-compatible client, so it
+# works with Ollama, LM Studio, or vLLM — just point THEMIS_LLM_URL at it. SKIPS when no
+# server answers, so it is safe anywhere; NOT part of `make check` (non-deterministic).
+#   Ollama:    THEMIS_LLM_URL=http://localhost:11434 THEMIS_LLM_MODEL=llama3.1:8b make e2e-llm
+#   LM Studio: THEMIS_LLM_URL=http://localhost:1234  THEMIS_LLM_MODEL=<model>     make e2e-llm
+e2e-llm:
+	$(GO) test -tags=llm -count=1 -v -run TestE2ERealLLM ./internal/intelligence/adapters/http/...
