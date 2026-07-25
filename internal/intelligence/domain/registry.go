@@ -33,15 +33,17 @@ func (r *Registry) All() []Capability {
 	return caps
 }
 
-// RecommendPositionV1 is the Δ1 capability (Revision 2): AI-assisted affected/
-// not-affected triage. It grounds the subject Finding + its Faultline enrichment,
-// runs a single LLM step, and may propose only the recommendable stance subset.
+// RecommendPositionV1 is the recommend_position capability (Revision 3 / Δ2):
+// AI-assisted affected/not-affected triage. It grounds the subject Finding + its
+// Faultline enrichment, runs a two-step **[Rule → LLM]** plan (the deterministic
+// version-range rule first, the LLM only when the rule defers), and may propose only the
+// recommendable stance subset.
 func RecommendPositionV1() Capability {
 	return Capability{
 		ID:             "recommend_position",
 		Version:        "v1",
 		Needs:          []ContextNeed{NeedFinding, NeedFaultline},
-		Plan:           ExecutionPlan{{Engine: EngineLLM, Prompt: "recommend_position"}},
+		Plan:           ExecutionPlan{{Engine: EngineRule}, {Engine: EngineLLM, Prompt: "recommend_position"}},
 		OutputSchema:   recommendPositionSchema,
 		AllowedStances: []Stance{StanceAffected, StanceNotAffected, StanceMitigated},
 		Routing:        RoutingRequirements{Privacy: PrivacyInternal, LocalOnly: true},

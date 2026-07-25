@@ -106,6 +106,7 @@ func toGenProposal(p domain.Proposal, correlationID string) gen.Proposal {
 		Reasoning:     strPtr(p.Reasoning),
 		Provider:      strPtr(p.Metadata.Provider),
 		Model:         strPtr(p.Metadata.Model),
+		DecidedBy:     strPtr(p.Metadata.DecidedBy),
 		CorrelationId: strPtr(correlationID),
 	}
 }

@@ -13,7 +13,7 @@ const recommendPositionSchema = `{
   "required": ["finding_id", "recommended_stance", "confidence", "evidence", "reasoning"],
   "properties": {
     "finding_id": { "type": "string", "minLength": 1 },
-    "recommended_stance": { "type": "string", "enum": ["affected", "not_affected", "mitigated"] },
+    "recommended_stance": { "type": "string", "enum": ["affected", "not_affected", "mitigated", "insufficient"] },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "evidence": {
       "type": "array",

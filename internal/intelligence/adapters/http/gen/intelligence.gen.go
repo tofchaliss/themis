@@ -41,15 +41,18 @@ type Problem struct {
 
 // Proposal defines model for Proposal.
 type Proposal struct {
-	Capability    *string     `json:"capability,omitempty"`
-	Confidence    *float32    `json:"confidence,omitempty"`
-	CorrelationId *string     `json:"correlation_id,omitempty"`
-	Evidence      *[]Evidence `json:"evidence,omitempty"`
-	FindingId     *string     `json:"finding_id,omitempty"`
-	Model         *string     `json:"model,omitempty"`
-	Provider      *string     `json:"provider,omitempty"`
-	Reasoning     *string     `json:"reasoning,omitempty"`
-	Stance        *string     `json:"stance,omitempty"`
+	Capability    *string  `json:"capability,omitempty"`
+	Confidence    *float32 `json:"confidence,omitempty"`
+	CorrelationId *string  `json:"correlation_id,omitempty"`
+
+	// DecidedBy Which plan step decided — "rule:<stance>" or "llm:<stance>".
+	DecidedBy *string     `json:"decided_by,omitempty"`
+	Evidence  *[]Evidence `json:"evidence,omitempty"`
+	FindingId *string     `json:"finding_id,omitempty"`
+	Model     *string     `json:"model,omitempty"`
+	Provider  *string     `json:"provider,omitempty"`
+	Reasoning *string     `json:"reasoning,omitempty"`
+	Stance    *string     `json:"stance,omitempty"`
 }
 
 // InvokeCapabilityJSONRequestBody defines body for InvokeCapability for application/json ContentType.
@@ -232,21 +235,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

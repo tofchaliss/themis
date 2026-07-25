@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
@@ -24,7 +25,8 @@ func TestGovernanceIntelligenceSeam(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{"capability":"recommend_position@v1","finding_id":"F1","stance":"affected",` +
-			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"KEV-listed"}`))
+			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"KEV-listed",` +
+			`"decided_by":"llm:affected"}`))
 	}))
 	defer intel.Close()
 
@@ -59,5 +61,38 @@ func TestGovernanceIntelligenceSeam(t *testing.T) {
 	}
 	if string(p.Status()) != "proposed" {
 		t.Errorf("AI proposal must not be auto-accepted; status = %s", p.Status())
+	}
+	// The decided-by provenance travels the wire into the recorded rationale.
+	if !strings.Contains(p.Rationale(), "[llm:affected]") {
+		t.Errorf("rationale must carry the decided-by provenance; got %q", p.Rationale())
+	}
+}
+
+// TestGovernanceIntelligenceSeamInsufficient drives the honest "no recommendation" path
+// over the wire: the Gateway declines (204 — insufficient / disabled / unavailable), and
+// Governance records NO proposal, never an error — the pipeline is unaffected.
+func TestGovernanceIntelligenceSeamInsufficient(t *testing.T) {
+	intel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent) // the Gateway produced no proposal
+	}))
+	defer intel.Close()
+
+	repo := newRepo()
+	repo.seed(identified(t, "F1", "rel-1", "fl-1", "CVE-1"))
+	client := intelligence.NewClient(intel.URL, intel.Client())
+	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(client)
+	srv := httptest.NewServer(govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{})).Router())
+	defer srv.Close()
+
+	code, _ := do(t, http.MethodPost, srv.URL+"/findings/F1/recommend", nil)
+	if code != http.StatusNoContent {
+		t.Fatalf("a declined recommendation must yield 204, got %d", code)
+	}
+	f, err := repo.GetByID(context.Background(), "F1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(f.Proposals()) != 0 {
+		t.Errorf("no proposal must be recorded when the Gateway declines; got %d", len(f.Proposals()))
 	}
 }

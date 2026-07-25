@@ -37,7 +37,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 | **M7 — Knowledge / Faultline** | `EDR-KNOWLEDGE-01` (D1–D12) | `phase3-knowledge` — **IMPLEMENTED** (25/25, gated) | KNOW-01…13 |
 | **M8 — Governance** (Findings + Positions) | `EDR-GOVERNANCE-01` (D1–D13) | `phase3-governance` — **IMPLEMENTED** (24/24, gated) | GOV-01…13 |
 | **M9 — Communication** (publish Positions) | `EDR-COMMUNICATION-01` (D1–D12) | `phase3-communication` — **IMPLEMENTED** (22/22, gated) | COMM-01…12 |
-| **M4 — Intelligence** (AI Gateway) | `EDR-INTELLIGENCE-01` (Rev 2, D1–D13) | `phase3-intelligence` — **Δ1 IMPLEMENTED** (37/37, gated); Δ2–Δ4 remain | INTEL-01…12 |
+| **M4 — Intelligence** (AI Gateway) | `EDR-INTELLIGENCE-01` (Rev 3, D1–D13 + Δ2 cut) | `phase3-intelligence` — **Δ1 IMPLEMENTED** (37/37); `phase3-intelligence-d2` — **Δ2 IMPLEMENTED** (9/9 groups, gated, 2026-07-24); Δ3–Δ4 remain | INTEL-01…12 |
 | **M7+ — Knowledge feeds** (follow-on) | `EDR-KNOWLEDGE-01` (D5/D6) | `phase3-knowledge-feeds` — **IMPLEMENTED** (19/19, gated) | real OSV/NVD clients · CVSS 4.0 (go-fwd D-NVD-2) · source tiers (go-fwd D-FEED-2) · scanner Proposals |
 
 All four docs lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:

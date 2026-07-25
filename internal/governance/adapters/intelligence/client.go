@@ -37,6 +37,7 @@ type wireProposal struct {
 	Stance     string  `json:"stance"`
 	Confidence float64 `json:"confidence"`
 	Reasoning  string  `json:"reasoning"`
+	DecidedBy  string  `json:"decided_by"`
 }
 
 // RecommendPosition invokes recommend_position for a Finding. produced=false on a 204
@@ -76,5 +77,6 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		Confidence: wp.Confidence,
 		Reasoning:  wp.Reasoning,
 		Capability: wp.Capability,
+		DecidedBy:  wp.DecidedBy,
 	}, true, nil
 }

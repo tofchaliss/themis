@@ -69,10 +69,27 @@ customers.
 
 An immutable observation relevant to the enterprise.
 
+### Information
+
+Gathered or machine-produced input that the enterprise has **not yet
+accepted** --- a feed's claim about a vulnerability, an external source
+or crawl result, an AI recommendation. Information is a *suggestion*: it
+may be reconciled, weighted, or rejected. It is never authoritative on
+arrival and never becomes business truth until an explicit acceptance
+step promotes it into Enterprise Knowledge.
+
+Information reflects an outside (or machine) perspective; Enterprise
+Knowledge reflects the enterprise's own considered perspective.
+
 ### Enterprise Knowledge
 
 The enterprise's understanding of evidence after correlation,
-enrichment, and analysis.
+enrichment, and analysis --- the view the enterprise **stands behind**,
+as distinct from the raw Information it was derived from.
+
+The boundary runs *through* the Faultline: the raw source claims
+recorded on it are Information; its reconciled enterprise view is
+Enterprise Knowledge.
 
 ### Faultline
 
@@ -113,6 +130,11 @@ Each business concept has a clearly defined owner.
 - Governance owns Findings and Enterprise Positions.
 - Communication owns published artifacts.
 
+Gatherers --- feeds, external sources, and the Intelligence Gateway ---
+produce Information only. They never write Enterprise Knowledge directly;
+crossing that boundary always requires a deliberate acceptance step
+(reconciliation by Knowledge, or a governed decision by Governance).
+
 Ownership gives terminology operational meaning.
 
 ------------------------------------------------------------------------
@@ -142,6 +164,18 @@ authoritative definition.
 
 Alternative terminology, aliases, or implementation-specific meanings
 shall not replace the ubiquitous language.
+
+------------------------------------------------------------------------
+
+## Domain Invariant 3 --- Gathering Is Not Knowing
+
+Information and Enterprise Knowledge are distinct.
+
+Anything that gathers or generates --- feeds, external sources, crawlers,
+or the Intelligence Gateway --- produces Information, never Enterprise
+Knowledge. Information becomes Enterprise Knowledge only through an
+explicit, governed acceptance step (Knowledge reconciliation, or a
+Governance decision). No gatherer writes business truth directly.
 
 ------------------------------------------------------------------------
 

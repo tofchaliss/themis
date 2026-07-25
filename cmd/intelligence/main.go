@@ -29,6 +29,8 @@ type config struct {
 	ollamaURL     string // THEMIS_OLLAMA_URL — Ollama (OpenAI-compatible) base URL.
 	model         string // THEMIS_INTELLIGENCE_MODEL — pinned model (default "llama3.1:8b").
 	useFake       bool   // THEMIS_INTELLIGENCE_PROVIDER=fake — dev/CI provider (no model).
+	apiKey        string // THEMIS_LLM_API_KEY — optional bearer token for an authenticated server.
+	respFormat    string // THEMIS_LLM_RESPONSE_FORMAT — structured-output mode (json_object|json_schema|text|none).
 }
 
 func loadConfig() config {
@@ -39,6 +41,8 @@ func loadConfig() config {
 		ollamaURL:     envDefault("THEMIS_OLLAMA_URL", "http://localhost:11434"),
 		model:         envDefault("THEMIS_INTELLIGENCE_MODEL", "llama3.1:8b"),
 		useFake:       os.Getenv("THEMIS_INTELLIGENCE_PROVIDER") == "fake",
+		apiKey:        os.Getenv("THEMIS_LLM_API_KEY"),
+		respFormat:    os.Getenv("THEMIS_LLM_RESPONSE_FORMAT"),
 	}
 }
 
@@ -53,13 +57,15 @@ func main() {
 	defer func() { _ = shutdownObs(context.Background()); _ = logger.Sync() }()
 
 	intel, err := wiring.Wire(wiring.Config{
-		GovernanceURL: cfg.governanceURL,
-		KnowledgeURL:  cfg.knowledgeURL,
-		OllamaURL:     cfg.ollamaURL,
-		Model:         cfg.model,
-		UseFake:       cfg.useFake,
-		Logger:        logger,
-		HTTPClient:    &http.Client{Timeout: 60 * time.Second},
+		GovernanceURL:  cfg.governanceURL,
+		KnowledgeURL:   cfg.knowledgeURL,
+		OllamaURL:      cfg.ollamaURL,
+		Model:          cfg.model,
+		UseFake:        cfg.useFake,
+		APIKey:         cfg.apiKey,
+		ResponseFormat: cfg.respFormat,
+		Logger:         logger,
+		HTTPClient:     &http.Client{Timeout: 60 * time.Second},
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))

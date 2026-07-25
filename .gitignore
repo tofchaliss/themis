@@ -22,3 +22,6 @@
 
 # release-smoke-test.sh runtime log (transient)
 /themis-smoke.log
+
+# local runtime config with secrets (DB DSN, NVD + LLM API keys) — never versioned
+/themis.yaml

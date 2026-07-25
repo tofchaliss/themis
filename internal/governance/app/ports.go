@@ -78,6 +78,7 @@ type Recommendation struct {
 	Confidence float64
 	Reasoning  string
 	Capability string // originating capability ref, e.g. "recommend_position@v1"
+	DecidedBy  string // which Intelligence plan step decided — "rule:<stance>" / "llm:<stance>"
 }
 
 // IDGenerator assigns new opaque Finding / Governance-Proposal identities.

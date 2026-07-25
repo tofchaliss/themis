@@ -53,6 +53,7 @@ declare -a infra_pkgs=(
 	intelligence/adapters/provider
 	intelligence/adapters/engine
 	intelligence/adapters/readapi
+	intelligence/adapters/admission
 	intelligence/adapters/http
 	platform/observability
 	registry/adapters/store

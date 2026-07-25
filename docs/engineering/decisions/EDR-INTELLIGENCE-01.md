@@ -97,6 +97,99 @@ One reactive capability end-to-end, pure Go, disable-able:
   **Mac dev runs native Ollama** (Metal GPU) at `localhost:11434`; **CI uses the fake provider**; all three
   are selected by config. Dev default model `llama3.1:8b` q4 (16 GB Apple Silicon).
 
+## Revision 3 (2026-07-24) — Δ2 concrete cut (typed dispatch + Rule Engine + admission spine)
+
+Grilled 2026-07-24 (plain-English session; decisions below are the source of truth for
+`openspec/changes/phase3-intelligence-d2`). Δ2 grows the Δ1 walking skeleton into the harness's **typed
+multi-engine** shape **on the same seams — additive, no rewrite**. The **authority spine (D1/D2/D7/D8/D10) is
+unchanged.**
+
+**New domain boundary ratified in this grill and written into the architecture book** (Book II, Ch 2 — new
+term **Information**, sharpened **Enterprise Knowledge**, and **Domain Invariant 3 — "Gathering Is Not
+Knowing"**): feeds, crawlers, and the Gateway produce **Information** (gathered/AI-produced claims &
+suggestions — rejectable, not-yet-accepted) only; crossing into **Enterprise Knowledge** (the reconciled view
+together with Findings and Positions the enterprise stands behind) always takes a deliberate accept/reconcile
+(Knowledge) or a governed decision (Governance). The boundary runs **through** the Faultline (raw Proposals = Information;
+reconciled view = Knowledge). This **reaffirms D1/D2**: Intelligence never writes truth — it returns
+Information the pipeline records and governs.
+
+### Δ2 behavioral cut
+
+`recommend_position` becomes a **two-step execution plan `[Rule → LLM]`** — the first real multi-engine plan,
+so the **Engine Dispatcher** gets a genuine routing job:
+
+1. **Rule step — version-range applicability** (deterministic, no provider). Compares the installed component
+   version against the Faultline's affected range.
+   - **Provably OUT of range → `not_affected`, certain → short-circuits; the LLM never runs.**
+   - Certain in **one direction only**: it may short-circuit to `not_affected`, **never** to `affected`
+     ("in range" ≠ affected — that is the judgment the LLM exists for; auto-"affected" would over-report **and**
+     duplicate Governance's KEV/severity `proposalFor` logic).
+   - Unknown/unsupported ecosystem or no range → not certain → **fall through to the LLM** (with no facts at
+     all → "insufficient data").
+   - **Checks the reconciled, backport-aware range** on the Faultline (the highest-precedence source's range —
+     e.g. Red Hat's `2.4.37-51.el8` fix), read from grounding (`FaultlineView.AffectedRanges` + the matched
+     component's ecosystem/version from its PURL), **not** a re-run of a feed's query-time filter. This is
+     where it earns its keep: OSV-by-version discovery already pre-filters, so on a **pure-OSV cold start the
+     rule mostly defers (acceptable)**; the payoff is catching **backport corrections** (OSV flags the upstream
+     range; the distro range excludes your build) and **coarse-source over-matches** (NVD/CPE, scanners) as
+     distro/NVD data enriches the card over time.
+   - **Version-range is the *only* Δ2 rule.** A **withdrawn-CVE → `not_affected`** rule was considered and
+     **rejected**: it would duplicate Governance's reactive `proposalFor` (FaultlineSuperseded → not_affected),
+     the same duplication we avoided by not re-deriving KEV/severity. More clear-answer rules may join later
+     **only where they do not duplicate Governance**.
+2. **LLM step — judgment** (fallback, only when the rule can't settle it). Reasons over facts the Gateway
+   **hands it** (grounding), not model memory. **Deterministic-first: the LLM runs iff there is no clear
+   deterministic answer.**
+
+**Honest fourth outcome.** The recommendable set gains **`insufficient`** — the capability may return
+**"can't determine — no recommendation"** as a **first-class, non-error** outcome (never a forced guess buried
+in low confidence). Δ2 only *returns* it; acting on it as an improvement signal is **G-AI-2**.
+
+**Richer grounding — precedent Positions.** When (and only when) the plan reaches the LLM step, the Gateway
+also pulls our **own past Enterprise Positions on the same CVE** (other releases) via a Governance read-API,
+handed **labeled** (release, component version, decision, rationale) as **context, not instruction** —
+read-only, human still decides. Ranking precedent by release-delta is **G-AI-3**.
+
+**Provenance / testability (build requirement).** Every result records **which step decided** —
+`rule:not_affected` / `llm:<stance>` / `insufficient` — so the two-step behavior is assertable ("version 3.5 →
+decided by the rule, provider never called") and the same stamp feeds the G-AI-2 metric. Because the trigger is
+an **API call** (Themis is API-first — no UI), Δ2 is fully testable with pure-Go rule tests, the fake provider,
+and over-the-wire seam tests: **no UI and no running model required**.
+
+### Admission spine (the one pre-invocation gate) — Δ2 slice
+
+One gate runs before any provider call, checking two things:
+
+- **Budget — measure now, enforce lightly.** Build the **meter** (per-call duration / input-size / token count
+  via OTel metrics) + one **runaway guard** (per-request timeout + prompt input-size cap). The model is
+  **local = free** in Δ2, so real multi-scope enforcement + degrade-not-fail routing is **deferred** (G-AI-4).
+- **Security/privacy — minimal, local-only.** (1) authorize the caller, (2) scrub secrets/PII from prompt +
+  telemetry (Communication's redaction discipline), (3) hard-mark the path **local-only** so nothing can reach
+  a cloud provider. Full data-classification → provider-clearance is **deferred** to when cloud providers exist
+  (G-AI-5).
+
+### Deferred (all tracked in `PHASE3-BACKLOG.md` §C)
+
+**G-AI-1** on-demand fresh-CVE gathering (AI asks, feeds gather — a crawler = a new feed producing
+Information); **G-AI-2** can't-determine as an improvement signal (metric / model-escalation / eval);
+**G-AI-3** rank precedent by release-delta; **G-AI-4** budget enforcement policy; **G-AI-5**
+data-classification / provider-clearance. Δ3 (Python engine + RAG) and Δ4 (autonomy + LLMOps) are unchanged.
+
+### Component & Technology Decisions (Δ2)
+
+Every choice is grounded — **rule basis · chosen · named alternatives · why better** — per STACK.md's "Not
+chosen (and why)" discipline. Reused Δ1/STACK items carry a one-line "carried forward because …".
+
+| # | Decision | Rule basis | Chosen | Alternatives considered | Why the chosen option (over the alternatives) |
+| --- | --- | --- | --- | --- | --- |
+| C1 | **Model runtime / serving** — the real decision is the **stable interface, not the vendor** (there are ~100 AI backends; the challenge is interfacing them to Themis) | INT-0070 ("stable abstractions, not stable vendors"), INT-0069 (sensitive→local), D4 (local-first), STACK | A **vendor-neutral Provider port speaking the OpenAI-compatible chat-completions schema** (built in Δ1); **Ollama** as the Δ2 default backend (native on Mac dev / containerized in-cluster / **fake** in CI) | Backends: **vLLM**, **Hugging Face TGI**, **Cerebras** (hosted inference), **llama.cpp**, **LM Studio**, hosted APIs (**OpenAI / Anthropic / Bedrock**) | The **port** is the architectural commitment; every named alternative also speaks (or fronts) an OpenAI-compatible endpoint, so each is a **config swap, not code** (INT-0070 satisfied → the choice is **reversible / low-stakes**). Ollama is the best *default*: runs natively on Apple-Silicon dev with **Metal GPU** (Docker-on-Mac has no GPU passthrough → vLLM/TGI containers are CPU-only on Mac dev), single-binary/low-ops, pulls quantized models (llama3.1:8b q4 on 16 GB). vLLM/TGI are higher-throughput **production** servers but heavier + GPU-hungry — premature for Δ2's advisory, low-QPS, local-first path; they slot behind the same port when throughput matters (Δ3+). Cerebras/hosted APIs conflict with the sensitive-data-local-only default (INT-0069) for the routine path — reserved for cleared, non-sensitive asks later |
+| C2 | **Version-range comparison** (the Rule Engine's core computation) | Δ2 rule = version-range applicability; must span ecosystems (PyPI/npm/Maven/apk/deb/RPM/Go) whose version schemes differ | **Port the PoC's proven, property-tested version engine** (`internal/domain/version_engine.go` + `version_match.go`; OSV ecosystem-aware ranges incl. Alpine `-r0`, introduced/fixed/last_affected, GIT-vs-ECOSYSTEM) into a **shared-kernel value object** (PoC is frozen reference → **port the design, do not import**) | `Masterminds/semver` (SemVer-2.0 only), `hashicorp/go-version`, `aquasecurity/go-version` (Trivy, ecosystem-aware), OSV's Go comparators, hand-rolled | The in-repo engine already handles Themis's **real messy ecosystems** that a SemVer-only lib (Masterminds) gets wrong (Debian/RPM epochs, Alpine `-r0`, PyPI); it's **battle-tested with a rapid property test**; and it adds **no new dependency**. The **"unsupported ecosystem → not certain → defer to the LLM"** safety valve bounds residual risk. `aquasecurity/go-version` is the closest external fallback if porting proves heavy |
+| C3 | **Rule representation** | EDR: "Rule Engine is **all-Go**" | **Hand-written Go rule predicates** (version-range = a small pure function) | An expression DSL — **CEL** (`google/cel-go`), `expr-lang/expr`; an external rules engine (`hyperjumptech/grule`) | Δ2 has exactly **one** deterministic rule; a DSL/engine adds a dependency + a runtime-interpreted rule language + its own test/debug surface for **zero present benefit**; all-Go keeps rules at 100% unit coverage, no dep. CEL/grule earn their place only when rules must be **authored/changed as data by non-developers at runtime** — not a Δ2 need |
+| C4 | **Engine Dispatcher** | EDR Δ2 typed dispatch; harness diagram | **A small in-Go typed dispatcher** mapping an execution-plan step's engine-kind → the registered Engine | An external **workflow engine** (Temporal, a DAG runner); a **plugin** system (Go plugins / `hashicorp/go-plugin`) | The plan is a **short ordered list (2 steps)**; a typed map/switch is trivial, fully testable, dependency-free. Temporal solves durable long-running orchestration we don't have (invoke is synchronous, bounded); go-plugin solves out-of-process isolation the in-Go Engine/Provider ports already cover for Δ2. Both become candidates only if Δ4 autonomy needs durable scheduling or Δ3's Python engine needs process isolation — already separate deltas |
+| C5 | **Budget meter** | R1 / STACK (OTel is the telemetry SoR); D4 / INT-0064 (cost telemetry) | **OpenTelemetry metrics** via `internal/platform/observability` (carried forward) | `prometheus/client_golang` directly; custom in-memory counters; a DB table | OTel is the **already-wired, mandated, vendor-neutral** telemetry, correlated by business id, needing **no new store** (Δ2 is stateless). Prometheus is a complement, not the SoR; a DB table would break Δ2's stateless design |
+| C6 | **Precedent-Positions grounding** | D5 / INT-0068 (context via read APIs, **never** DB) | **Extend Governance's read API** with a "Positions for this CVE across releases" query + pull via the existing **read-API-client seam** (like `FindingReader` / `FaultlineReader`) | Query Governance's DB directly; a materialized precedent cache inside Intelligence | Direct DB read violates D5 (rejected); an Intelligence cache violates Δ2 statelessness. Extending the read API **keeps the boundary**, reuses the proven client seam, and adds **no store** |
+| C7 | **Redaction (admission scrub)** | D10 / INT-0069 (sanitization); STACK ("same redaction as Communication") | **A `Redactor` port mirroring Communication's** (secrets/PII scrub of prompt + telemetry) | A third-party PII/secret scanner; ad-hoc regex only | Consistency + reuse across contexts; a heavyweight scanner is premature for **local-only** Δ2 (revisit with cloud providers under G-AI-5) |
+
 ## Decisions
 
 ### D1 — Intelligence is a supporting Gateway (owns no truth), beside the pipeline, the exclusive provider entry

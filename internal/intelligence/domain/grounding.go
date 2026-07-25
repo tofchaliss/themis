@@ -31,13 +31,25 @@ type FaultlineView struct {
 // FixAvailable reports whether the Faultline has any known fixed version.
 func (f FaultlineView) FixAvailable() bool { return len(f.FixedVersions) > 0 }
 
+// PrecedentPosition is one of our own past Enterprise Positions on the SAME CVE from
+// another release, pulled into grounding as labeled context (Δ2 richer grounding, C6).
+// It is context, not instruction: the AI only reads it and the human still decides.
+// Ranking precedent by release-to-release delta is deferred (G-AI-3).
+type PrecedentPosition struct {
+	ReleaseID string
+	Stance    string
+	Rationale string
+}
+
 // AssembledContext is the deterministic output of Context Construction (D5): exactly
 // the grounding a capability declared it needs, assembled via read-API Knowledge
 // Providers. It is the anti-hallucination ground truth — stage-2 validation checks
-// (via Grounds) that every cited evidence ref exists here.
+// (via Grounds) that every cited evidence ref exists here. Precedents are supplementary
+// reasoning context (not citable evidence), pulled lazily only for the LLM step.
 type AssembledContext struct {
-	Finding   FindingView
-	Faultline FaultlineView
+	Finding    FindingView
+	Faultline  FaultlineView
+	Precedents []PrecedentPosition
 }
 
 // Grounds reports whether a non-empty evidence citation ref refers to something in
