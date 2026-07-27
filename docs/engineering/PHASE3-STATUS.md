@@ -11,7 +11,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 > IMPLEMENTED, gated, and **merged to `main`** (`origin/main` = `9d43692`; branch `phase3-evidence` carries the
 > ongoing work). **M5 — Event Infrastructure (the shared event bus) is GRILLED + SCAFFOLDED, not yet
 > implemented:** `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-> `openspec/changes/phase3-event-infrastructure/` (**0/42 tasks**, 10 groups EB-01…EB-11). **Next task:
+> `openspec/changes/phase3-event-infrastructure/` (**0/43 tasks**, 10 groups EB-01…EB-11). **Next task:
 > implement M5** via `/opsx:apply phase3-event-infrastructure` starting at Group 1 — the user is reviewing the
 > EDR and asked to **confirm before implementation begins**. To verify green on resume: `make check`.
 
@@ -40,7 +40,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 | **M9 — Communication** (publish Positions) | `EDR-COMMUNICATION-01` (D1–D12) | `phase3-communication` — **IMPLEMENTED** (22/22, gated) | COMM-01…12 |
 | **M4 — Intelligence** (AI Gateway) | `EDR-INTELLIGENCE-01` (Rev 3, D1–D13 + Δ2 cut) | `phase3-intelligence` — **Δ1 IMPLEMENTED** (37/37); `phase3-intelligence-d2` — **Δ2 IMPLEMENTED** (9/9 groups, gated, 2026-07-24); Δ3–Δ4 remain | INTEL-01…12 |
 | **M7+ — Knowledge feeds** (follow-on) | `EDR-KNOWLEDGE-01` (D5/D6) | `phase3-knowledge-feeds` — **IMPLEMENTED** (19/19, gated) | real OSV/NVD clients · CVSS 4.0 (go-fwd D-NVD-2) · source tiers (go-fwd D-FEED-2) · scanner Proposals |
-| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **SCAFFOLDED** (0/42, not implemented) | EB-01…EB-11 |
+| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **SCAFFOLDED** (0/43, not implemented) | EB-01…EB-11 |
 
 All four docs lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:
 `openspec/changes/archive/2026-07-14-themis-ai-1` (folds into Phase-3 Intelligence / M4) and
@@ -174,7 +174,7 @@ admission spine; Δ3 (Python + RAG) and Δ4 (autonomy + LLMOps) deferred (see `d
 **Next: implement M5 — Event Infrastructure** (`phase3-event-infrastructure`, EB-01…EB-11) — the
 **platform-owned event bus** carrying events between contexts (PostgreSQL channel now, Kafka-swappable later
 behind stable ports), which unblocks the single wired **SBOM → published-VEX pipeline e2e**. **GRILLED +
-SCAFFOLDED:** `EDR-EVENTBUS-01` (D1–D11) + `openspec/changes/phase3-event-infrastructure/` (0/42, 10 groups).
+SCAFFOLDED:** `EDR-EVENTBUS-01` (D1–D11) + `openspec/changes/phase3-event-infrastructure/` (0/43, 10 groups).
 Implement via `/opsx:apply phase3-event-infrastructure` starting Group 1 — **awaiting the user's go-ahead**
 (they are reviewing the EDR). All deferred per-context follow-ups (Communication channels, Governance expiry
 worker, store fault-injection, OTel traces/metrics) are listed in [`docs/BACKLOG.md`](../BACKLOG.md).

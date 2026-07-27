@@ -43,7 +43,7 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
 
 - [ ] **M5 — Event Infrastructure (the shared event bus)** — **GRILLED + SCAFFOLDED (2026-07-25), not yet
   implemented.** `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-  `openspec/changes/phase3-event-infrastructure/` (**0/42 tasks**, 10 groups EB-01…EB-11). Today each context
+  `openspec/changes/phase3-event-infrastructure/` (**0/43 tasks**, 10 groups EB-01…EB-11). Today each context
   writes to its own transactional outbox and a relay drives a **logging-stand-in `Publisher`**; there is no
   real bus carrying events between contexts. M5 delivers the **platform-owned channel**
   (`internal/platform/eventbus` + a `bus` database), threads the full kernel `Envelope` end-to-end, and adds
@@ -220,6 +220,13 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
 
 - [ ] **Domain glossary upkeep.** Grilling has not been maintaining a domain glossary; the real
   `/grill-with-docs` (`grilling` + `domain-modeling`) would start doing so on future EDRs.
+
+- [ ] **Extend CI with the pipeline e2e (post-M5).** `ci/add-workflows` adds
+  `.github/workflows/{pr,main}.yml` running `make check` (+ `make e2e-evidence` on `main`). When M5 lands
+  `make e2e-pipeline` (`phase3-event-infrastructure` tasks 9.1 / 10.4), add an `e2e-pipeline` step to
+  `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is wanted. Kept **out of
+  `make check`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional: a `make e2e` / `make ci`
+  aggregate target.
 
 ---
 

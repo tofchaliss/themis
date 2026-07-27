@@ -121,4 +121,10 @@
 - [ ] 10.2 Add the M5 ubiquitous language (Stream, Interest set, Inbox / `processed_events`, Event Log,
   exactly-once application vs at-least-once transport) to the architecture book's ubiquitous-language chapter.
 - [ ] 10.3 Update `TESTING.md` with the `make e2e-pipeline` how-to.
-- [ ] 10.4 Gate: six Themis gates green; `markdownlint-cli2` clean.
+- [ ] 10.4 **Wire `make e2e-pipeline` into CI.** The `ci/add-workflows` change adds
+  `.github/workflows/{pr,main}.yml` (`main.yml` runs `make check` + `make e2e-evidence`; `pr.yml` runs
+  `make check`). Once `make e2e-pipeline` exists (9.1) and that CI change has merged, add an `e2e-pipeline`
+  step to `main.yml` (post-merge), mirroring the `e2e-evidence` step — and to `pr.yml` if pre-merge pipeline
+  proof is wanted. Kept **out of `make check`** deliberately (e2e is slow; consistent with `e2e-evidence`).
+  Tracked in `docs/BACKLOG.md` §E.
+- [ ] 10.5 Gate: six Themis gates green; `markdownlint-cli2` clean.
