@@ -15,7 +15,13 @@ GO_TEST_FLAGS ?=
 
 COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/... ./internal/domain/... ./internal/usecase/... ./internal/adapter/... ./internal/infrastructure/... ./tests/acceptance/...
 
-.PHONY: all build clean tidy test test-integration test-property lint coverage coverage-pkg deadcode clean-arch arch-test check \
+# Greenfield-only coverage scope. The frozen v0.3.x legacy tree (internal/{domain,
+# usecase,adapter,infrastructure}, tests/acceptance) is reference-only and has
+# platform-dependent integration tests green only on macOS's coarse clock, so CI gates
+# the go-forward tree via `make check-ci`, not the whole repo.
+COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/...
+
+.PHONY: all build clean tidy test test-integration test-property lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
 	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
@@ -68,6 +74,13 @@ coverage:
 	$(GO) tool cover -func=$(COVERAGE_OUT) | tee $(COVERAGE_TXT)
 	@scripts/check-coverage.sh
 
+# Greenfield-only coverage (used by check-ci). check-coverage.sh skips any registered
+# package absent from the profile, so the frozen legacy packages are simply not gated.
+coverage-greenfield:
+	$(GO) test $(GO_TEST_FLAGS) -tags=integration -p 1 -coverprofile=$(COVERAGE_OUT) -covermode=atomic $(COVERAGE_PKGS_GREENFIELD)
+	$(GO) tool cover -func=$(COVERAGE_OUT) | tee $(COVERAGE_TXT)
+	@scripts/check-coverage.sh
+
 # Task-group coverage gate: check only the package(s) for the current task group.
 # Usage: make coverage-pkg PKG=usecase/enrichment
 #        make coverage-pkg PKG="usecase/enrichment adapter/store"
@@ -102,7 +115,13 @@ clean-arch:
 arch-test:
 	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
 
-check: build lint clean-arch arch-test coverage deadcode
+check: build test lint clean-arch arch-test coverage deadcode
+
+# CI gate — greenfield-scoped: same as `check` but coverage covers only the go-forward
+# tree (the frozen v0.3.x legacy integration tests are green only on macOS and are
+# reference-only). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
+# for local use.
+check-ci: build test lint clean-arch arch-test coverage-greenfield deadcode
 
 # golang-migrate registers the postgres driver only with -tags postgres.
 MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1

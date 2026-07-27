@@ -45,7 +45,7 @@ and collaborates only via events + read APIs (no shared tables).
 
 ```sh
 go build ./...     # builds every service
-make check         # build · lint · clean-arch · arch-test · coverage (+ integration) · deadcode
+make check         # build · test · lint · clean-arch · arch-test · coverage (+ integration) · deadcode
 ```
 
 ### Configure

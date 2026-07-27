@@ -51,7 +51,7 @@ make coverage           # scripts/check-coverage.sh, per-package tiers
 make deadcode           # x/tools deadcode (non-fatal reporter, exits 0)
 ```
 
-`make check` runs: **build · lint · clean-arch · arch-test · coverage · deadcode** — and coverage pulls in
+`make check` runs: **build · test · lint · clean-arch · arch-test · coverage · deadcode** — and coverage pulls in
 the integration tests. Every OpenSpec `tasks.md` group ends by making this green.
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
