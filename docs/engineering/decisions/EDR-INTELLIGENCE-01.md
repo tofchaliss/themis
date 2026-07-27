@@ -168,7 +168,7 @@ One gate runs before any provider call, checking two things:
   a cloud provider. Full data-classification → provider-clearance is **deferred** to when cloud providers exist
   (G-AI-5).
 
-### Deferred (all tracked in `PHASE3-BACKLOG.md` §C)
+### Deferred (all tracked in `docs/BACKLOG.md` §C)
 
 **G-AI-1** on-demand fresh-CVE gathering (AI asks, feeds gather — a crawler = a new feed producing
 Information); **G-AI-2** can't-determine as an improvement signal (metric / model-escalation / eval);

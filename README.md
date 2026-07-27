@@ -47,7 +47,7 @@ Deeper references under [`docs/`](docs/):
 
 | Area | Location |
 | ---- | -------- |
-| Phase-3 status & backlog | [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md) · [`PHASE3-BACKLOG.md`](docs/engineering/PHASE3-BACKLOG.md) |
+| Phase-3 status & backlog | [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md) · [`docs/BACKLOG.md`](docs/BACKLOG.md) |
 | Engineering decision records (per context) | [`docs/engineering/decisions/`](docs/engineering/decisions/) |
 | Stack, conventions, AI harness | [`STACK.md`](docs/engineering/STACK.md) · [`CONVENTIONS.md`](docs/engineering/CONVENTIONS.md) · [`THEMIS-AI-HARNESS.md`](docs/engineering/THEMIS-AI-HARNESS.md) |
 | Architecture book & ADRs | [`docs/architecture/`](docs/architecture/) · [`docs/adr/`](docs/adr/) |

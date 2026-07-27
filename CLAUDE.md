@@ -17,7 +17,7 @@ publishes standards-based artifacts. Backed by PostgreSQL. No UI, no external br
 
 The greenfield rebuild splits the monolith into independently-deployable bounded-context services. Start any
 session at [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md) and
-[`PHASE3-BACKLOG.md`](docs/engineering/PHASE3-BACKLOG.md).
+[`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 ## Standing ground rules (override defaults)
 
@@ -49,10 +49,18 @@ make clean-arch         # go-cleanarch: monolith + each greenfield context (see 
 make arch-test          # ./tests/architecture — the Go architecture test
 make coverage           # scripts/check-coverage.sh, per-package tiers
 make deadcode           # x/tools deadcode (non-fatal reporter, exits 0)
+
+make e2e-evidence       # Evidence context end-to-end (register → upload SBOM → inventory)
+make e2e-llm            # Intelligence real-model e2e against a live OpenAI-compatible server
 ```
 
 `make check` runs: **build · test · lint · clean-arch · arch-test · coverage · deadcode** — and coverage pulls in
 the integration tests. Every OpenSpec `tasks.md` group ends by making this green.
+
+`make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives `recommend_position`
+against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
+`THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
+bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
 
@@ -140,5 +148,5 @@ OpenVEX / CSAF out.
 - `scripts/release-smoke-test.sh` — one-command release test (build → fresh DB → migrate → run → register →
   upload the SBOM under `scripts/` → verify components + enrichment). Wrapped by the `/themis-release-test`
   skill.
-- Defects and go-forward gaps are tracked in `docs/current-changes/project-backlog.md` (e.g. D-NVD-2,
-  D-FEED-2).
+- Defects and go-forward gaps are tracked in [`docs/BACKLOG.md`](docs/BACKLOG.md) — **Part 1** is the active
+  greenfield tracker (open this first); **Part 2** is the frozen legacy-PoC history (e.g. D-NVD-2, D-FEED-2).

@@ -120,7 +120,7 @@ outbound calls — the pipeline is unchanged. "Off", "down", and "declined" all 
   **local-only**, and a **runaway-prompt / timeout guard** turns an oversize prompt or a hung provider into a
   safe `insufficient` (never a hang). The per-call cost (`InputBytes`, tokens, duration) is metered on the
   telemetry record. Budget *enforcement* + data-classification are deliberately deferred (see
-  `PHASE3-BACKLOG.md` G-AI-4 / G-AI-5).
+  `docs/BACKLOG.md` G-AI-4 / G-AI-5).
 
 ### Other services (per-context APIs)
 

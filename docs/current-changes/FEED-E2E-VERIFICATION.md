@@ -62,7 +62,7 @@ Recent CVEs scored **only** with CVSS 4.0 (`CVE-2025-8869`, `CVE-2026-1703/3219/
 `severity=unknown`, `cvss_score=0`, `risk=0`. Root cause in two spots: `nvd/client.go extractNVDCVSS` reads
 `v3.1→v3.0→v2` with no `cvssMetricV40`; `osv/cvss.go cvssV3BaseScore` implements the v3.1 formula only. They
 **do not self-heal** (the `cvss_checked_at` back-off). Full detail + fix in
-[`project-backlog.md`](project-backlog.md) **DEFECT D-NVD-2**. Phase-3 cross-ref: `PHASE3-BACKLOG.md` §C.
+[`docs/BACKLOG.md`](../BACKLOG.md) **DEFECT D-NVD-2** (Part 2). Phase-3 cross-ref: `docs/BACKLOG.md` §C (Part 1).
 
 ### G2 — Intel source-tier taxonomy is unimplemented (logged as **D-FEED-2**)
 
@@ -72,7 +72,7 @@ with **differentiated failure behavior** (tier 1 critical → `signals_stale` + 
 columns exist but are never written (`RecordFeedSuccess`/`Failure` omit them), and both `DegradedFeeds`
 (`consecutive_failures > 0`) and `SignalsStale` are **tier-agnostic** — every feed is treated identically.
 Not currently biting (all feeds healthy), but a tier-3 feed failure would surface exactly like a tier-1 one.
-Full detail in [`project-backlog.md`](project-backlog.md) **DEFECT D-FEED-2**.
+Full detail in [`docs/BACKLOG.md`](../BACKLOG.md) **DEFECT D-FEED-2** (Part 2).
 
 ## What is confirmed correct (no action)
 
@@ -84,7 +84,7 @@ Full detail in [`project-backlog.md`](project-backlog.md) **DEFECT D-FEED-2**.
 
 - **G1 (CVSS 4.0)** and **G2 (source tiers)** both belong to the Phase-3 **Knowledge** context's feed ACL +
   reconciliation surface (`internal/knowledge/adapters/feed`, `domain/reconcile.go`). When Knowledge's real
-  feed-fetch clients land (`PHASE3-BACKLOG.md` §C), fold in: CVSS-4.0 parsing in the severity precedence, and
+  feed-fetch clients land (`docs/BACKLOG.md` §C), fold in: CVSS-4.0 parsing in the severity precedence, and
   the tier taxonomy as feed-ACL metadata driving health/staleness. Promote to `openspec/changes/phase3-knowledge`
   tasks if/when that work is scheduled.
 - No new **v0.3.x** OpenSpec change is required; both gaps are recorded as defects in the v0.3.x backlog.
