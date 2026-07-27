@@ -259,7 +259,7 @@ make test               # unit tests
 make test-integration   # embedded Postgres (no Docker); or set THEMIS_TEST_DATABASE_DSN
 make coverage           # unit + integration with per-package coverage thresholds
 make test-property      # property-based tests (1000 examples; RAPID_CHECKS=20000 to go deeper)
-make check              # full gate: build · lint · clean-arch · arch-test · coverage(+integration) · deadcode
+make check              # full gate: build · test · lint · clean-arch · arch-test · coverage(+integration) · deadcode
 ```
 
 Every task group / PR must pass `make check`. Coverage tiers are enforced by `scripts/check-coverage.sh`

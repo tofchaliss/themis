@@ -68,7 +68,7 @@ package (`adapters/wiring/`) are excluded from the coverage calc — `wiring` is
 | Coverage (greenfield) | per-package above | ✅ every package clears its tier |
 | Full canonical gate | `make check` | ✅ **exit 0** — all coverage thresholds satisfied, whole repo |
 
-`make check` = build · lint · clean-arch · arch-test · coverage · deadcode over the **whole** repo
+`make check` = build · test · lint · clean-arch · arch-test · coverage · deadcode over the **whole** repo
 (greenfield + the frozen v0.3.x legacy tree). It exited **0**. `deadcode` is informational (always exit 0);
 it reported 3 unreachable funcs in the legacy `usecase/enrichment` `NoOpMetricsRecorder` — legacy tree, not
 a gate failure. The full-repo coverage gate checked these greenfield packages, all green:

@@ -102,7 +102,7 @@ clean-arch:
 arch-test:
 	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
 
-check: build lint clean-arch arch-test coverage deadcode
+check: build test lint clean-arch arch-test coverage deadcode
 
 # golang-migrate registers the postgres driver only with -tags postgres.
 MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
