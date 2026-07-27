@@ -147,7 +147,7 @@ coverage_percent_from_profile() {
 		}
 		END {
 			if (total == 0) {
-				print "0"
+				print "none"
 			} else {
 				printf "%.1f", (covered * 100) / total
 			}
@@ -168,6 +168,14 @@ check_threshold_from_profile() {
 	fi
 
 	pct="$(coverage_percent_from_profile "$pkg_path")"
+
+	# Not measured in this run (e.g. a greenfield-scoped coverage profile that omits
+	# the frozen legacy packages). Skip rather than fail — a full-repo run measures
+	# every registered package, so nothing is skipped there.
+	if [[ "$pct" == "none" ]]; then
+		echo "SKIP ${import_path}: not in coverage profile (scoped run)"
+		return
+	fi
 
 	if awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= threshold + 0) }'; then
 		echo "OK   ${import_path}: ${pct}% (threshold ${threshold}%)"

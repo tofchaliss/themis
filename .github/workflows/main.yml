@@ -35,10 +35,11 @@ jobs:
             | sh -s -- -b "$(go env GOPATH)/bin"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # The full quality gate, identical to the local `make check`:
-      # build · lint · clean-arch · arch-test · coverage · deadcode.
-      - name: make check
-        run: make check
+      # Greenfield-scoped quality gate: build · test · lint · clean-arch · arch-test ·
+      # coverage-greenfield · deadcode. The frozen v0.3.x legacy tree is excluded from
+      # coverage (its integration tests are green only on macOS's coarse clock).
+      - name: make check-ci
+        run: make check-ci
 
       # Post-merge only: the slower Evidence end-to-end (self-provisions embedded
       # Postgres). Kept off PRs to keep pre-merge feedback fast.

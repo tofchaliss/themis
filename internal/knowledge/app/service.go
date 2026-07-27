@@ -9,7 +9,12 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
-const maxSaveRetries = 5
+// maxSaveRetries bounds FoldProposal's optimistic-concurrency retry loop. Additive
+// folds always converge, but each contended round lets only one version-guarded save
+// win, so N concurrent folds of the same CVE need up to N attempts for the last writer.
+// Sized well above realistic same-CVE concurrency (a handful of feeds); a pathological
+// herd still surfaces ErrConcurrent rather than spinning forever.
+const maxSaveRetries = 50
 
 // FaultlineService orchestrates the Knowledge write use cases over its ports.
 type FaultlineService struct {
