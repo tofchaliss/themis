@@ -19,6 +19,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -271,19 +272,19 @@ func TestConcurrentEnrichConverges(t *testing.T) {
 
 type fakePublisher struct {
 	mu        sync.Mutex
-	delivered []store.OutboxNote
+	delivered []event.Envelope
 	failFirst bool
 	calls     int
 }
 
-func (p *fakePublisher) Publish(_ context.Context, n store.OutboxNote) error {
+func (p *fakePublisher) Publish(_ context.Context, env event.Envelope) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
 	if p.failFirst && p.calls == 1 {
 		return errors.New("publish boom")
 	}
-	p.delivered = append(p.delivered, n)
+	p.delivered = append(p.delivered, env)
 	return nil
 }
 

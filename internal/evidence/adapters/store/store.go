@@ -18,7 +18,14 @@ import (
 	"github.com/themis-project/themis/internal/kernel/value"
 )
 
-const eventTypeEvidenceRegistered = "EvidenceRegistered"
+const (
+	eventTypeEvidenceRegistered = "EvidenceRegistered"
+	// sourceContext + schemaRef stamp the outbox row as a full kernel Envelope (M5 EB-02).
+	// schemaRef is the integration-contract id of the payload (EB-03 pins it to a checked-in
+	// JSON schema); correlation_id is the workflow root — the Evidence id, propagated downstream.
+	sourceContext               = "evidence"
+	schemaRefEvidenceRegistered = "evidence.registered.v1"
+)
 
 // ErrNotFound indicates no Evidence exists for the requested id.
 var ErrNotFound = errors.New("evidence: not found")
@@ -84,9 +91,9 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO evidence_outbox (id, evidence_id, event_type, payload, occurred_at)
-		VALUES ($1,$2,$3,$4,$5)
-	`, uuid.NewString(), insertedID, eventTypeEvidenceRegistered, string(payload), event.OccurredAt); err != nil {
+		INSERT INTO evidence_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	`, uuid.NewString(), sourceContext, insertedID, eventTypeEvidenceRegistered, schemaRefEvidenceRegistered, insertedID, string(payload), event.OccurredAt); err != nil {
 		return SaveResult{}, fmt.Errorf("evidence: outbox insert: %w", err)
 	}
 

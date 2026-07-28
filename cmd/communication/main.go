@@ -22,8 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/communication/adapters/delivery"
-	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/adapters/wiring"
+	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -88,17 +88,16 @@ func main() {
 	router.Mount("/api/v1", comm.Handler)
 
 	// Inbound Governance Position-event intake. Until the Event Infrastructure (M5) bus
-	// lands, the seam is fed over HTTP: {"type": "...", "payload": <raw governance event>}.
+	// reader lands, the seam is fed over HTTP with the full kernel Envelope JSON (the reader
+	// will call the same Consumer.Handle). A body carrying only {"type","payload"} still
+	// decodes — the unset envelope fields are transport metadata the ACL does not read.
 	router.Post("/internal/governance-events", func(w http.ResponseWriter, r *http.Request) {
-		var env struct {
-			Type    string          `json:"type"`
-			Payload json.RawMessage `json:"payload"`
-		}
+		var env event.Envelope
 		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := comm.Consumer.Handle(r.Context(), env.Type, env.Payload); err != nil {
+		if err := comm.Consumer.Handle(r.Context(), env); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -172,8 +171,9 @@ func envDefault(key, def string) string {
 
 type logPublisher struct{ logger *observability.Logger }
 
-func (p logPublisher) Publish(_ context.Context, n store.OutboxNote) error {
-	p.logger.Info("published outbox note",
-		observability.String("id", n.ID), observability.String("type", n.EventType))
+func (p logPublisher) Publish(_ context.Context, env event.Envelope) error {
+	p.logger.Info("published envelope",
+		observability.String("id", env.ID), observability.String("type", env.Type),
+		observability.String("subject", env.Subject))
 	return nil
 }

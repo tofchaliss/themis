@@ -12,6 +12,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/event"
 )
 
 // Knowledge integration-event type identifiers Governance consumes (mirrors
@@ -30,20 +31,22 @@ type Consumer struct {
 // NewConsumer wires the inbound consumer over the coordinator.
 func NewConsumer(coord *app.Coordinator) *Consumer { return &Consumer{coord: coord} }
 
-// Handle decodes and dispatches one Knowledge event by type. An unrecognized type is
-// ignored (returns nil) so the consumer tolerates a shared bus. A malformed payload for a
-// recognized type is a real error (surfaced so the event is retried, not silently dropped).
-func (c *Consumer) Handle(ctx context.Context, eventType string, payload []byte) error {
-	switch eventType {
+// Handle decodes and dispatches one Knowledge event carried by the kernel Envelope. It
+// reads the event type + payload from the Envelope (M5 EB-02); the rest of the envelope
+// metadata is transport concern, not the ACL's. An unrecognized type is ignored (returns
+// nil) so the consumer tolerates a shared bus. A malformed payload for a recognized type
+// is a real error (surfaced so the event is retried, not silently dropped).
+func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
+	switch env.Type {
 	case eventComponentMatched:
 		var dto componentMatchedDTO
-		if err := json.Unmarshal(payload, &dto); err != nil {
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
 			return err
 		}
 		return c.coord.OnComponentMatched(ctx, dto.toInbound())
 	case eventFaultlineEnriched:
 		var dto faultlineEnrichedDTO
-		if err := json.Unmarshal(payload, &dto); err != nil {
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
 			return err
 		}
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
@@ -51,7 +54,7 @@ func (c *Consumer) Handle(ctx context.Context, eventType string, payload []byte)
 		})
 	case eventFaultlineSuperseded:
 		var dto faultlineSupersededDTO
-		if err := json.Unmarshal(payload, &dto); err != nil {
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
 			return err
 		}
 		return c.coord.OnFaultlineSuperseded(ctx, app.InboundFaultlineSuperseded{FaultlineID: dto.FaultlineID, CVE: dto.CVE})

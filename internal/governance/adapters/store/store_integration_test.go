@@ -20,6 +20,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/event"
 )
 
 var testDSN string
@@ -269,7 +270,7 @@ func TestOutboxRelay(t *testing.T) {
 	if n, err := relay.DeliverPending(ctx); err != nil || n != 0 {
 		t.Fatalf("failing relay: n=%d err=%v", n, err)
 	}
-	if got := count(t, pool, `SELECT attempts FROM governance_outbox WHERE finding_id = 'fnd-1'`); got != 1 {
+	if got := count(t, pool, `SELECT attempts FROM governance_outbox WHERE subject = 'fnd-1'`); got != 1 {
 		t.Errorf("attempts = %d, want 1", got)
 	}
 
@@ -277,6 +278,16 @@ func TestOutboxRelay(t *testing.T) {
 	fp.failFirst = false
 	if n, err := relay.DeliverPending(ctx); err != nil || n != 1 {
 		t.Fatalf("healthy relay: n=%d err=%v", n, err)
+	}
+	// The relay reads the full kernel Envelope from the outbox (M5 EB-02): metadata intact.
+	if len(fp.delivered) != 1 {
+		t.Fatalf("delivered %d envelopes, want 1", len(fp.delivered))
+	}
+	env := fp.delivered[0]
+	if env.ID == "" || env.SourceContext != "governance" || env.Subject != "fnd-1" ||
+		env.Type != app.EventFindingOpened || env.SchemaRef != app.EventFindingOpened ||
+		env.CorrelationID != "fnd-1" || len(env.Payload) == 0 {
+		t.Errorf("delivered envelope = %+v", env)
 	}
 	if n, _ := relay.DeliverPending(ctx); n != 0 {
 		t.Errorf("second pass delivered %d, want 0", n)
@@ -413,13 +424,13 @@ func load(t *testing.T, st *store.Store, id domain.FindingID) (domain.Finding, b
 
 type fakePublisher struct {
 	failFirst bool
-	delivered []store.OutboxNote
+	delivered []event.Envelope
 }
 
-func (p *fakePublisher) Publish(_ context.Context, n store.OutboxNote) error {
+func (p *fakePublisher) Publish(_ context.Context, env event.Envelope) error {
 	if p.failFirst {
 		return errors.New("bus down")
 	}
-	p.delivered = append(p.delivered, n)
+	p.delivered = append(p.delivered, env)
 	return nil
 }

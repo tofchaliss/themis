@@ -86,6 +86,38 @@ func TestKernelIsLeaf(t *testing.T) {
 	}
 }
 
+// TestPlatformEventbusIsBusinessAgnostic enforces that the platform event bus
+// (internal/platform/eventbus) imports no bounded context and not the registry — it is
+// business-agnostic transport that moves kernel Envelopes and depends only on the kernel
+// plus infrastructure drivers (EDR-EVENTBUS-01 D10). Depguard's platform-eventbus-infra-only
+// rule enforces the same thing at lint time; this is the module-level backstop.
+func TestPlatformEventbusIsBusinessAgnostic(t *testing.T) {
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(cfg, module+"/internal/platform/eventbus/...")
+	if err != nil {
+		t.Fatalf("load eventbus packages: %v", err)
+	}
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		t.Fatalf("eventbus packages contained %d load error(s)", n)
+	}
+
+	forbidden := append([]string{"registry"}, boundedContexts...)
+	for _, p := range pkgs {
+		for imp := range p.Imports {
+			if !strings.HasPrefix(imp, module+"/internal/") {
+				continue // stdlib / infrastructure drivers are fine
+			}
+			for _, f := range forbidden {
+				base := module + "/internal/" + f
+				if imp == base || strings.HasPrefix(imp, base+"/") {
+					t.Errorf("eventbus violation: %s imports %s — the platform bus must depend on no context or the registry, only the kernel",
+						p.PkgPath, imp)
+				}
+			}
+		}
+	}
+}
+
 // TestRegistrySupportingContext enforces that the registry — a supporting foundation
 // beneath the pipeline — keeps inward-only rings (domain < app < adapters) and imports
 // no pipeline context (it collaborates via its read API, e.g. ReleaseExists). It may

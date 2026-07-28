@@ -9,7 +9,14 @@ import (
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
+	"github.com/themis-project/themis/internal/kernel/event"
 )
+
+// mkEnv wraps an event type + payload in the kernel Envelope the consumer now handles
+// (M5 EB-02). The other envelope fields are transport metadata the ACL does not read.
+func mkEnv(typ string, payload []byte) event.Envelope {
+	return event.Envelope{Type: typ, Payload: payload}
+}
 
 // memRepo records only the publishable-queue upserts; the other Repository methods are
 // unused by the inbound path.
@@ -56,7 +63,7 @@ func consumer(repo *memRepo) *inbound.Consumer {
 func TestConsumer_PositionEstablished(t *testing.T) {
 	repo := &memRepo{}
 	payload := []byte(`{"FindingID":"fnd-1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-2024-1","Version":1,"Stance":"not_affected"}`)
-	if err := consumer(repo).Handle(context.Background(), "governance.position_established", payload); err != nil {
+	if err := consumer(repo).Handle(context.Background(), mkEnv("governance.position_established", payload)); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if len(repo.queue) != 1 {
@@ -71,7 +78,7 @@ func TestConsumer_PositionEstablished(t *testing.T) {
 func TestConsumer_PositionRevisedMarksStale(t *testing.T) {
 	repo := &memRepo{}
 	payload := []byte(`{"FindingID":"fnd-1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-1","Version":2,"Stance":"mitigated"}`)
-	if err := consumer(repo).Handle(context.Background(), "governance.position_revised", payload); err != nil {
+	if err := consumer(repo).Handle(context.Background(), mkEnv("governance.position_revised", payload)); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if len(repo.queue) != 1 || !repo.queue[0].Stale || repo.queue[0].Version != 2 {
@@ -81,7 +88,7 @@ func TestConsumer_PositionRevisedMarksStale(t *testing.T) {
 
 func TestConsumer_UnknownTypeIgnored(t *testing.T) {
 	repo := &memRepo{}
-	if err := consumer(repo).Handle(context.Background(), "governance.finding_opened", []byte(`{}`)); err != nil {
+	if err := consumer(repo).Handle(context.Background(), mkEnv("governance.finding_opened", []byte(`{}`))); err != nil {
 		t.Errorf("unknown type should be ignored, got %v", err)
 	}
 	if len(repo.queue) != 0 {
@@ -92,7 +99,7 @@ func TestConsumer_UnknownTypeIgnored(t *testing.T) {
 func TestConsumer_MalformedPayloads(t *testing.T) {
 	c := consumer(&memRepo{})
 	for _, evt := range []string{"governance.position_established", "governance.position_revised"} {
-		if err := c.Handle(context.Background(), evt, []byte("{not json")); err == nil {
+		if err := c.Handle(context.Background(), mkEnv(evt, []byte("{not json"))); err == nil {
 			t.Errorf("%s: malformed payload should error", evt)
 		}
 	}
