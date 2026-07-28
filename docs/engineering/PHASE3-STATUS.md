@@ -1,19 +1,28 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-07-25 · **Read this first when resuming.**
+**Updated:** 2026-07-27 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
 architecture book (`docs/architecture/` Books I–III) and the **69 ADRs** (`docs/adr/`). It is the **sole
 go-forward**; the current architecture is **frozen at v0.3.x**.
 
-> **Resume snapshot (2026-07-25 session end):** The four-context pipeline **plus M4 Intelligence Δ1 + Δ2** is
-> IMPLEMENTED, gated, and **merged to `main`** (`origin/main` = `9d43692`; branch `phase3-evidence` carries the
-> ongoing work). **M5 — Event Infrastructure (the shared event bus) is GRILLED + SCAFFOLDED, not yet
-> implemented:** `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-> `openspec/changes/phase3-event-infrastructure/` (**0/43 tasks**, 10 groups EB-01…EB-11). **Next task:
-> implement M5** via `/opsx:apply phase3-event-infrastructure` starting at Group 1 — the user is reviewing the
-> EDR and asked to **confirm before implementation begins**. To verify green on resume: `make check`.
+> **Resume snapshot (2026-07-27 session):** The four-context pipeline **plus M4 Intelligence Δ1 + Δ2** is
+> IMPLEMENTED, gated, and **merged to `main`** (`origin/main` = `762bbac`). Two more PRs landed on `main` this
+> session: **#53 — CI** (`.github/workflows/{pr,main}.yml` running a **greenfield-scoped `make check-ci`**;
+> whole-repo `make check` is macOS-only-green because the frozen legacy tree has a clock-precision integration
+> test) plus a Faultline concurrent-fold fix; and **#54 — the consolidated `docs/BACKLOG.md`** (Part 1 active /
+> Part 2 frozen, replacing the two old backlog files) + the **M5 scaffold**. **M5 — Event Infrastructure is now
+> BEING IMPLEMENTED** on branch **`phase3-event-infrastructure`**: `docs/engineering/decisions/EDR-EVENTBUS-01.md`
+> (D1–D11) + `openspec/changes/phase3-event-infrastructure/` (**9/43 tasks — Groups 1–2 done**, 10 groups
+> EB-01…EB-11), via `/opsx:apply phase3-event-infrastructure`. To verify green on resume: **`make check-ci`**
+> (the greenfield gate CI runs, not whole-repo `make check`).
+>
+> **Update (2026-07-28):** **Group 1** (EB-01 — `internal/platform/eventbus` scaffold + `bus` database +
+> depguard/arch-test guard) and **Group 2** (EB-02 — the full kernel `Envelope` now threaded end-to-end
+> through all four producers' outboxes and both inbound consumers) are **DONE and gated** (full `make check`
+> green). Next: **Group 3** (EB-03 — integration-contract v1 + per-event JSON-schema guard; this pins each
+> producer's `SchemaRef`, currently a placeholder `= event type`).
 
 ---
 
@@ -40,7 +49,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 | **M9 — Communication** (publish Positions) | `EDR-COMMUNICATION-01` (D1–D12) | `phase3-communication` — **IMPLEMENTED** (22/22, gated) | COMM-01…12 |
 | **M4 — Intelligence** (AI Gateway) | `EDR-INTELLIGENCE-01` (Rev 3, D1–D13 + Δ2 cut) | `phase3-intelligence` — **Δ1 IMPLEMENTED** (37/37); `phase3-intelligence-d2` — **Δ2 IMPLEMENTED** (9/9 groups, gated, 2026-07-24); Δ3–Δ4 remain | INTEL-01…12 |
 | **M7+ — Knowledge feeds** (follow-on) | `EDR-KNOWLEDGE-01` (D5/D6) | `phase3-knowledge-feeds` — **IMPLEMENTED** (19/19, gated) | real OSV/NVD clients · CVSS 4.0 (go-fwd D-NVD-2) · source tiers (go-fwd D-FEED-2) · scanner Proposals |
-| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **SCAFFOLDED** (0/43, not implemented) | EB-01…EB-11 |
+| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **IMPLEMENTING** (started 2026-07-27; **9/43 — Groups 1–2 done**; branch `phase3-event-infrastructure`) | EB-01…EB-11 |
 
 All four docs lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:
 `openspec/changes/archive/2026-07-14-themis-ai-1` (folds into Phase-3 Intelligence / M4) and
@@ -171,13 +180,16 @@ order:
 beside the pipeline (owns no truth): reactive `recommend_position` → typed `[Rule → LLM]` dispatch + the
 admission spine; Δ3 (Python + RAG) and Δ4 (autonomy + LLMOps) deferred (see `docs/BACKLOG.md` §A).
 
-**Next: implement M5 — Event Infrastructure** (`phase3-event-infrastructure`, EB-01…EB-11) — the
+**In progress: M5 — Event Infrastructure** (`phase3-event-infrastructure`, EB-01…EB-11) — the
 **platform-owned event bus** carrying events between contexts (PostgreSQL channel now, Kafka-swappable later
-behind stable ports), which unblocks the single wired **SBOM → published-VEX pipeline e2e**. **GRILLED +
-SCAFFOLDED:** `EDR-EVENTBUS-01` (D1–D11) + `openspec/changes/phase3-event-infrastructure/` (0/43, 10 groups).
-Implement via `/opsx:apply phase3-event-infrastructure` starting Group 1 — **awaiting the user's go-ahead**
-(they are reviewing the EDR). All deferred per-context follow-ups (Communication channels, Governance expiry
-worker, store fault-injection, OTel traces/metrics) are listed in [`docs/BACKLOG.md`](../BACKLOG.md).
+behind stable ports), which unblocks the single wired **SBOM → published-VEX pipeline e2e**. Implementation
+**started 2026-07-27** on branch `phase3-event-infrastructure` via `/opsx:apply phase3-event-infrastructure`
+(**9/43 — Groups 1–2 done** as of 2026-07-28: the `eventbus` scaffold + `bus` DB, and the full `Envelope`
+threaded end-to-end through every outbox + both inbound consumers; `make check` green); source of truth
+`EDR-EVENTBUS-01` (D1–D11). Also newly on `main` this session: **CI**
+(greenfield `make check-ci`, PR #53) and the **consolidated `docs/BACKLOG.md`** (PR #54). All deferred
+per-context follow-ups (Communication channels, Governance expiry worker, store fault-injection, OTel
+traces/metrics) are listed in [`docs/BACKLOG.md`](../BACKLOG.md).
 
 Note (Option A in effect): `/grill-with-docs` is user-invoked, but the model can run the same via
 `grilling` + `domain-modeling` directly — that is how `EDR-KNOWLEDGE-01` was grilled. Either works.

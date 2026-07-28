@@ -10,28 +10,31 @@
 
 ## 1. Platform scaffold + `bus` database (EB-01 · D3/D4/D10)
 
-- [ ] 1.1 Create `internal/platform/eventbus` with a `doc.go` stating it owns transport infrastructure and
+- [x] 1.1 Create `internal/platform/eventbus` with a `doc.go` stating it owns transport infrastructure and
   depends **only** on the kernel (`Envelope`) + drivers — never a bounded context.
-- [ ] 1.2 `bus` database + migrations under `internal/platform/eventbus/migrations/`: `event_log` (seq
+- [x] 1.2 `bus` database + migrations under `internal/platform/eventbus/migrations/`: `event_log` (seq
   `bigserial` PK, envelope_id unique, source_context, subject, type, occurred_at, correlation_id, schema_ref,
   payload `jsonb`) with indexes for stream filter (source_context) + ordering (seq) + dedup (envelope_id);
   up/down reversibility.
-- [ ] 1.3 Extend depguard so `internal/platform/eventbus` is importable only by adapters + `cmd` (mirror the
+- [x] 1.3 Extend depguard so `internal/platform/eventbus` is importable only by adapters + `cmd` (mirror the
   `observability` rule); arch-test asserting eventbus imports only kernel + drivers, no context.
-- [ ] 1.4 Register the package in the coverage tiers (`scripts/check-coverage.sh` + Makefile `COVERAGE_PKGS`).
-- [ ] 1.5 Gate: build · lint · clean-arch · arch-test · coverage · deadcode green.
+- [x] 1.4 Register the package in the coverage tiers (`scripts/check-coverage.sh` + Makefile `COVERAGE_PKGS`).
+- [x] 1.5 Gate: build · lint · clean-arch · arch-test · coverage · deadcode green.
 
 ## 2. Thread the full kernel `Envelope` end-to-end (EB-02 · D9 · KERNEL-D4)
 
-- [ ] 2.1 Generalize each context's outbox row to carry the full `Envelope` (add `source_context`,
+- [x] 2.1 Generalize each context's outbox row to carry the full `Envelope` (add `source_context`,
   `schema_ref`, `correlation_id`; generalize the context-specific subject column — e.g. Knowledge's
-  `faultline_id` — to `subject`); migrations with up/down.
-- [ ] 2.2 Evolve the outbound path so the relay reads an `Envelope` (not the reduced `OutboxNote`), and the
+  `faultline_id` — to `subject`); migrations with up/down. Done for all four producers: evidence, knowledge,
+  governance (`000002_governance_envelope`), communication (`000002_communication_envelope`).
+- [x] 2.2 Evolve the outbound path so the relay reads an `Envelope` (not the reduced `OutboxNote`), and the
   inbound `Consumer.Handle` carries the `Envelope` (type + payload accessible from it); keep the ACL decode
-  logic and the ignore-unknown behaviour unchanged.
-- [ ] 2.3 Tests: envelope round-trips outbox → (relay) → reader → `Handle` with all fields intact; existing
-  per-context consumer tests updated to the envelope-carrying signature.
-- [ ] 2.4 Gate: six Themis gates green.
+  logic and the ignore-unknown behaviour unchanged. Both inbound consumers (governance ← knowledge,
+  communication ← governance) now take `event.Envelope`; the HTTP intake seam decodes the full envelope JSON.
+- [x] 2.3 Tests: envelope round-trips outbox → (relay) → reader → `Handle` with all fields intact; existing
+  per-context consumer tests updated to the envelope-carrying signature. (Reader lands in Group 5; the M5-cut
+  round-trip is outbox → relay → Publisher, asserted field-for-field in the governance store test.)
+- [x] 2.4 Gate: six Themis gates green.
 
 ## 3. Integration-contract v1 + schema guard (EB-03 · D9 · BCK-0046)
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
 	"github.com/themis-project/themis/internal/evidence/domain"
+	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/kernel/value"
 )
 
@@ -261,19 +262,19 @@ func TestGetAndList(t *testing.T) {
 
 type fakePublisher struct {
 	mu        sync.Mutex
-	delivered []store.OutboxNote
+	delivered []event.Envelope
 	failFirst bool
 	calls     int
 }
 
-func (p *fakePublisher) Publish(_ context.Context, n store.OutboxNote) error {
+func (p *fakePublisher) Publish(_ context.Context, env event.Envelope) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
 	if p.failFirst && p.calls == 1 {
 		return errors.New("publish boom")
 	}
-	p.delivered = append(p.delivered, n)
+	p.delivered = append(p.delivered, env)
 	return nil
 }
 

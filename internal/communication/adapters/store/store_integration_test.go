@@ -20,6 +20,7 @@ import (
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
+	"github.com/themis-project/themis/internal/kernel/event"
 )
 
 var testDSN string
@@ -329,7 +330,7 @@ func TestOutboxRelay(t *testing.T) {
 	if n, err := relay.DeliverPending(ctx); err != nil || n != 0 {
 		t.Fatalf("failing relay: n=%d err=%v", n, err)
 	}
-	if got := count(t, pool, `SELECT attempts FROM communication_outbox WHERE publication_id='pub-1'`); got != 1 {
+	if got := count(t, pool, `SELECT attempts FROM communication_outbox WHERE subject='pub-1'`); got != 1 {
 		t.Errorf("attempts = %d, want 1", got)
 	}
 	fp.failFirst = false
@@ -343,7 +344,7 @@ func TestOutboxRelay(t *testing.T) {
 
 type fakePublisher struct{ failFirst bool }
 
-func (p *fakePublisher) Publish(_ context.Context, _ store.OutboxNote) error {
+func (p *fakePublisher) Publish(_ context.Context, _ event.Envelope) error {
 	if p.failFirst {
 		return errors.New("bus down")
 	}

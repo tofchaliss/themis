@@ -2,28 +2,23 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/themis-project/themis/internal/kernel/event"
 )
 
-// OutboxNote is one undelivered outbox entry handed to a Publisher.
-type OutboxNote struct {
-	ID         string
-	EventType  string
-	Payload    []byte
-	OccurredAt time.Time
-}
-
-// Publisher delivers an outbox note to the event bus. Implementations live in the
-// Event Infrastructure (M5); the Evidence store only produces the notes.
+// Publisher delivers a completed-fact Envelope to the event bus. A logging stand-in is
+// used until Event Infrastructure (M5) wires the real platform Publisher (EB-04); the
+// Envelope is the kernel's stable integration-event contract (D9).
 type Publisher interface {
-	Publish(ctx context.Context, note OutboxNote) error
+	Publish(ctx context.Context, env event.Envelope) error
 }
 
-// Relay delivers unsent outbox notes and marks them sent, giving
+// Relay delivers unsent outbox rows and marks them sent, giving
 // exactly-once-eventually delivery (BCK-0041): every stored evidence is announced
-// exactly once, and no announcement exists for un-stored evidence.
+// exactly once, and no announcement exists for un-stored evidence. Each row is read as
+// a full kernel Envelope (the row id is the Envelope id).
 type Relay struct {
 	pool      *pgxpool.Pool
 	publisher Publisher
@@ -40,26 +35,27 @@ func NewRelay(pool *pgxpool.Pool, publisher Publisher, batchSize int) *Relay {
 	return &Relay{pool: pool, publisher: publisher, batchSize: batchSize}
 }
 
-// DeliverPending delivers up to batchSize unsent notes (oldest first) and returns
-// the number successfully delivered. A publish failure increments the note's
-// attempt counter and leaves it unsent for a later retry; it does not abort the
-// batch, so one bad note cannot block the others.
+// DeliverPending delivers up to batchSize unsent envelopes (oldest first) and returns
+// the number successfully delivered. A publish failure increments the row's attempt
+// counter and leaves it unsent for a later retry; it does not abort the batch, so one
+// bad envelope cannot block the others. The relay trusts its own outbox, so it scans
+// each row straight into an Envelope without re-validation.
 func (r *Relay) DeliverPending(ctx context.Context) (int, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, event_type, payload, occurred_at FROM evidence_outbox
-		WHERE sent_at IS NULL ORDER BY occurred_at, id LIMIT $1
+		SELECT id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at
+		FROM evidence_outbox WHERE sent_at IS NULL ORDER BY occurred_at, id LIMIT $1
 	`, r.batchSize)
 	if err != nil {
 		return 0, err
 	}
-	var notes []OutboxNote
+	var envs []event.Envelope
 	for rows.Next() {
-		var n OutboxNote
-		if err := rows.Scan(&n.ID, &n.EventType, &n.Payload, &n.OccurredAt); err != nil {
+		var e event.Envelope
+		if err := rows.Scan(&e.ID, &e.SourceContext, &e.Subject, &e.Type, &e.SchemaRef, &e.CorrelationID, &e.Payload, &e.OccurredAt); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		notes = append(notes, n)
+		envs = append(envs, e)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -67,12 +63,12 @@ func (r *Relay) DeliverPending(ctx context.Context) (int, error) {
 	}
 
 	delivered := 0
-	for _, n := range notes {
-		if err := r.publisher.Publish(ctx, n); err != nil {
-			_, _ = r.pool.Exec(ctx, `UPDATE evidence_outbox SET attempts = attempts + 1 WHERE id = $1`, n.ID)
+	for _, env := range envs {
+		if err := r.publisher.Publish(ctx, env); err != nil {
+			_, _ = r.pool.Exec(ctx, `UPDATE evidence_outbox SET attempts = attempts + 1 WHERE id = $1`, env.ID)
 			continue
 		}
-		if _, err := r.pool.Exec(ctx, `UPDATE evidence_outbox SET sent_at = now() WHERE id = $1`, n.ID); err != nil {
+		if _, err := r.pool.Exec(ctx, `UPDATE evidence_outbox SET sent_at = now() WHERE id = $1`, env.ID); err != nil {
 			return delivered, err
 		}
 		delivered++

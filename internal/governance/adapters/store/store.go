@@ -23,6 +23,11 @@ import (
 // ErrNotFound is returned by GetByID when no Finding exists.
 var ErrNotFound = errors.New("governance: finding not found")
 
+// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
+// the event type as the integration-contract id until EB-03 pins each type to a checked-in
+// JSON schema; correlation_id is the Finding id — the workflow anchor for its lifecycle.
+const sourceContext = "governance"
+
 // Store is the Governance Finding aggregate repository.
 type Store struct {
 	pool *pgxpool.Pool
@@ -281,9 +286,9 @@ func (s *Store) saveNotes(ctx context.Context, tx pgx.Tx, f domain.Finding, note
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO governance_outbox (id, finding_id, event_type, payload, occurred_at)
-			VALUES ($1,$2,$3,$4,$5)`,
-			uuid.NewString(), string(f.ID()), n.EventType, string(payload), n.OccurredAt); err != nil {
+			INSERT INTO governance_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, n.EventType, string(f.ID()), string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}

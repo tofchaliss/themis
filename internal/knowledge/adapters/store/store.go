@@ -24,6 +24,12 @@ import (
 // ErrNotFound is returned by GetByID when no card exists.
 var ErrNotFound = errors.New("knowledge: faultline not found")
 
+// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
+// the (already namespaced) event type as the v1 integration-contract id; EB-03 pins the
+// checked-in schemas. correlation_id defaults to the subject (the faultline) until true
+// upstream propagation is threaded with the pipeline wiring (EB-07/08).
+const sourceContext = "knowledge"
+
 // Store is the Knowledge Faultline aggregate repository.
 type Store struct {
 	pool *pgxpool.Pool
@@ -161,9 +167,9 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO knowledge_outbox (id, faultline_id, event_type, payload, occurred_at)
-			VALUES ($1,$2,$3,$4,$5)`,
-			uuid.NewString(), string(f.ID()), n.EventType, string(payload), n.OccurredAt); err != nil {
+			INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, n.EventType, string(f.ID()), string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}
@@ -209,9 +215,9 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO knowledge_outbox (id, faultline_id, event_type, payload, occurred_at)
-		VALUES ($1,$2,$3,$4,$5)`,
-		uuid.NewString(), string(m.FaultlineID), app.EventComponentMatched, string(payload), m.OccurredAt); err != nil {
+		INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		uuid.NewString(), sourceContext, string(m.FaultlineID), app.EventComponentMatched, app.EventComponentMatched, string(m.FaultlineID), string(payload), m.OccurredAt); err != nil {
 		return false, err
 	}
 

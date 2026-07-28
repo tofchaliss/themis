@@ -24,6 +24,11 @@ import (
 // ErrNotFound is returned by GetByID when no Publication exists.
 var ErrNotFound = errors.New("communication: publication not found")
 
+// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
+// the event type as the integration-contract id until EB-03 pins each type to a checked-in
+// JSON schema; correlation_id is the Publication id — the workflow anchor for its delivery.
+const sourceContext = "communication"
+
 // Store is the Communication Publication aggregate repository.
 type Store struct {
 	pool *pgxpool.Pool
@@ -167,10 +172,11 @@ func (s *Store) saveNotes(ctx context.Context, tx pgx.Tx, notes []app.OutboxNote
 		if err != nil {
 			return err
 		}
+		subject := publicationIDOf(n.Event)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO communication_outbox (id, publication_id, event_type, payload, occurred_at)
-			VALUES ($1,$2,$3,$4,$5)`,
-			uuid.NewString(), publicationIDOf(n.Event), n.EventType, string(payload), n.OccurredAt); err != nil {
+			INSERT INTO communication_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			uuid.NewString(), sourceContext, subject, n.EventType, n.EventType, subject, string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}

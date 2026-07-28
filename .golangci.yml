@@ -213,6 +213,22 @@ linters:
               desc: Registry must not import Communication — it is a foundation beneath the pipeline
             - pkg: github.com/themis-project/themis/internal/intelligence
               desc: Registry must not import Intelligence — it is a foundation beneath the pipeline
+        platform-eventbus-infra-only:
+          files:
+            - "internal/platform/eventbus/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
+            - pkg: github.com/themis-project/themis/internal/registry
+              desc: eventbus is platform transport beneath the pipeline — it depends only on the kernel + drivers, not the registry context
         no-format-leakage:
           files:
             - "**/*.go"

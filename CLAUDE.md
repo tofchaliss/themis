@@ -89,6 +89,15 @@ Each bounded context is `internal/<context>/{domain,app,adapters}` with **inward
 outbox + relay, and (b) read-only **HTTP read APIs** (a consuming context talks to a small client seam, e.g.
 Knowledge's `adapters/evidence` client reads Evidence's inventory). This rule is enforced, not aspirational.
 
+**Event transport (M5, `internal/platform/eventbus`).** The events above ride a platform-owned bus — the
+second shared platform package after `observability`. Topology is one PostgreSQL server, **database-per-context
+plus a dedicated `bus` database** holding a single `event_log` (a Postgres stand-in for a Kafka topic): a
+Publisher appends each outbox note to it, a stream Reader drains rows in `seq` order filtered by
+`source_context`, and delivers a kernel `Envelope` to each context's inbound `Consumer.Handle`. The database
+boundary makes context isolation structural (no cross-database joins). The bus is **business-agnostic** — it
+moves kernel `Envelope`s and imports no bounded context — so a real broker can later slot behind the same
+`Envelope` + ports. Source of record: `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11).
+
 The contexts and their pipeline order:
 
 **Kernel/Registry** (shared value objects + Product→Project→Release identity) → **Evidence** (immutable,
@@ -107,7 +116,9 @@ it reads via read APIs / writes via proposal-intake.
   `-domain domain -application app -interfaces adapters`. **go-cleanarch scans test files too** — a
   cross-layer test placed in the wrong ring directory will fail the check.
 - **depguard** blocks illegal imports (including the shared observability package leaking into `domain`/`app`
-  — only adapters + the composition root may import it).
+  — only adapters + the composition root may import it). The same guard (`platform-eventbus-infra-only`) plus
+  the arch test `TestPlatformEventbusIsBusinessAgnostic` keep `internal/platform/eventbus` importable only by
+  adapters + `cmd`, and keep it free of any bounded context or the registry — kernel + drivers only.
 - **Coverage tiers** (`scripts/check-coverage.sh`; a package must be registered there): `domain`/`app` →
   **100%**, adapters/infra → **90%**, aggregate **stores** → **80%** (store DB-error branches need pool-fault
   injection, a tracked follow-up). Each greenfield store also owns a `migrations/` dir under its
@@ -127,8 +138,8 @@ it reads via read APIs / writes via proposal-intake.
 Go 1.25 · PostgreSQL via `pgx/v5` · `golang-migrate/v4` · `chi/v5` · `oapi-codegen/v2` (spec-first) ·
 `santhosh-tekuri/jsonschema/v6` · OpenTelemetry + `zap` + `prometheus/client_golang` · std-lib `testing` +
 `pgregory.net/rapid` (property) + `fergusstrange/embedded-postgres` (integration). No ORM, no heavy web
-framework, **no external broker** — event delivery is a Postgres transactional outbox + relay (a broker can
-slot behind the same event envelope later). Standards-only formats: CycloneDX/SPDX in; CycloneDX-VEX /
+framework, **no external broker** — event delivery is a Postgres transactional outbox + relay draining into a
+dedicated `bus` database (`internal/platform/eventbus`); a broker can slot behind the same event envelope later. Standards-only formats: CycloneDX/SPDX in; CycloneDX-VEX /
 OpenVEX / CSAF out.
 
 ## Key invariants

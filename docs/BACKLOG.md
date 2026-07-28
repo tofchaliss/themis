@@ -41,19 +41,27 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   the two-step `[Rule → LLM]` plan, the honest `insufficient` outcome, precedent-Positions grounding, and a
   which-step-decided provenance stamp.
 
-- [ ] **M5 — Event Infrastructure (the shared event bus)** — **GRILLED + SCAFFOLDED (2026-07-25), not yet
-  implemented.** `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-  `openspec/changes/phase3-event-infrastructure/` (**0/43 tasks**, 10 groups EB-01…EB-11). Today each context
-  writes to its own transactional outbox and a relay drives a **logging-stand-in `Publisher`**; there is no
-  real bus carrying events between contexts. M5 delivers the **platform-owned channel**
-  (`internal/platform/eventbus` + a `bus` database), threads the full kernel `Envelope` end-to-end, and adds
-  the per-consumer inbox (exactly-once **application**), per-subject ordering, stream/interest-set
+- [ ] **M5 — Event Infrastructure (the shared event bus)** — **IMPLEMENTING (started 2026-07-27)** on branch
+  `phase3-event-infrastructure`. `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
+  `openspec/changes/phase3-event-infrastructure/` (**9/43 tasks — Groups 1–2 done**, 10 groups EB-01…EB-11).
+  Today each context writes to its own transactional outbox and a relay drives a **logging-stand-in
+  `Publisher`**; there is no real bus carrying events between contexts. M5 delivers the **platform-owned
+  channel** (`internal/platform/eventbus` + a `bus` database), threads the full kernel `Envelope` end-to-end,
+  and adds the per-consumer inbox (exactly-once **application**), per-subject ordering, stream/interest-set
   subscription, subject-scoped failure isolation (shipped as **stream-halt** for M5), and the missing
   `cmd/knowledge`. **This is the blocker for the full-pipeline e2e (§B).** Staged deferrals that become their
   own backlog entries once M5 lands: the **Kafka transport swap** (D1/D2), the **subject-aware scheduler**
   (D8 target), and **explicit integration DTOs** (D9 target). Dep: none new — the outbox tables + relays +
-  inbound consumers are all in place. **Next action: `/opsx:apply phase3-event-infrastructure` (awaiting user
-  go).**
+  inbound consumers are all in place.
+  - **Progress (2026-07-28):** ✅ **Group 1 (EB-01)** — `internal/platform/eventbus` scaffold + `bus` database
+    + `platform-eventbus-infra-only` depguard / `TestPlatformEventbusIsBusinessAgnostic` arch guard. ✅
+    **Group 2 (EB-02)** — full kernel `Envelope` threaded through all four producers' outboxes
+    (`000002_*_envelope` migrations rename the context-specific subject column and add
+    `source_context`/`schema_ref`/`correlation_id`) and both inbound consumers (`Consumer.Handle(ctx,
+    Envelope)`). Both gated (`make check` green). **Two M5-cut seams noted:** `schema_ref` is a placeholder
+    (`= event type`) until Group 3 pins it; `correlation_id` is each context's own aggregate id (cross-context
+    propagation deferred to the Group 9 e2e). **Next: Group 3 (EB-03)** — integration-contract v1 + per-event
+    JSON-schema guard.
 
 ---
 
@@ -221,12 +229,12 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
 - [ ] **Domain glossary upkeep.** Grilling has not been maintaining a domain glossary; the real
   `/grill-with-docs` (`grilling` + `domain-modeling`) would start doing so on future EDRs.
 
-- [ ] **Extend CI with the pipeline e2e (post-M5).** `ci/add-workflows` adds
-  `.github/workflows/{pr,main}.yml` running `make check` (+ `make e2e-evidence` on `main`). When M5 lands
-  `make e2e-pipeline` (`phase3-event-infrastructure` tasks 9.1 / 10.4), add an `e2e-pipeline` step to
-  `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is wanted. Kept **out of
-  `make check`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional: a `make e2e` / `make ci`
-  aggregate target.
+- [ ] **Extend CI with the pipeline e2e (post-M5).** CI is **live on `main`** (PR #53):
+  `.github/workflows/{pr,main}.yml` run a greenfield-scoped **`make check-ci`** (+ `make e2e-evidence` on
+  `main`). When M5 lands `make e2e-pipeline` (`phase3-event-infrastructure` tasks 9.1 / 10.4), add an
+  `e2e-pipeline` step to `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is
+  wanted. Kept **out of `make check-ci`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional:
+  a `make e2e` / `make ci` aggregate target.
 
 ---
 

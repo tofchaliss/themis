@@ -21,6 +21,7 @@ import (
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
 	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	"github.com/themis-project/themis/internal/evidence/adapters/wiring"
+	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/observability"
 	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
 )
@@ -163,8 +164,9 @@ func (v registrySubjectRef) ReleaseExists(ctx context.Context, releaseID string)
 
 type logPublisher struct{ logger *observability.Logger }
 
-func (p logPublisher) Publish(_ context.Context, n store.OutboxNote) error {
-	p.logger.Info("published outbox note",
-		observability.String("id", n.ID), observability.String("type", n.EventType))
+func (p logPublisher) Publish(_ context.Context, env event.Envelope) error {
+	p.logger.Info("published envelope",
+		observability.String("id", env.ID), observability.String("type", env.Type),
+		observability.String("subject", env.Subject))
 	return nil
 }
