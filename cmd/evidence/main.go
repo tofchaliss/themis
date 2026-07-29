@@ -22,6 +22,7 @@ import (
 	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	"github.com/themis-project/themis/internal/evidence/adapters/wiring"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
 )
@@ -35,6 +36,10 @@ type config struct {
 	migrate        bool     // THEMIS_EVIDENCE_MIGRATE=1 — apply the Evidence migrations on startup.
 	devPurge       bool     // THEMIS_EVIDENCE_DEV_PURGE=1 — expose DELETE /dev/evidence (dev only; never in production).
 	migrationsPath string   // THEMIS_EVIDENCE_MIGRATIONS — path to the Evidence migrations dir.
+
+	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
+	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
+	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
 }
 
 func loadConfig() config {
@@ -45,6 +50,10 @@ func loadConfig() config {
 		migrate:        os.Getenv("THEMIS_EVIDENCE_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_EVIDENCE_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_EVIDENCE_MIGRATIONS", "internal/evidence/adapters/store/migrations"),
+
+		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
+		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
+		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 	}
 }
 
@@ -101,7 +110,10 @@ func main() {
 		logger.Info("DEV purge route enabled (DELETE /dev/evidence)")
 	}
 
-	go relayLoop(pool, logger.Component("relay"))
+	publisher, closeBus := newPublisher(ctx, cfg, logger)
+	defer closeBus()
+
+	go relayLoop(pool, publisher, logger.Component("relay"))
 
 	logger.Info("listening", observability.String("addr", cfg.addr))
 	if err := http.ListenAndServe(cfg.addr, router); err != nil {
@@ -110,10 +122,10 @@ func main() {
 	}
 }
 
-// relayLoop delivers outbox notes on a fixed cadence. The publisher is a logging
-// stand-in until the Event Infrastructure (M5) event bus is available.
-func relayLoop(pool *pgxpool.Pool, logger *observability.Logger) {
-	relay := store.NewRelay(pool, logPublisher{logger}, 100)
+// relayLoop delivers outbox notes on a fixed cadence, appending each to the event bus
+// via the given publisher (EB-04).
+func relayLoop(pool *pgxpool.Pool, publisher store.Publisher, logger *observability.Logger) {
+	relay := store.NewRelay(pool, publisher, 100)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -121,6 +133,30 @@ func relayLoop(pool *pgxpool.Pool, logger *observability.Logger) {
 			logger.Error("relay failed", observability.Err(err))
 		}
 	}
+}
+
+// newPublisher builds the outbox relay's publisher. With THEMIS_BUS_DATABASE_DSN set it
+// is the real platform Publisher appending to the bus event_log (EB-04); with it empty a
+// logging stand-in keeps a single context runnable without the bus (dev). The returned
+// cleanup closes the bus pool (a no-op for the stand-in).
+func newPublisher(ctx context.Context, cfg config, logger *observability.Logger) (store.Publisher, func()) {
+	if cfg.busDSN == "" {
+		logger.Info("event bus not configured (THEMIS_BUS_DATABASE_DSN empty); using logging publisher")
+		return logPublisher{logger}, func() {}
+	}
+	if cfg.busMigrate {
+		if err := applyMigrations(cfg.busDSN, cfg.busMigrationsPath); err != nil {
+			logger.Error("bus migrate failed", observability.Err(err))
+			os.Exit(1)
+		}
+	}
+	busPool, err := pgxpool.New(ctx, cfg.busDSN)
+	if err != nil {
+		logger.Error("bus pool failed", observability.Err(err))
+		os.Exit(1)
+	}
+	logger.Info("event bus connected (EB-04 Publisher)")
+	return eventbus.NewPublisher(busPool), busPool.Close
 }
 
 func applyMigrations(dsn, path string) error {

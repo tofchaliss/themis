@@ -24,10 +24,30 @@ import (
 // ErrNotFound is returned by GetByID when no Publication exists.
 var ErrNotFound = errors.New("communication: publication not found")
 
-// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
-// the event type as the integration-contract id until EB-03 pins each type to a checked-in
-// JSON schema; correlation_id is the Publication id — the workflow anchor for its delivery.
+// sourceContext stamps every outbox row's source_context (M5 EB-02). correlation_id is
+// the Publication id — the workflow anchor for its delivery.
 const sourceContext = "communication"
+
+// schemaRefByEventType pins each published Communication event type to its frozen
+// integration-contract v1 schema (M5 EB-03 / D9 / BCK-0046). This producer-owned mapping
+// stamps the outbox row's schema_ref; the checked-in schemas under schemas/ and the
+// contract test guard the wire shape so a domain refactor fails the build rather than
+// silently breaking a consumer.
+var schemaRefByEventType = map[string]string{
+	app.EventPublicationCreated:    "communication.publication_created.v1",
+	app.EventPublicationDelivered:  "communication.publication_delivered.v1",
+	app.EventPublicationSuperseded: "communication.publication_superseded.v1",
+}
+
+// schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
+// type falls back to the raw type so the outbox write still succeeds; the contract test
+// forbids that gap.
+func schemaRefFor(eventType string) string {
+	if ref, ok := schemaRefByEventType[eventType]; ok {
+		return ref
+	}
+	return eventType
+}
 
 // Store is the Communication Publication aggregate repository.
 type Store struct {
@@ -176,7 +196,7 @@ func (s *Store) saveNotes(ctx context.Context, tx pgx.Tx, notes []app.OutboxNote
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO communication_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			uuid.NewString(), sourceContext, subject, n.EventType, n.EventType, subject, string(payload), n.OccurredAt); err != nil {
+			uuid.NewString(), sourceContext, subject, n.EventType, schemaRefFor(n.EventType), subject, string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}
@@ -297,7 +317,9 @@ func (s *Store) PublishableQueue(ctx context.Context) ([]app.QueueEntry, error) 
 
 // MarkPublishable upserts the publishable-positions worklist projection (D4).
 func (s *Store) MarkPublishable(ctx context.Context, e app.QueueEntry) error {
-	_, err := s.pool.Exec(ctx, `
+	// Join the inbox unit of work when one rides the context (EB-06), so the worklist
+	// upsert commits atomically with the envelope claim.
+	_, err := s.exec(ctx).Exec(ctx, `
 		INSERT INTO publishable_positions (finding_id, release_id, faultline_id, cve, version, stance, stale, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,now())
 		ON CONFLICT (finding_id) DO UPDATE SET
@@ -323,6 +345,6 @@ func (s *Store) PrunePayloads(ctx context.Context, before time.Time) (int, error
 // Purge removes all Communication rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`)
+		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`)
 	return err
 }

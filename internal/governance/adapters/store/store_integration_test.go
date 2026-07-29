@@ -94,7 +94,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE processed_events, governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -285,7 +285,7 @@ func TestOutboxRelay(t *testing.T) {
 	}
 	env := fp.delivered[0]
 	if env.ID == "" || env.SourceContext != "governance" || env.Subject != "fnd-1" ||
-		env.Type != app.EventFindingOpened || env.SchemaRef != app.EventFindingOpened ||
+		env.Type != app.EventFindingOpened || env.SchemaRef != "governance.finding_opened.v1" ||
 		env.CorrelationID != "fnd-1" || len(env.Payload) == 0 {
 		t.Errorf("delivered envelope = %+v", env)
 	}

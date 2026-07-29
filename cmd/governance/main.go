@@ -20,34 +20,45 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/governance/adapters/inbound"
 	"github.com/themis-project/themis/internal/governance/adapters/intelligence"
+	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/adapters/wiring"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // config is read from the environment. Every option is documented here (the
 // self-documented-config convention); there is no separate config reference.
 type config struct {
-	dsn            string // THEMIS_DATABASE_DSN — Postgres DSN (required).
-	addr           string // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
-	migrate        bool   // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
-	devPurge       bool   // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
-	migrationsPath string // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
-	aiEnabled      bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
+	dsn             string // THEMIS_DATABASE_DSN — Postgres DSN (required).
+	addr            string // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
+	migrate         bool   // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
+	devPurge        bool   // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
+	migrationsPath  string // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
+	aiEnabled       bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
 	intelligenceURL string // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
+
+	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
+	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
+	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
 }
 
 func loadConfig() config {
 	return config{
-		dsn:            os.Getenv("THEMIS_DATABASE_DSN"),
-		addr:           envDefault("THEMIS_GOVERNANCE_ADDR", ":8083"),
-		migrate:        os.Getenv("THEMIS_GOVERNANCE_MIGRATE") == "1",
-		devPurge:       os.Getenv("THEMIS_GOVERNANCE_DEV_PURGE") == "1",
-		migrationsPath: envDefault("THEMIS_GOVERNANCE_MIGRATIONS", "internal/governance/adapters/store/migrations"),
-		aiEnabled:      os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
+		dsn:             os.Getenv("THEMIS_DATABASE_DSN"),
+		addr:            envDefault("THEMIS_GOVERNANCE_ADDR", ":8083"),
+		migrate:         os.Getenv("THEMIS_GOVERNANCE_MIGRATE") == "1",
+		devPurge:        os.Getenv("THEMIS_GOVERNANCE_DEV_PURGE") == "1",
+		migrationsPath:  envDefault("THEMIS_GOVERNANCE_MIGRATIONS", "internal/governance/adapters/store/migrations"),
+		aiEnabled:       os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
 		intelligenceURL: envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
+
+		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
+		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
+		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 	}
 }
 
@@ -88,9 +99,27 @@ func main() {
 		logger.Info("AI enrichment enabled", observability.String("intelligence_url", cfg.intelligenceURL))
 	}
 
-	gov := wiring.Wire(pool, logPublisher{logger}, advisor)
+	busPool, closeBus := openBus(ctx, cfg, logger)
+	defer closeBus()
+
+	var publisher store.Publisher = logPublisher{logger}
+	if busPool != nil {
+		publisher = eventbus.NewPublisher(busPool)
+	}
+
+	gov := wiring.Wire(pool, publisher, advisor)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
+
+	// The bus reader drives Finding open/update + re-evaluation off the Knowledge stream
+	// (EB-07/08). Without a bus it is disabled — inbound events then arrive only over the
+	// /internal HTTP seam below (dev).
+	if busPool != nil {
+		reader := inbound.Subscription.NewReader(busPool, logger.Component("reader"),
+			store.NewInboxConsumer(pool, gov.Consumer))
+		go readerLoop(reader, logger.Component("reader"))
+		logger.Info("knowledge-stream reader enabled")
+	}
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
@@ -161,6 +190,46 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// openBus opens the pool on the `bus` database (optionally migrating it), or returns nil when
+// no bus DSN is configured — in which case the relay uses a logging publisher and the reader
+// is disabled (a single context stays runnable without the bus, dev). The returned cleanup
+// closes the pool (a no-op when nil).
+func openBus(ctx context.Context, cfg config, logger *observability.Logger) (*pgxpool.Pool, func()) {
+	if cfg.busDSN == "" {
+		logger.Info("event bus not configured (THEMIS_BUS_DATABASE_DSN empty); using logging publisher, reader disabled")
+		return nil, func() {}
+	}
+	if cfg.busMigrate {
+		if err := applyMigrations(cfg.busDSN, cfg.busMigrationsPath); err != nil {
+			logger.Error("bus migrate failed", observability.Err(err))
+			os.Exit(1)
+		}
+	}
+	busPool, err := pgxpool.New(ctx, cfg.busDSN)
+	if err != nil {
+		logger.Error("bus pool failed", observability.Err(err))
+		os.Exit(1)
+	}
+	logger.Info("event bus connected")
+	return busPool, busPool.Close
+}
+
+// readerLoop drains the subscribed stream on a fixed cadence; a poison halt (D8) stops the
+// loop loudly rather than silent-skipping (the reader has already alerted).
+func readerLoop(reader *eventbus.Reader, logger *observability.Logger) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if _, err := reader.Drain(context.Background()); err != nil {
+			logger.Error("reader drain failed", observability.Err(err))
+			if reader.Halted() {
+				logger.Error("stream halted — reader loop stopping until restart")
+				return
+			}
+		}
+	}
 }
 
 type logPublisher struct{ logger *observability.Logger }

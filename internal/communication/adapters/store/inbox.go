@@ -1,0 +1,83 @@
+package store
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/themis-project/themis/internal/kernel/event"
+)
+
+// txCtxKey carries an in-flight transaction through the context so a wrapped apply joins
+// the caller's unit of work instead of opening its own. Only this package reads it.
+type txCtxKey struct{}
+
+func withTx(ctx context.Context, tx pgx.Tx) context.Context {
+	return context.WithValue(ctx, txCtxKey{}, tx)
+}
+
+func txFromCtx(ctx context.Context) (pgx.Tx, bool) {
+	tx, ok := ctx.Value(txCtxKey{}).(pgx.Tx)
+	return tx, ok
+}
+
+// execer is the write surface shared by *pgxpool.Pool and pgx.Tx.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// exec returns the ambient inbox transaction when one rides the context (so a single-
+// statement write joins the unit of work), else the pool.
+func (s *Store) exec(ctx context.Context) execer {
+	if tx, ok := txFromCtx(ctx); ok {
+		return tx
+	}
+	return s.pool
+}
+
+// Handler applies one delivered envelope. The inbound Consumer satisfies it; InboxConsumer
+// decorates it with exactly-once application.
+type Handler interface {
+	Handle(ctx context.Context, env event.Envelope) error
+}
+
+// InboxConsumer wraps a Handler with the consumer inbox (D5 / EB-06): it claims the
+// envelope id in processed_events and runs the inner Handle in ONE transaction on this
+// context's own database. A redelivery of the same envelope id is a no-op, so an out-of-date
+// redelivery cannot overwrite newer state — exactly-once application over an at-least-once
+// transport.
+type InboxConsumer struct {
+	pool  *pgxpool.Pool
+	inner Handler
+}
+
+// NewInboxConsumer wraps inner with exactly-once application over pool (this context's DB).
+func NewInboxConsumer(pool *pgxpool.Pool, inner Handler) *InboxConsumer {
+	return &InboxConsumer{pool: pool, inner: inner}
+}
+
+// Handle claims env.ID and applies the inner Handle atomically; a duplicate envelope id
+// short-circuits to a no-op.
+func (ic *InboxConsumer) Handle(ctx context.Context, env event.Envelope) error {
+	tx, err := ic.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	ct, err := tx.Exec(ctx,
+		`INSERT INTO processed_events (envelope_id) VALUES ($1) ON CONFLICT (envelope_id) DO NOTHING`, env.ID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return tx.Commit(ctx) // already applied — a no-op (D5)
+	}
+
+	if err := ic.inner.Handle(withTx(ctx, tx), env); err != nil {
+		return err // deferred rollback undoes the claim and any partial write
+	}
+	return tx.Commit(ctx)
+}

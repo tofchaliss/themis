@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/communication/communication.publication_superseded.v1.schema.json",
+  "title": "communication.publication_superseded.v1",
+  "description": "Integration-contract v1 for the PublicationSuperseded event payload (M5 EB-03; current wire shape frozen). Both records are kept after a Position revision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["PublicationID", "SupersededByID", "OccurredAt"],
+  "properties": {
+    "PublicationID": { "type": "string" },
+    "SupersededByID": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

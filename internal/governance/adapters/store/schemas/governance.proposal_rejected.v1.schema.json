@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.proposal_rejected.v1.schema.json",
+  "title": "governance.proposal_rejected.v1",
+  "description": "Integration-contract v1 for the ProposalRejected event payload (M5 EB-03; current wire shape frozen).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ProposalID", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ProposalID": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

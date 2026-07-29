@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.faultline_created.v1.schema.json",
+  "title": "knowledge.faultline_created.v1",
+  "description": "Integration-contract v1 for the FaultlineCreated event payload (M5 EB-03; current wire shape frozen). Thin fact: consumers fetch detail via the Knowledge read API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

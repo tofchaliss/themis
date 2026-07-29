@@ -45,3 +45,8 @@ jobs:
       # Postgres). Kept off PRs to keep pre-merge feedback fast.
       - name: make e2e-evidence
         run: make e2e-evidence
+
+      # Post-merge only: the full in-process pipeline e2e (M5) — all four contexts +
+      # the `bus` database on one embedded Postgres, SBOM in → published OpenVEX out.
+      - name: make e2e-pipeline
+        run: make e2e-pipeline

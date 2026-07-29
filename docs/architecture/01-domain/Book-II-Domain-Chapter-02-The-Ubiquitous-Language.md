@@ -157,6 +157,45 @@ The language remains stable while implementations evolve.
 
 ------------------------------------------------------------------------
 
+## 2.6 Event Infrastructure Vocabulary (M5)
+
+The words the contexts use to collaborate **over the event bus**, not domain concepts but a
+shared, transport-independent vocabulary (`EDR-EVENTBUS-01`). They survive a future swap from
+the PostgreSQL realization to a broker.
+
+### Event Log
+
+The single ordered channel of published integration events — a Postgres stand-in for a Kafka
+topic, one append-only `bus.event_log` table. Every producing context's relay appends its
+outbox notes here; readers drain it in `seq` order.
+
+### Stream
+
+The unit of **routing and ordering** a consumer subscribes to — today one stream per producing
+context (`source_context`). Ordering guarantees are properties *of a stream*; there is no
+global order across streams.
+
+### Interest set
+
+The event types a consumer **dispatches on** within its stream. Purely a dispatch filter —
+types outside it are ignored — it never affects routing or ordering, so narrowing it is always
+safe.
+
+### Inbox (`processed_events`)
+
+The consumer-side dedup ledger in each context's **own** database, keyed by envelope id. The
+inbound apply records the envelope id and does its business writes in **one transaction**, so a
+redelivered envelope is a no-op.
+
+### Exactly-once application vs at-least-once transport
+
+The transport (relay → log → reader) is **at-least-once**: an envelope may be delivered more
+than once. Correctness is the consumer's — the inbox makes the *application* of an envelope
+happen **exactly once**. Ordering (the stream) and de-duplication (the inbox) are orthogonal
+safety nets; a cursor/offset is only a read-position optimization and carries no correctness.
+
+------------------------------------------------------------------------
+
 ## Domain Invariant 2 --- One Concept, One Meaning
 
 Every significant business concept within Themis has exactly one

@@ -182,7 +182,14 @@ func TestContextFirstArchitecture(t *testing.T) {
 				continue // stdlib / third-party — not an architecture concern here
 			}
 
-			// (1) No imports across bounded contexts.
+			// (1) No imports across bounded contexts. This is the **no synchronous
+			// cross-context orchestration** guarantee (M5 EB-09/D11): a context cannot import
+			// another's domain/app/adapters, so it can never call another context's use cases
+			// in-process. Collaboration is only (a) asynchronous domain events over the
+			// platform bus (internal/platform/eventbus — not a context), and (b) a read-only
+			// HTTP client seam (e.g. knowledge/adapters/evidence, which speaks HTTP and imports
+			// no evidence package). The whole SBOM→published-VEX pipeline therefore runs with
+			// zero synchronous fan-out between contexts — proven live by tests/pipeline.
 			for _, other := range boundedContexts {
 				if other == ctx {
 					continue

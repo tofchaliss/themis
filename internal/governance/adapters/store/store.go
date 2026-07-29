@@ -23,10 +23,36 @@ import (
 // ErrNotFound is returned by GetByID when no Finding exists.
 var ErrNotFound = errors.New("governance: finding not found")
 
-// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
-// the event type as the integration-contract id until EB-03 pins each type to a checked-in
-// JSON schema; correlation_id is the Finding id — the workflow anchor for its lifecycle.
+// sourceContext stamps every outbox row's source_context (M5 EB-02). correlation_id is
+// the Finding id — the workflow anchor for its lifecycle.
 const sourceContext = "governance"
+
+// schemaRefByEventType pins each published Governance event type to its frozen
+// integration-contract v1 schema (M5 EB-03 / D9 / BCK-0046). This producer-owned mapping
+// stamps the outbox row's schema_ref; the checked-in schemas under schemas/ and the
+// contract test guard the wire shape so a domain refactor fails the build rather than
+// silently breaking a consumer.
+var schemaRefByEventType = map[string]string{
+	app.EventFindingOpened:       "governance.finding_opened.v1",
+	app.EventFindingResolved:     "governance.finding_resolved.v1",
+	app.EventFindingReopened:     "governance.finding_reopened.v1",
+	app.EventFindingArchived:     "governance.finding_archived.v1",
+	app.EventProposalRaised:      "governance.proposal_raised.v1",
+	app.EventProposalAccepted:    "governance.proposal_accepted.v1",
+	app.EventProposalRejected:    "governance.proposal_rejected.v1",
+	app.EventPositionEstablished: "governance.position_established.v1",
+	app.EventPositionRevised:     "governance.position_revised.v1",
+}
+
+// schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
+// type falls back to the raw type so the outbox write still succeeds; the contract test
+// forbids that gap.
+func schemaRefFor(eventType string) string {
+	if ref, ok := schemaRefByEventType[eventType]; ok {
+		return ref
+	}
+	return eventType
+}
 
 // Store is the Governance Finding aggregate repository.
 type Store struct {
@@ -180,11 +206,15 @@ func decidedActor(kind, id string) domain.Actor {
 // Components/proposals/positions are upserted idempotently; only a proposal's decision
 // columns are ever updated (immutable columns never change).
 func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVersion int, notes []app.OutboxNote) error {
-	tx, err := s.pool.Begin(ctx)
+	// Join the inbox unit of work when one rides the context (EB-06), so the aggregate
+	// write commits atomically with the envelope claim; otherwise own a fresh transaction.
+	tx, own, err := s.beginOrJoin(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	if own {
+		defer func() { _ = tx.Rollback(ctx) }()
+	}
 
 	now := time.Now().UTC()
 	curStance, curVersion := materializedPosition(f)
@@ -226,7 +256,10 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if own {
+		return tx.Commit(ctx)
+	}
+	return nil // the inbox unit of work owns the commit
 }
 
 func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding) error {
@@ -288,7 +321,7 @@ func (s *Store) saveNotes(ctx context.Context, tx pgx.Tx, f domain.Finding, note
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO governance_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, n.EventType, string(f.ID()), string(payload), n.OccurredAt); err != nil {
+			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, schemaRefFor(n.EventType), string(f.ID()), string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}
@@ -394,6 +427,6 @@ func isUniqueViolation(err error) bool {
 // Purge removes all Governance rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
+		`TRUNCATE processed_events, governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
 	return err
 }

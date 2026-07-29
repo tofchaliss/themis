@@ -18,11 +18,15 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 > EB-01…EB-11), via `/opsx:apply phase3-event-infrastructure`. To verify green on resume: **`make check-ci`**
 > (the greenfield gate CI runs, not whole-repo `make check`).
 >
-> **Update (2026-07-28):** **Group 1** (EB-01 — `internal/platform/eventbus` scaffold + `bus` database +
-> depguard/arch-test guard) and **Group 2** (EB-02 — the full kernel `Envelope` now threaded end-to-end
-> through all four producers' outboxes and both inbound consumers) are **DONE and gated** (full `make check`
-> green). Next: **Group 3** (EB-03 — integration-contract v1 + per-event JSON-schema guard; this pins each
-> producer's `SchemaRef`, currently a placeholder `= event type`).
+> **Update (2026-07-29): M5 is DONE — all 10 groups (43/43), gated `make check` green + `make e2e-pipeline`
+> green.** Groups 1–2 (scaffold + `Envelope` threading), Group 3 (integration-contract v1 schema guard),
+> Group 4 (`Publisher` → `bus.event_log`), Group 5 (stream `Reader` — gap-free txid watermark + D8
+> poison-halt), Group 6 (consumer inbox — exactly-once application), Group 7 (subscriptions — stream +
+> interest set), Group 8 (`cmd/knowledge` + readers in every cmd + in-process pipeline runner), Group 9
+> (black-box **SBOM → published-OpenVEX** e2e + focused D5/D6/D8 tests + the "no synchronous cross-context
+> orchestration" arch assertion), Group 10 (docs). **The pipeline flows end-to-end over the real Postgres
+> bus.** Remaining maturations are tracked, not blocking: the D8 subject-aware scheduler (M5 ships stream-halt)
+> and the D9 explicit integration DTOs (M5 froze the current wire shapes as v1).
 
 ---
 
@@ -49,7 +53,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 | **M9 — Communication** (publish Positions) | `EDR-COMMUNICATION-01` (D1–D12) | `phase3-communication` — **IMPLEMENTED** (22/22, gated) | COMM-01…12 |
 | **M4 — Intelligence** (AI Gateway) | `EDR-INTELLIGENCE-01` (Rev 3, D1–D13 + Δ2 cut) | `phase3-intelligence` — **Δ1 IMPLEMENTED** (37/37); `phase3-intelligence-d2` — **Δ2 IMPLEMENTED** (9/9 groups, gated, 2026-07-24); Δ3–Δ4 remain | INTEL-01…12 |
 | **M7+ — Knowledge feeds** (follow-on) | `EDR-KNOWLEDGE-01` (D5/D6) | `phase3-knowledge-feeds` — **IMPLEMENTED** (19/19, gated) | real OSV/NVD clients · CVSS 4.0 (go-fwd D-NVD-2) · source tiers (go-fwd D-FEED-2) · scanner Proposals |
-| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **IMPLEMENTING** (started 2026-07-27; **9/43 — Groups 1–2 done**; branch `phase3-event-infrastructure`) | EB-01…EB-11 |
+| **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **IMPLEMENTED** (43/43, all 10 groups; gated `make check` + `make e2e-pipeline` green; 2026-07-29) | EB-01…EB-11 |
 
 All four docs lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:
 `openspec/changes/archive/2026-07-14-themis-ai-1` (folds into Phase-3 Intelligence / M4) and

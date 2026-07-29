@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/communication/communication.publication_delivered.v1.schema.json",
+  "title": "communication.publication_delivered.v1",
+  "description": "Integration-contract v1 for the PublicationDelivered event payload (M5 EB-03; current wire shape frozen).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["PublicationID", "Channel", "OccurredAt"],
+  "properties": {
+    "PublicationID": { "type": "string" },
+    "Channel": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

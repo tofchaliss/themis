@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.finding_reopened.v1.schema.json",
+  "title": "governance.finding_reopened.v1",
+  "description": "Integration-contract v1 for the FindingReopened event payload (M5 EB-03; current wire shape frozen).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

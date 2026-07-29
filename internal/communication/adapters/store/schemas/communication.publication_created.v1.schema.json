@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/communication/communication.publication_created.v1.schema.json",
+  "title": "communication.publication_created.v1",
+  "description": "Integration-contract v1 for the PublicationCreated event payload (M5 EB-03; current wire shape frozen). A terminal audit fact; establishes no new truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["PublicationID", "Type", "Stance", "ReleaseID", "FaultlineID", "CVE", "OccurredAt"],
+  "properties": {
+    "PublicationID": { "type": "string" },
+    "Type": { "type": "string" },
+    "Stance": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

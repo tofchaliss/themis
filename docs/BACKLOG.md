@@ -41,18 +41,17 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   the two-step `[Rule → LLM]` plan, the honest `insufficient` outcome, precedent-Positions grounding, and a
   which-step-decided provenance stamp.
 
-- [ ] **M5 — Event Infrastructure (the shared event bus)** — **IMPLEMENTING (started 2026-07-27)** on branch
+- [x] **M5 — Event Infrastructure (the shared event bus)** — **DONE (2026-07-29)** on branch
   `phase3-event-infrastructure`. `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-  `openspec/changes/phase3-event-infrastructure/` (**9/43 tasks — Groups 1–2 done**, 10 groups EB-01…EB-11).
-  Today each context writes to its own transactional outbox and a relay drives a **logging-stand-in
-  `Publisher`**; there is no real bus carrying events between contexts. M5 delivers the **platform-owned
-  channel** (`internal/platform/eventbus` + a `bus` database), threads the full kernel `Envelope` end-to-end,
-  and adds the per-consumer inbox (exactly-once **application**), per-subject ordering, stream/interest-set
-  subscription, subject-scoped failure isolation (shipped as **stream-halt** for M5), and the missing
-  `cmd/knowledge`. **This is the blocker for the full-pipeline e2e (§B).** Staged deferrals that become their
-  own backlog entries once M5 lands: the **Kafka transport swap** (D1/D2), the **subject-aware scheduler**
-  (D8 target), and **explicit integration DTOs** (D9 target). Dep: none new — the outbox tables + relays +
-  inbound consumers are all in place.
+  `openspec/changes/phase3-event-infrastructure/` (**43/43 tasks — all 10 groups EB-01…EB-11**), gated
+  `make check` + `make e2e-pipeline` green. The platform-owned channel (`internal/platform/eventbus` +
+  a `bus` database) now carries the full kernel `Envelope` between contexts: schema-guarded integration
+  contract v1, `Publisher` → `bus.event_log`, gap-free stream `Reader` (txid watermark) + D8 stream-halt,
+  per-consumer inbox (exactly-once **application**), stream/interest-set subscriptions, `cmd/knowledge` +
+  readers in every cmd, and an in-process runner proving **SBOM → published-OpenVEX** black-box. The staged
+  maturations are their own low-priority entries now (M5 shipped the stable contract, not the final mechanism):
+  the **Kafka transport swap** (D1/D2), the **subject-aware scheduler** (D8 target — M5 halts the whole
+  stream), and **explicit integration DTOs** (D9 target — M5 froze the current wire shapes as v1). See §C/§E.
   - **Progress (2026-07-28):** ✅ **Group 1 (EB-01)** — `internal/platform/eventbus` scaffold + `bus` database
     + `platform-eventbus-infra-only` depguard / `TestPlatformEventbusIsBusinessAgnostic` arch guard. ✅
     **Group 2 (EB-02)** — full kernel `Envelope` threaded through all four producers' outboxes
@@ -62,6 +61,16 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
     (`= event type`) until Group 3 pins it; `correlation_id` is each context's own aggregate id (cross-context
     propagation deferred to the Group 9 e2e). **Next: Group 3 (EB-03)** — integration-contract v1 + per-event
     JSON-schema guard.
+  - **M5 maturations (LOW — contract stable, mechanism evolves; not blocking):**
+    - [ ] **Kafka transport swap (D1/D2).** Replace the Postgres event_log + cursor with a broker behind the
+      same `Envelope` + Publisher/Reader ports; the inbox (exactly-once application) and per-subject ordering
+      guarantees are transport-independent and carry over unchanged.
+    - [ ] **Subject-aware scheduler (D8).** M5 halts the *whole stream* on a poison event; the architectural
+      target isolates the halt to the failing `Subject` so unrelated aggregates keep flowing — replace the
+      single drain loop with a per-Subject scheduler, no changes to D5/D6/D7 or the event contracts.
+    - [ ] **Explicit integration DTOs (D9).** M5 froze the current wire shapes as v1 (Knowledge/Governance/
+      Communication still marshal the raw domain struct — PascalCase). Introduce per-type outbound DTOs while
+      keeping the bytes identical (else a v2 `schema_ref`); Evidence already has one (`eventPayload`).
 
 ---
 
@@ -84,6 +93,17 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
 > fakeable today). The v0.3.x monolith defects D-NVD-2 / D-FEED-2 themselves stay open (this is the Phase-3
 > realization, not the v0.3.x fix).
 
+- [x] **Knowledge consumer inbox (M5 EB-06) — DONE in Group 8.** Built alongside `cmd/knowledge`:
+  `internal/knowledge/adapters/inbound` (decode `EvidenceRegistered` → correlation + Subscription),
+  `000003_knowledge_inbox` `processed_events` migration + `InboxConsumer`, and `Save`/`RecordMatch` join the
+  ctx-tx (both fan out over SBOM components). Proven by the Knowledge inbox integration tests + the
+  `tests/pipeline` SBOM→Faultline e2e.
+- [ ] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
+  `txCtxKey` / `withTx` / `txFromCtx` + `InboxConsumer` are duplicated per consuming context (Governance,
+  Communication, later Knowledge). It is business-agnostic infra and could collapse into one platform package
+  (a third after `observability` + `eventbus`), trading a little context independence for less duplication.
+  Deferred: adding a platform package is an architecture decision to justify against the EDR; revisit if the
+  duplication grows or a third/fourth consumer lands. See [[feedback-backlog-surfaced-followups]].
 - [ ] **Knowledge — real feed-fetch HTTP clients.** The scheduled discovery/watch use real **OSV
   query-by-package** + **NVD modified-since** clients behind the existing `PackageVulnSource` /
   `ChangedVulnSource` ports (currently fakeable ports only). The G3 feed **ACLs already do the translation**;
@@ -235,6 +255,19 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   `e2e-pipeline` step to `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is
   wanted. Kept **out of `make check-ci`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional:
   a `make e2e` / `make ci` aggregate target.
+
+- [ ] **Close the PR-gate e2e blind spot (LOW — revisit post-M5).** `make e2e-evidence` runs only on the
+  post-merge `main.yml`, not on `pr.yml` (it carries the `e2e` build tag, excluded from `check`/`check-ci`), so
+  a change that breaks e2e merges **green** and only reddens `main` afterward. This bit us: PR #55 renamed
+  `evidence_outbox.evidence_id` → `subject` (M5 migration `000002`) without updating the e2e `outboxCount`
+  helper; the PR passed, `main`'s Main run went red, fixed in PR #56 (`8c6a7c3`). **Decision:** stays
+  backlogged at low priority — revisit **after M5**; implement only if it recurs or a green gate ends up with a
+  straight dependency on pre-merge e2e proof. Natural fix is to run e2e on `pr.yml` too (folds into the
+  pipeline-e2e item above once `make e2e-pipeline` exists).
+
+- [ ] **Bump GitHub Actions off Node 20 (LOW).** `actions/checkout@v4` and `actions/setup-go@v5` are being
+  force-migrated to Node 24 (runner deprecation warning on every run). Cosmetic today; bump to the Node-24
+  action majors next time `.github/workflows/*` are touched.
 
 ---
 

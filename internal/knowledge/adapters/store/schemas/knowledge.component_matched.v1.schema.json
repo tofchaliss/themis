@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.component_matched.v1.schema.json",
+  "title": "knowledge.component_matched.v1",
+  "description": "Integration-contract v1 for the ComponentMatched correlation event payload (M5 EB-03; current wire shape frozen). Governance consumes it to create a Finding; it is a Proposal, not truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "ReleaseID", "Components", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "Components": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["PURL", "Name", "Version", "Ecosystem"],
+        "properties": {
+          "PURL": { "type": "string" },
+          "Name": { "type": "string" },
+          "Version": { "type": "string" },
+          "Ecosystem": { "type": "string" }
+        }
+      }
+    },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}
