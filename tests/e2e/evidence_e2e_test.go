@@ -422,7 +422,7 @@ func outboxCount(t *testing.T, evidenceID string) int {
 	t.Helper()
 	var n int
 	if err := testPool.QueryRow(context.Background(),
-		"SELECT count(*) FROM evidence_outbox WHERE evidence_id = $1", evidenceID).Scan(&n); err != nil {
+		"SELECT count(*) FROM evidence_outbox WHERE subject = $1", evidenceID).Scan(&n); err != nil {
 		t.Fatalf("count outbox for %s: %v", evidenceID, err)
 	}
 	return n
