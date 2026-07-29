@@ -58,6 +58,15 @@ envelope through it.
   guarded by a **contract test** (produced payload validates against a checked-in JSON schema) — so a domain
   refactor that reshapes the wire fails the test instead of silently breaking a consumer. Explicit DTOs are
   the deferred maturation; the mapping lives in the producer's **outbound** adapter.
+- **As-built (EB-03).** Each producing store owns a `schemaRefByEventType` map (the outbound mapping) that
+  stamps the row's `schema_ref`, checked-in schemas under `internal/<ctx>/adapters/store/schemas/*.schema.json`,
+  and an in-package contract test that validates the exact marshaled payload against the pinned schema
+  (`additionalProperties:false` + all fields `required`, so a rename/retype/drop fails). Asymmetry that is the
+  **DTO migration surface**: Evidence already marshals a dedicated integration DTO (`eventPayload`, snake_case),
+  so `evidence.registered.v1` is snake_case; Knowledge/Governance/Communication still marshal the raw domain
+  struct, so their v1 schemas freeze the current **PascalCase** field names. The deferred maturation introduces
+  per-type DTOs for the latter three **without bumping `schema_ref` past v1 only if the wire bytes are
+  unchanged** — otherwise it is a v2 (a new `schema_ref`), never a silent reshape of v1.
 
 ## Layout (D10) — house context-first, additive; platform is business-agnostic
 

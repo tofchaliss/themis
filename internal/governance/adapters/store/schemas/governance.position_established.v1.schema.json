@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.position_established.v1.schema.json",
+  "title": "governance.position_established.v1",
+  "description": "Integration-contract v1 for the PositionEstablished event payload (M5 EB-03; current wire shape frozen). One of the two Position events Communication consumes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ReleaseID", "FaultlineID", "CVE", "Version", "Stance", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "Version": { "type": "integer" },
+    "Stance": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.faultline_enriched.v1.schema.json",
+  "title": "knowledge.faultline_enriched.v1",
+  "description": "Integration-contract v1 for the FaultlineEnriched event payload (M5 EB-03; current wire shape frozen). Carries a coarse headline so Governance can re-evaluate without fetching the whole card.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "Severity", "KEV", "ExploitPublic", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "Severity": { "type": "string" },
+    "KEV": { "type": "boolean" },
+    "ExploitPublic": { "type": "boolean" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

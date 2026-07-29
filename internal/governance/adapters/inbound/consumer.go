@@ -13,6 +13,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/eventbus"
 )
 
 // Knowledge integration-event type identifiers Governance consumes (mirrors
@@ -22,6 +23,16 @@ const (
 	eventFaultlineEnriched   = "knowledge.faultline_enriched"
 	eventFaultlineSuperseded = "knowledge.faultline_superseded"
 )
+
+// Subscription declares Governance's bus binding (EB-07 / D7): it consumes the Knowledge
+// stream and dispatches on the three Faultline facts below (its interest set — the same
+// types Handle switches on). Composition binds this to a platform Reader over the inbox-
+// wrapped Consumer; the interest filter drops any other type the stream may carry.
+var Subscription = eventbus.Subscription{
+	Consumer: "governance",
+	Stream:   "knowledge",
+	Interest: []string{eventComponentMatched, eventFaultlineEnriched, eventFaultlineSuperseded},
+}
 
 // Consumer translates raw Knowledge events into coordinator calls.
 type Consumer struct {

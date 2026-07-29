@@ -22,8 +22,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/communication/adapters/delivery"
+	"github.com/themis-project/themis/internal/communication/adapters/inbound"
+	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/adapters/wiring"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -36,6 +39,10 @@ type config struct {
 	migrate        bool   // THEMIS_COMMUNICATION_MIGRATE=1 — apply the communication migrations on startup.
 	devPurge       bool   // THEMIS_COMMUNICATION_DEV_PURGE=1 — expose DELETE /dev/communication (dev only).
 	migrationsPath string // THEMIS_COMMUNICATION_MIGRATIONS — path to the communication migrations dir.
+
+	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
+	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
+	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
 }
 
 func loadConfig() config {
@@ -46,6 +53,10 @@ func loadConfig() config {
 		migrate:        os.Getenv("THEMIS_COMMUNICATION_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_COMMUNICATION_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_COMMUNICATION_MIGRATIONS", "internal/communication/adapters/store/migrations"),
+
+		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
+		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
+		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 	}
 }
 
@@ -78,10 +89,28 @@ func main() {
 	}
 	defer pool.Close()
 
+	busPool, closeBus := openBus(ctx, cfg, logger)
+	defer closeBus()
+
+	var publisher store.Publisher = logPublisher{logger}
+	if busPool != nil {
+		publisher = eventbus.NewPublisher(busPool)
+	}
+
 	comm := wiring.Wire(pool, cfg.governanceURL,
-		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, logPublisher{logger})
+		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher)
 
 	go workerLoop(comm, logger.Component("worker"))
+
+	// The bus reader drives the publishable-positions worklist off the Governance stream
+	// (EB-07/08). Without a bus it is disabled — Position events then arrive only over the
+	// /internal HTTP seam below (dev).
+	if busPool != nil {
+		reader := inbound.Subscription.NewReader(busPool, logger.Component("reader"),
+			store.NewInboxConsumer(pool, comm.Consumer))
+		go readerLoop(reader, logger.Component("reader"))
+		logger.Info("governance-stream reader enabled")
+	}
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
@@ -167,6 +196,46 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// openBus opens the pool on the `bus` database (optionally migrating it), or returns nil when
+// no bus DSN is configured — in which case the relay uses a logging publisher and the reader
+// is disabled (a single context stays runnable without the bus, dev). The returned cleanup
+// closes the pool (a no-op when nil).
+func openBus(ctx context.Context, cfg config, logger *observability.Logger) (*pgxpool.Pool, func()) {
+	if cfg.busDSN == "" {
+		logger.Info("event bus not configured (THEMIS_BUS_DATABASE_DSN empty); using logging publisher, reader disabled")
+		return nil, func() {}
+	}
+	if cfg.busMigrate {
+		if err := applyMigrations(cfg.busDSN, cfg.busMigrationsPath); err != nil {
+			logger.Error("bus migrate failed", observability.Err(err))
+			os.Exit(1)
+		}
+	}
+	busPool, err := pgxpool.New(ctx, cfg.busDSN)
+	if err != nil {
+		logger.Error("bus pool failed", observability.Err(err))
+		os.Exit(1)
+	}
+	logger.Info("event bus connected")
+	return busPool, busPool.Close
+}
+
+// readerLoop drains the subscribed stream on a fixed cadence; a poison halt (D8) stops the
+// loop loudly rather than silent-skipping (the reader has already alerted).
+func readerLoop(reader *eventbus.Reader, logger *observability.Logger) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if _, err := reader.Drain(context.Background()); err != nil {
+			logger.Error("reader drain failed", observability.Err(err))
+			if reader.Halted() {
+				logger.Error("stream halted — reader loop stopping until restart")
+				return
+			}
+		}
+	}
 }
 
 type logPublisher struct{ logger *observability.Logger }

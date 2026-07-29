@@ -22,7 +22,7 @@ COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/eviden
 COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/...
 
 .PHONY: all build clean tidy test test-integration test-property lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
-	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence verify-build
+	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
 # Add a context here as it is scaffolded.
@@ -167,6 +167,13 @@ generate-api-intelligence:
 #   EVIDENCE_E2E_FORMAT=spdx make e2e-evidence
 e2e-evidence:
 	$(GO) test -tags=e2e -count=1 -v ./tests/e2e/...
+
+# In-process composed pipeline e2e (M5 EB-08): all four contexts + the `bus` database on one
+# embedded Postgres, driven through the real event bus — SBOM in one end, a correlated
+# Faultline out the other. A developer convenience, not a deployment model; not part of
+# `make check`.
+e2e-pipeline:
+	$(GO) test -tags=e2e -count=1 -v ./tests/pipeline/...
 
 # Opt-in REAL-LLM e2e for the Intelligence Gateway: recommend_position against a running
 # OpenAI-compatible model server. The provider is a pure OpenAI-compatible client, so it

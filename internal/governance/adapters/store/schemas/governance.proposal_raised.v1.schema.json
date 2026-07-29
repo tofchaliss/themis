@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.proposal_raised.v1.schema.json",
+  "title": "governance.proposal_raised.v1",
+  "description": "Integration-contract v1 for the ProposalRaised event payload (M5 EB-03; current wire shape frozen).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ProposalID", "Stance", "ProposerKind", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ProposalID": { "type": "string" },
+    "Stance": { "type": "string" },
+    "ProposerKind": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

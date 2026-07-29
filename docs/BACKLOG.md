@@ -84,6 +84,17 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
 > fakeable today). The v0.3.x monolith defects D-NVD-2 / D-FEED-2 themselves stay open (this is the Phase-3
 > realization, not the v0.3.x fix).
 
+- [x] **Knowledge consumer inbox (M5 EB-06) — DONE in Group 8.** Built alongside `cmd/knowledge`:
+  `internal/knowledge/adapters/inbound` (decode `EvidenceRegistered` → correlation + Subscription),
+  `000003_knowledge_inbox` `processed_events` migration + `InboxConsumer`, and `Save`/`RecordMatch` join the
+  ctx-tx (both fan out over SBOM components). Proven by the Knowledge inbox integration tests + the
+  `tests/pipeline` SBOM→Faultline e2e.
+- [ ] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
+  `txCtxKey` / `withTx` / `txFromCtx` + `InboxConsumer` are duplicated per consuming context (Governance,
+  Communication, later Knowledge). It is business-agnostic infra and could collapse into one platform package
+  (a third after `observability` + `eventbus`), trading a little context independence for less duplication.
+  Deferred: adding a platform package is an architecture decision to justify against the EDR; revisit if the
+  duplication grows or a third/fourth consumer lands. See [[feedback-backlog-surfaced-followups]].
 - [ ] **Knowledge — real feed-fetch HTTP clients.** The scheduled discovery/watch use real **OSV
   query-by-package** + **NVD modified-since** clients behind the existing `PackageVulnSource` /
   `ChangedVulnSource` ports (currently fakeable ports only). The G3 feed **ACLs already do the translation**;
@@ -235,6 +246,19 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   `e2e-pipeline` step to `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is
   wanted. Kept **out of `make check-ci`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional:
   a `make e2e` / `make ci` aggregate target.
+
+- [ ] **Close the PR-gate e2e blind spot (LOW — revisit post-M5).** `make e2e-evidence` runs only on the
+  post-merge `main.yml`, not on `pr.yml` (it carries the `e2e` build tag, excluded from `check`/`check-ci`), so
+  a change that breaks e2e merges **green** and only reddens `main` afterward. This bit us: PR #55 renamed
+  `evidence_outbox.evidence_id` → `subject` (M5 migration `000002`) without updating the e2e `outboxCount`
+  helper; the PR passed, `main`'s Main run went red, fixed in PR #56 (`8c6a7c3`). **Decision:** stays
+  backlogged at low priority — revisit **after M5**; implement only if it recurs or a green gate ends up with a
+  straight dependency on pre-merge e2e proof. Natural fix is to run e2e on `pr.yml` too (folds into the
+  pipeline-e2e item above once `make e2e-pipeline` exists).
+
+- [ ] **Bump GitHub Actions off Node 20 (LOW).** `actions/checkout@v4` and `actions/setup-go@v5` are being
+  force-migrated to Node 24 (runner deprecation warning on every run). Cosmetic today; bump to the Node-24
+  action majors next time `.github/workflows/*` are touched.
 
 ---
 

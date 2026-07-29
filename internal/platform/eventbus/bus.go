@@ -20,6 +20,19 @@ const (
 	ColCorrelationID = "correlation_id" // ties events into a workflow across contexts
 	ColSchemaRef     = "schema_ref"     // integration-contract id of the payload (D9)
 	ColPayload       = "payload"        // opaque producer-owned integration event
+	ColInsertXid8    = "insert_xid8"    // inserting transaction id; backs the Reader's gap-free watermark (EB-05, D7)
+)
+
+// stream_cursor schema — the per-consumer read position over a stream (EB-05, D5). The
+// cursor is a PostgreSQL-era read optimization only: correctness is the consumer's
+// processed_events inbox, so a lost cursor rescans from zero as a no-op.
+const (
+	TableStreamCursor = "stream_cursor"
+
+	ColConsumer  = "consumer"       // the subscribing consumer
+	ColStream    = "source_context" // the subscribed stream (shares event_log's source_context)
+	ColLastSeq   = "last_seq"       // highest seq whose Handle succeeded for this (consumer, stream)
+	ColUpdatedAt = "updated_at"
 )
 
 // DefaultMigrationsPath is where the `bus` migrations live, applied against the `bus`

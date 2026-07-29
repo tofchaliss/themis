@@ -24,11 +24,33 @@ import (
 // ErrNotFound is returned by GetByID when no card exists.
 var ErrNotFound = errors.New("knowledge: faultline not found")
 
-// sourceContext stamps every outbox row's source_context (M5 EB-02). schema_ref reuses
-// the (already namespaced) event type as the v1 integration-contract id; EB-03 pins the
-// checked-in schemas. correlation_id defaults to the subject (the faultline) until true
-// upstream propagation is threaded with the pipeline wiring (EB-07/08).
+// sourceContext stamps every outbox row's source_context (M5 EB-02). correlation_id
+// defaults to the subject (the faultline) until true upstream propagation is threaded
+// with the pipeline wiring (EB-07/08).
 const sourceContext = "knowledge"
+
+// schemaRefByEventType pins each published Knowledge event type to its frozen
+// integration-contract v1 schema (M5 EB-03 / D9 / BCK-0046). This producer-owned mapping
+// is what stamps the outbox row's schema_ref; the checked-in schemas under schemas/ and
+// the contract test guard the wire shape so a domain refactor fails the build rather than
+// silently breaking a consumer.
+var schemaRefByEventType = map[string]string{
+	app.EventFaultlineCreated:    "knowledge.faultline_created.v1",
+	app.EventFaultlineEnriched:   "knowledge.faultline_enriched.v1",
+	app.EventFaultlineMatured:    "knowledge.faultline_matured.v1",
+	app.EventFaultlineSuperseded: "knowledge.faultline_superseded.v1",
+	app.EventComponentMatched:    "knowledge.component_matched.v1",
+}
+
+// schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
+// type (a new event added without freezing its contract) falls back to the raw type so
+// the outbox write still succeeds; the contract test forbids that gap.
+func schemaRefFor(eventType string) string {
+	if ref, ok := schemaRefByEventType[eventType]; ok {
+		return ref
+	}
+	return eventType
+}
 
 // Store is the Knowledge Faultline aggregate repository.
 type Store struct {
@@ -117,11 +139,15 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 		return err
 	}
 
-	tx, err := s.pool.Begin(ctx)
+	// Join the inbox unit of work when one rides the context (EB-06), so the aggregate
+	// write commits atomically with the envelope claim; otherwise own a fresh transaction.
+	tx, own, err := s.beginOrJoin(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	if own {
+		defer func() { _ = tx.Rollback(ctx) }()
+	}
 
 	now := time.Now().UTC()
 	if created {
@@ -169,12 +195,15 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, n.EventType, string(f.ID()), string(payload), n.OccurredAt); err != nil {
+			uuid.NewString(), sourceContext, string(f.ID()), n.EventType, schemaRefFor(n.EventType), string(f.ID()), string(payload), n.OccurredAt); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit(ctx)
+	if own {
+		return tx.Commit(ctx)
+	}
+	return nil // the inbox unit of work owns the commit
 }
 
 // RecordMatch records a release-component match idempotently (D3). On a new match it
@@ -182,11 +211,15 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 // card) and queues a ComponentMatched event, all in one transaction. A re-scan of the
 // same occurrence records nothing and emits no duplicate.
 func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
+	// Join the inbox unit of work when one rides the context (EB-06); correlation fans out
+	// over an SBOM's components, so every match for one EvidenceRegistered shares one tx.
+	tx, own, err := s.beginOrJoin(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	if own {
+		defer func() { _ = tx.Rollback(ctx) }()
+	}
 
 	ct, err := tx.Exec(ctx, `
 		INSERT INTO faultline_matches (release_id, faultline_id, component_purl, matched_at)
@@ -196,7 +229,10 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		return false, err
 	}
 	if ct.RowsAffected() == 0 {
-		return false, tx.Commit(ctx) // already matched — idempotent
+		if own {
+			return false, tx.Commit(ctx) // already matched — idempotent
+		}
+		return false, nil
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -217,11 +253,14 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		uuid.NewString(), sourceContext, string(m.FaultlineID), app.EventComponentMatched, app.EventComponentMatched, string(m.FaultlineID), string(payload), m.OccurredAt); err != nil {
+		uuid.NewString(), sourceContext, string(m.FaultlineID), app.EventComponentMatched, schemaRefFor(app.EventComponentMatched), string(m.FaultlineID), string(payload), m.OccurredAt); err != nil {
 		return false, err
 	}
 
-	return true, tx.Commit(ctx)
+	if own {
+		return true, tx.Commit(ctx)
+	}
+	return true, nil // the inbox unit of work owns the commit
 }
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint violation
@@ -287,6 +326,6 @@ func (s *Store) SetLastSuccess(ctx context.Context, t time.Time) error {
 
 // Purge removes all Knowledge rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines RESTART IDENTITY CASCADE`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines RESTART IDENTITY CASCADE`)
 	return err
 }

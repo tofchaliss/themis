@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/evidence/evidence.registered.v1.schema.json",
+  "title": "evidence.registered.v1",
+  "description": "Integration-contract v1 for the EvidenceRegistered event payload (M5 EB-03; the current wire shape frozen). Downstream contexts fetch the canonical inventory via Evidence's read API keyed by evidence_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence_id", "kind", "subject_release_id", "fingerprint", "occurred_at"],
+  "properties": {
+    "evidence_id": { "type": "string" },
+    "kind": { "type": "string" },
+    "subject_release_id": { "type": "string" },
+    "fingerprint": { "type": "string" },
+    "occurred_at": { "type": "string", "format": "date-time" }
+  }
+}

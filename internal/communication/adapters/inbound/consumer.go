@@ -13,6 +13,7 @@ import (
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/eventbus"
 )
 
 // Governance integration-event type identifiers Communication consumes (mirrors
@@ -21,6 +22,16 @@ const (
 	eventPositionEstablished = "governance.position_established"
 	eventPositionRevised     = "governance.position_revised"
 )
+
+// Subscription declares Communication's bus binding (EB-07 / D7): it consumes the Governance
+// stream and dispatches only on the two Position facts below (its interest set — Positions
+// only, DOM-0025). Composition binds this to a platform Reader over the inbox-wrapped
+// Consumer; the interest filter drops the lifecycle/proposal events Governance also emits.
+var Subscription = eventbus.Subscription{
+	Consumer: "communication",
+	Stream:   "governance",
+	Interest: []string{eventPositionEstablished, eventPositionRevised},
+}
 
 // Consumer translates raw Governance Position events into publishable-queue updates.
 type Consumer struct {
