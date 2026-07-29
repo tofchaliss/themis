@@ -38,7 +38,8 @@ session at [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.
 
 ```sh
 go build ./...          # build every service (greenfield + monolith)
-make check              # THE quality gate — must pass before any commit
+make check              # THE quality gate (whole repo) — must pass before any commit
+make check-ci           # what CI runs: same gate, coverage greenfield-only (frozen legacy excluded)
 make build              # build the v0.3.x monolith to ./bin/themis
 
 make test               # unit tests (no build tags)
@@ -55,7 +56,10 @@ make e2e-llm            # Intelligence real-model e2e against a live OpenAI-comp
 ```
 
 `make check` runs: **build · test · lint · clean-arch · arch-test · coverage · deadcode** — and coverage pulls in
-the integration tests. Every OpenSpec `tasks.md` group ends by making this green.
+the integration tests. Every OpenSpec `tasks.md` group ends by making this green. `make check-ci` is the
+same gate but swaps `coverage` for `coverage-greenfield` (go-forward tree only); it — not `make check` — is
+what `.github/workflows/{pr,main}.yml` enforce, because the frozen v0.3.x legacy integration tests are green
+only on macOS's coarse clock.
 
 `make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives `recommend_position`
 against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
