@@ -41,18 +41,17 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   the two-step `[Rule → LLM]` plan, the honest `insufficient` outcome, precedent-Positions grounding, and a
   which-step-decided provenance stamp.
 
-- [ ] **M5 — Event Infrastructure (the shared event bus)** — **IMPLEMENTING (started 2026-07-27)** on branch
+- [x] **M5 — Event Infrastructure (the shared event bus)** — **DONE (2026-07-29)** on branch
   `phase3-event-infrastructure`. `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
-  `openspec/changes/phase3-event-infrastructure/` (**9/43 tasks — Groups 1–2 done**, 10 groups EB-01…EB-11).
-  Today each context writes to its own transactional outbox and a relay drives a **logging-stand-in
-  `Publisher`**; there is no real bus carrying events between contexts. M5 delivers the **platform-owned
-  channel** (`internal/platform/eventbus` + a `bus` database), threads the full kernel `Envelope` end-to-end,
-  and adds the per-consumer inbox (exactly-once **application**), per-subject ordering, stream/interest-set
-  subscription, subject-scoped failure isolation (shipped as **stream-halt** for M5), and the missing
-  `cmd/knowledge`. **This is the blocker for the full-pipeline e2e (§B).** Staged deferrals that become their
-  own backlog entries once M5 lands: the **Kafka transport swap** (D1/D2), the **subject-aware scheduler**
-  (D8 target), and **explicit integration DTOs** (D9 target). Dep: none new — the outbox tables + relays +
-  inbound consumers are all in place.
+  `openspec/changes/phase3-event-infrastructure/` (**43/43 tasks — all 10 groups EB-01…EB-11**), gated
+  `make check` + `make e2e-pipeline` green. The platform-owned channel (`internal/platform/eventbus` +
+  a `bus` database) now carries the full kernel `Envelope` between contexts: schema-guarded integration
+  contract v1, `Publisher` → `bus.event_log`, gap-free stream `Reader` (txid watermark) + D8 stream-halt,
+  per-consumer inbox (exactly-once **application**), stream/interest-set subscriptions, `cmd/knowledge` +
+  readers in every cmd, and an in-process runner proving **SBOM → published-OpenVEX** black-box. The staged
+  maturations are their own low-priority entries now (M5 shipped the stable contract, not the final mechanism):
+  the **Kafka transport swap** (D1/D2), the **subject-aware scheduler** (D8 target — M5 halts the whole
+  stream), and **explicit integration DTOs** (D9 target — M5 froze the current wire shapes as v1). See §C/§E.
   - **Progress (2026-07-28):** ✅ **Group 1 (EB-01)** — `internal/platform/eventbus` scaffold + `bus` database
     + `platform-eventbus-infra-only` depguard / `TestPlatformEventbusIsBusinessAgnostic` arch guard. ✅
     **Group 2 (EB-02)** — full kernel `Envelope` threaded through all four producers' outboxes
@@ -62,6 +61,16 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
     (`= event type`) until Group 3 pins it; `correlation_id` is each context's own aggregate id (cross-context
     propagation deferred to the Group 9 e2e). **Next: Group 3 (EB-03)** — integration-contract v1 + per-event
     JSON-schema guard.
+  - **M5 maturations (LOW — contract stable, mechanism evolves; not blocking):**
+    - [ ] **Kafka transport swap (D1/D2).** Replace the Postgres event_log + cursor with a broker behind the
+      same `Envelope` + Publisher/Reader ports; the inbox (exactly-once application) and per-subject ordering
+      guarantees are transport-independent and carry over unchanged.
+    - [ ] **Subject-aware scheduler (D8).** M5 halts the *whole stream* on a poison event; the architectural
+      target isolates the halt to the failing `Subject` so unrelated aggregates keep flowing — replace the
+      single drain loop with a per-Subject scheduler, no changes to D5/D6/D7 or the event contracts.
+    - [ ] **Explicit integration DTOs (D9).** M5 froze the current wire shapes as v1 (Knowledge/Governance/
+      Communication still marshal the raw domain struct — PascalCase). Introduce per-type outbound DTOs while
+      keeping the bytes identical (else a v2 `schema_ref`); Evidence already has one (`eventPayload`).
 
 ---
 

@@ -269,6 +269,43 @@ func TestSubscription_StreamAndInterestFilter(t *testing.T) {
 	}
 }
 
+// TestReader_PerSubjectOrderPreserved proves D6: for events sharing a Subject, the platform
+// preserves their relative order. FaultlineEnriched then FaultlineSuperseded for one Faultline
+// are delivered in that order — the single monotonic seq cursor yields per-subject order for
+// free (a consumer must never observe the supersession before the enrichment).
+func TestReader_PerSubjectOrderPreserved(t *testing.T) {
+	pool := newPool(t)
+	pub := eventbus.NewPublisher(pool)
+	ctx := context.Background()
+
+	enriched, err := event.NewEnvelope("evt-enr", "knowledge.faultline_enriched", "knowledge", "fl-1",
+		"knowledge.faultline_enriched.v1", "fl-1", time.Unix(1_700_000_000, 0).UTC(), nil)
+	if err != nil {
+		t.Fatalf("enriched: %v", err)
+	}
+	superseded, err := event.NewEnvelope("evt-sup", "knowledge.faultline_superseded", "knowledge", "fl-1",
+		"knowledge.faultline_superseded.v1", "fl-1", time.Unix(1_700_000_001, 0).UTC(), nil)
+	if err != nil {
+		t.Fatalf("superseded: %v", err)
+	}
+	if err := pub.Publish(ctx, enriched); err != nil {
+		t.Fatalf("publish enriched: %v", err)
+	}
+	if err := pub.Publish(ctx, superseded); err != nil {
+		t.Fatalf("publish superseded: %v", err)
+	}
+
+	h := &recordingHandler{}
+	sub := eventbus.Subscription{Consumer: "governance", Stream: "knowledge",
+		Interest: []string{"knowledge.faultline_enriched", "knowledge.faultline_superseded"}}
+	if _, err := sub.NewReader(pool, observability.Nop(), h).Drain(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(h.ids) != 2 || h.ids[0] != "evt-enr" || h.ids[1] != "evt-sup" {
+		t.Fatalf("per-subject delivery order for fl-1 = %v, want [evt-enr evt-sup]", h.ids)
+	}
+}
+
 // TestReader_ContextCancelIsNotPoison proves a shutdown mid-retry returns the context error
 // and does NOT halt the stream (no false poison).
 func TestReader_ContextCancelIsNotPoison(t *testing.T) {

@@ -52,7 +52,7 @@ this document so choices are consistent and defensible — not decided ad-hoc pe
 
 | Concern | Choice | Why | Ref |
 | --- | --- | --- | --- |
-| Event infrastructure (M5) | **Postgres-outbox + relay** (no external broker to start) | BCK-0041 needs exactly-once-eventually; a DB-backed outbox meets it without operating Kafka/NATS. A broker can slot behind the same envelope later | KERN D4 · BCK-0041 |
+| Event infrastructure (M5) | **Postgres-outbox + relay + `bus` event_log + stream Reader** (no external broker) — **realized 2026-07-29** | BCK-0041 needs exactly-once-eventually; a DB-backed outbox → `bus.event_log` → per-consumer inbox meets it without operating Kafka/NATS. Publisher/Reader ride the kernel `Envelope`, so a broker can slot behind the same ports later (D1/D2) | KERN D4 · BCK-0041 · EDR-EVENTBUS-01 |
 | SBOM/VEX formats | **CycloneDX / SPDX** (in), **CycloneDX VEX / OpenVEX / CSAF** (out) | Standards-only, extensible ACL/serializer registries — no tool-specific dialects leak into the domain | EVID D4 · COMM D7 · BCK-0052 |
 | AI providers (Intelligence only) | **local-first (Ollama HTTP)** + optional cloud, behind a uniform **provider port** | Provider-independent; sensitive data stays local; provider code confined to the Gateway `adapters/` | INT-0069/0070 · D4/D10 |
 | Vector store / RAG (Intelligence, autonomous) | **pgvector** (deferred) | Only if the autonomous engine needs embeddings retrieval; reactive-first ships without it | INT-0068 · INTEL D3 |

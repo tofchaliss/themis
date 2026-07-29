@@ -1,11 +1,12 @@
 //go:build e2e
 
-// Package pipeline holds the in-process composed pipeline runner (EB-08, dev/e2e only): it
+// Package pipeline holds the in-process composed pipeline runner (EB-08/09, dev/e2e only): it
 // wires all four bounded contexts against ONE PostgreSQL server with a database per context
 // plus the dedicated `bus` database, drives them through the platform event bus, and lets a
-// test push an SBOM in one end and observe a Faultline/Finding/Publication come out the
-// other. It is a developer convenience, NOT a deployment model — production runs per-context
-// binaries. The bus makes the contexts collaborate exactly as separate processes would.
+// test push an SBOM in one end and observe a published OpenVEX artifact come out the other —
+// black-box, over the read/triage/publish HTTP APIs, never peeking a context's own tables. It
+// is a developer convenience, NOT a deployment model; production runs per-context binaries.
+// The bus makes the contexts collaborate exactly as separate processes would.
 package pipeline
 
 import (
@@ -13,14 +14,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -50,6 +53,7 @@ import (
 const (
 	pgPort    = 15588
 	releaseID = "rel-pipeline"
+	targetCVE = "CVE-2024-1000"
 
 	// A minimal CycloneDX SBOM with one PyPI component the fake OSV maps to a CVE.
 	sbomDoc = `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,` +
@@ -61,12 +65,12 @@ const (
 		`"affected":[{"ranges":[{"events":[{"introduced":"0"},{"fixed":"2.0"}]}]}]}`
 )
 
-// pipeline is the composed runner: pools per context DB + bus, the wired services, and the
-// relay/reader drain points the pump advances.
+// pipeline is the composed runner: the three public HTTP surfaces plus the relay/reader drain
+// points the pump advances.
 type pipeline struct {
-	knPool *pgxpool.Pool
-
-	evidenceURL string
+	evidenceURL      string
+	governanceURL    string
+	communicationURL string
 
 	evRelay    *evstore.Relay
 	kn         knwiring.Knowledge
@@ -83,76 +87,144 @@ type pipeline struct {
 func (p *pipeline) pump(t *testing.T, n int) {
 	t.Helper()
 	ctx := context.Background()
+	drive := func(name string, f func(context.Context) (int, error)) {
+		if _, err := f(ctx); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
 	for i := 0; i < n; i++ {
-		if _, err := p.evRelay.DeliverPending(ctx); err != nil {
-			t.Fatalf("evidence relay: %v", err)
-		}
-		if _, err := p.knReader.Drain(ctx); err != nil {
-			t.Fatalf("knowledge reader: %v", err)
-		}
-		if _, err := p.kn.Relay.DeliverPending(ctx); err != nil {
-			t.Fatalf("knowledge relay: %v", err)
-		}
-		if _, err := p.govReader.Drain(ctx); err != nil {
-			t.Fatalf("governance reader: %v", err)
-		}
-		if _, err := p.gov.Reconcile.Reconcile(ctx); err != nil {
-			t.Fatalf("governance reconcile: %v", err)
-		}
-		if _, err := p.commReader.Drain(ctx); err != nil {
-			t.Fatalf("communication reader: %v", err)
-		}
-		if _, err := p.comm.Reconcile.Reconcile(ctx); err != nil {
-			t.Fatalf("communication reconcile: %v", err)
-		}
+		drive("evidence relay", p.evRelay.DeliverPending)
+		drive("knowledge reader", p.knReader.Drain)
+		drive("knowledge relay", p.kn.Relay.DeliverPending)
+		drive("governance reader", p.govReader.Drain)
+		drive("governance reconcile", p.gov.Reconcile.Reconcile)
+		drive("communication reader", p.commReader.Drain)
+		drive("communication reconcile", p.comm.Reconcile.Reconcile)
+		drive("communication delivery", p.comm.Delivery.DeliverPending)
 	}
 }
 
-func TestPipeline_SBOMToFaultline(t *testing.T) {
+// TestPipeline_SBOMToPublishedVEX is the black-box M5 pipeline proof (EB-09 / D11): an SBOM
+// pushed into Evidence flows over the real bus — Evidence → Knowledge (correlate) → Governance
+// (open Finding) — a human governs an "affected" Position, a human triggers an OpenVEX
+// publication, and the published artifact appears with the expected stance. Every observation
+// is over a public HTTP API; no context's tables are read directly.
+func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 	p := newPipeline(t)
 
-	// Push an SBOM in one end.
-	id := uploadSBOM(t, p.evidenceURL)
-	t.Logf("registered evidence id=%s", id)
+	// SBOM in.
+	uploadSBOM(t, p.evidenceURL)
 
-	// Drive the bus: EvidenceRegistered → Knowledge correlates (reads the inventory over
-	// Evidence's read API, discovers the CVE via the fake OSV) → a Faultline exists.
+	// Evidence → Knowledge (correlate) → Governance (open Finding).
 	p.pump(t, 3)
 
-	var n int
-	if err := p.knPool.QueryRow(context.Background(),
-		"SELECT count(*) FROM faultlines WHERE cve=$1", "CVE-2024-1000").Scan(&n); err != nil {
-		t.Fatalf("query faultlines: %v", err)
+	// Discover the Finding black-box via Governance's release posture.
+	var posture []struct {
+		FindingID string `json:"finding_id"`
+		CVE       string `json:"cve"`
 	}
-	if n != 1 {
-		t.Fatalf("faultlines for CVE-2024-1000 = %d, want 1 (SBOM did not flow Evidence→bus→Knowledge)", n)
+	getJSON(t, p.governanceURL+"/api/v1/releases/"+releaseID+"/posture", &posture)
+	findingID := ""
+	for _, e := range posture {
+		if e.CVE == targetCVE {
+			findingID = e.FindingID
+		}
 	}
-	t.Log("pipeline OK: SBOM → Evidence → bus → Knowledge correlated a Faultline")
+	if findingID == "" {
+		t.Fatalf("no Finding for %s in posture (SBOM did not flow Evidence→Knowledge→Governance): %+v", targetCVE, posture)
+	}
+	t.Logf("finding opened: %s", findingID)
+
+	// Govern the decision: a human raises an "affected" proposal and accepts it → Position v1.
+	var raised struct {
+		ProposalID string `json:"proposal_id"`
+	}
+	postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals",
+		map[string]any{"stance": "affected", "proposer_kind": "human", "proposer_id": "e2e"}, http.StatusCreated, &raised)
+	postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals/"+raised.ProposalID+"/accept",
+		map[string]any{"actor_id": "e2e", "actor_kind": "human"}, http.StatusNoContent, nil)
+
+	// Governance Position → Communication publishable.
+	p.pump(t, 3)
+
+	// A human triggers the OpenVEX publication (Communication never auto-publishes).
+	var created struct {
+		PublicationID string `json:"publication_id"`
+	}
+	postJSON(t, p.communicationURL+"/api/v1/publications",
+		map[string]any{"finding_id": findingID, "artifact_type": "vex", "format": "openvex"}, http.StatusCreated, &created)
+	p.pump(t, 2)
+
+	// Assert the published OpenVEX artifact black-box via Communication's read API. The list
+	// view omits the rendered payload, so fetch the artifact by id to confirm the OpenVEX
+	// document actually names the CVE.
+	var pubs []struct {
+		ID     string `json:"id"`
+		Format string `json:"format"`
+		Stance string `json:"stance"`
+		CVE    string `json:"cve"`
+	}
+	getJSON(t, p.communicationURL+"/api/v1/publications?release="+releaseID, &pubs)
+	for _, pub := range pubs {
+		if pub.Format == "openvex" && pub.CVE == targetCVE && pub.Stance == "affected" {
+			var full struct {
+				Payload string `json:"payload"`
+			}
+			getJSON(t, p.communicationURL+"/api/v1/publications/"+pub.ID, &full)
+			if !strings.Contains(full.Payload, targetCVE) {
+				t.Errorf("OpenVEX payload does not name %s: %s", targetCVE, full.Payload)
+			}
+			t.Log("pipeline OK: SBOM → Evidence → Knowledge → Governance → Communication published OpenVEX (affected)")
+			return
+		}
+	}
+	t.Fatalf("no published OpenVEX (affected) for %s: %+v", targetCVE, pubs)
+}
+
+// --- HTTP helpers --------------------------------------------------------------------------
+
+func uploadSBOM(t *testing.T, evidenceURL string) {
+	t.Helper()
+	postJSON(t, evidenceURL+"/api/v1/evidence", map[string]any{
+		"kind": "sbom", "format": "cyclonedx", "subject_release_id": releaseID, "document": sbomDoc,
+	}, http.StatusCreated, nil)
+}
+
+func getJSON(t *testing.T, url string, out any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", url, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		t.Fatalf("decode %s: %v", url, err)
+	}
+}
+
+func postJSON(t *testing.T, url string, body any, wantStatus int, out any) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		msg, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST %s = %d, want %d: %s", url, resp.StatusCode, wantStatus, msg)
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatalf("decode %s: %v", url, err)
+		}
+	}
 }
 
 // --- runner setup --------------------------------------------------------------------------
-
-func uploadSBOM(t *testing.T, evidenceURL string) string {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{
-		"kind": "sbom", "format": "cyclonedx", "subject_release_id": releaseID, "document": sbomDoc,
-	})
-	resp, err := http.Post(evidenceURL+"/api/v1/evidence", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("upload: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("upload status = %d, want 201", resp.StatusCode)
-	}
-	var out struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode upload response: %v", err)
-	}
-	return out.ID
-}
 
 func newPipeline(t *testing.T) *pipeline {
 	t.Helper()
@@ -206,13 +278,13 @@ func newPipeline(t *testing.T) *pipeline {
 	t.Cleanup(evidenceSrv.Close)
 	evRelay := evstore.NewRelay(evPool, eventbus.NewPublisher(busPool), 100)
 
-	// Knowledge: consumes the Evidence stream and correlates.
+	// Knowledge: consumes the Evidence stream and correlates (no HTTP surface needed here).
 	knPool := mustPool(t, dsnFor("knowledge"))
 	t.Cleanup(knPool.Close)
 	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, eventbus.NewPublisher(busPool))
 	knReader := kninbound.Subscription.NewReader(busPool, log, knstore.NewInboxConsumer(knPool, kn.Consumer))
 
-	// Governance: consumes the Knowledge stream.
+	// Governance: consumes the Knowledge stream; serves posture + triage.
 	govPool := mustPool(t, dsnFor("governance"))
 	t.Cleanup(govPool.Close)
 	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil)
@@ -220,23 +292,27 @@ func newPipeline(t *testing.T) *pipeline {
 	t.Cleanup(governanceSrv.Close)
 	govReader := govinbound.Subscription.NewReader(busPool, log, govstore.NewInboxConsumer(govPool, gov.Consumer))
 
-	// Communication: consumes the Governance stream.
+	// Communication: consumes the Governance stream; serves publish + read (reads Positions
+	// back from Governance over its read API).
 	commPool := mustPool(t, dsnFor("communication"))
 	t.Cleanup(commPool.Close)
 	comm := commwiring.Wire(commPool, governanceSrv.URL,
 		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool))
+	communicationSrv := httptest.NewServer(mount(comm.Handler))
+	t.Cleanup(communicationSrv.Close)
 	commReader := comminbound.Subscription.NewReader(busPool, log, commstore.NewInboxConsumer(commPool, comm.Consumer))
 
 	return &pipeline{
-		knPool:      knPool,
-		evidenceURL: evidenceSrv.URL,
-		evRelay:     evRelay,
-		kn:          kn,
-		knReader:    knReader,
-		gov:         gov,
-		govReader:   govReader,
-		comm:        comm,
-		commReader:  commReader,
+		evidenceURL:      evidenceSrv.URL,
+		governanceURL:    governanceSrv.URL,
+		communicationURL: communicationSrv.URL,
+		evRelay:          evRelay,
+		kn:               kn,
+		knReader:         knReader,
+		gov:              gov,
+		govReader:        govReader,
+		comm:             comm,
+		commReader:       commReader,
 	}
 }
 

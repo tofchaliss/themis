@@ -126,9 +126,24 @@ outbound calls — the pipeline is unchanged. "Off", "down", and "declined" all 
 
 Each context is testable in isolation via its own API ([API.md](API.md)) — e.g. register a Release
 (`POST :8082/api/v1/releases`), register Evidence (`POST :8081/api/v1/evidence`), read a Finding's posture
-(`GET :8083/api/v1/releases/{id}/posture`), preview a Publication (`POST :8084/api/v1/previews`). The one
-wired **SBOM → published-VEX** cross-context run awaits the **M5 event bus**; until then, drive each hop
-over its HTTP API.
+(`GET :8083/api/v1/releases/{id}/posture`), preview a Publication (`POST :8084/api/v1/previews`).
+
+### Composed pipeline end-to-end (`make e2e-pipeline`)
+
+The **M5 event bus** now carries the whole flow. `make e2e-pipeline` runs the in-process composed runner
+(`tests/pipeline`, build tag `e2e`): it starts one embedded Postgres, creates a database per context plus the
+`bus` database, wires all four contexts, and drives them **only over the bus** — no Docker, no external infra.
+
+```sh
+make e2e-pipeline
+```
+
+`TestPipeline_SBOMToPublishedVEX` pushes an SBOM into Evidence and asserts, purely over the read/triage/publish
+HTTP APIs (no internal-state peeking), that a **published OpenVEX** artifact with the expected stance comes out
+the other end: Evidence → (bus) → Knowledge correlates a Faultline → (bus) → Governance opens a Finding → a
+human governs an **affected** Position → (bus) → Communication publishes the OpenVEX. It skips cleanly if
+embedded Postgres is unavailable, and is **not** part of `make check` (e2e is slow; it runs post-merge in CI
+alongside `make e2e-evidence`).
 
 ---
 

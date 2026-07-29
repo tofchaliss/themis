@@ -168,29 +168,43 @@
 
 ## 9. Pipeline e2e + focused platform tests + arch assertion (EB-09, EB-10 · D11 · D5/D6/D8)
 
-- [ ] 9.1 **Black-box pipeline e2e** `tests/e2e/pipeline_e2e_test.go` (`//go:build e2e`, `make e2e-pipeline`):
-  register a Release + upload an SBOM to Evidence → assert a published **OpenVEX** artifact eventually appears
-  with the expected stance under a timeout, driven **only** over the `bus` via the in-process runner, no
-  internal-state peeking.
-- [ ] 9.2 **Three focused platform tests:** D5 (redeliver → exactly-once application), D6 (`FaultlineEnriched`
+- [x] 9.1 **Black-box pipeline e2e** (`//go:build e2e`, `make e2e-pipeline`): register a Release + upload an
+  SBOM to Evidence → assert a published **OpenVEX** artifact eventually appears with the expected stance,
+  driven **only** over the `bus` via the in-process runner, no internal-state peeking. _`tests/pipeline`
+  (separate package from `tests/e2e` to avoid a TestMain clash): `TestPipeline_SBOMToPublishedVEX` uploads an
+  SBOM, discovers the Finding via Governance's posture read API, governs an **affected** Position (raise +
+  accept over the triage API), triggers the OpenVEX publication, and asserts the artifact via Communication's
+  read API — the payload (fetched by id) names the CVE. Every observation is over a public HTTP API._
+- [x] 9.2 **Three focused platform tests:** D5 (redeliver → exactly-once application), D6 (`FaultlineEnriched`
   before `FaultlineSuperseded` for one `Subject` honored), D8 (poison halts its stream loudly, never dropped).
-- [ ] 9.3 **Architectural assertion:** the existing arch-test/depguard confirm no context imports another's
+  _D5: the per-context inbox integration tests (Governance/Communication/Knowledge) prove a redelivered
+  envelope applies once. D6: `TestReader_PerSubjectOrderPreserved` (same Subject, enriched-then-superseded
+  delivered in order). D8: `TestReader_PoisonHaltsStreamAndAlerts` (bounded retries → halt + loud alert,
+  cursor not advanced, no silent skip)._
+- [x] 9.3 **Architectural assertion:** the existing arch-test/depguard confirm no context imports another's
   `app`/`domain` (only the read-API client seam + eventbus) — record it as the "no synchronous cross-context
-  orchestration" guarantee (extend the arch test with an explicit case/comment if needed).
-- [ ] 9.4 Gate: six Themis gates green; `make e2e-pipeline` green.
+  orchestration" guarantee. _`TestContextFirstArchitecture` case (1) bans all cross-context imports; expanded
+  its comment to name the **no synchronous cross-context orchestration** guarantee (collaboration only via
+  async bus events + the read-only HTTP client seam), proven live by `tests/pipeline`._
+- [x] 9.4 Gate: six Themis gates green; `make e2e-pipeline` green.
 
 ## 10. Docs + status (EB-11)
 
-- [ ] 10.1 Update `docs/engineering/PHASE3-STATUS.md` (M5 done; the wired SBOM → published-VEX e2e now green),
+- [x] 10.1 Update `docs/engineering/PHASE3-STATUS.md` (M5 done; the wired SBOM → published-VEX e2e now green),
   `docs/BACKLOG.md` (mark the M5 line; note D8 subject-aware scheduler + D9 explicit DTOs
   as the remaining maturations), `docs/engineering/STACK.md` (M5 realized), and `openspec/STATUS.md`.
-- [ ] 10.2 Add the M5 ubiquitous language (Stream, Interest set, Inbox / `processed_events`, Event Log,
+  _All four updated to M5 DONE (43/43); the three maturations (Kafka swap, subject-aware scheduler, explicit
+  DTOs) are their own LOW backlog items under the M5 entry._
+- [x] 10.2 Add the M5 ubiquitous language (Stream, Interest set, Inbox / `processed_events`, Event Log,
   exactly-once application vs at-least-once transport) to the architecture book's ubiquitous-language chapter.
-- [ ] 10.3 Update `TESTING.md` with the `make e2e-pipeline` how-to.
+  _New §2.6 "Event Infrastructure Vocabulary (M5)" in Book-II Chapter 2._
+- [x] 10.3 Update `TESTING.md` with the `make e2e-pipeline` how-to. _Added under Part A "Composed pipeline
+  end-to-end" — the in-process runner, black-box SBOM→OpenVEX, skips without Postgres, post-merge in CI._
 - [ ] 10.4 **Wire `make e2e-pipeline` into CI.** The `ci/add-workflows` change adds
   `.github/workflows/{pr,main}.yml` (`main.yml` runs `make check` + `make e2e-evidence`; `pr.yml` runs
   `make check`). Once `make e2e-pipeline` exists (9.1) and that CI change has merged, add an `e2e-pipeline`
   step to `main.yml` (post-merge), mirroring the `e2e-evidence` step — and to `pr.yml` if pre-merge pipeline
   proof is wanted. Kept **out of `make check`** deliberately (e2e is slow; consistent with `e2e-evidence`).
-  Tracked in `docs/BACKLOG.md` §E.
-- [ ] 10.5 Gate: six Themis gates green; `markdownlint-cli2` clean.
+  Tracked in `docs/BACKLOG.md` §E. _Added the `e2e-pipeline` step to `main.yml` (post-merge), mirroring
+  `e2e-evidence`._
+- [x] 10.5 Gate: six Themis gates green; `markdownlint-cli2` clean.
