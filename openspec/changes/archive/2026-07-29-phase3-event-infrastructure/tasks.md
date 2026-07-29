@@ -200,7 +200,7 @@
   _New §2.6 "Event Infrastructure Vocabulary (M5)" in Book-II Chapter 2._
 - [x] 10.3 Update `TESTING.md` with the `make e2e-pipeline` how-to. _Added under Part A "Composed pipeline
   end-to-end" — the in-process runner, black-box SBOM→OpenVEX, skips without Postgres, post-merge in CI._
-- [ ] 10.4 **Wire `make e2e-pipeline` into CI.** The `ci/add-workflows` change adds
+- [x] 10.4 **Wire `make e2e-pipeline` into CI.** The `ci/add-workflows` change adds
   `.github/workflows/{pr,main}.yml` (`main.yml` runs `make check` + `make e2e-evidence`; `pr.yml` runs
   `make check`). Once `make e2e-pipeline` exists (9.1) and that CI change has merged, add an `e2e-pipeline`
   step to `main.yml` (post-merge), mirroring the `e2e-evidence` step — and to `pr.yml` if pre-merge pipeline
