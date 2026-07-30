@@ -18,6 +18,14 @@ type WatchState interface {
 	SetLastSuccess(ctx context.Context, t time.Time) error
 }
 
+// KnownCVEs returns the set of canonical CVEs that already have a card. It backs the
+// relevance bound on the watch (D5): a modified-since feed is filtered to CVEs the
+// enterprise already knows about, so the watch enriches existing cards rather than
+// mirroring the whole feed.
+type KnownCVEs interface {
+	KnownCVEs(ctx context.Context) (map[string]struct{}, error)
+}
+
 // WatchService is the scheduled watch worker (D5/D11): it discovers CVEs changed since
 // the last watermark, folds their Proposals into the cards, and advances the watermark.
 // It is idempotent — re-folding a Proposal converges — and resumable from the watermark.

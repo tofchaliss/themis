@@ -137,6 +137,35 @@ type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now().UTC() }
 
+// TestKnownCVEs proves the relevance-bound query returns exactly the CVEs that have a card.
+func TestKnownCVEs(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	svc := service(pool)
+	ctx := context.Background()
+
+	if set, err := st.KnownCVEs(ctx); err != nil || len(set) != 0 {
+		t.Fatalf("empty store: got (%v, %v), want (∅, nil)", set, err)
+	}
+	for _, id := range []string{"CVE-2024-10", "CVE-2024-11"} {
+		if _, err := svc.FoldProposal(ctx, cveID(t, id), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			t.Fatalf("fold %s: %v", id, err)
+		}
+	}
+	set, err := st.KnownCVEs(ctx)
+	if err != nil {
+		t.Fatalf("KnownCVEs: %v", err)
+	}
+	if len(set) != 2 {
+		t.Fatalf("got %d CVEs, want 2: %v", len(set), set)
+	}
+	for _, id := range []string{"CVE-2024-10", "CVE-2024-11"} {
+		if _, ok := set[id]; !ok {
+			t.Errorf("known set missing %s", id)
+		}
+	}
+}
+
 func service(pool *pgxpool.Pool) *app.FaultlineService {
 	return app.NewFaultlineService(store.New(pool), &seqIDs{}, realClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
 }

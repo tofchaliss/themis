@@ -22,6 +22,7 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/adapters/wiring"
+	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
@@ -37,6 +38,11 @@ type config struct {
 	evidenceURL    string // THEMIS_EVIDENCE_URL — Evidence read-API base URL (inventory source; default "http://localhost:8081").
 	osvURL         string // THEMIS_OSV_URL — OSV query base URL (lazy discovery; default "https://api.osv.dev").
 
+	nvdEnabled      bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
+	nvdURL          string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
+	nvdAPIKey       string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
+	nvdPollInterval time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
+
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. When set, the relay publishes and the reader drains the Evidence stream; when empty, a logging publisher is used and the reader is disabled (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
@@ -51,6 +57,11 @@ func loadConfig() config {
 		migrationsPath: envDefault("THEMIS_KNOWLEDGE_MIGRATIONS", "internal/knowledge/adapters/store/migrations"),
 		evidenceURL:    envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		osvURL:         envDefault("THEMIS_OSV_URL", "https://api.osv.dev"),
+
+		nvdEnabled:      os.Getenv("THEMIS_NVD_ENABLED") == "1",
+		nvdURL:          os.Getenv("THEMIS_NVD_URL"),
+		nvdAPIKey:       os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdPollInterval: parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -94,9 +105,21 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher)
+	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
+		Enabled: cfg.nvdEnabled,
+		BaseURL: cfg.nvdURL,
+		APIKey:  cfg.nvdAPIKey,
+		HTTP:    &http.Client{Timeout: 60 * time.Second},
+	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
+
+	// Scheduled NVD modified-since watch (D5): enriches already-carded CVEs with authoritative
+	// CVSS/severity. Off unless THEMIS_NVD_ENABLED=1.
+	if kn.Watch != nil {
+		go watchLoop(kn.Watch, cfg.nvdPollInterval, logger.Component("watch"))
+		logger.Info("nvd modified-since watch enabled", observability.String("interval", cfg.nvdPollInterval.String()))
+	}
 
 	// The bus reader drives correlation off the Evidence stream (EB-07/08). Without a bus it
 	// is disabled — correlation then only runs via direct calls (dev).
@@ -138,6 +161,29 @@ func relayLoop(relay *store.Relay, logger *observability.Logger) {
 		if _, err := relay.DeliverPending(context.Background()); err != nil {
 			logger.Error("relay failed", observability.Err(err))
 		}
+	}
+}
+
+// watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
+// every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
+// failure is logged and retried next tick (the watermark only advances on a clean pass).
+func watchLoop(watch *app.WatchService, interval time.Duration, logger *observability.Logger) {
+	poll := func() {
+		n, err := watch.Poll(context.Background())
+		if err != nil {
+			logger.Error("nvd watch poll failed", observability.Err(err))
+			return
+		}
+		if n > 0 {
+			logger.Info("nvd watch enriched cards", observability.Int("folded", n))
+		}
+	}
+	time.Sleep(15 * time.Second) // let the service settle before the first (up-to-120-day) poll
+	poll()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		poll()
 	}
 }
 
@@ -193,6 +239,14 @@ func applyMigrations(dsn, path string) error {
 func envDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// parseDurationDefault parses a Go duration string, falling back to def when empty or invalid.
+func parseDurationDefault(s string, def time.Duration) time.Duration {
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d
 	}
 	return def
 }
