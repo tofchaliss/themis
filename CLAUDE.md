@@ -33,6 +33,10 @@ session at [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.
   `openspec archive <name> --skip-specs -y`.
 - **Commit and push only when the user explicitly asks.** Do not commit, push, or open PRs on your own
   initiative, even after a green `make check`.
+- **The `.cursor/rules/*.mdc` files are `alwaysApply: true` but describe the frozen v0.3.x PoC** (the
+  `usecase/adapter/infrastructure` layers, the three-layer data model, "treat as current intent"). For
+  greenfield work they are superseded by this file, the ADRs/EDRs, `STACK.md`, and `CONVENTIONS.md` — do not
+  read them as go-forward intent.
 
 ## Commands
 
@@ -52,6 +56,7 @@ make coverage           # scripts/check-coverage.sh, per-package tiers
 make deadcode           # x/tools deadcode (non-fatal reporter, exits 0)
 
 make e2e-evidence       # Evidence context end-to-end (register → upload SBOM → inventory)
+make e2e-pipeline       # M5 multi-context pipeline over the event bus (-tags=e2e ./tests/pipeline/...)
 make e2e-llm            # Intelligence real-model e2e against a live OpenAI-compatible server
 ```
 

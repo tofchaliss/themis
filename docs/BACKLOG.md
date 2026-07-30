@@ -98,6 +98,30 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   `000003_knowledge_inbox` `processed_events` migration + `InboxConsumer`, and `Save`/`RecordMatch` join the
   ctx-tx (both fan out over SBOM components). Proven by the Knowledge inbox integration tests + the
   `tests/pipeline` SBOM→Faultline e2e.
+- [ ] **(LOW) `cmd/knowledge` default listen port collides with Registry.** `THEMIS_KNOWLEDGE_ADDR`
+  defaults to `:8082` — the same as `cmd/registry` — but the rest of the system addresses Knowledge at
+  `:8085` (Intelligence's `THEMIS_KNOWLEDGE_URL` default; `deploy/node.env.example`). Running Registry +
+  Knowledge on defaults fails to bind the second one. Fix: change the `cmd/knowledge` default to `:8085`.
+  Until then the INSTALLATION.md runbook sets `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly. Plugs into
+  `cmd/knowledge/main.go` `loadConfig`. Surfaced 2026-07-30 wiring the end-to-end deployment.
+  See [[feedback-backlog-surfaced-followups]].
+- [ ] **(MED) Registry + Evidence co-located in one DB clobber golang-migrate's default `schema_migrations`.**
+  The registry-backed SubjectRef reads registry tables in-process over Evidence's pool, so `cmd/registry` and
+  `cmd/evidence` must share the `evidence` database. Both `applyMigrations` call `migrate.New` with **no
+  `x-migrations-table`**, so both manage the single default `schema_migrations` — whichever migrates second
+  reads the other's version and silently skips its own `CREATE TABLE`. The `make e2e-pipeline` proof hides
+  this by using the **stub** SubjectRef (no registry). Workaround in the INSTALLATION.md runbook: append
+  `&x-migrations-table=registry_schema_migrations` to the Registry DSN. Fix: set a per-context migrations
+  table (or run registry in its own DB with a read-API SubjectRef instead of the in-process read). Plugs into
+  `cmd/registry/main.go` + `cmd/evidence/main.go`. Surfaced 2026-07-30 wiring the end-to-end deployment.
+  See [[feedback-backlog-surfaced-followups]].
+- [ ] **(LOW) `cmd/knowledge` default listen port collides with Registry.** `THEMIS_KNOWLEDGE_ADDR`
+  defaults to `:8082` — the same as `cmd/registry` — but the rest of the system addresses Knowledge at
+  `:8085` (Intelligence's `THEMIS_KNOWLEDGE_URL` default; `deploy/node.env.example`). Running Registry +
+  Knowledge on defaults fails to bind the second one. Fix: change the `cmd/knowledge` default to `:8085`.
+  Until then the INSTALLATION.md runbook sets `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly. Plugs into
+  `cmd/knowledge/main.go` `loadConfig`. Surfaced 2026-07-30 wiring the end-to-end deployment.
+  See [[feedback-backlog-surfaced-followups]].
 - [ ] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
   `txCtxKey` / `withTx` / `txFromCtx` + `InboxConsumer` are duplicated per consuming context (Governance,
   Communication, later Knowledge). It is business-agnostic infra and could collapse into one platform package
