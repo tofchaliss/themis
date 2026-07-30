@@ -19,10 +19,16 @@ type cycloneDXDocument struct {
 }
 
 type cycloneDXComponent struct {
-	BOMRef  string `json:"bom-ref"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	PURL    string `json:"purl"`
+	BOMRef     string              `json:"bom-ref"`
+	Name       string              `json:"name"`
+	Version    string              `json:"version"`
+	PURL       string              `json:"purl"`
+	Properties []cycloneDXProperty `json:"properties"`
+}
+
+type cycloneDXProperty struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type cycloneDXDependency struct {
@@ -79,7 +85,7 @@ func (cycloneDXParser) parse(raw []byte, specVersion string) ([]domain.Component
 			refToPURL[c.BOMRef] = purl
 		}
 		refToPURL[purl.String()] = purl
-		components = append(components, domain.Component{PURL: purl, Name: name, Version: ver, Ecosystem: ecosystem})
+		components = append(components, domain.Component{PURL: purl, Name: name, Version: ver, Ecosystem: ecosystem, Source: srcNameFromProperties(c.Properties)})
 	}
 
 	resolve := func(ref string) (value.PURL, bool) {
@@ -108,6 +114,17 @@ func (cycloneDXParser) parse(raw []byte, specVersion string) ([]domain.Component
 	}
 
 	return components, edges, warnings, nil
+}
+
+// srcNameFromProperties returns the distro source-package name from a CycloneDX property whose
+// name ends with ":srcname" (e.g. Trivy's "aquasecurity:trivy:SrcName"), or "" if absent.
+func srcNameFromProperties(props []cycloneDXProperty) string {
+	for _, p := range props {
+		if strings.HasSuffix(strings.ToLower(p.Name), ":srcname") {
+			return strings.TrimSpace(p.Value)
+		}
+	}
+	return ""
 }
 
 func validateCycloneDXVersion(version string) error {

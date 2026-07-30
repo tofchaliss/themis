@@ -106,9 +106,15 @@ func TestOSVEcosystem(t *testing.T) {
 		{"pkg:composer/v/x@1", "", "Packagist"},
 		{"pkg:hex/x@1", "", "Hex"},
 		{"pkg:pub/x@1", "", "Pub"},
-		{"pkg:rpm/rocky/x@1", "", ""},  // distro → skip
-		{"pkg:apk/alpine/x@1", "", ""}, // distro → skip
-		{"", "PyPI", "PyPI"},           // fallback to ecosystem label
+		{"pkg:rpm/rocky/x@1", "", ""},                          // no distro= qualifier → skip
+		{"pkg:apk/alpine/x@1", "", ""},                         // no distro= qualifier → skip
+		{"pkg:rpm/rocky/x@1?distro=rocky-8.10", "", "Rocky Linux:8"},
+		{"pkg:rpm/alma/x@1?distro=almalinux-9", "", "AlmaLinux:9"},
+		{"pkg:rpm/rhel/x@1?distro=rhel-9.2", "", "Red Hat"},
+		{"pkg:deb/debian/x@1?distro=debian-11", "", "Debian:11"},
+		{"pkg:apk/alpine/x@1?distro=alpine-3.18", "", "Alpine:v3.18"},
+		{"pkg:rpm/x/y@1?distro=exotic-1", "", ""}, // unknown distro → skip
+		{"", "PyPI", "PyPI"},                      // fallback to ecosystem label
 		{"", "golang", "Go"},           // fallback synonym
 		{"", "somethingelse", ""},      // unknown → skip
 	}
@@ -121,17 +127,65 @@ func TestOSVEcosystem(t *testing.T) {
 
 func TestOSVPackageName(t *testing.T) {
 	cases := []struct {
-		purl, name, want string
+		purl, name, source, want string
 	}{
-		{"pkg:maven/io.prometheus/prom@1", "prom", "io.prometheus:prom"},
-		{"pkg:npm/@scope/pkg@1", "pkg", "@scope/pkg"},
-		{"pkg:pypi/urllib3@1", "urllib3", "urllib3"},
-		{"", "fallback", "fallback"}, // no PURL → component Name
+		{"pkg:maven/io.prometheus/prom@1", "prom", "", "io.prometheus:prom"},
+		{"pkg:npm/@scope/pkg@1", "pkg", "", "@scope/pkg"},
+		{"pkg:pypi/urllib3@1", "urllib3", "", "urllib3"},
+		{"", "fallback", "", "fallback"}, // no PURL → component Name
+		// distro queries by the SOURCE package name when present, else the binary name.
+		{"pkg:rpm/rocky/openssl-libs@1?distro=rocky-8.10", "openssl-libs", "openssl", "openssl"},
+		{"pkg:rpm/rocky/bash@1?distro=rocky-8.10", "bash", "", "bash"},
 	}
 	for _, c := range cases {
-		got := osvPackageName(app.InventoryComponent{PURL: c.purl, Name: c.name})
+		got := osvPackageName(app.InventoryComponent{PURL: c.purl, Name: c.name, Source: c.source})
 		if got != c.want {
-			t.Errorf("osvPackageName(%q,%q) = %q, want %q", c.purl, c.name, got, c.want)
+			t.Errorf("osvPackageName(%q,%q,src=%q) = %q, want %q", c.purl, c.name, c.source, got, c.want)
+		}
+	}
+}
+
+// TestOSVVersion covers the rpm epoch normalization: keep an existing "N:" prefix, recover the
+// epoch from the PURL epoch= qualifier when the version omits it, and leave non-rpm untouched.
+func TestOSVVersion(t *testing.T) {
+	cases := []struct {
+		purl, version, want string
+	}{
+		{"pkg:rpm/rocky/x@1?distro=rocky-8.10&epoch=1", "1:1.1.1k-17.el8_10", "1:1.1.1k-17.el8_10"}, // already has epoch
+		{"pkg:rpm/rocky/x@1?distro=rocky-8.10&epoch=1", "1.1.1k-17.el8_10", "1:1.1.1k-17.el8_10"},   // recovered from qualifier
+		{"pkg:rpm/rocky/x@1?distro=rocky-8.10&epoch=0", "2.4.0-1.el8", "2.4.0-1.el8"},               // epoch 0 → unchanged
+		{"pkg:rpm/rocky/x@1?distro=rocky-8.10", "2.4.0-1.el8", "2.4.0-1.el8"},                       // no epoch anywhere
+		{"pkg:pypi/x@1.2.3", "1.2.3", "1.2.3"},                                                      // non-rpm untouched
+	}
+	for _, c := range cases {
+		got := osvVersion(app.InventoryComponent{PURL: c.purl, Version: c.version})
+		if got != c.want {
+			t.Errorf("osvVersion(%q,%q) = %q, want %q", c.purl, c.version, got, c.want)
+		}
+	}
+}
+
+// TestOSVDistro_FormatParity asserts the OSV query params are IDENTICAL for the same package
+// shaped as CycloneDX vs SPDX (different version build aside) — same ecosystem and source name,
+// both epoch-bearing — so distro correlation does not depend on the SBOM format.
+func TestOSVDistro_FormatParity(t *testing.T) {
+	cdx := app.InventoryComponent{
+		PURL:    "pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10?arch=x86_64&distro=rocky-8.9&epoch=1",
+		Name:    "openssl-libs", Version: "1:1.1.1k-15.el8_10", Source: "openssl",
+	}
+	spdx := app.InventoryComponent{
+		PURL:    "pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10&epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm",
+		Name:    "openssl-libs", Version: "1:1.1.1k-17.el8_10", Source: "openssl",
+	}
+	for _, c := range []app.InventoryComponent{cdx, spdx} {
+		if got := osvEcosystem(c); got != "Rocky Linux:8" {
+			t.Errorf("ecosystem = %q, want Rocky Linux:8", got)
+		}
+		if got := osvPackageName(c); got != "openssl" {
+			t.Errorf("name = %q, want openssl", got)
+		}
+		if got := osvVersion(c); !hasEpochPrefix(got) {
+			t.Errorf("version %q lacks the rpm epoch", got)
 		}
 	}
 }

@@ -140,7 +140,7 @@ func toInventory(inv domain.Inventory) gen.Inventory {
 	comps := make([]gen.Component, 0, len(inv.Components()))
 	for _, c := range inv.Components() {
 		comps = append(comps, gen.Component{
-			Purl: strptr(c.PURL.String()), Name: strptr(c.Name), Version: strptr(c.Version), Ecosystem: strptr(c.Ecosystem),
+			Purl: strptr(c.PURL.String()), Name: strptr(c.Name), Version: strptr(c.Version), Ecosystem: strptr(c.Ecosystem), Source: strptr(c.Source),
 		})
 	}
 	edges := make([]gen.DependencyEdge, 0, len(inv.Dependencies()))

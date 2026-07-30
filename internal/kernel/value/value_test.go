@@ -87,6 +87,25 @@ func TestNewPURL(t *testing.T) {
 	}
 }
 
+func TestPURLQualifier(t *testing.T) {
+	const p = "pkg:rpm/rocky/openssl@1.1.1k?arch=x86_64&distro=rocky-8.10&epoch=1#sub"
+	cases := []struct{ key, want string }{
+		{"distro", "rocky-8.10"},
+		{"epoch", "1"},
+		{"arch", "x86_64"},
+		{"DISTRO", "rocky-8.10"}, // case-insensitive key
+		{"missing", ""},
+	}
+	for _, c := range cases {
+		if got := value.PURLQualifier(p, c.key); got != c.want {
+			t.Errorf("PURLQualifier(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+	if got := value.PURLQualifier("pkg:pypi/x@1", "distro"); got != "" {
+		t.Errorf("no qualifiers = %q, want empty", got)
+	}
+}
+
 func TestPURL_Equal_Zero(t *testing.T) {
 	a, _ := value.NewPURL("pkg:npm/left-pad@1.0.0")
 	b, _ := value.NewPURL("pkg:npm/left-pad@1.0.0")

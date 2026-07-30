@@ -55,6 +55,54 @@ func TestParse_CycloneDX_Golden(t *testing.T) {
 	}
 }
 
+// TestParse_SourceName_FormatParity proves the distro source-package name is captured from
+// BOTH formats — Trivy's CycloneDX `aquasecurity:trivy:SrcName` property and the SPDX PURL
+// `upstream=` qualifier — so the same image yields the same Source regardless of format.
+func TestParse_SourceName_FormatParity(t *testing.T) {
+	cdx := `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{` +
+		`"name":"openssl-libs","version":"1:1.1.1k-15.el8_10",` +
+		`"purl":"pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10?arch=x86_64&distro=rocky-8.9&epoch=1",` +
+		`"properties":[{"name":"aquasecurity:trivy:PkgType","value":"rocky"},{"name":"aquasecurity:trivy:SrcName","value":"openssl"}]}]}`
+	spdx := `{"spdxVersion":"SPDX-2.3","packages":[{"SPDXID":"SPDXRef-1","name":"openssl-libs",` +
+		`"versionInfo":"1:1.1.1k-17.el8_10","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER",` +
+		`"referenceType":"purl","referenceLocator":"pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10&epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm"}]}]}`
+
+	for _, tc := range []struct{ format, doc string }{{"cyclonedx", cdx}, {"spdx", spdx}} {
+		res, err := parser.NewRegistry().Parse(context.Background(), tc.format, "", []byte(tc.doc))
+		if err != nil {
+			t.Fatalf("%s parse: %v", tc.format, err)
+		}
+		comps := res.Inventory.Components()
+		if len(comps) != 1 {
+			t.Fatalf("%s: components = %d, want 1 (%+v)", tc.format, len(comps), comps)
+		}
+		if comps[0].Source != "openssl" {
+			t.Errorf("%s: Source = %q, want openssl (binary openssl-libs -> source openssl)", tc.format, comps[0].Source)
+		}
+	}
+}
+
+// TestParse_SourceName_HyphenatedAndAbsent covers a hyphenated source name and the no-source case.
+func TestParse_SourceName_HyphenatedAndAbsent(t *testing.T) {
+	spdx := `{"spdxVersion":"SPDX-2.3","packages":[` +
+		`{"SPDXID":"a","name":"gcc","versionInfo":"12.2.1-7.el8","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:rpm/rocky/gcc@12.2.1-7.el8?distro=rocky-8.10&upstream=gcc-toolset-12-gcc-12.2.1-7.el8.src.rpm"}]},` +
+		`{"SPDXID":"b","name":"bash","versionInfo":"4.4.20-4.el8","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:rpm/rocky/bash@4.4.20-4.el8?distro=rocky-8.10"}]}]}`
+	res, err := parser.NewRegistry().Parse(context.Background(), "spdx", "", []byte(spdx))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := map[string]string{}
+	for _, c := range res.Inventory.Components() {
+		got[c.Name] = c.Source
+	}
+	if got["gcc"] != "gcc-toolset-12-gcc" {
+		t.Errorf("hyphenated source = %q, want gcc-toolset-12-gcc", got["gcc"])
+	}
+	if got["bash"] != "" {
+		t.Errorf("no-upstream source = %q, want empty", got["bash"])
+	}
+}
+
 func TestParse_SPDX_Golden(t *testing.T) {
 	res, err := parser.NewRegistry().Parse(context.Background(), "spdx", "", load(t, "spdx.json"))
 	if err != nil {

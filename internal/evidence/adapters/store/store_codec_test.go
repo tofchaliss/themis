@@ -24,8 +24,8 @@ func mustPURL(t *testing.T, s string) value.PURL {
 
 func TestInventoryCodec_RoundTrip(t *testing.T) {
 	inv := domain.NewInventory(
-		[]domain.Component{{PURL: mustPURL(t, "pkg:deb/debian/openssl@3.0.11"), Name: "openssl", Version: "3.0.11", Ecosystem: "deb"}},
-		[]domain.DependencyEdge{{From: mustPURL(t, "pkg:deb/debian/app@1"), To: mustPURL(t, "pkg:deb/debian/openssl@3.0.11"), Relationship: "depends_on"}},
+		[]domain.Component{{PURL: mustPURL(t, "pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10"), Name: "openssl-libs", Version: "1:1.1.1k-15.el8_10", Ecosystem: "rpm", Source: "openssl"}},
+		[]domain.DependencyEdge{{From: mustPURL(t, "pkg:deb/debian/app@1"), To: mustPURL(t, "pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10"), Relationship: "depends_on"}},
 	)
 	data, err := marshalInventory(inv)
 	if err != nil {
@@ -35,8 +35,11 @@ func TestInventoryCodec_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(got.Components()) != 1 || got.Components()[0].Name != "openssl" {
+	if len(got.Components()) != 1 || got.Components()[0].Name != "openssl-libs" {
 		t.Errorf("components round-trip: %+v", got.Components())
+	}
+	if got.Components()[0].Source != "openssl" {
+		t.Errorf("Source round-trip = %q, want openssl", got.Components()[0].Source)
 	}
 	if len(got.Dependencies()) != 1 || got.Dependencies()[0].Relationship != "depends_on" {
 		t.Errorf("dependencies round-trip: %+v", got.Dependencies())

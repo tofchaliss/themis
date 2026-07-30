@@ -94,27 +94,43 @@ func TestOSVClient_MavenNameMapping(t *testing.T) {
 	}
 }
 
-func TestOSVClient_DistroComponentSkipped(t *testing.T) {
-	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hit = true
+// TestOSVClient_DistroComponentQueried proves a distro (rpm) component now issues an OSV
+// query against the resolved distro ecosystem, keyed by the SOURCE package name, with the
+// rpm epoch on the version (so OSV can version-filter). openssl-libs -> source openssl.
+func TestOSVClient_DistroComponentQueried(t *testing.T) {
+	var gotReq osvQueryReq
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotReq)
 		_ = json.NewEncoder(w).Encode(map[string]any{"vulns": []any{}})
 	}))
 	t.Cleanup(srv.Close)
 	c := feed.NewOSVClient(srv.URL, srv.Client())
 
-	got, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
-		PURL: "pkg:rpm/rocky/gnutls@3.6.16-8.el8_10.5?distro=rocky-8.9", Name: "gnutls",
-	})
-	if err != nil {
+	if _, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL:    "pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10&epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm",
+		Name:    "openssl-libs",
+		Version: "1:1.1.1k-17.el8_10",
+		Source:  "openssl",
+	}); err != nil {
 		t.Fatalf("VulnsForPackage: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("got %d proposals, want 0 (distro is not OSV-query-by-package)", len(got))
+	if gotReq.Package.Ecosystem != "Rocky Linux:8" {
+		t.Errorf("ecosystem = %q, want Rocky Linux:8", gotReq.Package.Ecosystem)
 	}
-	if hit {
-		t.Error("distro component should not have issued an OSV query")
+	if gotReq.Package.Name != "openssl" {
+		t.Errorf("name = %q, want openssl (source, not the binary openssl-libs)", gotReq.Package.Name)
 	}
+	if gotReq.Version != "1:1.1.1k-17.el8_10" {
+		t.Errorf("version = %q, want epoch-bearing 1:1.1.1k-17.el8_10", gotReq.Version)
+	}
+}
+
+type osvQueryReq struct {
+	Version string `json:"version"`
+	Package struct {
+		Name      string `json:"name"`
+		Ecosystem string `json:"ecosystem"`
+	} `json:"package"`
 }
 
 func TestOSVClient_SkipsGHSAOnlyRecord(t *testing.T) {

@@ -15,6 +15,9 @@ type InventoryComponent struct {
 	Name      string
 	Version   string
 	Ecosystem string
+	// Source is the upstream source-package name for distro (rpm) components (e.g. openssl-libs
+	// -> openssl); "" for non-distro. Distro vuln databases key on the source package.
+	Source string
 }
 
 // Inventory is the subset of Evidence's canonical inventory correlation needs.

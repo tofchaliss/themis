@@ -8,6 +8,11 @@ type Component struct {
 	Name      string
 	Version   string
 	Ecosystem string
+	// Source is the upstream source-package name for distro (rpm) components
+	// (e.g. the binary openssl-libs has source openssl); "" for non-distro components.
+	// Distro vulnerability databases key on the source package, so downstream correlation
+	// queries by Source when set — captured uniformly here so CycloneDX and SPDX agree.
+	Source string
 }
 
 // DependencyEdge is a normalized dependency relationship between two components.
