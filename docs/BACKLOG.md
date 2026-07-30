@@ -118,6 +118,14 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   `internal/knowledge/adapters/store/store.go` (`GetByCVE`/`load` + `Save`) and/or
   `internal/knowledge/app/correlate.go`. Surfaced 2026-07-30 during the end-to-end deployment.
   See [[feedback-backlog-surfaced-followups]].
+- [ ] **(MED) Risk score — add the release-scoped blast multiplier per-Finding in Governance.** The
+  Knowledge Faultline now carries a CVE-intrinsic `priority`/`score` (Layer-1 level + severity+EPSS+KEV
+  base, `internal/knowledge/domain/priority.go`). The monolith's composite also multiplied by a blast
+  factor (1.0–2.0× off the unique-customer/affected-release count) — a *release-scoped* input that belongs
+  on the Governance Finding, not the Faultline. Wire a per-Finding priority = Faultline base × blast, reading
+  the Faultline score via the Knowledge read API and the release count via Governance's blast-radius
+  projection. Depends on the org asset graph (Product→…→Customer) for the true customer-count multiplier;
+  the affected-release count is a usable proxy meanwhile. Surfaced 2026-07-30. See [[feedback-backlog-surfaced-followups]].
 - [ ] **(LOW) OpenVEX output identifies the product by bare release UUID, with no vulnerable subcomponent.**
   The Communication OpenVEX serializer renders `statements[].products` as the raw `release_id`
   (e.g. `2859e949-…`) and emits no `subcomponents`. A downstream OpenVEX consumer can't resolve a bare UUID,

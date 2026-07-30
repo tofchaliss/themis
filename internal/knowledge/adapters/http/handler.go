@@ -84,6 +84,8 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		Epss:           f32ptr(v.EPSS),
 		Kev:            &kev,
 		ExploitPublic:  &pub,
+		Priority:       strptr(v.Priority()),
+		Score:          intptr(v.Score()),
 	}
 	props := make([]gen.ProposalProvenance, 0, len(f.Proposals()))
 	for _, p := range f.Proposals() {
@@ -108,3 +110,5 @@ func writeProblem(w http.ResponseWriter, status int, title, detail string) {
 func strptr(s string) *string { return &s }
 
 func f32ptr(f float64) *float32 { v := float32(f); return &v }
+
+func intptr(i int) *int { return &i }
