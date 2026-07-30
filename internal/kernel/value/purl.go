@@ -40,3 +40,26 @@ func (p PURL) Equal(other PURL) bool { return p.raw == other.raw }
 
 // IsZero reports whether the purl is the zero value.
 func (p PURL) IsZero() bool { return p.raw == "" }
+
+// PURLQualifier returns the value of a PURL qualifier (from the "?k=v&..." part) by
+// case-insensitive key, or "" if absent. It operates on the canonical string form and does
+// not validate the purl grammar. Example:
+//
+//	PURLQualifier("pkg:rpm/rocky/x@1?distro=rocky-8&epoch=1", "distro") == "rocky-8".
+func PURLQualifier(purl, key string) string {
+	i := strings.IndexByte(purl, '?')
+	if i < 0 {
+		return ""
+	}
+	q := purl[i+1:]
+	if h := strings.IndexByte(q, '#'); h >= 0 {
+		q = q[:h]
+	}
+	for _, kv := range strings.Split(q, "&") {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
+			return v
+		}
+	}
+	return ""
+}

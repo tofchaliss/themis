@@ -219,6 +219,7 @@ type componentJSON struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
 	Ecosystem string `json:"ecosystem"`
+	Source    string `json:"source,omitempty"`
 }
 
 type edgeJSON struct {
@@ -230,7 +231,7 @@ type edgeJSON struct {
 func marshalInventory(inv domain.Inventory) ([]byte, error) {
 	dto := inventoryJSON{}
 	for _, c := range inv.Components() {
-		dto.Components = append(dto.Components, componentJSON{PURL: c.PURL.String(), Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem})
+		dto.Components = append(dto.Components, componentJSON{PURL: c.PURL.String(), Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source})
 	}
 	for _, e := range inv.Dependencies() {
 		dto.Dependencies = append(dto.Dependencies, edgeJSON{From: e.From.String(), To: e.To.String(), Relationship: e.Relationship})
@@ -252,7 +253,7 @@ func unmarshalInventory(data []byte) (domain.Inventory, error) {
 		if err != nil {
 			return domain.Inventory{}, fmt.Errorf("inventory component: %w", err)
 		}
-		comps = append(comps, domain.Component{PURL: purl, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem})
+		comps = append(comps, domain.Component{PURL: purl, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source})
 	}
 	edges := make([]domain.DependencyEdge, 0, len(dto.Dependencies))
 	for _, e := range dto.Dependencies {

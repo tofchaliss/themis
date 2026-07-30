@@ -72,7 +72,7 @@ func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []d
 			continue
 		}
 		idToPURL[pkg.SPDXID] = purl
-		components = append(components, domain.Component{PURL: purl, Name: pkg.Name, Version: pkg.VersionInfo, Ecosystem: ecosystem})
+		components = append(components, domain.Component{PURL: purl, Name: pkg.Name, Version: pkg.VersionInfo, Ecosystem: ecosystem, Source: srcNameFromPURL(purl.String())})
 	}
 
 	var edges []domain.DependencyEdge
@@ -89,6 +89,28 @@ func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []d
 	}
 
 	return components, edges, warnings, nil
+}
+
+// srcNameFromPURL returns the distro source-package name from a PURL "upstream=" qualifier
+// (e.g. "openssl-1.1.1k-17.el8_10.src.rpm" -> "openssl"), or "" when absent. The source NAME
+// is everything before the last two '-'-delimited fields (name-version-release), so names that
+// themselves contain hyphens are preserved (e.g. "gcc-toolset-12-gcc-12.2.1-7.el8" -> "gcc-toolset-12-gcc").
+func srcNameFromPURL(purl string) string {
+	up := value.PURLQualifier(purl, "upstream")
+	up = strings.TrimSuffix(up, ".src.rpm")
+	up = strings.TrimSuffix(up, ".rpm")
+	if up == "" {
+		return ""
+	}
+	last := strings.LastIndexByte(up, '-')
+	if last <= 0 {
+		return up
+	}
+	secondLast := strings.LastIndexByte(up[:last], '-')
+	if secondLast <= 0 {
+		return up[:last]
+	}
+	return up[:secondLast]
 }
 
 func purlFromExternalRefs(refs []spdxExternalRef) (string, bool) {

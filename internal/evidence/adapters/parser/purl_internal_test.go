@@ -56,6 +56,24 @@ func TestStripVersionQualifiers(t *testing.T) {
 	}
 }
 
+func TestSrcNameFromPURL(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want string
+	}{
+		"normal":       {"pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm", "openssl"},
+		"hyphenatedSrc": {"pkg:rpm/rocky/gcc@1?upstream=gcc-toolset-12-gcc-12.2.1-7.el8.src.rpm", "gcc-toolset-12-gcc"},
+		"oneHyphen":     {"pkg:rpm/rocky/foo@1?upstream=foo-1.0.src.rpm", "foo"},
+		"noHyphen":      {"pkg:rpm/rocky/foo@1?upstream=foo.src.rpm", "foo"},
+		"noUpstream":    {"pkg:rpm/rocky/openssl@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10", ""},
+	}
+	for name, c := range cases {
+		if got := srcNameFromPURL(c.in); got != c.want {
+			t.Errorf("%s: srcNameFromPURL(%q) = %q, want %q", name, c.in, got, c.want)
+		}
+	}
+}
+
 func TestDecodeSegment(t *testing.T) {
 	if got := decodeSegment("libstdc%2B%2B"); got != "libstdc++" {
 		t.Errorf("decode valid = %q", got)

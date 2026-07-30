@@ -34,6 +34,7 @@ type inventoryResponse struct {
 		Name      string `json:"name"`
 		Version   string `json:"version"`
 		Ecosystem string `json:"ecosystem"`
+		Source    string `json:"source"`
 	} `json:"components"`
 }
 
@@ -61,7 +62,7 @@ func (c *Client) GetInventory(ctx context.Context, evidenceID string) (app.Inven
 	inv := app.Inventory{Components: make([]app.InventoryComponent, 0, len(body.Components))}
 	for _, comp := range body.Components {
 		inv.Components = append(inv.Components, app.InventoryComponent{
-			PURL: comp.Purl, Name: comp.Name, Version: comp.Version, Ecosystem: comp.Ecosystem,
+			PURL: comp.Purl, Name: comp.Name, Version: comp.Version, Ecosystem: comp.Ecosystem, Source: comp.Source,
 		})
 	}
 	return inv, nil

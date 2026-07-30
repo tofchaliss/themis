@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
 
@@ -67,7 +68,7 @@ func (c *OSVClient) VulnsForPackage(ctx context.Context, comp app.InventoryCompo
 	}
 
 	body, err := json.Marshal(osvQueryRequest{
-		Version: strings.TrimSpace(comp.Version),
+		Version: osvVersion(comp),
 		Package: osvQueryPackage{Name: name, Ecosystem: eco},
 	})
 	if err != nil {
@@ -113,9 +114,8 @@ func (c *OSVClient) VulnsForPackage(ctx context.Context, comp app.InventoryCompo
 }
 
 // osvEcosystem maps a component to its OSV ecosystem name, preferring the PURL type
-// (authoritative) and falling back to a supplied OSV-style ecosystem label. Distro
-// packages (apk/deb/rpm) return "" — they are correlated by the distro OSV feeds, not
-// query-by-package.
+// (authoritative) and falling back to a supplied OSV-style ecosystem label. Distro packages
+// (apk/deb/rpm) resolve to OSV's per-distro ecosystem from the PURL "distro=" qualifier.
 func osvEcosystem(comp app.InventoryComponent) string {
 	switch purlType(comp.PURL) {
 	case "pypi":
@@ -139,7 +139,7 @@ func osvEcosystem(comp app.InventoryComponent) string {
 	case "pub":
 		return "Pub"
 	case "apk", "deb", "rpm":
-		return "" // distro — handled by the distro OSV feeds
+		return osvDistroEcosystem(comp.PURL)
 	}
 	// Fall back to an already-OSV-shaped ecosystem label if the PURL type was unknown.
 	switch strings.ToLower(strings.TrimSpace(comp.Ecosystem)) {
@@ -156,10 +156,18 @@ func osvEcosystem(comp app.InventoryComponent) string {
 	}
 }
 
-// osvPackageName derives the OSV package name from the PURL: Maven wants
-// "group:artifact", npm keeps its "@scope/name", others use the bare name. Falls back to
-// the component's Name.
+// osvPackageName derives the OSV package name from the PURL: distro (apk/deb/rpm) queries by
+// the SOURCE package name (OSV's distro databases key on it — e.g. openssl-libs -> openssl);
+// Maven wants "group:artifact", npm keeps its "@scope/name", others use the bare name. Falls
+// back to the component's Name.
 func osvPackageName(comp app.InventoryComponent) string {
+	switch purlType(comp.PURL) {
+	case "apk", "deb", "rpm":
+		if src := strings.TrimSpace(comp.Source); src != "" {
+			return src
+		}
+		return strings.TrimSpace(comp.Name)
+	}
 	ns, name := purlNamespaceName(comp.PURL)
 	if name == "" {
 		return strings.TrimSpace(comp.Name)
@@ -175,6 +183,80 @@ func osvPackageName(comp app.InventoryComponent) string {
 		}
 	}
 	return name
+}
+
+// osvDistroEcosystem maps a distro package (apk/deb/rpm) to its OSV ecosystem string from the
+// PURL "distro=" qualifier (e.g. "rocky-8.10" -> "Rocky Linux:8"). Returns "" when the distro
+// or its version can't be resolved — the component is then skipped by VulnsForPackage.
+func osvDistroEcosystem(purl string) string {
+	distro := value.PURLQualifier(purl, "distro")
+	i := strings.IndexByte(distro, '-')
+	if i <= 0 || i+1 >= len(distro) {
+		return ""
+	}
+	name := strings.ToLower(distro[:i])
+	ver := distro[i+1:]
+	switch name {
+	case "rocky", "rockylinux":
+		return "Rocky Linux:" + distroMajor(ver)
+	case "alma", "almalinux":
+		return "AlmaLinux:" + distroMajor(ver)
+	case "rhel", "redhat":
+		return "Red Hat"
+	case "debian":
+		return "Debian:" + distroMajor(ver)
+	case "alpine":
+		return "Alpine:v" + distroMajorMinor(ver)
+	}
+	return ""
+}
+
+// distroMajor returns the leading numeric release ("8.10" -> "8").
+func distroMajor(v string) string {
+	if i := strings.IndexByte(v, '.'); i >= 0 {
+		return v[:i]
+	}
+	return v
+}
+
+// distroMajorMinor returns "major.minor" ("3.18.4" -> "3.18") for Alpine's vX.Y ecosystem.
+func distroMajorMinor(v string) string {
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) >= 2 {
+		return parts[0] + "." + parts[1]
+	}
+	return v
+}
+
+// osvVersion returns the version to query OSV with. For rpm components it ensures the RPM epoch
+// is present — OSV's distro version filtering only compares when the query carries the "N:"
+// epoch — recovering it from the PURL "epoch=" qualifier when the version field omits it.
+func osvVersion(comp app.InventoryComponent) string {
+	v := strings.TrimSpace(comp.Version)
+	if v == "" || purlType(comp.PURL) != "rpm" {
+		return v
+	}
+	if hasEpochPrefix(v) {
+		return v
+	}
+	if ep := value.PURLQualifier(comp.PURL, "epoch"); ep != "" && ep != "0" {
+		return ep + ":" + v
+	}
+	return v
+}
+
+// hasEpochPrefix reports whether an rpm version already carries an "N:" epoch prefix.
+func hasEpochPrefix(v string) bool {
+	i := strings.IndexByte(v, ':')
+	if i <= 0 {
+		return false
+	}
+	for _, r := range v[:i] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // purlType returns the PURL type (the token between "pkg:" and the first "/").
