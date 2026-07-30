@@ -60,6 +60,23 @@ type Store struct {
 // New builds a Store over the given pool.
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// rowQuerier is the read subset shared by *pgxpool.Pool and pgx.Tx.
+type rowQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// querier returns the ambient inbox transaction when one rides the context, else the pool.
+// Reading through the joined tx lets a load see that transaction's own in-flight writes — e.g.
+// a Faultline card created for the same CVE earlier in the same correlation batch — so a later
+// component reuses it (update path) instead of re-inserting and colliding on faultlines_cve_key.
+func (s *Store) querier(ctx context.Context) rowQuerier {
+	if tx, ok := txFromCtx(ctx); ok {
+		return tx
+	}
+	return s.pool
+}
+
 // GetByCVE loads the card for a canonical CVE; found=false if none exists.
 func (s *Store) GetByCVE(ctx context.Context, cve string) (domain.Faultline, bool, error) {
 	f, err := s.load(ctx, "cve", cve)
@@ -83,8 +100,9 @@ func (s *Store) load(ctx context.Context, column, arg string) (domain.Faultline,
 		version        int
 		viewRaw        []byte
 	)
+	q := s.querier(ctx)
 	query := "SELECT id, cve, stage, version, view FROM faultlines WHERE " + column + " = $1"
-	err := s.pool.QueryRow(ctx, query, arg).Scan(&id, &cve, &stage, &version, &viewRaw)
+	err := q.QueryRow(ctx, query, arg).Scan(&id, &cve, &stage, &version, &viewRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Faultline{}, ErrNotFound
 	}
@@ -101,7 +119,7 @@ func (s *Store) load(ctx context.Context, column, arg string) (domain.Faultline,
 		return domain.Faultline{}, err
 	}
 
-	rows, err := s.pool.Query(ctx,
+	rows, err := q.Query(ctx,
 		`SELECT source, observed_at, kind, payload FROM faultline_proposals WHERE faultline_id = $1 ORDER BY seq`, id)
 	if err != nil {
 		return domain.Faultline{}, err
@@ -151,14 +169,28 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 
 	now := time.Now().UTC()
 	if created {
+		// Guard the INSERT with a savepoint: a duplicate-CVE unique violation (a concurrent
+		// creator, or one that raced the GetByCVE read) otherwise aborts a joined inbox tx, so
+		// no later statement — including the ErrConcurrent retry's reload — can run. Rolling
+		// back to the savepoint clears the abort; ErrConcurrent then reloads and folds as an
+		// update. (A fresh, self-owned tx would abort too, so the savepoint is needed either way.)
+		if _, err := tx.Exec(ctx, "SAVEPOINT faultline_ins"); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO faultlines (id, cve, stage, version, view, created_at, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$6)`,
 			string(f.ID()), f.CVE().String(), string(f.Stage()), f.Version(), string(viewRaw), now); err != nil {
 			// A concurrent writer created this CVE first — converge by retrying as an update.
 			if isUniqueViolation(err) {
+				if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT faultline_ins"); rbErr != nil {
+					return rbErr
+				}
 				return app.ErrConcurrent
 			}
+			return err
+		}
+		if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT faultline_ins"); err != nil {
 			return err
 		}
 	} else {

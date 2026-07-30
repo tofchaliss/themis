@@ -98,6 +98,33 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   `000003_knowledge_inbox` `processed_events` migration + `InboxConsumer`, and `Save`/`RecordMatch` join the
   ctx-tx (both fan out over SBOM components). Proven by the Knowledge inbox integration tests + the
   `tests/pipeline` SBOM→Faultline e2e.
+- [x] **(HIGH) Knowledge correlation halts on any SBOM where two components share a CVE. — FIXED 2026-07-30.**
+  Fix: store reads join the ambient inbox tx (`querier(ctx)`) so a later component reuses the in-flight card,
+  and the faultline INSERT is savepoint-guarded so a genuine cross-process duplicate rolls back and the
+  `ErrConcurrent` retry converges; regression `TestInboxCorrelatesSharedCVEWithoutHalt`. Original report:
+  `FaultlineService.FoldProposal` reuses an existing card via `GetByCVE`, but `store.GetByCVE` read through
+  `s.pool` (committed data) while `Save` joins the inbox unit-of-work transaction. Within one SBOM's
+  single-tx, sequential correlation, the first component creates the card for CVE-X (uncommitted); a later
+  component's `GetByCVE` can't see it (separate connection) → it INSERTs CVE-X again → `23505` on
+  `faultlines_cve_key`. `Save` maps 23505 → `ErrConcurrent` to force a reload, but the failed INSERT has
+  already poisoned the shared inbox tx (`25P02`), so the retry's first statement dies and correlation fails
+  → **D8 poison-halts the entire Evidence stream** (`cmd/knowledge` reader stops until restart). The
+  1-component demo never hit this; a real 542-component SBOM (many Spring modules → shared CVEs) halts on the
+  first collision (verified live 2026-07-30, CVE-2026-8384). **Fix:** make reads join the inbox tx so
+  `GetByCVE` sees in-flight creates (within-SBOM duplicates then take the update path), AND wrap the faultline
+  INSERT in a SAVEPOINT so a genuine cross-process duplicate can `ROLLBACK TO SAVEPOINT` and let the existing
+  `ErrConcurrent` retry converge instead of poisoning the outer tx — or dedupe discovered CVEs per SBOM in
+  `Correlate` before folding. Add a multi-component-same-CVE correlation test. Plugs into
+  `internal/knowledge/adapters/store/store.go` (`GetByCVE`/`load` + `Save`) and/or
+  `internal/knowledge/app/correlate.go`. Surfaced 2026-07-30 during the end-to-end deployment.
+  See [[feedback-backlog-surfaced-followups]].
+- [ ] **(LOW) OpenVEX output identifies the product by bare release UUID, with no vulnerable subcomponent.**
+  The Communication OpenVEX serializer renders `statements[].products` as the raw `release_id`
+  (e.g. `2859e949-…`) and emits no `subcomponents`. A downstream OpenVEX consumer can't resolve a bare UUID,
+  and the affected package (e.g. `pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1`) is not named. Prefer
+  a resolvable product identifier and add the correlated component PURL as an OpenVEX `subcomponent`. Plugs
+  into the Communication serializer registry (`internal/communication/adapters/.../openvex`). Surfaced
+  2026-07-30 verifying the end-to-end deployment. See [[feedback-backlog-surfaced-followups]].
 - [ ] **(LOW) `cmd/knowledge` default listen port collides with Registry.** `THEMIS_KNOWLEDGE_ADDR`
   defaults to `:8082` — the same as `cmd/registry` — but the rest of the system addresses Knowledge at
   `:8085` (Intelligence's `THEMIS_KNOWLEDGE_URL` default; `deploy/node.env.example`). Running Registry +
@@ -105,23 +132,21 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   Until then the INSTALLATION.md runbook sets `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly. Plugs into
   `cmd/knowledge/main.go` `loadConfig`. Surfaced 2026-07-30 wiring the end-to-end deployment.
   See [[feedback-backlog-surfaced-followups]].
-- [ ] **(MED) Registry + Evidence co-located in one DB clobber golang-migrate's default `schema_migrations`.**
-  The registry-backed SubjectRef reads registry tables in-process over Evidence's pool, so `cmd/registry` and
-  `cmd/evidence` must share the `evidence` database. Both `applyMigrations` call `migrate.New` with **no
-  `x-migrations-table`**, so both manage the single default `schema_migrations` — whichever migrates second
-  reads the other's version and silently skips its own `CREATE TABLE`. The `make e2e-pipeline` proof hides
-  this by using the **stub** SubjectRef (no registry). Workaround in the INSTALLATION.md runbook: append
-  `&x-migrations-table=registry_schema_migrations` to the Registry DSN. Fix: set a per-context migrations
-  table (or run registry in its own DB with a read-API SubjectRef instead of the in-process read). Plugs into
-  `cmd/registry/main.go` + `cmd/evidence/main.go`. Surfaced 2026-07-30 wiring the end-to-end deployment.
-  See [[feedback-backlog-surfaced-followups]].
-- [ ] **(LOW) `cmd/knowledge` default listen port collides with Registry.** `THEMIS_KNOWLEDGE_ADDR`
-  defaults to `:8082` — the same as `cmd/registry` — but the rest of the system addresses Knowledge at
-  `:8085` (Intelligence's `THEMIS_KNOWLEDGE_URL` default; `deploy/node.env.example`). Running Registry +
-  Knowledge on defaults fails to bind the second one. Fix: change the `cmd/knowledge` default to `:8085`.
-  Until then the INSTALLATION.md runbook sets `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly. Plugs into
-  `cmd/knowledge/main.go` `loadConfig`. Surfaced 2026-07-30 wiring the end-to-end deployment.
-  See [[feedback-backlog-surfaced-followups]].
+- [ ] **(MED) `cmd/registry` cannot self-migrate into the `evidence` DB it shares with Evidence.**
+  The registry-backed SubjectRef reads registry tables in-process over Evidence's pool, so `cmd/registry`
+  and `cmd/evidence` must share the `evidence` database. Both `applyMigrations` call `migrate.New` with the
+  default `schema_migrations` table, so whichever migrates second reads the other's version and silently
+  skips its own `CREATE TABLE`. **The obvious `x-migrations-table` DSN param does NOT fix it** — `cmd/registry`
+  reuses the *same* DSN for `pgxpool.New`, and pgx forwards the unknown parameter to Postgres as a startup
+  option → `FATAL: unrecognized configuration parameter "x-migrations-table"` on every runtime connection
+  (migration succeeds, but the service can't serve; verified live 2026-07-30). The `make e2e-pipeline` proof
+  hides all of this by using the **stub** SubjectRef (no registry). **Operational workaround** (now in the
+  INSTALLATION.md runbook): load the registry schema directly — `psql -f
+  internal/registry/adapters/store/migrations/000001_registry.up.sql` (idempotent) — and run `cmd/registry`
+  with a plain DSN and no migrate flag. **Real fix:** separate the migration DSN from the pool DSN (so
+  `x-migrations-table` rides only on migrate), or give registry its own DB behind a read-API SubjectRef
+  instead of the in-process read. Plugs into `cmd/registry/main.go` (+ `cmd/evidence/main.go`).
+  Surfaced 2026-07-30 wiring the end-to-end deployment. See [[feedback-backlog-surfaced-followups]].
 - [ ] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
   `txCtxKey` / `withTx` / `txFromCtx` + `InboxConsumer` are duplicated per consuming context (Governance,
   Communication, later Knowledge). It is business-agnostic infra and could collapse into one platform package
