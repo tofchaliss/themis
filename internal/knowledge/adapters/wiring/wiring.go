@@ -38,7 +38,8 @@ type Knowledge struct {
 	Store    *store.Store
 	Consumer *inbound.Consumer
 	Relay    *store.Relay
-	Watch    *app.WatchService // nil when the NVD watch is disabled
+	Watch    *app.WatchService            // nil when the NVD watch is disabled
+	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
 }
 
 // NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
@@ -52,11 +53,23 @@ type NVDConfig struct {
 	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
+// SignalsConfig configures the optional scheduled exploit-signal enrichment sweep (EPSS / KEV
+// / ExploitDB). When Enabled, Wire builds the bulk client and a SignalEnrichmentService on
+// Knowledge.Signals (nil when disabled); the composition root schedules its Enrich. Each feed
+// URL may be empty to skip that source; relevance is bounded to already-carded CVEs.
+type SignalsConfig struct {
+	Enabled      bool
+	EPSSURL      string
+	KEVURL       string
+	ExploitDBURL string
+	HTTP         *http.Client // optional; nil → http.DefaultClient
+}
+
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
@@ -72,6 +85,10 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	if nvd.Enabled {
 		changed := feed.NewRelevanceFilteredSource(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
 		kn.Watch = app.NewWatchService(changed, st, fold, sysClock{})
+	}
+	if signals.Enabled {
+		src := feed.NewExploitSignalClient(signals.EPSSURL, signals.KEVURL, signals.ExploitDBURL, signals.HTTP)
+		kn.Signals = app.NewSignalEnrichmentService(src, st, fold, sysClock{})
 	}
 	return kn
 }

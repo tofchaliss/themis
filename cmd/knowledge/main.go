@@ -43,6 +43,12 @@ type config struct {
 	nvdAPIKey       string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
 	nvdPollInterval time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
 
+	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
+	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
+	kevURL          string        // THEMIS_KEV_URL — CISA KEV JSON catalog URL (default; empty skips KEV).
+	exploitDBURL    string        // THEMIS_EXPLOITDB_URL — ExploitDB files_exploits.csv URL (default; empty skips ExploitDB).
+	sigPollInterval time.Duration // THEMIS_EPSSKEV_POLL_INTERVAL — Go duration between enrichment sweeps (default 24h; falls back to 24h if unparseable).
+
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. When set, the relay publishes and the reader drains the Evidence stream; when empty, a logging publisher is used and the reader is disabled (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
@@ -62,6 +68,12 @@ func loadConfig() config {
 		nvdURL:          os.Getenv("THEMIS_NVD_URL"),
 		nvdAPIKey:       os.Getenv("THEMIS_NVD_API_KEY"),
 		nvdPollInterval: parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
+
+		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
+		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
+		kevURL:          envDefault("THEMIS_KEV_URL", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"),
+		exploitDBURL:    envDefault("THEMIS_EXPLOITDB_URL", "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"),
+		sigPollInterval: parseDurationDefault(os.Getenv("THEMIS_EPSSKEV_POLL_INTERVAL"), 24*time.Hour),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -110,6 +122,12 @@ func main() {
 		BaseURL: cfg.nvdURL,
 		APIKey:  cfg.nvdAPIKey,
 		HTTP:    &http.Client{Timeout: 60 * time.Second},
+	}, wiring.SignalsConfig{
+		Enabled:      cfg.sigEnabled,
+		EPSSURL:      cfg.epssURL,
+		KEVURL:       cfg.kevURL,
+		ExploitDBURL: cfg.exploitDBURL,
+		HTTP:         &http.Client{Timeout: 120 * time.Second},
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
@@ -119,6 +137,13 @@ func main() {
 	if kn.Watch != nil {
 		go watchLoop(kn.Watch, cfg.nvdPollInterval, logger.Component("watch"))
 		logger.Info("nvd modified-since watch enabled", observability.String("interval", cfg.nvdPollInterval.String()))
+	}
+
+	// Scheduled exploit-signal enrichment (D5): folds EPSS/KEV/public-exploit onto already-carded
+	// CVEs. Off unless THEMIS_EPSSKEV_ENABLED=1.
+	if kn.Signals != nil {
+		go signalLoop(kn.Signals, cfg.sigPollInterval, logger.Component("signals"))
+		logger.Info("exploit-signal enrichment enabled", observability.String("interval", cfg.sigPollInterval.String()))
 	}
 
 	// The bus reader drives correlation off the Evidence stream (EB-07/08). Without a bus it
@@ -184,6 +209,29 @@ func watchLoop(watch *app.WatchService, interval time.Duration, logger *observab
 	defer ticker.Stop()
 	for range ticker.C {
 		poll()
+	}
+}
+
+// signalLoop runs the scheduled exploit-signal enrichment: one sweep shortly after startup,
+// then every interval. It folds EPSS/KEV/public-exploit onto already-carded CVEs; a failure is
+// logged and retried next tick (the sweep is idempotent).
+func signalLoop(sig *app.SignalEnrichmentService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := sig.Enrich(context.Background())
+		if err != nil {
+			logger.Error("exploit-signal enrichment failed", observability.Err(err))
+			return
+		}
+		if n > 0 {
+			logger.Info("exploit-signal enrichment folded", observability.Int("folded", n))
+		}
+	}
+	time.Sleep(20 * time.Second) // let the service settle; the bulk feeds are large
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
 	}
 }
 
