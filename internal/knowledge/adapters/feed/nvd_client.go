@@ -27,6 +27,11 @@ const (
 	nvdMaxPages = 10
 )
 
+// nvdMaxWindow is NVD's maximum lastModStartDate..lastModEndDate span (120 days). A zero
+// watermark (first poll) would otherwise request the entire history; the start is clamped
+// to it so the first pass covers the last 120 days of changes.
+const nvdMaxWindow = 120 * 24 * time.Hour
+
 // NVDClient is the real NVD **modified-since** feed-fetch client (EDR-KNOWLEDGE-01 D5):
 // the scheduled watch pulls CVEs changed since a watermark and translates each into a
 // vuln-facts Proposal via the NVD ACL. It implements app.ChangedVulnSource.
@@ -109,6 +114,9 @@ type nvdMetric struct {
 // carry no signal); the watch's job is to fill severity/score.
 func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.ProposalFor, error) {
 	end := time.Now().UTC()
+	if since.Before(end.Add(-nvdMaxWindow)) {
+		since = end.Add(-nvdMaxWindow) // clamp to NVD's 120-day max window (and handle a zero watermark)
+	}
 	var out []app.ProposalFor
 	startIndex := 0
 	for page := 0; page < nvdMaxPages; page++ {

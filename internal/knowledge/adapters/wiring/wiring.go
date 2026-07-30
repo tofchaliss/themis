@@ -31,30 +31,49 @@ func (sysClock) Now() time.Time { return time.Now().UTC() }
 
 // Knowledge bundles the composed Knowledge components: the read-API handler (routes under
 // /faultlines — mount under /api/v1), the Store (operational tasks / dev purge), the inbound
-// Evidence-event Consumer (the correlation worker's input), and the outbox Relay.
+// Evidence-event Consumer (the correlation worker's input), the outbox Relay, and (when the
+// NVD watch is enabled) the scheduled Watch worker for the composition root to poll.
 type Knowledge struct {
 	Handler  http.Handler
 	Store    *store.Store
 	Consumer *inbound.Consumer
 	Relay    *store.Relay
+	Watch    *app.WatchService // nil when the NVD watch is disabled
+}
+
+// NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
+// When Enabled, Wire builds the NVD client, filters it to already-carded CVEs (relevance
+// bound), and returns a WatchService on Knowledge.Watch (nil when disabled); the composition
+// root schedules its Poll.
+type NVDConfig struct {
+	Enabled bool
+	BaseURL string       // "" → the client default (services.nvd.nist.gov)
+	APIKey  string       // optional; empty uses NVD's lower unauthenticated rate limit
+	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
-// discovery base URL, and outbox publisher. Reconciliation precedence ranks NVD over OSV (the
-// authoritative source wins ties — D-FEED-2 source tiers).
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher) Knowledge {
+// discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
+// NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
+// Proposals become the reconciled headline on cards OSV created.
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
 	inv := evidence.NewClient(evidenceBaseURL, nil)
 	disc := feed.NewOSVClient(osvBaseURL, nil)
 	corr := app.NewCorrelationService(inv, disc, fold, st, sysClock{})
-	return Knowledge{
+	kn := Knowledge{
 		Handler:  knhttp.NewHandler(read).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr)),
 		Relay:    store.NewRelay(pool, pub, 100),
 	}
+	if nvd.Enabled {
+		changed := feed.NewRelevanceFilteredSource(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
+		kn.Watch = app.NewWatchService(changed, st, fold, sysClock{})
+	}
+	return kn
 }
 
 // KnowledgeReadAPI wires the Knowledge read service over the given pool and returns the REST

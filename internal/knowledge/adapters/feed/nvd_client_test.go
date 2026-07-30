@@ -41,6 +41,40 @@ func onlyProposal(t *testing.T, got []app.ProposalFor) app.ProposalFor {
 	return got[0]
 }
 
+// TestNVDClient_ChangedSince_ClampsWindow proves the start date is clamped to NVD's 120-day
+// max window: a zero watermark (first run) queries ~last 120 days, not all of history, while
+// a recent watermark passes through unchanged.
+func TestNVDClient_ChangedSince_ClampsWindow(t *testing.T) {
+	const layout = "2006-01-02T15:04:05.000"
+	var gotStart string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotStart = r.URL.Query().Get("lastModStartDate")
+		_, _ = w.Write([]byte(`{"totalResults":0,"vulnerabilities":[]}`))
+	}))
+	defer srv.Close()
+	c := feed.NewNVDClient(srv.URL, "", srv.Client())
+
+	if _, err := c.ChangedSince(context.Background(), time.Time{}); err != nil {
+		t.Fatalf("ChangedSince(zero): %v", err)
+	}
+	start, err := time.Parse(layout, gotStart)
+	if err != nil {
+		t.Fatalf("parse start %q: %v", gotStart, err)
+	}
+	if age := time.Since(start); age < 119*24*time.Hour || age > 121*24*time.Hour {
+		t.Errorf("zero watermark: clamped start age = %v, want ~120d", age)
+	}
+
+	recent := time.Now().Add(-24 * time.Hour).UTC()
+	if _, err := c.ChangedSince(context.Background(), recent); err != nil {
+		t.Fatalf("ChangedSince(recent): %v", err)
+	}
+	start, _ = time.Parse(layout, gotStart)
+	if d := start.Sub(recent); d < -time.Minute || d > time.Minute {
+		t.Errorf("recent watermark: start = %v, want ~= %v (unchanged)", start, recent)
+	}
+}
+
 func TestNVDClient_V31Scored(t *testing.T) {
 	srv := nvdServer(t, cve("CVE-2024-2000",
 		`{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":7.8,"baseSeverity":"HIGH","vectorString":"CVSS:3.1/AV:L"}}]}`))

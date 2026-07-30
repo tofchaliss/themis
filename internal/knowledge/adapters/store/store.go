@@ -356,6 +356,26 @@ func (s *Store) SetLastSuccess(ctx context.Context, t time.Time) error {
 	return err
 }
 
+// KnownCVEs returns the set of canonical CVEs that already have a card — the relevance
+// bound for the scheduled watch (D5): the modified-since feed is filtered to these so the
+// watch enriches known cards instead of mirroring the whole feed.
+func (s *Store) KnownCVEs(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.pool.Query(ctx, `SELECT cve FROM faultlines`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := map[string]struct{}{}
+	for rows.Next() {
+		var cve string
+		if err := rows.Scan(&cve); err != nil {
+			return nil, err
+		}
+		set[cve] = struct{}{}
+	}
+	return set, rows.Err()
+}
+
 // Purge removes all Knowledge rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines RESTART IDENTITY CASCADE`)

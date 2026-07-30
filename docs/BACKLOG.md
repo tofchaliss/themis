@@ -153,10 +153,17 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   (a third after `observability` + `eventbus`), trading a little context independence for less duplication.
   Deferred: adding a platform package is an architecture decision to justify against the EDR; revisit if the
   duplication grows or a third/fourth consumer lands. See [[feedback-backlog-surfaced-followups]].
-- [ ] **Knowledge — real feed-fetch HTTP clients.** The scheduled discovery/watch use real **OSV
-  query-by-package** + **NVD modified-since** clients behind the existing `PackageVulnSource` /
-  `ChangedVulnSource` ports (currently fakeable ports only). The G3 feed **ACLs already do the translation**;
-  this is just the fetch adapters. Plugs into `internal/knowledge/adapters` behind the discovery/watch ports.
+- [~] **Knowledge — real feed-fetch HTTP clients (PARTIALLY DONE).** OSV query-by-package (incl. distro
+  ecosystems — separate PR) and the **NVD modified-since watch** are now wired: `cmd/knowledge` builds
+  `feed.NewNVDClient` behind a `feed.RelevanceFilteredSource` (D5 relevance bound — only CVEs that already
+  have a card are enriched, never a full feed mirror) into the `WatchService`, scheduled off
+  `THEMIS_NVD_ENABLED`/`THEMIS_NVD_POLL_INTERVAL`. **Still open:** the EPSS/KEV/ExploitDB/vendor-VEX/Red Hat
+  CSAF ACLs remain unwired (their fetch/schedule adapters); and the NVD by-CVE backfill (below).
+- [ ] **Knowledge — NVD by-CVE backfill (targeted enrichment).** The modified-since watch only covers CVEs
+  changed within NVD's 120-day window; a card whose CVE fell out of that window (or was created after the
+  last relevant modification) never gets NVD's authoritative CVSS/severity. Add a `FetchByCVEID` path and a
+  targeted per-card enrichment trigger (e.g. on `FaultlineCreated`, or a backfill pass over cards missing an
+  NVD proposal). Plugs into `internal/knowledge/adapters/feed` + a new backfill worker. Surfaced 2026-07-30.
 
 - [ ] **Knowledge — CVSS v4.0 in feed ACLs + Reconcile.** The feed ACLs and `Reconcile` headline-severity
   selection must parse **CVSS 4.0** (NVD `cvssMetricV40`; OSV v4.0 vectors), else recent CVEs land
