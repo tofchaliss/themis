@@ -157,8 +157,13 @@ next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-con
   ecosystems — separate PR) and the **NVD modified-since watch** are now wired: `cmd/knowledge` builds
   `feed.NewNVDClient` behind a `feed.RelevanceFilteredSource` (D5 relevance bound — only CVEs that already
   have a card are enriched, never a full feed mirror) into the `WatchService`, scheduled off
-  `THEMIS_NVD_ENABLED`/`THEMIS_NVD_POLL_INTERVAL`. **Still open:** the EPSS/KEV/ExploitDB/vendor-VEX/Red Hat
-  CSAF ACLs remain unwired (their fetch/schedule adapters); and the NVD by-CVE backfill (below).
+  `THEMIS_NVD_ENABLED`/`THEMIS_NVD_POLL_INTERVAL`. **EPSS/KEV/ExploitDB** are now wired too: a bulk
+  `feed.ExploitSignalClient` (EPSS gzip-CSV + CISA KEV JSON + ExploitDB CSV) feeds an
+  `app.SignalEnrichmentService` that folds exploit-signal Proposals onto already-carded CVEs (same D5
+  relevance bound), scheduled off `THEMIS_EPSSKEV_ENABLED`/`THEMIS_EPSSKEV_POLL_INTERVAL` (default 24h). The
+  bulk client bypasses the pre-existing per-record `epsskev.go`/`exploitdb.go` ACLs (a tidy-up follow-up: fold
+  them out or align shapes). **Still open:** the **vendor-VEX / Red Hat CSAF** ACLs remain unwired (applicability
+  overlay); and the NVD by-CVE backfill (below).
 - [ ] **Knowledge — NVD by-CVE backfill (targeted enrichment).** The modified-since watch only covers CVEs
   changed within NVD's 120-day window; a card whose CVE fell out of that window (or was created after the
   last relevant modification) never gets NVD's authoritative CVSS/severity. Add a `FetchByCVEID` path and a
