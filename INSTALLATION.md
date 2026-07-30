@@ -26,20 +26,36 @@ model runtime **only when AI is enabled** (Ollama — see [below](#intelligence-
 ## Part A — Phase-3 greenfield services
 
 The pipeline is **Evidence → Knowledge → Governance → Communication**, over a **Registry/Kernel**
-foundation, with a supporting **Intelligence Gateway** beside it. Each is its own binary + Postgres schema
-and collaborates only via events + read APIs (no shared tables).
+foundation, with a supporting **Intelligence Gateway** beside it. Each is its own binary and **its own
+database**, and since **M5** they collaborate over a real **event bus** (a dedicated `bus` PostgreSQL
+database holding one `event_log`) plus read-only HTTP APIs — no shared business tables.
 
-| Service | Command | Port | Migrations env |
-| ------- | ------- | ---- | -------------- |
-| Registry | `cmd/registry` | `:8082` | `THEMIS_REGISTRY_MIGRATE=1` |
-| Evidence | `cmd/evidence` | `:8081` | `THEMIS_EVIDENCE_MIGRATE=1` |
-| Governance | `cmd/governance` | `:8083` | `THEMIS_GOVERNANCE_MIGRATE=1` |
-| Communication | `cmd/communication` | `:8084` | `THEMIS_COMMUNICATION_MIGRATE=1` |
-| Intelligence | `cmd/intelligence` | `:8086` | — (stateless) |
+| Service | Command | Port | Own database | Reads over HTTP | Migrate on startup |
+| ------- | ------- | ---- | ------------ | --------------- | ------------------ |
+| Registry | `cmd/registry` | `:8082` | `evidence` (shared) | — | `THEMIS_REGISTRY_MIGRATE=1` |
+| Evidence | `cmd/evidence` | `:8081` | `evidence` | Registry (in-proc) | `THEMIS_EVIDENCE_MIGRATE=1` |
+| Knowledge | `cmd/knowledge` | `:8085` | `knowledge` | Evidence `:8081`, OSV | `THEMIS_KNOWLEDGE_MIGRATE=1` |
+| Governance | `cmd/governance` | `:8083` | `governance` | Intelligence `:8086` (if AI on) | `THEMIS_GOVERNANCE_MIGRATE=1` |
+| Communication | `cmd/communication` | `:8084` | `communication` | Governance `:8083` | `THEMIS_COMMUNICATION_MIGRATE=1` |
+| Intelligence | `cmd/intelligence` | `:8086` | — (stateless) | Governance `:8083`, Knowledge `:8085` | — |
+| **bus** | — | — | `bus` | — | `THEMIS_BUS_MIGRATE=1` (any pipeline svc) |
 
-> Knowledge/Faultline is implemented under `internal/knowledge`; its standalone service wiring lands with
-> the **M5 event bus** (which also carries the cross-context events — today each context relays to a logging
-> stand-in). See [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
+> **The event bus is the end-to-end switch.** Each of the four pipeline services relays its outbox to the
+> bus and drains its upstream stream on a 2-second loop **only when `THEMIS_BUS_DATABASE_DSN` is set**. Leave
+> it unset and the service falls back to a logging stand-in publisher with its reader disabled — a single
+> context runs, but **an uploaded SBOM never crosses into Knowledge / Governance / Communication**. For an
+> end-to-end SBOM→VEX flow, every pipeline service must point `THEMIS_BUS_DATABASE_DSN` at the same `bus`
+> database.
+
+> **Port gotcha (`cmd/knowledge`).** Its `THEMIS_KNOWLEDGE_ADDR` default is `:8082`, which **collides with
+> Registry**. The rest of the system expects Knowledge on **:8085** (Intelligence's `THEMIS_KNOWLEDGE_URL`
+> default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
+
+> **Databases (5 on one PostgreSQL server):** `evidence`, `knowledge`, `governance`, `communication`, `bus`.
+> Registry co-locates in the **`evidence`** database — Evidence validates a release id in-process via
+> `registry.ReleaseExists`, so the registry tables must live there (point `cmd/registry` at the `evidence`
+> DSN with `THEMIS_REGISTRY_MIGRATE=1`). The database boundary keeps contexts structurally isolated.
+> See [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
 
 ### Build & gate
 
@@ -48,57 +64,140 @@ go build ./...     # builds every service
 make check         # build · test · lint · clean-arch · arch-test · coverage (+ integration) · deadcode
 ```
 
-### Configure
-
-Every option for every service is documented inline in [`deploy/node.env.example`](deploy/node.env.example)
-— copy it, fill in the values for the service you're running, and export them. Shared essentials:
+### 1. PostgreSQL — role and the five databases
 
 ```sh
-export THEMIS_DATABASE_DSN="postgres://themis:CHANGEME@localhost:5432/themis?sslmode=disable"  # required by persisting services
+psql -U postgres -c "CREATE USER themis WITH PASSWORD 'CHANGEME';"
+for db in evidence knowledge governance communication bus; do
+  psql -U postgres -c "CREATE DATABASE $db OWNER themis;"
+done
+```
+
+Each service reads its options from the environment; every option is documented inline in
+[`deploy/node.env.example`](deploy/node.env.example). Shared essentials (set for every persisting service):
+
+```sh
 export THEMIS_LOG_LEVEL=info          # debug | info | warn | error
 export THEMIS_LOG_FORMAT=json         # json (prod) | console (dev)
-# OpenTelemetry log export is OFF unless an endpoint is set:
-export THEMIS_OTLP_LOGS_ENDPOINT=     # e.g. otel-collector:4318
+export THEMIS_OTLP_LOGS_ENDPOINT=     # empty = console-only; e.g. otel-collector:4318 to export
+# Per-service, THEMIS_DATABASE_DSN points at that service's OWN database; the four pipeline services
+# additionally point THEMIS_BUS_DATABASE_DSN at the shared `bus` database (this is what wires end-to-end).
+export PGBASE="postgres://themis:CHANGEME@localhost:5432"
+export THEMIS_BUS_DATABASE_DSN="$PGBASE/bus?sslmode=disable"
 ```
 
-### Run a service
+### 2. Run the pipeline (start in this order)
 
-Each service applies its own migrations on request and serves under `/api/v1`:
+Each service applies its own migrations (`*_MIGRATE=1`), serves under `/api/v1`, and runs its relay +
+reader loops in the background. `THEMIS_BUS_MIGRATE=1` on the first service creates the `bus` `event_log`.
+Run each in its own shell (or under systemd/tmux); `&` backgrounds them here for brevity.
 
 ```sh
-THEMIS_REGISTRY_MIGRATE=1     go run ./cmd/registry       # :8082
-THEMIS_EVIDENCE_MIGRATE=1     go run ./cmd/evidence       # :8081
-THEMIS_GOVERNANCE_MIGRATE=1   go run ./cmd/governance     # :8083
-THEMIS_COMMUNICATION_MIGRATE=1 go run ./cmd/communication # :8084
+# Registry — owns identity tables inside the `evidence` DB (Evidence reads them in-process).
+# It shares that DB with Evidence, so it MUST keep its own migration-bookkeeping table
+# (x-migrations-table); otherwise both services fight over the default `schema_migrations`
+# and one silently skips its schema. (Tracked in docs/BACKLOG.md §C.)
+THEMIS_DATABASE_DSN="$PGBASE/evidence?sslmode=disable&x-migrations-table=registry_schema_migrations" \
+THEMIS_REGISTRY_MIGRATE=1 THEMIS_REGISTRY_ADDR=:8082 go run ./cmd/registry &
+
+# Evidence — SBOM/VEX intake + inventory. Migrates its own tables AND the bus event_log.
+THEMIS_DATABASE_DSN="$PGBASE/evidence?sslmode=disable" \
+THEMIS_EVIDENCE_MIGRATE=1 THEMIS_BUS_MIGRATE=1 THEMIS_EVIDENCE_ADDR=:8081 go run ./cmd/evidence &
+
+# Knowledge — correlates the SBOM's components against CVEs (reads Evidence inventory + OSV).
+# NOTE the explicit :8085 — the code default :8082 collides with Registry.
+THEMIS_DATABASE_DSN="$PGBASE/knowledge?sslmode=disable" \
+THEMIS_EVIDENCE_URL=http://localhost:8081 \
+THEMIS_KNOWLEDGE_MIGRATE=1 THEMIS_KNOWLEDGE_ADDR=:8085 go run ./cmd/knowledge &
+
+# Governance — opens Findings, holds Positions. AI ON (uses the Intelligence Gateway below).
+THEMIS_DATABASE_DSN="$PGBASE/governance?sslmode=disable" \
+THEMIS_GOVERNANCE_AI_ENABLED=1 THEMIS_INTELLIGENCE_URL=http://localhost:8086 \
+THEMIS_GOVERNANCE_MIGRATE=1 THEMIS_GOVERNANCE_ADDR=:8083 go run ./cmd/governance &
+
+# Communication — materializes + publishes VEX/advisories (reads Positions from Governance).
+THEMIS_DATABASE_DSN="$PGBASE/communication?sslmode=disable" \
+THEMIS_GOVERNANCE_URL=http://localhost:8083 \
+THEMIS_COMMUNICATION_MIGRATE=1 THEMIS_COMMUNICATION_ADDR=:8084 go run ./cmd/communication &
 ```
 
-(Use one database; each service owns its own tables/migrations within it.)
+(`THEMIS_BUS_DATABASE_DSN` is exported once above, so all four pipeline services inherit it. Drop it — or
+set `THEMIS_GOVERNANCE_AI_ENABLED=0` and skip the Intelligence service — for a bus-less / AI-less single
+context.)
 
-### Intelligence Gateway (optional AI)
+### 3. Drive an SBOM end-to-end
+
+```sh
+# Register identity → capture the release id. Every register endpoint returns {"id": ...}.
+J='-s -H content-type:application/json'
+PID=$(curl $J localhost:8082/api/v1/products -d '{"name":"acme"}'                            | jq -r .id)
+JID=$(curl $J localhost:8082/api/v1/projects -d "{\"product_id\":\"$PID\",\"name\":\"api\"}" | jq -r .id)
+RID=$(curl $J localhost:8082/api/v1/releases -d "{\"project_id\":\"$JID\",\"version\":\"1.0.0\"}" | jq -r .id)
+
+# Upload an SBOM against that release (Evidence accepts CycloneDX/SPDX JSON in `document`).
+curl $J localhost:8081/api/v1/evidence -d "$(jq -n --arg r "$RID" --rawfile d ./my-sbom.json \
+  '{kind:"sbom",format:"cyclonedx",subject_release_id:$r,document:$d}')"
+
+# Wait ~10s for the cascade (2s loops × Evidence→Knowledge→Governance hops), then watch a Finding appear:
+curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq .   # → grab the finding_id, set FID below
+FID=<FINDING_ID>
+
+# (optional) Ask cyberpal for an advisory recommendation on a Finding (records a proposal; never decides):
+curl $J -X POST "localhost:8083/api/v1/findings/$FID/recommend" | jq .
+
+# Decide the Position (human): raise an "affected" proposal and accept it.
+PROP=$(curl $J "localhost:8083/api/v1/findings/$FID/proposals" \
+  -d '{"stance":"affected","proposer_kind":"human","proposer_id":"you"}' | jq -r .proposal_id)
+curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP/accept" \
+  -d '{"actor_id":"you","actor_kind":"human"}'
+
+# Publish OpenVEX (human-triggered), wait ~4s, then read the artifact — it names the CVE.
+curl $J localhost:8084/api/v1/publications \
+  -d "{\"finding_id\":\"$FID\",\"artifact_type\":\"vex\",\"format\":\"openvex\"}"
+curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
+```
+
+> **Quick smoke without the Registry.** To skip identity registration, start Evidence with
+> `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload with
+> `subject_release_id:"rel-demo"`. This is what the `make e2e-pipeline` black-box proof uses.
+
+### 4. Intelligence Gateway (optional AI — Ollama)
 
 `cmd/intelligence` is **stateless** (no database) and part of the **optional AI plane** — the pipeline is
-fully correct with it off (disabled ≡ unavailable). It turns a Governance Finding into an **advisory**
-position recommendation that a human still decides.
+fully correct with it off (disabled ≡ unavailable). It is **on-demand and advisory**: a human POSTs
+`/api/v1/findings/{id}/recommend` to Governance, which invokes the Gateway's `recommend_position`
+capability (grounded via the Governance + Knowledge read APIs), and the Gateway returns a recommendation
+that Governance records as a **proposal a human still accepts or rejects**. It never runs automatically in
+the pipeline and never decides.
 
 **Provider** (config-selected):
 
-- **Fake (no model):** `THEMIS_INTELLIGENCE_PROVIDER=fake` — for wiring/smoke tests without Ollama.
-- **Ollama (real, local-first):** `THEMIS_OLLAMA_URL` (default `http://localhost:11434`) +
-  `THEMIS_INTELLIGENCE_MODEL` (default `llama3.1:8b`). On **macOS run Ollama natively** for Metal GPU
-  acceleration — a container on a Mac is CPU-only. In a cluster, run the Ollama container as its own Service.
+- **Ollama (real, local-first — the default):** leave `THEMIS_INTELLIGENCE_PROVIDER` empty. Point
+  `THEMIS_OLLAMA_URL` at the Ollama server (default `http://localhost:11434`) and pin
+  `THEMIS_INTELLIGENCE_MODEL` to the exact tag from `ollama list` (e.g. your `cyberpal` model).
+- **Fake (no model):** `THEMIS_INTELLIGENCE_PROVIDER=fake` — deterministic, for wiring/smoke tests.
 
 ```sh
-# real:
-ollama serve &            # native on macOS (Metal GPU)
-ollama pull llama3.1:8b
-go run ./cmd/intelligence # :8086, grounds via THEMIS_GOVERNANCE_URL + THEMIS_KNOWLEDGE_URL
+ollama serve &                 # on a Linux GPU host, ensure the CUDA/ROCm runtime is present
+ollama pull cyberpal           # or whatever you named it; confirm the tag with `ollama list`
+
+THEMIS_GOVERNANCE_URL=http://localhost:8083 \
+THEMIS_KNOWLEDGE_URL=http://localhost:8085 \
+THEMIS_OLLAMA_URL=http://localhost:11434 \
+THEMIS_INTELLIGENCE_MODEL=cyberpal \
+THEMIS_INTELLIGENCE_ADDR=:8086 go run ./cmd/intelligence &   # grounds via Governance + Knowledge
 ```
+
+Ollama's OpenAI-compatible endpoint uses `json_object` structured output by default
+(`THEMIS_LLM_RESPONSE_FORMAT` empty). If your model needs a bearer token or JSON-schema mode, set
+`THEMIS_LLM_API_KEY` / `THEMIS_LLM_RESPONSE_FORMAT=json_schema` (see [TESTING.md](TESTING.md) and
+`make e2e-llm`).
 
 **The disable gate (D13)** is one wiring choice on the *Governance* service — no call-site flags:
 
 ```sh
 # AI OFF (default): don't run cmd/intelligence; leave the flag unset → Governance wires a no-op advisor.
-# AI ON:
+# AI ON (as in the runbook above):
 export THEMIS_GOVERNANCE_AI_ENABLED=1
 export THEMIS_INTELLIGENCE_URL=http://localhost:8086
 ```
