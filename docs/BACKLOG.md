@@ -10,13 +10,17 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
-**Updated:** 2026-07-25 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
-Status of what **is** done lives in `PHASE3-STATUS.md`; this file is only the open work. Each item states
+**Updated:** 2026-07-30 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
+Status of what **is** done lives in `PHASE3-STATUS.md`; the monolith→greenfield capability diff lives in
+[`engineering/PARITY-GAP.md`](engineering/PARITY-GAP.md). This file is only the open work. Each item states
 **what**, **why it's open**, **where it plugs in**, and its **dependency**.
 
-Snapshot: the four-context pipeline **Evidence → Knowledge → Governance → Communication plus M4 Intelligence
-Δ1 + Δ2 is implemented, gated, and merged to `main`**. Open work is the **M5 event bus (grilled + scaffolded,
-next up)**, the full-pipeline e2e (blocked on M5), M4 Δ3–Δ4, and the per-context follow-ups below.
+Snapshot: the four-context pipeline **plus M4 Intelligence Δ1+Δ2 and M5 (event bus) are merged to `main`**,
+and the stack is **deployed end-to-end on a Linux VM under systemd** (2026-07-30). The first monolith→greenfield
+**parity cluster (correlation + enrichment) is closed** — distro (rpm) correlation, NVD/EPSS/KEV/ExploitDB
+enrichment, and a deterministic priority+score (PRs #60–#63). Open work: the **delivery/security parity
+cluster** (notifications, org blast-radius graph, API auth — see PARITY-GAP.md §B), M4 Δ3–Δ4, and the
+per-context follow-ups below.
 
 ---
 
