@@ -117,6 +117,12 @@ components:
           type: boolean
         exploit_public:
           type: boolean
+        priority:
+          type: string
+          description: Deterministic exploitability level (critical | high+ | high | elevated | informational).
+        score:
+          type: integer
+          description: CVE-intrinsic composite priority score, 0-100 (severity baseline + EPSS + KEV; excludes release-scoped blast).
     ProposalProvenance:
       type: object
       properties:

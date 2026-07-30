@@ -29,8 +29,14 @@ type EnterpriseView struct {
 	ExploitPublic  *bool     `json:"exploit_public,omitempty"`
 	FixedVersions  *[]string `json:"fixed_versions,omitempty"`
 	Kev            *bool     `json:"kev,omitempty"`
-	Severity       *string   `json:"severity,omitempty"`
-	SeveritySource *string   `json:"severity_source,omitempty"`
+
+	// Priority Deterministic exploitability level (critical | high+ | high | elevated | informational).
+	Priority *string `json:"priority,omitempty"`
+
+	// Score CVE-intrinsic composite priority score, 0-100 (severity baseline + EPSS + KEV; excludes release-scoped blast).
+	Score          *int    `json:"score,omitempty"`
+	Severity       *string `json:"severity,omitempty"`
+	SeveritySource *string `json:"severity_source,omitempty"`
 }
 
 // FaultlineView defines model for FaultlineView.
@@ -320,20 +326,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1FXNjts2EH4VYtrDLipbTjcn3dJgWyxSoEZQ7KUNDJoc2ZNQJDOklBUWBvoQfcI+SUHJ8k/KbR1gD82N",
-	"HA5nht838/ERlGu8s2hjgOoRGIN3NuCwWbJbG2zSUjkb0ca0lN4bUjKSs+X74GyyBbXFRqbVt4w1VPBN",
-	"eYxbjqehnOLtdrsCNAbF5FMYqOCW2fEc0sHeOwW7tRHZMwW8J/yULJ6dR440FijrGlVEvWJpN6OJIjbD",
-	"IvYeoYIQmewGdsVkkMyyT3vVhbAKyjGeuNu2WSMfjjtU0XE2HPoQshfxwRtHceXbtSF14rJ2zqC0yaem",
-	"B9SrDjmQs19Y9wfs8kEDdsgU+2yU6XAVXMsKMz7HVG79HlVMt36UrYmG7BP4qw6zyUhnzemyC9KcP/g/",
-	"Oma4sWTXoZVWYQ6REOUmX0i3L/vfcnzWZFkcTibhHAGNUZLJ80bRXIpz5p3/SPWBbB5Wtw7IHeqVHOaz",
-	"dtykFWgZcRapQSgy/XB5GyQT2dqN7z2d2jfWfTKoNygGfXiI4mq5lQFnN2LDiLYmNPpa/PXHn4JRahG3",
-	"KPAAtzh0l1CSdRBX6ZxROavIoBaJPfGdGEudTd0j/AGkayHtGHVSghmjQRkwCHbGtH4u3qLUM2dNX+2z",
-	"YOdMh6IjKWpEHUrlmNEMglYI66KIWwri1fJu/ruFA4/w6xYbCuL45lfLOyhgP8RQwYv5Yr4YCPFopSeo",
-	"4Ga+mN9AAV7G7UBiWU9vHrYbHChLNA/57zRU8BPGAzI/9K/vb4cALBuMyAGq3x6BUr6PLXIPBVjZpPrS",
-	"MBbA+LElRg1V5BaLE2X+nOd3xbnaf79YPJvSn+tGRu9/eTNPSL0cc+ZCHWo7fhvJ/+UX+Kc2b5tGcj+i",
-	"KuRJy617oaR1lpQ04vX97fj5nPBTPpLeXUjSnX6Co0T8kSLSXyFDz4k4xSBIo40U+zzg5TTAFyH/dnL+",
-	"H6J/6Y/+BPRnUP5MIYpRHffyNgleQvUU5KtR95JIJvUmZ6/nY47hk9ij07KBCkrpqexewO7d7u8AAAD/",
-	"/w==",
+	"1FZRb9s2EP4rB24PCSJbztIn7anLvCHIgBntkJetMCjybF9LkeyRUiMkBvYj9gv3SwZKlmM36uYCfVif",
+	"LB2Pd6fv++7OD0K5yjuLNgZRPAjG4J0N2L0s2JUGq/SonI1oY3qU3htSMpKz+dvgbLIFtcFKpqdvGVei",
+	"EN/kT3Hz/jTkQ7ztdpsJjUEx+RRGFGLO7Hgq0sHOOwWb24jsmQLeEX5IFs/OI0fqC5SrFaqIesnSrnsT",
+	"Ray6h9h6FIUIkcmuxTYbDJJZtuldNSEsg3KMB+62rkrk/XGDKjoeDYc+hNGLeO+No7j0dWlIHbiUzhmU",
+	"Nvms6B71skEO5Oxn1v0Om/GgnskxxTadHqP7I0bkiiyFSAp2BcqSDMUWDDZo4EwxRVLSwCNsaL252P3C",
+	"I6DBRkbU8AhkV46rjntpzqcie17uHtHjEq7v5hOyySuQgk4cgSLCUDR09zKYTS5nMzgL2GBnLmVAQxbh",
+	"AuaL16/hAm7nd98D3itTawzAaFAGnATlPGoojQzxsDCyEdc9MUPMUZSHw2VwNSsc8XmiwpVvUcV06ydZ",
+	"m5jKG9enanA0GelRc7rsgjTHgviPjupuLNg1aKVVOKaYEOV6vJBmV/a/5fioCUdxOJgUxwhojJLMuK4p",
+	"mlNxHvnOZ6nekR2H1ZUBuUG9lN386hUsCqFlxEmkCkdlfLoMkik1xnPR31r3waBeI3Tz8z7C2WKT1HoF",
+	"a0a0K0Kjz+HvP/8CRqkhbhBwDzfs1QVKsg5wls4ZlbOKDGpI7MEF9KVOBvWA34N0DtL2UYdJOdn1SwB2",
+	"xtR+Cq9Q6omzpi12WbBxpkFoSMIKUYdcOWY0XdNnYF2EuKEALxc30z+s2PMofttgRQGevvnl4kZkYjfk",
+	"RCEup7PprCPEo5WeRCGuprPplciEl3HTkZivhm/uXtfYUZZo7vLfaFGInzHukfmhvb6bdwFYVmnKBVH8",
+	"/iAo5XtfI7ciE1ZWqb7UjJlgfF8ToxZF5Bqzg831Mc9vsuNt+N1s9sU24fHcGNmHv95OE1Iv+pxjofa1",
+	"Pa3V5P/iM/yTzOuqktz2qII8kFzZgpLW2W4nXN/N++V8wE/+QHp7Ikk3+hMcJeKfKCL9FTL0JRGnGIA0",
+	"2kixHQc8Hxr4JORfDc7/Q/RP/cfzCeiPoPyFQoR+Ou7G2zDwEqqHIJ/1cy8NyTS9ydnzaZ+jWxI7dGo2",
+	"ohC59JQ3l2L7ZvtPAAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
