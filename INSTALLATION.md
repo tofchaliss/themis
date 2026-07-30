@@ -14,12 +14,25 @@ For exercising a running system (SBOM upload, the Intelligence Gateway, verifica
 
 | Requirement | Version | Notes |
 | ----------- | ------- | ----- |
-| Go | 1.25+ | Must match `go` in `go.mod` |
+| Go | 1.25+ | Must match `go` in `go.mod`; also the floor for golangci-lint (below) |
 | PostgreSQL | 14+ (16 recommended) | Running and reachable before you start Themis |
-| golangci-lint | v2.x | Only for `make check` / contributing |
+| jq | any | Only for the SBOM walkthrough's `curl` helpers in Part A |
+| golangci-lint | **v2.x**, built with Go ≥ 1.25 | Only for `make check` / `make lint` (contributing/CI) — **not** needed to run Themis |
 
 The binaries need no runtime dependency beyond PostgreSQL. The Intelligence Gateway additionally needs a
-model runtime **only when AI is enabled** (Ollama — see [below](#intelligence-gateway-optional-ai)).
+model runtime **only when AI is enabled** (Ollama — see the Intelligence Gateway step in Part A below).
+
+**Installing golangci-lint (only if you run `make check` / `make lint`).** The repo's `.golangci.yml` is
+`version: "2"`, so a v1 binary can't parse it — you need **v2**. Install the latest v2 the same way CI
+does; the latest build tracks the current Go toolchain, so it supports this project's **Go 1.25** — an
+older golangci-lint built against an older Go will refuse to typecheck 1.25 code. Running Themis needs none
+of this (`go build ./...` + the services); this is the dev/CI quality gate only.
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin"
+export PATH="$(go env GOPATH)/bin:$PATH"   # add to your shell profile to persist
+golangci-lint version                       # expect 2.x, built with go1.25+
+```
 
 ---
 
@@ -32,7 +45,7 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 
 | Service | Command | Port | Own database | Reads over HTTP | Migrate on startup |
 | ------- | ------- | ---- | ------------ | --------------- | ------------------ |
-| Registry | `cmd/registry` | `:8082` | `evidence` (shared) | — | `THEMIS_REGISTRY_MIGRATE=1` |
+| Registry | `cmd/registry` | `:8082` | `evidence` (shared) | — | `psql` schema load (step 4) |
 | Evidence | `cmd/evidence` | `:8081` | `evidence` | Registry (in-proc) | `THEMIS_EVIDENCE_MIGRATE=1` |
 | Knowledge | `cmd/knowledge` | `:8085` | `knowledge` | Evidence `:8081`, OSV | `THEMIS_KNOWLEDGE_MIGRATE=1` |
 | Governance | `cmd/governance` | `:8083` | `governance` | Intelligence `:8086` (if AI on) | `THEMIS_GOVERNANCE_MIGRATE=1` |
@@ -53,28 +66,64 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 
 > **Databases (5 on one PostgreSQL server):** `evidence`, `knowledge`, `governance`, `communication`, `bus`.
 > Registry co-locates in the **`evidence`** database — Evidence validates a release id in-process via
-> `registry.ReleaseExists`, so the registry tables must live there (point `cmd/registry` at the `evidence`
-> DSN with `THEMIS_REGISTRY_MIGRATE=1`). The database boundary keeps contexts structurally isolated.
+> `registry.ReleaseExists`, so the registry tables must live there (its schema is loaded with `psql`, not
+> self-migrated — see step 4). The database boundary keeps contexts structurally isolated.
 > See [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
 
-### Build & gate
+### 1. Install and start PostgreSQL
+
+The greenfield services need a running PostgreSQL (unlike `make check`, which provisions its own throwaway
+embedded Postgres). On a fresh Linux box:
 
 ```sh
-go build ./...     # builds every service
-make check         # build · test · lint · clean-arch · arch-test · coverage (+ integration) · deadcode
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y postgresql
+sudo systemctl enable --now postgresql
+
+# RHEL / Fedora / Rocky
+sudo dnf install -y postgresql-server && sudo postgresql-setup --initdb
+sudo systemctl enable --now postgresql
 ```
 
-### 1. PostgreSQL — role and the five databases
+Create the `themis` role and the five databases (as the `postgres` superuser). Set the password **once** in
+a shell variable and reuse it everywhere — the runbook's DSNs read the same `$PGPW`, so there is no second
+place to keep in sync:
 
 ```sh
-psql -U postgres -c "CREATE USER themis WITH PASSWORD 'CHANGEME';"
+# Use only letters/digits — @ : / # ' $ would break the connection URL. Keep this exported for later steps.
+export PGPW='ChangeMe4Themis'
+
+sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
 for db in evidence knowledge governance communication bus; do
-  psql -U postgres -c "CREATE DATABASE $db OWNER themis;"
+  sudo -u postgres psql -c "CREATE DATABASE $db OWNER themis;"
 done
+# verify the themis role can connect over TCP (default localhost auth is password-based; prints '1'):
+psql "postgres://themis:$PGPW@localhost:5432/evidence?sslmode=disable" -c 'SELECT 1;'
 ```
+
+Each database is owned by `themis` on purpose: on PostgreSQL 15+ only the database owner may create tables
+in the `public` schema, and the per-context migrations need that — owning the DB covers it, no extra GRANT.
+
+### 2. Build the services
+
+```sh
+go build ./...     # compile-check everything (silent output = success)
+# then produce the service binaries the runbook runs (cleaner than `go run` for six background processes):
+go build -o bin/ ./cmd/registry ./cmd/evidence ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence
+ls bin/            # registry evidence knowledge governance communication intelligence
+```
+
+`make build` builds only the frozen v0.3.x monolith (→ `./bin/themis`) — you don't need it for the
+pipeline. `make check` / `make lint` are the **contributor/CI quality gate** (lint · clean-arch · arch-test
+· coverage · deadcode; the coverage step spins up its own embedded Postgres). They are **not** part of
+deploying — skip them here, and run them only when contributing, after installing golangci-lint v2
+(see [Prerequisites](#prerequisites)).
+
+### 3. Configure the shared environment
 
 Each service reads its options from the environment; every option is documented inline in
-[`deploy/node.env.example`](deploy/node.env.example). Shared essentials (set for every persisting service):
+[`deploy/node.env.example`](deploy/node.env.example). Set these once (they apply to every persisting
+service in the runbook below):
 
 ```sh
 export THEMIS_LOG_LEVEL=info          # debug | info | warn | error
@@ -82,67 +131,99 @@ export THEMIS_LOG_FORMAT=json         # json (prod) | console (dev)
 export THEMIS_OTLP_LOGS_ENDPOINT=     # empty = console-only; e.g. otel-collector:4318 to export
 # Per-service, THEMIS_DATABASE_DSN points at that service's OWN database; the four pipeline services
 # additionally point THEMIS_BUS_DATABASE_DSN at the shared `bus` database (this is what wires end-to-end).
-export PGBASE="postgres://themis:CHANGEME@localhost:5432"
+export PGBASE="postgres://themis:$PGPW@localhost:5432"   # $PGPW from step 1 — re-export it in a new shell
 export THEMIS_BUS_DATABASE_DSN="$PGBASE/bus?sslmode=disable"
 ```
 
-### 2. Run the pipeline (start in this order)
+### 4. Run the pipeline (start in this order)
 
-Each service applies its own migrations (`*_MIGRATE=1`), serves under `/api/v1`, and runs its relay +
-reader loops in the background. `THEMIS_BUS_MIGRATE=1` on the first service creates the `bus` `event_log`.
-Run each in its own shell (or under systemd/tmux); `&` backgrounds them here for brevity.
+Each service serves under `/api/v1` and runs its relay + reader loops in the background; the ones with
+`*_MIGRATE=1` apply their own migrations on startup, and `THEMIS_BUS_MIGRATE=1` on Evidence creates the
+shared `bus` event_log. Logs go to `logs/`.
+
+**Registry first — load its schema by hand.** Registry co-locates its identity tables in the `evidence`
+database (Evidence reads them in-process), but it cannot self-migrate there: golang-migrate's single default
+`schema_migrations` table would clash with Evidence's, and passing `x-migrations-table` on the DSN to work
+around that **breaks the running service** — pgx forwards the unknown parameter to Postgres and every
+connection is rejected. Instead load the schema directly (the migration is idempotent
+`CREATE TABLE IF NOT EXISTS`) and run Registry with a plain DSN and **no** migrate flag:
 
 ```sh
-# Registry — owns identity tables inside the `evidence` DB (Evidence reads them in-process).
-# It shares that DB with Evidence, so it MUST keep its own migration-bookkeeping table
-# (x-migrations-table); otherwise both services fight over the default `schema_migrations`
-# and one silently skips its schema. (Tracked in docs/BACKLOG.md §C.)
-THEMIS_DATABASE_DSN="$PGBASE/evidence?sslmode=disable&x-migrations-table=registry_schema_migrations" \
-THEMIS_REGISTRY_MIGRATE=1 THEMIS_REGISTRY_ADDR=:8082 go run ./cmd/registry &
+psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000001_registry.up.sql
+```
+
+```sh
+mkdir -p logs
+
+# Registry — plain DSN, no migrate (schema loaded above).
+THEMIS_DATABASE_DSN="$PGBASE/evidence?sslmode=disable" THEMIS_REGISTRY_ADDR=:8082 \
+  ./bin/registry > logs/registry.log 2>&1 &
 
 # Evidence — SBOM/VEX intake + inventory. Migrates its own tables AND the bus event_log.
 THEMIS_DATABASE_DSN="$PGBASE/evidence?sslmode=disable" \
-THEMIS_EVIDENCE_MIGRATE=1 THEMIS_BUS_MIGRATE=1 THEMIS_EVIDENCE_ADDR=:8081 go run ./cmd/evidence &
+THEMIS_EVIDENCE_MIGRATE=1 THEMIS_BUS_MIGRATE=1 THEMIS_EVIDENCE_ADDR=:8081 \
+  ./bin/evidence > logs/evidence.log 2>&1 &
 
 # Knowledge — correlates the SBOM's components against CVEs (reads Evidence inventory + OSV).
 # NOTE the explicit :8085 — the code default :8082 collides with Registry.
 THEMIS_DATABASE_DSN="$PGBASE/knowledge?sslmode=disable" \
 THEMIS_EVIDENCE_URL=http://localhost:8081 \
-THEMIS_KNOWLEDGE_MIGRATE=1 THEMIS_KNOWLEDGE_ADDR=:8085 go run ./cmd/knowledge &
+THEMIS_KNOWLEDGE_MIGRATE=1 THEMIS_KNOWLEDGE_ADDR=:8085 \
+  ./bin/knowledge > logs/knowledge.log 2>&1 &
 
-# Governance — opens Findings, holds Positions. AI ON (uses the Intelligence Gateway below).
+# Governance — opens Findings, holds Positions. AI ON (calls Intelligence at :8086 only on /recommend).
 THEMIS_DATABASE_DSN="$PGBASE/governance?sslmode=disable" \
 THEMIS_GOVERNANCE_AI_ENABLED=1 THEMIS_INTELLIGENCE_URL=http://localhost:8086 \
-THEMIS_GOVERNANCE_MIGRATE=1 THEMIS_GOVERNANCE_ADDR=:8083 go run ./cmd/governance &
+THEMIS_GOVERNANCE_MIGRATE=1 THEMIS_GOVERNANCE_ADDR=:8083 \
+  ./bin/governance > logs/governance.log 2>&1 &
 
 # Communication — materializes + publishes VEX/advisories (reads Positions from Governance).
 THEMIS_DATABASE_DSN="$PGBASE/communication?sslmode=disable" \
 THEMIS_GOVERNANCE_URL=http://localhost:8083 \
-THEMIS_COMMUNICATION_MIGRATE=1 THEMIS_COMMUNICATION_ADDR=:8084 go run ./cmd/communication &
+THEMIS_COMMUNICATION_MIGRATE=1 THEMIS_COMMUNICATION_ADDR=:8084 \
+  ./bin/communication > logs/communication.log 2>&1 &
+
+sleep 6
+ss -ltn 'sport = :8081 or sport = :8082 or sport = :8083 or sport = :8084 or sport = :8085'   # 5× LISTEN
+grep -iRE "listening|event bus connected|reader enabled|error|abort|panic" logs/
 ```
 
 (`THEMIS_BUS_DATABASE_DSN` is exported once above, so all four pipeline services inherit it. Drop it — or
 set `THEMIS_GOVERNANCE_AI_ENABLED=0` and skip the Intelligence service — for a bus-less / AI-less single
 context.)
 
-### 3. Drive an SBOM end-to-end
+> **Restarting a service** (e.g. after a rebuild): `pkill -f 'bin/<service>'` then start it again. If your
+> shell has `noclobber` set, `>` refuses to overwrite an existing log file — use `>|` on restarts. For
+> anything beyond a quick trial, run the services under **systemd** instead (step 7) — that is the durable
+> way to manage lifecycle, and it sidesteps this entirely.
+
+### 5. Drive an SBOM end-to-end
 
 ```sh
-# Register identity → capture the release id. Every register endpoint returns {"id": ...}.
 J='-s -H content-type:application/json'
-PID=$(curl $J localhost:8082/api/v1/products -d '{"name":"acme"}'                            | jq -r .id)
-JID=$(curl $J localhost:8082/api/v1/projects -d "{\"product_id\":\"$PID\",\"name\":\"api\"}" | jq -r .id)
-RID=$(curl $J localhost:8082/api/v1/releases -d "{\"project_id\":\"$JID\",\"version\":\"1.0.0\"}" | jq -r .id)
 
-# Upload an SBOM against that release (Evidence accepts CycloneDX/SPDX JSON in `document`).
-curl $J localhost:8081/api/v1/evidence -d "$(jq -n --arg r "$RID" --rawfile d ./my-sbom.json \
-  '{kind:"sbom",format:"cyclonedx",subject_release_id:$r,document:$d}')"
+# Easiest — the greenfield helper registers Product -> Project -> Release and uploads the SBOM. It
+# auto-detects CycloneDX/SPDX and STREAMS the body from a file, so large SBOMs work (see note below):
+./scripts/gf-upload-sbom.sh -f ./my-sbom.json -p acme -j api -v 1.0.0
+export RID=<the RELEASE_ID it prints>          # reuse an existing release with:  -r <RELEASE_ID>
+
+# --- or drive the raw API yourself (each register endpoint returns {"id": ...}): ---
+# PID=$(curl $J localhost:8082/api/v1/products -d '{"name":"acme"}'                            | jq -r .id)
+# JID=$(curl $J localhost:8082/api/v1/projects -d "{\"product_id\":\"$PID\",\"name\":\"api\"}" | jq -r .id)
+# export RID=$(curl $J localhost:8082/api/v1/releases -d "{\"project_id\":\"$JID\",\"version\":\"1.0.0\"}" | jq -r .id)
+# Upload — inline -d only works for SMALL SBOMs: a single argv is capped at 128KB on Linux
+# (MAX_ARG_STRLEN), so a large document fails with "Argument list too long". For anything sizeable,
+# build the body into a file and stream it (what the helper above does):
+#   tmp=$(mktemp); jq -n --arg r "$RID" --rawfile d ./my-sbom.json \
+#     '{kind:"sbom",format:"cyclonedx",subject_release_id:$r,document:$d}' > "$tmp"
+#   curl $J localhost:8081/api/v1/evidence --data-binary @"$tmp"; rm -f "$tmp"
 
 # Wait ~10s for the cascade (2s loops × Evidence→Knowledge→Governance hops), then watch a Finding appear:
 curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq .   # → grab the finding_id, set FID below
 FID=<FINDING_ID>
 
-# (optional) Ask cyberpal for an advisory recommendation on a Finding (records a proposal; never decides):
+# (optional) Ask cyberpal for an advisory recommendation on a Finding (records a proposal; never decides).
+# Requires the Intelligence Gateway (step 6) already running; without it this returns 204 (no recommendation).
 curl $J -X POST "localhost:8083/api/v1/findings/$FID/recommend" | jq .
 
 # Decide the Position (human): raise an "affected" proposal and accept it.
@@ -161,7 +242,7 @@ curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 > `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload with
 > `subject_release_id:"rel-demo"`. This is what the `make e2e-pipeline` black-box proof uses.
 
-### 4. Intelligence Gateway (optional AI — Ollama)
+### 6. Intelligence Gateway (optional AI — Ollama)
 
 `cmd/intelligence` is **stateless** (no database) and part of the **optional AI plane** — the pipeline is
 fully correct with it off (disabled ≡ unavailable). It is **on-demand and advisory**: a human POSTs
@@ -204,6 +285,34 @@ export THEMIS_INTELLIGENCE_URL=http://localhost:8086
 
 Design: [`docs/engineering/decisions/EDR-INTELLIGENCE-01.md`](docs/engineering/decisions/EDR-INTELLIGENCE-01.md)
 (Revision 2) + [`docs/engineering/THEMIS-AI-HARNESS.md`](docs/engineering/THEMIS-AI-HARNESS.md).
+
+### 7. Run as systemd services (survive logout / reboot)
+
+Steps 4–6 run the services as background jobs of your shell — fine for a trial, but they die when the shell
+exits. To install them as managed **systemd** services (auto-start on boot, restart on failure, logs in
+journald), use the installer under [`deploy/systemd/`](deploy/systemd). Build the binaries (step 2), make
+sure the databases exist (step 1), then stop any hand-started copies so they don't hold the ports:
+
+```sh
+# from the repo root, as root, with the DB password (and your Ollama model tag):
+pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)' || true
+sudo THEMIS_PGPW='<db-password>' THEMIS_INTELLIGENCE_MODEL='<ollama-model:tag>' \
+  ./deploy/systemd/install-systemd.sh
+```
+
+It loads the registry schema (idempotent), writes one `EnvironmentFile` per service under `/etc/themis/`
+(mode 0640), installs a single templated `themis@.service`, and enables + starts
+`themis@{registry,evidence,knowledge,governance,communication,intelligence}`. Manage them the usual way:
+
+```sh
+systemctl status 'themis@*'                 # all six
+sudo systemctl restart themis@knowledge     # e.g. after a rebuild
+journalctl -u themis@knowledge -f           # follow logs
+```
+
+To change configuration, edit `/etc/themis/<service>.env` then `sudo systemctl restart themis@<service>`.
+`WorkingDirectory` is the repo root (services resolve their migrations by a relative path), so keep the
+built `bin/` in place.
 
 ---
 

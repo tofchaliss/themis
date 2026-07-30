@@ -1,0 +1,22 @@
+[Unit]
+# Templated unit for every Themis Phase-3 service. The instance name (%i) is the service:
+#   registry evidence knowledge governance communication intelligence
+# install-systemd.sh substitutes @REPO@ / @USER@ and installs this as themis@.service.
+Description=Themis Phase-3 %i service
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=@USER@
+# WorkingDirectory must be the repo root: services resolve their migrations dir by a
+# relative path (e.g. internal/<ctx>/adapters/store/migrations).
+WorkingDirectory=@REPO@
+EnvironmentFile=/etc/themis/%i.env
+ExecStart=@REPO@/bin/%i
+Restart=on-failure
+RestartSec=5
+# journald captures stdout/stderr; view with: journalctl -u themis@<service> -f
+
+[Install]
+WantedBy=multi-user.target

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
@@ -118,5 +119,38 @@ func TestInboxRollsBackOnApplyError(t *testing.T) {
 	}
 	if got := count(t, pool, "SELECT count(*) FROM processed_events"); got != 0 {
 		t.Errorf("processed_events = %d, want 0 (claim rolled back)", got)
+	}
+}
+
+// TestInboxCorrelatesSharedCVEWithoutHalt is the regression for the shared-CVE correlation
+// halt: when two components in one SBOM resolve to the same CVE, the second fold — inside the
+// same inbox transaction — must reuse the card the first fold just created (reading its own
+// in-flight write) instead of re-inserting and colliding on faultlines_cve_key. Before the fix
+// GetByCVE read the pool, not the joined tx, so the second fold could not see the uncommitted
+// card, re-inserted it, hit 23505, poisoned the transaction (25P02), and the stream poison-halted.
+func TestInboxCorrelatesSharedCVEWithoutHalt(t *testing.T) {
+	pool := newPool(t)
+	svc := service(pool)
+	ctx := context.Background()
+
+	cve := cveID(t, "CVE-2024-777")
+	inner := &recordingApply{fn: func(ctx context.Context) error {
+		// Two components in one SBOM both resolve to CVE-2024-777, folded within one inbox tx.
+		if _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			return err
+		}
+		_, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "osv", value.SeverityLow))
+		return err
+	}}
+	inbox := store.NewInboxConsumer(pool, inner)
+
+	if err := inbox.Handle(ctx, event.Envelope{ID: "evt-shared-cve", Type: "EvidenceRegistered"}); err != nil {
+		t.Fatalf("correlating an SBOM with two components sharing a CVE must not halt: %v", err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM faultlines"); got != 1 {
+		t.Fatalf("faultlines = %d, want 1 (both components reuse one card)", got)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM faultline_proposals"); got != 2 {
+		t.Errorf("faultline_proposals = %d, want 2 (both source proposals folded into the one card)", got)
 	}
 }
