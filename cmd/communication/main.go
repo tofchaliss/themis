@@ -26,6 +26,7 @@ import (
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/adapters/wiring"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
@@ -43,6 +44,9 @@ type config struct {
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
+
+	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
+	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
 }
 
 func loadConfig() config {
@@ -57,6 +61,9 @@ func loadConfig() config {
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
+
+		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
+		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
 	}
 }
 
@@ -114,7 +121,8 @@ func main() {
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
-	router.Mount("/api/v1", comm.Handler)
+	closeAuth := authedMount(ctx, router, cfg, logger, comm.Handler)
+	defer closeAuth()
 
 	// Inbound Governance Position-event intake. Until the Event Infrastructure (M5) bus
 	// reader lands, the seam is fed over HTTP with the full kernel Envelope JSON (the reader
@@ -177,6 +185,35 @@ func workerLoop(comm wiring.Communication, logger *observability.Logger) {
 			}
 		}
 	}
+}
+
+// authedMount mounts the API under the authenticated group when THEMIS_AUTH_DATABASE_DSN is
+// set (RequireAPIKey then the method-based RequireWriteScope — EDR-SECURITY-01 D1/D4);
+// otherwise it mounts open with a warning (single-context dev). THEMIS_AUTH_REQUIRED=1
+// hard-fails when the DSN is unset so a production node can never boot open. The returned
+// cleanup closes the auth pool (a no-op when auth is disabled).
+func authedMount(ctx context.Context, router chi.Router, cfg config, logger *observability.Logger, handler http.Handler) func() {
+	if cfg.authDSN == "" {
+		if cfg.authRequired {
+			logger.Error("startup aborted: THEMIS_AUTH_REQUIRED=1 but THEMIS_AUTH_DATABASE_DSN is empty")
+			os.Exit(1)
+		}
+		logger.Warn("AUTH DISABLED — set THEMIS_AUTH_DATABASE_DSN to require X-API-Key (dev only)")
+		router.Mount("/api/v1", handler)
+		return func() {}
+	}
+	authn, closeAuth, err := auth.Open(ctx, cfg.authDSN)
+	if err != nil {
+		logger.Error("auth store failed", observability.Err(err))
+		os.Exit(1)
+	}
+	router.Group(func(r chi.Router) {
+		r.Use(authn.RequireAPIKey)
+		r.Use(auth.RequireWriteScope)
+		r.Mount("/api/v1", handler)
+	})
+	logger.Info("API-key auth enabled (X-API-Key)")
+	return closeAuth
 }
 
 func applyMigrations(dsn, path string) error {
