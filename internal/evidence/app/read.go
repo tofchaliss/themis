@@ -18,6 +18,12 @@ func (s *EvidenceService) GetInventory(ctx context.Context, id domain.EvidenceID
 	return s.repo.GetInventory(ctx, id)
 }
 
+// GetDocument returns a document's kind and raw stored bytes (D6 read path; Knowledge uses it
+// to parse an uploaded VEX — EDR-VEX-01 D1).
+func (s *EvidenceService) GetDocument(ctx context.Context, id domain.EvidenceID) (string, []byte, error) {
+	return s.repo.GetRawDocument(ctx, id)
+}
+
 // ListByRelease returns evidence summaries filed against a release, newest first.
 func (s *EvidenceService) ListByRelease(ctx context.Context, releaseID string) ([]EvidenceSummary, error) {
 	return s.repo.ListByRelease(ctx, releaseID)

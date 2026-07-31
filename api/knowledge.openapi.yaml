@@ -134,6 +134,21 @@ components:
         score:
           type: integer
           description: CVE-intrinsic composite priority score, 0-100 (severity baseline + EPSS + KEV; excludes release-scoped blast).
+        applicabilities:
+          type: array
+          description: Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).
+          items:
+            $ref: '#/components/schemas/Applicability'
+    Applicability:
+      type: object
+      properties:
+        package:
+          type: string
+        status:
+          type: string
+          description: e.g. affected | not_affected | fixed | under_investigation.
+        justification:
+          type: string
     ProposalProvenance:
       type: object
       properties:

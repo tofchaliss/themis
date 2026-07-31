@@ -43,6 +43,18 @@ type memRepo struct {
 	created bool
 	getErr  error
 	listErr error
+	rawKind string
+	rawDoc  []byte
+}
+
+func (m *memRepo) GetRawDocument(_ context.Context, _ domain.EvidenceID) (string, []byte, error) {
+	if m.getErr != nil {
+		return "", nil, m.getErr
+	}
+	if m.rawDoc == nil {
+		return "", nil, store.ErrNotFound
+	}
+	return m.rawKind, m.rawDoc, nil
 }
 
 func (m *memRepo) Save(_ context.Context, e domain.Evidence, _ []byte, _ domain.EvidenceRegistered) (domain.EvidenceID, bool, error) {
@@ -189,6 +201,17 @@ func TestReads(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodGet, "/evidence?release=rel-1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ev-1") {
 		t.Errorf("list: %d %s", rec.Code, rec.Body)
+	}
+
+	// Raw document (the read path Knowledge uses to parse an uploaded VEX — EDR-VEX-01 D1).
+	repo.rawKind, repo.rawDoc = "vex", []byte(`{"statements":[]}`)
+	if rec := do(t, h, http.MethodGet, "/evidence/ev-1/document", ""); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"vex"`) || !strings.Contains(rec.Body.String(), "statements") {
+		t.Errorf("get document: %d %s", rec.Code, rec.Body)
+	}
+	repo.rawDoc = nil
+	if rec := do(t, h, http.MethodGet, "/evidence/ev-1/document", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("document not-found status = %d, want 404", rec.Code)
 	}
 
 	// Not found.

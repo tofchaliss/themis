@@ -47,6 +47,9 @@ type fakeRepo struct {
 	invErr      error
 	list        []app.EvidenceSummary
 	listErr     error
+	rawKind     string
+	rawDoc      []byte
+	rawErr      error
 }
 
 func (f *fakeRepo) Save(_ context.Context, e domain.Evidence, _ []byte, _ domain.EvidenceRegistered) (domain.EvidenceID, bool, error) {
@@ -58,6 +61,10 @@ func (f *fakeRepo) GetByID(context.Context, domain.EvidenceID) (domain.Evidence,
 }
 func (f *fakeRepo) GetInventory(context.Context, domain.EvidenceID) (domain.Inventory, error) {
 	return f.inv, f.invErr
+}
+
+func (f *fakeRepo) GetRawDocument(context.Context, domain.EvidenceID) (string, []byte, error) {
+	return f.rawKind, f.rawDoc, f.rawErr
 }
 func (f *fakeRepo) ListByRelease(context.Context, string) ([]app.EvidenceSummary, error) {
 	return f.list, f.listErr
@@ -195,6 +202,9 @@ func TestReads(t *testing.T) {
 	}
 	if _, err := svc.GetInventory(ctx, "ev-1"); err != nil {
 		t.Errorf("GetInventory: %v", err)
+	}
+	if _, _, err := svc.GetDocument(ctx, "ev-1"); err != nil {
+		t.Errorf("GetDocument: %v", err)
 	}
 	list, err := svc.ListByRelease(ctx, "rel-1")
 	if err != nil || len(list) != 1 {

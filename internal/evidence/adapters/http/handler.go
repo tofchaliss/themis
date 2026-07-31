@@ -82,6 +82,18 @@ func (h *Handler) GetEvidenceInventory(w http.ResponseWriter, r *http.Request, i
 	writeJSON(w, http.StatusOK, toInventory(inv))
 }
 
+// GetEvidenceDocument handles GET /evidence/{id}/document — the raw stored bytes + kind, the
+// read path Knowledge uses to parse an uploaded VEX (EDR-VEX-01 D1). Evidence serves the
+// bytes as-is; it does not parse them.
+func (h *Handler) GetEvidenceDocument(w http.ResponseWriter, r *http.Request, id string) {
+	kind, doc, err := h.svc.GetDocument(r.Context(), domain.EvidenceID(id))
+	if err != nil {
+		writeReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, gen.Document{Kind: kind, Document: string(doc)})
+}
+
 // ListEvidence handles GET /evidence?release=.
 func (h *Handler) ListEvidence(w http.ResponseWriter, r *http.Request, params gen.ListEvidenceParams) {
 	list, err := h.svc.ListByRelease(r.Context(), params.Release)

@@ -75,6 +75,15 @@ type DependencyEdge struct {
 	To           *string `json:"to,omitempty"`
 }
 
+// Document defines model for Document.
+type Document struct {
+	// Document The raw stored document bytes as UTF-8 text.
+	Document string `json:"document"`
+
+	// Kind The evidence kind (sbom | vex | scanner-report).
+	Kind string `json:"kind"`
+}
+
 // EvidenceFacts defines model for EvidenceFacts.
 type EvidenceFacts struct {
 	FiledAt               *time.Time `json:"filed_at,omitempty"`
@@ -152,6 +161,9 @@ type ServerInterface interface {
 	// Get evidence facts by ID.
 	// (GET /evidence/{id})
 	GetEvidence(w http.ResponseWriter, r *http.Request, id string)
+	// Get the raw stored document (bytes as UTF-8 text) + kind by evidence ID. Used by Knowledge to parse an uploaded VEX (Evidence serves the bytes, never parses them).
+	// (GET /evidence/{id}/document)
+	GetEvidenceDocument(w http.ResponseWriter, r *http.Request, id string)
 	// Get the canonical component inventory by evidence ID.
 	// (GET /evidence/{id}/inventory)
 	GetEvidenceInventory(w http.ResponseWriter, r *http.Request, id string)
@@ -176,6 +188,12 @@ func (_ Unimplemented) RegisterEvidence(w http.ResponseWriter, r *http.Request) 
 // Get evidence facts by ID.
 // (GET /evidence/{id})
 func (_ Unimplemented) GetEvidence(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the raw stored document (bytes as UTF-8 text) + kind by evidence ID. Used by Knowledge to parse an uploaded VEX (Evidence serves the bytes, never parses them).
+// (GET /evidence/{id}/document)
+func (_ Unimplemented) GetEvidenceDocument(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -258,6 +276,32 @@ func (siw *ServerInterfaceWrapper) GetEvidence(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetEvidence(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetEvidenceDocument operation middleware
+func (siw *ServerInterfaceWrapper) GetEvidenceDocument(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEvidenceDocument(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -416,6 +460,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/evidence/{id}", wrapper.GetEvidence)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/evidence/{id}/document", wrapper.GetEvidenceDocument)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/evidence/{id}/inventory", wrapper.GetEvidenceInventory)
 	})
 
@@ -427,24 +474,26 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1FfbbuM2EP0Vgu1DAii2N8lD4T7tdrOL9JYg2RYFtoFBk2ObG4lkhiNvhEBAP6Jf2C8pSEm2bMkbJ+32",
-	"8iaJ5PDMmZkzowcubeasAUOejx84gnfWeIgvl2inKWThUVpDYCg8CudSLQVpa4YfvDXhm5cLyER4+hJh",
-	"xsf8i+Ha7rBa9cPGXlmWCVfgJWoXzPAxP0O0OOBhod4djH3T2AgvDq0DJF1hA2l94alCR4UDPuaeUJs5",
-	"LxNuRAa9Cy7HtHfB2xxl/5kloNeVn1trZdJ8sdMPICnsfg0OjAIjizM1hy7wGdp+zAhpJNUvtOvdQHZP",
-	"CGdLHQDAGyGrqG4h0CmoiYikzixm4YkrQXBEOgOedG+eaTMHdKirSHTWter9fKtN/4JDuwQjjISJzsQc",
-	"JkrPwdNjez8RI59H7ycIKQgPkx2ICHNPE0+Ccv9EMq/zLBNY/Pfo7AN9bpZgyPbB3ax3TZD5x+p2XYbr",
-	"uwSiKHis4zrfa/t7Wdwqko7ZPp9aarTpkQISekdV585ZJFCTKjKbCLvpseUbaUphT8qvYK49ATb5cgV3",
-	"eZ3TW3CtzLNa0zZF8N0CGIqPDGoTrNnKDn569+boK0ZwTwmDwXzAhGHXry5+YN9eX/x4OOjLMrh3IIPr",
-	"cgHy1uf9qtNk7AMHE7a857KQqTWg7nnCvVP3/CbZnYvNIT+1GQ9SGU9JYQzgEUIgv/f8Z1AAB3KyW6r3",
-	"lIiow3e5RlDBrehm79FkHcebvbKh6qs99YggCNpYptamIMxOJdjCGME0VrpYwnZtZrabbg02Fpv7PbGD",
-	"y4XwcHTC5ghgZhpSdcj++O13hrU3TGdZTmKaQjdHPTsICTn8+eyXQyaMYghCsamQt4wWoJHNQjeKK1IY",
-	"a7QUKdONTg1+NXxVb6EQMu3ZCuDLy3Pe6sP8xWA0GAV+rAMjnOZjfjIYDU54wp2gReR12CAML3OIqRV4",
-	"jz32XPEx/157aq6IJ1FkQICej98/cB0uussBC97ME7yOP28HgDCHpDUAbQfrJtkcqo5HoycNVHvp6XaT",
-	"6gpqZ+K6+G4Qtp1WcPqMr2C3BrdQC3UfjPyt8yC2QSbmQhtPTLCaq3iJs76H/+0aqWkFT6+sKv62qXOX",
-	"MJebhRTiWP7FWD0NRq0IPbF5mYbiKVZ1B4odaAWZswFHLMlpQXAULFEspNylVqjDyPbx6MW/gvqqhdbA",
-	"x8Nn5FfCT4+Pn5uPzf2hN3bk6WuGQDkazwTzlYSt5OX8dfXnsZKM4YNW5U7deAuPyUYQobVqRIH+5wRj",
-	"H52o/gw+pQqnz43CW2iLQtT8abGD4qFuz6mPkb0eav9nrK+BfzbGaQGttro6vG6wIQiwmfDBCOCy4TD+",
-	"GfOhcHq4fMHLm/LPAAAA//8=",
+	"1Fjbbhs3EP0Vgu2DhK4lxclDoT4ljRO4aRvDToIAriFQy5HEeJekh1xZC0dAP6Jf2C8pyL1KS0WyW7fN",
+	"24qX4ZkzM4dD3dFYpVpJkNbQ8R1FMFpJA/7HGappAqn7jJW0IK37ZFonImZWKDn8ZJR0YyZeQMrc17cI",
+	"Mzqm3wwbu8Ni1gwre+v1OqIcTIxCOzN0TE8QFQ6omyhXO2M/VjbcD41KA1pRYINYmdzYAp3NNdAxNRaF",
+	"nNN1RCVLITihM0yCE0ZlGIf3LAGNKPzcmltH1YiafoLYutUvQYPkIOP8hM+hC3yGKowZIfGkmoXQwQVW",
+	"HQpBxVkaZI23ZjYD8G4BBNktMVYhcFItJNPcgiHMkPfvXh19Tyys7IBGXXDXQvKwVVgKRwcQt4T0zFSl",
+	"5DNZwop8JiZmUgIeIWiFth+w7Im5yQQCp+PL4pio8eMq4P5JeeArFhdJvRUAkQCfMM/BTGHqvihnFo6s",
+	"SCHk20zIOaBGURDXmRc8OFxR0k1CVEuQTMYwESmbw4SLORi7b+0XUtRk3vsJQgLMwGQHIouZsRNjmc3M",
+	"gblUkXmRpSnD/P9HZwj0qVyCtCoEd1PuhIXU7JOtRoWasxgiy6mXsbLcS/sHWdzSiI7ZkE8tMd6qabBM",
+	"7BC1TLu6Aj4pIrOJsJseW75ZYRM4kPJzmAtjAat8OYebrMzp+0pQLRi1CPUa8YkIDOYDwiS5ePH2F/LT",
+	"xdtf+0FBgpWG2LkeLyC+NllYdKuMvaMg3ZJLGudxoiTwFY2o0XzVkphuLlabnKhRd1P4XRuiFtz/CAqg",
+	"IZ7svqkOlIiw2ga27pHgbjYUbUWgHhGYhTaWqVIJMLlTCbYwejCVlS4Wt1zImeqmW4WN+N5mZUnvbMEM",
+	"HD0lcwSQMwEJ75M/f/+DYOkNEWmaWTZNoJujhvRcQg4/nHzsEyY5QWCcTFl8TewCBJKZu438TMykkiJm",
+	"CRGVTg1+k7SuN1cIqTCkBvj87JS22hD6ZDAajBw/SoNkWtAxfToYDZ7SiGpmF57XYYXQ/ZiDTy3Hu28x",
+	"Tjkd05+FsdURfieyFCygoePLOyrcQTcZYE6rdoqW8aftAFjMIGr1f9vBuoo2e8rj0ehe/eRBerp9SXUF",
+	"tdNwvn0zcMueFXBCxmvYrb7V1UJ5D3r+mjzw1yBhcyaksYSRkit/iFYmwP92jZS0grEvFM//saZ7lzCv",
+	"NwvJxXH9N2N1PxilIgRi8zxxxZPXdQec9ASHVCuHw5eka0uPnCXrCynTiWK879k+Hj35T1Cft9BKuO0/",
+	"IL8i+uz4+KH5WJ3v7saOPP1AEGyG0hBGTCFhtbycviweXrVkDO8EX+/UjdewTzacCDWq4QX63xOMQ3Si",
+	"eBl8SRWePTQKr6EtCl7zp/kOioftXmgf1/Wj7ivjvMb9aHTbHU/XXuDt2iffFe/Qad6E6fTlgLw34Aff",
+	"SHWbAJ8DsYpohgZcPRX6Apx8OPlIenXlGMAlGA/AnxURCUvAYp8fT/vBwIv2A2Vf5JvXzFcW+gb4o8a+",
+	"6afqzU1ntR3oAooPXMmh/0eIDpkWw+UTur5a/xUAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

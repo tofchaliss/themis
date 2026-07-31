@@ -244,6 +244,18 @@ func TestGetAndList(t *testing.T) {
 		t.Errorf("inventory components = %d, want 1", len(inv.Components()))
 	}
 
+	// GetRawDocument returns the stored kind + raw bytes (the read path Knowledge uses for VEX).
+	kind, doc, err := s.GetRawDocument(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != "sbom" || string(doc) != "raw-get" {
+		t.Errorf("raw document = (%q, %q), want (sbom, raw-get)", kind, string(doc))
+	}
+	if _, _, err := s.GetRawDocument(ctx, "nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetRawDocument(nope) = %v, want ErrNotFound", err)
+	}
+
 	list, err := s.ListByRelease(ctx, "rel-42")
 	if err != nil {
 		t.Fatal(err)

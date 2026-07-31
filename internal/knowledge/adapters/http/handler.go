@@ -118,6 +118,11 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		Priority:       strptr(v.Priority()),
 		Score:          intptr(v.Score()),
 	}
+	apps := make([]gen.Applicability, 0, len(v.Applicabilities))
+	for _, a := range v.Applicabilities {
+		apps = append(apps, gen.Applicability{Package: strptr(a.Package), Status: strptr(a.Status), Justification: strptr(a.Justification)})
+	}
+	ev.Applicabilities = &apps
 	props := make([]gen.ProposalProvenance, 0, len(f.Proposals()))
 	for _, p := range f.Proposals() {
 		at := p.ObservedAt()

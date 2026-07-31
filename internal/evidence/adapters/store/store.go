@@ -106,7 +106,7 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 // GetByID loads the whole Evidence aggregate by its id.
 func (s *Store) GetByID(ctx context.Context, id domain.EvidenceID) (domain.Evidence, error) {
 	var (
-		kind, fingerprint, releaseID string
+		kind, fingerprint, releaseID  string
 		provSource, provDigest, trust string
 		invJSON                       []byte
 		filedAt                       time.Time
@@ -146,6 +146,24 @@ func (s *Store) GetInventory(ctx context.Context, id domain.EvidenceID) (domain.
 		return domain.Inventory{}, err
 	}
 	return unmarshalInventory(invJSON)
+}
+
+// GetRawDocument returns an evidence document's kind and raw stored bytes — the read path
+// Knowledge uses to parse an uploaded VEX (EDR-VEX-01 D1). Evidence serves the bytes; it does
+// not parse them (it stays a filing cabinet — EDR-EVIDENCE-01 D4).
+func (s *Store) GetRawDocument(ctx context.Context, id domain.EvidenceID) (string, []byte, error) {
+	var (
+		kind string
+		doc  []byte
+	)
+	err := s.pool.QueryRow(ctx, `SELECT kind, raw_document FROM evidence WHERE id = $1`, string(id)).Scan(&kind, &doc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return kind, doc, nil
 }
 
 // Purge deletes all Evidence and outbox rows. It is a DEV/TEST-ONLY affordance for

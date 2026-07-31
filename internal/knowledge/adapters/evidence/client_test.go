@@ -21,10 +21,37 @@ func fakeEvidence(t *testing.T) *httptest.Server {
 			]}`))
 		case "/api/v1/evidence/malformed/inventory":
 			_, _ = w.Write([]byte(`{not json`))
+		case "/api/v1/evidence/ev-1/document":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"kind":"vex","document":"{\"statements\":[]}"}`))
+		case "/api/v1/evidence/malformed/document":
+			_, _ = w.Write([]byte(`{not json`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+func TestClient_GetDocument(t *testing.T) {
+	srv := fakeEvidence(t)
+	defer srv.Close()
+	c := evidence.NewClient(srv.URL, srv.Client())
+
+	raw, kind, err := c.GetDocument(context.Background(), "ev-1")
+	if err != nil {
+		t.Fatalf("get document: %v", err)
+	}
+	if kind != "vex" || string(raw) != `{"statements":[]}` {
+		t.Errorf("document = %q kind=%q", raw, kind)
+	}
+	// An unknown id → non-200 → error (drives the caller's fail-safe).
+	if _, _, err := c.GetDocument(context.Background(), "nope"); err == nil {
+		t.Error("unknown document must error")
+	}
+	// A malformed body → decode error.
+	if _, _, err := c.GetDocument(context.Background(), "malformed"); err == nil {
+		t.Error("malformed document body must error")
+	}
 }
 
 func TestClient_GetInventory(t *testing.T) {

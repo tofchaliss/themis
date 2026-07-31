@@ -10,22 +10,30 @@ type EvidenceRegistered struct {
 	Kind       string
 }
 
-// Coordinator sequences the new-SBOM → correlate flow (BCK-0044) by calling app
-// services only; it owns no aggregates and enforces no business rules.
+// Coordinator sequences the inbound-evidence flows (BCK-0044) by calling app services only;
+// it owns no aggregates and enforces no business rules. An SBOM drives correlation; an
+// uploaded VEX drives applicability folding (EDR-VEX-01 D2).
 type Coordinator struct {
 	correlate *CorrelationService
+	vex       *VEXApplicabilityService
 }
 
-// NewCoordinator wires the coordinator over the correlation service.
-func NewCoordinator(c *CorrelationService) *Coordinator { return &Coordinator{correlate: c} }
+// NewCoordinator wires the coordinator over the correlation and VEX-applicability services.
+func NewCoordinator(c *CorrelationService, vex *VEXApplicabilityService) *Coordinator {
+	return &Coordinator{correlate: c, vex: vex}
+}
 
-// OnEvidenceRegistered runs correlation for a newly registered SBOM. Non-SBOM evidence
-// (VEX / scanner reports) folds in via its own ACLs, not correlation, so it is ignored
-// here.
+// OnEvidenceRegistered dispatches by kind: an SBOM correlates its inventory; an uploaded VEX
+// folds its applicability statements onto the cards (D2). Other kinds (e.g. scanner reports)
+// are ignored here — they fold in via their own paths.
 func (c *Coordinator) OnEvidenceRegistered(ctx context.Context, e EvidenceRegistered) error {
-	if e.Kind != "sbom" {
+	switch e.Kind {
+	case "sbom":
+		_, err := c.correlate.Correlate(ctx, e.ReleaseID, e.EvidenceID)
+		return err
+	case "vex":
+		return c.vex.Apply(ctx, e.EvidenceID)
+	default:
 		return nil
 	}
-	_, err := c.correlate.Correlate(ctx, e.ReleaseID, e.EvidenceID)
-	return err
 }
