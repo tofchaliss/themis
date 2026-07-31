@@ -32,15 +32,17 @@ func NewFaultlineService(repo Repository, ids IDGenerator, clock Clock, prec dom
 // FoldProposal finds-or-creates the Faultline for a canonical CVE and folds a source
 // Proposal into it, reconciling the enterprise view and publishing completed-fact
 // events on state change (D2/D8/D9). It retries on optimistic-concurrency conflicts,
-// which converge because Proposals are additive and reconciliation is deterministic.
-func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.FaultlineID, error) {
+// which converge because Proposals are additive and reconciliation is deterministic. It
+// returns the folded aggregate so the caller can read the reconciled view (e.g.
+// correlation gating a match against the reconciled affected range — D3).
+func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.Faultline, error) {
 	if cve.IsZero() {
-		return "", fmt.Errorf("knowledge: zero cve")
+		return domain.Faultline{}, fmt.Errorf("knowledge: zero cve")
 	}
 	for attempt := 0; attempt < maxSaveRetries; attempt++ {
 		existing, found, err := s.repo.GetByCVE(ctx, cve.String())
 		if err != nil {
-			return "", err
+			return domain.Faultline{}, err
 		}
 		now := s.clock.Now()
 
@@ -56,7 +58,7 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 		} else {
 			f, err = domain.NewFaultline(domain.FaultlineID(s.ids.NewID()), cve)
 			if err != nil {
-				return "", err
+				return domain.Faultline{}, err
 			}
 			created = true
 			notes = append(notes, OutboxNote{EventType: EventFaultlineCreated, Event: domain.NewFaultlineCreated(f, now), OccurredAt: now})
@@ -68,12 +70,12 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 
 		switch err := s.repo.Save(ctx, f, created, prevVersion, notes); {
 		case err == nil:
-			return f.ID(), nil
+			return f, nil
 		case errors.Is(err, ErrConcurrent):
 			continue // reload and retry; additive folds converge
 		default:
-			return "", err
+			return domain.Faultline{}, err
 		}
 	}
-	return "", ErrConcurrent
+	return domain.Faultline{}, ErrConcurrent
 }

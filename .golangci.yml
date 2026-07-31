@@ -229,6 +229,22 @@ linters:
               desc: eventbus is business-agnostic platform transport — it moves kernel Envelopes and must not import a bounded context (D10)
             - pkg: github.com/themis-project/themis/internal/registry
               desc: eventbus is platform transport beneath the pipeline — it depends only on the kernel + drivers, not the registry context
+        platform-auth-infra-only:
+          files:
+            - "internal/platform/auth/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
+            - pkg: github.com/themis-project/themis/internal/registry
+              desc: auth is platform edge-security beneath the pipeline — it depends only on the kernel + drivers, not the registry context
         no-format-leakage:
           files:
             - "**/*.go"

@@ -56,6 +56,7 @@ type Knowledge struct {
 	Relay    *store.Relay
 	Watch    *app.WatchService            // nil when the NVD watch is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
+	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 }
 
 // NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
@@ -67,6 +68,12 @@ type NVDConfig struct {
 	BaseURL string       // "" → the client default (services.nvd.nist.gov)
 	APIKey  string       // optional; empty uses NVD's lower unauthenticated rate limit
 	HTTP    *http.Client // optional; nil → http.DefaultClient
+
+	// Discovery adds NVD to the correlation discovery fan-out (A2): a per-component,
+	// CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a
+	// finding. Opt-in and bounded per component (D5); off by default (no silent NVD calls at
+	// correlation time). An API key is recommended — discovery issues one query per component.
+	Discovery bool
 }
 
 // SignalsConfig configures the optional scheduled exploit-signal enrichment sweep (EPSS / KEV
@@ -90,16 +97,23 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	read := app.NewReadService(st, st)
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
 	evClient := evidence.NewClient(evidenceBaseURL, nil)
-	disc := feed.NewOSVClient(osvBaseURL, nil)
+	var disc app.PackageVulnSource = feed.NewOSVClient(osvBaseURL, nil)
+	if nvd.Discovery {
+		// NVD joins the discovery fan-out beside OSV (A2). The reconciled version-range gate in
+		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
+		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
+	}
 	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{})
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
+	health := app.NewFeedHealthService(st, sysClock{})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read).Router(),
+		Handler:  knhttp.NewHandler(read, health).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
+		Health:   health,
 	}
 	if nvd.Enabled {
 		changed := feed.NewRelevanceFilteredSource(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
@@ -118,5 +132,6 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 func KnowledgeReadAPI(pool *pgxpool.Pool) (http.Handler, *store.Store) {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
-	return knhttp.NewHandler(read).Router(), st
+	health := app.NewFeedHealthService(st, sysClock{})
+	return knhttp.NewHandler(read, health).Router(), st
 }

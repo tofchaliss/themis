@@ -60,6 +60,27 @@ type FaultlineView struct {
 	View      *EnterpriseView       `json:"view,omitempty"`
 }
 
+// FeedHealthEntry defines model for FeedHealthEntry.
+type FeedHealthEntry struct {
+	ConsecutiveFailures *int       `json:"consecutive_failures,omitempty"`
+	LastSuccessAt       *time.Time `json:"last_success_at,omitempty"`
+	Source              *string    `json:"source,omitempty"`
+
+	// Status healthy | stale | degraded | informational.
+	Status *string `json:"status,omitempty"`
+	Tier   *int    `json:"tier,omitempty"`
+}
+
+// FeedHealthReport defines model for FeedHealthReport.
+type FeedHealthReport struct {
+	// DegradedFeeds Sources of Tier-2 feeds currently failing (degraded, non-blocking).
+	DegradedFeeds *[]string          `json:"degraded_feeds,omitempty"`
+	Feeds         *[]FeedHealthEntry `json:"feeds,omitempty"`
+
+	// SignalsStale True when any Tier-1 (critical) feed is stale — the platform's signals are unreliable.
+	SignalsStale *bool `json:"signals_stale,omitempty"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	Detail *string `json:"detail,omitempty"`
@@ -89,6 +110,9 @@ type ServerInterface interface {
 	// List the releases affected by a Faultline (rollup projection).
 	// (GET /faultlines/{id}/releases)
 	GetFaultlineReleases(w http.ResponseWriter, r *http.Request, id string)
+	// Tier-aware feed-health snapshot (signals_stale flag + per-feed status).
+	// (GET /feeds)
+	GetFeedHealth(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -110,6 +134,12 @@ func (_ Unimplemented) GetFaultlineById(w http.ResponseWriter, r *http.Request, 
 // List the releases affected by a Faultline (rollup projection).
 // (GET /faultlines/{id}/releases)
 func (_ Unimplemented) GetFaultlineReleases(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Tier-aware feed-health snapshot (signals_stale flag + per-feed status).
+// (GET /feeds)
+func (_ Unimplemented) GetFeedHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -198,6 +228,20 @@ func (siw *ServerInterfaceWrapper) GetFaultlineReleases(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetFaultlineReleases(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFeedHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetFeedHealth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFeedHealth(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -329,6 +373,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/faultlines/{id}/releases", wrapper.GetFaultlineReleases)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/feeds", wrapper.GetFeedHealth)
+	})
 
 	return r
 }
@@ -338,24 +385,29 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"AAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

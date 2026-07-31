@@ -27,6 +27,7 @@ type InboundFaultlineEnriched struct {
 	Severity      string
 	KEV           bool
 	ExploitPublic bool
+	Score         int // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
 }
 
 // InboundFaultlineSuperseded is Knowledge's FaultlineSuperseded fact: the CVE was withdrawn
@@ -59,6 +60,7 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		FaultlineID:  e.FaultlineID,
 		KEV:          e.KEV,
 		HighSeverity: isHighSeverity(e.Severity),
+		Score:        e.Score,
 	})
 }
 

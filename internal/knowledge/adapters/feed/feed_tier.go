@@ -23,3 +23,8 @@ var tierBySource = map[string]domain.Tier{
 func (r *Registry) Tier(source string) domain.Tier {
 	return tierBySource[source]
 }
+
+// TierFor returns the intelligence tier for a feed source (domain.TierUnknown if the source
+// is not classified) without needing a Registry — the composition root uses it to tag each
+// scheduled feed's health observation with its tier (the B1 feed-health wiring).
+func TierFor(source string) domain.Tier { return tierBySource[source] }

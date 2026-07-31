@@ -96,7 +96,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -177,10 +177,11 @@ func TestSaveAndReload(t *testing.T) {
 	st := store.New(pool)
 
 	// Fold a proposal → creates the card.
-	id, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"))
+	f, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := f.ID()
 
 	got, found, err := st.GetByCVE(ctx, "CVE-2024-1")
 	if err != nil || !found {
@@ -473,10 +474,11 @@ func TestRecordMatch(t *testing.T) {
 	ctx := context.Background()
 	st := store.New(pool)
 
-	id, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-11"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-11"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := f.ID()
 
 	m := app.Match{
 		ReleaseID: "rel-1", FaultlineID: id, CVE: "CVE-2024-11",
@@ -538,10 +540,11 @@ func TestAffectedReleasesAndReconcile(t *testing.T) {
 	ctx := context.Background()
 	st := store.New(pool)
 
-	id, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-12"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-12"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := f.ID()
 	for _, rel := range []string{"rel-b", "rel-a"} { // inserted out of order
 		if _, err := st.RecordMatch(ctx, app.Match{
 			ReleaseID: rel, FaultlineID: id, CVE: "CVE-2024-12",

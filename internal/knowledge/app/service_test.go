@@ -87,6 +87,19 @@ func vulnFacts(t *testing.T, source string, sev value.Severity) domain.Proposal 
 	return p
 }
 
+// vulnFactsRanged builds an NVD vuln-facts Proposal carrying affected-range groups, so a
+// reconciled view exposes them to the correlation range gate (A1 / D3).
+func vulnFactsRanged(t *testing.T, source string, ranges ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "")
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, AffectedRanges: ranges})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 func noteTypes(notes []app.OutboxNote) []string {
 	out := make([]string, len(notes))
 	for i, n := range notes {
@@ -97,11 +110,11 @@ func noteTypes(notes []app.OutboxNote) []string {
 
 func TestFoldProposal_CreatesCard(t *testing.T) {
 	repo := newRepo()
-	id, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
-	if id == "" {
+	if f.ID() == "" {
 		t.Fatal("empty faultline id")
 	}
 	// A new card fires Created + Enriched (view changed from empty).
@@ -139,12 +152,12 @@ func TestFoldProposal_EnrichAndNoOp(t *testing.T) {
 func TestFoldProposal_RetryConverges(t *testing.T) {
 	repo := newRepo()
 	repo.conflictFor = 2 // first two saves conflict, third wins
-	id, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
-	if id == "" || repo.saveCalls != 3 {
-		t.Errorf("expected convergence after 3 saves, got id=%q saves=%d", id, repo.saveCalls)
+	if f.ID() == "" || repo.saveCalls != 3 {
+		t.Errorf("expected convergence after 3 saves, got id=%q saves=%d", f.ID(), repo.saveCalls)
 	}
 }
 

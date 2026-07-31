@@ -19,10 +19,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
 	"github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/adapters/wiring"
 	"github.com/themis-project/themis/internal/knowledge/app"
+	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
@@ -41,6 +43,7 @@ type config struct {
 	nvdEnabled      bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
 	nvdURL          string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
 	nvdAPIKey       string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
+	nvdDiscovery    bool          // THEMIS_NVD_DISCOVERY=1 — add NVD to correlation discovery: a per-component, CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a finding (A2). Default off (external NVD call per component at correlation time; an NVD API key is strongly recommended for large inventories — NVD throttles).
 	nvdPollInterval time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
@@ -52,6 +55,9 @@ type config struct {
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. When set, the relay publishes and the reader drains the Evidence stream; when empty, a logging publisher is used and the reader is disabled (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
+
+	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
+	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
 }
 
 func loadConfig() config {
@@ -67,6 +73,7 @@ func loadConfig() config {
 		nvdEnabled:      os.Getenv("THEMIS_NVD_ENABLED") == "1",
 		nvdURL:          os.Getenv("THEMIS_NVD_URL"),
 		nvdAPIKey:       os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdDiscovery:    os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
 		nvdPollInterval: parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
@@ -78,6 +85,9 @@ func loadConfig() config {
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
+
+		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
+		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
 	}
 }
 
@@ -118,10 +128,11 @@ func main() {
 	}
 
 	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
-		Enabled: cfg.nvdEnabled,
-		BaseURL: cfg.nvdURL,
-		APIKey:  cfg.nvdAPIKey,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		Enabled:   cfg.nvdEnabled,
+		BaseURL:   cfg.nvdURL,
+		APIKey:    cfg.nvdAPIKey,
+		Discovery: cfg.nvdDiscovery,
+		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}, wiring.SignalsConfig{
 		Enabled:      cfg.sigEnabled,
 		EPSSURL:      cfg.epssURL,
@@ -135,14 +146,14 @@ func main() {
 	// Scheduled NVD modified-since watch (D5): enriches already-carded CVEs with authoritative
 	// CVSS/severity. Off unless THEMIS_NVD_ENABLED=1.
 	if kn.Watch != nil {
-		go watchLoop(kn.Watch, cfg.nvdPollInterval, logger.Component("watch"))
+		go watchLoop(kn.Watch, kn.Health, cfg.nvdPollInterval, logger.Component("watch"))
 		logger.Info("nvd modified-since watch enabled", observability.String("interval", cfg.nvdPollInterval.String()))
 	}
 
 	// Scheduled exploit-signal enrichment (D5): folds EPSS/KEV/public-exploit onto already-carded
 	// CVEs. Off unless THEMIS_EPSSKEV_ENABLED=1.
 	if kn.Signals != nil {
-		go signalLoop(kn.Signals, cfg.sigPollInterval, logger.Component("signals"))
+		go signalLoop(kn.Signals, kn.Health, cfg.sigPollInterval, logger.Component("signals"))
 		logger.Info("exploit-signal enrichment enabled", observability.String("interval", cfg.sigPollInterval.String()))
 	}
 
@@ -159,7 +170,8 @@ func main() {
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
-	router.Mount("/api/v1", kn.Handler)
+	closeAuth := authedMount(ctx, router, cfg, logger, kn.Handler)
+	defer closeAuth()
 	if cfg.devPurge {
 		router.Delete("/dev/knowledge", func(w http.ResponseWriter, r *http.Request) {
 			if err := kn.Store.Purge(r.Context()); err != nil {
@@ -189,16 +201,33 @@ func relayLoop(relay *store.Relay, logger *observability.Logger) {
 	}
 }
 
+// recordFeed records a scheduled feed poll's outcome into feed-health (B1): a success when
+// pollErr is nil, otherwise a failure, tagged with the source's intelligence tier. A recording
+// error is logged, never fatal — health is observability, not the pipeline.
+func recordFeed(health *app.FeedHealthService, source string, pollErr error, logger *observability.Logger) {
+	var rerr error
+	if pollErr != nil {
+		rerr = health.RecordFailure(context.Background(), source, feed.TierFor(source))
+	} else {
+		rerr = health.RecordSuccess(context.Background(), source, feed.TierFor(source))
+	}
+	if rerr != nil {
+		logger.Error("record feed health failed", observability.String("source", source), observability.Err(rerr))
+	}
+}
+
 // watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
 // every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
 // failure is logged and retried next tick (the watermark only advances on a clean pass).
-func watchLoop(watch *app.WatchService, interval time.Duration, logger *observability.Logger) {
+func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
 	poll := func() {
 		n, err := watch.Poll(context.Background())
 		if err != nil {
 			logger.Error("nvd watch poll failed", observability.Err(err))
+			recordFeed(health, "nvd", err, logger)
 			return
 		}
+		recordFeed(health, "nvd", nil, logger)
 		if n > 0 {
 			logger.Info("nvd watch enriched cards", observability.Int("folded", n))
 		}
@@ -215,13 +244,15 @@ func watchLoop(watch *app.WatchService, interval time.Duration, logger *observab
 // signalLoop runs the scheduled exploit-signal enrichment: one sweep shortly after startup,
 // then every interval. It folds EPSS/KEV/public-exploit onto already-carded CVEs; a failure is
 // logged and retried next tick (the sweep is idempotent).
-func signalLoop(sig *app.SignalEnrichmentService, interval time.Duration, logger *observability.Logger) {
+func signalLoop(sig *app.SignalEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
 	sweep := func() {
 		n, err := sig.Enrich(context.Background())
 		if err != nil {
 			logger.Error("exploit-signal enrichment failed", observability.Err(err))
+			recordFeed(health, "epsskev", err, logger)
 			return
 		}
+		recordFeed(health, "epsskev", nil, logger)
 		if n > 0 {
 			logger.Info("exploit-signal enrichment folded", observability.Int("folded", n))
 		}
@@ -270,6 +301,35 @@ func openBus(ctx context.Context, cfg config, logger *observability.Logger) (*pg
 	}
 	logger.Info("event bus connected")
 	return busPool, busPool.Close
+}
+
+// authedMount mounts the API under the authenticated group when THEMIS_AUTH_DATABASE_DSN is
+// set (RequireAPIKey then the method-based RequireWriteScope — EDR-SECURITY-01 D1/D4);
+// otherwise it mounts open with a warning (single-context dev). THEMIS_AUTH_REQUIRED=1
+// hard-fails when the DSN is unset so a production node can never boot open. The returned
+// cleanup closes the auth pool (a no-op when auth is disabled).
+func authedMount(ctx context.Context, router chi.Router, cfg config, logger *observability.Logger, handler http.Handler) func() {
+	if cfg.authDSN == "" {
+		if cfg.authRequired {
+			logger.Error("startup aborted: THEMIS_AUTH_REQUIRED=1 but THEMIS_AUTH_DATABASE_DSN is empty")
+			os.Exit(1)
+		}
+		logger.Warn("AUTH DISABLED — set THEMIS_AUTH_DATABASE_DSN to require X-API-Key (dev only)")
+		router.Mount("/api/v1", handler)
+		return func() {}
+	}
+	authn, closeAuth, err := auth.Open(ctx, cfg.authDSN)
+	if err != nil {
+		logger.Error("auth store failed", observability.Err(err))
+		os.Exit(1)
+	}
+	router.Group(func(r chi.Router) {
+		r.Use(authn.RequireAPIKey)
+		r.Use(auth.RequireWriteScope)
+		r.Mount("/api/v1", handler)
+	})
+	logger.Info("API-key auth enabled (X-API-Key)")
+	return closeAuth
 }
 
 func applyMigrations(dsn, path string) error {

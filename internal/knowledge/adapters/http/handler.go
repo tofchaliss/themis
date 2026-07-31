@@ -14,13 +14,17 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
-// Handler implements gen.ServerInterface over the Knowledge read service.
+// Handler implements gen.ServerInterface over the Knowledge read service and the feed-health
+// service.
 type Handler struct {
-	read *app.ReadService
+	read   *app.ReadService
+	health *app.FeedHealthService
 }
 
 // NewHandler builds a Handler.
-func NewHandler(read *app.ReadService) *Handler { return &Handler{read: read} }
+func NewHandler(read *app.ReadService, health *app.FeedHealthService) *Handler {
+	return &Handler{read: read, health: health}
+}
 
 // Router returns an http.Handler serving the Knowledge routes; mount it under the
 // OpenAPI base path (/api/v1).
@@ -65,6 +69,33 @@ func (h *Handler) GetFaultlineReleases(w http.ResponseWriter, r *http.Request, i
 		rels = []string{}
 	}
 	writeJSON(w, http.StatusOK, rels)
+}
+
+// GetFeedHealth handles GET /feeds — the tier-aware feed-health snapshot (B1).
+func (h *Handler) GetFeedHealth(w http.ResponseWriter, r *http.Request) {
+	rep, err := h.health.Report(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot read feed health", err.Error())
+		return
+	}
+	entries := make([]gen.FeedHealthEntry, 0, len(rep.Feeds))
+	for _, e := range rep.Feeds {
+		last := e.LastSuccessAt
+		entries = append(entries, gen.FeedHealthEntry{
+			Source:              strptr(e.Source),
+			Tier:                intptr(e.Tier),
+			Status:              strptr(e.Status),
+			ConsecutiveFailures: intptr(e.ConsecutiveFailures),
+			LastSuccessAt:       last,
+		})
+	}
+	stale := rep.SignalsStale
+	degraded := rep.DegradedFeeds
+	writeJSON(w, http.StatusOK, gen.FeedHealthReport{
+		SignalsStale:  &stale,
+		Feeds:         &entries,
+		DegradedFeeds: &degraded,
+	})
 }
 
 // --- mappers + helpers -----------------------------------------------------

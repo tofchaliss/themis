@@ -27,6 +27,9 @@ type PostureEntry struct {
 	Stage       domain.Stage
 	Stance      domain.Stance
 	HasPosition bool
+	// BaseScore is Knowledge's CVE-intrinsic priority (0–100), materialized from the
+	// FaultlineEnriched event (C6). Governance scales it by the blast multiplier (C2).
+	BaseScore int
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads

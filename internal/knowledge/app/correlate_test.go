@@ -96,6 +96,34 @@ func TestCorrelate_MatchesAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestCorrelate_SkipsOutOfRange(t *testing.T) {
+	ctx := context.Background()
+	// The component's installed version (3.0) is provably OUTSIDE the reconciled affected range
+	// (<2.0), so correlation must NOT record a match — Knowledge applies its own backport-aware
+	// range knowledge (D3), catching what OSV's query-time filter would have admitted.
+	comp := app.InventoryComponent{PURL: "pkg:pypi/urllib3@3.0", Name: "urllib3", Version: "3.0", Ecosystem: "pypi"}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		comp.PURL: {{CVE: cve(t, "CVE-2024-9"), Proposal: vulnFactsRanged(t, "nvd", ">=0,<2.0")}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	s := correlation(t, inv, disc, matches, repo)
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 0 || matches.calls != 0 {
+		t.Errorf("out-of-range component recorded a match (n=%d, RecordMatch calls=%d), want none", n, matches.calls)
+	}
+	// The card is still folded — the CVE is real intelligence; only THIS release's occurrence is
+	// not affected. Correlation folds the Proposal before it gates the release-scoped match.
+	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-9"); !found {
+		t.Error("expected the folded faultline to exist even though the component is out of range")
+	}
+}
+
 func TestCorrelate_Errors(t *testing.T) {
 	ctx := context.Background()
 	proposals := map[string][]app.ProposalFor{"p": {{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "nvd", value.SeverityHigh)}}}

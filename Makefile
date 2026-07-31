@@ -168,10 +168,13 @@ generate-api-intelligence:
 e2e-evidence:
 	$(GO) test -tags=e2e -count=1 -v ./tests/e2e/...
 
-# In-process composed pipeline e2e (M5 EB-08): all four contexts + the `bus` database on one
-# embedded Postgres, driven through the real event bus — SBOM in one end, a correlated
-# Faultline out the other. A developer convenience, not a deployment model; not part of
-# `make check`.
+# Deterministic no-AI SBOM→VEX gate (M5 EB-08): registers a release through the real Registry,
+# uploads an SBOM to Evidence, and drives all four contexts + the `bus` database on one embedded
+# Postgres through the real event bus — correlate → open a Finding → govern an "affected"
+# Position → publish OpenVEX — asserting the produced artifact names the CVE. Runs NO model (AI
+# is off by construction: a nil advisor). Self-provisions Postgres (skips if unavailable). A
+# deployment-faithful integration gate run on every PR (pr.yml) and post-merge (main.yml); it is
+# not part of `make check` (which self-provisions its own Postgres only inside coverage).
 e2e-pipeline:
 	$(GO) test -tags=e2e -count=1 -v ./tests/pipeline/...
 

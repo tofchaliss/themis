@@ -38,7 +38,6 @@ import (
 	commwiring "github.com/themis-project/themis/internal/communication/adapters/wiring"
 
 	evstore "github.com/themis-project/themis/internal/evidence/adapters/store"
-	evsubjectref "github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	evwiring "github.com/themis-project/themis/internal/evidence/adapters/wiring"
 
 	govinbound "github.com/themis-project/themis/internal/governance/adapters/inbound"
@@ -48,11 +47,13 @@ import (
 	kninbound "github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	knstore "github.com/themis-project/themis/internal/knowledge/adapters/store"
 	knwiring "github.com/themis-project/themis/internal/knowledge/adapters/wiring"
+
+	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
+	registrywiring "github.com/themis-project/themis/internal/registry/adapters/wiring"
 )
 
 const (
 	pgPort    = 15588
-	releaseID = "rel-pipeline"
 	targetCVE = "CVE-2024-1000"
 
 	// A minimal CycloneDX SBOM with one PyPI component the fake OSV maps to a CVE.
@@ -68,6 +69,7 @@ const (
 // pipeline is the composed runner: the three public HTTP surfaces plus the relay/reader drain
 // points the pump advances.
 type pipeline struct {
+	registryURL      string
 	evidenceURL      string
 	governanceURL    string
 	communicationURL string
@@ -112,8 +114,14 @@ func (p *pipeline) pump(t *testing.T, n int) {
 func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 	p := newPipeline(t)
 
-	// SBOM in.
-	uploadSBOM(t, p.evidenceURL)
+	// Register the release through the real Registry (Product → Project → Release), exactly as a
+	// greenfield deployment does — Evidence validates the SBOM's subject_release_id against these
+	// registered ids (a registry-backed SubjectRef), so an unregistered release would be rejected.
+	releaseID := registerRelease(t, p.registryURL)
+	t.Logf("registered release: %s", releaseID)
+
+	// SBOM in (its subject is the just-registered release).
+	uploadSBOM(t, p.evidenceURL, releaseID)
 
 	// Evidence → Knowledge (correlate) → Governance (open Finding).
 	p.pump(t, 3)
@@ -183,11 +191,31 @@ func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 
 // --- HTTP helpers --------------------------------------------------------------------------
 
-func uploadSBOM(t *testing.T, evidenceURL string) {
+func uploadSBOM(t *testing.T, evidenceURL, releaseID string) {
 	t.Helper()
 	postJSON(t, evidenceURL+"/api/v1/evidence", map[string]any{
 		"kind": "sbom", "format": "cyclonedx", "subject_release_id": releaseID, "document": sbomDoc,
 	}, http.StatusCreated, nil)
+}
+
+// registerRelease drives the real Registry HTTP API to create a Product → Project → Release chain
+// and returns the generated release id — the deployment-faithful way to obtain a subject the
+// Evidence context will accept (vs a stubbed SubjectRef).
+func registerRelease(t *testing.T, registryURL string) string {
+	t.Helper()
+	var product, project, release struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, registryURL+"/api/v1/products",
+		map[string]any{"name": "acme"}, http.StatusCreated, &product)
+	postJSON(t, registryURL+"/api/v1/projects",
+		map[string]any{"product_id": product.ID, "name": "api"}, http.StatusCreated, &project)
+	postJSON(t, registryURL+"/api/v1/releases",
+		map[string]any{"project_id": project.ID, "version": "1.0.0"}, http.StatusCreated, &release)
+	if release.ID == "" {
+		t.Fatal("registry returned an empty release id")
+	}
+	return release.ID
 }
 
 func getJSON(t *testing.T, url string, out any) {
@@ -270,10 +298,19 @@ func newPipeline(t *testing.T) *pipeline {
 	}))
 	t.Cleanup(osv.Close)
 
-	// Evidence: producer of EvidenceRegistered. SubjectRef is stubbed (registry-free dev).
+	// Registry: co-locates its identity tables in the evidence DB (as in production — it cannot
+	// self-migrate there, so load the idempotent schema directly). It serves the Product →
+	// Project → Release API the test registers against.
 	evPool := mustPool(t, dsnFor("evidence"))
 	t.Cleanup(evPool.Close)
-	evHandler, _ := evwiring.EvidenceAPI(evPool, evsubjectref.NewStub(releaseID))
+	loadSQL(t, evPool, "../../internal/registry/adapters/store/migrations/000001_registry.up.sql")
+	regHandler, _ := registrywiring.RegistryAPI(evPool)
+	registrySrv := httptest.NewServer(mount(regHandler))
+	t.Cleanup(registrySrv.Close)
+
+	// Evidence: producer of EvidenceRegistered. SubjectRef is registry-backed — it validates a
+	// release id against the registry tables in the shared evidence DB (registry.ReleaseExists).
+	evHandler, _ := evwiring.EvidenceAPI(evPool, registrySubjectRef{store: registrystore.New(evPool)})
 	evidenceSrv := httptest.NewServer(mount(evHandler))
 	t.Cleanup(evidenceSrv.Close)
 	evRelay := evstore.NewRelay(evPool, eventbus.NewPublisher(busPool), 100)
@@ -303,6 +340,7 @@ func newPipeline(t *testing.T) *pipeline {
 	commReader := comminbound.Subscription.NewReader(busPool, log, commstore.NewInboxConsumer(commPool, comm.Consumer))
 
 	return &pipeline{
+		registryURL:      registrySrv.URL,
 		evidenceURL:      evidenceSrv.URL,
 		governanceURL:    governanceSrv.URL,
 		communicationURL: communicationSrv.URL,
@@ -346,4 +384,26 @@ func migrateDB(t *testing.T, db, path string) {
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		t.Fatalf("migrate %s: %v", db, err)
 	}
+}
+
+// loadSQL executes a .sql file against the pool — used to load the registry schema into the
+// evidence DB (the registry co-locates there and cannot self-migrate; the schema is idempotent).
+func loadSQL(t *testing.T, pool *pgxpool.Pool, path string) {
+	t.Helper()
+	sql, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+}
+
+// registrySubjectRef backs Evidence's SubjectRef with the registry's ReleaseExists read query
+// (mirrors cmd/evidence): in-process it reads the registry tables in the shared evidence DB, so
+// Evidence accepts exactly the releases the test registered.
+type registrySubjectRef struct{ store *registrystore.Store }
+
+func (v registrySubjectRef) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
+	return v.store.ReleaseExists(ctx, releaseID)
 }

@@ -238,9 +238,17 @@ curl $J localhost:8084/api/v1/publications \
 curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 ```
 
-> **Quick smoke without the Registry.** To skip identity registration, start Evidence with
-> `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload with
-> `subject_release_id:"rel-demo"`. This is what the `make e2e-pipeline` black-box proof uses.
+> **No AI required — this is the whole pipeline.** Every step above runs with the AI plane OFF.
+> The optional `recommend` call (and step 6) is the *only* AI touchpoint; the Position is decided
+> by the human `proposals` + `accept` calls, so you can go all the way from a registered release to
+> a published OpenVEX artifact without ever starting the Intelligence Gateway. `make e2e-pipeline`
+> runs exactly this **register → upload SBOM → correlate → Finding → Position → OpenVEX** flow
+> deterministically (no model, self-provisioned Postgres) and asserts the artifact names the CVE —
+> it is the CI gate that guards this flow on every PR.
+>
+> **Quick smoke without the Registry.** For a throwaway dev run you can skip identity registration:
+> start Evidence with `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload
+> with `subject_release_id:"rel-demo"`.
 
 ### 6. Intelligence Gateway (optional AI — Ollama)
 

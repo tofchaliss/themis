@@ -82,6 +82,33 @@ go test -tags=integration -run TestFaultlineLifecycleDemo -v ./internal/knowledg
 hand-edited): `make generate-api-<context>` (e.g. `generate-api-knowledge`). Specs live in
 `api/<context>.openapi.yaml`; the monolith's is `api/openapi.yaml`.
 
+## Running the greenfield stack
+
+The end-to-end operator runbook is [`INSTALLATION.md`](INSTALLATION.md) Part A (install Postgres → create the
+databases → `go build -o bin/ ./cmd/...` → export env → run each node → drive an SBOM).
+`deploy/node.env.example` is the self-documented env template (CONVENTIONS.md R2);
+`deploy/systemd/install-systemd.sh` generates `/etc/themis/<svc>.env` + a templated `themis@.service` unit for
+all six nodes.
+
+- **Topology: one Postgres server, five databases** — `evidence` (the `registry` schema **co-locates** here),
+  `knowledge`, `governance`, `communication`, and `bus`. Ports: Evidence `:8081`, Registry `:8082`,
+  Governance `:8083`, Communication `:8084`, Intelligence `:8086`, and **Knowledge `:8085`** — its code default
+  is `:8082`, which collides with Registry, so you **must** set `THEMIS_KNOWLEDGE_ADDR=:8085` (the port every
+  other node's `THEMIS_KNOWLEDGE_URL` already defaults to).
+- **`THEMIS_BUS_DATABASE_DSN` is the cross-context switch.** Set it on every node ⇒ the relay publishes and each
+  reader drains the `bus` DB, so events actually cross contexts. Leave it unset ⇒ a log-only publisher and
+  disabled readers (single-context dev; nothing propagates).
+- **Registry does not self-migrate** into the shared `evidence` DB — load its schema with
+  `psql -f internal/registry/adapters/store/migrations/000001_registry.up.sql` and run it with a **plain** DSN
+  (an `x-migrations-table` DSN param breaks the pgx pool at runtime).
+- **Drive an SBOM:** `scripts/gf-upload-sbom.sh` registers Product→Project→Release and uploads (auto-detects
+  CycloneDX/SPDX; streams large files via `curl --data-binary @-`; `-r` reuses a release). Evidence is
+  content-addressed, so re-uploading byte-identical content **dedups** — a re-run needs changed bytes.
+- **Opt-in enrichment** (off by default — no silent outbound calls; all **relevance-bounded** per
+  EDR-KNOWLEDGE-01 D5, i.e. feeds enrich *existing* Faultlines and never mirror the full feed):
+  `THEMIS_NVD_ENABLED=1` (authoritative CVSS/severity via the modified-since watch) and
+  `THEMIS_EPSSKEV_ENABLED=1` (EPSS/KEV/ExploitDB signal sweep). OSV distro + language correlation is always on.
+
 ## Architecture
 
 ### Clean Architecture, context-first (greenfield)
@@ -168,5 +195,47 @@ OpenVEX / CSAF out.
 - `scripts/release-smoke-test.sh` — one-command release test (build → fresh DB → migrate → run → register →
   upload the SBOM under `scripts/` → verify components + enrichment). Wrapped by the `/themis-release-test`
   skill.
+- `scripts/gf-upload-sbom.sh` — the **greenfield** register-and-upload driver (Product→Project→Release + SBOM);
+  see "Running the greenfield stack" above. `deploy/systemd/` holds the systemd unit template + generator.
 - Defects and go-forward gaps are tracked in [`docs/BACKLOG.md`](docs/BACKLOG.md) — **Part 1** is the active
   greenfield tracker (open this first); **Part 2** is the frozen legacy-PoC history (e.g. D-NVD-2, D-FEED-2).
+- Monolith→greenfield capability parity (what has and hasn't carried over) is tracked in
+  [`docs/engineering/PARITY-GAP.md`](docs/engineering/PARITY-GAP.md); resume any session at
+  [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
+
+## Permission and related
+
+### Allowed without asking
+
+- Formatting
+- Lint fixes
+- Tests
+- Bug fixes
+- Small refactoring
+- Documentation
+- Comments
+
+### Must ask
+
+- New package
+- New dependency
+- New service
+- New module
+- New directory structure
+- New architectural pattern
+- API change
+- Domain model change
+- Build changes
+- CI changes
+- Security model changes
+
+### Before asking
+
+Provide:
+
+1. Why the change is needed.
+2. Alternatives considered.
+3. Impact.
+4. Files affected.
+
+Wait for approval.

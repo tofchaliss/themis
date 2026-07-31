@@ -94,12 +94,23 @@ func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceI
 			return newMatches, err
 		}
 		for _, d := range discovered {
-			faultlineID, err := s.fold.FoldProposal(ctx, d.CVE, d.Proposal)
+			f, err := s.fold.FoldProposal(ctx, d.CVE, d.Proposal)
 			if err != nil {
 				return newMatches, err
 			}
+			// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
+			// record a match unless the component's version is provably OUT of the reconciled
+			// range. This catches the case discovery cannot — e.g. a distro backport whose
+			// reconciled range excludes a version the feed's query-time filter admitted. An
+			// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
+			// the match: a parse gap must never drop a real vulnerability. This mirrors the
+			// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
+			affected := value.AffectedRange{Ecosystem: comp.Ecosystem, Groups: f.View().AffectedRanges}
+			if affected.Applicability(comp.Version) == value.RangeOutOfRange {
+				continue
+			}
 			created, err := s.matches.RecordMatch(ctx, Match{
-				ReleaseID: releaseID, FaultlineID: faultlineID, CVE: d.CVE.String(),
+				ReleaseID: releaseID, FaultlineID: f.ID(), CVE: d.CVE.String(),
 				Component: comp, OccurredAt: s.clock.Now(),
 			})
 			if err != nil {

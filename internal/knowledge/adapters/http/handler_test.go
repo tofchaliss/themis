@@ -68,9 +68,31 @@ func sampleCard(t *testing.T) domain.Faultline {
 
 func server(t *testing.T, repo app.Repository, proj app.ProjectionReader) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(knhttp.NewHandler(app.NewReadService(repo, proj)).Router())
+	return feedServer(t, repo, proj, fakeFeedStore{})
+}
+
+// feedServer serves the full handler backed by a specific feed-health store (for GET /feeds).
+func feedServer(t *testing.T, repo app.Repository, proj app.ProjectionReader, feeds app.FeedHealthStore) *httptest.Server {
+	t.Helper()
+	health := app.NewFeedHealthService(feeds, feedClock{})
+	srv := httptest.NewServer(knhttp.NewHandler(app.NewReadService(repo, proj), health).Router())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+type feedClock struct{}
+
+func (feedClock) Now() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+type fakeFeedStore struct {
+	rows []app.FeedHealthRow
+	err  error
+}
+
+func (fakeFeedStore) RecordFeedSuccess(context.Context, string, int, time.Time) error { return nil }
+func (fakeFeedStore) RecordFeedFailure(context.Context, string, int, time.Time) error { return nil }
+func (f fakeFeedStore) FeedHealthRows(context.Context) ([]app.FeedHealthRow, error) {
+	return f.rows, f.err
 }
 
 func get(t *testing.T, url string) (int, []byte) {
@@ -150,5 +172,47 @@ func TestReadErrors(t *testing.T) {
 		if status, _ := get(t, srv.URL+path); status != http.StatusInternalServerError {
 			t.Errorf("%s status = %d, want 500", path, status)
 		}
+	}
+}
+
+func TestGetFeedHealth(t *testing.T) {
+	recent := feedClock{}.Now().Add(-1 * time.Hour) // within every tier threshold
+	feeds := fakeFeedStore{rows: []app.FeedHealthRow{
+		{Source: "nvd", Tier: 1, LastSuccessAt: &recent, ConsecutiveFailures: 0}, // healthy
+		{Source: "osv", Tier: 2, LastSuccessAt: &recent, ConsecutiveFailures: 3}, // Tier-2 failing → degraded
+	}}
+	srv := feedServer(t, fakeRepo{}, fakeProjection{}, feeds)
+
+	status, body := get(t, srv.URL+"/feeds")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	var rep struct {
+		SignalsStale  bool     `json:"signals_stale"`
+		DegradedFeeds []string `json:"degraded_feeds"`
+		Feeds         []struct {
+			Source string `json:"source"`
+			Status string `json:"status"`
+			Tier   int    `json:"tier"`
+		} `json:"feeds"`
+	}
+	if err := json.Unmarshal(body, &rep); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, body)
+	}
+	if rep.SignalsStale {
+		t.Errorf("signals_stale = true, want false (no Tier-1 stale)")
+	}
+	if len(rep.Feeds) != 2 {
+		t.Fatalf("feeds = %d, want 2", len(rep.Feeds))
+	}
+	if len(rep.DegradedFeeds) != 1 || rep.DegradedFeeds[0] != "osv" {
+		t.Errorf("degraded_feeds = %v, want [osv]", rep.DegradedFeeds)
+	}
+}
+
+func TestGetFeedHealthError(t *testing.T) {
+	srv := feedServer(t, fakeRepo{}, fakeProjection{}, fakeFeedStore{err: errors.New("db down")})
+	if status, _ := get(t, srv.URL+"/feeds"); status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", status)
 	}
 }
