@@ -421,10 +421,16 @@ No amendment to the decisions above; these record how two under-realizations wer
   short-circuits to not-affected only on `RangeOutOfRange`. Scanner-report ingestion stays ungated (the
   scanner is itself the version-match authority). This is the case discovery cannot catch: a distro backport
   whose reconciled range excludes a version the feed's query-time filter admitted.
-- **A2 — NVD as a bounded discovery source (realizes D5 path 2) — PENDING.** D5 already authorizes NVD to
-  *create* cards for changed CVEs checked against known **components** ("creating cards for new hits"). The
-  current `RelevanceFilteredSource` instead bounds by known **CVEs** (enrich-only) — stricter than D5 and
-  keyed wrong, so a CVE only NVD's CPE data covers yields no finding. A2 will add NVD to the discovery
-  fan-out, **bounded to ingested components** to honor D5's hard invariant ("never mirror the whole feed
-  universe") — which needs a component-keyed relevance port (today's `KnownCVEs` is CVE-keyed). Reconciliation
-  needs no change (precedence `nvd>osv` and the range union already absorb NVD-discovered facts).
+- **A2 — NVD as a bounded discovery source (realizes D5 path 2) — SHIPPED (opt-in).** Previously a CVE only
+  NVD's CPE data covers yielded no finding: OSV discovery returned nothing for it and the watch's
+  `RelevanceFilteredSource` dropped it (enrich-only, CVE-keyed — stricter than D5, which bounds by known
+  *components*). A2 adds `NVDClient.VulnsForPackage` to the correlation discovery fan-out (via a best-effort
+  `feed.MultiSource` beside OSV), gated behind `THEMIS_NVD_DISCOVERY`. Because NVD has no query-by-package and
+  a naive pull would be the "full feed mirror" D5 forbids, it is **triple-gated**: (1) a *bounded* per-component
+  keyword-exact query (capped at `nvdMaxPages`); (2) a **CPE-product gate** — only CVEs whose CPE config names
+  a normalized-equal product survive (a keyword mention ≠ an occurrence); (3) A1's reconciled version-range
+  gate. Exact product match keeps false positives low (a miss is safe — OSV/watch still cover it); anything
+  slipping all three surfaces as a *human-governed* Finding, never an auto-decision. Reconciliation needed no
+  change (precedence `nvd>osv` + the range union already absorb NVD-discovered facts). **Known limitation:**
+  one NVD call per component ⇒ an API key is strongly recommended for large inventories (NVD throttles);
+  request caching is a tracked follow-up.
