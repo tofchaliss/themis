@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
 	"github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/adapters/wiring"
@@ -135,14 +136,14 @@ func main() {
 	// Scheduled NVD modified-since watch (D5): enriches already-carded CVEs with authoritative
 	// CVSS/severity. Off unless THEMIS_NVD_ENABLED=1.
 	if kn.Watch != nil {
-		go watchLoop(kn.Watch, cfg.nvdPollInterval, logger.Component("watch"))
+		go watchLoop(kn.Watch, kn.Health, cfg.nvdPollInterval, logger.Component("watch"))
 		logger.Info("nvd modified-since watch enabled", observability.String("interval", cfg.nvdPollInterval.String()))
 	}
 
 	// Scheduled exploit-signal enrichment (D5): folds EPSS/KEV/public-exploit onto already-carded
 	// CVEs. Off unless THEMIS_EPSSKEV_ENABLED=1.
 	if kn.Signals != nil {
-		go signalLoop(kn.Signals, cfg.sigPollInterval, logger.Component("signals"))
+		go signalLoop(kn.Signals, kn.Health, cfg.sigPollInterval, logger.Component("signals"))
 		logger.Info("exploit-signal enrichment enabled", observability.String("interval", cfg.sigPollInterval.String()))
 	}
 
@@ -189,16 +190,33 @@ func relayLoop(relay *store.Relay, logger *observability.Logger) {
 	}
 }
 
+// recordFeed records a scheduled feed poll's outcome into feed-health (B1): a success when
+// pollErr is nil, otherwise a failure, tagged with the source's intelligence tier. A recording
+// error is logged, never fatal — health is observability, not the pipeline.
+func recordFeed(health *app.FeedHealthService, source string, pollErr error, logger *observability.Logger) {
+	var rerr error
+	if pollErr != nil {
+		rerr = health.RecordFailure(context.Background(), source, feed.TierFor(source))
+	} else {
+		rerr = health.RecordSuccess(context.Background(), source, feed.TierFor(source))
+	}
+	if rerr != nil {
+		logger.Error("record feed health failed", observability.String("source", source), observability.Err(rerr))
+	}
+}
+
 // watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
 // every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
 // failure is logged and retried next tick (the watermark only advances on a clean pass).
-func watchLoop(watch *app.WatchService, interval time.Duration, logger *observability.Logger) {
+func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
 	poll := func() {
 		n, err := watch.Poll(context.Background())
 		if err != nil {
 			logger.Error("nvd watch poll failed", observability.Err(err))
+			recordFeed(health, "nvd", err, logger)
 			return
 		}
+		recordFeed(health, "nvd", nil, logger)
 		if n > 0 {
 			logger.Info("nvd watch enriched cards", observability.Int("folded", n))
 		}
@@ -215,13 +233,15 @@ func watchLoop(watch *app.WatchService, interval time.Duration, logger *observab
 // signalLoop runs the scheduled exploit-signal enrichment: one sweep shortly after startup,
 // then every interval. It folds EPSS/KEV/public-exploit onto already-carded CVEs; a failure is
 // logged and retried next tick (the sweep is idempotent).
-func signalLoop(sig *app.SignalEnrichmentService, interval time.Duration, logger *observability.Logger) {
+func signalLoop(sig *app.SignalEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
 	sweep := func() {
 		n, err := sig.Enrich(context.Background())
 		if err != nil {
 			logger.Error("exploit-signal enrichment failed", observability.Err(err))
+			recordFeed(health, "epsskev", err, logger)
 			return
 		}
+		recordFeed(health, "epsskev", nil, logger)
 		if n > 0 {
 			logger.Info("exploit-signal enrichment folded", observability.Int("folded", n))
 		}

@@ -40,6 +40,7 @@ type Knowledge struct {
 	Relay    *store.Relay
 	Watch    *app.WatchService            // nil when the NVD watch is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
+	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 }
 
 // NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
@@ -76,11 +77,13 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	inv := evidence.NewClient(evidenceBaseURL, nil)
 	disc := feed.NewOSVClient(osvBaseURL, nil)
 	corr := app.NewCorrelationService(inv, disc, fold, st, sysClock{})
+	health := app.NewFeedHealthService(st, sysClock{})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read).Router(),
+		Handler:  knhttp.NewHandler(read, health).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr)),
 		Relay:    store.NewRelay(pool, pub, 100),
+		Health:   health,
 	}
 	if nvd.Enabled {
 		changed := feed.NewRelevanceFilteredSource(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
@@ -99,5 +102,6 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 func KnowledgeReadAPI(pool *pgxpool.Pool) (http.Handler, *store.Store) {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
-	return knhttp.NewHandler(read).Router(), st
+	health := app.NewFeedHealthService(st, sysClock{})
+	return knhttp.NewHandler(read, health).Router(), st
 }
