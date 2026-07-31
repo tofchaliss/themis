@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-07-30 · **Read this first when resuming.**
+**Updated:** 2026-07-31 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -52,6 +52,33 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 >   stub → SMTP/Teams), the org blast-radius graph (Product→…→Customer + the score multiplier), and API auth
 >   (no auth on any greenfield endpoint). Plus tracked follow-ups: NVD by-CVE backfill, per-Finding blast
 >   multiplier, distro ubuntu/suse mapping, and the per-record ACL tidy-up (BACKLOG §C).
+
+> **Update (2026-07-31): full parity audit + six clusters advanced (9 PRs, all off `main`, all CI-green,
+> awaiting merge).** A 6-reader two-tree code audit rewrote [`PARITY-GAP.md`](PARITY-GAP.md) into the complete
+> gap inventory (stable IDs A1–F8) and corrected the "correlation CLOSED" claim. Design-first throughout —
+> **four new decision records**: `EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01` (+ realization notes on
+> `EDR-KNOWLEDGE-01`). Landed as PRs:
+> - **#65 — F1/F2/F3 auth.** `internal/platform/auth` (the 3rd shared platform package): `X-API-Key` bcrypt
+>   store + method-based scopes, HMAC webhook seam, `cmd/authadmin`; wired across all six services behind
+>   `THEMIS_AUTH_DATABASE_DSN` (opt-in; `THEMIS_AUTH_REQUIRED=1` prod guard). Closed the "zero inbound auth" gap.
+> - **#66 — B1 feed-health.** Wired the unwired `feedtier.go` policy end-to-end: `feed_health` store, per-poll
+>   recording, `GET /feeds` (`signals_stale` + `degraded_feeds`).
+> - **#67 — no-AI SBOM→VEX CI gate.** `tests/pipeline` now registers a real release via Registry and runs on
+>   every PR (`pr.yml`); the runbook's no-AI path made explicit.
+> - **#68 → #69 (stacked) — A1 + A2 correlation depth.** A1 wires the reconciled range gate into correlation
+>   (realizes D3 — was trusting OSV's server filter); A2 makes NVD a bounded, opt-in discovery source
+>   (keyword + CPE-product + version triple-gated). **Merge #68 before #69.**
+> - **#71 — C1/C2/C6 estate & blast-radius.** Registry estate graph (Product→Microservice→Deployment→Customer
+>   + `GET /releases/{id}/blast-radius`), the base score threaded to Governance (C6), and the blast multiplier
+>   applied to Finding priority (`base × 1.0–2.0×`, fail-safe 1.0×). A vuln in a 40-customer service now
+>   outranks it in a zero-customer dev tool.
+> - **#73 — vendor-VEX ingest (EDR-VEX-01 Phase 1).** Uploaded OpenVEX → `applicability` Proposals on the card
+>   (Evidence serves raw bytes; Knowledge parses; the card carries, never suppresses). **Phase 2** (Governance
+>   suppression overlay — the visible payoff) and **Phase 3** (Red Hat CSAF / generic crawler feeds, B3/B4)
+>   remain.
+> - **Net:** the intelligence/enrichment, correlation-depth, risk-fidelity, and edge-security halves of parity
+>   are essentially closed; the longer tail (A3–A6, B2/B5/B6, C3–C5, D2–D7 notifications, E1–E11 input-integrity,
+>   F4–F8 metrics/traces/probes) is fully enumerated in PARITY-GAP.md with priorities.
 
 ---
 
