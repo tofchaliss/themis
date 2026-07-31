@@ -129,14 +129,15 @@ func TestCoordinator_OnEvidenceRegistered(t *testing.T) {
 	inv := fakeInventory{inv: inventoryOf("p")}
 	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{"p": {{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "nvd", value.SeverityHigh)}}}}
 	matches := newMatches()
-	coord := app.NewCoordinator(correlation(t, inv, disc, matches, newRepo()))
+	coord := app.NewCoordinator(correlation(t, inv, disc, matches, newRepo()), nil)
 
-	// Non-SBOM evidence is ignored.
-	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev", ReleaseID: "rel", Kind: "vex"}); err != nil {
-		t.Fatalf("vex: %v", err)
+	// A scanner-report (neither SBOM nor VEX) is ignored — it does not correlate. (VEX now has
+	// its own apply path — see TestCoordinator_DispatchesByKind.)
+	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev", ReleaseID: "rel", Kind: "scanner-report"}); err != nil {
+		t.Fatalf("scanner-report: %v", err)
 	}
 	if matches.calls != 0 {
-		t.Error("non-SBOM should not correlate")
+		t.Error("a non-SBOM/non-VEX kind should not correlate")
 	}
 	// SBOM evidence triggers correlation.
 	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev", ReleaseID: "rel", Kind: "sbom"}); err != nil {

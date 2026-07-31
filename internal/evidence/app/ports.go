@@ -47,6 +47,9 @@ type Repository interface {
 	GetByID(ctx context.Context, id domain.EvidenceID) (domain.Evidence, error)
 	GetInventory(ctx context.Context, id domain.EvidenceID) (domain.Inventory, error)
 	ListByRelease(ctx context.Context, releaseID string) ([]EvidenceSummary, error)
+	// GetRawDocument returns a document's kind + raw stored bytes (the read path Knowledge
+	// uses to parse an uploaded VEX — EDR-VEX-01 D1; Evidence serves, never parses).
+	GetRawDocument(ctx context.Context, id domain.EvidenceID) (kind string, doc []byte, err error)
 }
 
 // EvidenceSummary is a list-view row for evidence filed against a release.

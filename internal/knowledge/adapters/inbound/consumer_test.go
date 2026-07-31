@@ -27,7 +27,7 @@ func (fakeClock) Now() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 func newConsumer(inv app.InventoryReader) *inbound.Consumer {
 	// Empty inventory means discovery/fold/matches are never reached, so nil is safe there.
 	corr := app.NewCorrelationService(inv, nil, nil, nil, fakeClock{})
-	return inbound.NewConsumer(app.NewCoordinator(corr))
+	return inbound.NewConsumer(app.NewCoordinator(corr, nil))
 }
 
 func mkEnv(typ string, payload string) event.Envelope {
@@ -49,12 +49,14 @@ func TestConsumer_EvidenceRegistered_SBOM(t *testing.T) {
 func TestConsumer_NonSBOMIgnored(t *testing.T) {
 	inv := &fakeInv{}
 	c := newConsumer(inv)
-	env := mkEnv("EvidenceRegistered", `{"evidence_id":"ev-9","kind":"vex","subject_release_id":"rel-9"}`)
+	// A scanner-report is neither SBOM nor VEX — it does not correlate. (VEX now has its own
+	// apply path, exercised at the app layer.)
+	env := mkEnv("EvidenceRegistered", `{"evidence_id":"ev-9","kind":"scanner-report","subject_release_id":"rel-9"}`)
 	if err := c.Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if inv.gotEvidenceID != "" {
-		t.Errorf("non-SBOM evidence triggered correlation (%q)", inv.gotEvidenceID)
+		t.Errorf("a non-SBOM/non-VEX kind triggered correlation (%q)", inv.gotEvidenceID)
 	}
 }
 

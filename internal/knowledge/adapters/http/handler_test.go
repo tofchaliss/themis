@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	knhttp "github.com/themis-project/themis/internal/knowledge/adapters/http"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
-	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 type fakeRepo struct {
@@ -95,7 +95,7 @@ func TestGetFaultlineById(t *testing.T) {
 	var v struct {
 		Cve, Stage string
 		View       struct {
-			Severity string  `json:"severity"`
+			Severity  string  `json:"severity"`
 			CvssScore float32 `json:"cvss_score"`
 		}
 		Proposals []map[string]any

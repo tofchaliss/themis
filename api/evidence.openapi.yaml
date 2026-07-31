@@ -93,6 +93,25 @@ paths:
                 $ref: '#/components/schemas/Inventory'
         '404':
           $ref: '#/components/responses/Problem'
+  /evidence/{id}/document:
+    get:
+      operationId: getEvidenceDocument
+      summary: Get the raw stored document (bytes as UTF-8 text) + kind by evidence ID. Used by Knowledge to parse an uploaded VEX (Evidence serves the bytes, never parses them).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '404':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -165,6 +184,16 @@ components:
         filed_at:
           type: string
           format: date-time
+    Document:
+      type: object
+      required: [kind, document]
+      properties:
+        kind:
+          type: string
+          description: The evidence kind (sbom | vex | scanner-report).
+        document:
+          type: string
+          description: The raw stored document bytes as UTF-8 text.
     Inventory:
       type: object
       properties:

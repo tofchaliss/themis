@@ -67,3 +67,31 @@ func (c *Client) GetInventory(ctx context.Context, evidenceID string) (app.Inven
 	}
 	return inv, nil
 }
+
+type documentResponse struct {
+	Kind     string `json:"kind"`
+	Document string `json:"document"`
+}
+
+// GetDocument fetches an evidence document's raw bytes + kind via Evidence's read API — the
+// read path Knowledge uses to parse an uploaded VEX (EDR-VEX-01 D2/D6).
+func (c *Client) GetDocument(ctx context.Context, evidenceID string) ([]byte, string, error) {
+	url := c.baseURL + "/api/v1/evidence/" + evidenceID + "/document"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("evidence: document %s: status %d", evidenceID, resp.StatusCode)
+	}
+	var body documentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, "", err
+	}
+	return []byte(body.Document), body.Kind, nil
+}

@@ -20,15 +20,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Applicability defines model for Applicability.
+type Applicability struct {
+	Justification *string `json:"justification,omitempty"`
+	Package       *string `json:"package,omitempty"`
+
+	// Status e.g. affected | not_affected | fixed | under_investigation.
+	Status *string `json:"status,omitempty"`
+}
+
 // EnterpriseView defines model for EnterpriseView.
 type EnterpriseView struct {
 	AffectedRanges *[]string `json:"affected_ranges,omitempty"`
-	CvssScore      *float32  `json:"cvss_score,omitempty"`
-	CvssVector     *string   `json:"cvss_vector,omitempty"`
-	Epss           *float32  `json:"epss,omitempty"`
-	ExploitPublic  *bool     `json:"exploit_public,omitempty"`
-	FixedVersions  *[]string `json:"fixed_versions,omitempty"`
-	Kev            *bool     `json:"kev,omitempty"`
+
+	// Applicabilities Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).
+	Applicabilities *[]Applicability `json:"applicabilities,omitempty"`
+	CvssScore       *float32         `json:"cvss_score,omitempty"`
+	CvssVector      *string          `json:"cvss_vector,omitempty"`
+	Epss            *float32         `json:"epss,omitempty"`
+	ExploitPublic   *bool            `json:"exploit_public,omitempty"`
+	FixedVersions   *[]string        `json:"fixed_versions,omitempty"`
+	Kev             *bool            `json:"kev,omitempty"`
 
 	// Priority Deterministic exploitability level (critical | high+ | high | elevated | informational).
 	Priority *string `json:"priority,omitempty"`
@@ -326,22 +338,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1FZRb9s2EP4rB24PCSJbztIn7anLvCHIgBntkJetMCjybF9LkeyRUiMkBvYj9gv3SwZKlmM36uYCfVif",
-	"LB2Pd6fv++7OD0K5yjuLNgZRPAjG4J0N2L0s2JUGq/SonI1oY3qU3htSMpKz+dvgbLIFtcFKpqdvGVei",
-	"EN/kT3Hz/jTkQ7ztdpsJjUEx+RRGFGLO7Hgq0sHOOwWb24jsmQLeEX5IFs/OI0fqC5SrFaqIesnSrnsT",
-	"Ray6h9h6FIUIkcmuxTYbDJJZtuldNSEsg3KMB+62rkrk/XGDKjoeDYc+hNGLeO+No7j0dWlIHbiUzhmU",
-	"Nvms6B71skEO5Oxn1v0Om/GgnskxxTadHqP7I0bkiiyFSAp2BcqSDMUWDDZo4EwxRVLSwCNsaL252P3C",
-	"I6DBRkbU8AhkV46rjntpzqcie17uHtHjEq7v5hOyySuQgk4cgSLCUDR09zKYTS5nMzgL2GBnLmVAQxbh",
-	"AuaL16/hAm7nd98D3itTawzAaFAGnATlPGoojQzxsDCyEdc9MUPMUZSHw2VwNSsc8XmiwpVvUcV06ydZ",
-	"m5jKG9enanA0GelRc7rsgjTHgviPjupuLNg1aKVVOKaYEOV6vJBmV/a/5fioCUdxOJgUxwhojJLMuK4p",
-	"mlNxHvnOZ6nekR2H1ZUBuUG9lN386hUsCqFlxEmkCkdlfLoMkik1xnPR31r3waBeI3Tz8z7C2WKT1HoF",
-	"a0a0K0Kjz+HvP/8CRqkhbhBwDzfs1QVKsg5wls4ZlbOKDGpI7MEF9KVOBvWA34N0DtL2UYdJOdn1SwB2",
-	"xtR+Cq9Q6omzpi12WbBxpkFoSMIKUYdcOWY0XdNnYF2EuKEALxc30z+s2PMofttgRQGevvnl4kZkYjfk",
-	"RCEup7PprCPEo5WeRCGuprPplciEl3HTkZivhm/uXtfYUZZo7vLfaFGInzHukfmhvb6bdwFYVmnKBVH8",
-	"/iAo5XtfI7ciE1ZWqb7UjJlgfF8ToxZF5Bqzg831Mc9vsuNt+N1s9sU24fHcGNmHv95OE1Iv+pxjofa1",
-	"Pa3V5P/iM/yTzOuqktz2qII8kFzZgpLW2W4nXN/N++V8wE/+QHp7Ikk3+hMcJeKfKCL9FTL0JRGnGIA0",
-	"2kixHQc8Hxr4JORfDc7/Q/RP/cfzCeiPoPyFQoR+Ou7G2zDwEqqHIJ/1cy8NyTS9ydnzaZ+jWxI7dGo2",
-	"ohC59JQ3l2L7ZvtPAAAA//8=",
+	"1FZRb9s2EP4rB24PDmLL7ton7anrvCLogBntYAzYCoMmz9YlFKkeKSVGYmA/Yr9wv2QgJTtWonQp0Ift",
+	"SRJJ3R2/77uPvBXKlZWzaIMX+a1g9JWzHtPHgt3aYBlflbMBbYivsqoMKRnI2emldzaOeVVgKePbt4wb",
+	"kYtvpvdxp+2snx7i7ff7sdDoFVMVw4hczJkdZyJOdKtjsNdtqjUZCrs4ULGrkAO19V3WPtCmqyUOhF2F",
+	"Ihc+MNmt2I9FJdWV3OLgnA8y1ClOvxTMthnIzQZVQA13YF1YnXxu6CY9a6uRV2Qb9IG2qYRMjB+m2R9H",
+	"3PoSVYiJ5zYgV0wel4TXj7d1SLZiabftEAUs/eAuugHJLHfxW55A1sXrb2+JVjuG5fw3OF27g4gHlpEw",
+	"KNBocBZCgaAkaxgpyUyoxxGN9j/U8Peff8Fb1yBbaRWCRkUaPVwXGApkCA4KZx2D7GO4SUOMBqXHswja",
+	"cXufU09fDANbV433K68cn/Jt63KNfJxuUAXHg0hi5f3gj3hTGUdhVdVrQ+pkydo5g9LGNUkVqwbZk7Nf",
+	"SNkVNsNBKybHnfL7JP6IAbkkSz6Qgq7AA5EGGzQwUkyBlDRwBwVti/PuCXeABhvZqpnsxnGZ1CvN2YCA",
+	"Yz92iPZLeLOcT8jGVZ4UJL48BYRD0ZD+G8Ns8mI2g5HHBtPwWno0ZBHOYb748AHO4d18+T3gjTJ1VE+n",
+	"i4lXrkINayN9OC2MbMBtS8wh5nB7d5Mr72pWQxYw1Js/ydqEWN5wa6pm2EtID9sPu8p5afqC+BeLTH8s",
+	"2DWY2mpIMT48ZWpNV/bncjzwn0EcTqy/j4DGIMkM65qCeS7OA/t8lOqK7DCsbu2RG9QrmQ6kVsEiF1oG",
+	"nAQqcVDGz5dBHIqN8Vj076y7Nqi3COlAvAkwWhRRrS9hy4h2Q2j0WTJGRqmTgeIRbjiqK7mqh1GcZ1TO",
+	"KjKoIbIH59CWOjmoB6ojSGcgbRv14KaTrl88sDOmrjJ4j1JPnDW7vMuCjTMNQkMSNojaT5VjRpOavjX0",
+	"UJCH14uL7A8rjjyKXwssycP9nl8vLsRYdCYncvEim2WzREiFVlYkcvEym2UvRTx4Q5FInG4Oe06fW0yU",
+	"RZpT/gstcvEWwxGZH3ZvlvMUgGUZXc6L/PdbQTHfpxp5J8bCyjLWF5txLBg/1cSoRR64xvHJVeQhzx/H",
+	"/evNd7PZV7va9H1j4ILzy7ssIvWqzTkU6ljb/T0prn/1BeujzOuylLxrUQV5Irn1DpS0zqYz4c1y3t62",
+	"TviZ3pLeP5OkC/0ER5H4e4pI/w8Z+pqIU/BAGm2gsBsGfHpo4Gch//6w+D+I/nNvPE9A34PyZ/IBWnfs",
+	"7O14fVzveiCPWt+LJhndm5w9y9oc6ZDo0KnZiFxMZUXT5oXYf9z/EwAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

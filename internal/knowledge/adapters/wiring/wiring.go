@@ -17,9 +17,25 @@ import (
 	knhttp "github.com/themis-project/themis/internal/knowledge/adapters/http"
 	"github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
+	"github.com/themis-project/themis/internal/knowledge/adapters/vex"
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
+
+// vexParserAdapter bridges the OpenVEX parser (an adapter) to the app's VEXParser port.
+type vexParserAdapter struct{}
+
+func (vexParserAdapter) Parse(raw []byte) ([]app.VEXStatement, error) {
+	stmts, err := vex.ParseOpenVEX(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]app.VEXStatement, len(stmts))
+	for i, s := range stmts {
+		out[i] = app.VEXStatement{CVE: s.CVE, Package: s.Package, Status: s.Status, Justification: s.Justification}
+	}
+	return out, nil
+}
 
 type idGen struct{}
 
@@ -73,13 +89,16 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
-	inv := evidence.NewClient(evidenceBaseURL, nil)
+	evClient := evidence.NewClient(evidenceBaseURL, nil)
 	disc := feed.NewOSVClient(osvBaseURL, nil)
-	corr := app.NewCorrelationService(inv, disc, fold, st, sysClock{})
+	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{})
+	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
+	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
+	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
 	kn := Knowledge{
 		Handler:  knhttp.NewHandler(read).Router(),
 		Store:    st,
-		Consumer: inbound.NewConsumer(app.NewCoordinator(corr)),
+		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
 	}
 	if nvd.Enabled {

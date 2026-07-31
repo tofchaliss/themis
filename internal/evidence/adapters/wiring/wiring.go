@@ -71,6 +71,10 @@ func (b repoBridge) Save(ctx context.Context, e domain.Evidence, raw []byte, eve
 func (b repoBridge) GetByID(ctx context.Context, id domain.EvidenceID) (domain.Evidence, error) {
 	return b.store.GetByID(ctx, id)
 }
+func (b repoBridge) GetRawDocument(ctx context.Context, id domain.EvidenceID) (string, []byte, error) {
+	return b.store.GetRawDocument(ctx, id)
+}
+
 func (b repoBridge) GetInventory(ctx context.Context, id domain.EvidenceID) (domain.Inventory, error) {
 	return b.store.GetInventory(ctx, id)
 }
