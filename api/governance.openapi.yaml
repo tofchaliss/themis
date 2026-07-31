@@ -366,6 +366,15 @@ components:
           type: string
         has_position:
           type: boolean
+        base_score:
+          type: integer
+          description: CVE-intrinsic composite priority (0-100), from Knowledge (C6).
+        blast_multiplier:
+          type: number
+          description: Enterprise blast-radius amplification (1.0-2.0x) from the estate graph (C2); 1.0 when the estate is empty/unreachable.
+        effective_priority:
+          type: integer
+          description: base_score x blast_multiplier, clamped to 100 - the release-scoped priority a human triages by.
     RaiseProposalRequest:
       type: object
       required: [stance]

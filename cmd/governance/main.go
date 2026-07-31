@@ -41,6 +41,7 @@ type config struct {
 	migrationsPath  string // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
 	aiEnabled       bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
 	intelligenceURL string // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
+	registryURL     string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -59,6 +60,7 @@ func loadConfig() config {
 		migrationsPath:  envDefault("THEMIS_GOVERNANCE_MIGRATIONS", "internal/governance/adapters/store/migrations"),
 		aiEnabled:       os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
 		intelligenceURL: envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
+		registryURL:     envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -114,7 +116,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor)
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 

@@ -23,7 +23,7 @@ func (a fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recomme
 func serverWithAdvisor(t *testing.T, repo *fakeRepo, adv app.PositionAdvisor) *httptest.Server {
 	t.Helper()
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
-	read := app.NewReadService(repo, fakeProjection{})
+	read := app.NewReadService(repo, fakeProjection{}, nil)
 	srv := httptest.NewServer(govhttp.NewHandler(write, read).Router())
 	t.Cleanup(srv.Close)
 	return srv

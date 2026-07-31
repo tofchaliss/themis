@@ -268,13 +268,19 @@ func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
 
 func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	has := e.HasPosition
+	base := e.BaseScore
+	mult := float32(e.Multiplier)
+	eff := e.EffectivePriority
 	return gen.PostureEntry{
-		FindingId:   strptr(string(e.FindingID)),
-		FaultlineId: strptr(e.FaultlineID),
-		Cve:         strptr(e.CVE),
-		Stage:       strptr(string(e.Stage)),
-		Stance:      strptr(string(e.Stance)),
-		HasPosition: &has,
+		FindingId:         strptr(string(e.FindingID)),
+		FaultlineId:       strptr(e.FaultlineID),
+		Cve:               strptr(e.CVE),
+		Stage:             strptr(string(e.Stage)),
+		Stance:            strptr(string(e.Stance)),
+		HasPosition:       &has,
+		BaseScore:         &base,
+		BlastMultiplier:   &mult,
+		EffectivePriority: &eff,
 	}
 }
 
