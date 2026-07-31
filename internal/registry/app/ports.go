@@ -20,6 +20,15 @@ type Repository interface {
 	ProductExists(ctx context.Context, productID string) (bool, error)
 	ProjectExists(ctx context.Context, projectID string) (bool, error)
 	ReleaseExists(ctx context.Context, releaseID string) (bool, error)
+
+	// Estate graph (C1 — EDR-ESTATE-01): Product → Microservice → Deployment → Customer,
+	// and the traversal that counts unique customers reached from a release.
+	SaveCustomer(ctx context.Context, c domain.Customer) error
+	SaveMicroservice(ctx context.Context, m domain.Microservice) error
+	SaveDeployment(ctx context.Context, d domain.Deployment) error
+	MicroserviceExists(ctx context.Context, microserviceID string) (bool, error)
+	CustomerExists(ctx context.Context, customerID string) (bool, error)
+	BlastRadiusCustomers(ctx context.Context, releaseID string) (int, error)
 }
 
 // IDGenerator assigns new opaque aggregate identities (backed by kernel/id in the

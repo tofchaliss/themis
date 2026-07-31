@@ -18,7 +18,10 @@ func TestNewProduct(t *testing.T) {
 		t.Errorf("Name = %q, want trimmed Themis", p.Name())
 	}
 
-	for name, tc := range map[string]struct{ id domain.ProductID; pname string }{
+	for name, tc := range map[string]struct {
+		id    domain.ProductID
+		pname string
+	}{
 		"emptyID":   {"", "Themis"},
 		"emptyName": {"prod-1", "   "},
 	} {
@@ -48,6 +51,75 @@ func TestNewProject(t *testing.T) {
 		"emptyName":    {"proj-1", "prod-1", " "},
 	} {
 		if _, err := domain.NewProject(tc.id, tc.product, tc.pname); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}
+
+func TestNewCustomer(t *testing.T) {
+	c, err := domain.NewCustomer("cust-1", "  Acme  ")
+	if err != nil {
+		t.Fatalf("valid customer: %v", err)
+	}
+	if c.ID() != "cust-1" || c.Name() != "Acme" {
+		t.Errorf("customer = %+v", c)
+	}
+	for name, tc := range map[string]struct {
+		id    domain.CustomerID
+		cname string
+	}{
+		"emptyID":   {"", "Acme"},
+		"emptyName": {"cust-1", "  "},
+	} {
+		if _, err := domain.NewCustomer(tc.id, tc.cname); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}
+
+func TestNewMicroservice(t *testing.T) {
+	m, err := domain.NewMicroservice("ms-1", "prod-1", "  payments  ")
+	if err != nil {
+		t.Fatalf("valid microservice: %v", err)
+	}
+	if m.ID() != "ms-1" || m.ProductID() != "prod-1" || m.Name() != "payments" {
+		t.Errorf("microservice = %+v", m)
+	}
+	for name, tc := range map[string]struct {
+		id      domain.MicroserviceID
+		product domain.ProductID
+		mname   string
+	}{
+		"emptyID":      {"", "prod-1", "payments"},
+		"emptyProduct": {"ms-1", "", "payments"},
+		"emptyName":    {"ms-1", "prod-1", " "},
+	} {
+		if _, err := domain.NewMicroservice(tc.id, tc.product, tc.mname); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}
+
+func TestNewDeployment(t *testing.T) {
+	d, err := domain.NewDeployment("dep-1", "ms-1", "cust-1", "  prod  ")
+	if err != nil {
+		t.Fatalf("valid deployment: %v", err)
+	}
+	if d.ID() != "dep-1" || d.MicroserviceID() != "ms-1" || d.CustomerID() != "cust-1" || d.Environment() != "prod" {
+		t.Errorf("deployment = %+v", d)
+	}
+	for name, tc := range map[string]struct {
+		id           domain.DeploymentID
+		microservice domain.MicroserviceID
+		customer     domain.CustomerID
+		env          string
+	}{
+		"emptyID":           {"", "ms-1", "cust-1", "prod"},
+		"emptyMicroservice": {"dep-1", "", "cust-1", "prod"},
+		"emptyCustomer":     {"dep-1", "ms-1", "", "prod"},
+		"emptyEnv":          {"dep-1", "ms-1", "cust-1", " "},
+	} {
+		if _, err := domain.NewDeployment(tc.id, tc.microservice, tc.customer, tc.env); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
 		}
 	}
