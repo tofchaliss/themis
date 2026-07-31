@@ -5,7 +5,8 @@
 #
 # Prerequisites (see INSTALLATION.md Part A):
 #   - PostgreSQL running with the `themis` role and the 5 databases (evidence/knowledge/
-#     governance/communication/bus) already created.
+#     governance/communication/bus) already created. (A 6th, `auth`, is only needed if you
+#     turn on API authentication — see "enabling auth" at the end; this installer leaves it off.)
 #   - The service binaries built: go build -o bin/ ./cmd/registry ./cmd/evidence \
 #       ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence
 #   - Any manually-started ./bin/* processes stopped (they'd hold the ports):
@@ -113,3 +114,9 @@ systemctl --no-pager --lines=0 status $UNITS 2>/dev/null | grep -E "themis@|Acti
 echo
 echo "logs:   journalctl -u themis@knowledge -f"
 echo "status: systemctl status 'themis@*'"
+echo
+echo "auth:   API auth is OFF (endpoints are open). To enable it without lockout:"
+echo "          createdb auth; go build -o bin/ ./cmd/authadmin"
+echo "          THEMIS_AUTH_DATABASE_DSN=${BASE}/auth?sslmode=disable THEMIS_AUTH_MIGRATE=1 \\"
+echo "            ./bin/authadmin create-key --name admin --scopes admin   # copy the printed token"
+echo "        then add THEMIS_AUTH_DATABASE_DSN (+ THEMIS_AUTH_REQUIRED=1) to each /etc/themis/*.env and restart."

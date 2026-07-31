@@ -52,6 +52,7 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 | Communication | `cmd/communication` | `:8084` | `communication` | Governance `:8083` | `THEMIS_COMMUNICATION_MIGRATE=1` |
 | Intelligence | `cmd/intelligence` | `:8086` | — (stateless) | Governance `:8083`, Knowledge `:8085` | — |
 | **bus** | — | — | `bus` | — | `THEMIS_BUS_MIGRATE=1` (any pipeline svc) |
+| **auth** (optional) | `cmd/authadmin` | — | `auth` | — | `authadmin` with `THEMIS_AUTH_MIGRATE=1` |
 
 > **The event bus is the end-to-end switch.** Each of the four pipeline services relays its outbox to the
 > bus and drains its upstream stream on a 2-second loop **only when `THEMIS_BUS_DATABASE_DSN` is set**. Leave
@@ -64,11 +65,27 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 > Registry**. The rest of the system expects Knowledge on **:8085** (Intelligence's `THEMIS_KNOWLEDGE_URL`
 > default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
 
-> **Databases (5 on one PostgreSQL server):** `evidence`, `knowledge`, `governance`, `communication`, `bus`.
-> Registry co-locates in the **`evidence`** database — Evidence validates a release id in-process via
-> `registry.ReleaseExists`, so the registry tables must live there (its schema is loaded with `psql`, not
-> self-migrated — see step 4). The database boundary keeps contexts structurally isolated.
+> **Databases (6 on one PostgreSQL server):** `evidence`, `knowledge`, `governance`, `communication`, `bus`,
+> and `auth` (the last only used when API authentication is turned on — see below). Registry co-locates in the
+> **`evidence`** database — Evidence validates a release id in-process via `registry.ReleaseExists`, so the
+> registry tables must live there (its schema is loaded with `psql`, not self-migrated — see step 4). The
+> database boundary keeps contexts structurally isolated.
 > See [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
+
+> **API authentication (optional — OFF by default).** Every `/api/v1` endpoint is open until you set
+> `THEMIS_AUTH_DATABASE_DSN` on a service (EDR-SECURITY-01). Turn it on **without locking yourself out** by
+> minting a key *before* enabling enforcement:
+> ```sh
+> go build -o bin/ ./cmd/authadmin
+> # (1) mint an admin key — THEMIS_AUTH_MIGRATE=1 also creates the api_keys schema on first run.
+> #     Copy the printed token; it is shown once and only its bcrypt hash is stored.
+> THEMIS_AUTH_DATABASE_DSN="postgres://themis:$PGPW@localhost:5432/auth?sslmode=disable" \
+>   THEMIS_AUTH_MIGRATE=1 ./bin/authadmin create-key --name admin --scopes admin
+> ```
+> Then (2) set `THEMIS_AUTH_DATABASE_DSN` (the `auth` DSN above) — and optionally `THEMIS_AUTH_REQUIRED=1` so a
+> node refuses to boot open — on **every** service and restart. Clients then send `X-API-Key: <token>`; `GET`
+> works for any key, while writes need an `admin` or `product:<id>` key (a `--scopes read` key is read-only).
+> Revoke with `./bin/authadmin revoke-key --id <key-id>`.
 
 ### 1. Install and start PostgreSQL
 
@@ -94,7 +111,7 @@ place to keep in sync:
 export PGPW='ChangeMe4Themis'
 
 sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
-for db in evidence knowledge governance communication bus; do
+for db in evidence knowledge governance communication bus auth; do
   sudo -u postgres psql -c "CREATE DATABASE $db OWNER themis;"
 done
 # verify the themis role can connect over TCP (default localhost auth is password-based; prints '1'):
