@@ -68,6 +68,17 @@ paths:
                 type: array
                 items:
                   type: string
+  /feeds:
+    get:
+      operationId: getFeedHealth
+      summary: Tier-aware feed-health snapshot (signals_stale flag + per-feed status).
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedHealthReport'
 components:
   responses:
     Problem:
@@ -133,6 +144,37 @@ components:
         observed_at:
           type: string
           format: date-time
+    FeedHealthReport:
+      type: object
+      properties:
+        signals_stale:
+          type: boolean
+          description: True when any Tier-1 (critical) feed is stale — the platform's signals are unreliable.
+        feeds:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedHealthEntry'
+        degraded_feeds:
+          type: array
+          items:
+            type: string
+          description: Sources of Tier-2 feeds currently failing (degraded, non-blocking).
+    FeedHealthEntry:
+      type: object
+      properties:
+        source:
+          type: string
+        tier:
+          type: integer
+        status:
+          type: string
+          description: healthy | stale | degraded | informational.
+        consecutive_failures:
+          type: integer
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
     Problem:
       type: object
       properties:
