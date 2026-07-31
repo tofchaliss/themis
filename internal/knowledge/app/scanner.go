@@ -52,12 +52,15 @@ func (s *ScannerReportService) Ingest(ctx context.Context, releaseID, evidenceID
 	}
 	newMatches := 0
 	for _, p := range props {
-		faultlineID, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
+		// A scanner report is already a version-matched finding (the scanner did the matching),
+		// so it is recorded as-is — the reconciled-range gate applies only to the OSV/NVD
+		// discovery path in CorrelationService, not to authoritative scanner evidence.
+		f, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
 		if err != nil {
 			return newMatches, err
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
-			ReleaseID: releaseID, FaultlineID: faultlineID, CVE: p.CVE.String(),
+			ReleaseID: releaseID, FaultlineID: f.ID(), CVE: p.CVE.String(),
 			Component: p.Component, OccurredAt: s.clock.Now(),
 		})
 		if err != nil {
