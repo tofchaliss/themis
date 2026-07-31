@@ -25,6 +25,27 @@ vendor-VEX crawler). "Closed" was too strong; the shipped slice is real, the clu
 
 ---
 
+## Progress since this audit (2026-07-31)
+
+Nine PRs (all off `main`, CI-green, awaiting merge; see [`PHASE3-STATUS.md`](PHASE3-STATUS.md) for per-PR
+detail) closed or advanced these gaps. The tables below keep the original audit findings unchanged; the rows
+named here are now addressed in-flight.
+
+| Gap(s) | PR | What landed |
+| --- | --- | --- |
+| **F1 / F2 / F3** | #65 | inbound `X-API-Key` auth + method-based scopes + HMAC webhook seam + `cmd/authadmin` (opt-in via `THEMIS_AUTH_DATABASE_DSN`) |
+| **B1** | #66 | feed-health wired end-to-end (`feed_health` store + `GET /feeds` with `signals_stale` / `degraded_feeds`) |
+| **A1** | #68 | reconciled version-range gate wired into correlation (realizes EDR-KNOWLEDGE-01 D3) |
+| **A2** | #69 (stacked on #68) | NVD as a bounded, opt-in discovery source (keyword + CPE-product + version triple-gate) |
+| **C6** | #71 | Knowledge base score threaded to the Governance Finding |
+| **C1** | #71 | Registry estate graph (Product→Microservice→Deployment→Customer) + `GET /releases/{id}/blast-radius` |
+| **C2** | #71 | blast multiplier on Finding priority (`base × 1.0–2.0×`; fail-safe 1.0×) |
+| **VEX-ingest (→ B3/B4)** | #73 | uploaded OpenVEX → applicability Proposals on the card (EDR-VEX-01 **Phase 1**; suppression = Phase 2, Red Hat/generic feeds = Phase 3) |
+
+Also shipped: a deterministic no-AI **SBOM→VEX CI gate** (#67, now a PR gate) and four decision records
+(`EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01`, + realization notes on `EDR-KNOWLEDGE-01`). **Remaining
+tail:** A3–A6, B2/B5/B6, C3–C5, the D-series notifications, E1–E11 input-integrity, F4–F8 observability.
+
 ## A. Correlation & version matching
 
 The version-range engine **was ported** (`internal/kernel/value/versionrange.go` — a faithful copy of the
