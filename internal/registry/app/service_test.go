@@ -11,22 +11,66 @@ import (
 
 // fakeRepo is an in-memory Repository with error-injection hooks for the failure paths.
 type fakeRepo struct {
-	products map[string]bool
-	projects map[string]bool
-	releases map[string]domain.Release
+	products      map[string]bool
+	projects      map[string]bool
+	releases      map[string]domain.Release
+	microservices map[string]bool
+	customers     map[string]bool
 
-	errProductExists error
-	errProjectExists error
-	errReleaseExists error
-	errSaveProduct   error
-	errSaveProject   error
-	errSaveRelease   error
-	errGetRelease    error
-	errList          error
+	errProductExists      error
+	errProjectExists      error
+	errReleaseExists      error
+	errSaveProduct        error
+	errSaveProject        error
+	errSaveRelease        error
+	errGetRelease         error
+	errList               error
+	errMicroserviceExists error
+	errCustomerExists     error
+	errSaveMicroservice   error
+	errSaveCustomer       error
+	errSaveDeployment     error
+	blast                 int
+	errBlast              error
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{}}
+	return &fakeRepo{
+		products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{},
+		microservices: map[string]bool{}, customers: map[string]bool{},
+	}
+}
+
+func (r *fakeRepo) SaveCustomer(_ context.Context, c domain.Customer) error {
+	if r.errSaveCustomer != nil {
+		return r.errSaveCustomer
+	}
+	r.customers[string(c.ID())] = true
+	return nil
+}
+
+func (r *fakeRepo) SaveMicroservice(_ context.Context, m domain.Microservice) error {
+	if r.errSaveMicroservice != nil {
+		return r.errSaveMicroservice
+	}
+	r.microservices[string(m.ID())] = true
+	return nil
+}
+
+func (r *fakeRepo) SaveDeployment(_ context.Context, _ domain.Deployment) error {
+	return r.errSaveDeployment
+}
+
+func (r *fakeRepo) MicroserviceExists(_ context.Context, id string) (bool, error) {
+	return r.microservices[id], r.errMicroserviceExists
+}
+
+func (r *fakeRepo) CustomerExists(_ context.Context, id string) (bool, error) {
+	return r.customers[id], r.errCustomerExists
+}
+
+func (r *fakeRepo) BlastRadiusCustomers(_ context.Context, _ string) (int, error) {
+	return r.blast, r.errBlast
 }
 
 func (r *fakeRepo) SaveProduct(_ context.Context, p domain.Product) error {
@@ -213,5 +257,105 @@ func TestReadPaths(t *testing.T) {
 	list, err := svc.ListReleases(ctx, "proj-1")
 	if err != nil || len(list) != 1 {
 		t.Errorf("ListReleases = %+v, %v", list, err)
+	}
+}
+
+func TestRegisterCustomer(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	id, err := newService(repo).RegisterCustomer(ctx, "Acme")
+	if err != nil || id != "id-1" || !repo.customers["id-1"] {
+		t.Fatalf("register customer: id=%q err=%v", id, err)
+	}
+	if _, err := newService(newFakeRepo()).RegisterCustomer(ctx, " "); err == nil {
+		t.Error("empty name: expected error")
+	}
+	failing := newFakeRepo()
+	failing.errSaveCustomer = errors.New("boom")
+	if _, err := newService(failing).RegisterCustomer(ctx, "Acme"); err == nil {
+		t.Error("save error: expected error")
+	}
+}
+
+func TestRegisterMicroservice(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	repo.products["prod-1"] = true
+	id, err := newService(repo).RegisterMicroservice(ctx, "prod-1", "payments")
+	if err != nil || id != "id-1" {
+		t.Fatalf("register ms: id=%q err=%v", id, err)
+	}
+	if _, err := newService(newFakeRepo()).RegisterMicroservice(ctx, "nope", "payments"); !errors.Is(err, app.ErrUnknownProduct) {
+		t.Errorf("unknown product: %v", err)
+	}
+	pe := newFakeRepo()
+	pe.errProductExists = errors.New("db down")
+	if _, err := newService(pe).RegisterMicroservice(ctx, "prod-1", "payments"); err == nil {
+		t.Error("ProductExists error: expected error")
+	}
+	inv := newFakeRepo()
+	inv.products["prod-1"] = true
+	if _, err := newService(inv).RegisterMicroservice(ctx, "prod-1", " "); err == nil {
+		t.Error("empty name: expected error")
+	}
+	sf := newFakeRepo()
+	sf.products["prod-1"] = true
+	sf.errSaveMicroservice = errors.New("boom")
+	if _, err := newService(sf).RegisterMicroservice(ctx, "prod-1", "payments"); err == nil {
+		t.Error("save error: expected error")
+	}
+}
+
+func TestRegisterDeployment(t *testing.T) {
+	ctx := context.Background()
+	base := func() *fakeRepo {
+		r := newFakeRepo()
+		r.microservices["ms-1"] = true
+		r.customers["cust-1"] = true
+		return r
+	}
+	id, err := newService(base()).RegisterDeployment(ctx, "ms-1", "cust-1", "prod")
+	if err != nil || id != "id-1" {
+		t.Fatalf("register deployment: id=%q err=%v", id, err)
+	}
+	if _, err := newService(newFakeRepo()).RegisterDeployment(ctx, "nope", "cust-1", "prod"); !errors.Is(err, app.ErrUnknownMicroservice) {
+		t.Errorf("unknown ms: %v", err)
+	}
+	me := base()
+	me.errMicroserviceExists = errors.New("db down")
+	if _, err := newService(me).RegisterDeployment(ctx, "ms-1", "cust-1", "prod"); err == nil {
+		t.Error("MicroserviceExists error: expected error")
+	}
+	noCust := newFakeRepo()
+	noCust.microservices["ms-1"] = true
+	if _, err := newService(noCust).RegisterDeployment(ctx, "ms-1", "nope", "prod"); !errors.Is(err, app.ErrUnknownCustomer) {
+		t.Errorf("unknown customer: %v", err)
+	}
+	ce := base()
+	ce.errCustomerExists = errors.New("db down")
+	if _, err := newService(ce).RegisterDeployment(ctx, "ms-1", "cust-1", "prod"); err == nil {
+		t.Error("CustomerExists error: expected error")
+	}
+	if _, err := newService(base()).RegisterDeployment(ctx, "ms-1", "cust-1", " "); err == nil {
+		t.Error("empty env: expected error")
+	}
+	sf := base()
+	sf.errSaveDeployment = errors.New("boom")
+	if _, err := newService(sf).RegisterDeployment(ctx, "ms-1", "cust-1", "prod"); err == nil {
+		t.Error("save error: expected error")
+	}
+}
+
+func TestBlastRadius(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	repo.blast = 7
+	if n, err := newService(repo).BlastRadius(ctx, "rel-1"); err != nil || n != 7 {
+		t.Errorf("blast = %d, %v, want 7,nil", n, err)
+	}
+	be := newFakeRepo()
+	be.errBlast = errors.New("db down")
+	if _, err := newService(be).BlastRadius(ctx, "rel-1"); err == nil {
+		t.Error("blast error: expected error")
 	}
 }

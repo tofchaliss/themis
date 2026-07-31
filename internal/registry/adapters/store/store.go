@@ -106,9 +106,56 @@ func (s *Store) exists(ctx context.Context, query, id string) (bool, error) {
 	return ok, nil
 }
 
+// --- estate graph (C1) -----------------------------------------------------
+
+// SaveCustomer inserts a Customer.
+func (s *Store) SaveCustomer(ctx context.Context, c domain.Customer) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO customers (id, name) VALUES ($1,$2)`, string(c.ID()), c.Name())
+	return err
+}
+
+// SaveMicroservice inserts a Microservice (its product_id FK enforces the Product exists).
+func (s *Store) SaveMicroservice(ctx context.Context, m domain.Microservice) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO microservices (id, product_id, name) VALUES ($1,$2,$3)`,
+		string(m.ID()), string(m.ProductID()), m.Name())
+	return err
+}
+
+// SaveDeployment inserts a Deployment (its FKs enforce the Microservice + Customer exist).
+func (s *Store) SaveDeployment(ctx context.Context, d domain.Deployment) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO deployments (id, microservice_id, customer_id, environment) VALUES ($1,$2,$3,$4)`,
+		string(d.ID()), string(d.MicroserviceID()), string(d.CustomerID()), d.Environment())
+	return err
+}
+
+// MicroserviceExists reports whether a Microservice with the given id exists.
+func (s *Store) MicroserviceExists(ctx context.Context, microserviceID string) (bool, error) {
+	return s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM microservices WHERE id = $1)`, microserviceID)
+}
+
+// CustomerExists reports whether a Customer with the given id exists.
+func (s *Store) CustomerExists(ctx context.Context, customerID string) (bool, error) {
+	return s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM customers WHERE id = $1)`, customerID)
+}
+
+// BlastRadiusCustomers returns the count of DISTINCT customers reached from a release's
+// product through its microservices' deployments (C1 — the estate traversal). An unpopulated
+// (or unknown) release yields 0.
+func (s *Store) BlastRadiusCustomers(ctx context.Context, releaseID string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT d.customer_id)
+		FROM releases r
+		JOIN projects pr     ON r.project_id = pr.id
+		JOIN microservices m ON m.product_id = pr.product_id
+		JOIN deployments d   ON d.microservice_id = m.id
+		WHERE r.id = $1`, releaseID).Scan(&n)
+	return n, err
+}
+
 // Purge removes all registry rows. It is a development/test-only affordance for
 // resetting data; callers must gate it behind a non-production environment flag.
 func (s *Store) Purge(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE releases, projects, products RESTART IDENTITY CASCADE`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE deployments, microservices, customers, releases, projects, products RESTART IDENTITY CASCADE`)
 	return err
 }

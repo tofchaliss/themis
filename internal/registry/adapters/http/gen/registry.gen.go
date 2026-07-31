@@ -19,10 +19,32 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// BlastRadius defines model for BlastRadius.
+type BlastRadius struct {
+	ReleaseId       string `json:"release_id"`
+	UniqueCustomers int    `json:"unique_customers"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	Detail *string `json:"detail,omitempty"`
 	Title  *string `json:"title,omitempty"`
+}
+
+// RegisterCustomerRequest defines model for RegisterCustomerRequest.
+type RegisterCustomerRequest struct {
+	Name string `json:"name"`
+}
+
+// RegisterDeploymentRequest defines model for RegisterDeploymentRequest.
+type RegisterDeploymentRequest struct {
+	CustomerId  string `json:"customer_id"`
+	Environment string `json:"environment"`
+}
+
+// RegisterMicroserviceRequest defines model for RegisterMicroserviceRequest.
+type RegisterMicroserviceRequest struct {
+	Name string `json:"name"`
 }
 
 // RegisterProductRequest defines model for RegisterProductRequest.
@@ -59,8 +81,17 @@ type ListReleasesParams struct {
 	Project string `form:"project" json:"project"`
 }
 
+// RegisterCustomerJSONRequestBody defines body for RegisterCustomer for application/json ContentType.
+type RegisterCustomerJSONRequestBody = RegisterCustomerRequest
+
+// RegisterDeploymentJSONRequestBody defines body for RegisterDeployment for application/json ContentType.
+type RegisterDeploymentJSONRequestBody = RegisterDeploymentRequest
+
 // RegisterProductJSONRequestBody defines body for RegisterProduct for application/json ContentType.
 type RegisterProductJSONRequestBody = RegisterProductRequest
+
+// RegisterMicroserviceJSONRequestBody defines body for RegisterMicroservice for application/json ContentType.
+type RegisterMicroserviceJSONRequestBody = RegisterMicroserviceRequest
 
 // RegisterProjectJSONRequestBody defines body for RegisterProject for application/json ContentType.
 type RegisterProjectJSONRequestBody = RegisterProjectRequest
@@ -70,9 +101,18 @@ type RegisterReleaseJSONRequestBody = RegisterReleaseRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Register a customer; returns a stable Customer ID.
+	// (POST /customers)
+	RegisterCustomer(w http.ResponseWriter, r *http.Request)
+	// Register a deployment of a microservice for a customer; returns a stable Deployment ID.
+	// (POST /microservices/{id}/deployments)
+	RegisterDeployment(w http.ResponseWriter, r *http.Request, id string)
 	// Register a product; returns a stable Product ID.
 	// (POST /products)
 	RegisterProduct(w http.ResponseWriter, r *http.Request)
+	// Register a microservice under a product; returns a stable Microservice ID.
+	// (POST /products/{id}/microservices)
+	RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string)
 	// Register a project under a product; returns a stable Project ID.
 	// (POST /projects)
 	RegisterProject(w http.ResponseWriter, r *http.Request)
@@ -85,15 +125,36 @@ type ServerInterface interface {
 	// Get a release by ID.
 	// (GET /releases/{id})
 	GetRelease(w http.ResponseWriter, r *http.Request, id string)
+	// Count the unique customers a release reaches through the estate graph.
+	// (GET /releases/{id}/blast-radius)
+	GetBlastRadius(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
 
+// Register a customer; returns a stable Customer ID.
+// (POST /customers)
+func (_ Unimplemented) RegisterCustomer(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Register a deployment of a microservice for a customer; returns a stable Deployment ID.
+// (POST /microservices/{id}/deployments)
+func (_ Unimplemented) RegisterDeployment(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Register a product; returns a stable Product ID.
 // (POST /products)
 func (_ Unimplemented) RegisterProduct(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Register a microservice under a product; returns a stable Microservice ID.
+// (POST /products/{id}/microservices)
+func (_ Unimplemented) RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -121,6 +182,12 @@ func (_ Unimplemented) GetRelease(w http.ResponseWriter, r *http.Request, id str
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Count the unique customers a release reaches through the estate graph.
+// (GET /releases/{id}/blast-radius)
+func (_ Unimplemented) GetBlastRadius(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -130,11 +197,77 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// RegisterCustomer operation middleware
+func (siw *ServerInterfaceWrapper) RegisterCustomer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterCustomer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegisterDeployment operation middleware
+func (siw *ServerInterfaceWrapper) RegisterDeployment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterDeployment(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RegisterProduct operation middleware
 func (siw *ServerInterfaceWrapper) RegisterProduct(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterProduct(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegisterMicroservice operation middleware
+func (siw *ServerInterfaceWrapper) RegisterMicroservice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterMicroservice(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -222,6 +355,32 @@ func (siw *ServerInterfaceWrapper) GetRelease(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRelease(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBlastRadius operation middleware
+func (siw *ServerInterfaceWrapper) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBlastRadius(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -345,7 +504,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/customers", wrapper.RegisterCustomer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/microservices/{id}/deployments", wrapper.RegisterDeployment)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/products", wrapper.RegisterProduct)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/products/{id}/microservices", wrapper.RegisterMicroservice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/projects", wrapper.RegisterProject)
@@ -359,6 +527,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}", wrapper.GetRelease)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/blast-radius", wrapper.GetBlastRadius)
+	})
 
 	return r
 }
@@ -368,19 +539,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"5oCvL9b/BAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
