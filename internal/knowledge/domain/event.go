@@ -26,6 +26,9 @@ type FaultlineEnriched struct {
 	Severity      value.Severity
 	KEV           bool
 	ExploitPublic bool
+	// Score is the CVE-intrinsic composite priority (0–100), snapshotted so Governance can
+	// apply its release-scoped blast multiplier without refetching the card (C6 → C2).
+	Score         int
 	OccurredAt    time.Time
 }
 
@@ -76,6 +79,7 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		Severity:      v.Severity,
 		KEV:           v.KEV,
 		ExploitPublic: v.ExploitPublic,
+		Score:         v.Score(),
 		OccurredAt:    at.UTC(),
 	}
 }

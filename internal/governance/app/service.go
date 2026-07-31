@@ -141,6 +141,7 @@ type EnrichmentSignal struct {
 	KEV          bool
 	HighSeverity bool
 	Withdrawn    bool // the Faultline was superseded (CVE withdrawn / rejected upstream)
+	Score        int  // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
 }
 
 // proposalFor maps an enrichment signal to the Governance Proposal it should raise (D6). It
@@ -164,6 +165,14 @@ func proposalFor(sig EnrichmentSignal) (stance domain.Stance, rationale string, 
 // many small per-aggregate transactions (D9). Re-delivery is idempotent (a proposal id
 // derived from the finding + proposed stance dedups).
 func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSignal) error {
+	// Materialize the CVE-intrinsic base score onto every Finding for this Faultline (C6), on
+	// every enrichment — independent of whether a re-prioritize proposal is raised, so the
+	// posture always reflects the current score. A superseded Faultline carries no score.
+	if !sig.Withdrawn {
+		if err := s.repo.SetBaseScore(ctx, sig.FaultlineID, sig.Score); err != nil {
+			return err
+		}
+	}
 	stance, rationale, raise := proposalFor(sig)
 	if !raise {
 		return nil // no decision impact — advisory priority recompute only

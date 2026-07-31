@@ -62,6 +62,8 @@ func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Findi
 	return clone(f), nil
 }
 
+func (r *fakeRepo) SetBaseScore(context.Context, string, int) error { return nil }
+
 func (r *fakeRepo) FindingsByFaultline(_ context.Context, fl string) ([]domain.FindingID, error) {
 	var out []domain.FindingID
 	for _, id := range r.order {
