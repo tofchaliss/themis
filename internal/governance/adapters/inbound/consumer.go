@@ -61,7 +61,7 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 			return err
 		}
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
-			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
+			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
 		})
 	case eventFaultlineSuperseded:
 		var dto faultlineSupersededDTO
@@ -105,6 +105,7 @@ type faultlineEnrichedDTO struct {
 	Severity      string `json:"Severity"`
 	KEV           bool   `json:"KEV"`
 	ExploitPublic bool   `json:"ExploitPublic"`
+	Score         int    `json:"Score"` // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
 }
 
 type faultlineSupersededDTO struct {

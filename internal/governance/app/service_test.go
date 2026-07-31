@@ -23,6 +23,19 @@ type fakeRepo struct {
 	byFaultlineErr error
 	saveErr        error
 	lastNotes      []app.OutboxNote
+	baseScores     map[string]int
+	setScoreErr    error
+}
+
+func (r *fakeRepo) SetBaseScore(_ context.Context, fl string, score int) error {
+	if r.setScoreErr != nil {
+		return r.setScoreErr
+	}
+	if r.baseScores == nil {
+		r.baseScores = map[string]int{}
+	}
+	r.baseScores[fl] = score
+	return nil
 }
 
 func newRepo() *fakeRepo { return &fakeRepo{byID: map[domain.FindingID]domain.Finding{}} }
@@ -244,6 +257,39 @@ func TestOpenOrUpdateFinding_ConcurrencyRetry(t *testing.T) {
 }
 
 // --- ReactToEnrichment (D6) ----------------------------------------------------------
+
+func TestReactToEnrichment_PersistsBaseScore(t *testing.T) {
+	ctx := context.Background()
+
+	// A non-escalating enrichment (no KEV / high severity) raises no proposal, but must still
+	// materialize the CVE-intrinsic base score onto the Faultline's Findings (C6).
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+	if err := writeSvc(repo).ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Score: 87}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if repo.baseScores["fl-1"] != 87 {
+		t.Errorf("base score = %d, want 87", repo.baseScores["fl-1"])
+	}
+
+	// A superseded (withdrawn) Faultline carries no score → the update is skipped.
+	repo2 := newRepo()
+	repo2.seed(identified(t, "fnd-2", "rel-1", "fl-2", "CVE-2024-2"))
+	if err := writeSvc(repo2).ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-2", Withdrawn: true}); err != nil {
+		t.Fatalf("withdrawn react: %v", err)
+	}
+	if _, set := repo2.baseScores["fl-2"]; set {
+		t.Error("a withdrawn Faultline must not set a base score")
+	}
+
+	// A store failure on the score update propagates.
+	repo3 := newRepo()
+	repo3.seed(identified(t, "fnd-3", "rel-1", "fl-3", "CVE-2024-3"))
+	repo3.setScoreErr = errors.New("boom")
+	if err := writeSvc(repo3).ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-3", Score: 50}); err == nil {
+		t.Error("SetBaseScore error must propagate")
+	}
+}
 
 func TestReactToEnrichment_RaisesProposalNoAutoDecide(t *testing.T) {
 	repo := newRepo()

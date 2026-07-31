@@ -55,6 +55,10 @@ type Repository interface {
 	// FindingsByFaultline lists the ids of every Finding referencing a Faultline — the
 	// FaultlineEnriched fan-out (D6/D9: many small per-aggregate transactions, never one).
 	FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error)
+	// SetBaseScore materializes Knowledge's CVE-intrinsic base score onto every Finding for a
+	// Faultline (C6 — denormalized read-data, not aggregate state; Governance scales it by the
+	// blast multiplier for C2).
+	SetBaseScore(ctx context.Context, faultlineID string, score int) error
 	// Save persists the aggregate + outbox notes atomically. created=true inserts a new
 	// Finding; otherwise it updates guarded by prevVersion and returns ErrConcurrent on a
 	// version mismatch. Appended proposals/positions are persisted idempotently by key.

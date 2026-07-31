@@ -12,6 +12,7 @@
     "Severity": { "type": "string" },
     "KEV": { "type": "boolean" },
     "ExploitPublic": { "type": "boolean" },
+    "Score": { "type": "integer", "minimum": 0, "maximum": 100, "description": "CVE-intrinsic composite priority (0-100); optional additive field (C6) — Governance's blast multiplier scales it." },
     "OccurredAt": { "type": "string", "format": "date-time" }
   }
 }

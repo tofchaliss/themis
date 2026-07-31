@@ -365,7 +365,7 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 // stance for a Release (D10), served from the materialized current-position columns.
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, faultline_id, cve, stage, current_stance, current_position_version
+		SELECT id, faultline_id, cve, stage, current_stance, current_position_version, base_score
 		FROM findings WHERE release_id = $1 ORDER BY id`, releaseID)
 	if err != nil {
 		return nil, err
@@ -378,8 +378,9 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			id, faultlineID, cve, stage string
 			curStance                   *string
 			curVersion                  *int
+			baseScore                   int
 		)
-		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion); err != nil {
+		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore); err != nil {
 			return nil, err
 		}
 		e := app.PostureEntry{
@@ -387,6 +388,7 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			FaultlineID: faultlineID,
 			CVE:         cve,
 			Stage:       domain.Stage(stage),
+			BaseScore:   baseScore,
 		}
 		if curStance != nil {
 			e.Stance = domain.Stance(*curStance)
@@ -395,6 +397,14 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// SetBaseScore materializes Knowledge's CVE-intrinsic base score onto every Finding for a
+// Faultline (C6). It is a denormalized read-column update, independent of aggregate version.
+func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
+	return err
 }
 
 // FaultlineBlastRadius returns the Releases affected by a Faultline (D10).

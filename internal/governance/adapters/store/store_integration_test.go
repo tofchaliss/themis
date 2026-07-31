@@ -343,6 +343,17 @@ func TestProjectionsAndFanout(t *testing.T) {
 	if len(p2) != 1 || p2[0].HasPosition {
 		t.Errorf("rel-2 posture = %+v", p2)
 	}
+
+	// C6: materializing a base score onto fl-1 reflects on ALL its Findings (rel-1 and rel-2).
+	if err := st.SetBaseScore(ctx, "fl-1", 77); err != nil {
+		t.Fatalf("SetBaseScore: %v", err)
+	}
+	if p, _ := st.ReleasePosture(ctx, "rel-1"); len(p) != 1 || p[0].BaseScore != 77 {
+		t.Errorf("rel-1 base score = %+v, want 77", p)
+	}
+	if p, _ := st.ReleasePosture(ctx, "rel-2"); len(p) != 1 || p[0].BaseScore != 77 {
+		t.Errorf("rel-2 base score = %+v, want 77", p)
+	}
 }
 
 func TestCrashResumePendingDecisionSurvives(t *testing.T) {
