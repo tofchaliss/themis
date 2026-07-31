@@ -42,3 +42,11 @@ jobs:
       # cannot go red post-merge.
       - name: make check-ci
         run: make check-ci
+
+      # Deterministic no-AI end-to-end gate: register a release → upload SBOM → correlate → open a
+      # Finding → govern an "affected" Position → publish OpenVEX, asserting the artifact names the
+      # CVE. Runs no model; self-provisions embedded Postgres. Guards the whole greenfield pipeline
+      # on every PR (previously only post-merge in main.yml), so a break in the SBOM→VEX flow can
+      # never reach main.
+      - name: make e2e-pipeline (no-AI SBOM→VEX gate)
+        run: make e2e-pipeline
