@@ -118,6 +118,38 @@ func TestPlatformEventbusIsBusinessAgnostic(t *testing.T) {
 	}
 }
 
+// TestPlatformAuthIsBusinessAgnostic enforces that the platform edge-security package
+// (internal/platform/auth) imports no bounded context and not the registry — it is
+// business-agnostic middleware + identity store that depends only on the standard library
+// and infrastructure drivers (pgx, bcrypt) (EDR-SECURITY-01 D1). Depguard's
+// platform-auth-infra-only rule enforces the same at lint time; this is the module-level backstop.
+func TestPlatformAuthIsBusinessAgnostic(t *testing.T) {
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(cfg, module+"/internal/platform/auth/...")
+	if err != nil {
+		t.Fatalf("load auth packages: %v", err)
+	}
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		t.Fatalf("auth packages contained %d load error(s)", n)
+	}
+
+	forbidden := append([]string{"registry"}, boundedContexts...)
+	for _, p := range pkgs {
+		for imp := range p.Imports {
+			if !strings.HasPrefix(imp, module+"/internal/") {
+				continue // stdlib / infrastructure drivers are fine
+			}
+			for _, f := range forbidden {
+				base := module + "/internal/" + f
+				if imp == base || strings.HasPrefix(imp, base+"/") {
+					t.Errorf("auth violation: %s imports %s — platform edge-security must depend on no context or the registry, only the kernel + drivers",
+						p.PkgPath, imp)
+				}
+			}
+		}
+	}
+}
+
 // TestRegistrySupportingContext enforces that the registry — a supporting foundation
 // beneath the pipeline — keeps inward-only rings (domain < app < adapters) and imports
 // no pipeline context (it collaborates via its read API, e.g. ReleaseExists). It may
