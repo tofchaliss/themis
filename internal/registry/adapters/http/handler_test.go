@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,13 +18,39 @@ import (
 
 // fakeRepo is an in-memory Repository backing the handler tests.
 type fakeRepo struct {
-	products map[string]bool
-	projects map[string]bool
-	releases map[string]domain.Release
+	products      map[string]bool
+	projects      map[string]bool
+	releases      map[string]domain.Release
+	microservices map[string]bool
+	customers     map[string]bool
+	blast         int
+	blastErr      error
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{}}
+	return &fakeRepo{
+		products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{},
+		microservices: map[string]bool{}, customers: map[string]bool{},
+	}
+}
+
+func (r *fakeRepo) SaveCustomer(_ context.Context, c domain.Customer) error {
+	r.customers[string(c.ID())] = true
+	return nil
+}
+func (r *fakeRepo) SaveMicroservice(_ context.Context, m domain.Microservice) error {
+	r.microservices[string(m.ID())] = true
+	return nil
+}
+func (r *fakeRepo) SaveDeployment(_ context.Context, _ domain.Deployment) error { return nil }
+func (r *fakeRepo) MicroserviceExists(_ context.Context, id string) (bool, error) {
+	return r.microservices[id], nil
+}
+func (r *fakeRepo) CustomerExists(_ context.Context, id string) (bool, error) {
+	return r.customers[id], nil
+}
+func (r *fakeRepo) BlastRadiusCustomers(_ context.Context, _ string) (int, error) {
+	return r.blast, r.blastErr
 }
 
 func (r *fakeRepo) SaveProduct(_ context.Context, p domain.Product) error {
@@ -52,8 +79,12 @@ func (r *fakeRepo) ListReleases(_ context.Context, _ domain.ProjectID) ([]domain
 	}
 	return out, nil
 }
-func (r *fakeRepo) ProductExists(_ context.Context, id string) (bool, error) { return r.products[id], nil }
-func (r *fakeRepo) ProjectExists(_ context.Context, id string) (bool, error) { return r.projects[id], nil }
+func (r *fakeRepo) ProductExists(_ context.Context, id string) (bool, error) {
+	return r.products[id], nil
+}
+func (r *fakeRepo) ProjectExists(_ context.Context, id string) (bool, error) {
+	return r.projects[id], nil
+}
 func (r *fakeRepo) ReleaseExists(_ context.Context, id string) (bool, error) {
 	_, ok := r.releases[id]
 	return ok, nil
@@ -177,6 +208,80 @@ func TestRegisterErrors(t *testing.T) {
 		if status, _ := post(t, srv.URL+path, "{not json"); status != http.StatusBadRequest {
 			t.Errorf("%s malformed body status = %d, want 400", path, status)
 		}
+	}
+}
+
+func TestEstateEndpoints(t *testing.T) {
+	repo := newFakeRepo()
+	repo.products["prod-1"] = true
+	repo.blast = 3
+	srv := newServer(t, repo)
+
+	code, body := post(t, srv.URL+"/customers", map[string]any{"name": "Acme"})
+	if code != http.StatusCreated {
+		t.Fatalf("customer = %d: %s", code, body)
+	}
+	custID := idOf(t, body)
+
+	code, body = post(t, srv.URL+"/products/prod-1/microservices", map[string]any{"name": "payments"})
+	if code != http.StatusCreated {
+		t.Fatalf("microservice = %d: %s", code, body)
+	}
+	msID := idOf(t, body)
+
+	code, body = post(t, srv.URL+"/microservices/"+msID+"/deployments",
+		map[string]any{"customer_id": custID, "environment": "prod"})
+	if code != http.StatusCreated {
+		t.Fatalf("deployment = %d: %s", code, body)
+	}
+
+	resp, err := http.Get(srv.URL + "/releases/rel-1/blast-radius")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("blast status = %d", resp.StatusCode)
+	}
+	var br struct {
+		ReleaseId       string `json:"release_id"`
+		UniqueCustomers int    `json:"unique_customers"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&br)
+	if br.ReleaseId != "rel-1" || br.UniqueCustomers != 3 {
+		t.Errorf("blast = %+v, want rel-1 / 3", br)
+	}
+}
+
+func TestEstateErrors(t *testing.T) {
+	srv := newServer(t, newFakeRepo())
+	if code, _ := post(t, srv.URL+"/products/nope/microservices", map[string]any{"name": "x"}); code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown-product microservice = %d, want 422", code)
+	}
+	if code, _ := post(t, srv.URL+"/microservices/nope/deployments", map[string]any{"customer_id": "c", "environment": "prod"}); code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown-microservice deployment = %d, want 422", code)
+	}
+	// Malformed body → 400 on every estate register handler (exercise each decode path).
+	for _, path := range []string{"/customers", "/products/prod-1/microservices", "/microservices/ms-1/deployments"} {
+		if code, _ := post(t, srv.URL+path, "{bad"); code != http.StatusBadRequest {
+			t.Errorf("%s malformed body = %d, want 400", path, code)
+		}
+	}
+	// Invalid customer name → 400 (domain validation via writeRegisterError).
+	if code, _ := post(t, srv.URL+"/customers", map[string]any{"name": ""}); code != http.StatusBadRequest {
+		t.Errorf("empty customer name = %d, want 400", code)
+	}
+	// A traversal store error → 500.
+	repo := newFakeRepo()
+	repo.blastErr = errors.New("db down")
+	esrv := newServer(t, repo)
+	resp, err := http.Get(esrv.URL + "/releases/rel-1/blast-radius")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("blast error = %d, want 500", resp.StatusCode)
 	}
 }
 

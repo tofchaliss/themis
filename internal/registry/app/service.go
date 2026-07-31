@@ -11,8 +11,10 @@ import (
 // ErrUnknownProduct is returned when registering a Project against a Product that does
 // not exist; ErrUnknownProject likewise for a Release against a missing Project.
 var (
-	ErrUnknownProduct = errors.New("registry: unknown product")
-	ErrUnknownProject = errors.New("registry: unknown project")
+	ErrUnknownProduct      = errors.New("registry: unknown product")
+	ErrUnknownProject      = errors.New("registry: unknown project")
+	ErrUnknownMicroservice = errors.New("registry: unknown microservice")
+	ErrUnknownCustomer     = errors.New("registry: unknown customer")
 )
 
 // RegistryService orchestrates the registry use cases over its ports.
@@ -80,6 +82,72 @@ func (s *RegistryService) RegisterRelease(ctx context.Context, project domain.Pr
 // SubjectRef validation (EDR-EVIDENCE-01 D5).
 func (s *RegistryService) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
 	return s.repo.ReleaseExists(ctx, releaseID)
+}
+
+// --- estate graph (C1 — EDR-ESTATE-01) -------------------------------------
+
+// RegisterCustomer creates a Customer and returns its new stable id.
+func (s *RegistryService) RegisterCustomer(ctx context.Context, name string) (domain.CustomerID, error) {
+	c, err := domain.NewCustomer(domain.CustomerID(s.ids.NewID()), name)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.SaveCustomer(ctx, c); err != nil {
+		return "", err
+	}
+	return c.ID(), nil
+}
+
+// RegisterMicroservice creates a Microservice under an existing Product. Unknown product → error.
+func (s *RegistryService) RegisterMicroservice(ctx context.Context, product domain.ProductID, name string) (domain.MicroserviceID, error) {
+	ok, err := s.repo.ProductExists(ctx, string(product))
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: %q", ErrUnknownProduct, product)
+	}
+	m, err := domain.NewMicroservice(domain.MicroserviceID(s.ids.NewID()), product, name)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.SaveMicroservice(ctx, m); err != nil {
+		return "", err
+	}
+	return m.ID(), nil
+}
+
+// RegisterDeployment places an existing Microservice into an environment for an existing
+// Customer. Unknown microservice or customer → error.
+func (s *RegistryService) RegisterDeployment(ctx context.Context, microservice domain.MicroserviceID, customer domain.CustomerID, environment string) (domain.DeploymentID, error) {
+	ok, err := s.repo.MicroserviceExists(ctx, string(microservice))
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: %q", ErrUnknownMicroservice, microservice)
+	}
+	ok, err = s.repo.CustomerExists(ctx, string(customer))
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: %q", ErrUnknownCustomer, customer)
+	}
+	d, err := domain.NewDeployment(domain.DeploymentID(s.ids.NewID()), microservice, customer, environment)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.SaveDeployment(ctx, d); err != nil {
+		return "", err
+	}
+	return d.ID(), nil
+}
+
+// BlastRadius returns the number of unique customers reached from a release through the
+// estate graph — the input to Governance's blast-radius multiplier (C2).
+func (s *RegistryService) BlastRadius(ctx context.Context, releaseID string) (int, error) {
+	return s.repo.BlastRadiusCustomers(ctx, releaseID)
 }
 
 // GetRelease loads a Release by id.

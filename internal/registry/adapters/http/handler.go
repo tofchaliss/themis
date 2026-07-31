@@ -71,6 +71,61 @@ func (h *Handler) RegisterRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(id)})
 }
 
+// RegisterCustomer handles POST /customers.
+func (h *Handler) RegisterCustomer(w http.ResponseWriter, r *http.Request) {
+	var req gen.RegisterCustomerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	id, err := h.svc.RegisterCustomer(r.Context(), req.Name)
+	if err != nil {
+		writeRegisterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(id)})
+}
+
+// RegisterMicroservice handles POST /products/{id}/microservices (id = product id).
+func (h *Handler) RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string) {
+	var req gen.RegisterMicroserviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	msID, err := h.svc.RegisterMicroservice(r.Context(), domain.ProductID(id), req.Name)
+	if err != nil {
+		writeRegisterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(msID)})
+}
+
+// RegisterDeployment handles POST /microservices/{id}/deployments (id = microservice id).
+func (h *Handler) RegisterDeployment(w http.ResponseWriter, r *http.Request, id string) {
+	var req gen.RegisterDeploymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	depID, err := h.svc.RegisterDeployment(r.Context(), domain.MicroserviceID(id), domain.CustomerID(req.CustomerId), req.Environment)
+	if err != nil {
+		writeRegisterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(depID)})
+}
+
+// GetBlastRadius handles GET /releases/{id}/blast-radius — unique customers reached (C1).
+func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request, id string) {
+	n, err := h.svc.BlastRadius(r.Context(), id)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot compute blast radius", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, gen.BlastRadius{ReleaseId: id, UniqueCustomers: n})
+}
+
 // GetRelease handles GET /releases/{id}.
 func (h *Handler) GetRelease(w http.ResponseWriter, r *http.Request, id string) {
 	rel, err := h.svc.GetRelease(r.Context(), domain.ReleaseID(id))
@@ -107,6 +162,10 @@ func writeRegisterError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusUnprocessableEntity, "unknown product", err.Error())
 	case errors.Is(err, app.ErrUnknownProject):
 		writeProblem(w, http.StatusUnprocessableEntity, "unknown project", err.Error())
+	case errors.Is(err, app.ErrUnknownMicroservice):
+		writeProblem(w, http.StatusUnprocessableEntity, "unknown microservice", err.Error())
+	case errors.Is(err, app.ErrUnknownCustomer):
+		writeProblem(w, http.StatusUnprocessableEntity, "unknown customer", err.Error())
 	default:
 		writeProblem(w, http.StatusBadRequest, "cannot register", err.Error())
 	}

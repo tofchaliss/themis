@@ -13,6 +13,7 @@ import (
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
 	"github.com/themis-project/themis/internal/governance/adapters/inbound"
+	"github.com/themis-project/themis/internal/governance/adapters/registry"
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -40,14 +41,20 @@ type Governance struct {
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
 // Intelligence advisor (the D13 disable gate — pass a real client to enable AI, a no-op or
-// nil to disable it), and optional Governance-owned auto-accept policies (D11).
-func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, policies ...domain.PolicyRule) Governance {
+// nil to disable it), the Registry read-API base URL for the blast-radius multiplier (empty ⇒
+// the multiplier defaults to 1.0 — fail-safe, C2), and optional Governance-owned auto-accept
+// policies (D11).
+func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, registryURL string, policies ...domain.PolicyRule) Governance {
 	st := store.New(pool)
 	write := app.NewFindingService(st, idGen{}, sysClock{}, policies...)
 	if advisor != nil {
 		write = write.WithAdvisor(advisor)
 	}
-	read := app.NewReadService(st, st)
+	var blast app.BlastRadiusReader
+	if registryURL != "" {
+		blast = registry.NewClient(registryURL, &http.Client{Timeout: 10 * time.Second})
+	}
+	read := app.NewReadService(st, st, blast)
 	relay := store.NewRelay(pool, pub, 100)
 	return Governance{
 		Handler:   govhttp.NewHandler(write, read).Router(),

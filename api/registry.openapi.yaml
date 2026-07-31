@@ -109,6 +109,98 @@ paths:
                 $ref: '#/components/schemas/Release'
         '404':
           $ref: '#/components/responses/Problem'
+  /customers:
+    post:
+      operationId: registerCustomer
+      summary: Register a customer; returns a stable Customer ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterCustomerRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /products/{id}/microservices:
+    post:
+      operationId: registerMicroservice
+      summary: Register a microservice under a product; returns a stable Microservice ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterMicroserviceRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /microservices/{id}/deployments:
+    post:
+      operationId: registerDeployment
+      summary: Register a deployment of a microservice for a customer; returns a stable Deployment ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeploymentRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/blast-radius:
+    get:
+      operationId: getBlastRadius
+      summary: Count the unique customers a release reaches through the estate graph.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlastRadius'
+        '400':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -155,6 +247,34 @@ components:
           type: string
         version:
           type: string
+    RegisterCustomerRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    RegisterMicroserviceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    RegisterDeploymentRequest:
+      type: object
+      required: [customer_id, environment]
+      properties:
+        customer_id:
+          type: string
+        environment:
+          type: string
+    BlastRadius:
+      type: object
+      required: [release_id, unique_customers]
+      properties:
+        release_id:
+          type: string
+        unique_customers:
+          type: integer
     Problem:
       type: object
       properties:

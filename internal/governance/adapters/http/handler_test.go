@@ -109,7 +109,7 @@ var human = domain.Actor{Kind: domain.ActorHuman, ID: "alice"}
 func server(t *testing.T, repo *fakeRepo, proj fakeProjection) *httptest.Server {
 	t.Helper()
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
-	read := app.NewReadService(repo, proj)
+	read := app.NewReadService(repo, proj, nil)
 	srv := httptest.NewServer(govhttp.NewHandler(write, read).Router())
 	t.Cleanup(srv.Close)
 	return srv

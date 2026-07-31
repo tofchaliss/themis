@@ -46,6 +46,7 @@ declare -a infra_pkgs=(
 	governance/adapters/http
 	governance/adapters/inbound
 	governance/adapters/intelligence
+	governance/adapters/registry
 	communication/adapters/serializer
 	communication/adapters/store
 	communication/adapters/governance

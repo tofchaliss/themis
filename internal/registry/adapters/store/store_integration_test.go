@@ -90,7 +90,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE releases, projects, products RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE deployments, microservices, customers, releases, projects, products RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -134,6 +134,54 @@ func TestRegisterAndLookup(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].ID() != relID {
 		t.Errorf("list = %+v", list)
+	}
+}
+
+func TestBlastRadius(t *testing.T) {
+	ctx := context.Background()
+	s := store.New(newPool(t))
+	_, _, rel := seed(t, s) // prod-1 → proj-1 → rel-1
+
+	// Unpopulated estate → 0; unknown release → 0.
+	if n, err := s.BlastRadiusCustomers(ctx, string(rel)); err != nil || n != 0 {
+		t.Fatalf("empty blast = %d, %v, want 0", n, err)
+	}
+	if n, _ := s.BlastRadiusCustomers(ctx, "nope"); n != 0 {
+		t.Errorf("unknown release blast = %d, want 0", n)
+	}
+
+	// One microservice on prod-1, one customer, one deployment → blast 1.
+	ms, _ := domain.NewMicroservice("ms-1", "prod-1", "payments")
+	must(t, s.SaveMicroservice(ctx, ms))
+	c1, _ := domain.NewCustomer("cust-1", "Acme")
+	must(t, s.SaveCustomer(ctx, c1))
+	d1, _ := domain.NewDeployment("dep-1", "ms-1", "cust-1", "prod")
+	must(t, s.SaveDeployment(ctx, d1))
+	if n, err := s.BlastRadiusCustomers(ctx, string(rel)); err != nil || n != 1 {
+		t.Errorf("blast = %d, %v, want 1", n, err)
+	}
+
+	// A second customer + deployment → 2 distinct customers.
+	c2, _ := domain.NewCustomer("cust-2", "Globex")
+	must(t, s.SaveCustomer(ctx, c2))
+	d2, _ := domain.NewDeployment("dep-2", "ms-1", "cust-2", "prod")
+	must(t, s.SaveDeployment(ctx, d2))
+	if n, _ := s.BlastRadiusCustomers(ctx, string(rel)); n != 2 {
+		t.Errorf("blast after 2nd customer = %d, want 2", n)
+	}
+
+	// A duplicate deployment to cust-1 (different env) does NOT double-count (DISTINCT).
+	d3, _ := domain.NewDeployment("dep-3", "ms-1", "cust-1", "staging")
+	must(t, s.SaveDeployment(ctx, d3))
+	if n, _ := s.BlastRadiusCustomers(ctx, string(rel)); n != 2 {
+		t.Errorf("blast after duplicate customer = %d, want 2 (DISTINCT)", n)
+	}
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
