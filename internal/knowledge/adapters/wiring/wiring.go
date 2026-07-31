@@ -52,6 +52,12 @@ type NVDConfig struct {
 	BaseURL string       // "" → the client default (services.nvd.nist.gov)
 	APIKey  string       // optional; empty uses NVD's lower unauthenticated rate limit
 	HTTP    *http.Client // optional; nil → http.DefaultClient
+
+	// Discovery adds NVD to the correlation discovery fan-out (A2): a per-component,
+	// CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a
+	// finding. Opt-in and bounded per component (D5); off by default (no silent NVD calls at
+	// correlation time). An API key is recommended — discovery issues one query per component.
+	Discovery bool
 }
 
 // SignalsConfig configures the optional scheduled exploit-signal enrichment sweep (EPSS / KEV
@@ -75,7 +81,12 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	read := app.NewReadService(st, st)
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
 	inv := evidence.NewClient(evidenceBaseURL, nil)
-	disc := feed.NewOSVClient(osvBaseURL, nil)
+	var disc app.PackageVulnSource = feed.NewOSVClient(osvBaseURL, nil)
+	if nvd.Discovery {
+		// NVD joins the discovery fan-out beside OSV (A2). The reconciled version-range gate in
+		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
+		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
+	}
 	corr := app.NewCorrelationService(inv, disc, fold, st, sysClock{})
 	health := app.NewFeedHealthService(st, sysClock{})
 	kn := Knowledge{
