@@ -18,6 +18,13 @@ type ProjectionReader interface {
 	FaultlineBlastRadius(ctx context.Context, faultlineID string) ([]string, error)
 }
 
+// BlastRadiusReader reads a release's enterprise blast radius — the count of unique customers
+// it reaches — from the Registry estate graph over its read API (EDR-ESTATE-01 C2/D7). It is
+// a small client seam (like Knowledge→Evidence); Governance never imports Registry.
+type BlastRadiusReader interface {
+	BlastRadius(ctx context.Context, releaseID string) (int, error)
+}
+
 // PostureEntry is one row of a Release's security posture: the Finding, its investigation
 // stage, and its current Enterprise Position stance (empty when no Position exists yet).
 type PostureEntry struct {
@@ -30,18 +37,25 @@ type PostureEntry struct {
 	// BaseScore is Knowledge's CVE-intrinsic priority (0–100), materialized from the
 	// FaultlineEnriched event (C6). Governance scales it by the blast multiplier (C2).
 	BaseScore int
+	// Multiplier is the release's blast-radius amplification (1.0–2.0×) from the estate graph
+	// (C2); 1.0 when the estate is empty or unreachable (fail-safe).
+	Multiplier float64
+	// EffectivePriority is BaseScore × Multiplier, clamped to 100 — what a human triages by.
+	EffectivePriority int
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads
 // from the authoritative aggregate store, and heavier rollups from projections.
 type ReadService struct {
-	repo Repository
-	proj ProjectionReader
+	repo  Repository
+	proj  ProjectionReader
+	blast BlastRadiusReader // may be nil — the multiplier then defaults to 1.0 (fail-safe)
 }
 
-// NewReadService wires the aggregate repository and the projection store.
-func NewReadService(repo Repository, proj ProjectionReader) *ReadService {
-	return &ReadService{repo: repo, proj: proj}
+// NewReadService wires the aggregate repository, the projection store, and the blast-radius
+// reader (nil disables the multiplier — every effective priority equals its base score).
+func NewReadService(repo Repository, proj ProjectionReader, blast BlastRadiusReader) *ReadService {
+	return &ReadService{repo: repo, proj: proj, blast: blast}
 }
 
 // GetFinding returns the full Finding aggregate — current Position + Position history +
@@ -76,9 +90,27 @@ func (s *ReadService) GetPosition(ctx context.Context, id domain.FindingID, vers
 	return domain.Position{}, false, nil
 }
 
-// ReleasePosture returns the Release security-posture rollup (D10).
+// ReleasePosture returns the Release security-posture rollup (D10), each Finding's base score
+// scaled by the release's blast-radius multiplier (C2). The blast radius is fetched ONCE per
+// release. Fail-safe: a nil reader or any read error ⇒ multiplier 1.0 (effective == base) and
+// the posture still returns — a missing or unreachable estate never inflates a score or breaks
+// the read.
 func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]PostureEntry, error) {
-	return s.proj.ReleasePosture(ctx, releaseID)
+	entries, err := s.proj.ReleasePosture(ctx, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	mult := 1.0
+	if s.blast != nil {
+		if customers, berr := s.blast.BlastRadius(ctx, releaseID); berr == nil {
+			mult = domain.BlastMultiplier(customers)
+		}
+	}
+	for i := range entries {
+		entries[i].Multiplier = mult
+		entries[i].EffectivePriority = domain.EffectivePriority(entries[i].BaseScore, mult)
+	}
+	return entries, nil
 }
 
 // FaultlineBlastRadius returns the Releases affected by a Faultline (D10).
