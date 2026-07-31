@@ -402,3 +402,29 @@ OpenSpec change `openspec/changes/phase3-knowledge/` with these as `tasks.md` gr
   events for rollup queries; never authoritative, rebuildable from events (BCK-0047).
 - Reconciler — a first-class periodic job that inspects persisted authoritative state and continues
   incomplete correlation/enrichment work; recovery begins from state, never replay (BCK-0050).
+
+---
+
+## Realization notes (2026-07-31 — parity closure A1/A2)
+
+No amendment to the decisions above; these record how two under-realizations were brought up to the EDR
+(the golden rule: the code was the divergence, not these notes).
+
+- **A1 — local reconciled-range gate in correlation (realizes D3).** `CorrelationService.Correlate`
+  previously recorded a match for *every* discovered Proposal, trusting the feed's server-side version
+  filter — under-realizing D3 ("Knowledge owns correlation, applying its **own** affected-range knowledge")
+  and the Correlation glossary entry ("matching … against the cards' **affected ranges**"). A1 wires the
+  shared `kernel/value` range engine into `correlate.go`: a match is recorded unless the component's
+  version is **provably out of** the reconciled (backport-aware) range. **Fail-open decision:** an
+  `RangeUndecidable` verdict (no usable range yet, or an absent/unparseable version) keeps the match — a
+  parse gap must never drop a real vulnerability — mirroring the Intelligence Rule Engine, which
+  short-circuits to not-affected only on `RangeOutOfRange`. Scanner-report ingestion stays ungated (the
+  scanner is itself the version-match authority). This is the case discovery cannot catch: a distro backport
+  whose reconciled range excludes a version the feed's query-time filter admitted.
+- **A2 — NVD as a bounded discovery source (realizes D5 path 2) — PENDING.** D5 already authorizes NVD to
+  *create* cards for changed CVEs checked against known **components** ("creating cards for new hits"). The
+  current `RelevanceFilteredSource` instead bounds by known **CVEs** (enrich-only) — stricter than D5 and
+  keyed wrong, so a CVE only NVD's CPE data covers yields no finding. A2 will add NVD to the discovery
+  fan-out, **bounded to ingested components** to honor D5's hard invariant ("never mirror the whole feed
+  universe") — which needs a component-keyed relevance port (today's `KnownCVEs` is CVE-keyed). Reconciliation
+  needs no change (precedence `nvd>osv` and the range union already absorb NVD-discovered facts).

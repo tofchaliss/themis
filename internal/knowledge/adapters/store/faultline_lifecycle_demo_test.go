@@ -35,10 +35,11 @@ func TestFaultlineLifecycleDemo(t *testing.T) {
 	cve := cveID(t, "CVE-2024-9999")
 
 	t.Log("STEP 1 — first source Proposal (NVD, high): the card is CREATED and ENRICHED.")
-	id, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh, ">=1.0,<3.0"))
+	f, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh, ">=1.0,<3.0"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := f.ID()
 	card, _, _ := st.GetByCVE(ctx, cve.String())
 	logCard(t, "after NVD", card)
 	if card.Stage() != domain.StageEnriched || card.View().Severity != value.SeverityHigh {
@@ -145,10 +146,11 @@ func TestFaultlineReuseAcrossSBOMs(t *testing.T) {
 
 	t.Log("SBOM #1 (release rel-A): first sighting of CVE-2024-9999 on foo → a NEW card is created.")
 	cve1 := cveID(t, "CVE-2024-9999")
-	id1, err := svc.FoldProposal(ctx, cve1, vulnFacts(t, "nvd", value.SeverityHigh))
+	f1, err := svc.FoldProposal(ctx, cve1, vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id1 := f1.ID()
 	if _, err := st.RecordMatch(ctx, app.Match{ReleaseID: "rel-A", FaultlineID: id1, CVE: cve1.String(),
 		Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1.0"}, OccurredAt: time.Now()}); err != nil {
 		t.Fatal(err)
@@ -158,10 +160,11 @@ func TestFaultlineReuseAcrossSBOMs(t *testing.T) {
 	t.Log("SBOM #2 (release rel-B): the SAME CVE arrives as distro alias 'ALPINE-CVE-2024-9999' on a different component.")
 	cve2 := cveID(t, "ALPINE-CVE-2024-9999") // normalizes to the same canonical CVE
 	t.Logf("  'ALPINE-CVE-2024-9999' normalizes to canonical %s (== SBOM #1's CVE)", cve2)
-	id2, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical))
+	f2, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical))
 	if err != nil {
 		t.Fatal(err)
 	}
+	id2 := f2.ID()
 	if _, err := st.RecordMatch(ctx, app.Match{ReleaseID: "rel-B", FaultlineID: id2, CVE: cve2.String(),
 		Component: app.InventoryComponent{PURL: "pkg:apk/alpine/bar@2.0"}, OccurredAt: time.Now()}); err != nil {
 		t.Fatal(err)
