@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-07-27 · **Read this first when resuming.**
+**Updated:** 2026-07-30 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -27,6 +27,31 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 > orchestration" arch assertion), Group 10 (docs). **The pipeline flows end-to-end over the real Postgres
 > bus.** Remaining maturations are tracked, not blocking: the D8 subject-aware scheduler (M5 ships stream-halt)
 > and the D9 explicit integration DTOs (M5 froze the current wire shapes as v1).
+>
+> **Update (2026-07-30): deployed end-to-end on a Linux VM + first parity cluster closed.** The full
+> post-M5 stack was brought up from scratch on Ubuntu 24.04 — all six services under **systemd**, a real
+> 542/556-component OAMP image SBOM driven through to a published OpenVEX, and **cyberpal (Ollama)** as the
+> reactive AI plane. Landed on `main` this session:
+> - **PR #59 — post-M5 deployment hardening.** `INSTALLATION.md` Part A rewritten for the real M5 world
+>   (the `THEMIS_BUS_DATABASE_DSN` switch, database-per-context + `bus`, ordered 6-service runbook, the
+>   Ollama/cyberpal + on-demand `/recommend` seam, a systemd step); `deploy/systemd/` (templated
+>   `themis@.service` + installer); `scripts/gf-upload-sbom.sh` (greenfield register+upload, streams large
+>   SBOMs); and a **real correlation bug fix** — a shared-CVE SBOM used to poison-halt the Evidence stream
+>   (GetByCVE read the pool while Save joined the inbox tx); fixed with tx-aware reads + a savepoint
+>   (`TestInboxCorrelatesSharedCVEWithoutHalt`). Deployment defects logged in `docs/BACKLOG.md`.
+> - **Monolith→greenfield parity analysis** — full capability diff captured in
+>   [`docs/engineering/PARITY-GAP.md`](PARITY-GAP.md).
+> - **First parity cluster (intelligence/enrichment) — 4 PRs merged (#60–#63):** distro (rpm) correlation
+>   via OSV, format-agnostic (Evidence captures the source-package name; #60); **NVD** modified-since
+>   CVSS/severity enrichment, relevance-bounded (#61); **EPSS / KEV / ExploitDB** signal enrichment (#62);
+>   deterministic **priority level + composite score** on the Faultline (#63). All the enrichment feeds are
+>   **opt-in** (`THEMIS_NVD_ENABLED`, `THEMIS_EPSSKEV_ENABLED`) and respect D5 (enrich existing cards, never
+>   mirror the feed). A greenfield Faultline now correlates language + distro packages and carries
+>   authoritative CVSS + EPSS + KEV + public-exploit + a 0–100 score.
+> - **Remaining parity gaps (delivery/security cluster):** real notifications (Communication's `LogDeliverer`
+>   stub → SMTP/Teams), the org blast-radius graph (Product→…→Customer + the score multiplier), and API auth
+>   (no auth on any greenfield endpoint). Plus tracked follow-ups: NVD by-CVE backfill, per-Finding blast
+>   multiplier, distro ubuntu/suse mapping, and the per-record ACL tidy-up (BACKLOG §C).
 
 ---
 
