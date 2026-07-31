@@ -41,6 +41,7 @@ type config struct {
 	nvdEnabled      bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
 	nvdURL          string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
 	nvdAPIKey       string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
+	nvdDiscovery    bool          // THEMIS_NVD_DISCOVERY=1 — add NVD to correlation discovery: a per-component, CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a finding (A2). Default off (external NVD call per component at correlation time; an NVD API key is strongly recommended for large inventories — NVD throttles).
 	nvdPollInterval time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
@@ -67,6 +68,7 @@ func loadConfig() config {
 		nvdEnabled:      os.Getenv("THEMIS_NVD_ENABLED") == "1",
 		nvdURL:          os.Getenv("THEMIS_NVD_URL"),
 		nvdAPIKey:       os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdDiscovery:    os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
 		nvdPollInterval: parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
@@ -118,10 +120,11 @@ func main() {
 	}
 
 	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
-		Enabled: cfg.nvdEnabled,
-		BaseURL: cfg.nvdURL,
-		APIKey:  cfg.nvdAPIKey,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		Enabled:   cfg.nvdEnabled,
+		BaseURL:   cfg.nvdURL,
+		APIKey:    cfg.nvdAPIKey,
+		Discovery: cfg.nvdDiscovery,
+		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}, wiring.SignalsConfig{
 		Enabled:      cfg.sigEnabled,
 		EPSSURL:      cfg.epssURL,

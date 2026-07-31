@@ -218,3 +218,18 @@ func TestTruncateForError(t *testing.T) {
 		t.Errorf("long truncation failed: len=%d", len(got))
 	}
 }
+
+// TestCPEProductGateEdges covers the A2 precision-gate helpers on the boundary cases the
+// keyword test does not reach: a malformed CPE URI yields no product, and an empty component
+// name never matches (so a zero name can't accidentally admit everything).
+func TestCPEProductGateEdges(t *testing.T) {
+	if got := cpeProduct("cpe:2.3:a:vendor:openssl:3.0"); got != "openssl" {
+		t.Errorf("cpeProduct = %q, want openssl", got)
+	}
+	if got := cpeProduct("too:short"); got != "" {
+		t.Errorf("cpeProduct(malformed) = %q, want empty", got)
+	}
+	if nvdConfigsMatchProduct(nil, "") {
+		t.Error("empty name must not match any config")
+	}
+}

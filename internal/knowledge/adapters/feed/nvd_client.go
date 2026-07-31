@@ -139,12 +139,104 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 	return out, nil
 }
 
+// VulnsForPackage discovers the CVEs affecting a component directly from NVD (A2 — the
+// go-forward realization of D5 path 2 for NVD-only CVEs OSV never returns). NVD has no
+// query-by-package, so it is triple-gated to honor D5's "never mirror the whole feed": (1) a
+// bounded keyword-exact description search per component, capped at nvdMaxPages; (2) the
+// CPE-product gate — only CVEs whose CPE config names a matching product survive; (3) the
+// caller's reconciled version-range gate in correlation (A1) filters by version. It implements
+// app.PackageVulnSource, so it slots beside OSV in the correlation discovery fan-out.
+func (c *NVDClient) VulnsForPackage(ctx context.Context, comp app.InventoryComponent) ([]app.ProposalFor, error) {
+	name := strings.TrimSpace(comp.Name)
+	if name == "" {
+		return nil, nil
+	}
+	var out []app.ProposalFor
+	startIndex := 0
+	for page := 0; page < nvdMaxPages; page++ {
+		resp, err := c.fetchKeyword(ctx, name, startIndex)
+		if err != nil {
+			return out, err
+		}
+		for _, v := range resp.Vulnerabilities {
+			if !nvdConfigsMatchProduct(v.CVE.Configurations, name) {
+				continue // keyword hit but no matching CPE product — a mention, not an occurrence
+			}
+			pf, ok, terr := c.translate(v.CVE)
+			if terr != nil || !ok {
+				continue // no CVSS / unparseable — best-effort per record
+			}
+			out = append(out, pf)
+		}
+		startIndex += len(resp.Vulnerabilities)
+		if len(resp.Vulnerabilities) == 0 || startIndex >= resp.TotalResults {
+			break
+		}
+	}
+	return out, nil
+}
+
+// cpeProduct extracts the product from a CPE 2.3 URI
+// (cpe:2.3:<part>:<vendor>:<product>:<version>:…) — field index 4, or "" if malformed.
+func cpeProduct(criteria string) string {
+	parts := strings.Split(criteria, ":")
+	if len(parts) < 5 {
+		return ""
+	}
+	return parts[4]
+}
+
+// nvdConfigsMatchProduct reports whether any vulnerable CPE match names a product that
+// normalized-equals name — the precision gate that turns a fuzzy keyword hit into a real
+// "this CVE is about this component". Exact normalized equality (not substring) keeps false
+// positives low: a missed match is safe (OSV + the watch still cover it), a wrong one is noise.
+func nvdConfigsMatchProduct(configs []nvdConfig, name string) bool {
+	want := normalizeProduct(name)
+	if want == "" {
+		return false
+	}
+	for _, cfg := range configs {
+		for _, node := range cfg.Nodes {
+			for _, m := range node.CPEMatch {
+				if m.Vulnerable && normalizeProduct(cpeProduct(m.Criteria)) == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// normalizeProduct lowercases and unifies "_"/"-" so a component name and a CPE product name
+// compare on equal footing (CPE uses "_" where purls often use "-").
+func normalizeProduct(s string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
+}
+
 func (c *NVDClient) fetchPage(ctx context.Context, start, end time.Time, startIndex int) (nvdLiveResponse, error) {
 	q := url.Values{}
 	q.Set("lastModStartDate", start.Format(nvdTimeLayout))
 	q.Set("lastModEndDate", end.Format(nvdTimeLayout))
 	q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPageSize))
 	q.Set("startIndex", fmt.Sprintf("%d", startIndex))
+	return c.get(ctx, q, "nvd modified-since")
+}
+
+// fetchKeyword pulls one page of CVEs whose description exactly contains keyword — the
+// bounded per-component discovery query (A2, EDR-KNOWLEDGE-01 D5). keywordExactMatch keeps the
+// description search tight; the CPE-product gate (nvdConfigsMatchProduct) then confirms the CVE
+// is actually about the component rather than merely mentioning its name.
+func (c *NVDClient) fetchKeyword(ctx context.Context, keyword string, startIndex int) (nvdLiveResponse, error) {
+	q := url.Values{}
+	q.Set("keywordSearch", keyword)
+	q.Set("keywordExactMatch", "")
+	q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPageSize))
+	q.Set("startIndex", fmt.Sprintf("%d", startIndex))
+	return c.get(ctx, q, "nvd keyword")
+}
+
+// get issues one NVD 2.0 CVE-API query and decodes the page.
+func (c *NVDClient) get(ctx context.Context, q url.Values, label string) (nvdLiveResponse, error) {
 	u := c.baseURL + "/rest/json/cves/2.0?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -156,7 +248,7 @@ func (c *NVDClient) fetchPage(ctx context.Context, start, end time.Time, startIn
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nvdLiveResponse{}, fmt.Errorf("nvd modified-since: %w", err)
+		return nvdLiveResponse{}, fmt.Errorf("%s: %w", label, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -165,11 +257,11 @@ func (c *NVDClient) fetchPage(ctx context.Context, start, end time.Time, startIn
 		return nvdLiveResponse{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nvdLiveResponse{}, fmt.Errorf("nvd modified-since: status %d: %s", resp.StatusCode, truncateForError(data))
+		return nvdLiveResponse{}, fmt.Errorf("%s: status %d: %s", label, resp.StatusCode, truncateForError(data))
 	}
 	var parsed nvdLiveResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nvdLiveResponse{}, fmt.Errorf("nvd modified-since: decode: %w", err)
+		return nvdLiveResponse{}, fmt.Errorf("%s: decode: %w", label, err)
 	}
 	return parsed, nil
 }
@@ -298,4 +390,7 @@ func parseNVDTime(s string) time.Time {
 }
 
 // ensure the port is satisfied at compile time.
-var _ app.ChangedVulnSource = (*NVDClient)(nil)
+var (
+	_ app.ChangedVulnSource = (*NVDClient)(nil)
+	_ app.PackageVulnSource = (*NVDClient)(nil)
+)
