@@ -111,9 +111,16 @@ applicability (Red Hat applicability is additive, not a replacement).
    D4 (`ReactToEnrichment` raises a **system `not_affected` Proposal** on each Finding whose matched component a
    vendor `not_affected` statement covers, via `Finding.CoversPackage`; policy/human accepts → suppressed;
    never auto-suppresses). Delivers uploaded-VEX suppression end-to-end.
-3. **Phase 3 — vendor VEX feeds. ⏳ OPEN.** B3 Red Hat fetch client (per-CVE relevance-bounded — the legacy
-   working path was Hydra `securitydata/cve/<id>.json`, not the dead CSAF directory crawl; also covers
-   Rocky/Alma via the 1:1 NEVRA-clone assumption) producing both the vendor-severity **vuln-facts** path and
-   **applicability** statements + B4 generic CSAF/zip crawler — scheduled, relevance-bounded, feeding the same
-   Phase-1/2 machinery. Needs its own watermark key (the NVD watch's is a singleton `id=1`) and an RPM
-   NEVRA/epoch verdict engine (EL-major main-stream-only, to avoid false "fixed" from AUS/EUS backports).
+3. **Phase 3 — vendor VEX feeds. ◐ PARTIAL.**
+   - **B3 Red Hat fetch client + scheduler — ✅ DONE 2026-08-01 (PR2).** `feed.RedHatClient` does the per-CVE
+     relevance-bounded fetch of the public Hydra `securitydata/cve/<id>.json` (the legacy *working* path, not
+     the dead CSAF directory crawl) → a vendor-severity **vuln-facts** Proposal (CVSS-gated) + a `not_affected`
+     **applicability** Proposal per package Red Hat marks "Not affected". `app.RedHatEnrichmentService` sweeps
+     the already-carded CVEs (no watermark needed — it re-reads `KnownCVEs`, so the singleton-`id=1` collision
+     never arises). Precedence ranks `redhat` distro-authoritative. Covers RHEL and its 1:1 rebuilds (Rocky,
+     Alma). `THEMIS_REDHAT_ENABLED`/`_URL`/`_POLL_INTERVAL`.
+   - **RPM NEVRA/epoch fixed-verdict engine — ⏳ OPEN (PR3).** The current feed emits the vendor's *explicit*
+     `not_affected` (no version math). PR3 adds the `affected_release` NEVRA compare (epoch:version-release
+     rpmvercmp) with EL-major main-stream-only scoping (to avoid a false "fixed" from AUS/EUS/E4S/TUS backports),
+     yielding the version-precise `fixed` verdict + per-stream precision.
+   - **B4 generic CSAF/zip crawler — ⏳ OPEN.** Feeds the same Phase-1/2 machinery.
