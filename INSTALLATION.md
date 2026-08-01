@@ -248,6 +248,55 @@ curl -H "X-API-Key: $THEMIS_API_KEY" http://localhost:8081/api/v1/...     # 200;
 > registration returns **401**. For an open end-to-end run, keep auth in its own shell (or `unset
 > THEMIS_AUTH_DATABASE_DSN` before step 5); prove auth separately as an edge spot-check.
 
+### 4b. Enable enrichment feeds (optional)
+
+Correlation always runs the **OSV** query-by-package source (language + distro ecosystems) — no config needed.
+Every other feed is **opt-in and relevance-bounded**: each enriches only the CVEs already carded from your
+SBOMs (EDR-KNOWLEDGE-01 D5), so none of them mirrors a full feed. They all run on the **Knowledge** node — set
+the env below and (re)start `./bin/knowledge`.
+
+```sh
+# --- authoritative severity / CVSS (NVD) ---
+THEMIS_NVD_ENABLED=1                 # scheduled modified-since watch → authoritative CVSS/severity on carded CVEs
+THEMIS_NVD_DISCOVERY=1               # add NVD to correlation discovery (per-component CPE-gated keyword query)
+THEMIS_NVD_API_KEY=<key>             # strongly recommended — NVD throttles hard without one
+THEMIS_NVD_POLL_INTERVAL=6h
+
+# --- exploit signals ---
+THEMIS_EPSSKEV_ENABLED=1             # EPSS + CISA KEV + ExploitDB → carded CVEs
+
+# --- vendor VEX (the EDR-VEX-01 cluster) ---
+THEMIS_REDHAT_ENABLED=1              # Red Hat per-CVE feed: vendor severity + not_affected + fixed verdict; covers RHEL/Rocky/Alma
+THEMIS_REDHAT_POLL_INTERVAL=12h
+THEMIS_VEXFEED_ENABLED=1             # generic CSAF-VEX feed (B4)
+THEMIS_VEXFEED_URLS=https://<vendor>/csaf/vex,https://<vendor2>/...   # comma-separated CSAF trusted-provider bases
+THEMIS_VEXFEED_POLL_INTERVAL=12h
+
+# --- (Governance) blast-radius saturation cap, parity with the legacy config ---
+THEMIS_BLAST_RADIUS_CAP=10           # unique-customer count at which the priority multiplier saturates to 2.0×
+```
+
+Example — restart Knowledge with NVD + Red Hat enabled. Discovery is **keyless-safe now** because discovery
+I/O runs *outside* the inbox transaction (the D7 fix), so a slow feed no longer stalls the pipeline:
+
+```sh
+pkill -f 'bin/knowledge'
+THEMIS_DATABASE_DSN="$PGBASE/knowledge?sslmode=disable" \
+THEMIS_EVIDENCE_URL=http://localhost:8081 THEMIS_KNOWLEDGE_ADDR=:8085 \
+THEMIS_NVD_ENABLED=1 THEMIS_NVD_API_KEY=<key> THEMIS_REDHAT_ENABLED=1 \
+  ./bin/knowledge >| logs/knowledge.log 2>&1 &
+```
+
+Check feed health (B1) after a poll has run — each enabled feed reports `healthy` with its intelligence tier:
+
+```sh
+curl -s localhost:8085/api/v1/feeds | jq .    # nvd (tier 1), redhat (tier 2), vexfeed (tier 3), epsskev (tier 1) …
+```
+
+> The **first NVD poll is an up-to-120-day modified-since query (~12 min)**, so `nvd` health surfaces only
+> after it completes. The Red Hat and CSAF-VEX feeds fetch **per carded CVE**, so their sweep time scales with
+> your card set, not the vendor's whole catalog.
+
 ### 5. Drive an SBOM end-to-end
 
 ```sh
@@ -318,6 +367,39 @@ curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 > **Quick smoke without the Registry.** For a throwaway dev run you can skip identity registration:
 > start Evidence with `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload
 > with `subject_release_id:"rel-demo"`.
+
+### 5a. Test vendor-VEX suppression + the fixed verdict (EDR-VEX-01)
+
+A vendor `not_affected` statement (uploaded or from a feed) never silently drops a Finding — it becomes a
+**governed proposal** a human or policy accepts. Two ways to exercise it:
+
+**(a) Upload a VEX and suppress a Finding.** With a Finding open for `$FID` (from step 5), upload an OpenVEX
+`not_affected` for its CVE + package, then watch it flow Knowledge → Governance:
+
+```sh
+CVE=<the finding's CVE>          # from: curl -s localhost:8083/api/v1/releases/$RID/posture | jq -r '.[0].cve'
+tmp=/tmp/vex.json; rm -f "$tmp"  # noclobber-safe: delete then recreate
+jq -n --arg r "$RID" --arg cve "$CVE" '{kind:"vex",format:"openvex",subject_release_id:$r,document:(
+  {"@context":"https://openvex.dev/ns/v0.2.0","@id":"vex-1","author":"acme","timestamp":"2024-01-15T00:00:00Z",
+   statements:[{vulnerability:{name:$cve},products:[{"@id":"pkg:rpm/rhel/openssl"}],
+                status:"not_affected",justification:"vulnerable_code_not_present"}]} | tostring)}' > "$tmp"
+curl $J localhost:8081/api/v1/evidence --data-binary @"$tmp"; rm -f "$tmp"
+
+sleep 8
+# 1. The card now carries the vendor statement (Knowledge read API, :8085; getFaultlineByCVE returns one card):
+curl -s "localhost:8085/api/v1/faultlines?cve=$CVE" | jq '.applicabilities'
+# 2. Governance raised a SYSTEM not_affected proposal on the Finding — accept it (a human decision):
+PROP=$(curl -s "localhost:8083/api/v1/findings/$FID" | jq -r '.proposals[] | select(.stance=="not_affected") | .id' | head -1)
+curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP/accept" -d '{"actor_id":"you","actor_kind":"human"}'
+# 3. The Finding's Position is now not_affected → it drops out of the effective posture.
+curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq '.[] | {cve, stance, effective_priority}'
+```
+
+**(b) Let a feed do it.** With `THEMIS_REDHAT_ENABLED=1` (or the CSAF-VEX feed, §4b), the same applicability
+Proposal is folded **automatically** for any carded CVE Red Hat marks `not_affected` — no upload. And the
+**fixed verdict** needs no action at all: if a `pkg:rpm/...` component is already at/above its same-EL-stream
+Red Hat fix, correlation records **no match**, so no Finding is ever opened for that (already-patched)
+occurrence. A cross-stream fix (an el9 fix vs an el8 install) is never applied — so a live vuln is never hidden.
 
 ### 6. Intelligence Gateway (optional AI — Ollama)
 
