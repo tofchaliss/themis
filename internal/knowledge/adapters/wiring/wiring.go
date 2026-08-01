@@ -57,6 +57,7 @@ type Knowledge struct {
 	Watch    *app.WatchService            // nil when the NVD watch is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
+	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
 	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 }
 
@@ -100,11 +101,22 @@ type RedHatConfig struct {
 	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
+// VexfeedConfig configures the optional generic vendor CSAF-VEX feed (parity B4, EDR-VEX-01 D2).
+// When Enabled, Wire builds the multi-base per-CVE CSAF-VEX client and a VexEnrichmentService on
+// Knowledge.Vexfeed (nil when disabled); the composition root schedules its Enrich.
+// Relevance-bounded to already-carded CVEs (D5). BaseURLs are CSAF-VEX directory bases whose
+// per-CVE files live at /<year>/cve-<id>.json.
+type VexfeedConfig struct {
+	Enabled  bool
+	BaseURLs []string
+	HTTP     *http.Client // optional; nil → http.DefaultClient
+}
+
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, vexfeed VexfeedConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -140,6 +152,9 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	}
 	if redhat.Enabled {
 		kn.RedHat = app.NewRedHatEnrichmentService(feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP), st, fold)
+	}
+	if vexfeed.Enabled {
+		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)
 	}
 	return kn
 }
