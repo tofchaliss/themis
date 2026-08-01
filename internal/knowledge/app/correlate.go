@@ -142,6 +142,13 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
 			continue
 		}
+		// Vendor fixed-verdict (EDR-VEX-01 Phase 3): for an rpm component, if the installed build
+		// is at or above a same-EL-stream vendor fix (Red Hat/Rocky/Alma), the backported fix is
+		// present and this occurrence is NOT affected — drop the match. Stream-scoped and
+		// conservative (any uncertainty stays affected), so it never hides a live vulnerability.
+		if value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, f.View().FixedVersions) {
+			continue
+		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, OccurredAt: s.clock.Now(),
