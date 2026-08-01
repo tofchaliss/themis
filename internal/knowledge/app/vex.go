@@ -42,19 +42,35 @@ func NewVEXApplicabilityService(docs DocumentReader, parser VEXParser, fold *Fau
 	return &VEXApplicabilityService{docs: docs, parser: parser, fold: fold, clock: clock}
 }
 
-// Apply reads a VEX evidence document and folds its applicability statements onto the cards.
-// It is idempotent: re-folding an applicability Proposal converges. Individual malformed
+// PlannedApplicability is one VEX applicability Proposal bound to its CVE — produced by the
+// read phase (PlanVEX) and folded by the write phase (ApplyVEX).
+type PlannedApplicability struct {
+	CVE      value.CVEID
+	Proposal domain.Proposal
+}
+
+// VEXPlan is the output of the VEX read phase (PlanVEX): the applicability Proposals parsed
+// from an uploaded VEX document, ready to fold. Building it does the external document read +
+// parse so the write phase (ApplyVEX) touches no network and its transaction stays short — a
+// long-open write transaction would pin the cluster xmin and stall the bus reader (D7).
+type VEXPlan struct {
+	Items []PlannedApplicability
+}
+
+// PlanVEX runs the VEX READ phase with NO transaction: it reads the document from Evidence,
+// parses it, and builds one applicability Proposal per statement. Individual malformed
 // statements (bad CVE id / missing package or status) are skipped, not fatal.
-func (s *VEXApplicabilityService) Apply(ctx context.Context, evidenceID string) error {
+func (s *VEXApplicabilityService) PlanVEX(ctx context.Context, evidenceID string) (VEXPlan, error) {
 	raw, _, err := s.docs.GetDocument(ctx, evidenceID)
 	if err != nil {
-		return err
+		return VEXPlan{}, err
 	}
 	stmts, err := s.parser.Parse(raw)
 	if err != nil {
-		return err
+		return VEXPlan{}, err
 	}
 	now := s.clock.Now()
+	var plan VEXPlan
 	for _, st := range stmts {
 		cve, err := value.NewCVEID(st.CVE)
 		if err != nil {
@@ -66,9 +82,30 @@ func (s *VEXApplicabilityService) Apply(ctx context.Context, evidenceID string) 
 		if err != nil {
 			continue // skip an invalid statement (missing package/status)
 		}
-		if _, err := s.fold.FoldProposal(ctx, cve, p); err != nil {
+		plan.Items = append(plan.Items, PlannedApplicability{CVE: cve, Proposal: p})
+	}
+	return plan, nil
+}
+
+// ApplyVEX runs the VEX WRITE phase inside the caller's transaction: it folds each planned
+// applicability Proposal onto the Faultline for its CVE. No network I/O. Idempotent —
+// re-folding an applicability Proposal converges.
+func (s *VEXApplicabilityService) ApplyVEX(ctx context.Context, plan VEXPlan) error {
+	for _, item := range plan.Items {
+		if _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Apply reads a VEX evidence document and folds its applicability statements onto the cards.
+// It runs the read and write phases back-to-back; the event path uses PlanVEX + ApplyVEX so
+// the document read stays OUTSIDE the inbox transaction. Idempotent.
+func (s *VEXApplicabilityService) Apply(ctx context.Context, evidenceID string) error {
+	plan, err := s.PlanVEX(ctx, evidenceID)
+	if err != nil {
+		return err
+	}
+	return s.ApplyVEX(ctx, plan)
 }

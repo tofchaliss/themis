@@ -103,12 +103,17 @@ applicability (Red Hat applicability is additive, not a replacement).
 
 ## Phased implementation (each its own PR, `make check-ci` green)
 
-1. **Phase 1 — uploaded VEX onto the card.** D1 (Evidence `…/document` read endpoint) + D2 uploaded-trigger
-   (Knowledge VEX parser + `kind==vex` coordinator branch + fold). Expose `applicabilities` on Knowledge's
-   Faultline read API so the statement is visible. *Self-contained; reuses `vexACL` + the domain overlay.*
-2. **Phase 2 — Governance suppression overlay (the payoff).** D5 (carry applicability on the seam) + D4
-   (system `not_affected` Proposal on the Findings; policy/human accepts → suppressed). Delivers the
-   user-visible behaviour for uploaded VEX end-to-end.
-3. **Phase 3 — vendor VEX feeds.** B3 Red Hat CSAF fetch client (applicability + the vendor-severity
-   vuln-facts path) + B4 generic CSAF/zip crawler — scheduled, relevance-bounded, feeding the same Phase-1/2
-   machinery.
+1. **Phase 1 — uploaded VEX onto the card. ✅ DONE (#73).** D1 (Evidence `…/document` read endpoint) + D2
+   uploaded-trigger (Knowledge VEX parser + `kind==vex` coordinator branch + fold). `applicabilities` exposed
+   on Knowledge's Faultline read API. *Self-contained; reuses `vexACL` + the domain overlay.*
+2. **Phase 2 — Governance suppression overlay (the payoff). ✅ DONE 2026-08-01.** D5 (applicability carried on
+   `FaultlineEnriched`, additive/optional so the frozen v1 wire is byte-identical when absent — EVENTBUS D9) +
+   D4 (`ReactToEnrichment` raises a **system `not_affected` Proposal** on each Finding whose matched component a
+   vendor `not_affected` statement covers, via `Finding.CoversPackage`; policy/human accepts → suppressed;
+   never auto-suppresses). Delivers uploaded-VEX suppression end-to-end.
+3. **Phase 3 — vendor VEX feeds. ⏳ OPEN.** B3 Red Hat fetch client (per-CVE relevance-bounded — the legacy
+   working path was Hydra `securitydata/cve/<id>.json`, not the dead CSAF directory crawl; also covers
+   Rocky/Alma via the 1:1 NEVRA-clone assumption) producing both the vendor-severity **vuln-facts** path and
+   **applicability** statements + B4 generic CSAF/zip crawler — scheduled, relevance-bounded, feeding the same
+   Phase-1/2 machinery. Needs its own watermark key (the NVD watch's is a singleton `id=1`) and an RPM
+   NEVRA/epoch verdict engine (EL-major main-stream-only, to avoid false "fixed" from AUS/EUS backports).

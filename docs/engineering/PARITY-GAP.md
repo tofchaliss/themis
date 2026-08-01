@@ -40,7 +40,8 @@ named here are now addressed in-flight.
 | **C6** | #71 | Knowledge base score threaded to the Governance Finding |
 | **C1** | #71 | Registry estate graph (Product→Microservice→Deployment→Customer) + `GET /releases/{id}/blast-radius` |
 | **C2** | #71 | blast multiplier on Finding priority (`base × 1.0–2.0×`; fail-safe 1.0×) |
-| **VEX-ingest (→ B3/B4)** | #73 | uploaded OpenVEX → applicability Proposals on the card (EDR-VEX-01 **Phase 1**; suppression = Phase 2, Red Hat/generic feeds = Phase 3) |
+| **VEX-ingest (→ B3/B4)** | #73 | uploaded OpenVEX → applicability Proposals on the card (EDR-VEX-01 **Phase 1**) |
+| **VEX-suppress (Phase 2)** | (local) | applicability carried on `FaultlineEnriched` (v1-additive) → Governance raises a **system `not_affected` Proposal** on the covered Findings (policy/human accepts → suppressed). EDR-VEX-01 **Phase 2 DONE** 2026-08-01. Red Hat/generic **feeds = Phase 3** (B3/B4, open) |
 
 Also shipped: a deterministic no-AI **SBOM→VEX CI gate** (#67, now a PR gate) and four decision records
 (`EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01`, + realization notes on `EDR-KNOWLEDGE-01`). **Remaining

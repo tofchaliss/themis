@@ -60,8 +60,13 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		if err := json.Unmarshal(env.Payload, &dto); err != nil {
 			return err
 		}
+		apps := make([]app.Applicability, 0, len(dto.Applicabilities))
+		for _, a := range dto.Applicabilities {
+			apps = append(apps, app.Applicability{Package: a.Package, Status: a.Status, Justification: a.Justification})
+		}
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
+			Applicabilities: apps,
 		})
 	case eventFaultlineSuperseded:
 		var dto faultlineSupersededDTO
@@ -100,12 +105,19 @@ func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 }
 
 type faultlineEnrichedDTO struct {
-	FaultlineID   string `json:"FaultlineID"`
-	CVE           string `json:"CVE"`
-	Severity      string `json:"Severity"`
-	KEV           bool   `json:"KEV"`
-	ExploitPublic bool   `json:"ExploitPublic"`
-	Score         int    `json:"Score"` // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
+	FaultlineID     string             `json:"FaultlineID"`
+	CVE             string             `json:"CVE"`
+	Severity        string             `json:"Severity"`
+	KEV             bool               `json:"KEV"`
+	ExploitPublic   bool               `json:"ExploitPublic"`
+	Score           int                `json:"Score"`           // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
+	Applicabilities []applicabilityDTO `json:"Applicabilities"` // vendor VEX statements (EDR-VEX-01 D5); absent on an older payload.
+}
+
+type applicabilityDTO struct {
+	Package       string `json:"Package"`
+	Status        string `json:"Status"`
+	Justification string `json:"Justification"`
 }
 
 type faultlineSupersededDTO struct {

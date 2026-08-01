@@ -122,6 +122,42 @@ per-context follow-ups below.
   `internal/knowledge/adapters/store/store.go` (`GetByCVE`/`load` + `Save`) and/or
   `internal/knowledge/app/correlate.go`. Surfaced 2026-07-30 during the end-to-end deployment.
   See [[feedback-backlog-surfaced-followups]].
+- [x] **(HIGH) Correlation ran its whole external-I/O fan-out inside the inbox transaction → cluster-wide
+  bus stall. — FIXED 2026-08-01.** Root cause of "SBOM uploaded but no CVE entries captured": `InboxConsumer.
+  Handle` opened one write transaction, then correlation made a per-component OSV/NVD HTTP call (`VulnsForPackage`)
+  *inside* it. On a large SBOM / keyless-NVD-throttled call that transaction stayed open for minutes, pinning the
+  **cluster-global** `pg_snapshot_xmin`; the bus reader's gap-free watermark (`insert_xid8 < pg_snapshot_xmin`,
+  `reader.go:196`) then could not advance past any newer event and **every** reader on **every** stream starved.
+  **Fix:** a `Preparer` seam on the inbox — the consumer runs the read/discovery phase OUTSIDE the transaction
+  (`PlanCorrelation`/`PlanVEX` → `PrepareEvidenceRegistered` → `Consumer.Prepare`) and the inbox runs only the
+  write closure (`ApplyCorrelation`/`ApplyVEX`) inside the claimed transaction, so it stays short. Honors EB-06
+  (claim+writes atomic) and D7 (gap-free); EDR-EVENTBUS-01 D5 refined with the read/write-phase note. Integration
+  regressions `TestInboxPreparerRunsReadOutsideTxAndDedups` / `...ReadErrorClaimsNothing` / `...RollsBackOnApplyError`.
+  Surfaced 2026-07-31, fixed next session. See [[project-vm-fromscratch-test-20260731]].
+  - **Fast-follow (LOW):** Governance's inbound consumer makes a Registry blast-radius HTTP call inside *its*
+    inbox tx too (C2) — the same class, far smaller (one localhost call, not N throttled ones). Adopt the same
+    `Preparer` seam there for symmetry before it ever matters at scale.
+- [ ] **(LOW) Feed-health omits the always-on OSV feed.** `RecordSuccess`/`RecordFailure` are called only by the
+  opt-in schedulers (NVD watch, EPSS/KEV sweep), never by OSV correlation — so with only OSV running, the
+  feed-health surface (B1) is empty even though the primary feed is healthy. Have correlation stamp OSV health on
+  each discovery pass. `internal/knowledge/app` + `adapters/feed`. Surfaced 2026-07-31.
+- [ ] **(LOW) Feed-health records only *after* a full poll.** The first NVD watch poll is a 120-day
+  modified-since query (~12 min), so `nvd` health does not surface until it completes — a fresh node looks
+  feed-dark for minutes. Stamp health at poll *start*, or use a smaller first window. `cmd/knowledge` `watchLoop`.
+  Surfaced 2026-07-31.
+- [ ] **(MED) VEX round-trip mismatch — Themis cannot re-ingest its own published OpenVEX.** The OpenVEX
+  *serializer* emits `products` as bare id strings; the VEX-1 *parser* (`adapters/vex/parser.go`
+  `openVEXProduct{ ID string json:"@id" }`) expects product **objects** `{"@id": …}`. So a Communication-published
+  OpenVEX fed back into Knowledge yields zero applicability statements. Align the two shapes (parser accept both,
+  or serializer emit objects). Surfaced 2026-07-31.
+- [ ] **(LOW) Wolfi distro unmapped in OSV discovery.** `osvDistroEcosystem` (`adapters/feed/osv_client.go`) maps
+  Rocky/Alma/Red Hat/Debian/Alpine but has no `wolfi` case; the legacy monolith had a `wolfi_osv_url` feed. Add the
+  Wolfi ecosystem mapping. Surfaced 2026-08-01 during the legacy→greenfield feed-parity check.
+- [x] **(LOW) `blast_radius_cap` is hardcoded, not configurable. — FIXED 2026-08-01.** `BlastMultiplier` now
+  takes the cap as a parameter (`domain.DefaultBlastRadiusCap = 10`), threaded via `THEMIS_BLAST_RADIUS_CAP`
+  through `cmd/governance` → `Wire` → `NewReadService` (which normalizes < 2 to the default); a fixed +0.1/customer
+  slope clamped to 2.0×. Closes the feed-parity PARTIAL for `intelligence.blast_radius_cap`. Surfaced + fixed
+  2026-08-01 (feed-parity check).
 - [ ] **(MED) Risk score — add the release-scoped blast multiplier per-Finding in Governance.** The
   Knowledge Faultline now carries a CVE-intrinsic `priority`/`score` (Layer-1 level + severity+EPSS+KEV
   base, `internal/knowledge/domain/priority.go`). The monolith's composite also multiplied by a blast

@@ -38,7 +38,7 @@ func findingWithPositions(t *testing.T) domain.Finding {
 func TestReadService_GetFinding(t *testing.T) {
 	repo := newRepo()
 	repo.seed(findingWithPositions(t))
-	rs := app.NewReadService(repo, fakeProjection{}, nil)
+	rs := app.NewReadService(repo, fakeProjection{}, nil, 0)
 
 	f, err := rs.GetFinding(context.Background(), "fnd-1")
 	if err != nil || f.ID() != "fnd-1" || len(f.Positions()) != 2 {
@@ -56,7 +56,7 @@ func TestReadService_GetFinding(t *testing.T) {
 	// Error propagates.
 	ge := newRepo()
 	ge.getByIDErr = errors.New("db down")
-	if _, err := app.NewReadService(ge, fakeProjection{}, nil).GetFinding(context.Background(), "fnd-1"); err == nil {
+	if _, err := app.NewReadService(ge, fakeProjection{}, nil, 0).GetFinding(context.Background(), "fnd-1"); err == nil {
 		t.Error("get error: expected error")
 	}
 }
@@ -64,7 +64,7 @@ func TestReadService_GetFinding(t *testing.T) {
 func TestReadService_GetPosition(t *testing.T) {
 	repo := newRepo()
 	repo.seed(findingWithPositions(t))
-	rs := app.NewReadService(repo, fakeProjection{}, nil)
+	rs := app.NewReadService(repo, fakeProjection{}, nil, 0)
 	ctx := context.Background()
 
 	// Latest (version <= 0).
@@ -87,7 +87,7 @@ func TestReadService_GetPosition(t *testing.T) {
 	// Get error.
 	ge := newRepo()
 	ge.getByIDErr = errors.New("db down")
-	if _, _, err := app.NewReadService(ge, fakeProjection{}, nil).GetPosition(ctx, "fnd-1", 0); err == nil {
+	if _, _, err := app.NewReadService(ge, fakeProjection{}, nil, 0).GetPosition(ctx, "fnd-1", 0); err == nil {
 		t.Error("get error: expected error")
 	}
 }
@@ -104,7 +104,7 @@ func TestReadService_BlastMultiplier(t *testing.T) {
 	proj := fakeProjection{posture: []app.PostureEntry{{FindingID: "fnd-1", BaseScore: 50}}}
 
 	// 5 unique customers → 1.4× → effective priority 70.
-	got, err := app.NewReadService(newRepo(), proj, fakeBlast{customers: 5}).ReleasePosture(ctx, "rel-1")
+	got, err := app.NewReadService(newRepo(), proj, fakeBlast{customers: 5}, 0).ReleasePosture(ctx, "rel-1")
 	if err != nil || len(got) != 1 {
 		t.Fatalf("posture = %+v err=%v", got, err)
 	}
@@ -113,15 +113,22 @@ func TestReadService_BlastMultiplier(t *testing.T) {
 	}
 
 	// Fail-safe: a blast-read error ⇒ 1.0× (effective == base), and the read still succeeds.
-	g2, err := app.NewReadService(newRepo(), proj, fakeBlast{err: errors.New("registry down")}).ReleasePosture(ctx, "rel-1")
+	g2, err := app.NewReadService(newRepo(), proj, fakeBlast{err: errors.New("registry down")}, 0).ReleasePosture(ctx, "rel-1")
 	if err != nil || len(g2) != 1 || g2[0].Multiplier != 1.0 || g2[0].EffectivePriority != 50 {
 		t.Errorf("fail-safe = %+v err=%v, want mult 1.0 / eff 50", g2, err)
 	}
 
 	// Nil reader ⇒ 1.0× as well.
-	g3, _ := app.NewReadService(newRepo(), proj, nil).ReleasePosture(ctx, "rel-1")
+	g3, _ := app.NewReadService(newRepo(), proj, nil, 0).ReleasePosture(ctx, "rel-1")
 	if g3[0].Multiplier != 1.0 || g3[0].EffectivePriority != 50 {
 		t.Errorf("nil reader = %+v, want mult 1.0 / eff 50", g3)
+	}
+
+	// A configured cap (< default) saturates sooner: cap=3 with 5 customers ⇒ 2.0× ⇒ effective 100.
+	// (Also exercises the non-normalized NewReadService path where the caller supplies cap ≥ 2.)
+	g4, _ := app.NewReadService(newRepo(), proj, fakeBlast{customers: 5}, 3).ReleasePosture(ctx, "rel-1")
+	if g4[0].Multiplier != 2.0 || g4[0].EffectivePriority != 100 {
+		t.Errorf("cap=3 = %+v, want mult 2.0 / eff 100", g4)
 	}
 }
 
@@ -130,7 +137,7 @@ func TestReadService_Projections(t *testing.T) {
 		posture: []app.PostureEntry{{FindingID: "fnd-1", Stage: domain.StagePositionEstablished, Stance: domain.StanceAffected, HasPosition: true}},
 		blast:   []string{"rel-1", "rel-2"},
 	}
-	rs := app.NewReadService(newRepo(), proj, nil)
+	rs := app.NewReadService(newRepo(), proj, nil, 0)
 	ctx := context.Background()
 
 	if got, err := rs.ReleasePosture(ctx, "rel-1"); err != nil || len(got) != 1 || got[0].FindingID != "fnd-1" {
@@ -141,7 +148,7 @@ func TestReadService_Projections(t *testing.T) {
 	}
 
 	// Errors propagate.
-	bad := app.NewReadService(newRepo(), fakeProjection{err: errors.New("proj down")}, nil)
+	bad := app.NewReadService(newRepo(), fakeProjection{err: errors.New("proj down")}, nil, 0)
 	if _, err := bad.ReleasePosture(ctx, "rel-1"); err == nil {
 		t.Error("posture error: expected error")
 	}

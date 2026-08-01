@@ -42,9 +42,10 @@ type Governance struct {
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
 // Intelligence advisor (the D13 disable gate — pass a real client to enable AI, a no-op or
 // nil to disable it), the Registry read-API base URL for the blast-radius multiplier (empty ⇒
-// the multiplier defaults to 1.0 — fail-safe, C2), and optional Governance-owned auto-accept
+// the multiplier defaults to 1.0 — fail-safe, C2), the blast-radius saturation cap (any value
+// < 2 is normalized to domain.DefaultBlastRadiusCap), and optional Governance-owned auto-accept
 // policies (D11).
-func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, registryURL string, policies ...domain.PolicyRule) Governance {
+func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, registryURL string, blastCap int, policies ...domain.PolicyRule) Governance {
 	st := store.New(pool)
 	write := app.NewFindingService(st, idGen{}, sysClock{}, policies...)
 	if advisor != nil {
@@ -54,7 +55,8 @@ func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, 
 	if registryURL != "" {
 		blast = registry.NewClient(registryURL, &http.Client{Timeout: 10 * time.Second})
 	}
-	read := app.NewReadService(st, st, blast)
+	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
+	read := app.NewReadService(st, st, blast, blastCap)
 	relay := store.NewRelay(pool, pub, 100)
 	return Governance{
 		Handler:   govhttp.NewHandler(write, read).Router(),

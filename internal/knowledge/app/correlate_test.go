@@ -175,3 +175,15 @@ func TestCoordinator_OnEvidenceRegistered(t *testing.T) {
 		t.Error("SBOM should correlate")
 	}
 }
+
+// TestCoordinator_SBOMReadErrorPropagates proves a failure in the correlation READ phase (the
+// part now run outside the inbox transaction) surfaces from OnEvidenceRegistered — so the
+// event is retried, and the inbox never opens a transaction for a read that failed.
+func TestCoordinator_SBOMReadErrorPropagates(t *testing.T) {
+	ctx := context.Background()
+	coord := app.NewCoordinator(
+		correlation(t, fakeInventory{err: errors.New("evidence down")}, fakeDiscovery{}, newMatches(), newRepo()), nil)
+	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev", ReleaseID: "rel", Kind: "sbom"}); err == nil {
+		t.Error("a read-phase (inventory) error must propagate from OnEvidenceRegistered")
+	}
+}

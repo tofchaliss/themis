@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +26,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/adapters/wiring"
 	"github.com/themis-project/themis/internal/governance/app"
+	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
@@ -42,6 +44,7 @@ type config struct {
 	aiEnabled       bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
 	intelligenceURL string // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
 	registryURL     string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
+	blastRadiusCap  int    // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -61,6 +64,7 @@ func loadConfig() config {
 		aiEnabled:       os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
 		intelligenceURL: envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
 		registryURL:     envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
+		blastRadiusCap:  envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -116,7 +120,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL)
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.blastRadiusCap)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 
@@ -227,6 +231,18 @@ func applyMigrations(dsn, path string) error {
 func envDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// envIntDefault reads an integer env var, falling back to def when unset, empty, or unparseable
+// (the wiring layer further normalizes out-of-range values, so a bad value degrades to the
+// default rather than failing startup).
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return def
 }

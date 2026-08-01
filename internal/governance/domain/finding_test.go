@@ -92,6 +92,30 @@ func TestAbsorbComponent(t *testing.T) {
 	}
 }
 
+func TestCoversPackage(t *testing.T) {
+	f := newFinding(t)
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl"}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	cases := []struct {
+		pkg  string
+		want bool
+	}{
+		{"", false},                     // empty never matches
+		{"pkg:rpm/openssl@1.0.2", true}, // exact PURL
+		{"openssl", true},               // bare name
+		{"pkg:rpm/openssl", true},       // PURL without the @version suffix (vendor form)
+		{"  openssl  ", true},           // trimmed before matching
+		{"pkg:rpm/zlib", false},         // covers a different package
+		{"pkg:rpm/openssl@1.0.2-extra", false}, // not a prefix boundary match
+	}
+	for _, tc := range cases {
+		if got := f.CoversPackage(tc.pkg); got != tc.want {
+			t.Errorf("CoversPackage(%q) = %v, want %v", tc.pkg, got, tc.want)
+		}
+	}
+}
+
 func TestRaiseProposalFlagsForReview(t *testing.T) {
 	f := newFinding(t)
 	if err := f.RaiseProposal(proposal(t, "p1", human, domain.StanceAffected)); err != nil {
