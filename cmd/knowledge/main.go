@@ -52,6 +52,10 @@ type config struct {
 	exploitDBURL    string        // THEMIS_EXPLOITDB_URL — ExploitDB files_exploits.csv URL (default; empty skips ExploitDB).
 	sigPollInterval time.Duration // THEMIS_EPSSKEV_POLL_INTERVAL — Go duration between enrichment sweeps (default 24h; falls back to 24h if unparseable).
 
+	redhatEnabled      bool          // THEMIS_REDHAT_ENABLED=1 — enable the scheduled Red Hat vendor feed (per-CVE vendor severity + not_affected applicability on already-carded CVEs; covers RHEL/Rocky/Alma; default off).
+	redhatURL          string        // THEMIS_REDHAT_URL — Red Hat Security Data API base URL (empty → the public Hydra default; no API key needed).
+	redhatPollInterval time.Duration // THEMIS_REDHAT_POLL_INTERVAL — Go duration between Red Hat sweeps (default 12h; falls back to 12h if unparseable).
+
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. When set, the relay publishes and the reader drains the Evidence stream; when empty, a logging publisher is used and the reader is disabled (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
@@ -81,6 +85,10 @@ func loadConfig() config {
 		kevURL:          envDefault("THEMIS_KEV_URL", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"),
 		exploitDBURL:    envDefault("THEMIS_EXPLOITDB_URL", "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"),
 		sigPollInterval: parseDurationDefault(os.Getenv("THEMIS_EPSSKEV_POLL_INTERVAL"), 24*time.Hour),
+
+		redhatEnabled:      os.Getenv("THEMIS_REDHAT_ENABLED") == "1",
+		redhatURL:          os.Getenv("THEMIS_REDHAT_URL"),
+		redhatPollInterval: parseDurationDefault(os.Getenv("THEMIS_REDHAT_POLL_INTERVAL"), 12*time.Hour),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -139,6 +147,10 @@ func main() {
 		KEVURL:       cfg.kevURL,
 		ExploitDBURL: cfg.exploitDBURL,
 		HTTP:         &http.Client{Timeout: 120 * time.Second},
+	}, wiring.RedHatConfig{
+		Enabled: cfg.redhatEnabled,
+		BaseURL: cfg.redhatURL,
+		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
@@ -155,6 +167,13 @@ func main() {
 	if kn.Signals != nil {
 		go signalLoop(kn.Signals, kn.Health, cfg.sigPollInterval, logger.Component("signals"))
 		logger.Info("exploit-signal enrichment enabled", observability.String("interval", cfg.sigPollInterval.String()))
+	}
+
+	// Scheduled Red Hat vendor feed (D5, parity B3): folds vendor severity + not_affected
+	// applicability onto already-carded CVEs (covers RHEL/Rocky/Alma). Off unless THEMIS_REDHAT_ENABLED=1.
+	if kn.RedHat != nil {
+		go redhatLoop(kn.RedHat, kn.Health, cfg.redhatPollInterval, logger.Component("redhat"))
+		logger.Info("red hat vendor feed enabled", observability.String("interval", cfg.redhatPollInterval.String()))
 	}
 
 	// The bus reader drives correlation off the Evidence stream (EB-07/08). Without a bus it
@@ -258,6 +277,32 @@ func signalLoop(sig *app.SignalEnrichmentService, health *app.FeedHealthService,
 		}
 	}
 	time.Sleep(20 * time.Second) // let the service settle; the bulk feeds are large
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
+// redhatLoop runs the scheduled Red Hat vendor feed: one sweep shortly after startup, then every
+// interval. It folds vendor severity + not_affected applicability onto already-carded CVEs
+// (relevance-bounded, per-CVE Hydra fetch); a failure is logged and retried next tick (the sweep
+// is idempotent). A CVE Red Hat does not track is skipped inside the sweep, not an error.
+func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := rh.Enrich(context.Background())
+		if err != nil {
+			logger.Error("red hat enrichment failed", observability.Err(err))
+			recordFeed(health, "redhat", err, logger)
+			return
+		}
+		recordFeed(health, "redhat", nil, logger)
+		if n > 0 {
+			logger.Info("red hat enrichment folded", observability.Int("folded", n))
+		}
+	}
+	time.Sleep(25 * time.Second) // let the service settle; per-CVE fetches scale with the card set
 	sweep()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
