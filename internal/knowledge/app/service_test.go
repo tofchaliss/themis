@@ -100,6 +100,19 @@ func vulnFactsRanged(t *testing.T, source string, ranges ...string) domain.Propo
 	return p
 }
 
+// vulnFactsFixed builds a vuln-facts Proposal carrying fixed versions (e.g. Red Hat main-stream
+// fix NEVRAs), so a reconciled view exposes them to correlation's stream-scoped fixed gate.
+func vulnFactsFixed(t *testing.T, source string, fixed ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "")
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, FixedVersions: fixed})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 func noteTypes(notes []app.OutboxNote) []string {
 	out := make([]string, len(notes))
 	for i, n := range notes {

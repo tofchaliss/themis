@@ -56,6 +56,8 @@ type Knowledge struct {
 	Relay    *store.Relay
 	Watch    *app.WatchService            // nil when the NVD watch is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
+	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
+	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
 	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 }
 
@@ -88,14 +90,39 @@ type SignalsConfig struct {
 	HTTP         *http.Client // optional; nil → http.DefaultClient
 }
 
+// RedHatConfig configures the optional Red Hat vendor feed (parity B3, EDR-VEX-01 D2/Phase 3).
+// When Enabled, Wire builds the per-CVE Red Hat Security Data client and a
+// RedHatEnrichmentService on Knowledge.RedHat (nil when disabled); the composition root
+// schedules its Enrich. Relevance-bounded to already-carded CVEs (D5); the public Hydra API
+// needs no key. Covers RHEL and its 1:1 rebuilds (Rocky, Alma).
+type RedHatConfig struct {
+	Enabled bool
+	BaseURL string       // "" → the client default (access.redhat.com Hydra)
+	HTTP    *http.Client // optional; nil → http.DefaultClient
+}
+
+// VexfeedConfig configures the optional generic vendor CSAF-VEX feed (parity B4, EDR-VEX-01 D2).
+// When Enabled, Wire builds the multi-base per-CVE CSAF-VEX client and a VexEnrichmentService on
+// Knowledge.Vexfeed (nil when disabled); the composition root schedules its Enrich.
+// Relevance-bounded to already-carded CVEs (D5). BaseURLs are CSAF-VEX directory bases whose
+// per-CVE files live at /<year>/cve-<id>.json.
+type VexfeedConfig struct {
+	Enabled  bool
+	BaseURLs []string
+	HTTP     *http.Client // optional; nil → http.DefaultClient
+}
+
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, vexfeed VexfeedConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
-	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("nvd", "osv"))
+	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
+	// the reconcile policy is "distro-authoritative first, then NVD, then others"). Red Hat's
+	// vendor-severity + not_affected statements therefore headline the reconciled distro view.
+	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
 	evClient := evidence.NewClient(evidenceBaseURL, nil)
 	var disc app.PackageVulnSource = feed.NewOSVClient(osvBaseURL, nil)
 	if nvd.Discovery {
@@ -122,6 +149,12 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	if signals.Enabled {
 		src := feed.NewExploitSignalClient(signals.EPSSURL, signals.KEVURL, signals.ExploitDBURL, signals.HTTP)
 		kn.Signals = app.NewSignalEnrichmentService(src, st, fold, sysClock{})
+	}
+	if redhat.Enabled {
+		kn.RedHat = app.NewRedHatEnrichmentService(feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP), st, fold)
+	}
+	if vexfeed.Enabled {
+		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)
 	}
 	return kn
 }
