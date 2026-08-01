@@ -126,4 +126,11 @@ applicability (Red Hat applicability is additive, not a replacement).
      into `VulnFacts.FixedVersions`, and correlation's gate drops a match when the installed rpm build is at/above
      its same-EL-stream vendor fix. **Conservative by design** — any parse/stream uncertainty stays *affected*, so
      a false "fixed" (the only unsafe direction) never occurs.
-   - **B4 generic CSAF/zip crawler — ⏳ OPEN.** Feeds the same Phase-1/2 machinery.
+   - **B4 generic vendor CSAF-VEX feed — ✅ DONE 2026-08-01.** Realized **per-CVE** (relevance-bounded, D5),
+     NOT as a bulk crawler: `feed.CSAFVexClient` fetches `<base>/<year>/cve-<id>.json` from each configured CSAF
+     trusted-provider base (`THEMIS_VEXFEED_URLS`), `feed.parseCSAFVEX` resolves the `product_tree` PURLs to
+     package names (the resolution the legacy naive parser skipped), and `app.VexEnrichmentService` sweeps the
+     already-carded CVEs — folding `not_affected` applicability into the Phase-1/2 suppression overlay. The bulk
+     CSAF-dir/zip crawl the parity line named was **deliberately rejected**: it would transiently mirror the whole
+     vendor catalog (violating D5) — the same shape that left the legacy crawler always-empty. A zip/dir crawler
+     for providers without a per-CVE endpoint remains a possible future addition.

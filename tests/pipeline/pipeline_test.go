@@ -318,7 +318,7 @@ func newPipeline(t *testing.T) *pipeline {
 	// Knowledge: consumes the Evidence stream and correlates (no HTTP surface needed here).
 	knPool := mustPool(t, dsnFor("knowledge"))
 	t.Cleanup(knPool.Close)
-	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{})
+	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{}, knwiring.VexfeedConfig{})
 	knReader := kninbound.Subscription.NewReader(busPool, log, knstore.NewInboxConsumer(knPool, kn.Consumer))
 
 	// Governance: consumes the Knowledge stream; serves posture + triage.
