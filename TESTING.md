@@ -79,15 +79,12 @@ Verified 2026-07-25 against LM Studio (WhiteRabbitNeo-V3-7B) → a validated `af
 # enable AI on the Governance service:
 export THEMIS_GOVERNANCE_AI_ENABLED=1 THEMIS_INTELLIGENCE_URL=http://localhost:8086
 
-# a Finding is born from a Knowledge ComponentMatched event; until the M5 bus lands, feed it over HTTP:
-curl -s -X POST localhost:8083/internal/knowledge-events \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"...","payload":{...}}'   # exact ComponentMatched shape: see internal/governance/adapters/inbound + seam_test.go
-
-FINDING=$(curl -s "localhost:8083/api/v1/findings?release=<rel>&faultline=<fl>" | jq -r .id)
-curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8083/api/v1/findings/$FINDING/recommend
-# 201 → an AI proposal was recorded (StatusProposed, actor=ai); 204 → AI off / unavailable / declined.
-curl -s localhost:8083/api/v1/findings/$FINDING | jq '.proposals'   # inspect the advisory proposal
+# A Finding is born when an SBOM component matches a card and the ComponentMatched event crosses the M5 bus
+# to Governance. Drive one end-to-end (INSTALLATION.md § 5), then grab a Finding id from the release posture:
+FID=$(curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq -r '.[0].finding_id')
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8083/api/v1/findings/$FID/recommend
+# an advisory AI proposal is recorded (actor=ai); 204 → AI off / unavailable / declined.
+curl -s localhost:8083/api/v1/findings/$FID | jq '.proposals'   # inspect the advisory proposal
 ```
 
 **4. Disable gate.** With `THEMIS_GOVERNANCE_AI_ENABLED` unset (or `cmd/intelligence` not running),
@@ -144,6 +141,26 @@ the other end: Evidence → (bus) → Knowledge correlates a Faultline → (bus)
 human governs an **affected** Position → (bus) → Communication publishes the OpenVEX. It skips cleanly if
 embedded Postgres is unavailable, and is **not** part of `make check` (e2e is slow; it runs post-merge in CI
 alongside `make e2e-evidence`).
+
+### Vendor-VEX capabilities (EDR-VEX-01: suppression + Red Hat + CSAF-VEX + fixed verdict)
+
+The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-vendor-vex-suppression--the-fixed-verdict-edr-vex-01); enable the feeds per [§ 4b](INSTALLATION.md#4b-enable-enrichment-feeds-optional). What each capability should show:
+
+- **Uploaded-VEX suppression (Phase 2).** Upload an OpenVEX `not_affected` for a carded CVE's package → the
+  card's `applicabilities` gains the statement (`GET :8085/api/v1/faultlines?cve=<CVE>`), Governance raises a
+  **system `not_affected` Proposal** on the affected Finding (`GET :8083/api/v1/findings/<FID>` → a
+  `proposer_kind:"system"`, `stance:"not_affected"`, `status:"proposed"` proposal), and accepting it flips the
+  Position → the Finding drops from `GET :8083/api/v1/releases/<RID>/posture`. It is **never auto-suppressed**.
+- **Red Hat feed (B3).** With `THEMIS_REDHAT_ENABLED=1`, a carded CVE Red Hat rates gains authoritative
+  severity, and a Red Hat `not_affected` folds the same applicability automatically (no upload). Confirm the
+  feed is live via `GET :8085/api/v1/feeds` → `redhat` healthy (tier 2). Covers RHEL and its 1:1 rebuilds
+  (Rocky, Alma).
+- **CSAF-VEX feed (B4).** With `THEMIS_VEXFEED_ENABLED=1` + `THEMIS_VEXFEED_URLS=<bases>`, generic vendor
+  `not_affected` statements fold per carded CVE; `GET :8085/api/v1/feeds` → `vexfeed` (tier 3).
+- **Stream-scoped fixed verdict (B3/PR3).** An SBOM whose `pkg:rpm/...` component is **at or above** its
+  same-EL-stream Red Hat fix produces **no Finding** for that occurrence (already patched). A cross-stream
+  fix (an el9 fix vs an el8 install) is deliberately never applied — verify a genuinely-vulnerable el8 build
+  below its el8 fix **does** still open a Finding (the conservative direction never hides a live vuln).
 
 ---
 
