@@ -124,6 +124,36 @@ func TestCorrelate_SkipsOutOfRange(t *testing.T) {
 	}
 }
 
+func TestCorrelate_SkipsRPMFixedByStream(t *testing.T) {
+	ctx := context.Background()
+	// The installed RHEL-8 build (release 17) is at/above the Red Hat RHEL-8 fix (release 16), so
+	// it carries the backported fix — correlation records NO match for this occurrence (fixed, not
+	// affected), even though the CVE is real (EDR-VEX-01 Phase 3, stream-scoped fixed verdict).
+	comp := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/openssl@1.0.2k-17.el8_10", Name: "openssl",
+		Version: "1.0.2k-17.el8_10", Ecosystem: "rhel",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		comp.PURL: {{CVE: cve(t, "CVE-2024-11"), Proposal: vulnFactsFixed(t, "redhat", "openssl-1.0.2k-16.el8_10")}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	s := correlation(t, inv, disc, matches, repo)
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 0 || matches.calls != 0 {
+		t.Errorf("a build at/above its same-stream vendor fix must record no match (n=%d, RecordMatch calls=%d)", n, matches.calls)
+	}
+	// The card is still folded — the CVE is real intelligence; only THIS release's occurrence is fixed.
+	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-11"); !found {
+		t.Error("expected the folded faultline to exist even though the component is fixed")
+	}
+}
+
 func TestCorrelate_Errors(t *testing.T) {
 	ctx := context.Background()
 	proposals := map[string][]app.ProposalFor{"p": {{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "nvd", value.SeverityHigh)}}}

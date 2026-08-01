@@ -98,6 +98,44 @@ func TestRedHatClient_SeverityMapping(t *testing.T) {
 	}
 }
 
+func TestRedHatClient_MainStreamFixesOnly(t *testing.T) {
+	// affected_release carries fixes for several products; only MAIN-stream enterprise_linux
+	// advisories reach FixedVersions — the EUS backport line, a non-EL product, and an empty
+	// package are all excluded (EDR-VEX-01 Phase 3, to avoid a false stream-scoped "fixed").
+	body := `{
+		"name":"CVE-2024-7","threat_severity":"Important","public_date":"2024-01-15T00:00:00Z",
+		"cvss3":{"cvss3_base_score":"7.5","cvss3_scoring_vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
+		"affected_release":[
+			{"product_name":"RHEL 8","package":"openssl-1:1.0.2k-16.el8_10","cpe":"cpe:/o:redhat:enterprise_linux:8"},
+			{"product_name":"RHEL 8.6 EUS","package":"openssl-1:1.0.2k-16.el8_6","cpe":"cpe:/o:redhat:enterprise_linux_eus:8.6"},
+			{"product_name":"RHEL 9","package":"openssl-1:3.0.1-47.el9_2","cpe":"cpe:/o:redhat:enterprise_linux:9"},
+			{"product_name":"OpenShift","package":"openssl-1:3.0.1-47.el9_2","cpe":"cpe:/a:redhat:openshift:4"},
+			{"product_name":"RHEL 8 empty","package":"","cpe":"cpe:/o:redhat:enterprise_linux:8"}
+		]
+	}`
+	srv := rhServer(t, http.StatusOK, body)
+	got, err := feed.NewRedHatClient(srv.URL, srv.Client()).FetchCVE(context.Background(), "CVE-2024-7")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("proposals = %d, want 1 (vuln-facts only)", len(got))
+	}
+	vf, ok := got[0].Proposal.VulnFacts()
+	if !ok {
+		t.Fatal("want a vuln-facts proposal")
+	}
+	want := []string{"openssl-1:1.0.2k-16.el8_10", "openssl-1:3.0.1-47.el9_2"} // el8 + el9 main-stream, in doc order
+	if len(vf.FixedVersions) != len(want) {
+		t.Fatalf("FixedVersions = %v, want %v (main-stream only)", vf.FixedVersions, want)
+	}
+	for i := range want {
+		if vf.FixedVersions[i] != want[i] {
+			t.Errorf("FixedVersions[%d] = %q, want %q", i, vf.FixedVersions[i], want[i])
+		}
+	}
+}
+
 func TestRedHatClient_NoCVSSStillEmitsApplicability(t *testing.T) {
 	// No CVSS → no vuln-facts (mirror the NVD ACL drop-no-CVSS), but the not_affected statement
 	// still folds. Also exercises the bare YYYY-MM-DD public_date form.

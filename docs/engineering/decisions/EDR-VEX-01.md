@@ -119,8 +119,11 @@ applicability (Red Hat applicability is additive, not a replacement).
      the already-carded CVEs (no watermark needed — it re-reads `KnownCVEs`, so the singleton-`id=1` collision
      never arises). Precedence ranks `redhat` distro-authoritative. Covers RHEL and its 1:1 rebuilds (Rocky,
      Alma). `THEMIS_REDHAT_ENABLED`/`_URL`/`_POLL_INTERVAL`.
-   - **RPM NEVRA/epoch fixed-verdict engine — ⏳ OPEN (PR3).** The current feed emits the vendor's *explicit*
-     `not_affected` (no version math). PR3 adds the `affected_release` NEVRA compare (epoch:version-release
-     rpmvercmp) with EL-major main-stream-only scoping (to avoid a false "fixed" from AUS/EUS/E4S/TUS backports),
-     yielding the version-precise `fixed` verdict + per-stream precision.
+   - **RPM NEVRA/epoch fixed-verdict engine — ✅ DONE 2026-08-01 (PR3).** The kernel already had the
+     `rpmvercmp`/epoch comparator (`value.compareRPMVersion`); PR3 added `value.RPMReleaseMajor` +
+     `value.RPMFixedByStream` (EL-major, same-stream-only compare via `rpmEVR` NEVRA normalization), the Red Hat
+     client now surfaces **main-stream** `affected_release` fix NEVRAs (excluding EUS/AUS/E4S/TUS via the CPE)
+     into `VulnFacts.FixedVersions`, and correlation's gate drops a match when the installed rpm build is at/above
+     its same-EL-stream vendor fix. **Conservative by design** — any parse/stream uncertainty stays *affected*, so
+     a false "fixed" (the only unsafe direction) never occurs.
    - **B4 generic CSAF/zip crawler — ⏳ OPEN.** Feeds the same Phase-1/2 machinery.

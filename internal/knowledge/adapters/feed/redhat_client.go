@@ -63,6 +63,10 @@ type redhatCVEDocument struct {
 		FixState    string `json:"fix_state"`
 		PackageName string `json:"package_name"`
 	} `json:"package_state"`
+	AffectedRelease []struct {
+		Package string `json:"package"` // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
+		CPE     string `json:"cpe"`     // the advisory product CPE — carries the EL stream
+	} `json:"affected_release"`
 }
 
 // FetchCVE fetches and translates one CVE's Red Hat document. A 404 (Red Hat tracks no such
@@ -104,10 +108,27 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 
 	var out []app.ProposalFor
 
+	// Main-stream fixed builds (EDR-VEX-01 Phase 3): the vendor fix NEVRA per EL stream, keeping
+	// only MAIN-stream advisories (excluding EUS/AUS/E4S/TUS via the CPE) so correlation's
+	// stream-scoped fixed verdict never compares a rolling install against a minor-locked backport.
+	var fixes []string
+	for _, ar := range doc.AffectedRelease {
+		pkg := strings.TrimSpace(ar.Package)
+		if pkg == "" || !redhatIsMainStream(ar.CPE) {
+			continue
+		}
+		fixes = append(fixes, pkg)
+	}
+
 	// Vendor-severity vuln-facts (only when a CVSS is present — mirror the NVD ACL's drop-no-CVSS
-	// so a Red Hat CVE without CVSS3 never pollutes the reconciled headline with a zero score).
+	// so a Red Hat CVE without CVSS3 never pollutes the reconciled headline with a zero score). The
+	// main-stream fixed builds ride here so they reach the reconciled view's FixedVersions.
 	if cvss, cok := parseRedHatCVSS(doc.CVSS3.BaseScore, doc.CVSS3.Vector); cok {
-		facts := domain.VulnFacts{Severity: severityFrom(redhatSeverityLabel(doc.ThreatSeverity), cvss), CVSS: cvss}
+		facts := domain.VulnFacts{
+			Severity:      severityFrom(redhatSeverityLabel(doc.ThreatSeverity), cvss),
+			CVSS:          cvss,
+			FixedVersions: fixes,
+		}
 		if p, perr := domain.NewVulnFactsProposal("redhat", observedAt, facts); perr == nil {
 			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})
 		}
@@ -200,4 +221,22 @@ func productSuffix(product string) string {
 		return ""
 	}
 	return " in " + product
+}
+
+// redhatIsMainStream reports whether an advisory CPE is a MAIN-stream RHEL product — an
+// `enterprise_linux` CPE that is NOT a minor-locked backport line (EUS / AUS / E4S / TUS).
+// Only main-stream fixes are surfaced for the stream-scoped fixed verdict (EDR-VEX-01 Phase 3):
+// a rolling main-stream install compared against a minor-locked backport fix can produce a false
+// "fixed" (the backport's lower release number outranks nothing), so those lines are excluded.
+func redhatIsMainStream(cpe string) bool {
+	c := strings.ToLower(cpe)
+	if !strings.Contains(c, "enterprise_linux") {
+		return false
+	}
+	for _, backport := range []string{"eus", "aus", "e4s", "tus"} {
+		if strings.Contains(c, backport) {
+			return false
+		}
+	}
+	return true
 }
