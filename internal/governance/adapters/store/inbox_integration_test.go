@@ -39,7 +39,7 @@ func TestInboxExactlyOnceApplication(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 
-	gov := wiring.Wire(pool, noopPublisher{}, nil, "")
+	gov := wiring.Wire(pool, noopPublisher{}, nil, "", 0)
 	inbox := store.NewInboxConsumer(pool, gov.Consumer)
 
 	// A ComponentMatched opens the (Release, Faultline) Finding the enrichment reacts to.
@@ -99,7 +99,7 @@ func TestInboxRolledBackOnApplyError(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 
-	gov := wiring.Wire(pool, noopPublisher{}, nil, "")
+	gov := wiring.Wire(pool, noopPublisher{}, nil, "", 0)
 	inbox := store.NewInboxConsumer(pool, gov.Consumer)
 
 	bad := event.Envelope{ID: "evt-bad", Type: "knowledge.component_matched", Payload: json.RawMessage(`not json`)}

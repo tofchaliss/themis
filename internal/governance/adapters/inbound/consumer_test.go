@@ -131,6 +131,25 @@ func TestConsumer_FaultlineEnriched(t *testing.T) {
 	}
 }
 
+func TestConsumer_FaultlineEnriched_Applicability(t *testing.T) {
+	repo := newMemRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl"}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	// A vendor not_affected statement on the wire (EDR-VEX-01 D5) is decoded and drives a system
+	// not_affected Proposal on the covered Finding (D4). Severity is low, so this is the only one.
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"low","Applicabilities":[{"Package":"openssl","Status":"not_affected","Justification":"vulnerable_code_not_present"}]}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	got := repo.byID["fnd-1"]
+	if len(got.Proposals()) != 1 || got.Proposals()[0].Stance() != domain.StanceNotAffected {
+		t.Errorf("proposals = %+v, want one system not_affected", got.Proposals())
+	}
+}
+
 func TestConsumer_FaultlineSuperseded(t *testing.T) {
 	repo := newMemRepo()
 	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")

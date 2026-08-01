@@ -47,15 +47,22 @@ type PostureEntry struct {
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads
 // from the authoritative aggregate store, and heavier rollups from projections.
 type ReadService struct {
-	repo  Repository
-	proj  ProjectionReader
-	blast BlastRadiusReader // may be nil — the multiplier then defaults to 1.0 (fail-safe)
+	repo     Repository
+	proj     ProjectionReader
+	blast    BlastRadiusReader // may be nil — the multiplier then defaults to 1.0 (fail-safe)
+	blastCap int               // unique-customer count at which the multiplier saturates (C2, configurable)
 }
 
-// NewReadService wires the aggregate repository, the projection store, and the blast-radius
-// reader (nil disables the multiplier — every effective priority equals its base score).
-func NewReadService(repo Repository, proj ProjectionReader, blast BlastRadiusReader) *ReadService {
-	return &ReadService{repo: repo, proj: proj, blast: blast}
+// NewReadService wires the aggregate repository, the projection store, the blast-radius reader
+// (nil disables the multiplier — every effective priority equals its base score), and the
+// blast-radius saturation cap (THEMIS_BLAST_RADIUS_CAP). A cap < 2 is normalized to
+// domain.DefaultBlastRadiusCap, so this constructor owns the invariant that the cap is always
+// sane regardless of caller.
+func NewReadService(repo Repository, proj ProjectionReader, blast BlastRadiusReader, blastCap int) *ReadService {
+	if blastCap < 2 {
+		blastCap = domain.DefaultBlastRadiusCap
+	}
+	return &ReadService{repo: repo, proj: proj, blast: blast, blastCap: blastCap}
 }
 
 // GetFinding returns the full Finding aggregate — current Position + Position history +
@@ -103,7 +110,7 @@ func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]P
 	mult := 1.0
 	if s.blast != nil {
 		if customers, berr := s.blast.BlastRadius(ctx, releaseID); berr == nil {
-			mult = domain.BlastMultiplier(customers)
+			mult = domain.BlastMultiplier(customers, s.blastCap)
 		}
 	}
 	for i := range entries {

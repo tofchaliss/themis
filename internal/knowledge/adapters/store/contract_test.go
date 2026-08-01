@@ -63,7 +63,11 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 		event     any
 	}{
 		{app.EventFaultlineCreated, domain.FaultlineCreated{FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
-		{app.EventFaultlineEnriched, domain.FaultlineEnriched{FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: value.SeverityHigh, KEV: true, ExploitPublic: false, OccurredAt: now}},
+		{app.EventFaultlineEnriched, domain.FaultlineEnriched{
+			FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: value.SeverityHigh, KEV: true, ExploitPublic: false,
+			Applicabilities: []domain.Applicability{{Package: "pkg:rpm/openssl", Status: "not_affected", Justification: "vulnerable_code_not_present"}},
+			OccurredAt:      now,
+		}},
 		{app.EventFaultlineMatured, domain.FaultlineMatured{FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
 		{app.EventFaultlineSuperseded, domain.FaultlineSuperseded{FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
 		{app.EventComponentMatched, domain.ComponentMatched{

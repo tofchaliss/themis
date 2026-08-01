@@ -167,6 +167,19 @@ owns and never rewinds the offset, and it does **not** survive a transport where
 (a Kafka consumer-group rebalance would re-apply); deferring the inbox to "when Kafka arrives" means
 retrofitting correctness under load.
 
+**Refinement — read/write phase separation (D5 ↔ D7).** "In one transaction … records the envelope-id **and**
+applies the business change" means the **claim and the *writes* are atomic** — it does **not** mean external
+*reads* run inside that transaction. A consumer whose application needs slow external I/O (Knowledge's
+correlation issues a per-component feed query; a keyless NVD call can block for minutes) MUST perform that I/O
+in a **transaction-free read phase** *before* opening the inbox transaction, and hold only the writes under it.
+Reason, and why this is a D7 property not a D5 nicety: a write transaction left open across external calls
+holds an assigned XID, which pins the **cluster-wide** `pg_snapshot_xmin` horizon (XIDs are cluster-global);
+D7's gap-free watermark `insert_xid8 < pg_snapshot_xmin(pg_current_snapshot())` then cannot advance past any
+event newer than that transaction, starving **every** reader on **every** stream — a consumer's own long apply
+silently halts the whole bus. Realized by the optional `Preparer` seam on the consumer inbox: `Prepare` runs
+the reads and returns an apply closure the inbox runs inside the claimed transaction. Handlers with no external
+reads are unaffected and still apply inside the transaction.
+
 ### D6 — Per-subject ordering only; no global or cross-context order (EB-Q5)
 
 The platform guarantees **ordered delivery for events belonging to the same aggregate instance** (identified

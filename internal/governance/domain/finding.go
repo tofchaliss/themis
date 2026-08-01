@@ -250,6 +250,25 @@ func (f Finding) Components() []MatchedComponent {
 	return append([]MatchedComponent(nil), f.components...)
 }
 
+// CoversPackage reports whether a vendor VEX statement about `pkg` applies to this Finding —
+// i.e. one of its matched components IS that package (EDR-VEX-01 D4). A VEX product id is
+// matched against a component's full PURL, its bare name, or the PURL without the `@version`
+// suffix (the common vendor form, e.g. "pkg:rpm/openssl" for "pkg:rpm/openssl@1.0.2"). Empty
+// `pkg` never matches. The match is intentionally conservative: a broader/looser heuristic
+// could suppress the wrong Finding, and suppression is a governed, human-overridable step.
+func (f Finding) CoversPackage(pkg string) bool {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return false
+	}
+	for _, c := range f.components {
+		if c.PURL == pkg || c.Name == pkg || strings.HasPrefix(c.PURL, pkg+"@") {
+			return true
+		}
+	}
+	return false
+}
+
 // Stage returns the current investigation lifecycle stage.
 func (f Finding) Stage() Stage { return f.stage }
 

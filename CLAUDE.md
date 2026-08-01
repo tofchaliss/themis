@@ -90,16 +90,25 @@ databases → `go build -o bin/ ./cmd/...` → export env → run each node → 
 `deploy/systemd/install-systemd.sh` generates `/etc/themis/<svc>.env` + a templated `themis@.service` unit for
 all six nodes.
 
-- **Topology: one Postgres server, five databases** — `evidence` (the `registry` schema **co-locates** here),
-  `knowledge`, `governance`, `communication`, and `bus`. Ports: Evidence `:8081`, Registry `:8082`,
+- **Topology: one Postgres server, six databases** — `evidence` (the `registry` schema **co-locates** here),
+  `knowledge`, `governance`, `communication`, `bus`, and `auth` (the shared API-key store; see the auth switch
+  below). Ports: Evidence `:8081`, Registry `:8082`,
   Governance `:8083`, Communication `:8084`, Intelligence `:8086`, and **Knowledge `:8085`** — its code default
   is `:8082`, which collides with Registry, so you **must** set `THEMIS_KNOWLEDGE_ADDR=:8085` (the port every
   other node's `THEMIS_KNOWLEDGE_URL` already defaults to).
 - **`THEMIS_BUS_DATABASE_DSN` is the cross-context switch.** Set it on every node ⇒ the relay publishes and each
   reader drains the `bus` DB, so events actually cross contexts. Leave it unset ⇒ a log-only publisher and
   disabled readers (single-context dev; nothing propagates).
+- **`THEMIS_AUTH_DATABASE_DSN` is the inbound-edge auth switch (F1, EDR-SECURITY-01).** Set it on a node ⇒ that
+  node's `/api/v1` requires a valid `X-API-Key`; leave it unset ⇒ auth is disabled (dev) and the node logs
+  `AUTH DISABLED` — **unless** `THEMIS_AUTH_REQUIRED=1`, which hard-fails startup when the DSN is empty (a
+  production guard so a node can never boot open). Mint keys with `cmd/authadmin`:
+  `THEMIS_AUTH_DATABASE_DSN=… THEMIS_AUTH_MIGRATE=1 go run ./cmd/authadmin create-key --name ci --scopes admin`
+  (`--scopes` ∈ `admin`=read+write, `read`=read-only; prints the token **once**, stores only its bcrypt hash;
+  `revoke-key --id` disables one). Auth is **inbound-edge only** — inter-service read clients send no key.
 - **Registry does not self-migrate** into the shared `evidence` DB — load its schema with
-  `psql -f internal/registry/adapters/store/migrations/000001_registry.up.sql` and run it with a **plain** DSN
+  `psql -f internal/registry/adapters/store/migrations/000001_registry.up.sql` **and**
+  `…/000002_estate.up.sql` (the enterprise estate graph, C1) and run it with a **plain** DSN
   (an `x-migrations-table` DSN param breaks the pgx pool at runtime).
 - **Drive an SBOM:** `scripts/gf-upload-sbom.sh` registers Product→Project→Release and uploads (auto-detects
   CycloneDX/SPDX; streams large files via `curl --data-binary @-`; `-r` reuses a release). Evidence is
@@ -125,8 +134,9 @@ Each bounded context is `internal/<context>/{domain,app,adapters}` with **inward
 outbox + relay, and (b) read-only **HTTP read APIs** (a consuming context talks to a small client seam, e.g.
 Knowledge's `adapters/evidence` client reads Evidence's inventory). This rule is enforced, not aspirational.
 
-**Event transport (M5, `internal/platform/eventbus`).** The events above ride a platform-owned bus — the
-second shared platform package after `observability`. Topology is one PostgreSQL server, **database-per-context
+**Event transport (M5, `internal/platform/eventbus`).** The events above ride a platform-owned bus — one of
+three shared platform packages (`observability`, `eventbus`, and the inbound-edge `auth`; only adapters + the
+`cmd` composition root may import them). Topology is one PostgreSQL server, **database-per-context
 plus a dedicated `bus` database** holding a single `event_log` (a Postgres stand-in for a Kafka topic): a
 Publisher appends each outbox note to it, a stream Reader drains rows in `seq` order filtered by
 `source_context`, and delivers a kernel `Envelope` to each context's inbound `Consumer.Handle`. The database
@@ -136,10 +146,14 @@ moves kernel `Envelope`s and imports no bounded context — so a real broker can
 
 The contexts and their pipeline order:
 
-**Kernel/Registry** (shared value objects + Product→Project→Release identity) → **Evidence** (immutable,
+**Kernel/Registry** (shared value objects + Product→Project→Release identity, plus the enterprise **estate
+graph** Product→Microservice→Deployment→Customer and a `GET /releases/{id}/blast-radius` traversal that counts
+the unique customers a release reaches — C1) → **Evidence** (immutable,
 content-addressed SBOM/VEX; canonical inventory) → **Knowledge** (Faultline aggregate; order-independent
 reconciliation; feed ACLs; correlation) → **Governance** (Findings + append-only Enterprise Positions — AI
-proposes, humans/policy decide) → **Communication** (deterministic Publication materialization + serializer
+proposes, humans/policy decide; triage priority is `base_score × blast-multiplier`, the multiplier derived
+from Registry's blast-radius over the read seam `THEMIS_REGISTRY_URL` and **fail-safe to 1.0** when Registry is
+unreachable — C2) → **Communication** (deterministic Publication materialization + serializer
 registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; all provider/LLM code is
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and
 it reads via read APIs / writes via proposal-intake.

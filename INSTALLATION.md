@@ -85,16 +85,18 @@ sudo dnf install -y postgresql-server && sudo postgresql-setup --initdb
 sudo systemctl enable --now postgresql
 ```
 
-Create the `themis` role and the five databases (as the `postgres` superuser). Set the password **once** in
-a shell variable and reuse it everywhere — the runbook's DSNs read the same `$PGPW`, so there is no second
-place to keep in sync:
+Create the `themis` role and the **six** databases (as the `postgres` superuser): the four pipeline
+databases (`evidence` — which also co-locates the Registry identity schema — `knowledge`, `governance`,
+`communication`), the shared `bus` event log, and `auth` (the API-key store for inbound edge auth, F1). Set
+the password **once** in a shell variable and reuse it everywhere — the runbook's DSNs read the same `$PGPW`,
+so there is no second place to keep in sync:
 
 ```sh
 # Use only letters/digits — @ : / # ' $ would break the connection URL. Keep this exported for later steps.
 export PGPW='ChangeMe4Themis'
 
 sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
-for db in evidence knowledge governance communication bus; do
+for db in evidence knowledge governance communication bus auth; do
   sudo -u postgres psql -c "CREATE DATABASE $db OWNER themis;"
 done
 # verify the themis role can connect over TCP (default localhost auth is password-based; prints '1'):
@@ -103,6 +105,21 @@ psql "postgres://themis:$PGPW@localhost:5432/evidence?sslmode=disable" -c 'SELEC
 
 Each database is owned by `themis` on purpose: on PostgreSQL 15+ only the database owner may create tables
 in the `public` schema, and the per-context migrations need that — owning the DB covers it, no extra GRANT.
+Creating the databases needs the `postgres` superuser (`sudo -u postgres`) because the `themis` role has no
+`CREATEDB`; everything *inside* a database (migrations, the runbook) uses the plain `themis` DSN.
+
+> **Re-testing from a clean slate?** If these databases already exist from a previous run, **stop every
+> service first** — an open connection blocks `DROP DATABASE` — then drop and recreate in one shot:
+>
+> ```sh
+> sudo systemctl stop 'themis@*' 2>/dev/null   # if running under systemd (step 7)
+> pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)' 2>/dev/null
+> for db in evidence knowledge governance communication bus auth; do
+>   sudo -u postgres psql -c "DROP DATABASE IF EXISTS $db WITH (FORCE);" -c "CREATE DATABASE $db OWNER themis;"
+> done
+> ```
+>
+> `WITH (FORCE)` (PostgreSQL 13+) terminates any lingering connection so the drop cannot hang.
 
 ### 2. Build the services
 
@@ -145,11 +162,15 @@ shared `bus` event_log. Logs go to `logs/`.
 database (Evidence reads them in-process), but it cannot self-migrate there: golang-migrate's single default
 `schema_migrations` table would clash with Evidence's, and passing `x-migrations-table` on the DSN to work
 around that **breaks the running service** — pgx forwards the unknown parameter to Postgres and every
-connection is rejected. Instead load the schema directly (the migration is idempotent
-`CREATE TABLE IF NOT EXISTS`) and run Registry with a plain DSN and **no** migrate flag:
+connection is rejected. Instead load the schema directly (the migrations are idempotent
+`CREATE TABLE IF NOT EXISTS`) and run Registry with a plain DSN and **no** migrate flag. Load **both**
+migrations — `000001` is the Product→Project→Release identity, `000002` is the enterprise **estate** graph
+(Customer / Microservice / Deployment) that the release blast-radius traversal needs (C1/C2); skip the second
+and `GET /releases/{id}/blast-radius` returns an empty estate and the priority multiplier stays at 1.0×:
 
 ```sh
 psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000001_registry.up.sql
+psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000002_estate.up.sql
 ```
 
 ```sh
@@ -197,6 +218,36 @@ context.)
 > anything beyond a quick trial, run the services under **systemd** instead (step 7) — that is the durable
 > way to manage lifecycle, and it sidesteps this entirely.
 
+### 4a. Enable inbound edge auth (optional — F1)
+
+By default the runbook above runs **open** (no API key) — fine on a trusted single box. To require an
+`X-API-Key` on every node's `/api/v1`, point each node at the shared `auth` database and mint a key. Auth is
+**inbound-edge only**: it guards external callers, not service-to-service reads (those clients send no key).
+
+```sh
+export THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable"
+
+# Mint an admin key (read+write). THEMIS_AUTH_MIGRATE=1 creates the api_keys table on first run.
+# The token is printed ONCE — copy it now; only its bcrypt hash is stored. Run from the repo root
+# (the migrations path is relative). Scopes: admin (read+write) | read (read-only).
+THEMIS_AUTH_MIGRATE=1 go run ./cmd/authadmin create-key --name ci --scopes admin
+# → prints: key-<uuid>  <TOKEN>          # export it: export THEMIS_API_KEY=<TOKEN>
+```
+
+Then **restart the nodes with `THEMIS_AUTH_DATABASE_DSN` exported** (it is inherited by every service you
+start in that shell). Each node logs `AUTH ENABLED` on boot; without the DSN it logs `AUTH DISABLED`. Set
+`THEMIS_AUTH_REQUIRED=1` in production so a node **refuses to start** if the DSN is empty (it can never boot
+open by mistake). Callers then pass the token:
+
+```sh
+curl -H "X-API-Key: $THEMIS_API_KEY" http://localhost:8081/api/v1/...     # 200; without the header → 401
+```
+
+> **Gotcha we hit:** exporting `THEMIS_AUTH_DATABASE_DSN` in the *same shell* where you later start the
+> pipeline turns auth **on for every service**, and the plain `gf-upload-sbom.sh` driver sends no key → every
+> registration returns **401**. For an open end-to-end run, keep auth in its own shell (or `unset
+> THEMIS_AUTH_DATABASE_DSN` before step 5); prove auth separately as an edge spot-check.
+
 ### 5. Drive an SBOM end-to-end
 
 ```sh
@@ -237,6 +288,24 @@ curl $J localhost:8084/api/v1/publications \
   -d "{\"finding_id\":\"$FID\",\"artifact_type\":\"vex\",\"format\":\"openvex\"}"
 curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 ```
+
+> **If no Finding appears — verify the cascade.** The pipeline is event-driven, so a stuck Finding almost
+> always means events did not cross a context. Check, in order:
+>
+> ```sh
+> # 1. Did Evidence publish, and did each reader advance its cursor to match?
+> psql "$PGBASE/bus?sslmode=disable" -c "SELECT source_context, max(seq) FROM event_log GROUP BY 1;"
+> psql "$PGBASE/bus?sslmode=disable" -c "SELECT consumer, source_context, last_seq FROM stream_cursor ORDER BY 1;"
+> # 2. Did Knowledge correlate (cards + matches > 0)?
+> psql "$PGBASE/knowledge?sslmode=disable" -c "SELECT (SELECT count(*) FROM faultlines) cards, (SELECT count(*) FROM faultline_matches) matches;"
+> # 3. Nothing should be stuck 'idle in transaction' — a long-open write tx would stall every reader:
+> psql "$PGBASE/postgres?sslmode=disable" -c "SELECT pid, state, now()-xact_start age, left(query,50) FROM pg_stat_activity WHERE state LIKE 'idle in transaction%';"
+> ```
+>
+> A `stream_cursor` that lags `event_log`'s max `seq` for a source means that reader is not draining. Query 3
+> is the smoking gun for the historical correlation-transaction stall (fixed 2026-08-01: discovery I/O now
+> runs outside the inbox transaction, so a healthy pipeline shows **no** long-lived `idle in transaction`
+> row). `grep -i "error\|halt\|panic" logs/*.log` surfaces a poison-halted stream.
 
 > **No AI required — this is the whole pipeline.** Every step above runs with the AI plane OFF.
 > The optional `recommend` call (and step 6) is the *only* AI touchpoint; the Position is decided

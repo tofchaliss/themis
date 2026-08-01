@@ -77,49 +77,93 @@ func NewCorrelationService(inv InventoryReader, disc PackageVulnSource, fold *Fa
 	return &CorrelationService{inventory: inv, discover: disc, fold: fold, matches: matches, clock: clock}
 }
 
-// Correlate runs correlation for one registered SBOM: read the inventory, discover and
-// fold per-component vulnerabilities, and record matches. It is idempotent — a re-run
-// re-folds Proposals (which converge) and records no duplicate matches. It returns the
-// number of new matches.
-func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceID string) (int, error) {
+// PlannedMatch is one discovered (component, CVE, source Proposal) triple awaiting fold +
+// record. It is the unit of a CorrelationPlan — pure data produced by the read phase and
+// consumed by the write phase.
+type PlannedMatch struct {
+	Component InventoryComponent
+	CVE       value.CVEID
+	Proposal  domain.Proposal
+}
+
+// CorrelationPlan is the output of correlation's read phase (PlanCorrelation): every
+// vulnerability discovered for a release's components, ready to fold and record. Building it
+// performs ALL external I/O (Evidence inventory read + per-component discovery) so the write
+// phase (ApplyCorrelation) touches no network and its transaction stays short — a long-open
+// write transaction would pin the cluster xmin and starve the bus reader's gap-free watermark
+// (EDR-EVENTBUS-01 D7). The read/write split is why the inbox runs Prepare outside its tx.
+type CorrelationPlan struct {
+	ReleaseID string
+	Items     []PlannedMatch
+}
+
+// PlanCorrelation runs correlation's READ phase with NO transaction: it reads the release's
+// inventory from Evidence and discovers the vulnerabilities affecting each component. Every
+// network round-trip (the slow, rate-limited part) happens here, outside any unit of work.
+// The returned plan is handed to ApplyCorrelation for the short write phase.
+func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evidenceID string) (CorrelationPlan, error) {
 	inv, err := s.inventory.GetInventory(ctx, evidenceID)
 	if err != nil {
-		return 0, err
+		return CorrelationPlan{}, err
 	}
-
-	newMatches := 0
+	plan := CorrelationPlan{ReleaseID: releaseID}
 	for _, comp := range inv.Components {
 		discovered, err := s.discover.VulnsForPackage(ctx, comp)
 		if err != nil {
-			return newMatches, err
+			return CorrelationPlan{}, err
 		}
 		for _, d := range discovered {
-			f, err := s.fold.FoldProposal(ctx, d.CVE, d.Proposal)
-			if err != nil {
-				return newMatches, err
-			}
-			// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
-			// record a match unless the component's version is provably OUT of the reconciled
-			// range. This catches the case discovery cannot — e.g. a distro backport whose
-			// reconciled range excludes a version the feed's query-time filter admitted. An
-			// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
-			// the match: a parse gap must never drop a real vulnerability. This mirrors the
-			// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
-			affected := value.AffectedRange{Ecosystem: comp.Ecosystem, Groups: f.View().AffectedRanges}
-			if affected.Applicability(comp.Version) == value.RangeOutOfRange {
-				continue
-			}
-			created, err := s.matches.RecordMatch(ctx, Match{
-				ReleaseID: releaseID, FaultlineID: f.ID(), CVE: d.CVE.String(),
-				Component: comp, OccurredAt: s.clock.Now(),
-			})
-			if err != nil {
-				return newMatches, err
-			}
-			if created {
-				newMatches++
-			}
+			plan.Items = append(plan.Items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal})
+		}
+	}
+	return plan, nil
+}
+
+// ApplyCorrelation runs correlation's WRITE phase inside the caller's transaction (the inbox
+// unit of work): for each planned match it folds the source Proposal onto the enterprise card
+// and records a match. It performs NO network I/O, so the transaction stays short. Idempotent —
+// FoldProposal converges and RecordMatch dedups, so a re-apply records no duplicate. Returns
+// the number of new matches.
+func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan CorrelationPlan) (int, error) {
+	newMatches := 0
+	for _, item := range plan.Items {
+		f, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
+		if err != nil {
+			return newMatches, err
+		}
+		// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
+		// record a match unless the component's version is provably OUT of the reconciled
+		// range. This catches the case discovery cannot — e.g. a distro backport whose
+		// reconciled range excludes a version the feed's query-time filter admitted. An
+		// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
+		// the match: a parse gap must never drop a real vulnerability. This mirrors the
+		// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
+		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem, Groups: f.View().AffectedRanges}
+		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
+			continue
+		}
+		created, err := s.matches.RecordMatch(ctx, Match{
+			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
+			Component: item.Component, OccurredAt: s.clock.Now(),
+		})
+		if err != nil {
+			return newMatches, err
+		}
+		if created {
+			newMatches++
 		}
 	}
 	return newMatches, nil
+}
+
+// Correlate runs the read and write phases back-to-back. It is retained for direct callers and
+// tests that do not need the split; the event path uses PlanCorrelation + ApplyCorrelation so
+// discovery I/O stays OUTSIDE the inbox transaction. Idempotent — a re-run converges and
+// records no duplicate matches. Returns the number of new matches.
+func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceID string) (int, error) {
+	plan, err := s.PlanCorrelation(ctx, releaseID, evidenceID)
+	if err != nil {
+		return 0, err
+	}
+	return s.ApplyCorrelation(ctx, plan)
 }

@@ -34,7 +34,7 @@ func TestGovernanceIntelligenceSeam(t *testing.T) {
 	repo.seed(identified(t, "F1", "rel-1", "fl-1", "CVE-1"))
 	client := intelligence.NewClient(intel.URL, intel.Client())
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(client)
-	srv := httptest.NewServer(govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{}, nil)).Router())
+	srv := httptest.NewServer(govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{}, nil, 0)).Router())
 	defer srv.Close()
 
 	// Human on-demand request.
@@ -81,7 +81,7 @@ func TestGovernanceIntelligenceSeamInsufficient(t *testing.T) {
 	repo.seed(identified(t, "F1", "rel-1", "fl-1", "CVE-1"))
 	client := intelligence.NewClient(intel.URL, intel.Client())
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(client)
-	srv := httptest.NewServer(govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{}, nil)).Router())
+	srv := httptest.NewServer(govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{}, nil, 0)).Router())
 	defer srv.Close()
 
 	code, _ := do(t, http.MethodPost, srv.URL+"/findings/F1/recommend", nil)

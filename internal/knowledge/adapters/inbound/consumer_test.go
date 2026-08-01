@@ -77,3 +77,44 @@ func TestConsumer_MalformedPayload(t *testing.T) {
 		t.Error("malformed payload for a recognized type should error (so it retries)")
 	}
 }
+
+// TestConsumer_Prepare_SBOM proves the Preparer path runs the READ phase (inventory fetch)
+// outside any transaction and returns a non-nil apply closure for the write phase — this is
+// what keeps discovery I/O out of the inbox transaction (EDR-EVENTBUS-01 D7).
+func TestConsumer_Prepare_SBOM(t *testing.T) {
+	inv := &fakeInv{}
+	c := newConsumer(inv)
+	env := mkEnv("EvidenceRegistered", `{"evidence_id":"ev-42","kind":"sbom","subject_release_id":"rel-42"}`)
+	apply, err := c.Prepare(context.Background(), env)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if apply == nil {
+		t.Fatal("an SBOM must yield a non-nil apply func")
+	}
+	if inv.gotEvidenceID != "ev-42" {
+		t.Errorf("read phase asked for evidence %q, want ev-42 (Prepare must do the read)", inv.gotEvidenceID)
+	}
+	// The write phase runs cleanly against an empty plan (empty inventory → no folds/matches).
+	if err := apply(context.Background()); err != nil {
+		t.Errorf("apply: %v", err)
+	}
+}
+
+func TestConsumer_Prepare_UnknownTypeNoOp(t *testing.T) {
+	c := newConsumer(&fakeInv{})
+	apply, err := c.Prepare(context.Background(), mkEnv("governance.finding_opened", `{}`))
+	if err != nil {
+		t.Errorf("unknown type should be ignored, got %v", err)
+	}
+	if apply != nil {
+		t.Error("an unconsumed type must yield a nil apply (no-op)")
+	}
+}
+
+func TestConsumer_Prepare_MalformedPayload(t *testing.T) {
+	c := newConsumer(&fakeInv{})
+	if _, err := c.Prepare(context.Background(), mkEnv("EvidenceRegistered", `not json`)); err == nil {
+		t.Error("malformed payload for a recognized type should error (so it retries)")
+	}
+}

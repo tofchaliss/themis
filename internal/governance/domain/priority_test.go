@@ -9,20 +9,29 @@ import (
 func TestBlastMultiplier(t *testing.T) {
 	tests := []struct {
 		customers int
+		cap       int
 		want      float64
 	}{
-		{0, 1.0},
-		{1, 1.0},
-		{2, 1.1},
-		{5, 1.4},
-		{9, 1.8},
-		{10, 2.0},
-		{11, 2.0},
-		{1000, 2.0},
+		// Default cap (10) — legacy-parity behavior, unchanged.
+		{0, domain.DefaultBlastRadiusCap, 1.0},
+		{1, domain.DefaultBlastRadiusCap, 1.0},
+		{2, domain.DefaultBlastRadiusCap, 1.1},
+		{5, domain.DefaultBlastRadiusCap, 1.4},
+		{9, domain.DefaultBlastRadiusCap, 1.8},
+		{10, domain.DefaultBlastRadiusCap, 2.0},
+		{11, domain.DefaultBlastRadiusCap, 2.0},
+		{1000, domain.DefaultBlastRadiusCap, 2.0},
+		// A tighter configured cap saturates sooner (a small org reaches 2.0× at fewer customers).
+		{3, 5, 1.2},
+		{5, 5, 2.0},
+		{4, 5, 1.3},
+		// A wider cap: the fixed +0.1/customer slope is clamped so the multiplier never exceeds 2.0×.
+		{15, 30, 2.0},
+		{12, 30, 2.0}, // 1.0 + 0.1×11 = 2.1 → clamped to 2.0
 	}
 	for _, tt := range tests {
-		if got := domain.BlastMultiplier(tt.customers); got != tt.want {
-			t.Errorf("BlastMultiplier(%d) = %v, want %v", tt.customers, got, tt.want)
+		if got := domain.BlastMultiplier(tt.customers, tt.cap); got != tt.want {
+			t.Errorf("BlastMultiplier(%d, cap=%d) = %v, want %v", tt.customers, tt.cap, got, tt.want)
 		}
 	}
 }

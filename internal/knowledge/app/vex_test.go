@@ -88,3 +88,14 @@ func TestCoordinator_DispatchesByKind(t *testing.T) {
 		t.Errorf("other kinds must be ignored: %v", err)
 	}
 }
+
+// TestCoordinator_VEXReadErrorPropagates proves a failure in the VEX READ phase (the document
+// fetch, now run outside the inbox transaction) surfaces from OnEvidenceRegistered so the event
+// is retried rather than silently applied against a transaction.
+func TestCoordinator_VEXReadErrorPropagates(t *testing.T) {
+	ctx := context.Background()
+	coord := app.NewCoordinator(nil, vexService(newRepo(), fakeDocReader{err: errors.New("evidence down")}, fakeVEXParser{}))
+	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev-1", Kind: "vex"}); err == nil {
+		t.Error("a read-phase (document) error must propagate from OnEvidenceRegistered")
+	}
+}

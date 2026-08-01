@@ -28,8 +28,13 @@ type FaultlineEnriched struct {
 	ExploitPublic bool
 	// Score is the CVE-intrinsic composite priority (0–100), snapshotted so Governance can
 	// apply its release-scoped blast multiplier without refetching the card (C6 → C2).
-	Score         int
-	OccurredAt    time.Time
+	Score int
+	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D5) so Governance
+	// can raise a system not_affected Proposal on the affected Findings without fetching the card.
+	// Optional/additive (omitempty): a card with no vendor statement keeps the frozen v1 wire
+	// byte-identical (EVENTBUS D9 — additive, non-breaking).
+	Applicabilities []Applicability `json:"Applicabilities,omitempty"`
+	OccurredAt      time.Time
 }
 
 // FaultlineMatured announces the card reached the Mature stage.
@@ -70,17 +75,19 @@ func NewFaultlineCreated(f Faultline, at time.Time) FaultlineCreated {
 	return FaultlineCreated{FaultlineID: f.ID(), CVE: f.CVE().String(), OccurredAt: at.UTC()}
 }
 
-// NewFaultlineEnriched builds the view-change event, snapshotting the current headline.
+// NewFaultlineEnriched builds the view-change event, snapshotting the current headline and the
+// reconciled vendor applicability statements (D5).
 func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 	v := f.View()
 	return FaultlineEnriched{
-		FaultlineID:   f.ID(),
-		CVE:           f.CVE().String(),
-		Severity:      v.Severity,
-		KEV:           v.KEV,
-		ExploitPublic: v.ExploitPublic,
-		Score:         v.Score(),
-		OccurredAt:    at.UTC(),
+		FaultlineID:     f.ID(),
+		CVE:             f.CVE().String(),
+		Severity:        v.Severity,
+		KEV:             v.KEV,
+		ExploitPublic:   v.ExploitPublic,
+		Score:           v.Score(),
+		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
+		OccurredAt:      at.UTC(),
 	}
 }
 

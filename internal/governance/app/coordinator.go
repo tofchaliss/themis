@@ -20,14 +20,16 @@ type InboundComponentMatched struct {
 }
 
 // InboundFaultlineEnriched is Knowledge's FaultlineEnriched fact: a Faultline's enterprise
-// view changed (D6). It carries the coarse headline Governance re-evaluates against.
+// view changed (D6). It carries the coarse headline Governance re-evaluates against, plus the
+// reconciled vendor VEX statements (EDR-VEX-01 D5) it may suppress a Finding with.
 type InboundFaultlineEnriched struct {
-	FaultlineID   string
-	CVE           string
-	Severity      string
-	KEV           bool
-	ExploitPublic bool
-	Score         int // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
+	FaultlineID     string
+	CVE             string
+	Severity        string
+	KEV             bool
+	ExploitPublic   bool
+	Score           int // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
+	Applicabilities []Applicability
 }
 
 // InboundFaultlineSuperseded is Knowledge's FaultlineSuperseded fact: the CVE was withdrawn
@@ -57,10 +59,11 @@ func (c *Coordinator) OnComponentMatched(ctx context.Context, m InboundComponent
 // flagging for review, never auto-deciding (D6).
 func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlineEnriched) error {
 	return c.svc.ReactToEnrichment(ctx, EnrichmentSignal{
-		FaultlineID:  e.FaultlineID,
-		KEV:          e.KEV,
-		HighSeverity: isHighSeverity(e.Severity),
-		Score:        e.Score,
+		FaultlineID:     e.FaultlineID,
+		KEV:             e.KEV,
+		HighSeverity:    isHighSeverity(e.Severity),
+		Score:           e.Score,
+		Applicabilities: e.Applicabilities,
 	})
 }
 

@@ -16,6 +16,14 @@ const maxSaveRetries = 5
 // when a Faultline is enriched (D6). It is ActorSystem — a proposer with no authority.
 const enrichmentActorID = "knowledge-enrichment"
 
+// vexApplicabilityActorID is the proposer id for the system not_affected Proposal raised from
+// a vendor VEX statement (EDR-VEX-01 D4). Also ActorSystem — it proposes suppression; a policy
+// or human still decides. vexStatusNotAffected is the VEX vocabulary value it keys on.
+const (
+	vexApplicabilityActorID = "vex-applicability"
+	vexStatusNotAffected    = "not_affected"
+)
+
 // errNoop signals that a use-case body made no persistable change (an idempotent
 // re-delivery). The mutate loop treats it as success and skips the save entirely.
 var errNoop = errors.New("governance: no change")
@@ -142,6 +150,18 @@ type EnrichmentSignal struct {
 	HighSeverity bool
 	Withdrawn    bool // the Faultline was superseded (CVE withdrawn / rejected upstream)
 	Score        int  // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
+	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D4). A
+	// not_affected statement whose package matches a Finding's component raises a system
+	// not_affected Proposal on that Finding (policy/human accepts — never auto-suppress).
+	Applicabilities []Applicability
+}
+
+// Applicability is one vendor VEX statement distilled from the enrichment event (the raw wire
+// shape stays at the adapter boundary). Governance never imports Knowledge's type.
+type Applicability struct {
+	Package       string
+	Status        string
+	Justification string
 }
 
 // proposalFor maps an enrichment signal to the Governance Proposal it should raise (D6). It
@@ -173,25 +193,70 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 			return err
 		}
 	}
-	stance, rationale, raise := proposalFor(sig)
-	if !raise {
-		return nil // no decision impact — advisory priority recompute only
+	// Severity / withdrawn re-prioritization: one system proposal per Finding of the Faultline.
+	if stance, rationale, raise := proposalFor(sig); raise {
+		ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
+		if err != nil {
+			return err
+		}
+		proposer := domain.Actor{Kind: domain.ActorSystem, ID: enrichmentActorID}
+		for _, id := range ids {
+			pid := domain.ProposalID("enrich:" + string(id) + ":" + string(stance))
+			if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
+				p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now)
+				if err != nil {
+					return nil, err
+				}
+				notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
+				if errors.Is(err, domain.ErrDuplicateProposal) {
+					return nil, errNoop // already raised for this signal — idempotent
+				}
+				return notes, err
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	// Vendor VEX suppression overlay (EDR-VEX-01 D4): a not_affected statement covering a
+	// Finding's component raises a system not_affected Proposal on that Finding.
+	return s.reactToApplicability(ctx, sig)
+}
+
+// reactToApplicability raises a system not_affected Proposal on each Finding whose matched
+// component a vendor not_affected VEX statement covers (EDR-VEX-01 D4). It never auto-suppresses:
+// a Governance-owned policy may auto-accept the system proposal (D11), otherwise it awaits a
+// human. The vendor justification is carried into the rationale so a suppression is explainable
+// (D6). Idempotent — the proposal id derives from the Finding + covered package, and a
+// re-delivery dedups.
+func (s *FindingService) reactToApplicability(ctx context.Context, sig EnrichmentSignal) error {
+	var notAffected []Applicability
+	for _, a := range sig.Applicabilities {
+		if a.Status == vexStatusNotAffected && strings.TrimSpace(a.Package) != "" {
+			notAffected = append(notAffected, a)
+		}
+	}
+	if len(notAffected) == 0 {
+		return nil // no vendor not_affected statement — nothing to suppress
 	}
 	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
 	if err != nil {
 		return err
 	}
-	proposer := domain.Actor{Kind: domain.ActorSystem, ID: enrichmentActorID}
+	proposer := domain.Actor{Kind: domain.ActorSystem, ID: vexApplicabilityActorID}
 	for _, id := range ids {
-		pid := domain.ProposalID("enrich:" + string(id) + ":" + string(stance))
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-			p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now)
+			covered, ok := coveringStatement(f, notAffected)
+			if !ok {
+				return nil, errNoop // no vendor statement covers this Finding's components
+			}
+			pid := domain.ProposalID("vex:" + string(id) + ":" + covered.Package)
+			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected, vexRationale(covered), now)
 			if err != nil {
 				return nil, err
 			}
 			notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
 			if errors.Is(err, domain.ErrDuplicateProposal) {
-				return nil, errNoop // already raised for this signal — idempotent
+				return nil, errNoop // already raised for this statement — idempotent
 			}
 			return notes, err
 		}); err != nil {
@@ -199,6 +264,26 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 		}
 	}
 	return nil
+}
+
+// coveringStatement returns the first not_affected statement covering one of the Finding's
+// matched components (EDR-VEX-01 D4).
+func coveringStatement(f *domain.Finding, apps []Applicability) (Applicability, bool) {
+	for _, a := range apps {
+		if f.CoversPackage(a.Package) {
+			return a, true
+		}
+	}
+	return Applicability{}, false
+}
+
+// vexRationale renders the rationale for a vendor not_affected suppression, carrying the vendor
+// justification through for explainability (D6).
+func vexRationale(a Applicability) string {
+	if strings.TrimSpace(a.Justification) == "" {
+		return "vendor VEX: not_affected for " + a.Package
+	}
+	return "vendor VEX: not_affected for " + a.Package + " (" + a.Justification + ")"
 }
 
 // RaiseProposal records a Governance Proposal against a Finding from a human or AI proposer

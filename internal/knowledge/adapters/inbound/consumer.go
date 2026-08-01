@@ -57,6 +57,29 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 	}
 }
 
+// Prepare decodes the envelope and runs the coordinator's READ phase OUTSIDE the inbox
+// transaction, returning the write-only apply func (nil for an ignored/irrelevant envelope).
+// It satisfies the store.Preparer optional interface so the InboxConsumer keeps the slow
+// per-component discovery I/O out of its transaction — a long-open write transaction would pin
+// the cluster xmin and starve the bus reader's gap-free watermark (EDR-EVENTBUS-01 D7). A
+// malformed payload for a recognized type is surfaced so the event is retried, not dropped.
+func (c *Consumer) Prepare(ctx context.Context, env event.Envelope) (func(context.Context) error, error) {
+	switch env.Type {
+	case eventEvidenceRegistered:
+		var dto evidenceRegisteredDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return nil, err
+		}
+		return c.coord.PrepareEvidenceRegistered(ctx, app.EvidenceRegistered{
+			EvidenceID: dto.EvidenceID,
+			ReleaseID:  dto.SubjectReleaseID,
+			Kind:       dto.Kind,
+		})
+	default:
+		return nil, nil // not a Knowledge-consumed event — no-op
+	}
+}
+
 // evidenceRegisteredDTO mirrors Evidence's evidence.registered.v1 payload (snake_case — it
 // marshals a dedicated integration DTO). Only the fields correlation needs are decoded.
 type evidenceRegisteredDTO struct {
