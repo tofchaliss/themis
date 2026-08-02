@@ -8,12 +8,16 @@ import (
 	"github.com/themis-project/themis/internal/kernel/value"
 )
 
-// osvRecord is the curated subset of an OSV record the ACL consumes. OSV carries the
-// CVE as its id or among its aliases (e.g. a GHSA id aliasing a CVE).
+// osvRecord is the curated subset of an OSV record the ACL consumes. Language ecosystems key
+// the CVE as the id or among the aliases (e.g. a GHSA id aliasing a CVE). Distro advisories
+// (Red Hat / Rocky / Alma) are advisory-keyed instead — id is an "RHSA-…", aliases is null, and
+// the addressed CVE(s) live in `upstream` — so the ACL must read that field or every distro
+// record is dropped as "no canonical CVE" (BACKLOG: distro OSV correlation).
 type osvRecord struct {
 	ID               string        `json:"id"`
 	Modified         string        `json:"modified"`
 	Aliases          []string      `json:"aliases"`
+	Upstream         []string      `json:"upstream"`
 	Severity         []osvSeverity `json:"severity"`
 	Affected         []osvAffected `json:"affected"`
 	DatabaseSpecific struct {
@@ -46,9 +50,12 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return nil, fmt.Errorf("osv: invalid json: %w", err)
 	}
-	cve, err := firstCVE(append([]string{rec.ID}, rec.Aliases...)...)
-	if err != nil {
-		return nil, err
+	// Gather EVERY addressed CVE, not just the first: a distro advisory keys its CVEs in
+	// `upstream` (id is an RHSA), and one advisory can fix several — a component the advisory
+	// covers is affected by each until it is patched, so each must be carded.
+	cves := allCVEs(append(append([]string{rec.ID}, rec.Aliases...), rec.Upstream...)...)
+	if len(cves) == 0 {
+		return nil, fmt.Errorf("feed: no canonical CVE in osv id/aliases/upstream")
 	}
 	at, err := parseObserved(rec.Modified)
 	if err != nil {
@@ -78,13 +85,18 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 		}
 	}
 
-	p, err := domain.NewVulnFactsProposal(a.Source(), at, domain.VulnFacts{
+	facts := domain.VulnFacts{
 		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, FixedVersions: fixes,
-	})
-	if err != nil {
-		return nil, err
 	}
-	return []Translated{{CVE: cve, Proposal: p}}, nil
+	out := make([]Translated, 0, len(cves))
+	for _, cve := range cves {
+		p, err := domain.NewVulnFactsProposal(a.Source(), at, facts)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Translated{CVE: cve, Proposal: p})
+	}
+	return out, nil
 }
 
 // rangeString renders an OSV introduced/fixed event pair as a human-readable range.

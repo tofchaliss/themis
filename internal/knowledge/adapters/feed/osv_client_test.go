@@ -40,6 +40,47 @@ const osvVulnCVE = `{
   "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.0"}]}]}]
 }`
 
+// osvRedHatAdvisory mirrors OSV.dev's Red Hat ecosystem shape: the id is an RHSA, aliases is
+// null, and the addressed CVEs live in `upstream` — one advisory fixing two CVEs.
+const osvRedHatAdvisory = `{
+  "id": "RHSA-2023:0835",
+  "modified": "2023-02-16T00:00:00Z",
+  "aliases": null,
+  "upstream": ["CVE-2022-40897", "CVE-2021-3572", "CVE-2022-40897"],
+  "database_specific": {"severity": "HIGH", "cvss_score": 5.9},
+  "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "0:53.0.0-12.el9_4.1"}]}]}]
+}`
+
+// TestOSVClient_RedHatAdvisoryUpstreamCVEs proves a distro advisory record (id "RHSA-…",
+// aliases null) is correlated via its `upstream` CVEs, carding BOTH CVEs one advisory fixes.
+// Before the upstream fix these records were dropped as "no canonical CVE" and RHEL/Rocky/Alma
+// rpm components silently produced zero matches.
+func TestOSVClient_RedHatAdvisoryUpstreamCVEs(t *testing.T) {
+	srv, _ := osvServer(t, osvRedHatAdvisory)
+	c := feed.NewOSVClient(srv.URL, srv.Client())
+
+	got, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL: "pkg:rpm/redhat/python-setuptools@39.2.0-5.el9?distro=rhel-9", Name: "python-setuptools",
+		Version: "39.2.0-5.el9", Source: "python-setuptools",
+	})
+	if err != nil {
+		t.Fatalf("VulnsForPackage: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d proposals, want 2 (one per upstream CVE)", len(got))
+	}
+	seen := map[string]bool{}
+	for _, p := range got {
+		seen[p.CVE.String()] = true
+		if vf, ok := p.Proposal.VulnFacts(); !ok || vf.Severity != "high" {
+			t.Errorf("cve %s: vuln facts = %+v ok=%v, want severity high", p.CVE, vf, ok)
+		}
+	}
+	if !seen["CVE-2022-40897"] || !seen["CVE-2021-3572"] {
+		t.Errorf("carded CVEs = %v, want both CVE-2022-40897 and CVE-2021-3572", seen)
+	}
+}
+
 func TestOSVClient_VulnsForPackage_PyPI(t *testing.T) {
 	srv, body := osvServer(t, osvVulnCVE)
 	c := feed.NewOSVClient(srv.URL, srv.Client())
