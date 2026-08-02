@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -226,7 +228,8 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 // component a vendor not_affected VEX statement covers (EDR-VEX-01 D4). It never auto-suppresses:
 // a Governance-owned policy may auto-accept the system proposal (D11), otherwise it awaits a
 // human. The vendor justification is carried into the rationale so a suppression is explainable
-// (D6). Idempotent — the proposal id derives from the Finding + covered package, and a
+// (D6). Idempotent — the proposal id derives from the Finding + a path-safe hash of the covered
+// package (so it never embeds the PURL's '/', which would 404 the accept/reject REST path), and a
 // re-delivery dedups.
 func (s *FindingService) reactToApplicability(ctx context.Context, sig EnrichmentSignal) error {
 	var notAffected []Applicability
@@ -249,7 +252,7 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 			if !ok {
 				return nil, errNoop // no vendor statement covers this Finding's components
 			}
-			pid := domain.ProposalID("vex:" + string(id) + ":" + covered.Package)
+			pid := domain.ProposalID("vex:" + string(id) + ":" + packageKey(covered.Package))
 			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected, vexRationale(covered), now)
 			if err != nil {
 				return nil, err
@@ -284,6 +287,16 @@ func vexRationale(a Applicability) string {
 		return "vendor VEX: not_affected for " + a.Package
 	}
 	return "vendor VEX: not_affected for " + a.Package + " (" + a.Justification + ")"
+}
+
+// packageKey derives a short, path-safe, deterministic token from a package identifier. The vex
+// proposal id embeds this instead of the raw PURL so the id never carries a '/', which would make
+// the accept/reject REST path (…/proposals/{id}/accept) 404. Deterministic ⇒ the same covered
+// package always folds to the same proposal id (idempotent dedup); the human-readable package is
+// preserved in the proposal rationale (vexRationale), so nothing is lost for explainability.
+func packageKey(pkg string) string {
+	sum := sha256.Sum256([]byte(pkg))
+	return hex.EncodeToString(sum[:8])
 }
 
 // RaiseProposal records a Governance Proposal against a Finding from a human or AI proposer
