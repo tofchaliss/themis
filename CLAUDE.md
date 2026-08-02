@@ -115,8 +115,13 @@ all six nodes.
   content-addressed, so re-uploading byte-identical content **dedups** — a re-run needs changed bytes.
 - **Opt-in enrichment** (off by default — no silent outbound calls; all **relevance-bounded** per
   EDR-KNOWLEDGE-01 D5, i.e. feeds enrich *existing* Faultlines and never mirror the full feed):
-  `THEMIS_NVD_ENABLED=1` (authoritative CVSS/severity via the modified-since watch) and
-  `THEMIS_EPSSKEV_ENABLED=1` (EPSS/KEV/ExploitDB signal sweep). OSV distro + language correlation is always on.
+  `THEMIS_NVD_ENABLED=1` (authoritative CVSS/severity via the modified-since watch),
+  `THEMIS_EPSSKEV_ENABLED=1` (EPSS/KEV/ExploitDB signal sweep),
+  `THEMIS_REDHAT_ENABLED=1` (per-CVE Red Hat vendor severity + `not_affected` applicability + RPM fixed-version
+  bounds; covers RHEL/Rocky/Alma — EDR-VEX-01 Phase 3), and
+  `THEMIS_VEXFEED_ENABLED=1` + `THEMIS_VEXFEED_URLS=<csaf-base,…>` (generic per-CVE CSAF-VEX directories at
+  `<base>/<year>/cve-<id>.json` — EDR-VEX-01 B4). Each feed also honors `_URL`/`_POLL_INTERVAL` (default 12h).
+  OSV distro + language correlation is always on.
 
 ## Architecture
 
@@ -152,8 +157,9 @@ the unique customers a release reaches — C1) → **Evidence** (immutable,
 content-addressed SBOM/VEX; canonical inventory) → **Knowledge** (Faultline aggregate; order-independent
 reconciliation; feed ACLs; correlation) → **Governance** (Findings + append-only Enterprise Positions — AI
 proposes, humans/policy decide; triage priority is `base_score × blast-multiplier`, the multiplier derived
-from Registry's blast-radius over the read seam `THEMIS_REGISTRY_URL` and **fail-safe to 1.0** when Registry is
-unreachable — C2) → **Communication** (deterministic Publication materialization + serializer
+from Registry's blast-radius over the read seam `THEMIS_REGISTRY_URL`, **fail-safe to 1.0** when Registry is
+unreachable, and saturating to 2.0× at `THEMIS_BLAST_RADIUS_CAP` unique customers (default 10) — C2) →
+**Communication** (deterministic Publication materialization + serializer
 registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; all provider/LLM code is
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and
 it reads via read APIs / writes via proposal-intake.
@@ -199,6 +205,9 @@ OpenVEX / CSAF out.
   source precedence; lifecycle is forward-only (Created→Enriched→Correlated→Mature→Superseded) — a card is
   **never deleted**, only superseded. Duplicate CVE from a later SBOM **reuses** the existing card.
 - **VEX overlays, never deletes** — VEX changes effective/enterprise state only; raw findings are preserved.
+  Vendor VEX (Red Hat / CSAF feeds) is *gathered, not obeyed*: a reconciled `not_affected` statement raises a
+  **system Proposal** on the Findings whose component it covers, which policy auto-accepts or a human decides —
+  it never auto-suppresses (EDR-VEX-01; "Gathering Is Not Knowing").
 - **AI is advisory** — the Intelligence Gateway *proposes* a position; humans or policy decide. It is
   disable-able and never auto-decides.
 

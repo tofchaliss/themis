@@ -150,9 +150,62 @@ per-context follow-ups below.
   `openVEXProduct{ ID string json:"@id" }`) expects product **objects** `{"@id": …}`. So a Communication-published
   OpenVEX fed back into Knowledge yields zero applicability statements. Align the two shapes (parser accept both,
   or serializer emit objects). Surfaced 2026-07-31.
+- [ ] **(MED) VEX-applicability proposal ids embed a PURL (`/`), breaking the accept/reject REST path.** A
+  feed-/upload-derived suppression proposal is given the deterministic id `vex:<findingID>:<package-purl>`
+  (observed: `vex:9da2…:pkg:pypi/setuptools@50.3.2`). The `/` inside the PURL makes
+  `POST /findings/{id}/proposals/{proposalId}/accept` return **404 page not found** unless the caller
+  percent-encodes the id (`/`→`%2F`) — so the documented §5a suppression-*accept* step fails as written. Real fix:
+  keep the id deterministic but path-safe (e.g. `vex:<fid>:<sha1(purl)>`), or accept/reject by proposal id in the
+  request **body** instead of the path. Client workaround meanwhile: `printf '%s' "$id" | jq -sRr @uri`.
+  `internal/governance/app/service.go` (proposal-id construction) + `api/governance.openapi.yaml`. Surfaced
+  2026-08-02 during the VM VEX-suppression test. See [[feedback-backlog-surfaced-followups]].
+- [ ] **(MED) Release-posture `effective_priority` ignores the governed stance.** `ReleasePosture`
+  (`internal/governance/app/read.go:118`) computes `EffectivePriority = base_score × blast_multiplier` with no
+  regard to the Finding's accepted Position — so a Finding dispositioned **not_affected** (or otherwise
+  suppressed) still reports its full intrinsic priority (observed: CVE-2024-6345 accepted `not_affected`, yet
+  `effective_priority: 70`). A human sorting the primary triage view by `effective_priority` sees suppressed
+  Findings ranked as high as unaddressed ones — the suppression is visible only in the separate `stance` field.
+  Decision needed (likely an EDR-GOVERNANCE point): zero/omit effective_priority for suppressing stances
+  (not_affected / false_positive / resolved-fixed), add an explicit `residual_priority`/`suppressed` signal, or
+  formally define effective_priority as *intrinsic* and require consumers to filter by stance. Surfaced
+  2026-08-02 (VM suppression test). See [[feedback-backlog-surfaced-followups]].
+- [ ] **(LOW) Intelligence provider HTTP timeout is hardcoded to 60s — too low for larger local models.**
+  `cmd/intelligence/main.go:75` builds the provider client as `&http.Client{Timeout: 60 * time.Second}` with no
+  env override. A grounded `recommend_position` on a 20B local model (cyberpal20b via Ollama) exceeds 60s on
+  modest hardware → the provider call aborts with `reason:"provider_error"` → 204 (no proposal); confirmed on the
+  VM (two calls, each exactly 59.96s, while a tiny direct prompt answered in 9s). Advisory invariant holds (no
+  bad proposal recorded), but the real-model path is unusable without a smaller/faster model. Fix: add a
+  `THEMIS_LLM_TIMEOUT` (Go duration, default 60s). Surfaced 2026-08-02 (VM AI-recommend test).
+  See [[feedback-backlog-surfaced-followups]].
 - [ ] **(LOW) Wolfi distro unmapped in OSV discovery.** `osvDistroEcosystem` (`adapters/feed/osv_client.go`) maps
   Rocky/Alma/Red Hat/Debian/Alpine but has no `wolfi` case; the legacy monolith had a `wolfi_osv_url` feed. Add the
   Wolfi ecosystem mapping. Surfaced 2026-08-01 during the legacy→greenfield feed-parity check.
+- [x] **(HIGH) OSV distro correlation misses Red Hat/Rocky/Alma CVEs — the ACL ignores OSV's `upstream` field. — FIXED 2026-08-02 (code green, uncommitted).**
+  OSV's Red Hat-ecosystem records are advisory-keyed (`id: "RHSA-2023:0835"`, `aliases: null`, `related: null`)
+  and carry the addressed CVE(s) in the **`upstream`** field (verified live: `upstream: ["CVE-2022-40897"]`).
+  The OSV ACL (`internal/knowledge/adapters/feed/osv.go:49`) resolves the canonical CVE from **only** `rec.ID` +
+  `rec.Aliases`, so every Red Hat advisory record is dropped as "no canonical CVE" → an rpm component in a
+  RHEL/Rocky/Alma SBOM gets **zero** OSV CVE matches. Confirmed on a from-scratch VM:
+  `python-setuptools@39.2.0-5.el9?distro=rhel-9` → OSV returns 20 records, Themis correlates 0, posture empty.
+  PyPI/npm/etc. are unaffected (they CVE-key `id`/`aliases`); Debian/Alpine may use a different shape (recheck).
+  The Red Hat Hydra *enrichment* feed does NOT compensate — it only folds severity onto ALREADY-carded CVEs, and
+  nothing cards them. **Fix:** add an `Upstream []string` (and likely `Related`) field to the OSV record struct
+  (`osv.go`) and include them in the `firstCVE(...)` candidate list, with a translate test over a real
+  RHSA/`upstream` record. Blocks the RPM fixed-verdict feature end-to-end (the gate never receives a match).
+  Surfaced 2026-08-02 (VM fixed-verdict test). **FIXED same day:** `osvRecord` gained an `Upstream []string`
+  field; `Translate` now gathers every CVE across id/aliases/upstream via a new `allCVEs` helper (`feed.go`) and
+  emits one vuln-facts Proposal **per addressed CVE** (an RHSA fixing N CVEs cards all N, deduped). Regression
+  test `TestOSVClient_RedHatAdvisoryUpstreamCVEs`; feed pkg 93.6%; `make check-ci` green. Live re-verify on the
+  VM (redeploy + rpm SBOM → the fixed-verdict gate) still pending. See [[feedback-backlog-surfaced-followups]].
+- [ ] **(LOW) Red Hat vendor-VEX folds the entire product-catalog `not_affected` list per CVE.** One Red Hat
+  per-CVE record carries a `not_affected` statement for every RHEL/OpenShift/Ansible product it ships (CVE-2024-6345
+  → ~21 statements), so a single 68-card SBOM folded **3,418** applicability Proposals in one sweep. Correct and
+  idempotent, and **no over-suppression** — package-precise `Finding.CoversPackage` means none of the RHEL-package
+  statements (`python-setuptools`, …) suppress a non-RHEL component (PyPI `setuptools@50.3.2` correctly stayed
+  `affected`) — but the stored applicability set is mostly irrelevant intel for a non-RHEL SBOM (volume + noise).
+  Consider scoping folded Red Hat applicabilities to ecosystems present in the estate (or cap/summarize) vs.
+  accepting them as raw gathered VEX. `internal/knowledge/adapters/feed/redhat_client.go` + `app/enrich_redhat.go`.
+  Surfaced 2026-08-02 during the from-scratch VM enrichment test. See [[feedback-backlog-surfaced-followups]].
 - [x] **(LOW) `blast_radius_cap` is hardcoded, not configurable. — FIXED 2026-08-01.** `BlastMultiplier` now
   takes the cap as a parameter (`domain.DefaultBlastRadiusCap = 10`), threaded via `THEMIS_BLAST_RADIUS_CAP`
   through `cmd/governance` → `Wire` → `NewReadService` (which normalizes < 2 to the default); a fixed +0.1/customer
