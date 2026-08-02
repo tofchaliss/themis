@@ -150,7 +150,7 @@ per-context follow-ups below.
   `openVEXProduct{ ID string json:"@id" }`) expects product **objects** `{"@id": …}`. So a Communication-published
   OpenVEX fed back into Knowledge yields zero applicability statements. Align the two shapes (parser accept both,
   or serializer emit objects). Surfaced 2026-07-31.
-- [ ] **(MED) VEX-applicability proposal ids embed a PURL (`/`), breaking the accept/reject REST path.** A
+- [x] **(MED) VEX-applicability proposal ids embed a PURL (`/`), breaking the accept/reject REST path. — FIXED 2026-08-02 (code green, uncommitted).** A
   feed-/upload-derived suppression proposal is given the deterministic id `vex:<findingID>:<package-purl>`
   (observed: `vex:9da2…:pkg:pypi/setuptools@50.3.2`). The `/` inside the PURL makes
   `POST /findings/{id}/proposals/{proposalId}/accept` return **404 page not found** unless the caller
@@ -158,7 +158,11 @@ per-context follow-ups below.
   keep the id deterministic but path-safe (e.g. `vex:<fid>:<sha1(purl)>`), or accept/reject by proposal id in the
   request **body** instead of the path. Client workaround meanwhile: `printf '%s' "$id" | jq -sRr @uri`.
   `internal/governance/app/service.go` (proposal-id construction) + `api/governance.openapi.yaml`. Surfaced
-  2026-08-02 during the VM VEX-suppression test. See [[feedback-backlog-surfaced-followups]].
+  2026-08-02 during the VM VEX-suppression test. **FIXED same day:** `reactToApplicability` now builds the id as
+  `vex:<findingID>:<packageKey(purl)>` where `packageKey` is a short sha256 hex token — path-safe (colons only,
+  no `/`), still deterministic (idempotent dedup), and the human-readable package stays in the proposal rationale.
+  INSTALLATION.md §5a reverted to a direct accept (no URL-encode needed); governance app 100%. No API-contract
+  change (proposalId is still an opaque path-param string). See [[feedback-backlog-surfaced-followups]].
 - [ ] **(MED) Release-posture `effective_priority` ignores the governed stance.** `ReleasePosture`
   (`internal/governance/app/read.go:118`) computes `EffectivePriority = base_score × blast_multiplier` with no
   regard to the Finding's accepted Position — so a Finding dispositioned **not_affected** (or otherwise

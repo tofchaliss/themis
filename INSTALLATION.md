@@ -389,10 +389,9 @@ sleep 8
 # 1. The card now carries the vendor statement (Knowledge read API, :8085; getFaultlineByCVE returns one card):
 curl -s "localhost:8085/api/v1/faultlines?cve=$CVE" | jq '.applicabilities'
 # 2. Governance raised a SYSTEM not_affected proposal — accept it (a human decision). The proposal id
-#    embeds the package PURL (contains a '/'), so URL-encode it or the accept PATH 404s (BACKLOG: path-safe ids):
+#    is path-safe (a hashed package token, no '/'), so it accepts directly:
 PROP=$(curl -s "localhost:8083/api/v1/findings/$FID" | jq -r '.proposals[] | select(.stance=="not_affected") | .id' | head -1)
-PROP_ENC=$(printf '%s' "$PROP" | jq -sRr @uri)
-curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP_ENC/accept" -d '{"actor_id":"you","actor_kind":"human"}'
+curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP/accept" -d '{"actor_id":"you","actor_kind":"human"}'
 # 3. The Finding's Position is now not_affected (has_position=true, stance=not_affected) — it is DISPOSITIONED,
 #    not dropped: effective_priority stays the intrinsic base×blast, so filter the posture BY STANCE to exclude
 #    suppressed findings (BACKLOG: effective_priority ignoring stance).
