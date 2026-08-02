@@ -401,6 +401,47 @@ read APIs, no shared tables). Same template as Evidence D9 / Knowledge D12.
 PoC contrast: the PoC is technical-layer-first (`domain` / `usecase` / `adapter` at the top, shared across
 everything); the greenfield is context-first with Governance isolated behind events + read APIs.
 
+### D14 — Posture priority is two numbers: intrinsic `effective_priority` + disposition-aware `residual_priority`, with a rule/AI re-evaluation watcher
+
+Decision:
+
+- The release-posture rollup (D10) carries **two** priority numbers, separating **impact** from **disposition**:
+  - **`effective_priority`** = `base_score × blast_multiplier` (C2), clamped to 100 — the CVE-intrinsic,
+    release-scoped severity, **independent of stance** (unchanged). Answers *"how bad is this here, regardless of
+    what we decided?"*
+  - **`residual_priority`** = `effective_priority × stanceWeight(stance)` — the **triage** number a human sorts
+    by. Answers *"what still needs my attention?"* A dispositioned Finding drops out of the top of the list
+    without losing its intrinsic severity (which `effective_priority`/`base_score` still show).
+- **`stanceWeight` is a deterministic policy** over the current Position stance (D2/D3): `not_affected` → 0,
+  `accepted_risk` → 0, `mitigated` → 0.5 (configurable), `deferred` → 0.9, and `affected` /
+  `under_investigation` / no-position → 1.0. A risk-removing (`not_affected`) or risk-accepted
+  (`accepted_risk`) *terminal* disposition zeroes the triage number; an open or affected Finding keeps it.
+- **`residual_priority` stays a read projection** (D10) — recomputed per read from the current `base_score`
+  (already tracking the latest enrichment signals) × blast × `stanceWeight`; it adds no aggregate state.
+- **Disposition re-evaluation is a governed watcher — "decided for now, watched for change" — never a silent
+  flip.** A terminal disposition is re-tested on each `FaultlineEnriched` signal change (or a scheduled sweep) by
+  a **deterministic rule**: if the risk that justified it has **materially drifted** — a **KEV listing**, **EPSS
+  crossing a configurable threshold**, a **newly-public exploit**, or a **reversing vendor VEX** — the rule
+  **emits a "disposition-stale" completed-fact event** (push, not pull) that re-surfaces the Finding for review.
+  Same reactive shape as D6. It **never** auto-changes the Position (D6/D11 — never auto-decide); it re-opens the
+  decision for a human or a governed policy. This is what makes `accepted_risk → 0` safe: an acceptance does not
+  vanish, it **expires** when its premise changes.
+- **AI is the advisory upgrade on the deterministic core, never a requirement (EDR-INTELLIGENCE-01; standing
+  automation/AI lens).** With AI off, the rule watcher + arithmetic stand alone. With AI on, the Gateway may
+  (a) reason whether a drift *actually* invalidates the original justification before re-surfacing, (b) render
+  the *"why low-priority now / why re-surfaced"* explanation (D6), and (c) — future/LLMOps — tune `stanceWeight`
+  (e.g. `mitigated`) from observed re-open behaviour. The stance itself is already AI-proposable via
+  `recommend_position`, which feeds `residual_priority` on acceptance.
+
+ADR basis: D2/D3 (Position stance is the disposition authority), D6/D11 (propose + re-surface, never
+auto-decide), D10 (posture is a disposable read projection), C2 (blast multiplier). Cross-cutting: Knowledge
+supplies the drift signals (EPSS/KEV/exploit on the Faultline); the optional AI upgrade is EDR-INTELLIGENCE-01.
+Standing lens: every decision keeps a deterministic core + an optional automation/AI seam.
+
+PoC contrast: the PoC exposes a single composite risk score with no separation of intrinsic severity from
+enterprise disposition, and never re-evaluates an accepted/suppressed finding when its exploit signals change —
+an acceptance is permanent until someone manually revisits it.
+
 ## Traceability → issues
 
 One issue per implementable decision; each cross-references its decision + ADR. Suggested delivery: an
@@ -422,6 +463,7 @@ OpenSpec change `openspec/changes/phase3-governance/` with these as `tasks.md` g
 | GOV-11 | Outbox relay + thin Position events for Communication (`PositionEstablished`/`PositionRevised`); Communication consumes Positions only | D8 · BCK-0041/DOM-0025 |
 | GOV-12 | Workers (Finding, expiry/timer) + non-owning coordinator; state-based recovery (idempotent re-run + first-class reconciler, no replay) (+ crash/resume tests) | D11·D12 · BCK-0044/0045/0050 |
 | GOV-13 | `adapters/http`: triage + read API — raise/accept/reject proposal, finding/position reads, release posture; error-UX envelope + authorization hook | D10·D11 · BCK-0048 |
+| GOV-14 | Posture priority: add `residual_priority` = `effective_priority × stanceWeight(stance)` alongside the intrinsic `effective_priority` (read projection); a deterministic disposition re-evaluation watcher (KEV/EPSS-threshold/exploit/reversing-VEX → "disposition-stale" event, push, never auto-decide); AI upgrade optional | D14 · C2 · EDR-INTELLIGENCE-01 |
 
 ## Glossary (this context)
 

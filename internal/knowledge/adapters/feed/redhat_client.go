@@ -143,7 +143,7 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 			continue
 		}
 		pkg := strings.TrimSpace(ps.PackageName)
-		if pkg == "" {
+		if pkg == "" || !redhatIsPackageLevel(pkg) {
 			continue
 		}
 		if _, dup := seen[pkg]; dup {
@@ -239,4 +239,19 @@ func redhatIsMainStream(cpe string) bool {
 		}
 	}
 	return true
+}
+
+// redhatIsPackageLevel reports whether a Red Hat package_state package name is a plain,
+// package-level identifier a customer SBOM could carry as a component. Container images and
+// layered-product artifacts carry a "/" or ":" namespace or a "-container" suffix (e.g.
+// "openshift-logging/elasticsearch6-rhel8", "gimp:flatpak/python2-setuptools",
+// "rhdh-operator-container"); an rpm/pypi/npm component name never does, so their not_affected
+// statements can never match a Finding. Folding only the package-level statements keeps the
+// card's applicability set to what can actually suppress something, losing no possible match
+// (EDR-VEX-01 D5 relevance-binding; BACKLOG: Red Hat applicability volume).
+func redhatIsPackageLevel(pkg string) bool {
+	if strings.ContainsAny(pkg, "/:") {
+		return false
+	}
+	return !strings.HasSuffix(pkg, "-container")
 }

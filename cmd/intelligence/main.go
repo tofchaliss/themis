@@ -32,6 +32,7 @@ type config struct {
 	useFake       bool   // THEMIS_INTELLIGENCE_PROVIDER=fake — dev/CI provider (no model).
 	apiKey        string // THEMIS_LLM_API_KEY — optional bearer token for an authenticated server.
 	respFormat    string // THEMIS_LLM_RESPONSE_FORMAT — structured-output mode (json_object|json_schema|text|none).
+	llmTimeout    time.Duration // THEMIS_LLM_TIMEOUT — provider HTTP client timeout (Go duration, default 60s). Raise for a slower/larger local model whose grounded recommend exceeds 60s (else the call aborts with provider_error → an "insufficient" 204).
 
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
@@ -47,6 +48,7 @@ func loadConfig() config {
 		useFake:       os.Getenv("THEMIS_INTELLIGENCE_PROVIDER") == "fake",
 		apiKey:        os.Getenv("THEMIS_LLM_API_KEY"),
 		respFormat:    os.Getenv("THEMIS_LLM_RESPONSE_FORMAT"),
+		llmTimeout:    envDurationDefault("THEMIS_LLM_TIMEOUT", 60*time.Second),
 
 		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
 		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
@@ -72,7 +74,7 @@ func main() {
 		APIKey:         cfg.apiKey,
 		ResponseFormat: cfg.respFormat,
 		Logger:         logger,
-		HTTPClient:     &http.Client{Timeout: 60 * time.Second},
+		HTTPClient:     &http.Client{Timeout: cfg.llmTimeout},
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))
@@ -126,6 +128,16 @@ func authedMount(ctx context.Context, router chi.Router, cfg config, logger *obs
 func envDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// envDurationDefault parses a Go duration from key, falling back to def when unset or unparseable.
+func envDurationDefault(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return def
 }

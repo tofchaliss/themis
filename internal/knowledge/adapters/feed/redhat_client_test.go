@@ -32,7 +32,9 @@ func TestRedHatClient_TranslatesSeverityAndNotAffected(t *testing.T) {
 			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Not affected","package_name":"openssl"},
 			{"product_name":"Red Hat Enterprise Linux 9","fix_state":"Not affected","package_name":"openssl"},
 			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Affected","package_name":"curl"},
-			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Not affected","package_name":""}
+			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Not affected","package_name":""},
+			{"product_name":"Red Hat OpenShift AI","fix_state":"Not affected","package_name":"odh-ml-pipelines-api-server-container"},
+			{"product_name":"Logging Subsystem","fix_state":"Not affected","package_name":"openshift-logging/elasticsearch6-rhel8"}
 		]
 	}`
 	srv := rhServer(t, http.StatusOK, body)
@@ -41,7 +43,9 @@ func TestRedHatClient_TranslatesSeverityAndNotAffected(t *testing.T) {
 		t.Fatalf("fetch: %v", err)
 	}
 	// vuln-facts (High from Important) + ONE deduped not_affected applicability (openssl). The
-	// "Affected" curl and the empty-package entry are skipped.
+	// "Affected" curl, the empty-package entry, and the container/namespaced product artifacts
+	// (a "-container" image and an "openshift-logging/…" namespaced name — never package-level
+	// SBOM components) are all skipped.
 	if len(got) != 2 {
 		t.Fatalf("proposals = %d, want 2", len(got))
 	}
