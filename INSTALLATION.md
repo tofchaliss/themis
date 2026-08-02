@@ -388,11 +388,15 @@ curl $J localhost:8081/api/v1/evidence --data-binary @"$tmp"; rm -f "$tmp"
 sleep 8
 # 1. The card now carries the vendor statement (Knowledge read API, :8085; getFaultlineByCVE returns one card):
 curl -s "localhost:8085/api/v1/faultlines?cve=$CVE" | jq '.applicabilities'
-# 2. Governance raised a SYSTEM not_affected proposal on the Finding — accept it (a human decision):
+# 2. Governance raised a SYSTEM not_affected proposal — accept it (a human decision). The proposal id
+#    embeds the package PURL (contains a '/'), so URL-encode it or the accept PATH 404s (BACKLOG: path-safe ids):
 PROP=$(curl -s "localhost:8083/api/v1/findings/$FID" | jq -r '.proposals[] | select(.stance=="not_affected") | .id' | head -1)
-curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP/accept" -d '{"actor_id":"you","actor_kind":"human"}'
-# 3. The Finding's Position is now not_affected → it drops out of the effective posture.
-curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq '.[] | {cve, stance, effective_priority}'
+PROP_ENC=$(printf '%s' "$PROP" | jq -sRr @uri)
+curl $J -X POST "localhost:8083/api/v1/findings/$FID/proposals/$PROP_ENC/accept" -d '{"actor_id":"you","actor_kind":"human"}'
+# 3. The Finding's Position is now not_affected (has_position=true, stance=not_affected) — it is DISPOSITIONED,
+#    not dropped: effective_priority stays the intrinsic base×blast, so filter the posture BY STANCE to exclude
+#    suppressed findings (BACKLOG: effective_priority ignoring stance).
+curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq '.[] | {cve, stance, has_position, effective_priority}'
 ```
 
 **(b) Let a feed do it.** With `THEMIS_REDHAT_ENABLED=1` (or the CSAF-VEX feed, §4b), the same applicability

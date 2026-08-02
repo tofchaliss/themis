@@ -91,6 +91,26 @@ func firstCVE(candidates ...string) (value.CVEID, error) {
 	return value.CVEID{}, fmt.Errorf("feed: no canonical CVE among %v", candidates)
 }
 
+// allCVEs returns every DISTINCT canonical CVE among the candidates, preserving order. Unlike
+// firstCVE it does not stop at the first match: an OSV distro advisory (id: "RHSA-…") lists the
+// CVEs it addresses in `upstream`, and one advisory can fix several — each must be carded.
+func allCVEs(candidates ...string) []value.CVEID {
+	seen := make(map[string]struct{})
+	var out []value.CVEID
+	for _, c := range candidates {
+		cve, err := value.NewCVEID(c)
+		if err != nil {
+			continue
+		}
+		if _, dup := seen[cve.String()]; dup {
+			continue
+		}
+		seen[cve.String()] = struct{}{}
+		out = append(out, cve)
+	}
+	return out
+}
+
 // parseObserved parses the feed record's observation timestamp (RFC 3339). A feed
 // record must carry when it was observed so the Proposal is explainable + reconcilable.
 func parseObserved(s string) (time.Time, error) {
