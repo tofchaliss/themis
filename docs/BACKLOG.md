@@ -177,7 +177,9 @@ per-context follow-ups below.
   accepted_risk 0, mitigated 0.5, deferred 0.9, else 1.0), a read projection; plus a deterministic disposition
   **re-evaluation watcher** (KEV/EPSS-threshold/exploit/reversing-VEX → "disposition-stale" push event, never
   auto-decide) so `accepted_risk → 0` *expires* on signal drift; AI is the optional advisory upgrade. Ready to
-  implement as **GOV-14** (still open). See [[feedback-backlog-surfaced-followups]] and [[feedback-ai-automation-lens]].
+  implement as **GOV-14**, **targeted for v0.4.x** (fits the AI-capability expansion; deliberately NOT blocking the
+  v0.4.0 greenfield-baseline tag — the decision is durable in EDR-GOVERNANCE-01 D14). See
+  [[feedback-backlog-surfaced-followups]] and [[feedback-ai-automation-lens]].
 - [x] **(LOW) Intelligence provider HTTP timeout is hardcoded to 60s — too low for larger local models. — FIXED 2026-08-02 (code green, uncommitted).**
   `cmd/intelligence/main.go:75` builds the provider client as `&http.Client{Timeout: 60 * time.Second}` with no
   env override. A grounded `recommend_position` on a 20B local model (cyberpal20b via Ollama) exceeds 60s on
