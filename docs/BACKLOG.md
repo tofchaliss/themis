@@ -172,7 +172,12 @@ per-context follow-ups below.
   Decision needed (likely an EDR-GOVERNANCE point): zero/omit effective_priority for suppressing stances
   (not_affected / false_positive / resolved-fixed), add an explicit `residual_priority`/`suppressed` signal, or
   formally define effective_priority as *intrinsic* and require consumers to filter by stance. Surfaced
-  2026-08-02 (VM suppression test). See [[feedback-backlog-surfaced-followups]].
+  2026-08-02 (VM suppression test). **DECIDED 2026-08-02 → EDR-GOVERNANCE-01 D14** (Option D): keep intrinsic
+  `effective_priority` + add `residual_priority` = `effective_priority × stanceWeight(stance)` (not_affected 0,
+  accepted_risk 0, mitigated 0.5, deferred 0.9, else 1.0), a read projection; plus a deterministic disposition
+  **re-evaluation watcher** (KEV/EPSS-threshold/exploit/reversing-VEX → "disposition-stale" push event, never
+  auto-decide) so `accepted_risk → 0` *expires* on signal drift; AI is the optional advisory upgrade. Ready to
+  implement as **GOV-14** (still open). See [[feedback-backlog-surfaced-followups]] and [[feedback-ai-automation-lens]].
 - [x] **(LOW) Intelligence provider HTTP timeout is hardcoded to 60s — too low for larger local models. — FIXED 2026-08-02 (code green, uncommitted).**
   `cmd/intelligence/main.go:75` builds the provider client as `&http.Client{Timeout: 60 * time.Second}` with no
   env override. A grounded `recommend_position` on a 20B local model (cyberpal20b via Ollama) exceeds 60s on
