@@ -5,13 +5,83 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-02
+### Added
+- feat: Phase-3 greenfield rebuild — 4-context pipeline + Intelligence Gateway Δ1 (@invalid-email-address)
+- feat(knowledge): implement phase3-knowledge-feeds (19/19, gated) (@invalid-email-address)
+- feat(intelligence): Δ2 — typed dispatch + Rule Engine + admission + OpenAI-compatible provider auth (@invalid-email-address)
+- feat(eventbus): M5 Groups 1-2 - platform bus scaffold + full Envelope threading (@invalid-email-address)
+- feat(eventbus): M5 Groups 3-8 — contracts, transport, and pipeline composition (@invalid-email-address)
+- feat(eventbus): M5 Groups 9-10 — pipeline e2e, focused tests, docs; M5 complete (@invalid-email-address)
+- feat: post-M5 deployment hardening + shared-CVE correlation fix (@invalid-email-address)
+- feat(knowledge): correlate distro (rpm) packages via OSV, format-agnostic (@invalid-email-address)
+- feat(knowledge): NVD modified-since enrichment (relevance-bounded, opt-in) (@invalid-email-address)
+- feat(knowledge): EPSS/KEV/ExploitDB exploit-signal enrichment (opt-in) (@invalid-email-address)
+- feat(knowledge): deterministic priority level + composite score on the Faultline (@invalid-email-address)
+- feat(auth): inbound API-key auth + HMAC webhook trust across all services (F1/F2/F3) (@invalid-email-address)
+- feat(knowledge): wire feed-health tier policy end-to-end + GET /feeds (parity B1) (@invalid-email-address)
+- feat(knowledge): apply the reconciled range gate in correlation (parity A1 / D3) (@invalid-email-address)
+- feat(knowledge): NVD as a bounded, opt-in correlation discovery source (parity A2 / D5) (@invalid-email-address)
+- feat(governance): thread Knowledge's base score to the Finding (parity C6) + EDR-ESTATE-01 (@invalid-email-address)
+- feat(knowledge,evidence): ingest uploaded VEX as applicability Proposals (EDR-VEX-01 Phase 1) (@invalid-email-address)
+- feat(registry): enterprise estate graph + blast-radius traversal (parity C1) (@invalid-email-address)
+- feat(governance): apply the blast-radius multiplier to Finding priority (parity C2) (@invalid-email-address)
+- feat(vex): Phase 2 suppression overlay + eventbus D7 fix + configurable blast-cap (@invalid-email-address)
+- feat(knowledge): Red Hat relevance-bounded vendor feed (EDR-VEX-01 Phase 3, PR2) (@invalid-email-address)
+- feat(knowledge): stream-scoped RPM fixed verdict (EDR-VEX-01 Phase 3, PR3) (@invalid-email-address)
+- feat(knowledge): generic CSAF-VEX vendor feed (EDR-VEX-01 B4) (@invalid-email-address)
+
+### Changed
+- docs: add architecture book, ADRs, and engineering notes (markdownlint-clean) (@invalid-email-address)
+- docs: split the README into INSTALLATION / TESTING / API guides (@invalid-email-address)
+- docs: v0.3.x feed e2e verification + CVSS-4.0/source-tier gaps + vuln-listing helpers (@invalid-email-address)
+- docs(openspec): propose phase3-knowledge-feeds — promote feed gaps to tasks (@invalid-email-address)
+- test: add release smoke-test script + TESTING pointer (@invalid-email-address)
+- chore: gitignore themis-smoke.log (release-smoke-test.sh runtime log) (@invalid-email-address)
+- test(knowledge): executable Faultline lifecycle + cross-SBOM reuse demos (@invalid-email-address)
+- chore: version the themis-release-test skill (force-tracked) (@invalid-email-address)
+- chore(openspec): archive phase3-knowledge-feeds (19/19, complete) (@invalid-email-address)
+- Merge phase3-evidence: Δ2 Intelligence (typed dispatch + Rule Engine + admission + OpenAI-compatible provider auth); untrack .claude/ (local tooling + agent memory, not versioned) (@invalid-email-address)
+- chore(openspec): archive 7 implemented phase3-* changes (kernel/evidence/knowledge/governance/communication/intelligence + Δ2) — all on main (@invalid-email-address)
+- ci: add PR + Main workflows running the make check gate; fold test into check (@invalid-email-address)
+- ci: scope the gate to greenfield (make check-ci); fix Faultline concurrent-fold flake (@invalid-email-address)
+- docs+openspec: consolidate backlogs into docs/BACKLOG.md; scaffold M5 event-infrastructure (@invalid-email-address)
+- docs(m5): add task + backlog to wire make e2e-pipeline into CI after M5 (@invalid-email-address)
+- docs(CLAUDE): document make check-ci as the CI gate (@invalid-email-address)
+- chore(openspec): archive phase3-event-infrastructure (M5 complete, 43/43) (@invalid-email-address)
+- docs(install): wire the post-M5 end-to-end deployment runbook (@invalid-email-address)
+- docs: checkpoint 2026-07-30 — VM deployment + first parity cluster closed (@invalid-email-address)
+- docs(parity): expand PARITY-GAP with the full two-tree audit (stable IDs A1–F8) (@invalid-email-address)
+- test(pipeline): deployment-faithful no-AI SBOM→VEX gate on every PR (@invalid-email-address)
+- docs: checkpoint 2026-07-31 — full parity audit + 9-PR advancement (@invalid-email-address)
+- docs(deploy): document THEMIS_REGISTRY_URL for Governance (C2 blast multiplier) (@invalid-email-address)
+- docs: end-to-end runbook for the vendor-VEX feeds + AI (from scratch to E2E) (@invalid-email-address)
+- docs: feed-config reconcile, §5a suppression fix, VM-test backlog findings (@invalid-email-address)
+- docs: §5a direct accept + mark proposal-id path-safe fix done (@invalid-email-address)
+- docs(backlog): mark the Red Hat applicability-volume + LLM-timeout items fixed (@invalid-email-address)
+- docs(edr): EDR-GOVERNANCE-01 D14 — posture residual_priority + disposition re-evaluation (@invalid-email-address)
+- docs: v0.4.0 release notes (first greenfield release) + GOV-14 v0.4.x target (@invalid-email-address)
+
+### Fixed
+- fix(v0.3.x): read CVSS v4.0 in the NVD adapter (D-NVD-2) (@invalid-email-address)
+- fix(evidence-e2e): follow evidence_outbox column rename in outboxCount (@invalid-email-address)
+- fix(knowledge): correlate OSV distro advisories via the `upstream` field (@invalid-email-address)
+- fix(governance): make vex suppression proposal ids path-safe (@invalid-email-address)
+- fix(knowledge): scope Red Hat not_affected applicabilities to package-level names (@invalid-email-address)
+- fix(intelligence): make provider HTTP timeout configurable (THEMIS_LLM_TIMEOUT) (@invalid-email-address)
+
 ## [0.3.11] - 2026-07-06
 ### Changed
-- docs: consolidate under docs/ (Kubernetes/Istio-style layout) + refresh stale context
+- proposal(themis-ai-1): consolidate basic AI enrichment (CVE Summarizer) (@invalid-email-address)
+- design(themis-ai-1): resolve open questions (grain, queue, footprint) + next-stage roadmap (@invalid-email-address)
+- propose(themis-ai-1): task breakdown — 46 tasks, apply-ready (@invalid-email-address)
+- docs: consolidate under docs/ with K8s/Istio-style layout + refresh stale context (@invalid-email-address)
+- release: v0.3.11 — docs consolidation (K8s/Istio layout) + context refresh (@invalid-email-address)
 
 ## [0.3.10] - 2026-07-02
 ### Changed
-- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9
+- docs(openspec): archive themis-core-model + sync specs; docs current to v0.3.9 (@invalid-email-address)
+- release: v0.3.10 — archive themis-core-model; docs current to v0.3.9 (@invalid-email-address)
 
 ## [0.3.9] - 2026-07-01
 ### Added
