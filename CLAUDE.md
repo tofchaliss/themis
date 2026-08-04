@@ -70,6 +70,10 @@ only on macOS's coarse clock.
 against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
 `THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
 bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
+`THEMIS_LLM_TIMEOUT` (Go duration, default `60s`) is the provider HTTP-client timeout — **raise it for a
+slower/larger local model** whose grounded `recommend_position` exceeds 60s, else the call aborts with
+`provider_error` and the Gateway returns an `insufficient` (204), which reads like a bad recommendation but is
+really a timeout.
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
 

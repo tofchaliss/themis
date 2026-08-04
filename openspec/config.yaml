@@ -2,33 +2,45 @@ schema: spec-driven
 
 # Project context shown to AI when creating OpenSpec artifacts.
 context: |
-  Themis — open-source Go backend security intelligence platform (PostgreSQL, Clean Architecture).
+  Themis — open-source Go backend security-intelligence platform (PostgreSQL, Clean Architecture), now a set
+  of independently-deployable DDD bounded-context services (the Phase-3 greenfield rebuild).
 
-  Canonical context sources (read before any work):
-  - docs/current-changes/PROJECT_CONTEXT.md — domain model, architecture, phase scope, invariants, quality gates
-  - README.md — build/test/config, coverage targets, repo layout
-  - docs/current-changes/AGENTS.md — agent workflow tying the above to OpenSpec
-  - openspec/specs/ — canonical capability specs (Phase 1 + 2a merged; source of truth)
-  - openspec/STATUS.md — authoritative active-change / release / phase status
+  This greenfield rebuild is the SOLE go-forward. The single-binary v0.3.x monolith
+  (internal/{domain,usecase,adapter,infrastructure}, cmd/themis) is FROZEN and reference-only — never modify it.
 
-  Active change: themis-ai-1 (v0.4.0 Basic AI Enrichment — advisory CVE Summarizer). Do not add features beyond the active change without explicit direction.
+  Canonical context sources (read before any greenfield work):
+  - CLAUDE.md — the two code trees, standing ground rules, commands, architecture, key invariants
+  - docs/engineering/PHASE3-STATUS.md — greenfield status + resume point (start here)
+  - docs/engineering/decisions/EDR-<CONTEXT>-NN.md — per-context source of truth (ADR/EDR wins)
+  - docs/engineering/STACK.md + docs/engineering/CONVENTIONS.md — justified stack + cross-cutting rules
+  - docs/BACKLOG.md (Part 1) — active greenfield tracker; docs/engineering/PARITY-GAP.md — parity gaps
+  - openspec/STATUS.md — OpenSpec change / release status
 
-  Permanent invariants:
-  - Raw component_vulnerabilities rows are never deleted or modified; VEX changes risk_context.effective_state only
-  - Clean Architecture import direction enforced by go-cleanarch + depguard
-  - Six gates per task group: build, unit tests, coverage, dead code, integration tests, clean-arch
+  Active change: NONE. v0.4.0 (the first greenfield release) shipped 2026-08-02; every phase3-* change is
+  archived. Next focus is AI-related features — GOV-14 (EDR-GOVERNANCE-01 D14), then Intelligence Δ3 (Python
+  engine + RAG/pgvector) and Δ4 (autonomy + LLMOps). Scaffold phase3-intelligence-d3 from EDR-INTELLIGENCE-01
+  when that work starts. Do not add features beyond the active change without explicit direction.
+
+  Permanent invariants (greenfield):
+  - No cross-context imports; rings import inward only (domain <- app <- adapters). Contexts collaborate only
+    via domain events (transactional outbox -> relay -> the bus DB) and read-only HTTP read APIs.
+  - Faultline = one card per canonical CVE; source Proposals are append-only; the reconciled view is
+    deterministic by source precedence; lifecycle is forward-only — a card is never deleted, only superseded.
+  - VEX overlays, never deletes: vendor VEX is gathered, not obeyed — a not_affected raises a system Proposal
+    that policy auto-accepts or a human decides; it never auto-suppresses ("Gathering Is Not Knowing").
+  - AI is advisory: the Intelligence Gateway proposes; humans/policy decide. Disable-able; never auto-decides.
+  - Import direction enforced by go-cleanarch + depguard; every task group ends green on `make check`
+    (CI runs the greenfield-scoped `make check-ci`).
 
 rules:
   proposal:
-    - Align with docs/current-changes/PROJECT_CONTEXT.md phase scope; include Non-goals for deferred phases
-    - Reference existing ADRs in docs/archive/proposal-initial.md where applicable
+    - Align with the per-context EDR (docs/engineering/decisions/) and the CLAUDE.md ground rules; ADR/EDR wins
+    - Include Non-goals for deferred work (e.g. later Intelligence deltas)
   design:
-    - Follow Clean Architecture layers; document import rules
-    - State which quality gates apply
+    - Follow context-first Clean Architecture (internal/<context>/{domain,app,adapters}); inward-only imports
+    - Point the Stack section at docs/engineering/STACK.md; state which quality gates apply
   tasks:
-    - Break into task groups matching capabilities in proposal.md
-    - Each group ends with the six mandatory gates from docs/current-changes/PROJECT_CONTEXT.md
-    - Mark tasks complete only when make check passes
+    - Break into task groups matching the proposal
+    - Each group ends green on `make check` (CI: `make check-ci`); mark tasks complete only then
   specs:
-    - One spec per capability; include acceptance scenarios
-    - Never require Phase 2/3 features in Phase 1 specs
+    - phase3-* changes carry no specs/ deltas (per-context EDRs are the source of truth); archive with --skip-specs

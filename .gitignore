@@ -25,3 +25,6 @@
 
 # local runtime config with secrets (DB DSN, NVD + LLM API keys) — never versioned
 /themis.yaml
+
+# local tooling artifact (large, generated) — never versioned
+/scripts/oamp.json

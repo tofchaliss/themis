@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-07-31 · **Read this first when resuming.**
+**Updated:** 2026-08-03 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -80,6 +80,59 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 >   are essentially closed; the longer tail (A3–A6, B2/B5/B6, C3–C5, D2–D7 notifications, E1–E11 input-integrity,
 >   F4–F8 metrics/traces/probes) is fully enumerated in PARITY-GAP.md with priorities.
 
+> **Update (2026-08-03): v0.4.0 shipped — the first greenfield release (`6e03396`, tagged 2026-08-02).**
+> Everything above merged to `main`, and the EDR-VEX-01 vendor-VEX line completed end-to-end. Landed this
+> session:
+> - **EDR-VEX-01 Phase 2 — governed suppression overlay.** A reconciled `not_affected` (uploaded or fed)
+>   raises a **system Proposal** on the covered Finding that policy auto-accepts or a human decides — it never
+>   auto-suppresses ("Gathering Is Not Knowing"). Package-scoped matching prevents over-suppression.
+> - **EDR-VEX-01 Phase 3 — vendor feeds.** The **Red Hat** relevance-bounded feed (per-CVE vendor severity +
+>   `not_affected` applicability + RPM fixed-version bounds; covers RHEL/Rocky/Alma via clone) and a **generic
+>   CSAF-VEX** directory feed (B4), plus a **stream-scoped RPM fixed verdict** (a `pkg:rpm/…` at/above its
+>   same-EL-stream fix opens no Finding; an unpatched build still does). Both opt-in, both D5-bounded.
+> - **Correctness fixes:** OSV **`upstream`** distro correlation (RHEL/Rocky/Alma advisories via the upstream
+>   CVE), **path-safe** VEX proposal ids, **package-scoped** Red Hat applicability, and eventbus **D7**
+>   (Preparer read/write split). Provider timeout is now configurable (`THEMIS_LLM_TIMEOUT`, default 60s → a
+>   slow local model returns an honest `insufficient` 204, not a hang).
+> - **GOV-14 (EDR-GOVERNANCE-01 D14) — decided this release, implemented next:** a disposition-aware
+>   `residual_priority` on the posture + a deterministic **disposition re-evaluation watcher** (KEV /
+>   EPSS-threshold / new exploit / reversing VEX → re-surface a suppressed or accepted Finding), AI-judge optional.
+> - **Net: current development (pipeline + parity + vendor-VEX) is done and released.** The next line is
+>   **AI-capability expansion** — GOV-14 implementation, then Intelligence **Δ3** (Python + RAG/pgvector) and
+>   **Δ4** (autonomy + LLMOps).
+
+> **Update (2026-08-03, later): Intelligence Δ3 RAG integration — designed + decided (docs only, staged).**
+> A 3-session evaluation under `docs/engineering/` chose the RAG stack against the real use cases:
+> - **`RAG-INTEGRATION-OPTIONS.md`** (S1) — two-axis survey (vector store × orchestration) + scored matrix.
+> - **`RAG-SESSION-2-SPIKE.md`** (S2) — a real pure-Go cosine benchmark: **~47 ms/query @ 50k** single-thread,
+>   ~150 MB (corrected an earlier "<10 ms" guess); persist embeddings in plain Postgres, load on boot.
+> - **`RAG-SESSION-3-DECISION.md`** (S3) — the decision record (R1–R6).
+> - Folded into **`EDR-INTELLIGENCE-01` Revision 4** (Δ3 concrete cut) + **STACK.md** reconciled.
+>
+> **Decision:** Δ3a = semantic precedent for `recommend_position` (G-AI-3) via **in-memory Go search over
+> plain-Postgres-persisted embeddings** (no pgvector — corpus ≤~50k), hand-rolled Go retrieval; Python DSPy
+> deferred to Δ3b; pgvector/Qdrant = port-swap upgrades. Demo target = use-case **#4 triage automation**.
+> **Open:** R5 embedding-model pick (`nomic-embed-text`) pending a local Ollama eval (`RAG-SESSION-2-SPIKE.md`
+> §4). Also today (housekeeping): reconciled `openspec/STATUS.md` + `openspec/config.yaml` to the v0.4.0
+> reality, refreshed this resume point, and added a `THEMIS_LLM_TIMEOUT` note to `CLAUDE.md`. **All docs
+> staged, uncommitted.** Resume at the Next-action § below.
+
+> **Update (2026-08-04): `/repository-discovery` for Δ3a + Book IV Chapter 8 restructured around Semantic
+> Retrieval.** Two read-only recon agents mapped the Intelligence seams (VectorIndex/Embedder ports absent →
+> additive; `EngineKnowledge` a new kind on the existing plan-walk; `AssembledContext.Precedents` exists but
+> its element type lacks `SourceCVE`/`Score`; Intelligence has **no datastore + no bus reader today** → Δ3a
+> introduces both = CLAUDE.md "Must ask") and confirmed the reuse patterns (Knowledge bus consumer + inbox,
+> Governance store + migrations, `.golangci.yml` intelligence allow-lists). **Book IV** (`docs/architecture/
+> 04-ai/`) Chapter 8 was rewritten from "RAG = external-only" to **Semantic Retrieval over three Knowledge
+> Spaces**: KS1 System of Record (Themis) · KS2 Operational Semantic Index (AI Runtime, derived/rebuildable) ·
+> KS3 Supporting Documentation (external). Key idea: **the retrieval mechanism is independent of the corpus** —
+> so Δ3a = **RC-1** (semantic precedent over Enterprise Positions, KS1→KS2) is the *first* capability, and
+> external-doc RAG = **RC-2** (KS3→KS2) is a later corpus behind the same `VectorIndex` port; principle
+> unchanged (AI never owns truth). Also updated Book IV Principle 7/9, WF-004, two diagrams + ownership map,
+> and cross-linked EDR-INTELLIGENCE-01 Rev 4 ↔ Book IV Ch 8. **Δ3a is discovery-complete but NOT started** —
+> awaiting go-ahead on the Must-ask items (new `intelligence` DB, `PrecedentPosition` field add, first
+> bus-consumer role). All staged, uncommitted.
+
 ---
 
 ## Ground rules (do not re-litigate)
@@ -107,7 +160,16 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 | **M7+ — Knowledge feeds** (follow-on) | `EDR-KNOWLEDGE-01` (D5/D6) | `phase3-knowledge-feeds` — **IMPLEMENTED** (19/19, gated) | real OSV/NVD clients · CVSS 4.0 (go-fwd D-NVD-2) · source tiers (go-fwd D-FEED-2) · scanner Proposals |
 | **M5 — Event Infrastructure** (the shared event bus) | `EDR-EVENTBUS-01` (D1–D11) | `phase3-event-infrastructure` — **IMPLEMENTED** (43/43, all 10 groups; gated `make check` + `make e2e-pipeline` green; 2026-07-29) | EB-01…EB-11 |
 
-All four docs lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:
+**Post-M5 (parity + hardening — EDR-driven, landed on `main` without an OpenSpec change; all shipped in
+v0.4.0):** opt-in relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / **Red Hat** / **CSAF**);
+**EDR-SECURITY-01** (F1) inbound-edge API-key auth (`internal/platform/auth` + `cmd/authadmin`);
+**EDR-ESTATE-01** (C1/C2) enterprise estate graph + blast-radius priority (`base_score × blast_multiplier`,
+fail-safe 1.0×); **EDR-VEX-01** Phase 1–3 governed vendor-VEX suppression (system Proposals, never
+auto-suppress) + stream-scoped RPM fixed verdict; **EDR-GOVERNANCE-01 D14** (GOV-14) decided
+(residual-priority + disposition re-evaluation — implementation is the next line). Detail + the full gap
+inventory: [`PARITY-GAP.md`](PARITY-GAP.md) and [`docs/BACKLOG.md`](../BACKLOG.md).
+
+All the EDR docs are lint-clean (`markdownlint-cli2`). Superseded work archived 2026-07-14:
 `openspec/changes/archive/2026-07-14-themis-ai-1` (folds into Phase-3 Intelligence / M4) and
 `…-themis-phase-2` (superseded reference). Each has a `SUPERSEDED.md` with a restore command.
 
@@ -192,72 +254,49 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 
 ## Next action (resume here)
 
-**All six EDRs grilled + all six OpenSpec changes scaffolded.** Implementation is under way, in dependency
-order:
+**Current development is done and released as v0.4.0** (`6e03396`, tagged 2026-08-02). The whole pipeline
+(M2 Kernel/Registry · M6 Evidence · M7 Knowledge · M8 Governance · M9 Communication · M5 event bus · M4
+Intelligence Δ1/Δ2) plus the post-M5 parity/hardening work (opt-in feeds, EDR-SECURITY-01 auth,
+EDR-ESTATE-01 estate/blast-radius, EDR-VEX-01 Phase 1–3 governed suppression) is IMPLEMENTED, gated, merged,
+and archived. `openspec list` → **no active changes**. Milestone detail is in "Done so far" above; don't
+re-narrate it here.
 
-- **M2 Shared Kernel — IMPLEMENTED (2026-07-16, 20/20, `make check` green).** `internal/kernel/{value,id,event}`
-  (CVE-ID/PURL/fingerprint/CVSS/Severity, UUID+clock, event envelope+schema) + `internal/registry/{domain,app,
-  adapters}` (Product→Project→Release, `ReleaseExists`, spec-first HTTP) + `cmd/registry`. Arch guarded by
-  `TestKernelIsLeaf` + `TestRegistrySupportingContext`.
-- **M6 Evidence — IMPLEMENTED (exemplar, 7/7).** 5-scenario e2e; see `EVIDENCE-VERIFICATION.md`.
-- **Evidence SubjectRef — registry-backed.** `wiring.EvidenceAPI` takes the `SubjectRefValidator` port;
-  `cmd/evidence` uses `registry.ReleaseExists` by default (allow-set stub only for dev/e2e).
-- **M7 Knowledge — IMPLEMENTED (2026-07-16, 25/25, gated).** `internal/knowledge/{domain,app,adapters}`:
-  Faultline aggregate + append-only Proposals + deterministic reconciliation (rapid property test caught a
-  real order-dependence bug) + forward-only lifecycle; 6 feed ACLs → common Proposal; Postgres aggregate
-  (optimistic concurrency) + transactional outbox + relay; correlation via the **Evidence read-API client**
-  (`GetInventory`) emitting `ComponentMatched`; watch/discovery as fakeable ports; read API + affected-
-  releases projection + first-class reconciler. domain/app 100%, adapters 83–98%.
-- **M8 Governance — IMPLEMENTED (2026-07-17, 24/24, gated).** `internal/governance/{domain,app,adapters}` +
-  `cmd/governance`: Finding aggregate (own identity, (Release, Faultline) key, matched-components content,
-  **reopenable** Book II §7.5 lifecycle, append-only Governance Proposals + append-only immutable Enterprise
-  Position versions, optimistic concurrency; rapid property test on the version/append-only invariants);
-  inbound Knowledge-seam consumer (`ComponentMatched`→find-or-create Finding, `FaultlineEnriched`/
-  `FaultlineSuperseded`→auto-raise a system proposal + flag for review, **never auto-decide**) via a
-  non-owning coordinator; authority line (AI/system propose-only, human decides, Governance-owned policy
-  auto-accept); Postgres aggregate + outbox + projections (release posture, Faultline blast-radius) + relay;
-  spec-first triage + read HTTP API; state-based reconciler (outbox drain) + crash-resume durability.
-  domain/app/inbound 100%, store 80.5%, http 97.9%.
+**Next line — AI-capability expansion (v0.4.x).** In order:
 
-- **M9 Communication — IMPLEMENTED (2026-07-18, 22/22, gated).** `internal/communication/{domain,app,adapters}`
-  plus `cmd/communication`: **Publication** aggregate (own identity, Position-version reference + permanent
-  lineage handles, immutable content + mutable delivery status, append-and-supersede, **capped/regenerable**
-  payload); **deterministic materialization** with the hard **stance-equality invariant** (the artifact never
-  restates a different conclusion than the Position); extensible **serializer registry** (OpenVEX /
-  CycloneDX-VEX / CSAF / markdown advisory / json audit-report / channel-native text — golden-tested); inbound
-  Governance Position-event consumer → **publishable-positions worklist** (Positions only, **no auto-publish**
-  — D4); human-triggered `CreatePublication` (fetch Position via the Governance read-API client → materialize
-  → serialize → record → supersede the prior current); Postgres aggregate + transactional outbox +
-  projections + relay; **delivery worker** (exactly-once off the durable pending status, redaction hook,
-  outcome recorded) + **retention/pruning** (regenerable) + first-class **reconciler**; spec-first
-  publish/read/**preview** API. domain/app 100%, adapters 81–100%.
+1. **GOV-14 — EDR-GOVERNANCE-01 D14 (decided in v0.4.0, implement next).** A disposition-aware
+   `residual_priority` on the release posture + a deterministic **disposition re-evaluation watcher**
+   (KEV / EPSS-threshold / new public exploit / reversing VEX → re-surface a suppressed or accepted Finding),
+   with an optional AI-judge upgrade layered on the deterministic core.
+2. **Intelligence Δ3 — RAG / Knowledge Engine.** **Design + decision DONE (2026-08-03)** — a 3-session
+   evaluation (`docs/engineering/RAG-INTEGRATION-OPTIONS.md` · `RAG-SESSION-2-SPIKE.md` ·
+   `RAG-SESSION-3-DECISION.md`) → **`EDR-INTELLIGENCE-01` Revision 4** (R1–R6) + STACK.md reconciled.
+   Decided: semantic precedent for `recommend_position` (**G-AI-3**) via **in-memory Go cosine over
+   embeddings persisted in a plain Postgres table** (no pgvector — measured ~47 ms/query @ 50k), behind an
+   `app.VectorIndex` port; hand-rolled Go retrieval; **Python DSPy deferred to Δ3b**; pgvector/Qdrant are
+   port-swap upgrades. **Next: implement Δ3a** (store · embedder · Knowledge Engine · bus-consumer
+   population · plan `[Rule → Knowledge → LLM]` · e2e) — introduces Intelligence's **first DB + bus-consumer
+   role** (CLAUDE.md "Must ask"). **Blocked only on R5** — the local `nomic-embed-text` embedding eval
+   (`RAG-SESSION-2-SPIKE.md` §4, needs Ollama). Scaffold `phase3-intelligence-d3` from EDR Rev 4 when building.
+3. **Intelligence Δ4 — autonomy + LLMOps.** The scheduled autonomous-analyst mode (advisory-only — pushes
+   Proposals to proposal-intake) + eval / routing / weight-tuning. Guardrail unchanged: autonomy of
+   *generation* yes, of *authority* never.
 
-**M4 Intelligence — IMPLEMENTED (Δ1 37/37 + Δ2 9/9, gated, merged to main).** The supporting AI Gateway
-beside the pipeline (owns no truth): reactive `recommend_position` → typed `[Rule → LLM]` dispatch + the
-admission spine; Δ3 (Python + RAG) and Δ4 (autonomy + LLMOps) deferred (see `docs/BACKLOG.md` §A).
-
-**In progress: M5 — Event Infrastructure** (`phase3-event-infrastructure`, EB-01…EB-11) — the
-**platform-owned event bus** carrying events between contexts (PostgreSQL channel now, Kafka-swappable later
-behind stable ports), which unblocks the single wired **SBOM → published-VEX pipeline e2e**. Implementation
-**started 2026-07-27** on branch `phase3-event-infrastructure` via `/opsx:apply phase3-event-infrastructure`
-(**9/43 — Groups 1–2 done** as of 2026-07-28: the `eventbus` scaffold + `bus` DB, and the full `Envelope`
-threaded end-to-end through every outbox + both inbound consumers; `make check` green); source of truth
-`EDR-EVENTBUS-01` (D1–D11). Also newly on `main` this session: **CI**
-(greenfield `make check-ci`, PR #53) and the **consolidated `docs/BACKLOG.md`** (PR #54). All deferred
-per-context follow-ups (Communication channels, Governance expiry worker, store fault-injection, OTel
-traces/metrics) are listed in [`docs/BACKLOG.md`](../BACKLOG.md).
+Workflow for each: grill the EDR delta → scaffold the OpenSpec change → `/opsx:apply` → gate on `make check`.
+The longer parity tail (A3–A6, B2/B5/B6, C3–C5, D2–D7 notifications, E1–E11 input-integrity, F4–F8
+metrics/traces/probes) stays enumerated in [`PARITY-GAP.md`](PARITY-GAP.md); pull from there between AI
+increments as capacity allows.
 
 Note (Option A in effect): `/grill-with-docs` is user-invoked, but the model can run the same via
 `grilling` + `domain-modeling` directly — that is how `EDR-KNOWLEDGE-01` was grilled. Either works.
 
 ## Deferred / pending work
 
-**All pending and deferred work lives in one place: [`docs/BACKLOG.md`](../BACKLOG.md) (Part 1).** It
-consolidates the next milestones (M4 Intelligence, M5 event bus), the full-pipeline e2e (blocked on M5), the
-per-context follow-ups (Knowledge real feed clients; Governance accepted-risk expiry worker; Communication
-concrete channels + delegated auto-publish; store fault-injection coverage), the remaining observability
-signals (OTel traces + metrics), and the optional Evidence tracer-bullet reslice. Update that file, not this
-section, as items open or close.
+**All pending and deferred work lives in one place: [`docs/BACKLOG.md`](../BACKLOG.md) (Part 1)**, with the
+full monolith→greenfield gap inventory in [`PARITY-GAP.md`](PARITY-GAP.md). Between them they track the next
+line (GOV-14 / D14, Intelligence Δ3 / Δ4), the remaining parity tail (notifications D2–D7, input-integrity
+E1–E11, metrics/traces/probes F4–F8, and the A/B/C follow-ups), and the standing per-context follow-ups
+(Governance accepted-risk expiry worker; Communication concrete channels + delegated auto-publish; store
+fault-injection coverage; OTel traces + metrics). Update those files, not this section, as items open or close.
 
 ## Key file pointers
 
@@ -271,8 +310,9 @@ section, as items open or close.
   `otelzap` bridge, one `Setup`; config-driven level/format/OTLP endpoint via `ConfigFromEnv`; a
   `RequestLogger` correlation-id middleware; domain/app stay log-free by depguard). All four greenfield cmds
   wire it; example config at `deploy/node.env.example`.
-- Changes: **none active** — all six to be scaffolded fresh from the EDRs; pre-scaffold Kernel/Evidence
-  drafts archived at `openspec/changes/archive/2026-07-15-phase3-*-prescaffold/`
+- Changes: **none active** — all Phase-3 changes IMPLEMENTED + archived (`openspec/changes/archive/`); the
+  next change (`phase3-intelligence-d3`, the AI-feature line) is unscaffolded — create it from
+  `EDR-INTELLIGENCE-01`
 - Blueprints (to fill from Evidence exemplar): `docs/engineering/implementation-blueprint/01–06`
 - Architecture source of truth: `docs/architecture/` (Books I–III) + `docs/adr/` (69 ADRs)
 - Change status: `openspec/STATUS.md`

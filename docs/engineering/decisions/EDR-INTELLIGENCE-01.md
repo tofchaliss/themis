@@ -1,7 +1,9 @@
 # EDR-INTELLIGENCE-01 — Intelligence Gateway (AI Enrichment) Supporting Context
 
-Status: **Re-grilled against the harness — ready to implement Δ1** (13 decisions locked; revised 2026-07-18).
-Ground rule: ADR/EDR wins; the `internal/` PoC and the archived `themis-ai-1` design are reference only.
+Status: **Δ1 + Δ2 implemented (v0.4.0); Δ3 concrete cut recorded (Revision 4, 2026-08-03) — ready to
+implement Δ3a (RAG / Knowledge Engine), R5 embedding-model pick pending.** (13 base decisions locked;
+Rev 2 Δ1 · Rev 3 Δ2 · Rev 4 Δ3.) Ground rule: ADR/EDR wins; the `internal/` PoC and the archived
+`themis-ai-1` design are reference only.
 
 ## Purpose
 
@@ -189,6 +191,59 @@ chosen (and why)" discipline. Reused Δ1/STACK items carry a one-line "carried f
 | C5 | **Budget meter** | R1 / STACK (OTel is the telemetry SoR); D4 / INT-0064 (cost telemetry) | **OpenTelemetry metrics** via `internal/platform/observability` (carried forward) | `prometheus/client_golang` directly; custom in-memory counters; a DB table | OTel is the **already-wired, mandated, vendor-neutral** telemetry, correlated by business id, needing **no new store** (Δ2 is stateless). Prometheus is a complement, not the SoR; a DB table would break Δ2's stateless design |
 | C6 | **Precedent-Positions grounding** | D5 / INT-0068 (context via read APIs, **never** DB) | **Extend Governance's read API** with a "Positions for this CVE across releases" query + pull via the existing **read-API-client seam** (like `FindingReader` / `FaultlineReader`) | Query Governance's DB directly; a materialized precedent cache inside Intelligence | Direct DB read violates D5 (rejected); an Intelligence cache violates Δ2 statelessness. Extending the read API **keeps the boundary**, reuses the proven client seam, and adds **no store** |
 | C7 | **Redaction (admission scrub)** | D10 / INT-0069 (sanitization); STACK ("same redaction as Communication") | **A `Redactor` port mirroring Communication's** (secrets/PII scrub of prompt + telemetry) | A third-party PII/secret scanner; ad-hoc regex only | Consistency + reuse across contexts; a heavyweight scanner is premature for **local-only** Δ2 (revisit with cloud providers under G-AI-5) |
+
+## Revision 4 (2026-08-03) — Δ3 concrete cut (RAG / Knowledge Engine)
+
+Decided across a three-session integration evaluation (source: `docs/engineering/RAG-INTEGRATION-OPTIONS.md`,
+`RAG-SESSION-2-SPIKE.md`, `RAG-SESSION-3-DECISION.md`). Δ3 grows the Δ1/Δ2 skeleton into the harness's
+**Knowledge Engine (RAG)** on the same seams — additive, no rewrite. The **authority spine
+(D1/D2/D7/D8/D10) is unchanged:** retrieved precedent is grounding that feeds the LLM step; it is never a
+decision, and every output remains an advisory Proposal ("Gathering Is Not Knowing").
+
+**Governance basis — Book IV Chapter 8 (Semantic Retrieval).** The retrieval mechanism is independent of
+the corpus it indexes; the architecture names three **Knowledge Spaces**: KS1 System of Record (Themis-owned
+truth — Positions/Findings/Faultlines), KS2 **Operational Semantic Index** (the AI-Runtime-owned, derived,
+rebuildable vector index — this Δ3a store), and KS3 Supporting Documentation (external vendor/OWASP/MITRE).
+This Δ3a is **RC-1 — semantic precedent over Enterprise Positions** (KS1 → KS2); external-document retrieval
+is **RC-2** (KS3 → KS2), a later corpus behind the *same* `VectorIndex` port. `EngineKnowledge` = the RC-1
+retrieval step; the `position_embeddings` store = KS2. Embedding a Position does not make the Gateway *own*
+it — Governance still owns KS1; KS2 holds only a derived vector (D12).
+
+### Δ3 behavioral cut
+`recommend_position` gains a **retrieval step**, so its plan becomes `[Rule → Knowledge(retrieve) → LLM]`:
+
+- **Knowledge step (new Engine, `EngineKnowledge`):** embeds the subject Finding's text, does a
+  nearest-neighbour search over our **own past Enterprise Positions**, and fills
+  `AssembledContext.Precedents` with the top-k **semantically similar** decisions (labeled: release,
+  component, stance, rationale, source CVE, score). This **generalises the Δ2 exact-CVE precedent seam**
+  (`adapters/readapi/precedent.go`) to similar-CVE precedent — realising backlog **G-AI-3**. Precedents
+  remain **context, not citable evidence** (stage-2 `Grounds()` unchanged); the human still decides.
+- **LLM step:** reasons over the (now precedent-enriched) grounding, exactly as Δ2. Deterministic-first is
+  intact — the Rule step still short-circuits `not_affected` when provably out of range, before retrieval.
+
+### Two shippable increments
+- **Δ3a — RAG / Knowledge Engine, all-Go.** The retrieval above, using the **existing Ollama LLM**. This
+  delivers the value; it is the demoable slice.
+- **Δ3b — Python reasoning engine.** A DSPy service behind the provider port for a *reasoning* step that
+  wants prompt optimisation — added **only if** a task needs it. Deferred; not required for Δ3a.
+
+### Δ3 component decisions (R1–R6) — rule-basis · chosen · alternatives · why
+
+| # | Decision | Rule basis | Chosen | Alternatives | Why the chosen option |
+| --- | --- | --- | --- | --- | --- |
+| R1 | **Vector index** | D12 (operational, rebuildable) · corpus ≤50k · STACK minimal-deps | **In-memory Go cosine over persisted plain-PG vectors**, behind an `app.VectorIndex` port | pgvector; Qdrant; Weaviate/Milvus; Redis-vector; Chroma; FAISS | At ≤50k, brute-force search is **~47 ms/query** (measured; ~6 ms across 8 cores) — negligible vs the LLM; no extension, no new service, no `embedded-postgres` test gap; the port makes pgvector/Qdrant a config-swap upgrade past ~10⁵–10⁶ |
+| R2 | **Persistence** | D12 · store convention · `embedded-postgres` testability | **Plain Postgres table** (`float4[]` / `bytea`) in a new Intelligence DB | pgvector column; a dedicated vector DB; in-memory-only | vectors as ordinary columns run under `embedded-postgres` (no extension); load-on-boot is cheap, re-embed is minutes → persist vectors; in-memory-only would re-embed 50k every restart |
+| R3 | **Retrieval orchestration** | D5/D6/D7 already Go-owned · Go-first ethos · structured (not document) corpus | **Hand-rolled Go** (embed → search → rank → fill `Precedents`) | LlamaIndex; LangChain/LangGraph; DSPy-for-retrieval | records → one embedding each (no chunking/loader problem); a framework would re-own D5/D6/D7 and add a heavy Python dep tree for value that does not apply here |
+| R4 | **Advanced reasoning (Δ3b)** | INT-0070 (provider port) · reactive-first | **Python DSPy behind the provider port — deferred; only if needed** | LlamaIndex/LangChain agents; Go-only reasoning | keep retrieval in Go; add Python only for a reasoning step wanting prompt optimisation/eval; isolated as a provider (process isolation), optional plane (D13) |
+| R5 | **Embedding model** | D10 (local-only) · PoC precedent | **`nomic-embed-text` (768)** on the local Ollama — **PENDING** the Ollama eval | bge-small (384); e5-small (384); cloud embeddings | reuses the deployed runtime, local/private, PoC-precedented; cloud violates D10; smaller models only if memory/latency demand (they do not at 50k). Confirm recall@10 + what-text-to-embed before locking |
+| R6 | **Freshness / population** | D5 (read-APIs, never foreign DB) · M5 bus | **Event-driven incremental** (bus consumer on `PositionEstablished` / `FaultlineEnriched`) + **backfill/rebuild** command | poll-and-rebuild; lazy embed-per-request | steady-state cost = one embed per new decision; index derived + rebuildable (D12); consumes events + read-APIs, never foreign tables (D5). Intelligence becomes a bus consumer for the first time |
+
+### Status of the cut
+R1–R4 + R6 are **data-backed and locked**; **R5 is pending** the local Ollama embedding eval
+(`RAG-SESSION-2-SPIKE.md` §4) — leaning `nomic-embed-text`. Deferred as before: Δ3b Python engine, external-
+intel embedding (U3), the KB-first similarity short-circuit (designed-in, enabled after eval), and Δ4
+autonomy/LLMOps. On R5 confirmation, the Δ3a groups (store · embedder · Knowledge Engine · population ·
+plan integration · e2e) are ready to implement.
 
 ## Decisions
 

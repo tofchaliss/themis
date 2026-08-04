@@ -1,37 +1,72 @@
 # Themis — Project Status
 
-_Maintained automatically by openspec skills (`propose`, `apply`, `archive`).
-Last updated: 2026-07-27 (**Phase-3 greenfield pivot** — the DDD bounded-context rebuild, per the
-architecture book `docs/architecture/` Books I–III + the 69 ADRs `docs/adr/`, is the **sole go-forward**;
-the current architecture is **frozen at v0.3.x**. `themis-ai-1` and `themis-phase-2` archived as
-superseded. **Grilling phase complete: all six context EDRs done** (`docs/engineering/decisions/`), and
-**all six OpenSpec changes scaffolded** — `phase3-shared-kernel` (M2), `phase3-evidence` (M6),
-`phase3-knowledge` (M7), `phase3-governance` (M8), `phase3-communication` (M9), `phase3-intelligence` (M4).
-The four-context pipeline + **M4 Intelligence Δ1/Δ2** are implemented, gated, and **merged to `main`**
-(`762bbac`). **CI** landed (PR #53: `.github/workflows/{pr,main}.yml` → greenfield-scoped `make check-ci`),
-and the two backlogs were **consolidated into `docs/BACKLOG.md`** (PR #54). **M5 Event Infrastructure is
-DONE** (2026-07-29) on branch `phase3-event-infrastructure`: `EDR-EVENTBUS-01` (D1–D11) +
-`phase3-event-infrastructure` (**43/43 — all 10 groups**), gated `make check` + `make e2e-pipeline` green.
-See `docs/engineering/PHASE3-STATUS.md`.)_
+_Maintained by the openspec skills (`propose`, `apply`, `archive`) and by hand when work lands outside a
+change. Last updated: 2026-08-03._
+
+**Phase-3 greenfield pivot — the sole go-forward.** The DDD bounded-context rebuild (Evidence → Knowledge →
+Governance → Communication, over Kernel/Registry, with the Intelligence AI gateway beside it), per the
+architecture book `docs/architecture/` Books I–III + the 69 ADRs `docs/adr/`, replaced the single-binary
+monolith — which is **frozen at v0.3.x (last tag `v0.3.11`), reference-only**.
+
+**v0.4.0 — released 2026-08-02 (`6e03396`), the first greenfield release.** The whole pipeline over the
+Postgres event bus: M2 Kernel/Registry · M6 Evidence · M7 Knowledge · M8 Governance · M9 Communication · M5
+Event Infrastructure · M4 Intelligence (Δ1 + Δ2). Plus the post-M5 parity/hardening work — opt-in
+relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed vendor-VEX suppression
+(EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
+inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
+
+**OpenSpec state: no active changes** (`openspec list` → "No active changes found"). Every Phase-3 change is
+archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
+landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
+OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
+"uncommitted") had gone stale.
+
+**Next active focus — AI-related features** (v0.4.x, "AI-capability expansion"): **GOV-14** (EDR-GOVERNANCE-01
+D14 — disposition-aware `residual_priority` + the deterministic disposition re-evaluation watcher, AI-judge
+optional), then Intelligence **Δ3** (Python engine + RAG / pgvector) and **Δ4** (autonomy + LLMOps). Scaffold
+a fresh OpenSpec change (`phase3-intelligence-d3`) from `EDR-INTELLIGENCE-01` when that work starts.
+
+Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `docs/BACKLOG.md` (Part 1). Parity →
+`docs/engineering/PARITY-GAP.md`.
 
 ---
 
 ## Active Changes
 
-| Change | Status | Started | Progress | Blocked On |
-| --- | --- | --- | --- | --- |
-| **phase3-shared-kernel** (M2) | **Implemented — 20/20 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-16 | `internal/kernel/{value,id,event}` + `internal/registry/{domain,app,adapters}` + `cmd/registry`; `make check` green — value/id/event + registry domain/app 100%, registry store 89.2%, http 92.7%; `ReleaseExists` backs Evidence's `SubjectRef` | — |
-| **phase3-evidence** (M6) | **Implemented — 7/7 groups, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-15 | full context (`internal/evidence` + `internal/kernel/value` + `cmd/evidence`); tests green, coverage 100% (domain/app/parser/trust/subjectref) · store 84.5% · http 95.7%; blueprints 01–06 written | SubjectRef still uses the stub; `phase3-shared-kernel` now provides `registry.ReleaseExists` — swapping the stub for a registry-backed adapter is the remaining wiring step |
-| **phase3-knowledge** (M7) | **Implemented — 25/25 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-16 | full context `internal/knowledge/{domain,app,adapters}` (Faultline aggregate + deterministic reconciliation [rapid property], 6 feed ACLs, Postgres aggregate + outbox, correlation via Evidence read-API client + `ComponentMatched`, watch/discovery ports, read API + reconciler); domain/app 100%, adapters 83–98% | feed-fetch HTTP clients are ports awaiting real OSV/NVD adapters |
-| **phase3-governance** (M8) | **Implemented — 24/24 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-17 | full context `internal/governance/{domain,app,adapters}` + `cmd/governance` (Finding aggregate + reopenable lifecycle + append-only Position versions + Governance Proposals [rapid property], inbound Knowledge seam consumer → find-or-create Finding / auto-raise proposal [never auto-decide], authority line + policy auto-accept, Postgres aggregate + outbox + projections + relay, spec-first triage/read API, reconciler); domain/app/inbound 100%, store 80.5%, http 97.9% | Communication consumes `PositionEstablished`/`PositionRevised` (next: M9) |
-| **phase3-communication** (M9) | **Implemented — 22/22 tasks, gated** (branch `phase3-evidence`, uncommitted) | 2026-07-18 | full context `internal/communication/{domain,app,adapters}` + `cmd/communication` (Publication aggregate [immutable content + mutable delivery status + append-and-supersede, capped/regenerable payload], deterministic materialization with the **stance-equality invariant**, 6-serializer registry [OpenVEX/CycloneDX-VEX/CSAF/markdown/json-report/text], inbound Governance Position-event consumer → publishable-positions queue [Positions only, no auto-publish], human-triggered `CreatePublication` + supersede, Postgres aggregate + outbox + projections + relay, delivery worker [exactly-once off pending status] + retention/pruning + reconciler, spec-first publish/read/preview API); domain/app 100%, adapters 81–100% | terminal — **pipeline complete** (Evidence→Knowledge→Governance→Communication) |
-| **phase3-intelligence** (M4) | **Δ1 + Δ2 Implemented — gated** (branch `phase3-evidence`) | 2026-07-24 | `EDR-INTELLIGENCE-01` Rev 3 (D1–D13 + Δ2 cut). **Δ1** reactive walking skeleton — `internal/intelligence/{domain,app,adapters}` + `cmd/intelligence` (stateless) + Governance caller seam; `recommend_position` triage, Ollama (OpenAI-compat) + fake provider, 3-stage validation, disable gate (D13). **Δ2** (`phase3-intelligence-d2`, 9/9 groups, `make check` green): two-step **[Rule → LLM]** plan + Engine Dispatcher, the **version-range Rule engine** (ported kernel value object) deciding `not_affected` off the **reconciled** range, the honest **`insufficient`** outcome, **precedent-Positions** grounding (Governance blast-radius + find-by-key), the admission gate (OTel meter + runaway/timeout guard → `insufficient`, secret/PII **redactor**, local-only), and a `decided_by` provenance stamp. Δ3 (Python+RAG) / Δ4 (autonomy+LLMOps) remain | — |
-| **phase3-event-infrastructure** (M5) | **Implemented — 43/43 tasks (all 10 groups)** (branch `phase3-event-infrastructure`; gated `make check` + `make e2e-pipeline` green) | 2026-07-29 | `EDR-EVENTBUS-01` (D1–D11), the platform-owned event bus. 10 groups EB-01…EB-11: `internal/platform/eventbus` + a `bus` database, full `Envelope` threading, integration-contract v1 (schema-guarded), `Publisher`, stream `Reader`/drain (gap-free + D8 stream-halt), consumer inbox (exactly-once **application**), stream + interest-set subscriptions, `cmd/knowledge` + in-process runner, black-box **SBOM→published-OpenVEX** e2e + focused D5/D6/D8 tests, docs. Remaining maturations (contract stable, not blocking): Kafka transport swap (D1/D2), subject-aware scheduler (D8), explicit integration DTOs (D9). **Ready to archive** (`openspec archive phase3-event-infrastructure --skip-specs -y`). | — |
-| **phase3-knowledge-feeds** (M7 follow-on) | **Archived (2026-07-23) — 19/19, gated** → `changes/archive/2026-07-23-phase3-knowledge-feeds` | 2026-07-23 | Makes the Knowledge feed layer production-real + closes the go-forward feed gaps found in the feed e2e verification (`docs/current-changes/FEED-E2E-VERIFICATION.md`): real **OSV query-by-package** + **NVD modified-since** fetch clients (behind M7's ports), **CVSS v4.0** in the vuln-facts ACL + `Reconcile` (go-forward **D-NVD-2**), **source-tier taxonomy** → tier-aware feed health (go-forward **D-FEED-2**), and **scanner reports as advisory source Proposals** (EDR-KNOWLEDGE-01 D5/D6). 5 task groups | `phase3-knowledge` (done); group 4 needs an Evidence `scanner-report` kind |
-| Layer-0 refactor (CR-1…CR-10) | **Released (v0.3.0, 2026-06-24)** | 2026-06-23 | all 10 CRs merged and tagged `v0.3.0`; all gates green. Closes D-CVSS-1, D-FEED-1, D-NVD-1, D-LOG-1. See `project-backlog.md`. | — (current arch frozen at v0.3.x) |
-| ~~themis-phase-2~~ | **Archived — superseded** (2026-07-14) | — | superseded by `docs/architecture/` + `docs/adr/`; reference input for Phase-3 grilling | archived → `changes/archive/2026-07-14-themis-phase-2/` |
-| ~~themis-ai-1~~ | **Archived — superseded** (2026-07-14) | — | never built; AI design folded into Phase-3 Intelligence (M4, INT ADRs) | archived → `changes/archive/2026-07-14-themis-ai-1/` |
-| ~~themis-phase-2b / 2c~~ | **Superseded by greenfield** | — | 2b folded into `themis-ai-1` (archived); 2c → Phase-3 Governance/Intelligence roadmap | — |
+**None.** `openspec list` reports "No active changes found." Every Phase-3 change is archived (below). The
+next change (`phase3-intelligence-d3` — the AI-feature work) has **not been scaffolded yet**; create it from
+`EDR-INTELLIGENCE-01` when AI development resumes.
+
+## Archived Phase-3 changes
+
+The greenfield rebuild shipped as these changes, all under `openspec/changes/archive/`. (`phase3-*` changes
+carry **no `specs/` deltas** — EDRs are the source of truth — so each was archived with `--skip-specs`.)
+
+| Change | Milestone | Tasks | Archived |
+| --- | --- | --- | --- |
+| `phase3-shared-kernel` | M2 — Kernel value objects + Registry identity | 20/20 | 2026-07-25 |
+| `phase3-evidence` | M6 — Evidence (content-addressed SBOM/VEX + inventory) | 7/7 | 2026-07-25 |
+| `phase3-knowledge` | M7 — Knowledge / Faultline aggregate + reconciliation | 25/25 | 2026-07-25 |
+| `phase3-knowledge-feeds` | M7+ — real OSV/NVD clients · CVSS-4.0 (D-NVD-2) · source tiers (D-FEED-2) · scanner Proposals | 19/19 | 2026-07-23 |
+| `phase3-governance` | M8 — Findings + append-only Enterprise Positions | 24/24 | 2026-07-25 |
+| `phase3-communication` | M9 — Publication aggregate + 6-serializer registry | 22/22 | 2026-07-25 |
+| `phase3-intelligence` | M4 — AI Gateway Δ1 (reactive `recommend_position`) | 37/37 | 2026-07-25 |
+| `phase3-intelligence-d2` | M4 — Δ2: `[Rule → LLM]` dispatch + admission spine + `insufficient` | 9/9 | 2026-07-25 |
+| `phase3-event-infrastructure` | M5 — the platform event bus (`EDR-EVENTBUS-01` D1–D11) | 43/43 | 2026-07-29 |
+| `phase3-{shared-kernel,evidence}-prescaffold` | pre-scaffold drafts (superseded by the real changes) | — | 2026-07-15 |
+
+Post-M5 parity / VEX / auth / estate / D14 work (parity clusters, EDR-VEX-01 Phase 1–3, EDR-SECURITY-01,
+EDR-ESTATE-01, EDR-GOVERNANCE-01 D14) landed on `main` via its EDRs + `PARITY-GAP.md` / `BACKLOG.md` — **not**
+as OpenSpec changes. Detail lives there, not here.
+
+### Superseded legacy proposals (frozen v0.3.x era)
+
+| Change | Note |
+| --- | --- |
+| Layer-0 refactor (CR-1…CR-10) | Released v0.3.0 (2026-06-24); closed D-CVSS-1 / D-FEED-1 / D-NVD-1 / D-LOG-1 |
+| ~~themis-phase-2~~ | Archived 2026-07-14 — superseded by `docs/architecture/` + `docs/adr/`; reference input for Phase-3 grilling |
+| ~~themis-ai-1~~ | Archived 2026-07-14 — never built; AI design folded into Phase-3 Intelligence (M4) |
+| ~~themis-phase-2b / 2c~~ | Superseded by the greenfield rebuild (2c → Governance/Intelligence roadmap) |
 
 ## Prerequisite Work
 
@@ -109,26 +144,37 @@ See `docs/engineering/PHASE3-STATUS.md`.)_
 | `v0.3.9` | `5d5ee3c` (PR #44) | Feed registry — user-defined `vexfeed.feeds` delta list |
 | `v0.3.10` | `79bfb84` | Housekeeping — archive `themis-core-model`, sync delta specs into `openspec/specs/`, refresh status/context docs to v0.3.9 |
 | `v0.3.11` | (PR #47) | Housekeeping — consolidate docs under `docs/` (release-notes / current-changes / architecture) + refresh stale context |
-| `v0.4.0` | — (planned) | Phase 2b AI Intelligence |
-| `v0.5.0` | — (planned) | Phase 2c AI-Assisted VEX |
+| `v0.4.0` | `6e03396` (2026-08-02) | **First greenfield release** — the bounded-context platform: the whole pipeline over the event bus (M2/M6/M7/M8/M9/M5 + M4 Δ1/Δ2) + opt-in relevance-bounded feeds + governed vendor-VEX suppression (EDR-VEX-01) + estate/blast-radius (C1/C2) + inbound API-key auth (EDR-SECURITY-01). Monolith frozen at `v0.3.11`. |
+| `v0.4.x` | — (next) | **AI-capability expansion** — GOV-14 (EDR-GOVERNANCE-01 D14), Intelligence Δ3 (Python + RAG/pgvector), Δ4 (autonomy + LLMOps) |
 
-## Phase Roadmap
+## Roadmap
+
+**Legacy v0.3.x monolith line (frozen, reference-only):**
 
 | Phase | Change | Theme | State |
 | --- | --- | --- | --- |
-| Phase 1 | themis-phase-1 | Core intelligence platform — Go REST API + PostgreSQL | Complete (archived 2026-06-09; v0.1.0) |
-| Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Complete (archived 2026-06-17; v0.2.0) |
-| — | (maintenance) | v0.2.1 — feed reliability + Phase 1 hardening | Released (v0.2.1) |
-| core-model + Layer-0 | themis-core-model + CR-1…CR-10 | Schema restructure (breaking) + correlation/feeder/observability refactor | **Released (v0.3.0, 2026-06-24)** |
-| — | (maintenance) | v0.3.2–v0.3.9 — correlation/VEX correctness + ergonomics on the v0.3.0 schema (canonical CVE keying, el8/el9 streams, distro-authoritative identity, CVSS-clobber fix, Red Hat VEX overlay + minor-stream fix, OSV GIT-range fix, scoped vuln endpoints, feed registry) | **v0.3.2–v0.3.9 released** |
-| Phase 2b | themis-phase-2b | AI Intelligence — workers, RAG, pgvector | Planned (unblocked) — targets v0.4.0 |
-| Phase 2c | themis-phase-2c | AI-Assisted VEX — auto-apply, FP, thresholds | Planned — targets v0.5.0 |
-| Phase 3 | themis-phase-3 | Production platform — Docker, UI, Redis, RBAC, cosign | Not started |
+| Phase 1 | themis-phase-1 | Core intelligence platform — Go REST API + PostgreSQL | Released v0.1.0 (2026-06-09) |
+| Phase 2a | themis-phase-2a | Signal Foundation — feeds, graph entities, VEX export | Released v0.2.0 (2026-06-17) |
+| — | (maintenance) | Feed reliability + Phase 1 hardening | Released v0.2.1 |
+| core-model + Layer-0 | themis-core-model + CR-1…CR-10 | Schema restructure (breaking) + correlation/feeder/observability refactor | Released v0.3.0 (2026-06-24) |
+| — | (maintenance) | Correlation/VEX correctness + ergonomics on the v0.3.0 schema | Released v0.3.2–v0.3.11 |
 
-Architecture reference for Phases 2a–2c: `openspec/changes/themis-phase-2/`
+The former monolith roadmap (**Phase 2b** AI Intelligence, **Phase 2c** AI-Assisted VEX, **Phase 3**
+Docker/UI/RBAC) was **superseded by the Phase-3 greenfield rebuild** — those capabilities are delivered in the
+bounded-context services instead (AI Intelligence → the M4 Intelligence gateway; AI-Assisted VEX → EDR-VEX-01
++ Intelligence Δ3/Δ4).
 
-Cross-phase intelligence source tier classification: `openspec/intel-source-tiers.md`
+**Greenfield line (go-forward):**
 
-Canonical capability specs (source of truth, Phase 1 + 2a merged): `openspec/specs/`
-(17 capabilities). Seeded 2026-06-17 when `themis-phase-2a` was archived with spec sync;
-future changes update this tree via `openspec archive`.
+| Release | Delivers | State |
+| --- | --- | --- |
+| v0.4.0 | The bounded-context platform — M2/M6/M7/M8/M9/M5 + M4 Δ1/Δ2 + parity/VEX/auth/estate | Released 2026-08-02 |
+| v0.4.x | AI-capability expansion — GOV-14 (D14), Intelligence Δ3 (Python + RAG/pgvector), Δ4 (autonomy + LLMOps) | **Next** |
+
+Greenfield milestone map + resume point: `docs/engineering/PHASE3-STATUS.md`.
+
+Cross-phase intelligence source-tier classification: `openspec/intel-source-tiers.md`
+
+`openspec/specs/` holds the **frozen v0.3.x** capability specs (17 capabilities, Phase 1 + 2a merged) — a
+legacy reference only. Greenfield `phase3-*` changes carry **no `specs/` deltas**; their source of truth is
+the per-context EDRs (`docs/engineering/decisions/`), which is why `openspec archive` runs with `--skip-specs`.
