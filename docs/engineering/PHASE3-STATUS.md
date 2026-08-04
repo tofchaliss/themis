@@ -133,6 +133,22 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 > awaiting go-ahead on the Must-ask items (new `intelligence` DB, `PrecedentPosition` field add, first
 > bus-consumer role). All staged, uncommitted.
 
+> **Update (2026-08-04, end of day): Δ3a IMPLEMENTED, gated, committed + PUSHED to `origin/main`.** The whole
+> RAG / Knowledge Engine shipped in six gated groups (A1–A6) plus the R5 eval harness — all on `origin/main`
+> (`2c1d826`), `make check-ci` green. Commits: `fe9218e` (A1–A3 store + embedder + retrieval engine) ·
+> `245adfa` (A4 bus-consumer population, exactly-once) · `3825735` (A5 plan `[Rule → Knowledge → LLM]` + A6
+> wiring / cmd / e2e / docs) · `2c1d826` (R5 harness, `make e2e-embed`).
+> - **Behavior:** `recommend_position` now retrieves semantically similar **past** Positions (a *different* CVE
+>   on the same component) to ground — and can flip — a recommendation. Best-effort Knowledge step + exact-CVE
+>   fallback ⇒ **cold-start-safe**; every failure mode degrades to no-precedent, never blocks.
+> - **New surface:** Intelligence's first datastore (the optional `intelligence` DB / KS2 Operational Semantic
+>   Index, derived + rebuildable) and first bus-consumer role (drains Governance Position events, exactly-once).
+> - **How to test (tomorrow's first step):** `go test -run TestDemoSemanticPrecedentChangesRecommendation
+>   ./internal/intelligence/adapters/wiring/` proves the demo with **no model**; **`make e2e-embed`** runs the
+>   R5 retrieval-quality eval on a live Ollama (SKIPS without one). See TESTING.md §6 + RAG-SESSION-2-SPIKE §4.
+> - **Only open item: run R5** on the Ollama box → confirm `nomic-embed-text` (or pick the winner + reboot with
+>   `THEMIS_INTELLIGENCE_REBUILD=1`). Δ3b (Python DSPy) + Δ4 deferred; two LOW freshness follow-ups in BACKLOG §C.
+
 ---
 
 ## Ground rules (do not re-litigate)
