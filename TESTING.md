@@ -137,6 +137,15 @@ Operational Semantic Index, labeled into the prompt with a similarity score. Fas
   gracefully, never breaks. After changing `THEMIS_INTELLIGENCE_EMBED_MODEL`, restart once with
   `THEMIS_INTELLIGENCE_REBUILD=1` to re-embed the whole index.
 
+**Choosing the embedding model (R5).** `make e2e-embed` runs an opt-in retrieval-quality eval: it embeds a
+labeled corpus (findings grouped by shared component) with each candidate model + text composition and prints
+recall@1/@3 + MRR + embed latency, so you pick the best `THEMIS_INTELLIGENCE_EMBED_MODEL`. Needs a live Ollama
+(or any OpenAI-compatible embedding server); SKIPS otherwise; not part of `make check`:
+
+```sh
+THEMIS_EMBED_MODELS=nomic-embed-text,mxbai-embed-large make e2e-embed
+```
+
 ### Other services (per-context APIs)
 
 Each context is testable in isolation via its own API ([API.md](API.md)) — e.g. register a Release

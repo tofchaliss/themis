@@ -22,7 +22,7 @@ COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/eviden
 COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/...
 
 .PHONY: all build clean tidy test test-integration test-property lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
-	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline verify-build
+	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline e2e-llm e2e-embed verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
 # Add a context here as it is scaffolded.
@@ -186,3 +186,12 @@ e2e-pipeline:
 #   LM Studio: THEMIS_LLM_URL=http://localhost:1234  THEMIS_LLM_MODEL=<model>     make e2e-llm
 e2e-llm:
 	$(GO) test -tags=llm -count=1 -v -run TestE2ERealLLM ./internal/intelligence/adapters/http/...
+
+# Opt-in embedding-model + what-to-embed evaluation for the Δ3a Knowledge Engine (R5). Embeds a
+# small labeled corpus (findings grouped by shared component) with each candidate model + text
+# composition and reports same-component sibling retrieval (recall@1/@3, MRR) + embed latency —
+# higher recall/MRR + lower latency is better. Needs a running Ollama (or any OpenAI-compatible
+# embedding server); SKIPS when none answers; NOT part of `make check`.
+#   THEMIS_EMBED_MODELS=nomic-embed-text,mxbai-embed-large,bge-large make e2e-embed
+e2e-embed:
+	$(GO) test -tags=embed_eval -count=1 -v -run TestEmbeddingModelEval ./internal/intelligence/adapters/embed/...

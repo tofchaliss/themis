@@ -281,10 +281,13 @@ re-narrate it here.
    **exact-CVE fallback** (cold-start-safe) · the demo e2e (`adapters/wiring/demo_e2e_test.go` — a semantic
    precedent flips a recommendation) · cmd wiring (store pool, bus reader, boot-load, `THEMIS_INTELLIGENCE_REBUILD`
    = purge + cursor-reset re-embed) · CLAUDE.md/node.env/INSTALLATION/TESTING/BACKLOG docs. **Commit state:**
-   A1–A4 committed on `main` (local, ahead of origin); A5–A6 in the working tree, uncommitted. **Still open:
-   R5** — confirm the `nomic-embed-text` pick via the local Ollama eval (`RAG-SESSION-2-SPIKE.md` §4); build +
-   tests run on the fake embedder, so only the *live* demo waits on it. **Δ3b** (Python DSPy, only if needed) +
-   **Δ4** (autonomy + LLMOps) deferred; two LOW freshness follow-ups filed in BACKLOG §C.
+   A1–A6 committed + pushed to `origin/main` (`3825735`). **R5 harness built** — `make e2e-embed`
+   (`internal/intelligence/adapters/embed/embed_eval_test.go`, opt-in `//go:build embed_eval`, SKIPS without
+   Ollama) embeds a labeled component-grouped corpus with each candidate model + text composition and reports
+   recall@1/@3 + MRR + latency. **Still open: run it** on the Ollama box to confirm `nomic-embed-text`
+   (`RAG-SESSION-2-SPIKE.md` §4); build + tests run on the fake embedder, so only the *live* demo waits on it.
+   **Δ3b** (Python DSPy, only if needed) + **Δ4** (autonomy + LLMOps) deferred; two LOW freshness follow-ups
+   filed in BACKLOG §C.
 3. **Intelligence Δ4 — autonomy + LLMOps.** The scheduled autonomous-analyst mode (advisory-only — pushes
    Proposals to proposal-intake) + eval / routing / weight-tuning. Guardrail unchanged: autonomy of
    *generation* yes, of *authority* never.

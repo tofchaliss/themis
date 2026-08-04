@@ -83,15 +83,18 @@ run under `embedded-postgres` with no extension). ✓ confirms "plain-PG persist
   -- loaded into an in-memory []float32 index on boot; kept fresh by the bus consumer.
 ```
 
-## 4. Embedding-model eval — PENDING (needs Ollama)
+## 4. Embedding-model eval — HARNESS BUILT (`make e2e-embed`); the RUN is PENDING (needs Ollama)
 
-Not runnable here (no Ollama in this environment). To run where Ollama lives (Mac dev / the VM):
+The eval is now a repeatable command — `make e2e-embed`
+(`internal/intelligence/adapters/embed/embed_eval_test.go`, `//go:build embed_eval`, opt-in, excluded from
+`make check`). It embeds a labeled 12-finding / 6-component corpus with each candidate model **and** each text
+composition, then reports same-component **sibling retrieval** — recall@1 / recall@3 / MRR — plus embed
+latency; it SKIPS cleanly when no server answers. Run it where Ollama lives (Mac dev / the VM):
 
 ```sh
-ollama pull nomic-embed-text
-# latency + a sanity similarity check on our text (rationales + CVE descriptions):
-curl -s http://localhost:11434/api/embeddings \
-  -d '{"model":"nomic-embed-text","prompt":"<a real Position rationale>"}' | jq '.embedding | length'
+ollama pull nomic-embed-text            # + any other candidates you want to compare
+THEMIS_EMBED_MODELS=nomic-embed-text,mxbai-embed-large,bge-large make e2e-embed
+# reads a table; pick the model + composition with the best recall@1/@3 + MRR at acceptable latency.
 ```
 
 Candidates + what to measure (rule-basis · chosen · alternatives · why — for Session 3):
@@ -102,10 +105,12 @@ Candidates + what to measure (rule-basis · chosen · alternatives · why — fo
 | bge-small-en-v1.5 | 384 | smaller/faster; strong MTEB | quality vs nomic at ⅓ memory |
 | e5-small-v2 | 384 | query/passage prefixes; strong retrieval | same |
 
-**What text to embed** (open question O4 from S1) — options to A/B: (a) rationale only; (b) rationale +
-CVE description; (c) rationale + CVE description + component/bug-class. Hypothesis: (c) best serves the
-"same component / same bug-class" precedent match (the #4 demo), but risks diluting the rationale signal —
-measure recall on labeled pairs.
+**What text to embed** (open question O4 from S1) — `make e2e-embed` A/Bs four compositions the harness
+builds from each finding: (a) components only; (b) components + severity (the current production
+`embed.SubjectText`); (c) + CVE id; (d) + a short bug description. Hypothesis: (b) already clusters by
+component (the #4 demo), and a strong (d) shows the upside of enriching the embed text with CVE prose —
+which `FaultlineView` does not carry today, so a decisive (d) win is the signal to add a description
+read-API (filed as a follow-up if the numbers support it).
 
 **Lean (to confirm):** `nomic-embed-text` at 768 dims — reuse the deployed runtime, local (D10), PoC
 precedent. Matryoshka-truncate to 256 only if memory/latency ever demands it (they don't at 50k).
