@@ -273,10 +273,18 @@ re-narrate it here.
    Decided: semantic precedent for `recommend_position` (**G-AI-3**) via **in-memory Go cosine over
    embeddings persisted in a plain Postgres table** (no pgvector — measured ~47 ms/query @ 50k), behind an
    `app.VectorIndex` port; hand-rolled Go retrieval; **Python DSPy deferred to Δ3b**; pgvector/Qdrant are
-   port-swap upgrades. **Next: implement Δ3a** (store · embedder · Knowledge Engine · bus-consumer
-   population · plan `[Rule → Knowledge → LLM]` · e2e) — introduces Intelligence's **first DB + bus-consumer
-   role** (CLAUDE.md "Must ask"). **Blocked only on R5** — the local `nomic-embed-text` embedding eval
-   (`RAG-SESSION-2-SPIKE.md` §4, needs Ollama). Scaffold `phase3-intelligence-d3` from EDR Rev 4 when building.
+   port-swap upgrades. **Δ3a IMPLEMENTED + gated (A1–A6, 2026-08-04, `make check-ci` green):** the store
+   (`internal/intelligence/adapters/store`, its own `intelligence` DB) · embedder (`adapters/embed`, Ollama
+   `/v1/embeddings` + a deterministic fake) · in-memory `VectorIndex` + `EngineKnowledge`
+   (`adapters/{index,engine}`) · bus-consumer population (`adapters/inbound`, exactly-once, Preparer-split so
+   the embed stays out of the tx) · plan `[Rule → Knowledge → LLM]` with a **best-effort** Knowledge step +
+   **exact-CVE fallback** (cold-start-safe) · the demo e2e (`adapters/wiring/demo_e2e_test.go` — a semantic
+   precedent flips a recommendation) · cmd wiring (store pool, bus reader, boot-load, `THEMIS_INTELLIGENCE_REBUILD`
+   = purge + cursor-reset re-embed) · CLAUDE.md/node.env/INSTALLATION/TESTING/BACKLOG docs. **Commit state:**
+   A1–A4 committed on `main` (local, ahead of origin); A5–A6 in the working tree, uncommitted. **Still open:
+   R5** — confirm the `nomic-embed-text` pick via the local Ollama eval (`RAG-SESSION-2-SPIKE.md` §4); build +
+   tests run on the fake embedder, so only the *live* demo waits on it. **Δ3b** (Python DSPy, only if needed) +
+   **Δ4** (autonomy + LLMOps) deferred; two LOW freshness follow-ups filed in BACKLOG §C.
 3. **Intelligence Δ4 — autonomy + LLMOps.** The scheduled autonomous-analyst mode (advisory-only — pushes
    Proposals to proposal-intake) + eval / routing / weight-tuning. Guardrail unchanged: autonomy of
    *generation* yes, of *authority* never.

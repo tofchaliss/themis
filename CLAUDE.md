@@ -94,9 +94,11 @@ databases → `go build -o bin/ ./cmd/...` → export env → run each node → 
 `deploy/systemd/install-systemd.sh` generates `/etc/themis/<svc>.env` + a templated `themis@.service` unit for
 all six nodes.
 
-- **Topology: one Postgres server, six databases** — `evidence` (the `registry` schema **co-locates** here),
-  `knowledge`, `governance`, `communication`, `bus`, and `auth` (the shared API-key store; see the auth switch
-  below). Ports: Evidence `:8081`, Registry `:8082`,
+- **Topology: one Postgres server, up to seven databases** — `evidence` (the `registry` schema **co-locates**
+  here), `knowledge`, `governance`, `communication`, `bus`, `auth` (the shared API-key store; see the auth
+  switch below), and `intelligence` (the Δ3a **Operational Semantic Index** — Intelligence's own KS2 vector
+  store; present only when semantic precedent is enabled via `THEMIS_DATABASE_DSN` on the Intelligence node —
+  it is derived/rebuildable, not truth, so the Gateway still owns no truth). Ports: Evidence `:8081`, Registry `:8082`,
   Governance `:8083`, Communication `:8084`, Intelligence `:8086`, and **Knowledge `:8085`** — its code default
   is `:8082`, which collides with Registry, so you **must** set `THEMIS_KNOWLEDGE_ADDR=:8085` (the port every
   other node's `THEMIS_KNOWLEDGE_URL` already defaults to).

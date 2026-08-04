@@ -323,11 +323,13 @@ func TestInvokeRuleDecisionBusinessInvalid(t *testing.T) {
 }
 
 func TestInvokeUnwiredEngineKind(t *testing.T) {
-	reg := domain.NewRegistry(customCap("needs_knowledge", domain.ExecutionPlan{{Engine: domain.EngineKind("knowledge")}}))
+	// A required (non-optional) engine kind that is not wired is a fatal ProviderError. (The
+	// Knowledge kind is exempt — it is best-effort and skips when unwired; see the Δ3a tests.)
+	reg := domain.NewRegistry(customCap("needs_mystery", domain.ExecutionPlan{{Engine: domain.EngineKind("mystery")}}))
 	g := gatewayWith(t, reg, &fakeEngine{replies: []engineReply{{raw: okRaw}}}) // only an LLM engine wired
-	_, oc := g.Invoke(context.Background(), "needs_knowledge", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "needs_mystery", "F1", "corr")
 	if oc.Produced || oc.Reason != ReasonProviderError {
-		t.Errorf("outcome = %+v, want provider_error/false (unwired engine kind)", oc)
+		t.Errorf("outcome = %+v, want provider_error/false (unwired non-optional engine kind)", oc)
 	}
 }
 
@@ -434,6 +436,117 @@ func TestInvokePrecedentErrorDegrades(t *testing.T) {
 	}
 	if len(cp.got.Precedents) != 0 {
 		t.Errorf("precedents must be empty on read error, got %+v", cp.got.Precedents)
+	}
+}
+
+// --- Δ3a Knowledge step: semantic precedent + exact-CVE fallback -------------
+
+// fakeKnowledgeEngine is a stub EngineKnowledge returning canned semantic precedents (or err).
+type fakeKnowledgeEngine struct {
+	precedents []domain.PrecedentPosition
+	err        error
+	calls      int
+}
+
+func (e *fakeKnowledgeEngine) Kind() domain.EngineKind { return domain.EngineKnowledge }
+
+func (e *fakeKnowledgeEngine) Execute(_ context.Context, _ ExecInput) (EngineResult, error) {
+	e.calls++
+	if e.err != nil {
+		return EngineResult{}, e.err
+	}
+	return EngineResult{Precedents: e.precedents}, nil
+}
+
+func gatewayRuleKnowledgeLLM(t *testing.T, prompt PromptRenderer, prec PrecedentReader, know Engine, llm Engine) *Gateway {
+	t.Helper()
+	fr, flr := groundedReaders()
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Precedent: prec, Prompt: prompt, Engines: []Engine{fakeRuleEngine{}, know, llm},
+	})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	return g
+}
+
+func TestKnowledgeStepFillsSemanticPrecedents(t *testing.T) {
+	know := &fakeKnowledgeEngine{precedents: []domain.PrecedentPosition{
+		{ReleaseID: "R2", SourceCVE: "CVE-2", Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "unreachable", Score: 0.91},
+		{ReleaseID: "R3", SourceCVE: "CVE-3", Stance: "affected", Rationale: "reachable", Score: 0.77},
+	}}
+	cp := &capturePrompt{}
+	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	if !oc.Produced {
+		t.Fatalf("outcome = %+v, want produced", oc)
+	}
+	if know.calls != 1 {
+		t.Errorf("knowledge engine calls = %d, want 1", know.calls)
+	}
+	if oc.PrecedentsUsed != 2 {
+		t.Errorf("PrecedentsUsed = %d, want 2 (provenance)", oc.PrecedentsUsed)
+	}
+	if len(cp.got.Precedents) != 2 || cp.got.Precedents[0].SourceCVE != "CVE-2" {
+		t.Errorf("LLM grounding = %+v, want the 2 semantic precedents", cp.got.Precedents)
+	}
+}
+
+func TestKnowledgeStepPreemptsExactCVEFallback(t *testing.T) {
+	know := &fakeKnowledgeEngine{precedents: []domain.PrecedentPosition{{ReleaseID: "R2", SourceCVE: "CVE-2", Stance: "not_affected", Score: 0.9}}}
+	prec := &fakePrecedent{positions: []domain.PrecedentPosition{{ReleaseID: "R9", Stance: "affected"}}}
+	cp := &capturePrompt{}
+	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	if !oc.Produced {
+		t.Fatalf("outcome = %+v", oc)
+	}
+	if prec.calls != 0 {
+		t.Errorf("the exact-CVE fallback must NOT run when semantic retrieval found precedent; calls=%d", prec.calls)
+	}
+	if len(cp.got.Precedents) != 1 || cp.got.Precedents[0].ReleaseID != "R2" {
+		t.Errorf("grounding = %+v, want the semantic precedent R2", cp.got.Precedents)
+	}
+}
+
+func TestKnowledgeEmptyFallsBackToExactCVE(t *testing.T) {
+	know := &fakeKnowledgeEngine{precedents: nil} // cold / incomplete index
+	prec := &fakePrecedent{positions: []domain.PrecedentPosition{{ReleaseID: "R9", Stance: "affected", Rationale: "same cve elsewhere"}}}
+	cp := &capturePrompt{}
+	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	if !oc.Produced {
+		t.Fatalf("outcome = %+v", oc)
+	}
+	if prec.calls != 1 {
+		t.Errorf("the exact-CVE fallback must run when semantic retrieval found none; calls=%d", prec.calls)
+	}
+	if len(cp.got.Precedents) != 1 || cp.got.Precedents[0].ReleaseID != "R9" {
+		t.Errorf("grounding = %+v, want the exact-CVE fallback R9", cp.got.Precedents)
+	}
+	if oc.PrecedentsUsed != 1 {
+		t.Errorf("PrecedentsUsed = %d, want 1", oc.PrecedentsUsed)
+	}
+}
+
+func TestKnowledgeStepErrorDegrades(t *testing.T) {
+	know := &fakeKnowledgeEngine{err: errors.New("embedder down")}
+	cp := &capturePrompt{}
+	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	if !oc.Produced {
+		t.Errorf("a Knowledge-engine failure must degrade, not block: %+v", oc)
+	}
+	if know.calls != 1 {
+		t.Errorf("knowledge calls = %d, want 1", know.calls)
+	}
+	if len(cp.got.Precedents) != 0 || oc.PrecedentsUsed != 0 {
+		t.Errorf("expected no precedent on knowledge error, got %+v / used=%d", cp.got.Precedents, oc.PrecedentsUsed)
 	}
 }
 

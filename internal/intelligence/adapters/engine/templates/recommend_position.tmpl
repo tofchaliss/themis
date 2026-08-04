@@ -17,8 +17,8 @@ affected by a specific vulnerability, and explain why.
 - fixed_versions: {{range .Faultline.FixedVersions}}{{.}} {{end}}
 - affected_ranges: {{range .Faultline.AffectedRanges}}{{.}} {{end}}
 {{if .Precedents}}
-## Prior enterprise decisions on this CVE (other releases — consider for consistency, do not blindly copy)
-{{range .Precedents}}- release {{.ReleaseID}}: {{.Stance}} — {{.Rationale}}
+## Prior enterprise decisions on this or similar findings (consider for consistency, do not blindly copy — a different CVE may not be comparable)
+{{range .Precedents}}- release {{.ReleaseID}}{{if .SourceCVE}} · cve {{.SourceCVE}}{{end}}{{if .Component}} · {{.Component}}{{end}}{{if gt .Score 0.0}} · similarity {{printf "%.2f" .Score}}{{end}}: {{.Stance}} — {{.Rationale}}
 {{end}}{{end}}
 ## Instructions
 Respond with a single JSON object ONLY (no prose), matching exactly:

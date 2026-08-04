@@ -50,7 +50,7 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 | Knowledge | `cmd/knowledge` | `:8085` | `knowledge` | Evidence `:8081`, OSV | `THEMIS_KNOWLEDGE_MIGRATE=1` |
 | Governance | `cmd/governance` | `:8083` | `governance` | Intelligence `:8086` (if AI on) | `THEMIS_GOVERNANCE_MIGRATE=1` |
 | Communication | `cmd/communication` | `:8084` | `communication` | Governance `:8083` | `THEMIS_COMMUNICATION_MIGRATE=1` |
-| Intelligence | `cmd/intelligence` | `:8086` | — (stateless) | Governance `:8083`, Knowledge `:8085` | — |
+| Intelligence | `cmd/intelligence` | `:8086` | `intelligence` (optional, Δ3a) | Governance `:8083`, Knowledge `:8085`, bus (population) | `THEMIS_INTELLIGENCE_MIGRATE=1` (only if semantic precedent on) |
 | **bus** | — | — | `bus` | — | `THEMIS_BUS_MIGRATE=1` (any pipeline svc) |
 
 > **The event bus is the end-to-end switch.** Each of the four pipeline services relays its outbox to the
@@ -64,7 +64,9 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 > Registry**. The rest of the system expects Knowledge on **:8085** (Intelligence's `THEMIS_KNOWLEDGE_URL`
 > default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
 
-> **Databases (5 on one PostgreSQL server):** `evidence`, `knowledge`, `governance`, `communication`, `bus`.
+> **Databases (5 required + 1 optional on one PostgreSQL server):** `evidence`, `knowledge`, `governance`,
+> `communication`, `bus` — plus **`intelligence`** when Δ3a semantic precedent is enabled (the Operational
+> Semantic Index; skip it to run the Gateway stateless).
 > Registry co-locates in the **`evidence`** database — Evidence validates a release id in-process via
 > `registry.ReleaseExists`, so the registry tables must live there (its schema is loaded with `psql`, not
 > self-migrated — see step 4). The database boundary keeps contexts structurally isolated.
@@ -85,9 +87,11 @@ sudo dnf install -y postgresql-server && sudo postgresql-setup --initdb
 sudo systemctl enable --now postgresql
 ```
 
-Create the `themis` role and the **six** databases (as the `postgres` superuser): the four pipeline
-databases (`evidence` — which also co-locates the Registry identity schema — `knowledge`, `governance`,
-`communication`), the shared `bus` event log, and `auth` (the API-key store for inbound edge auth, F1). Set
+Create the `themis` role and the databases (as the `postgres` superuser): the four pipeline databases
+(`evidence` — which also co-locates the Registry identity schema — `knowledge`, `governance`,
+`communication`), the shared `bus` event log, `auth` (the API-key store for inbound edge auth, F1), and
+`intelligence` (the Δ3a Operational Semantic Index — harmless to create even if you run the Gateway
+stateless). Set
 the password **once** in a shell variable and reuse it everywhere — the runbook's DSNs read the same `$PGPW`,
 so there is no second place to keep in sync:
 
@@ -96,7 +100,7 @@ so there is no second place to keep in sync:
 export PGPW='ChangeMe4Themis'
 
 sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
-for db in evidence knowledge governance communication bus auth; do
+for db in evidence knowledge governance communication bus auth intelligence; do
   sudo -u postgres psql -c "CREATE DATABASE $db OWNER themis;"
 done
 # verify the themis role can connect over TCP (default localhost auth is password-based; prints '1'):
@@ -114,7 +118,7 @@ Creating the databases needs the `postgres` superuser (`sudo -u postgres`) becau
 > ```sh
 > sudo systemctl stop 'themis@*' 2>/dev/null   # if running under systemd (step 7)
 > pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)' 2>/dev/null
-> for db in evidence knowledge governance communication bus auth; do
+> for db in evidence knowledge governance communication bus auth intelligence; do
 >   sudo -u postgres psql -c "DROP DATABASE IF EXISTS $db WITH (FORCE);" -c "CREATE DATABASE $db OWNER themis;"
 > done
 > ```
@@ -423,13 +427,24 @@ the pipeline and never decides.
 ```sh
 ollama serve &                 # on a Linux GPU host, ensure the CUDA/ROCm runtime is present
 ollama pull cyberpal           # or whatever you named it; confirm the tag with `ollama list`
+ollama pull nomic-embed-text   # embedding model for Δ3a semantic precedent (RC-1)
 
 THEMIS_GOVERNANCE_URL=http://localhost:8083 \
 THEMIS_KNOWLEDGE_URL=http://localhost:8085 \
 THEMIS_OLLAMA_URL=http://localhost:11434 \
 THEMIS_INTELLIGENCE_MODEL=cyberpal \
-THEMIS_INTELLIGENCE_ADDR=:8086 go run ./cmd/intelligence &   # grounds via Governance + Knowledge
+THEMIS_DATABASE_DSN="$PGBASE/intelligence?sslmode=disable" THEMIS_INTELLIGENCE_MIGRATE=1 \
+THEMIS_INTELLIGENCE_EMBED_MODEL=nomic-embed-text \
+THEMIS_BUS_DATABASE_DSN="$PGBASE/bus?sslmode=disable" \
+THEMIS_INTELLIGENCE_ADDR=:8086 go run ./cmd/intelligence &   # grounds via Governance + Knowledge, + Δ3a semantic precedent
 ```
+
+The `THEMIS_DATABASE_DSN` + `THEMIS_BUS_DATABASE_DSN` lines enable **Δ3a semantic precedent** (RC-1): the
+Gateway keeps its own `intelligence` index, its bus reader populates it from Governance Position events, and
+`recommend_position` retrieves semantically similar **past** decisions to ground the model. **Omit both** to
+run the Gateway stateless (exact-CVE precedent only) — everything else works identically. After changing
+`THEMIS_INTELLIGENCE_EMBED_MODEL`, restart the node **once** with `THEMIS_INTELLIGENCE_REBUILD=1` to re-embed
+the whole index under the new model.
 
 Ollama's OpenAI-compatible endpoint uses `json_object` structured output by default
 (`THEMIS_LLM_RESPONSE_FORMAT` empty). If your model needs a bearer token or JSON-schema mode, set

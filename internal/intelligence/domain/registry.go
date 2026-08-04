@@ -33,17 +33,23 @@ func (r *Registry) All() []Capability {
 	return caps
 }
 
-// RecommendPositionV1 is the recommend_position capability (Revision 3 / Δ2):
-// AI-assisted affected/not-affected triage. It grounds the subject Finding + its
-// Faultline enrichment, runs a two-step **[Rule → LLM]** plan (the deterministic
-// version-range rule first, the LLM only when the rule defers), and may propose only the
-// recommendable stance subset.
+// RecommendPositionV1 is the recommend_position capability (Δ3a): AI-assisted
+// affected/not-affected triage. It grounds the subject Finding + its Faultline enrichment and
+// runs a three-step **[Rule → Knowledge → LLM]** plan — the deterministic version-range rule
+// first (short-circuits when provably out of range), then the Knowledge engine enriches the
+// grounding with semantically similar past Enterprise Positions (best-effort precedent, RC-1),
+// then the LLM reasons over the precedent-enriched grounding when the rule deferred. It may
+// propose only the recommendable stance subset.
 func RecommendPositionV1() Capability {
 	return Capability{
-		ID:             "recommend_position",
-		Version:        "v1",
-		Needs:          []ContextNeed{NeedFinding, NeedFaultline},
-		Plan:           ExecutionPlan{{Engine: EngineRule}, {Engine: EngineLLM, Prompt: "recommend_position"}},
+		ID:      "recommend_position",
+		Version: "v1",
+		Needs:   []ContextNeed{NeedFinding, NeedFaultline},
+		Plan: ExecutionPlan{
+			{Engine: EngineRule},
+			{Engine: EngineKnowledge},
+			{Engine: EngineLLM, Prompt: "recommend_position"},
+		},
 		OutputSchema:   recommendPositionSchema,
 		AllowedStances: []Stance{StanceAffected, StanceNotAffected, StanceMitigated},
 		Routing:        RoutingRequirements{Privacy: PrivacyInternal, LocalOnly: true},

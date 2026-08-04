@@ -44,6 +44,13 @@ per-context follow-ups below.
   **meter only** (enforcement → G-AI-4), admission = **local-only** (classification/clearance → G-AI-5); plus
   the two-step `[Rule → LLM]` plan, the honest `insufficient` outcome, precedent-Positions grounding, and a
   which-step-decided provenance stamp.
+  **Δ3a IMPLEMENTED + gated (A1–A6, 2026-08-04):** the RAG / Knowledge Engine, **all-Go, NO pgvector** —
+  in-memory cosine over embeddings persisted in a plain-Postgres `intelligence` DB (`EDR-INTELLIGENCE-01`
+  **Revision 4**; Book IV Ch 8 RC-1). Adds Intelligence's first datastore + first bus-consumer role (populates
+  from Governance Position events, exactly-once). The plan is now `[Rule → Knowledge → LLM]`; the demo — a
+  semantic precedent flips a recommendation — is the acceptance test. Still deferred: **Δ3b** (Python DSPy
+  reasoning engine, only if a task needs it) + **Δ4** (autonomy + push + LLMOps). **R5** (embedding-model pick,
+  leaning `nomic-embed-text`) pending the local Ollama eval.
 
 - [x] **M5 — Event Infrastructure (the shared event bus)** — **DONE (2026-07-29)** on branch
   `phase3-event-infrastructure`. `docs/engineering/decisions/EDR-EVENTBUS-01.md` (D1–D11) +
@@ -96,6 +103,17 @@ per-context follow-ups below.
 > only remaining piece is the concrete Evidence `scanner-report` read adapter (a documented prerequisite,
 > fakeable today). The v0.3.x monolith defects D-NVD-2 / D-FEED-2 themselves stay open (this is the Phase-3
 > realization, not the v0.3.x fix).
+
+- [ ] **(LOW) Δ3a — re-embed on `knowledge.faultline_enriched`.** The population consumer
+  (`internal/intelligence/adapters/inbound`) indexes on Governance **Position** events only; a later Faultline
+  severity change (which feeds `embed.SubjectText`) does not re-embed the affected findings until their next
+  Position event. A freshness optimization, not correctness — the vector still matches on components. **Fix:**
+  a second subscription (stream `knowledge`, interest `knowledge.faultline_enriched`) that re-embeds the
+  faultline's findings. Surfaced building A4 (2026-08-04).
+- [ ] **(LOW) Δ3a — use `text_hash` to skip unchanged re-embeds.** `position_embeddings.text_hash` is
+  populated but not yet consulted: a Position revise always re-embeds even when the subject text is unchanged
+  (only the stance/rationale label moved). Gate the Ollama embed on a hash mismatch, updating the labels
+  in place otherwise — saves an embed call per revise. Surfaced building A4 (2026-08-04).
 
 - [x] **Knowledge consumer inbox (M5 EB-06) — DONE in Group 8.** Built alongside `cmd/knowledge`:
   `internal/knowledge/adapters/inbound` (decode `EvidenceRegistered` → correlation + Subscription),
@@ -363,10 +381,13 @@ per-context follow-ups below.
   release (same component version + usage) should carry weight; one on a very different release should be
   down-weighted or dropped, not blindly trusted. This needs real **release-comparison machinery** (component /
   usage deltas across Releases) that does not exist yet, and it overlaps the semantic "similar findings"
-  retrieval (RAG, Δ3). **Why open:** no release-diff capability today; ranking-by-similarity is Δ3 RAG-class.
-  **Where it plugs in:** Intelligence Context Construction (grounding assembly) together with a Registry /
-  Evidence release-comparison read-API and Δ3 RAG. **Dep:** builds on the Δ2 labeled-precedent grounding; needs
-  release-diff together with Δ3 retrieval. **Scope:** Δ2 hands labeled precedent as-is; rank-by-delta is Δ3+.
+  retrieval (RAG, Δ3). **✅ Δ3a delivered the semantic-retrieval half** (RC-1, 2026-08-04): `recommend_position`
+  now embeds the Finding and retrieves cosine-similar past Positions — possibly a *different* CVE on the same
+  component — cosine-ranked into the grounding (`internal/intelligence/adapters/{index,engine}`; plan is
+  `[Rule → Knowledge → LLM]`). **What remains:** rank/weight that precedent by the **release-to-release delta**
+  (down-weight a decision on a very different release), which still needs a Registry/Evidence
+  release-comparison read-API that does not exist. **Where it plugs in:** the Knowledge engine's ranking, given
+  a release-diff signal. **Scope:** cosine-similarity ranking is done; delta-aware ranking is the open remainder.
 
 - [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 builds the **meter** (per-call time / input-size / token count recorded via telemetry) plus

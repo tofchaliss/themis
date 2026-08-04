@@ -27,6 +27,31 @@ func TestPromptRendererHappy(t *testing.T) {
 	}
 }
 
+func TestPromptRendererSemanticPrecedents(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ac := domain.AssembledContext{
+		Finding:   domain.FindingView{ID: "F1", CVE: "CVE-2026-1", Components: []string{"pkg:golang/openssl"}},
+		Faultline: domain.FaultlineView{ID: "FL1", Severity: "high"},
+		Precedents: []domain.PrecedentPosition{
+			{ReleaseID: "R2", SourceCVE: "CVE-2025-9", Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "unreachable", Score: 0.87},
+		},
+	}
+	out, err := r.Render("recommend_position", ac)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	// A semantic precedent renders its release, the similar CVE, the component, the similarity
+	// score, and the stance + rationale — so the LLM can weigh a different-CVE precedent.
+	for _, want := range []string{"R2", "CVE-2025-9", "pkg:golang/openssl", "0.87", "not_affected", "unreachable"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing precedent detail %q\n%s", want, out)
+		}
+	}
+}
+
 func TestPromptRendererUnknownCapability(t *testing.T) {
 	r, _ := NewPromptRenderer()
 	if _, err := r.Render("nope", domain.AssembledContext{}); err == nil {

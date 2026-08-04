@@ -1,0 +1,154 @@
+package wiring_test
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/themis-project/themis/internal/intelligence/adapters/embed"
+	"github.com/themis-project/themis/internal/intelligence/adapters/engine"
+	"github.com/themis-project/themis/internal/intelligence/adapters/index"
+	"github.com/themis-project/themis/internal/intelligence/adapters/provider"
+	"github.com/themis-project/themis/internal/intelligence/adapters/store"
+	"github.com/themis-project/themis/internal/intelligence/adapters/wiring"
+	"github.com/themis-project/themis/internal/intelligence/app"
+	"github.com/themis-project/themis/internal/intelligence/domain"
+)
+
+// precedentSensitiveProvider stands in for the LLM: it reads the rendered prompt and, when a
+// prior enterprise decision of "not_affected" is present, recommends not_affected — otherwise
+// affected. This lets the e2e prove that a RETRIEVED semantic precedent changes the
+// recommendation, with no live model. It is the Δ3a acceptance test / demo.
+type precedentSensitiveProvider struct{ lastPrompt string }
+
+func (p *precedentSensitiveProvider) Complete(_ context.Context, req app.CompletionRequest) (app.CompletionResult, error) {
+	p.lastPrompt = req.Prompt
+	stance := "affected"
+	// Key on the indexed precedent's rationale text, which appears in the prompt ONLY when a
+	// precedent was actually retrieved (unlike "not_affected", which the instructions always
+	// list as an allowed stance). Presence of the precedent flips the recommendation.
+	if strings.Contains(req.Prompt, "vulnerable function not reachable") {
+		stance = "not_affected"
+	}
+	raw := `{"finding_id":"F1","recommended_stance":"` + stance +
+		`","confidence":0.9,"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"weighed against precedent"}`
+	return app.CompletionResult{Text: raw, TokensUsed: 1}, nil
+}
+func (p *precedentSensitiveProvider) Name() string  { return "precedent-sensitive-fake" }
+func (p *precedentSensitiveProvider) Model() string { return "fake" }
+
+type stubFindingReader struct{ v domain.FindingView }
+
+func (s stubFindingReader) GetFinding(context.Context, string) (domain.FindingView, error) {
+	return s.v, nil
+}
+
+type stubFaultlineReader struct{ v domain.FaultlineView }
+
+func (s stubFaultlineReader) GetFaultline(context.Context, string) (domain.FaultlineView, error) {
+	return s.v, nil
+}
+
+func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Embedder) *app.Gateway {
+	t.Helper()
+	pr, err := engine.NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	gw, err := app.NewGateway(app.GatewayConfig{
+		Registry: domain.DefaultRegistry(),
+		Finding: stubFindingReader{v: domain.FindingView{
+			ID: "F1", ReleaseID: "rel-new", FaultlineID: "FL1", CVE: "CVE-2026-NEW",
+			Components: []string{"pkg:golang/openssl"},
+		}},
+		Faultline: stubFaultlineReader{v: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-NEW", Severity: "high"}},
+		Prompt:    pr,
+		Engines: []app.Engine{
+			engine.NewRuleEngine(domain.VersionRangeRule{}),
+			engine.NewKnowledgeEngine(emb, idx, 5),
+			engine.NewLLMEngine(provider.NewStaticRouter(prov)),
+		},
+	})
+	if err != nil {
+		t.Fatalf("gateway: %v", err)
+	}
+	return gw
+}
+
+// TestDemoSemanticPrecedentChangesRecommendation is the Δ3a demo (Use Case #4): a never-before-
+// seen CVE gets a recommendation grounded in semantically similar PAST decisions. With a cold
+// index the recommendation is "affected"; after a similar past not_affected Position (a DIFFERENT
+// CVE on the SAME component) is indexed, the retrieved precedent flips it to "not_affected".
+func TestDemoSemanticPrecedentChangesRecommendation(t *testing.T) {
+	emb := embed.NewFakeEmbedder(256)
+	idx := index.NewMemory()
+	prov := &precedentSensitiveProvider{}
+	gw := demoGateway(t, prov, idx, emb)
+	ctx := context.Background()
+
+	// Case A — cold index (no precedent): the recommendation is "affected".
+	pA, ocA := gw.Invoke(ctx, "recommend_position", "F1", "corr-A")
+	if !ocA.Produced || pA.Recommendation.Stance != domain.StanceAffected {
+		t.Fatalf("cold index: outcome=%+v stance=%v, want produced/affected", ocA, pA.Recommendation.Stance)
+	}
+	if ocA.PrecedentsUsed != 0 {
+		t.Errorf("cold index PrecedentsUsed = %d, want 0", ocA.PrecedentsUsed)
+	}
+
+	// Index a semantically similar past decision: a DIFFERENT CVE on the SAME component (openssl),
+	// decided not_affected in another release. Embed the SAME text the query embeds so the vectors
+	// are comparable (this is exactly what the population consumer does).
+	vec, err := emb.Embed(ctx, embed.SubjectText("high", []string{"pkg:golang/openssl"}))
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	idx.Upsert(store.EmbeddingRecord{
+		FindingID: "F-past", ReleaseID: "rel-old", FaultlineID: "FL-old", CVE: "CVE-2025-OLD",
+		Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "vulnerable function not reachable",
+		Vector: vec,
+	})
+
+	// Case B — same subject, warm index: the retrieved precedent changes the recommendation.
+	pB, ocB := gw.Invoke(ctx, "recommend_position", "F1", "corr-B")
+	if !ocB.Produced || pB.Recommendation.Stance != domain.StanceNotAffected {
+		t.Fatalf("warm index: outcome=%+v stance=%v, want produced/not_affected (precedent should flip it)", ocB, pB.Recommendation.Stance)
+	}
+	if ocB.PrecedentsUsed != 1 {
+		t.Errorf("warm index PrecedentsUsed = %d, want 1 (provenance)", ocB.PrecedentsUsed)
+	}
+	if !strings.Contains(prov.lastPrompt, "CVE-2025-OLD") {
+		t.Errorf("the prompt must cite the retrieved precedent's CVE\n%s", prov.lastPrompt)
+	}
+}
+
+func TestWireStatelessVsStateful(t *testing.T) {
+	base := wiring.Config{
+		GovernanceURL: "http://gov", KnowledgeURL: "http://know",
+		UseFake: true, HTTPClient: http.DefaultClient,
+	}
+
+	// Stateless: no store → no retrieval plane.
+	stateless, err := wiring.Wire(base)
+	if err != nil {
+		t.Fatalf("wire stateless: %v", err)
+	}
+	if stateless.Index != nil || stateless.Consumer != nil {
+		t.Errorf("stateless Wire must not build an index/consumer, got index=%v consumer=%v", stateless.Index, stateless.Consumer)
+	}
+	if stateless.Handler == nil || stateless.Gateway == nil {
+		t.Error("stateless Wire must still build the Gateway + Handler")
+	}
+
+	// Stateful: a store lights up the Δ3a retrieval plane (index + population consumer). The
+	// store's pool is never dereferenced during Wire, so a nil-pool store is fine here.
+	cfg := base
+	cfg.Store = store.New(nil)
+	stateful, err := wiring.Wire(cfg)
+	if err != nil {
+		t.Fatalf("wire stateful: %v", err)
+	}
+	if stateful.Index == nil || stateful.Consumer == nil {
+		t.Errorf("stateful Wire must build the index + population consumer, got index=%v consumer=%v", stateful.Index, stateful.Consumer)
+	}
+}

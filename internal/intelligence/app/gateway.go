@@ -41,16 +41,17 @@ const (
 // Outcome is the per-invocation telemetry record (D9). It carries no sensitive prompt
 // content (D10) — only provenance and the terminal reason.
 type Outcome struct {
-	CapabilityID  string
-	CorrelationID string
-	Provider      string
-	Model         string
-	TokensUsed    int
-	InputBytes    int // rendered prompt size — a metered cost input (C5); 0 on a rule short-circuit
-	Duration      time.Duration
-	Produced      bool
-	Reason        string
-	DecidedBy     string // "rule:<stance>" / "llm:<stance>" / "guard:<reason>" — what decided
+	CapabilityID   string
+	CorrelationID  string
+	Provider       string
+	Model          string
+	TokensUsed     int
+	InputBytes     int // rendered prompt size — a metered cost input (C5); 0 on a rule short-circuit
+	Duration       time.Duration
+	Produced       bool
+	Reason         string
+	DecidedBy      string // "rule:<stance>" / "llm:<stance>" / "guard:<reason>" — what decided
+	PrecedentsUsed int    // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance); 0 on a rule short-circuit
 }
 
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
@@ -130,10 +131,11 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 
 // Invoke runs the reactive pipeline for a capability against a subject Finding. It
 // assembles grounding once, then the Engine Dispatcher walks the capability's execution
-// plan: a deterministic (Rule) step that decides short-circuits the plan; a step that
-// defers passes to the next; the LLM step renders a prompt, runs with a schema retry,
-// and validates in stages. produced=false is a safe "no proposal"; Outcome carries the
-// telemetry, including which step decided.
+// plan: a deterministic (Rule) step that decides short-circuits the plan; a Knowledge step
+// enriches the grounding with semantically similar past Positions (best-effort precedent,
+// Δ3a); a step that defers passes to the next; the LLM step renders a prompt, runs with a
+// schema retry, and validates in stages. produced=false is a safe "no proposal"; Outcome
+// carries the telemetry, including which step decided and how much precedent grounded it.
 func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, correlationID string) (domain.Proposal, Outcome) {
 	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID}
 
@@ -168,6 +170,19 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 
 	start := g.now()
 	for _, step := range capb.Plan {
+		// Knowledge (retrieval) step (Δ3a): best-effort semantic precedent grounding. Unlike
+		// Rule/LLM, precedent is OPTIONAL — a missing or failing Knowledge engine degrades to no
+		// precedent and never blocks the recommendation, so it is handled before the generic
+		// dispatcher lookup (an unwired index is a graceful skip, not a fatal ProviderError).
+		if step.Engine == domain.EngineKnowledge {
+			if eng, ok := g.dispatcher.For(step.Engine); ok {
+				if res, kerr := eng.Execute(ctx, ExecInput{Context: ac}); kerr == nil && len(res.Precedents) > 0 {
+					ac.Precedents = res.Precedents
+				}
+			}
+			continue
+		}
+
 		eng, ok := g.dispatcher.For(step.Engine)
 		if !ok {
 			oc.Duration = g.now().Sub(start)
@@ -197,14 +212,16 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 			return g.buildProposal(out, capb, oc), oc
 		}
 
-		// LLM step (the generative fallback). Pull precedent grounding lazily HERE — only
-		// once the rule has deferred — so a rule short-circuit costs no precedent read (C6).
-		// A precedent-read failure degrades to no precedent; it never blocks.
-		if g.precedent != nil {
+		// LLM step (the generative fallback). Semantic precedent from the Knowledge step already
+		// rides ac.Precedents; fall back to the Δ2 exact-CVE blast-radius pull ONLY when that
+		// found none (a cold or incomplete index) — so a rule short-circuit still costs no read,
+		// and a read failure degrades to no precedent, never blocks (C6).
+		if len(ac.Precedents) == 0 && g.precedent != nil {
 			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding.FaultlineID, ac.Finding.ReleaseID); prErr == nil {
 				ac.Precedents = prec
 			}
 		}
+		oc.PrecedentsUsed = len(ac.Precedents)
 		// Render a prompt per step, run with a bounded schema retry, then business-validate.
 		prompt, perr := g.prompt.Render(capabilityID, ac)
 		if perr != nil {

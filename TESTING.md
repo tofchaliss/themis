@@ -119,6 +119,24 @@ outbound calls — the pipeline is unchanged. "Off", "down", and "declined" all 
   telemetry record. Budget *enforcement* + data-classification are deliberately deferred (see
   `docs/BACKLOG.md` G-AI-4 / G-AI-5).
 
+**6. Δ3a — semantic precedent (RC-1): a prior decision changes the recommendation.** With a store configured,
+`recommend_position` runs `[Rule → Knowledge → LLM]`: the Knowledge step embeds the Finding and retrieves
+semantically similar **past** Positions (a *different* CVE on the same component/bug-class) from the
+Operational Semantic Index, labeled into the prompt with a similarity score. Fastest proof — no DB, no model:
+
+  ```sh
+  go test -run TestDemoSemanticPrecedentChangesRecommendation ./internal/intelligence/adapters/wiring/
+  ```
+
+  It asserts the demo directly: a cold index recommends `affected`; after a similar `not_affected` precedent is
+  indexed, the retrieved precedent flips the recommendation to `not_affected` (and `PrecedentsUsed` on the
+  telemetry rises 0 → 1). The store + exactly-once bus population is proven under `embedded-postgres`
+  (`go test -tags=integration ./internal/intelligence/adapters/store/`). To run it live, set
+  `THEMIS_DATABASE_DSN` + `THEMIS_BUS_DATABASE_DSN` on the Intelligence node (INSTALLATION.md); the index is
+  **cold-start-safe** — until it warms up, the Gateway falls back to exact-CVE precedent, so behavior degrades
+  gracefully, never breaks. After changing `THEMIS_INTELLIGENCE_EMBED_MODEL`, restart once with
+  `THEMIS_INTELLIGENCE_REBUILD=1` to re-embed the whole index.
+
 ### Other services (per-context APIs)
 
 Each context is testable in isolation via its own API ([API.md](API.md)) — e.g. register a Release
