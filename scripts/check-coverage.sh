@@ -54,9 +54,12 @@ declare -a infra_pkgs=(
 	communication/adapters/http
 	communication/adapters/delivery
 	intelligence/adapters/provider
+	intelligence/adapters/embed
 	intelligence/adapters/engine
+	intelligence/adapters/index
 	intelligence/adapters/readapi
 	intelligence/adapters/admission
+	intelligence/adapters/store
 	intelligence/adapters/http
 	platform/eventbus
 	platform/observability
@@ -97,6 +100,7 @@ threshold_for() {
 		knowledge/adapters/store) echo 80; return ;;
 		governance/adapters/store) echo 80; return ;;
 		communication/adapters/store) echo 80; return ;;
+		intelligence/adapters/store) echo 80; return ;;
 	esac
 	for pkg in "${domain_pkgs[@]}"; do
 		if [[ "$pkg" == "$pkg_path" ]]; then

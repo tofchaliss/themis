@@ -31,14 +31,20 @@ type FaultlineView struct {
 // FixAvailable reports whether the Faultline has any known fixed version.
 func (f FaultlineView) FixAvailable() bool { return len(f.FixedVersions) > 0 }
 
-// PrecedentPosition is one of our own past Enterprise Positions on the SAME CVE from
-// another release, pulled into grounding as labeled context (Δ2 richer grounding, C6).
-// It is context, not instruction: the AI only reads it and the human still decides.
-// Ranking precedent by release-to-release delta is deferred (G-AI-3).
+// PrecedentPosition is one of our own past Enterprise Positions pulled into grounding as
+// labeled context. Δ2 pulls precedent on the SAME CVE from other releases (exact match,
+// Score 0); Δ3a's Knowledge Engine additionally retrieves SEMANTICALLY similar past decisions
+// — possibly a DIFFERENT CVE on the same component or bug-class — each with a cosine Score in
+// [0,1] (Book IV Ch 8, RC-1). It is context, not instruction: the AI only reads it and the
+// human still decides ("Gathering Is Not Knowing"). Ranking by release-to-release delta stays
+// deferred (G-AI-3).
 type PrecedentPosition struct {
 	ReleaseID string
 	Stance    string
 	Rationale string
+	SourceCVE string  // CVE of the precedent decision (may differ from the subject — Δ3a semantic precedent)
+	Component string  // representative component of the precedent decision (label)
+	Score     float64 // cosine similarity in [0,1] for a Δ3a retrieved precedent; 0 for a Δ2 exact-CVE precedent
 }
 
 // AssembledContext is the deterministic output of Context Construction (D5): exactly

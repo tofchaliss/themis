@@ -65,6 +65,10 @@ type EngineResult struct {
 	Model      string
 	TokensUsed int
 	Decision   *domain.RuleDecision // non-nil = a deterministic decision; nil = deferred / LLM path
+	// Precedents, when set by the Knowledge engine (Δ3a), are the semantically similar past
+	// Positions the Gateway merges into the grounding before the LLM step. A retrieval engine
+	// fills only this — no Raw, no Decision.
+	Precedents []domain.PrecedentPosition
 }
 
 // PromptRenderer builds the provider-facing prompt for a capability from the
@@ -93,6 +97,26 @@ type FaultlineReader interface {
 // costs no read; a read failure degrades to no precedent (never blocks the recommendation).
 type PrecedentReader interface {
 	GetPrecedents(ctx context.Context, faultlineID, excludeReleaseID string) ([]domain.PrecedentPosition, error)
+}
+
+// Embedder turns text into a dense vector for the Operational Semantic Index (KS2, Book IV
+// Chapter 8 / EDR-INTELLIGENCE-01 Rev 4, Δ3a). The Knowledge Engine embeds the subject
+// Finding's text to retrieve semantically similar past Positions; the population consumer
+// embeds each new decision. Confined to the adapters ring — a local Ollama embedder in
+// production, a deterministic fake in CI. Model() names the embedding model so the index can
+// be stamped and rebuilt on a model swap (R6).
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+	Model() string
+}
+
+// VectorIndex is the in-memory nearest-neighbour search over the Operational Semantic Index
+// (KS2, Δ3a). Search returns up to k past Positions most cosine-similar to the query vector,
+// excluding the subject's own release, each carrying its similarity Score. It is loaded from
+// the store on boot and kept fresh by the population consumer — operational and rebuildable
+// (D12), never truth.
+type VectorIndex interface {
+	Search(query []float32, k int, excludeReleaseID string) []domain.PrecedentPosition
 }
 
 // Authorizer is the pre-invocation authorization check (D10, Δ2 C7). A non-nil error

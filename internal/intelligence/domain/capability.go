@@ -8,6 +8,12 @@ type EngineKind string
 // EngineLLM is the generative-model engine — the only engine Δ1 builds.
 const EngineLLM EngineKind = "llm"
 
+// EngineKnowledge is the retrieval engine (Δ3a): it embeds the subject Finding's text and
+// searches the Operational Semantic Index (KS2, Book IV Ch 8) for semantically similar past
+// Enterprise Positions, enriching the grounding with precedent. It decides nothing — precedent
+// is context for the LLM step ("Gathering Is Not Knowing").
+const EngineKnowledge EngineKind = "knowledge"
+
 // Step is one node of a Capability's ExecutionPlan: which kind of engine runs and,
 // for the LLM engine, which prompt template the Gateway renders (D6). Δ1 plans have
 // exactly one LLM step.
