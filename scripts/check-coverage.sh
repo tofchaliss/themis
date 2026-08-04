@@ -57,6 +57,7 @@ declare -a infra_pkgs=(
 	intelligence/adapters/embed
 	intelligence/adapters/engine
 	intelligence/adapters/index
+	intelligence/adapters/inbound
 	intelligence/adapters/readapi
 	intelligence/adapters/admission
 	intelligence/adapters/store

@@ -60,6 +60,18 @@ func (c *PrecedentClient) GetPrecedents(ctx context.Context, faultlineID, exclud
 	return out, nil
 }
 
+// CurrentPosition returns the current Enterprise Position (stance + rationale) for a
+// (release, faultline) — used by Δ3a index population to label a precedent embedding. It reuses
+// the same find-by-key endpoint as GetPrecedents. found=false when that release has no Position
+// yet (or the finding is absent).
+func (c *PrecedentClient) CurrentPosition(ctx context.Context, release, faultline string) (stance, rationale string, found bool, err error) {
+	pos, ok, err := c.currentPosition(ctx, release, faultline)
+	if err != nil || !ok {
+		return "", "", false, err
+	}
+	return pos.Stance, pos.Rationale, true, nil
+}
+
 func (c *PrecedentClient) blastRadius(ctx context.Context, faultlineID string) ([]string, error) {
 	u := fmt.Sprintf("%s/api/v1/faultlines/%s/blast-radius", c.baseURL, url.PathEscape(faultlineID))
 	var releases []string
