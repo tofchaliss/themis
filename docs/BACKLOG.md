@@ -156,8 +156,10 @@ per-context follow-ups below.
   **FIX LANDED:** `querier(ctx)`/`exec(ctx)` seams in `internal/governance/adapters/store/inbox.go`; aggregate
   reads (`load`/`loadComponents`/`loadProposals`/`loadPositions`/`FindingsByFaultline`) + `SetBaseScore` now join
   the ambient inbox tx in `store.go`; regression `TestInboxTwoMutationsOnOneFindingConverge` (fails without the
-  fix with `concurrent modification`, passes with it); convention **R3** added to `CONVENTIONS.md`. VM re-test of
-  the UC-6 repro pending.
+  fix with `concurrent modification`, passes with it); convention **R3** added to `CONVENTIONS.md`. **VM re-test PASSED 2026-08-05** — the
+  live repro (a shared, critical CVE-2021-44228 `not_affected` VEX) produced 0 halts, the governance/knowledge
+  cursor advanced (51 -> 1363), and 2 system `not_affected` proposals landed on the R1+R2 findings; UC-6 now
+  completes end-to-end. Branch `fix/governance-enrichment-poison-halt` (732f3eb), pushed, PR-ready.
   Deterministic: on restart the Governance `knowledge`-stream reader re-processes the same
   `knowledge.faultline_enriched` envelope, fails `governance: concurrent modification` 5× (max retries), and
   **D8 poison-halts the whole stream** (envelope `198a567c…`, faultline `42ac1521…` = CVE-2021-45105). Restart
