@@ -87,7 +87,7 @@ Shipped and confirmed: **NVD watch (#61)**, **EPSS/KEV/ExploitDB sweep (#62)** �
 | **C3** | Effective-state / VEX score modifier | score scaled by outcome (FP ×0.1, confirmed ×1.2, resolved 0 — `state.go:46`) | absent; a not-affected/accepted finding is **not de-ranked** | MED | 🆕 |
 | **C4** | Accepted-risk TTL / auto-expiry | `accepted_until` required + `ProcessExpiredAcceptedRisk` reverts on expiry | stance exists, but **no timer/TTL/auto-revert**; time-boxed acceptance silently becomes permanent | MED | 🆕 |
 | **C5** | Assignee / team field on a Finding | `AssignedTo` on triage history + risk-context | Finding/Proposal/Position have no assignee — can't route/assign to a person or team | LOW-MED | 🆕 |
-| **C6** | Knowledge score consumed by Governance | n/a | Knowledge computes Priority+Score (#63) but the `FaultlineEnriched` seam drops the score; Governance ranks nothing by it | LOW | 🆕 (wiring) |
+| **C6** | Knowledge score consumed by Governance | n/a | **ADDRESSED 2026-08-05:** the score reaches Findings via BOTH `FaultlineEnriched`→`SetBaseScore` and (BUG-3, PR #87) the score riding `ComponentMatched` so a Finding is stamped at open; Governance materializes `base_score` and ranks by `effective_priority = base × blast` (C2). Deeper `residual_priority`/re-eval is GOV-14. | LOW | ✅ |
 
 ## D. Export / VEX / notifications
 
