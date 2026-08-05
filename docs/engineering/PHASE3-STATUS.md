@@ -270,6 +270,33 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 
 ## Next action (resume here)
 
+**2026-08-05 — from-scratch VM bring-up + two HIGH bug fixes (both merged to `main`).** A full cold-start
+deployment on the enterprise VM (Postgres → 7 DBs → build → the 6 nodes → Ollama `cyberpal20b` +
+`nomic-embed-text` → the Δ3a vector store), driven through real use cases (SBOM→Finding→`recommend_position`
+with semantic precedent→OpenVEX→vendor-VEX suppression→estate blast-radius→multi-format publish), surfaced,
+scoped, fixed, live-verified, and **merged** two defects — plus ran R5:
+
+- **BUG-1 (PR #86, on `main`)** — Governance poison-halted the `knowledge` stream on a shared-CVE
+  `faultline_enriched` carrying a VEX applicability: aggregate reads (`GetByID`→`load`) ran on the pool while
+  `Save` joined the inbox tx, so a 2nd same-envelope mutate never saw the 1st's uncommitted version →
+  `ErrConcurrent` never converged → D8 halt. Fix: `querier(ctx)`/`exec(ctx)` seams so reads/`SetBaseScore` join
+  the ambient inbox tx (mirrors the PR #59 Knowledge fix) + convention **R3** in `CONVENTIONS.md` (aggregate
+  reads in an event handler join the ambient tx). Live: 0 halts, cursor advanced, suppression proposals land.
+- **BUG-3 (PR #87, on `main`)** — `base_score` was materialized onto Findings **only** by `SetBaseScore` on
+  `faultline_enriched`, so a Finding born (via `component_matched`) on an already-enriched card was stranded at
+  0 — a critical CVE shown as priority 0. Fix: the card's composite score now rides the
+  `knowledge.component_matched` event (+ `.v1` schema `Score`) and Governance stamps it in `OpenOrUpdateFinding`
+  (guarded `>0`; `SetBaseScore` joins the inbox tx per BUG-1). Live: a fresh log4j release is born scored
+  (44228=90, 45046=90, 45105=70, others=40) instead of 0 — OSV scores, no NVD needed.
+- **R5 (task #10) run** — `make e2e-embed` on the VM Ollama confirmed **`nomic-embed-text` + `components+severity`**
+  (recall@1=1.00, MRR=1.00, ~46 ms); `+cve` neutral, `+description` **hurts** (recall@1 0.83). Detail:
+  `RAG-SESSION-2-SPIKE.md` §4. No embed-model change needed.
+- **Open (filed in `docs/BACKLOG.md`, decisions/config — not bugs):** DN-1 (`effective_priority` clamps at
+  100), DN-2 / **A2** (NVD *discovery* doesn't cover Maven→CPE and the watch doesn't backfill old CVEs — the
+  flat prioritization was BUG-3, not the feed), DN-3 (component-level embedding conflates distinct CVEs →
+  contradictory precedents → the AI honestly declines). **A2 (NVD as a real discovery source) is the next
+  substantive code fix if live prioritization + the dormant reactive Rule step are wanted.**
+
 **Current development is done and released as v0.4.0** (`6e03396`, tagged 2026-08-02). The whole pipeline
 (M2 Kernel/Registry · M6 Evidence · M7 Knowledge · M8 Governance · M9 Communication · M5 event bus · M4
 Intelligence Δ1/Δ2) plus the post-M5 parity/hardening work (opt-in feeds, EDR-SECURITY-01 auth,
@@ -300,8 +327,9 @@ re-narrate it here.
    A1–A6 committed + pushed to `origin/main` (`3825735`). **R5 harness built** — `make e2e-embed`
    (`internal/intelligence/adapters/embed/embed_eval_test.go`, opt-in `//go:build embed_eval`, SKIPS without
    Ollama) embeds a labeled component-grouped corpus with each candidate model + text composition and reports
-   recall@1/@3 + MRR + latency. **Still open: run it** on the Ollama box to confirm `nomic-embed-text`
-   (`RAG-SESSION-2-SPIKE.md` §4); build + tests run on the fake embedder, so only the *live* demo waits on it.
+   recall@1/@3 + MRR + latency. **RUN 2026-08-05** on the VM Ollama — `nomic-embed-text` + `components+severity`
+   confirmed (recall@1=1.00, MRR=1.00, ~46 ms; `+cve` neutral, `+description` hurts at 0.83); no model change
+   (`RAG-SESSION-2-SPIKE.md` §4).
    **Δ3b** (Python DSPy, only if needed) + **Δ4** (autonomy + LLMOps) deferred; two LOW freshness follow-ups
    filed in BACKLOG §C.
 3. **Intelligence Δ4 — autonomy + LLMOps.** The scheduled autonomous-analyst mode (advisory-only — pushes
