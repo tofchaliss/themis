@@ -58,6 +58,24 @@ Rules:
 - The commented example config is the artifact a reviewer reads to understand every knob; keep it current
   as options are added.
 
+## R3 — Aggregate reads inside an event handler join the ambient inbox transaction
+
+An inbound event handler runs its writes inside the consumer **inbox unit of work** (the exactly-once
+transaction, EB-06). Any aggregate **read** it performs — including the re-load in an optimistic
+load-apply-save retry — **must run on that same transaction**, not on the pool. Route reads through the
+store's `querier(ctx)` seam (returns the ambient tx when one rides the context, else the pool); the write
+seam is `Save` / `exec(ctx)`.
+
+**Why:** when one envelope mutates the *same* aggregate more than once (e.g. a `faultline_enriched` that
+both re-prioritizes and folds a VEX applicability onto one Finding), a committed pool-read cannot see the
+first mutate's uncommitted version bump, so the optimistic `WHERE version = prev` matches zero rows and
+`ErrConcurrent` **never converges** — the reader poison-halts the whole stream (D8). This is the third
+symptom of one root tension — the D7 correlation-tx stall, the PR #59 Knowledge shared-CVE halt, and the
+Governance enrichment halt (BUG-1). Treat "handler reads on the pool" as a defect.
+
+**Guard:** each context's store owns a regression test that mutates one aggregate twice within a single
+inbox envelope and asserts convergence (e.g. Governance's `TestInboxTwoMutationsOnOneFindingConverge`).
+
 ## How these apply per node
 
 Both rules are **shared infrastructure**, not re-implemented per context: one observability bootstrap

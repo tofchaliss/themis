@@ -110,3 +110,65 @@ func TestInboxRolledBackOnApplyError(t *testing.T) {
 		t.Errorf("failed apply left %d inbox rows, want 0 (claim rolled back)", got)
 	}
 }
+
+// TestInboxTwoMutationsOnOneFindingConverge is the regression for BUG-1 (the Governance
+// poison-halt): a single faultline_enriched that BOTH re-prioritizes (high severity) AND folds
+// a not_affected VEX applicability mutates the SAME Finding twice within one inbox transaction.
+// The aggregate reads must join that transaction (Store.querier) so the 2nd mutate's GetByID
+// sees the 1st's in-flight version bump and Save converges. Before the fix the 2nd mutate read
+// committed data on the pool, missed the uncommitted version, and ErrConcurrent never resolved
+// across the retry budget — the reader poison-halted the whole stream (D8). Handle must return
+// nil and both proposals (affected re-prioritize + not_affected suppression) must land.
+func TestInboxTwoMutationsOnOneFindingConverge(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+
+	gov := wiring.Wire(pool, noopPublisher{}, nil, "", 0)
+	inbox := store.NewInboxConsumer(pool, gov.Consumer)
+
+	// Open the Finding the enrichment will mutate twice.
+	match := envFor(t, "evt-match", "knowledge.component_matched", struct {
+		FaultlineID string
+		CVE         string
+		ReleaseID   string
+		Components  []struct{ PURL, Name, Version, Ecosystem string }
+	}{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1", ReleaseID: "rel-1",
+		Components: []struct{ PURL, Name, Version, Ecosystem string }{{"pkg:deb/debian/openssl@3", "openssl", "3", "deb"}},
+	})
+	if err := inbox.Handle(ctx, match); err != nil {
+		t.Fatalf("apply match: %v", err)
+	}
+	before := count(t, pool, "SELECT count(*) FROM finding_proposals")
+
+	// One enrichment that triggers BOTH mutate paths on the one Finding: high severity raises a
+	// re-prioritize proposal, and a not_affected applicability whose package covers the
+	// component raises a system suppression proposal.
+	enrich := envFor(t, "evt-enrich", "knowledge.faultline_enriched", struct {
+		FaultlineID     string
+		CVE             string
+		Severity        string
+		Score           int
+		Applicabilities []struct{ Package, Status, Justification string }
+	}{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: "high", Score: 70,
+		Applicabilities: []struct{ Package, Status, Justification string }{
+			{"pkg:deb/debian/openssl", "not_affected", "vulnerable_code_not_present"},
+		},
+	})
+	// The regression: before the fix this returned ErrConcurrent (D8 poison-halt); now it converges.
+	if err := inbox.Handle(ctx, enrich); err != nil {
+		t.Fatalf("enrichment with re-prioritize + applicability halted the stream (BUG-1): %v", err)
+	}
+
+	// Both mutate paths landed their proposals on the one Finding.
+	if got := count(t, pool, "SELECT count(*) FROM finding_proposals") - before; got < 2 {
+		t.Fatalf("expected 2 new proposals (affected re-prioritize + not_affected suppression), got %d", got)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM finding_proposals WHERE stance = 'not_affected'"); got != 1 {
+		t.Fatalf("system not_affected proposal not raised (got %d)", got)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM finding_proposals WHERE stance = 'affected'"); got != 1 {
+		t.Fatalf("re-prioritize affected proposal not raised (got %d)", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/kernel/event"
@@ -33,6 +34,41 @@ func (s *Store) beginOrJoin(ctx context.Context) (pgx.Tx, bool, error) {
 	return tx, true, err
 }
 
+// rowQuerier is the read surface shared by *pgxpool.Pool and pgx.Tx.
+type rowQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// querier returns the ambient inbox transaction as the read surface when one rides the
+// context, else the pool. Routing aggregate reads through it lets a handler that mutates the
+// SAME aggregate more than once within one envelope (e.g. an enrichment proposal, then a VEX
+// applicability proposal, on one Finding) read its own in-flight writes — the uncommitted
+// version bump — and converge. Without it the 2nd mutate's committed pool-read misses the
+// 1st's version bump, so `Save … WHERE version=prev` matches zero rows and ErrConcurrent
+// never resolves → D8 poison-halt (BUG-1). Mirrors the Knowledge store's PR #59 fix.
+func (s *Store) querier(ctx context.Context) rowQuerier {
+	if tx, ok := txFromCtx(ctx); ok {
+		return tx
+	}
+	return s.pool
+}
+
+// execer is the write surface shared by *pgxpool.Pool and pgx.Tx.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// exec returns the ambient inbox transaction as the write surface when one rides the context,
+// else the pool — so a non-aggregate write (SetBaseScore) commits atomically with the envelope
+// claim instead of autocommitting outside the unit of work.
+func (s *Store) exec(ctx context.Context) execer {
+	if tx, ok := txFromCtx(ctx); ok {
+		return tx
+	}
+	return s.pool
+}
+
 // Handler applies one delivered envelope. The inbound Consumer satisfies it; InboxConsumer
 // decorates it with exactly-once application.
 type Handler interface {
@@ -46,9 +82,12 @@ type Handler interface {
 //
 // The claim is per envelope, so an event that fans out to several aggregate writes (e.g. a
 // FaultlineEnriched re-evaluating every affected Finding) applies atomically under one dedup
-// key. Only the write path (Store.Save) joins the unit of work; reads run on the pool, which
-// is correct because an inbound apply must not read-its-own-writes within a single envelope
-// (its fan-out is over independent aggregates).
+// key. Both the write path (Store.Save / Store.exec) AND aggregate reads (Store.load via
+// Store.querier) join the unit of work, so a handler that mutates the SAME aggregate more than
+// once within one envelope reads its own in-flight writes and converges — an earlier revision
+// ran reads on the pool assuming the fan-out was always over independent aggregates, which the
+// enrichment handler (an enrichment proposal then a VEX applicability proposal on one Finding)
+// violated, poison-halting the stream (BUG-1).
 type InboxConsumer struct {
 	pool  *pgxpool.Pool
 	inner Handler

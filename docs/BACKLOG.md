@@ -114,6 +114,16 @@ per-context follow-ups below.
   populated but not yet consulted: a Position revise always re-embeds even when the subject text is unchanged
   (only the stance/rationale label moved). Gate the Ollama embed on a hash mismatch, updating the labels
   in place otherwise — saves an embed call per revise. Surfaced building A4 (2026-08-04).
+- [ ] **(LOW, design) Delta-3a — component-level embedding conflates distinct CVEs on one component, so
+  contradictory precedents cancel and the AI declines.** `embed.SubjectText` keys on component + severity
+  (deliberately excludes the CVE, so it matches by "what it is" — what makes cross-CVE precedent work). Side
+  effect: two different vulns on the same component embed near-identically and both retrieve as precedent. When
+  their enterprise stances differ, the retrieved set is self-contradictory and `recommend_position` honestly
+  returns `insufficient`. Verified 2026-08-05 (AI-P2): cold -> insufficient; one affected precedent -> affected;
+  affected + not_affected -> insufficient (tokens 834 -> 996 -> 1081 confirm the precedents were injected). Honest
+  under ambiguity, but retrieval PRECISION degrades as history diversifies -> more frequent declines at scale.
+  **Refinement:** enrich the embed text with vuln-class / CWE (ties to the R5 "+description" signal) or
+  filter/weight retrieved precedent by vuln-similarity, not just component (overlaps G-AI-3). Not a defect.
 
 - [x] **Knowledge consumer inbox (M5 EB-06) — DONE in Group 8.** Built alongside `cmd/knowledge`:
   `internal/knowledge/adapters/inbound` (decode `EvidenceRegistered` → correlation + Subscription),
@@ -140,6 +150,40 @@ per-context follow-ups below.
   `internal/knowledge/adapters/store/store.go` (`GetByCVE`/`load` + `Save`) and/or
   `internal/knowledge/app/correlate.go`. Surfaced 2026-07-30 during the end-to-end deployment.
   See [[feedback-backlog-surfaced-followups]].
+- [x] **(HIGH — FIXED 2026-08-05, code green/uncommitted) Governance poison-halts the `knowledge` stream on a
+  shared-CVE `faultline_enriched` — `concurrent modification` never converges. — SURFACED 2026-08-05 (from-scratch
+  VM bring-up, UC-6).**
+  **FIX LANDED:** `querier(ctx)`/`exec(ctx)` seams in `internal/governance/adapters/store/inbox.go`; aggregate
+  reads (`load`/`loadComponents`/`loadProposals`/`loadPositions`/`FindingsByFaultline`) + `SetBaseScore` now join
+  the ambient inbox tx in `store.go`; regression `TestInboxTwoMutationsOnOneFindingConverge` (fails without the
+  fix with `concurrent modification`, passes with it); convention **R3** added to `CONVENTIONS.md`. VM re-test of
+  the UC-6 repro pending.
+  Deterministic: on restart the Governance `knowledge`-stream reader re-processes the same
+  `knowledge.faultline_enriched` envelope, fails `governance: concurrent modification` 5× (max retries), and
+  **D8 poison-halts the whole stream** (envelope `198a567c…`, faultline `42ac1521…` = CVE-2021-45105). Restart
+  does **not** help (same cursor, same event); it blocks ALL further knowledge→governance flow (no new SBOM
+  yields Findings/Positions) until the cursor is advanced past it or the bug is fixed. **Trigger:** a CVE shared
+  across ≥2 releases (so `FindingsByFaultline` returns multiple Findings) **plus** a VEX-applicability enrichment,
+  so `ReactToEnrichment` fans `SetBaseScore` (bulk, version-bumping) + a per-Finding optimistic `mutate`
+  (enrichment proposal, then `reactToApplicability`'s system not_affected proposal) across several Findings — a
+  self-conflict window a single-release faultline never exercises. **Same class as the FIXED Knowledge shared-CVE
+  halt above (PR #59) but a different context** (Governance enrichment handler, not Knowledge correlation) — that
+  2026-07-30 fix did not cover this path. **ROOT CAUSE CONFIRMED 2026-08-05 (code trace):** `mutate` reads via
+  `repo.GetByID` -> `store.load` -> `s.pool` (committed, no tx) while `Save` does `beginOrJoin(ctx)` (joins the
+  inbox tx). `ReactToEnrichment` mutates the same Finding twice in one inbox tx (enrichment-proposal path AND
+  `reactToApplicability`): the 1st `mutate`'s `Save` bumps `version` V->V+1 uncommitted in the tx, the 2nd
+  `mutate`'s `GetByID` reads the pool (still committed V), so `Save ... WHERE version=V` hits 0 rows ->
+  `ErrConcurrent`, and every retry re-reads the pool at V -> never converges -> 5 fails -> D8 halt. **SCOPE
+  CONFIRMED:** a 542-component `oamp.json` correlation (211 shared-CVE findings, NO VEX) did NOT halt -> the
+  trigger needs the applicability's 2nd same-tx write, not a plain shared-CVE flood. **Fix (mirror PR #59):**
+  make aggregate reads join the ambient inbox tx (a ctx `querier(ctx)` seam behind
+  `load`/`loadProposals`/`loadPositions`/`GetByID`) so the 2nd in-tx read sees the in-flight version and
+  converges; alternatively fold the handler's per-Finding writes into one load-apply-save so each Finding mutates
+  once. Add a shared-CVE-`faultline_enriched`-with-applicability regression test. Touches
+  `internal/governance/app/service.go` (`ReactToEnrichment` / `reactToApplicability` / `SetBaseScore` + `mutate`)
+  and the Governance inbound consumer. **Repro:** upload one log4j SBOM to two releases, decide a Position on one,
+  upload a not_affected OpenVEX for a shared CVE → the Governance reader halts. See
+  [[feedback-backlog-surfaced-followups]].
 - [x] **(HIGH) Correlation ran its whole external-I/O fan-out inside the inbox transaction → cluster-wide
   bus stall. — FIXED 2026-08-01.** Root cause of "SBOM uploaded but no CVE entries captured": `InboxConsumer.
   Handle` opened one write transaction, then correlation made a per-component OSV/NVD HTTP call (`VulnsForPackage`)
