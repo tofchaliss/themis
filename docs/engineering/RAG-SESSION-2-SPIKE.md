@@ -130,7 +130,11 @@ citing them. This benchmark confirms the retrieval that powers that demo is fast
   8× headroom via goroutines). ANN/pgvector upgrade trigger is ~10⁵–10⁶, beyond the corpus.
 - **Persistence:** ✓ persist embeddings in a **plain Postgres table** (`float4[]`/`bytea`); load-on-boot is
   cheap, re-embed is not → we persist vectors. No pgvector → no test gap.
-- **Embedding model:** ⏳ eval pending Ollama; lean = `nomic-embed-text` (768). Run before Session 3
-  finalizes.
+- **Embedding model:** ⏳ eval RUN 2026-08-05 on the VM Ollama. `nomic-embed-text` confirmed —
+  same-component sibling retrieval **recall@1=1.00, MRR=1.00, ~46ms** for `components` and `components+severity`
+  (the production `SubjectText`); `+cve` is neutral (1.00), `+description` **hurts** (recall@1 0.83, ~52ms).
+  **Decision: keep `nomic-embed-text` + `components+severity`; do NOT add descriptions** — refutes the O4
+  "+description" hypothesis for component grouping. (A model bake-off vs mxbai/bge is still open but low-value:
+  nomic already scores a perfect recall@1.)
 - **Net:** the Session-1 front-runner (in-memory + plain-PG + hand-rolled Go) is **confirmed by data** on
   the search + persistence axes; only the embedding-model pick remains empirical.

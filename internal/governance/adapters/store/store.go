@@ -84,7 +84,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 		id, releaseID, faultlineID, cve, stage string
 		version                                int
 	)
-	row := s.pool.QueryRow(ctx, "SELECT id, release_id, faultline_id, cve, stage, version FROM findings WHERE "+where, args...)
+	row := s.querier(ctx).QueryRow(ctx, "SELECT id, release_id, faultline_id, cve, stage, version FROM findings WHERE "+where, args...)
 	if err := row.Scan(&id, &releaseID, &faultlineID, &cve, &stage, &version); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Finding{}, ErrNotFound
@@ -110,7 +110,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 }
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
-	rows, err := s.pool.Query(ctx,
+	rows, err := s.querier(ctx).Query(ctx,
 		`SELECT purl, name, version, ecosystem FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 }
 
 func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.GovernanceProposal, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT proposal_id, proposer_kind, proposer_id, stance, rationale, raised_at,
 		       status, decided_kind, decided_id, decided_at
 		FROM finding_proposals WHERE finding_id = $1 ORDER BY seq`, id)
@@ -165,7 +165,7 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 }
 
 func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at
 		FROM finding_positions WHERE finding_id = $1 ORDER BY version`, id)
 	if err != nil {
@@ -344,7 +344,7 @@ func materializedPosition(f domain.Finding) (*string, *int) {
 // FindingsByFaultline lists the ids of every Finding referencing a Faultline — the
 // FaultlineEnriched fan-out (D6).
 func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM findings WHERE faultline_id = $1 ORDER BY id`, faultlineID)
+	rows, err := s.querier(ctx).Query(ctx, `SELECT id FROM findings WHERE faultline_id = $1 ORDER BY id`, faultlineID)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +402,7 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 // SetBaseScore materializes Knowledge's CVE-intrinsic base score onto every Finding for a
 // Faultline (C6). It is a denormalized read-column update, independent of aggregate version.
 func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
-	_, err := s.pool.Exec(ctx,
+	_, err := s.exec(ctx).Exec(ctx,
 		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
 	return err
 }
