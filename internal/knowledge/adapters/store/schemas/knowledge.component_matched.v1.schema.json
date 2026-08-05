@@ -24,6 +24,7 @@
         }
       }
     },
+    "Score": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Card's CVE-intrinsic composite score at match time (C6); optional — 0 when an older payload omits it. Governance stamps base_score at finding-open (BUG-3)." },
     "OccurredAt": { "type": "string", "format": "date-time" }
   }
 }
