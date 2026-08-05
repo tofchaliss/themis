@@ -179,7 +179,10 @@ per-context follow-ups below.
   stamps `base_score` in `OpenOrUpdateFinding` (guarded `>0` so a pre-enrichment match never zeroes a live
   score; `SetBaseScore` joins the inbox tx per the BUG-1 fix, so it sees the just-saved Finding). Regressions:
   `TestInboxComponentMatchedStampsBaseScore` (integration) + `TestOpenOrUpdateFinding_StampsBaseScore` (unit),
-  both fail without the stamp. `make check-ci` green. See [[feedback-backlog-surfaced-followups]].
+  both fail without the stamp. `make check-ci` green. **VM re-test PASSED 2026-08-05** — a fresh log4j release's
+  findings are born scored (44228=90, 45046=90, 45105=70, others=40) instead of 0; OSV scores, no NVD needed.
+  On branch `fix/governance-enrichment-poison-halt` (0f05ff2) with BUG-1, PR #86. See
+  [[feedback-backlog-surfaced-followups]].
   Deterministic: on restart the Governance `knowledge`-stream reader re-processes the same
   `knowledge.faultline_enriched` envelope, fails `governance: concurrent modification` 5× (max retries), and
   **D8 poison-halts the whole stream** (envelope `198a567c…`, faultline `42ac1521…` = CVE-2021-45105). Restart
