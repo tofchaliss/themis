@@ -86,6 +86,7 @@ type componentMatchedDTO struct {
 	FaultlineID string         `json:"FaultlineID"`
 	CVE         string         `json:"CVE"`
 	ReleaseID   string         `json:"ReleaseID"`
+	Score       int            `json:"Score"` // card's CVE-intrinsic score at match time (C6); 0 when an older payload omits it.
 	Components  []componentDTO `json:"Components"`
 }
 
@@ -101,7 +102,7 @@ func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 	for _, c := range d.Components {
 		comps = append(comps, domain.MatchedComponent{PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem})
 	}
-	return app.InboundComponentMatched{FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Components: comps}
+	return app.InboundComponentMatched{FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Score: d.Score, Components: comps}
 }
 
 type faultlineEnrichedDTO struct {

@@ -163,7 +163,7 @@ func eq(a, b []string) bool {
 
 func TestOpenOrUpdateFinding_Create(t *testing.T) {
 	repo := newRepo()
-	id, err := writeSvc(repo).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-2024-1", []domain.MatchedComponent{comp("pkg:a")})
+	id, err := writeSvc(repo).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-2024-1", 0, []domain.MatchedComponent{comp("pkg:a")})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -182,11 +182,11 @@ func TestOpenOrUpdateFinding_AbsorbAndIdempotent(t *testing.T) {
 	repo := newRepo()
 	s := writeSvc(repo)
 	ctx := context.Background()
-	id, _ := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", []domain.MatchedComponent{comp("pkg:a")})
+	id, _ := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", 0, []domain.MatchedComponent{comp("pkg:a")})
 	createSaves := repo.saveCalls
 
 	// A new component on the same (release,faultline) is absorbed (no FindingOpened note).
-	if _, err := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", []domain.MatchedComponent{comp("pkg:b")}); err != nil {
+	if _, err := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", 0, []domain.MatchedComponent{comp("pkg:b")}); err != nil {
 		t.Fatal(err)
 	}
 	if repo.saveCalls != createSaves+1 {
@@ -201,7 +201,7 @@ func TestOpenOrUpdateFinding_AbsorbAndIdempotent(t *testing.T) {
 
 	// Re-delivery of an already-present component performs no write (idempotent).
 	saves := repo.saveCalls
-	if _, err := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", []domain.MatchedComponent{comp("pkg:a")}); err != nil {
+	if _, err := s.OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-2024-1", 0, []domain.MatchedComponent{comp("pkg:a")}); err != nil {
 		t.Fatal(err)
 	}
 	if repo.saveCalls != saves {
@@ -213,30 +213,30 @@ func TestOpenOrUpdateFinding_Errors(t *testing.T) {
 	ctx := context.Background()
 	comps := []domain.MatchedComponent{comp("pkg:a")}
 
-	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "", "fl-1", "CVE-1", comps); !errors.Is(err, app.ErrInvalidMatch) {
+	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "", "fl-1", "CVE-1", 0, comps); !errors.Is(err, app.ErrInvalidMatch) {
 		t.Errorf("empty release err = %v, want ErrInvalidMatch", err)
 	}
-	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "rel-1", " ", "CVE-1", comps); !errors.Is(err, app.ErrInvalidMatch) {
+	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "rel-1", " ", "CVE-1", 0, comps); !errors.Is(err, app.ErrInvalidMatch) {
 		t.Errorf("blank faultline err = %v", err)
 	}
 	// Empty id from the generator → NewFinding fails.
-	if _, err := app.NewFindingService(newRepo(), emptyIDs{}, fixedClock{}).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", comps); err == nil {
+	if _, err := app.NewFindingService(newRepo(), emptyIDs{}, fixedClock{}).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", 0, comps); err == nil {
 		t.Error("empty id: expected NewFinding error")
 	}
 	// Invalid component (empty PURL) on the create path.
-	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", []domain.MatchedComponent{{Name: "x"}}); err == nil {
+	if _, err := writeSvc(newRepo()).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", 0, []domain.MatchedComponent{{Name: "x"}}); err == nil {
 		t.Error("empty PURL: expected error")
 	}
 	// GetByKey error.
 	ge := newRepo()
 	ge.getByKeyErr = errors.New("db down")
-	if _, err := writeSvc(ge).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", comps); err == nil {
+	if _, err := writeSvc(ge).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", 0, comps); err == nil {
 		t.Error("get error: expected error")
 	}
 	// Non-concurrent save error.
 	se := newRepo()
 	se.saveErr = errors.New("write failed")
-	if _, err := writeSvc(se).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", comps); err == nil {
+	if _, err := writeSvc(se).OpenOrUpdateFinding(ctx, "rel-1", "fl-1", "CVE-1", 0, comps); err == nil {
 		t.Error("save error: expected error")
 	}
 }
@@ -244,15 +244,41 @@ func TestOpenOrUpdateFinding_Errors(t *testing.T) {
 func TestOpenOrUpdateFinding_ConcurrencyRetry(t *testing.T) {
 	repo := newRepo()
 	repo.conflictFor = 2 // first two saves conflict, third wins
-	id, err := writeSvc(repo).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-1", []domain.MatchedComponent{comp("pkg:a")})
+	id, err := writeSvc(repo).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-1", 0, []domain.MatchedComponent{comp("pkg:a")})
 	if err != nil || id == "" || repo.saveCalls != 3 {
 		t.Errorf("expected convergence after 3 saves: id=%q saves=%d err=%v", id, repo.saveCalls, err)
 	}
 	// Exhausted retries → ErrConcurrent.
 	ce := newRepo()
 	ce.conflictFor = 99
-	if _, err := writeSvc(ce).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-1", []domain.MatchedComponent{comp("pkg:a")}); !errors.Is(err, app.ErrConcurrent) {
+	if _, err := writeSvc(ce).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-1", 0, []domain.MatchedComponent{comp("pkg:a")}); !errors.Is(err, app.ErrConcurrent) {
 		t.Errorf("exhausted err = %v, want ErrConcurrent", err)
+	}
+}
+
+func TestOpenOrUpdateFinding_StampsBaseScore(t *testing.T) {
+	// A scored match stamps base_score at finding-open so a Finding on an already-enriched card
+	// is not stranded at 0 (BUG-3).
+	repo := newRepo()
+	if _, err := writeSvc(repo).OpenOrUpdateFinding(context.Background(), "rel-1", "fl-1", "CVE-1", 90, []domain.MatchedComponent{comp("pkg:a")}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if repo.baseScores["fl-1"] != 90 {
+		t.Errorf("base score at open = %d, want 90", repo.baseScores["fl-1"])
+	}
+	// A pre-enrichment match (score 0) must NOT stamp — it would zero a live score.
+	repo0 := newRepo()
+	if _, err := writeSvc(repo0).OpenOrUpdateFinding(context.Background(), "rel-2", "fl-2", "CVE-2", 0, []domain.MatchedComponent{comp("pkg:b")}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, set := repo0.baseScores["fl-2"]; set {
+		t.Error("score 0 must not stamp base_score (would zero a live score)")
+	}
+	// A SetBaseScore failure propagates out of OpenOrUpdateFinding.
+	se := newRepo()
+	se.setScoreErr = errors.New("boom")
+	if _, err := writeSvc(se).OpenOrUpdateFinding(context.Background(), "rel-3", "fl-3", "CVE-3", 90, []domain.MatchedComponent{comp("pkg:c")}); err == nil {
+		t.Error("SetBaseScore error must propagate")
 	}
 }
 

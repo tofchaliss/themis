@@ -50,6 +50,7 @@ type Match struct {
 	FaultlineID domain.FaultlineID
 	CVE         string
 	Component   InventoryComponent
+	Score       int // the card's composite score at match time (C6/BUG-3); rides the ComponentMatched event so Governance can stamp base_score at finding-open.
 	OccurredAt  time.Time
 }
 
@@ -151,7 +152,7 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
-			Component: item.Component, OccurredAt: s.clock.Now(),
+			Component: item.Component, Score: f.View().Score(), OccurredAt: s.clock.Now(),
 		})
 		if err != nil {
 			return newMatches, err

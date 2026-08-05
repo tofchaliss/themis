@@ -172,3 +172,33 @@ func TestInboxTwoMutationsOnOneFindingConverge(t *testing.T) {
 		t.Fatalf("re-prioritize affected proposal not raised (got %d)", got)
 	}
 }
+
+// TestInboxComponentMatchedStampsBaseScore is the regression for BUG-3: a component_matched
+// carries the card's score, so Governance stamps base_score on the Finding at open — a Finding
+// born on an already-enriched card is not stranded at 0 waiting for a faultline_enriched it may
+// never receive. Before the fix the finding was created at base_score 0 and only SetBaseScore
+// (on enrichment) could lift it.
+func TestInboxComponentMatchedStampsBaseScore(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+
+	gov := wiring.Wire(pool, noopPublisher{}, nil, "", 0)
+	inbox := store.NewInboxConsumer(pool, gov.Consumer)
+
+	match := envFor(t, "evt-match-scored", "knowledge.component_matched", struct {
+		FaultlineID string
+		CVE         string
+		ReleaseID   string
+		Score       int
+		Components  []struct{ PURL, Name, Version, Ecosystem string }
+	}{
+		FaultlineID: "fl-9", CVE: "CVE-2024-9", ReleaseID: "rel-9", Score: 90,
+		Components: []struct{ PURL, Name, Version, Ecosystem string }{{"pkg:deb/debian/x@1", "x", "1", "deb"}},
+	})
+	if err := inbox.Handle(ctx, match); err != nil {
+		t.Fatalf("apply match: %v", err)
+	}
+	if got := count(t, pool, "SELECT coalesce(max(base_score),0) FROM findings WHERE faultline_id='fl-9'"); got != 90 {
+		t.Fatalf("base_score at finding-open = %d, want 90 (BUG-3: the score must ride the match)", got)
+	}
+}

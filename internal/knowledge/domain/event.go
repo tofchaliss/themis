@@ -67,7 +67,11 @@ type ComponentMatched struct {
 	CVE         string
 	ReleaseID   string
 	Components  []MatchedComponent
-	OccurredAt  time.Time
+	// Score is the card's CVE-intrinsic composite score (0–100) at match time (C6). Carried so
+	// Governance can stamp base_score at finding-open — otherwise a Finding born on an
+	// already-enriched card is stranded at 0 until the next enrichment event (BUG-3).
+	Score      int
+	OccurredAt time.Time
 }
 
 // NewFaultlineCreated builds the event for a newly created card.
@@ -108,6 +112,7 @@ func NewComponentMatched(f Faultline, releaseID string, components []MatchedComp
 		CVE:         f.CVE().String(),
 		ReleaseID:   releaseID,
 		Components:  append([]MatchedComponent(nil), components...),
+		Score:       f.View().Score(),
 		OccurredAt:  at.UTC(),
 	}
 }

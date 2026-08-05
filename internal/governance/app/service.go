@@ -90,7 +90,7 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 // path for a Finding; a new Finding starts Identified with no Position, emitting
 // FindingOpened. Re-delivery is idempotent: an existing Finding absorbs only new components
 // and, if nothing changed, performs no write. Retries on optimistic-concurrency conflicts.
-func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, releaseID, faultlineID, cve string, comps []domain.MatchedComponent) (domain.FindingID, error) {
+func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, releaseID, faultlineID, cve string, baseScore int, comps []domain.MatchedComponent) (domain.FindingID, error) {
 	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(faultlineID) == "" {
 		return "", ErrInvalidMatch
 	}
@@ -133,6 +133,15 @@ func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, releaseID, fau
 
 		switch err := s.repo.Save(ctx, f, created, prev, notes); {
 		case err == nil:
+			// Stamp the CVE-intrinsic base score onto the (possibly brand-new) Finding so a
+			// Finding opened on an already-enriched card is not stranded at 0 (BUG-3). Guarded
+			// on >0 so a pre-enrichment match (card not yet scored) never zeroes a live score;
+			// SetBaseScore joins the inbox tx, so it sees this just-saved Finding.
+			if baseScore > 0 {
+				if err := s.repo.SetBaseScore(ctx, faultlineID, baseScore); err != nil {
+					return "", err
+				}
+			}
 			return f.ID(), nil
 		case errors.Is(err, ErrConcurrent):
 			continue

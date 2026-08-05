@@ -276,6 +276,7 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 	event := domain.ComponentMatched{
 		FaultlineID: m.FaultlineID, CVE: m.CVE, ReleaseID: m.ReleaseID,
 		Components: []domain.MatchedComponent{{PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version, Ecosystem: m.Component.Ecosystem}},
+		Score:      m.Score,
 		OccurredAt: m.OccurredAt.UTC(),
 	}
 	payload, err := json.Marshal(event)

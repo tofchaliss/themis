@@ -160,6 +160,29 @@ per-context follow-ups below.
   live repro (a shared, critical CVE-2021-44228 `not_affected` VEX) produced 0 halts, the governance/knowledge
   cursor advanced (51 -> 1363), and 2 system `not_affected` proposals landed on the R1+R2 findings; UC-6 now
   completes end-to-end. Branch `fix/governance-enrichment-poison-halt` (732f3eb), pushed, PR-ready.
+- [x] **(HIGH — FIXED 2026-08-05, code green) Governance base_score not materialized onto findings born on an
+  already-enriched Faultline — silent mis-prioritization. — FOUND 2026-08-05 (BUG-3, DN-2 exploration).** `SetBaseScore` runs only on a
+  `knowledge.faultline_enriched` event (C6). A Finding opened by `component_matched` for a Faultline that was
+  enriched earlier receives no fresh enrichment event, so it is stranded at `base_score = 0` even though the
+  card carries a real score. **Evidence:** the CVE-2021-44228 card reads `score 90 / severity critical (OSV)`,
+  yet across 4 releases the findings read `90, 90, 0, 0` — the two earliest (born while the card was enriching)
+  scored, the two later ones (settled card) did not. `effective_priority = base x blast`, so these findings
+  read priority 0 — a critical CVE shown as lowest priority. NOT OSV sparsity (OSV scored it 90) and NOT NVD
+  (the score already exists) — a materialization-ordering gap. **Fix options:** (a) `component_matched` carries
+  the card's current score so Governance stamps `base_score` in `OpenOrUpdateFinding`; (b) Governance reads the
+  card score via the Knowledge read-API at finding-open; (c) Knowledge re-emits a lightweight score on every new
+  match. The exact `faultline_enriched` re-emit trigger needs a code trace. Touches
+  `internal/governance/app/service.go` (`OpenOrUpdateFinding`) and/or the Knowledge correlation emit path.
+  Surfaced chasing DN-2 — the flat prioritization is this gap, not the feeds. **FIX LANDED 2026-08-05:** the
+  card's composite score now rides the `knowledge.component_matched` event (Knowledge `domain/event.go` +
+  `app/correlate.go` + `adapters/store/store.go` + the `.v1` schema gains an optional `Score`); Governance
+  stamps `base_score` in `OpenOrUpdateFinding` (guarded `>0` so a pre-enrichment match never zeroes a live
+  score; `SetBaseScore` joins the inbox tx per the BUG-1 fix, so it sees the just-saved Finding). Regressions:
+  `TestInboxComponentMatchedStampsBaseScore` (integration) + `TestOpenOrUpdateFinding_StampsBaseScore` (unit),
+  both fail without the stamp. `make check-ci` green. **VM re-test PASSED 2026-08-05** — a fresh log4j release's
+  findings are born scored (44228=90, 45046=90, 45105=70, others=40) instead of 0; OSV scores, no NVD needed.
+  On branch `fix/governance-enrichment-poison-halt` (0f05ff2) with BUG-1, PR #86. See
+  [[feedback-backlog-surfaced-followups]].
   Deterministic: on restart the Governance `knowledge`-stream reader re-processes the same
   `knowledge.faultline_enriched` envelope, fails `governance: concurrent modification` 5× (max retries), and
   **D8 poison-halts the whole stream** (envelope `198a567c…`, faultline `42ac1521…` = CVE-2021-45105). Restart

@@ -17,6 +17,7 @@ type InboundComponentMatched struct {
 	CVE         string
 	ReleaseID   string
 	Components  []domain.MatchedComponent
+	Score       int // CVE-intrinsic base priority 0–100 (C6) of the card at match time; stamped onto the Finding at open so it is not stranded at 0 on an already-enriched card (BUG-3).
 }
 
 // InboundFaultlineEnriched is Knowledge's FaultlineEnriched fact: a Faultline's enterprise
@@ -51,7 +52,7 @@ func NewCoordinator(svc *FindingService) *Coordinator { return &Coordinator{svc:
 
 // OnComponentMatched opens-or-updates the (Release, Faultline) Finding for a match (D5).
 func (c *Coordinator) OnComponentMatched(ctx context.Context, m InboundComponentMatched) error {
-	_, err := c.svc.OpenOrUpdateFinding(ctx, m.ReleaseID, m.FaultlineID, m.CVE, m.Components)
+	_, err := c.svc.OpenOrUpdateFinding(ctx, m.ReleaseID, m.FaultlineID, m.CVE, m.Score, m.Components)
 	return err
 }
 
