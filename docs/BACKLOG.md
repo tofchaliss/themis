@@ -24,6 +24,37 @@ per-context follow-ups below.
 
 ---
 
+### 0. Cluster index — read this before picking work
+
+**Added 2026-08-06.** The item list below is organized by *where code lives*, which is right for finding
+things and wrong for deciding what to do. 36 open items resolve to **9 problems**. Fix a cluster, not an
+item — several entries in each cluster close together, and some close for free.
+
+Ordered by priority. "Measured" means the claim rests on an observation from a running system, not a
+code reading.
+
+| # | Cluster | Priority | What is actually wrong | Items |
+|---|---|---|---|---|
+| **C1** | **Feed enrichment is silently blind** | **P0** | No card in any deployment carries authoritative NVD severity, so `base_score`, `priority` and triage order all rest on OSV alone — and nothing reports a problem. *Measured 2026-08-06.* | NVD-WATCH-1 · NVD by-CVE backfill · feed-health-after-poll · feed-health-omits-OSV · CVSS v4.0 in ACLs · Wolfi unmapped · (PARITY-GAP A2) |
+| **C2** | **Governance can decide, but has nothing to decide with** | **P1** | No policy is wired anywhere, so auto-accept never fires and the T4 bar is untestable; posture priority ignores decisions already taken. The governed road exists and is unpaved. | TRUST-7 · posture-ignores-stance · per-Finding blast multiplier · structured AI-proposal fields · accepted-risk expiry |
+| **C3** | **Believed-correct, never demonstrated** | **P1** | Assurance gap. The version-range verdict, the four-context pipeline, and store fault paths have no end-to-end coverage; a regression in any would be silent. | TRUST-9 · SBOM→published-VEX e2e · store fault-injection · CI pipeline e2e · PR-gate e2e blind spot |
+| **C4** | **AI output is legible to machines, not to humans** | **P2** | We cannot explain an AI refusal, and the narrative a human decides on is the least-verified field in it. Blocks operating the AI seam, not the model itself. | TRUST-6 · TRUST-8 · G-AI-2 |
+| **C5** | **Trust vocabulary is hand-waved at three edges** | **P2** | The model is sound in the middle; applicabilities, the AI→Knowledge source, and the withdrawal path each carry a stated rather than sourced class, and the source table is maintained by hand. | TRUST-1 · TRUST-2 · TRUST-3 · TRUST-4 |
+| **C6** | **Published artifacts are not round-trippable** | **P2** | Themis cannot re-ingest its own OpenVEX, and identifies products by bare UUID. Poor for a standards-based platform whose output is the product. | VEX round-trip mismatch · OpenVEX bare-UUID product |
+| **C7** | **Observability is half-wired** | **P2** | Logs only — no traces, no metrics. Three separate findings on 2026-08-06 were caused by a missing signal rather than by wrong logic. | OTel traces + metrics · (the reporting halves of NVD-WATCH-1 and TRUST-6) |
+| **C8** | **AI harness build-out** | **P3** | Roadmap, not defects. Keep separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a re-embed / text_hash / component-embedding |
+| **C9** | **Papercuts and unbuilt features** | **P3** | Individually trivial. Several are one-line fixes that have been open for weeks purely because nobody batched them. | port collision · registry self-migrate · platform/uow · TRUST-5 dead config · GH Actions Node 20 · Communication channels · auto-publish policy · glossary · tracer-bullet reslice |
+
+**Suggested next three moves:** (1) fix **C1** — it invalidates the priority numbers every other feature is
+read through; (2) sweep the trivial half of **C9** in one PR to shrink the list by ~6; (3) take **C2**,
+which needs a policy *decision* before any code and so has the longest lead time.
+
+**Filing rule going forward:** a new item names its cluster, and states whether its claim is **measured**
+or **read from code**. Three items in C1 were filed separately over three weeks describing one defect from
+three angles, and two of them proposed fixes that would not have worked.
+
+---
+
 ### A. Milestones not yet implemented (in dependency order)
 
 - [x] **M4 Δ1 — Intelligence (AI Gateway) walking skeleton** — `phase3-intelligence`, `EDR-INTELLIGENCE-01`
@@ -564,6 +595,151 @@ per-context follow-ups below.
   Governance** rather than a fact carried from the source. Move it onto
   `knowledge.faultline_superseded.v1` (additively, as `faultline_enriched` did in group 3) so it reflects
   what actually drove the supersession. **Scope:** LOW now the regression is closed.
+
+- [ ] **TRUST-6 — `business_invalid` discards *which* Grounding Verification check failed.**
+  _(Surfaced during the `phase3-trust-model` VM verification run, 2026-08-06.)_
+  `domain.Validator.ValidateBusiness` returns a fully-formed error naming the failure — wrong `finding_id`
+  echo, confidence outside `[0,1]`, disallowed stance, or ungrounded evidence ref — but
+  `app.Gateway` maps every one of them to the single constant `ReasonBusinessInvalid` and drops `verr`
+  (`gateway.go:294-297`). The outcome telemetry therefore records *that* the AI output was refused and never
+  *why*. On a live VM this made a real 204 undiagnosable from logs: `recommend_position` reached
+  `cyberpal20b:latest`, returned 1182 tokens in 40s, and was refused — with no way to tell a hallucinated
+  UUID from a hallucinated evidence ref without re-running against different subjects to infer it.
+  **Why it matters beyond convenience:** these four checks fail for opposite reasons. A wrong `finding_id`
+  is a *model-capability* problem (fix: smaller ids in the prompt, or a stricter response schema); an
+  ungrounded ref is a *grounding* problem (fix: the projection is too thin); a disallowed stance is a
+  *prompt/capability-contract* problem. Collapsing them hides which lever to pull, and G-AI-2 ("can't
+  determine is an improvement signal") depends on exactly this signal being legible.
+  **Fix:** carry the validator's error into the outcome as a `detail` field alongside `Reason` — telemetry
+  only, never the API response (the 204 must stay opaque, see the advisory-AI invariant). Redact before
+  emitting, per R1. **Where it plugs in:** `internal/intelligence/app/gateway.go` (`Outcome`),
+  `internal/intelligence/domain/validate.go` (already produces the text). **Dep:** none.
+  **Scope:** LOW-MEDIUM — small change, disproportionate diagnostic value.
+
+- [ ] **TRUST-7 — No auto-accept policy is wired in any composition root, so the constitutional bar is
+  end-to-end unobservable.** _(Surfaced during the `phase3-trust-model` VM verification run, 2026-08-06.)_
+  `cmd/governance/main.go` calls `app.Wire(...)` with **no `policies...`**, so `FindingService.policies` is
+  empty on every deployed node. Consequences: stage 2 of `raiseAndMaybeAutoAccept` never fires, so nothing is
+  ever auto-accepted; and the T4 constitutional bar in stage 1 — the headline decision of EDR-TRUST-01 —
+  produces an outcome **indistinguishable** from "no policy matched" (both leave the proposal open). The bar
+  is proven by unit tests and cannot be demonstrated on a running system.
+  **Why open rather than a defect:** which stances a policy may auto-accept, and under whose authority, is a
+  Governance-owned business decision that no EDR has taken yet — shipping a default would be inventing
+  enterprise policy in a composition root. `PolicyRule` already restricts auto-accept to open,
+  system-raised proposals (the authority axis, T12), so the mechanism is ready; only the configuration is
+  absent. **Fix:** decide the default policy set (candidate: auto-accept `system`-raised `not_affected`
+  resting on non-Inferred evidence, matching the EDR-VEX-01 Phase 2 suppression overlay), express it as R2
+  self-documented config rather than a hardcoded literal, and wire it in `cmd/governance`.
+  **Where it plugs in:** `cmd/governance/main.go` + `deploy/node.env.example`.
+  **Dep:** needs a policy decision before code. **Scope:** MEDIUM — blocks demonstrating T4/T6 on a
+  live system and leaves the VEX auto-suppression path dormant.
+
+- [ ] **TRUST-8 — The AI rationale a human reads is the least-verified field in the proposal.**
+  _(Observed on a live model during the `phase3-trust-model` VM verification run, 2026-08-06.)_
+  T8 Grounding Verification checks the **structured** `evidence[].ref` array by set membership against the
+  `AssembledContext` (`ac.Grounds(ev.Ref)`), and Governance's Business Verification checks the same refs with
+  `f.Vouches(ref)`. Neither examines the free-text `reasoning` field — correctly, since prose cannot be
+  set-membership-checked. **Observed instance:** `cyberpal20b:latest` produced a valid proposal for
+  `CVE-2026-41842` on finding `3c4c08b3…` whose two evidence refs both correctly cited faultline
+  `a38d9c32…` and passed every stage — while its `reasoning` stated the component was "included in the
+  release ee006ff7-f278-496e-8b31-ff0aba181db3". The Finding's actual release is `007de00e…`; `ee006ff7…` is
+  an unrelated release from a prior day that the model was never given. **Why it matters:** the rationale is
+  what a human reads when exercising the T4 decision the constitution reserves for them, so the most
+  persuasive part of the output carries the weakest guarantee, and nothing distinguishes it from the
+  verified refs at the point of decision. **This is not a trust-model defect** — the proposal is `Inferred`,
+  barred from auto-acceptance, and a human decided; the safety net held. It is a *presentation* gap.
+  **Candidate fixes (not yet chosen):** (a) render `evidence[].ref` as the primary UI/report artifact and the
+  narrative as clearly-secondary; (b) post-hoc scan the rationale for identifier-shaped tokens
+  (UUIDs, CVE ids, PURLs) not present in the grounding set and attach a warning to the proposal —
+  cheap, deterministic, and catches exactly this class; (c) prompt the model to reference only ids it cites
+  in `evidence[]`. Option (b) is preferred: it is verifiable rather than hopeful. **Where it plugs in:**
+  `internal/intelligence/domain/validate.go` (a rationale-scan alongside `ValidateBusiness`) +
+  the Communication serializers that render a rationale. **Dep:** none. **Scope:** MEDIUM — no correctness
+  impact today, direct impact on human decision quality.
+
+- [ ] **TRUST-9 — The version-range verdict (T5) fires on exactly one transition — "no usable range at
+  correlation, usable range later" — and nothing demonstrates it end-to-end.** _(Established during the
+  `phase3-trust-model` VM verification run, 2026-08-06.)_ Two independent gates evaluate the same predicate
+  at different times, and the first one starves the second:
+  1. `knowledge/app/correlate.go:143` — `ApplyCorrelation` **skips `RecordMatch`** when
+     `affected.Applicability(version) == RangeOutOfRange`, so no Match, and therefore **no Finding**, is
+     ever created for a provably out-of-range component.
+  2. `governance/app/service.go` — `reactToVersionRange` raises its system `not_affected` proposal only when
+     `domain.ProvablyOutOfRange(f.Components(), sig.AffectedRanges)` holds for **every** matched component
+     of an existing Finding.
+  Since (1) guarantees each Finding's components were *not* provably out of range at correlation time, (2)
+  can only become true via one specific transition. `value.AffectedRange.Applicability` returns
+  `RangeUndecidable` when `hasUsableConstraint()` is false, and correlation skips **only** on
+  `RangeOutOfRange` — so a card with no usable range still produces a Match and a Finding. When a usable
+  range arrives later and excludes the component, the verdict flips `Undecidable → OutOfRange` and the
+  proposal is raised. That is precisely the case `ProvablyOutOfRange`'s own doc comment names: "a Finding
+  created BEFORE the range was known, which correlation's own gate (which only runs at match time) will
+  never revisit."
+  **What cannot trigger it — and this is the part that is easy to get wrong:** a range *narrowing*.
+  `Reconcile` builds `AffectedRanges` as the **sorted union** across contributing sources, and
+  `AffectedRange.Matches` is satisfied by any group. A union only ever widens, so once a usable range
+  admitted a component, no later evidence can exclude it. Writing the e2e test around "a higher-precedence
+  feed refines an over-broad range" would therefore test a transition the reconciliation model makes
+  impossible. **Confirmed on the VM:** across 237
+  faultlines, 196 Findings, and successful OSV + EPSS/KEV + NVD enrichment,
+  `select count(*) from finding_proposals where proposal_id like 'range:%'` returned **0**. Every system
+  `not_affected` came from `vex-applicability` instead.
+  **Why this is not simply a defect:** the two gates are complementary by design — Knowledge's is
+  *pre-Finding noise suppression*, Governance's is *post-Finding governed retraction* that must travel the
+  proposal road rather than silently deleting a Finding a human may already have decided on. Both are
+  correct. **What is genuinely open:** (a) there is **no test or demo path** that exercises the Governance
+  gate end-to-end, so a regression there would be silent — the unit tests cover `ProvablyOutOfRange` but
+  nothing covers the wave that triggers it; (b) it is unverified how often ranges actually narrow in
+  practice, so the path's real-world reachability is unmeasured; (c) if narrowing is rare, T5's
+  "Deterministic Inference precedes AI" claim rests on a path that seldom runs.
+  **Fix:** add an integration/e2e scenario that correlates a Finding while its card carries **no usable
+  affected range** (so correlation's gate defers on `RangeUndecidable`), then folds a proposal that supplies
+  a usable range excluding the installed version, and asserts a `range:` proposal appears carrying the range
+  group's trust class. Land it in `tests/pipeline` (it needs two waves, so it is not a unit test). Then
+  instrument how many `range:` proposals real deployments raise — on a deployment where discovery always
+  arrives with ranges attached (OSV), the answer may legitimately be zero.
+  **Where it plugs in:** `tests/pipeline/`, `internal/governance/app/service.go` (telemetry counter).
+  **Dep:** none. **Scope:** MEDIUM — the code is believed correct, the assurance is missing.
+
+- [ ] **NVD-WATCH-1 — The modified-since watch silently examines ~5% of its window and reports success.**
+  _(Found on a live VM during the `phase3-trust-model` verification run, 2026-08-06 — a pre-existing feed
+  defect, unrelated to the trust model.)_ `NVDClient.ChangedSince` pages with `nvdPageSize = 2000` and
+  `nvdMaxPages = 10`, so **one poll reads at most 20,000 records**. Measured against the live NVD API, a
+  120-day window currently holds **356,223** modified CVEs — the watch therefore covers **5.6%** of it, takes
+  whatever NVD happens to return first, and exits the loop with **no error, no warning, and no log line**
+  (`for page := 0; page < nvdMaxPages; page++` simply ends). `watchLoop` then calls `recordFeed(health,
+  "nvd", nil, …)`, so `GET /feeds` reports `status: healthy`, and because `watchLoop` logs only `if n > 0`,
+  a truncated poll that folded nothing is **completely silent**.
+  **Observed consequence:** with 237 carded CVEs and NVD + EPSS/KEV both enabled, the watch folded **0**
+  cards across three successful polls (including a full 120-day window after a deliberate watermark reset).
+  `CVE-2021-44228` is carded and was modified `2026-06-17` — inside the window — and was still never
+  enriched. Every card's headline stayed `severity_source: osv`, so **no card in the deployment has
+  authoritative NVD CVSS**, which is the entire purpose of the watch. This is very likely the real mechanism
+  behind the older "A2 NVD returns 0" observation (2026-07-31), which was diagnosed as a discovery problem.
+  **Worse, the watermark advances anyway:** `WatchService` reads `since` from `feed_health.last_success_at`,
+  which is written on any non-error poll. So a truncated poll **advances the watermark past records it never
+  read**, and those records are never revisited — the gap is permanent, not eventually-consistent.
+  **Fix (in order):** (1) detect the cap — when the loop exits with `startIndex < resp.TotalResults`, that is
+  a truncated poll; (2) **do not advance the watermark** on a truncated poll, or advance it only to the
+  last-modified timestamp actually consumed, so the next poll resumes rather than skips; (3) log
+  `discovered` alongside `folded` and surface truncation in feed health as a distinct state (`healthy` is a
+  lie here); (4) reconsider the bound itself — 20,000 is not a meaningful fraction of a 120-day NVD window,
+  so either raise it substantially, narrow the default window, or drive the watch from the carded CVE set
+  (a per-CVE `cveId` fetch for the ~237 cards is bounded by the estate rather than by NVD's churn, which is
+  what D5's relevance bound actually implies).
+  Option (4)-by-carded-set is the strongest: it makes the cost proportional to the enterprise, not to the
+  internet — and it is already filed independently as **"Knowledge — NVD by-CVE backfill (targeted
+  enrichment)"** (§C, surfaced 2026-07-30), which proposed `FetchByCVEID` as an *addition* to the watch.
+  This finding upgrades that item from a nice-to-have to the **primary** fix: the watch is not merely
+  missing cards outside the window, it is missing 94% of the cards *inside* it.
+  **Corrects a neighbouring item:** "(LOW) Feed-health records only *after* a full poll" (§C, 2026-07-31)
+  states the first 120-day poll takes "~12 min". Measured 2026-08-06, a full-window poll completed in
+  **under 60 seconds** — precisely *because* it truncates at 20,000 records. The slowness that item
+  describes was never the real behaviour; the speed is the symptom.
+  **Where it plugs in:** `internal/knowledge/adapters/feed/nvd_client.go` (`ChangedSince`),
+  `internal/knowledge/app/watch.go` (watermark advance), `cmd/knowledge/main.go` (`watchLoop` logging).
+  **Dep:** none. **Scope:** HIGH — the NVD watch is currently non-functional in any deployment whose CVEs
+  are not in the first 20,000 records of the window, and it fails silently while reporting healthy.
 
 ---
 
