@@ -7,14 +7,28 @@
 
 ## 1. Trust vocabulary in the kernel (T2 · T3)
 
-- [ ] 1.1 `internal/kernel/value/trust.go`: `TrustClass` (`Observed` < `Asserted` < `Inferred`), `Valid()`,
-  ordering, and a monotonic `Max(...)` that returns the highest-risk class. Stdlib-only.
-- [ ] 1.2 Document the criterion **on the type**: *derivable vs declared* — can this be re-derived, or must
-  someone be believed? Include the SBOM and vendor-`not_affected` cases as the two calibrating examples.
-- [ ] 1.3 Property test (`rapid`): `Max` is commutative, associative, idempotent, and **never returns a
-  lower class than any input** (monotonicity is the invariant the whole model rests on).
-- [ ] 1.4 Register the package in `scripts/check-coverage.sh` (**kernel tier = 100%**).
-- [ ] 1.5 Gate: `make check-ci` green. **No behaviour change** — this group is pure addition.
+- [x] 1.1 `internal/kernel/value/trust.go`: `TrustClass` (`Observed` < `Asserted` < `Inferred`), `Valid()`,
+  ordering, and a monotonic `Max(...)` that returns the highest-risk class. Stdlib-only. — named
+  **`MaxTrust`**, not `Max`: every top-level func in this package names its concept (`ParseSeverity`,
+  `CompareVersions`), and `value.Max(…)` would say nothing about trust at the call site. Two safety choices:
+  the signature is `MaxTrust(first, rest...)` so an **empty** argument list is impossible — a variadic-only
+  form would return the *most trusted* class for no evidence, the exact failure T3 exists to prevent — and an
+  unrecognized class **ranks highest** and normalizes to `TrustInferred`, so a malformed value can never be
+  mistaken for a trusted one.
+- [x] 1.2 Document the criterion **on the type**: *derivable vs declared* — can this be re-derived, or must
+  someone be believed? Include the SBOM and vendor-`not_affected` cases as the two calibrating examples. —
+  both examples are on the type doc, with the "self-assertion is not observation" corollary.
+- [x] 1.3 Property test (`rapid`): `Max` is commutative, associative, idempotent, and **never returns a
+  lower class than any input** (monotonicity is the invariant the whole model rests on). —
+  `trust_property_test.go`, five properties (the four above plus *always returns a valid class*), and the
+  generator **includes malformed values** because that is where a silent downgrade would hide. Plus a
+  worked unit test of the laundering case: one Inferred input among three Observed still yields Inferred.
+- [x] 1.4 Register the package in `scripts/check-coverage.sh` (**kernel tier = 100%**). — **no change
+  needed**: `kernel/value` is already registered in `domain_pkgs` at the 100% tier, and this adds a file to
+  that existing package rather than a new one.
+- [x] 1.5 Gate: `make check-ci` green. **No behaviour change** — this group is pure addition. — exit 0;
+  `kernel/value` **100.0%** (`trust.go` 100% per-func); 51 packages over threshold. One lint fix on the way:
+  staticcheck `QF1001` on a negated conjunction in the test.
 
 ## 2. Source → class mapping in Knowledge (T2)
 
