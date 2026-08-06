@@ -32,14 +32,63 @@ func BlastMultiplier(uniqueCustomers, cap int) float64 {
 }
 
 // EffectivePriority scales a CVE-intrinsic base score (0–100) by the blast multiplier and
-// clamps to 100 — the release-scoped priority a human triages by.
+// clamps to 100 — how bad this is here, **regardless of what was decided** (D14).
 func EffectivePriority(base int, mult float64) int {
-	v := int(float64(base)*mult + 0.5)
-	if v > 100 {
+	return clampPriority(float64(base) * mult)
+}
+
+// DefaultMitigatedWeight is the stance weight for `mitigated` when no operator override is set
+// (EDR-GOVERNANCE-01 D14). It is the one weight D14 leaves configurable, because "mitigated"
+// spans a real range — a compensating control may remove most of the risk or very little — while
+// the others are structural: a terminal risk-removing or risk-accepted disposition is 0, and an
+// open one is 1.0, in every enterprise.
+const DefaultMitigatedWeight = 0.5
+
+// StanceWeight is the deterministic disposition policy of D14: how much of a Finding's
+// intrinsic priority still demands attention, given the stance of its current Position.
+//
+//   - not_affected / accepted_risk → 0    — terminal. The risk is removed, or knowingly owned.
+//   - mitigated                    → mitigatedWeight (default 0.5) — reduced, not gone.
+//   - deferred                     → 0.9  — still real; deliberately parked, so it slips only
+//     slightly rather than dropping off the list.
+//   - affected / under_investigation / no position → 1.0 — nothing has been decided yet.
+//
+// A zero weight is what makes `accepted_risk` safe to zero out: the acceptance does not delete
+// the Finding or its intrinsic score, it removes it from the triage queue — and D14's
+// re-evaluation watcher re-surfaces it when the premise drifts. An unrecognized stance weighs
+// 1.0, failing **loud**: an unknown disposition must keep demanding attention, never silently
+// suppress a Finding.
+func StanceWeight(s Stance, mitigatedWeight float64) float64 {
+	switch s {
+	case StanceNotAffected, StanceAcceptedRisk:
+		return 0
+	case StanceMitigated:
+		if mitigatedWeight < 0 || mitigatedWeight > 1 {
+			return DefaultMitigatedWeight // an out-of-range override is a config error, not a licence to suppress
+		}
+		return mitigatedWeight
+	case StanceDeferred:
+		return 0.9
+	default:
+		return 1.0 // affected, under_investigation, no position, or anything unrecognized
+	}
+}
+
+// ResidualPriority is the **triage** number of D14 — effective priority scaled by the stance
+// weight. It answers "what still needs my attention?", where EffectivePriority answers "how bad
+// is this here?". Keeping both is the whole point: a dispositioned Finding drops out of the top
+// of the queue without losing the intrinsic severity that justifies revisiting it later.
+func ResidualPriority(effective int, weight float64) int {
+	return clampPriority(float64(effective) * weight)
+}
+
+func clampPriority(v float64) int {
+	n := int(v + 0.5)
+	if n > 100 {
 		return 100
 	}
-	if v < 0 {
+	if n < 0 {
 		return 0
 	}
-	return v
+	return n
 }

@@ -281,7 +281,18 @@ three angles, and two of them proposed fixes that would not have worked.
   no `/`), still deterministic (idempotent dedup), and the human-readable package stays in the proposal rationale.
   INSTALLATION.md §5a reverted to a direct accept (no URL-encode needed); governance app 100%. No API-contract
   change (proposalId is still an opaque path-param string). See [[feedback-backlog-surfaced-followups]].
-- [ ] **(MED) Release-posture `effective_priority` ignores the governed stance.** `ReleasePosture`
+- [x] **(MED) Release-posture `effective_priority` ignores the governed stance.** ✅ **FIXED 2026-08-06**
+  (the `residual_priority` half of GOV-14; the D14 re-evaluation watcher is now tracked separately as
+  **GOV-14b** below). `domain.StanceWeight` + `domain.ResidualPriority` implement D14's deterministic
+  disposition policy, and `ReleasePosture` now emits **both** numbers: intrinsic `effective_priority`
+  (unchanged, stance-independent) and `residual_priority` = effective × stanceWeight — `not_affected` and
+  `accepted_risk` 0, `mitigated` 0.5 (`THEMIS_MITIGATED_WEIGHT`), `deferred` 0.9, everything open 1.0. Added
+  additively to `PostureEntry` on the v1 spec (no v2). An unrecognized stance weighs **1.0**, failing loud —
+  an unknown disposition must keep demanding attention rather than silently suppress a Finding — and an
+  out-of-range weight override falls back to the default for the same reason. Tests assert the property that
+  motivates keeping two numbers: suppressing a Finding zeroes its residual while leaving its
+  `effective_priority` untouched, which is what lets GOV-14b re-surface it on the same evidence.
+  Original report follows. `ReleasePosture`
   (`internal/governance/app/read.go:118`) computes `EffectivePriority = base_score × blast_multiplier` with no
   regard to the Finding's accepted Position — so a Finding dispositioned **not_affected** (or otherwise
   suppressed) still reports its full intrinsic priority (observed: CVE-2024-6345 accepted `not_affected`, yet
@@ -771,6 +782,27 @@ three angles, and two of them proposed fixes that would not have worked.
   open: logging `discovered` alongside `folded`, so "the feed returned nothing" and "nothing it returned was
   about us" stop being the same signal — the relevance filter drops records inside
   `RelevanceFilteredSource`, before `Poll` can count them.
+
+- [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
+  _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
+  half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —
+  which is only **safe** because D14 pairs it with a watcher that re-surfaces the Finding when the premise
+  of the decision drifts. Without it, an acceptance is permanent in practice: the Finding leaves the queue
+  and nothing brings it back. **That is the live risk today** — the zeroing shipped, the watcher did not.
+  **What D14 specifies:** on each `FaultlineEnriched` signal change (or a scheduled sweep), re-test terminal
+  dispositions with a **deterministic rule** — a **KEV listing**, **EPSS crossing a configurable threshold**,
+  a **newly-public exploit**, or a **reversing vendor VEX**. On material drift, emit a **"disposition-stale"
+  completed-fact event** (push, not pull). It **never** auto-changes the Position (D6/D11): it re-opens the
+  decision for a human or a governed policy. So an acceptance does not vanish — it **expires** when its
+  premise changes. AI is the optional upgrade on the deterministic core: reasoning whether a drift actually
+  invalidates the original justification before re-surfacing, and rendering the "why re-surfaced"
+  explanation. **Why it was not done with the first half:** it needs a new event type on the Governance
+  outbox and a worker, where `residual_priority` was a pure read projection with no new state — different
+  size, different risk. **Where it plugs in:** `internal/governance/app` (rule + worker),
+  `internal/governance/adapters/store` (the new event), the Knowledge `FaultlineEnriched` consumer that
+  already carries the drift signals. **Dep:** none — the EPSS/KEV/exploit signals it needs are already on
+  the Faultline and already reach Governance. **Scope:** MEDIUM-HIGH — it is the safety net under a
+  suppression mechanism that is already live.
 
 ---
 

@@ -41,8 +41,14 @@ type PostureEntry struct {
 	// Multiplier is the release's blast-radius amplification (1.0–2.0×) from the estate graph
 	// (C2); 1.0 when the estate is empty or unreachable (fail-safe).
 	Multiplier float64
-	// EffectivePriority is BaseScore × Multiplier, clamped to 100 — what a human triages by.
+	// EffectivePriority is BaseScore × Multiplier, clamped to 100 — how bad this is here,
+	// independent of what was decided about it (D14).
 	EffectivePriority int
+	// ResidualPriority is EffectivePriority × StanceWeight(Stance) — the number a human sorts
+	// the triage queue by (D14). A not_affected or accepted_risk Finding reads 0 here while
+	// keeping its intrinsic EffectivePriority, so a suppressed Finding leaves the top of the
+	// queue without losing the severity that would justify revisiting it.
+	ResidualPriority int
 	// Reservation is the trust class of the evidence the current Position rested on, when
 	// that is weaker than Observed (EDR-TRUST-01 T12) — e.g. an acceptance leaning on a
 	// vendor's Asserted not_affected. Empty means no Position, or one on Observed evidence.
@@ -63,6 +69,18 @@ type ReadService struct {
 	// knowledge may be nil — the FindingAssessment projection then carries the Finding alone
 	// (single-context dev, or a Knowledge outage). Best-effort by design (T10).
 	knowledge FaultlineKnowledgeReader
+	// mitigatedWeight is the one configurable stance weight (D14); the rest are structural.
+	// Seeded to domain.DefaultMitigatedWeight by the constructor so a zero value can never be
+	// mistaken for "suppress everything mitigated".
+	mitigatedWeight float64
+}
+
+// WithMitigatedWeight overrides the `mitigated` stance weight (THEMIS_MITIGATED_WEIGHT, D14)
+// and returns the service for chaining. Out-of-range values fall back to the default in
+// domain.StanceWeight — a misconfigured knob must not silently zero a Finding's triage number.
+func (s *ReadService) WithMitigatedWeight(w float64) *ReadService {
+	s.mitigatedWeight = w
+	return s
 }
 
 // WithKnowledge wires the optional Knowledge read seam used by the FindingAssessment
@@ -82,7 +100,10 @@ func NewReadService(repo Repository, proj ProjectionReader, blast BlastRadiusRea
 	if blastCap < 2 {
 		blastCap = domain.DefaultBlastRadiusCap
 	}
-	return &ReadService{repo: repo, proj: proj, blast: blast, blastCap: blastCap}
+	return &ReadService{
+		repo: repo, proj: proj, blast: blast, blastCap: blastCap,
+		mitigatedWeight: domain.DefaultMitigatedWeight,
+	}
 }
 
 // GetFinding returns the full Finding aggregate — current Position + Position history +
@@ -136,6 +157,11 @@ func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]P
 	for i := range entries {
 		entries[i].Multiplier = mult
 		entries[i].EffectivePriority = domain.EffectivePriority(entries[i].BaseScore, mult)
+		// The disposition-aware triage number (D14). A Finding with no Position weighs 1.0,
+		// so residual == effective until someone decides something — the two numbers only
+		// diverge once a governed decision exists to divide them.
+		entries[i].ResidualPriority = domain.ResidualPriority(
+			entries[i].EffectivePriority, domain.StanceWeight(entries[i].Stance, s.mitigatedWeight))
 	}
 	return entries, nil
 }

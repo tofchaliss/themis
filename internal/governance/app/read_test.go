@@ -157,3 +157,53 @@ func TestReadService_Projections(t *testing.T) {
 		t.Error("blast error: expected error")
 	}
 }
+
+// The release posture carries BOTH priority numbers (EDR-GOVERNANCE-01 D14): the intrinsic
+// effective_priority, unchanged by any decision, and the disposition-aware residual_priority a
+// human sorts the triage queue by. This is the defect the VM run surfaced — an accepted
+// not_affected Finding still reported its full priority, so suppressed and unaddressed Findings
+// sorted identically.
+func TestReadService_ResidualPriorityReflectsTheGovernedStance(t *testing.T) {
+	ctx := context.Background()
+	proj := fakeProjection{posture: []app.PostureEntry{
+		{FindingID: "open", BaseScore: 70, Stance: domain.StanceAffected},
+		{FindingID: "suppressed", BaseScore: 70, Stance: domain.StanceNotAffected},
+		{FindingID: "accepted", BaseScore: 70, Stance: domain.StanceAcceptedRisk},
+		{FindingID: "mitigated", BaseScore: 70, Stance: domain.StanceMitigated},
+		{FindingID: "deferred", BaseScore: 70, Stance: domain.StanceDeferred},
+		{FindingID: "undecided", BaseScore: 70},
+	}}
+	got, err := app.NewReadService(newRepo(), proj, nil, 0).ReleasePosture(ctx, "rel-1")
+	if err != nil {
+		t.Fatalf("ReleasePosture: %v", err)
+	}
+	want := map[domain.FindingID]int{
+		"open": 70, "suppressed": 0, "accepted": 0, "mitigated": 35, "deferred": 63, "undecided": 70,
+	}
+	for _, e := range got {
+		if e.ResidualPriority != want[e.FindingID] {
+			t.Errorf("%s: residual = %d, want %d", e.FindingID, e.ResidualPriority, want[e.FindingID])
+		}
+		// Whatever the disposition, the intrinsic number is untouched — that is what makes a
+		// suppression reversible when D14's watcher re-surfaces it.
+		if e.EffectivePriority != 70 {
+			t.Errorf("%s: effective = %d, want 70 — a decision must not erase intrinsic severity", e.FindingID, e.EffectivePriority)
+		}
+	}
+}
+
+// The mitigated weight is the one operator-tunable input, and it must actually reach the
+// projection rather than sit in config.
+func TestReadService_WithMitigatedWeightOverridesTheDefault(t *testing.T) {
+	ctx := context.Background()
+	proj := fakeProjection{posture: []app.PostureEntry{{FindingID: "m", BaseScore: 80, Stance: domain.StanceMitigated}}}
+
+	def, _ := app.NewReadService(newRepo(), proj, nil, 0).ReleasePosture(ctx, "rel-1")
+	if def[0].ResidualPriority != 40 {
+		t.Fatalf("default residual = %d, want 40 (80 x 0.5)", def[0].ResidualPriority)
+	}
+	over, _ := app.NewReadService(newRepo(), proj, nil, 0).WithMitigatedWeight(0.25).ReleasePosture(ctx, "rel-1")
+	if over[0].ResidualPriority != 20 {
+		t.Fatalf("overridden residual = %d, want 20 (80 x 0.25)", over[0].ResidualPriority)
+	}
+}

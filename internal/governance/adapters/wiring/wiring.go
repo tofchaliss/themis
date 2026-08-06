@@ -48,7 +48,7 @@ type Governance struct {
 // policies (D11).
 func Wire(
 	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
-	registryURL, knowledgeURL string, blastCap int, policies ...domain.PolicyRule,
+	registryURL, knowledgeURL string, blastCap int, mitigatedWeight float64, policies ...domain.PolicyRule,
 ) Governance {
 	st := store.New(pool)
 	write := app.NewFindingService(st, idGen{}, sysClock{}, policies...)
@@ -61,6 +61,11 @@ func Wire(
 	}
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
 	read := app.NewReadService(st, st, blast, blastCap)
+	// The one configurable stance weight (D14). A zero or out-of-range value keeps the domain
+	// default rather than silently zeroing every mitigated Finding's triage number.
+	if mitigatedWeight > 0 {
+		read = read.WithMitigatedWeight(mitigatedWeight)
+	}
 	// The Knowledge read seam feeds the FindingAssessment Domain Projection (T10). Empty ⇒
 	// the projection carries the Finding alone, which is the same fail-safe posture the
 	// blast-radius reader takes: a missing seam degrades the view, never the request.

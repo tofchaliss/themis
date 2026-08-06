@@ -427,7 +427,17 @@ components:
           description: Enterprise blast-radius amplification (1.0-2.0x) from the estate graph (C2); 1.0 when the estate is empty/unreachable.
         effective_priority:
           type: integer
-          description: base_score x blast_multiplier, clamped to 100 - the release-scoped priority a human triages by.
+          description: >
+            base_score x blast_multiplier, clamped to 100 - how bad this is here, INDEPENDENT of
+            what was decided about it (EDR-GOVERNANCE-01 D14).
+        residual_priority:
+          type: integer
+          description: >
+            effective_priority x stance_weight(stance), clamped to 100 - the number to SORT a
+            triage queue by (D14). not_affected and accepted_risk weigh 0, mitigated 0.5
+            (configurable), deferred 0.9, and affected / under_investigation / no-position 1.0.
+            A dispositioned Finding drops out of the queue without losing the intrinsic severity
+            that effective_priority still reports.
         reservation:
           type: string
           enum: [asserted, inferred]

@@ -312,6 +312,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	base := e.BaseScore
 	mult := float32(e.Multiplier)
 	eff := e.EffectivePriority
+	res := e.ResidualPriority
 	out := gen.PostureEntry{
 		FindingId:         strptr(string(e.FindingID)),
 		FaultlineId:       strptr(e.FaultlineID),
@@ -322,6 +323,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		BaseScore:         &base,
 		BlastMultiplier:   &mult,
 		EffectivePriority: &eff,
+		ResidualPriority:  &res,
 	}
 	// Omitted when the Position rests on Observed evidence — an absent reservation reads as
 	// "nothing to caveat", which is exactly right, and keeps the common row unchanged.

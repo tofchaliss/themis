@@ -36,16 +36,17 @@ import (
 // config is read from the environment. Every option is documented here (the
 // self-documented-config convention); there is no separate config reference.
 type config struct {
-	dsn             string // THEMIS_DATABASE_DSN — Postgres DSN (required).
-	addr            string // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
-	migrate         bool   // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
-	devPurge        bool   // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
-	migrationsPath  string // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
-	aiEnabled       bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
-	intelligenceURL string // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
-	registryURL     string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
-	knowledgeURL    string // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
-	blastRadiusCap  int    // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
+	dsn             string  // THEMIS_DATABASE_DSN — Postgres DSN (required).
+	addr            string  // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
+	migrate         bool    // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
+	devPurge        bool    // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
+	migrationsPath  string  // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
+	aiEnabled       bool    // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
+	intelligenceURL string  // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
+	registryURL     string  // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
+	knowledgeURL    string  // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
+	blastRadiusCap  int     // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
+	mitigatedWeight float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -67,6 +68,7 @@ func loadConfig() config {
 		registryURL:     envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		knowledgeURL:    envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
 		blastRadiusCap:  envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
+		mitigatedWeight: envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -122,7 +124,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.blastRadiusCap)
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.blastRadiusCap, cfg.mitigatedWeight)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 
@@ -244,6 +246,19 @@ func envIntDefault(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+// envFloatDefault reads a float knob, falling back to def when unset or unparseable. Out-of-range
+// values are rejected here as well as in the domain: a weight outside (0,1] would either suppress
+// Findings that should still be triaged or inflate one past its intrinsic priority, and neither
+// is worth failing startup over when a sane default exists.
+func envFloatDefault(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1 {
+			return f
 		}
 	}
 	return def
