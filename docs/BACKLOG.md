@@ -636,8 +636,23 @@ three angles, and two of them proposed fixes that would not have worked.
   `internal/intelligence/domain/validate.go` (already produces the text). **Dep:** none.
   **Scope:** LOW-MEDIUM — small change, disproportionate diagnostic value.
 
-- [ ] **TRUST-7 — No auto-accept policy is wired in any composition root, so the constitutional bar is
-  end-to-end unobservable.** _(Surfaced during the `phase3-trust-model` VM verification run, 2026-08-06.)_
+- [x] **TRUST-7 — No auto-accept policy is wired in any composition root, so the constitutional bar is
+  end-to-end unobservable.** ✅ **CLOSED 2026-08-06.** The missing piece was a decision, so the decision was
+  written first: **EDR-GOVERNANCE-01 D15** (+ GOV-15), which settles that Themis ships **exactly one**
+  auto-accept rule, `auto-not-affected-observed` — open **and** `ActorSystem`-raised **and** stance
+  `not_affected` **and** evidence class `observed`. Implemented as
+  `domain.AutoAcceptObservedNotAffectedPolicy()`, wired in `cmd/governance` behind
+  `THEMIS_GOVERNANCE_AUTOACCEPT` (`observed_not_affected` default | `off`), and **logged either way** —
+  the silent-empty-policy state is exactly what made the bar unobservable, so `off` now announces itself.
+  **The substance is the `observed` floor, which is stricter than T4 requires.** T4 bars only `Inferred`,
+  which would have left `Asserted` — a vendor's word — auto-suppressing Findings, contradicting EDR-VEX-01's
+  "Gathering Is Not Knowing". The floor lives on `PolicyRule` itself (`RequiringEvidence`), so a rule that
+  omits one is permissive-by-accident rather than strict-by-accident: the failure mode that is loud in
+  review instead of invisible at runtime. The comparison reuses `value.MaxTrust` rather than exporting a
+  rank — `MaxTrust(actual, required) == required` is exactly "at least as strong as", and an unset class
+  folds to `Inferred` so it clears no floor. Tests cover all seven shapes, the case that carries the
+  decision being an `Asserted` vendor `not_affected` that **passes** the constitutional bar and is still
+  refused. Original report follows. _(Surfaced during the `phase3-trust-model` VM verification run, 2026-08-06.)_
   `cmd/governance/main.go` calls `app.Wire(...)` with **no `policies...`**, so `FindingService.policies` is
   empty on every deployed node. Consequences: stage 2 of `raiseAndMaybeAutoAccept` never fires, so nothing is
   ever auto-accepted; and the T4 constitutional bar in stage 1 — the headline decision of EDR-TRUST-01 —

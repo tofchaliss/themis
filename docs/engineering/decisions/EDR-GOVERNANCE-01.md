@@ -442,6 +442,53 @@ PoC contrast: the PoC exposes a single composite risk score with no separation o
 enterprise disposition, and never re-evaluates an accepted/suppressed finding when its exploit signals change —
 an acceptance is permanent until someone manually revisits it.
 
+### D15 — The shipped auto-accept policy is exactly one rule: system-raised `not_affected` resting on **Observed** evidence
+
+Context: D11 sanctioned Governance-owned auto-accept in the abstract and gave one example ("CVE withdrawn
+upstream → auto-accept Not-Affected"), but no decision ever said **which** rules ship. The consequence was
+discovered on a live VM (2026-08-06, backlog TRUST-7): `cmd/governance` called `Wire(...)` with **no policies
+at all**, so stage 2 never fired, nothing was ever auto-accepted, and — worse — the EDR-TRUST-01 T4
+constitutional bar became **unobservable**, because "barred by the constitution" and "no policy matched"
+produced an identical outcome. A governed road existed and was unpaved.
+
+Decision:
+
+- **Exactly one rule ships**, named `auto-not-affected-observed`: auto-accept a Governance Proposal when
+  **all** of the following hold — it is **open**, raised by **ActorSystem** (D11's authority axis), its stance
+  is **`not_affected`**, and its evidence class is **`observed`**.
+- **The `observed` floor is the substance of this decision**, and it is stricter than T4 requires. T4 bars only
+  `Inferred`, which would leave `Asserted` auto-acceptable — and `Asserted` is precisely a **vendor's word**.
+  Auto-accepting on a vendor statement alone contradicts EDR-VEX-01's "Gathering Is Not Knowing": vendor VEX is
+  *gathered, not obeyed*, and a `not_affected` from a vendor raises a proposal for a human, it does not
+  suppress. So the policy floor is **`observed`** — evidence anyone can **re-derive**: the version-range
+  verdict (arithmetic over public ranges, T5) and an upstream CVE withdrawal (re-fetch and the CVE is still
+  rejected). Nothing that requires believing a third party is auto-accepted.
+- **Only suppressing stances are eligible.** The rule does not auto-accept `affected`. An automatic
+  `affected` would be a decision no one made about work someone must now do; leaving it open costs nothing,
+  because an undecided Finding already sits at full `residual_priority` (D14) and is already in the queue.
+- **The floor is a property of the rule, not of the engine.** `PolicyRule` carries a required evidence class,
+  so a rule that omits one is inert-by-accident rather than permissive-by-accident, and any future rule must
+  state its floor at construction where it is reviewable.
+- **Configurable, and off is a supported answer** (R2): `THEMIS_GOVERNANCE_AUTOACCEPT` ∈
+  `observed_not_affected` (default) | `off`. An enterprise that wants every suppression to pass a human sets
+  `off` and loses nothing but automation.
+- **This does not weaken T4 — it is what makes T4 legible.** With a policy present, "the AI proposed a
+  `not_affected` and it stayed open" becomes an observable refusal rather than a coincidence of empty config.
+
+Why not the wider rule (auto-accept `Asserted` too): it is the highest-automation option and the one that
+trades away the VEX line. Rejected deliberately; the vendor path keeps its human. Why not "nothing
+auto-accepts": that is defensible, but it makes D11's policy machinery permanently dead code and leaves the
+version-range verdict — a provable arithmetic result — waiting on a human for no epistemic reason.
+
+ADR basis: D4/D11 (proposals + the authority line: policy is the authority, not the proposer), D6 (react and
+propose, never auto-decide), EDR-TRUST-01 T1/T2/T4/T6 (evidence-borne trust, the constitutional bar, and
+"Governance evaluates constitutionally, then by policy"), EDR-VEX-01 (vendor VEX gathered, not obeyed).
+Standing lens: the deterministic core auto-accepts only what it can re-derive; AI never reaches this path at
+all, since `Inferred` fails the constitutional stage before policy is consulted.
+
+PoC contrast: the PoC had no notion of a governed auto-accept — suppression was either manual or implicit in
+feed handling, with no recorded authority and no evidence floor.
+
 ## Traceability → issues
 
 One issue per implementable decision; each cross-references its decision + ADR. Suggested delivery: an
@@ -464,6 +511,7 @@ OpenSpec change `openspec/changes/phase3-governance/` with these as `tasks.md` g
 | GOV-12 | Workers (Finding, expiry/timer) + non-owning coordinator; state-based recovery (idempotent re-run + first-class reconciler, no replay) (+ crash/resume tests) | D11·D12 · BCK-0044/0045/0050 |
 | GOV-13 | `adapters/http`: triage + read API — raise/accept/reject proposal, finding/position reads, release posture; error-UX envelope + authorization hook | D10·D11 · BCK-0048 |
 | GOV-14 | Posture priority: add `residual_priority` = `effective_priority × stanceWeight(stance)` alongside the intrinsic `effective_priority` (read projection); a deterministic disposition re-evaluation watcher (KEV/EPSS-threshold/exploit/reversing-VEX → "disposition-stale" event, push, never auto-decide); AI upgrade optional | D14 · C2 · EDR-INTELLIGENCE-01 |
+| GOV-15 | Ship the one auto-accept policy `auto-not-affected-observed` (open + ActorSystem + `not_affected` + evidence class `observed`); evidence floor carried on `PolicyRule` itself; wired in `cmd/governance` behind `THEMIS_GOVERNANCE_AUTOACCEPT` (default on, `off` supported) | D15 · D4/D11 · EDR-TRUST-01 T4/T6 · EDR-VEX-01 |
 
 ## Glossary (this context)
 

@@ -46,6 +46,7 @@ type config struct {
 	registryURL     string  // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
 	knowledgeURL    string  // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
 	blastRadiusCap  int     // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
+	autoAccept      string  // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
 	mitigatedWeight float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
@@ -68,6 +69,7 @@ func loadConfig() config {
 		registryURL:     envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		knowledgeURL:    envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
 		blastRadiusCap:  envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
+		autoAccept:      envDefault("THEMIS_GOVERNANCE_AUTOACCEPT", autoAcceptObservedNotAffected),
 		mitigatedWeight: envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
@@ -124,7 +126,8 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.blastRadiusCap, cfg.mitigatedWeight)
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL,
+		cfg.blastRadiusCap, cfg.mitigatedWeight, autoAcceptPolicies(cfg.autoAccept, logger)...)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 
@@ -249,6 +252,39 @@ func envIntDefault(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// Auto-accept policy names for THEMIS_GOVERNANCE_AUTOACCEPT (EDR-GOVERNANCE-01 D15).
+const (
+	autoAcceptObservedNotAffected = "observed_not_affected"
+	autoAcceptOff                 = "off"
+)
+
+// autoAcceptPolicies resolves the configured Governance-owned auto-accept policy (D15).
+//
+// It is logged either way, and that is deliberate: which suppressions happen without a human is
+// the kind of thing an operator must be able to read off a node's startup line rather than infer
+// from behaviour. The empty-policy state is exactly what made the EDR-TRUST-01 T4 constitutional
+// bar unobservable on the VM (TRUST-7) — "barred by the constitution" and "no policy configured"
+// looked identical — so `off` now announces itself instead of being the silent default.
+//
+// An unrecognized value falls back to the default rather than failing startup, and says so. A
+// typo must not silently disable governance automation, nor take a node down.
+func autoAcceptPolicies(name string, logger *observability.Logger) []domain.PolicyRule {
+	switch name {
+	case autoAcceptOff:
+		logger.Info("auto-accept DISABLED — every proposal, including provable not_affected, waits for a human",
+			observability.String("policy", autoAcceptOff))
+		return nil
+	case autoAcceptObservedNotAffected:
+	default:
+		logger.Warn("unknown THEMIS_GOVERNANCE_AUTOACCEPT — falling back to the default policy",
+			observability.String("given", name), observability.String("using", autoAcceptObservedNotAffected))
+	}
+	rule := domain.AutoAcceptObservedNotAffectedPolicy()
+	logger.Info("auto-accept policy enabled: system-raised not_affected on observed evidence only "+
+		"(vendor VEX is Asserted and still waits for a human)", observability.String("policy", rule.Name()))
+	return []domain.PolicyRule{rule}
 }
 
 // envFloatDefault reads a float knob, falling back to def when unset or unparseable. Out-of-range
