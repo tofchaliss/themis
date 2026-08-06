@@ -94,7 +94,6 @@ EOF
 # Intelligence: stateless AI gateway over Ollama.
 write_env intelligence <<EOF
 THEMIS_GOVERNANCE_URL=http://localhost:8083
-THEMIS_KNOWLEDGE_URL=http://localhost:8085
 THEMIS_OLLAMA_URL=http://localhost:11434
 THEMIS_INTELLIGENCE_MODEL=${MODEL}
 THEMIS_INTELLIGENCE_ADDR=:8086

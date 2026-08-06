@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,12 +21,35 @@ const NVDBaseURL = "https://services.nvd.nist.gov"
 // records' lastModified field (ISO-8601 with milliseconds, no zone).
 const nvdTimeLayout = "2006-01-02T15:04:05.000"
 
-// nvdPageSize is the NVD 2.0 max results per page; nvdMaxPages bounds a single poll so a
-// wide window can never run away.
+// nvdPageSize is the NVD 2.0 max results per page; nvdMaxPages bounds a single SLICE so one
+// request burst can never run away.
 const (
 	nvdPageSize = 2000
 	nvdMaxPages = 10
 )
+
+// nvdSliceWindow is the initial width of one modified-since slice, and nvdMinSlice the
+// narrowest a slice may be halved to before the poll gives up.
+//
+// The window since the watermark is walked in slices rather than requested whole, because a
+// wide window holds far more records than the page budget can read. Measured against the live
+// API on 2026-08-06, a 120-day window held **356,223** modified CVEs against a 20,000-record
+// budget — so the previous whole-window request read 5.6% of it, stopped, and reported success
+// (NVD-WATCH-1). Slicing keeps every request bounded while still covering the window, and a
+// slice that overflows anyway is halved, so a burst of NVD activity self-corrects instead of
+// depending on a tuned constant.
+const (
+	nvdSliceWindow = 24 * time.Hour
+	nvdMinSlice    = time.Hour
+)
+
+// ErrWindowTruncated reports that a modified-since slice held more records than the page
+// budget could read even at nvdMinSlice. It is returned WITH whatever was read so far, and it
+// is deliberately an error rather than a silent short read: the caller's watermark advances
+// only on success, so an unreadable slice is retried next poll instead of being skipped
+// forever. Feed health degrades on it, which is the point — a feed that cannot see its window
+// must not report healthy.
+var ErrWindowTruncated = errors.New("nvd: modified-since slice exceeds the page budget")
 
 // nvdMaxWindow is NVD's maximum lastModStartDate..lastModEndDate span (120 days). A zero
 // watermark (first poll) would otherwise request the entire history; the start is clamped
@@ -118,11 +142,46 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 		since = end.Add(-nvdMaxWindow) // clamp to NVD's 120-day max window (and handle a zero watermark)
 	}
 	var out []app.ProposalFor
-	startIndex := 0
-	for page := 0; page < nvdMaxPages; page++ {
-		resp, err := c.fetchPage(ctx, since.UTC(), end, startIndex)
+	width := nvdSliceWindow
+	for cursor := since.UTC(); cursor.Before(end); {
+		sliceEnd := cursor.Add(width)
+		if sliceEnd.After(end) {
+			sliceEnd = end
+		}
+		got, complete, err := c.fetchWindow(ctx, cursor, sliceEnd)
 		if err != nil {
 			return out, err
+		}
+		if !complete {
+			// The slice holds more than the page budget. Narrow it and retry the SAME
+			// slice — the cursor does not advance, so nothing is skipped. The width is
+			// left narrowed for the rest of this poll (a dense stretch tends to stay
+			// dense) and resets on the next one.
+			if width <= nvdMinSlice {
+				return out, fmt.Errorf("%w: %s..%s holds more than %d records",
+					ErrWindowTruncated, cursor.Format(nvdTimeLayout), sliceEnd.Format(nvdTimeLayout),
+					nvdPageSize*nvdMaxPages)
+			}
+			width /= 2
+			continue
+		}
+		out = append(out, got...)
+		cursor = sliceEnd
+	}
+	return out, nil
+}
+
+// fetchWindow reads one modified-since slice, paginating up to nvdMaxPages. `complete`
+// reports whether the slice was read in FULL; false means NVD holds more records for it than
+// the budget allows. Returning that as a flag rather than swallowing it is the whole fix for
+// NVD-WATCH-1 — the caller narrows the slice instead of dropping the remainder unnoticed.
+func (c *NVDClient) fetchWindow(ctx context.Context, start, end time.Time) ([]app.ProposalFor, bool, error) {
+	var out []app.ProposalFor
+	startIndex := 0
+	for page := 0; page < nvdMaxPages; page++ {
+		resp, err := c.fetchPage(ctx, start, end, startIndex)
+		if err != nil {
+			return out, false, err
 		}
 		for _, v := range resp.Vulnerabilities {
 			pf, ok, terr := c.translate(v.CVE)
@@ -133,10 +192,10 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 		}
 		startIndex += len(resp.Vulnerabilities)
 		if len(resp.Vulnerabilities) == 0 || startIndex >= resp.TotalResults {
-			break
+			return out, true, nil
 		}
 	}
-	return out, nil
+	return out, false, nil
 }
 
 // VulnsForPackage discovers the CVEs affecting a component directly from NVD (A2 — the

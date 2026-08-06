@@ -119,8 +119,8 @@ func TestDemoSemanticPrecedentChangesRecommendation(t *testing.T) {
 
 func TestWireStatelessVsStateful(t *testing.T) {
 	base := wiring.Config{
-		GovernanceURL: "http://gov", KnowledgeURL: "http://know",
-		UseFake: true, HTTPClient: http.DefaultClient,
+		GovernanceURL: "http://gov",
+		UseFake:       true, HTTPClient: http.DefaultClient,
 	}
 
 	// Stateless: no store → no retrieval plane.

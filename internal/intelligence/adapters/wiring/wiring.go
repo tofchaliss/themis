@@ -31,8 +31,7 @@ const fakeEmbedDim = 256
 
 // Config wires the Gateway's dependencies from the node configuration.
 type Config struct {
-	GovernanceURL  string // Governance read-API base URL (Finding grounding)
-	KnowledgeURL   string // Knowledge read-API base URL (Faultline grounding)
+	GovernanceURL  string // Governance read-API base URL (the FindingAssessment projection — the runtime's ONLY business read)
 	OllamaURL      string // Ollama base URL (OpenAI-compatible; used by both the LLM and the embedder)
 	Model          string // pinned LLM model, e.g. "llama3.1:8b"
 	APIKey         string // optional bearer token for an authenticated OpenAI-compatible server
@@ -62,8 +61,8 @@ type Intelligence struct {
 // to compile (a programming error).
 func Wire(cfg Config) (Intelligence, error) {
 	// One projection read, from the context that owns the Finding Selection Type (T10).
-	// KnowledgeURL is no longer read by the runtime at all — Governance composes the
-	// enrichment into the projection, which is what stopped the runtime orchestrating.
+	// There is deliberately NO Knowledge address here: Governance composes the enrichment
+	// into the projection, which is what stopped the runtime orchestrating its own grounding.
 	proj := readapi.NewAssessmentClient(cfg.GovernanceURL, cfg.HTTPClient)
 	prc := readapi.NewPrecedentClient(cfg.GovernanceURL, cfg.HTTPClient)
 

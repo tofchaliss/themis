@@ -268,9 +268,10 @@ func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval 
 			return
 		}
 		recordFeed(health, "nvd", nil, logger)
-		if n > 0 {
-			logger.Info("nvd watch enriched cards", observability.Int("folded", n))
-		}
+		// Logged on EVERY successful poll, including a zero fold. Suppressing the zero case
+		// made a feed that saw 5% of its window indistinguishable from a quiet one
+		// (NVD-WATCH-1): "no log line" and "nothing to say" must not be the same signal.
+		logger.Info("nvd watch poll complete", observability.Int("folded", n))
 	}
 	time.Sleep(15 * time.Second) // let the service settle before the first (up-to-120-day) poll
 	poll()

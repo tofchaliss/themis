@@ -158,13 +158,3 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	}
 	return kn
 }
-
-// KnowledgeReadAPI wires the Knowledge read service over the given pool and returns the REST
-// handler (routes under /faultlines — mount it under /api/v1) plus the Store. It is the
-// read-only subset of Wire, kept for callers that need only the query surface.
-func KnowledgeReadAPI(pool *pgxpool.Pool) (http.Handler, *store.Store) {
-	st := store.New(pool)
-	read := app.NewReadService(st, st)
-	health := app.NewFeedHealthService(st, sysClock{})
-	return knhttp.NewHandler(read, health).Router(), st
-}

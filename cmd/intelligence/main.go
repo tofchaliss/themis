@@ -1,7 +1,9 @@
 // Command intelligence runs the Intelligence Gateway as an independent service
 // (EDR-INTELLIGENCE-01): the reactive AI-enrichment surface. It serves the synchronous invoke
-// API (POST /api/v1/capabilities/{id}/invoke), grounding each capability via the Governance +
-// Knowledge read APIs and running the Rule → Knowledge → LLM plan over Ollama.
+// API (POST /api/v1/capabilities/{id}/invoke), grounding each capability from the Governance
+// FindingAssessment projection — its ONLY business read (EDR-TRUST-01 T10; the runtime no
+// longer reads Knowledge or assembles its own context) — and running the Knowledge → LLM plan
+// over Ollama.
 //
 // When THEMIS_DATABASE_DSN is set it also owns the Operational Semantic Index (KS2, Δ3a): its
 // only datastore, a derived + rebuildable vector index over the enterprise's own past
@@ -38,7 +40,6 @@ import (
 type config struct {
 	addr          string        // THEMIS_INTELLIGENCE_ADDR — listen address (default ":8086").
 	governanceURL string        // THEMIS_GOVERNANCE_URL — Governance read-API base URL.
-	knowledgeURL  string        // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL.
 	ollamaURL     string        // THEMIS_OLLAMA_URL — Ollama (OpenAI-compatible) base URL (LLM + embedder).
 	model         string        // THEMIS_INTELLIGENCE_MODEL — pinned LLM model (default "llama3.1:8b").
 	useFake       bool          // THEMIS_INTELLIGENCE_PROVIDER=fake — dev/CI provider + embedder (no model).
@@ -66,7 +67,6 @@ func loadConfig() config {
 	return config{
 		addr:          envDefault("THEMIS_INTELLIGENCE_ADDR", ":8086"),
 		governanceURL: envDefault("THEMIS_GOVERNANCE_URL", "http://localhost:8083"),
-		knowledgeURL:  envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
 		ollamaURL:     envDefault("THEMIS_OLLAMA_URL", "http://localhost:11434"),
 		model:         envDefault("THEMIS_INTELLIGENCE_MODEL", "llama3.1:8b"),
 		useFake:       os.Getenv("THEMIS_INTELLIGENCE_PROVIDER") == "fake",
@@ -126,7 +126,6 @@ func main() {
 
 	intel, err := wiring.Wire(wiring.Config{
 		GovernanceURL:  cfg.governanceURL,
-		KnowledgeURL:   cfg.knowledgeURL,
 		OllamaURL:      cfg.ollamaURL,
 		Model:          cfg.model,
 		UseFake:        cfg.useFake,

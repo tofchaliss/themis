@@ -567,7 +567,16 @@ three angles, and two of them proposed fixes that would not have worked.
   `internal/knowledge/adapters/wiring/trust_sources.go`. **Dep:** the AI→Knowledge proposal-intake path
   (Δ4-class). **Scope:** MEDIUM — a correctness gap the moment that path ships.
 
-- [ ] **TRUST-5 — `cmd/intelligence` still reads `THEMIS_KNOWLEDGE_URL` into dead config.**
+- [x] **TRUST-5 — `cmd/intelligence` still reads `THEMIS_KNOWLEDGE_URL` into dead config.**
+  ✅ **CLOSED 2026-08-06.** `knowledgeURL` removed from `cmd/intelligence`'s config and `KnowledgeURL` from
+  `wiring.Config`, so the knob cannot be set at all rather than being set and ignored. Also swept the places
+  that still handed it to the Intelligence node — `deploy/systemd/install-systemd.sh`, `INSTALLATION.md`'s
+  run block, and `deploy/node.env.example` (which now states positively that the node reads no Knowledge
+  address, and why). Corrected the `cmd/intelligence` package doc, which still described grounding "via the
+  Governance + Knowledge read APIs" and a "Rule → Knowledge → LLM plan" — both untrue since T10 and the
+  Rule-engine deletion. **Found alongside:** `wiring.KnowledgeReadAPI` in the *Knowledge* context was
+  likewise unreachable ("kept for callers that need only the query surface" — there are none); deleted, which
+  clears the one `make deadcode` report in the greenfield tree.
   _(Surfaced during the VM verification run, 2026-08-06.)_ `main.go:69` reads the env var into
   `Config.KnowledgeURL` and passes it to `wiring.Config` (`wiring.go:35`), but **nothing consumes it** — the
   runtime stopped reading Knowledge in `phase3-trust-model` group 9 (T10), and Governance composes the
@@ -740,6 +749,28 @@ three angles, and two of them proposed fixes that would not have worked.
   `internal/knowledge/app/watch.go` (watermark advance), `cmd/knowledge/main.go` (`watchLoop` logging).
   **Dep:** none. **Scope:** HIGH — the NVD watch is currently non-functional in any deployment whose CVEs
   are not in the first 20,000 records of the window, and it fails silently while reporting healthy.
+  **✅ PARTIALLY FIXED 2026-08-06 — the silence and the skip are gone; the strategy question remains.**
+  `NVDClient.ChangedSince` no longer requests the window whole. It **walks it in contiguous slices**
+  (`nvdSliceWindow`, 24h), and a slice holding more than the page budget is **halved and retried** — the
+  cursor does not advance, so nothing is skipped. Only when narrowing bottoms out at `nvdMinSlice` (1h) does
+  it return the new `feed.ErrWindowTruncated` **with** the partial results. Because `WatchService.Poll`
+  advances the watermark only on a nil error, an unreadable slice is now retried next poll instead of being
+  stepped over permanently, and `recordFeed` degrades feed health — so the feed can no longer report
+  `healthy` while blind. `watchLoop` also logs **every** successful poll including a zero fold, since
+  suppressing the zero case is what made a 5%-coverage feed look like a quiet one.
+  Two regression tests pin the properties that matter rather than the mechanism:
+  `TestNVDClient_ChangedSince_WalksTheWindowInContiguousSlices` (starts at the watermark, reaches now, and
+  **no gap** between consecutive slices) and
+  `TestNVDClient_ChangedSince_OverfullSliceNarrowsThenErrorsNeverTruncates`.
+  **What remains open (needs a decision, not code):** whether the watch should keep walking the window at
+  all. Covering 120 days now means fetching on the order of 356k records to fold a few hundred — correct, but
+  it reads the internet to learn about the estate. The alternative is fix (4): drive enrichment from the
+  **carded CVE set** via per-CVE `cveId` fetches, making cost proportional to the enterprise, which is what
+  D5's relevance bound actually implies. That is a change to how the feed works and is the same choice as
+  the "NVD by-CVE backfill" item; it wants an EDR-KNOWLEDGE-01 D5 note before implementation. Also still
+  open: logging `discovered` alongside `folded`, so "the feed returned nothing" and "nothing it returned was
+  about us" stop being the same signal — the relevance filter drops records inside
+  `RelevanceFilteredSource`, before `Poll` can count them.
 
 ---
 

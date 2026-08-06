@@ -3,6 +3,7 @@ package feed_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -41,37 +42,101 @@ func onlyProposal(t *testing.T, got []app.ProposalFor) app.ProposalFor {
 	return got[0]
 }
 
-// TestNVDClient_ChangedSince_ClampsWindow proves the start date is clamped to NVD's 120-day
-// max window: a zero watermark (first run) queries ~last 120 days, not all of history, while
-// a recent watermark passes through unchanged.
-func TestNVDClient_ChangedSince_ClampsWindow(t *testing.T) {
-	const layout = "2006-01-02T15:04:05.000"
-	var gotStart string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotStart = r.URL.Query().Get("lastModStartDate")
+const nvdTestLayout = "2006-01-02T15:04:05.000"
+
+// nvdSlice is one observed [lastModStartDate, lastModEndDate] request pair.
+type nvdSlice struct{ start, end time.Time }
+
+// recordingNVDServer serves empty pages and records the window of every request, so a test
+// can assert on the whole walk rather than on a single call.
+func recordingNVDServer(t *testing.T, slices *[]nvdSlice) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s, err1 := time.Parse(nvdTestLayout, r.URL.Query().Get("lastModStartDate"))
+		e, err2 := time.Parse(nvdTestLayout, r.URL.Query().Get("lastModEndDate"))
+		if err1 != nil || err2 != nil {
+			t.Errorf("unparseable window: %q..%q", r.URL.Query().Get("lastModStartDate"), r.URL.Query().Get("lastModEndDate"))
+		}
+		*slices = append(*slices, nvdSlice{s, e})
 		_, _ = w.Write([]byte(`{"totalResults":0,"vulnerabilities":[]}`))
+	}))
+}
+
+// TestNVDClient_ChangedSince_WalksTheWindowInContiguousSlices is the NVD-WATCH-1 regression.
+// The window since the watermark is covered by a walk of slices, not by one whole-window
+// request that stops at the page budget. What must hold is coverage, so this asserts the
+// three properties that make the walk sound: it STARTS at the watermark (clamped to NVD's
+// 120-day maximum), it REACHES now, and consecutive slices are CONTIGUOUS — no gap between
+// one slice's end and the next slice's start, because a gap is exactly the silent skip the
+// old code shipped.
+func TestNVDClient_ChangedSince_WalksTheWindowInContiguousSlices(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		since    time.Time
+		wantSpan time.Duration // expected age of the first slice's start
+	}{
+		{"zero watermark clamps to the 120-day maximum", time.Time{}, 120 * 24 * time.Hour},
+		{"recent watermark is used as-is", time.Now().Add(-72 * time.Hour).UTC(), 72 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var slices []nvdSlice
+			srv := recordingNVDServer(t, &slices)
+			defer srv.Close()
+			c := feed.NewNVDClient(srv.URL, "", srv.Client())
+
+			if _, err := c.ChangedSince(context.Background(), tc.since); err != nil {
+				t.Fatalf("ChangedSince: %v", err)
+			}
+			if len(slices) == 0 {
+				t.Fatal("no requests issued")
+			}
+			if age := time.Since(slices[0].start); age < tc.wantSpan-time.Minute || age > tc.wantSpan+time.Minute {
+				t.Errorf("first slice starts %v ago, want ~%v", age, tc.wantSpan)
+			}
+			if tail := time.Since(slices[len(slices)-1].end); tail > time.Minute {
+				t.Errorf("walk stops %v short of now — the tail of the window is never read", tail)
+			}
+			for i := 1; i < len(slices); i++ {
+				if !slices[i].start.Equal(slices[i-1].end) {
+					t.Fatalf("gap between slice %d (ends %v) and slice %d (starts %v) — records in the gap are skipped",
+						i-1, slices[i-1].end, i, slices[i].start)
+				}
+			}
+		})
+	}
+}
+
+// A slice holding more records than the page budget must NOT be silently truncated. It is
+// narrowed and retried; only when narrowing bottoms out does it surface as an error, so the
+// caller's watermark stays put and the slice is retried on the next poll rather than skipped
+// forever. This is the defect NVD-WATCH-1 recorded: 356,223 records in a 120-day window
+// against a 20,000-record budget, read as a successful poll.
+func TestNVDClient_ChangedSince_OverfullSliceNarrowsThenErrorsNeverTruncates(t *testing.T) {
+	var widths []time.Duration
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s, _ := time.Parse(nvdTestLayout, r.URL.Query().Get("lastModStartDate"))
+		e, _ := time.Parse(nvdTestLayout, r.URL.Query().Get("lastModEndDate"))
+		if r.URL.Query().Get("startIndex") == "0" {
+			widths = append(widths, e.Sub(s))
+		}
+		// Always claim far more results than the budget can read, so every slice overflows.
+		_, _ = w.Write([]byte(`{"totalResults":1000000,"vulnerabilities":[` + cve("CVE-2024-9999",
+			`{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":7.8,"baseSeverity":"HIGH","vectorString":"CVSS:3.1/AV:L"}}]}`) + `]}`))
 	}))
 	defer srv.Close()
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	if _, err := c.ChangedSince(context.Background(), time.Time{}); err != nil {
-		t.Fatalf("ChangedSince(zero): %v", err)
+	_, err := c.ChangedSince(context.Background(), time.Now().Add(-48*time.Hour))
+	if !errors.Is(err, feed.ErrWindowTruncated) {
+		t.Fatalf("err = %v, want ErrWindowTruncated — a slice it cannot read must never look like success", err)
 	}
-	start, err := time.Parse(layout, gotStart)
-	if err != nil {
-		t.Fatalf("parse start %q: %v", gotStart, err)
+	if len(widths) < 2 {
+		t.Fatalf("issued %d slice attempts, want the slice narrowed and retried at least once", len(widths))
 	}
-	if age := time.Since(start); age < 119*24*time.Hour || age > 121*24*time.Hour {
-		t.Errorf("zero watermark: clamped start age = %v, want ~120d", age)
-	}
-
-	recent := time.Now().Add(-24 * time.Hour).UTC()
-	if _, err := c.ChangedSince(context.Background(), recent); err != nil {
-		t.Fatalf("ChangedSince(recent): %v", err)
-	}
-	start, _ = time.Parse(layout, gotStart)
-	if d := start.Sub(recent); d < -time.Minute || d > time.Minute {
-		t.Errorf("recent watermark: start = %v, want ~= %v (unchanged)", start, recent)
+	for i := 1; i < len(widths); i++ {
+		if widths[i] >= widths[i-1] {
+			t.Fatalf("slice %d width %v did not narrow from %v", i, widths[i], widths[i-1])
+		}
 	}
 }
 

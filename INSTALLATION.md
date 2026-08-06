@@ -61,8 +61,8 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 > database.
 
 > **Port gotcha (`cmd/knowledge`).** Its `THEMIS_KNOWLEDGE_ADDR` default is `:8082`, which **collides with
-> Registry**. The rest of the system expects Knowledge on **:8085** (Intelligence's `THEMIS_KNOWLEDGE_URL`
-> default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
+> Registry**. The rest of the system expects Knowledge on **:8085** (the Governance node's
+> `THEMIS_KNOWLEDGE_URL` default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
 
 > **Databases (5 required + 1 optional on one PostgreSQL server):** `evidence`, `knowledge`, `governance`,
 > `communication`, `bus` — plus **`intelligence`** when Δ3a semantic precedent is enabled (the Operational
@@ -430,13 +430,12 @@ ollama pull cyberpal           # or whatever you named it; confirm the tag with 
 ollama pull nomic-embed-text   # embedding model for Δ3a semantic precedent (RC-1)
 
 THEMIS_GOVERNANCE_URL=http://localhost:8083 \
-THEMIS_KNOWLEDGE_URL=http://localhost:8085 \
 THEMIS_OLLAMA_URL=http://localhost:11434 \
 THEMIS_INTELLIGENCE_MODEL=cyberpal \
 THEMIS_DATABASE_DSN="$PGBASE/intelligence?sslmode=disable" THEMIS_INTELLIGENCE_MIGRATE=1 \
 THEMIS_INTELLIGENCE_EMBED_MODEL=nomic-embed-text \
 THEMIS_BUS_DATABASE_DSN="$PGBASE/bus?sslmode=disable" \
-THEMIS_INTELLIGENCE_ADDR=:8086 go run ./cmd/intelligence &   # grounds via Governance + Knowledge, + Δ3a semantic precedent
+THEMIS_INTELLIGENCE_ADDR=:8086 go run ./cmd/intelligence &   # grounds ONLY via the Governance projection, + Δ3a semantic precedent
 ```
 
 The `THEMIS_DATABASE_DSN` + `THEMIS_BUS_DATABASE_DSN` lines enable **Δ3a semantic precedent** (RC-1): the
