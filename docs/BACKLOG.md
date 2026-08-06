@@ -536,6 +536,18 @@ per-context follow-ups below.
   `internal/knowledge/adapters/wiring/trust_sources.go`. **Dep:** the AI→Knowledge proposal-intake path
   (Δ4-class). **Scope:** MEDIUM — a correctness gap the moment that path ships.
 
+- [ ] **TRUST-5 — `cmd/intelligence` still reads `THEMIS_KNOWLEDGE_URL` into dead config.**
+  _(Surfaced during the VM verification run, 2026-08-06.)_ `main.go:69` reads the env var into
+  `Config.KnowledgeURL` and passes it to `wiring.Config` (`wiring.go:35`), but **nothing consumes it** — the
+  runtime stopped reading Knowledge in `phase3-trust-model` group 9 (T10), and Governance composes the
+  enrichment into the `FindingAssessment` projection instead. The field is set, threaded, and never used.
+  **Why it matters:** `make deadcode` cannot see it (a struct field, not a function), so it will sit there
+  looking load-bearing. An operator reading `node.env.example` or the process env reasonably concludes the
+  Intelligence node still needs a Knowledge address, and would "fix" a working deployment by adding it back.
+  **Fix:** drop `knowledgeURL` from `cmd/intelligence`'s config and `KnowledgeURL` from `wiring.Config`.
+  **Where it plugs in:** `cmd/intelligence/main.go` + `internal/intelligence/adapters/wiring/wiring.go`.
+  **Scope:** LOW — cosmetic, but it is exactly the kind of stale knob that outlives the code that used it.
+
 - [ ] **TRUST-4 — The CVE-withdrawal path carries no trust class, and unset is not safe for it.**
   _(Surfaced implementing `phase3-trust-model` group 3, 2026-08-06.)_ `knowledge.faultline_superseded.v1`
   has no trust field, so `Coordinator.OnFaultlineSuperseded` builds an `EnrichmentSignal` with the classes
