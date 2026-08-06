@@ -12,6 +12,9 @@ import (
 
 type fixedPrompt struct{ s string }
 
+const okRaw = `{"finding_id":"F1","recommended_stance":"affected","confidence":0.8,` +
+	`"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"x"}`
+
 func (p fixedPrompt) Render(_ string, _ domain.AssembledContext) (string, error) { return p.s, nil }
 
 type fakePrompt struct{ err error }
@@ -54,27 +57,22 @@ func (e *fakeEngine) Execute(_ context.Context, in ExecInput) (EngineResult, err
 	return EngineResult{Raw: r.raw, Provider: "fakeprov", Model: "fakemodel", TokensUsed: 5}, nil
 }
 
-// fakeRuleEngine is a stub Rule engine: it returns decision (nil = defer) or err.
-type fakeRuleEngine struct {
-	decision *domain.RuleDecision
-	err      error
+// fakeProjection stands in for Governance's FindingAssessment Domain Projection. The runtime
+// receives it whole — there is nothing here for the gateway to compose.
+type fakeProjection struct {
+	proj domain.FindingAssessment
+	err  error
 }
 
-func (e fakeRuleEngine) Kind() domain.EngineKind { return domain.EngineRule }
-
-func (e fakeRuleEngine) Execute(_ context.Context, _ ExecInput) (EngineResult, error) {
-	if e.err != nil {
-		return EngineResult{}, e.err
-	}
-	return EngineResult{Decision: e.decision}, nil
+func (f fakeProjection) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
+	return f.proj, f.err
 }
 
-const okRaw = `{"finding_id":"F1","recommended_stance":"affected","confidence":0.8,` +
-	`"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"x"}`
-
-func groundedReaders() (fakeFindingReader, fakeFaultlineReader) {
-	return fakeFindingReader{view: domain.FindingView{ID: "F1", FaultlineID: "FL1"}},
-		fakeFaultlineReader{view: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"}}
+func groundedProjection() fakeProjection {
+	return fakeProjection{proj: domain.FindingAssessment{
+		Finding:   domain.FindingView{ID: "F1", FaultlineID: "FL1"},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"},
+	}}
 }
 
 // customCap builds a valid ad-hoc capability (minimal schema, grounded needs) for
@@ -83,6 +81,9 @@ func customCap(id string, plan domain.ExecutionPlan) domain.Capability {
 	return domain.Capability{
 		ID:             id,
 		Version:        "v1",
+		SelectionType:  domain.SelectionFinding,
+		MinSelection:   1,
+		MaxSelection:   1,
 		Needs:          []domain.ContextNeed{domain.NeedFinding, domain.NeedFaultline},
 		Plan:           plan,
 		OutputSchema:   `{"type":"object"}`,
@@ -92,8 +93,8 @@ func customCap(id string, plan domain.ExecutionPlan) domain.Capability {
 
 func gatewayWith(t *testing.T, reg *domain.Registry, engines ...Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
-	g, err := NewGateway(GatewayConfig{Registry: reg, Finding: fr, Faultline: flr, Prompt: fakePrompt{}, Engines: engines})
+	proj := groundedProjection()
+	g, err := NewGateway(GatewayConfig{Registry: reg, Projection: proj, Prompt: fakePrompt{}, Engines: engines})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
@@ -104,10 +105,10 @@ func gatewayWith(t *testing.T, reg *domain.Registry, engines ...Engine) *Gateway
 // default [Rule → LLM] plan falls through to the LLM (the Δ1 behaviour under test).
 func newTestGateway(t *testing.T, prompt PromptRenderer, llm Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Prompt: prompt, Engines: []Engine{fakeRuleEngine{}, llm},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Prompt: prompt, Engines: []Engine{llm},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -123,10 +124,10 @@ func TestNewGatewayInvalidSchema(t *testing.T) {
 }
 
 func TestNewGatewayCustomClock(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	fixed := time.Unix(0, 0)
 	_, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 		Now: func() time.Time { return fixed },
 	})
@@ -137,7 +138,7 @@ func TestNewGatewayCustomClock(t *testing.T) {
 
 func TestInvokeUnknownCapability(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	_, oc := g.Invoke(context.Background(), "does_not_exist", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "does_not_exist", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonUnknownCap {
 		t.Errorf("outcome = %+v, want unknown_capability/false", oc)
 	}
@@ -145,16 +146,15 @@ func TestInvokeUnknownCapability(t *testing.T) {
 
 func TestInvokeNoGrounding(t *testing.T) {
 	g, err := NewGateway(GatewayConfig{
-		Registry:  domain.DefaultRegistry(),
-		Finding:   fakeFindingReader{view: domain.FindingView{}}, // empty ID = not found
-		Faultline: fakeFaultlineReader{},
-		Prompt:    fakePrompt{},
-		Engines:   []Engine{fakeRuleEngine{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}}},
+		Registry:   domain.DefaultRegistry(),
+		Projection: fakeProjection{}, // empty projection = not found
+		Prompt:     fakePrompt{},
+		Engines:    []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonNoGrounding {
 		t.Errorf("outcome = %+v, want no_grounding/false", oc)
 	}
@@ -162,7 +162,7 @@ func TestInvokeNoGrounding(t *testing.T) {
 
 func TestInvokePromptError(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{err: errors.New("boom")}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Reason != ReasonPromptError {
 		t.Errorf("reason = %s, want prompt_error", oc.Reason)
 	}
@@ -170,7 +170,7 @@ func TestInvokePromptError(t *testing.T) {
 
 func TestInvokeProviderError(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{err: errors.New("model down")}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Reason != ReasonProviderError {
 		t.Errorf("reason = %s, want provider_error", oc.Reason)
 	}
@@ -178,7 +178,7 @@ func TestInvokeProviderError(t *testing.T) {
 
 func TestInvokeSchemaInvalidMalformed(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: "{not json"}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonSchemaInvalid {
 		t.Errorf("outcome = %+v, want schema_invalid/false", oc)
 	}
@@ -186,7 +186,7 @@ func TestInvokeSchemaInvalidMalformed(t *testing.T) {
 
 func TestInvokeRetryAfterMalformedThenOK(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: "{bad"}, {raw: okRaw}}})
-	p, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	p, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced || oc.Reason != ReasonOK {
 		t.Fatalf("outcome = %+v, want ok/true", oc)
 	}
@@ -199,7 +199,7 @@ func TestInvokeRetryAfterSchemaViolationThenOK(t *testing.T) {
 	// Valid JSON but a stance outside the schema enum → ValidateSchema fails, retry.
 	badEnum := `{"finding_id":"F1","recommended_stance":"deferred","confidence":0.5,"evidence":[],"reasoning":"x"}`
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: badEnum}, {raw: okRaw}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced || oc.Reason != ReasonOK {
 		t.Errorf("outcome = %+v, want ok/true", oc)
 	}
@@ -209,7 +209,7 @@ func TestInvokeBusinessInvalid(t *testing.T) {
 	ungrounded := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.8,` +
 		`"evidence":[{"kind":"cve","ref":"CVE-9999-9999"}],"reasoning":"x"}`
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: ungrounded}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonBusinessInvalid {
 		t.Errorf("outcome = %+v, want business_invalid/false", oc)
 	}
@@ -217,7 +217,7 @@ func TestInvokeBusinessInvalid(t *testing.T) {
 
 func TestInvokeHappy(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	p, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr-9")
+	p, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr-9")
 	if !oc.Produced || oc.Reason != ReasonOK {
 		t.Fatalf("outcome = %+v, want ok/true", oc)
 	}
@@ -232,57 +232,18 @@ func TestInvokeHappy(t *testing.T) {
 	}
 }
 
-// --- Δ2 two-step plan (Rule → LLM) ------------------------------------------
-
-func TestInvokeRuleShortCircuits(t *testing.T) {
-	decision := &domain.RuleDecision{
-		Stance: domain.StanceNotAffected, RuleID: "version-range", Reason: "out of range",
-		Evidence: []domain.Evidence{{Kind: "cve", Ref: "CVE-1"}}, // grounded (Faultline CVE-1)
-	}
-	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}} // would say "affected" if it ran
-	g := gatewayWith(t, domain.DefaultRegistry(), fakeRuleEngine{decision: decision}, llm)
-
-	p, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
-	if !oc.Produced || oc.Reason != ReasonOK {
-		t.Fatalf("outcome = %+v, want ok/true", oc)
-	}
-	if oc.DecidedBy != "rule:not_affected" || p.Metadata.DecidedBy != "rule:not_affected" {
-		t.Errorf("provenance = %q / %q, want rule:not_affected", oc.DecidedBy, p.Metadata.DecidedBy)
-	}
-	if p.Recommendation.Stance != domain.StanceNotAffected || p.Confidence != 1.0 {
-		t.Errorf("proposal = %+v, want the rule's not_affected @ confidence 1.0", p)
-	}
-	if llm.calls != 0 {
-		t.Errorf("the LLM must NOT run when the rule decides; calls=%d", llm.calls)
-	}
-}
-
-func TestInvokeRuleDefersToLLM(t *testing.T) {
-	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	p, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
-	if !oc.Produced || oc.DecidedBy != "llm:affected" {
-		t.Fatalf("outcome = %+v, want produced with DecidedBy llm:affected", oc)
-	}
-	if p.Recommendation.Stance != domain.StanceAffected {
-		t.Errorf("stance = %q, want the LLM's affected", p.Recommendation.Stance)
-	}
-	if oc.InputBytes == 0 {
-		t.Error("InputBytes should be metered on the LLM path")
-	}
-}
-
 func TestInvokeRunawayPromptGuard(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Prompt: fixedPrompt{s: strings.Repeat("x", 100)}, Engines: []Engine{fakeRuleEngine{}, llm},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Prompt: fixedPrompt{s: strings.Repeat("x", 100)}, Engines: []Engine{llm},
 		MaxPromptBytes: 10,
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonInsufficient || oc.DecidedBy != "guard:oversize" {
 		t.Errorf("outcome = %+v, want insufficient/guard:oversize", oc)
 	}
@@ -296,29 +257,9 @@ func TestInvokeRunawayPromptGuard(t *testing.T) {
 
 func TestInvokeProviderTimeoutInsufficient(t *testing.T) {
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{err: context.DeadlineExceeded}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonInsufficient || oc.DecidedBy != "guard:timeout" {
 		t.Errorf("outcome = %+v, want insufficient/guard:timeout (never a hard error)", oc)
-	}
-}
-
-func TestInvokeRuleEngineError(t *testing.T) {
-	g := gatewayWith(t, domain.DefaultRegistry(),
-		fakeRuleEngine{err: errors.New("rule boom")}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
-	if oc.Produced || oc.Reason != ReasonProviderError {
-		t.Errorf("outcome = %+v, want provider_error/false", oc)
-	}
-}
-
-func TestInvokeRuleDecisionBusinessInvalid(t *testing.T) {
-	bad := &domain.RuleDecision{Stance: domain.StanceNotAffected, RuleID: "version-range",
-		Evidence: []domain.Evidence{{Kind: "cve", Ref: "CVE-9999"}}} // ungrounded
-	g := gatewayWith(t, domain.DefaultRegistry(),
-		fakeRuleEngine{decision: bad}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
-	if oc.Produced || oc.Reason != ReasonBusinessInvalid {
-		t.Errorf("outcome = %+v, want business_invalid/false", oc)
 	}
 }
 
@@ -327,25 +268,16 @@ func TestInvokeUnwiredEngineKind(t *testing.T) {
 	// Knowledge kind is exempt — it is best-effort and skips when unwired; see the Δ3a tests.)
 	reg := domain.NewRegistry(customCap("needs_mystery", domain.ExecutionPlan{{Engine: domain.EngineKind("mystery")}}))
 	g := gatewayWith(t, reg, &fakeEngine{replies: []engineReply{{raw: okRaw}}}) // only an LLM engine wired
-	_, oc := g.Invoke(context.Background(), "needs_mystery", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "needs_mystery", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonProviderError {
 		t.Errorf("outcome = %+v, want provider_error/false (unwired non-optional engine kind)", oc)
-	}
-}
-
-func TestInvokeRuleOnlyPlanExhausts(t *testing.T) {
-	reg := domain.NewRegistry(customCap("rule_only", domain.ExecutionPlan{{Engine: domain.EngineRule}}))
-	g := gatewayWith(t, reg, fakeRuleEngine{}) // rule defers, no further step → exhausts
-	_, oc := g.Invoke(context.Background(), "rule_only", "F1", "corr")
-	if oc.Produced || oc.Reason != ReasonInsufficient || oc.DecidedBy != "insufficient" {
-		t.Errorf("outcome = %+v, want insufficient/false (exhausted plan)", oc)
 	}
 }
 
 func TestInvokeLLMDeclinesInsufficient(t *testing.T) {
 	decline := `{"finding_id":"F1","recommended_stance":"insufficient","confidence":0,"evidence":[],"reasoning":"not enough data"}`
 	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: decline}}})
-	p, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	p, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced {
 		t.Fatalf("insufficient must not produce a proposal: %+v", oc)
 	}
@@ -382,9 +314,9 @@ func (p *fakePrecedent) GetPrecedents(_ context.Context, fl, excl string) ([]dom
 
 func gatewayWithPrecedent(t *testing.T, prompt PromptRenderer, prec PrecedentReader, engines ...Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Precedent: prec, Prompt: prompt, Engines: engines,
 	})
 	if err != nil {
@@ -396,9 +328,9 @@ func gatewayWithPrecedent(t *testing.T, prompt PromptRenderer, prec PrecedentRea
 func TestInvokePullsPrecedentForLLM(t *testing.T) {
 	prec := &fakePrecedent{positions: []domain.PrecedentPosition{{ReleaseID: "R2", Stance: "not_affected", Rationale: "backport"}}}
 	cp := &capturePrompt{}
-	g := gatewayWithPrecedent(t, cp, prec, fakeRuleEngine{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := gatewayWithPrecedent(t, cp, prec, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Fatalf("outcome = %+v, want produced", oc)
 	}
@@ -410,27 +342,12 @@ func TestInvokePullsPrecedentForLLM(t *testing.T) {
 	}
 }
 
-func TestRuleShortCircuitSkipsPrecedent(t *testing.T) {
-	decision := &domain.RuleDecision{Stance: domain.StanceNotAffected, RuleID: "version-range",
-		Evidence: []domain.Evidence{{Kind: "cve", Ref: "CVE-1"}}}
-	prec := &fakePrecedent{}
-	g := gatewayWithPrecedent(t, fakePrompt{}, prec, fakeRuleEngine{decision: decision}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
-
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
-	if oc.DecidedBy != "rule:not_affected" {
-		t.Fatalf("expected a rule short-circuit, got %+v", oc)
-	}
-	if prec.calls != 0 {
-		t.Errorf("precedent must NOT be read on a rule short-circuit; calls=%d", prec.calls)
-	}
-}
-
 func TestInvokePrecedentErrorDegrades(t *testing.T) {
 	prec := &fakePrecedent{err: errors.New("governance down")}
 	cp := &capturePrompt{}
-	g := gatewayWithPrecedent(t, cp, prec, fakeRuleEngine{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := gatewayWithPrecedent(t, cp, prec, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Errorf("a precedent-read failure must degrade, not block: %+v", oc)
 	}
@@ -460,10 +377,10 @@ func (e *fakeKnowledgeEngine) Execute(_ context.Context, _ ExecInput) (EngineRes
 
 func gatewayRuleKnowledgeLLM(t *testing.T, prompt PromptRenderer, prec PrecedentReader, know Engine, llm Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Precedent: prec, Prompt: prompt, Engines: []Engine{fakeRuleEngine{}, know, llm},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Precedent: prec, Prompt: prompt, Engines: []Engine{know, llm},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -479,7 +396,7 @@ func TestKnowledgeStepFillsSemanticPrecedents(t *testing.T) {
 	cp := &capturePrompt{}
 	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Fatalf("outcome = %+v, want produced", oc)
 	}
@@ -500,7 +417,7 @@ func TestKnowledgeStepPreemptsExactCVEFallback(t *testing.T) {
 	cp := &capturePrompt{}
 	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Fatalf("outcome = %+v", oc)
 	}
@@ -518,7 +435,7 @@ func TestKnowledgeEmptyFallsBackToExactCVE(t *testing.T) {
 	cp := &capturePrompt{}
 	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Fatalf("outcome = %+v", oc)
 	}
@@ -538,7 +455,7 @@ func TestKnowledgeStepErrorDegrades(t *testing.T) {
 	cp := &capturePrompt{}
 	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Errorf("a Knowledge-engine failure must degrade, not block: %+v", oc)
 	}
@@ -561,17 +478,17 @@ type tagRedactor struct{}
 func (tagRedactor) Redact(s string) string { return "REDACTED:" + s }
 
 func TestInvokeUnauthorized(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Prompt: fakePrompt{}, Engines: []Engine{fakeRuleEngine{}, llm},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Prompt: fakePrompt{}, Engines: []Engine{llm},
 		Authorizer: denyAuthorizer{err: errors.New("forbidden")},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	_, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr")
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if oc.Produced || oc.Reason != ReasonUnauthorized {
 		t.Errorf("outcome = %+v, want unauthorized/false", oc)
 	}
@@ -581,32 +498,32 @@ func TestInvokeUnauthorized(t *testing.T) {
 }
 
 func TestInvokeAuthorizedAllows(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Prompt: fakePrompt{}, Engines: []Engine{fakeRuleEngine{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}}},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 		Authorizer: denyAuthorizer{err: nil}, // allows
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	if _, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr"); !oc.Produced {
+	if _, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr"); !oc.Produced {
 		t.Errorf("an allowing authorizer must not block: %+v", oc)
 	}
 }
 
 func TestInvokeRedactsPromptAndBindsLocalOnly(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
-		Prompt: fakePrompt{}, Engines: []Engine{fakeRuleEngine{}, llm},
+		Registry: domain.DefaultRegistry(), Projection: proj,
+		Prompt: fakePrompt{}, Engines: []Engine{llm},
 		Redactor: tagRedactor{},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	if _, oc := g.Invoke(context.Background(), "recommend_position", "F1", "corr"); !oc.Produced {
+	if _, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr"); !oc.Produced {
 		t.Fatalf("outcome = %+v", oc)
 	}
 	if !strings.HasPrefix(llm.lastPrompt, "REDACTED:") {
@@ -614,5 +531,128 @@ func TestInvokeRedactsPromptAndBindsLocalOnly(t *testing.T) {
 	}
 	if !llm.lastLocalOnly {
 		t.Error("the provider binding must carry LocalOnly=true (C7 local-only)")
+	}
+}
+
+// A plan that walks to the end without producing must return the honest "insufficient"
+// outcome — not a hang, and not a false success. A retrieval-only plan is the reachable
+// case: the Knowledge step enriches grounding and never decides, so the loop exhausts.
+//
+// This replaces the rule-only-plan test deleted with the Rule engine (EDR-TRUST-01 T5). The
+// property it guards is about the PLAN WALK, not about rules, so it must outlive them.
+func TestInvokeRetrievalOnlyPlanExhaustsToInsufficient(t *testing.T) {
+	reg := domain.NewRegistry(customCap("retrieval_only", domain.ExecutionPlan{{Engine: domain.EngineKnowledge}}))
+	g := gatewayWith(t, reg, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+
+	p, oc := g.Invoke(context.Background(), "retrieval_only", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Produced {
+		t.Fatalf("a plan that never decides must not produce a proposal, got %+v", p)
+	}
+	if oc.Reason != ReasonInsufficient || oc.DecidedBy != "insufficient" {
+		t.Errorf("outcome = %q/%q, want insufficient — an honest no-answer, never an error",
+			oc.Reason, oc.DecidedBy)
+	}
+}
+
+// A Selection the capability does not accept is rejected at the door — before grounding is
+// assembled and before any provider is touched. The engines here would panic if reached.
+func TestInvokeSelectionMismatchRejectedBeforeAnyWork(t *testing.T) {
+	cases := []struct {
+		name string
+		sel  domain.Selection
+	}{
+		{"wrong type", domain.NewSelection(domain.SelectionRelease, "R1")},
+		{"too many for a single-Finding capability", domain.NewSelection(domain.SelectionFinding, "F1", "F2")},
+		{"empty", domain.NewSelection(domain.SelectionFinding)},
+		{"unknown type", domain.NewSelection(domain.SelectionType("position"), "P1")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := gatewayWith(t, domain.DefaultRegistry(), &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+			p, oc := g.Invoke(context.Background(), "recommend_position", c.sel, "corr")
+			if oc.Produced {
+				t.Fatalf("must not produce a proposal, got %+v", p)
+			}
+			if oc.Reason != ReasonSelectionMismatch {
+				t.Errorf("reason = %q, want %q", oc.Reason, ReasonSelectionMismatch)
+			}
+			// Nothing was spent: no provider was called, so no provenance was recorded.
+			if oc.Provider != "" || oc.TokensUsed != 0 || oc.InputBytes != 0 {
+				t.Errorf("rejection must cost nothing, got %+v", oc)
+			}
+		})
+	}
+}
+
+// The Selection travels onto the telemetry record, so an invocation's provenance says what
+// it was about and not merely which capability ran (T9).
+func TestInvokeOutcomeCarriesTheSelection(t *testing.T) {
+	g := gatewayWith(t, domain.DefaultRegistry(), &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	sel := domain.NewSelection(domain.SelectionFinding, "F1")
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", sel, "corr")
+	if oc.Selection.Type != domain.SelectionFinding || oc.Selection.First() != "F1" {
+		t.Errorf("outcome selection = %+v, want finding/F1", oc.Selection)
+	}
+}
+
+// --- Capability classes (EDR-TRUST-01 T7) -----------------------------------------------
+
+// An Information capability produces an EPHEMERAL response and NO proposal. This is the
+// structural half of "an Information Response may never become enterprise truth": the
+// Gateway returns before BuildProposal is reachable, so there is nothing for a caller to
+// record even if a future edit forgot the rule.
+func TestInvokeInformationCapabilityProducesNoProposal(t *testing.T) {
+	info := customCap("explain_vulnerability", domain.ExecutionPlan{{Engine: domain.EngineLLM, Prompt: "p"}})
+	info.Output = domain.OutputInformation
+	reasoning := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,` +
+		`"evidence":[],"reasoning":"Log4Shell lets an attacker..."}`
+	g := gatewayWith(t, domain.NewRegistry(info), &fakeEngine{replies: []engineReply{{raw: reasoning}}})
+
+	p, oc := g.Invoke(context.Background(), "explain_vulnerability",
+		domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+
+	if oc.Produced {
+		t.Fatal("an Information capability must never produce a proposal")
+	}
+	if p.Recommendation.Stance != "" || p.Recommendation.FindingID != "" || p.Capability != "" {
+		t.Errorf("proposal must be zero-valued, got %+v", p)
+	}
+	if oc.OutputClass != domain.OutputInformation {
+		t.Errorf("OutputClass = %q, want %q", oc.OutputClass, domain.OutputInformation)
+	}
+	if oc.Information == "" {
+		t.Error("the ephemeral answer should be returned for a human to read")
+	}
+	// Not an error and not a decline — the capability did exactly its job.
+	if oc.Reason != ReasonOK {
+		t.Errorf("reason = %q, want %q", oc.Reason, ReasonOK)
+	}
+}
+
+// The control: the same plan on a Decision capability DOES produce a proposal, so the test
+// above cannot pass merely because the pipeline is broken.
+func TestInvokeDecisionCapabilityStillProducesAProposal(t *testing.T) {
+	g := gatewayWith(t, domain.DefaultRegistry(), &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	p, oc := g.Invoke(context.Background(), "recommend_position",
+		domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+
+	if !oc.Produced || oc.OutputClass != domain.OutputDecision {
+		t.Fatalf("outcome = %+v, want produced/decision", oc)
+	}
+	if p.Recommendation.Stance == "" {
+		t.Error("a Decision capability must produce a recordable claim")
+	}
+	if oc.Information != "" {
+		t.Error("a Decision capability produces no ephemeral answer")
+	}
+}
+
+// The shipped capability is a Decision — its stance aspires to become an Enterprise Position.
+// Pinned so a later edit cannot silently reclassify it and route a governed claim down the
+// ephemeral path, where nothing would ever record it.
+func TestRecommendPositionIsADecisionCapability(t *testing.T) {
+	if got := domain.RecommendPositionV1().Output; got != domain.OutputDecision {
+		t.Fatalf("output class = %q, want %q", got, domain.OutputDecision)
 	}
 }

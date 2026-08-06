@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // --- fakes -----------------------------------------------------------------------------
@@ -154,7 +156,7 @@ func TestGetFinding(t *testing.T) {
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
 	_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a"})
 	// A raised + accepted proposal exercises the proposal + position + current-position mappers.
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	_, _ = f.AcceptProposal("p1", human, fixedClock{}.Now())
 	repo.seed(f)
@@ -221,7 +223,7 @@ func TestGetFindingByKey(t *testing.T) {
 func TestGetPosition(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	_, _ = f.AcceptProposal("p1", human, fixedClock{}.Now())
 	repo.seed(f)
@@ -321,7 +323,7 @@ func TestRaiseProposal(t *testing.T) {
 func TestAcceptAndRejectProposal(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	repo.seed(f)
 	srv := server(t, repo, fakeProjection{})
@@ -352,7 +354,7 @@ func TestAcceptAndRejectProposal(t *testing.T) {
 func TestRejectProposal(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "vendor VEX", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "vendor VEX", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	repo.seed(f)
 	srv := server(t, repo, fakeProjection{})
@@ -415,4 +417,78 @@ func doRaw(t *testing.T, url, raw string) (int, []byte) {
 	var buf [4096]byte
 	n, _ := resp.Body.Read(buf[:])
 	return resp.StatusCode, buf[:n]
+}
+
+type stubKnowledgeReader struct {
+	k   app.FaultlineKnowledge
+	err error
+}
+
+func (s stubKnowledgeReader) GetFaultline(context.Context, string) (app.FaultlineKnowledge, error) {
+	return s.k, s.err
+}
+
+// The FindingAssessment Domain Projection on the wire (EDR-TRUST-01 T10). It is business-named
+// and self-contained, which is what makes it reusable by a dashboard, a report and the AI
+// Runtime alike — and replayable as a fixture.
+func TestGetFindingAssessment(t *testing.T) {
+	newSrv := func(t *testing.T, kr app.FaultlineKnowledgeReader) *httptest.Server {
+		t.Helper()
+		repo := newRepo()
+		f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+		_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:golang/x@1.0.0"})
+		repo.seed(f)
+		write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0)
+		if kr != nil {
+			read = read.WithKnowledge(kr)
+		}
+		srv := httptest.NewServer(govhttp.NewHandler(write, read).Router())
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	t.Run("both halves", func(t *testing.T) {
+		srv := newSrv(t, stubKnowledgeReader{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: "high", KEV: true,
+			AffectedRanges: []string{"<2.0"}, RangeTrust: value.TrustObserved,
+		}})
+		status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, body)
+		}
+		var v struct {
+			Finding   map[string]any `json:"finding"`
+			Knowledge map[string]any `json:"knowledge"`
+		}
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if v.Finding["id"] != "fnd-1" {
+			t.Errorf("finding half = %v", v.Finding)
+		}
+		if v.Knowledge["severity"] != "high" || v.Knowledge["range_trust"] != "observed" {
+			t.Errorf("knowledge half = %v", v.Knowledge)
+		}
+	})
+
+	// Absent rather than zero-valued, so a consumer can tell "Knowledge was unreachable" from
+	// "this CVE has no enrichment". Collapsing both into zeros would hide an outage.
+	t.Run("knowledge omitted when unavailable", func(t *testing.T) {
+		srv := newSrv(t, stubKnowledgeReader{err: errors.New("knowledge down")})
+		status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, body)
+		}
+		if strings.Contains(string(body), `"knowledge"`) {
+			t.Errorf("knowledge must be omitted when absent; body=%s", string(body))
+		}
+	})
+
+	t.Run("unknown finding", func(t *testing.T) {
+		srv := newSrv(t, nil)
+		if status, _ := do(t, http.MethodGet, srv.URL+"/findings/nope/assessment", nil); status != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", status)
+		}
+	})
 }

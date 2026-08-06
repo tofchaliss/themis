@@ -59,7 +59,7 @@ func inventoryOf(purls ...string) app.Inventory {
 
 func correlation(t *testing.T, inv app.InventoryReader, disc app.PackageVulnSource, matches app.MatchRecorder, repo app.Repository) *app.CorrelationService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return app.NewCorrelationService(inv, disc, fold, matches, fixedClock{})
 }
 

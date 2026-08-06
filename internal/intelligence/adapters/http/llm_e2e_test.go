@@ -71,7 +71,6 @@ func TestE2ERealLLM(t *testing.T) {
 		Faultline: readapi.NewFaultlineClient(know.URL, know.Client()),
 		Prompt:    pr,
 		Engines: []app.Engine{
-			engine.NewRuleEngine(domain.VersionRangeRule{}),
 			engine.NewLLMEngine(provider.NewStaticRouter(realProvider)),
 		},
 		ProviderTimeout: 180 * time.Second, // a cold model load can be slow

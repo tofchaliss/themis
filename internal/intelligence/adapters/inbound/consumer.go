@@ -57,8 +57,7 @@ type IndexWriter interface {
 
 // Consumer maintains the Operational Semantic Index from Governance Position events.
 type Consumer struct {
-	findings   app.FindingReader
-	faultlines app.FaultlineReader
+	projection app.ProjectionReader
 	positions  PositionReader
 	embedder   app.Embedder
 	store      EmbeddingWriter
@@ -68,10 +67,10 @@ type Consumer struct {
 
 // NewConsumer wires the population consumer. The embedder's model is stamped on every row so a
 // model swap is detectable and the index rebuildable (R6).
-func NewConsumer(findings app.FindingReader, faultlines app.FaultlineReader, positions PositionReader,
+func NewConsumer(projection app.ProjectionReader, positions PositionReader,
 	embedder app.Embedder, st EmbeddingWriter, idx IndexWriter) *Consumer {
 	return &Consumer{
-		findings: findings, faultlines: faultlines, positions: positions,
+		projection: projection, positions: positions,
 		embedder: embedder, store: st, index: idx, model: embedder.Model(),
 	}
 }
@@ -131,15 +130,13 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 // there is nothing to embed (no components and no severity), and an error only for a transient
 // read/embed failure (which the caller retries).
 func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*store.EmbeddingRecord, error) {
-	finding, err := c.findings.GetFinding(ctx, dto.FindingID)
+	// One projection read, not two gathering reads (T10) — the population path is a consumer
+	// of the same business view the reasoning path uses.
+	proj, err := c.projection.GetAssessment(ctx, dto.FindingID)
 	if err != nil {
 		return nil, err
 	}
-	faultline, err := c.faultlines.GetFaultline(ctx, dto.FaultlineID)
-	if err != nil {
-		return nil, err
-	}
-	text := embed.SubjectText(faultline.Severity, finding.Components)
+	text := embed.SubjectText(proj.Knowledge.Severity, proj.Finding.Components)
 	if text == "" {
 		return nil, nil
 	}
@@ -156,7 +153,7 @@ func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*stor
 		FaultlineID: dto.FaultlineID,
 		ReleaseID:   dto.ReleaseID,
 		CVE:         dto.CVE,
-		Component:   representativeComponent(finding.Components),
+		Component:   representativeComponent(proj.Finding.Components),
 		Stance:      dto.Stance,
 		Rationale:   rationale,
 		Model:       c.model,

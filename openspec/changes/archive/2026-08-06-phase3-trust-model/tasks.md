@@ -1,0 +1,403 @@
+# Tasks — phase3-trust-model (evidence trust, deterministic inference, capability surface)
+
+> Scope: the cross-context trust model per `proposal.md` / `design.md`; every decision traces to
+> **`docs/engineering/decisions/EDR-TRUST-01.md` (T1–T12)**. Each group ends green on **`make check-ci`**.
+> **Group order is load-bearing** — it is the migration order that keeps `recommend_position` behaviourally
+> identical throughout (design.md §Migration order). Do not reorder groups 6 and 7.
+
+## 1. Trust vocabulary in the kernel (T2 · T3)
+
+- [x] 1.1 `internal/kernel/value/trust.go`: `TrustClass` (`Observed` < `Asserted` < `Inferred`), `Valid()`,
+  ordering, and a monotonic `Max(...)` that returns the highest-risk class. Stdlib-only. — named
+  **`MaxTrust`**, not `Max`: every top-level func in this package names its concept (`ParseSeverity`,
+  `CompareVersions`), and `value.Max(…)` would say nothing about trust at the call site. Two safety choices:
+  the signature is `MaxTrust(first, rest...)` so an **empty** argument list is impossible — a variadic-only
+  form would return the *most trusted* class for no evidence, the exact failure T3 exists to prevent — and an
+  unrecognized class **ranks highest** and normalizes to `TrustInferred`, so a malformed value can never be
+  mistaken for a trusted one.
+- [x] 1.2 Document the criterion **on the type**: *derivable vs declared* — can this be re-derived, or must
+  someone be believed? Include the SBOM and vendor-`not_affected` cases as the two calibrating examples. —
+  both examples are on the type doc, with the "self-assertion is not observation" corollary.
+- [x] 1.3 Property test (`rapid`): `Max` is commutative, associative, idempotent, and **never returns a
+  lower class than any input** (monotonicity is the invariant the whole model rests on). —
+  `trust_property_test.go`, five properties (the four above plus *always returns a valid class*), and the
+  generator **includes malformed values** because that is where a silent downgrade would hide. Plus a
+  worked unit test of the laundering case: one Inferred input among three Observed still yields Inferred.
+- [x] 1.4 Register the package in `scripts/check-coverage.sh` (**kernel tier = 100%**). — **no change
+  needed**: `kernel/value` is already registered in `domain_pkgs` at the 100% tier, and this adds a file to
+  that existing package rather than a new one.
+- [x] 1.5 Gate: `make check-ci` green. **No behaviour change** — this group is pure addition. — exit 0;
+  `kernel/value` **100.0%** (`trust.go` 100% per-func); 51 packages over threshold. One lint fix on the way:
+  staticcheck `QF1001` on a negated conjunction in the test.
+
+## 2. Source → class mapping in Knowledge (T2)
+
+- [x] 2.1 A single reviewable registry mapping each feed/source id to its `TrustClass`, per design.md's
+  table. Adding a source must force answering one question: *reproducible, declared, or reasoned?* —
+  `adapters/wiring/trust_sources.go`, beside `NewPrecedence` in the composition root: the domain owns the
+  mechanism, the composition root owns the table (the same split `Precedence` already uses).
+- [x] 2.2 `knowledge/domain`: `Proposal` exposes a **derived** `TrustClass()` from its existing `source` —
+  **no new persisted field**, no migration. — realized as `domain.TrustPolicy.ClassOf(source)` rather than a
+  method on `Proposal`: a Proposal should not know the global policy, and injecting the table matches
+  `Precedence`. Confirmed **no migration** — the class is derived from the `source` already stored.
+- [x] 2.3 An unknown source must **fail closed** to `Asserted` (never `Observed`) and be logged once. —
+  fails closed to `Asserted`. **Not logged**: `domain` may not log (depguard, R1), and a runtime log is the
+  wrong instrument anyway — an unclassified source is a config gap, so it is a **build failure** instead
+  (`TestEveryKnownSourceIsClassified`). Asserted rather than Inferred is deliberate and documented: Inferred
+  means "a model produced this", so labelling an unknown feed Inferred would be a lie that corrupts the
+  vocabulary for the sake of a risk level.
+- [x] 2.4 Reconciliation carries the class through to the enterprise view, using `Max` across contributing
+  proposals (T3). — **per field-group, not per view**: `HeadlineTrust` (the winner's class — the headline is
+  winner-take-all) · `RangeTrust` · `SignalTrust` (folded across contributors). A single view-level class
+  would be **actively wrong**: one vendor VEX statement would drag the whole card down and bar a
+  version-range verdict computed purely from Observed ranges — the group-6 rule. Unset groups stay empty,
+  which is safe because `MaxTrust` reads an unset class as Inferred. Trust is now part of `equal()`, so a
+  trust change correctly fires `FaultlineEnriched`.
+- [x] 2.5 Unit tests incl. the calibration cases: OSV range → Observed; Red Hat `not_affected` → Asserted;
+  an AI-sourced proposal → Inferred. — asserted twice: against a fixture (`trustpolicy_test.go`) and against
+  the **table we actually ship** (`trust_sources_test.go`). Plus the test that justifies the whole
+  field-group design: an Asserted applicability on a card does **not** contaminate Observed ranges.
+- [x] 2.6 Gate: `make check-ci` green; `knowledge/domain` still 100%. — exit 0; `knowledge/domain` **100%**,
+  `knowledge/app` **100%**. **Caught a real regression on the way:** the store's `viewDTO` has an explicit
+  field list and silently dropped the three new fields, so the view decoded empty on every reload, was
+  recomputed, and fired a duplicate `FaultlineEnriched` on **every** fold. `TestViewChangeEmitsOneEvent`
+  caught it. Fixed in `adapters/store/codec.go`; jsonb, so backward-compatible with no migration.
+  Three deferrals filed as **TRUST-1/2/3** in `docs/BACKLOG.md`.
+
+## 3. Trust across the Knowledge → Governance seam (T3)
+
+- [x] 3.1 Decide per event whether the class must ride the wire or is re-derivable downstream. Prefer
+  re-derivation — it keeps the frozen v1 payloads untouched. — **the preference does not survive contact: it
+  must ride the wire.** Re-deriving downstream would require Governance to hold a **second copy of the
+  source→class policy**, and two copies of a trust policy will eventually disagree — worse than a wire
+  change. Knowledge owns the table, so Knowledge ships the verdict. Applied to
+  **`knowledge.faultline_enriched`** only; `component_matched` opens a Finding and raises no proposal, so it
+  needs no class yet.
+- [x] 3.2 Where it must ride: mint `<event>.v2.schema.json` + a new `schema_ref`. **Never edit a frozen v1
+  schema.** Keep v1 readable for in-flight events. — **no v2 was minted, and that is the correct call.** The
+  house pattern for additive fields is an **optional property on v1** with `required` unchanged and
+  `omitempty` on the struct — used twice already, for `Score` (BUG-3) and `Applicabilities` (EDR-VEX-01 D5),
+  whose schema comment states the intent: *"keeps the frozen v1 wire byte-identical (EVENTBUS D9 — additive,
+  non-breaking)"*. Minting a v2 would have forced a `schema_ref` change nothing needs and broken consistency
+  with those two. The v1 schema was **extended, not edited** — no existing constraint changed.
+- [x] 3.3 Consumer tests drive the exact wire JSON for both versions. — both shapes covered on both sides.
+  Knowledge: `TestIntegrationContractV1_FaultlineEnrichedTrustIsAdditive` asserts a trust-less card marshals
+  **byte-identically** to the pre-change wire (keys absent) *and* a trust-bearing card still validates v1 —
+  the two conditions that make "additive, not v2" legitimate. Plus
+  `TestIntegrationContractV1_RejectsUnknownTrustClass` (the schema pins the vocabulary via `enum`, so a typo
+  fails the contract instead of reaching Governance as an unrecognized string). Governance: DTO decode tests
+  for both shapes, asserted on the **decode itself** — nothing consumes trust until group 4, so there is no
+  Finding change to assert against yet.
+- [x] 3.4 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0. `knowledge/domain` 100%,
+  `governance/app` 100%, `governance/adapters/inbound` 100%. **Filed TRUST-4:** the CVE-withdrawal path
+  carries no class, and unset reads as `Inferred` — which would make group 4's constitutional bar block a
+  policy auto-accept that works today. A live regression waiting; the site is marked in
+  `coordinator.go` and it is a **must-do before group 4 consumes trust**.
+
+## 4. Governance — the constitutional stage (T4 · T6)
+
+- [x] 4.1 `governance/domain`: a **pure, non-configurable** constitutional check evaluated **before**
+  `PolicyRule`. Chiefly: a proposal whose class is `Inferred` is **never** auto-acceptable. —
+  `domain.ConstitutionallyAutoAcceptable`; `GovernanceProposal` gains `evidenceTrust` (the check reads the
+  **evidence**, never the proposer). An unset class reads as `Inferred` via `MaxTrust`, so a proposal raised
+  without stating its evidence fails closed.
+- [x] 4.2 Wire it ahead of policy in the aggregate's decision path. A proposal failing stage 1 is ineligible
+  for **any** automatic acceptance. — one place: `raiseAndMaybeAutoAccept`, returning **before** the policy
+  loop. Failing stage 1 is not an error — the proposal is still **raised** and stays open for a human.
+- [x] 4.3 Stop branching on producer identity (T1): the `Proposer().Kind != ActorSystem` gate is replaced by
+  the trust class. **Land 4.1–4.2 first** so the `Inferred` bar is never momentarily absent. — **the task as
+  written was too broad and was NOT done that way.** T1 removes the producer as a *trust-bearing* category;
+  it does not remove **authority**. Dropping the `ActorSystem` gate would newly let policy auto-accept a
+  **human's** proposal — nothing intends that and DOM-0024 forbids it. So: trust moved to the constitutional
+  stage (4.1), and the `ActorSystem` check **stays** in `PolicyRule.Evaluate` as an authority rule, now
+  documented as such. Decisions and evidence are different axes (T12) — this is the decision axis.
+  `EDR-TRUST-01` T6 amended to record it.
+- [x] 4.4 Regression test proving the laundering path is closed: a **deterministic** rule consuming
+  AI-derived evidence yields an `Inferred` conclusion and is **not** auto-accepted — the case producer-based
+  classification could not see. — `TestConstitutionallyAutoAcceptable_DeterministicProposerCannotLaunder-
+  InferredEvidence`: proposer is `ActorSystem`, so every producer-based check says "eligible"; the evidence
+  is `Inferred`, so it is barred.
+- [x] 4.5 Test that no policy configuration can enable auto-acceptance of `Inferred`. —
+  `TestInferredIsBarredRegardlessOfPolicyConfiguration` asserts the policy *would* match the stance and the
+  constitutional stage still refuses. Plus the end-to-end pair through the service (Inferred blocked /
+  Observed accepted) so the block cannot pass for the wrong reason.
+- [x] 4.6 Confirm outcomes stay **Accepted / Rejected**, with open (`StatusProposed`) as the absence of an
+  automatic outcome. **No new status is added.** — confirmed; no status added.
+- [x] 4.7 Gate: `make check-ci` green; `governance/domain` + `app` 100%. — exit 0; `governance/domain` and
+  `app` **100%**, `adapters/inbound` 100%, `adapters/store` 82.7%. `make e2e-pipeline` green.
+  **TRUST-4 resolved (mitigated):** the withdrawal path now states `Observed` in `evidenceTrustFor` with a
+  guard test, so the long-standing policy auto-accept keeps working; moving the class onto the superseded
+  event stays open. **Persistence:** `finding_proposals.evidence_trust` (migration 000005, up+down) — the
+  aggregate is reloaded before every decision, so a class that failed to round-trip would come back unset,
+  read as `Inferred`, and silently bar a proposal that policy accepted before. Guarded by
+  `TestProposalEvidenceTrustRoundTrips`, which asserts the **constitutional verdict is identical** either
+  side of a save/reload. The column defaults to `'asserted'`, not empty, so existing proposals are not
+  retroactively barred on deploy.
+
+## 5. Reservations — derived, never stored (T12)
+
+- [x] 5.1 Derive a **Reservation** from a Position's immutable `PositionInputs` when its evidence included
+  `Asserted` (or lower) facts. **No new column, no new state.** — `Finding.CurrentReservation()`:
+  `PositionInputs` already references the accepted proposal by id and the Finding holds both, so the whole
+  derivation lives inside the aggregate. Returns the class **and the proposer** — "how sound was that call?"
+  needs to know on whose word. Confirmed: no new column, no new lifecycle status.
+- [x] 5.2 Surface it in the read models — beside `stance` and `effective_priority` on the posture rollup, and
+  on the Position in the read API. *Derived must not mean invisible; this is part of the decision.* —
+  `PostureEntry.Reservation` + `reservation` on the API (spec-first, regenerated). The posture rollup derives
+  it with a **two-table JOIN** (Position → accepted proposal → its class) rather than reading a stored flag,
+  which is what makes drift impossible rather than merely unlikely. Omitted when the Position rests on
+  Observed evidence, so the common row is unchanged.
+- [x] 5.3 Test: an acceptance resting on a vendor `not_affected` surfaces a reservation naming the declarer;
+  one resting only on Observed evidence surfaces none. — plus **unstated** evidence is reserved (not silently
+  trusted) and a **missing accepted proposal** is reserved — the partial-projection case, where implying
+  "well-evidenced" precisely when we cannot tell would be the harmful reading. Integration test proves the
+  JOIN resolves end-to-end.
+- [x] 5.4 Test the lifting path: a later Position version resting on Observed evidence carries **no**
+  reservation, with **no migration or backfill** — history simply shows it lift. —
+  `TestCurrentReservation_LiftsWhenBetterEvidenceEstablishesANewVersion`: a signed build manifest makes the
+  same claim re-derivable, v2 carries no reservation, both versions are retained and v1 stays explicable
+  from its own inputs. This is the property that **justifies deriving over storing** — a stored flag would
+  have needed rewriting on the old row, or gone stale on it.
+- [x] 5.5 Gate: `make check-ci` green. — exit 0; `governance/domain` **100%**, `app` **100%**,
+  `adapters/http` 96.9%, `adapters/store` 82.9%. `make e2e-pipeline` green.
+
+## 6. Deterministic Inference — add the version-range rule to the backend, prove equivalence (T5 · T11)
+
+> **This group must be complete and green before Group 7.** A window with the rule in neither place is a
+> window where a deterministic verdict silently disappears.
+
+- [x] 6.1 Implement the version-range rule as a stage **inside the context that owns its evidence**,
+  alongside the existing `reactToApplicability` precedent. No new context, no new deployable. —
+  **a finding while implementing changed what this group builds.** Knowledge *already* runs a version-range
+  check, in `ApplyCorrelation`, with a comment saying it "mirrors the Intelligence Rule Engine". But the two
+  do different things: Knowledge's is a **filter** (out of range → no match recorded → **no Finding ever
+  created**); Intelligence's is a **verdict on a Finding that already exists**. The real gap is therefore a
+  Finding created *before* the range was known — correlation kept it, enrichment later brings a range that
+  excludes it, and **nothing re-evaluates**. `domain.ProvablyOutOfRange` (pure) +
+  `reactToVersionRange`, mirroring `reactToApplicability`: Knowledge reconciles and ships, Governance runs
+  the per-Finding check because it holds the Finding. `AffectedRanges` rides `faultline_enriched` additively
+  on v1, as group 3 established.
+- [x] 6.2 **Precision requirement:** it must evaluate the **reconciled, backport-aware** range, not a feed's
+  query-time filter. Add a distro-backport test — upstream flags the version, the distribution's build is not
+  vulnerable — as the explicit guard. — `TestProvablyOutOfRange_ReconciledRangeCatchesADistroBackport` pins
+  **both directions**: the reconciled range proves not-affected for `openssl@1.1.1k-51.el8`, and the raw
+  upstream range must **not** yield a verdict. The second assertion is the important one — a wrong reconciled
+  range produces a *silent, wrong* `not_affected`.
+- [x] 6.3 A provable verdict raises a **system proposal** on the covered Finding, travelling the same road as
+  the vendor-VEX suppression proposal. Its class is `Observed`, so policy may auto-accept it. — done; the
+  class is **`sig.RangeTrust`** specifically, not the card's worst. That is group 2's per-field-group design
+  paying off: a vendor statement elsewhere on the card cannot downgrade a verdict computed purely from public
+  ranges.
+- [x] 6.4 **Equivalence test:** the backend rule returns the *same* verdict as the Intelligence rule for the
+  same inputs — table-driven, reusing the existing `domain/rule_test.go` cases as the oracle. —
+  `TestProvablyOutOfRange_MatchesTheIntelligenceRuleOracle`, one case per oracle entry. **One deliberate
+  difference, documented in the test:** Intelligence parses purls to recover (ecosystem, version), so
+  malformed-purl cases make it defer; Governance's `MatchedComponent` carries both as fields (parsed once at
+  correlation), so those cases cannot arise. The behavioural rule is identical. Also pinned: the rule is
+  **certain in one direction only** — in-range never yields "affected".
+- [x] 6.5 Prove the D13 repair: with AI **disabled**, the version-range verdict is still produced. —
+  `TestReactToEnrichment_VersionRangeVerdictProducedWithAIDisabled` asserts the AI seam produces nothing
+  (no advisor wired) *and* the deterministic verdict is still raised. Before this group, switching AI off
+  silently lost a verdict Themis can compute from arithmetic.
+- [x] 6.6 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0; `governance/domain` and
+  `governance/app` **100%**, `knowledge/domain` 100%.
+
+## 7. Remove the version-range rule from the AI runtime (T5)
+
+- [x] 7.1 Delete `intelligence/domain/rule.go` + its wiring; `recommend_position`'s plan becomes
+  `[Knowledge → LLM]`. — 4 files deleted (`domain/rule.go`, `adapters/engine/rule.go` + both tests); plan
+  shortened; the capability doc now states *why* the step is absent rather than leaving a silent gap.
+- [x] 7.2 Remove the now-unused `EngineRule` dispatch path and its kernel version-range import. — the
+  gateway's rule branch, `EngineRule`, `RuleDecision`, `RuleSet`, and **`EngineResult.Decision`** are all
+  gone. Dropping that field is the load-bearing part: with no decision channel, an engine here *structurally
+  cannot* settle a question — it only supplies reasoning or grounding. Verified `internal/intelligence` no
+  longer references `value.AffectedRange` at all.
+- [x] 7.3 `demo_e2e_test.go` + `llm_e2e_test.go` stay green **unchanged in behaviour** — the semantic
+  precedent still flips a recommendation. — `TestDemoSemanticPrecedentChangesRecommendation` passes
+  untouched; `llm_e2e_test.go` (opt-in `//go:build llm`) vets clean, as does `embed_eval`.
+- [x] 7.4 `make deadcode` reports nothing orphaned. — 4 unreachable funcs, **the same 4 as before this
+  change** and none in `intelligence`.
+- [x] 7.5 Gate: `make check-ci` green. — exit 0; `intelligence/domain` and `intelligence/app` **100%**.
+  `make e2e-pipeline` green.
+  **Two tests were replaced rather than deleted, because the property outlived the mechanism:**
+  `TestE2ERuleShortCircuitsOverTheWire` → `TestE2ENoDeterministicShortCircuitInTheRuntime`, which pins the
+  **deliberate behaviour change** at the endpoint (an out-of-range component now reaches the model instead of
+  short-circuiting) so nothing can quietly start deciding there again; and `TestInvokeRuleOnlyPlanExhausts` →
+  `TestInvokeRetrievalOnlyPlanExhaustsToInsufficient`, since "a plan that walks to the end without producing
+  returns an honest `insufficient`" is a property of the **plan walk**, not of rules.
+
+## 8. Selection replaces the bare finding id (T9)
+
+- [x] 8.1 `intelligence/domain`: `Selection{Type, IDs}` with `SelectionType` ∈ {`finding`, `release`};
+  `Capability` declares its supported type and **min/max cardinality** (which subsumes any fan-out limit). —
+  `domain/selection.go`. The doc records *why* each rejected type is rejected (Position has no independent
+  identity and nothing selects it; product/faultline are addressable but unselected today), so a future
+  reader sees the admission rule rather than an arbitrary enum.
+- [x] 8.2 `Gateway.Invoke(ctx, capabilityID, Selection, correlationID)`; a type or cardinality mismatch is a
+  new `ReasonSelectionMismatch`, rejected **before** any projection or provider call. — asserted by more than
+  the reason code: the mismatch test also checks `Provider`, `TokensUsed` and `InputBytes` are all zero, so
+  "rejected before any work" is verified rather than assumed. `Outcome` also carries the Selection now, so an
+  invocation's provenance says *what it was about*, not just which capability ran.
+- [x] 8.3 Spec-first API change: `subject{type, ids}` in `InvokeRequest`, with **`finding_id` accepted as a
+  deprecated alias** for one release. Regenerate; never hand-edit `gen/`. — done; `subject` wins when both
+  are present, so an explicit Selection is never overridden by the legacy shorthand. A mismatch returns
+  **400, not 204** — it is a caller error, and 204 would read as "the AI had nothing to say" and hide the bug.
+- [x] 8.4 Governance's `adapters/intelligence` client constructs the Selection; its `app` port is
+  **unchanged**. — confirmed: `RecommendPosition(ctx, findingID)` is untouched; building the Selection is the
+  ACL's job, which is what an anti-corruption layer is for.
+- [x] 8.5 Tests: cardinality boundaries, type mismatch, the deprecated alias. — boundary cases at, and one
+  past, the upper bound; wrong type; unknown type; empty. Wire-level tests for all four request shapes.
+  **The cross-context seam test caught the wire change and was updated to pin the new shape** — it now
+  asserts the ACL *translates* rather than leaking Selection upward into Governance's port.
+- [x] 8.6 Gate: `make check-ci` green; `intelligence/domain` + `app` 100%. — exit 0;
+  `intelligence/domain`, `app` and `adapters/http` all **100%**. `make e2e-pipeline` green; `llm`-tagged
+  tests vet clean.
+
+## 9. Domain Projections; the runtime stops gathering (T10)
+
+- [x] 9.1 Recognize `ReleasePosture` as the first **Domain Projection**; document the naming rule (business
+  view, never a consumer) beside it. — done in group 5's reservation join and reiterated on the new
+  projection. `FindingAssessment` follows the same pattern: own aggregate + one read-API call, fail-safe.
+- [x] 9.2 Add the projection(s) `recommend_position` needs, owned by the context owning the Selection Type,
+  assembled **only** from events and read-only APIs. **Serve them before 9.3.** —
+  `GET /findings/{id}/assessment` → `FindingAssessment`, served by **Governance** (owner of the Finding
+  Selection Type), composing its own aggregate with Knowledge's read API via a new ACL client. Named for the
+  **business view**: a dashboard rendering a finding-detail page wants exactly this. Naming it
+  `recommend_position_context` would have guaranteed it was never reused — and would have let AI drive the
+  domain model. The Knowledge half is **best-effort**: an outage degrades the view, never the request, and
+  the half is **omitted rather than zeroed** so a consumer can tell an outage from "no enrichment".
+- [x] 9.3 Delete `intelligence/app/context.go` (`AssembleContext`) — closing backlog **G-AI-6**, the dead
+  `NeedFinding`, with it. The runtime issues **no business reads**. — deleted; **G-AI-6 closed**. The
+  population consumer collapsed from two gathering reads to the same one projection, so the KS2 path is now
+  another consumer of the same business view rather than a second orchestrator.
+- [x] 9.4 Implement the four rules: no orchestration · information-preserving shaping (nothing introduced
+  that the projection did not contain) · full provenance · **Grounding Verification anchors to the received
+  Domain Projection, never solely to a shaped view**. — made **structural, not conventional**:
+  `domain.FindingAssessment` (the received projection) owns `Grounds`, and `AssembledContext` (the shaped
+  Capability Context) **delegates** to it. A shaping bug therefore cannot widen what counts as grounded.
+  Precision recorded on the `ProjectionReader` port: rule 1 forbids *orchestration* — composing contexts or
+  requesting a capability-shaped bundle — and fetching one **business-named** projection moves no capability
+  definition into the runtime. The naming rule is what makes that a distinction rather than a loophole.
+- [x] 9.5 Test that a shaped view cannot launder an invented identifier past Grounding Verification. —
+  `TestGroundsAnchorsToTheProjectionNotTheShapedView`: retrieved precedents (a *different* CVE, a component
+  the projection never mentioned) are explicitly **not** grounded, so a model citing one is caught. Plus an
+  empty projection grounds nothing — a failed read must never read as a licence to hallucinate freely.
+- [x] 9.6 Replayability test: a capability runs end-to-end from a **recorded projection fixture**, no live
+  database. — `TestE2EReplaysFromARecordedProjectionFixture`: a JSON blob → the real client decode path →
+  gateway → grounding verification, with no database, no Governance, no Knowledge, no bus. That is the payoff
+  for gathering nothing: reproducing a reasoning failure now means pasting one document, not reproducing two
+  services' states.
+- [x] 9.7 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0. New package
+  `governance/adapters/knowledge` **registered in `scripts/check-coverage.sh`** (adapters tier) rather than
+  left unchecked. **`make e2e-pipeline` caught a caller the sweep missed** — `tests/pipeline` lives outside
+  `internal/`, which is exactly why it is a separate gate.
+
+## 10. Capability classes and the verification split (T7 · T8)
+
+- [x] 10.1 `Capability` declares its **output class**: `Information` or `Decision`. — `domain.OutputClass`.
+- [x] 10.2 An **Information** capability returns an ephemeral response; **nothing is recorded**, and it never
+  reaches Governance. Grounding Verification still applies — for Information it is the **only** gate. — the
+  Gateway returns **before `BuildProposal` is reachable** on that path, so the guarantee is structural rather
+  than a rule someone must remember. `Outcome.Information` carries the answer; `Produced` stays false because
+  there is nothing to record.
+- [x] 10.3 A **Decision** capability's proposal is **Business-Verified** by Governance against current truth
+  **before** it is recorded, and carries its trust class. — `Finding.Vouches` + the check in
+  `RecommendPosition`. The AI client now carries the cited **evidence**, which it previously dropped — without
+  it there was nothing to verify. A failed check is a **silent no-proposal, not an error**: AI producing
+  nothing usable is a normal outcome and must never block a human's request (D13).
+- [x] 10.4 Arch/unit test asserting an Information Response has **no** path to enterprise truth. —
+  `TestInvokeInformationCapabilityProducesNoProposal` (zero-valued proposal, `Produced` false, `Reason` still
+  `ok` — the capability did its job), with a **control** proving the same plan on a Decision capability *does*
+  produce one, so the first test cannot pass merely because the pipeline is broken.
+- [x] 10.5 `recommend_position` is registered as a `Decision` capability — behaviour unchanged. — pinned by
+  `TestRecommendPositionIsADecisionCapability`: a silent reclassification would route a governed claim down
+  the ephemeral path where nothing would ever record it.
+- [x] 10.6 Gate: `make check-ci` green. — exit 0, `make e2e-pipeline` green.
+  **The cross-context seam test caught Business Verification working**: its fake AI cited `FL1` while the
+  seeded Finding's faultline is `fl-1`, so the claim was correctly refused and the fixture was wrong, not the
+  code. Two coverage gaps also surfaced a real testing subtlety — `Vouches` and `OutputClass.Valid` were
+  exercised only from *other packages'* tests, which does not count toward the owning package's tier; both
+  moved to where the code lives.
+
+## 11. Documentation + close-out
+
+- [x] 11.1 `TESTING.md`: how to exercise trust classes, the constitutional bar, and the projection fixtures. —
+  two new sections, runnable without a live stack, each pointing at *what to look for* rather than just what
+  to run. Includes replaying a projection by hand — `curl … /assessment | tee` — because that is the concrete
+  payoff of the runtime gathering nothing.
+- [x] 11.2 `deploy/node.env.example` + `INSTALLATION.md` if any knob is added (R2 — self-documented config). —
+  `THEMIS_KNOWLEDGE_URL` added to the **Governance** node (fail-safe documented). The Intelligence node's
+  entry is now a comment noting it **no longer reads Knowledge**: the knob did not just get added, it
+  **moved**, and a stale copy would have silently kept working while meaning nothing.
+- [x] 11.3 `PHASE3-STATUS.md` resume point; `PARITY-GAP.md` if any gap closes; **close `G-AI-6`** in
+  `docs/BACKLOG.md`. — resume point rewritten; `openspec/STATUS.md` corrected (it still claimed no active
+  change); **G-AI-6 closed** by group 9. No `PARITY-GAP.md` entry closes — this change was EDR-driven, not
+  parity-driven.
+- [x] 11.4 Record the answers to `EDR-TRUST-01`'s remaining open questions if implementation settles them. —
+  **migration order closed by construction**, with the three load-bearing orderings recorded. The Decision
+  Proposal payload stays open by design and is now cheaper: T7's `OutputClass` means a second shape slots in
+  behind it rather than re-litigating the envelope.
+- [x] 11.5 Final gate: **`make check`** (whole repo, macOS) **and** `make check-ci`, plus `make e2e-pipeline`
+  and `make e2e-evidence`. — **all four exit 0**, including whole-repo `make check` over the frozen v0.3.x
+  tree.
+- [x] 11.6 Archive: `openspec archive phase3-trust-model --skip-specs -y` (phase3 changes carry no
+  `specs/` deltas — "no deltas" is expected).
+
+---
+
+## Retrospective — what the task list got wrong
+
+Recorded because the pattern repeated, and the next change should expect it: **three groups had tasks that
+were wrong as written, and each was caught only by trying to do them.**
+
+| Task | Written | Actual |
+| --- | --- | --- |
+| 3.1 | "prefer re-derivation downstream" | Must ride the wire — re-derivation needs a *second copy* of the trust policy, and two copies eventually disagree |
+| 3.2 | "mint `<event>.v2.schema.json`" | The house pattern is **additive-optional on v1**, used twice already (`Score`, `Applicabilities`) |
+| 4.3 | "replace the `ActorSystem` gate with the trust class" | T1 removes the producer as a *trust* signal, not an *authority* one — dropping it would let policy auto-accept a **human's** proposal |
+| 6.1 | "implement the version-range rule" | Knowledge already ran one — as a **filter at match time**. The real gap was a Finding born *before* the range was known, which nothing revisited |
+
+Writing tasks before touching the code buys **sequencing**, not correctness. The sequencing was right and
+load-bearing (groups 6→7 especially); the content needed the code to correct it.
+
+### Why the sequencing still mattered
+
+The task content needed correcting, but the *order* was right and load-bearing. Three orderings could not
+have been swapped:
+
+- **The constitutional stage landed before the producer-identity branch was removed** (group 4), so the
+  `Inferred` bar was never momentarily absent.
+- **The version-range rule was added to the backend and proven equivalent before being deleted from the
+  runtime** (groups 6 → 7). A window with it in neither place loses a deterministic security verdict
+  **silently** — no test would have failed to say so.
+- **Projections were served before the runtime stopped gathering** (group 9).
+
+Each is a window of incorrectness rather than a window of breakage, which is exactly the kind a green build
+will not catch for you.
+
+### The pattern that made the guarantees hold
+
+Every guarantee in this change was only safe once the code made its violation **unexpressible** — recorded in
+full as *Implementation lesson* in `EDR-TRUST-01`. The short form: `Grounds` lives on the projection, so a
+shaped view has none to get wrong; `EngineResult` has no decision field, so a runtime engine has no channel
+to settle a question through; the Gateway returns before `BuildProposal` is reachable on the Information path.
+
+**The test for whether a guarantee is real: write down the code that would violate it.** If you can, it is a
+comment, not a guarantee.
+
+### Notes for the reviewer
+
+- **`EDR-TRUST-01` (T1–T12) is the reason of record** for everything here. Read it before the diff; the code
+  will not explain *why* trust is a property of evidence rather than of the producer.
+- **`EDR-INTELLIGENCE-01` Revision 5 is superseded.** Future AI work scaffolds from `EDR-TRUST-01` (+
+  `EDR-GOVERNANCE-01` for GOV-14), not from Revision 5, whose S1–S6 are absorbed or replaced.
+- **No new bounded context and no new deployable.** T11 (*behaviour follows ownership*) is why: Deterministic
+  Inference is a **stage** executed inside evidence-owning contexts, never a service.
+- **One deliberate, user-visible behaviour change**, pinned by test rather than assumed:
+  `POST /capabilities/recommend_position/invoke` no longer short-circuits an out-of-range component with
+  `decided_by: rule:…`. The verdict did not disappear — it moved **earlier**, fires automatically on
+  enrichment, and now works with AI switched off (repairing D13).
+- **One breaking request shape**, mitigated: `InvokeRequest` takes `subject{type, ids}`; `finding_id` is
+  accepted as a deprecated alias for one release.
+- **One config knob moved, not just added:** `THEMIS_KNOWLEDGE_URL` now belongs to the **Governance** node.
+  The Intelligence node no longer reads Knowledge at all.

@@ -134,6 +134,13 @@ components:
         score:
           type: integer
           description: CVE-intrinsic composite priority score, 0-100 (severity baseline + EPSS + KEV; excludes release-scoped blast).
+        range_trust:
+          type: string
+          enum: [observed, asserted, inferred]
+          description: >
+            Trust class of the sources that contributed the affected ranges / fixed versions
+            (EDR-TRUST-01 T2/T3). Absent when no range evidence contributed. Per field-group,
+            not per card - a vendor statement elsewhere must not downgrade public ranges.
         applicabilities:
           type: array
           description: Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).

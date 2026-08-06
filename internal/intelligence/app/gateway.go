@@ -32,6 +32,11 @@ const (
 	ReasonSchemaInvalid   = "schema_invalid"
 	ReasonBusinessInvalid = "business_invalid"
 	ReasonUnauthorized    = "unauthorized" // admission denied the caller before any provider call (C7)
+	// ReasonSelectionMismatch: the Selection's type or cardinality is not what the capability
+	// declared (T9). Rejected at the door — before any grounding is assembled or any provider
+	// is called — so a release id sent to a Finding-scoped capability surfaces as exactly that,
+	// rather than as a confusing grounding failure further in.
+	ReasonSelectionMismatch = "selection_mismatch"
 	// ReasonInsufficient is the honest "can't determine — no recommendation" outcome
 	// (Δ2): the LLM declined, or the whole plan deferred without producing. It is
 	// produced=false but NOT an error, and is distinct from AI being switched off.
@@ -50,8 +55,14 @@ type Outcome struct {
 	Duration       time.Duration
 	Produced       bool
 	Reason         string
-	DecidedBy      string // "rule:<stance>" / "llm:<stance>" / "guard:<reason>" — what decided
-	PrecedentsUsed int    // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance); 0 on a rule short-circuit
+	DecidedBy      string             // "llm:<stance>" / "guard:<reason>" — what decided
+	Selection      domain.Selection   // what the invocation was about (T9 provenance)
+	OutputClass    domain.OutputClass // which branch ran (T7): information or decision
+	PrecedentsUsed int                // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance)
+	// Information is the ephemeral answer produced by an Information capability. It is NEVER
+	// recorded as enterprise truth and never reaches Governance — a human reads it and it is
+	// discarded. Empty for a Decision capability.
+	Information string
 }
 
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
@@ -61,8 +72,7 @@ type Outcome struct {
 type Gateway struct {
 	registry        *domain.Registry
 	validators      map[string]*domain.Validator
-	finding         FindingReader
-	faultline       FaultlineReader
+	projection      ProjectionReader
 	precedent       PrecedentReader // optional (nil = no precedent grounding)
 	authorizer      Authorizer      // optional (nil = allow-all)
 	redactor        Redactor        // optional (nil = no redaction)
@@ -77,8 +87,7 @@ type Gateway struct {
 // Dispatcher; Δ2 wires the Rule engine and the LLM engine.
 type GatewayConfig struct {
 	Registry        *domain.Registry
-	Finding         FindingReader
-	Faultline       FaultlineReader
+	Projection      ProjectionReader
 	Precedent       PrecedentReader // optional richer grounding (Δ2 C6); nil disables it
 	Authorizer      Authorizer      // optional pre-invocation authz (Δ2 C7); nil = allow-all
 	Redactor        Redactor        // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
@@ -116,8 +125,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 	return &Gateway{
 		registry:        cfg.Registry,
 		validators:      validators,
-		finding:         cfg.Finding,
-		faultline:       cfg.Faultline,
+		projection:      cfg.Projection,
 		precedent:       cfg.Precedent,
 		authorizer:      cfg.Authorizer,
 		redactor:        cfg.Redactor,
@@ -129,21 +137,30 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 	}, nil
 }
 
-// Invoke runs the reactive pipeline for a capability against a subject Finding. It
+// Invoke runs the reactive pipeline for a capability against a Selection. It
 // assembles grounding once, then the Engine Dispatcher walks the capability's execution
 // plan: a deterministic (Rule) step that decides short-circuits the plan; a Knowledge step
 // enriches the grounding with semantically similar past Positions (best-effort precedent,
 // Δ3a); a step that defers passes to the next; the LLM step renders a prompt, runs with a
 // schema retry, and validates in stages. produced=false is a safe "no proposal"; Outcome
 // carries the telemetry, including which step decided and how much precedent grounded it.
-func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, correlationID string) (domain.Proposal, Outcome) {
-	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID}
+func (g *Gateway) Invoke(
+	ctx context.Context, capabilityID string, sel domain.Selection, correlationID string,
+) (domain.Proposal, Outcome) {
+	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID, Selection: sel}
 
 	capb, ok := g.registry.Lookup(capabilityID)
 	if !ok {
 		oc.Reason = ReasonUnknownCap
 		return domain.Proposal{}, oc
 	}
+	// The Selection contract (T9), checked before anything is fetched or spent.
+	if !capb.Accepts(sel) {
+		oc.Reason = ReasonSelectionMismatch
+		return domain.Proposal{}, oc
+	}
+	subjectFindingID := sel.First()
+	oc.OutputClass = capb.Output
 	validator := g.validators[capabilityID]
 
 	// Pre-invocation authorization (C7): reject BEFORE any grounding or provider call.
@@ -162,11 +179,13 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 		defer cancel()
 	}
 
-	ac, err := AssembleContext(ctx, g.finding, g.faultline, capb.Needs, subjectFindingID)
-	if err != nil {
+	// Receive the Domain Projection — one read, no composition (T10).
+	proj, err := g.projection.GetAssessment(ctx, subjectFindingID)
+	if err != nil || proj.Finding.ID == "" {
 		oc.Reason = ReasonNoGrounding
 		return domain.Proposal{}, oc
 	}
+	ac := domain.AssembledContext{Projection: proj}
 
 	start := g.now()
 	for _, step := range capb.Plan {
@@ -190,34 +209,12 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 			return domain.Proposal{}, oc
 		}
 
-		if step.Engine == domain.EngineRule {
-			res, err := eng.Execute(ctx, ExecInput{Context: ac})
-			if err != nil {
-				oc.Duration = g.now().Sub(start)
-				oc.Reason = ReasonProviderError
-				return domain.Proposal{}, oc
-			}
-			if res.Decision == nil {
-				continue // the rule deferred — fall through to the next plan step
-			}
-			out := res.Decision.AsOutput(subjectFindingID)
-			if verr := validator.ValidateBusiness(out, subjectFindingID, ac); verr != nil {
-				oc.Duration = g.now().Sub(start)
-				oc.Reason = ReasonBusinessInvalid
-				return domain.Proposal{}, oc
-			}
-			oc.Duration = g.now().Sub(start)
-			oc.DecidedBy = "rule:" + string(res.Decision.Stance)
-			oc.Produced, oc.Reason = true, ReasonOK
-			return g.buildProposal(out, capb, oc), oc
-		}
-
 		// LLM step (the generative fallback). Semantic precedent from the Knowledge step already
 		// rides ac.Precedents; fall back to the Δ2 exact-CVE blast-radius pull ONLY when that
 		// found none (a cold or incomplete index) — so a rule short-circuit still costs no read,
 		// and a read failure degrades to no precedent, never blocks (C6).
 		if len(ac.Precedents) == 0 && g.precedent != nil {
-			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding.FaultlineID, ac.Finding.ReleaseID); prErr == nil {
+			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding().FaultlineID, ac.Finding().ReleaseID); prErr == nil {
 				ac.Precedents = prec
 			}
 		}
@@ -275,6 +272,16 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 			oc.Duration = g.now().Sub(start)
 			oc.Reason = ReasonSchemaInvalid
 			return domain.Proposal{}, oc
+		}
+		// Information capabilities stop here (T7). The answer is rendered for a human and
+		// discarded; BuildProposal is not reachable on this path, so an Information Response
+		// has no route to enterprise truth even if a future edit forgot the rule.
+		if capb.Output == domain.OutputInformation {
+			oc.Duration = g.now().Sub(start)
+			oc.Information = out.Reasoning
+			oc.DecidedBy = "llm:information"
+			oc.Reason = ReasonOK
+			return domain.Proposal{}, oc // produced stays FALSE: there is no proposal to record
 		}
 		if out.RecommendedStance == string(domain.StanceInsufficient) {
 			// The model honestly declined — a first-class "no recommendation", not an

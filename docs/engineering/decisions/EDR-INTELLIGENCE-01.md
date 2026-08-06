@@ -210,6 +210,7 @@ retrieval step; the `position_embeddings` store = KS2. Embedding a Position does
 it — Governance still owns KS1; KS2 holds only a derived vector (D12).
 
 ### Δ3 behavioral cut
+
 `recommend_position` gains a **retrieval step**, so its plan becomes `[Rule → Knowledge(retrieve) → LLM]`:
 
 - **Knowledge step (new Engine, `EngineKnowledge`):** embeds the subject Finding's text, does a
@@ -222,6 +223,7 @@ it — Governance still owns KS1; KS2 holds only a derived vector (D12).
   intact — the Rule step still short-circuits `not_affected` when provably out of range, before retrieval.
 
 ### Two shippable increments
+
 - **Δ3a — RAG / Knowledge Engine, all-Go.** The retrieval above, using the **existing Ollama LLM**. This
   delivers the value; it is the demoable slice.
 - **Δ3b — Python reasoning engine.** A DSPy service behind the provider port for a *reasoning* step that
@@ -239,11 +241,135 @@ it — Governance still owns KS1; KS2 holds only a derived vector (D12).
 | R6 | **Freshness / population** | D5 (read-APIs, never foreign DB) · M5 bus | **Event-driven incremental** (bus consumer on `PositionEstablished` / `FaultlineEnriched`) + **backfill/rebuild** command | poll-and-rebuild; lazy embed-per-request | steady-state cost = one embed per new decision; index derived + rebuildable (D12); consumes events + read-APIs, never foreign tables (D5). Intelligence becomes a bus consumer for the first time |
 
 ### Status of the cut
-R1–R4 + R6 are **data-backed and locked**; **R5 is pending** the local Ollama embedding eval
-(`RAG-SESSION-2-SPIKE.md` §4) — leaning `nomic-embed-text`. Deferred as before: Δ3b Python engine, external-
-intel embedding (U3), the KB-first similarity short-circuit (designed-in, enabled after eval), and Δ4
-autonomy/LLMOps. On R5 confirmation, the Δ3a groups (store · embedder · Knowledge Engine · population ·
-plan integration · e2e) are ready to implement.
+
+R1–R4 + R6 are **data-backed and locked**; **R5 is CONFIRMED (2026-08-05)** — the `make e2e-embed` eval on the
+VM Ollama chose **`nomic-embed-text` + `components+severity`** (recall@1 = 1.00, MRR = 1.00, ~46 ms; `+cve`
+neutral, `+description` degrades to 0.83); detail in `RAG-SESSION-2-SPIKE.md` §4. Deferred as before: Δ3b
+Python engine, external-intel embedding (U3), the KB-first similarity short-circuit (designed-in, enabled
+after eval), and Δ4 autonomy/LLMOps. Δ3a shipped in full (groups A1–A6, 2026-08-04).
+
+## Revision 5 (2026-08-06) — Δ3c cut: Subject Generalization (**SUPERSEDED — historical**)
+
+> **Status: SUPERSEDED, same day, by [`EDR-TRUST-01`](EDR-TRUST-01.md).** Grilling this cut escalated past
+> the invocation surface into the enterprise **trust model**. S1–S6 are absorbed or replaced: **S1/S2/S4 →
+> T9** (Selection: a type plus a set, with declared cardinality — which subsumes the fan-out guard);
+> **S3 → T10** (the owning context produces authoritative Domain Projections; the runtime gathers nothing and
+> may only shape what it receives, under four rules);
+> **S5 → T8** (two verification boundaries — Grounding in the runtime, Business in Governance);
+> **S6 → T7** (two output classes — Information Response and Decision Proposal).
+>
+> `EDR-TRUST-01` further **rewrites D5** (context assembly leaves the Gateway) and **amends D2** (output is
+> no longer a single Proposal shape). This section is retained **only** for the reasoning trail — the
+> problem statement and the five-layer analysis below remain accurate and are why the trust work started.
+> **Do not implement from S1–S6.**
+
+### Why this cut exists
+
+A capability-surface audit (2026-08-06) against the AI use-case catalog
+(`docs/current-changes/themis-ai-use-cases.md`) and **Book IV §6–7** found that **one** AI capability is
+implemented (`recommend_position`) and **none** of Book IV's six user use cases or three background workflows
+are. The catalog's remaining entries split into three groups: solved deterministically by design (ingestion /
+normalization, prioritization, SBOM correlation, report *formats*), blocked on corpora or planes not yet built
+(KS3 external documentation; the Δ4 autonomy/LLMOps plane), and — the subject of this Revision — **blocked on
+the shape of the invocation surface itself**.
+
+`Gateway.Invoke(ctx, capabilityID, subjectFindingID, correlationID)` admits exactly one subject shape: a
+single Governance Finding. Five committed use cases cannot be expressed against it — Book IV **UC-001**
+(release readiness), **UC-002** (engineering planning / workstream clustering), **UC-006** (risk explanation),
+plus catalog #5 (root-cause grouping) and #12 (trend forecasting). Each needs a **release-** or
+**product-scoped** subject grounding **many** Findings.
+
+The constraint is not one parameter. "Finding" is welded in at five layers, and the last two are the design
+problem, not the rename:
+
+| Layer | Site | Nature |
+| --- | --- | --- |
+| Transport | `api/intelligence.openapi.yaml` — `InvokeRequest.required: [finding_id]` | mechanical |
+| Gateway signature | `app/gateway.go` — `Invoke(…, subjectFindingID, …)` | mechanical |
+| Grounding assembly | `app/context.go` — unconditional `fr.GetFinding(findingID)` root | mechanical |
+| **Grounding shape** | `domain/grounding.go` — `AssembledContext{Finding, Faultline, …}` singular; `Grounds()` switches over exactly those ids | **design** |
+| **Output anchor** | `domain/validate.go` — stage 2 asserts `out.FindingID == subjectFindingID` | **design** |
+
+The output anchor is the subtle one: that equality **is** the D7 anti-hallucination guarantee — it proves the
+model's answer is about the thing that was asked. A many-Finding subject cannot satisfy it, so generalization
+must *redesign the anchor*, not merely widen the parameter.
+
+**Governance basis.** INT-0058 (capabilities are invoked by **name**, against a subject — the ADR never
+constrains the subject to a Finding) · Book IV §6 UC-001/002/006 · D5 (deterministic Context Construction) ·
+D7 (mandatory 3-stage validation) · D11 (Capability Registry). The **authority spine is unchanged**: a
+release-scoped capability still emits an advisory Proposal a human or policy decides on — widening the subject
+widens what AI may *discuss*, never what it may *decide* (D1/D8, CON-0015).
+
+### Δ3c behavioral cut
+
+`recommend_position` is **behaviourally unchanged** — same plan, same grounding, same output, same 204
+semantics. It becomes the first capability that *declares* a subject kind rather than assuming one. What
+changes is the harness:
+
+- **A typed `Subject{Kind, ID}`** replaces the bare finding-id string end to end (transport → Gateway → domain
+  → telemetry → Proposal). A capability declares the `SubjectKind` it accepts; a mismatch is rejected
+  **before any grounding or provider call**, as a new `ReasonSubjectMismatch` outcome — the same guard shape
+  as the existing `ReasonUnauthorized`.
+- **`AssembledContext` becomes uniformly plural** (`Findings []`, `Faultlines []`), with subject-aware
+  accessors so the singular case stays ergonomic. `Grounds()` becomes genuine set-membership over everything
+  assembled — **strictly more correct** than today's five-way switch over one Finding's ids.
+- **`ContextNeed` is repaired and promoted.** Today `NeedFinding` is declared, passed, asserted in tests, and
+  **never consulted** — `AssembleContext` hardcodes the Finding read. The cut separates three concerns the
+  current model conflates: the **Subject** (the grounding root), the **Needs** (what data is required), and
+  the **read strategy** (which read API satisfies a need most cheaply — the assembler's choice, invisible to
+  the capability).
+- **A read fan-out guard** joins the admission spine. Subject generalization is what first makes a single
+  `Invoke` capable of issuing unbounded read-API calls; the guard degrades to an honest `insufficient`.
+
+### Δ3c component decisions (S1–S6) — rule-basis · chosen · alternatives · why
+
+| # | Decision | Rule basis | Chosen | Alternatives | Why the chosen option |
+| --- | --- | --- | --- | --- | --- |
+| S1 | **Subject model** | INT-0058 (invoke by name against a subject) · D11 · D5 determinism | **Typed `Subject{Kind, ID}` value object**; `Capability.SubjectKind` declares what it accepts; mismatch → `ReasonSubjectMismatch` pre-grounding | `subject_type`+`subject_id` as bare strings; opaque `params map[string]string`; a second `/invoke-release` endpoint | Typed catches a release id sent to a Finding-scoped capability at the door instead of as a confusing grounding failure. Bare strings leave the hard layers untouched. An opaque bag breaks D5's *"same identifiers + same upstream state → same context"* determinism, which is what makes stage-2 validation authoritative. A second endpoint forks the pipeline — duplicating admission, metering, validation, telemetry — against the whole point of one Capability abstraction |
+| S2 | **Grounding cardinality** | D5 · D7 (`Grounds()` is the anti-hallucination set) · 100% domain coverage tier | **Uniformly plural** `AssembledContext{Subject, Findings[], Faultlines[], Precedents[]}` + `SubjectFinding()` / `FaultlineFor(id)` accessors | Fat struct (singular *and* plural fields, populate what fits); sum type / per-shape variants | Plural makes `Grounds()` what its name always claimed — set membership over everything assembled — and fixes a latent narrowness (today it grounds one Finding's ids only). A fat struct gives two ways to express one thing and invites nil-deref bugs. A Go sum type forces a type switch into every engine for two subject kinds — cost without payoff |
+| S3 | **Grounding fidelity / read strategy** | D5 (read APIs, never foreign DB) · D12 | **`ContextNeed` declares *what data*; the assembler picks the *read*.** `NeedComponents` on a release subject = N× `GET /findings/{id}` today; a components-bearing `/posture` later satisfies the same need in one read | Hardcode N detail reads; block Δ3c on enriching Governance's `PostureEntry`; read Evidence inventory | The capability contract is **identical** in both worlds, so enriching `PostureEntry` becomes a pure performance optimization landing whenever it is worth it — **Δ3c needs no Governance change at all**. Evidence is the wrong context: it knows SBOM components, not the finding→component mapping, which Governance owns (`finding_components`). Also repairs the dead `NeedFinding` by giving needs something real to express |
+| S4 | **Read fan-out guard** | D4 (metered, degrade-not-fail) · D10 admission spine · G-AI-4 | **`MaxSubjectFanout`** in the admission spine, beside `MaxPromptBytes` / `ProviderTimeout`; over-cap → `insufficient` with `DecidedBy = "guard:fanout"` | No guard; cap inside each reader; unbounded with a longer timeout | A 500-Finding release × `NeedComponents` is 500 read-API calls inside one invocation — a self-inflicted DoS on Governance that today's guards do not cover (they bound prompt bytes and wall-clock, not read count). Degrading to the existing honest `insufficient` needs no new outcome vocabulary. Per-reader caps cannot see the total |
+| S5 | **Stage-2 anchor** | **D7** (3-stage validation is mandatory and unweakened) | **Split stage 2:** generic rules (confidence ∈ [0,1]; every `evidence[].ref` satisfies `Grounds()`; stance ∈ `AllowedStances`) stay universal; the *subject anchor* becomes a small per-capability rule on the `Validator` | Keep `out.FindingID == subject.ID` and force every future output to be Finding-shaped; drop the anchor for non-Finding subjects | The anchor generalizes rather than weakens: Finding-scoped keeps `out.FindingID == subject.ID`; release-scoped becomes *"every Finding cited is one of the assembled Findings"* — the same guarantee over a set. Dropping it for wide subjects would surrender D7 exactly where hallucination risk is highest. Forcing one output shape would make every future capability lie about its own semantics |
+| S6 | **Subject provenance** | D2 (structured output) · D9 (telemetry) · step-2 feedback loop | **`Subject` is carried on `Outcome` and `Proposal` now**; generalizing the Proposal *payload* beyond `Recommendation{FindingID, Stance}` is **deferred to the first release-scoped capability** | Generalize the payload now; defer `Subject` on `Outcome` too | The forthcoming Outcome-persistence work (feedback loop) must record what each invocation was *about*; adding `Subject` now avoids a schema migration on a table not yet created. The payload is the opposite case — designing a second output shape before a capability needs it is guesswork; the seam is what Δ3c owes, the shape is what UC-002 will settle |
+
+### Amendments to standing decisions
+
+- **D5 (Context Construction)** — the pipeline is now rooted at a **`Subject`**, not a Finding id, and is
+  **need-driven for the root as well as the expansion**. The determinism contract is unchanged and
+  strengthened: same `Subject` + same needs + same upstream state → same `AssembledContext`. Read strategy is
+  an assembler-internal choice and is **not** part of the capability contract.
+- **D7 (3-stage validation)** — stage 2 splits into **universal** rules and a **per-capability subject
+  anchor**. Stages 1 and 3 are untouched. No capability may opt out of an anchor.
+- **D9 (observability)** — the per-invocation `Outcome` gains `Subject`; the existing privacy rule holds
+  (provenance only, never prompt content).
+- **D11 (Capability Registry)** — `Capability` gains `SubjectKind`. Registry lookup is by id, unchanged
+  (INT-0058).
+
+### Compatibility
+
+`POST /capabilities/{id}/invoke` is a **breaking request-body change** (`finding_id` → `subject{kind,id}`).
+Mitigation: accept `finding_id` as a **deprecated alias** mapping to `{kind:"finding", id:…}` for one release,
+so Governance's existing client seam keeps working while it is migrated. Governance's own
+`advisor.RecommendPosition(ctx, findingID)` port is **unchanged** — its adapter constructs the `Subject`.
+**No Governance, Knowledge, Evidence, Registry or Communication change is in this cut.**
+
+### Explicitly deferred (not in Δ3c)
+
+- The **second output payload shape** (workstreams / narratives) — settled by the first release-scoped
+  capability (S6).
+- **Enriching Governance's `PostureEntry`** with components — a performance optimization, unblocked by S3.
+- The **release-scoped capabilities themselves** (UC-001 / UC-002 / UC-006) — Δ3c is the surface they need,
+  not the capabilities.
+- **KS3 external-document retrieval** (RC-2), the **Δ4** autonomy/LLMOps plane, and **G-AI-1/2/4/5** — all
+  unchanged and independently tracked.
+
+### Status of the cut
+
+**PROPOSED — S1–S6 are open for grilling; no code.** `recommend_position` behavioural parity is the
+acceptance condition (`adapters/wiring/demo_e2e_test.go` + `adapters/http/llm_e2e_test.go` must stay green
+unchanged in behaviour). Note the **100% coverage tier** on `domain/`: `Subject`, the plural accessors, and
+the rewritten `Grounds()` need complete branch coverage or `make check` fails. On grill closure, scaffold
+`openspec/changes/phase3-intelligence-d3c/`.
 
 ## Decisions
 

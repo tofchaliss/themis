@@ -7,6 +7,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 type fakeProjection struct {
@@ -25,7 +26,7 @@ func (f fakeProjection) FaultlineBlastRadius(context.Context, string) ([]string,
 
 func findingWithPositions(t *testing.T) domain.Finding {
 	t.Helper()
-	p1, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "v1", fixedClock{}.Now())
+	p1, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "v1", fixedClock{}.Now(), value.TrustAsserted)
 	pos1 := domain.ReconstitutePosition(1, domain.StanceAffected, "confirmed", human,
 		domain.PositionInputs{AcceptedProposalID: "p1", FaultlineRef: "fl-1"}, fixedClock{}.Now())
 	pos2 := domain.ReconstitutePosition(2, domain.StanceMitigated, "fixed", human,

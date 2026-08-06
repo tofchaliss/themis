@@ -51,9 +51,11 @@ func TestRecommendPositionV1(t *testing.T) {
 	if c.ID != "recommend_position" || c.Version != "v1" {
 		t.Fatalf("unexpected id/version: %s@%s", c.ID, c.Version)
 	}
-	if len(c.Plan) != 3 || c.Plan[0].Engine != EngineRule || c.Plan[1].Engine != EngineKnowledge ||
-		c.Plan[2].Engine != EngineLLM || c.Plan[2].Prompt != "recommend_position" {
-		t.Errorf("Δ3a plan must be [rule → knowledge → llm], got %+v", c.Plan)
+	// The deterministic rule step is gone by design (EDR-TRUST-01 T5): provable verdicts are
+	// computed in the backend, before AI runs and independently of whether AI is on at all.
+	if len(c.Plan) != 2 || c.Plan[0].Engine != EngineKnowledge ||
+		c.Plan[1].Engine != EngineLLM || c.Plan[1].Prompt != "recommend_position" {
+		t.Errorf("plan must be [knowledge → llm], got %+v", c.Plan)
 	}
 	if len(c.Needs) != 2 || c.Needs[0] != NeedFinding || c.Needs[1] != NeedFaultline {
 		t.Errorf("grounding needs = %v, want [finding faultline]", c.Needs)

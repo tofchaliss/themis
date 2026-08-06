@@ -32,10 +32,7 @@ func (s *stubIndex) Search(q []float32, k int, excl string) []domain.PrecedentPo
 }
 
 func groundingFor(release string, components []string) domain.AssembledContext {
-	return domain.AssembledContext{
-		Finding:   domain.FindingView{ID: "f1", ReleaseID: release, Components: components},
-		Faultline: domain.FaultlineView{Severity: "high"},
-	}
+	return domain.AssembledContext{Projection: domain.FindingAssessment{Finding: domain.FindingView{ID: "f1", ReleaseID: release, Components: components}, Knowledge: domain.FaultlineView{Severity: "high"}}}
 }
 
 func TestKnowledgeEngineKind(t *testing.T) {
@@ -80,7 +77,7 @@ func TestKnowledgeEngineEmptyTextSkipsRetrieval(t *testing.T) {
 
 	// No components and no severity → empty embed text → no retrieval.
 	res, err := e.Execute(context.Background(), app.ExecInput{
-		Context: domain.AssembledContext{Finding: domain.FindingView{ReleaseID: "r"}},
+		Context: domain.AssembledContext{Projection: domain.FindingAssessment{Finding: domain.FindingView{ReleaseID: "r"}}},
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)

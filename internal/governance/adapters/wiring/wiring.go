@@ -13,6 +13,7 @@ import (
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
 	"github.com/themis-project/themis/internal/governance/adapters/inbound"
+	"github.com/themis-project/themis/internal/governance/adapters/knowledge"
 	"github.com/themis-project/themis/internal/governance/adapters/registry"
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
@@ -45,7 +46,10 @@ type Governance struct {
 // the multiplier defaults to 1.0 — fail-safe, C2), the blast-radius saturation cap (any value
 // < 2 is normalized to domain.DefaultBlastRadiusCap), and optional Governance-owned auto-accept
 // policies (D11).
-func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, registryURL string, blastCap int, policies ...domain.PolicyRule) Governance {
+func Wire(
+	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
+	registryURL, knowledgeURL string, blastCap int, policies ...domain.PolicyRule,
+) Governance {
 	st := store.New(pool)
 	write := app.NewFindingService(st, idGen{}, sysClock{}, policies...)
 	if advisor != nil {
@@ -57,6 +61,12 @@ func Wire(pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor, 
 	}
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
 	read := app.NewReadService(st, st, blast, blastCap)
+	// The Knowledge read seam feeds the FindingAssessment Domain Projection (T10). Empty ⇒
+	// the projection carries the Finding alone, which is the same fail-safe posture the
+	// blast-radius reader takes: a missing seam degrades the view, never the request.
+	if knowledgeURL != "" {
+		read = read.WithKnowledge(knowledge.NewClient(knowledgeURL, &http.Client{Timeout: 10 * time.Second}))
+	}
 	relay := store.NewRelay(pool, pub, 100)
 	return Governance{
 		Handler:   govhttp.NewHandler(write, read).Router(),

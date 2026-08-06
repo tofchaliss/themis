@@ -22,6 +22,19 @@ type viewDTO struct {
 	KEV             bool               `json:"kev"`
 	ExploitPublic   bool               `json:"exploit_public"`
 	Applicabilities []applicabilityDTO `json:"applicabilities"`
+
+	// Per-field-group trust (EDR-TRUST-01 T3). These MUST round-trip: the view is
+	// reloaded before every fold, so a dropped field decodes as empty, gets recomputed,
+	// and the aggregate reports a spurious view change on every single fold — firing a
+	// duplicate FaultlineEnriched each time. Omitting them here is exactly the defect
+	// TestViewChangeEmitsOneEvent catches.
+	//
+	// Adding them is backward-compatible: the column is jsonb, so pre-existing rows
+	// decode with empty trust and are repopulated on their next fold — which correctly
+	// reports one view change, because the view genuinely gained information.
+	HeadlineTrust string `json:"headline_trust,omitempty"`
+	RangeTrust    string `json:"range_trust,omitempty"`
+	SignalTrust   string `json:"signal_trust,omitempty"`
 }
 
 type applicabilityDTO struct {
@@ -35,6 +48,7 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 		Severity: string(v.Severity), CVSSScore: v.CVSS.Score(), CVSSVector: v.CVSS.Vector(),
 		SeveritySource: v.SeveritySource, AffectedRanges: v.AffectedRanges, FixedVersions: v.FixedVersions,
 		EPSS: v.EPSS, KEV: v.KEV, ExploitPublic: v.ExploitPublic,
+		HeadlineTrust: string(v.HeadlineTrust), RangeTrust: string(v.RangeTrust), SignalTrust: string(v.SignalTrust),
 	}
 	for _, a := range v.Applicabilities {
 		dto.Applicabilities = append(dto.Applicabilities, applicabilityDTO{a.Package, a.Status, a.Justification})
@@ -55,6 +69,9 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 		Severity: value.Severity(dto.Severity), CVSS: cvss, SeveritySource: dto.SeveritySource,
 		AffectedRanges: dto.AffectedRanges, FixedVersions: dto.FixedVersions,
 		EPSS: dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
+		HeadlineTrust: value.TrustClass(dto.HeadlineTrust),
+		RangeTrust:    value.TrustClass(dto.RangeTrust),
+		SignalTrust:   value.TrustClass(dto.SignalTrust),
 	}
 	for _, a := range dto.Applicabilities {
 		v.Applicabilities = append(v.Applicabilities, domain.Applicability{Package: a.Package, Status: a.Status, Justification: a.Justification})

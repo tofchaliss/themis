@@ -36,7 +36,7 @@ func TestReconcile_Precedence(t *testing.T) {
 		vulnFacts(t, "osv", value.SeverityCritical),
 		vulnFacts(t, "nvd", value.SeverityMedium),
 		vulnFacts(t, "redhat", value.SeverityLow),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if v.Severity != value.SeverityLow || v.SeveritySource != "redhat" {
 		t.Errorf("precedence: got %s from %s, want low from redhat", v.Severity, v.SeveritySource)
 	}
@@ -46,7 +46,7 @@ func TestReconcile_Precedence(t *testing.T) {
 	v2 := domain.Reconcile([]domain.Proposal{
 		vulnFacts(t, "zvendor", value.SeverityHigh),
 		vulnFacts(t, "avendor", value.SeverityHigh),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if v2.SeveritySource != "avendor" {
 		t.Errorf("tiebreak: got %s, want avendor (lexical)", v2.SeveritySource)
 	}
@@ -55,7 +55,7 @@ func TestReconcile_Precedence(t *testing.T) {
 	v4 := domain.Reconcile([]domain.Proposal{
 		vulnFacts(t, "zvendor", value.SeverityHigh),
 		vulnFacts(t, "avendor", value.SeverityMedium),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if v4.Severity != value.SeverityHigh || v4.SeveritySource != "zvendor" {
 		t.Errorf("higher-severity tiebreak: got %s from %s, want high from zvendor", v4.Severity, v4.SeveritySource)
 	}
@@ -64,7 +64,7 @@ func TestReconcile_Precedence(t *testing.T) {
 	v3 := domain.Reconcile([]domain.Proposal{
 		vulnFacts(t, "redhat", value.SeverityUnknown),
 		vulnFacts(t, "nvd", value.SeverityHigh),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if v3.Severity != value.SeverityHigh || v3.SeveritySource != "nvd" {
 		t.Errorf("unknown-severity should not win: %+v", v3)
 	}
@@ -87,7 +87,7 @@ func TestReconcile_UnionAndSignals(t *testing.T) {
 		withFixes,
 		exploit(t, "kev", older, 0.1, true, false),
 		exploit(t, "epss", newer, 0.7, false, true),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 
 	if got := v.AffectedRanges; len(got) != 3 || got[0] != "<2.0" || got[2] != "<4.0" {
 		t.Errorf("ranges union not sorted/deduped: %v", got)
@@ -106,7 +106,7 @@ func TestReconcile_UnionAndSignals(t *testing.T) {
 	v2 := domain.Reconcile([]domain.Proposal{
 		exploit(t, "a", newer, 0.2, false, false),
 		exploit(t, "b", newer, 0.9, false, false),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if v2.EPSS != 0.9 {
 		t.Errorf("EPSS equal-time tiebreak = %v, want 0.9", v2.EPSS)
 	}
@@ -129,7 +129,7 @@ func TestReconcile_ApplicabilityAndEmpty(t *testing.T) {
 		// Same package + status, different justification → not deduped; sorts by justification.
 		justified("curl", "affected", "reason-b"),
 		justified("curl", "affected", "reason-a"),
-	}, prec)
+	}, prec, domain.NewTrustPolicy(nil))
 	if len(v.Applicabilities) != 4 {
 		t.Fatalf("applicabilities = %d, want 4", len(v.Applicabilities))
 	}
@@ -140,7 +140,7 @@ func TestReconcile_ApplicabilityAndEmpty(t *testing.T) {
 		t.Errorf("applicabilities not sorted by package: %+v", v.Applicabilities)
 	}
 
-	empty := domain.Reconcile(nil, prec)
+	empty := domain.Reconcile(nil, prec, domain.NewTrustPolicy(nil))
 	if empty.Severity != value.SeverityUnknown || empty.AffectedRanges != nil || empty.Applicabilities != nil {
 		t.Errorf("empty reconcile = %+v", empty)
 	}
@@ -152,14 +152,14 @@ func TestReconcile_OrderIndependent(t *testing.T) {
 	prec := domain.NewPrecedence("redhat", "nvd", "osv")
 	rapid.Check(t, func(rt *rapid.T) {
 		ps := genProposals(rt)
-		want := domain.Reconcile(ps, prec)
+		want := domain.Reconcile(ps, prec, domain.NewTrustPolicy(nil))
 
 		shuffled := append([]domain.Proposal(nil), ps...)
 		for i := len(shuffled) - 1; i > 0; i-- {
 			j := rapid.IntRange(0, i).Draw(rt, "swap")
 			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 		}
-		got := domain.Reconcile(shuffled, prec)
+		got := domain.Reconcile(shuffled, prec, domain.NewTrustPolicy(nil))
 
 		if !viewEqual(want, got) {
 			rt.Fatalf("order-dependent view:\n want %+v\n got  %+v", want, got)

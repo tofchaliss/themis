@@ -15,17 +15,19 @@ func (e kindEngine) Execute(context.Context, ExecInput) (EngineResult, error) {
 }
 
 func TestDispatcherRoutesByKind(t *testing.T) {
-	rule := kindEngine{kind: domain.EngineRule}
+	knowledge := kindEngine{kind: domain.EngineKnowledge}
 	llm := kindEngine{kind: domain.EngineLLM}
-	d := NewDispatcher(rule, llm)
+	d := NewDispatcher(knowledge, llm)
 
-	if got, ok := d.For(domain.EngineRule); !ok || got != rule {
-		t.Errorf("For(rule) = %v, %v; want the rule engine", got, ok)
+	if got, ok := d.For(domain.EngineKnowledge); !ok || got != knowledge {
+		t.Errorf("For(knowledge) = %v, %v; want the knowledge engine", got, ok)
 	}
 	if got, ok := d.For(domain.EngineLLM); !ok || got != llm {
 		t.Errorf("For(llm) = %v, %v; want the llm engine", got, ok)
 	}
-	if _, ok := d.For(domain.EngineKind("knowledge")); ok {
+	// A kind nothing registered — including "rule", which the runtime no longer has at all
+	// now that provable verdicts run in the backend (EDR-TRUST-01 T5).
+	if _, ok := d.For(domain.EngineKind("rule")); ok {
 		t.Error("For(unwired kind) should return ok=false")
 	}
 }

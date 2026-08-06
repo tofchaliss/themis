@@ -35,7 +35,7 @@ func known(cves ...string) fakeKnown {
 
 func enrichSvc(t *testing.T, repo app.Repository, sig app.ExploitSignalSource, kn app.KnownCVEs) *app.SignalEnrichmentService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return app.NewSignalEnrichmentService(sig, kn, fold, fixedClock{})
 }
 

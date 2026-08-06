@@ -29,7 +29,7 @@ func (f fakeReconciler) ReconcileStuckStages(_ context.Context) (int, error) { r
 func TestReadService(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	f, err := fold.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)

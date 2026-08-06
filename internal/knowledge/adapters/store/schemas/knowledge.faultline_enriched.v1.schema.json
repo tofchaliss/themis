@@ -27,6 +27,10 @@
         }
       }
     },
+    "AffectedRanges": { "type": "array", "items": { "type": "string" }, "description": "Reconciled backport-aware affected range (D3); optional additive field. Governance re-evaluates existing Findings against it (EDR-TRUST-01 T5)." },
+    "HeadlineTrust": { "enum": ["observed", "asserted", "inferred"], "description": "Trust class of the source that won the headline severity/CVSS (EDR-TRUST-01 T2); optional additive field. Absent means no headline evidence contributed." },
+    "RangeTrust": { "enum": ["observed", "asserted", "inferred"], "description": "Highest-risk trust class among sources contributing affected ranges / fixed versions (T3); optional additive field." },
+    "SignalTrust": { "enum": ["observed", "asserted", "inferred"], "description": "Highest-risk trust class among sources contributing exploit signals (T3); optional additive field." },
     "OccurredAt": { "type": "string", "format": "date-time" }
   }
 }

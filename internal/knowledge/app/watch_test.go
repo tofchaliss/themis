@@ -36,7 +36,7 @@ func (f *fakeWatchState) SetLastSuccess(_ context.Context, t time.Time) error {
 
 func watchSvc(t *testing.T, changed app.ChangedVulnSource, state app.WatchState, repo app.Repository) *app.WatchService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return app.NewWatchService(changed, state, fold, fixedClock{})
 }
 

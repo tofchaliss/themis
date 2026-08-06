@@ -18,14 +18,14 @@ import (
 // Intelligence client against a fake Intelligence Gateway and records the returned
 // advisory Proposal — never auto-accepted.
 func TestGovernanceIntelligenceSeam(t *testing.T) {
-	var gotBody map[string]string
+	var gotBody map[string]any
 	intel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/capabilities/recommend_position/invoke" {
 			t.Errorf("intel path = %s", r.URL.Path)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{"capability":"recommend_position@v1","finding_id":"F1","stance":"affected",` +
-			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"KEV-listed",` +
+			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"fl-1"}],"reasoning":"KEV-listed",` +
 			`"decided_by":"llm:affected"}`))
 	}))
 	defer intel.Close()
@@ -42,9 +42,19 @@ func TestGovernanceIntelligenceSeam(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("recommend status = %d, want 201", code)
 	}
-	// The exact wire request carried the subject finding id.
-	if gotBody["finding_id"] != "F1" {
-		t.Errorf("intelligence received finding_id %q, want F1", gotBody["finding_id"])
+	// The exact wire request carried the Selection (EDR-TRUST-01 T9). Governance's own app
+	// port still passes a plain finding id — building the Selection is the ACL's job — so
+	// this asserts the adapter translates rather than leaking the new shape upward.
+	subject, ok := gotBody["subject"].(map[string]any)
+	if !ok {
+		t.Fatalf("intelligence received %v, want a subject selection", gotBody)
+	}
+	if subject["type"] != "finding" {
+		t.Errorf("subject type = %v, want finding", subject["type"])
+	}
+	ids, ok := subject["ids"].([]any)
+	if !ok || len(ids) != 1 || ids[0] != "F1" {
+		t.Errorf("subject ids = %v, want [F1]", subject["ids"])
 	}
 
 	// The advisory proposal was recorded as an AI proposal, still awaiting a human decision.

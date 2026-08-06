@@ -47,32 +47,28 @@ type PrecedentPosition struct {
 	Score     float64 // cosine similarity in [0,1] for a Δ3a retrieved precedent; 0 for a Δ2 exact-CVE precedent
 }
 
-// AssembledContext is the deterministic output of Context Construction (D5): exactly
-// the grounding a capability declared it needs, assembled via read-API Knowledge
-// Providers. It is the anti-hallucination ground truth — stage-2 validation checks
-// (via Grounds) that every cited evidence ref exists here. Precedents are supplementary
-// reasoning context (not citable evidence), pulled lazily only for the LLM step.
+// AssembledContext is the **Capability Context** (EDR-TRUST-01 T10): the shape a capability
+// reasons over, derived in memory from the received Domain Projection and never persisted.
+//
+// It is a **view, not a source**. Shaping may reduce (filter, sort, group, summarise) but may
+// introduce nothing the projection did not contain (rule 2), every element stays traceable to
+// it (rule 3), and Grounding Verification anchors to the projection rather than to this
+// (rule 4) — which is why Grounds delegates instead of re-implementing.
+//
+// Precedents are the one addition, and deliberately NOT citable evidence: they are
+// supplementary reasoning context retrieved from the runtime's own semantic index, so they
+// are excluded from Grounds by construction.
 type AssembledContext struct {
-	Finding    FindingView
-	Faultline  FaultlineView
+	Projection FindingAssessment
 	Precedents []PrecedentPosition
 }
 
-// Grounds reports whether a non-empty evidence citation ref refers to something in
-// the assembled context (D7 anti-hallucination). Δ1 grounds the subject Finding, its
-// Faultline, their CVE aliases, and the Finding's component purls.
-func (c AssembledContext) Grounds(ref string) bool {
-	if ref == "" {
-		return false
-	}
-	switch ref {
-	case c.Finding.ID, c.Finding.FaultlineID, c.Finding.CVE, c.Faultline.ID, c.Faultline.CVE:
-		return true
-	}
-	for _, purl := range c.Finding.Components {
-		if purl == ref {
-			return true
-		}
-	}
-	return false
-}
+// Finding returns the subject Finding from the authoritative projection.
+func (c AssembledContext) Finding() FindingView { return c.Projection.Finding }
+
+// Faultline returns the CVE knowledge from the authoritative projection.
+func (c AssembledContext) Faultline() FaultlineView { return c.Projection.Knowledge }
+
+// Grounds delegates to the authoritative projection (T10 rule 4). A shaped view can never
+// widen what counts as grounded — that is the whole point of anchoring to authority.
+func (c AssembledContext) Grounds(ref string) bool { return c.Projection.Grounds(ref) }

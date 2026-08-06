@@ -45,7 +45,7 @@ func TestFeedsSeamE2E(t *testing.T) {
 		t.Fatalf("nvd changed = %d, %v", len(nvdProps), err)
 	}
 	card, _ := domain.NewFaultline(domain.FaultlineID("fl-8869"), nvdProps[0].CVE)
-	card.FoldProposal(nvdProps[0].Proposal, domain.NewPrecedence("nvd"))
+	card.FoldProposal(nvdProps[0].Proposal, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	if card.View().Severity != value.SeverityMedium {
 		t.Errorf("v4.0-only card severity = %v, want medium (D-NVD-2 seam e2e)", card.View().Severity)
 	}
@@ -59,8 +59,8 @@ func TestFeedsSeamE2E(t *testing.T) {
 	rockyCVSS, _ := value.NewCVSS(8.0, "")
 	rocky, _ := domain.NewVulnFactsProposal("rocky", hourAgo, domain.VulnFacts{Severity: value.SeverityHigh, CVSS: rockyCVSS})
 	card2, _ := domain.NewFaultline(domain.FaultlineID("fl-8000"), scanOut[0].CVE)
-	card2.FoldProposal(scanOut[0].Proposal, domain.NewPrecedence("rocky"))
-	card2.FoldProposal(rocky, domain.NewPrecedence("rocky"))
+	card2.FoldProposal(scanOut[0].Proposal, domain.NewPrecedence("rocky"), domain.NewTrustPolicy(nil))
+	card2.FoldProposal(rocky, domain.NewPrecedence("rocky"), domain.NewTrustPolicy(nil))
 	if card2.View().SeveritySource != "rocky" {
 		t.Errorf("headline source = %q, want rocky (scanner carries no authority)", card2.View().SeveritySource)
 	}

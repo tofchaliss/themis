@@ -82,7 +82,12 @@ type Recommendation struct {
 	Confidence float64
 	Reasoning  string
 	Capability string // originating capability ref, e.g. "recommend_position@v1"
-	DecidedBy  string // which Intelligence plan step decided — "rule:<stance>" / "llm:<stance>"
+	DecidedBy  string // which Intelligence plan step decided — "llm:<stance>"
+	// Evidence is what the recommendation claims to rest on. Governance Business-Verifies
+	// every reference against its own Finding before recording (T8) — the runtime's own
+	// grounding check measured the model against context it was handed, so only the context
+	// owner can confirm the claim is consistent with the system of record.
+	Evidence []string
 }
 
 // IDGenerator assigns new opaque Finding / Governance-Proposal identities.

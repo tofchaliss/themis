@@ -20,6 +20,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for EnterpriseViewRangeTrust.
+const (
+	Asserted EnterpriseViewRangeTrust = "asserted"
+	Inferred EnterpriseViewRangeTrust = "inferred"
+	Observed EnterpriseViewRangeTrust = "observed"
+)
+
+// Valid indicates whether the value is a known member of the EnterpriseViewRangeTrust enum.
+func (e EnterpriseViewRangeTrust) Valid() bool {
+	switch e {
+	case Asserted:
+		return true
+	case Inferred:
+		return true
+	case Observed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Applicability defines model for Applicability.
 type Applicability struct {
 	Justification *string `json:"justification,omitempty"`
@@ -45,11 +66,17 @@ type EnterpriseView struct {
 	// Priority Deterministic exploitability level (critical | high+ | high | elevated | informational).
 	Priority *string `json:"priority,omitempty"`
 
+	// RangeTrust Trust class of the sources that contributed the affected ranges / fixed versions (EDR-TRUST-01 T2/T3). Absent when no range evidence contributed. Per field-group, not per card - a vendor statement elsewhere must not downgrade public ranges.
+	RangeTrust *EnterpriseViewRangeTrust `json:"range_trust,omitempty"`
+
 	// Score CVE-intrinsic composite priority score, 0-100 (severity baseline + EPSS + KEV; excludes release-scoped blast).
 	Score          *int    `json:"score,omitempty"`
 	Severity       *string `json:"severity,omitempty"`
 	SeveritySource *string `json:"severity_source,omitempty"`
 }
+
+// EnterpriseViewRangeTrust Trust class of the sources that contributed the affected ranges / fixed versions (EDR-TRUST-01 T2/T3). Absent when no range evidence contributed. Per field-group, not per card - a vendor statement elsewhere must not downgrade public ranges.
+type EnterpriseViewRangeTrust string
 
 // FaultlineView defines model for FaultlineView.
 type FaultlineView struct {
@@ -385,29 +412,31 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1Fdtbhs3EL3KgC1QGdaXk/xSf6WpmhopUCMJjAJtIFDkaHdiitwMuWsLtoAeoifsSQpyd2XJph0HSIH2",
-	"l7Vc7nDmvcc342uh3LpyFm3wYnYtGH3lrMf0cMZuaXAdfypnA9oQf8qqMqRkIGcnH72zcc2rEtcy/vqW",
-	"cSVm4pvJbdxJ+9ZP+njb7XYoNHrFVMUwYibmzI7HIr7odsdgL9ujlmQobOJCxa5CDtTm97H2gVZdLnEh",
-	"bCoUM+EDky3EdigqqS5kgdl3PshQpziHqeC4GINcrVAF1HAD1oXF3uOKrtLf2mrkBdkGfaAipTAWw7vH",
-	"bHcrbvkRVYgHz21Arpg8nhNe3i+rP2zB0hbtEgVc+2wV3YJklpv4LPcg6+IdlneOVjuG8/lvsL93AxEP",
-	"XEfCoESjwVkIJYKSrGGgJDOhHkY02u9Qw99//gWvXYNspVUIGhVp9HBZYiiRITgonXUM8hDDVVpiNCg9",
-	"HkXQduU9pp5DMWRKV433C68c7/Nt6/USefe6QRUcZ5HEyvvsh3hVGUdhUdVLQ2pvy9I5g9LGPUkViwbZ",
-	"k7NfSNkFNvmgFZPjTvmHJP6IAXlNlnwgBV2CPZEGGzQwUEyBlDRwAyUV5XH3F24ADTayVTPZleN1Uq80",
-	"RxkBx/vYIXqYwqvz+Yhs3OVJQeLLU0Dok4b03RCmo5PpFAYeG0zLS+nRkEU4hvnZu3dwDG/m598DXilT",
-	"R/V0uhh55SrUsDTSh/3EyAYsWmL6mPnr3b1ceFezyllA7m7+JGsTYnr5q6mavJeQztsPu8p5aQ4F8RmL",
-	"TF+csWswXaucYnx4yNSaLu3HzrjjP3kcEPXPKE0o5zZwxntV7BKqDtTgYiXJ1Iz7at9jKRK48LVS6P1C",
-	"phbSak7MhJYBR4HWKIbC1sbIpUExC1xjTogPEfmwl5ephA3cRHczCDegsWCp72s/K/1AyLmiHkfsLVaO",
-	"w33I+qMXK0SdSfZdqs+DW8F7Qh49g7QRVM2MNpgNRKDJFjDoQ0U/tqOlceqCbHHopZ/1nV0aT1LmXUXk",
-	"ZEmFlcYvEtb363vPNcbmYEHaTVviya1NHaVqgXxHVWwusf9URobI03ceuvggGaG2jIaiXvaY23lnjqC9",
-	"aeYuL0GSyUNGwTzVOjJX995RF2TzTuGWHrlB/dgFefqFuJ9eXIp6v8/KG+suDeoCIc14VwEGZ2U04OdQ",
-	"MKJdERp9lOhglDpxgjsHgZ1hpkHBwyC+Z1TOKjKoIRoSHEOb6qg3RKh2IB2BtG3UfkAYdS3AAztj6moM",
-	"b1HqkbNmM+tOwcaZBqEh2d6RiXLMaNJdbmeUUJKHl2en4z+s2PEo3pe4Jg+3Nb88OxVD0fVtMRMn4+l4",
-	"mgip0MqKxEw8H0/Hz0WcJUOZSJys+prTY4GJskhzOv9Ui5l4jWGHzA+bV+fzFIDlOjZuL2a/XwuK532q",
-	"kTfR/OQ65hf7y1AwfqqJUfdOeDtd3+X5w/BwYn82nX61af2wFWZm9l/fjCNSL9ozc6F2ud2O/nH/iy/Y",
-	"H2Ver9cy9qCIKsg9yS03oKR1No05r87n7T8Qe/xMrklvn0jSqX6Ao0j8LUWk/4cMfU3EKXggjTZQ2OQB",
-	"n/QX+EnIv+03/wfRf2ozfQD6Ayh/IR+gdcfO3nb/ES03ByAPWt+LJhndm5w96oHuW/aDqO66tPg3hXd3",
-	"1nkSAKnjy8vYvWMdo3Y4A29l5UsXYHAwP8DKyAKOoUIepcmgnfESEmm856bXSc1GzMREVjRpTsT2w/af",
-	"AAAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

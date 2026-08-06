@@ -34,7 +34,27 @@ type FaultlineEnriched struct {
 	// Optional/additive (omitempty): a card with no vendor statement keeps the frozen v1 wire
 	// byte-identical (EVENTBUS D9 — additive, non-breaking).
 	Applicabilities []Applicability `json:"Applicabilities,omitempty"`
-	OccurredAt      time.Time
+	// AffectedRanges is the reconciled, backport-aware affected range (D3), carried so
+	// Governance can re-evaluate an EXISTING Finding against it (EDR-TRUST-01 T5) — the case
+	// correlation's own range gate cannot reach, because that gate only runs at match time,
+	// so a Finding born before the range was known is never revisited.
+	AffectedRanges []string `json:"AffectedRanges,omitempty"`
+	// Trust classes for the reconciled view's field-groups (EDR-TRUST-01 T2/T3), so
+	// Governance can apply the constitutional check (T4) and derive reservations (T12)
+	// without refetching the card.
+	//
+	// These must ride the wire rather than being re-derived downstream: re-derivation
+	// would require Governance to hold a **second copy** of the source→class policy, and
+	// two copies of a trust policy will eventually disagree. Knowledge owns the table, so
+	// Knowledge ships the verdict.
+	//
+	// Additive and optional (omitempty), like Score and Applicabilities before them: a
+	// payload from before this change stays byte-identical, and an older consumer ignores
+	// them (EVENTBUS D9 — additive, non-breaking, no schema version bump).
+	HeadlineTrust value.TrustClass `json:"HeadlineTrust,omitempty"`
+	RangeTrust    value.TrustClass `json:"RangeTrust,omitempty"`
+	SignalTrust   value.TrustClass `json:"SignalTrust,omitempty"`
+	OccurredAt    time.Time
 }
 
 // FaultlineMatured announces the card reached the Mature stage.
@@ -91,6 +111,10 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		ExploitPublic:   v.ExploitPublic,
 		Score:           v.Score(),
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
+		AffectedRanges:  append([]string(nil), v.AffectedRanges...),
+		HeadlineTrust:   v.HeadlineTrust,
+		RangeTrust:      v.RangeTrust,
+		SignalTrust:     v.SignalTrust,
 		OccurredAt:      at.UTC(),
 	}
 }

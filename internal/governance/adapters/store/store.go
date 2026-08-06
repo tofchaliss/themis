@@ -18,6 +18,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // ErrNotFound is returned by GetByID when no Finding exists.
@@ -131,7 +132,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.GovernanceProposal, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT proposal_id, proposer_kind, proposer_id, stance, rationale, raised_at,
-		       status, decided_kind, decided_id, decided_at
+		       status, decided_kind, decided_id, decided_at, evidence_trust
 		FROM finding_proposals WHERE finding_id = $1 ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
@@ -142,11 +143,12 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 	for rows.Next() {
 		var (
 			pid, proposerKind, proposerID, stance, rationale, status, decidedKind, decidedID string
+			evidenceTrust                                                                    string
 			raisedAt                                                                         time.Time
 			decidedAt                                                                        *time.Time
 		)
 		if err := rows.Scan(&pid, &proposerKind, &proposerID, &stance, &rationale, &raisedAt,
-			&status, &decidedKind, &decidedID, &decidedAt); err != nil {
+			&status, &decidedKind, &decidedID, &decidedAt, &evidenceTrust); err != nil {
 			return nil, err
 		}
 		var dat time.Time
@@ -159,6 +161,7 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 			domain.Stance(stance), rationale, raisedAt,
 			domain.ProposalStatus(status),
 			decidedActor(decidedKind, decidedID), dat,
+			value.TrustClass(evidenceTrust),
 		))
 	}
 	return out, rows.Err()
@@ -283,14 +286,14 @@ func (s *Store) saveProposals(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_proposals
-			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at, evidence_trust)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 			ON CONFLICT (finding_id, proposal_id)
 			DO UPDATE SET status=EXCLUDED.status, decided_kind=EXCLUDED.decided_kind,
 			              decided_id=EXCLUDED.decided_id, decided_at=EXCLUDED.decided_at`,
 			string(f.ID()), string(p.ID()), seq, string(p.Proposer().Kind), p.Proposer().ID,
 			string(p.Stance()), p.Rationale(), p.RaisedAt(), string(p.Status()),
-			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt); err != nil {
+			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt, string(p.EvidenceTrust())); err != nil {
 			return err
 		}
 	}
@@ -365,8 +368,17 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 // stance for a Release (D10), served from the materialized current-position columns.
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, faultline_id, cve, stage, current_stance, current_position_version, base_score
-		FROM findings WHERE release_id = $1 ORDER BY id`, releaseID)
+		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
+		       f.base_score, COALESCE(pr.evidence_trust, '')
+		FROM findings f
+		-- The reservation (EDR-TRUST-01 T12) is DERIVED, never stored: join the current
+		-- Position to the proposal it accepted and read that proposal's evidence class. A
+		-- stored flag could disagree with the evidence it describes; a join cannot.
+		LEFT JOIN finding_positions po
+		       ON po.finding_id = f.id AND po.version = f.current_position_version
+		LEFT JOIN finding_proposals pr
+		       ON pr.finding_id = f.id AND pr.proposal_id = po.accepted_proposal_id
+		WHERE f.release_id = $1 ORDER BY f.id`, releaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -379,8 +391,9 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			curStance                   *string
 			curVersion                  *int
 			baseScore                   int
+			evidenceTrust               string
 		)
-		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore); err != nil {
+		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore, &evidenceTrust); err != nil {
 			return nil, err
 		}
 		e := app.PostureEntry{
@@ -393,6 +406,11 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		if curStance != nil {
 			e.Stance = domain.Stance(*curStance)
 			e.HasPosition = true
+			// Derived must not mean invisible (T12): a Position resting on anything weaker
+			// than Observed carries its class here, beside stance and priority.
+			if c := value.MaxTrust(value.TrustClass(evidenceTrust)); c != value.TrustObserved {
+				e.Reservation = c
+			}
 		}
 		out = append(out, e)
 	}

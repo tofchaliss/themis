@@ -62,7 +62,7 @@ func sampleCard(t *testing.T) domain.Faultline {
 	c, _ := value.NewCVSS(7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
 	p, _ := domain.NewVulnFactsProposal("nvd", time.Unix(1_700_000_000, 0),
 		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, AffectedRanges: []string{"<3.0"}})
-	f.FoldProposal(p, domain.NewPrecedence("nvd"))
+	f.FoldProposal(p, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return f
 }
 

@@ -324,7 +324,7 @@ func newPipeline(t *testing.T) *pipeline {
 	// Governance: consumes the Knowledge stream; serves posture + triage.
 	govPool := mustPool(t, dsnFor("governance"))
 	t.Cleanup(govPool.Close)
-	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", 0)
+	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", 0)
 	governanceSrv := httptest.NewServer(mount(gov.Handler))
 	t.Cleanup(governanceSrv.Close)
 	govReader := govinbound.Subscription.NewReader(busPool, log, govstore.NewInboxConsumer(govPool, gov.Consumer))

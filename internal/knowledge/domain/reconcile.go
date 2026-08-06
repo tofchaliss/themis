@@ -21,6 +21,21 @@ type EnterpriseView struct {
 	EPSS           float64
 	KEV            bool
 	ExploitPublic  bool
+
+	// Trust is tracked per field-group, not for the view as a whole (EDR-TRUST-01 T3).
+	// A single view-level class would be actively wrong: one vendor VEX statement
+	// (Asserted) on a card would drag the whole view down and incorrectly downgrade a
+	// version-range verdict computed purely from Observed ranges. A conclusion inherits
+	// the trust of the evidence *it* depended on, so each group carries its own.
+	//
+	// Each is **unset** when no proposal of that kind contributed. That is deliberate and
+	// safe: value.MaxTrust treats an unset class as Inferred, so a consumer that folds one
+	// in without checking degrades to the most conservative answer rather than silently
+	// claiming Observed.
+	HeadlineTrust value.TrustClass // class of the source that won the headline severity/CVSS
+	RangeTrust    value.TrustClass // highest-risk class among sources contributing ranges / fixed versions
+	SignalTrust   value.TrustClass // highest-risk class among sources contributing exploit signals
+
 	Applicabilities []Applicability
 }
 
@@ -62,7 +77,7 @@ func (p Precedence) rankOf(source string) int {
 //   - affected ranges + fix versions = the sorted union across vuln-facts;
 //   - KEV / public-exploit = logical-OR; EPSS = the latest observation (ties → higher);
 //   - applicabilities = the sorted set of vendor VEX statements (held, not folded).
-func Reconcile(proposals []Proposal, prec Precedence) EnterpriseView {
+func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) EnterpriseView {
 	view := EnterpriseView{Severity: value.SeverityUnknown}
 
 	var best headlineCandidate
@@ -85,6 +100,11 @@ func Reconcile(proposals []Proposal, prec Precedence) EnterpriseView {
 					best = c
 				}
 			}
+			// Ranges and fixed versions are a union, so the group inherits the highest-risk
+			// class among every source that contributed to it (T3).
+			if len(f.AffectedRanges) > 0 || len(f.FixedVersions) > 0 {
+				view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(p.source))
+			}
 			for _, rng := range f.AffectedRanges {
 				rangeSet[rng] = struct{}{}
 			}
@@ -95,6 +115,7 @@ func Reconcile(proposals []Proposal, prec Precedence) EnterpriseView {
 			s := p.exploitSignal
 			view.KEV = view.KEV || s.KEV
 			view.ExploitPublic = view.ExploitPublic || s.ExploitPublic
+			view.SignalTrust = foldTrust(view.SignalTrust, trust.ClassOf(p.source))
 			// EPSS: latest observation wins; equal timestamps → higher value (deterministic).
 			if !epssChosen || p.observedAt.After(epssTime) ||
 				(p.observedAt.Equal(epssTime) && s.EPSS > view.EPSS) {
@@ -111,6 +132,9 @@ func Reconcile(proposals []Proposal, prec Precedence) EnterpriseView {
 		view.Severity = best.severity
 		view.CVSS = best.cvss
 		view.SeveritySource = best.source
+		// The headline is winner-take-all, so it inherits exactly the winner's class —
+		// not a fold across losing candidates that contributed nothing to it.
+		view.HeadlineTrust = trust.ClassOf(best.source)
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
 	view.FixedVersions = sortedKeys(fixSet)
@@ -175,9 +199,25 @@ func (v EnterpriseView) equal(o EnterpriseView) bool {
 		v.EPSS != o.EPSS || v.KEV != o.KEV || v.ExploitPublic != o.ExploitPublic {
 		return false
 	}
+	// A trust change is a view change: evidence getting weaker or stronger is exactly
+	// what Governance re-evaluates on, so it must fire FaultlineEnriched (D8).
+	if v.HeadlineTrust != o.HeadlineTrust || v.RangeTrust != o.RangeTrust || v.SignalTrust != o.SignalTrust {
+		return false
+	}
 	return equalStrings(v.AffectedRanges, o.AffectedRanges) &&
 		equalStrings(v.FixedVersions, o.FixedVersions) &&
 		equalApplicabilities(v.Applicabilities, o.Applicabilities)
+}
+
+// foldTrust accumulates a field-group's trust across contributing sources. The first
+// contributor seeds the group (an unset accumulator means "no evidence yet", which
+// value.MaxTrust would otherwise read as Inferred); every later one folds in via the
+// monotonic max.
+func foldTrust(acc, c value.TrustClass) value.TrustClass {
+	if acc == "" {
+		return c
+	}
+	return value.MaxTrust(acc, c)
 }
 
 func sortedKeys(set map[string]struct{}) []string {

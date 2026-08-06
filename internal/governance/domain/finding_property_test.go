@@ -7,6 +7,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // TestFindingInvariantsProperty drives a Finding through a random sequence of governed
@@ -48,7 +49,7 @@ func TestFindingInvariantsProperty(t *testing.T) {
 				nextPID++
 				stance := rapid.SampledFrom(stances).Draw(t, "stance")
 				proposer := rapid.SampledFrom(proposers).Draw(t, "proposer")
-				p, perr := domain.NewGovernanceProposal(domain.ProposalID(fmt.Sprintf("p%d", nextPID)), proposer, stance, "x", epoch)
+				p, perr := domain.NewGovernanceProposal(domain.ProposalID(fmt.Sprintf("p%d", nextPID)), proposer, stance, "x", epoch, value.TrustAsserted)
 				if perr != nil {
 					t.Fatalf("build proposal: %v", perr)
 				}

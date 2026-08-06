@@ -489,6 +489,70 @@ per-context follow-ups below.
   multiple providers together with clearance policy. **Scope:** minimal local-only gate in Δ2; full
   classification / clearance Δ3+.
 
+- [x] **G-AI-6 — `NeedFinding` is declared but never consulted; the grounding root is hardcoded.** ✅ **CLOSED 2026-08-06** (phase3-trust-model group 9): `app.AssembleContext` is deleted outright — the runtime receives a Domain Projection and gathers nothing (T10), so the half-wired `ContextNeed` mechanism it lived in is gone with it. _(Found in
+  the capability-surface audit, 2026-08-06.)_ `domain.NeedFinding` is defined (`domain/capability.go`), listed
+  in `RecommendPositionV1().Needs`, and asserted in tests — but `app.AssembleContext` fetches the subject
+  Finding **unconditionally** and only branches on `NeedFaultline`. The `ContextNeed` mechanism therefore
+  governs the *expansion* but not the *root*, so a capability cannot truthfully declare its grounding. Harmless
+  today (every capability needs the Finding), but it is dead code that misrepresents the contract and it is
+  precisely what blocks a non-Finding subject. **Where it plugs in:** `internal/intelligence/app/context.go` +
+  `domain/capability.go`. **Dep:** overtaken by **`EDR-TRUST-01` T10** — the owning context produces
+  authoritative **Domain Projections** and the runtime gathers nothing, which deletes `AssembleContext` and
+  this defect with it. (It was first filed against `EDR-INTELLIGENCE-01` Revision 5 / S3, now superseded.) Filed here so
+  the defect is not lost if the trust-model line is deferred. **Scope:** LOW on its own; free under T10.
+
+- [ ] **TRUST-1 — Applicability statements carry no per-statement trust class.** _(Surfaced implementing
+  `phase3-trust-model` group 2, 2026-08-06.)_ `EnterpriseView` now tracks trust per field-group (headline /
+  ranges / signals), but **applicabilities are excluded**: `domain.Applicability{Package, Status,
+  Justification}` is used as the **dedup map key** in `Reconcile`, so adding a source field would change
+  dedup semantics (two vendors stating the same thing would stop collapsing) and would ripple into the frozen
+  `knowledge.faultline_enriched.v1` schema. **Why it is not urgent:** every applicability today originates
+  from vendor VEX or an uploaded VEX document, so all of them are uniformly **Asserted** — a per-statement
+  class would carry no information yet. **It becomes load-bearing** when a *derivable* applicability source
+  appears (e.g. a signed build manifest), because then two statements on one card would deserve different
+  classes. **Where it plugs in:** `internal/knowledge/domain/reconcile.go` + a `.v2` payload schema.
+  **Scope:** MEDIUM when a mixed-trust applicability source lands; LOW until then.
+
+- [ ] **TRUST-2 — The shipped-source list for the classification guard is manual.**
+  _(Surfaced implementing `phase3-trust-model` group 2, 2026-08-06.)_
+  `TestEveryKnownSourceIsClassified` asserts that every source Knowledge can record a Proposal under is
+  present in `trustBySource`, but the "every source" list is **hand-maintained** in the test. Adding a feed
+  and forgetting both the table *and* the list would still compile, and the new source would fail closed to
+  Asserted silently — safe, but wrong for a feed republishing a public record, whose conclusions would be
+  needlessly kept out of policy auto-acceptance. **Fix:** derive the list from a single shipped-source
+  registry (source ids as constants, or the feed registry enumerating itself) so classification cannot be
+  skipped. **Where it plugs in:** `internal/knowledge/adapters/{feed,wiring}`. **Scope:** LOW.
+
+- [ ] **TRUST-3 — The AI→Knowledge proposal source is unclassified, and the fail-closed default is wrong for
+  it.** _(Surfaced implementing `phase3-trust-model` group 2, 2026-08-06.)_ `EDR-INTELLIGENCE-01` D2 allows an
+  Intelligence capability to propose **into Knowledge** as a source Proposal; only the Governance path is
+  wired today, so no AI source id exists in `trustBySource`. An unregistered source fails closed to
+  **Asserted** — deliberately, because labelling an unknown feed `Inferred` would claim a model produced
+  something no model touched. But for a genuinely AI-sourced proposal that default **under-classifies** it,
+  and `Inferred` is the one class with a constitutional consequence (T4: never auto-acceptable). **This is
+  the single case where the fail-closed default is not conservative enough.** **Fix:** when the AI→Knowledge
+  path lands, classify its source id as `value.TrustInferred` and delete
+  `TestNoShippedSourceIsInferredYet`, which exists to make this impossible to forget. **Where it plugs in:**
+  `internal/knowledge/adapters/wiring/trust_sources.go`. **Dep:** the AI→Knowledge proposal-intake path
+  (Δ4-class). **Scope:** MEDIUM — a correctness gap the moment that path ships.
+
+- [ ] **TRUST-4 — The CVE-withdrawal path carries no trust class, and unset is not safe for it.**
+  _(Surfaced implementing `phase3-trust-model` group 3, 2026-08-06.)_ `knowledge.faultline_superseded.v1`
+  has no trust field, so `Coordinator.OnFaultlineSuperseded` builds an `EnrichmentSignal` with the classes
+  **unset**. A withdrawal is genuinely **Observed** — re-fetch and the CVE is still rejected upstream, which
+  is reproducible — but unset reads as `Inferred` under `value.MaxTrust`, and the group-4 constitutional bar
+  (T4) would then **block a policy auto-accept that works today**. That is a live regression waiting for
+  group 4, not a theoretical one. **Fix (in group 4):** classify the withdrawal path explicitly — either add
+  the field to the superseded event additively (as the enriched event just did) or set it at the coordinator
+  with a comment. Prefer the event: it keeps the class where the evidence is. **Where it plugs in:**
+  `internal/governance/app/coordinator.go` + optionally `knowledge.faultline_superseded.v1`.
+  **✅ MITIGATED in group 4 (2026-08-06):** `evidenceTrustFor` now states `value.TrustObserved` for the
+  withdrawal path, with `TestReactToEnrichment_WithdrawnPathStillAutoAccepts` guarding the regression — the
+  auto-accept that works today keeps working. **What remains:** the class is a **stated assumption in
+  Governance** rather than a fact carried from the source. Move it onto
+  `knowledge.faultline_superseded.v1` (additively, as `faultline_enriched` did in group 3) so it reflects
+  what actually drove the supersession. **Scope:** LOW now the regression is closed.
+
 ---
 
 ### D. Observability (R1) — remaining signals

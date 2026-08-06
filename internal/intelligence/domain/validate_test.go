@@ -13,10 +13,7 @@ func validRaw() []byte {
 }
 
 func groundedContext() AssembledContext {
-	return AssembledContext{
-		Finding:   FindingView{ID: "F1", FaultlineID: "FL1", CVE: "CVE-1"},
-		Faultline: FaultlineView{ID: "FL1", CVE: "CVE-1"},
-	}
+	return AssembledContext{Projection: FindingAssessment{Finding: FindingView{ID: "F1", FaultlineID: "FL1", CVE: "CVE-1"}, Knowledge: FaultlineView{ID: "FL1", CVE: "CVE-1"}}}
 }
 
 func TestNewValidatorErrors(t *testing.T) {

@@ -37,37 +37,38 @@ type Router interface {
 	Select(req domain.RoutingRequirements) (Provider, error)
 }
 
-// Engine is a kind of reasoning (Revision 2). Δ1 ships one LLM engine and no
-// dispatcher. Execute runs one plan step (a rendered prompt) and returns the raw
-// model output for validation.
+// Engine is a kind of reasoning. Execute runs one plan step and returns its output —
+// generated text (LLM) or retrieved grounding (Knowledge). An engine never settles a
+// question: provable verdicts are the backend's, before AI runs (EDR-TRUST-01 T5).
 type Engine interface {
 	Kind() domain.EngineKind
 	Execute(ctx context.Context, in ExecInput) (EngineResult, error)
 }
 
-// ExecInput is a plan step ready to run. The LLM engine consumes the pre-rendered
-// Prompt; the Rule engine (Δ2) reads the assembled grounding in Context. Carrying both
-// keeps one Engine port across engine kinds without a rendered prompt for rule steps.
+// ExecInput is a plan step ready to run. The LLM engine consumes the pre-rendered Prompt;
+// the Knowledge engine reads the assembled grounding in Context. Carrying both keeps one
+// Engine port across engine kinds without requiring a rendered prompt for retrieval steps.
 type ExecInput struct {
 	Prompt      string
 	JSONSchema  string
 	Temperature float64
 	Routing     domain.RoutingRequirements
-	Context     domain.AssembledContext // grounding — read by deterministic engines (Rule)
+	Context     domain.AssembledContext // grounding — read by the retrieval engine
 }
 
-// EngineResult is one engine's output. A generative engine (LLM) fills Raw + provenance
-// for 3-stage validation; a deterministic engine (Rule, Δ2) fills Decision when it
-// reaches a certain conclusion, or leaves it nil to defer to the next plan step.
+// EngineResult is one engine's output. A generative engine (LLM) fills Raw + provenance for
+// 3-stage validation; a retrieval engine (Knowledge) fills only Precedents.
+//
+// There is deliberately no deterministic-decision field. Provable verdicts are computed in
+// the backend, before AI runs at all (EDR-TRUST-01 T5) — an engine here never settles a
+// question, it only supplies reasoning or grounding.
 type EngineResult struct {
 	Raw        string
 	Provider   string
 	Model      string
 	TokensUsed int
-	Decision   *domain.RuleDecision // non-nil = a deterministic decision; nil = deferred / LLM path
 	// Precedents, when set by the Knowledge engine (Δ3a), are the semantically similar past
-	// Positions the Gateway merges into the grounding before the LLM step. A retrieval engine
-	// fills only this — no Raw, no Decision.
+	// Positions the Gateway merges into the grounding before the LLM step.
 	Precedents []domain.PrecedentPosition
 }
 
@@ -78,23 +79,28 @@ type PromptRenderer interface {
 	Render(capabilityID string, ctx domain.AssembledContext) (string, error)
 }
 
-// FindingReader is a Knowledge Provider (D5): reads the subject Finding from
-// Governance's read API. It decodes wire JSON into the domain's own view type — no
-// cross-context import.
-type FindingReader interface {
-	GetFinding(ctx context.Context, findingID string) (domain.FindingView, error)
-}
-
-// FaultlineReader is a Knowledge Provider (D5): reads a Faultline's enrichment from
-// Knowledge's read API into the domain's own view type.
-type FaultlineReader interface {
-	GetFaultline(ctx context.Context, faultlineID string) (domain.FaultlineView, error)
+// ProjectionReader fetches the Domain Projection for a Selection (EDR-TRUST-01 T10).
+//
+// It is the runtime's ONLY business read, and it composes nothing: one business-named
+// projection, fetched by id, produced by the context that owns the Selection Type. The
+// runtime does not know which contexts contributed to it, does not orchestrate across them,
+// and issues no follow-up reads to complete it.
+//
+// Precision on rule 1 ("the runtime never gathers"): what that forbids is the runtime
+// participating in business orchestration — composing several contexts, or asking for a
+// capability-shaped bundle, either of which moves part of the capability definition into the
+// runtime. Fetching a **business-named** projection moves nothing: `FindingAssessment` is
+// what a dashboard or a report reads too. The naming rule is what makes this distinction
+// real rather than a loophole — a `recommend_position_context` endpoint would have been the
+// violation.
+type ProjectionReader interface {
+	GetAssessment(ctx context.Context, findingID string) (domain.FindingAssessment, error)
 }
 
 // PrecedentReader is a Knowledge Provider (D5, Δ2 C6): reads our own past Enterprise
 // Positions on the same CVE (Faultline) from OTHER releases, for richer LLM grounding.
-// It is pulled lazily — only when the plan reaches the LLM step — so a rule short-circuit
-// costs no read; a read failure degrades to no precedent (never blocks the recommendation).
+// It is the exact-CVE fallback, pulled only when semantic retrieval found nothing; a read
+// failure degrades to no precedent and never blocks the recommendation.
 type PrecedentReader interface {
 	GetPrecedents(ctx context.Context, faultlineID, excludeReleaseID string) ([]domain.PrecedentPosition, error)
 }

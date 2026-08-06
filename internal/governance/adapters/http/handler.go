@@ -16,6 +16,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // Handler implements gen.ServerInterface over the Governance write + read services.
@@ -43,6 +44,43 @@ func (h *Handler) GetFinding(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	writeJSON(w, http.StatusOK, toFindingView(f))
+}
+
+// GetFindingAssessment handles GET /findings/{id}/assessment — the FindingAssessment Domain
+// Projection (EDR-TRUST-01 T10).
+func (h *Handler) GetFindingAssessment(w http.ResponseWriter, r *http.Request, id string) {
+	a, err := h.read.GetFindingAssessment(r.Context(), domain.FindingID(id))
+	if err != nil {
+		writeErr(w, "cannot read finding assessment", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toFindingAssessment(a))
+}
+
+// toFindingAssessment maps the projection onto the wire. The knowledge half is omitted when
+// it is absent, so a consumer can tell "Knowledge was unreachable" from "the CVE has no
+// enrichment" — collapsing both into zero values would hide an outage.
+func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
+	view := toFindingView(a.Finding)
+	out := gen.FindingAssessment{Finding: &view}
+	k := a.Knowledge
+	if k.FaultlineID == "" {
+		return out
+	}
+	ranges, fixes := k.AffectedRanges, k.FixedVersions
+	kev, pub := k.KEV, k.ExploitPublic
+	cvss, epss := float32(k.CVSSScore), float32(k.EPSS)
+	kn := gen.FaultlineKnowledge{
+		FaultlineId: strptr(k.FaultlineID), Cve: strptr(k.CVE), Severity: strptr(k.Severity),
+		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
+		AffectedRanges: &ranges, FixedVersions: &fixes,
+	}
+	if k.RangeTrust != "" {
+		rt := gen.FaultlineKnowledgeRangeTrust(k.RangeTrust)
+		kn.RangeTrust = &rt
+	}
+	out.Knowledge = &kn
+	return out
 }
 
 // GetFindingByKey handles GET /findings?release=&faultline=.
@@ -125,7 +163,10 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 	if body.Rationale != nil {
 		rationale = *body.Rationale
 	}
-	pid, err := h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale)
+	// A human's proposal is Asserted: a declaration Themis cannot re-derive. It changes no
+	// behaviour today — a non-system proposal is never policy-auto-accepted regardless — but
+	// it states the evidence honestly rather than leaving it unset.
+	pid, err := h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, value.TrustAsserted)
 	if err != nil {
 		writeErr(w, "cannot raise proposal", err)
 		return
@@ -271,7 +312,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	base := e.BaseScore
 	mult := float32(e.Multiplier)
 	eff := e.EffectivePriority
-	return gen.PostureEntry{
+	out := gen.PostureEntry{
 		FindingId:         strptr(string(e.FindingID)),
 		FaultlineId:       strptr(e.FaultlineID),
 		Cve:               strptr(e.CVE),
@@ -282,6 +323,13 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		BlastMultiplier:   &mult,
 		EffectivePriority: &eff,
 	}
+	// Omitted when the Position rests on Observed evidence — an absent reservation reads as
+	// "nothing to caveat", which is exactly right, and keeps the common row unchanged.
+	if e.Reservation != "" {
+		r := gen.PostureEntryReservation(e.Reservation)
+		out.Reservation = &r
+	}
+	return out
 }
 
 // proposerFrom builds the proposer actor from the request (human by default; ai allowed).

@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained by the openspec skills (`propose`, `apply`, `archive`) and by hand when work lands outside a
-change. Last updated: 2026-08-03._
+change. Last updated: 2026-08-06._
 
 **Phase-3 greenfield pivot — the sole go-forward.** The DDD bounded-context rebuild (Evidence → Knowledge →
 Governance → Communication, over Kernel/Registry, with the Intelligence AI gateway beside it), per the
@@ -15,16 +15,28 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 (EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
-**OpenSpec state: no active changes** (`openspec list` → "No active changes found"). Every Phase-3 change is
-archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
+**OpenSpec state: no active changes.** `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
 "uncommitted") had gone stale.
 
-**Next active focus — AI-related features** (v0.4.x, "AI-capability expansion"): **GOV-14** (EDR-GOVERNANCE-01
-D14 — disposition-aware `residual_priority` + the deterministic disposition re-evaluation watcher, AI-judge
-optional), then Intelligence **Δ3** (Python engine + RAG / pgvector) and **Δ4** (autonomy + LLMOps). Scaffold
-a fresh OpenSpec change (`phase3-intelligence-d3`) from `EDR-INTELLIGENCE-01` when that work starts.
+**`phase3-trust-model` — IMPLEMENTED 2026-08-06 (63/63 tasks, all 11 groups), gated green at every group boundary**, scaffolded from
+**`EDR-TRUST-01` (T1–T12, ACCEPTED)**. It is **cross-context by construction** — Knowledge, Governance and
+Intelligence move together, because the trust model is exactly the horizontal that per-context EDRs left
+ownerless. It adds **no new bounded context and no new deployable**. Delivers: evidence trust classes
+(Observed / Asserted / Inferred, keyed on *derivable vs declared*) · monotonic trust propagation · a
+**constitutional stage** in Governance barring auto-acceptance of `Inferred` under any policy · reservations
+derived from immutable `PositionInputs` (never a state) · **Deterministic Inference** as a stage inside
+evidence-owning contexts, moving the version-range rule out of the AI runtime · **Selection** replacing the
+bare finding id · **Domain Projections**, after which the AI Runtime gathers nothing. **Group order is the
+migration order** — `recommend_position` stays behaviourally identical throughout, and groups 6→7 must not be
+reordered.
+
+**Then — AI-capability expansion** (v0.4.x): **GOV-14** (EDR-GOVERNANCE-01 D14 — disposition-aware
+`residual_priority` + the deterministic disposition re-evaluation watcher, AI-judge optional), then
+Intelligence **Δ3b** (Python engine) and **Δ4** (autonomy + LLMOps). Both are now **downstream** of the trust
+model. Note `EDR-INTELLIGENCE-01` Revision 5 is **superseded** by `EDR-TRUST-01`; scaffold from the latter.
 
 Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `docs/BACKLOG.md` (Part 1). Parity →
 `docs/engineering/PARITY-GAP.md`.
@@ -33,9 +45,12 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 ## Active Changes
 
-**None.** `openspec list` reports "No active changes found." Every Phase-3 change is archived (below). The
-next change (`phase3-intelligence-d3` — the AI-feature work) has **not been scaffolded yet**; create it from
-`EDR-INTELLIGENCE-01` when AI development resumes.
+**None.** `phase3-trust-model` was implemented and archived 2026-08-06 (63/63, all 11 groups) — see the
+table below.
+
+The next change (the AI-capability line — GOV-14, then Δ3b / Δ4) has **not been scaffolded yet**. Scaffold it
+from `EDR-TRUST-01` + `EDR-GOVERNANCE-01`, **not** from `EDR-INTELLIGENCE-01` Revision 5, which is
+superseded.
 
 ## Archived Phase-3 changes
 
@@ -53,6 +68,7 @@ carry **no `specs/` deltas** — EDRs are the source of truth — so each was ar
 | `phase3-intelligence` | M4 — AI Gateway Δ1 (reactive `recommend_position`) | 37/37 | 2026-07-25 |
 | `phase3-intelligence-d2` | M4 — Δ2: `[Rule → LLM]` dispatch + admission spine + `insufficient` | 9/9 | 2026-07-25 |
 | `phase3-event-infrastructure` | M5 — the platform event bus (`EDR-EVENTBUS-01` D1–D11) | 43/43 | 2026-07-29 |
+| `phase3-trust-model` | the enterprise trust model (`EDR-TRUST-01` T1–T12) — cross-context: Knowledge + Governance + Intelligence | 63/63 | 2026-08-06 |
 | `phase3-{shared-kernel,evidence}-prescaffold` | pre-scaffold drafts (superseded by the real changes) | — | 2026-07-15 |
 
 Post-M5 parity / VEX / auth / estate / D14 work (parity clusters, EDR-VEX-01 Phase 1–3, EDR-SECURITY-01,

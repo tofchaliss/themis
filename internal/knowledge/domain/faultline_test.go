@@ -50,7 +50,7 @@ func TestFoldProposal(t *testing.T) {
 	f, _ := domain.NewFaultline("fl-1", cve(t, "CVE-2024-1"))
 
 	// First fold → view changes, stage advances to Enriched, version bumps.
-	if r := f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec); !r.ViewChanged {
+	if r := f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec, domain.NewTrustPolicy(nil)); !r.ViewChanged {
 		t.Error("first fold should change the view")
 	}
 	if f.Stage() != domain.StageEnriched || f.Version() != 1 {
@@ -61,7 +61,7 @@ func TestFoldProposal(t *testing.T) {
 	}
 
 	// Folding an identical fact again changes nothing (but is still recorded).
-	if r := f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec); r.ViewChanged {
+	if r := f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec, domain.NewTrustPolicy(nil)); r.ViewChanged {
 		t.Error("duplicate fold should not change the view")
 	}
 	if len(f.Proposals()) != 2 || f.Version() != 2 {
@@ -69,7 +69,7 @@ func TestFoldProposal(t *testing.T) {
 	}
 
 	// A higher-authority source overrides the headline severity.
-	if r := f.FoldProposal(vulnFacts(t, "redhat", value.SeverityCritical), prec); !r.ViewChanged {
+	if r := f.FoldProposal(vulnFacts(t, "redhat", value.SeverityCritical), prec, domain.NewTrustPolicy(nil)); !r.ViewChanged {
 		t.Error("higher-authority fold should change the view")
 	}
 	if f.View().Severity != value.SeverityCritical || f.View().SeveritySource != "redhat" {
@@ -80,13 +80,13 @@ func TestFoldProposal(t *testing.T) {
 func TestLifecycleLadder(t *testing.T) {
 	prec := domain.NewPrecedence("nvd")
 	f, _ := domain.NewFaultline("fl-1", cve(t, "CVE-2024-1"))
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec) // → Enriched
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil)) // → Enriched
 
 	if !f.MarkCorrelated() || f.Stage() != domain.StageCorrelated {
 		t.Errorf("MarkCorrelated: stage=%s", f.Stage())
 	}
 	// Folding after Correlated must not regress the stage.
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec)
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil))
 	if f.Stage() != domain.StageCorrelated {
 		t.Errorf("fold regressed stage to %s", f.Stage())
 	}
@@ -107,7 +107,7 @@ func TestLifecycleLadder(t *testing.T) {
 		t.Error("Supersede on a superseded card should be a no-op")
 	}
 	verBefore := f.Version()
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityLow), prec) // still recorded, stage frozen
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityLow), prec, domain.NewTrustPolicy(nil)) // still recorded, stage frozen
 	if f.Stage() != domain.StageSuperseded {
 		t.Errorf("fold moved a superseded card to %s", f.Stage())
 	}
@@ -119,7 +119,7 @@ func TestLifecycleLadder(t *testing.T) {
 func TestReconstitute(t *testing.T) {
 	prec := domain.NewPrecedence("nvd")
 	p := vulnFacts(t, "nvd", value.SeverityHigh, "<3.0")
-	view := domain.Reconcile([]domain.Proposal{p}, prec)
+	view := domain.Reconcile([]domain.Proposal{p}, prec, domain.NewTrustPolicy(nil))
 
 	f := domain.Reconstitute("fl-9", cve(t, "CVE-2024-9"), []domain.Proposal{p}, view, domain.StageCorrelated, 5)
 	if f.ID() != "fl-9" || f.Stage() != domain.StageCorrelated || f.Version() != 5 {

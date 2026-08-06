@@ -64,10 +64,10 @@ type FoldResult struct {
 // (D2), advances the lifecycle to at least Enriched (D7), and bumps the version. It
 // reports whether the enterprise view changed. Idempotency (not re-folding the same
 // proposal) is an app/store concern (D11), not the aggregate's.
-func (f *Faultline) FoldProposal(p Proposal, prec Precedence) FoldResult {
+func (f *Faultline) FoldProposal(p Proposal, prec Precedence, trust TrustPolicy) FoldResult {
 	prev := f.view
 	f.proposals = append(f.proposals, p)
-	f.view = Reconcile(f.proposals, prec)
+	f.view = Reconcile(f.proposals, prec, trust)
 	f.stage = f.stage.advanceTo(StageEnriched)
 	f.version++
 	return FoldResult{ViewChanged: !f.view.equal(prev)}

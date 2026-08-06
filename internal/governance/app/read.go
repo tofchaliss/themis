@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // ProjectionReader serves disposable, event-built rollups (BCK-0047 / D10). Aggregates stay
@@ -42,6 +43,14 @@ type PostureEntry struct {
 	Multiplier float64
 	// EffectivePriority is BaseScore × Multiplier, clamped to 100 — what a human triages by.
 	EffectivePriority int
+	// Reservation is the trust class of the evidence the current Position rested on, when
+	// that is weaker than Observed (EDR-TRUST-01 T12) — e.g. an acceptance leaning on a
+	// vendor's Asserted not_affected. Empty means no Position, or one on Observed evidence.
+	//
+	// It is DERIVED from the accepted proposal, never stored: a stored flag can disagree
+	// with the evidence it describes. Surfacing it here is part of the decision, not a
+	// refinement — a reservation nobody computes is a reservation nobody sees.
+	Reservation value.TrustClass
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads
@@ -51,6 +60,17 @@ type ReadService struct {
 	proj     ProjectionReader
 	blast    BlastRadiusReader // may be nil — the multiplier then defaults to 1.0 (fail-safe)
 	blastCap int               // unique-customer count at which the multiplier saturates (C2, configurable)
+	// knowledge may be nil — the FindingAssessment projection then carries the Finding alone
+	// (single-context dev, or a Knowledge outage). Best-effort by design (T10).
+	knowledge FaultlineKnowledgeReader
+}
+
+// WithKnowledge wires the optional Knowledge read seam used by the FindingAssessment
+// projection and returns the service for chaining. Kept separate from the constructor so
+// every existing caller is unaffected.
+func (s *ReadService) WithKnowledge(k FaultlineKnowledgeReader) *ReadService {
+	s.knowledge = k
+	return s
 }
 
 // NewReadService wires the aggregate repository, the projection store, the blast-radius reader

@@ -27,7 +27,7 @@ type fakeVEXParser struct {
 func (f fakeVEXParser) Parse([]byte) ([]app.VEXStatement, error) { return f.stmts, f.err }
 
 func vexService(repo app.Repository, docs app.DocumentReader, parser app.VEXParser) *app.VEXApplicabilityService {
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return app.NewVEXApplicabilityService(docs, parser, fold, fixedClock{})
 }
 

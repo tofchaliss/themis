@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-03 · **Read this first when resuming.**
+**Updated:** 2026-08-06 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -270,6 +270,58 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 
 ## Next action (resume here)
 
+**2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
+audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
+from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as
+**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (**ACCEPTED** — grilled + closed 2026-08-06, T1–T12) with coordinated updates to **Book I-adjacent
+vocabulary** (Book II Ch 2 §2.7 + **Domain Invariant 4 — Trust Is Inherited, Never Granted**), **Book III
+Ch 16** (Domain Projections + Deterministic Inference), and **Book IV** (§2.1–2.3 capability classes,
+runtime contract, principles 10–17). `EDR-INTELLIGENCE-01` **Revision 5 is SUPERSEDED** by it the same day.
+
+What changed, in one line each: trust derives from **evidence provenance**, not the producing component ·
+three classes **Observed / Asserted / Inferred**, propagating **monotonically** · **Inferred is
+constitutionally barred from auto-acceptance** · **Deterministic Inference** runs provable rules before AI —
+a **stage, not a service**, executed inside evidence-owning contexts (**behaviour follows ownership**: new
+evidence justifies a context, never new rules), and the version-range rule **moves out of** the AI runtime ·
+capabilities are **Information** or
+**Decision**, and only Decision outputs enter Governance · the context owning a Selection Type produces
+authoritative, business-named **Domain Projections** (`ReleasePosture` is the first — the pattern already
+works) while capability-specific shaping stays **in-memory and unpersisted**, bounding the runtime to **four
+rules** (no orchestration · information-preserving shaping · full provenance · grounding anchors to authority;
+rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
+bare finding-id subject.
+
+**IMPLEMENTED 2026-08-06 — `phase3-trust-model`, all 11 groups, on branch
+`docs/2026-08-06-trust-model`.** `make check-ci` + `make e2e-pipeline` green at every group boundary.
+What shipped, in order: `TrustClass` in the kernel · source classification + per-field-group trust on the
+reconciled view · trust across the Knowledge→Governance seam (additive on v1, **no v2**) · the
+**constitutional stage** barring `Inferred` auto-acceptance under any policy · reservations derived from
+immutable `PositionInputs` (never a state) · **Deterministic Inference** re-evaluating existing Findings
+against the reconciled range · the version-range rule **deleted from the AI runtime** · **Selection**
+replacing the bare finding id · **Domain Projections** (`AssembleContext` deleted, closing **G-AI-6**) ·
+**Information vs Decision** capability classes + **Business Verification** in Governance · docs.
+
+**Three tasks were wrong as written and were corrected against the code**, which is the pattern worth
+carrying into the next change: T6's "drop the producer check" (it is an *authority* rule, not a trust one);
+group 3's "mint a v2 schema" (the house pattern is additive-optional on v1, used twice already); and group
+6's premise (Knowledge already ran a version-range check — as a **filter at match time**, so the real gap was
+a Finding born *before* the range was known, which nothing revisited). Writing tasks before touching code
+buys sequencing, not correctness.
+
+**Reading order for a reviewer:** `EDR-TRUST-01` (T1–T12) is the **reason of record** — read it before the
+diff, because the code will not explain *why* trust is a property of evidence rather than of the producer.
+Then the retrospective + reviewer notes at the tail of
+`openspec/changes/archive/2026-08-06-phase3-trust-model/tasks.md`, which record what the task list got wrong,
+why the group order was load-bearing anyway, and the four things a reviewer should know going in (the one
+deliberate behaviour change, the one breaking request shape, the moved config knob, and that
+**`EDR-INTELLIGENCE-01` Revision 5 is superseded** — scaffold future AI work from `EDR-TRUST-01`).
+
+**Open:** the Decision Proposal payload shape, deferred by construction until a second Decision capability
+defines it. `TRUST-1/2/3/4` in `docs/BACKLOG.md` are LOW follow-ups. The AI-line ordering below
+(GOV-14 → Δ3b → Δ4) is now unblocked — the capability surface those use cases need exists.
+
+---
+
 **2026-08-05 — from-scratch VM bring-up + two HIGH bug fixes (both merged to `main`).** A full cold-start
 deployment on the enterprise VM (Postgres → 7 DBs → build → the 6 nodes → Ollama `cyberpal20b` +
 `nomic-embed-text` → the Δ3a vector store), driven through real use cases (SBOM→Finding→`recommend_position`
@@ -365,9 +417,11 @@ fault-injection coverage; OTel traces + metrics). Update those files, not this s
   `otelzap` bridge, one `Setup`; config-driven level/format/OTLP endpoint via `ConfigFromEnv`; a
   `RequestLogger` correlation-id middleware; domain/app stay log-free by depguard). All four greenfield cmds
   wire it; example config at `deploy/node.env.example`.
-- Changes: **none active** — all Phase-3 changes IMPLEMENTED + archived (`openspec/changes/archive/`); the
-  next change (`phase3-intelligence-d3`, the AI-feature line) is unscaffolded — create it from
-  `EDR-INTELLIGENCE-01`
+- Changes: **none active** — `phase3-trust-model` IMPLEMENTED + ARCHIVED 2026-08-06 (**63/63**, 11 groups),
+  from `EDR-TRUST-01` (T1–T12). Cross-context by construction (Knowledge + Governance + Intelligence);
+  **group order is the migration order** and groups 6→7 must not be reordered. All other Phase-3 changes are
+  IMPLEMENTED + archived (`openspec/changes/archive/`). `openspec validate` reports **"no deltas"** — expected
+  for `phase3-*`; archive with `--skip-specs -y`
 - Blueprints (to fill from Evidence exemplar): `docs/engineering/implementation-blueprint/01–06`
 - Architecture source of truth: `docs/architecture/` (Books I–III) + `docs/adr/` (69 ADRs)
 - Change status: `openspec/STATUS.md`

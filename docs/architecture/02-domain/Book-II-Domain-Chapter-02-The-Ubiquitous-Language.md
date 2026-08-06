@@ -196,6 +196,141 @@ safety nets; a cursor/offset is only a read-position optimization and carries no
 
 ------------------------------------------------------------------------
 
+## 2.7 Trust and Capability Vocabulary
+
+Reason of record:
+[`EDR-TRUST-01`](../../engineering/decisions/EDR-TRUST-01.md).
+
+### Evidence Trust Class
+
+Whether a fact can be **re-derived, or must someone be believed**. Every
+fact carries exactly one class, and the classes are ordered by risk:
+
+- **Observed** --- **reproducible**: mechanically derivable from an
+    artifact Themis holds, or a public record independent parties publish.
+    *A component version read from an ingested SBOM --- rescan the artifact
+    and you get the same answer. A CVE's affected range. An EPSS score.*
+- **Asserted** --- **not reproducible**: a declaration or judgment Themis
+    cannot re-derive. Trust rests on the declarer, who is recorded.
+    *A vendor VEX `not_affected`; "this build excludes the JNDI module",
+    typed into a field.*
+- **Inferred** --- the output of **non-deterministic reasoning**. Not
+    re-derivable even in principle. *Any AI capability output.*
+
+**Transport does not decide the class.** An affected range and a vendor's
+`not_affected` may arrive by the identical HTTP fetch; what separates them
+is that one is a public record anyone can check and the other is a
+judgment nothing can re-run.
+
+**Who the fact is about is not the criterion.** An SBOM is a claim about
+our own product and is still Observed, because a tool derived it from the
+artifact. Conversely **self-assertion is not observation**: "we compiled
+without JNDI", typed by our own operators, is Asserted --- while the same
+claim backed by a signed build manifest Themis holds becomes Observed.
+That is the gradient the model exists to expose.
+
+### Trust Propagation
+
+A conclusion takes the **highest-risk** trust class among the evidence it
+depends on. Propagation is **monotonic** --- no deterministic step,
+validation stage, or human relay may raise a class. Only new,
+better-classed evidence produces a better-classed conclusion, and that is
+a new conclusion rather than a promotion.
+
+### Deterministic Inference
+
+**Provable rules** executed over assembled evidence, raising system
+proposals for the conclusions they reach, before any AI Decision
+capability runs.
+
+It is a **stage in the architecture, not a deployable service**. Each
+rule executes inside the bounded context that owns the evidence it
+consumes --- *behaviour follows ownership*.
+
+**Rules carry no trust of their own** --- a rule is an algorithm; its
+conclusion is classed by its inputs.
+
+### Reservation
+
+A recorded caveat that a decision rested on evidence weaker than Observed
+--- for example an acceptance leaning on a vendor's Asserted
+`not_affected`.
+
+A reservation is a property of **evidence**, never of the **decision**. It
+is therefore **derived** from a Position's immutable inputs and **never
+persisted as independent state**: there is no "accepted with warning"
+lifecycle state. Read models surface reservations explicitly; the
+lifecycle records only what Governance decided.
+
+*Decisions are governed; evidence explains why the decision was
+reasonable at the time.*
+
+### Behaviour Follows Ownership
+
+Evidence-owning bounded contexts execute deterministic inference over the
+evidence they own. **Inference never justifies a bounded context; new
+evidence does.** A new context is created only when a new class of
+authoritative business evidence requires independent ownership --- never
+because new rules were introduced.
+
+### Product Applicability
+
+The context that would own what the enterprise **builds, ships and
+enables** --- feature configuration, build-time options, shipped
+configuration, platform bindings. **Named but not created**: it becomes
+justified when Themis begins collecting that evidence, and the rules that
+consume it arrive with it.
+
+### Selection
+
+The **user-addressable entry point** to a capability: a type plus a set
+of identifiers of that type, with a declared minimum and maximum
+cardinality.
+
+**Selection Types are not domain entities.** They are the things a person
+can point at. A type qualifies only when it is addressable today *and* a
+named use case treats it as the thing the user picks. Today: **Finding**
+and **Release**.
+
+### Decision Context
+
+Everything Themis assembles on the user's behalf --- Enterprise Positions,
+Faultlines, vendor VEX, policies, historical decisions, estate and
+blast-radius. Decision Context is **never selected**; it is gathered
+because the Selection implies it.
+
+### Domain Projection
+
+A **reusable, persisted** read model owned by the bounded context that
+owns a Selection Type, assembled **only** from events and read-only APIs
+from other contexts, and named for the **business view it represents**
+(`ReleasePosture`) --- never for a consumer. Every consumer uses the same
+projection: AI, dashboards, reports, exports. It is **authoritative** ---
+an owning context vouches for it.
+
+### Capability Context
+
+The **in-memory, non-persisted** shape a consumer derives from a Domain
+Projection for one capability. It is a **view, not a source**: it may
+reduce (filter, sort, group, summarise) but may introduce nothing the
+projection did not contain, and every element remains traceable to it.
+
+Keeping capability-specific shaping unpersisted is what makes AI a
+*consumer* of the domain rather than a *driver* of the domain model.
+
+### Information Response
+
+An answer rendered for a human --- an explanation, summary, or plan. It is
+**ephemeral**: read and discarded, never recorded as Enterprise
+Knowledge.
+
+### Decision Proposal
+
+A structured, schema-validated claim that **aspires to become Enterprise
+Knowledge**, and therefore enters Governance.
+
+------------------------------------------------------------------------
+
 ## Domain Invariant 2 --- One Concept, One Meaning
 
 Every significant business concept within Themis has exactly one
@@ -215,6 +350,24 @@ or the Intelligence Gateway --- produces Information, never Enterprise
 Knowledge. Information becomes Enterprise Knowledge only through an
 explicit, governed acceptance step (Knowledge reconciliation, or a
 Governance decision). No gatherer writes business truth directly.
+
+------------------------------------------------------------------------
+
+## Domain Invariant 4 --- Trust Is Inherited, Never Granted
+
+Trust is a property of **evidence**, not of the component that produced a
+conclusion. A conclusion inherits the highest-risk trust class among the
+evidence it used, and no step may raise it.
+
+It follows that a conclusion drawn from **Inferred** evidence may never
+be accepted automatically, under any policy configuration --- a
+constitutional bar, not a setting. A deterministic rule that consumes an
+AI-derived fact yields an Inferred conclusion and is equally barred:
+determinism launders nothing.
+
+This invariant generalizes Domain Invariant 3. "Gathering Is Not Knowing"
+states that a gatherer never writes truth; Invariant 4 states what the
+gathered thing is *worth* once something reasons over it.
 
 ------------------------------------------------------------------------
 

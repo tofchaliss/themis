@@ -18,19 +18,41 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for SelectionType.
+const (
+	Finding SelectionType = "finding"
+	Release SelectionType = "release"
+)
+
+// Valid indicates whether the value is a known member of the SelectionType enum.
+func (e SelectionType) Valid() bool {
+	switch e {
+	case Finding:
+		return true
+	case Release:
+		return true
+	default:
+		return false
+	}
+}
+
 // Evidence defines model for Evidence.
 type Evidence struct {
 	Kind *string `json:"kind,omitempty"`
 	Ref  *string `json:"ref,omitempty"`
 }
 
-// InvokeRequest defines model for InvokeRequest.
+// InvokeRequest Invoke a capability against a Selection - a user-addressable entry point plus the identifiers picked (EDR-TRUST-01 T9). Supply either `subject` or the deprecated `finding_id`; `subject` wins if both are present.
 type InvokeRequest struct {
 	// CorrelationId Optional correlation id for telemetry; generated if absent.
 	CorrelationId *string `json:"correlation_id,omitempty"`
 
-	// FindingId The subject Finding identifier to ground and recommend on.
-	FindingId string `json:"finding_id"`
+	// FindingId Deprecated alias for `subject: {type: finding, ids: [<id>]}`. Accepted for one release so existing callers keep working while they migrate; remove after.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	FindingId *string `json:"finding_id,omitempty"`
+
+	// Subject What the capability is invoked against. `ids` is a set because a user may pick several things of one kind (e.g. several Findings for a VEX draft); how many a given capability accepts is that capability's declared cardinality, enforced before any grounding is assembled.
+	Subject *Selection `json:"subject,omitempty"`
 }
 
 // Problem defines model for Problem.
@@ -54,6 +76,17 @@ type Proposal struct {
 	Reasoning *string     `json:"reasoning,omitempty"`
 	Stance    *string     `json:"stance,omitempty"`
 }
+
+// Selection What the capability is invoked against. `ids` is a set because a user may pick several things of one kind (e.g. several Findings for a VEX draft); how many a given capability accepts is that capability's declared cardinality, enforced before any grounding is assembled.
+type Selection struct {
+	Ids []string `json:"ids"`
+
+	// Type The user-addressable entry point. Not a domain entity - see EDR-TRUST-01 T9.
+	Type SelectionType `json:"type"`
+}
+
+// SelectionType The user-addressable entry point. Not a domain entity - see EDR-TRUST-01 T9.
+type SelectionType string
 
 // InvokeCapabilityJSONRequestBody defines body for InvokeCapability for application/json ContentType.
 type InvokeCapabilityJSONRequestBody = InvokeRequest
@@ -235,22 +268,29 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"rFbdjhs3D30VQt93sQFmbe9Pb7xX2yAtjAKpURToRbwI6BHtYaKhJpTGi8HCQB8iz9WH6JMU0vg3nqIJ",
-	"kKulRQ5Jkecc7Yspfd14IYnBTF+MUmi8BMo/5uqXjupkll4iSUwmNo3jEiN7GX8IXtJZKCuqMVn/V1qZ",
-	"qfnf+Jh33HvDeJ9vu90WxlIolZuUxkzNG1WvI5Mcu+iU7M2GLUlJyW7UN6SR+9Y+stj0N3YNmakJUVnW",
-	"ZluYXP7ifFvsT/zyA5UxRc5k4z/Sb/SppRAvK5RelVy+5nvOtc47/jUb6OAkENjCyitEclRT1O4B1iSk",
-	"GMkCrwCXgSSOTHHZ94rFsqwHS/1eEYQ2Nw4/9XGQBhN5xaQQPazVt2IBxYJS6euaxIKXgUp5RJ9aVrJm",
-	"+u607NPAjE4QcD4dSxHZDW4gcnT0lTuYq298QDcwfmxwyY5jN1ik9LI6YmPnlrZekvbuL5d3kcFSyZbs",
-	"+2V3OfA/Ki4raBwKhEgN7GLh7z8/w8Jo62i6aCeTuzJElJKyTQsDXmFhnKsHvYNrpxOEc6Q6/BeHDpQ4",
-	"jhNVsbvE0EWt2lsaXlmjPqXVf2EUBi/px5C3v+NXrTsdsaz85bxnEsk5XqeLwc8Y6Rk7uJpXGOj6DtZK",
-	"JCsmZwv46/PNq7yGWBEoYRl5Q3AEC4RWV1jSCHp6A4JgTRYeZ6dRyy5RFdfIEiLggV1HVj3kCvteen4F",
-	"4AgbxlTYXj/OZ/CL+GdHdk0w340wFKCthPw1yZqFCtigY4uRArBArJQIQsQ1hWLH2NiqhNRG1LaMrZIF",
-	"tBsOXjvYUyTf2ivcTu7hrYfXvSDDc0WS2rJUOhYKcLUw4qHZfbUwBSCsWEO8Lh2GAAFXBL6Npa/p1Qge",
-	"93W8uG6a2y7ROdIsJJrv/ABnC/LPEkA8RG1jNVqIOXA+KVXN4Tz8cT4zhdmQhn7ZN6PJaJKg4xsSbNhM",
-	"zd1oMrozhWkwVpkB48OumML4he12zHmfWSh8r9dJLjLFZzZjKPlfH2UjpVOsKZIGM333YjhVTyVMYRIo",
-	"zNSwNad6GLWl4uQx+xLST30whfijt913exfPX6LtuUannvLBycN8O5l8z0e5l+CBV/nxAN0BQI7SDm8n",
-	"95d0fnvEH1ztgGkLaKWnUbK9Qiu4QXa4dNRTGs+wmdPf9xcd6v8wkOO/FSn+/pvif/im/Enu2rpG7Q54",
-	"O+jLibjsZcl1cBU6KSv14tvwatSPOJBu9pBs1ZmpGWPD482N2T5t/wkAAP//",
+	"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",
+	"SWYrSLZi1FgNseHh7EQt7hf/BAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

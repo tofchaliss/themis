@@ -9,6 +9,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // --- fakes ---------------------------------------------------------------------------
@@ -418,7 +419,7 @@ func TestRaiseProposal_Human(t *testing.T) {
 	s := writeSvc(repo, domain.NewPolicyRule("auto-na", domain.StanceNotAffected))
 
 	// A human proposal is never auto-accepted, even for a policy-covered stance.
-	pid, err := s.RaiseProposal(context.Background(), "fnd-1", human, domain.StanceNotAffected, "manual review")
+	pid, err := s.RaiseProposal(context.Background(), "fnd-1", human, domain.StanceNotAffected, "manual review", value.TrustAsserted)
 	if err != nil || pid == "" {
 		t.Fatalf("raise: pid=%q err=%v", pid, err)
 	}
@@ -430,7 +431,7 @@ func TestRaiseProposal_Human(t *testing.T) {
 	}
 
 	// Unknown finding → error.
-	if _, err := s.RaiseProposal(context.Background(), "nope", human, domain.StanceAffected, ""); err == nil {
+	if _, err := s.RaiseProposal(context.Background(), "nope", human, domain.StanceAffected, "", value.TrustAsserted); err == nil {
 		t.Error("unknown finding: expected error")
 	}
 }
@@ -441,7 +442,7 @@ func TestAcceptProposal(t *testing.T) {
 	s := writeSvc(repo)
 	ctx := context.Background()
 
-	pid, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "confirmed")
+	pid, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "confirmed", value.TrustAsserted)
 
 	// AI may not decide.
 	if err := s.AcceptProposal(ctx, "fnd-1", pid, ai); !errors.Is(err, app.ErrUnauthorized) {
@@ -476,12 +477,12 @@ func TestAcceptProposal_RevisionEmitsRevised(t *testing.T) {
 	ctx := context.Background()
 
 	// v1.
-	pid1, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "confirmed")
+	pid1, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "confirmed", value.TrustAsserted)
 	if err := s.AcceptProposal(ctx, "fnd-1", pid1, human); err != nil {
 		t.Fatal(err)
 	}
 	// v2 → PositionRevised.
-	pid2, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceMitigated, "fixed")
+	pid2, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceMitigated, "fixed", value.TrustAsserted)
 	if err := s.AcceptProposal(ctx, "fnd-1", pid2, human); err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +500,7 @@ func TestRaiseProposal_OnArchivedFails(t *testing.T) {
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
 	_ = f.Archive()
 	repo.seed(f)
-	if _, err := writeSvc(repo).RaiseProposal(context.Background(), "fnd-1", human, domain.StanceAffected, "x"); !errors.Is(err, domain.ErrIllegalTransition) {
+	if _, err := writeSvc(repo).RaiseProposal(context.Background(), "fnd-1", human, domain.StanceAffected, "x", value.TrustAsserted); !errors.Is(err, domain.ErrIllegalTransition) {
 		t.Errorf("raise on archived err = %v, want ErrIllegalTransition", err)
 	}
 }
@@ -511,7 +512,7 @@ func TestWriteService_MisconfiguredClockAndPolicy(t *testing.T) {
 	zc := newRepo()
 	zc.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
 	badClock := app.NewFindingService(zc, &seqIDs{}, zeroClock{})
-	if _, err := badClock.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "x"); err == nil {
+	if _, err := badClock.RaiseProposal(ctx, "fnd-1", human, domain.StanceAffected, "x", value.TrustAsserted); err == nil {
 		t.Error("zero-clock RaiseProposal: expected error")
 	}
 	if err := badClock.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", KEV: true}); err == nil {
@@ -542,7 +543,7 @@ func TestAcceptProposal_ConcurrencyExhausted(t *testing.T) {
 	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
 	// Seed an open proposal directly so accept has a target.
 	f := repo.byID["fnd-1"]
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	repo.seed(f)
 	repo.conflictFor = 99
@@ -557,7 +558,7 @@ func TestRejectProposal(t *testing.T) {
 	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
 	s := writeSvc(repo)
 	ctx := context.Background()
-	pid, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceNotAffected, "vendor VEX")
+	pid, _ := s.RaiseProposal(ctx, "fnd-1", human, domain.StanceNotAffected, "vendor VEX", value.TrustAsserted)
 
 	// AI may not reject.
 	if err := s.RejectProposal(ctx, "fnd-1", pid, ai); !errors.Is(err, app.ErrUnauthorized) {

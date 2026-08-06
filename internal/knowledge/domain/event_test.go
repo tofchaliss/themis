@@ -12,8 +12,8 @@ func TestKnowledgeEvents(t *testing.T) {
 	at := time.Unix(1_700_000_500, 0)
 	prec := domain.NewPrecedence("nvd")
 	f, _ := domain.NewFaultline("fl-1", cve(t, "CVE-2024-1"))
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec)
-	f.FoldProposal(exploit(t, "kev", at, 0.3, true, true), prec)
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil))
+	f.FoldProposal(exploit(t, "kev", at, 0.3, true, true), prec, domain.NewTrustPolicy(nil))
 
 	created := domain.NewFaultlineCreated(f, at)
 	if created.FaultlineID != "fl-1" || created.CVE != "CVE-2024-1" || !created.OccurredAt.Equal(at.UTC()) {

@@ -65,7 +65,7 @@ type fixedClock struct{}
 func (fixedClock) Now() time.Time { return time.Unix(1_700_000_000, 0) }
 
 func svc(repo app.Repository, ids app.IDGenerator) *app.FaultlineService {
-	return app.NewFaultlineService(repo, ids, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
+	return app.NewFaultlineService(repo, ids, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), domain.NewTrustPolicy(nil))
 }
 
 func cve(t *testing.T, s string) value.CVEID {

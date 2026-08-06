@@ -54,14 +54,40 @@ components:
   schemas:
     InvokeRequest:
       type: object
-      required: [finding_id]
+      description: >
+        Invoke a capability against a Selection - a user-addressable entry point plus the
+        identifiers picked (EDR-TRUST-01 T9). Supply either `subject` or the deprecated
+        `finding_id`; `subject` wins if both are present.
       properties:
+        subject:
+          $ref: '#/components/schemas/Selection'
         finding_id:
           type: string
-          description: The subject Finding identifier to ground and recommend on.
+          deprecated: true
+          description: >
+            Deprecated alias for `subject: {type: finding, ids: [<id>]}`. Accepted for one
+            release so existing callers keep working while they migrate; remove after.
         correlation_id:
           type: string
           description: Optional correlation id for telemetry; generated if absent.
+    Selection:
+      type: object
+      required: [type, ids]
+      description: >
+        What the capability is invoked against. `ids` is a set because a user may pick
+        several things of one kind (e.g. several Findings for a VEX draft); how many a given
+        capability accepts is that capability's declared cardinality, enforced before any
+        grounding is assembled.
+      properties:
+        type:
+          type: string
+          enum: [finding, release]
+          description: The user-addressable entry point. Not a domain entity - see EDR-TRUST-01 T9.
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
     Proposal:
       type: object
       properties:
