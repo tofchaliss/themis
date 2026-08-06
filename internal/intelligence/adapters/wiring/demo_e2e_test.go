@@ -87,7 +87,7 @@ func TestDemoSemanticPrecedentChangesRecommendation(t *testing.T) {
 	ctx := context.Background()
 
 	// Case A — cold index (no precedent): the recommendation is "affected".
-	pA, ocA := gw.Invoke(ctx, "recommend_position", "F1", "corr-A")
+	pA, ocA := gw.Invoke(ctx, "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr-A")
 	if !ocA.Produced || pA.Recommendation.Stance != domain.StanceAffected {
 		t.Fatalf("cold index: outcome=%+v stance=%v, want produced/affected", ocA, pA.Recommendation.Stance)
 	}
@@ -109,7 +109,7 @@ func TestDemoSemanticPrecedentChangesRecommendation(t *testing.T) {
 	})
 
 	// Case B — same subject, warm index: the retrieved precedent changes the recommendation.
-	pB, ocB := gw.Invoke(ctx, "recommend_position", "F1", "corr-B")
+	pB, ocB := gw.Invoke(ctx, "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr-B")
 	if !ocB.Produced || pB.Recommendation.Stance != domain.StanceNotAffected {
 		t.Fatalf("warm index: outcome=%+v stance=%v, want produced/not_affected (precedent should flip it)", ocB, pB.Recommendation.Stance)
 	}

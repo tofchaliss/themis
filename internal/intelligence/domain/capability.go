@@ -59,11 +59,18 @@ type RoutingRequirements struct {
 // needs (Needs), how it runs (Plan), and how its output is validated (OutputSchema +
 // AllowedStances); provider/model/prompt are hidden behind it.
 type Capability struct {
-	ID             string
-	Version        string
+	ID      string
+	Version string
+	// SelectionType is the user-addressable entry point this capability accepts (T9), and
+	// Min/MaxSelection are how many of them. Declaring the bound here rather than in a global
+	// setting is what lets it double as the fan-out guard: the boundary is enforced before
+	// any grounding is assembled or any provider is called.
+	SelectionType  SelectionType
+	MinSelection   int
+	MaxSelection   int
 	Needs          []ContextNeed
 	Plan           ExecutionPlan
-	OutputSchema   string  // JSON Schema for the raw model output (stage-1 validation, D7)
+	OutputSchema   string   // JSON Schema for the raw model output (stage-1 validation, D7)
 	AllowedStances []Stance // the recommendable subset (stage-2 business rule, D7)
 	Routing        RoutingRequirements
 }

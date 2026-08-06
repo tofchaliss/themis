@@ -228,16 +228,30 @@
 
 ## 8. Selection replaces the bare finding id (T9)
 
-- [ ] 8.1 `intelligence/domain`: `Selection{Type, IDs}` with `SelectionType` ∈ {`finding`, `release`};
-  `Capability` declares its supported type and **min/max cardinality** (which subsumes any fan-out limit).
-- [ ] 8.2 `Gateway.Invoke(ctx, capabilityID, Selection, correlationID)`; a type or cardinality mismatch is a
-  new `ReasonSelectionMismatch`, rejected **before** any projection or provider call.
-- [ ] 8.3 Spec-first API change: `subject{type, ids}` in `InvokeRequest`, with **`finding_id` accepted as a
-  deprecated alias** for one release. Regenerate; never hand-edit `gen/`.
-- [ ] 8.4 Governance's `adapters/intelligence` client constructs the Selection; its `app` port is
-  **unchanged**.
-- [ ] 8.5 Tests: cardinality boundaries, type mismatch, the deprecated alias.
-- [ ] 8.6 Gate: `make check-ci` green; `intelligence/domain` + `app` 100%.
+- [x] 8.1 `intelligence/domain`: `Selection{Type, IDs}` with `SelectionType` ∈ {`finding`, `release`};
+  `Capability` declares its supported type and **min/max cardinality** (which subsumes any fan-out limit). —
+  `domain/selection.go`. The doc records *why* each rejected type is rejected (Position has no independent
+  identity and nothing selects it; product/faultline are addressable but unselected today), so a future
+  reader sees the admission rule rather than an arbitrary enum.
+- [x] 8.2 `Gateway.Invoke(ctx, capabilityID, Selection, correlationID)`; a type or cardinality mismatch is a
+  new `ReasonSelectionMismatch`, rejected **before** any projection or provider call. — asserted by more than
+  the reason code: the mismatch test also checks `Provider`, `TokensUsed` and `InputBytes` are all zero, so
+  "rejected before any work" is verified rather than assumed. `Outcome` also carries the Selection now, so an
+  invocation's provenance says *what it was about*, not just which capability ran.
+- [x] 8.3 Spec-first API change: `subject{type, ids}` in `InvokeRequest`, with **`finding_id` accepted as a
+  deprecated alias** for one release. Regenerate; never hand-edit `gen/`. — done; `subject` wins when both
+  are present, so an explicit Selection is never overridden by the legacy shorthand. A mismatch returns
+  **400, not 204** — it is a caller error, and 204 would read as "the AI had nothing to say" and hide the bug.
+- [x] 8.4 Governance's `adapters/intelligence` client constructs the Selection; its `app` port is
+  **unchanged**. — confirmed: `RecommendPosition(ctx, findingID)` is untouched; building the Selection is the
+  ACL's job, which is what an anti-corruption layer is for.
+- [x] 8.5 Tests: cardinality boundaries, type mismatch, the deprecated alias. — boundary cases at, and one
+  past, the upper bound; wrong type; unknown type; empty. Wire-level tests for all four request shapes.
+  **The cross-context seam test caught the wire change and was updated to pin the new shape** — it now
+  asserts the ACL *translates* rather than leaking Selection upward into Governance's port.
+- [x] 8.6 Gate: `make check-ci` green; `intelligence/domain` + `app` 100%. — exit 0;
+  `intelligence/domain`, `app` and `adapters/http` all **100%**. `make e2e-pipeline` green; `llm`-tagged
+  tests vet clean.
 
 ## 9. Domain Projections; the runtime stops gathering (T10)
 

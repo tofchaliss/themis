@@ -20,7 +20,7 @@ import (
 
 // Invoker is the reactive Gateway the handler drives (*app.Gateway satisfies it).
 type Invoker interface {
-	Invoke(ctx context.Context, capabilityID, subjectFindingID, correlationID string) (domain.Proposal, app.Outcome)
+	Invoke(ctx context.Context, capabilityID string, sel domain.Selection, correlationID string) (domain.Proposal, app.Outcome)
 }
 
 // Handler serves the reactive invoke API and logs execution telemetry.
@@ -50,8 +50,10 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
-	if req.FindingId == "" {
-		writeProblem(w, http.StatusBadRequest, "finding_id is required", "")
+	sel, ok := selectionFrom(req)
+	if !ok {
+		writeProblem(w, http.StatusBadRequest, "a subject is required",
+			"supply subject {type, ids} (or the deprecated finding_id)")
 		return
 	}
 
@@ -60,11 +62,18 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 		correlationID = *req.CorrelationId
 	}
 
-	proposal, oc := h.invoker.Invoke(r.Context(), id, req.FindingId, correlationID)
+	proposal, oc := h.invoker.Invoke(r.Context(), id, sel, correlationID)
 	h.logTelemetry(oc)
 
 	if oc.Reason == app.ReasonUnknownCap {
 		writeProblem(w, http.StatusNotFound, "unknown capability", id)
+		return
+	}
+	// A Selection this capability does not accept is a caller error, not a declined
+	// recommendation — surfacing it as 204 would read as "the AI had nothing to say".
+	if oc.Reason == app.ReasonSelectionMismatch {
+		writeProblem(w, http.StatusBadRequest, "selection not accepted by this capability",
+			"check the subject type and how many ids the capability takes")
 		return
 	}
 	if !oc.Produced {
@@ -88,6 +97,19 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 		observability.Bool("produced", oc.Produced),
 		observability.String("reason", oc.Reason),
 	)
+}
+
+// selectionFrom reads the Selection from the request, accepting the deprecated finding_id
+// alias so existing callers keep working for one release. `subject` wins when both are
+// present — an explicit Selection is never overridden by a legacy shorthand.
+func selectionFrom(req gen.InvokeRequest) (domain.Selection, bool) {
+	if req.Subject != nil && len(req.Subject.Ids) > 0 {
+		return domain.NewSelection(domain.SelectionType(req.Subject.Type), req.Subject.Ids...), true
+	}
+	if req.FindingId != nil && *req.FindingId != "" {
+		return domain.NewSelection(domain.SelectionFinding, *req.FindingId), true
+	}
+	return domain.Selection{}, false
 }
 
 func toGenProposal(p domain.Proposal, correlationID string) gen.Proposal {

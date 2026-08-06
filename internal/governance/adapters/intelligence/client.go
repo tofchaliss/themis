@@ -44,7 +44,12 @@ type wireProposal struct {
 // ("no proposal"). A transport/HTTP failure returns an error, which the caller treats
 // as "disabled ≡ unavailable" (a safe no-proposal outcome).
 func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.Recommendation, bool, error) {
-	reqBody, err := json.Marshal(map[string]string{"finding_id": findingID})
+	// The Selection shape (EDR-TRUST-01 T9). Governance's own app port is unchanged — it
+	// still passes a finding id; constructing the Selection is this adapter's job, which is
+	// exactly what an anti-corruption layer is for.
+	reqBody, err := json.Marshal(map[string]any{
+		"subject": map[string]any{"type": "finding", "ids": []string{findingID}},
+	})
 	if err != nil {
 		return app.Recommendation{}, false, err
 	}

@@ -47,7 +47,11 @@ func RecommendPositionV1() Capability {
 	return Capability{
 		ID:      "recommend_position",
 		Version: "v1",
-		Needs:   []ContextNeed{NeedFinding, NeedFaultline},
+		// Exactly one Finding: it reasons about a single (Release, Faultline) concern.
+		SelectionType: SelectionFinding,
+		MinSelection:  1,
+		MaxSelection:  1,
+		Needs:         []ContextNeed{NeedFinding, NeedFaultline},
 		Plan: ExecutionPlan{
 			{Engine: EngineKnowledge},
 			{Engine: EngineLLM, Prompt: "recommend_position"},

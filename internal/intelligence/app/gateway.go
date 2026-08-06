@@ -32,6 +32,11 @@ const (
 	ReasonSchemaInvalid   = "schema_invalid"
 	ReasonBusinessInvalid = "business_invalid"
 	ReasonUnauthorized    = "unauthorized" // admission denied the caller before any provider call (C7)
+	// ReasonSelectionMismatch: the Selection's type or cardinality is not what the capability
+	// declared (T9). Rejected at the door — before any grounding is assembled or any provider
+	// is called — so a release id sent to a Finding-scoped capability surfaces as exactly that,
+	// rather than as a confusing grounding failure further in.
+	ReasonSelectionMismatch = "selection_mismatch"
 	// ReasonInsufficient is the honest "can't determine — no recommendation" outcome
 	// (Δ2): the LLM declined, or the whole plan deferred without producing. It is
 	// produced=false but NOT an error, and is distinct from AI being switched off.
@@ -50,8 +55,9 @@ type Outcome struct {
 	Duration       time.Duration
 	Produced       bool
 	Reason         string
-	DecidedBy      string // "rule:<stance>" / "llm:<stance>" / "guard:<reason>" — what decided
-	PrecedentsUsed int    // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance); 0 on a rule short-circuit
+	DecidedBy      string           // "llm:<stance>" / "guard:<reason>" — what decided
+	Selection      domain.Selection // what the invocation was about (T9 provenance)
+	PrecedentsUsed int              // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance); 0 on a rule short-circuit
 }
 
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
@@ -129,21 +135,29 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 	}, nil
 }
 
-// Invoke runs the reactive pipeline for a capability against a subject Finding. It
+// Invoke runs the reactive pipeline for a capability against a Selection. It
 // assembles grounding once, then the Engine Dispatcher walks the capability's execution
 // plan: a deterministic (Rule) step that decides short-circuits the plan; a Knowledge step
 // enriches the grounding with semantically similar past Positions (best-effort precedent,
 // Δ3a); a step that defers passes to the next; the LLM step renders a prompt, runs with a
 // schema retry, and validates in stages. produced=false is a safe "no proposal"; Outcome
 // carries the telemetry, including which step decided and how much precedent grounded it.
-func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, correlationID string) (domain.Proposal, Outcome) {
-	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID}
+func (g *Gateway) Invoke(
+	ctx context.Context, capabilityID string, sel domain.Selection, correlationID string,
+) (domain.Proposal, Outcome) {
+	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID, Selection: sel}
 
 	capb, ok := g.registry.Lookup(capabilityID)
 	if !ok {
 		oc.Reason = ReasonUnknownCap
 		return domain.Proposal{}, oc
 	}
+	// The Selection contract (T9), checked before anything is fetched or spent.
+	if !capb.Accepts(sel) {
+		oc.Reason = ReasonSelectionMismatch
+		return domain.Proposal{}, oc
+	}
+	subjectFindingID := sel.First()
 	validator := g.validators[capabilityID]
 
 	// Pre-invocation authorization (C7): reject BEFORE any grounding or provider call.
