@@ -354,9 +354,36 @@ AI-derived input would otherwise emerge with the rule's higher standing.
 2. **Policy check** --- configurable, enterprise-owned, applied only to
     proposals that cleared stage 1.
 
-Outcomes: **Accepted**, **Accepted with Warning** (accepted while
-recording a named reservation --- for example an Asserted dependency the
-enterprise chose to rely on), **Rejected**, **Requires Human Review**.
+Outcomes remain the two Governance already has: **Accepted** and
+**Rejected**. A proposal clearing neither stage stays **open**
+(`StatusProposed`) --- awaiting a human is not a third outcome, it is the
+absence of an automatic one.
+
+### Decisions and evidence are different concepts
+
+There is **no "accepted with warning" state.** A Position's lifecycle
+state records Governance's *decision*; the **evidential confidence** of
+that decision is derived exclusively from its immutable
+`PositionInputs` --- the field that already exists to record "the evidence
+a Position version rested on, so any past decision is fully
+reconstructable".
+
+**Reservations are properties of evidence, not of decisions.** An
+acceptance resting on Asserted evidence is an ordinary acceptance whose
+inputs say so. Read models **shall surface that reservation explicitly**,
+beside `stance` and `effective_priority`; it **shall never be persisted
+as independent state**.
+
+Three properties follow. A derived reservation **cannot drift** from the
+evidence it describes. It **composes with append-only history** --- when a
+signed artifact later makes a claim Observed, a new Position version
+carries no reservation and the history simply shows it lifting, with no
+migration. And it **avoids forking every consumer** of proposal status for
+a distinction that does not change whether the proposal was accepted.
+
+The obligation: *derived* must not mean *invisible*. A reservation nobody
+computes is a reservation nobody sees. Surfacing it in the read model is
+part of the decision, not an optional refinement.
 
 The separation is what makes the bar on Inferred durable. Inside a
 configurable policy it would be one misconfiguration away from absent;

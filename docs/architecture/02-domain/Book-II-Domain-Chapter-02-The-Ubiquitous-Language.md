@@ -250,6 +250,21 @@ consumes --- *behaviour follows ownership*.
 **Rules carry no trust of their own** --- a rule is an algorithm; its
 conclusion is classed by its inputs.
 
+### Reservation
+
+A recorded caveat that a decision rested on evidence weaker than Observed
+--- for example an acceptance leaning on a vendor's Asserted
+`not_affected`.
+
+A reservation is a property of **evidence**, never of the **decision**. It
+is therefore **derived** from a Position's immutable inputs and **never
+persisted as independent state**: there is no "accepted with warning"
+lifecycle state. Read models surface reservations explicitly; the
+lifecycle records only what Governance decided.
+
+*Decisions are governed; evidence explains why the decision was
+reasonable at the time.*
+
 ### Behaviour Follows Ownership
 
 Evidence-owning bounded contexts execute deterministic inference over the

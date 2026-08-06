@@ -273,7 +273,7 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 **2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
 audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
 from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as
-**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T11) with coordinated updates to **Book I-adjacent
+**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T12) with coordinated updates to **Book I-adjacent
 vocabulary** (Book II Ch 2 §2.7 + **Domain Invariant 4 — Trust Is Inherited, Never Granted**), **Book III
 Ch 16** (Domain Projections + Deterministic Inference), and **Book IV** (§2.1–2.3 capability classes,
 runtime contract, principles 10–17). `EDR-INTELLIGENCE-01` **Revision 5 is SUPERSEDED** by it the same day.
@@ -291,12 +291,15 @@ rules** (no orchestration · information-preserving shaping · full provenance �
 rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
 bare finding-id subject.
 
-**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s **three**
-remaining open questions ("Accepted with Warning"; the Decision Proposal payload; `recommend_position`
-migration order). Three are now **closed**: projection ownership → **T10**, Deterministic Inference ownership
-→ **T11**, trust-class persistence → **T2** (classification is a per-**source** mapping keyed on
-*derivable vs declared*, not a per-fact field — Knowledge Proposals already carry `source`, so the frozen v1
-payload contracts are largely untouched). Consequently the cut needs **no new bounded context and no new
+**Nothing is implemented and no code has changed.** Before any build: `EDR-TRUST-01` has **two** remaining
+open questions — the Decision Proposal payload (deliberately deferred until a second Decision capability
+defines it) and `recommend_position` migration order. **Four are closed**: projection ownership → **T10** ·
+Deterministic Inference ownership → **T11** (behaviour follows ownership) · trust-class persistence → **T2**
+(a per-**source** mapping keyed on *derivable vs declared*, not a per-fact field — Knowledge Proposals already
+carry `source`, so the frozen v1 payload contracts are largely untouched) · "Accepted with Warning" → **T12**
+(*decisions and evidence are different concepts* — a reservation is derived from immutable `PositionInputs`
+and surfaced in read models, never a state; and "Requires Human Review" was never an outcome, it is the
+existing open `StatusProposed`). Consequently the cut needs **no new bounded context and no new
 deployable** — a future **Product Applicability** context is named but deferred until that evidence is
 collected. The AI-line ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of
 this.

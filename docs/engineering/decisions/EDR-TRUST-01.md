@@ -203,9 +203,11 @@ Governance evaluates a proposal in two ordered stages, and the order is not nego
 2. **Policy check** (configurable, enterprise-owned) — the deterministic auto-accept rules Governance already
    owns, applied only to proposals that cleared stage 1.
 
-- Governance's decision outcomes are: **Accepted**, **Accepted with Warning** (accepted while recording a
-  named reservation — e.g. an Asserted dependency the enterprise chose to rely on), **Rejected**, and
-  **Requires Human Review**.
+- Governance's decision outcomes remain exactly the two it already has: **Accepted** and **Rejected**. A
+  proposal that clears neither stage simply stays **open** (`StatusProposed`) — awaiting a human is not a
+  fourth outcome, it is the absence of an automatic one.
+- **"Accepted with Warning" is not a state.** It is an ordinary acceptance whose evidence included Asserted
+  (or lower) facts, surfaced from the Position's inputs — see **T12**.
 - Governance reads the proposal's **trust class and evidence provenance**. It does not read, and must not
   branch on, the producing component (T1).
 
@@ -424,6 +426,44 @@ Consequences:
 ADR basis: Book I Ch 9 (Bounded Contexts) · Book I Ch 10 Law 1 (single authoritative ownership) · Book III
 Ch 3 (Bounded Context Realization) · CON-0002.
 
+### T12 — Decisions and evidence are different concepts
+
+> **Decisions are governed; evidence explains why the decision was reasonable at the time.** Conflating them
+> is what produces state explosion in governance models.
+
+Decision:
+
+- A Position's **lifecycle state records Governance's decision** — nothing else.
+- The **evidential confidence** of that decision is **derived exclusively from its immutable
+  `PositionInputs`**.
+- **Reservations are properties of evidence, not of decisions.** There is therefore no
+  "accepted-with-warning" state: there is an ordinary acceptance whose inputs included Asserted (or lower)
+  evidence.
+- **Read models shall surface those reservations explicitly** — alongside stance and priority, on the posture
+  rollup and on the Position itself — **but they shall never be persisted as independent state.**
+
+Rationale:
+
+- The field already exists for exactly this purpose. `PositionInputs` is documented as recording *"the
+  evidence a Position version rested on, so any past decision is fully reconstructable (CON-0003 / D3)."* An
+  Asserted dependency **is** evidence the decision rested on; it needs no second home.
+- **A derived reservation cannot drift.** Trust propagates (T3), so a Position whose inputs include an
+  Asserted fact simply *is* a reserved acceptance. A stored flag can disagree with the evidence it describes;
+  a computed one cannot.
+- **It composes with append-only history.** Positions are immutable versions. When a signed build manifest
+  later makes a claim Observed, a **new version** is established carrying no reservation — the history shows
+  the reservation lifting, with no state migration and no backfill.
+- **It avoids forking every consumer.** A fourth status would branch projections, the API, serializers and
+  policy for a distinction that does not change *whether* the proposal was accepted.
+
+**The obligation this carries.** Derived must not mean invisible. A reservation nobody computes is a
+reservation nobody sees, and a state would at least have forced visibility. The read-model requirement above
+is therefore **not optional**: the reservation appears next to `stance` and `effective_priority`, or the
+decision is not implemented.
+
+ADR basis: CON-0003 (explainability) · `EDR-GOVERNANCE-01` D3 (immutable Position versions + inputs) ·
+DOM-0024 · Book I Ch 10 Law 3 (stable identity, evolving state).
+
 ## Consequences
 
 - **`EDR-INTELLIGENCE-01` Revision 5 (Δ3c) is superseded** in full. S1/S2/S4 are replaced by T9 (Selection with
@@ -450,18 +490,18 @@ Ch 3 (Bounded Context Realization) · CON-0002.
 
 ## Open questions (not decided here)
 
-1. **Whether "Accepted with Warning" is a new Position state** or a recorded reservation on an ordinary
-   acceptance.
-2. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
+1. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
    capability exists to define it.
-3. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
+2. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
 
 *Closed since drafting:* **projection ownership** → T10 (the context owning the Selection Type, following the
 proven `ReleasePosture` pattern) · **Deterministic Inference ownership** → T11 (behaviour follows ownership;
 a stage inside evidence-owning contexts, never a service) · **trust-class persistence** → T2 (classification
 is a per-**source** mapping, not a per-fact field; Knowledge Proposals already carry `source`, so the frozen
 v1 payload contracts are largely untouched, and where a class must ride the wire the existing
-`.v2.schema.json` + `schema_ref` versioning already covers it).
+`.v2.schema.json` + `schema_ref` versioning already covers it) · **"Accepted with Warning"** → T12 (not a
+state — a derived property of the Position's immutable inputs, surfaced in read models; and *"Requires Human
+Review"* was never a fourth outcome, it is the existing open `StatusProposed`).
 
 ## Glossary
 
@@ -485,3 +525,6 @@ v1 payload contracts are largely untouched, and where a class must ride the wire
 - **Decision Proposal** — a structured claim that aspires to become enterprise truth; governed.
 - **Grounding Verification** — the AI Runtime boundary protecting reasoning integrity.
 - **Business Verification** — the Governance boundary protecting enterprise truth integrity.
+- **Reservation** — a recorded caveat that a decision rested on evidence weaker than Observed. A property of
+  **evidence**, never of the decision: derived from a Position's immutable inputs, surfaced in read models,
+  **never persisted as state** (T12).
