@@ -53,22 +53,41 @@ ADR basis: CON-0002 (proposal before truth) · CON-0003 (explainability) · Book
 
 Decision:
 
-Every fact entering a conclusion carries exactly one **trust class**:
+Every fact entering a conclusion carries exactly one **trust class**. The criterion is **derivable versus
+declared** — *can this fact be re-derived, or must someone be believed?*
 
-| Class | Definition | Examples |
+| Class | Criterion | Examples |
 | --- | --- | --- |
-| **Observed** | Themis obtained the fact itself, from an artifact it parsed or a source it fetched. No third party had to be believed. | A component + version read from an ingested SBOM; a CVE's affected range reconciled from fetched advisories; an EPSS score pulled from the feed |
-| **Asserted** | A party outside Themis stated the fact. Themis records who stated it and when, and cannot independently verify it. | A vendor VEX `not_affected` statement; "this build compiles out the JNDI module"; hand-entered customer or platform metadata; a scanner's uncorroborated verdict |
-| **Inferred** | The fact is the output of non-deterministic reasoning. It is a judgment, not an observation. | Any AI capability output; any conclusion whose own evidence included an Inferred fact |
+| **Observed** | **Reproducible.** Mechanically derivable from an artifact Themis holds, or a public record that independent parties publish. Re-run the derivation and you get the same answer. | A component + version read from an ingested SBOM (rescan the artifact, same result); a CVE's affected range from public advisories; an EPSS score; a KEV listing; the existence of a public exploit |
+| **Asserted** | **Not reproducible.** A declaration or judgment Themis cannot re-derive. Trust rests entirely on the declarer, who is recorded along with when they said it. | A vendor VEX `not_affected` statement; "this build compiles out the JNDI module", hand-entered; customer or platform metadata typed by a human; a scanner's uncorroborated verdict |
+| **Inferred** | The output of **non-deterministic reasoning**. A judgment, not an observation, and not re-derivable even in principle — the same prompt may answer differently. | Any AI capability output; any conclusion whose own evidence included an Inferred fact |
 
 The classes are **ordered by risk**: `Observed < Asserted < Inferred`.
 
 Rationale:
 
+- **Transport does not decide the class.** An affected range and a vendor's `not_affected` may arrive by the
+  identical mechanism — an HTTP fetch of a JSON document from the same server. What separates them is that
+  the range is a public record anyone can check, while the `not_affected` is a judgment nothing can re-run.
+- **Who the fact is about is *not* the criterion**, though it correlates. An SBOM is a claim about our own
+  product, yet it is Observed: a tool derived it from the artifact, and rescanning reproduces it. A vendor's
+  `not_affected` is Asserted because it is a judgment, **not** because the vendor is unreliable — Red Hat is
+  the sole authority on their own build, so nothing can check them. That is a structural fact, not a
+  data-quality one.
+- **Self-assertion is not observation.** A declaration made by Themis's own operators about their own product
+  is still Asserted. "We compiled without JNDI", typed into a field, is Asserted; **the same claim backed by a
+  signed build manifest Themis holds becomes Observed**, because it can then be re-derived. This is T3's
+  investment gradient made concrete: the model names exactly which artifact to go and collect.
 - The distinction Themis already makes for vendor VEX — *gathered, not obeyed* (Domain Invariant 3) — is
   exactly the Observed/Asserted boundary, previously expressed only for one feed family. T2 generalizes it.
 - Without the Asserted class, "deterministic" becomes a false comfort: a pure function over an unverified
   claim is precisely as trustworthy as the claim, and no more.
+
+**Classification is per source, not per fact.** Knowledge Proposals already carry a `source` (which feed,
+capability or human produced the fact), so the class is **derived from a source-to-class mapping** rather than
+stored on every record. Adding a source therefore requires answering one question — *is its output
+reproducible, declared, or reasoned?* — and the answer is reviewable in one table instead of scattered across
+producers.
 
 ADR basis: Book II Ch 2 Domain Invariant 3 ("Gathering Is Not Knowing") · CON-0002 · `EDR-VEX-01` (vendor VEX
 is gathered, never obeyed) · `EDR-KNOWLEDGE-01` D5/D6 (source precedence).
@@ -431,17 +450,18 @@ Ch 3 (Bounded Context Realization) · CON-0002.
 
 ## Open questions (not decided here)
 
-1. **Where the trust class is persisted** and how it threads through the existing event contracts
-   (integration contract v1 froze the current wire shapes).
-2. **Whether "Accepted with Warning" is a new Position state** or a recorded reservation on an ordinary
+1. **Whether "Accepted with Warning" is a new Position state** or a recorded reservation on an ordinary
    acceptance.
-3. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
+2. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
    capability exists to define it.
-4. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
+3. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
 
 *Closed since drafting:* **projection ownership** → T10 (the context owning the Selection Type, following the
 proven `ReleasePosture` pattern) · **Deterministic Inference ownership** → T11 (behaviour follows ownership;
-it is a stage inside evidence-owning contexts, never a service).
+a stage inside evidence-owning contexts, never a service) · **trust-class persistence** → T2 (classification
+is a per-**source** mapping, not a per-fact field; Knowledge Proposals already carry `source`, so the frozen
+v1 payload contracts are largely untouched, and where a class must ride the wire the existing
+`.v2.schema.json` + `schema_ref` versioning already covers it).
 
 ## Glossary
 

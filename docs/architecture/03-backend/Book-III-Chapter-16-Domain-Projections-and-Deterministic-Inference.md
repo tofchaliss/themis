@@ -303,10 +303,21 @@ part of anyone's user experience.
 
 ## 16.5 Trust Propagation in the Backend
 
-Every fact carries a **trust class**: **Observed** (Themis obtained it
-itself), **Asserted** (a party outside Themis stated it, unverified), or
-**Inferred** (the output of non-deterministic reasoning). The classes are
-ordered by risk.
+Every fact carries a **trust class**, decided by one question: **can this
+be re-derived, or must someone be believed?**
+
+- **Observed** --- reproducible from an artifact Themis holds or a public
+    record. *An SBOM component list: rescan the artifact, same answer.*
+- **Asserted** --- a declaration or judgment Themis cannot re-derive.
+    *A vendor `not_affected`.*
+- **Inferred** --- the output of non-deterministic reasoning.
+
+The classes are ordered by risk. Note that **transport does not decide the
+class** --- an affected range and a vendor's `not_affected` may arrive by
+the identical HTTP fetch --- and neither does **who the fact is about**: an
+SBOM describes our own product and is still Observed, while our own
+operators typing "feature is off" is Asserted until a signed artifact
+makes it re-derivable.
 
 A conclusion takes the **highest-risk class among the evidence it used**,
 and propagation is **monotonic** --- no deterministic step, no validation

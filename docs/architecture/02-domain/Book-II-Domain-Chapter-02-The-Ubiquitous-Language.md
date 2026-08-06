@@ -203,17 +203,31 @@ Reason of record:
 
 ### Evidence Trust Class
 
-How a fact was obtained. Every fact carries exactly one class, and the
-classes are ordered by risk:
+Whether a fact can be **re-derived, or must someone be believed**. Every
+fact carries exactly one class, and the classes are ordered by risk:
 
-- **Observed** --- Themis obtained the fact itself, from an artifact it
-    parsed or a source it fetched. No third party had to be believed.
-    *A component version read from an ingested SBOM.*
-- **Asserted** --- a party outside Themis stated the fact. Themis records
-    who stated it and when, and cannot independently verify it.
-    *A vendor VEX `not_affected`; "this build excludes the JNDI module".*
-- **Inferred** --- the output of non-deterministic reasoning. A judgment,
-    not an observation. *Any AI capability output.*
+- **Observed** --- **reproducible**: mechanically derivable from an
+    artifact Themis holds, or a public record independent parties publish.
+    *A component version read from an ingested SBOM --- rescan the artifact
+    and you get the same answer. A CVE's affected range. An EPSS score.*
+- **Asserted** --- **not reproducible**: a declaration or judgment Themis
+    cannot re-derive. Trust rests on the declarer, who is recorded.
+    *A vendor VEX `not_affected`; "this build excludes the JNDI module",
+    typed into a field.*
+- **Inferred** --- the output of **non-deterministic reasoning**. Not
+    re-derivable even in principle. *Any AI capability output.*
+
+**Transport does not decide the class.** An affected range and a vendor's
+`not_affected` may arrive by the identical HTTP fetch; what separates them
+is that one is a public record anyone can check and the other is a
+judgment nothing can re-run.
+
+**Who the fact is about is not the criterion.** An SBOM is a claim about
+our own product and is still Observed, because a tool derived it from the
+artifact. Conversely **self-assertion is not observation**: "we compiled
+without JNDI", typed by our own operators, is Asserted --- while the same
+claim backed by a signed build manifest Themis holds becomes Observed.
+That is the gradient the model exists to expose.
 
 ### Trust Propagation
 

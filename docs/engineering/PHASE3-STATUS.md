@@ -291,12 +291,14 @@ rules** (no orchestration · information-preserving shaping · full provenance �
 rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
 bare finding-id subject.
 
-**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s **four**
-remaining open questions (trust-class persistence vs the frozen v1 event contracts; "Accepted with Warning";
-the Decision Proposal payload; `recommend_position` migration order). Two are now **closed**: projection
-ownership → **T10**, Deterministic Inference ownership → **T11**. Consequently the cut needs **no new bounded
-context and no new deployable** — a future **Product Applicability** context is named but deferred until that
-evidence is collected. The AI-line ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of
+**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s **three**
+remaining open questions ("Accepted with Warning"; the Decision Proposal payload; `recommend_position`
+migration order). Three are now **closed**: projection ownership → **T10**, Deterministic Inference ownership
+→ **T11**, trust-class persistence → **T2** (classification is a per-**source** mapping keyed on
+*derivable vs declared*, not a per-fact field — Knowledge Proposals already carry `source`, so the frozen v1
+payload contracts are largely untouched). Consequently the cut needs **no new bounded context and no new
+deployable** — a future **Product Applicability** context is named but deferred until that evidence is
+collected. The AI-line ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of
 this.
 
 ---

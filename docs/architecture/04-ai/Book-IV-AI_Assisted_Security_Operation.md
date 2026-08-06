@@ -97,9 +97,9 @@ settled confidently.
 
 ## 2.3 Trust comes from evidence, not from the component that produced the conclusion
 
-Themis classifies every fact by how it was obtained — **Observed** (Themis saw it itself), **Asserted**
-(someone stated it, unverified), **Inferred** (the output of non-deterministic reasoning) — and a conclusion
-inherits the highest-risk class among the evidence it used.
+Themis classifies every fact by whether it can be **re-derived** — **Observed** (reproducible from an artifact
+or a public record), **Asserted** (a declaration or judgment nothing can re-run), **Inferred** (the output of
+non-deterministic reasoning) — and a conclusion inherits the highest-risk class among the evidence it used.
 
 The consequence for AI is absolute and non-negotiable: **an Inferred conclusion may never be accepted
 automatically, under any policy configuration.** Autonomy of generation, yes. Autonomy of authority, never.
