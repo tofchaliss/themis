@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-03 · **Read this first when resuming.**
+**Updated:** 2026-08-06 · **Read this first when resuming.**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -291,18 +291,26 @@ rules** (no orchestration · information-preserving shaping · full provenance �
 rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
 bare finding-id subject.
 
-**Nothing is implemented and no code has changed.** Before any build: `EDR-TRUST-01` has **two** remaining
-open questions — the Decision Proposal payload (deliberately deferred until a second Decision capability
-defines it) and `recommend_position` migration order. **Four are closed**: projection ownership → **T10** ·
-Deterministic Inference ownership → **T11** (behaviour follows ownership) · trust-class persistence → **T2**
-(a per-**source** mapping keyed on *derivable vs declared*, not a per-fact field — Knowledge Proposals already
-carry `source`, so the frozen v1 payload contracts are largely untouched) · "Accepted with Warning" → **T12**
-(*decisions and evidence are different concepts* — a reservation is derived from immutable `PositionInputs`
-and surfaced in read models, never a state; and "Requires Human Review" was never an outcome, it is the
-existing open `StatusProposed`). Consequently the cut needs **no new bounded context and no new
-deployable** — a future **Product Applicability** context is named but deferred until that evidence is
-collected. The AI-line ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of
-this.
+**IMPLEMENTED 2026-08-06 — `phase3-trust-model`, all 11 groups, on branch
+`docs/2026-08-06-trust-model`.** `make check-ci` + `make e2e-pipeline` green at every group boundary.
+What shipped, in order: `TrustClass` in the kernel · source classification + per-field-group trust on the
+reconciled view · trust across the Knowledge→Governance seam (additive on v1, **no v2**) · the
+**constitutional stage** barring `Inferred` auto-acceptance under any policy · reservations derived from
+immutable `PositionInputs` (never a state) · **Deterministic Inference** re-evaluating existing Findings
+against the reconciled range · the version-range rule **deleted from the AI runtime** · **Selection**
+replacing the bare finding id · **Domain Projections** (`AssembleContext` deleted, closing **G-AI-6**) ·
+**Information vs Decision** capability classes + **Business Verification** in Governance · docs.
+
+**Three tasks were wrong as written and were corrected against the code**, which is the pattern worth
+carrying into the next change: T6's "drop the producer check" (it is an *authority* rule, not a trust one);
+group 3's "mint a v2 schema" (the house pattern is additive-optional on v1, used twice already); and group
+6's premise (Knowledge already ran a version-range check — as a **filter at match time**, so the real gap was
+a Finding born *before* the range was known, which nothing revisited). Writing tasks before touching code
+buys sequencing, not correctness.
+
+**Open:** the Decision Proposal payload shape, deferred by construction until a second Decision capability
+defines it. `TRUST-1/2/3/4` in `docs/BACKLOG.md` are LOW follow-ups. The AI-line ordering below
+(GOV-14 → Δ3b → Δ4) is now unblocked — the capability surface those use cases need exists.
 
 ---
 
@@ -401,7 +409,7 @@ fault-injection coverage; OTel traces + metrics). Update those files, not this s
   `otelzap` bridge, one `Setup`; config-driven level/format/OTLP endpoint via `ConfigFromEnv`; a
   `RequestLogger` correlation-id middleware; domain/app stay log-free by depguard). All four greenfield cmds
   wire it; example config at `deploy/node.env.example`.
-- Changes: **`openspec/changes/phase3-trust-model/`** — SCAFFOLDED 2026-08-06, **0/63 tasks**, 11 groups,
+- Changes: **none active** — `phase3-trust-model` IMPLEMENTED + ARCHIVED 2026-08-06 (**63/63**, 11 groups),
   from `EDR-TRUST-01` (T1–T12). Cross-context by construction (Knowledge + Governance + Intelligence);
   **group order is the migration order** and groups 6→7 must not be reordered. All other Phase-3 changes are
   IMPLEMENTED + archived (`openspec/changes/archive/`). `openspec validate` reports **"no deltas"** — expected

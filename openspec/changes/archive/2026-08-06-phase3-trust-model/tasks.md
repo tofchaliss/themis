@@ -321,12 +321,41 @@
 
 ## 11. Documentation + close-out
 
-- [ ] 11.1 `TESTING.md`: how to exercise trust classes, the constitutional bar, and the projection fixtures.
-- [ ] 11.2 `deploy/node.env.example` + `INSTALLATION.md` if any knob is added (R2 — self-documented config).
-- [ ] 11.3 `PHASE3-STATUS.md` resume point; `PARITY-GAP.md` if any gap closes; **close `G-AI-6`** in
-  `docs/BACKLOG.md`.
-- [ ] 11.4 Record the answers to `EDR-TRUST-01`'s remaining open questions if implementation settles them.
-- [ ] 11.5 Final gate: **`make check`** (whole repo, macOS) **and** `make check-ci`, plus `make e2e-pipeline`
-  and `make e2e-evidence`.
-- [ ] 11.6 Archive: `openspec archive phase3-trust-model --skip-specs -y` (phase3 changes carry no
+- [x] 11.1 `TESTING.md`: how to exercise trust classes, the constitutional bar, and the projection fixtures. —
+  two new sections, runnable without a live stack, each pointing at *what to look for* rather than just what
+  to run. Includes replaying a projection by hand — `curl … /assessment | tee` — because that is the concrete
+  payoff of the runtime gathering nothing.
+- [x] 11.2 `deploy/node.env.example` + `INSTALLATION.md` if any knob is added (R2 — self-documented config). —
+  `THEMIS_KNOWLEDGE_URL` added to the **Governance** node (fail-safe documented). The Intelligence node's
+  entry is now a comment noting it **no longer reads Knowledge**: the knob did not just get added, it
+  **moved**, and a stale copy would have silently kept working while meaning nothing.
+- [x] 11.3 `PHASE3-STATUS.md` resume point; `PARITY-GAP.md` if any gap closes; **close `G-AI-6`** in
+  `docs/BACKLOG.md`. — resume point rewritten; `openspec/STATUS.md` corrected (it still claimed no active
+  change); **G-AI-6 closed** by group 9. No `PARITY-GAP.md` entry closes — this change was EDR-driven, not
+  parity-driven.
+- [x] 11.4 Record the answers to `EDR-TRUST-01`'s remaining open questions if implementation settles them. —
+  **migration order closed by construction**, with the three load-bearing orderings recorded. The Decision
+  Proposal payload stays open by design and is now cheaper: T7's `OutputClass` means a second shape slots in
+  behind it rather than re-litigating the envelope.
+- [x] 11.5 Final gate: **`make check`** (whole repo, macOS) **and** `make check-ci`, plus `make e2e-pipeline`
+  and `make e2e-evidence`. — **all four exit 0**, including whole-repo `make check` over the frozen v0.3.x
+  tree.
+- [x] 11.6 Archive: `openspec archive phase3-trust-model --skip-specs -y` (phase3 changes carry no
   `specs/` deltas — "no deltas" is expected).
+
+---
+
+## Retrospective — what the task list got wrong
+
+Recorded because the pattern repeated, and the next change should expect it: **three groups had tasks that
+were wrong as written, and each was caught only by trying to do them.**
+
+| Task | Written | Actual |
+| --- | --- | --- |
+| 3.1 | "prefer re-derivation downstream" | Must ride the wire — re-derivation needs a *second copy* of the trust policy, and two copies eventually disagree |
+| 3.2 | "mint `<event>.v2.schema.json`" | The house pattern is **additive-optional on v1**, used twice already (`Score`, `Applicabilities`) |
+| 4.3 | "replace the `ActorSystem` gate with the trust class" | T1 removes the producer as a *trust* signal, not an *authority* one — dropping it would let policy auto-accept a **human's** proposal |
+| 6.1 | "implement the version-range rule" | Knowledge already ran one — as a **filter at match time**. The real gap was a Finding born *before* the range was known, which nothing revisited |
+
+Writing tasks before touching the code buys **sequencing**, not correctness. The sequencing was right and
+load-bearing (groups 6→7 especially); the content needed the code to correct it.

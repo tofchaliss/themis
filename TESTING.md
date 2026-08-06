@@ -191,6 +191,68 @@ The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-v
 
 ---
 
+### Trust model (EDR-TRUST-01)
+
+The trust model is exercised entirely by the unit/integration suite — no live stack needed.
+
+```sh
+# Evidence trust classes + monotonic propagation (the invariant everything else rests on)
+go test ./internal/kernel/value/ -run 'Trust|MaxTrust' -v
+
+# Source classification, and the guard that fails the BUILD when a shipped source is unclassified
+go test ./internal/knowledge/domain/ -run 'TrustPolicy|Reconcile.*Trust' -v
+go test ./internal/knowledge/adapters/wiring/ -v
+
+# The constitutional bar: Inferred evidence is never auto-accepted, under any policy
+go test ./internal/governance/domain/ -run 'Constitutional|Inferred|Launder' -v
+go test ./internal/governance/app/  -run 'InferredEvidence|ObservedEvidence' -v
+
+# Deterministic version-range inference, incl. the distro-backport precision guard
+go test ./internal/governance/domain/ -run ProvablyOutOfRange -v
+
+# Reservations: derived from immutable Position inputs, never stored — and the LIFTING path
+go test ./internal/governance/domain/ -run Reservation -v
+
+# The trust class must survive persistence (integration; embedded Postgres)
+go test -tags=integration -run 'TrustRoundTrips|PostureSurfacesReservation' \
+  ./internal/governance/adapters/store/ -v
+```
+
+**What to look for.** `TestMaxTrust_DeterministicRuleCannotLaunderInferredEvidence` is the one that
+justifies the whole model: a *deterministic* rule consuming one AI-derived fact still yields an
+`Inferred` conclusion. Producer-based classification cannot see that case, because it asks who spoke
+last. `TestProposalEvidenceTrustRoundTrips` asserts the constitutional **verdict** is identical either
+side of a save/reload — not merely that the string survived.
+
+### Domain Projections and the AI Runtime contract (T10)
+
+```sh
+# The runtime gathers nothing: one business-named projection, no composition
+go test ./internal/intelligence/adapters/readapi/ -run Assessment -v
+
+# Grounding Verification anchors to the AUTHORITATIVE projection, not to a shaped view
+go test ./internal/intelligence/domain/ -run GroundsAnchors -v
+
+# Replayability: the whole capability runs from a recorded JSON fixture — no DB, no services
+go test ./internal/intelligence/adapters/http/ -run Replays -v
+
+# Capability classes: an Information Response has no path to enterprise truth
+go test ./internal/intelligence/app/ -run 'Information|Decision' -v
+
+# Business Verification: Governance refuses a claim it cannot vouch for
+go test ./internal/governance/app/ -run BusinessVerification -v
+```
+
+**Replaying a projection by hand.** A Domain Projection is deterministic and self-contained, so
+reproducing a reasoning failure means capturing one document rather than two services' states:
+
+```sh
+curl -s localhost:8083/api/v1/findings/<finding-id>/assessment | tee /tmp/projection.json
+```
+
+Serve that file from any static endpoint, point `THEMIS_GOVERNANCE_URL` at it, and the capability
+replays exactly.
+
 ## Part B — v0.3.x end-to-end SBOM flow
 
 Exercises the frozen `cmd/themis` monolith (setup in [INSTALLATION.md § Part B](INSTALLATION.md#part-b--v03x-single-binary-cmdthemis)).

@@ -10,6 +10,14 @@ Revision 5 (Δ3c Subject Generalization), whose S1–S6 are absorbed or replaced
 > existing open state). The **two remaining open questions are deliberately deferred**, not unresolved: the
 > Decision Proposal payload cannot be designed before a second Decision capability exists to shape it, and
 > migration order is implementation sequencing. **Neither blocks implementation of T1–T12.**
+>
+> **Implemented 2026-08-06** as `openspec/changes/phase3-trust-model` (11 groups). Migration order is now
+> closed by construction — see §Open questions. Three decisions were **corrected during implementation**,
+> each because the code disagreed with the task as written: T6 (the `ActorSystem` gate is an *authority* rule,
+> not a trust one, so it stays), T10 (fetching one *business-named* projection is not orchestration — the
+> naming rule is what makes that a distinction rather than a loophole), and the group-6 scope (Knowledge
+> already ran a version-range check, but as a **filter at match time**, so the real gap was a Finding born
+> before the range was known).
 
 ## Purpose
 
@@ -505,8 +513,17 @@ DOM-0024 · Book I Ch 10 Law 3 (stable identity, evolving state).
 ## Open questions (not decided here)
 
 1. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
-   capability exists to define it.
-2. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
+   capability exists to define it. **Still open by construction**, and now cheaper: T7 declares the output
+   class, so a second shape slots in behind `OutputClass` rather than requiring the envelope to be
+   re-litigated.
+
+*Closed by implementation (2026-08-06):* **migration order** — the `openspec/changes/phase3-trust-model`
+group order held end-to-end, and `recommend_position` stayed behaviourally identical throughout. The three
+orderings that turned out to be load-bearing: the constitutional stage landed **before** the producer-identity
+branch was removed (so the `Inferred` bar was never momentarily absent); the version-range rule was **added to
+the backend and proven equivalent before** being deleted from the runtime (a window with it in neither place
+loses a deterministic verdict silently); and projections were **served before** the runtime stopped
+gathering.
 
 *Closed since drafting:* **projection ownership** → T10 (the context owning the Selection Type, following the
 proven `ReleasePosture` pattern) · **Deterministic Inference ownership** → T11 (behaviour follows ownership;
