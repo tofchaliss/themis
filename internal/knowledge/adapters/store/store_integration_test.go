@@ -167,7 +167,7 @@ func TestKnownCVEs(t *testing.T) {
 }
 
 func service(pool *pgxpool.Pool) *app.FaultlineService {
-	return app.NewFaultlineService(store.New(pool), &seqIDs{}, realClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
+	return app.NewFaultlineService(store.New(pool), &seqIDs{}, realClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), domain.NewTrustPolicy(nil))
 }
 
 func TestSaveAndReload(t *testing.T) {
@@ -242,13 +242,13 @@ func TestOptimisticConcurrency_StaleUpdateRejected(t *testing.T) {
 	prec := domain.NewPrecedence("nvd")
 
 	f, _ := domain.NewFaultline("fl-x", cveID(t, "CVE-2024-3"))
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec) // version 1
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil)) // version 1
 	if err := st.Save(ctx, f, true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// A save with a stale expected version is rejected.
-	f.FoldProposal(vulnFacts(t, "osv", value.SeverityMedium), prec) // version 2
+	f.FoldProposal(vulnFacts(t, "osv", value.SeverityMedium), prec, domain.NewTrustPolicy(nil)) // version 2
 	if err := st.Save(ctx, f, false, 0, nil); !errors.Is(err, app.ErrConcurrent) {
 		t.Errorf("stale update err = %v, want ErrConcurrent", err)
 	}
@@ -374,9 +374,9 @@ func TestCodecAllKinds(t *testing.T) {
 	prec := domain.NewPrecedence("nvd")
 
 	f, _ := domain.NewFaultline("fl-codec", cveID(t, "CVE-2024-7"))
-	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec)
-	f.FoldProposal(exploitSig(t, "kev", 0.5, true, true), prec)
-	f.FoldProposal(applic(t, "redhat", "openssl", "not_affected"), prec)
+	f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"), prec, domain.NewTrustPolicy(nil))
+	f.FoldProposal(exploitSig(t, "kev", 0.5, true, true), prec, domain.NewTrustPolicy(nil))
+	f.FoldProposal(applic(t, "redhat", "openssl", "not_affected"), prec, domain.NewTrustPolicy(nil))
 	if err := st.Save(ctx, f, true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -409,13 +409,13 @@ func TestDuplicateCreateIsConcurrent(t *testing.T) {
 	prec := domain.NewPrecedence("nvd")
 
 	a, _ := domain.NewFaultline("fl-a", cveID(t, "CVE-2024-6"))
-	a.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec)
+	a.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil))
 	if err := st.Save(ctx, a, true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	b, _ := domain.NewFaultline("fl-b", cveID(t, "CVE-2024-6")) // same CVE, different id
-	b.FoldProposal(vulnFacts(t, "osv", value.SeverityLow), prec)
+	b.FoldProposal(vulnFacts(t, "osv", value.SeverityLow), prec, domain.NewTrustPolicy(nil))
 	if err := st.Save(ctx, b, true, 0, nil); !errors.Is(err, app.ErrConcurrent) {
 		t.Errorf("duplicate create err = %v, want ErrConcurrent", err)
 	}

@@ -122,7 +122,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
 	// the reconcile policy is "distro-authoritative first, then NVD, then others"). Red Hat's
 	// vendor-severity + not_affected statements therefore headline the reconciled distro view.
-	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
+	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), newTrustPolicy())
 	evClient := evidence.NewClient(evidenceBaseURL, nil)
 	var disc app.PackageVulnSource = feed.NewOSVClient(osvBaseURL, nil)
 	if nvd.Discovery {

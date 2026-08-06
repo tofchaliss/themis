@@ -68,7 +68,7 @@ func TestScannerACL_NoSpecialAuthority(t *testing.T) {
 
 	// Precedence ranks the distro first; "scanner" is unlisted → lowest authority.
 	prec := domain.NewPrecedence("rocky", "nvd")
-	view := domain.Reconcile([]domain.Proposal{scanOut[0].Proposal, rocky}, prec)
+	view := domain.Reconcile([]domain.Proposal{scanOut[0].Proposal, rocky}, prec, domain.NewTrustPolicy(nil))
 
 	if view.Severity != value.SeverityHigh || view.SeveritySource != "rocky" {
 		t.Errorf("headline = %s (source %q), want high (rocky) — the scanner must not win despite being newer/critical",

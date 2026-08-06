@@ -501,6 +501,41 @@ per-context follow-ups below.
   this defect with it. (It was first filed against `EDR-INTELLIGENCE-01` Revision 5 / S3, now superseded.) Filed here so
   the defect is not lost if the trust-model line is deferred. **Scope:** LOW on its own; free under T10.
 
+- [ ] **TRUST-1 — Applicability statements carry no per-statement trust class.** _(Surfaced implementing
+  `phase3-trust-model` group 2, 2026-08-06.)_ `EnterpriseView` now tracks trust per field-group (headline /
+  ranges / signals), but **applicabilities are excluded**: `domain.Applicability{Package, Status,
+  Justification}` is used as the **dedup map key** in `Reconcile`, so adding a source field would change
+  dedup semantics (two vendors stating the same thing would stop collapsing) and would ripple into the frozen
+  `knowledge.faultline_enriched.v1` schema. **Why it is not urgent:** every applicability today originates
+  from vendor VEX or an uploaded VEX document, so all of them are uniformly **Asserted** — a per-statement
+  class would carry no information yet. **It becomes load-bearing** when a *derivable* applicability source
+  appears (e.g. a signed build manifest), because then two statements on one card would deserve different
+  classes. **Where it plugs in:** `internal/knowledge/domain/reconcile.go` + a `.v2` payload schema.
+  **Scope:** MEDIUM when a mixed-trust applicability source lands; LOW until then.
+
+- [ ] **TRUST-2 — The shipped-source list for the classification guard is manual.**
+  _(Surfaced implementing `phase3-trust-model` group 2, 2026-08-06.)_
+  `TestEveryKnownSourceIsClassified` asserts that every source Knowledge can record a Proposal under is
+  present in `trustBySource`, but the "every source" list is **hand-maintained** in the test. Adding a feed
+  and forgetting both the table *and* the list would still compile, and the new source would fail closed to
+  Asserted silently — safe, but wrong for a feed republishing a public record, whose conclusions would be
+  needlessly kept out of policy auto-acceptance. **Fix:** derive the list from a single shipped-source
+  registry (source ids as constants, or the feed registry enumerating itself) so classification cannot be
+  skipped. **Where it plugs in:** `internal/knowledge/adapters/{feed,wiring}`. **Scope:** LOW.
+
+- [ ] **TRUST-3 — The AI→Knowledge proposal source is unclassified, and the fail-closed default is wrong for
+  it.** _(Surfaced implementing `phase3-trust-model` group 2, 2026-08-06.)_ `EDR-INTELLIGENCE-01` D2 allows an
+  Intelligence capability to propose **into Knowledge** as a source Proposal; only the Governance path is
+  wired today, so no AI source id exists in `trustBySource`. An unregistered source fails closed to
+  **Asserted** — deliberately, because labelling an unknown feed `Inferred` would claim a model produced
+  something no model touched. But for a genuinely AI-sourced proposal that default **under-classifies** it,
+  and `Inferred` is the one class with a constitutional consequence (T4: never auto-acceptable). **This is
+  the single case where the fail-closed default is not conservative enough.** **Fix:** when the AI→Knowledge
+  path lands, classify its source id as `value.TrustInferred` and delete
+  `TestNoShippedSourceIsInferredYet`, which exists to make this impossible to forget. **Where it plugs in:**
+  `internal/knowledge/adapters/wiring/trust_sources.go`. **Dep:** the AI→Knowledge proposal-intake path
+  (Δ4-class). **Scope:** MEDIUM — a correctness gap the moment that path ships.
+
 ---
 
 ### D. Observability (R1) — remaining signals

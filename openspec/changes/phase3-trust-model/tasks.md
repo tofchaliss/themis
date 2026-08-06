@@ -32,16 +32,37 @@
 
 ## 2. Source → class mapping in Knowledge (T2)
 
-- [ ] 2.1 A single reviewable registry mapping each feed/source id to its `TrustClass`, per design.md's
-  table. Adding a source must force answering one question: *reproducible, declared, or reasoned?*
-- [ ] 2.2 `knowledge/domain`: `Proposal` exposes a **derived** `TrustClass()` from its existing `source` —
-  **no new persisted field**, no migration.
-- [ ] 2.3 An unknown source must **fail closed** to `Asserted` (never `Observed`) and be logged once.
-- [ ] 2.4 Reconciliation carries the class through to the enterprise view, using `Max` across contributing
-  proposals (T3).
-- [ ] 2.5 Unit tests incl. the calibration cases: OSV range → Observed; Red Hat `not_affected` → Asserted;
-  an AI-sourced proposal → Inferred.
-- [ ] 2.6 Gate: `make check-ci` green; `knowledge/domain` still 100%.
+- [x] 2.1 A single reviewable registry mapping each feed/source id to its `TrustClass`, per design.md's
+  table. Adding a source must force answering one question: *reproducible, declared, or reasoned?* —
+  `adapters/wiring/trust_sources.go`, beside `NewPrecedence` in the composition root: the domain owns the
+  mechanism, the composition root owns the table (the same split `Precedence` already uses).
+- [x] 2.2 `knowledge/domain`: `Proposal` exposes a **derived** `TrustClass()` from its existing `source` —
+  **no new persisted field**, no migration. — realized as `domain.TrustPolicy.ClassOf(source)` rather than a
+  method on `Proposal`: a Proposal should not know the global policy, and injecting the table matches
+  `Precedence`. Confirmed **no migration** — the class is derived from the `source` already stored.
+- [x] 2.3 An unknown source must **fail closed** to `Asserted` (never `Observed`) and be logged once. —
+  fails closed to `Asserted`. **Not logged**: `domain` may not log (depguard, R1), and a runtime log is the
+  wrong instrument anyway — an unclassified source is a config gap, so it is a **build failure** instead
+  (`TestEveryKnownSourceIsClassified`). Asserted rather than Inferred is deliberate and documented: Inferred
+  means "a model produced this", so labelling an unknown feed Inferred would be a lie that corrupts the
+  vocabulary for the sake of a risk level.
+- [x] 2.4 Reconciliation carries the class through to the enterprise view, using `Max` across contributing
+  proposals (T3). — **per field-group, not per view**: `HeadlineTrust` (the winner's class — the headline is
+  winner-take-all) · `RangeTrust` · `SignalTrust` (folded across contributors). A single view-level class
+  would be **actively wrong**: one vendor VEX statement would drag the whole card down and bar a
+  version-range verdict computed purely from Observed ranges — the group-6 rule. Unset groups stay empty,
+  which is safe because `MaxTrust` reads an unset class as Inferred. Trust is now part of `equal()`, so a
+  trust change correctly fires `FaultlineEnriched`.
+- [x] 2.5 Unit tests incl. the calibration cases: OSV range → Observed; Red Hat `not_affected` → Asserted;
+  an AI-sourced proposal → Inferred. — asserted twice: against a fixture (`trustpolicy_test.go`) and against
+  the **table we actually ship** (`trust_sources_test.go`). Plus the test that justifies the whole
+  field-group design: an Asserted applicability on a card does **not** contaminate Observed ranges.
+- [x] 2.6 Gate: `make check-ci` green; `knowledge/domain` still 100%. — exit 0; `knowledge/domain` **100%**,
+  `knowledge/app` **100%**. **Caught a real regression on the way:** the store's `viewDTO` has an explicit
+  field list and silently dropped the three new fields, so the view decoded empty on every reload, was
+  recomputed, and fired a duplicate `FaultlineEnriched` on **every** fold. `TestViewChangeEmitsOneEvent`
+  caught it. Fixed in `adapters/store/codec.go`; jsonb, so backward-compatible with no migration.
+  Three deferrals filed as **TRUST-1/2/3** in `docs/BACKLOG.md`.
 
 ## 3. Trust across the Knowledge → Governance seam (T3)
 

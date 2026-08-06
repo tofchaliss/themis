@@ -22,11 +22,16 @@ type FaultlineService struct {
 	ids   IDGenerator
 	clock Clock
 	prec  domain.Precedence
+	trust domain.TrustPolicy
 }
 
-// NewFaultlineService wires the use-case ports and the reconciliation precedence policy.
-func NewFaultlineService(repo Repository, ids IDGenerator, clock Clock, prec domain.Precedence) *FaultlineService {
-	return &FaultlineService{repo: repo, ids: ids, clock: clock, prec: prec}
+// NewFaultlineService wires the use-case ports, the reconciliation precedence policy, and
+// the source→trust-class policy (EDR-TRUST-01 T2). Both tables are injected rather than
+// hard-coded: the domain owns the mechanism, the composition root owns the table.
+func NewFaultlineService(
+	repo Repository, ids IDGenerator, clock Clock, prec domain.Precedence, trust domain.TrustPolicy,
+) *FaultlineService {
+	return &FaultlineService{repo: repo, ids: ids, clock: clock, prec: prec, trust: trust}
 }
 
 // FoldProposal finds-or-creates the Faultline for a canonical CVE and folds a source
@@ -64,7 +69,7 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 			notes = append(notes, OutboxNote{EventType: EventFaultlineCreated, Event: domain.NewFaultlineCreated(f, now), OccurredAt: now})
 		}
 
-		if res := f.FoldProposal(p, s.prec); res.ViewChanged {
+		if res := f.FoldProposal(p, s.prec, s.trust); res.ViewChanged {
 			notes = append(notes, OutboxNote{EventType: EventFaultlineEnriched, Event: domain.NewFaultlineEnriched(f, now), OccurredAt: now})
 		}
 

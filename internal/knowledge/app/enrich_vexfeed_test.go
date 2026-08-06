@@ -24,7 +24,7 @@ func (f fakeVexFeed) FetchCVE(_ context.Context, cve string) ([]app.ProposalFor,
 
 func vexSvc(t *testing.T, repo app.Repository, src app.VexFeedSource, kn app.KnownCVEs) *app.VexEnrichmentService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), domain.NewTrustPolicy(nil))
 	return app.NewVexEnrichmentService(src, kn, fold)
 }
 

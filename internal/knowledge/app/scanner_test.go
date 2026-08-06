@@ -21,7 +21,7 @@ func (f fakeScannerSource) ScannerProposals(_ context.Context, _ string) ([]app.
 
 func scannerService(t *testing.T, src app.ScannerReportSource, matches *fakeMatches, repo *fakeRepo) *app.ScannerReportService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
 	return app.NewScannerReportService(src, fold, matches, fixedClock{})
 }
 

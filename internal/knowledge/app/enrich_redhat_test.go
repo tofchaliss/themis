@@ -25,7 +25,7 @@ func (f fakeRedHat) FetchCVE(_ context.Context, cve string) ([]app.ProposalFor, 
 
 func redhatSvc(t *testing.T, repo app.Repository, src app.RedHatCVESource, kn app.KnownCVEs) *app.RedHatEnrichmentService {
 	t.Helper()
-	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"))
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), domain.NewTrustPolicy(nil))
 	return app.NewRedHatEnrichmentService(src, kn, fold)
 }
 
