@@ -308,6 +308,14 @@ group 3's "mint a v2 schema" (the house pattern is additive-optional on v1, used
 a Finding born *before* the range was known, which nothing revisited). Writing tasks before touching code
 buys sequencing, not correctness.
 
+**Reading order for a reviewer:** `EDR-TRUST-01` (T1–T12) is the **reason of record** — read it before the
+diff, because the code will not explain *why* trust is a property of evidence rather than of the producer.
+Then the retrospective + reviewer notes at the tail of
+`openspec/changes/archive/2026-08-06-phase3-trust-model/tasks.md`, which record what the task list got wrong,
+why the group order was load-bearing anyway, and the four things a reviewer should know going in (the one
+deliberate behaviour change, the one breaking request shape, the moved config knob, and that
+**`EDR-INTELLIGENCE-01` Revision 5 is superseded** — scaffold future AI work from `EDR-TRUST-01`).
+
 **Open:** the Decision Proposal payload shape, deferred by construction until a second Decision capability
 defines it. `TRUST-1/2/3/4` in `docs/BACKLOG.md` are LOW follow-ups. The AI-line ordering below
 (GOV-14 → Δ3b → Δ4) is now unblocked — the capability surface those use cases need exists.

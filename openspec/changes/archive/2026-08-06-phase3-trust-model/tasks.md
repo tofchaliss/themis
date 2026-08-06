@@ -359,3 +359,45 @@ were wrong as written, and each was caught only by trying to do them.**
 
 Writing tasks before touching the code buys **sequencing**, not correctness. The sequencing was right and
 load-bearing (groups 6→7 especially); the content needed the code to correct it.
+
+### Why the sequencing still mattered
+
+The task content needed correcting, but the *order* was right and load-bearing. Three orderings could not
+have been swapped:
+
+- **The constitutional stage landed before the producer-identity branch was removed** (group 4), so the
+  `Inferred` bar was never momentarily absent.
+- **The version-range rule was added to the backend and proven equivalent before being deleted from the
+  runtime** (groups 6 → 7). A window with it in neither place loses a deterministic security verdict
+  **silently** — no test would have failed to say so.
+- **Projections were served before the runtime stopped gathering** (group 9).
+
+Each is a window of incorrectness rather than a window of breakage, which is exactly the kind a green build
+will not catch for you.
+
+### The pattern that made the guarantees hold
+
+Every guarantee in this change was only safe once the code made its violation **unexpressible** — recorded in
+full as *Implementation lesson* in `EDR-TRUST-01`. The short form: `Grounds` lives on the projection, so a
+shaped view has none to get wrong; `EngineResult` has no decision field, so a runtime engine has no channel
+to settle a question through; the Gateway returns before `BuildProposal` is reachable on the Information path.
+
+**The test for whether a guarantee is real: write down the code that would violate it.** If you can, it is a
+comment, not a guarantee.
+
+### Notes for the reviewer
+
+- **`EDR-TRUST-01` (T1–T12) is the reason of record** for everything here. Read it before the diff; the code
+  will not explain *why* trust is a property of evidence rather than of the producer.
+- **`EDR-INTELLIGENCE-01` Revision 5 is superseded.** Future AI work scaffolds from `EDR-TRUST-01` (+
+  `EDR-GOVERNANCE-01` for GOV-14), not from Revision 5, whose S1–S6 are absorbed or replaced.
+- **No new bounded context and no new deployable.** T11 (*behaviour follows ownership*) is why: Deterministic
+  Inference is a **stage** executed inside evidence-owning contexts, never a service.
+- **One deliberate, user-visible behaviour change**, pinned by test rather than assumed:
+  `POST /capabilities/recommend_position/invoke` no longer short-circuits an out-of-range component with
+  `decided_by: rule:…`. The verdict did not disappear — it moved **earlier**, fires automatically on
+  enrichment, and now works with AI switched off (repairing D13).
+- **One breaking request shape**, mitigated: `InvokeRequest` takes `subject{type, ids}`; `finding_id` is
+  accepted as a deprecated alias for one release.
+- **One config knob moved, not just added:** `THEMIS_KNOWLEDGE_URL` now belongs to the **Governance** node.
+  The Intelligence node no longer reads Knowledge at all.

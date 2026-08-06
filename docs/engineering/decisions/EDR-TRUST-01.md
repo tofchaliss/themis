@@ -510,6 +510,31 @@ DOM-0024 · Book I Ch 10 Law 3 (stable identity, evolving state).
   Governance Proposals. Where it is stored and how it is threaded is an implementation decision this EDR does
   not fix.
 
+## Implementation lesson — make the guarantee structural, not conventional
+
+Recorded because it recurred at every layer of the realization, and it is the thing most likely to be
+undone by a well-meaning future edit.
+
+Each of this EDR's guarantees started as a rule someone had to remember, and each was only safe once the code
+made the violation **unexpressible**:
+
+| Guarantee | As a convention | As built |
+| --- | --- | --- |
+| A shaped view cannot widen grounding (T10 r4) | "always validate against the projection" | `Grounds` lives on `FindingAssessment`; the shaped context **delegates** and has no `Grounds` of its own to get wrong |
+| A runtime engine never settles a question (T5) | "engines only reason" | `EngineResult` has **no decision field** — there is no channel to return one through |
+| An Information Response never becomes truth (T7) | "don't record Information outputs" | the Gateway returns **before `BuildProposal` is reachable** on that path |
+| Trust cannot be laundered by determinism (T1/T3) | "check the evidence, not the producer" | the class rides the **proposal itself** and `MaxTrust` reads unset as `Inferred`, so an unstated claim fails closed |
+| Fan-out is bounded (T9) | a global `MaxSubjectFanout` setting | per-capability **declared cardinality**, enforced before any read — a setting nobody tunes correctly became a contract |
+
+The test for whether a guarantee is real: **write down the code that would violate it.** If you can, the
+guarantee is a comment. Two of the five above were comments in the first draft and were rewritten once that
+question was asked of them.
+
+A corollary worth stating: **defaults must fail in the safe direction, and "safe" is not always "empty".**
+`finding_proposals.evidence_trust` defaults to `'asserted'`, not `''`, because empty reads as `Inferred` and
+an empty default would have retroactively barred every pre-existing proposal from policy on deploy. The safe
+default was the one that preserved behaviour, not the one that looked most cautious.
+
 ## Open questions (not decided here)
 
 1. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
