@@ -64,3 +64,53 @@ func TestProposalEvidenceTrustRoundTrips(t *testing.T) {
 		})
 	}
 }
+
+// The posture rollup derives the reservation with a JOIN rather than reading a stored flag,
+// so this proves the join actually resolves: Position -> accepted proposal -> its class.
+func TestReleasePostureSurfacesReservation(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	epoch := time.Unix(1_700_000_000, 0).UTC()
+
+	seed := func(t *testing.T, findingID, proposalID string, class value.TrustClass) {
+		t.Helper()
+		f, err := domain.NewFinding(domain.FindingID(findingID), "rel-posture", "fl-"+findingID, "CVE-2024-1")
+		if err != nil {
+			t.Fatalf("new finding: %v", err)
+		}
+		p, err := domain.NewGovernanceProposal(domain.ProposalID(proposalID),
+			domain.Actor{Kind: domain.ActorSystem, ID: "vex-applicability"},
+			domain.StanceNotAffected, "because", epoch, class)
+		if err != nil {
+			t.Fatalf("new proposal: %v", err)
+		}
+		if err := f.RaiseProposal(p); err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+		if _, err := f.AcceptProposal(domain.ProposalID(proposalID),
+			domain.Actor{Kind: domain.ActorHuman, ID: "analyst"}, epoch); err != nil {
+			t.Fatalf("accept: %v", err)
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+	seed(t, "fnd-asserted", "p-asserted", value.TrustAsserted)
+	seed(t, "fnd-observed", "p-observed", value.TrustObserved)
+
+	entries, err := st.ReleasePosture(ctx, "rel-posture")
+	if err != nil {
+		t.Fatalf("posture: %v", err)
+	}
+	got := map[string]value.TrustClass{}
+	for _, e := range entries {
+		got[string(e.FindingID)] = e.Reservation
+	}
+	if got["fnd-asserted"] != value.TrustAsserted {
+		t.Errorf("asserted finding reservation = %q, want %q", got["fnd-asserted"], value.TrustAsserted)
+	}
+	if got["fnd-observed"] != "" {
+		t.Errorf("observed finding reservation = %q, want empty (nothing to caveat)", got["fnd-observed"])
+	}
+}

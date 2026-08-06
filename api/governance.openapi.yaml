@@ -375,6 +375,14 @@ components:
         effective_priority:
           type: integer
           description: base_score x blast_multiplier, clamped to 100 - the release-scoped priority a human triages by.
+        reservation:
+          type: string
+          enum: [asserted, inferred]
+          description: >
+            Trust class of the evidence the current Position rested on, when weaker than
+            'observed' (EDR-TRUST-01 T12) - e.g. an acceptance leaning on a vendor's Asserted
+            not_affected. Absent means no Position, or one resting on observed evidence.
+            Derived from the accepted proposal, never stored as state.
     RaiseProposalRequest:
       type: object
       required: [stance]

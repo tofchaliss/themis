@@ -136,15 +136,30 @@
 
 ## 5. Reservations — derived, never stored (T12)
 
-- [ ] 5.1 Derive a **Reservation** from a Position's immutable `PositionInputs` when its evidence included
-  `Asserted` (or lower) facts. **No new column, no new state.**
-- [ ] 5.2 Surface it in the read models — beside `stance` and `effective_priority` on the posture rollup, and
-  on the Position in the read API. *Derived must not mean invisible; this is part of the decision.*
-- [ ] 5.3 Test: an acceptance resting on a vendor `not_affected` surfaces a reservation naming the declarer;
-  one resting only on Observed evidence surfaces none.
-- [ ] 5.4 Test the lifting path: a later Position version resting on Observed evidence carries **no**
-  reservation, with **no migration or backfill** — history simply shows it lift.
-- [ ] 5.5 Gate: `make check-ci` green.
+- [x] 5.1 Derive a **Reservation** from a Position's immutable `PositionInputs` when its evidence included
+  `Asserted` (or lower) facts. **No new column, no new state.** — `Finding.CurrentReservation()`:
+  `PositionInputs` already references the accepted proposal by id and the Finding holds both, so the whole
+  derivation lives inside the aggregate. Returns the class **and the proposer** — "how sound was that call?"
+  needs to know on whose word. Confirmed: no new column, no new lifecycle status.
+- [x] 5.2 Surface it in the read models — beside `stance` and `effective_priority` on the posture rollup, and
+  on the Position in the read API. *Derived must not mean invisible; this is part of the decision.* —
+  `PostureEntry.Reservation` + `reservation` on the API (spec-first, regenerated). The posture rollup derives
+  it with a **two-table JOIN** (Position → accepted proposal → its class) rather than reading a stored flag,
+  which is what makes drift impossible rather than merely unlikely. Omitted when the Position rests on
+  Observed evidence, so the common row is unchanged.
+- [x] 5.3 Test: an acceptance resting on a vendor `not_affected` surfaces a reservation naming the declarer;
+  one resting only on Observed evidence surfaces none. — plus **unstated** evidence is reserved (not silently
+  trusted) and a **missing accepted proposal** is reserved — the partial-projection case, where implying
+  "well-evidenced" precisely when we cannot tell would be the harmful reading. Integration test proves the
+  JOIN resolves end-to-end.
+- [x] 5.4 Test the lifting path: a later Position version resting on Observed evidence carries **no**
+  reservation, with **no migration or backfill** — history simply shows it lift. —
+  `TestCurrentReservation_LiftsWhenBetterEvidenceEstablishesANewVersion`: a signed build manifest makes the
+  same claim re-derivable, v2 carries no reservation, both versions are retained and v1 stays explicable
+  from its own inputs. This is the property that **justifies deriving over storing** — a stored flag would
+  have needed rewriting on the old row, or gone stale on it.
+- [x] 5.5 Gate: `make check-ci` green. — exit 0; `governance/domain` **100%**, `app` **100%**,
+  `adapters/http` 96.9%, `adapters/store` 82.9%. `make e2e-pipeline` green.
 
 ## 6. Deterministic Inference — add the version-range rule to the backend, prove equivalence (T5 · T11)
 

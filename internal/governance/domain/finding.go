@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"github.com/themis-project/themis/internal/kernel/value"
 	"strings"
 	"time"
 )
@@ -295,3 +296,47 @@ func (f Finding) CurrentPosition() (Position, bool) {
 
 // Version returns the optimistic-concurrency version stamp.
 func (f Finding) Version() int { return f.version }
+
+// Reservation is a recorded caveat that a decision rested on evidence weaker than Observed
+// — for example an acceptance leaning on a vendor's Asserted `not_affected` (EDR-TRUST-01
+// T12). It names the class and who supplied the evidence, so "how sound was that call?"
+// has an answer months later.
+//
+// A reservation is a property of **evidence**, never of the decision, so it is **derived
+// from the Position's immutable inputs and never persisted as state**. There is no
+// "accepted with warning" lifecycle status: the Position's state records what Governance
+// decided; the reservation explains what that decision rested on.
+type Reservation struct {
+	EvidenceTrust value.TrustClass // class of the evidence the accepted proposal rested on
+	Proposer      Actor            // who supplied that evidence
+}
+
+// CurrentReservation returns the reservation on the Finding's current Position, if any.
+// ok=false means either no Position yet, or one resting on Observed evidence — nothing to
+// caveat.
+//
+// It cannot drift, because it is recomputed from the accepted proposal rather than stored
+// alongside it. And it lifts by itself: when better evidence later establishes a NEW
+// Position version, that version simply carries no reservation — no migration, no backfill,
+// and the history shows the caveat disappearing.
+func (f Finding) CurrentReservation() (Reservation, bool) {
+	pos, ok := f.CurrentPosition()
+	if !ok {
+		return Reservation{}, false
+	}
+	for _, p := range f.proposals {
+		if p.ID() != pos.Inputs().AcceptedProposalID {
+			continue
+		}
+		// MaxTrust normalizes an unset class to Inferred, so a Position whose evidence was
+		// never stated is reserved rather than silently treated as trusted.
+		class := value.MaxTrust(p.EvidenceTrust())
+		if class == value.TrustObserved {
+			return Reservation{}, false
+		}
+		return Reservation{EvidenceTrust: class, Proposer: p.Proposer()}, true
+	}
+	// A Position whose accepted proposal is not present (e.g. a partial projection) cannot
+	// be vouched for — reserve it rather than imply it was well-evidenced.
+	return Reservation{EvidenceTrust: value.TrustInferred}, true
+}

@@ -275,7 +275,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	base := e.BaseScore
 	mult := float32(e.Multiplier)
 	eff := e.EffectivePriority
-	return gen.PostureEntry{
+	out := gen.PostureEntry{
 		FindingId:         strptr(string(e.FindingID)),
 		FaultlineId:       strptr(e.FaultlineID),
 		Cve:               strptr(e.CVE),
@@ -286,6 +286,13 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		BlastMultiplier:   &mult,
 		EffectivePriority: &eff,
 	}
+	// Omitted when the Position rests on Observed evidence — an absent reservation reads as
+	// "nothing to caveat", which is exactly right, and keeps the common row unchanged.
+	if e.Reservation != "" {
+		r := gen.PostureEntryReservation(e.Reservation)
+		out.Reservation = &r
+	}
+	return out
 }
 
 // proposerFrom builds the proposer actor from the request (human by default; ai allowed).
