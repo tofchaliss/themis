@@ -21,6 +21,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 var testDSN string
@@ -178,7 +179,7 @@ func TestDecisionRoundTrip(t *testing.T) {
 
 	// Raise + accept, then persist the mutated aggregate.
 	f, _, _ = load(t, st, "fnd-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed exploitable", epoch)
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed exploitable", epoch, value.TrustAsserted)
 	if err := f.RaiseProposal(p); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +307,7 @@ func TestProjectionsAndFanout(t *testing.T) {
 	seed := func(id, rel, fl string, stance domain.Stance) {
 		f := newFinding(t, id, rel, fl, "CVE-1")
 		if stance != "" {
-			p, _ := domain.NewGovernanceProposal(domain.ProposalID("p-"+id), human, stance, "x", epoch)
+			p, _ := domain.NewGovernanceProposal(domain.ProposalID("p-"+id), human, stance, "x", epoch, value.TrustAsserted)
 			_ = f.RaiseProposal(p)
 			_, _ = f.AcceptProposal(domain.ProposalID("p-"+id), human, epoch)
 		}
@@ -362,7 +363,7 @@ func TestCrashResumePendingDecisionSurvives(t *testing.T) {
 
 	// A Finding awaiting a human: Under Investigation with an open proposal.
 	f := newFinding(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "needs review", epoch)
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "needs review", epoch, value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	if err := store.New(pool).Save(ctx, f, true, 0, nil); err != nil {
 		t.Fatal(err)

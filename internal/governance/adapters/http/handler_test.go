@@ -15,6 +15,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // --- fakes -----------------------------------------------------------------------------
@@ -154,7 +155,7 @@ func TestGetFinding(t *testing.T) {
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
 	_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a"})
 	// A raised + accepted proposal exercises the proposal + position + current-position mappers.
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	_, _ = f.AcceptProposal("p1", human, fixedClock{}.Now())
 	repo.seed(f)
@@ -221,7 +222,7 @@ func TestGetFindingByKey(t *testing.T) {
 func TestGetPosition(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	_, _ = f.AcceptProposal("p1", human, fixedClock{}.Now())
 	repo.seed(f)
@@ -321,7 +322,7 @@ func TestRaiseProposal(t *testing.T) {
 func TestAcceptAndRejectProposal(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	repo.seed(f)
 	srv := server(t, repo, fakeProjection{})
@@ -352,7 +353,7 @@ func TestAcceptAndRejectProposal(t *testing.T) {
 func TestRejectProposal(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
-	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "vendor VEX", fixedClock{}.Now())
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "vendor VEX", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
 	repo.seed(f)
 	srv := server(t, repo, fakeProjection{})

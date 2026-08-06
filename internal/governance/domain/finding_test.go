@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 var (
@@ -24,7 +25,7 @@ func newFinding(t *testing.T) domain.Finding {
 
 func proposal(t *testing.T, id domain.ProposalID, proposer domain.Actor, stance domain.Stance) domain.GovernanceProposal {
 	t.Helper()
-	p, err := domain.NewGovernanceProposal(id, proposer, stance, "because", epoch)
+	p, err := domain.NewGovernanceProposal(id, proposer, stance, "because", epoch, value.TrustAsserted)
 	if err != nil {
 		t.Fatalf("NewGovernanceProposal(%s): %v", id, err)
 	}
@@ -101,12 +102,12 @@ func TestCoversPackage(t *testing.T) {
 		pkg  string
 		want bool
 	}{
-		{"", false},                     // empty never matches
-		{"pkg:rpm/openssl@1.0.2", true}, // exact PURL
-		{"openssl", true},               // bare name
-		{"pkg:rpm/openssl", true},       // PURL without the @version suffix (vendor form)
-		{"  openssl  ", true},           // trimmed before matching
-		{"pkg:rpm/zlib", false},         // covers a different package
+		{"", false},                            // empty never matches
+		{"pkg:rpm/openssl@1.0.2", true},        // exact PURL
+		{"openssl", true},                      // bare name
+		{"pkg:rpm/openssl", true},              // PURL without the @version suffix (vendor form)
+		{"  openssl  ", true},                  // trimmed before matching
+		{"pkg:rpm/zlib", false},                // covers a different package
 		{"pkg:rpm/openssl@1.0.2-extra", false}, // not a prefix boundary match
 	}
 	for _, tc := range cases {
@@ -138,7 +139,7 @@ func TestRaiseProposalRejections(t *testing.T) {
 	}
 
 	// A reconstituted, already-decided proposal cannot be raised.
-	decided := domain.ReconstituteProposal("pd", human, domain.StanceAffected, "x", epoch, domain.StatusAccepted, human, epoch)
+	decided := domain.ReconstituteProposal("pd", human, domain.StanceAffected, "x", epoch, domain.StatusAccepted, human, epoch, value.TrustAsserted)
 	if err := f.RaiseProposal(decided); !errors.Is(err, domain.ErrProposalNotOpen) {
 		t.Errorf("decided raise err = %v, want ErrProposalNotOpen", err)
 	}

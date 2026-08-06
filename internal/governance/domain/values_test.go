@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 var epoch = time.Unix(1_700_000_000, 0).UTC()
@@ -78,7 +79,7 @@ func TestReconstitutePosition(t *testing.T) {
 
 func TestNewGovernanceProposal(t *testing.T) {
 	proposer := domain.Actor{Kind: domain.ActorAI, ID: "triage-analyst"}
-	p, err := domain.NewGovernanceProposal("p1", proposer, domain.StanceNotAffected, "vendor VEX", epoch)
+	p, err := domain.NewGovernanceProposal("p1", proposer, domain.StanceNotAffected, "vendor VEX", epoch, value.TrustAsserted)
 	if err != nil {
 		t.Fatalf("valid proposal: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestNewGovernanceProposalRejectsBadInput(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := domain.NewGovernanceProposal(c.id, c.proposer, c.stance, "", c.at); err == nil {
+			if _, err := domain.NewGovernanceProposal(c.id, c.proposer, c.stance, "", c.at, value.TrustAsserted); err == nil {
 				t.Fatalf("%s: expected error", c.name)
 			}
 		})
@@ -124,7 +125,7 @@ func TestReconstituteProposal(t *testing.T) {
 	proposer := domain.Actor{Kind: domain.ActorSystem, ID: "faultline-enriched"}
 	decider := domain.Actor{Kind: domain.ActorPolicy, ID: "auto-not-affected"}
 	p := domain.ReconstituteProposal("p9", proposer, domain.StanceNotAffected, "withdrawn", epoch,
-		domain.StatusAccepted, decider, epoch.Add(time.Hour))
+		domain.StatusAccepted, decider, epoch.Add(time.Hour), value.TrustAsserted)
 
 	if p.Status() != domain.StatusAccepted || p.IsOpen() {
 		t.Error("reconstituted accepted proposal should not be open")
@@ -144,26 +145,26 @@ func TestPolicyRuleEvaluate(t *testing.T) {
 	human := domain.Actor{Kind: domain.ActorHuman, ID: "alice"}
 
 	// Auto-accepts an open, system-raised proposal whose stance is in the allow-set.
-	sysNotAffected, _ := domain.NewGovernanceProposal("p1", system, domain.StanceNotAffected, "withdrawn", epoch)
+	sysNotAffected, _ := domain.NewGovernanceProposal("p1", system, domain.StanceNotAffected, "withdrawn", epoch, value.TrustAsserted)
 	if ok, by := rule.Evaluate(sysNotAffected); !ok || by.Kind != domain.ActorPolicy || by.ID != "auto-not-affected" {
 		t.Errorf("system not-affected should auto-accept via policy: ok=%v by=%+v", ok, by)
 	}
 
 	// Not a system proposer → never auto-accept (human keeps authority).
-	humanNotAffected, _ := domain.NewGovernanceProposal("p2", human, domain.StanceNotAffected, "manual", epoch)
+	humanNotAffected, _ := domain.NewGovernanceProposal("p2", human, domain.StanceNotAffected, "manual", epoch, value.TrustAsserted)
 	if ok, _ := rule.Evaluate(humanNotAffected); ok {
 		t.Error("human proposal must not be auto-accepted")
 	}
 
 	// Stance not in the allow-set → not auto-accepted.
-	sysAffected, _ := domain.NewGovernanceProposal("p3", system, domain.StanceAffected, "confirmed", epoch)
+	sysAffected, _ := domain.NewGovernanceProposal("p3", system, domain.StanceAffected, "confirmed", epoch, value.TrustAsserted)
 	if ok, _ := rule.Evaluate(sysAffected); ok {
 		t.Error("stance outside allow-set must not be auto-accepted")
 	}
 
 	// Already-decided proposal → not open → not auto-accepted.
 	decided := domain.ReconstituteProposal("p4", system, domain.StanceNotAffected, "x", epoch,
-		domain.StatusRejected, human, epoch)
+		domain.StatusRejected, human, epoch, value.TrustAsserted)
 	if ok, _ := rule.Evaluate(decided); ok {
 		t.Error("decided proposal must not be auto-accepted")
 	}

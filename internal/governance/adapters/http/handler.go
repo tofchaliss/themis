@@ -16,6 +16,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // Handler implements gen.ServerInterface over the Governance write + read services.
@@ -125,7 +126,10 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 	if body.Rationale != nil {
 		rationale = *body.Rationale
 	}
-	pid, err := h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale)
+	// A human's proposal is Asserted: a declaration Themis cannot re-derive. It changes no
+	// behaviour today — a non-system proposal is never policy-auto-accepted regardless — but
+	// it states the evidence honestly rather than leaving it unset.
+	pid, err := h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, value.TrustAsserted)
 	if err != nil {
 		writeErr(w, "cannot raise proposal", err)
 		return

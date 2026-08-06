@@ -96,19 +96,43 @@
 
 ## 4. Governance — the constitutional stage (T4 · T6)
 
-- [ ] 4.1 `governance/domain`: a **pure, non-configurable** constitutional check evaluated **before**
-  `PolicyRule`. Chiefly: a proposal whose class is `Inferred` is **never** auto-acceptable.
-- [ ] 4.2 Wire it ahead of policy in the aggregate's decision path. A proposal failing stage 1 is ineligible
-  for **any** automatic acceptance.
-- [ ] 4.3 Stop branching on producer identity (T1): the `Proposer().Kind != ActorSystem` gate is replaced by
-  the trust class. **Land 4.1–4.2 first** so the `Inferred` bar is never momentarily absent.
-- [ ] 4.4 Regression test proving the laundering path is closed: a **deterministic** rule consuming
+- [x] 4.1 `governance/domain`: a **pure, non-configurable** constitutional check evaluated **before**
+  `PolicyRule`. Chiefly: a proposal whose class is `Inferred` is **never** auto-acceptable. —
+  `domain.ConstitutionallyAutoAcceptable`; `GovernanceProposal` gains `evidenceTrust` (the check reads the
+  **evidence**, never the proposer). An unset class reads as `Inferred` via `MaxTrust`, so a proposal raised
+  without stating its evidence fails closed.
+- [x] 4.2 Wire it ahead of policy in the aggregate's decision path. A proposal failing stage 1 is ineligible
+  for **any** automatic acceptance. — one place: `raiseAndMaybeAutoAccept`, returning **before** the policy
+  loop. Failing stage 1 is not an error — the proposal is still **raised** and stays open for a human.
+- [x] 4.3 Stop branching on producer identity (T1): the `Proposer().Kind != ActorSystem` gate is replaced by
+  the trust class. **Land 4.1–4.2 first** so the `Inferred` bar is never momentarily absent. — **the task as
+  written was too broad and was NOT done that way.** T1 removes the producer as a *trust-bearing* category;
+  it does not remove **authority**. Dropping the `ActorSystem` gate would newly let policy auto-accept a
+  **human's** proposal — nothing intends that and DOM-0024 forbids it. So: trust moved to the constitutional
+  stage (4.1), and the `ActorSystem` check **stays** in `PolicyRule.Evaluate` as an authority rule, now
+  documented as such. Decisions and evidence are different axes (T12) — this is the decision axis.
+  `EDR-TRUST-01` T6 amended to record it.
+- [x] 4.4 Regression test proving the laundering path is closed: a **deterministic** rule consuming
   AI-derived evidence yields an `Inferred` conclusion and is **not** auto-accepted — the case producer-based
-  classification could not see.
-- [ ] 4.5 Test that no policy configuration can enable auto-acceptance of `Inferred`.
-- [ ] 4.6 Confirm outcomes stay **Accepted / Rejected**, with open (`StatusProposed`) as the absence of an
-  automatic outcome. **No new status is added.**
-- [ ] 4.7 Gate: `make check-ci` green; `governance/domain` + `app` 100%.
+  classification could not see. — `TestConstitutionallyAutoAcceptable_DeterministicProposerCannotLaunder-
+  InferredEvidence`: proposer is `ActorSystem`, so every producer-based check says "eligible"; the evidence
+  is `Inferred`, so it is barred.
+- [x] 4.5 Test that no policy configuration can enable auto-acceptance of `Inferred`. —
+  `TestInferredIsBarredRegardlessOfPolicyConfiguration` asserts the policy *would* match the stance and the
+  constitutional stage still refuses. Plus the end-to-end pair through the service (Inferred blocked /
+  Observed accepted) so the block cannot pass for the wrong reason.
+- [x] 4.6 Confirm outcomes stay **Accepted / Rejected**, with open (`StatusProposed`) as the absence of an
+  automatic outcome. **No new status is added.** — confirmed; no status added.
+- [x] 4.7 Gate: `make check-ci` green; `governance/domain` + `app` 100%. — exit 0; `governance/domain` and
+  `app` **100%**, `adapters/inbound` 100%, `adapters/store` 82.7%. `make e2e-pipeline` green.
+  **TRUST-4 resolved (mitigated):** the withdrawal path now states `Observed` in `evidenceTrustFor` with a
+  guard test, so the long-standing policy auto-accept keeps working; moving the class onto the superseded
+  event stays open. **Persistence:** `finding_proposals.evidence_trust` (migration 000005, up+down) — the
+  aggregate is reloaded before every decision, so a class that failed to round-trip would come back unset,
+  read as `Inferred`, and silently bar a proposal that policy accepted before. Guarded by
+  `TestProposalEvidenceTrustRoundTrips`, which asserts the **constitutional verdict is identical** either
+  side of a save/reload. The column defaults to `'asserted'`, not empty, so existing proposals are not
+  retroactively barred on deploy.
 
 ## 5. Reservations — derived, never stored (T12)
 

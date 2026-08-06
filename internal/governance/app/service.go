@@ -79,7 +79,9 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	}
 	rationale := fmt.Sprintf("AI recommendation%s (confidence %.2f): %s", provenance, rec.Confidence, rec.Reasoning)
 	proposer := domain.Actor{Kind: domain.ActorAI, ID: rec.Capability}
-	pid, err := s.RaiseProposal(ctx, findingID, proposer, domain.Stance(rec.Stance), rationale)
+	// Inferred by definition: the output of non-deterministic reasoning. The constitutional
+	// check (T4) bars it from automatic acceptance under any policy — a human decides.
+	pid, err := s.RaiseProposal(ctx, findingID, proposer, domain.Stance(rec.Stance), rationale, value.TrustInferred)
 	if err != nil {
 		return "", false, err
 	}
@@ -196,6 +198,28 @@ func proposalFor(sig EnrichmentSignal) (stance domain.Stance, rationale string, 
 	}
 }
 
+// evidenceTrustFor returns the trust class of the evidence backing an enrichment-driven
+// proposal (EDR-TRUST-01 T3). It folds in ONLY the field-groups that actually drove the
+// stance — folding in an unset-but-irrelevant group would read as Inferred under MaxTrust
+// and wrongly bar a well-evidenced proposal from policy.
+func evidenceTrustFor(sig EnrichmentSignal) value.TrustClass {
+	if sig.Withdrawn {
+		// TRUST-4: knowledge.faultline_superseded.v1 carries no class, so it is stated here.
+		// A withdrawal is reproducible — re-fetch and the CVE is still rejected upstream — so
+		// it is genuinely Observed. Left unset it would read as Inferred and break the
+		// withdrawn-CVE policy auto-accept that works today. Moving the class onto the event,
+		// so it reflects the real source rather than this assumption, stays open as TRUST-4.
+		return value.TrustObserved
+	}
+	if sig.KEV && sig.HighSeverity {
+		return value.MaxTrust(sig.SignalTrust, sig.HeadlineTrust)
+	}
+	if sig.KEV {
+		return value.MaxTrust(sig.SignalTrust)
+	}
+	return value.MaxTrust(sig.HeadlineTrust)
+}
+
 // ReactToEnrichment re-evaluates every Finding referencing an enriched Faultline by raising
 // a single system-generated Governance Proposal against each and flagging it for review —
 // it never auto-changes the Enterprise Position (D6/DOM-0026). A Governance-owned policy
@@ -221,7 +245,7 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 		for _, id := range ids {
 			pid := domain.ProposalID("enrich:" + string(id) + ":" + string(stance))
 			if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-				p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now)
+				p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now, evidenceTrustFor(sig))
 				if err != nil {
 					return nil, err
 				}
@@ -269,7 +293,11 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 				return nil, errNoop // no vendor statement covers this Finding's components
 			}
 			pid := domain.ProposalID("vex:" + string(id) + ":" + packageKey(covered.Package))
-			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected, vexRationale(covered), now)
+			// A vendor VEX statement is Asserted: the vendor is the sole authority on their own
+			// build, so nothing can re-run it. Hard-coded rather than read per-statement because
+			// applicabilities carry no individual class yet (TRUST-1) — every one of them today
+			// originates from vendor or uploaded VEX, so they are uniformly Asserted.
+			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected, vexRationale(covered), now, value.TrustAsserted)
 			if err != nil {
 				return nil, err
 			}
@@ -319,10 +347,13 @@ func packageKey(pkg string) string {
 // (D4/D11) — the single proposer entry. It raises the proposal and flags the Finding for
 // review; a Governance-owned policy never auto-accepts a non-system proposal, so a human or
 // AI proposal always awaits a human decision. Returns the new proposal id.
-func (s *FindingService) RaiseProposal(ctx context.Context, findingID domain.FindingID, proposer domain.Actor, stance domain.Stance, rationale string) (domain.ProposalID, error) {
+func (s *FindingService) RaiseProposal(
+	ctx context.Context, findingID domain.FindingID, proposer domain.Actor, stance domain.Stance, rationale string,
+	evidenceTrust value.TrustClass,
+) (domain.ProposalID, error) {
 	pid := domain.ProposalID(s.ids.NewID())
 	err := s.mutate(ctx, findingID, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-		p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now)
+		p, err := domain.NewGovernanceProposal(pid, proposer, stance, rationale, now, evidenceTrust)
 		if err != nil {
 			return nil, err
 		}
@@ -439,6 +470,14 @@ func (s *FindingService) raiseAndMaybeAutoAccept(f *domain.Finding, p domain.Gov
 		return nil, err
 	}
 	notes := []OutboxNote{{EventType: EventProposalRaised, Event: domain.NewProposalRaised(*f, p, now), OccurredAt: now}}
+	// Stage 1 — the constitutional check (EDR-TRUST-01 T6). Fixed, non-configurable, and
+	// evaluated BEFORE any policy: a proposal resting on Inferred evidence is ineligible for
+	// automatic acceptance no matter how policy is configured. Failing it is not an error —
+	// the proposal simply stays open for a human.
+	if !domain.ConstitutionallyAutoAcceptable(p) {
+		return notes, nil
+	}
+	// Stage 2 — the configurable, Governance-owned policy.
 	for _, rule := range s.policies {
 		if ok, by := rule.Evaluate(p); ok {
 			pos, err := f.AcceptProposal(p.ID(), by, now)

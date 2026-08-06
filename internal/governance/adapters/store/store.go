@@ -18,6 +18,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // ErrNotFound is returned by GetByID when no Finding exists.
@@ -131,7 +132,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.GovernanceProposal, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT proposal_id, proposer_kind, proposer_id, stance, rationale, raised_at,
-		       status, decided_kind, decided_id, decided_at
+		       status, decided_kind, decided_id, decided_at, evidence_trust
 		FROM finding_proposals WHERE finding_id = $1 ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
@@ -142,11 +143,12 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 	for rows.Next() {
 		var (
 			pid, proposerKind, proposerID, stance, rationale, status, decidedKind, decidedID string
+			evidenceTrust                                                                    string
 			raisedAt                                                                         time.Time
 			decidedAt                                                                        *time.Time
 		)
 		if err := rows.Scan(&pid, &proposerKind, &proposerID, &stance, &rationale, &raisedAt,
-			&status, &decidedKind, &decidedID, &decidedAt); err != nil {
+			&status, &decidedKind, &decidedID, &decidedAt, &evidenceTrust); err != nil {
 			return nil, err
 		}
 		var dat time.Time
@@ -159,6 +161,7 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 			domain.Stance(stance), rationale, raisedAt,
 			domain.ProposalStatus(status),
 			decidedActor(decidedKind, decidedID), dat,
+			value.TrustClass(evidenceTrust),
 		))
 	}
 	return out, rows.Err()
@@ -283,14 +286,14 @@ func (s *Store) saveProposals(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_proposals
-			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at, evidence_trust)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 			ON CONFLICT (finding_id, proposal_id)
 			DO UPDATE SET status=EXCLUDED.status, decided_kind=EXCLUDED.decided_kind,
 			              decided_id=EXCLUDED.decided_id, decided_at=EXCLUDED.decided_at`,
 			string(f.ID()), string(p.ID()), seq, string(p.Proposer().Kind), p.Proposer().ID,
 			string(p.Stance()), p.Rationale(), p.RaisedAt(), string(p.Status()),
-			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt); err != nil {
+			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt, string(p.EvidenceTrust())); err != nil {
 			return err
 		}
 	}

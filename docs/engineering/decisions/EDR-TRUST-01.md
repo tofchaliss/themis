@@ -216,7 +216,14 @@ Governance evaluates a proposal in two ordered stages, and the order is not nego
 - **"Accepted with Warning" is not a state.** It is an ordinary acceptance whose evidence included Asserted
   (or lower) facts, surfaced from the Position's inputs — see **T12**.
 - Governance reads the proposal's **trust class and evidence provenance**. It does not read, and must not
-  branch on, the producing component (T1).
+  branch on, the producing component **as a trust signal** (T1).
+- **Clarification (added during implementation, 2026-08-06).** T1 removes the producer as a *trust-bearing*
+  category — it does **not** remove it as an *authority* one. Governance's existing rule that only its own
+  automation (`ActorSystem`) is eligible for policy auto-acceptance is an **authority** rule and **stays**:
+  dropping it would newly let policy auto-accept a **human's** proposal, which DOM-0024 does not permit and
+  nothing intends. The two stages therefore read different things — stage 1 asks *"how good is the
+  evidence?"*, stage 2 asks *"who may be auto-decided?"*. That is T12's separation applied to the decision
+  path: decisions and evidence are different concepts.
 
 Rationale:
 

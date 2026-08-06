@@ -545,8 +545,13 @@ per-context follow-ups below.
   group 4, not a theoretical one. **Fix (in group 4):** classify the withdrawal path explicitly — either add
   the field to the superseded event additively (as the enriched event just did) or set it at the coordinator
   with a comment. Prefer the event: it keeps the class where the evidence is. **Where it plugs in:**
-  `internal/governance/app/coordinator.go` + optionally `knowledge.faultline_superseded.v1`. **Scope:**
-  MUST-DO before group 4 consumes trust; a `// Tracked as TRUST-4` comment marks the site.
+  `internal/governance/app/coordinator.go` + optionally `knowledge.faultline_superseded.v1`.
+  **✅ MITIGATED in group 4 (2026-08-06):** `evidenceTrustFor` now states `value.TrustObserved` for the
+  withdrawal path, with `TestReactToEnrichment_WithdrawnPathStillAutoAccepts` guarding the regression — the
+  auto-accept that works today keeps working. **What remains:** the class is a **stated assumption in
+  Governance** rather than a fact carried from the source. Move it onto
+  `knowledge.faultline_superseded.v1` (additively, as `faultline_enriched` did in group 3) so it reflects
+  what actually drove the supersession. **Scope:** LOW now the regression is closed.
 
 ---
 
