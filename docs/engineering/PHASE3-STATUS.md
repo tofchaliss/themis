@@ -273,7 +273,7 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 **2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
 audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
 from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as
-**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T12) with coordinated updates to **Book I-adjacent
+**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (**ACCEPTED** — grilled + closed 2026-08-06, T1–T12) with coordinated updates to **Book I-adjacent
 vocabulary** (Book II Ch 2 §2.7 + **Domain Invariant 4 — Trust Is Inherited, Never Granted**), **Book III
 Ch 16** (Domain Projections + Deterministic Inference), and **Book IV** (§2.1–2.3 capability classes,
 runtime contract, principles 10–17). `EDR-INTELLIGENCE-01` **Revision 5 is SUPERSEDED** by it the same day.

@@ -1,8 +1,15 @@
 # EDR-TRUST-01 — The Themis Trust Model (constitutional, cross-cutting)
 
-**Status:** PROPOSED (2026-08-06) · **Scope:** cross-cutting — Knowledge, Governance, Intelligence, and the
-Deterministic Inference stage · **Supersedes:** `EDR-INTELLIGENCE-01` Revision 5 (Δ3c Subject
-Generalization), whose S1–S6 are absorbed or replaced here.
+**Status:** ACCEPTED — grilled and closed 2026-08-06 (T1–T12) · **Scope:** cross-cutting — Knowledge,
+Governance, Intelligence, and the Deterministic Inference stage · **Supersedes:** `EDR-INTELLIGENCE-01`
+Revision 5 (Δ3c Subject Generalization), whose S1–S6 are absorbed or replaced here.
+
+> **What the grill closed.** T1–T12 were stress-tested decision by decision; four questions open at drafting
+> were resolved and two decisions were **corrected** in the process — T2's criterion (which contradicted its
+> own flagship example) and T6's outcome list (which invented a fourth Governance outcome that was really the
+> existing open state). The **two remaining open questions are deliberately deferred**, not unresolved: the
+> Decision Proposal payload cannot be designed before a second Decision capability exists to shape it, and
+> migration order is implementation sequencing. **Neither blocks implementation of T1–T12.**
 
 ## Purpose
 
