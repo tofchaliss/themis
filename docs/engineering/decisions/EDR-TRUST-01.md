@@ -1,7 +1,7 @@
 # EDR-TRUST-01 — The Themis Trust Model (constitutional, cross-cutting)
 
 **Status:** PROPOSED (2026-08-06) · **Scope:** cross-cutting — Knowledge, Governance, Intelligence, and the
-new Deterministic Inference layer · **Supersedes:** `EDR-INTELLIGENCE-01` Revision 5 (Δ3c Subject
+Deterministic Inference stage · **Supersedes:** `EDR-INTELLIGENCE-01` Revision 5 (Δ3c Subject
 Generalization), whose S1–S6 are absorbed or replaced here.
 
 ## Purpose
@@ -126,16 +126,26 @@ Ch 5 (Authority Over Automation).
 
 Decision:
 
-- Themis gains a **Deterministic Inference layer**: a dedicated stage that executes provable rules over
-  assembled evidence and raises **system proposals** for the conclusions it reaches.
-- It sits between Knowledge and Governance in the enterprise pipeline:
+- Themis gains **Deterministic Inference**: provable rules executed over assembled evidence, raising **system
+  proposals** for the conclusions they reach, **before** any AI Decision capability runs.
+- **It is a stage, not a deployable service.** It is realized *inside* whichever context owns the evidence a
+  rule consumes (T11). Reading the stage as a box in the service chain is the one misreading this decision
+  must prevent.
 
 ```text
-Evidence → Knowledge → Deterministic Inference → System Proposals → Governance
-                                                                         │
-                                                     AI (Decision capabilities) ─┘
-                                                     only where inference could not conclude
+   Evidence  ─────►  Knowledge  ─────►  Governance  ─────►  Communication
+                         ╎                   ╎
+                         ╎ deterministic     ╎ deterministic
+                         ╎ inference over    ╎ inference over
+                         ╎ the evidence      ╎ the evidence
+                         ╎ Knowledge owns    ╎ Governance owns
+                         ╰───── system proposals ─────►  Governance decides
+                                                              ▲
+                             AI (Decision capabilities) ──────╯
+                             only where inference could not conclude
 ```
+
+The dotted lines are **stages inside contexts**, not services. The solid line is the deployable pipeline.
 
 - **Rules are deterministic algorithms and carry no trust class of their own** (T1). Their conclusions are
   classed by their inputs (T2/T3).
@@ -353,6 +363,48 @@ INT-0068 more literally than runtime-side assembly does. This decision therefore
 
 ADR basis: ADR-INT-0061 · ADR-INT-0068 · INT-0059 (single provider entry) · Book IV Principles 5 + 6.
 
+### T11 — Behaviour follows ownership
+
+> This decision is **broader than the trust model**. It arose in resolving where Deterministic Inference
+> lives, but it governs bounded-context design generally and should be read as such.
+
+Decision:
+
+- **Evidence-owning bounded contexts execute deterministic inference over the evidence they own.**
+- **Inference never justifies a bounded context; new evidence does.**
+- **A new bounded context is created only when a new class of authoritative business evidence requires
+  independent ownership** — for example a future **Product Applicability** context owning what the enterprise
+  builds, ships and enables — **never because new deterministic rules are introduced.**
+- **"Deterministic Inference" is a stage in the architecture, not a deployable service.**
+
+Rationale:
+
+- Every bounded context in Themis is defined by **what it is the authority on** — Evidence owns artifacts,
+  Knowledge owns CVE cards, Registry owns identity, Governance owns Findings and Positions. None was created
+  to hold logic. A context whose only asset is behaviour has no authority to defend and no truth to own.
+- The pattern is already realized. `FindingService.reactToApplicability` is deterministic inference living in
+  Governance — and it is there for a principled reason, not by convenience: `coveringStatement(f *Finding,
+  …)` needs a **Finding**, because "is release R affected by CVE C?" is a question about a Finding, and
+  Finding is Governance's aggregate. Behaviour followed ownership without anyone naming the rule.
+- It also explains why the inference rules felt homeless: **four of the six anticipated rules need evidence
+  Themis does not collect** (build options, feature configuration, shipped configuration, platform bindings).
+  The gap was never a missing rule engine — it was a missing *authority* over product-applicability facts.
+  When that evidence arrives it earns a context, and its rules arrive with it.
+- Finally, a separate inference service could not write its conclusions anyway: contexts collaborate only by
+  events and read-only APIs, so it could at best emit an event that Governance turns into a proposal — which
+  is exactly what Knowledge already does. The service would buy nothing and cost a deployment.
+
+Consequences:
+
+- Version-range and package-not-shipped need **no new context** — their evidence already has owners.
+- The **Product Applicability** context is named but **not created**. It becomes justified when the enterprise
+  begins collecting what it builds, ships and enables — and not one day earlier.
+- Any diagram showing Deterministic Inference must render it as a **stage inside contexts**, never as a box in
+  the service chain. Boxes get implemented as services.
+
+ADR basis: Book I Ch 9 (Bounded Contexts) · Book I Ch 10 Law 1 (single authoritative ownership) · Book III
+Ch 3 (Bounded Context Realization) · CON-0002.
+
 ## Consequences
 
 - **`EDR-INTELLIGENCE-01` Revision 5 (Δ3c) is superseded** in full. S1/S2/S4 are replaced by T9 (Selection with
@@ -362,8 +414,9 @@ ADR basis: ADR-INT-0061 · ADR-INT-0068 · INT-0059 (single provider entry) · B
   output classes, not one).
 - **`EDR-GOVERNANCE-01` D11 is amended** — policy evaluation gains a preceding constitutional stage (T6) and
   stops branching on producer identity (T1).
-- **A new Deterministic Inference layer is introduced** (T5). This is a new architectural layer and requires
-  explicit approval before implementation under the project's standing rules.
+- **Deterministic Inference is introduced as a stage, not a service** (T5 + T11). It needs **no new bounded
+  context and no new deployable** — its first two rules run inside the contexts that already own their
+  evidence. A future **Product Applicability** context is named but deferred until the evidence exists.
 - **The version-range rule moves** out of `internal/intelligence/domain/rule.go` into Deterministic Inference.
   It is currently the only user of the kernel version-range value object outside the AI runtime's own wiring.
   **Precision requirement:** the relocated rule must evaluate the *reconciled, backport-aware* range — not a
@@ -378,17 +431,17 @@ ADR basis: ADR-INT-0061 · ADR-INT-0068 · INT-0059 (single provider entry) · B
 
 ## Open questions (not decided here)
 
-1. **Which context owns the Deterministic Inference layer** — a new bounded context, or a capability of
-   Knowledge (which holds the reconciled ranges the first rules need). *(Projection ownership is no longer
-   open: T10 assigns it to the context owning the Selection Type, following the proven `ReleasePosture`
-   pattern.)*
-2. **Where the trust class is persisted** and how it threads through the existing event contracts
+1. **Where the trust class is persisted** and how it threads through the existing event contracts
    (integration contract v1 froze the current wire shapes).
-3. **Whether "Accepted with Warning" is a new Position state** or a recorded reservation on an ordinary
+2. **Whether "Accepted with Warning" is a new Position state** or a recorded reservation on an ordinary
    acceptance.
-4. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
+3. **The Decision Proposal payload shape** beyond `{finding, stance}` — deferred until a second Decision
    capability exists to define it.
-5. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
+4. **Migration order** for the shipped `recommend_position`, whose behaviour must be preserved throughout.
+
+*Closed since drafting:* **projection ownership** → T10 (the context owning the Selection Type, following the
+proven `ReleasePosture` pattern) · **Deterministic Inference ownership** → T11 (behaviour follows ownership;
+it is a stage inside evidence-owning contexts, never a service).
 
 ## Glossary
 
@@ -400,7 +453,12 @@ ADR basis: ADR-INT-0061 · ADR-INT-0068 · INT-0059 (single provider entry) · B
   (`ReleasePosture`), never for a consumer. It is **authoritative**: Grounding Verification anchors to it.
 - **Capability Context** — the in-memory, **non-persisted** shape a consumer derives from a Domain Projection
   for one capability. A view, not a source; bounded by the four runtime rules (T10).
-- **Deterministic Inference** — the layer executing provable rules over assembled evidence, before AI.
+- **Deterministic Inference** — provable rules executed over assembled evidence, before AI. A **stage**
+  realized inside evidence-owning contexts, **never a deployable service** (T11).
+- **Behaviour follows ownership** — evidence-owning contexts execute inference over the evidence they own; a
+  new bounded context is justified by new authoritative evidence, never by new rules (T11).
+- **Product Applicability** — the *named but not yet created* context that would own what the enterprise
+  builds, ships and enables. It becomes justified when that evidence begins to be collected.
 - **Trust class** — Observed, Asserted, or Inferred; a property of evidence, ordered by risk.
 - **Trust propagation** — a conclusion takes the highest-risk class among its evidence; monotonic.
 - **Information Response** — an ephemeral answer for a human; never enterprise truth.

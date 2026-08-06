@@ -67,10 +67,16 @@ governed. Explanations are disposable; proposals are governed.
 "AI only where reasoning adds value" is not a guideline about taste. It is an ordering:
 
 ```text
-Evidence → Knowledge → Deterministic Inference → System Proposals → Governance
-                                                                         │
-                                                     AI (Decision capabilities) ─┘
-                                                     only where inference could not conclude
+   Evidence  ─────►  Knowledge  ─────►  Governance  ─────►  Communication
+                         ╎                   ╎
+                         ╎ deterministic     ╎ deterministic
+                         ╎ inference over    ╎ inference over
+                         ╎ the evidence      ╎ the evidence
+                         ╎ Knowledge owns    ╎ Governance owns
+                         ╰──── system proposals ──────►  Governance decides
+                                                              ▲
+                             AI (Decision capabilities) ──────╯
+                             only where inference could not conclude
 ```
 
 **Deterministic Inference** executes provable rules over assembled evidence — version-range applicability,
@@ -78,6 +84,10 @@ package-not-shipped, and, as the evidence to support them arrives, feature-disab
 static configuration, platform incompatibility. A provable verdict is a computation, not a reasoning task.
 Routing it through a language model is slower, costlier, less accurate, and unavailable whenever the optional
 AI plane is switched off.
+
+**It is a stage, not a service.** The dotted lines above are stages *inside* contexts; the solid line is the
+deployable pipeline. Each rule executes inside the bounded context that owns the evidence it consumes —
+*behaviour follows ownership*. Inference never justifies a new bounded context; **new evidence does.**
 
 **AI is the last resort for ambiguity, not the first tool for every problem.**
 
@@ -785,7 +795,8 @@ point at which document-retrieval tooling is (re)evaluated.
     governed Decision capability.
 
 12. Deterministic inference precedes AI. AI is the last resort for ambiguity in Decision capabilities, never
-    the first tool.
+    the first tool. Inference is a **stage, not a service** — behaviour follows ownership, and new evidence
+    justifies a bounded context, never new rules.
 
 13. Trust derives from evidence provenance, not from the component that produced the conclusion.
 

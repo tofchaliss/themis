@@ -273,15 +273,17 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 **2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
 audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
 from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as
-**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T10) with coordinated updates to **Book I-adjacent
+**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T11) with coordinated updates to **Book I-adjacent
 vocabulary** (Book II Ch 2 §2.7 + **Domain Invariant 4 — Trust Is Inherited, Never Granted**), **Book III
 Ch 16** (Domain Projections + Deterministic Inference), and **Book IV** (§2.1–2.3 capability classes,
 runtime contract, principles 10–17). `EDR-INTELLIGENCE-01` **Revision 5 is SUPERSEDED** by it the same day.
 
 What changed, in one line each: trust derives from **evidence provenance**, not the producing component ·
 three classes **Observed / Asserted / Inferred**, propagating **monotonically** · **Inferred is
-constitutionally barred from auto-acceptance** · a new **Deterministic Inference** layer runs provable rules
-before AI (the version-range rule **moves out of** the AI runtime) · capabilities are **Information** or
+constitutionally barred from auto-acceptance** · **Deterministic Inference** runs provable rules before AI —
+a **stage, not a service**, executed inside evidence-owning contexts (**behaviour follows ownership**: new
+evidence justifies a context, never new rules), and the version-range rule **moves out of** the AI runtime ·
+capabilities are **Information** or
 **Decision**, and only Decision outputs enter Governance · the context owning a Selection Type produces
 authoritative, business-named **Domain Projections** (`ReleasePosture` is the first — the pattern already
 works) while capability-specific shaping stays **in-memory and unpersisted**, bounding the runtime to **four
@@ -289,11 +291,13 @@ rules** (no orchestration · information-preserving shaping · full provenance �
 rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
 bare finding-id subject.
 
-**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s five open
-questions (projection ownership under no-cross-context-imports; trust-class persistence vs the frozen v1 event
-contracts; "Accepted with Warning"; the Decision Proposal payload; `recommend_position` migration order). The
-new Deterministic Inference layer is a **new architectural layer** and needs explicit approval. The AI-line
-ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of this.
+**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s **four**
+remaining open questions (trust-class persistence vs the frozen v1 event contracts; "Accepted with Warning";
+the Decision Proposal payload; `recommend_position` migration order). Two are now **closed**: projection
+ownership → **T10**, Deterministic Inference ownership → **T11**. Consequently the cut needs **no new bounded
+context and no new deployable** — a future **Product Applicability** context is named but deferred until that
+evidence is collected. The AI-line ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of
+this.
 
 ---
 

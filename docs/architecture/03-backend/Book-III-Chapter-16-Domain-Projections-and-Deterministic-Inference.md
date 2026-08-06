@@ -23,8 +23,10 @@ After reading this chapter, the reader should understand:
 - What a **Domain Projection** is, and which context owns it.
 - Why AI is **just another consumer** of the domain, never a driver of it.
 - The **four rules** that define what the AI Runtime may do.
-- What the **Deterministic Inference** layer is, where it sits, and what
-    it emits.
+- What **Deterministic Inference** is, why it is a **stage rather than a
+    service**, and what it emits.
+- Why **behaviour follows ownership** --- and therefore when a new bounded
+    context is justified at all.
 - What a **Selection** is, and why Selection Types are not domain
     entities.
 - How **evidence trust classes** propagate through the backend.
@@ -174,17 +176,54 @@ four rules. The test is reuse, not convenience.
 
 ------------------------------------------------------------------------
 
-## 16.3 The Deterministic Inference Layer
+## 16.3 Deterministic Inference --- A Stage, Not a Service
 
 **Deterministic Inference** executes provable rules over assembled
-evidence and raises **system proposals** for the conclusions it reaches.
+evidence and raises **system proposals** for the conclusions it reaches,
+before any AI Decision capability runs.
+
+> **It is a stage in the architecture, not a deployable service.** Each
+> rule executes inside the bounded context that owns the evidence it
+> consumes. This is the one misreading this section exists to prevent ---
+> boxes in a service chain get implemented as services.
 
 ```text
-Evidence → Knowledge → Deterministic Inference → System Proposals → Governance
-                                                                         │
-                                                     AI (Decision capabilities) ─┘
-                                                     only where inference could not conclude
+   Evidence  ─────►  Knowledge  ─────►  Governance  ─────►  Communication
+                         ╎                   ╎
+                         ╎ deterministic     ╎ deterministic
+                         ╎ inference over    ╎ inference over
+                         ╎ the evidence      ╎ the evidence
+                         ╎ Knowledge owns    ╎ Governance owns
+                         ╰──── system proposals ──────►  Governance decides
+                                                              ▲
+                             AI (Decision capabilities) ──────╯
+                             only where inference could not conclude
 ```
+
+The dotted lines are stages **inside** contexts. The solid line is the
+deployable pipeline.
+
+### Behaviour follows ownership
+
+- **Evidence-owning bounded contexts execute deterministic inference over
+    the evidence they own.**
+- **Inference never justifies a bounded context; new evidence does.** A
+    new context is created only when a new class of authoritative business
+    evidence requires independent ownership --- never because new rules
+    were introduced.
+
+Themis already does this without having named the rule.
+`FindingService.reactToApplicability` is deterministic inference living in
+Governance --- and it is there for a principled reason, not a convenient
+one: `coveringStatement(f *domain.Finding, …)` needs a **Finding**,
+because *"is release R affected by CVE C?"* is a question about a Finding,
+and Finding is Governance's aggregate.
+
+A separate inference service could not have written that conclusion
+anyway. Contexts collaborate only through events and read-only APIs, so
+it could at best emit an event for Governance to turn into a proposal ---
+which is precisely what Knowledge already does. The service would buy
+nothing and cost a deployment.
 
 Rules at adoption --- both over **Observed** evidence:
 
@@ -193,9 +232,16 @@ Rules at adoption --- both over **Observed** evidence:
 | **Version-range applicability** | Every matched component version is provably outside the reconciled affected range ⇒ not affected |
 | **Package not shipped** | The vulnerable package is absent from the release's inventory ⇒ not affected |
 
-Anticipated as the supporting evidence arrives --- initially **Asserted**:
-feature-disabled, build-time exclusion, static configuration analysis,
-platform incompatibility.
+Anticipated --- initially **Asserted**: feature-disabled, build-time
+exclusion, static configuration analysis, platform incompatibility.
+
+Note what those four have in common: **Themis does not collect their
+evidence.** The gap was never a missing rule engine; it was a missing
+*authority* over what the enterprise builds, ships and enables. That
+authority is the future **Product Applicability** context --- **named but
+not created**. When that evidence begins to be collected it earns a
+context, and its rules arrive with it. Until then, the two adoption rules
+need no new context at all: their evidence already has owners.
 
 ### Rules carry no trust of their own
 
@@ -333,7 +379,11 @@ as a preceding stage it cannot be switched off.
     information-preserving shaping; full provenance; grounding anchors to
     authority.
 - **Deterministic Inference** executes provable rules before AI, raising
-    system proposals. AI is the last resort for ambiguity.
+    system proposals. AI is the last resort for ambiguity. It is a
+    **stage, not a service**.
+- **Behaviour follows ownership.** Evidence-owning contexts run inference
+    over the evidence they own; a new bounded context is justified by new
+    authoritative evidence, never by new rules.
 - **Selection** is the user-addressable entry point: a type plus a set,
     with declared cardinality. Selection Types are entry points, not
     domain entities.

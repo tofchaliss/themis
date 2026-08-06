@@ -225,10 +225,32 @@ a new conclusion rather than a promotion.
 
 ### Deterministic Inference
 
-The layer that executes **provable rules** over assembled evidence and
-raises system proposals for the conclusions it reaches. It runs between
-Knowledge and Governance, and before AI. **Rules carry no trust of their
-own** --- a rule is an algorithm; its conclusion is classed by its inputs.
+**Provable rules** executed over assembled evidence, raising system
+proposals for the conclusions they reach, before any AI Decision
+capability runs.
+
+It is a **stage in the architecture, not a deployable service**. Each
+rule executes inside the bounded context that owns the evidence it
+consumes --- *behaviour follows ownership*.
+
+**Rules carry no trust of their own** --- a rule is an algorithm; its
+conclusion is classed by its inputs.
+
+### Behaviour Follows Ownership
+
+Evidence-owning bounded contexts execute deterministic inference over the
+evidence they own. **Inference never justifies a bounded context; new
+evidence does.** A new context is created only when a new class of
+authoritative business evidence requires independent ownership --- never
+because new rules were introduced.
+
+### Product Applicability
+
+The context that would own what the enterprise **builds, ships and
+enables** --- feature configuration, build-time options, shipped
+configuration, platform bindings. **Named but not created**: it becomes
+justified when Themis begins collecting that evidence, and the rules that
+consume it arrive with it.
 
 ### Selection
 
