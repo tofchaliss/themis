@@ -489,7 +489,7 @@ per-context follow-ups below.
   multiple providers together with clearance policy. **Scope:** minimal local-only gate in Δ2; full
   classification / clearance Δ3+.
 
-- [ ] **G-AI-6 — `NeedFinding` is declared but never consulted; the grounding root is hardcoded.** _(Found in
+- [x] **G-AI-6 — `NeedFinding` is declared but never consulted; the grounding root is hardcoded.** ✅ **CLOSED 2026-08-06** (phase3-trust-model group 9): `app.AssembleContext` is deleted outright — the runtime receives a Domain Projection and gathers nothing (T10), so the half-wired `ContextNeed` mechanism it lived in is gone with it. _(Found in
   the capability-surface audit, 2026-08-06.)_ `domain.NeedFinding` is defined (`domain/capability.go`), listed
   in `RecommendPositionV1().Needs`, and asserted in tests — but `app.AssembleContext` fetches the subject
   Finding **unconditionally** and only branches on `NeedFaultline`. The `ContextNeed` mechanism therefore

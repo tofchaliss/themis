@@ -12,10 +12,7 @@ func TestPromptRendererHappy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPromptRenderer: %v", err)
 	}
-	ac := domain.AssembledContext{
-		Finding:   domain.FindingView{ID: "F1", CVE: "CVE-2024-0001", Components: []string{"pkg:golang/x@1.0.0"}},
-		Faultline: domain.FaultlineView{ID: "FL1", Severity: "high", KEV: true},
-	}
+	ac := domain.AssembledContext{Projection: domain.FindingAssessment{Finding: domain.FindingView{ID: "F1", CVE: "CVE-2024-0001", Components: []string{"pkg:golang/x@1.0.0"}}, Knowledge: domain.FaultlineView{ID: "FL1", Severity: "high", KEV: true}}}
 	out, err := r.Render("recommend_position", ac)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -32,13 +29,9 @@ func TestPromptRendererSemanticPrecedents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPromptRenderer: %v", err)
 	}
-	ac := domain.AssembledContext{
-		Finding:   domain.FindingView{ID: "F1", CVE: "CVE-2026-1", Components: []string{"pkg:golang/openssl"}},
-		Faultline: domain.FaultlineView{ID: "FL1", Severity: "high"},
-		Precedents: []domain.PrecedentPosition{
-			{ReleaseID: "R2", SourceCVE: "CVE-2025-9", Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "unreachable", Score: 0.87},
-		},
-	}
+	ac := domain.AssembledContext{Projection: domain.FindingAssessment{Finding: domain.FindingView{ID: "F1", CVE: "CVE-2026-1", Components: []string{"pkg:golang/openssl"}}, Knowledge: domain.FaultlineView{ID: "FL1", Severity: "high"}}, Precedents: []domain.PrecedentPosition{
+		{ReleaseID: "R2", SourceCVE: "CVE-2025-9", Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "unreachable", Score: 0.87},
+	}}
 	out, err := r.Render("recommend_position", ac)
 	if err != nil {
 		t.Fatalf("Render: %v", err)

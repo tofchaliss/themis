@@ -38,16 +38,10 @@ func (p *precedentSensitiveProvider) Complete(_ context.Context, req app.Complet
 func (p *precedentSensitiveProvider) Name() string  { return "precedent-sensitive-fake" }
 func (p *precedentSensitiveProvider) Model() string { return "fake" }
 
-type stubFindingReader struct{ v domain.FindingView }
+type stubProjectionReader struct{ p domain.FindingAssessment }
 
-func (s stubFindingReader) GetFinding(context.Context, string) (domain.FindingView, error) {
-	return s.v, nil
-}
-
-type stubFaultlineReader struct{ v domain.FaultlineView }
-
-func (s stubFaultlineReader) GetFaultline(context.Context, string) (domain.FaultlineView, error) {
-	return s.v, nil
+func (s stubProjectionReader) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
+	return s.p, nil
 }
 
 func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Embedder) *app.Gateway {
@@ -58,12 +52,14 @@ func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Emb
 	}
 	gw, err := app.NewGateway(app.GatewayConfig{
 		Registry: domain.DefaultRegistry(),
-		Finding: stubFindingReader{v: domain.FindingView{
-			ID: "F1", ReleaseID: "rel-new", FaultlineID: "FL1", CVE: "CVE-2026-NEW",
-			Components: []string{"pkg:golang/openssl"},
+		Projection: stubProjectionReader{p: domain.FindingAssessment{
+			Finding: domain.FindingView{
+				ID: "F1", ReleaseID: "rel-new", FaultlineID: "FL1", CVE: "CVE-2026-NEW",
+				Components: []string{"pkg:golang/openssl"},
+			},
+			Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-NEW", Severity: "high"},
 		}},
-		Faultline: stubFaultlineReader{v: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-NEW", Severity: "high"}},
-		Prompt:    pr,
+		Prompt: pr,
 		Engines: []app.Engine{
 			engine.NewKnowledgeEngine(emb, idx, 5),
 			engine.NewLLMEngine(provider.NewStaticRouter(prov)),

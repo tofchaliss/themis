@@ -7,120 +7,79 @@ import (
 	"testing"
 )
 
-func TestFindingClientHappy(t *testing.T) {
+// The runtime's single grounding read: one business-named Domain Projection, decoded whole.
+// Nothing here composes two responses — that composition is Governance's, which is exactly
+// what stopped the runtime orchestrating (EDR-TRUST-01 T10).
+func TestAssessmentClientHappy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/findings/F1" {
-			t.Errorf("path = %s", r.URL.Path)
+		if r.URL.Path != "/api/v1/findings/F1/assessment" {
+			t.Errorf("path = %s, want the assessment projection", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{
-			"id":"F1","release_id":"R1","faultline_id":"FL1","cve":"CVE-2024-0001","stage":"identified",
-			"components":[{"purl":"pkg:golang/x@1.0.0"},{"purl":""},{"purl":"pkg:npm/y@2.0.0"}]
+			"finding":{"id":"F1","release_id":"R1","faultline_id":"FL1","cve":"CVE-2024-0001","stage":"identified",
+			           "components":[{"purl":"pkg:golang/x@1.0.0"},{"purl":"pkg:npm/y@2.0.0"}]},
+			"knowledge":{"faultline_id":"FL1","cve":"CVE-2024-0001","severity":"high","cvss_score":7.5,
+			             "epss":0.42,"kev":true,"exploit_public":true,
+			             "affected_ranges":["< 2.0"],"fixed_versions":["2.0"]}
 		}`))
 	}))
 	defer srv.Close()
 
-	c := NewFindingClient(srv.URL, srv.Client())
-	fv, err := c.GetFinding(context.Background(), "F1")
+	got, err := NewAssessmentClient(srv.URL, srv.Client()).GetAssessment(context.Background(), "F1")
 	if err != nil {
-		t.Fatalf("GetFinding err: %v", err)
+		t.Fatalf("GetAssessment: %v", err)
 	}
-	if fv.ID != "F1" || fv.FaultlineID != "FL1" || fv.CVE != "CVE-2024-0001" {
-		t.Errorf("unexpected view %+v", fv)
+	if got.Finding.ID != "F1" || got.Finding.FaultlineID != "FL1" || len(got.Finding.Components) != 2 {
+		t.Errorf("finding half = %+v", got.Finding)
 	}
-	if len(fv.Components) != 2 { // empty purl filtered out
-		t.Errorf("components = %v, want 2 non-empty purls", fv.Components)
-	}
-}
-
-func TestFindingClientNotFoundAndErrors(t *testing.T) {
-	notFound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer notFound.Close()
-	c := NewFindingClient(notFound.URL, notFound.Client())
-	if fv, err := c.GetFinding(context.Background(), "missing"); err != nil || fv.ID != "" {
-		t.Errorf("404 → zero view, nil err; got %+v, %v", fv, err)
-	}
-
-	boom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer boom.Close()
-	if _, err := NewFindingClient(boom.URL, boom.Client()).GetFinding(context.Background(), "x"); err == nil {
-		t.Error("500 should error")
-	}
-
-	badJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{not json"))
-	}))
-	defer badJSON.Close()
-	if _, err := NewFindingClient(badJSON.URL, badJSON.Client()).GetFinding(context.Background(), "x"); err == nil {
-		t.Error("bad JSON should error")
-	}
-
-	if _, err := NewFindingClient("http://ex\x00ample", nil).GetFinding(context.Background(), "x"); err == nil {
-		t.Error("bad URL should error")
-	}
-	if _, err := NewFindingClient("http://127.0.0.1:1", &http.Client{}).GetFinding(context.Background(), "x"); err == nil {
-		t.Error("transport error expected")
+	if got.Knowledge.Severity != "high" || !got.Knowledge.KEV || len(got.Knowledge.AffectedRanges) != 1 {
+		t.Errorf("knowledge half = %+v", got.Knowledge)
 	}
 }
 
-func TestFaultlineClientHappy(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/faultlines/FL1" {
-			t.Errorf("path = %s", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{
-			"id":"FL1","cve":"CVE-2024-0001",
-			"view":{"severity":"high","cvss_score":8.1,"epss":0.42,"kev":true,"exploit_public":true,
-				"fixed_versions":["1.2.4"],"affected_ranges":["<1.2.4"]}
-		}`))
+// A projection whose knowledge half is absent still decodes — Governance degrades to the
+// Finding alone when Knowledge is unreachable, and the runtime must carry that through rather
+// than treat it as a failed read. The reasoning then proceeds with less grounding, which is
+// the honest outcome.
+func TestAssessmentClientToleratesMissingKnowledge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"finding":{"id":"F1","faultline_id":"FL1"}}`))
 	}))
 	defer srv.Close()
 
-	c := NewFaultlineClient(srv.URL, srv.Client())
-	fv, err := c.GetFaultline(context.Background(), "FL1")
+	got, err := NewAssessmentClient(srv.URL, srv.Client()).GetAssessment(context.Background(), "F1")
 	if err != nil {
-		t.Fatalf("GetFaultline err: %v", err)
+		t.Fatalf("GetAssessment: %v", err)
 	}
-	if fv.ID != "FL1" || fv.Severity != "high" || !fv.KEV || !fv.ExploitPublic || !fv.FixAvailable() {
-		t.Errorf("unexpected view %+v", fv)
+	if got.Finding.ID != "F1" {
+		t.Errorf("finding half lost: %+v", got.Finding)
 	}
-	if fv.EPSS != 0.42 || fv.CVSSScore != 8.1 {
-		t.Errorf("scores = %v / %v", fv.EPSS, fv.CVSSScore)
+	if got.Knowledge.ID != "" {
+		t.Errorf("knowledge half = %+v, want empty", got.Knowledge)
 	}
 }
 
-func TestFaultlineClientNotFoundAndErrors(t *testing.T) {
+func TestAssessmentClientErrors(t *testing.T) {
 	notFound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer notFound.Close()
-	if fv, err := NewFaultlineClient(notFound.URL, notFound.Client()).GetFaultline(context.Background(), "x"); err != nil || fv.ID != "" {
-		t.Errorf("404 → zero view, nil err; got %+v, %v", fv, err)
-	}
-
-	boom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-	}))
-	defer boom.Close()
-	if _, err := NewFaultlineClient(boom.URL, boom.Client()).GetFaultline(context.Background(), "x"); err == nil {
-		t.Error("502 should error")
+	if _, err := NewAssessmentClient(notFound.URL, notFound.Client()).GetAssessment(context.Background(), "F1"); err == nil {
+		t.Error("a 404 projection must be an error, not an empty grounding")
 	}
 
 	badJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("{nope"))
+		_, _ = w.Write([]byte(`{`))
 	}))
 	defer badJSON.Close()
-	if _, err := NewFaultlineClient(badJSON.URL, badJSON.Client()).GetFaultline(context.Background(), "x"); err == nil {
-		t.Error("bad JSON should error")
+	if _, err := NewAssessmentClient(badJSON.URL, badJSON.Client()).GetAssessment(context.Background(), "F1"); err == nil {
+		t.Error("malformed JSON must error")
 	}
 
-	if _, err := NewFaultlineClient("http://ex\x00ample", nil).GetFaultline(context.Background(), "x"); err == nil {
-		t.Error("bad URL should error")
+	if _, err := NewAssessmentClient("http://127.0.0.1:1", nil).GetAssessment(context.Background(), "F1"); err == nil {
+		t.Error("a transport failure must error")
 	}
-	if _, err := NewFaultlineClient("http://127.0.0.1:1", &http.Client{}).GetFaultline(context.Background(), "x"); err == nil {
-		t.Error("transport error expected")
+	if _, err := NewAssessmentClient("://bad", nil).GetAssessment(context.Background(), "F1"); err == nil {
+		t.Error("a malformed URL must error")
 	}
 }

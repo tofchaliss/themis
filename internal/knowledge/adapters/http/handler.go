@@ -118,6 +118,12 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		Priority:       strptr(v.Priority()),
 		Score:          intptr(v.Score()),
 	}
+	// Omitted when no range evidence contributed — absent reads as "nothing to say", which
+	// is exactly right, and keeps a card with no ranges byte-identical on the wire.
+	if v.RangeTrust != "" {
+		rt := gen.EnterpriseViewRangeTrust(v.RangeTrust)
+		ev.RangeTrust = &rt
+	}
 	apps := make([]gen.Applicability, 0, len(v.Applicabilities))
 	for _, a := range v.Applicabilities {
 		apps = append(apps, gen.Applicability{Package: strptr(a.Package), Status: strptr(a.Status), Justification: strptr(a.Justification)})

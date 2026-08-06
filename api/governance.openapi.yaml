@@ -207,6 +207,29 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/assessment:
+    get:
+      operationId: getFindingAssessment
+      summary: >
+        Domain Projection - everything needed to assess one Finding: the release-scoped
+        concern plus what is known about the CVE it rests on (EDR-TRUST-01 T10). Named for
+        the business view, never for a consumer; a dashboard, a report and the AI Runtime all
+        read the same projection. Deterministic and self-contained, so it replays as a test
+        fixture. The knowledge half is best-effort - an unreachable Knowledge degrades to the
+        Finding alone rather than failing the projection.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingAssessment'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /releases/{releaseId}/posture:
     get:
       operationId: getReleasePosture
@@ -351,6 +374,36 @@ components:
           type: string
         ecosystem:
           type: string
+    FindingAssessment:
+      type: object
+      properties:
+        finding:
+          $ref: '#/components/schemas/FindingView'
+        knowledge:
+          $ref: '#/components/schemas/FaultlineKnowledge'
+    FaultlineKnowledge:
+      type: object
+      description: >
+        What Knowledge knows about the CVE, read over its read API. Absent fields mean the
+        enrichment was unavailable when the projection was built.
+      properties:
+        faultline_id: { type: string }
+        cve: { type: string }
+        severity: { type: string }
+        cvss_score: { type: number }
+        epss: { type: number }
+        kev: { type: boolean }
+        exploit_public: { type: boolean }
+        affected_ranges:
+          type: array
+          items: { type: string }
+        fixed_versions:
+          type: array
+          items: { type: string }
+        range_trust:
+          type: string
+          enum: [observed, asserted, inferred]
+          description: Trust class of the sources contributing the ranges (EDR-TRUST-01 T2/T3).
     PostureEntry:
       type: object
       properties:

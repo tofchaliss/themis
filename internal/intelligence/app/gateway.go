@@ -67,8 +67,7 @@ type Outcome struct {
 type Gateway struct {
 	registry        *domain.Registry
 	validators      map[string]*domain.Validator
-	finding         FindingReader
-	faultline       FaultlineReader
+	projection      ProjectionReader
 	precedent       PrecedentReader // optional (nil = no precedent grounding)
 	authorizer      Authorizer      // optional (nil = allow-all)
 	redactor        Redactor        // optional (nil = no redaction)
@@ -83,8 +82,7 @@ type Gateway struct {
 // Dispatcher; Δ2 wires the Rule engine and the LLM engine.
 type GatewayConfig struct {
 	Registry        *domain.Registry
-	Finding         FindingReader
-	Faultline       FaultlineReader
+	Projection      ProjectionReader
 	Precedent       PrecedentReader // optional richer grounding (Δ2 C6); nil disables it
 	Authorizer      Authorizer      // optional pre-invocation authz (Δ2 C7); nil = allow-all
 	Redactor        Redactor        // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
@@ -122,8 +120,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 	return &Gateway{
 		registry:        cfg.Registry,
 		validators:      validators,
-		finding:         cfg.Finding,
-		faultline:       cfg.Faultline,
+		projection:      cfg.Projection,
 		precedent:       cfg.Precedent,
 		authorizer:      cfg.Authorizer,
 		redactor:        cfg.Redactor,
@@ -176,11 +173,13 @@ func (g *Gateway) Invoke(
 		defer cancel()
 	}
 
-	ac, err := AssembleContext(ctx, g.finding, g.faultline, capb.Needs, subjectFindingID)
-	if err != nil {
+	// Receive the Domain Projection — one read, no composition (T10).
+	proj, err := g.projection.GetAssessment(ctx, subjectFindingID)
+	if err != nil || proj.Finding.ID == "" {
 		oc.Reason = ReasonNoGrounding
 		return domain.Proposal{}, oc
 	}
+	ac := domain.AssembledContext{Projection: proj}
 
 	start := g.now()
 	for _, step := range capb.Plan {
@@ -209,7 +208,7 @@ func (g *Gateway) Invoke(
 		// found none (a cold or incomplete index) — so a rule short-circuit still costs no read,
 		// and a read failure degrades to no precedent, never blocks (C6).
 		if len(ac.Precedents) == 0 && g.precedent != nil {
-			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding.FaultlineID, ac.Finding.ReleaseID); prErr == nil {
+			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding().FaultlineID, ac.Finding().ReleaseID); prErr == nil {
 				ac.Precedents = prec
 			}
 		}

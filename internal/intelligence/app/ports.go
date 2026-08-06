@@ -79,17 +79,22 @@ type PromptRenderer interface {
 	Render(capabilityID string, ctx domain.AssembledContext) (string, error)
 }
 
-// FindingReader is a Knowledge Provider (D5): reads the subject Finding from
-// Governance's read API. It decodes wire JSON into the domain's own view type — no
-// cross-context import.
-type FindingReader interface {
-	GetFinding(ctx context.Context, findingID string) (domain.FindingView, error)
-}
-
-// FaultlineReader is a Knowledge Provider (D5): reads a Faultline's enrichment from
-// Knowledge's read API into the domain's own view type.
-type FaultlineReader interface {
-	GetFaultline(ctx context.Context, faultlineID string) (domain.FaultlineView, error)
+// ProjectionReader fetches the Domain Projection for a Selection (EDR-TRUST-01 T10).
+//
+// It is the runtime's ONLY business read, and it composes nothing: one business-named
+// projection, fetched by id, produced by the context that owns the Selection Type. The
+// runtime does not know which contexts contributed to it, does not orchestrate across them,
+// and issues no follow-up reads to complete it.
+//
+// Precision on rule 1 ("the runtime never gathers"): what that forbids is the runtime
+// participating in business orchestration — composing several contexts, or asking for a
+// capability-shaped bundle, either of which moves part of the capability definition into the
+// runtime. Fetching a **business-named** projection moves nothing: `FindingAssessment` is
+// what a dashboard or a report reads too. The naming rule is what makes this distinction
+// real rather than a loophole — a `recommend_position_context` endpoint would have been the
+// violation.
+type ProjectionReader interface {
+	GetAssessment(ctx context.Context, findingID string) (domain.FindingAssessment, error)
 }
 
 // PrecedentReader is a Knowledge Provider (D5, Δ2 C6): reads our own past Enterprise

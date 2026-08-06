@@ -20,18 +20,39 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for FaultlineKnowledgeRangeTrust.
+const (
+	FaultlineKnowledgeRangeTrustAsserted FaultlineKnowledgeRangeTrust = "asserted"
+	FaultlineKnowledgeRangeTrustInferred FaultlineKnowledgeRangeTrust = "inferred"
+	FaultlineKnowledgeRangeTrustObserved FaultlineKnowledgeRangeTrust = "observed"
+)
+
+// Valid indicates whether the value is a known member of the FaultlineKnowledgeRangeTrust enum.
+func (e FaultlineKnowledgeRangeTrust) Valid() bool {
+	switch e {
+	case FaultlineKnowledgeRangeTrustAsserted:
+		return true
+	case FaultlineKnowledgeRangeTrustInferred:
+		return true
+	case FaultlineKnowledgeRangeTrustObserved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostureEntryReservation.
 const (
-	Asserted PostureEntryReservation = "asserted"
-	Inferred PostureEntryReservation = "inferred"
+	PostureEntryReservationAsserted PostureEntryReservation = "asserted"
+	PostureEntryReservationInferred PostureEntryReservation = "inferred"
 )
 
 // Valid indicates whether the value is a known member of the PostureEntryReservation enum.
 func (e PostureEntryReservation) Valid() bool {
 	switch e {
-	case Asserted:
+	case PostureEntryReservationAsserted:
 		return true
-	case Inferred:
+	case PostureEntryReservationInferred:
 		return true
 	default:
 		return false
@@ -52,6 +73,33 @@ type DecisionRequest struct {
 
 	// ActorKind human (default). Only a human decider is accepted via the API.
 	ActorKind *string `json:"actor_kind,omitempty"`
+}
+
+// FaultlineKnowledge What Knowledge knows about the CVE, read over its read API. Absent fields mean the enrichment was unavailable when the projection was built.
+type FaultlineKnowledge struct {
+	AffectedRanges *[]string `json:"affected_ranges,omitempty"`
+	Cve            *string   `json:"cve,omitempty"`
+	CvssScore      *float32  `json:"cvss_score,omitempty"`
+	Epss           *float32  `json:"epss,omitempty"`
+	ExploitPublic  *bool     `json:"exploit_public,omitempty"`
+	FaultlineId    *string   `json:"faultline_id,omitempty"`
+	FixedVersions  *[]string `json:"fixed_versions,omitempty"`
+	Kev            *bool     `json:"kev,omitempty"`
+
+	// RangeTrust Trust class of the sources contributing the ranges (EDR-TRUST-01 T2/T3).
+	RangeTrust *FaultlineKnowledgeRangeTrust `json:"range_trust,omitempty"`
+	Severity   *string                       `json:"severity,omitempty"`
+}
+
+// FaultlineKnowledgeRangeTrust Trust class of the sources contributing the ranges (EDR-TRUST-01 T2/T3).
+type FaultlineKnowledgeRangeTrust string
+
+// FindingAssessment defines model for FindingAssessment.
+type FindingAssessment struct {
+	Finding *FindingView `json:"finding,omitempty"`
+
+	// Knowledge What Knowledge knows about the CVE, read over its read API. Absent fields mean the enrichment was unavailable when the projection was built.
+	Knowledge *FaultlineKnowledge `json:"knowledge,omitempty"`
 }
 
 // FindingView defines model for FindingView.
@@ -177,6 +225,9 @@ type ServerInterface interface {
 	// Archive a Finding (terminal — release retired).
 	// (POST /findings/{id}/archive)
 	ArchiveFinding(w http.ResponseWriter, r *http.Request, id FindingId)
+	// Domain Projection - everything needed to assess one Finding: the release-scoped concern plus what is known about the CVE it rests on (EDR-TRUST-01 T10). Named for the business view, never for a consumer; a dashboard, a report and the AI Runtime all read the same projection. Deterministic and self-contained, so it replays as a test fixture. The knowledge half is best-effort - an unreachable Knowledge degrades to the Finding alone rather than failing the projection.
+	// (GET /findings/{id}/assessment)
+	GetFindingAssessment(w http.ResponseWriter, r *http.Request, id FindingId)
 	// Get a Finding's current (or a specific) Enterprise Position version.
 	// (GET /findings/{id}/position)
 	GetPosition(w http.ResponseWriter, r *http.Request, id FindingId, params GetPositionParams)
@@ -228,6 +279,12 @@ func (_ Unimplemented) GetFinding(w http.ResponseWriter, r *http.Request, id Fin
 // Archive a Finding (terminal — release retired).
 // (POST /findings/{id}/archive)
 func (_ Unimplemented) ArchiveFinding(w http.ResponseWriter, r *http.Request, id FindingId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Domain Projection - everything needed to assess one Finding: the release-scoped concern plus what is known about the CVE it rests on (EDR-TRUST-01 T10). Named for the business view, never for a consumer; a dashboard, a report and the AI Runtime all read the same projection. Deterministic and self-contained, so it replays as a test fixture. The knowledge half is best-effort - an unreachable Knowledge degrades to the Finding alone rather than failing the projection.
+// (GET /findings/{id}/assessment)
+func (_ Unimplemented) GetFindingAssessment(w http.ResponseWriter, r *http.Request, id FindingId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -403,6 +460,32 @@ func (siw *ServerInterfaceWrapper) ArchiveFinding(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveFinding(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFindingAssessment operation middleware
+func (siw *ServerInterfaceWrapper) GetFindingAssessment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id FindingId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFindingAssessment(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -780,6 +863,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/findings/{id}/archive", wrapper.ArchiveFinding)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/findings/{id}/assessment", wrapper.GetFindingAssessment)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/findings/{id}/position", wrapper.GetPosition)
 	})
 	r.Group(func(r chi.Router) {
@@ -812,42 +898,49 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"cRTEpGDx6iTY3G7+FwAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

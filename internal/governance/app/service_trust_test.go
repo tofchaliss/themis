@@ -304,3 +304,63 @@ func TestReactToVersionRange_ProposalBuildFailurePropagates(t *testing.T) {
 		t.Error("zero-clock proposal build in the version-range path must error")
 	}
 }
+
+// --- FindingAssessment Domain Projection (EDR-TRUST-01 T10) ---------------------------
+
+type stubKnowledge struct {
+	k   app.FaultlineKnowledge
+	err error
+}
+
+func (s stubKnowledge) GetFaultline(context.Context, string) (app.FaultlineKnowledge, error) {
+	return s.k, s.err
+}
+
+func TestGetFindingAssessment(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+	known := app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: "high", KEV: true}
+
+	t.Run("composes the finding with what Knowledge knows", func(t *testing.T) {
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+		got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+		if err != nil {
+			t.Fatalf("assessment: %v", err)
+		}
+		if got.Finding.ID() != "fnd-1" || got.Knowledge.Severity != "high" || !got.Knowledge.KEV {
+			t.Errorf("assessment = %+v", got)
+		}
+	})
+
+	// Best-effort by design: an unreachable Knowledge degrades the VIEW, never the request.
+	// Failing outright would make a Knowledge outage look like a missing Finding.
+	t.Run("degrades to the finding alone when Knowledge is down", func(t *testing.T) {
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0).
+			WithKnowledge(stubKnowledge{err: errors.New("knowledge down")})
+		got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+		if err != nil {
+			t.Fatalf("a Knowledge outage must not fail the projection: %v", err)
+		}
+		if got.Finding.ID() != "fnd-1" {
+			t.Errorf("finding half lost: %+v", got.Finding)
+		}
+		if got.Knowledge.FaultlineID != "" {
+			t.Errorf("knowledge half = %+v, want empty so a consumer can tell", got.Knowledge)
+		}
+	})
+
+	t.Run("no Knowledge seam wired", func(t *testing.T) {
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0)
+		got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+		if err != nil || got.Finding.ID() != "fnd-1" {
+			t.Errorf("assessment = %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("an unknown finding is an error", func(t *testing.T) {
+		read := app.NewReadService(newRepo(), fakeProjection{}, nil, 0)
+		if _, err := read.GetFindingAssessment(context.Background(), "nope"); err == nil {
+			t.Error("expected an error for an unknown Finding")
+		}
+	})
+}

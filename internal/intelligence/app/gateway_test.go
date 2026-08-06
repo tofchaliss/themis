@@ -57,9 +57,22 @@ func (e *fakeEngine) Execute(_ context.Context, in ExecInput) (EngineResult, err
 	return EngineResult{Raw: r.raw, Provider: "fakeprov", Model: "fakemodel", TokensUsed: 5}, nil
 }
 
-func groundedReaders() (fakeFindingReader, fakeFaultlineReader) {
-	return fakeFindingReader{view: domain.FindingView{ID: "F1", FaultlineID: "FL1"}},
-		fakeFaultlineReader{view: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"}}
+// fakeProjection stands in for Governance's FindingAssessment Domain Projection. The runtime
+// receives it whole — there is nothing here for the gateway to compose.
+type fakeProjection struct {
+	proj domain.FindingAssessment
+	err  error
+}
+
+func (f fakeProjection) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
+	return f.proj, f.err
+}
+
+func groundedProjection() fakeProjection {
+	return fakeProjection{proj: domain.FindingAssessment{
+		Finding:   domain.FindingView{ID: "F1", FaultlineID: "FL1"},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"},
+	}}
 }
 
 // customCap builds a valid ad-hoc capability (minimal schema, grounded needs) for
@@ -80,8 +93,8 @@ func customCap(id string, plan domain.ExecutionPlan) domain.Capability {
 
 func gatewayWith(t *testing.T, reg *domain.Registry, engines ...Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
-	g, err := NewGateway(GatewayConfig{Registry: reg, Finding: fr, Faultline: flr, Prompt: fakePrompt{}, Engines: engines})
+	proj := groundedProjection()
+	g, err := NewGateway(GatewayConfig{Registry: reg, Projection: proj, Prompt: fakePrompt{}, Engines: engines})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
@@ -92,9 +105,9 @@ func gatewayWith(t *testing.T, reg *domain.Registry, engines ...Engine) *Gateway
 // default [Rule → LLM] plan falls through to the LLM (the Δ1 behaviour under test).
 func newTestGateway(t *testing.T, prompt PromptRenderer, llm Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: prompt, Engines: []Engine{llm},
 	})
 	if err != nil {
@@ -111,10 +124,10 @@ func TestNewGatewayInvalidSchema(t *testing.T) {
 }
 
 func TestNewGatewayCustomClock(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	fixed := time.Unix(0, 0)
 	_, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 		Now: func() time.Time { return fixed },
 	})
@@ -133,11 +146,10 @@ func TestInvokeUnknownCapability(t *testing.T) {
 
 func TestInvokeNoGrounding(t *testing.T) {
 	g, err := NewGateway(GatewayConfig{
-		Registry:  domain.DefaultRegistry(),
-		Finding:   fakeFindingReader{view: domain.FindingView{}}, // empty ID = not found
-		Faultline: fakeFaultlineReader{},
-		Prompt:    fakePrompt{},
-		Engines:   []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
+		Registry:   domain.DefaultRegistry(),
+		Projection: fakeProjection{}, // empty projection = not found
+		Prompt:     fakePrompt{},
+		Engines:    []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -221,10 +233,10 @@ func TestInvokeHappy(t *testing.T) {
 }
 
 func TestInvokeRunawayPromptGuard(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fixedPrompt{s: strings.Repeat("x", 100)}, Engines: []Engine{llm},
 		MaxPromptBytes: 10,
 	})
@@ -302,9 +314,9 @@ func (p *fakePrecedent) GetPrecedents(_ context.Context, fl, excl string) ([]dom
 
 func gatewayWithPrecedent(t *testing.T, prompt PromptRenderer, prec PrecedentReader, engines ...Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Precedent: prec, Prompt: prompt, Engines: engines,
 	})
 	if err != nil {
@@ -365,9 +377,9 @@ func (e *fakeKnowledgeEngine) Execute(_ context.Context, _ ExecInput) (EngineRes
 
 func gatewayRuleKnowledgeLLM(t *testing.T, prompt PromptRenderer, prec PrecedentReader, know Engine, llm Engine) *Gateway {
 	t.Helper()
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Precedent: prec, Prompt: prompt, Engines: []Engine{know, llm},
 	})
 	if err != nil {
@@ -466,10 +478,10 @@ type tagRedactor struct{}
 func (tagRedactor) Redact(s string) string { return "REDACTED:" + s }
 
 func TestInvokeUnauthorized(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fakePrompt{}, Engines: []Engine{llm},
 		Authorizer: denyAuthorizer{err: errors.New("forbidden")},
 	})
@@ -486,9 +498,9 @@ func TestInvokeUnauthorized(t *testing.T) {
 }
 
 func TestInvokeAuthorizedAllows(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
 		Authorizer: denyAuthorizer{err: nil}, // allows
 	})
@@ -501,10 +513,10 @@ func TestInvokeAuthorizedAllows(t *testing.T) {
 }
 
 func TestInvokeRedactsPromptAndBindsLocalOnly(t *testing.T) {
-	fr, flr := groundedReaders()
+	proj := groundedProjection()
 	llm := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
 	g, err := NewGateway(GatewayConfig{
-		Registry: domain.DefaultRegistry(), Finding: fr, Faultline: flr,
+		Registry: domain.DefaultRegistry(), Projection: proj,
 		Prompt: fakePrompt{}, Engines: []Engine{llm},
 		Redactor: tagRedactor{},
 	})

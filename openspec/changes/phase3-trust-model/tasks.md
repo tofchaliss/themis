@@ -255,19 +255,42 @@
 
 ## 9. Domain Projections; the runtime stops gathering (T10)
 
-- [ ] 9.1 Recognize `ReleasePosture` as the first **Domain Projection**; document the naming rule (business
-  view, never a consumer) beside it.
-- [ ] 9.2 Add the projection(s) `recommend_position` needs, owned by the context owning the Selection Type,
-  assembled **only** from events and read-only APIs. **Serve them before 9.3.**
-- [ ] 9.3 Delete `intelligence/app/context.go` (`AssembleContext`) — closing backlog **G-AI-6**, the dead
-  `NeedFinding`, with it. The runtime issues **no business reads**.
-- [ ] 9.4 Implement the four rules: no orchestration · information-preserving shaping (nothing introduced
+- [x] 9.1 Recognize `ReleasePosture` as the first **Domain Projection**; document the naming rule (business
+  view, never a consumer) beside it. — done in group 5's reservation join and reiterated on the new
+  projection. `FindingAssessment` follows the same pattern: own aggregate + one read-API call, fail-safe.
+- [x] 9.2 Add the projection(s) `recommend_position` needs, owned by the context owning the Selection Type,
+  assembled **only** from events and read-only APIs. **Serve them before 9.3.** —
+  `GET /findings/{id}/assessment` → `FindingAssessment`, served by **Governance** (owner of the Finding
+  Selection Type), composing its own aggregate with Knowledge's read API via a new ACL client. Named for the
+  **business view**: a dashboard rendering a finding-detail page wants exactly this. Naming it
+  `recommend_position_context` would have guaranteed it was never reused — and would have let AI drive the
+  domain model. The Knowledge half is **best-effort**: an outage degrades the view, never the request, and
+  the half is **omitted rather than zeroed** so a consumer can tell an outage from "no enrichment".
+- [x] 9.3 Delete `intelligence/app/context.go` (`AssembleContext`) — closing backlog **G-AI-6**, the dead
+  `NeedFinding`, with it. The runtime issues **no business reads**. — deleted; **G-AI-6 closed**. The
+  population consumer collapsed from two gathering reads to the same one projection, so the KS2 path is now
+  another consumer of the same business view rather than a second orchestrator.
+- [x] 9.4 Implement the four rules: no orchestration · information-preserving shaping (nothing introduced
   that the projection did not contain) · full provenance · **Grounding Verification anchors to the received
-  Domain Projection, never solely to a shaped view**.
-- [ ] 9.5 Test that a shaped view cannot launder an invented identifier past Grounding Verification.
-- [ ] 9.6 Replayability test: a capability runs end-to-end from a **recorded projection fixture**, no live
-  database.
-- [ ] 9.7 Gate: `make check-ci` + `make e2e-pipeline` green.
+  Domain Projection, never solely to a shaped view**. — made **structural, not conventional**:
+  `domain.FindingAssessment` (the received projection) owns `Grounds`, and `AssembledContext` (the shaped
+  Capability Context) **delegates** to it. A shaping bug therefore cannot widen what counts as grounded.
+  Precision recorded on the `ProjectionReader` port: rule 1 forbids *orchestration* — composing contexts or
+  requesting a capability-shaped bundle — and fetching one **business-named** projection moves no capability
+  definition into the runtime. The naming rule is what makes that a distinction rather than a loophole.
+- [x] 9.5 Test that a shaped view cannot launder an invented identifier past Grounding Verification. —
+  `TestGroundsAnchorsToTheProjectionNotTheShapedView`: retrieved precedents (a *different* CVE, a component
+  the projection never mentioned) are explicitly **not** grounded, so a model citing one is caught. Plus an
+  empty projection grounds nothing — a failed read must never read as a licence to hallucinate freely.
+- [x] 9.6 Replayability test: a capability runs end-to-end from a **recorded projection fixture**, no live
+  database. — `TestE2EReplaysFromARecordedProjectionFixture`: a JSON blob → the real client decode path →
+  gateway → grounding verification, with no database, no Governance, no Knowledge, no bus. That is the payoff
+  for gathering nothing: reproducing a reasoning failure now means pasting one document, not reproducing two
+  services' states.
+- [x] 9.7 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0. New package
+  `governance/adapters/knowledge` **registered in `scripts/check-coverage.sh`** (adapters tier) rather than
+  left unchecked. **`make e2e-pipeline` caught a caller the sweep missed** — `tests/pipeline` lives outside
+  `internal/`, which is exactly why it is a separate gate.
 
 ## 10. Capability classes and the verification split (T7 · T8)
 

@@ -60,6 +60,17 @@ type ReadService struct {
 	proj     ProjectionReader
 	blast    BlastRadiusReader // may be nil — the multiplier then defaults to 1.0 (fail-safe)
 	blastCap int               // unique-customer count at which the multiplier saturates (C2, configurable)
+	// knowledge may be nil — the FindingAssessment projection then carries the Finding alone
+	// (single-context dev, or a Knowledge outage). Best-effort by design (T10).
+	knowledge FaultlineKnowledgeReader
+}
+
+// WithKnowledge wires the optional Knowledge read seam used by the FindingAssessment
+// projection and returns the service for chaining. Kept separate from the constructor so
+// every existing caller is unaffected.
+func (s *ReadService) WithKnowledge(k FaultlineKnowledgeReader) *ReadService {
+	s.knowledge = k
+	return s
 }
 
 // NewReadService wires the aggregate repository, the projection store, the blast-radius reader

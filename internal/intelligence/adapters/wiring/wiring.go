@@ -61,8 +61,10 @@ type Intelligence struct {
 // Wire assembles the Gateway. It returns an error only if a capability's output schema fails
 // to compile (a programming error).
 func Wire(cfg Config) (Intelligence, error) {
-	fr := readapi.NewFindingClient(cfg.GovernanceURL, cfg.HTTPClient)
-	flr := readapi.NewFaultlineClient(cfg.KnowledgeURL, cfg.HTTPClient)
+	// One projection read, from the context that owns the Finding Selection Type (T10).
+	// KnowledgeURL is no longer read by the runtime at all — Governance composes the
+	// enrichment into the projection, which is what stopped the runtime orchestrating.
+	proj := readapi.NewAssessmentClient(cfg.GovernanceURL, cfg.HTTPClient)
 	prc := readapi.NewPrecedentClient(cfg.GovernanceURL, cfg.HTTPClient)
 
 	var prov app.Provider
@@ -89,7 +91,7 @@ func Wire(cfg Config) (Intelligence, error) {
 		}
 		idx = index.NewMemory()
 		engines = append(engines, engine.NewKnowledgeEngine(emb, idx, cfg.TopK))
-		consumer = inbound.NewConsumer(fr, flr, prc, emb, cfg.Store, idx)
+		consumer = inbound.NewConsumer(proj, prc, emb, cfg.Store, idx)
 	}
 
 	pr, err := engine.NewPromptRenderer()
@@ -97,13 +99,12 @@ func Wire(cfg Config) (Intelligence, error) {
 		return Intelligence{}, err
 	}
 	gw, err := app.NewGateway(app.GatewayConfig{
-		Registry:  domain.DefaultRegistry(),
-		Finding:   fr,
-		Faultline: flr,
-		Precedent: prc,
-		Redactor:  admission.NewBasicRedactor(), // C7 secret/PII scrub (authorizer = deployment seam)
-		Prompt:    pr,
-		Engines:   engines,
+		Registry:   domain.DefaultRegistry(),
+		Projection: proj,
+		Precedent:  prc,
+		Redactor:   admission.NewBasicRedactor(), // C7 secret/PII scrub (authorizer = deployment seam)
+		Prompt:     pr,
+		Engines:    engines,
 	})
 	if err != nil {
 		return Intelligence{}, err

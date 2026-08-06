@@ -38,7 +38,7 @@ func (e *KnowledgeEngine) Kind() domain.EngineKind { return domain.EngineKnowled
 // returns no precedent (nil), never an error — a missing precedent must not block the
 // recommendation (the same degrade-to-none contract as the Δ2 exact-CVE precedent pull).
 func (e *KnowledgeEngine) Execute(ctx context.Context, in app.ExecInput) (app.EngineResult, error) {
-	text := embed.SubjectText(in.Context.Faultline.Severity, in.Context.Finding.Components)
+	text := embed.SubjectText(in.Context.Faultline().Severity, in.Context.Finding().Components)
 	if text == "" {
 		return app.EngineResult{}, nil
 	}
@@ -46,5 +46,5 @@ func (e *KnowledgeEngine) Execute(ctx context.Context, in app.ExecInput) (app.En
 	if err != nil {
 		return app.EngineResult{}, nil
 	}
-	return app.EngineResult{Precedents: e.index.Search(vec, e.topK, in.Context.Finding.ReleaseID)}, nil
+	return app.EngineResult{Precedents: e.index.Search(vec, e.topK, in.Context.Finding().ReleaseID)}, nil
 }

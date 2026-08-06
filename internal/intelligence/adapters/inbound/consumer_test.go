@@ -14,22 +14,15 @@ import (
 
 // --- stubs -------------------------------------------------------------------------------
 
-type stubFinding struct {
-	v   domain.FindingView
+// stubProjection stands in for Governance's FindingAssessment. The population path is just
+// another consumer of the same business view the reasoning path reads.
+type stubProjection struct {
+	p   domain.FindingAssessment
 	err error
 }
 
-func (s stubFinding) GetFinding(context.Context, string) (domain.FindingView, error) {
-	return s.v, s.err
-}
-
-type stubFaultline struct {
-	v   domain.FaultlineView
-	err error
-}
-
-func (s stubFaultline) GetFaultline(context.Context, string) (domain.FaultlineView, error) {
-	return s.v, s.err
+func (s stubProjection) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
+	return s.p, s.err
 }
 
 type stubPosition struct {
@@ -77,10 +70,18 @@ func positionEnv(typ, findingID, release, faultline, cve, stance string) event.E
 	return event.Envelope{ID: "env-" + findingID, Type: typ, Payload: payload}
 }
 
-func newConsumer(f stubFinding, fl stubFaultline, p stubPosition, e stubEmbedder) (*inbound.Consumer, *captureStore, *captureIndex) {
+func newConsumer(pr stubProjection, p stubPosition, e stubEmbedder) (*inbound.Consumer, *captureStore, *captureIndex) {
 	st, idx := &captureStore{}, &captureIndex{}
-	c := inbound.NewConsumer(f, fl, p, e, st, idx)
+	c := inbound.NewConsumer(pr, p, e, st, idx)
 	return c, st, idx
+}
+
+// projOf builds a projection stub from the two halves the tests care about.
+func projOf(components []string, severity string) stubProjection {
+	return stubProjection{p: domain.FindingAssessment{
+		Finding:   domain.FindingView{Components: components},
+		Knowledge: domain.FaultlineView{Severity: severity},
+	}}
 }
 
 // --- tests -------------------------------------------------------------------------------
@@ -100,8 +101,7 @@ func TestSubscription(t *testing.T) {
 
 func TestPrepareHappyPathUpsertsStoreAndIndex(t *testing.T) {
 	c, st, idx := newConsumer(
-		stubFinding{v: domain.FindingView{Components: []string{"pkg:golang/openssl", "pkg:golang/x"}}},
-		stubFaultline{v: domain.FaultlineView{Severity: "high"}},
+		projOf([]string{"pkg:golang/openssl", "pkg:golang/x"}, "high"),
 		stubPosition{stance: "not_affected", rationale: "not reachable", found: true},
 		stubEmbedder{vec: []float32{0.1, 0.2, 0.3}},
 	)
@@ -142,8 +142,7 @@ func TestPrepareHappyPathUpsertsStoreAndIndex(t *testing.T) {
 func TestPrepareEmptyTextClaimsAndSkips(t *testing.T) {
 	// No components AND no severity → empty embed text → nothing to embed.
 	c, st, idx := newConsumer(
-		stubFinding{v: domain.FindingView{}},
-		stubFaultline{v: domain.FaultlineView{}},
+		projOf(nil, ""),
 		stubPosition{found: true},
 		stubEmbedder{vec: []float32{1}},
 	)
@@ -165,23 +164,22 @@ func TestPrepareEmptyTextClaimsAndSkips(t *testing.T) {
 
 func TestPrepareRetriesOnTransientErrors(t *testing.T) {
 	env := positionEnv("governance.position_revised", "f1", "rel-1", "fl-1", "CVE-1", "affected")
-	good := domain.FindingView{Components: []string{"pkg:golang/openssl"}}
+	good := projOf([]string{"pkg:golang/openssl"}, "high")
 
 	cases := []struct {
 		name string
-		f    stubFinding
-		fl   stubFaultline
+		pr   stubProjection
 		p    stubPosition
 		e    stubEmbedder
 	}{
-		{"finding read", stubFinding{err: errors.New("gov down")}, stubFaultline{}, stubPosition{found: true}, stubEmbedder{vec: []float32{1}}},
-		{"faultline read", stubFinding{v: good}, stubFaultline{err: errors.New("knowledge down")}, stubPosition{found: true}, stubEmbedder{vec: []float32{1}}},
-		{"embed", stubFinding{v: good}, stubFaultline{v: domain.FaultlineView{Severity: "high"}}, stubPosition{found: true}, stubEmbedder{err: errors.New("ollama down")}},
-		{"position read", stubFinding{v: good}, stubFaultline{v: domain.FaultlineView{Severity: "high"}}, stubPosition{err: errors.New("gov down")}, stubEmbedder{vec: []float32{1}}},
+		// One projection read replaces the two that used to fail independently.
+		{"projection read", stubProjection{err: errors.New("gov down")}, stubPosition{found: true}, stubEmbedder{vec: []float32{1}}},
+		{"embed", good, stubPosition{found: true}, stubEmbedder{err: errors.New("ollama down")}},
+		{"position read", good, stubPosition{err: errors.New("gov down")}, stubEmbedder{vec: []float32{1}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, _, _ := newConsumer(tc.f, tc.fl, tc.p, tc.e)
+			c, _, _ := newConsumer(tc.pr, tc.p, tc.e)
 			apply, err := c.Prepare(context.Background(), env)
 			if err == nil {
 				t.Fatalf("expected a retryable error for %s", tc.name)
@@ -194,7 +192,7 @@ func TestPrepareRetriesOnTransientErrors(t *testing.T) {
 }
 
 func TestPrepareBadPayload(t *testing.T) {
-	c, _, _ := newConsumer(stubFinding{}, stubFaultline{}, stubPosition{}, stubEmbedder{})
+	c, _, _ := newConsumer(stubProjection{}, stubPosition{}, stubEmbedder{})
 	env := event.Envelope{ID: "e", Type: "governance.position_established", Payload: []byte("not json")}
 	if _, err := c.Prepare(context.Background(), env); err == nil {
 		t.Fatal("expected an error for a malformed payload")
@@ -202,7 +200,7 @@ func TestPrepareBadPayload(t *testing.T) {
 }
 
 func TestPrepareIgnoresNonPositionType(t *testing.T) {
-	c, _, _ := newConsumer(stubFinding{}, stubFaultline{}, stubPosition{}, stubEmbedder{})
+	c, _, _ := newConsumer(stubProjection{}, stubPosition{}, stubEmbedder{})
 	apply, err := c.Prepare(context.Background(),
 		event.Envelope{ID: "e", Type: "governance.finding_opened", Payload: []byte("{}")})
 	if err != nil || apply != nil {
@@ -212,8 +210,7 @@ func TestPrepareIgnoresNonPositionType(t *testing.T) {
 
 func TestHandleFallbackUpserts(t *testing.T) {
 	c, st, idx := newConsumer(
-		stubFinding{v: domain.FindingView{Components: []string{"pkg:golang/openssl"}}},
-		stubFaultline{v: domain.FaultlineView{Severity: "high"}},
+		projOf([]string{"pkg:golang/openssl"}, "high"),
 		stubPosition{stance: "affected", rationale: "reachable", found: true},
 		stubEmbedder{vec: []float32{1, 0}},
 	)
@@ -230,7 +227,7 @@ func TestHandleFallbackUpserts(t *testing.T) {
 }
 
 func TestHandleIgnoresNonPositionAndBadPayload(t *testing.T) {
-	c, st, _ := newConsumer(stubFinding{}, stubFaultline{}, stubPosition{}, stubEmbedder{})
+	c, st, _ := newConsumer(stubProjection{}, stubPosition{}, stubEmbedder{})
 	if err := c.Handle(context.Background(),
 		event.Envelope{ID: "e", Type: "governance.finding_opened", Payload: []byte("{}")}); err != nil {
 		t.Fatalf("non-position: %v", err)
@@ -246,8 +243,7 @@ func TestHandleIgnoresNonPositionAndBadPayload(t *testing.T) {
 
 func TestHandleStoreErrorPropagates(t *testing.T) {
 	c := inbound.NewConsumer(
-		stubFinding{v: domain.FindingView{Components: []string{"pkg:golang/openssl"}}},
-		stubFaultline{v: domain.FaultlineView{Severity: "high"}},
+		projOf([]string{"pkg:golang/openssl"}, "high"),
 		stubPosition{found: true},
 		stubEmbedder{vec: []float32{1}},
 		&captureStore{err: errors.New("db down")},

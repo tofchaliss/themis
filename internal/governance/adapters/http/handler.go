@@ -46,6 +46,43 @@ func (h *Handler) GetFinding(w http.ResponseWriter, r *http.Request, id string) 
 	writeJSON(w, http.StatusOK, toFindingView(f))
 }
 
+// GetFindingAssessment handles GET /findings/{id}/assessment — the FindingAssessment Domain
+// Projection (EDR-TRUST-01 T10).
+func (h *Handler) GetFindingAssessment(w http.ResponseWriter, r *http.Request, id string) {
+	a, err := h.read.GetFindingAssessment(r.Context(), domain.FindingID(id))
+	if err != nil {
+		writeErr(w, "cannot read finding assessment", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toFindingAssessment(a))
+}
+
+// toFindingAssessment maps the projection onto the wire. The knowledge half is omitted when
+// it is absent, so a consumer can tell "Knowledge was unreachable" from "the CVE has no
+// enrichment" — collapsing both into zero values would hide an outage.
+func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
+	view := toFindingView(a.Finding)
+	out := gen.FindingAssessment{Finding: &view}
+	k := a.Knowledge
+	if k.FaultlineID == "" {
+		return out
+	}
+	ranges, fixes := k.AffectedRanges, k.FixedVersions
+	kev, pub := k.KEV, k.ExploitPublic
+	cvss, epss := float32(k.CVSSScore), float32(k.EPSS)
+	kn := gen.FaultlineKnowledge{
+		FaultlineId: strptr(k.FaultlineID), Cve: strptr(k.CVE), Severity: strptr(k.Severity),
+		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
+		AffectedRanges: &ranges, FixedVersions: &fixes,
+	}
+	if k.RangeTrust != "" {
+		rt := gen.FaultlineKnowledgeRangeTrust(k.RangeTrust)
+		kn.RangeTrust = &rt
+	}
+	out.Knowledge = &kn
+	return out
+}
+
 // GetFindingByKey handles GET /findings?release=&faultline=.
 func (h *Handler) GetFindingByKey(w http.ResponseWriter, r *http.Request, params gen.GetFindingByKeyParams) {
 	f, found, err := h.read.GetFindingByKey(r.Context(), params.Release, params.Faultline)
