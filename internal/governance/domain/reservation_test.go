@@ -130,3 +130,29 @@ func TestCurrentReservation_MissingAcceptedProposalIsReserved(t *testing.T) {
 		t.Errorf("reservation = %+v ok=%v, want reserved as %q", r, ok, value.TrustInferred)
 	}
 }
+
+// Business Verification's primitive (EDR-TRUST-01 T8): the aggregate says what it can vouch
+// for, computed from its OWN state. A claim citing anything else is refused before it is ever
+// recorded — which is what makes a stale or forged projection useless rather than merely
+// unlikely to be accepted.
+func TestFindingVouches(t *testing.T) {
+	f, err := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if err != nil {
+		t.Fatalf("new finding: %v", err)
+	}
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:golang/x@1.0.0"}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	for _, ref := range []string{"fnd-1", "fl-1", "CVE-2024-1", "pkg:golang/x@1.0.0"} {
+		if !f.Vouches(ref) {
+			t.Errorf("%q is part of this Finding and must vouch", ref)
+		}
+	}
+	// A different Finding, a different CVE, a component never shipped in this release, and
+	// the empty string — none of which this Finding can stand behind.
+	for _, ref := range []string{"", "fnd-2", "fl-2", "CVE-2024-9", "pkg:golang/never-shipped@9.9"} {
+		if f.Vouches(ref) {
+			t.Errorf("%q is not part of this Finding and must not vouch", ref)
+		}
+	}
+}

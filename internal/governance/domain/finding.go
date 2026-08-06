@@ -297,6 +297,30 @@ func (f Finding) CurrentPosition() (Position, bool) {
 // Version returns the optimistic-concurrency version stamp.
 func (f Finding) Version() int { return f.version }
 
+// Vouches reports whether a cited evidence reference resolves against what THIS Finding
+// actually is — the Business Verification check (EDR-TRUST-01 T8).
+//
+// It is computed from Governance's own aggregate, deliberately: the AI Runtime's Grounding
+// Verification proves the model reasoned only from the context it was handed, but that
+// context was supplied to it. Only the context owner can say whether the claim is consistent
+// with the system of record. That is what makes a stale or forged projection **useless**
+// rather than merely unlikely to be accepted.
+func (f Finding) Vouches(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	switch ref {
+	case string(f.id), f.faultlineID, f.cve:
+		return true
+	}
+	for _, c := range f.components {
+		if c.PURL == ref {
+			return true
+		}
+	}
+	return false
+}
+
 // Reservation is a recorded caveat that a decision rested on evidence weaker than Observed
 // — for example an acceptance leaning on a vendor's Asserted `not_affected` (EDR-TRUST-01
 // T12). It names the class and who supplied the evidence, so "how sound was that call?"

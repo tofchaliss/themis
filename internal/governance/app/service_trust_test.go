@@ -364,3 +364,71 @@ func TestGetFindingAssessment(t *testing.T) {
 		}
 	})
 }
+
+// --- Business Verification (EDR-TRUST-01 T8) --------------------------------------------
+
+type stubAdvisor struct {
+	rec      app.Recommendation
+	produced bool
+}
+
+func (s stubAdvisor) RecommendPosition(context.Context, string) (app.Recommendation, bool, error) {
+	return s.rec, s.produced, nil
+}
+
+// Governance validates the returned claim against ITS OWN truth before recording anything.
+// The runtime's Grounding Verification proved the model reasoned only from the context it was
+// handed — but that context was supplied to it. Only the context owner can confirm the claim
+// is consistent with the system of record, which is what makes a stale or forged projection
+// USELESS rather than merely unlikely to be accepted.
+func TestRecommendPosition_BusinessVerification(t *testing.T) {
+	newSvc := func(t *testing.T, evidence []string) (*app.FindingService, *fakeRepo) {
+		t.Helper()
+		repo := newRepo()
+		f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+		if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:golang/x@1.0.0"}); err != nil {
+			t.Fatalf("absorb: %v", err)
+		}
+		repo.seed(f)
+		return writeSvc(repo).WithAdvisor(stubAdvisor{produced: true, rec: app.Recommendation{
+			Stance: string(domain.StanceNotAffected), Capability: "recommend_position@v1",
+			Reasoning: "why", Evidence: evidence,
+		}}), repo
+	}
+
+	t.Run("a claim consistent with our truth is recorded", func(t *testing.T) {
+		// Every reference resolves against the Finding Governance actually holds.
+		s, repo := newSvc(t, []string{"fnd-1", "fl-1", "CVE-2024-1", "pkg:golang/x@1.0.0"})
+		pid, produced, err := s.RecommendPosition(context.Background(), "fnd-1")
+		if err != nil || !produced || pid == "" {
+			t.Fatalf("pid=%q produced=%v err=%v", pid, produced, err)
+		}
+		if n := len(repo.byID["fnd-1"].Proposals()); n != 1 {
+			t.Errorf("proposals = %d, want 1", n)
+		}
+	})
+
+	t.Run("a claim citing evidence we cannot vouch for is refused", func(t *testing.T) {
+		// The forged/stale-projection case: the reasoning is internally consistent, the
+		// runtime's own grounding check passed, and Governance still refuses — because this
+		// component is not on this Finding.
+		s, repo := newSvc(t, []string{"pkg:golang/never-shipped@9.9"})
+		pid, produced, err := s.RecommendPosition(context.Background(), "fnd-1")
+		if err != nil {
+			t.Fatalf("a failed check is a silent no-proposal, never an error: %v", err)
+		}
+		if produced || pid != "" {
+			t.Errorf("produced=%v pid=%q — an unvouchable claim must not be recorded", produced, pid)
+		}
+		if n := len(repo.byID["fnd-1"].Proposals()); n != 0 {
+			t.Errorf("proposals = %d, want 0 — nothing may be recorded", n)
+		}
+	})
+
+	t.Run("a claim citing another Finding is refused", func(t *testing.T) {
+		s, _ := newSvc(t, []string{"fnd-999"})
+		if _, produced, _ := s.RecommendPosition(context.Background(), "fnd-1"); produced {
+			t.Error("evidence naming a different Finding must not vouch")
+		}
+	})
+}

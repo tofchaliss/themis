@@ -25,7 +25,7 @@ func TestGovernanceIntelligenceSeam(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{"capability":"recommend_position@v1","finding_id":"F1","stance":"affected",` +
-			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"KEV-listed",` +
+			`"confidence":0.8,"evidence":[{"kind":"faultline","ref":"fl-1"}],"reasoning":"KEV-listed",` +
 			`"decided_by":"llm:affected"}`))
 	}))
 	defer intel.Close()

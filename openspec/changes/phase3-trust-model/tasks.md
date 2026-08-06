@@ -294,14 +294,30 @@
 
 ## 10. Capability classes and the verification split (T7 · T8)
 
-- [ ] 10.1 `Capability` declares its **output class**: `Information` or `Decision`.
-- [ ] 10.2 An **Information** capability returns an ephemeral response; **nothing is recorded**, and it never
-  reaches Governance. Grounding Verification still applies — for Information it is the **only** gate.
-- [ ] 10.3 A **Decision** capability's proposal is **Business-Verified** by Governance against current truth
-  **before** it is recorded, and carries its trust class.
-- [ ] 10.4 Arch/unit test asserting an Information Response has **no** path to enterprise truth.
-- [ ] 10.5 `recommend_position` is registered as a `Decision` capability — behaviour unchanged.
-- [ ] 10.6 Gate: `make check-ci` green.
+- [x] 10.1 `Capability` declares its **output class**: `Information` or `Decision`. — `domain.OutputClass`.
+- [x] 10.2 An **Information** capability returns an ephemeral response; **nothing is recorded**, and it never
+  reaches Governance. Grounding Verification still applies — for Information it is the **only** gate. — the
+  Gateway returns **before `BuildProposal` is reachable** on that path, so the guarantee is structural rather
+  than a rule someone must remember. `Outcome.Information` carries the answer; `Produced` stays false because
+  there is nothing to record.
+- [x] 10.3 A **Decision** capability's proposal is **Business-Verified** by Governance against current truth
+  **before** it is recorded, and carries its trust class. — `Finding.Vouches` + the check in
+  `RecommendPosition`. The AI client now carries the cited **evidence**, which it previously dropped — without
+  it there was nothing to verify. A failed check is a **silent no-proposal, not an error**: AI producing
+  nothing usable is a normal outcome and must never block a human's request (D13).
+- [x] 10.4 Arch/unit test asserting an Information Response has **no** path to enterprise truth. —
+  `TestInvokeInformationCapabilityProducesNoProposal` (zero-valued proposal, `Produced` false, `Reason` still
+  `ok` — the capability did its job), with a **control** proving the same plan on a Decision capability *does*
+  produce one, so the first test cannot pass merely because the pipeline is broken.
+- [x] 10.5 `recommend_position` is registered as a `Decision` capability — behaviour unchanged. — pinned by
+  `TestRecommendPositionIsADecisionCapability`: a silent reclassification would route a governed claim down
+  the ephemeral path where nothing would ever record it.
+- [x] 10.6 Gate: `make check-ci` green. — exit 0, `make e2e-pipeline` green.
+  **The cross-context seam test caught Business Verification working**: its fake AI cited `FL1` while the
+  seeded Finding's faultline is `fl-1`, so the claim was correctly refused and the fixture was wrong, not the
+  code. Two coverage gaps also surfaced a real testing subtlety — `Vouches` and `OutputClass.Valid` were
+  exercised only from *other packages'* tests, which does not count toward the owning package's tier; both
+  moved to where the code lives.
 
 ## 11. Documentation + close-out
 

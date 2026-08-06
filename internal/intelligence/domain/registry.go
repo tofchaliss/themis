@@ -51,6 +51,7 @@ func RecommendPositionV1() Capability {
 		SelectionType: SelectionFinding,
 		MinSelection:  1,
 		MaxSelection:  1,
+		Output:        OutputDecision, // its stance aspires to become an Enterprise Position
 		Needs:         []ContextNeed{NeedFinding, NeedFaultline},
 		Plan: ExecutionPlan{
 			{Engine: EngineKnowledge},

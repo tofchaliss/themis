@@ -38,6 +38,10 @@ type wireProposal struct {
 	Confidence float64 `json:"confidence"`
 	Reasoning  string  `json:"reasoning"`
 	DecidedBy  string  `json:"decided_by"`
+	Evidence   []struct {
+		Kind string `json:"kind"`
+		Ref  string `json:"ref"`
+	} `json:"evidence"`
 }
 
 // RecommendPosition invokes recommend_position for a Finding. produced=false on a 204
@@ -83,5 +87,16 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		Reasoning:  wp.Reasoning,
 		Capability: wp.Capability,
 		DecidedBy:  wp.DecidedBy,
+		Evidence:   evidenceRefs(wp),
 	}, true, nil
+}
+
+// evidenceRefs extracts the cited references so Governance can Business-Verify them against
+// its own truth before recording anything (EDR-TRUST-01 T8).
+func evidenceRefs(wp wireProposal) []string {
+	out := make([]string, 0, len(wp.Evidence))
+	for _, e := range wp.Evidence {
+		out = append(out, e.Ref)
+	}
+	return out
 }

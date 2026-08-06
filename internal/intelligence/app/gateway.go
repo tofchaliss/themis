@@ -55,9 +55,14 @@ type Outcome struct {
 	Duration       time.Duration
 	Produced       bool
 	Reason         string
-	DecidedBy      string           // "llm:<stance>" / "guard:<reason>" — what decided
-	Selection      domain.Selection // what the invocation was about (T9 provenance)
-	PrecedentsUsed int              // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance); 0 on a rule short-circuit
+	DecidedBy      string             // "llm:<stance>" / "guard:<reason>" — what decided
+	Selection      domain.Selection   // what the invocation was about (T9 provenance)
+	OutputClass    domain.OutputClass // which branch ran (T7): information or decision
+	PrecedentsUsed int                // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance)
+	// Information is the ephemeral answer produced by an Information capability. It is NEVER
+	// recorded as enterprise truth and never reaches Governance — a human reads it and it is
+	// discarded. Empty for a Decision capability.
+	Information string
 }
 
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
@@ -155,6 +160,7 @@ func (g *Gateway) Invoke(
 		return domain.Proposal{}, oc
 	}
 	subjectFindingID := sel.First()
+	oc.OutputClass = capb.Output
 	validator := g.validators[capabilityID]
 
 	// Pre-invocation authorization (C7): reject BEFORE any grounding or provider call.
@@ -266,6 +272,16 @@ func (g *Gateway) Invoke(
 			oc.Duration = g.now().Sub(start)
 			oc.Reason = ReasonSchemaInvalid
 			return domain.Proposal{}, oc
+		}
+		// Information capabilities stop here (T7). The answer is rendered for a human and
+		// discarded; BuildProposal is not reachable on this path, so an Information Response
+		// has no route to enterprise truth even if a future edit forgot the rule.
+		if capb.Output == domain.OutputInformation {
+			oc.Duration = g.now().Sub(start)
+			oc.Information = out.Reasoning
+			oc.DecidedBy = "llm:information"
+			oc.Reason = ReasonOK
+			return domain.Proposal{}, oc // produced stays FALSE: there is no proposal to record
 		}
 		if out.RecommendedStance == string(domain.StanceInsufficient) {
 			// The model honestly declined — a first-class "no recommendation", not an

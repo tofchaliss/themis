@@ -72,12 +72,26 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	if s.advisor == nil {
 		return "", false, nil // AI not wired — disabled
 	}
-	if _, err := s.repo.GetByID(ctx, findingID); err != nil {
+	f, err := s.repo.GetByID(ctx, findingID)
+	if err != nil {
 		return "", false, err // re-check the Finding exists before spending AI (defense in depth)
 	}
 	rec, produced, err := s.advisor.RecommendPosition(ctx, string(findingID))
 	if err != nil || !produced {
 		return "", false, nil // disabled ≡ unavailable — a safe no-proposal outcome
+	}
+	// Business Verification (EDR-TRUST-01 T8): before recording anything, check the claim
+	// against OUR truth. The runtime's Grounding Verification proved the model reasoned only
+	// from the context it was handed — but that context was supplied to it. Only the context
+	// owner can confirm the claim is consistent with the system of record, which is what makes
+	// a stale or forged projection useless rather than merely unlikely to be accepted.
+	//
+	// A failed check is a silent no-proposal, not an error: AI producing nothing usable is a
+	// normal outcome and must never block a human's request (D13).
+	for _, ref := range rec.Evidence {
+		if !f.Vouches(ref) {
+			return "", false, nil
+		}
 	}
 	provenance := ""
 	if rec.DecidedBy != "" {

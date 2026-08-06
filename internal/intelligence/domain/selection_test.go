@@ -81,3 +81,16 @@ func TestRecommendPositionV1_TakesExactlyOneFinding(t *testing.T) {
 		t.Error("must not accept two Findings")
 	}
 }
+
+func TestOutputClass_Valid(t *testing.T) {
+	for _, o := range []OutputClass{OutputInformation, OutputDecision} {
+		if !o.Valid() {
+			t.Errorf("expected %q valid", o)
+		}
+	}
+	for _, o := range []OutputClass{"", "proposal", "INFORMATION"} {
+		if o.Valid() {
+			t.Errorf("expected %q invalid", o)
+		}
+	}
+}

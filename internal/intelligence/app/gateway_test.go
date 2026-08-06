@@ -595,3 +595,64 @@ func TestInvokeOutcomeCarriesTheSelection(t *testing.T) {
 		t.Errorf("outcome selection = %+v, want finding/F1", oc.Selection)
 	}
 }
+
+// --- Capability classes (EDR-TRUST-01 T7) -----------------------------------------------
+
+// An Information capability produces an EPHEMERAL response and NO proposal. This is the
+// structural half of "an Information Response may never become enterprise truth": the
+// Gateway returns before BuildProposal is reachable, so there is nothing for a caller to
+// record even if a future edit forgot the rule.
+func TestInvokeInformationCapabilityProducesNoProposal(t *testing.T) {
+	info := customCap("explain_vulnerability", domain.ExecutionPlan{{Engine: domain.EngineLLM, Prompt: "p"}})
+	info.Output = domain.OutputInformation
+	reasoning := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,` +
+		`"evidence":[],"reasoning":"Log4Shell lets an attacker..."}`
+	g := gatewayWith(t, domain.NewRegistry(info), &fakeEngine{replies: []engineReply{{raw: reasoning}}})
+
+	p, oc := g.Invoke(context.Background(), "explain_vulnerability",
+		domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+
+	if oc.Produced {
+		t.Fatal("an Information capability must never produce a proposal")
+	}
+	if p.Recommendation.Stance != "" || p.Recommendation.FindingID != "" || p.Capability != "" {
+		t.Errorf("proposal must be zero-valued, got %+v", p)
+	}
+	if oc.OutputClass != domain.OutputInformation {
+		t.Errorf("OutputClass = %q, want %q", oc.OutputClass, domain.OutputInformation)
+	}
+	if oc.Information == "" {
+		t.Error("the ephemeral answer should be returned for a human to read")
+	}
+	// Not an error and not a decline — the capability did exactly its job.
+	if oc.Reason != ReasonOK {
+		t.Errorf("reason = %q, want %q", oc.Reason, ReasonOK)
+	}
+}
+
+// The control: the same plan on a Decision capability DOES produce a proposal, so the test
+// above cannot pass merely because the pipeline is broken.
+func TestInvokeDecisionCapabilityStillProducesAProposal(t *testing.T) {
+	g := gatewayWith(t, domain.DefaultRegistry(), &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	p, oc := g.Invoke(context.Background(), "recommend_position",
+		domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+
+	if !oc.Produced || oc.OutputClass != domain.OutputDecision {
+		t.Fatalf("outcome = %+v, want produced/decision", oc)
+	}
+	if p.Recommendation.Stance == "" {
+		t.Error("a Decision capability must produce a recordable claim")
+	}
+	if oc.Information != "" {
+		t.Error("a Decision capability produces no ephemeral answer")
+	}
+}
+
+// The shipped capability is a Decision — its stance aspires to become an Enterprise Position.
+// Pinned so a later edit cannot silently reclassify it and route a governed claim down the
+// ephemeral path, where nothing would ever record it.
+func TestRecommendPositionIsADecisionCapability(t *testing.T) {
+	if got := domain.RecommendPositionV1().Output; got != domain.OutputDecision {
+		t.Fatalf("output class = %q, want %q", got, domain.OutputDecision)
+	}
+}

@@ -39,6 +39,29 @@ const (
 	NeedFaultline ContextNeed = "faultline"
 )
 
+// OutputClass is what a capability produces, and it decides the entire path the output takes
+// (EDR-TRUST-01 T7).
+type OutputClass string
+
+const (
+	// OutputInformation produces an **Information Response**: an answer rendered for a human —
+	// an explanation, a summary, a plan. It is **ephemeral**: read and discarded, never
+	// recorded as enterprise truth, and it never reaches Governance. There is nothing to
+	// accept or reject.
+	//
+	// Grounding Verification still applies, and for this class it is the **only** gate: no
+	// Business Verification follows, so nothing else stands between the user and a confident,
+	// well-written, completely wrong paragraph.
+	OutputInformation OutputClass = "information"
+	// OutputDecision produces a **Decision Proposal**: a structured, schema-validated claim
+	// that aspires to become enterprise truth, and therefore enters Governance — where it is
+	// Business-Verified against the system of record before being recorded.
+	OutputDecision OutputClass = "decision"
+)
+
+// Valid reports whether o is a recognized output class.
+func (o OutputClass) Valid() bool { return o == OutputInformation || o == OutputDecision }
+
 // PrivacyClass classifies the sensitivity of a capability's assembled context (D10).
 // Δ1 is local-only, so everything is internal; the field travels for the Δ2
 // security/privacy admission step.
@@ -65,9 +88,11 @@ type Capability struct {
 	// Min/MaxSelection are how many of them. Declaring the bound here rather than in a global
 	// setting is what lets it double as the fan-out guard: the boundary is enforced before
 	// any grounding is assembled or any provider is called.
-	SelectionType  SelectionType
-	MinSelection   int
-	MaxSelection   int
+	SelectionType SelectionType
+	MinSelection  int
+	MaxSelection  int
+	// Output decides whether this capability's result can ever become enterprise truth (T7).
+	Output         OutputClass
 	Needs          []ContextNeed
 	Plan           ExecutionPlan
 	OutputSchema   string   // JSON Schema for the raw model output (stage-1 validation, D7)
