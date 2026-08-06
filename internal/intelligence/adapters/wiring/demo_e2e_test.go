@@ -65,7 +65,6 @@ func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Emb
 		Faultline: stubFaultlineReader{v: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-NEW", Severity: "high"}},
 		Prompt:    pr,
 		Engines: []app.Engine{
-			engine.NewRuleEngine(domain.VersionRangeRule{}),
 			engine.NewKnowledgeEngine(emb, idx, 5),
 			engine.NewLLMEngine(provider.NewStaticRouter(prov)),
 		},

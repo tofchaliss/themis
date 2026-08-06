@@ -45,7 +45,6 @@ func buildE2EGrounded(t *testing.T, providerResponse, purl, affectedRanges strin
 		Faultline: readapi.NewFaultlineClient(know.URL, know.Client()),
 		Prompt:    pr,
 		Engines: []app.Engine{
-			engine.NewRuleEngine(domain.VersionRangeRule{}),
 			engine.NewLLMEngine(provider.NewStaticRouter(provider.NewFakeProvider(providerResponse))),
 		},
 	})
@@ -88,18 +87,26 @@ func TestE2EDisallowedStanceNoProposal(t *testing.T) {
 
 // Δ2: component 2.0.0 is OUTSIDE the affected range (<1.2) → the deterministic rule decides
 // not_affected and short-circuits; the provider (which would say "affected") is never used.
-func TestE2ERuleShortCircuitsOverTheWire(t *testing.T) {
-	wrongLLM := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"llm"}`
-	h := buildE2EGrounded(t, wrongLLM, "pkg:golang/x@2.0.0", `["<1.2"]`)
+// The runtime no longer settles a provable question (EDR-TRUST-01 T5). An out-of-range
+// component used to short-circuit here with `decided_by: rule:not_affected`; the
+// deterministic verdict now runs in the backend, on enrichment, and — crucially — whether or
+// not AI is switched on at all. What reaches this endpoint is a reasoning request, so the
+// model answers it.
+//
+// This is a deliberate behaviour change at this endpoint, pinned rather than merely deleted:
+// nothing here may quietly start deciding again.
+func TestE2ENoDeterministicShortCircuitInTheRuntime(t *testing.T) {
+	llmSays := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"llm"}`
+	h := buildE2EGrounded(t, llmSays, "pkg:golang/x@2.0.0", `["<1.2"]`)
 	rr := do(t, h, `{"finding_id":"F1"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"stance":"not_affected"`) {
-		t.Errorf("rule must decide not_affected (not the LLM's affected); body=%s", rr.Body.String())
+	if strings.Contains(rr.Body.String(), `"decided_by":"rule:`) {
+		t.Errorf("the runtime must not carry rule provenance any more; body=%s", rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"decided_by":"rule:not_affected"`) {
-		t.Errorf("response must carry rule provenance; body=%s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), `"decided_by":"llm:`) {
+		t.Errorf("the reasoning step should have answered; body=%s", rr.Body.String())
 	}
 }
 

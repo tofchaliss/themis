@@ -33,20 +33,22 @@ func (r *Registry) All() []Capability {
 	return caps
 }
 
-// RecommendPositionV1 is the recommend_position capability (Δ3a): AI-assisted
-// affected/not-affected triage. It grounds the subject Finding + its Faultline enrichment and
-// runs a three-step **[Rule → Knowledge → LLM]** plan — the deterministic version-range rule
-// first (short-circuits when provably out of range), then the Knowledge engine enriches the
-// grounding with semantically similar past Enterprise Positions (best-effort precedent, RC-1),
-// then the LLM reasons over the precedent-enriched grounding when the rule deferred. It may
-// propose only the recommendable stance subset.
+// RecommendPositionV1 is the recommend_position capability: AI-assisted affected/not-affected
+// triage. It grounds the subject Finding + its Faultline enrichment and runs a two-step
+// **[Knowledge → LLM]** plan — the Knowledge engine enriches the grounding with semantically
+// similar past Enterprise Positions (best-effort precedent, RC-1), then the LLM reasons over
+// the precedent-enriched grounding. It may propose only the recommendable stance subset.
+//
+// The deterministic version-range step is deliberately absent (EDR-TRUST-01 T5): a provable
+// verdict is a computation, not a reasoning task, so it runs in the backend — before AI and
+// independently of whether AI is switched on at all. Routing it through here made a
+// correctness feature depend on an optional plane, contradicting D13.
 func RecommendPositionV1() Capability {
 	return Capability{
 		ID:      "recommend_position",
 		Version: "v1",
 		Needs:   []ContextNeed{NeedFinding, NeedFaultline},
 		Plan: ExecutionPlan{
-			{Engine: EngineRule},
 			{Engine: EngineKnowledge},
 			{Engine: EngineLLM, Prompt: "recommend_position"},
 		},

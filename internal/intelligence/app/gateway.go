@@ -190,28 +190,6 @@ func (g *Gateway) Invoke(ctx context.Context, capabilityID, subjectFindingID, co
 			return domain.Proposal{}, oc
 		}
 
-		if step.Engine == domain.EngineRule {
-			res, err := eng.Execute(ctx, ExecInput{Context: ac})
-			if err != nil {
-				oc.Duration = g.now().Sub(start)
-				oc.Reason = ReasonProviderError
-				return domain.Proposal{}, oc
-			}
-			if res.Decision == nil {
-				continue // the rule deferred — fall through to the next plan step
-			}
-			out := res.Decision.AsOutput(subjectFindingID)
-			if verr := validator.ValidateBusiness(out, subjectFindingID, ac); verr != nil {
-				oc.Duration = g.now().Sub(start)
-				oc.Reason = ReasonBusinessInvalid
-				return domain.Proposal{}, oc
-			}
-			oc.Duration = g.now().Sub(start)
-			oc.DecidedBy = "rule:" + string(res.Decision.Stance)
-			oc.Produced, oc.Reason = true, ReasonOK
-			return g.buildProposal(out, capb, oc), oc
-		}
-
 		// LLM step (the generative fallback). Semantic precedent from the Knowledge step already
 		// rides ac.Precedents; fall back to the Δ2 exact-CVE blast-radius pull ONLY when that
 		// found none (a cold or incomplete index) — so a rule short-circuit still costs no read,

@@ -73,9 +73,9 @@ func Wire(cfg Config) (Intelligence, error) {
 		prov = provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model, cfg.HTTPClient).
 			WithAPIKey(cfg.APIKey).WithResponseFormat(cfg.ResponseFormat)
 	}
-	ruleEng := engine.NewRuleEngine(domain.VersionRangeRule{})
+	// No rule engine: provable verdicts run in the backend, before AI (EDR-TRUST-01 T5).
 	llmEng := engine.NewLLMEngine(provider.NewStaticRouter(prov))
-	engines := []app.Engine{ruleEng, llmEng}
+	engines := []app.Engine{llmEng}
 
 	// Δ3a retrieval plane, built only when a store is configured.
 	var idx *index.Memory

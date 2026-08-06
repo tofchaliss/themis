@@ -204,13 +204,27 @@
 
 ## 7. Remove the version-range rule from the AI runtime (T5)
 
-- [ ] 7.1 Delete `intelligence/domain/rule.go` + its wiring; `recommend_position`'s plan becomes
-  `[Knowledge → LLM]`.
-- [ ] 7.2 Remove the now-unused `EngineRule` dispatch path and its kernel version-range import.
-- [ ] 7.3 `demo_e2e_test.go` + `llm_e2e_test.go` stay green **unchanged in behaviour** — the semantic
-  precedent still flips a recommendation.
-- [ ] 7.4 `make deadcode` reports nothing orphaned.
-- [ ] 7.5 Gate: `make check-ci` green.
+- [x] 7.1 Delete `intelligence/domain/rule.go` + its wiring; `recommend_position`'s plan becomes
+  `[Knowledge → LLM]`. — 4 files deleted (`domain/rule.go`, `adapters/engine/rule.go` + both tests); plan
+  shortened; the capability doc now states *why* the step is absent rather than leaving a silent gap.
+- [x] 7.2 Remove the now-unused `EngineRule` dispatch path and its kernel version-range import. — the
+  gateway's rule branch, `EngineRule`, `RuleDecision`, `RuleSet`, and **`EngineResult.Decision`** are all
+  gone. Dropping that field is the load-bearing part: with no decision channel, an engine here *structurally
+  cannot* settle a question — it only supplies reasoning or grounding. Verified `internal/intelligence` no
+  longer references `value.AffectedRange` at all.
+- [x] 7.3 `demo_e2e_test.go` + `llm_e2e_test.go` stay green **unchanged in behaviour** — the semantic
+  precedent still flips a recommendation. — `TestDemoSemanticPrecedentChangesRecommendation` passes
+  untouched; `llm_e2e_test.go` (opt-in `//go:build llm`) vets clean, as does `embed_eval`.
+- [x] 7.4 `make deadcode` reports nothing orphaned. — 4 unreachable funcs, **the same 4 as before this
+  change** and none in `intelligence`.
+- [x] 7.5 Gate: `make check-ci` green. — exit 0; `intelligence/domain` and `intelligence/app` **100%**.
+  `make e2e-pipeline` green.
+  **Two tests were replaced rather than deleted, because the property outlived the mechanism:**
+  `TestE2ERuleShortCircuitsOverTheWire` → `TestE2ENoDeterministicShortCircuitInTheRuntime`, which pins the
+  **deliberate behaviour change** at the endpoint (an out-of-range component now reaches the model instead of
+  short-circuiting) so nothing can quietly start deciding there again; and `TestInvokeRuleOnlyPlanExhausts` →
+  `TestInvokeRetrievalOnlyPlanExhaustsToInsufficient`, since "a plan that walks to the end without producing
+  returns an honest `insufficient`" is a property of the **plan walk**, not of rules.
 
 ## 8. Selection replaces the bare finding id (T9)
 
