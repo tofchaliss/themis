@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/themis-project/themis/internal/governance/app"
@@ -140,5 +141,166 @@ func TestReactToEnrichment_EvidenceTrustFoldsOnlyContributingGroups(t *testing.T
 				t.Errorf("auto-accepted = %v, want %v", established, tc.autoAccept)
 			}
 		})
+	}
+}
+
+// The deterministic version-range verdict on an EXISTING Finding — the case correlation's
+// own gate cannot reach, because that gate runs only at match time. A Finding born before
+// the range was known is revisited here.
+func TestReactToEnrichment_VersionRangeRaisesSystemNotAffected(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/foo@5.0", Name: "foo", Version: "5.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	s := writeSvc(repo, domain.NewPolicyRule("auto-not-affected", domain.StanceNotAffected))
+
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+
+	got := repo.byID["fnd-1"]
+	if len(got.Proposals()) != 1 || got.Proposals()[0].Stance() != domain.StanceNotAffected {
+		t.Fatalf("proposals = %+v, want one system not_affected", got.Proposals())
+	}
+	if k := got.Proposals()[0].Proposer().Kind; k != domain.ActorSystem {
+		t.Errorf("proposer kind = %q, want %q", k, domain.ActorSystem)
+	}
+	// Observed evidence clears the constitutional stage, so policy may auto-accept — a
+	// provable verdict should not queue for a human.
+	if _, ok := got.CurrentPosition(); !ok {
+		t.Error("a provable, Observed verdict should be policy-auto-acceptable")
+	}
+}
+
+// The D13 repair, asserted directly. writeSvc wires NO advisor, so AI is disabled — and the
+// deterministic verdict is still produced. Before this group the version-range rule lived
+// only in the AI runtime, so switching AI off silently lost a verdict Themis could compute
+// from arithmetic.
+func TestReactToEnrichment_VersionRangeVerdictProducedWithAIDisabled(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/foo@5.0", Name: "foo", Version: "5.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	s := writeSvc(repo) // no policies, and critically no advisor — AI is off
+
+	// Sanity: with AI off the on-demand AI seam produces nothing at all.
+	if _, produced, err := s.RecommendPosition(context.Background(), "fnd-1"); err != nil || produced {
+		t.Fatalf("precondition: AI must be disabled, got produced=%v err=%v", produced, err)
+	}
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if len(repo.byID["fnd-1"].Proposals()) != 1 {
+		t.Fatal("the deterministic verdict must be produced with AI switched off (D13)")
+	}
+}
+
+// An in-range component must produce nothing: the rule proves absence only, never presence.
+func TestReactToEnrichment_VersionRangeDefersWhenInRange(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/foo@2.0", Name: "foo", Version: "2.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	s := writeSvc(repo)
+
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if n := len(repo.byID["fnd-1"].Proposals()); n != 0 {
+		t.Errorf("proposals = %d, want 0 — an in-range component is never a verdict", n)
+	}
+}
+
+// Re-delivery is idempotent: the proposal id derives from the Finding, so a repeated
+// enrichment raises nothing new.
+func TestReactToEnrichment_VersionRangeIsIdempotent(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/foo@5.0", Name: "foo", Version: "5.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	s := writeSvc(repo)
+	sig := app.EnrichmentSignal{FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved}
+
+	for i := 0; i < 2; i++ {
+		if err := s.ReactToEnrichment(context.Background(), sig); err != nil {
+			t.Fatalf("react %d: %v", i, err)
+		}
+	}
+	if n := len(repo.byID["fnd-1"].Proposals()); n != 1 {
+		t.Errorf("proposals after re-delivery = %d, want 1", n)
+	}
+}
+
+// Error paths: a store failure must surface, not be swallowed into a silently missing
+// verdict. A dropped not_affected leaves a release looking vulnerable when it is not;
+// a dropped error makes that indistinguishable from "the rule declined".
+func TestReactToVersionRange_ErrorsPropagate(t *testing.T) {
+	sig := app.EnrichmentSignal{
+		FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved,
+	}
+
+	t.Run("findings lookup fails", func(t *testing.T) {
+		repo := newRepo()
+		repo.byFaultlineErr = errors.New("db down")
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), sig); err == nil {
+			t.Error("expected the lookup error to propagate")
+		}
+	})
+
+	t.Run("save fails", func(t *testing.T) {
+		repo := newRepo()
+		f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+		if _, err := f.AbsorbComponent(domain.MatchedComponent{
+			PURL: "pkg:pypi/foo@5.0", Name: "foo", Version: "5.0", Ecosystem: "pypi",
+		}); err != nil {
+			t.Fatalf("absorb: %v", err)
+		}
+		repo.seed(f)
+		repo.saveErr = errors.New("db down")
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), sig); err == nil {
+			t.Error("expected the save error to propagate")
+		}
+	})
+}
+
+// A proposal-build failure in the version-range path (here a zero clock) propagates rather
+// than silently dropping the verdict — mirroring the applicability path's guard.
+func TestReactToVersionRange_ProposalBuildFailurePropagates(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/foo@5.0", Name: "foo", Version: "5.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	badClock := app.NewFindingService(repo, &seqIDs{}, zeroClock{})
+
+	if err := badClock.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", AffectedRanges: []string{">= 1.0, < 3.0"}, RangeTrust: value.TrustObserved,
+	}); err == nil {
+		t.Error("zero-clock proposal build in the version-range path must error")
 	}
 }

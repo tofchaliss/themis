@@ -38,6 +38,8 @@ type InboundFaultlineEnriched struct {
 	HeadlineTrust value.TrustClass
 	RangeTrust    value.TrustClass
 	SignalTrust   value.TrustClass
+	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3).
+	AffectedRanges []string
 }
 
 // InboundFaultlineSuperseded is Knowledge's FaultlineSuperseded fact: the CVE was withdrawn
@@ -75,6 +77,7 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		HeadlineTrust:   e.HeadlineTrust,
 		RangeTrust:      e.RangeTrust,
 		SignalTrust:     e.SignalTrust,
+		AffectedRanges:  e.AffectedRanges,
 	})
 }
 

@@ -34,6 +34,11 @@ type FaultlineEnriched struct {
 	// Optional/additive (omitempty): a card with no vendor statement keeps the frozen v1 wire
 	// byte-identical (EVENTBUS D9 — additive, non-breaking).
 	Applicabilities []Applicability `json:"Applicabilities,omitempty"`
+	// AffectedRanges is the reconciled, backport-aware affected range (D3), carried so
+	// Governance can re-evaluate an EXISTING Finding against it (EDR-TRUST-01 T5) — the case
+	// correlation's own range gate cannot reach, because that gate only runs at match time,
+	// so a Finding born before the range was known is never revisited.
+	AffectedRanges []string `json:"AffectedRanges,omitempty"`
 	// Trust classes for the reconciled view's field-groups (EDR-TRUST-01 T2/T3), so
 	// Governance can apply the constitutional check (T4) and derive reservations (T12)
 	// without refetching the card.
@@ -106,6 +111,7 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		ExploitPublic:   v.ExploitPublic,
 		Score:           v.Score(),
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
+		AffectedRanges:  append([]string(nil), v.AffectedRanges...),
 		HeadlineTrust:   v.HeadlineTrust,
 		RangeTrust:      v.RangeTrust,
 		SignalTrust:     v.SignalTrust,

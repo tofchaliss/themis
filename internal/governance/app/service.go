@@ -27,6 +27,12 @@ const (
 	vexStatusNotAffected    = "not_affected"
 )
 
+// versionRangeActorID is the proposer id for the system not_affected Proposal raised by the
+// deterministic version-range rule (EDR-TRUST-01 T5). ActorSystem — Governance's own
+// automation, so policy may auto-accept it; the verdict rests on Observed evidence when the
+// ranges do.
+const versionRangeActorID = "version-range"
+
 // errNoop signals that a use-case body made no persistable change (an idempotent
 // re-delivery). The mutate loop treats it as success and skips the save entirely.
 var errNoop = errors.New("governance: no change")
@@ -174,6 +180,9 @@ type EnrichmentSignal struct {
 	HeadlineTrust value.TrustClass
 	RangeTrust    value.TrustClass
 	SignalTrust   value.TrustClass
+	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3), against which the
+	// deterministic version-range rule re-evaluates each Finding (EDR-TRUST-01 T5).
+	AffectedRanges []string
 }
 
 // Applicability is one vendor VEX statement distilled from the enrichment event (the raw wire
@@ -261,7 +270,15 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 	}
 	// Vendor VEX suppression overlay (EDR-VEX-01 D4): a not_affected statement covering a
 	// Finding's component raises a system not_affected Proposal on that Finding.
-	return s.reactToApplicability(ctx, sig)
+	if err := s.reactToApplicability(ctx, sig); err != nil {
+		return err
+	}
+	// Deterministic version-range inference (EDR-TRUST-01 T5): re-evaluate EXISTING Findings
+	// against the reconciled range. Correlation applies the same rule, but only at match
+	// time — a Finding born before the range was known is never revisited by it, and until
+	// now only an on-demand AI call would catch that (contradicting D13: the pipeline must be
+	// correct with AI switched off).
+	return s.reactToVersionRange(ctx, sig)
 }
 
 // reactToApplicability raises a system not_affected Proposal on each Finding whose matched
@@ -304,6 +321,48 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 			notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
 			if errors.Is(err, domain.ErrDuplicateProposal) {
 				return nil, errNoop // already raised for this statement — idempotent
+			}
+			return notes, err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reactToVersionRange raises a system not_affected Proposal on each Finding whose every
+// matched component is provably outside the reconciled affected range (EDR-TRUST-01 T5).
+//
+// It never auto-suppresses: like the vendor-VEX overlay it travels the governed road — a
+// Governance-owned policy may auto-accept the system proposal, otherwise a human decides.
+// The proposal's evidence class is the RANGE group's class specifically, not the card's
+// worst — a vendor statement elsewhere on the card must not downgrade a verdict computed
+// purely from public ranges.
+//
+// Idempotent: the proposal id derives from the Finding, so a re-delivery dedups.
+func (s *FindingService) reactToVersionRange(ctx context.Context, sig EnrichmentSignal) error {
+	if len(sig.AffectedRanges) == 0 {
+		return nil // no reconciled range to decide against
+	}
+	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
+	if err != nil {
+		return err
+	}
+	proposer := domain.Actor{Kind: domain.ActorSystem, ID: versionRangeActorID}
+	for _, id := range ids {
+		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
+			if !domain.ProvablyOutOfRange(f.Components(), sig.AffectedRanges) {
+				return nil, errNoop // in range, undecidable, or unreadable — defer, never suppress
+			}
+			pid := domain.ProposalID("range:" + string(id))
+			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected,
+				"every matched component version is outside the reconciled affected range", now, sig.RangeTrust)
+			if err != nil {
+				return nil, err
+			}
+			notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
+			if errors.Is(err, domain.ErrDuplicateProposal) {
+				return nil, errNoop // already raised for this Finding — idempotent
 			}
 			return notes, err
 		}); err != nil {

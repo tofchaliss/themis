@@ -166,17 +166,41 @@
 > **This group must be complete and green before Group 7.** A window with the rule in neither place is a
 > window where a deterministic verdict silently disappears.
 
-- [ ] 6.1 Implement the version-range rule as a stage **inside the context that owns its evidence**,
-  alongside the existing `reactToApplicability` precedent. No new context, no new deployable.
-- [ ] 6.2 **Precision requirement:** it must evaluate the **reconciled, backport-aware** range, not a feed's
+- [x] 6.1 Implement the version-range rule as a stage **inside the context that owns its evidence**,
+  alongside the existing `reactToApplicability` precedent. No new context, no new deployable. —
+  **a finding while implementing changed what this group builds.** Knowledge *already* runs a version-range
+  check, in `ApplyCorrelation`, with a comment saying it "mirrors the Intelligence Rule Engine". But the two
+  do different things: Knowledge's is a **filter** (out of range → no match recorded → **no Finding ever
+  created**); Intelligence's is a **verdict on a Finding that already exists**. The real gap is therefore a
+  Finding created *before* the range was known — correlation kept it, enrichment later brings a range that
+  excludes it, and **nothing re-evaluates**. `domain.ProvablyOutOfRange` (pure) +
+  `reactToVersionRange`, mirroring `reactToApplicability`: Knowledge reconciles and ships, Governance runs
+  the per-Finding check because it holds the Finding. `AffectedRanges` rides `faultline_enriched` additively
+  on v1, as group 3 established.
+- [x] 6.2 **Precision requirement:** it must evaluate the **reconciled, backport-aware** range, not a feed's
   query-time filter. Add a distro-backport test — upstream flags the version, the distribution's build is not
-  vulnerable — as the explicit guard.
-- [ ] 6.3 A provable verdict raises a **system proposal** on the covered Finding, travelling the same road as
-  the vendor-VEX suppression proposal. Its class is `Observed`, so policy may auto-accept it.
-- [ ] 6.4 **Equivalence test:** the backend rule returns the *same* verdict as the Intelligence rule for the
-  same inputs — table-driven, reusing the existing `domain/rule_test.go` cases as the oracle.
-- [ ] 6.5 Prove the D13 repair: with AI **disabled**, the version-range verdict is still produced.
-- [ ] 6.6 Gate: `make check-ci` + `make e2e-pipeline` green.
+  vulnerable — as the explicit guard. — `TestProvablyOutOfRange_ReconciledRangeCatchesADistroBackport` pins
+  **both directions**: the reconciled range proves not-affected for `openssl@1.1.1k-51.el8`, and the raw
+  upstream range must **not** yield a verdict. The second assertion is the important one — a wrong reconciled
+  range produces a *silent, wrong* `not_affected`.
+- [x] 6.3 A provable verdict raises a **system proposal** on the covered Finding, travelling the same road as
+  the vendor-VEX suppression proposal. Its class is `Observed`, so policy may auto-accept it. — done; the
+  class is **`sig.RangeTrust`** specifically, not the card's worst. That is group 2's per-field-group design
+  paying off: a vendor statement elsewhere on the card cannot downgrade a verdict computed purely from public
+  ranges.
+- [x] 6.4 **Equivalence test:** the backend rule returns the *same* verdict as the Intelligence rule for the
+  same inputs — table-driven, reusing the existing `domain/rule_test.go` cases as the oracle. —
+  `TestProvablyOutOfRange_MatchesTheIntelligenceRuleOracle`, one case per oracle entry. **One deliberate
+  difference, documented in the test:** Intelligence parses purls to recover (ecosystem, version), so
+  malformed-purl cases make it defer; Governance's `MatchedComponent` carries both as fields (parsed once at
+  correlation), so those cases cannot arise. The behavioural rule is identical. Also pinned: the rule is
+  **certain in one direction only** — in-range never yields "affected".
+- [x] 6.5 Prove the D13 repair: with AI **disabled**, the version-range verdict is still produced. —
+  `TestReactToEnrichment_VersionRangeVerdictProducedWithAIDisabled` asserts the AI seam produces nothing
+  (no advisor wired) *and* the deterministic verdict is still raised. Before this group, switching AI off
+  silently lost a verdict Themis can compute from arithmetic.
+- [x] 6.6 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0; `governance/domain` and
+  `governance/app` **100%**, `knowledge/domain` 100%.
 
 ## 7. Remove the version-range rule from the AI runtime (T5)
 
