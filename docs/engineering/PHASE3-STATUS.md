@@ -401,9 +401,11 @@ fault-injection coverage; OTel traces + metrics). Update those files, not this s
   `otelzap` bridge, one `Setup`; config-driven level/format/OTLP endpoint via `ConfigFromEnv`; a
   `RequestLogger` correlation-id middleware; domain/app stay log-free by depguard). All four greenfield cmds
   wire it; example config at `deploy/node.env.example`.
-- Changes: **none active** — all Phase-3 changes IMPLEMENTED + archived (`openspec/changes/archive/`); the
-  next change (`phase3-intelligence-d3`, the AI-feature line) is unscaffolded — create it from
-  `EDR-INTELLIGENCE-01`
+- Changes: **`openspec/changes/phase3-trust-model/`** — SCAFFOLDED 2026-08-06, **0/63 tasks**, 11 groups,
+  from `EDR-TRUST-01` (T1–T12). Cross-context by construction (Knowledge + Governance + Intelligence);
+  **group order is the migration order** and groups 6→7 must not be reordered. All other Phase-3 changes are
+  IMPLEMENTED + archived (`openspec/changes/archive/`). `openspec validate` reports **"no deltas"** — expected
+  for `phase3-*`; archive with `--skip-specs -y`
 - Blueprints (to fill from Evidence exemplar): `docs/engineering/implementation-blueprint/01–06`
 - Architecture source of truth: `docs/architecture/` (Books I–III) + `docs/adr/` (69 ADRs)
 - Change status: `openspec/STATUS.md`

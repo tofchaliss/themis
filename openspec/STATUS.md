@@ -15,16 +15,28 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 (EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
-**OpenSpec state: no active changes** (`openspec list` → "No active changes found"). Every Phase-3 change is
-archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
+**OpenSpec state: one active change — `phase3-trust-model`** (scaffolded 2026-08-06; see below). Every other
+Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
 "uncommitted") had gone stale.
 
-**Next active focus — AI-related features** (v0.4.x, "AI-capability expansion"): **GOV-14** (EDR-GOVERNANCE-01
-D14 — disposition-aware `residual_priority` + the deterministic disposition re-evaluation watcher, AI-judge
-optional), then Intelligence **Δ3** (Python engine + RAG / pgvector) and **Δ4** (autonomy + LLMOps). Scaffold
-a fresh OpenSpec change (`phase3-intelligence-d3`) from `EDR-INTELLIGENCE-01` when that work starts.
+**Active change (2026-08-06): `phase3-trust-model` — 0/63 tasks, 11 groups**, scaffolded from
+**`EDR-TRUST-01` (T1–T12, ACCEPTED)**. It is **cross-context by construction** — Knowledge, Governance and
+Intelligence move together, because the trust model is exactly the horizontal that per-context EDRs left
+ownerless. It adds **no new bounded context and no new deployable**. Delivers: evidence trust classes
+(Observed / Asserted / Inferred, keyed on *derivable vs declared*) · monotonic trust propagation · a
+**constitutional stage** in Governance barring auto-acceptance of `Inferred` under any policy · reservations
+derived from immutable `PositionInputs` (never a state) · **Deterministic Inference** as a stage inside
+evidence-owning contexts, moving the version-range rule out of the AI runtime · **Selection** replacing the
+bare finding id · **Domain Projections**, after which the AI Runtime gathers nothing. **Group order is the
+migration order** — `recommend_position` stays behaviourally identical throughout, and groups 6→7 must not be
+reordered.
+
+**Then — AI-capability expansion** (v0.4.x): **GOV-14** (EDR-GOVERNANCE-01 D14 — disposition-aware
+`residual_priority` + the deterministic disposition re-evaluation watcher, AI-judge optional), then
+Intelligence **Δ3b** (Python engine) and **Δ4** (autonomy + LLMOps). Both are now **downstream** of the trust
+model. Note `EDR-INTELLIGENCE-01` Revision 5 is **superseded** by `EDR-TRUST-01`; scaffold from the latter.
 
 Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `docs/BACKLOG.md` (Part 1). Parity →
 `docs/engineering/PARITY-GAP.md`.
