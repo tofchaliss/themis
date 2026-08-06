@@ -536,6 +536,18 @@ per-context follow-ups below.
   `internal/knowledge/adapters/wiring/trust_sources.go`. **Dep:** the AI→Knowledge proposal-intake path
   (Δ4-class). **Scope:** MEDIUM — a correctness gap the moment that path ships.
 
+- [ ] **TRUST-4 — The CVE-withdrawal path carries no trust class, and unset is not safe for it.**
+  _(Surfaced implementing `phase3-trust-model` group 3, 2026-08-06.)_ `knowledge.faultline_superseded.v1`
+  has no trust field, so `Coordinator.OnFaultlineSuperseded` builds an `EnrichmentSignal` with the classes
+  **unset**. A withdrawal is genuinely **Observed** — re-fetch and the CVE is still rejected upstream, which
+  is reproducible — but unset reads as `Inferred` under `value.MaxTrust`, and the group-4 constitutional bar
+  (T4) would then **block a policy auto-accept that works today**. That is a live regression waiting for
+  group 4, not a theoretical one. **Fix (in group 4):** classify the withdrawal path explicitly — either add
+  the field to the superseded event additively (as the enriched event just did) or set it at the coordinator
+  with a comment. Prefer the event: it keeps the class where the evidence is. **Where it plugs in:**
+  `internal/governance/app/coordinator.go` + optionally `knowledge.faultline_superseded.v1`. **Scope:**
+  MUST-DO before group 4 consumes trust; a `// Tracked as TRUST-4` comment marks the site.
+
 ---
 
 ### D. Observability (R1) — remaining signals

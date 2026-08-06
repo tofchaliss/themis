@@ -66,12 +66,33 @@
 
 ## 3. Trust across the Knowledge → Governance seam (T3)
 
-- [ ] 3.1 Decide per event whether the class must ride the wire or is re-derivable downstream. Prefer
-  re-derivation — it keeps the frozen v1 payloads untouched.
-- [ ] 3.2 Where it must ride: mint `<event>.v2.schema.json` + a new `schema_ref`. **Never edit a frozen v1
-  schema.** Keep v1 readable for in-flight events.
-- [ ] 3.3 Consumer tests drive the exact wire JSON for both versions.
-- [ ] 3.4 Gate: `make check-ci` + `make e2e-pipeline` green.
+- [x] 3.1 Decide per event whether the class must ride the wire or is re-derivable downstream. Prefer
+  re-derivation — it keeps the frozen v1 payloads untouched. — **the preference does not survive contact: it
+  must ride the wire.** Re-deriving downstream would require Governance to hold a **second copy of the
+  source→class policy**, and two copies of a trust policy will eventually disagree — worse than a wire
+  change. Knowledge owns the table, so Knowledge ships the verdict. Applied to
+  **`knowledge.faultline_enriched`** only; `component_matched` opens a Finding and raises no proposal, so it
+  needs no class yet.
+- [x] 3.2 Where it must ride: mint `<event>.v2.schema.json` + a new `schema_ref`. **Never edit a frozen v1
+  schema.** Keep v1 readable for in-flight events. — **no v2 was minted, and that is the correct call.** The
+  house pattern for additive fields is an **optional property on v1** with `required` unchanged and
+  `omitempty` on the struct — used twice already, for `Score` (BUG-3) and `Applicabilities` (EDR-VEX-01 D5),
+  whose schema comment states the intent: *"keeps the frozen v1 wire byte-identical (EVENTBUS D9 — additive,
+  non-breaking)"*. Minting a v2 would have forced a `schema_ref` change nothing needs and broken consistency
+  with those two. The v1 schema was **extended, not edited** — no existing constraint changed.
+- [x] 3.3 Consumer tests drive the exact wire JSON for both versions. — both shapes covered on both sides.
+  Knowledge: `TestIntegrationContractV1_FaultlineEnrichedTrustIsAdditive` asserts a trust-less card marshals
+  **byte-identically** to the pre-change wire (keys absent) *and* a trust-bearing card still validates v1 —
+  the two conditions that make "additive, not v2" legitimate. Plus
+  `TestIntegrationContractV1_RejectsUnknownTrustClass` (the schema pins the vocabulary via `enum`, so a typo
+  fails the contract instead of reaching Governance as an unrecognized string). Governance: DTO decode tests
+  for both shapes, asserted on the **decode itself** — nothing consumes trust until group 4, so there is no
+  Finding change to assert against yet.
+- [x] 3.4 Gate: `make check-ci` + `make e2e-pipeline` green. — both exit 0. `knowledge/domain` 100%,
+  `governance/app` 100%, `governance/adapters/inbound` 100%. **Filed TRUST-4:** the CVE-withdrawal path
+  carries no class, and unset reads as `Inferred` — which would make group 4's constitutional bar block a
+  policy auto-accept that works today. A live regression waiting; the site is marked in
+  `coordinator.go` and it is a **must-do before group 4 consumes trust**.
 
 ## 4. Governance — the constitutional stage (T4 · T6)
 

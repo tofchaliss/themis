@@ -66,6 +66,9 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 		{app.EventFaultlineEnriched, domain.FaultlineEnriched{
 			FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: value.SeverityHigh, KEV: true, ExploitPublic: false,
 			Applicabilities: []domain.Applicability{{Package: "pkg:rpm/openssl", Status: "not_affected", Justification: "vulnerable_code_not_present"}},
+			HeadlineTrust:   value.TrustObserved,
+			RangeTrust:      value.TrustAsserted,
+			SignalTrust:     value.TrustObserved,
 			OccurredAt:      now,
 		}},
 		{app.EventFaultlineMatured, domain.FaultlineMatured{FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
@@ -97,6 +100,53 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 	}
 	if len(files) != len(schemaRefByEventType) {
 		t.Errorf("schema files=%d but frozen event types=%d", len(files), len(schemaRefByEventType))
+	}
+}
+
+// The trust classes are an ADDITIVE change to the frozen v1 contract, not a v2 — the same
+// treatment Score and Applicabilities got (EVENTBUS D9). Two things must hold for that to be
+// legitimate, and both are asserted here: a card with no trust yet marshals byte-identically
+// to the pre-change wire (omitempty, so the keys are simply absent), and a card with trust
+// still validates against v1. If either broke, this would need a v2 + a new schema_ref.
+func TestIntegrationContractV1_FaultlineEnrichedTrustIsAdditive(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	ref := schemaRefFor(app.EventFaultlineEnriched)
+
+	withoutTrust, err := json.Marshal(domain.FaultlineEnriched{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: value.SeverityHigh, OccurredAt: now,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	assertValidContract(t, ref, withoutTrust)
+	for _, key := range []string{"HeadlineTrust", "RangeTrust", "SignalTrust"} {
+		if bytes.Contains(withoutTrust, []byte(key)) {
+			t.Errorf("unset trust must be omitted from the wire, found %q in %s", key, withoutTrust)
+		}
+	}
+
+	withTrust, err := json.Marshal(domain.FaultlineEnriched{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: value.SeverityHigh, OccurredAt: now,
+		HeadlineTrust: value.TrustObserved, RangeTrust: value.TrustAsserted, SignalTrust: value.TrustInferred,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	assertValidContract(t, ref, withTrust)
+}
+
+// The schema pins the class vocabulary, so a typo or a renamed class fails the contract
+// rather than reaching Governance as an unrecognized string.
+func TestIntegrationContractV1_RejectsUnknownTrustClass(t *testing.T) {
+	raw := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2024-1","Severity":"high","KEV":false,` +
+		`"ExploitPublic":false,"HeadlineTrust":"probably-fine","OccurredAt":"2023-11-14T22:13:20Z"}`)
+	sch := compileContract(t, schemaRefFor(app.EventFaultlineEnriched))
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if err := sch.Validate(doc); err == nil {
+		t.Fatal("expected an unknown trust class to fail the contract")
 	}
 }
 

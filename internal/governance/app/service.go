@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 const maxSaveRetries = 5
@@ -165,6 +166,12 @@ type EnrichmentSignal struct {
 	// not_affected statement whose package matches a Finding's component raises a system
 	// not_affected Proposal on that Finding (policy/human accepts — never auto-suppress).
 	Applicabilities []Applicability
+	// Per-field-group trust backing this signal (EDR-TRUST-01 T2/T3). Nothing consumes
+	// these yet — the constitutional check (T4) and reservations (T12) arrive in later
+	// groups; carrying them now means the seam does not change again.
+	HeadlineTrust value.TrustClass
+	RangeTrust    value.TrustClass
+	SignalTrust   value.TrustClass
 }
 
 // Applicability is one vendor VEX statement distilled from the enrichment event (the raw wire

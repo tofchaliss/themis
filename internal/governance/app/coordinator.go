@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // The inbound-seam contract (D5/D6). Governance re-declares the facts it consumes from
@@ -31,6 +32,12 @@ type InboundFaultlineEnriched struct {
 	ExploitPublic   bool
 	Score           int // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
 	Applicabilities []Applicability
+	// Per-field-group trust from Knowledge's reconciled view (EDR-TRUST-01 T2/T3). Unset
+	// on a payload predating the field; value.MaxTrust reads unset as Inferred, so a
+	// consumer that folds one in without checking degrades conservatively.
+	HeadlineTrust value.TrustClass
+	RangeTrust    value.TrustClass
+	SignalTrust   value.TrustClass
 }
 
 // InboundFaultlineSuperseded is Knowledge's FaultlineSuperseded fact: the CVE was withdrawn
@@ -65,11 +72,19 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		HighSeverity:    isHighSeverity(e.Severity),
 		Score:           e.Score,
 		Applicabilities: e.Applicabilities,
+		HeadlineTrust:   e.HeadlineTrust,
+		RangeTrust:      e.RangeTrust,
+		SignalTrust:     e.SignalTrust,
 	})
 }
 
 // OnFaultlineSuperseded re-evaluates the affected Findings for a withdrawn/rejected CVE
 // (D6): a system Not-Affected proposal per Finding (auto-accepted only by a policy).
+// The withdrawal path carries **no** trust class yet: knowledge.faultline_superseded.v1 does
+// not include one. A withdrawal is reproducible (re-fetch and the CVE is still rejected), so
+// it is genuinely Observed — but unset reads as Inferred under value.MaxTrust, and the
+// constitutional bar (T4) would then block a policy auto-accept that works today. Group 4
+// must classify this path explicitly before it consumes trust. Tracked as TRUST-4.
 func (c *Coordinator) OnFaultlineSuperseded(ctx context.Context, s InboundFaultlineSuperseded) error {
 	return c.svc.ReactToEnrichment(ctx, EnrichmentSignal{FaultlineID: s.FaultlineID, Withdrawn: true})
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 )
 
@@ -67,6 +68,9 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
 			Applicabilities: apps,
+			HeadlineTrust:   value.TrustClass(dto.HeadlineTrust),
+			RangeTrust:      value.TrustClass(dto.RangeTrust),
+			SignalTrust:     value.TrustClass(dto.SignalTrust),
 		})
 	case eventFaultlineSuperseded:
 		var dto faultlineSupersededDTO
@@ -113,6 +117,12 @@ type faultlineEnrichedDTO struct {
 	ExploitPublic   bool               `json:"ExploitPublic"`
 	Score           int                `json:"Score"`           // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
 	Applicabilities []applicabilityDTO `json:"Applicabilities"` // vendor VEX statements (EDR-VEX-01 D5); absent on an older payload.
+	// Per-field-group trust from Knowledge's reconciled view (EDR-TRUST-01 T2/T3). Empty
+	// on a payload predating the field — which is safe, because value.MaxTrust reads an
+	// unset class as Inferred, the most conservative answer.
+	HeadlineTrust string `json:"HeadlineTrust"`
+	RangeTrust    string `json:"RangeTrust"`
+	SignalTrust   string `json:"SignalTrust"`
 }
 
 type applicabilityDTO struct {
