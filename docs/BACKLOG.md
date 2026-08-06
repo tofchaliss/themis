@@ -489,6 +489,18 @@ per-context follow-ups below.
   multiple providers together with clearance policy. **Scope:** minimal local-only gate in Δ2; full
   classification / clearance Δ3+.
 
+- [ ] **G-AI-6 — `NeedFinding` is declared but never consulted; the grounding root is hardcoded.** _(Found in
+  the capability-surface audit, 2026-08-06.)_ `domain.NeedFinding` is defined (`domain/capability.go`), listed
+  in `RecommendPositionV1().Needs`, and asserted in tests — but `app.AssembleContext` fetches the subject
+  Finding **unconditionally** and only branches on `NeedFaultline`. The `ContextNeed` mechanism therefore
+  governs the *expansion* but not the *root*, so a capability cannot truthfully declare its grounding. Harmless
+  today (every capability needs the Finding), but it is dead code that misrepresents the contract and it is
+  precisely what blocks a non-Finding subject. **Where it plugs in:** `internal/intelligence/app/context.go` +
+  `domain/capability.go`. **Dep:** overtaken by **`EDR-TRUST-01` T10** — the owning context produces
+  authoritative **Domain Projections** and the runtime gathers nothing, which deletes `AssembleContext` and
+  this defect with it. (It was first filed against `EDR-INTELLIGENCE-01` Revision 5 / S3, now superseded.) Filed here so
+  the defect is not lost if the trust-model line is deferred. **Scope:** LOW on its own; free under T10.
+
 ---
 
 ### D. Observability (R1) — remaining signals

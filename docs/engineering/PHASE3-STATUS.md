@@ -270,6 +270,33 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 
 ## Next action (resume here)
 
+**2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
+audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
+from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as
+**[`EDR-TRUST-01`](decisions/EDR-TRUST-01.md)** (PROPOSED, T1–T10) with coordinated updates to **Book I-adjacent
+vocabulary** (Book II Ch 2 §2.7 + **Domain Invariant 4 — Trust Is Inherited, Never Granted**), **Book III
+Ch 16** (Domain Projections + Deterministic Inference), and **Book IV** (§2.1–2.3 capability classes,
+runtime contract, principles 10–17). `EDR-INTELLIGENCE-01` **Revision 5 is SUPERSEDED** by it the same day.
+
+What changed, in one line each: trust derives from **evidence provenance**, not the producing component ·
+three classes **Observed / Asserted / Inferred**, propagating **monotonically** · **Inferred is
+constitutionally barred from auto-acceptance** · a new **Deterministic Inference** layer runs provable rules
+before AI (the version-range rule **moves out of** the AI runtime) · capabilities are **Information** or
+**Decision**, and only Decision outputs enter Governance · the context owning a Selection Type produces
+authoritative, business-named **Domain Projections** (`ReleasePosture` is the first — the pattern already
+works) while capability-specific shaping stays **in-memory and unpersisted**, bounding the runtime to **four
+rules** (no orchestration · information-preserving shaping · full provenance · grounding anchors to authority;
+rewrites `EDR-INTELLIGENCE-01` **D5**, amends **D2**) · **Selection** (type + set + cardinality) replaces the
+bare finding-id subject.
+
+**Nothing is implemented and no code has changed.** Before any build: grill/close `EDR-TRUST-01`'s five open
+questions (projection ownership under no-cross-context-imports; trust-class persistence vs the frozen v1 event
+contracts; "Accepted with Warning"; the Decision Proposal payload; `recommend_position` migration order). The
+new Deterministic Inference layer is a **new architectural layer** and needs explicit approval. The AI-line
+ordering below (GOV-14 → Δ3 → Δ4) still stands but is now **downstream** of this.
+
+---
+
 **2026-08-05 — from-scratch VM bring-up + two HIGH bug fixes (both merged to `main`).** A full cold-start
 deployment on the enterprise VM (Postgres → 7 DBs → build → the 6 nodes → Ollama `cyberpal20b` +
 `nomic-embed-text` → the Δ3a vector store), driven through real use cases (SBOM→Finding→`recommend_position`

@@ -24,6 +24,79 @@ AI is used only when additional reasoning, explanation or external context adds 
 
 Human users remain responsible for governance decisions.
 
+## 2.1 Two classes of capability
+
+Every AI capability belongs to exactly one class, and the class determines the entire path its output takes.
+
+**Information capabilities** answer a question for a person. They produce an **Information Response** — an
+explanation, a summary, a plan. It is **ephemeral**: read by a human and discarded. Nothing is recorded, and
+there is nothing to accept or reject.
+
+**Decision capabilities** produce a **Decision Proposal** — a structured claim that aspires to become
+enterprise truth, and therefore enters Governance.
+
+```text
+                        Business Capability
+                                │
+                ┌───────────────┴───────────────┐
+                ▼                               ▼
+          Information                       Decision
+                │                               │
+          AI Runtime                       AI Runtime
+                │                               │
+     Grounding Verification          Grounding Verification
+                │                               │
+     Information Response             Decision Proposal
+                │                               │
+              User                   Business Verification (Governance)
+                                                │
+                                        Human Decision
+                                                │
+                                        Enterprise Truth
+```
+
+**Governance is not validating AI. Governance is validating only those outputs that aspire to become
+enterprise knowledge.**
+
+The rule that protects this: an Information Response may be shown to a human, but may **never** be stored as
+enterprise truth, nor converted into truth, except by passing through a Decision capability whose proposal is
+governed. Explanations are disposable; proposals are governed.
+
+## 2.2 Deterministic inference precedes AI
+
+"AI only where reasoning adds value" is not a guideline about taste. It is an ordering:
+
+```text
+Evidence → Knowledge → Deterministic Inference → System Proposals → Governance
+                                                                         │
+                                                     AI (Decision capabilities) ─┘
+                                                     only where inference could not conclude
+```
+
+**Deterministic Inference** executes provable rules over assembled evidence — version-range applicability,
+package-not-shipped, and, as the evidence to support them arrives, feature-disabled, build-time exclusion,
+static configuration, platform incompatibility. A provable verdict is a computation, not a reasoning task.
+Routing it through a language model is slower, costlier, less accurate, and unavailable whenever the optional
+AI plane is switched off.
+
+**AI is the last resort for ambiguity, not the first tool for every problem.**
+
+This ordering constrains **Decision** capabilities only. **Information** capabilities are user-initiated and
+may be invoked at any time — a user is entitled to ask for an explanation of an answer that inference already
+settled confidently.
+
+## 2.3 Trust comes from evidence, not from the component that produced the conclusion
+
+Themis classifies every fact by how it was obtained — **Observed** (Themis saw it itself), **Asserted**
+(someone stated it, unverified), **Inferred** (the output of non-deterministic reasoning) — and a conclusion
+inherits the highest-risk class among the evidence it used.
+
+The consequence for AI is absolute and non-negotiable: **an Inferred conclusion may never be accepted
+automatically, under any policy configuration.** Autonomy of generation, yes. Autonomy of authority, never.
+
+The full model — the classes, monotonic propagation, and the constitutional bar — is
+[`EDR-TRUST-01`](../../engineering/decisions/EDR-TRUST-01.md). Book IV assumes it.
+
 ---
 
 # 3. Actors
@@ -66,35 +139,62 @@ Typical questions:
 
 ## AI Runtime
 
-Provides reasoning services.
+Provides reasoning services. It is **one consumer of the domain among several** — alongside dashboards,
+reports and exports — and is privileged over none of them.
+
+```text
+Capability ID + Selection  →  Domain Projection  →  [shape]  →  reason  →  Information Response | Decision Proposal
+                              ↑ authoritative                   ↑ Grounding Verification anchors here ─┘
+```
+
+**The four rules define what the AI Runtime is allowed to do:**
+
+1. **No orchestration.** The runtime never gathers business data. It does not know which bounded contexts
+   exist, which projections exist, or how one is produced.
+2. **Information-preserving shaping.** It may filter, sort, group and summarise an authoritative projection
+   into the shape a capability reasons over. *Information-preserving* means **nothing may be introduced that
+   the projection did not contain** — reduction is permitted, invention is not.
+3. **Full provenance.** Every derived element must be traceable back to the received Domain Projection.
+4. **Grounding anchors to authority.** Grounding Verification always validates against the authoritative
+   Domain Projection — **never solely** against a runtime-generated view.
 
 Responsibilities:
 
-- Summarization
-- Recommendation
-- Explanation
-- Retrieval
-- Prompt orchestration
+- Reasoning — summarization, recommendation, explanation
+- **Semantic retrieval** over its own Operational Semantic Index (KS2 — derived, rebuildable, runtime-owned)
+- Prompt construction and model routing
+- Deriving a **Capability Context** from a Domain Projection — in memory, never persisted (rules 2 + 3)
+- **Grounding Verification** — proving the model reasoned only from the authoritative projection and the
+  evidence it retrieved, inventing no entity and citing nothing unsupported
 
-The AI Runtime never owns security objects.
+Explicitly **not** its responsibilities:
 
----
+- **Gathering.** It receives a Domain Projection. It issues no business reads and requests no fact-bundles.
+- **Deterministic inference.** Provable rules run before it, in the backend.
+- **Deciding anything.** It never owns security objects and never establishes truth.
 
 ## Themis Backend
 
-Owns deterministic security knowledge.
+Owns deterministic security knowledge, **capability definitions**, and the projections that feed reasoning.
 
 Responsibilities:
 
-- Products
-- Projects
-- Releases
-- SBOM
-- Findings
-- Faultlines
-- Enterprise Positions
-- Product VEX
-- Policies
+- Products, Projects, Releases
+- SBOM / Evidence
+- Findings, Faultlines, Enterprise Positions
+- Product VEX, Policies
+- **Deterministic Inference** — provable rules, raising system proposals
+- **Domain Projections** — reusable read models owned by the context that owns a Selection Type, assembled
+  only from events and read-only APIs, and named for the **business view** they represent (`ReleasePosture`),
+  never for a consumer. Where an aggregate is itself a reusable business view, the backend computes it.
+- **Business Verification** — validating a returned Decision Proposal against the system of record at
+  acceptance time
+
+Because a Domain Projection is deterministic and self-contained, it is also **replayable** — every consumer,
+AI included, is independently testable without a live database.
+
+`GET /releases/{id}/posture` is the first Domain Projection: it already composes Governance's own findings, a
+Knowledge-derived score and a Registry-derived blast multiplier, with no cross-context import.
 
 ---
 
@@ -244,6 +344,27 @@ This workflow never creates or modifies business objects in Themis. The index is
 ---
 
 # 6. User Use Cases
+
+Each use case declares its **capability class** (§2.1), the **Selection** the user points at, and — for
+Decision capabilities only — what enters Governance. Note that most user-facing AI in Themis is
+**Informational**: it explains and plans, it does not decide.
+
+| Use case | Class | Selection | Enters Governance? |
+| --- | --- | --- | --- |
+| UC-001 Release Readiness Assessment | Information | Release | No |
+| UC-002 Engineering Planning | Information | Release | No |
+| UC-003 Explain Vulnerability | Information | Finding | No |
+| UC-004 Generate Product VEX Draft | **Decision** | Finding (set) | Yes — a draft artifact for human review |
+| UC-005 Remediation Recommendation | Information | Finding (set) | No |
+| UC-006 Risk Explanation | Information | Release | No |
+
+`recommend_position` — the shipped affected/not-affected triage capability — is a **Decision** capability over
+a Finding Selection, and is the reference implementation of the Decision branch.
+
+**Selection Types are Finding and Release only.** They are *user-addressable entry points*, not domain
+entities: a type qualifies when it is addressable today **and** a use case treats it as the thing the user
+picks. Everything the system gathers on the user's behalf — Enterprise Positions, Faultlines, vendor VEX,
+policies, historical decisions, estate and blast-radius — is **Decision Context**, never a Selection.
 
 ## UC-001 Release Readiness Assessment
 
@@ -657,6 +778,28 @@ point at which document-retrieval tooling is (re)evaluated.
 8. AI recommendations must always be traceable to deterministic security knowledge.
 
 9. The retrieval mechanism is independent of the corpus it indexes; new retrieval targets never change the rule.
+
+10. Every capability is either Information or Decision. Only Decision outputs enter Governance.
+
+11. An Information Response is ephemeral. It may never become enterprise truth except by passing through a
+    governed Decision capability.
+
+12. Deterministic inference precedes AI. AI is the last resort for ambiguity in Decision capabilities, never
+    the first tool.
+
+13. Trust derives from evidence provenance, not from the component that produced the conclusion.
+
+14. Trust propagates monotonically. A conclusion is never more trusted than its weakest evidence.
+
+15. Inferred evidence is constitutionally barred from automatic acceptance, under any policy configuration.
+
+16. The AI Runtime never gathers. It may shape an authoritative Domain Projection without introducing anything
+    the projection did not contain, every derived element remains traceable to it, and Grounding Verification
+    anchors to the projection — never solely to a runtime-generated view. AI is a consumer of the domain,
+    never a driver of the domain model.
+
+17. Grounding Verification protects the reasoning process; Business Verification protects enterprise truth.
+    They are two boundaries, not one check performed twice.
 
 ## Use case diagrams:
 
