@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# release-posture.sh — the consolidated security posture of one Release, from the CLI.
+#
+# This is a READ-ONLY client over the existing APIs. It adds no workflow and stores nothing: every
+# number below is fetched live from Registry, Governance and Knowledge, and an operator, a GUI or
+# this script see exactly the same thing.
+#
+# It is also, deliberately, the specification for what a GUI needs. Anything this script has to do
+# by hand — enumerate, join, re-fetch — is a gap in the read surface, tracked as DASH-1/DASH-2:
+#   * a release UUID must be supplied, because Registry has no list or lookup-by-name;
+#   * the severity BAND costs one Knowledge call per Faultline, because PostureEntry carries
+#     base_score but not the band Knowledge already computes.
+#
+# Usage:
+#   scripts/release-posture.sh <release-id> [--top N] [--ai N] [--all]
+#
+#   --top N   how many rows to show (default 20)
+#   --ai N    ask the Intelligence Gateway to recommend a position for the top N undecided
+#             Findings (default 0 = off). SLOW: a grounded recommendation on a local model takes
+#             ~30-60s each, so start with 1 or 2.
+#   --all     include Findings already decided (residual_priority 0), which are hidden by default
+#
+# Env: THEMIS_REGISTRY_URL, THEMIS_GOVERNANCE_URL, THEMIS_KNOWLEDGE_URL, THEMIS_API_KEY
+set -uo pipefail
+
+REL="${1:-}"
+[ -n "$REL" ] || { echo "usage: $0 <release-id> [--top N] [--ai N] [--all]" >&2; exit 2; }
+shift
+
+TOP=20; AI=0; SHOW_ALL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --top) TOP="$2"; shift 2 ;;
+    --ai)  AI="$2";  shift 2 ;;
+    --all) SHOW_ALL=1; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+REGISTRY="${THEMIS_REGISTRY_URL:-http://localhost:8082}"
+GOVERNANCE="${THEMIS_GOVERNANCE_URL:-http://localhost:8083}"
+KNOWLEDGE="${THEMIS_KNOWLEDGE_URL:-http://localhost:8085}"
+
+# Inbound-edge auth is optional (EDR-SECURITY-01): send the key only when one is configured.
+get() {
+  if [ -n "${THEMIS_API_KEY:-}" ]; then curl -sf -H "X-API-Key: $THEMIS_API_KEY" "$@"; else curl -sf "$@"; fi
+}
+post() {
+  if [ -n "${THEMIS_API_KEY:-}" ]; then curl -s -H "X-API-Key: $THEMIS_API_KEY" -X POST "$@"; else curl -s -X POST "$@"; fi
+}
+
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+
+# ── Header ────────────────────────────────────────────────────────────────────────────────────
+release=$(get "$REGISTRY/api/v1/releases/$REL" 2>/dev/null || echo '{}')
+version=$(echo "$release" | jq -r '.version // "unknown"')
+# Blast radius is the ENTERPRISE half of priority (C2): how many customers this release reaches.
+# It is why two releases with the same CVE can rank differently.
+customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+
+posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || { echo "cannot read posture for $REL" >&2; exit 1; }
+total=$(echo "$posture" | jq 'length')
+[ "$total" != "0" ] || { echo "no Findings for release $REL"; exit 0; }
+
+open=$(echo "$posture" | jq '[.[] | select(.residual_priority > 0)] | length')
+decided=$((total - open))
+caveated=$(echo "$posture" | jq '[.[] | select(.reservation != null)] | length')
+
+printf '\n\033[1mRELEASE %s\033[0m  version=%s  customers-reached=%s\n' "$REL" "$version" "$customers"
+printf '  %s Findings — \033[1m%s need attention\033[0m, %s already decided' "$total" "$open" "$decided"
+[ "$caveated" != "0" ] && printf ', %s resting on weaker-than-observed evidence' "$caveated"
+printf '\n\n'
+
+# ── Rows ──────────────────────────────────────────────────────────────────────────────────────
+# Sorted by residual_priority: intrinsic severity scaled by what was DECIDED (EDR-GOVERNANCE-01
+# D14). This is the "what do I still have to do" ranking — a Finding marked not_affected drops to
+# zero without losing the effective_priority that records how bad it actually is.
+filter='.residual_priority > 0'
+[ "$SHOW_ALL" = "1" ] && filter='true'
+
+rows=$(echo "$posture" | jq -r --argjson n "$TOP" "[.[] | select($filter)] | sort_by(-.residual_priority) | .[0:\$n] | .[] | [.residual_priority, .effective_priority, .base_score, .blast_multiplier, .cve, (.stance // \"-\"), (.reservation // \"-\"), .faultline_id, .finding_id] | @tsv")
+
+{
+  printf 'RANK\tBAND\tCVE\tRESID\tEFFECT\tBLAST\tKEV\tEPSS\tCOMPONENT\tFIX\tSTANCE\tCAVEAT\n'
+  rank=0
+  while IFS=$'\t' read -r resid effect base blast cve stance reservation flid fid; do
+    [ -n "$cve" ] || continue
+    rank=$((rank + 1))
+    # The severity BAND and the FIX come from Knowledge. The band is exploitability-aware, not raw
+    # CVSS: `critical` means CVSS>=9 AND KEV-listed; `high+` means CVSS>=9 with a public exploit.
+    fl=$(get "$KNOWLEDGE/api/v1/faultlines/$flid" 2>/dev/null || echo '{}')
+    band=$(echo "$fl" | jq -r '.view.priority // "-"')
+    kev=$(echo "$fl" | jq -r 'if .view.kev then "yes" else "-" end')
+    epss=$(echo "$fl" | jq -r 'if .view.epss then (.view.epss * 100 | floor | tostring + "%") else "-" end')
+    # fixed_versions is the deterministic mitigation — the actual remediation, before any AI.
+    fix=$(echo "$fl" | jq -r '(.view.fixed_versions // []) | if length == 0 then "none published" else .[0] end')
+    comp=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end' | sed 's#pkg:[a-z]*/##; s#?.*##')
+    printf '%s\t%s\t%s\t%s\t%s\t%sx\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$rank" "$band" "$cve" "$resid" "$effect" "$blast" "$kev" "$epss" "$comp" "$fix" "$stance" "$reservation"
+  done <<< "$rows"
+} | column -t -s $'\t'
+
+# ── AI mitigation assistance (optional, advisory) ─────────────────────────────────────────────
+# The Gateway PROPOSES; it never decides (EDR-TRUST-01 T4). Anything it returns is recorded as an
+# advisory proposal on `inferred` evidence, which no policy may auto-accept — a human does.
+[ "$AI" -gt 0 ] 2>/dev/null || exit 0
+
+printf '\n\033[1mAI ASSISTANCE\033[0m — advisory only; every recommendation below is recorded as a\n'
+printf 'proposal on inferred evidence and is constitutionally barred from auto-acceptance.\n\n'
+
+echo "$posture" | jq -r --argjson n "$AI" '[.[] | select(.residual_priority > 0 and .has_position == false)] | sort_by(-.residual_priority) | .[0:$n] | .[] | [.cve, .finding_id] | @tsv' |
+while IFS=$'\t' read -r cve fid; do
+  [ -n "$fid" ] || continue
+  printf '  %s (%s) ... ' "$cve" "$fid"
+  out=$(post "$GOVERNANCE/api/v1/findings/$fid/recommend" -w '\n%{http_code}')
+  code=$(echo "$out" | tail -1)
+  case "$code" in
+    201)
+      pid=$(echo "$out" | head -n -1 | jq -r '.proposal_id')
+      printf 'proposed\n'
+      # Read it back from the system of record rather than the response, so what is shown is what
+      # was actually stored — including the UNVERIFIED MENTIONS caveat when the model's narrative
+      # named an identifier nobody gave it (TRUST-8).
+      psql "${THEMIS_GOVERNANCE_DSN:-}" -At -F'|' -c \
+        "select stance, evidence_trust, rationale from finding_proposals where proposal_id='$pid'" 2>/dev/null |
+        awk -F'|' '{printf "      stance=%s  evidence=%s\n      %s\n", $1, $2, $3}' ||
+        printf '      (set THEMIS_GOVERNANCE_DSN to show the recorded rationale)\n'
+      ;;
+    204) printf 'no recommendation (AI disabled, unreachable, or it declined — a safe outcome)\n' ;;
+    *)   printf 'error HTTP %s\n' "$code" ;;
+  esac
+done
+printf '\n'

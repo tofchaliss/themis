@@ -221,6 +221,13 @@ OpenVEX / CSAF out.
 
 - `scripts/list-open-vulns.sh` — auto-discovers API key + product ids and lists open vulnerabilities via the
   API, with a day-over-day snapshot diff.
+- `scripts/release-posture.sh` — the **consolidated release posture** from the CLI: sorts a release's
+  Findings by `residual_priority` (D14 — intrinsic severity scaled by what was decided), joins Knowledge for
+  the exploitability band and the published fix version, and with `--ai N` asks the Gateway to recommend a
+  position for the top N undecided Findings. Read-only over the existing APIs; it stores nothing and adds no
+  workflow, so a future GUI calls exactly the same endpoints. It is also the working spec for DASH-1/DASH-2 —
+  what it has to do by hand (supply a release UUID; one Knowledge call per Faultline for the severity band)
+  is precisely what the read surface is missing.
 - `scripts/release-smoke-test.sh` — one-command release test (build → fresh DB → migrate → run → register →
   upload the SBOM under `scripts/` → verify components + enrichment). Wrapped by the `/themis-release-test`
   skill.
