@@ -49,6 +49,18 @@ code reading.
 read through; (2) sweep the trivial half of **C9** in one PR to shrink the list by ~6; (3) take **C2**,
 which needs a policy *decision* before any code and so has the longest lead time.
 
+**Session 2026-08-07 — 10 defects closed, 6 opened, all VM-verified.** Closed: KN-FIX-1 (cross-package
+fix union dropped 31 live matches) · AI-GROUND-1 **P1** (the AI reasoned from another package's
+version at confidence 0.99) · AI-TIMEOUT-1 (three deadlines, two hard-coded) · TRUST-4 · AI-204-1 ·
+KN-EPSS-BAND-1 · KN-PROPOSAL-BLOAT-1 (28k proposals, 221 distinct) · KN-MODULE-1 · KN-FIX-2 ·
+DASH-3. Shipped: `plan_remediation@v1`, the first release-scoped AI capability.
+**The pattern worth remembering:** every one of these was a *correct component producing a
+misleading whole* — `folded: 236` when zero rows were written, `94 candidates`, `informational` on a
+99%-EPSS CVE, a bare `204`, `confidence 0.99` from another package's data. None failed a test,
+because no unit was wrong. All were found by **reading real output on real data**, which is why
+`scripts/release-posture.sh` earned its keep out of all proportion to its size: it is the only thing
+that reads across every context at once and shows a human the result.
+
 **Filing rule going forward:** a new item names its cluster, and states whether its claim is **measured**
 or **read from code**. Three items in C1 were filed separately over three weeks describing one defect from
 three angles, and two of them proposed fixes that would not have worked.
@@ -1188,6 +1200,55 @@ three angles, and two of them proposed fixes that would not have worked.
   verification asks "were you given this identifier", not "does it mean what you think". Only the
   selection fix could close that gap; guardrail and data quality are complementary.
 
+- [ ] **PLAN-1 — a merged plan step can list 33 packages inline, and the step becomes unreadable.**
+  _(**Measured** on the VM 2026-08-07, first working `plan_remediation@v1` run, step 8.)_
+  The sibling merge (KN-MODULE-1 / same-CVE-set collapse) worked — arguably too well. One step read:
+  `upgrade perl-Carp, perl-Data-Dumper, perl-Digest, … perl-threads-shared – closes 165 findings`,
+  wrapping over five terminal lines with 33 package names. The COLLAPSE is right (it is one
+  `dnf module update`); the RENDERING is not. It is also the largest step in the plan by a factor of
+  two and the hardest to read, which is the wrong way round.
+  **Fix:** cap the rendered list (`perl-Carp, perl-Data-Dumper, perl-Digest +30 more`) in the prompt
+  template AND in the CLI, and say what the step actually is — "one perl module-stream update".
+  The data is fine; only the presentation needs bounding, exactly as the FIX column did.
+  **Dep:** none. **Scope:** SMALL.
+
+- [ ] **PLAN-2 — plan ordering is triage-ordering, and a remediation plan may want impact-ordering.**
+  _(**Measured** on the same run; **design question**, not a defect.)_ `PlanActions` sorts by
+  `TopPriority` desc, then by findings-closed. The result: step 8 closes **165** findings, step 14
+  (`openssh`) closes **40**, while step 3 (`samba`) closes **6** and sits near the top. Every number
+  is correct and the order follows the stated rule — but for someone SCHEDULING work, "one update
+  closes 165" is a stronger argument than "this one is 2 points more severe".
+  Triage order (what is most dangerous?) and plan order (what buys the most?) are genuinely
+  different questions, and `residual_priority` answers the first. Options: (a) leave it and document
+  that a plan inherits triage order; (b) sort the plan by an impact score such as
+  `TopPriority × log(findings)`; (c) offer both and let the caller pick. **Do not** change it
+  silently — the ordering is currently reproducible and explainable, which is worth more than being
+  marginally better ordered.
+  **Dep:** none. **Scope:** SMALL for (b); the DECISION is the work, and it belongs in an EDR.
+
+- [ ] **PLAN-3 — the plan says what to upgrade but not what to upgrade TO.**
+  _(Known and accepted at build time; recorded so it is not mistaken for an oversight.)_
+  `PostureEntry` carries components but not their selected fix versions, so a step reads
+  `upgrade PyYAML` rather than `upgrade PyYAML to 0:5.4.1-1.module+el8.10.0+1582`. The per-Finding
+  assessment HAS the answer (AI-GROUND-1 selected it); the release-scoped projection does not.
+  Deliberate: carrying it needs a new field on `knowledge.faultline_enriched.v1`, a Governance
+  migration, and a stamping path — the same shape as `base_score` (C6/BUG-3). Until then the exact
+  version is one drill-down away.
+  **Fix:** stamp the selected fixes onto the Finding at enrichment, exactly as `base_score` is, then
+  surface them on `PostureEntry`. **Dep:** AI-GROUND-1 (landed). **Scope:** MEDIUM.
+
+- [ ] **PLAN-4 — `plan_remediation` has no real-model e2e; three live refusals were found by hand.**
+  _(Surfaced 2026-08-07 building the capability.)_ Every test uses a fake provider, and all of them
+  passed while the live capability was refused **three times running** — `PyYAML (rpm)`, then the
+  bare heading, then `httpd, mod_http2`. Each was a disagreement between the PROMPT and the
+  GROUNDING GATE, which have no compiler between them and cannot be reconciled by a fake that
+  returns whatever the test author already believes.
+  `make e2e-llm` exists for exactly this (`//go:build llm`, opt-in, skips when unreachable) and does
+  not cover the release path. **Fix:** add a `plan_remediation` case to it that asserts the outcome
+  is OK rather than `business_invalid` — a regression here is invisible to `make check-ci` by
+  construction. **Dep:** none. **Scope:** SMALL. **Priority: this is the only class of defect in the
+  AI seam that the normal gate cannot see.**
+
 - [x] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.** ✅ **CLOSED 2026-08-07.**
   **Fix:** the reason rides the 204 as `X-Themis-AI-Reason` (headers, not a body — 204 means no content, and a payload would be non-conforming; an older caller that ignores it behaves exactly as before). Intelligence sets its `Outcome.Reason`/`Detail`; Governance's client reads it and its own `/recommend` re-emits one of `disabled` · `unreachable` · `declined` · `business_verification_failed` · the Gateway's own reason. `release-posture.sh` now prints what to DO about each instead of one guess covering all three.
   _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three
@@ -1227,6 +1288,14 @@ three angles, and two of them proposed fixes that would not have worked.
   component query returns would turn re-attribution into an undeclared discovery pass. Bounded per
   run, per-card failures skipped, self-terminating (once everything is attributed it finds nothing
   and writes nothing), and idempotent for free now that the aggregate drops verbatim restatements.
+  **⚠ CAVEAT, VM-observed 2026-08-07:** the first sweep reported `folded: 0`, correctly — every
+  EXISTING `faultline_matches` row predates migration 000005 and carries a PURL alone, which cannot
+  be re-queried, so all of them are skipped. The sweep therefore does nothing for the current estate
+  and only starts acting on matches recorded from now on. That is the intended safe behaviour (a
+  component we cannot re-query is one we must not guess about), but it means **KN-FIX-2 is not yet
+  delivering value on this deployment** — it will as releases are re-correlated. A backfill that
+  reconstructs the missing component detail from Evidence's inventory would close the gap sooner;
+  not attempted, because it is a second, different sweep.
 
 - [x] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.** ✅ **CLOSED 2026-08-07.**
   **✅ VM-VERIFIED 2026-08-07:** `CVE-2021-45105` (CVSS 5.9, EPSS 99.999%) and `CVE-2021-44832`
