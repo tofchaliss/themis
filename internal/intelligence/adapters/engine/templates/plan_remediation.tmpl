@@ -20,9 +20,15 @@ Respond with a single JSON object ONLY (no prose outside it), matching exactly:
 {"subject_id":"{{.Release.ReleaseID}}","evidence":[{"kind":"...","ref":"..."}],"reasoning":"..."}
 
 Rules:
-- `reasoning` is the plan, written for an engineer who must schedule the work. Recommend an ORDER,
-  say what each step buys, and call out anything that looks like it needs judgement rather than a
-  routine upgrade.
+- `reasoning` is the plan itself, written for an engineer about to do the work. Write it as a
+  NUMBERED LIST, one line per step, in the order given:
+      1. upgrade <package> — closes N findings, worst <CVE-ID>
+  Add a short second line ONLY where a step needs a caveat a reader could not see from the list:
+  a major-version jump, a package with no clean upgrade, several actions that are really one module
+  rebuild, or anything that looks like it needs a decision rather than a routine bump.
+- DO NOT explain your prioritisation method or restate why high-impact items come first. The order
+  is already computed and given to you; describing it back is not useful to anyone. Say what to DO.
+- If a step is unremarkable, one line is the correct answer for it. Brevity is not laziness here.
 - Work ONLY from the actions listed above. Do not invent packages, versions, CVEs or findings, and
   do not claim a fix version — the listed versions are what is INSTALLED, not what to upgrade to.
 - Cite evidence ONLY as one of these exact identifiers:
