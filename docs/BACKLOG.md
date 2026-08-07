@@ -560,7 +560,20 @@ three angles, and two of them proposed fixes that would not have worked.
   auto-publish policy becomes an alternate **trigger source** alongside the human trigger — no model change.
   (EDR-COMMUNICATION-01 D4 "for the time being".)
 
-- [ ] **All contexts — store fault-injection coverage.** Lift the aggregate stores
+- [ ] **All contexts — store fault-injection coverage.** _(Consciously DEFERRED 2026-08-07, with the
+  trade stated.)_ The work is a mechanical refactor across five contexts — replace each `Store`'s
+  concrete `*pgxpool.Pool` field with an interface satisfying the existing `rowQuerier` + `execer`
+  plus `Begin`, then inject a wrapper that fails the Nth call. The abstraction is already half
+  present (`querier()` / `exec()` route through interfaces today), so the change is small per store
+  and repeated five times.
+  **Why deferred rather than done:** the uncovered lines are `if err != nil { return err }` branches
+  whose happy path the embedded-Postgres integration tests already prove. Nothing about them is
+  believed-but-unverified in the way TRUST-9 was — and TRUST-9's demonstration, written in the same
+  session, uncovered a **P1 silent-suppression defect** (RANGE-PARSE-1). Effort spent demonstrating
+  BEHAVIOUR found a real bug; effort spent covering error returns would not have.
+  **When to do it:** when a store gains logic in an error path (a retry, a fallback, a
+  compensating write) — at that point the branch stops being a passthrough and starts being a
+  decision. **The 80% tier stays until then, deliberately, not by neglect.** Lift the aggregate stores
   (evidence/knowledge/governance/communication ~80–83%, registry 89%) toward 90%+ by covering the DB-error
   branches via an **injectable `pgxpool` interface** (fault injection). Behavior is already proven by the
   embedded-Postgres integration tests; only error-path lines remain. The store tier is intentionally set to
@@ -1737,7 +1750,13 @@ three angles, and two of them proposed fixes that would not have worked.
   wanted. Kept **out of `make check-ci`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional:
   a `make e2e` / `make ci` aggregate target.
 
-- [ ] **Close the PR-gate e2e blind spot (LOW — mostly closed 2026-08-07).** **Update:** `pr.yml` now runs
+- [x] **Close the PR-gate e2e blind spot (LOW).** ✅ **CLOSED 2026-08-07.** Both halves are done:
+  `make e2e-evidence` is now a `pr.yml` step beside `make e2e-pipeline`, so neither e2e suite can
+  merge green and redden `main` afterwards; and the "cheap guard" this entry asked for shipped as
+  **`make vet-tags`**, wired into `check` and `check-ci`, which type-checks `integration`, `e2e`,
+  `llm` and `postgres` in seconds. That guard immediately earned itself twice: it caught two tagged
+  callers of `wiring.Wire` the untagged build cannot see, and it revealed that `llm_e2e_test.go` had
+  not compiled since the T10 refactor (PLAN-4). **Update:** `pr.yml` now runs
   `make e2e-pipeline`, so the *pipeline* e2e is a pre-merge gate and the original failure mode (a change
   that breaks e2e merging green) is largely closed. Confirmed live the same day: the D14/D15 `Wire`
   signature changes broke `tests/pipeline` compilation, which `make check-ci` **cannot** see because the

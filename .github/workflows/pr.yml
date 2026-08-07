@@ -50,3 +50,10 @@ jobs:
       # never reach main.
       - name: make e2e-pipeline (no-AI SBOM→VEX gate)
         run: make e2e-pipeline
+
+      # The Evidence-specific e2e kept the ORIGINAL blind spot after the pipeline e2e moved here:
+      # it ran only post-merge, so a change that breaks it merged green and reddened `main`
+      # afterwards. That is exactly how PR #55 landed (an outbox column rename the e2e helper still
+      # referenced), fixed in #56. Both e2e suites are now pre-merge gates.
+      - name: make e2e-evidence (Evidence register → upload → inventory)
+        run: make e2e-evidence
