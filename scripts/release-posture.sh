@@ -27,12 +27,14 @@ REL="${1:-}"
 [ -n "$REL" ] || { echo "usage: $0 <release-id> [--top N] [--ai N] [--all]" >&2; exit 2; }
 shift
 
-TOP=20; AI=0; SHOW_ALL=0
+TOP=20; AI=0; SHOW_ALL=0; FIXWIDTH=40
 while [ $# -gt 0 ]; do
   case "$1" in
     --top) TOP="$2"; shift 2 ;;
     --ai)  AI="$2";  shift 2 ;;
     --all) SHOW_ALL=1; shift ;;
+    # --fix-width 0 disables clipping, for piping into a file or a wide terminal.
+    --fix-width) FIXWIDTH="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -144,10 +146,16 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     [ -n "$pkg" ] || pkg=' no-such-package'
     # Shown newest-first and capped: one package legitimately has many published fixes (separate
     # el8 module streams), and a cell holding 90 of them is as unreadable as no answer at all.
-    fix=$(echo "$fl" | jq -r --arg p "$pkg" '
+    #
+    # The cell is also WIDTH-capped. `column -t` sizes a column to its widest cell, so a single row
+    # carrying three 45-character NEVRAs stretched the table past the terminal and wrapped every
+    # other row — the long value did not just look bad, it destroyed the alignment that makes the
+    # other 231 rows scannable. One over-wide cell is a whole-table defect.
+    fix=$(echo "$fl" | jq -r --arg p "$pkg" --argjson w "$FIXWIDTH" '
+      def clip: if ($w > 0 and (.|length) > $w) then (.[0:$w-1] + "…") else . end;
       ((.view.fixes // []) | map(select((.package // "") | ascii_downcase == ($p|ascii_downcase))) | map(.version) | unique | reverse) as $mine
-      | if ($mine|length) > 3 then (($mine[0:3]|join(", ")) + " (+\($mine|length - 3))")
-        elif ($mine|length) > 0 then ($mine|join(", "))
+      | if ($mine|length) > 3 then ((($mine[0:3]|join(", "))|clip) + " (+\($mine|length - 3))")
+        elif ($mine|length) > 0 then (($mine|join(", "))|clip)
         elif ((.view.fixed_versions // [])|length) == 0 then "none published"
         else "\((.view.fixed_versions|length)) unattributed"
         end')
