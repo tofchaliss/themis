@@ -104,8 +104,15 @@ func (m *Metrics) RecordFeedPoll(source, outcome string) {
 }
 
 // RecordFeedRecords counts records seen at a stage of one poll.
+//
+// A count of ZERO is recorded, not skipped. Adding 0 to a counter changes no value but does
+// CREATE the series, and that is the whole point here: "this feed discovered nothing" and "this
+// feed has never been polled" are different operational states, and an absent time series
+// cannot express the first. Skipping zeroes would reintroduce, one level down, exactly the
+// ambiguity these counters were added to remove. Only a negative — impossible from a length —
+// is refused.
 func (m *Metrics) RecordFeedRecords(source, stage string, n int) {
-	if m == nil || n <= 0 {
+	if m == nil || n < 0 {
 		return
 	}
 	m.feedRecords.WithLabelValues(source, stage).Add(float64(n))

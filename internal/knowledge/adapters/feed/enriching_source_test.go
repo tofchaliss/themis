@@ -85,3 +85,20 @@ func TestRelevanceFilteredSource(t *testing.T) {
 		t.Error("known error: expected error")
 	}
 }
+
+// The empty-feed path returns early, and must still record — "the feed returned nothing" is one
+// of the two cases these counters exist to tell apart, so it is the last one that may go
+// unrecorded. Asserted through the behaviour the early return governs: an empty raw feed still
+// yields no proposals and no error, and the known-CVE set is never consulted.
+func TestRelevanceFilteredSource_EmptyFeedShortCircuitsWithoutConsultingKnownCVEs(t *testing.T) {
+	known := &fakeKnownCVEs{}
+	src := feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{}, known)
+
+	out, err := src.ChangedSince(context.Background(), time.Time{})
+	if err != nil || len(out) != 0 {
+		t.Fatalf("out=%v err=%v, want no proposals and no error", out, err)
+	}
+	if known.called {
+		t.Error("known-CVE set consulted for an empty feed — the early return should short-circuit")
+	}
+}

@@ -33,6 +33,10 @@ func (s *RelevanceFilteredSource) ChangedSince(ctx context.Context, since time.T
 		return nil, err
 	}
 	if len(changed) == 0 {
+		// Recorded BEFORE returning, and with zeroes. "The feed returned nothing" is one of the
+		// two cases these counters exist to tell apart, so it is the last case that may go
+		// unrecorded — an absent series would be indistinguishable from a poll that never ran.
+		s.record(0, 0)
 		return nil, nil
 	}
 	known, err := s.known.KnownCVEs(ctx)
@@ -45,12 +49,15 @@ func (s *RelevanceFilteredSource) ChangedSince(ctx context.Context, since time.T
 			out = append(out, pf)
 		}
 	}
-	// Both numbers are recorded HERE because this is the only place that knows both. The watch
-	// downstream sees only the survivors, so `folded: 0` was ambiguous — either the feed
-	// returned nothing, or it returned plenty and none of it was about this enterprise. Those
-	// need opposite responses (fix the client vs. do nothing), and for months the system could
-	// not tell an operator which had happened.
-	observability.Default().RecordFeedRecords(s.source, observability.FeedRecordsDiscovered, len(changed))
-	observability.Default().RecordFeedRecords(s.source, observability.FeedRecordsRelevant, len(out))
+	s.record(len(changed), len(out))
 	return out, nil
+}
+
+// record emits both counts. They are recorded HERE because this is the only place that knows
+// both: the watch downstream sees only the survivors, so `folded: 0` alone was ambiguous —
+// either the feed returned nothing, or it returned plenty and none of it was about this
+// enterprise. Those need opposite responses (fix the client vs. do nothing).
+func (s *RelevanceFilteredSource) record(discovered, relevant int) {
+	observability.Default().RecordFeedRecords(s.source, observability.FeedRecordsDiscovered, discovered)
+	observability.Default().RecordFeedRecords(s.source, observability.FeedRecordsRelevant, relevant)
 }

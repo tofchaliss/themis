@@ -109,3 +109,27 @@ func TestMetrics_NilReceiverIsSafe(t *testing.T) {
 		t.Errorf("nil handler status = %d, want 404", rec.Code)
 	}
 }
+
+// A zero count must CREATE the series, not be skipped. "This feed discovered nothing" and "this
+// feed has never been polled" are different operational states, and an absent time series
+// cannot express the first — skipping zeroes reintroduces, one level down, exactly the
+// ambiguity these counters were added to remove.
+//
+// Found on the VM: the first deploy of these metrics showed no themis_feed_records_total at all
+// after a successful NVD poll, because the count was zero and both the recorder and its caller
+// skipped it.
+func TestMetrics_ZeroCountStillCreatesTheSeries(t *testing.T) {
+	m := observability.NewMetrics("knowledge")
+	m.RecordFeedRecords("nvd", observability.FeedRecordsDiscovered, 0)
+	m.RecordFeedRecords("nvd", observability.FeedRecordsRelevant, 0)
+
+	body := scrape(t, m)
+	for _, want := range []string{
+		`themis_feed_records_total{service="knowledge",source="nvd",stage="discovered"} 0`,
+		`themis_feed_records_total{service="knowledge",source="nvd",stage="relevant"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("scrape missing %q — a zero must still appear", want)
+		}
+	}
+}
