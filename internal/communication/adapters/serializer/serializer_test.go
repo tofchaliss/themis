@@ -12,7 +12,10 @@ func art(t *testing.T, typ domain.ArtifactType) domain.Artifact {
 	t.Helper()
 	snap := domain.PositionSnapshot{
 		FindingID: "fnd-1", Version: 2, Stance: domain.StanceNotAffected, Rationale: "vendor VEX confirms",
-		Lineage: domain.Lineage{ReleaseID: "rel-1", FindingID: "fnd-1", FaultlineID: "fl-1", CVE: "CVE-2024-1"},
+		Lineage: domain.Lineage{
+			ReleaseID: "rel-1", FindingID: "fnd-1", FaultlineID: "fl-1", CVE: "CVE-2024-1",
+			Components: []string{"pkg:pypi/urllib3@1.26.20"},
+		},
 	}
 	a, err := domain.Materialize(snap, typ)
 	if err != nil {
@@ -47,7 +50,14 @@ func TestOpenVEX(t *testing.T) {
         "name": "CVE-2024-1"
       },
       "products": [
-        "rel-1"
+        {
+          "@id": "https://themis.example/release/rel-1",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/urllib3@1.26.20"
+            }
+          ]
+        }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",

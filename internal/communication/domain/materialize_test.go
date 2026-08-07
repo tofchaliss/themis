@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -47,7 +48,10 @@ func TestMaterialize_StanceEqualityInvariant(t *testing.T) {
 func TestMaterialize_Deterministic(t *testing.T) {
 	a, _ := domain.Materialize(snapshot(domain.StanceNotAffected), domain.ArtifactAdvisory)
 	b, _ := domain.Materialize(snapshot(domain.StanceNotAffected), domain.ArtifactAdvisory)
-	if a != b {
+	// reflect.DeepEqual, not !=: the Artifact carries the component PURLs as a slice, so it is
+	// no longer a comparable struct. The property under test is unchanged — same snapshot in,
+	// identical artifact out — which is what makes the stored payload regenerable (D1).
+	if !reflect.DeepEqual(a, b) {
 		t.Errorf("materialization not deterministic:\n a=%+v\n b=%+v", a, b)
 	}
 }

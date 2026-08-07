@@ -1,0 +1,15 @@
+-- C6 / OpenVEX round-trip: carry the affected component PURLs on the Publication.
+--
+-- The OpenVEX serializer previously named the product by bare release UUID and emitted no
+-- subcomponents, so a published document identified nothing a consumer could resolve and
+-- round-tripped into an applicability statement matching no component. Emitting the PURLs as
+-- OpenVEX `subcomponents` fixes that, but the payload is REGENERABLE (D1) — re-rendering a
+-- stored Publication must reproduce the published bytes — so the PURLs have to be persisted
+-- alongside the rest of the artifact rather than re-fetched from Governance, whose Finding may
+-- have absorbed new components since.
+--
+-- JSONB (not a delimited string) because a PURL legitimately contains ':', '/', '@' and '%',
+-- leaving no safe separator. Added NOT NULL DEFAULT '[]' so the ALTER is safe on existing
+-- rows: a Publication created before this migration simply has no components recorded, and
+-- re-rendering it yields the same document it was published with.
+ALTER TABLE publications ADD COLUMN components JSONB NOT NULL DEFAULT '[]'::jsonb;

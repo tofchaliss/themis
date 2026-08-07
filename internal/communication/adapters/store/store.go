@@ -58,7 +58,7 @@ type Store struct {
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const pubColumns = `id, artifact_type, stance, title, summary, rationale, position_version,
-	release_id, finding_id, faultline_id, cve, format, audience, channel, payload,
+	release_id, finding_id, faultline_id, cve, components, format, audience, channel, payload,
 	delivery_status, delivery_attempts, delivery_last_error, delivered_at,
 	supersedes_id, superseded_by_id, version, created_at`
 
@@ -103,6 +103,7 @@ func scanPublication(r row) (domain.Publication, error) {
 		id, artifactType, stance, title, summary, rationale            string
 		positionVersion                                                int
 		releaseID, findingID, faultlineID, cve, format, audience, chnl string
+		componentsRaw                                                  []byte
 		payload                                                        []byte
 		deliveryStatus, deliveryLastError                              string
 		deliveryAttempts                                               int
@@ -112,7 +113,7 @@ func scanPublication(r row) (domain.Publication, error) {
 		createdAt                                                      time.Time
 	)
 	if err := r.Scan(&id, &artifactType, &stance, &title, &summary, &rationale, &positionVersion,
-		&releaseID, &findingID, &faultlineID, &cve, &format, &audience, &chnl, &payload,
+		&releaseID, &findingID, &faultlineID, &cve, &componentsRaw, &format, &audience, &chnl, &payload,
 		&deliveryStatus, &deliveryAttempts, &deliveryLastError, &deliveredAt,
 		&supersedesID, &supersededByID, &version, &createdAt); err != nil {
 		return domain.Publication{}, err
@@ -121,7 +122,10 @@ func scanPublication(r row) (domain.Publication, error) {
 	art := domain.Artifact{
 		Type: domain.ArtifactType(artifactType), Stance: domain.Stance(stance),
 		Title: title, Summary: summary, Rationale: rationale, PositionVersion: positionVersion,
-		Lineage: domain.Lineage{ReleaseID: releaseID, FindingID: findingID, FaultlineID: faultlineID, CVE: cve},
+		Lineage: domain.Lineage{
+			ReleaseID: releaseID, FindingID: findingID, FaultlineID: faultlineID, CVE: cve,
+			Components: componentsFrom(componentsRaw),
+		},
 	}
 	delivery := domain.DeliveryOutcome{
 		Status: domain.DeliveryStatus(deliveryStatus), Attempts: deliveryAttempts, LastError: deliveryLastError,
@@ -178,9 +182,9 @@ func insertPublication(ctx context.Context, tx pgx.Tx, pub domain.Publication) e
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO publications (`+pubColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 		string(pub.ID()), string(art.Type), string(pub.Stance()), art.Title, art.Summary, art.Rationale, art.PositionVersion,
-		l.ReleaseID, l.FindingID, l.FaultlineID, l.CVE, pub.Format(), pub.Audience(), pub.Channel(), payload,
+		l.ReleaseID, l.FindingID, l.FaultlineID, l.CVE, componentsJSON(l.Components), pub.Format(), pub.Audience(), pub.Channel(), payload,
 		string(d.Status), d.Attempts, d.LastError, deliveredAt,
 		string(pub.Supersedes()), string(pub.SupersededBy()), pub.Version(), pub.CreatedAt())
 	return err
@@ -347,4 +351,33 @@ func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
 		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`)
 	return err
+}
+
+// componentsJSON renders the affected component PURLs for storage. They are persisted rather
+// than re-fetched because the payload must be REGENERABLE (D1): re-rendering a stored
+// Publication has to reproduce the bytes that were published, and the Governance Finding it
+// came from may have absorbed new components since.
+func componentsJSON(purls []string) []byte {
+	if len(purls) == 0 {
+		return []byte("[]")
+	}
+	b, err := json.Marshal(purls)
+	if err != nil {
+		return []byte("[]") // unreachable for []string; never fail a save over presentation data
+	}
+	return b
+}
+
+// componentsFrom decodes the stored PURLs. Anything unreadable degrades to none rather than
+// failing the read: a Publication predating the column, or with corrupt JSON, is still a valid
+// historical record and must remain retrievable.
+func componentsFrom(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil || len(out) == 0 {
+		return nil
+	}
+	return out
 }

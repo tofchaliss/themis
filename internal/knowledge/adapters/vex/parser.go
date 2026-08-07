@@ -30,6 +30,11 @@ type openVEXStatement struct {
 }
 
 type openVEXProduct struct {
+	ID            string             `json:"@id"`
+	Subcomponents []openVEXComponent `json:"subcomponents"`
+}
+
+type openVEXComponent struct {
 	ID string `json:"@id"`
 }
 
@@ -49,11 +54,26 @@ func ParseOpenVEX(raw []byte) ([]Statement, error) {
 			continue
 		}
 		for _, p := range st.Products {
-			pkg := strings.TrimSpace(p.ID)
-			if pkg == "" {
+			// SUBCOMPONENTS first, when present. OpenVEX puts the affected packages there and
+			// the shipped thing in `@id`, so a document naming a release plus its packages must
+			// yield a statement per PACKAGE — a statement keyed by the release identifier would
+			// match no component in Knowledge and silently suppress nothing.
+			matched := false
+			for _, sub := range p.Subcomponents {
+				if pkg := strings.TrimSpace(sub.ID); pkg != "" {
+					out = append(out, Statement{CVE: cve, Package: pkg, Status: status, Justification: st.Justification})
+					matched = true
+				}
+			}
+			if matched {
 				continue
 			}
-			out = append(out, Statement{CVE: cve, Package: pkg, Status: status, Justification: st.Justification})
+			// No subcomponents: fall back to the product id. Plenty of real-world VEX documents
+			// put a PURL straight in `@id` with no subcomponents at all, and dropping those
+			// would refuse valid third-party input to enforce a shape the spec does not require.
+			if pkg := strings.TrimSpace(p.ID); pkg != "" {
+				out = append(out, Statement{CVE: cve, Package: pkg, Status: status, Justification: st.Justification})
+			}
 		}
 	}
 	return out, nil

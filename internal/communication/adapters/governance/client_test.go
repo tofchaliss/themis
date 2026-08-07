@@ -10,13 +10,24 @@ import (
 	"github.com/themis-project/themis/internal/communication/domain"
 )
 
-func TestGetPosition(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newGovernanceStub serves the Governance read-API shapes the client must handle. Shared so
+// every test exercises the same fixtures rather than drifting copies.
+func newGovernanceStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/findings/fnd-1":
 			_, _ = w.Write([]byte(`{
 				"id":"fnd-1","release_id":"rel-1","faultline_id":"fl-1","cve":"CVE-2024-1",
 				"current_position":{"version":2,"stance":"not_affected","rationale":"vendor VEX confirms"}
+			}`))
+		case "/api/v1/findings/with-components":
+			// Two real PURLs plus a blank entry and a whitespace-only one, which must be
+			// dropped rather than become empty OpenVEX subcomponent ids.
+			_, _ = w.Write([]byte(`{
+				"id":"with-components","release_id":"rel-3","faultline_id":"fl-3","cve":"CVE-2024-3",
+				"components":[{"purl":"pkg:pypi/urllib3@1.26.20"},{"purl":""},{"purl":"   "},{"purl":"pkg:npm/left-pad@1.3.0"}],
+				"current_position":{"version":1,"stance":"affected","rationale":"in range"}
 			}`))
 		case "/api/v1/findings/no-position":
 			_, _ = w.Write([]byte(`{"id":"no-position","release_id":"rel-2","faultline_id":"fl-2","cve":"CVE-2"}`))
@@ -28,6 +39,10 @@ func TestGetPosition(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+func TestGetPosition(t *testing.T) {
+	srv := newGovernanceStub(t)
 	defer srv.Close()
 
 	c := governance.NewClient(srv.URL, srv.Client())
@@ -70,5 +85,44 @@ func TestGetPosition_TransportError(t *testing.T) {
 	srv.Close()
 	if _, _, err := governance.NewClient(url, nil).GetPosition(context.Background(), "fnd-1"); err == nil {
 		t.Error("transport error: expected error")
+	}
+}
+
+// The affected component PURLs must cross the seam: they are what a published OpenVEX document
+// names as `subcomponents`, and without them a VEX statement identifies a release but nothing
+// a consumer can act on (C6).
+func TestGetPosition_CarriesComponentPURLs(t *testing.T) {
+	srv := newGovernanceStub(t)
+	defer srv.Close()
+	c := governance.NewClient(srv.URL, srv.Client())
+
+	snap, found, err := c.GetPosition(context.Background(), "with-components")
+	if err != nil || !found {
+		t.Fatalf("GetPosition: found=%v err=%v", found, err)
+	}
+	want := []string{"pkg:pypi/urllib3@1.26.20", "pkg:npm/left-pad@1.3.0"}
+	if len(snap.Lineage.Components) != len(want) {
+		t.Fatalf("components = %v, want %v — blank entries dropped, real ones kept", snap.Lineage.Components, want)
+	}
+	for i, p := range want {
+		if snap.Lineage.Components[i] != p {
+			t.Errorf("component %d = %q, want %q", i, snap.Lineage.Components[i], p)
+		}
+	}
+}
+
+// A Finding with no components yields nil rather than an empty slice, so the serializer omits
+// `subcomponents` entirely instead of emitting an empty array.
+func TestGetPosition_NoComponentsYieldsNil(t *testing.T) {
+	srv := newGovernanceStub(t)
+	defer srv.Close()
+	c := governance.NewClient(srv.URL, srv.Client())
+
+	snap, found, err := c.GetPosition(context.Background(), "fnd-1")
+	if err != nil || !found {
+		t.Fatalf("GetPosition: found=%v err=%v", found, err)
+	}
+	if snap.Lineage.Components != nil {
+		t.Errorf("components = %v, want nil", snap.Lineage.Components)
 	}
 }

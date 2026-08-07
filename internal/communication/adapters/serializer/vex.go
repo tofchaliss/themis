@@ -22,23 +22,63 @@ type openvexDoc struct {
 }
 
 type openvexStatement struct {
-	Vulnerability openvexVuln `json:"vulnerability"`
-	Products      []string    `json:"products"`
-	Status        string      `json:"status"`
-	Justification string      `json:"justification,omitempty"`
-	StatusNotes   string      `json:"status_notes,omitempty"`
+	Vulnerability openvexVuln      `json:"vulnerability"`
+	Products      []openvexProduct `json:"products"`
+	Status        string           `json:"status"`
+	Justification string           `json:"justification,omitempty"`
+	StatusNotes   string           `json:"status_notes,omitempty"`
+}
+
+// openvexProduct is an OpenVEX v0.2.0 Product: an identified thing the statement is about,
+// optionally naming the components inside it the statement actually concerns.
+//
+// This was previously a bare string, which is not the shape the spec defines and is not what
+// Themis's OWN VEX parser reads — so a published document fed back in yielded nothing (the C6
+// round-trip mismatch). Products are objects; subcomponents are where the affected packages go.
+type openvexProduct struct {
+	ID            string             `json:"@id"`
+	Subcomponents []openvexComponent `json:"subcomponents,omitempty"`
+}
+
+type openvexComponent struct {
+	ID string `json:"@id"`
 }
 
 type openvexVuln struct {
 	Name string `json:"name"`
 }
 
+// releaseIRI renders a release id as a resolvable identifier rather than a bare UUID.
+//
+// A consumer receiving `"products": [{"@id": "2859e949-…"}]` cannot resolve it to anything;
+// OpenVEX expects an IRI (or a PURL) that identifies the product outside this document. The
+// namespace matches the document's own `@id`, so both point at the same authority.
+func releaseIRI(releaseID string) string {
+	if releaseID == "" {
+		return ""
+	}
+	return themisNamespace + "/release/" + releaseID
+}
+
+// themisNamespace is the identifier authority for products and documents this instance emits.
+// A deployment fronting a real host would override it; it is deliberately one constant so the
+// document @id and the product @id can never disagree about who is speaking.
+const themisNamespace = "https://themis.example"
+
 // Render serializes the artifact as OpenVEX. The VEX status is the presentation mapping of
 // the Position's stance (never a reinterpretation).
 func (OpenVEX) Render(art domain.Artifact) ([]byte, error) {
+	// One product — the release — carrying the affected packages as subcomponents. This is the
+	// distinction OpenVEX draws and Themis previously collapsed: the PRODUCT is what was
+	// shipped, the SUBCOMPONENTS are the packages within it the statement is about. A consumer
+	// needs both to decide whether a statement applies to them.
+	product := openvexProduct{ID: releaseIRI(art.Lineage.ReleaseID)}
+	for _, purl := range art.Lineage.Components {
+		product.Subcomponents = append(product.Subcomponents, openvexComponent{ID: purl})
+	}
 	stmt := openvexStatement{
 		Vulnerability: openvexVuln{Name: art.Lineage.CVE},
-		Products:      []string{art.Lineage.ReleaseID},
+		Products:      []openvexProduct{product},
 		Status:        art.Stance.VEXStatus(),
 		StatusNotes:   art.Rationale,
 	}
@@ -48,7 +88,7 @@ func (OpenVEX) Render(art domain.Artifact) ([]byte, error) {
 	}
 	doc := openvexDoc{
 		Context:    "https://openvex.dev/ns/v0.2.0",
-		ID:         "https://themis.example/vex/" + art.Lineage.FaultlineID,
+		ID:         themisNamespace + "/vex/" + art.Lineage.FaultlineID,
 		Author:     "Themis",
 		Version:    art.PositionVersion,
 		Statements: []openvexStatement{stmt},

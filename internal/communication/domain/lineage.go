@@ -9,4 +9,9 @@ type Lineage struct {
 	FindingID   string
 	FaultlineID string
 	CVE         string
+	// Components are the affected package PURLs the Position is about, carried from
+	// Governance's Finding. They answer "which packages inside that release?", which is the
+	// other half of what a lineage identifies — and what a standards-compliant VEX document
+	// must name, as OpenVEX `subcomponents`, for a consumer to act on it.
+	Components []string
 }

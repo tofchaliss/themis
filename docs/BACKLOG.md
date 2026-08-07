@@ -269,7 +269,28 @@ three angles, and two of them proposed fixes that would not have worked.
   modified-since query (~12 min), so `nvd` health does not surface until it completes — a fresh node looks
   feed-dark for minutes. Stamp health at poll *start*, or use a smaller first window. `cmd/knowledge` `watchLoop`.
   Surfaced 2026-07-31.
-- [ ] **(MED) VEX round-trip mismatch — Themis cannot re-ingest its own published OpenVEX.** The OpenVEX
+- [x] **(MED) VEX round-trip mismatch — Themis cannot re-ingest its own published OpenVEX.**
+  ✅ **FIXED 2026-08-07, together with the bare-UUID product item below — they were one defect seen from
+  both ends.** The parser was right and the serializer was wrong: OpenVEX v0.2.0 defines `products` as
+  **objects** with `@id`, optionally carrying `subcomponents`. The serializer emitted bare strings, so a
+  published document fed back in yielded **zero** statements, silently.
+  Fixing only the shape would have been worse than useless: the parser keys a statement's `Package` off the
+  product id, so a document naming a release would have parsed cleanly and then matched no component —
+  a round-trip that succeeds syntactically and suppresses nothing. The real fix is the semantic one:
+  the **product** is the release (now a resolvable IRI, `…/release/<id>`, not a bare UUID) and the
+  **subcomponents** are the affected package PURLs. The parser reads subcomponents when present and falls
+  back to the product id otherwise, so third-party documents that put a PURL straight in `@id` — which the
+  spec permits — still parse.
+  Component PURLs now cross the Governance seam (`GET /findings/{id}` already returned them; no API change)
+  and are **persisted** on the Publication (migration `000004`, JSONB — a PURL contains `:`, `/`, `@` and
+  `%`, leaving no safe delimiter). Persisted rather than re-fetched because the payload must be
+  **regenerable** (D1): re-rendering a stored Publication has to reproduce the bytes that were published,
+  and the source Finding may have absorbed new components since. Existing rows default to `[]` and
+  re-render exactly as they were published.
+  **The contract is pinned by a test pair.** `TestParseOpenVEX_RoundTripsThemisOwnOutput` parses the
+  serializer's golden bytes verbatim; the bytes are duplicated as a literal rather than imported, because
+  Knowledge may not import Communication. Change the emitted shape and the serializer's golden test fails;
+  stop reading that shape and the parser's does. Original report follows. The OpenVEX
   *serializer* emits `products` as bare id strings; the VEX-1 *parser* (`adapters/vex/parser.go`
   `openVEXProduct{ ID string json:"@id" }`) expects product **objects** `{"@id": …}`. So a Communication-published
   OpenVEX fed back into Knowledge yields zero applicability statements. Align the two shapes (parser accept both,
@@ -370,7 +391,10 @@ three angles, and two of them proposed fixes that would not have worked.
   the Faultline score via the Knowledge read API and the release count via Governance's blast-radius
   projection. Depends on the org asset graph (Product→…→Customer) for the true customer-count multiplier;
   the affected-release count is a usable proxy meanwhile. Surfaced 2026-07-30. See [[feedback-backlog-surfaced-followups]].
-- [ ] **(LOW) OpenVEX output identifies the product by bare release UUID, with no vulnerable subcomponent.**
+- [x] **(LOW) OpenVEX output identifies the product by bare release UUID, with no vulnerable subcomponent.**
+  ✅ **FIXED 2026-08-07** — see the VEX round-trip item above; the two were the same defect. `products[].@id`
+  is now a resolvable IRI and the correlated component PURLs are emitted as OpenVEX `subcomponents`.
+  Original report follows.
   The Communication OpenVEX serializer renders `statements[].products` as the raw `release_id`
   (e.g. `2859e949-…`) and emits no `subcomponents`. A downstream OpenVEX consumer can't resolve a bare UUID,
   and the affected package (e.g. `pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1`) is not named. Prefer

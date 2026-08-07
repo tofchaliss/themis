@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/themis-project/themis/internal/communication/domain"
 )
@@ -30,11 +31,18 @@ func NewClient(baseURL string, hc *http.Client) *Client {
 
 // findingView mirrors Governance's FindingView JSON (the read-API contract).
 type findingView struct {
-	ID              string        `json:"id"`
-	ReleaseID       string        `json:"release_id"`
-	FaultlineID     string        `json:"faultline_id"`
-	CVE             string        `json:"cve"`
-	CurrentPosition *positionView `json:"current_position"`
+	ID              string         `json:"id"`
+	ReleaseID       string         `json:"release_id"`
+	FaultlineID     string         `json:"faultline_id"`
+	CVE             string         `json:"cve"`
+	Components      []componentRef `json:"components"`
+	CurrentPosition *positionView  `json:"current_position"`
+}
+
+// componentRef is the one field of Governance's Component this context needs: the PURL, which
+// is the identifier every VEX/SBOM consumer resolves against.
+type componentRef struct {
+	PURL string `json:"purl"`
 }
 
 type positionView struct {
@@ -81,6 +89,22 @@ func (c *Client) GetPosition(ctx context.Context, findingID string) (domain.Posi
 			FindingID:   findingID,
 			FaultlineID: fv.FaultlineID,
 			CVE:         fv.CVE,
+			Components:  purls(fv.Components),
 		},
 	}, true, nil
+}
+
+// purls extracts the component PURLs, skipping any blank one so an empty entry never becomes
+// an empty OpenVEX subcomponent id.
+func purls(cs []componentRef) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		if p := strings.TrimSpace(c.PURL); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
