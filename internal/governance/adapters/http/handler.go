@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/adapters/http/gen"
 	"github.com/themis-project/themis/internal/governance/adapters/store"
@@ -193,11 +194,11 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 
 // AcceptProposal handles POST /findings/{id}/proposals/{proposalId}/accept.
 func (h *Handler) AcceptProposal(w http.ResponseWriter, r *http.Request, id, proposalID string) {
-	decider, ok := deciderFrom(w, r)
+	decider, reviewBy, ok := decisionFrom(w, r)
 	if !ok {
 		return
 	}
-	if err := h.write.AcceptProposal(r.Context(), domain.FindingID(id), domain.ProposalID(proposalID), decider); err != nil {
+	if err := h.write.AcceptProposal(r.Context(), domain.FindingID(id), domain.ProposalID(proposalID), decider, reviewBy...); err != nil {
 		writeErr(w, "cannot accept proposal", err)
 		return
 	}
@@ -416,10 +417,27 @@ func proposerFrom(body gen.RaiseProposalRequest) (domain.Actor, error) {
 // deciderFrom builds the deciding actor from the request body — the authorization-hook
 // seam. Only a human decider is accepted via the API; a missing actor id is a bad request.
 func deciderFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, bool) {
+	actor, _, ok := decisionFrom(w, r)
+	return actor, ok
+}
+
+// decisionFrom decodes the decider AND the optional review-by date. Kept separate from
+// deciderFrom so the reject path — which has no shelf life to state — is not handed a field it
+// would have to ignore.
+func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, []time.Time, bool) {
 	var body gen.DecisionRequest
 	if !decode(w, r, &body) {
-		return domain.Actor{}, false
+		return domain.Actor{}, nil, false
 	}
+	var reviewBy []time.Time
+	if body.ReviewBy != nil && !body.ReviewBy.IsZero() {
+		reviewBy = append(reviewBy, body.ReviewBy.UTC())
+	}
+	actor, ok := deciderActorFrom(w, &body)
+	return actor, reviewBy, ok
+}
+
+func deciderActorFrom(w http.ResponseWriter, body *gen.DecisionRequest) (domain.Actor, bool) {
 	if body.ActorId == "" {
 		writeProblem(w, http.StatusBadRequest, "invalid decider", "actor_id is required")
 		return domain.Actor{}, false

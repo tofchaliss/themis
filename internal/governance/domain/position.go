@@ -13,6 +13,13 @@ type PositionInputs struct {
 	// INPUT to the decision, which is why it lives here rather than beside it: the watcher asks
 	// "has the premise moved?", and that is unanswerable from today's values alone.
 	DecidedWith ExploitSignals
+	// ReviewBy is the date this decision asked to be revisited — the decider's own statement that
+	// their justification has a shelf life. Zero means none was set, which is NOT "never expires":
+	// it means nobody agreed to a deadline, and inventing one would put words in their mouth.
+	//
+	// It sits beside DecidedWith for the same reason: both are inputs the decision RESTED on, and
+	// both are unanswerable later from current state alone.
+	ReviewBy time.Time
 }
 
 // Position is one immutable version of an Enterprise Position — the authoritative,

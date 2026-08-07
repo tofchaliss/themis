@@ -531,6 +531,16 @@ components:
         actor_kind:
           type: string
           description: human (default). Only a human decider is accepted via the API.
+        review_by:
+          type: string
+          format: date-time
+          description: >-
+            Optional review-by date for a SUPPRESSING decision (not_affected / accepted_risk). When
+            set, the disposition sweep re-surfaces the Finding once it passes — the time-based
+            counterpart to signal drift (GOV-14b). An accepted risk with no signal movement is not
+            thereby still acceptable: the compensating control may be gone, the component may have
+            moved, the person who accepted it may have left. Absent means NO date was agreed, which
+            is not the same as "never expires" — nothing invents a deadline the decider did not set.
     Problem:
       type: object
       properties:

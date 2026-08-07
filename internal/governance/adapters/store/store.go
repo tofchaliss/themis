@@ -175,7 +175,7 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
-		       decided_kev, decided_exploit_public, decided_epss
+		       decided_kev, decided_exploit_public, decided_epss, review_by
 		FROM finding_positions WHERE finding_id = $1 ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -189,15 +189,17 @@ func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position
 			stance, rationale, actorKind, actorID, acceptedPID, flRef string
 			establishedAt                                             time.Time
 			sig                                                       domain.ExploitSignals
+			reviewBy                                                  *time.Time
 		)
 		if err := rows.Scan(&version, &stance, &rationale, &actorKind, &actorID, &acceptedPID, &flRef, &establishedAt,
-			&sig.KEV, &sig.ExploitPublic, &sig.EPSS); err != nil {
+			&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &reviewBy); err != nil {
 			return nil, err
 		}
 		out = append(out, domain.ReconstitutePosition(version, domain.Stance(stance), rationale,
 			domain.Actor{Kind: domain.ActorKind(actorKind), ID: actorID},
 			domain.PositionInputs{
 				AcceptedProposalID: domain.ProposalID(acceptedPID), FaultlineRef: flRef, DecidedWith: sig,
+				ReviewBy: derefTime(reviewBy),
 			},
 			establishedAt))
 	}
@@ -317,12 +319,13 @@ func (s *Store) savePositions(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_positions
 			  (finding_id, version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
-			   decided_kev, decided_exploit_public, decided_epss)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (finding_id, version) DO NOTHING`,
+			   decided_kev, decided_exploit_public, decided_epss, review_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (finding_id, version) DO NOTHING`,
 			string(f.ID()), pos.Version(), string(pos.Stance()), pos.Rationale(),
 			string(pos.Actor().Kind), pos.Actor().ID,
 			string(pos.Inputs().AcceptedProposalID), pos.Inputs().FaultlineRef, pos.EstablishedAt(),
-			pos.Inputs().DecidedWith.KEV, pos.Inputs().DecidedWith.ExploitPublic, pos.Inputs().DecidedWith.EPSS); err != nil {
+			pos.Inputs().DecidedWith.KEV, pos.Inputs().DecidedWith.ExploitPublic, pos.Inputs().DecidedWith.EPSS,
+			nullableTime(pos.Inputs().ReviewBy)); err != nil {
 			return err
 		}
 	}
@@ -551,4 +554,20 @@ func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
 		`TRUNCATE processed_events, governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
 	return err
+}
+
+// nullableTime maps a zero time to SQL NULL. "No review-by date was set" and "the epoch" are
+// different statements, and a zero timestamp stored as a value would read as an expiry in 1970.
+func nullableTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }

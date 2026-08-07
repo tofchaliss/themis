@@ -193,3 +193,61 @@ func TestFindingSignals(t *testing.T) {
 		t.Errorf("Signals() = %+v, want %+v", withSig.Signals(), sig)
 	}
 }
+
+// Accepted-risk expiry. Zero `until` means NO review date was agreed — which is not the same as
+// "expires immediately"; inventing a deadline the decider did not set would re-surface every
+// suppression on the next enrichment and train people to ignore the signal.
+func TestExpired(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	for _, tc := range []struct {
+		name  string
+		until time.Time
+		want  bool
+	}{
+		{"a passed date has expired", now.Add(-time.Hour), true},
+		{"a future date has not", now.Add(time.Hour), false},
+		{"the exact instant has not — After is strict", now, false},
+		{"no date never expires", time.Time{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := domain.Expired(tc.until, now); got != tc.want {
+				t.Errorf("Expired(%v) = %v, want %v", tc.until, got, tc.want)
+			}
+		})
+	}
+}
+
+// AcceptProposal takes the review-by date VARIADICALLY so every existing caller is untouched. Both
+// shapes must work: a decision with a stated shelf life records it, and one without records none
+// rather than a zero that would read as "expired in year 1".
+func TestAcceptProposal_ReviewByIsOptional(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	accept := func(t *testing.T, reviewBy ...time.Time) domain.Position {
+		t.Helper()
+		f, err := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+		if err != nil {
+			t.Fatalf("new finding: %v", err)
+		}
+		p, err := domain.NewGovernanceProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"},
+			domain.StanceAcceptedRisk, "accepted", at, value.TrustObserved)
+		if err != nil {
+			t.Fatalf("proposal: %v", err)
+		}
+		if err := f.RaiseProposal(p); err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+		pos, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at, reviewBy...)
+		if err != nil {
+			t.Fatalf("accept: %v", err)
+		}
+		return pos
+	}
+
+	if got := accept(t).Inputs().ReviewBy; !got.IsZero() {
+		t.Errorf("ReviewBy = %v, want zero — no date was agreed", got)
+	}
+	until := at.Add(90 * 24 * time.Hour)
+	if got := accept(t, until).Inputs().ReviewBy; !got.Equal(until) {
+		t.Errorf("ReviewBy = %v, want %v", got, until)
+	}
+}

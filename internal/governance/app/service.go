@@ -560,12 +560,15 @@ func (s *FindingService) RaiseProposal(
 // policy) accepts an open proposal, establishing a new Enterprise Position version and
 // advancing the lifecycle in one transaction (D4/D9). AI and system actors are refused
 // (ErrUnauthorized — D11).
-func (s *FindingService) AcceptProposal(ctx context.Context, findingID domain.FindingID, proposalID domain.ProposalID, decider domain.Actor) error {
+// reviewBy is optional: when supplied, the Position records the date the decider asked to revisit
+// it, and the disposition sweep re-surfaces the Finding once it passes. Suppressing a Finding
+// forever is a choice; suppressing it until a stated date is a different and usually better one.
+func (s *FindingService) AcceptProposal(ctx context.Context, findingID domain.FindingID, proposalID domain.ProposalID, decider domain.Actor, reviewBy ...time.Time) error {
 	if err := requireDecider(decider); err != nil {
 		return err
 	}
 	return s.mutate(ctx, findingID, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-		pos, err := f.AcceptProposal(proposalID, decider, now)
+		pos, err := f.AcceptProposal(proposalID, decider, now, reviewBy...)
 		if err != nil {
 			return nil, err
 		}
@@ -717,6 +720,12 @@ func archivedEvent(f domain.Finding, at time.Time) any { return domain.NewFindin
 // whole design: automatic re-opening of a governed decision would be exactly the auto-deciding the
 // context forbids, while leaving a suppression permanent makes `residual_priority` unsafe.
 //
+// It fires on TWO triggers, and they answer different questions. Signal DRIFT asks "has the world
+// changed?"; review-by EXPIRY asks "has anyone looked at this lately?". An accepted risk with no
+// signal movement is not thereby still acceptable — the compensating control may have been
+// decommissioned, the component may have moved to a public network, the person who accepted it may
+// have left, and none of that appears in EPSS or KEV.
+//
 // Skipped entirely for a withdrawal, where the CVE has been retired upstream: re-surfacing a
 // Finding because its dead CVE's stale EPSS moved would be noise.
 func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSignal) error {
@@ -741,7 +750,8 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 			continue // nothing suppressed here — not this watcher's business
 		}
 		drift := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
-		if !drift.Material() {
+		expired := domain.Expired(pos.Inputs().ReviewBy, s.clock.Now())
+		if !drift.Material() && !expired {
 			continue
 		}
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
@@ -753,12 +763,18 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 				return nil, nil
 			}
 			d := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
+			reason := d.Reason()
 			if !d.Material() {
-				return nil, nil
+				if !domain.Expired(pos.Inputs().ReviewBy, now) {
+					return nil, nil
+				}
+				// Drift takes precedence when both fire: "the CVE entered KEV" is a stronger call
+				// to action than "your review date passed", and a re-surfacing gets read once.
+				reason = "the review-by date on this decision has passed"
 			}
 			return []OutboxNote{{
 				EventType:  EventDispositionStale,
-				Event:      domain.NewDispositionStale(*f, pos, d.Reason(), now),
+				Event:      domain.NewDispositionStale(*f, pos, reason, now),
 				OccurredAt: now,
 			}}, nil
 		}); err != nil {

@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,14 @@ import (
 // ReactToEnrichment made the test depend on which stance a policy happened to accept first.
 func suppressed(t *testing.T, stance domain.Stance, decidedWith domain.ExploitSignals) domain.Finding {
 	t.Helper()
+	return suppressedUntil(t, stance, decidedWith, time.Time{})
+}
+
+// fixedNow mirrors the test clock, so an expiry fixture can be expressed relative to it.
+var fixedNow = time.Unix(1_700_000_000, 0).UTC()
+
+func suppressedUntil(t *testing.T, stance domain.Stance, decidedWith domain.ExploitSignals, reviewBy time.Time) domain.Finding {
+	t.Helper()
 	f, err := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2024-1")
 	if err != nil {
 		t.Fatalf("new finding: %v", err)
@@ -38,7 +47,7 @@ func suppressed(t *testing.T, stance domain.Stance, decidedWith domain.ExploitSi
 	if err := f.RaiseProposal(p); err != nil {
 		t.Fatalf("raise: %v", err)
 	}
-	if _, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "analyst"}, at); err != nil {
+	if _, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "analyst"}, at, reviewBy); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
 	pos, ok := f.CurrentPosition()
@@ -388,6 +397,88 @@ func TestMaterializeBandAndFixes_FailuresSurface(t *testing.T) {
 			FaultlineID: "fl-1", Band: "high",
 		}); err == nil {
 			t.Fatal("a band/fixes write failure must surface")
+		}
+	})
+}
+
+// Accepted-risk expiry: the TIME-based sibling of signal drift.
+//
+// The two answer different questions. Drift asks "has the world changed?"; expiry asks "has anyone
+// looked at this lately?". An accepted risk with NO signal movement is not thereby still
+// acceptable — the compensating control may have been decommissioned, the component may have moved
+// to a public network, the person who accepted it may have left. None of that appears in EPSS or
+// KEV, so drift alone would never re-surface it.
+func TestWatchDispositions_ReSurfacesOnAnExpiredReviewDate(t *testing.T) {
+	past := fixedNow.Add(-24 * time.Hour)
+	future := fixedNow.Add(24 * time.Hour)
+
+	seed := func(t *testing.T, reviewBy time.Time) *fakeRepo {
+		t.Helper()
+		f := suppressedUntil(t, domain.StanceAcceptedRisk, domain.ExploitSignals{KEV: true, EPSS: 0.9}, reviewBy)
+		repo := newRepo()
+		repo.seed(f)
+		return repo
+	}
+	staleReason := func(repo *fakeRepo) string {
+		for _, n := range repo.lastNotes {
+			if n.EventType == app.EventDispositionStale {
+				return n.Event.(domain.DispositionStale).Reason
+			}
+		}
+		return ""
+	}
+	// Signals IDENTICAL to what the decision was taken with, so drift contributes nothing and only
+	// the date can fire.
+	unchanged := app.EnrichmentSignal{
+		FaultlineID: "fl-1", Signals: domain.ExploitSignals{KEV: true, EPSS: 0.9},
+	}
+
+	t.Run("a passed review date re-surfaces it", func(t *testing.T) {
+		repo := seed(t, past)
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), unchanged); err != nil {
+			t.Fatalf("react: %v", err)
+		}
+		if r := staleReason(repo); r == "" {
+			t.Fatal("an expired review date must re-surface the Finding even with no signal drift")
+		} else if !strings.Contains(r, "review-by") {
+			t.Errorf("reason = %q, want it to name the expiry", r)
+		}
+	})
+
+	t.Run("a future review date does not", func(t *testing.T) {
+		repo := seed(t, future)
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), unchanged); err != nil {
+			t.Fatalf("react: %v", err)
+		}
+		if r := staleReason(repo); r != "" {
+			t.Errorf("re-surfaced before the review date: %q", r)
+		}
+	})
+
+	// No date set is NOT "expired immediately". A decision taken without a shelf life did not agree
+	// to one, and inventing a deadline would put words in the decider's mouth.
+	t.Run("no review date never expires", func(t *testing.T) {
+		repo := seed(t, time.Time{})
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), unchanged); err != nil {
+			t.Fatalf("react: %v", err)
+		}
+		if r := staleReason(repo); r != "" {
+			t.Errorf("a decision with no review date must not expire: %q", r)
+		}
+	})
+
+	// When BOTH fire, drift wins the wording: "the CVE entered KEV" is a stronger call to action
+	// than "your review date passed", and a re-surfacing gets read once.
+	t.Run("drift takes precedence over expiry in the reason", func(t *testing.T) {
+		repo := newRepo()
+		repo.seed(suppressedUntil(t, domain.StanceAcceptedRisk, domain.ExploitSignals{}, past))
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+			FaultlineID: "fl-1", Signals: domain.ExploitSignals{KEV: true},
+		}); err != nil {
+			t.Fatalf("react: %v", err)
+		}
+		if r := staleReason(repo); !strings.Contains(r, "Known Exploited") {
+			t.Errorf("reason = %q, want the KEV drift to win over the date", r)
 		}
 	})
 }

@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // ExploitSignals is the exploitability picture behind a decision at a point in time.
 //
 // It is recorded on a Position so a later signal change can be compared against what was actually
@@ -26,6 +28,21 @@ func SuppressesTriage(s Stance) bool {
 // is the same story told louder. A relative threshold would fire constantly in the noise near zero,
 // which is where EPSS is least stable and where a re-surfaced Finding is least likely to be real.
 const DefaultEPSSDriftThreshold = 0.20
+
+// Expired reports whether a suppressing decision has passed its own review-by date.
+//
+// This is the TIME-based sibling of signal drift, and it exists because the two answer different
+// questions. Drift asks "has the world changed?"; expiry asks "has anyone looked at this lately?".
+// An accepted risk with no signal movement is not thereby still acceptable — the business
+// justification behind it ages (the compensating control was decommissioned, the component moved
+// to a public network, the person who accepted it left), and none of that is visible in EPSS or KEV.
+//
+// Zero `until` means no review-by date was set, which is NOT the same as "never expires": it means
+// the decision was taken without one, and this returns false rather than inventing a deadline the
+// decider did not agree to.
+func Expired(until, now time.Time) bool {
+	return !until.IsZero() && now.After(until)
+}
 
 // DispositionDrift explains why a suppressed decision should be re-opened. A zero value means the
 // premise still holds.

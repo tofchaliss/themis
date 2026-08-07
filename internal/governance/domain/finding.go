@@ -134,7 +134,9 @@ func (f *Finding) RaiseProposal(p GovernanceProposal) error {
 // Position Established on the first decision (a later revision never resets the stage —
 // D7), and bumps the version — all on the one aggregate, in one transaction at the store.
 // The deciding actor is recorded (CON-0003); the app enforces the authority line (D11).
-func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time) (Position, error) {
+// reviewBy is optional and variadic so every existing caller is untouched: a decision taken with no
+// stated shelf life records none, and nothing invents a deadline the decider did not agree to.
+func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time, reviewBy ...time.Time) (Position, error) {
 	if err := validActor(by); err != nil {
 		return Position{}, err
 	}
@@ -160,7 +162,10 @@ func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time) (Positio
 		// Snapshot the exploitability picture the decision is being taken WITH (GOV-14b). Taken
 		// from the Finding rather than passed in, so the human triage path records it exactly as
 		// the policy path does — a decision's premise must not depend on who took it.
-		inputs:        PositionInputs{AcceptedProposalID: id, FaultlineRef: f.faultlineID, DecidedWith: f.signals},
+		inputs: PositionInputs{
+			AcceptedProposalID: id, FaultlineRef: f.faultlineID,
+			DecidedWith: f.signals, ReviewBy: firstTime(reviewBy),
+		},
 		establishedAt: at.UTC(),
 	}
 	f.positions = append(f.positions, pos)
@@ -393,3 +398,10 @@ func (f Finding) Signals() ExploitSignals { return f.signals }
 // makes it matter is that AcceptProposal snapshots it, so every Position records the premise it
 // was taken on.
 func (f *Finding) RefreshSignals(s ExploitSignals) { f.signals = s }
+
+func firstTime(t []time.Time) time.Time {
+	if len(t) == 0 {
+		return time.Time{}
+	}
+	return t[0]
+}

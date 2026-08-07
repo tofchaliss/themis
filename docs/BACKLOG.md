@@ -564,10 +564,20 @@ three angles, and two of them proposed fixes that would not have worked.
   columns (nullable for non-AI proposals) — it ripples through domain + store schema + read API, hence
   deferred. Needed before the confidence-threshold auto-accept policy (EDR-INTELLIGENCE-01 D8).
 
-- [ ] **Governance — accepted-risk expiry/timer worker.** A worker that, when an accepted-risk decision
-  expires, raises a reopen/reconsider Governance Proposal (the PoC's `ListExpiredAcceptedRiskFindings`
-  behavior). **Needs an accepted-risk-until field on the Enterprise Position** first. Plugs into
-  `internal/governance/adapters` + a small domain addition.
+- [x] **Governance — accepted-risk expiry/timer worker.** ✅ **CLOSED 2026-08-07, folded into the
+  disposition sweep rather than built as a second worker.**
+  The "accepted-risk-until field" this entry asked for is `PositionInputs.ReviewBy` (migration
+  `000009`), settable on accept via `review_by` on the decision request. `domain.Expired` is the
+  TIME-based sibling of `DetectDispositionDrift`, and `watchDispositions` now fires on either.
+  **Why not a separate timer worker:** the two triggers answer different questions — drift asks
+  "has the world changed?", expiry asks "has anyone looked at this lately?" — but they produce the
+  SAME outcome, a `disposition_stale` fact that re-opens the question without touching the
+  Position. Two workers emitting one event type would have meant two places to keep that guarantee.
+  **Zero means no date was AGREED, not "never expires" and not "expired in year 1".** Inventing a
+  deadline the decider did not set would re-surface every suppression on the next enrichment and
+  train people to ignore the signal.
+  **Drift wins the wording when both fire:** "the CVE entered KEV" is a stronger call to action than
+  "your review date passed", and a re-surfacing gets read once.
 
 - [ ] **Communication — concrete delivery channels.** Real **SMTP / Slack / webhook** push adapters + the
   **routing rules / digest / redaction** machinery (reuse the PoC `notify`: `routing.go`, `digest.go`,

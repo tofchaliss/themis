@@ -1,0 +1,11 @@
+-- The review-by date a suppressing decision asked for (accepted-risk expiry).
+--
+-- The TIME-based sibling of `decided_*` (migration 000007): drift asks "has the world changed?",
+-- expiry asks "has anyone looked at this lately?". An accepted risk with no signal movement is not
+-- thereby still acceptable — the compensating control may have been decommissioned, the component
+-- may have moved to a public network, the person who accepted it may have left. None of that shows
+-- up in EPSS or KEV.
+--
+-- NULL means no date was set, which is NOT "never expires": it means the decision was taken without
+-- one. Nothing invents a deadline the decider did not agree to.
+ALTER TABLE finding_positions ADD COLUMN IF NOT EXISTS review_by TIMESTAMPTZ;
