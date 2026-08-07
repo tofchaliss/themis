@@ -254,9 +254,12 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 	}
 
 	ct, err := tx.Exec(ctx, `
-		INSERT INTO faultline_matches (release_id, faultline_id, component_purl, matched_at)
-		VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt)
+		INSERT INTO faultline_matches
+			(release_id, faultline_id, component_purl, matched_at,
+			 component_name, component_version, component_ecosystem, component_source)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
+		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt,
+		m.Component.Name, m.Component.Version, m.Component.Ecosystem, m.Component.Source)
 	if err != nil {
 		return false, err
 	}
@@ -418,4 +421,46 @@ func (s *Store) KnownCVEs(ctx context.Context) (map[string]struct{}, error) {
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines RESTART IDENTITY CASCADE`)
 	return err
+}
+
+// CardsNeedingAttribution finds cards holding at least one fix version with no package, paired
+// with a component known to have matched them (KN-FIX-2 — app.UnattributedCardReader).
+//
+// Only rows carrying the component detail are eligible: a match recorded before migration 000005
+// holds a PURL alone, which is not enough to ask a feed about. Skipping it is the honest choice —
+// a component we cannot re-query is one we must not guess about — and it self-heals as those
+// releases are re-correlated.
+//
+// Superseded cards are excluded: a withdrawn CVE is not worth a feed request. One component per
+// card (DISTINCT ON) keeps the sweep bounded at one query per card rather than per match.
+func (s *Store) CardsNeedingAttribution(ctx context.Context, limit int) ([]app.UnattributedCard, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (f.id)
+		       f.cve, m.component_purl, m.component_name, m.component_version,
+		       m.component_ecosystem, m.component_source
+		FROM faultlines f
+		JOIN faultline_matches m ON m.faultline_id = f.id
+		WHERE f.stage <> 'superseded'
+		  AND m.component_ecosystem <> ''
+		  AND EXISTS (
+		        SELECT 1 FROM jsonb_array_elements(COALESCE(f.view->'fixes', '[]'::jsonb)) AS fx
+		        WHERE COALESCE(fx->>'package', '') = ''
+		      )
+		ORDER BY f.id, m.matched_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []app.UnattributedCard
+	for rows.Next() {
+		var c app.UnattributedCard
+		if err := rows.Scan(&c.CVE, &c.Component.PURL, &c.Component.Name,
+			&c.Component.Version, &c.Component.Ecosystem, &c.Component.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

@@ -77,7 +77,8 @@ customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq -
 # empty name matched the UNATTRIBUTED bucket -- printing all 94 versions of every package into one
 # cell. A silent size limit turning into confidently wrong output is worth the temp file.
 srcfile="${TMPDIR:-/tmp}/themis-posture-src.$$.json"
-trap 'rm -f "$srcfile"' EXIT
+hdrfile="${TMPDIR:-/tmp}/themis-posture-hdr.$$.txt"
+trap 'rm -f "$srcfile" "$hdrfile"' EXIT
 for ev in $(get "$EVIDENCE/api/v1/evidence?release=$REL" 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
   get "$EVIDENCE/api/v1/evidence/$ev/inventory" 2>/dev/null || true
 done | jq -s 'map(.components // []) | add // [] | map({key: .purl, value: (.source // .name)}) | from_entries' \
@@ -176,7 +177,11 @@ echo "$posture" | jq -r --argjson n "$AI" '[.[] | select(.residual_priority > 0 
 while IFS=$'\t' read -r cve fid; do
   [ -n "$fid" ] || continue
   printf '  %s (%s) ... ' "$cve" "$fid"
-  out=$(post "$GOVERNANCE/api/v1/findings/$fid/recommend" -w '\n%{http_code}')
+  # -D captures the response headers: a 204 carries WHY on X-Themis-AI-Reason (AI-204-1),
+  # because "the model declined" and "the provider is down" are the same status code and
+  # opposite responses. This line used to print all three causes as one guess.
+  rm -f "$hdrfile"
+  out=$(post "$GOVERNANCE/api/v1/findings/$fid/recommend" -D "$hdrfile" -w '\n%{http_code}')
   code=$(echo "$out" | tail -1)
   case "$code" in
     201)
@@ -190,7 +195,18 @@ while IFS=$'\t' read -r cve fid; do
         awk -F'|' '{printf "      stance=%s  evidence=%s\n      %s\n", $1, $2, $3}' ||
         printf '      (set THEMIS_GOVERNANCE_DSN to show the recorded rationale)\n'
       ;;
-    204) printf 'no recommendation (AI disabled, unreachable, or it declined — a safe outcome)\n' ;;
+    204)
+      why=$(grep -i '^X-Themis-AI-Reason:' "$hdrfile" 2>/dev/null | sed 's/^[^:]*: *//; s/\r$//')
+      case "$why" in
+        "")           printf 'no recommendation (reason not reported — an older Governance node)\n' ;;
+        disabled)     printf 'no recommendation: AI is DISABLED on this node (config — set THEMIS_GOVERNANCE_AI_ENABLED=1)\n' ;;
+        unreachable*) printf 'no recommendation: Intelligence UNREACHABLE (%s) — an outage, not a verdict\n' "$why" ;;
+        insufficient*) printf 'no recommendation: the model DECLINED for want of grounding (%s) — the seam working as designed\n' "$why" ;;
+        provider_error*) printf 'no recommendation: PROVIDER ERROR (%s) — check THEMIS_LLM_TIMEOUT and THEMIS_INTELLIGENCE_TIMEOUT\n' "$why" ;;
+        business_verification_failed) printf 'no recommendation: the claim FAILED Business Verification against our truth (T8)\n' ;;
+        *)            printf 'no recommendation: %s\n' "$why" ;;
+      esac
+      ;;
     *)   printf 'error HTTP %s\n' "$code" ;;
   esac
 done

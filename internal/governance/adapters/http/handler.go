@@ -244,17 +244,27 @@ func (h *Handler) ArchiveFinding(w http.ResponseWriter, r *http.Request, id stri
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// aiReasonHeader carries why no proposal was produced on a 204 (AI-204-1). Advisory metadata,
+// not a contract: an absent header simply means an older node.
+const aiReasonHeader = "X-Themis-AI-Reason"
+
 // RecommendPosition handles POST /findings/{id}/recommend — the on-demand AI seam
 // (D8/D13, Revision 2). It invokes the Intelligence Gateway (when enabled) and records
 // an ADVISORY AI proposal, never auto-accepted. When AI is disabled, unavailable, or
 // declines, it returns 204 (no proposal) — the pipeline is unaffected.
 func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id string) {
-	pid, produced, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
+	pid, produced, reason, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
 	if err != nil {
 		writeErr(w, "cannot recommend position", err)
 		return
 	}
 	if !produced {
+		// WHY, on the 204 (AI-204-1). "the model correctly declined" and "the provider is down"
+		// are the same status code and opposite operator actions; a caller that ignores the
+		// header behaves exactly as before.
+		if reason != "" {
+			w.Header().Set(aiReasonHeader, reason)
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

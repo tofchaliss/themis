@@ -59,6 +59,10 @@ type Knowledge struct {
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
 	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
 	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
+	// Reattribute re-asks the discovery feeds about components already in the estate, so cards
+	// folded before fix-attribution existed gain it without a new SBOM (KN-FIX-2). Always set —
+	// it rides the always-on OSV discovery source, not an opt-in feed.
+	Reattribute *app.ReattributeService
 }
 
 // NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
@@ -149,6 +153,8 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
 		Health:   health,
+		// Same discovery fan-out correlation uses — one path to the feeds, not two.
+		Reattribute: app.NewReattributeService(st, disc, fold, 0),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

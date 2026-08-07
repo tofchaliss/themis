@@ -48,10 +48,17 @@ type wireProposal struct {
 	} `json:"evidence"`
 }
 
+// Headers the Gateway sets on a 204 to say why nothing was produced (AI-204-1). Absent from an
+// older node, which simply yields an empty reason — the same behaviour as before.
+const (
+	gatewayReasonHeader = "X-Themis-AI-Reason"
+	gatewayDetailHeader = "X-Themis-AI-Detail"
+)
+
 // RecommendPosition invokes recommend_position for a Finding. produced=false on a 204
 // ("no proposal"). A transport/HTTP failure returns an error, which the caller treats
 // as "disabled ≡ unavailable" (a safe no-proposal outcome).
-func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.Recommendation, bool, error) {
+func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.Recommendation, bool, string, error) {
 	// The Selection shape (EDR-TRUST-01 T9). Governance's own app port is unchanged — it
 	// still passes a finding id; constructing the Selection is this adapter's job, which is
 	// exactly what an anti-corruption layer is for.
@@ -59,31 +66,37 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		"subject": map[string]any{"type": "finding", "ids": []string{findingID}},
 	})
 	if err != nil {
-		return app.Recommendation{}, false, err
+		return app.Recommendation{}, false, "", err
 	}
 	url := fmt.Sprintf("%s/api/v1/capabilities/%s/invoke", c.baseURL, c.capability)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return app.Recommendation{}, false, err
+		return app.Recommendation{}, false, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return app.Recommendation{}, false, err
+		return app.Recommendation{}, false, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNoContent {
-		return app.Recommendation{}, false, nil // no proposal — a safe outcome
+		// The Gateway states WHY on the 204 (AI-204-1). A detail is appended when present —
+		// `provider_error` alone does not say the provider timed out at 60s.
+		reason := resp.Header.Get(gatewayReasonHeader)
+		if d := resp.Header.Get(gatewayDetailHeader); d != "" {
+			reason += ": " + d
+		}
+		return app.Recommendation{}, false, reason, nil // no proposal — a safe outcome
 	}
 	if resp.StatusCode != http.StatusOK {
-		return app.Recommendation{}, false, fmt.Errorf("intelligence API: status %d", resp.StatusCode)
+		return app.Recommendation{}, false, "", fmt.Errorf("intelligence API: status %d", resp.StatusCode)
 	}
 
 	var wp wireProposal
 	if err := json.NewDecoder(resp.Body).Decode(&wp); err != nil {
-		return app.Recommendation{}, false, err
+		return app.Recommendation{}, false, "", err
 	}
 	return app.Recommendation{
 		Stance:            wp.Stance,
@@ -93,7 +106,7 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		DecidedBy:         wp.DecidedBy,
 		Evidence:          evidenceRefs(wp),
 		RationaleWarnings: wp.RationaleWarnings,
-	}, true, nil
+	}, true, "", nil
 }
 
 // evidenceRefs extracts the cited references so Governance can Business-Verify them against

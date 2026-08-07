@@ -311,3 +311,23 @@ func TestReconcile_FixCountChangeIsAViewChange(t *testing.T) {
 		t.Fatal("expected ViewChanged: a second published fix is new knowledge")
 	}
 }
+
+// KN-MODULE-1: when a card holds both a direct fix and a module-stream rebuild for the same
+// package, the direct fix is offered first — "upgrade python3-ply to 3.11-10" beats "rebuild the
+// python39 module" as an instruction. Neither is dropped: the module rebuild is valid remediation
+// on a modular system, and the fixed-verdict engine needs the full set.
+func TestFixesFor_PrefersADirectFixOverAModuleStreamRebuild(t *testing.T) {
+	v := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "python-ply", Version: "0:3.11-10.module+el8.10.0+1582+bc278001"},
+		{Package: "python-ply", Version: "0:3.11-11.el8"},
+		{Package: "python-ply", Version: "0:3.11-10.module+el8.9.0+1418+f0d66789"},
+		{Package: "PyYAML", Version: "0:5.4.1-1.el8"},
+	}}
+	got := v.FixesFor("python-ply")
+	if len(got) != 3 {
+		t.Fatalf("FixesFor = %v, want all three python-ply fixes — none may be dropped", got)
+	}
+	if got[0] != "0:3.11-11.el8" {
+		t.Errorf("first fix = %q, want the direct 0:3.11-11.el8 — a consumer showing one row shows this", got[0])
+	}
+}

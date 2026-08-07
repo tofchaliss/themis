@@ -1188,7 +1188,8 @@ three angles, and two of them proposed fixes that would not have worked.
   verification asks "were you given this identifier", not "does it mean what you think". Only the
   selection fix could close that gap; guardrail and data quality are complementary.
 
-- [ ] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.**
+- [x] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.** ✅ **CLOSED 2026-08-07.**
+  **Fix:** the reason rides the 204 as `X-Themis-AI-Reason` (headers, not a body — 204 means no content, and a payload would be non-conforming; an older caller that ignores it behaves exactly as before). Intelligence sets its `Outcome.Reason`/`Detail`; Governance's client reads it and its own `/recommend` re-emits one of `disabled` · `unreachable` · `declined` · `business_verification_failed` · the Gateway's own reason. `release-posture.sh` now prints what to DO about each instead of one guess covering all three.
   _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three
   causes with opposite responses: AI disabled (config gap), provider unreachable/timed out (outage),
   and the model correctly declining for want of grounding (`insufficient` — the Δ2 fourth outcome,
@@ -1200,7 +1201,7 @@ three angles, and two of them proposed fixes that would not have worked.
   distinct status for the config/outage cases). A correct refusal is the AI's most valuable
   behaviour and currently looks identical to an outage. **Dep:** none. **Scope:** SMALL.
 
-- [ ] **KN-FIX-2 — existing cards never gain package attribution; they heal only on re-upload.**
+- [x] **KN-FIX-2 — existing cards never gain package attribution; they heal only on re-upload.** ✅ **CLOSED 2026-08-07 (option a).**
   _(**Measured** on the VM 2026-08-07: `CVE-2021-44228`'s card reports `with_pkg: 0` of 80 fixes,
   while `CVE-2007-4559` — whose release was re-uploaded after KN-FIX-1 — reports 89.)_
   Only **OSV** and **Red Hat** attribute a fix to a package; **NVD** (CPE-keyed) and the scanner ACL
@@ -1217,8 +1218,18 @@ three angles, and two of them proposed fixes that would not have worked.
   that attribution arrives with the next genuinely-new SBOM. **(a) is preferable** — it is the same
   shape as the existing `BackfillService` and needs no new concepts. **Dep:** KN-FIX-1 (landed).
   **Scope:** MEDIUM.
+  **Fix (a):** `app.ReattributeService` + `THEMIS_REATTRIBUTE_INTERVAL` (default 6h), riding the
+  same always-on OSV discovery fan-out correlation uses — one path to the feeds, not two. Migration
+  `000005_match_component_detail` persists the full matched component (name/version/ecosystem/source)
+  on `faultline_matches`, because a PURL alone cannot be re-queried: a feed lookup needs the
+  ecosystem and, for distro packages, the source name. Rows predating it are SKIPPED rather than
+  guessed at. The sweep folds only proposals for the CVE it asked about — folding everything a
+  component query returns would turn re-attribution into an undeclared discovery pass. Bounded per
+  run, per-card failures skipped, self-terminating (once everything is attributed it finds nothing
+  and writes nothing), and idempotent for free now that the aggregate drops verbatim restatements.
 
-- [ ] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.**
+- [x] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.** ✅ **CLOSED 2026-08-07.**
+  **Fix (option a, the minimum):** EPSS gets its own band arm mirroring KEV's — `EPSS >= 0.9 && CVSS < 7 → high`. Scoped tightly to what was MISLABELLED: the 0.9 floor is far above `elevated`'s 0.5 (this arm is for "already being exploited", not elevated probability), and `< 7` leaves every CVE the `elevated` rule already handles exactly where it was. A first attempt used `< 9` and silently re-banded high-CVSS cases that already had a sensible label — caught by its own test, then narrowed. KEV still wins: it is a CONFIRMED exploitation record where EPSS is a prediction. **Option (b) — raising the score's 30% lift cap so likelihood can overtake severity — remains open and needs an EDR decision.**
   _(**Measured** on the VM 2026-08-07 — release `ee006ff7`, posture rows 2 and 3 — with the formula
   **read from code** in `internal/knowledge/domain/priority.go`.)_
   Observed: `CVE-2021-45105` (log4j, CVSS 5.9, **EPSS 99%**) scores **52**, band `informational`, and
@@ -1242,8 +1253,8 @@ three angles, and two of them proposed fixes that would not have worked.
   band is read correctly. **(a) is the minimum** — the label is wrong today regardless of the ranking
   philosophy. **Dep:** none. **Scope:** SMALL for (a); (b) needs an EDR decision (D-series, Knowledge).
 
-- [ ] **KN-PROPOSAL-BLOAT-1 — the EPSS/KEV sweep re-folds byte-identical signals, so 99.2% of the
-  proposal log records no new information.** _(**Measured** on the VM 2026-08-07.)_
+- [x] **KN-PROPOSAL-BLOAT-1 — the EPSS/KEV sweep re-folds byte-identical signals, so 99.2% of the
+  proposal log records no new information.** ✅ **CLOSED 2026-08-07.** _(**Measured** on the VM 2026-08-07.)_
   `faultline_proposals` holds **28,128** rows from source `epsskev` across **239** cards — ~118 per
   card — of which only **221 payloads are distinct**. Every sweep appends a fresh Proposal per card
   whether or not EPSS moved, so a card typically carries one real observation and ~117 copies of it.
@@ -1259,9 +1270,21 @@ three angles, and two of them proposed fixes that would not have worked.
   **Fix:** fold only when the signal differs from the card's latest Proposal from that source (an
   observed-at refresh on the existing row, or simply no-op). Keep the first observation of every
   distinct value — that is the audit trail. **Dep:** none. **Scope:** MEDIUM, Knowledge-local.
+  **Fix:** `Faultline.FoldProposal` drops a Proposal whose (source, kind, payload) matches the card's
+  LATEST from that source. Comparing against the latest — not against any historical proposal — is
+  what preserves a value that changes and changes back (0.27 → 0.29 → 0.27 is three observations);
+  observed-at is deliberately excluded from the comparison, since it is the field that differs on
+  every poll. Corroboration from a *different* source, and a different *kind* from the same source,
+  are never collapsed. Anything that cannot be proven identical compares as different — a dropped
+  observation is unrecoverable, a duplicate is merely waste.
+  **Two tests asserted the old behaviour** ("duplicate not recorded", "both proposals are recorded
+  (append-only)") and were rewritten; that reading is what produced the 118× multiplier.
+  **Cost, taken deliberately:** a card no longer records "we re-confirmed this at T2".
+  `feed_health.last_success_at` answers it per source, and since feeds are relevance-bounded (D5 — a
+  sweep visits every carded CVE together) per-source is a faithful proxy for per-card.
 
-- [ ] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
-  view now makes it visible.** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_
+- [x] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
+  view now makes it visible.** ✅ **CLOSED 2026-08-07 (option b).** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_
   Five of the top fifteen rows pin **Python interpreter** CVEs onto unrelated packages:
   `CVE-2019-9636` (urlsplit) and `CVE-2007-4559` (tarfile) appear against `python3-pyyaml` and
   `python3-ply`, with fixes of `PyYAML 3.12-16` / `python-ply 3.11-10`. Those fix versions are **not**
@@ -1276,6 +1299,11 @@ three angles, and two of them proposed fixes that would not have worked.
   (rows 11/13 show `5.3.1-1` — the real PyYAML fix — alongside stream rebuilds); (c) leave as-is and
   document. **Do not** drop module entries: they are the correct remediation on a modular system.
   **Dep:** none. **Scope:** MEDIUM — display/precedence, no new truth. Revisit with DASH-3.
+  **Fix (b):** `value.IsRPMModuleStream` detects the `.module+el` marker, and `EnterpriseView.FixesFor`
+  returns package-specific fixes BEFORE module-stream rebuilds. Nothing is dropped — upgrading the
+  module IS correct remediation on a modular system, and the fixed-verdict engine needs the full set
+  to reason about backports — only the ORDER changes, which is what a consumer showing the first N
+  reads. Option (a), labelling the row as a stream rebuild in the UI, is now one call away.
   **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
   plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
 

@@ -49,6 +49,11 @@ type config struct {
 	nvdStaleAfter    time.Duration // THEMIS_NVD_STALE_AFTER — how long a card's NVD facts stay fresh before the sweep revisits it (Go duration, default 168h). Revisiting is what catches revised scores and CVEs withdrawn upstream; an enrich-once sweep is correct on the day it runs and quietly stale months later.
 	nvdBackfillLimit int           // THEMIS_NVD_BACKFILL_LIMIT — carded CVEs enriched per sweep (default 200). Cost is one small request per CVE, so this bounds a sweep to a predictable duration; a large estate drains over successive sweeps.
 	nvdPollInterval  time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
+	// THEMIS_REATTRIBUTE_INTERVAL — Go duration between re-attribution sweeps (default 6h).
+	// The sweep re-asks the discovery feeds about components already in the estate so cards
+	// folded before fix-attribution existed gain it (KN-FIX-2). It is self-terminating: once
+	// everything is attributed it finds nothing and writes nothing, so the cadence is cheap.
+	reattributeInterval time.Duration
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -82,13 +87,14 @@ func loadConfig() config {
 		evidenceURL:    envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		osvURL:         envDefault("THEMIS_OSV_URL", "https://api.osv.dev"),
 
-		nvdEnabled:       os.Getenv("THEMIS_NVD_ENABLED") == "1",
-		nvdURL:           os.Getenv("THEMIS_NVD_URL"),
-		nvdAPIKey:        os.Getenv("THEMIS_NVD_API_KEY"),
-		nvdDiscovery:     os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
-		nvdBackfillLimit: envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
-		nvdStaleAfter:    parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
-		nvdPollInterval:  parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
+		nvdEnabled:          os.Getenv("THEMIS_NVD_ENABLED") == "1",
+		nvdURL:              os.Getenv("THEMIS_NVD_URL"),
+		nvdAPIKey:           os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdDiscovery:        os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
+		nvdBackfillLimit:    envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
+		nvdStaleAfter:       parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
+		nvdPollInterval:     parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
+		reattributeInterval: parseDurationDefault(os.Getenv("THEMIS_REATTRIBUTE_INTERVAL"), 6*time.Hour),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -177,6 +183,11 @@ func main() {
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
+
+	// Re-attribution (KN-FIX-2). Always on: it needs no feed the node is not already using.
+	if kn.Reattribute != nil {
+		go reattributeLoop(kn.Reattribute, cfg.reattributeInterval, logger.Component("reattribute"))
+	}
 
 	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
 	// CVSS/severity onto its card. Off unless THEMIS_NVD_ENABLED=1.
@@ -276,6 +287,32 @@ func recordFeed(health *app.FeedHealthService, source string, pollErr error, log
 // watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
 // every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
 // failure is logged and retried next tick (the watermark only advances on a clean pass).
+// reattributeLoop re-asks the discovery feeds about components already in the estate, so cards
+// folded before fix-attribution existed gain it without waiting for a new SBOM (KN-FIX-2).
+//
+// It runs on the same cadence as the NVD sweep because it drains the same way: bounded per run,
+// idempotent (the aggregate drops verbatim restatements), and self-terminating — once every card
+// is attributed the query returns nothing and the sweep writes nothing. It is not gated behind a
+// feature flag because it rides the always-on OSV discovery source, not an opt-in feed.
+func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := rs.Sweep(context.Background())
+		if err != nil {
+			logger.Error("re-attribution sweep failed", observability.Err(err))
+			return
+		}
+		// Logged on every sweep including zero: "everything is attributed" and "the sweep stopped
+		// working" must not look alike (the same reasoning as NVD-WATCH-1).
+		logger.Info("re-attribution sweep complete", observability.Int("folded", n))
+	}
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
 // backfillLoop runs the per-CVE NVD enrichment sweep on a fixed cadence (D5a).
 //
 // Simpler than the window walk it replaces, because there is no window: each run asks the store

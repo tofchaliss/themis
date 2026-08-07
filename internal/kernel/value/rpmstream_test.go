@@ -113,3 +113,26 @@ func TestRPMPackageName(t *testing.T) {
 		}
 	}
 }
+
+// KN-MODULE-1: a modular advisory lists every RPM rebuilt in the stream, so a fix attributed to a
+// package may be a stream rebuild rather than a fix to that package. Labelling it is what lets a
+// consumer prefer a direct fix without discarding the module one (which IS valid remediation).
+func TestIsRPMModuleStream(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"0:3.11-10.module+el8.10.0+1582+bc278001", true},
+		{"0:5.4.1-1.module+el8.9.0+1418+f0d66789", true},
+		{"0:4.19.4-16.el8_10", false}, // a normal package fix
+		{"0:2.28-251.el8_10.38", false},
+		{"3.11", false}, // a bare upstream version
+		{"", false},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := value.IsRPMModuleStream(tc.version); got != tc.want {
+				t.Errorf("IsRPMModuleStream(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}

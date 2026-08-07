@@ -62,23 +62,43 @@ func (s *FindingService) WithAdvisor(a PositionAdvisor) *FindingService {
 	return s
 }
 
+// No-proposal reasons carried out of RecommendPosition (AI-204-1). Three of these demand
+// completely different operator responses — fix the config, chase an outage, or do nothing
+// because the model correctly declined — and a bare "no proposal" cannot distinguish them.
+const (
+	ReasonAIDisabled                 = "disabled"                     // no advisor wired
+	ReasonAIUnreachable              = "unreachable"                  // transport failed or timed out
+	ReasonAIDeclined                 = "declined"                     // the Gateway produced nothing and said no more
+	ReasonBusinessVerificationFailed = "business_verification_failed" // the claim did not check out against OUR truth (T8)
+)
+
 // RecommendPosition is the on-demand AI seam (D8/D13, Revision 2): a human asks for an AI
 // position recommendation on a Finding. When AI is enabled it invokes the Intelligence
 // Gateway and records the returned advice as an ADVISORY Governance Proposal (actor = AI,
 // the capability ref as provenance) — never auto-accepted; a human still decides. AI being
 // absent, unreachable, or declining is invisible: it simply produces no proposal
 // (disabled ≡ unavailable), never blocking. This runs off the pipeline hot path.
-func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain.FindingID) (domain.ProposalID, bool, error) {
+// The third return is WHY nothing was produced (AI-204-1): "disabled", the Gateway's own
+// reason, or "business_verification_failed" when the claim did not check out against our truth.
+// It is diagnostic only — every no-proposal path behaves identically, leaving the Finding
+// untouched. What it buys is that an operator can tell a correct refusal from an outage.
+func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain.FindingID) (domain.ProposalID, bool, string, error) {
 	if s.advisor == nil {
-		return "", false, nil // AI not wired — disabled
+		return "", false, ReasonAIDisabled, nil // AI not wired — disabled
 	}
 	f, err := s.repo.GetByID(ctx, findingID)
 	if err != nil {
-		return "", false, err // re-check the Finding exists before spending AI (defense in depth)
+		return "", false, "", err // re-check the Finding exists before spending AI (defense in depth)
 	}
-	rec, produced, err := s.advisor.RecommendPosition(ctx, string(findingID))
-	if err != nil || !produced {
-		return "", false, nil // disabled ≡ unavailable — a safe no-proposal outcome
+	rec, produced, reason, err := s.advisor.RecommendPosition(ctx, string(findingID))
+	if err != nil {
+		return "", false, ReasonAIUnreachable, nil // an outage is a safe no-proposal outcome
+	}
+	if !produced {
+		if reason == "" {
+			reason = ReasonAIDeclined
+		}
+		return "", false, reason, nil
 	}
 	// Business Verification (EDR-TRUST-01 T8): before recording anything, check the claim
 	// against OUR truth. The runtime's Grounding Verification proved the model reasoned only
@@ -90,7 +110,7 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	// normal outcome and must never block a human's request (D13).
 	for _, ref := range rec.Evidence {
 		if !vouchesRef(f, ref) {
-			return "", false, nil
+			return "", false, ReasonBusinessVerificationFailed, nil
 		}
 	}
 	provenance := ""
@@ -115,9 +135,9 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	// check (T4) bars it from automatic acceptance under any policy — a human decides.
 	pid, err := s.RaiseProposal(ctx, findingID, proposer, domain.Stance(rec.Stance), rationale, value.TrustInferred)
 	if err != nil {
-		return "", false, err
+		return "", false, "", err
 	}
-	return pid, true, nil
+	return pid, true, "", nil
 }
 
 // OpenOrUpdateFinding find-or-creates the Finding for a (Release, Faultline) pair from a
@@ -198,7 +218,7 @@ type EnrichmentSignal struct {
 	// WithdrawnTrust is the class of the source that reported the withdrawal (TRUST-4).
 	// Only meaningful when Withdrawn.
 	WithdrawnTrust value.TrustClass
-	Score        int  // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
+	Score          int // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D4). A
 	// not_affected statement whose package matches a Finding's component raises a system
 	// not_affected Proposal on that Finding (policy/human accepts — never auto-suppress).

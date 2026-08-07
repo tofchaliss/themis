@@ -56,3 +56,49 @@ func TestPriorityAndScore(t *testing.T) {
 		}
 	}
 }
+
+// KN-EPSS-BAND-1. Measured on a live estate 2026-08-07: CVE-2021-45105 (log4j, CVSS 5.9,
+// EPSS 99%) was banded `informational` — the label that tells an operator to do nothing, about a
+// vulnerability FIRST rates near-certain to be attacked. EPSS reached the band only via the
+// `elevated` rule, which also requires CVSS >= 7, so a medium-CVSS CVE fell through to the
+// default arm however certain its exploitation.
+func TestPriority_NearCertainEPSSLiftsALowCVSSOutOfInformational(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view EnterpriseView
+		want string
+	}{
+		{
+			name: "the measured case: medium CVSS, 99% EPSS",
+			view: EnterpriseView{Severity: value.SeverityMedium, EPSS: 0.99},
+			want: PriorityHigh,
+		},
+		{
+			// The arm is for "already being exploited", not merely elevated probability, so it
+			// sits far above `elevated`'s 0.5 floor. 0.6 must still land on the old rules.
+			name: "elevated probability alone does not reach the new arm",
+			view: EnterpriseView{Severity: value.SeverityMedium, EPSS: 0.6},
+			want: PriorityInformational,
+		},
+		{
+			// KEV is a CONFIRMED exploitation record; EPSS is a prediction. A critical KEV entry
+			// must still band `critical`, so the new arm cannot overtake the KEV arms above it.
+			name: "KEV still wins on a critical",
+			view: EnterpriseView{Severity: value.SeverityCritical, EPSS: 0.99, KEV: true},
+			want: PriorityCritical,
+		},
+		{
+			// A high-CVSS CVE with high EPSS keeps its existing `elevated` band: that rule is
+			// more specific (it also excludes KEV and public exploits) and still matches first.
+			name: "high CVSS with high EPSS keeps elevated",
+			view: EnterpriseView{Severity: value.SeverityHigh, EPSS: 0.95},
+			want: PriorityElevated,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.view.Priority(); got != tc.want {
+				t.Errorf("Priority() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

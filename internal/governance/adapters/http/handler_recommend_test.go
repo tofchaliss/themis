@@ -13,11 +13,12 @@ import (
 type fakeAdvisor struct {
 	rec      app.Recommendation
 	produced bool
+	reason   string
 	err      error
 }
 
-func (a fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, error) {
-	return a.rec, a.produced, a.err
+func (a fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, string, error) {
+	return a.rec, a.produced, a.reason, a.err
 }
 
 func serverWithAdvisor(t *testing.T, repo *fakeRepo, adv app.PositionAdvisor) *httptest.Server {

@@ -65,6 +65,24 @@ type FoldResult struct {
 // reports whether the enterprise view changed. Idempotency (not re-folding the same
 // proposal) is an app/store concern (D11), not the aggregate's.
 func (f *Faultline) FoldProposal(p Proposal, prec Precedence, trust TrustPolicy) FoldResult {
+	// A source repeating itself verbatim is not a new observation (KN-PROPOSAL-BLOAT-1).
+	//
+	// Measured on a live estate: 28,128 exploit-signal Proposals across 239 cards — ~118 per card
+	// — of just 221 distinct payloads. The EPSS/KEV sweep appended a fresh Proposal on every poll
+	// whether or not the numbers had moved, so a card carried one real observation and ~117
+	// copies of it.
+	//
+	// This does NOT weaken append-only (Domain Invariant 1). The audit trail's purpose is to
+	// answer "what did this source say, and when did it change" — every DISTINCT value is still
+	// kept forever, in order. What is dropped is the restatement, which records a timestamp and
+	// nothing else. An EPSS move 0.27 → 0.29 is history; ten polls reporting 0.27 are one fact.
+	//
+	// It matters beyond disk: Reconcile walks every Proposal on the card, so per-card proposal
+	// count sits on the hot path of every fold and grows monotonically forever. A 118× multiplier
+	// is invisible at 239 cards and decides p99 at 50,000.
+	if f.repeatsLatestFrom(p) {
+		return FoldResult{ViewChanged: false}
+	}
 	prev := f.view
 	f.proposals = append(f.proposals, p)
 	f.view = Reconcile(f.proposals, prec, trust)
@@ -113,3 +131,40 @@ func (f Faultline) Stage() Stage { return f.stage }
 
 // Version returns the optimistic-concurrency version stamp.
 func (f Faultline) Version() int { return f.version }
+
+// repeatsLatestFrom reports whether p carries exactly the content the card already holds from
+// that source and kind — i.e. the source restated itself and told us nothing new.
+//
+// It compares against the LATEST proposal of that (source, kind) rather than against any
+// historical one, so a value that changes and later changes back is recorded both times. That
+// is a genuine observation ("EPSS fell, then rose again") and dropping it would lose real
+// history, which is exactly what this must not do.
+//
+// The observed-at timestamp is deliberately NOT part of the comparison: it is the thing that
+// differs on every poll, and including it would make every duplicate look distinct — the bug.
+func (f *Faultline) repeatsLatestFrom(p Proposal) bool {
+	for i := len(f.proposals) - 1; i >= 0; i-- {
+		prev := f.proposals[i]
+		if prev.source != p.source || prev.kind != p.kind {
+			continue
+		}
+		return prev.sameContentAs(p)
+	}
+	return false
+}
+
+// sameContentAs compares two Proposals of the same kind by payload, ignoring observed-at.
+func (p Proposal) sameContentAs(other Proposal) bool {
+	switch {
+	case p.exploitSignal != nil && other.exploitSignal != nil:
+		return *p.exploitSignal == *other.exploitSignal
+	case p.applicability != nil && other.applicability != nil:
+		return *p.applicability == *other.applicability
+	case p.vulnFacts != nil && other.vulnFacts != nil:
+		return p.vulnFacts.sameAs(*other.vulnFacts)
+	default:
+		// Mixed or empty payloads: treat as different. Never suppress what cannot be proven
+		// identical — a dropped observation is unrecoverable, a duplicate is merely waste.
+		return false
+	}
+}

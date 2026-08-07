@@ -129,6 +129,35 @@ func vulnFacts(t *testing.T, source string, sev value.Severity, ranges ...string
 	return p
 }
 
+// vulnFactsFixed builds facts whose fix version carries NO package — the pre-attribution shape a
+// CPE-keyed source (NVD) still legitimately produces.
+func vulnFactsFixed(t *testing.T, source string, fixed ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, Fixes: domain.UnattributedFixes(fixed)})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
+// vulnFactsFixedFor builds facts whose fix version IS attributed to a package.
+func vulnFactsFixedFor(t *testing.T, source, pkg string, fixed ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
+	fixes := make([]domain.FixedVersion, 0, len(fixed))
+	for _, f := range fixed {
+		fixes = append(fixes, domain.FixedVersion{Package: pkg, Version: f})
+	}
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, Fixes: fixes})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 type seqIDs struct{ n int64 }
 
 func (s *seqIDs) NewID() string { return fmt.Sprintf("fl-%d", atomic.AddInt64(&s.n, 1)) }
@@ -229,9 +258,13 @@ func TestViewChangeEmitsOneEvent(t *testing.T) {
 	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventFaultlineEnriched); n != 1 {
 		t.Errorf("enriched events = %d, want 1", n)
 	}
-	// Both proposals are recorded (append-only), even though only one changed the view.
-	if n := count(t, pool, "SELECT count(*) FROM faultline_proposals"); n != 2 {
-		t.Errorf("proposals persisted = %d, want 2", n)
+	// The verbatim restatement is NOT persisted (KN-PROPOSAL-BLOAT-1). This asserted 2 before,
+	// and that reading produced 28,128 exploit-signal rows across 239 cards holding 221 distinct
+	// payloads. Append-only is intact — every DISTINCT value a source reports is still kept in
+	// order, and nothing is ever mutated or removed; what is dropped is a restatement carrying no
+	// information but a timestamp.
+	if n := count(t, pool, "SELECT count(*) FROM faultline_proposals"); n != 1 {
+		t.Errorf("proposals persisted = %d, want 1 — a source repeating itself is not an observation", n)
 	}
 }
 
@@ -642,5 +675,69 @@ func TestMigration_DownUp(t *testing.T) {
 	defer pool.Close()
 	if _, err := pool.Exec(context.Background(), "SELECT 1 FROM faultlines LIMIT 0"); err != nil {
 		t.Fatalf("faultlines table missing after down/up: %v", err)
+	}
+}
+
+// CardsNeedingAttribution drives the re-attribution sweep (KN-FIX-2): cards holding fix versions
+// with no package, paired with a component detailed enough to ask a feed about again.
+func TestCardsNeedingAttribution(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	// Card A: unattributed fixes + a fully-detailed match → eligible.
+	a, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-21"), vulnFactsFixed(t, "nvd", "1.2.3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: a.ID(), CVE: "CVE-2024-21", OccurredAt: time.Now().UTC(),
+		Component: app.InventoryComponent{
+			PURL: "pkg:rpm/rocky/python3-ply@3.9", Name: "python3-ply",
+			Version: "3.9", Ecosystem: "rpm", Source: "python-ply",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Card B: fixes ALREADY attributed → nothing to do, must not be returned.
+	b, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-22"), vulnFactsFixedFor(t, "osv", "openssl", "3.0.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: b.ID(), CVE: "CVE-2024-22", OccurredAt: time.Now().UTC(),
+		Component: app.InventoryComponent{PURL: "pkg:rpm/rocky/openssl@3.0", Name: "openssl", Ecosystem: "rpm"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Card C: unattributed, but its match predates migration 000005 and carries a PURL alone.
+	// A component we cannot re-query is one we must not guess about, so it is skipped.
+	c, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-23"), vulnFactsFixed(t, "nvd", "9.9.9"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: c.ID(), CVE: "CVE-2024-23", OccurredAt: time.Now().UTC(),
+		Component: app.InventoryComponent{PURL: "pkg:rpm/rocky/legacy@1.0"}, // no ecosystem
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.CardsNeedingAttribution(ctx, 10)
+	if err != nil {
+		t.Fatalf("CardsNeedingAttribution: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("cards = %+v, want exactly the unattributed one with a re-queryable component", got)
+	}
+	if got[0].CVE != "CVE-2024-21" {
+		t.Errorf("cve = %q, want CVE-2024-21", got[0].CVE)
+	}
+	// The source package is the point: it is the only key that joins python3-ply to python-ply.
+	if got[0].Component.Source != "python-ply" || got[0].Component.Ecosystem != "rpm" {
+		t.Errorf("component = %+v, want the full detail needed to re-query", got[0].Component)
 	}
 }

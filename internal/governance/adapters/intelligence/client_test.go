@@ -17,7 +17,7 @@ func TestClientProduced(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rec, produced, err := NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
+	rec, produced, _, err := NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
 	if err != nil || !produced {
 		t.Fatalf("expected produced; got %v, %v", produced, err)
 	}
@@ -31,7 +31,7 @@ func TestClientNoProposal(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	_, produced, err := NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
+	_, produced, _, err := NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
 	if err != nil || produced {
 		t.Errorf("204 → no proposal, nil err; got %v, %v", produced, err)
 	}
@@ -42,7 +42,7 @@ func TestClientErrors(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer boom.Close()
-	if _, _, err := NewClient(boom.URL, boom.Client()).RecommendPosition(context.Background(), "F1"); err == nil {
+	if _, _, _, err := NewClient(boom.URL, boom.Client()).RecommendPosition(context.Background(), "F1"); err == nil {
 		t.Error("500 should error")
 	}
 
@@ -50,20 +50,20 @@ func TestClientErrors(t *testing.T) {
 		_, _ = w.Write([]byte("{not json"))
 	}))
 	defer badJSON.Close()
-	if _, _, err := NewClient(badJSON.URL, badJSON.Client()).RecommendPosition(context.Background(), "F1"); err == nil {
+	if _, _, _, err := NewClient(badJSON.URL, badJSON.Client()).RecommendPosition(context.Background(), "F1"); err == nil {
 		t.Error("bad JSON should error")
 	}
 
-	if _, _, err := NewClient("http://ex\x00ample", nil).RecommendPosition(context.Background(), "F1"); err == nil {
+	if _, _, _, err := NewClient("http://ex\x00ample", nil).RecommendPosition(context.Background(), "F1"); err == nil {
 		t.Error("bad URL should error")
 	}
-	if _, _, err := NewClient("http://127.0.0.1:1", &http.Client{}).RecommendPosition(context.Background(), "F1"); err == nil {
+	if _, _, _, err := NewClient("http://127.0.0.1:1", &http.Client{}).RecommendPosition(context.Background(), "F1"); err == nil {
 		t.Error("transport error expected")
 	}
 }
 
 func TestNoopAdvisor(t *testing.T) {
-	_, produced, err := NoopAdvisor{}.RecommendPosition(context.Background(), "F1")
+	_, produced, _, err := NoopAdvisor{}.RecommendPosition(context.Background(), "F1")
 	if err != nil || produced {
 		t.Errorf("no-op must decline; got %v, %v", produced, err)
 	}

@@ -18,9 +18,9 @@ type fakeAdvisor struct {
 	calls    int
 }
 
-func (a *fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, error) {
+func (a *fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, string, error) {
 	a.calls++
-	return a.rec, a.produced, a.err
+	return a.rec, a.produced, "", a.err
 }
 
 func seedFinding(t *testing.T, repo *fakeRepo) domain.FindingID {
@@ -37,7 +37,7 @@ func TestRecommendPositionDisabled(t *testing.T) {
 	repo := newRepo()
 	id := seedFinding(t, repo)
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}) // no advisor = AI off
-	pid, produced, err := svc.RecommendPosition(context.Background(), id)
+	pid, produced, _, err := svc.RecommendPosition(context.Background(), id)
 	if err != nil || produced || pid != "" {
 		t.Errorf("AI disabled → no proposal; got %q, %v, %v", pid, produced, err)
 	}
@@ -46,7 +46,7 @@ func TestRecommendPositionDisabled(t *testing.T) {
 func TestRecommendPositionFindingMissing(t *testing.T) {
 	adv := &fakeAdvisor{produced: true, rec: app.Recommendation{Stance: "affected", Capability: "c"}}
 	svc := app.NewFindingService(newRepo(), &seqIDs{}, fixedClock{}).WithAdvisor(adv)
-	if _, _, err := svc.RecommendPosition(context.Background(), "nope"); err == nil {
+	if _, _, _, err := svc.RecommendPosition(context.Background(), "nope"); err == nil {
 		t.Error("missing finding should error before invoking AI")
 	}
 	if adv.calls != 0 {
@@ -63,7 +63,7 @@ func TestRecommendPositionDeclines(t *testing.T) {
 	}
 	for _, adv := range cases {
 		svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
-		pid, produced, err := svc.RecommendPosition(context.Background(), id)
+		pid, produced, _, err := svc.RecommendPosition(context.Background(), id)
 		if err != nil || produced || pid != "" {
 			t.Errorf("decline/unreachable → no proposal; got %q, %v, %v", pid, produced, err)
 		}
@@ -79,7 +79,7 @@ func TestRecommendPositionProduced(t *testing.T) {
 	}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
 
-	pid, produced, err := svc.RecommendPosition(context.Background(), id)
+	pid, produced, _, err := svc.RecommendPosition(context.Background(), id)
 	if err != nil || !produced || pid == "" {
 		t.Fatalf("expected a produced advisory proposal; got %q, %v, %v", pid, produced, err)
 	}
@@ -117,7 +117,7 @@ func TestRecommendPositionInvalidStance(t *testing.T) {
 	id := seedFinding(t, repo)
 	adv := &fakeAdvisor{produced: true, rec: app.Recommendation{Stance: "bogus", Capability: "c"}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
-	if _, _, err := svc.RecommendPosition(context.Background(), id); err == nil {
+	if _, _, _, err := svc.RecommendPosition(context.Background(), id); err == nil {
 		t.Error("an invalid AI stance should surface the RaiseProposal error")
 	}
 }
@@ -142,7 +142,7 @@ func TestRecommendPosition_UngroundedRationaleMentionsAreRecordedInTheRationale(
 	}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
 
-	pid, produced, err := svc.RecommendPosition(context.Background(), id)
+	pid, produced, _, err := svc.RecommendPosition(context.Background(), id)
 	if err != nil || !produced {
 		t.Fatalf("RecommendPosition: produced=%v err=%v — a warned proposal is still valid", produced, err)
 	}
@@ -184,7 +184,7 @@ func TestRecommendPosition_CleanRationaleCarriesNoCaveat(t *testing.T) {
 	}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
 
-	pid, _, err := svc.RecommendPosition(context.Background(), id)
+	pid, _, _, err := svc.RecommendPosition(context.Background(), id)
 	if err != nil {
 		t.Fatalf("RecommendPosition: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRecommendPosition_AcceptsALabelledButCorrectEvidenceRef(t *testing.T) {
 	}}
 	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
 
-	if _, produced, err := svc.RecommendPosition(context.Background(), id); err != nil || !produced {
+	if _, produced, _, err := svc.RecommendPosition(context.Background(), id); err != nil || !produced {
 		t.Fatalf("produced=%v err=%v — a labelled but correct ref must not be refused", produced, err)
 	}
 }
@@ -236,7 +236,7 @@ func TestRecommendPosition_StillRefusesLabelledWrongAndIdentifierlessRefs(t *tes
 				Stance: "affected", Capability: "c", Evidence: []string{tc.ref},
 			}}
 			svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
-			if _, produced, err := svc.RecommendPosition(context.Background(), id); err != nil || produced {
+			if _, produced, _, err := svc.RecommendPosition(context.Background(), id); err != nil || produced {
 				t.Fatalf("produced=%v err=%v, want the recommendation refused", produced, err)
 			}
 		})

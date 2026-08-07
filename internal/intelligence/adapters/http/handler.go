@@ -18,6 +18,14 @@ import (
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
+// Reason headers carried on a 204 so a caller can tell a declined recommendation from an
+// outage or a disabled seam (AI-204-1). They are advisory metadata, never a contract a
+// caller must depend on — an absent header means an older node.
+const (
+	reasonHeader = "X-Themis-AI-Reason"
+	detailHeader = "X-Themis-AI-Detail"
+)
+
 // Invoker is the reactive Gateway the handler drives (*app.Gateway satisfies it).
 type Invoker interface {
 	Invoke(ctx context.Context, capabilityID string, sel domain.Selection, correlationID string) (domain.Proposal, app.Outcome)
@@ -77,6 +85,20 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	if !oc.Produced {
+		// Carry WHY on the 204 (AI-204-1). A bare 204 collapses causes that demand opposite
+		// responses: AI disabled (fix your config), the provider unreachable or timed out (an
+		// outage), and the model correctly declining for want of grounding (`insufficient` —
+		// the seam working as designed, and arguably its most valuable behaviour). Diagnosing a
+		// caller-side timeout once cost a round-trip through this node's log precisely because
+		// the three were indistinguishable at the edge.
+		//
+		// Headers, not a body: 204 means "no content", and a payload here would be
+		// non-conforming. Response headers are legal on a 204 and every HTTP client can read
+		// them, so an older caller that ignores them still behaves exactly as before.
+		w.Header().Set(reasonHeader, string(oc.Reason))
+		if oc.Detail != "" {
+			w.Header().Set(detailHeader, oc.Detail)
+		}
 		w.WriteHeader(http.StatusNoContent) // no proposal — a safe outcome
 		return
 	}

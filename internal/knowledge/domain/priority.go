@@ -29,6 +29,25 @@ func (v EnterpriseView) Priority() string {
 		return PriorityHighPlus
 	case v.KEV && c < 9:
 		return PriorityHigh
+	// A near-certain EPSS lifts a LOW-CVSS CVE out of `informational`, exactly as the KEV arm
+	// above does (KN-EPSS-BAND-1).
+	//
+	// Without this arm, EPSS reached the band only through the `elevated` rule below, which also
+	// demands c >= 7. A medium-CVSS CVE therefore fell to the default arm and was reported as
+	// `informational` HOWEVER certain its exploitation. Measured on a live estate: CVE-2021-45105
+	// (CVSS 5.9, EPSS 99%) was labelled `informational`. That is not a neutral fallback — it is a
+	// claim, and it tells an operator to ignore something FIRST rates near-certain to be attacked.
+	//
+	// Scoped tightly to the cases that were MISLABELLED, and no wider. The 0.9 floor is far above
+	// `elevated`'s 0.5 — this arm is for "already being exploited", not merely elevated
+	// probability — and `c < 7` leaves every CVE the `elevated` rule already handles exactly
+	// where it was. Fixing a wrong label is the mandate; re-banding cases that were already
+	// sensible is a separate decision and not one to smuggle in.
+	//
+	// KEV remains stronger regardless: it is a CONFIRMED exploitation record where EPSS is a
+	// prediction, so the KEV arms above match first and this one cannot overtake them.
+	case v.EPSS >= 0.9 && c < 7:
+		return PriorityHigh
 	case v.EPSS >= 0.5 && c >= 7 && !v.KEV && !v.ExploitPublic:
 		return PriorityElevated
 	case c >= 9:

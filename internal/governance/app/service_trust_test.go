@@ -241,7 +241,7 @@ func TestReactToEnrichment_VersionRangeVerdictProducedWithAIDisabled(t *testing.
 	s := writeSvc(repo) // no policies, and critically no advisor — AI is off
 
 	// Sanity: with AI off the on-demand AI seam produces nothing at all.
-	if _, produced, err := s.RecommendPosition(context.Background(), "fnd-1"); err != nil || produced {
+	if _, produced, _, err := s.RecommendPosition(context.Background(), "fnd-1"); err != nil || produced {
 		t.Fatalf("precondition: AI must be disabled, got produced=%v err=%v", produced, err)
 	}
 	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
@@ -419,8 +419,8 @@ type stubAdvisor struct {
 	produced bool
 }
 
-func (s stubAdvisor) RecommendPosition(context.Context, string) (app.Recommendation, bool, error) {
-	return s.rec, s.produced, nil
+func (s stubAdvisor) RecommendPosition(context.Context, string) (app.Recommendation, bool, string, error) {
+	return s.rec, s.produced, "", nil
 }
 
 // Governance validates the returned claim against ITS OWN truth before recording anything.
@@ -446,7 +446,7 @@ func TestRecommendPosition_BusinessVerification(t *testing.T) {
 	t.Run("a claim consistent with our truth is recorded", func(t *testing.T) {
 		// Every reference resolves against the Finding Governance actually holds.
 		s, repo := newSvc(t, []string{"fnd-1", "fl-1", "CVE-2024-1", "pkg:golang/x@1.0.0"})
-		pid, produced, err := s.RecommendPosition(context.Background(), "fnd-1")
+		pid, produced, _, err := s.RecommendPosition(context.Background(), "fnd-1")
 		if err != nil || !produced || pid == "" {
 			t.Fatalf("pid=%q produced=%v err=%v", pid, produced, err)
 		}
@@ -460,7 +460,7 @@ func TestRecommendPosition_BusinessVerification(t *testing.T) {
 		// runtime's own grounding check passed, and Governance still refuses — because this
 		// component is not on this Finding.
 		s, repo := newSvc(t, []string{"pkg:golang/never-shipped@9.9"})
-		pid, produced, err := s.RecommendPosition(context.Background(), "fnd-1")
+		pid, produced, _, err := s.RecommendPosition(context.Background(), "fnd-1")
 		if err != nil {
 			t.Fatalf("a failed check is a silent no-proposal, never an error: %v", err)
 		}
@@ -474,7 +474,7 @@ func TestRecommendPosition_BusinessVerification(t *testing.T) {
 
 	t.Run("a claim citing another Finding is refused", func(t *testing.T) {
 		s, _ := newSvc(t, []string{"fnd-999"})
-		if _, produced, _ := s.RecommendPosition(context.Background(), "fnd-1"); produced {
+		if _, produced, _, _ := s.RecommendPosition(context.Background(), "fnd-1"); produced {
 			t.Error("evidence naming a different Finding must not vouch")
 		}
 	})

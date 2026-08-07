@@ -72,7 +72,12 @@ type Repository interface {
 // no-op advisor. Intelligence owns no truth — Governance records the advice as its own
 // (advisory) Proposal.
 type PositionAdvisor interface {
-	RecommendPosition(ctx context.Context, findingID string) (Recommendation, bool, error)
+	// The string return is WHY nothing was produced (AI-204-1) — "disabled", "provider_error",
+	// "insufficient", … — empty when a recommendation WAS produced. It is diagnostic only and
+	// never changes what Governance does: a declined recommendation and an outage both leave
+	// the Finding untouched. What differs is what an operator should do about it, and a bare
+	// "no proposal" cannot tell them.
+	RecommendPosition(ctx context.Context, findingID string) (Recommendation, bool, string, error)
 }
 
 // Recommendation is the advisory content Intelligence returns, mapped into Governance's

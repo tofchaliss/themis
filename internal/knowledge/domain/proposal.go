@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,6 +111,16 @@ type Proposal struct {
 	vulnFacts     *VulnFacts
 	exploitSignal *ExploitSignal
 	applicability *Applicability
+}
+
+// sameAs reports whether two VulnFacts carry identical content (KN-PROPOSAL-BLOAT-1). Slices
+// compare element-wise and in order: sources emit them in a stable order, so a reordering is
+// itself a change worth recording rather than one worth suppressing.
+func (f VulnFacts) sameAs(other VulnFacts) bool {
+	return f.Severity == other.Severity &&
+		f.CVSS == other.CVSS &&
+		slices.Equal(f.AffectedRanges, other.AffectedRanges) &&
+		slices.Equal(f.Fixes, other.Fixes)
 }
 
 func validSourceAndTime(source string, observedAt time.Time) error {

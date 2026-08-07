@@ -105,3 +105,20 @@ func RPMPackageName(nevra string) string {
 	}
 	return strings.Join(parts[:len(parts)-2], "-")
 }
+
+// IsRPMModuleStream reports whether a fix version is a MODULE-STREAM rebuild rather than a fix to
+// the package itself — RHEL/Rocky modular builds carry a `.module+elN` marker.
+//
+// The distinction matters because a modular advisory (RHSA for `python38`, `python39`, …) lists
+// EVERY RPM rebuilt in that stream as affected-and-fixed, not only the package carrying the flaw.
+// A vulnerability database records that faithfully, so a card legitimately attributes a Python
+// `tarfile` fix to `python-ply`. Measured on a live estate: five of the top fifteen posture rows
+// pinned interpreter CVEs onto unrelated packages this way (KN-MODULE-1).
+//
+// It is NOT a reason to drop the fix — upgrading the module IS the correct remediation on a
+// modular system. It is a reason to label it, and to prefer a package-specific fix when the card
+// holds both, so an operator is not told to upgrade python3-ply for a tarfile bug when a direct
+// fix exists.
+func IsRPMModuleStream(version string) bool {
+	return strings.Contains(version, ".module+el")
+}

@@ -299,13 +299,24 @@ func (v EnterpriseView) FixesFor(pkg string) []string {
 	if pkg == "" {
 		return nil
 	}
-	var out []string
+	// Package-specific fixes come FIRST, module-stream rebuilds after (KN-MODULE-1). A modular
+	// advisory lists every RPM rebuilt in the stream, so a card can hold both a direct fix and a
+	// stream rebuild for the same package — and "upgrade to the direct fix" is the better
+	// instruction when one exists. Nothing is dropped: the stream rebuild IS valid remediation on
+	// a modular system, and the fixed-verdict engine needs the full set to reason about backports.
+	// Only the ORDER changes, which is what a consumer showing the first N reads.
+	var direct, module []string
 	for _, f := range v.Fixes {
-		if strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
-			out = append(out, f.Version)
+		if !strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
+			continue
 		}
+		if value.IsRPMModuleStream(f.Version) {
+			module = append(module, f.Version)
+			continue
+		}
+		direct = append(direct, f.Version)
 	}
-	return out
+	return append(direct, module...)
 }
 
 // sortedFixes orders the reconciled fix set deterministically (package, then version), so the

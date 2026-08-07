@@ -13,6 +13,6 @@ import (
 type NoopAdvisor struct{}
 
 // RecommendPosition always declines (no proposal).
-func (NoopAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, error) {
-	return app.Recommendation{}, false, nil
+func (NoopAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, string, error) {
+	return app.Recommendation{}, false, app.ReasonAIDisabled, nil
 }
