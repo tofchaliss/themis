@@ -1099,6 +1099,24 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [ ] **KN-PROPOSAL-BLOAT-1 — the EPSS/KEV sweep re-folds byte-identical signals, so 99.2% of the
+  proposal log records no new information.** _(**Measured** on the VM 2026-08-07.)_
+  `faultline_proposals` holds **28,128** rows from source `epsskev` across **239** cards — ~118 per
+  card — of which only **221 payloads are distinct**. Every sweep appends a fresh Proposal per card
+  whether or not EPSS moved, so a card typically carries one real observation and ~117 copies of it.
+  Cross-check: `nvd` (2,636) and `osv` (3,609) are ~11–15 per card, so this is specific to the
+  exploit-signal path, not to folding in general.
+  **This is not an argument against append-only** (Domain Invariant 1 — the audit trail is why the
+  reconciled view is defensible). It is the difference between recording *history* and recording the
+  same fact 118 times: an EPSS move 0.27→0.29 is a new observation and belongs in the log; ten polls
+  reporting 0.27 are one observation and nine timestamps.
+  **Why it matters beyond disk:** reconciliation walks every Proposal on a card to recompute the view,
+  so per-card proposal count is on the hot path of every fold, and it grows monotonically forever. A
+  118× multiplier is invisible at 239 cards and decides p99 at 50,000.
+  **Fix:** fold only when the signal differs from the card's latest Proposal from that source (an
+  observed-at refresh on the existing row, or simply no-op). Keep the first observation of every
+  distinct value — that is the audit trail. **Dep:** none. **Scope:** MEDIUM, Knowledge-local.
+
 - [ ] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
   view now makes it visible.** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_
   Five of the top fifteen rows pin **Python interpreter** CVEs onto unrelated packages:
