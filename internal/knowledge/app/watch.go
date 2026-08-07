@@ -8,7 +8,16 @@ import (
 // ChangedVulnSource returns source Proposals for CVEs changed since a watermark (D5) —
 // the scheduled NVD modified-since watch.
 type ChangedVulnSource interface {
-	ChangedSince(ctx context.Context, since time.Time) ([]ProposalFor, error)
+	// ChangedSince returns the Proposals for CVEs changed since the watermark, AND the instant
+	// through which it actually covered.
+	//
+	// coveredThrough exists because a source may legitimately cover less than "up to now": NVD
+	// pages are large and slow (measured 2026-08-07: ~84s for one 24-hour slice), so a cold
+	// start spanning months cannot be walked in one poll. Reporting coverage lets the caller
+	// advance the watermark to what was really read, so catch-up is incremental and LOSSLESS —
+	// advancing to "now" after a partial walk would skip everything in between, which is the
+	// NVD-WATCH-1 defect in a new costume.
+	ChangedSince(ctx context.Context, since time.Time) (proposals []ProposalFor, coveredThrough time.Time, err error)
 }
 
 // WatchState persists the watch watermark (last successful poll) so a restart resumes
@@ -49,9 +58,7 @@ func (s *WatchService) Poll(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	start := s.clock.Now()
-
-	discovered, err := s.changed.ChangedSince(ctx, since)
+	discovered, coveredThrough, err := s.changed.ChangedSince(ctx, since)
 	if err != nil {
 		return 0, err
 	}
@@ -62,7 +69,12 @@ func (s *WatchService) Poll(ctx context.Context) (int, error) {
 		}
 		folded++
 	}
-	if err := s.state.SetLastSuccess(ctx, start); err != nil {
+	// The watermark moves to what was COVERED, never to the wall clock. A source that walked
+	// only part of the span leaves the rest for the next poll instead of stepping over it.
+	if coveredThrough.IsZero() || coveredThrough.After(s.clock.Now()) {
+		coveredThrough = s.clock.Now()
+	}
+	if err := s.state.SetLastSuccess(ctx, coveredThrough); err != nil {
 		return folded, err
 	}
 	return folded, nil

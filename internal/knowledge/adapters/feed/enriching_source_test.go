@@ -12,12 +12,13 @@ import (
 )
 
 type fakeRawChanged struct {
-	out []app.ProposalFor
-	err error
+	out     []app.ProposalFor
+	err     error
+	covered time.Time
 }
 
-func (f fakeRawChanged) ChangedSince(context.Context, time.Time) ([]app.ProposalFor, error) {
-	return f.out, f.err
+func (f fakeRawChanged) ChangedSince(context.Context, time.Time) ([]app.ProposalFor, time.Time, error) {
+	return f.out, f.covered, f.err
 }
 
 type fakeKnownCVEs struct {
@@ -49,7 +50,7 @@ func TestRelevanceFilteredSource(t *testing.T) {
 	src := feed.NewRelevanceFilteredSource("nvd",
 		fakeRawChanged{out: []app.ProposalFor{a, b}},
 		&fakeKnownCVEs{set: map[string]struct{}{"CVE-2024-1": {}}})
-	got, err := src.ChangedSince(ctx, time.Time{})
+	got, _, err := src.ChangedSince(ctx, time.Time{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -59,14 +60,14 @@ func TestRelevanceFilteredSource(t *testing.T) {
 
 	// Empty known set -> nothing survives.
 	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{set: map[string]struct{}{}})
-	if got, _ := src.ChangedSince(ctx, time.Time{}); len(got) != 0 {
+	if got, _, _ := src.ChangedSince(ctx, time.Time{}); len(got) != 0 {
 		t.Errorf("empty-known: got %d, want 0", len(got))
 	}
 
 	// No changes -> nothing, and the known set is not consulted.
 	known := &fakeKnownCVEs{err: errors.New("must not be called")}
 	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: nil}, known)
-	if got, err := src.ChangedSince(ctx, time.Time{}); err != nil || len(got) != 0 {
+	if got, _, err := src.ChangedSince(ctx, time.Time{}); err != nil || len(got) != 0 {
 		t.Errorf("no-changes: got (%+v,%v)", got, err)
 	}
 	if known.called {
@@ -75,13 +76,13 @@ func TestRelevanceFilteredSource(t *testing.T) {
 
 	// Raw error propagates.
 	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{err: errors.New("boom")}, &fakeKnownCVEs{})
-	if _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
+	if _, _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
 		t.Error("raw error: expected error")
 	}
 
 	// Known-set error propagates.
 	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{err: errors.New("boom")})
-	if _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
+	if _, _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
 		t.Error("known error: expected error")
 	}
 }
@@ -94,7 +95,7 @@ func TestRelevanceFilteredSource_EmptyFeedShortCircuitsWithoutConsultingKnownCVE
 	known := &fakeKnownCVEs{}
 	src := feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{}, known)
 
-	out, err := src.ChangedSince(context.Background(), time.Time{})
+	out, _, err := src.ChangedSince(context.Background(), time.Time{})
 	if err != nil || len(out) != 0 {
 		t.Fatalf("out=%v err=%v, want no proposals and no error", out, err)
 	}

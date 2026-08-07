@@ -27,21 +27,21 @@ func NewRelevanceFilteredSource(source string, raw app.ChangedVulnSource, known 
 
 // ChangedSince fetches the raw source's changed-CVE Proposals and returns only those whose
 // CVE already has a card. An empty known set yields no Proposals (nothing relevant to enrich).
-func (s *RelevanceFilteredSource) ChangedSince(ctx context.Context, since time.Time) ([]app.ProposalFor, error) {
-	changed, err := s.raw.ChangedSince(ctx, since)
+func (s *RelevanceFilteredSource) ChangedSince(ctx context.Context, since time.Time) ([]app.ProposalFor, time.Time, error) {
+	changed, coveredThrough, err := s.raw.ChangedSince(ctx, since)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if len(changed) == 0 {
 		// Recorded BEFORE returning, and with zeroes. "The feed returned nothing" is one of the
 		// two cases these counters exist to tell apart, so it is the last case that may go
 		// unrecorded — an absent series would be indistinguishable from a poll that never ran.
 		s.record(0, 0)
-		return nil, nil
+		return nil, coveredThrough, nil
 	}
 	known, err := s.known.KnownCVEs(ctx)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	out := make([]app.ProposalFor, 0, len(changed))
 	for _, pf := range changed {
@@ -50,7 +50,7 @@ func (s *RelevanceFilteredSource) ChangedSince(ctx context.Context, since time.T
 		}
 	}
 	s.record(len(changed), len(out))
-	return out, nil
+	return out, coveredThrough, nil
 }
 
 // record emits both counts. They are recorded HERE because this is the only place that knows

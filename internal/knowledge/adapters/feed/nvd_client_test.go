@@ -63,46 +63,90 @@ func recordingNVDServer(t *testing.T, slices *[]nvdSlice) *httptest.Server {
 }
 
 // TestNVDClient_ChangedSince_WalksTheWindowInContiguousSlices is the NVD-WATCH-1 regression.
-// The window since the watermark is covered by a walk of slices, not by one whole-window
-// request that stops at the page budget. What must hold is coverage, so this asserts the
-// three properties that make the walk sound: it STARTS at the watermark (clamped to NVD's
-// 120-day maximum), it REACHES now, and consecutive slices are CONTIGUOUS — no gap between
-// one slice's end and the next slice's start, because a gap is exactly the silent skip the
-// old code shipped.
+//
+// The span since the watermark is covered by a walk of slices, not one whole-window request
+// that stops at the page budget. Three properties make the walk sound, and they are what this
+// asserts: it STARTS at the watermark, consecutive slices are CONTIGUOUS (a gap is exactly the
+// silent skip the old code shipped), and the reported coverage instant EQUALS the last slice's
+// end — because the caller advances its watermark to that value, so a coverage claim wider than
+// the walk would skip records just as surely as a gap would.
+//
+// It deliberately does NOT assert the walk reaches "now": since 2026-08-07 a poll covers at
+// most nvdMaxWalkPerPoll, leaving the rest for the next one. See the bounded-walk test below.
 func TestNVDClient_ChangedSince_WalksTheWindowInContiguousSlices(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		since    time.Time
-		wantSpan time.Duration // expected age of the first slice's start
-	}{
-		{"zero watermark clamps to the 120-day maximum", time.Time{}, 120 * 24 * time.Hour},
-		{"recent watermark is used as-is", time.Now().Add(-72 * time.Hour).UTC(), 72 * time.Hour},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var slices []nvdSlice
-			srv := recordingNVDServer(t, &slices)
-			defer srv.Close()
-			c := feed.NewNVDClient(srv.URL, "", srv.Client())
+	var slices []nvdSlice
+	srv := recordingNVDServer(t, &slices)
+	defer srv.Close()
+	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-			if _, err := c.ChangedSince(context.Background(), tc.since); err != nil {
-				t.Fatalf("ChangedSince: %v", err)
-			}
-			if len(slices) == 0 {
-				t.Fatal("no requests issued")
-			}
-			if age := time.Since(slices[0].start); age < tc.wantSpan-time.Minute || age > tc.wantSpan+time.Minute {
-				t.Errorf("first slice starts %v ago, want ~%v", age, tc.wantSpan)
-			}
-			if tail := time.Since(slices[len(slices)-1].end); tail > time.Minute {
-				t.Errorf("walk stops %v short of now — the tail of the window is never read", tail)
-			}
-			for i := 1; i < len(slices); i++ {
-				if !slices[i].start.Equal(slices[i-1].end) {
-					t.Fatalf("gap between slice %d (ends %v) and slice %d (starts %v) — records in the gap are skipped",
-						i-1, slices[i-1].end, i, slices[i].start)
-				}
-			}
-		})
+	since := time.Now().Add(-48 * time.Hour).UTC()
+	_, covered, err := c.ChangedSince(context.Background(), since)
+	if err != nil {
+		t.Fatalf("ChangedSince: %v", err)
+	}
+	if len(slices) < 2 {
+		t.Fatalf("issued %d requests, want a 48h window split into slices", len(slices))
+	}
+	if d := slices[0].start.Sub(since); d < -time.Minute || d > time.Minute {
+		t.Errorf("first slice starts at %v, want the watermark %v", slices[0].start, since)
+	}
+	for i := 1; i < len(slices); i++ {
+		if !slices[i].start.Equal(slices[i-1].end) {
+			t.Fatalf("gap between slice %d (ends %v) and slice %d (starts %v) — records in the gap are skipped",
+				i-1, slices[i-1].end, i, slices[i].start)
+		}
+	}
+	last := slices[len(slices)-1].end
+	if d := covered.Sub(last); d < -time.Minute || d > time.Minute {
+		t.Fatalf("reported coverage %v but only walked to %v — the caller would advance its watermark past unread records",
+			covered, last)
+	}
+}
+
+// A cold start (no watermark) reaches back a MODEST window, not NVD's 120-day maximum. Measured
+// 2026-08-07, one 24-hour slice costs ~84s of NVD server time, so 120 days is ~2.8 hours of
+// walking — and with the relevance bound, a fresh deployment has no cards for those months
+// anyway, so the months would be fetched to match nothing.
+func TestNVDClient_ChangedSince_ColdStartUsesAModestWindow(t *testing.T) {
+	var slices []nvdSlice
+	srv := recordingNVDServer(t, &slices)
+	defer srv.Close()
+	c := feed.NewNVDClient(srv.URL, "", srv.Client())
+
+	if _, _, err := c.ChangedSince(context.Background(), time.Time{}); err != nil {
+		t.Fatalf("ChangedSince: %v", err)
+	}
+	age := time.Since(slices[0].start)
+	if age > 8*24*time.Hour {
+		t.Fatalf("cold start reached back %v — a zero watermark must not trigger a months-long walk", age)
+	}
+}
+
+// One poll covers a BOUNDED span, so a long backlog drains over several polls instead of
+// failing forever on the first. The remainder is not skipped: coverage is reported short of
+// now, and the caller's watermark advances only that far.
+func TestNVDClient_ChangedSince_BoundsOnePollAndReportsShortCoverage(t *testing.T) {
+	var slices []nvdSlice
+	srv := recordingNVDServer(t, &slices)
+	defer srv.Close()
+	c := feed.NewNVDClient(srv.URL, "", srv.Client())
+
+	since := time.Now().Add(-30 * 24 * time.Hour).UTC()
+	_, covered, err := c.ChangedSince(context.Background(), since)
+	if err != nil {
+		t.Fatalf("ChangedSince: %v", err)
+	}
+	if !covered.Before(time.Now().Add(-24 * time.Hour)) {
+		t.Fatalf("coverage %v claims to be near now — a 30-day backlog must not be walked in one poll", covered)
+	}
+	if !covered.After(since) {
+		t.Fatalf("coverage %v did not advance past the watermark %v — the backlog would never drain", covered, since)
+	}
+	// And the walk stopped there rather than continuing past what it reported. Compared with a
+	// tolerance because the recorded end round-trips through NVD's millisecond wire format
+	// while `covered` is the in-memory instant.
+	if last := slices[len(slices)-1].end; covered.Sub(last) > time.Second || last.Sub(covered) > time.Second {
+		t.Fatalf("walked to %v but reported %v", last, covered)
 	}
 }
 
@@ -126,7 +170,7 @@ func TestNVDClient_ChangedSince_OverfullSliceNarrowsThenErrorsNeverTruncates(t *
 	defer srv.Close()
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	_, err := c.ChangedSince(context.Background(), time.Now().Add(-48*time.Hour))
+	_, _, err := c.ChangedSince(context.Background(), time.Now().Add(-48*time.Hour))
 	if !errors.Is(err, feed.ErrWindowTruncated) {
 		t.Fatalf("err = %v, want ErrWindowTruncated — a slice it cannot read must never look like success", err)
 	}
@@ -145,7 +189,7 @@ func TestNVDClient_V31Scored(t *testing.T) {
 		`{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":7.8,"baseSeverity":"HIGH","vectorString":"CVSS:3.1/AV:L"}}]}`))
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("ChangedSince: %v", err)
 	}
@@ -163,7 +207,7 @@ func TestNVDClient_V40Only_ResolvesSeverity(t *testing.T) {
 		`{"cvssMetricV40":[{"type":"Secondary","cvssData":{"baseScore":5.9,"baseSeverity":"MEDIUM","vectorString":"CVSS:4.0/AV:N"}}]}`))
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("ChangedSince: %v", err)
 	}
@@ -185,7 +229,7 @@ func TestNVDClient_V31BeatsV40(t *testing.T) {
 	}`))
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, _ := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, _ := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	vf, _ := onlyProposal(t, got).Proposal.VulnFacts()
 	if vf.Severity != "critical" || vf.CVSS.Score() != 9.8 {
 		t.Errorf("both v3.1+v4.0: severity=%s score=%.1f, want critical/9.8 (v3.1 wins)", vf.Severity, vf.CVSS.Score())
@@ -200,7 +244,7 @@ func TestNVDClient_PrimaryBeatsSecondary(t *testing.T) {
 	]}`))
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, _ := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, _ := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	vf, _ := onlyProposal(t, got).Proposal.VulnFacts()
 	if vf.Severity != "high" || vf.CVSS.Score() != 8.1 {
 		t.Errorf("primary-over-secondary: severity=%s score=%.1f, want high/8.1", vf.Severity, vf.CVSS.Score())
@@ -212,7 +256,7 @@ func TestNVDClient_NoMetricsSkipped(t *testing.T) {
 	srv := nvdServer(t, cve("CVE-2026-9999", `{}`))
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("ChangedSince: %v", err)
 	}
@@ -242,7 +286,7 @@ func TestNVDClient_Paginates(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	got, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
+	got, _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("ChangedSince: %v", err)
 	}
@@ -258,7 +302,7 @@ func TestNVDClient_NonOKStatusIsError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
-	if _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour)); err == nil {
+	if _, _, err := c.ChangedSince(context.Background(), time.Now().Add(-time.Hour)); err == nil {
 		t.Fatal("expected an error on 403")
 	}
 }
@@ -312,7 +356,7 @@ func TestNVDClient_UnpacedEndpointIssuesRequestsImmediately(t *testing.T) {
 	c := feed.NewNVDClient(srv.URL, "", srv.Client())
 
 	start := time.Now()
-	if _, err := c.ChangedSince(context.Background(), time.Now().Add(-72*time.Hour)); err != nil {
+	if _, _, err := c.ChangedSince(context.Background(), time.Now().Add(-72*time.Hour)); err != nil {
 		t.Fatalf("ChangedSince: %v", err)
 	}
 	if len(slices) < 3 {

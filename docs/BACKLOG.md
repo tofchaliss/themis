@@ -941,6 +941,18 @@ three angles, and two of them proposed fixes that would not have worked.
   accidentally, keeping it inside the rate limit.** Fixed by deriving a minimum inter-request gap from the
   API key (700ms keyed, 6.5s unkeyed), applied only to the public endpoint so a mirror or a test server is
   unpaced. A 120-day first poll therefore takes roughly three minutes; subsequent polls are one slice.
+  **(3) MEASURED 2026-08-07 — walking the window is not viable at all, and this settles the open
+  strategy question below.** One NVD request for a 24-hour slice returned **5.2 MB in 83.6 seconds**; the
+  next nine requests answered in ~1.2s each, so this is NVD's server-side generation time, not throttling
+  and not our rate limiting. A 120-day cold start is therefore **~2.8 hours** of walking, and no timeout or
+  pacing constant changes that — the cost is proportional to NVD's record volume. **The per-CVE strategy
+  (option 4) is no longer merely preferable; it is the only viable design**, and needs the
+  EDR-KNOWLEDGE-01 D5 note.
+  **Interim, so the watch works at all:** the client timeout went 60s → 180s (one real page exceeds 60s on
+  its own); a cold start reaches back **7 days** rather than 120; and one poll covers at most **3 days**,
+  with `ChangedSince` now reporting the instant it actually covered so `WatchService` advances the
+  watermark only that far. A long backlog therefore drains over successive polls **losslessly** — advancing
+  to "now" after a partial walk would be the original NVD-WATCH-1 defect in a new costume.
   **✅ PARTIALLY FIXED 2026-08-06 — the silence and the skip are gone; the strategy question remains.**
   `NVDClient.ChangedSince` no longer requests the window whole. It **walks it in contiguous slices**
   (`nvdSliceWindow`, 24h), and a slice holding more than the page budget is **halved and retried** — the

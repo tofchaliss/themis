@@ -57,6 +57,27 @@ var ErrWindowTruncated = errors.New("nvd: modified-since slice exceeds the page 
 // to it so the first pass covers the last 120 days of changes.
 const nvdMaxWindow = 120 * 24 * time.Hour
 
+// nvdMaxWalkPerPoll bounds how much of the backlog ONE poll covers, and nvdColdStartWindow how
+// far back a poll reaches when there is no watermark at all.
+//
+// Both exist because NVD pages are slow, not because of any rate limit. Measured against the
+// live API on 2026-08-07: a single 24-hour slice returned 5.2 MB and took **83.6 seconds** —
+// server-side generation, with the next nine requests answering in ~1.2s each, so throttling
+// was not involved. A 120-day cold start is therefore ~2.8 HOURS of walking, which no timeout
+// or pacing tuning makes viable; the volume is the problem.
+//
+// Bounding the walk keeps each poll finite while staying lossless: ChangedSince reports the
+// instant it covered, the watermark advances only that far, and the next poll resumes there.
+// A long backlog drains over several polls instead of failing forever on the first.
+//
+// The real answer is to stop walking the window at all and fetch the ~hundreds of CARDED CVEs
+// by id — cost proportional to the estate rather than to NVD's churn. That is a change to
+// EDR-KNOWLEDGE-01 D5's relevance bound and is tracked as the open decision on NVD-WATCH-1.
+const (
+	nvdMaxWalkPerPoll  = 3 * 24 * time.Hour
+	nvdColdStartWindow = 7 * 24 * time.Hour
+)
+
 // NVDClient is the real NVD **modified-since** feed-fetch client (EDR-KNOWLEDGE-01 D5):
 // the scheduled watch pulls CVEs changed since a watermark and translates each into a
 // vuln-facts Proposal via the NVD ACL. It implements app.ChangedVulnSource.
@@ -119,7 +140,9 @@ func nvdMinRequestGap(apiKey, baseURL string) time.Duration {
 }
 
 // NVDRequestGapForTest exposes the pacing policy to the package's external test.
-func NVDRequestGapForTest(apiKey, baseURL string) time.Duration { return nvdMinRequestGap(apiKey, baseURL) }
+func NVDRequestGapForTest(apiKey, baseURL string) time.Duration {
+	return nvdMinRequestGap(apiKey, baseURL)
+}
 
 // pace blocks until the minimum gap since the previous request has elapsed. It honors context
 // cancellation, so a shutdown or a timeout during a long walk aborts promptly instead of
@@ -202,10 +225,22 @@ type nvdMetric struct {
 // ChangedSince pulls every CVE modified in [since, now] and translates it. CVEs NVD has
 // not scored under any CVSS version are skipped (a scoreless vuln-facts Proposal would
 // carry no signal); the watch's job is to fill severity/score.
-func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.ProposalFor, error) {
-	end := time.Now().UTC()
-	if since.Before(end.Add(-nvdMaxWindow)) {
-		since = end.Add(-nvdMaxWindow) // clamp to NVD's 120-day max window (and handle a zero watermark)
+func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.ProposalFor, time.Time, error) {
+	now := time.Now().UTC()
+	if since.IsZero() {
+		// Cold start: reach back a modest window rather than NVD's 120-day maximum. With the
+		// relevance bound, a fresh deployment has few or no cards for those months anyway, so
+		// the months would be fetched to match almost nothing.
+		since = now.Add(-nvdColdStartWindow)
+	}
+	if since.Before(now.Add(-nvdMaxWindow)) {
+		since = now.Add(-nvdMaxWindow) // NVD refuses a span wider than 120 days
+	}
+	// Bound THIS poll's span. Anything beyond is left for the next poll, which resumes from the
+	// coverage instant returned below.
+	end := now
+	if end.Sub(since) > nvdMaxWalkPerPoll {
+		end = since.Add(nvdMaxWalkPerPoll)
 	}
 	var out []app.ProposalFor
 	width := nvdSliceWindow
@@ -216,7 +251,9 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 		}
 		got, complete, err := c.fetchWindow(ctx, cursor, sliceEnd)
 		if err != nil {
-			return out, err
+			// Report the coverage achieved BEFORE the failure, so a partial walk still makes
+			// progress on the next poll instead of restarting from the same place forever.
+			return out, cursor, err
 		}
 		if !complete {
 			// The slice holds more than the page budget. Narrow it and retry the SAME
@@ -224,7 +261,7 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 			// left narrowed for the rest of this poll (a dense stretch tends to stay
 			// dense) and resets on the next one.
 			if width <= nvdMinSlice {
-				return out, fmt.Errorf("%w: %s..%s holds more than %d records",
+				return out, cursor, fmt.Errorf("%w: %s..%s holds more than %d records",
 					ErrWindowTruncated, cursor.Format(nvdTimeLayout), sliceEnd.Format(nvdTimeLayout),
 					nvdPageSize*nvdMaxPages)
 			}
@@ -234,7 +271,7 @@ func (c *NVDClient) ChangedSince(ctx context.Context, since time.Time) ([]app.Pr
 		out = append(out, got...)
 		cursor = sliceEnd
 	}
-	return out, nil
+	return out, end, nil
 }
 
 // fetchWindow reads one modified-since slice, paginating up to nvdMaxPages. `complete`

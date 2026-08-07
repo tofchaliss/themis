@@ -14,10 +14,13 @@ import (
 type fakeChanged struct {
 	props []app.ProposalFor
 	err   error
+	// covered is the instant the source reports having walked to; zero means "up to now", the
+	// behaviour of a source that always covers the whole span.
+	covered time.Time
 }
 
-func (f fakeChanged) ChangedSince(_ context.Context, _ time.Time) ([]app.ProposalFor, error) {
-	return f.props, f.err
+func (f fakeChanged) ChangedSince(_ context.Context, _ time.Time) ([]app.ProposalFor, time.Time, error) {
+	return f.props, f.covered, f.err
 }
 
 type fakeWatchState struct {

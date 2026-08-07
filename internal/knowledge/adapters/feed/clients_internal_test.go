@@ -106,8 +106,8 @@ func TestOSVEcosystem(t *testing.T) {
 		{"pkg:composer/v/x@1", "", "Packagist"},
 		{"pkg:hex/x@1", "", "Hex"},
 		{"pkg:pub/x@1", "", "Pub"},
-		{"pkg:rpm/rocky/x@1", "", ""},                          // no distro= qualifier → skip
-		{"pkg:apk/alpine/x@1", "", ""},                         // no distro= qualifier → skip
+		{"pkg:rpm/rocky/x@1", "", ""},  // no distro= qualifier → skip
+		{"pkg:apk/alpine/x@1", "", ""}, // no distro= qualifier → skip
 		{"pkg:rpm/rocky/x@1?distro=rocky-8.10", "", "Rocky Linux:8"},
 		{"pkg:rpm/alma/x@1?distro=almalinux-9", "", "AlmaLinux:9"},
 		{"pkg:rpm/rhel/x@1?distro=rhel-9.2", "", "Red Hat"},
@@ -115,8 +115,8 @@ func TestOSVEcosystem(t *testing.T) {
 		{"pkg:apk/alpine/x@1?distro=alpine-3.18", "", "Alpine:v3.18"},
 		{"pkg:rpm/x/y@1?distro=exotic-1", "", ""}, // unknown distro → skip
 		{"", "PyPI", "PyPI"},                      // fallback to ecosystem label
-		{"", "golang", "Go"},           // fallback synonym
-		{"", "somethingelse", ""},      // unknown → skip
+		{"", "golang", "Go"},                      // fallback synonym
+		{"", "somethingelse", ""},                 // unknown → skip
 	}
 	for _, c := range cases {
 		if got := osvEcosystem(comp(c.purl, c.eco)); got != c.want {
@@ -170,12 +170,12 @@ func TestOSVVersion(t *testing.T) {
 // both epoch-bearing — so distro correlation does not depend on the SBOM format.
 func TestOSVDistro_FormatParity(t *testing.T) {
 	cdx := app.InventoryComponent{
-		PURL:    "pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10?arch=x86_64&distro=rocky-8.9&epoch=1",
-		Name:    "openssl-libs", Version: "1:1.1.1k-15.el8_10", Source: "openssl",
+		PURL: "pkg:rpm/rocky/openssl-libs@1.1.1k-15.el8_10?arch=x86_64&distro=rocky-8.9&epoch=1",
+		Name: "openssl-libs", Version: "1:1.1.1k-15.el8_10", Source: "openssl",
 	}
 	spdx := app.InventoryComponent{
-		PURL:    "pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10&epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm",
-		Name:    "openssl-libs", Version: "1:1.1.1k-17.el8_10", Source: "openssl",
+		PURL: "pkg:rpm/rocky/openssl-libs@1.1.1k-17.el8_10?arch=x86_64&distro=rocky-8.10&epoch=1&upstream=openssl-1.1.1k-17.el8_10.src.rpm",
+		Name: "openssl-libs", Version: "1:1.1.1k-17.el8_10", Source: "openssl",
 	}
 	for _, c := range []app.InventoryComponent{cdx, spdx} {
 		if got := osvEcosystem(c); got != "Rocky Linux:8" {

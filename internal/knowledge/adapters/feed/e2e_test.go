@@ -40,7 +40,7 @@ func TestFeedsSeamE2E(t *testing.T) {
 			`"cvssData":{"baseScore":5.9,"baseSeverity":"MEDIUM","vectorString":"CVSS:4.0/AV:N"}}]}}}]}`))
 	}))
 	defer nvdSrv.Close()
-	nvdProps, err := feed.NewNVDClient(nvdSrv.URL, "", nvdSrv.Client()).ChangedSince(context.Background(), hourAgo)
+	nvdProps, _, err := feed.NewNVDClient(nvdSrv.URL, "", nvdSrv.Client()).ChangedSince(context.Background(), hourAgo)
 	if err != nil || len(nvdProps) != 1 {
 		t.Fatalf("nvd changed = %d, %v", len(nvdProps), err)
 	}

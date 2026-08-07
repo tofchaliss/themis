@@ -150,7 +150,10 @@ func main() {
 		BaseURL:   cfg.nvdURL,
 		APIKey:    cfg.nvdAPIKey,
 		Discovery: cfg.nvdDiscovery,
-		HTTP:      &http.Client{Timeout: 60 * time.Second},
+		// 180s, not 60s. A single 2000-record NVD page was measured at 5.2 MB / 83.6 seconds on
+		// 2026-08-07 — server-side generation time, not throttling — so the old 60s ceiling
+		// killed the request mid-body and failed the whole poll.
+		HTTP: &http.Client{Timeout: 180 * time.Second},
 	}, wiring.SignalsConfig{
 		Enabled:      cfg.sigEnabled,
 		EPSSURL:      cfg.epssURL,
