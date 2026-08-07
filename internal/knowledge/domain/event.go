@@ -68,7 +68,18 @@ type FaultlineMatured struct {
 type FaultlineSuperseded struct {
 	FaultlineID FaultlineID
 	CVE         string
-	OccurredAt  time.Time
+	// Trust is the class of the evidence that drove the supersession (EDR-TRUST-01 T2/T3),
+	// taken from the trust policy's entry for the source that reported the withdrawal.
+	//
+	// It rides the wire for the same reason the enriched event's classes do: Governance must
+	// not hold a second copy of the source→class table. Governance previously *stated* that a
+	// withdrawal is Observed — true for NVD, but an assumption rather than a fact, and one that
+	// would silently misclassify a withdrawal reported by an Asserted source.
+	//
+	// Additive and optional (omitempty): a payload from before this change stays byte-identical
+	// and an older consumer ignores it (EVENTBUS D9 — no schema version bump).
+	Trust      value.TrustClass `json:"Trust,omitempty"`
+	OccurredAt time.Time
 }
 
 // MatchedComponent is one release component that matched a card during correlation.
@@ -124,9 +135,10 @@ func NewFaultlineMatured(f Faultline, at time.Time) FaultlineMatured {
 	return FaultlineMatured{FaultlineID: f.ID(), CVE: f.CVE().String(), OccurredAt: at.UTC()}
 }
 
-// NewFaultlineSuperseded builds the Superseded-stage event.
-func NewFaultlineSuperseded(f Faultline, at time.Time) FaultlineSuperseded {
-	return FaultlineSuperseded{FaultlineID: f.ID(), CVE: f.CVE().String(), OccurredAt: at.UTC()}
+// NewFaultlineSuperseded builds the Superseded-stage event, carrying the trust class of the
+// source that reported the withdrawal.
+func NewFaultlineSuperseded(f Faultline, trust value.TrustClass, at time.Time) FaultlineSuperseded {
+	return FaultlineSuperseded{FaultlineID: f.ID(), CVE: f.CVE().String(), Trust: trust, OccurredAt: at.UTC()}
 }
 
 // NewComponentMatched builds the correlation event for a release's matched components.

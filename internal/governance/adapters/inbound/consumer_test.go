@@ -9,6 +9,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // mkEnv wraps an event type + payload in the kernel Envelope the consumer now handles
@@ -161,6 +162,40 @@ func TestConsumer_FaultlineSuperseded(t *testing.T) {
 	got := repo.byID["fnd-1"]
 	if len(got.Proposals()) != 1 || got.Proposals()[0].Stance() != domain.StanceNotAffected {
 		t.Errorf("proposals = %+v", got.Proposals())
+	}
+}
+
+// TRUST-4: the Trust field on the superseded payload must survive the DTO and reach the raised
+// proposal's evidence class. Decoding it into a field nothing reads would look identical from
+// the outside, so this asserts the value that policy actually gates on.
+//
+// The empty case is the wire-compatibility contract: an event predating the field must keep
+// reading as Observed, or replaying old bus rows would retroactively bar auto-acceptance.
+func TestConsumer_FaultlineSupersededCarriesTrustToTheProposal(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		want          value.TrustClass
+	}{
+		{"asserted rides the wire", `{"FaultlineID":"fl-1","CVE":"CVE-1","Trust":"asserted"}`, value.TrustAsserted},
+		{"observed rides the wire", `{"FaultlineID":"fl-1","CVE":"CVE-1","Trust":"observed"}`, value.TrustObserved},
+		{"absent falls back to observed", `{"FaultlineID":"fl-1","CVE":"CVE-1"}`, value.TrustObserved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMemRepo()
+			f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
+			repo.seed(f)
+			if err := consumer(repo).Handle(context.Background(),
+				mkEnv("knowledge.faultline_superseded", []byte(tc.payload))); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			props := repo.byID["fnd-1"].Proposals()
+			if len(props) != 1 {
+				t.Fatalf("proposals = %d, want 1", len(props))
+			}
+			if got := props[0].EvidenceTrust(); got != tc.want {
+				t.Errorf("EvidenceTrust = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

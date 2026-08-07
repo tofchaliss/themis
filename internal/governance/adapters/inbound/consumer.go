@@ -78,7 +78,9 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		if err := json.Unmarshal(env.Payload, &dto); err != nil {
 			return err
 		}
-		return c.coord.OnFaultlineSuperseded(ctx, app.InboundFaultlineSuperseded{FaultlineID: dto.FaultlineID, CVE: dto.CVE})
+		return c.coord.OnFaultlineSuperseded(ctx, app.InboundFaultlineSuperseded{
+			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Trust: value.TrustClass(dto.Trust),
+		})
 	default:
 		return nil // not a Governance-consumed event — ignore
 	}
@@ -137,4 +139,5 @@ type applicabilityDTO struct {
 type faultlineSupersededDTO struct {
 	FaultlineID string `json:"FaultlineID"`
 	CVE         string `json:"CVE"`
+	Trust       string `json:"Trust"`
 }

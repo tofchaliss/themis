@@ -103,7 +103,7 @@ func TestFaultlineLifecycleDemo(t *testing.T) {
 		t.Fatal("supersede should change the stage")
 	}
 	now := time.Now().UTC()
-	notes := []app.OutboxNote{{EventType: app.EventFaultlineSuperseded, Event: domain.NewFaultlineSuperseded(fresh, now), OccurredAt: now}}
+	notes := []app.OutboxNote{{EventType: app.EventFaultlineSuperseded, Event: domain.NewFaultlineSuperseded(fresh, value.TrustObserved, now), OccurredAt: now}}
 	if err := st.Save(ctx, fresh, false, prev, notes); err != nil {
 		t.Fatal(err)
 	}

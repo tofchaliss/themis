@@ -238,7 +238,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 	t.Run("zero cve is rejected", func(t *testing.T) {
 		svc := app.NewFaultlineService(newRepo(), &seqIDs{}, fixedClock{},
 			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
-		if _, err := svc.SupersedeFaultline(ctx, value.CVEID{}); err == nil {
+		if _, err := svc.SupersedeFaultline(ctx, value.CVEID{}, "nvd"); err == nil {
 			t.Fatal("want an error for a zero CVE")
 		}
 	})
@@ -248,7 +248,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 		repo.getErr = errors.New("db down")
 		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
 			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
-		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1")); err == nil {
+		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), "nvd"); err == nil {
 			t.Fatal("want the read error propagated")
 		}
 	})
@@ -261,7 +261,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 		repo.saveErr = errors.New("db down")
-		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1")); err == nil {
+		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), "nvd"); err == nil {
 			t.Fatal("want the write error propagated")
 		}
 	})
@@ -276,7 +276,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 		repo.saveCalls, repo.conflictFor = 0, 1 // first save conflicts, second succeeds
-		changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"))
+		changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), "nvd")
 		if err != nil || !changed {
 			t.Fatalf("changed=%v err=%v, want a retried success", changed, err)
 		}
@@ -286,6 +286,44 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 // Exhausting the retry budget surfaces as ErrConcurrent rather than a silent no-op: a card that
 // could not be superseded must not look like one that was already terminal, or a withdrawn CVE
 // would be quietly left alive.
+// TRUST-4: the superseded event carries the class of the source that reported the withdrawal,
+// classified from the injected policy table — NOT a constant.
+//
+// Governance used to state "a withdrawal is Observed" unconditionally. Table-driving both a
+// registered Observed source and an unregistered one (which fails closed to Asserted) proves the
+// class is read from provenance, so a withdrawal Themis cannot re-derive is no longer laundered
+// into the class that policy auto-acceptance rests on.
+func TestSupersedeFaultline_CarriesTheReportingSourcesTrustClass(t *testing.T) {
+	ctx := context.Background()
+	policy := domain.NewTrustPolicy(map[string]value.TrustClass{"nvd": value.TrustObserved})
+
+	for _, tc := range []struct {
+		name, source string
+		want         value.TrustClass
+	}{
+		{"a classified public record is Observed", "nvd", value.TrustObserved},
+		{"an unregistered source fails closed to Asserted", "some-vendor", value.TrustAsserted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepo()
+			svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), policy)
+			if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), tc.source); err != nil {
+				t.Fatalf("supersede: %v", err)
+			}
+			ev, ok := repo.lastNotes[0].Event.(domain.FaultlineSuperseded)
+			if !ok {
+				t.Fatalf("note 0 = %T, want FaultlineSuperseded", repo.lastNotes[0].Event)
+			}
+			if ev.Trust != tc.want {
+				t.Errorf("Trust = %q, want %q", ev.Trust, tc.want)
+			}
+		})
+	}
+}
+
 func TestSupersedeFaultline_ExhaustedRetriesReportConcurrent(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo()
@@ -295,7 +333,7 @@ func TestSupersedeFaultline_ExhaustedRetriesReportConcurrent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	repo.saveCalls, repo.conflictFor = 0, 1_000 // every save conflicts
-	changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"))
+	changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), "nvd")
 	if !errors.Is(err, app.ErrConcurrent) || changed {
 		t.Fatalf("changed=%v err=%v, want ErrConcurrent", changed, err)
 	}

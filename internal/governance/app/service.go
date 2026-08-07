@@ -195,6 +195,9 @@ type EnrichmentSignal struct {
 	KEV          bool
 	HighSeverity bool
 	Withdrawn    bool // the Faultline was superseded (CVE withdrawn / rejected upstream)
+	// WithdrawnTrust is the class of the source that reported the withdrawal (TRUST-4).
+	// Only meaningful when Withdrawn.
+	WithdrawnTrust value.TrustClass
 	Score        int  // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D4). A
 	// not_affected statement whose package matches a Finding's component raises a system
@@ -268,11 +271,20 @@ func vouchesRef(f domain.Finding, ref string) bool {
 // and wrongly bar a well-evidenced proposal from policy.
 func evidenceTrustFor(sig EnrichmentSignal) value.TrustClass {
 	if sig.Withdrawn {
-		// TRUST-4: knowledge.faultline_superseded.v1 carries no class, so it is stated here.
-		// A withdrawal is reproducible — re-fetch and the CVE is still rejected upstream — so
-		// it is genuinely Observed. Left unset it would read as Inferred and break the
-		// withdrawn-CVE policy auto-accept that works today. Moving the class onto the event,
-		// so it reflects the real source rather than this assumption, stays open as TRUST-4.
+		// TRUST-4 (closed): the class now rides knowledge.faultline_superseded.v1, classified
+		// by Knowledge from the source that reported the withdrawal. Governance reads it rather
+		// than holding a second copy of the source→class table.
+		//
+		// An empty class means a payload predating the field, and it falls back to Observed —
+		// which is what this code stated unconditionally before, so replay of an older event
+		// behaves exactly as it did. That fallback is deliberately NOT fail-closed: the classes
+		// it would fall closed to (Asserted/Inferred) would bar the withdrawn-CVE auto-accept
+		// that works today, turning a wire-compatibility gap into a behaviour regression. The
+		// producer always sets the field, and an unregistered source is already failed closed
+		// to Asserted at classification time — so this path only ever sees genuinely old events.
+		if sig.WithdrawnTrust.Valid() {
+			return sig.WithdrawnTrust
+		}
 		return value.TrustObserved
 	}
 	if sig.KEV && sig.HighSeverity {

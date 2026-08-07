@@ -28,7 +28,7 @@ func TestKnowledgeEvents(t *testing.T) {
 	if m := domain.NewFaultlineMatured(f, at); m.CVE != "CVE-2024-1" {
 		t.Errorf("matured = %+v", m)
 	}
-	if s := domain.NewFaultlineSuperseded(f, at); s.FaultlineID != "fl-1" {
+	if s := domain.NewFaultlineSuperseded(f, value.TrustObserved, at); s.FaultlineID != "fl-1" || s.Trust != value.TrustObserved {
 		t.Errorf("superseded = %+v", s)
 	}
 

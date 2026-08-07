@@ -694,7 +694,7 @@ three angles, and two of them proposed fixes that would not have worked.
   **Where it plugs in:** `cmd/intelligence/main.go` + `internal/intelligence/adapters/wiring/wiring.go`.
   **Scope:** LOW — cosmetic, but it is exactly the kind of stale knob that outlives the code that used it.
 
-- [ ] **TRUST-4 — The CVE-withdrawal path carries no trust class, and unset is not safe for it.**
+- [x] **TRUST-4 — The CVE-withdrawal path carries no trust class, and unset is not safe for it.**
   _(Surfaced implementing `phase3-trust-model` group 3, 2026-08-06.)_ `knowledge.faultline_superseded.v1`
   has no trust field, so `Coordinator.OnFaultlineSuperseded` builds an `EnrichmentSignal` with the classes
   **unset**. A withdrawal is genuinely **Observed** — re-fetch and the CVE is still rejected upstream, which
@@ -719,6 +719,24 @@ three angles, and two of them proposed fixes that would not have worked.
   to be wrong by the time the producer exists. **The requirement stands and moves to the producer's
   ticket:** whoever wires supersession carries the class on the event rather than restating it in
   Governance. See **KN-WITHDRAW-1** below for the producer gap itself.
+  **✅ CLOSED 2026-08-07 — the producer exists, so the deferral expired the same day.** KN-WITHDRAW-1
+  built it (`BackfillService` → `SupersedeFaultline` → `Faultline.Supersede()`), and it was watched
+  running live on the VM: NVD reports CVE-2021-20095 `vulnStatus: Rejected` → the card is superseded →
+  Governance raises a system `not_affected` → policy auto-accepts.
+  `knowledge.faultline_superseded.v1` now carries `Trust` (additive + `omitempty`, EVENTBUS D9), set
+  from `TrustPolicy.ClassOf(source)` at the point of supersession — so the class states who reported
+  the withdrawal instead of Governance assuming. `SupersedeFaultline` takes the source; the DTO,
+  `InboundFaultlineSuperseded`, and `EnrichmentSignal.WithdrawnTrust` thread it through.
+  **Behaviour change:** a withdrawal from an **Asserted** source no longer clears the shipped D15
+  `observed` floor — it raises the proposal and waits for a human, instead of auto-suppressing on a
+  vendor's unverifiable word. NVD is Observed, so the live path is unchanged.
+  An **absent** class still reads as Observed (the value this code stated unconditionally before), so
+  replaying pre-change bus rows behaves identically — deliberately not fail-closed, because failing
+  closed here would convert a wire-compatibility gap into a behaviour regression.
+  Guarded by `TestSupersedeFaultline_CarriesTheReportingSourcesTrustClass` (Observed + fail-closed
+  Asserted), `TestConsumer_FaultlineSupersededCarriesTrustToTheProposal` (all three wire shapes), and
+  `TestReactToEnrichment_WithdrawalFromAn{Asserted,Observed}SourceIs…` — the Asserted one verified to
+  FAIL against the previous stated-Observed code.
 
 - [x] **TRUST-6 — `business_invalid` discards *which* Grounding Verification check failed.**
   ✅ **CLOSED 2026-08-07.** `app.Outcome` gained a `Detail` field carrying the check's own message, set on

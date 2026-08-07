@@ -118,7 +118,7 @@ func (s *BackfillService) Enrich(ctx context.Context) (int, error) {
 		// whatever stale facts the record still carries, it is retired. Folding first and
 		// superseding after would leave a moment where a dead card looks freshly authoritative.
 		if facts.Withdrawn {
-			changed, serr := s.fold.SupersedeFaultline(ctx, cve)
+			changed, serr := s.fold.SupersedeFaultline(ctx, cve, s.source)
 			if serr != nil {
 				return folded, serr
 			}

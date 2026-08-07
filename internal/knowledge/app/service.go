@@ -48,10 +48,13 @@ func NewFaultlineService(
 //
 // Idempotent: the lifecycle is forward-only, so superseding an already-superseded card changes
 // nothing and emits nothing. A re-delivery or a repeated sweep is therefore free.
-func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVEID) (bool, error) {
+// source names who reported the withdrawal; its trust class is classified here and carried on the
+// event (TRUST-4) so Governance reads the real provenance instead of assuming one.
+func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVEID, source string) (bool, error) {
 	if cve.IsZero() {
 		return false, fmt.Errorf("knowledge: zero cve")
 	}
+	trust := s.trust.ClassOf(source)
 	for attempt := 0; attempt < maxSaveRetries; attempt++ {
 		f, found, err := s.repo.GetByCVE(ctx, cve.String())
 		if err != nil {
@@ -67,7 +70,7 @@ func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVE
 		now := s.clock.Now()
 		notes := []OutboxNote{{
 			EventType:  EventFaultlineSuperseded,
-			Event:      domain.NewFaultlineSuperseded(f, now),
+			Event:      domain.NewFaultlineSuperseded(f, trust, now),
 			OccurredAt: now,
 		}}
 		switch err := s.repo.Save(ctx, f, false, prevVersion, notes); {

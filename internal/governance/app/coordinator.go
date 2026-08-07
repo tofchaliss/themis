@@ -47,6 +47,9 @@ type InboundFaultlineEnriched struct {
 type InboundFaultlineSuperseded struct {
 	FaultlineID string
 	CVE         string
+	// Trust is the class Knowledge assigned to the source that reported the withdrawal
+	// (TRUST-4). Empty on a payload predating the field — see evidenceTrustFor.
+	Trust value.TrustClass
 }
 
 // Coordinator sequences the inbound Knowledge seam by calling the app services only
@@ -89,7 +92,9 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 // constitutional bar (T4) would then block a policy auto-accept that works today. Group 4
 // must classify this path explicitly before it consumes trust. Tracked as TRUST-4.
 func (c *Coordinator) OnFaultlineSuperseded(ctx context.Context, s InboundFaultlineSuperseded) error {
-	return c.svc.ReactToEnrichment(ctx, EnrichmentSignal{FaultlineID: s.FaultlineID, Withdrawn: true})
+	return c.svc.ReactToEnrichment(ctx, EnrichmentSignal{
+		FaultlineID: s.FaultlineID, Withdrawn: true, WithdrawnTrust: s.Trust,
+	})
 }
 
 // isHighSeverity reports whether a coarse severity headline warrants a re-prioritize

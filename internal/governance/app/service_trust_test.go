@@ -57,23 +57,70 @@ func TestReactToEnrichment_ObservedEvidenceStillAutoAccepts(t *testing.T) {
 	}
 }
 
-// TRUST-4 regression guard. knowledge.faultline_superseded.v1 carries no trust class, so
-// the withdrawal path states Observed explicitly in evidenceTrustFor. Left unset it would
-// read as Inferred, and this long-standing policy auto-accept would silently stop working —
-// a vulnerability withdrawn upstream would start piling up in human review queues.
+// TRUST-4 wire-compatibility guard. A superseded event predating the Trust field decodes to an
+// empty class, and evidenceTrustFor falls back to the Observed this code used to state
+// unconditionally. Without that fallback an empty class reads as Inferred under MaxTrust and
+// this long-standing auto-accept silently stops working — a vulnerability withdrawn upstream
+// would start piling up in human review queues.
 func TestReactToEnrichment_WithdrawnPathStillAutoAccepts(t *testing.T) {
 	repo := newRepo()
 	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
 	s := writeSvc(repo, domain.NewPolicyRule("auto-not-affected", domain.StanceNotAffected))
 
 	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
-		FaultlineID: "fl-1", Withdrawn: true,
+		FaultlineID: "fl-1", Withdrawn: true, // no WithdrawnTrust — the pre-TRUST-4 wire shape
 	}); err != nil {
 		t.Fatalf("react: %v", err)
 	}
 	f := repo.byID["fnd-1"]
 	if _, ok := f.CurrentPosition(); !ok {
 		t.Fatal("a withdrawn CVE must still auto-accept — its evidence is a public record (Observed)")
+	}
+}
+
+// TRUST-4, the point of the change: the withdrawal's class is now SOURCED, so a withdrawal
+// reported by an Asserted source no longer clears the shipped rule's Observed floor (D15).
+//
+// Before this, Governance stated Observed for every withdrawal regardless of who reported it.
+// That was right for NVD and wrong in general — it would have auto-suppressed a Finding on a
+// vendor's unverifiable word, which is exactly what "Gathering Is Not Knowing" forbids.
+func TestReactToEnrichment_WithdrawalFromAnAssertedSourceIsNotAutoAccepted(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+	rule := domain.NewPolicyRule("auto-not-affected-observed", domain.StanceNotAffected).
+		RequiringEvidence(value.TrustObserved)
+	s := writeSvc(repo, rule)
+
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", Withdrawn: true, WithdrawnTrust: value.TrustAsserted,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	f := repo.byID["fnd-1"]
+	if _, ok := f.CurrentPosition(); ok {
+		t.Fatal("an Asserted withdrawal must not clear the Observed floor — it waits for a human")
+	}
+	if len(f.Proposals()) == 0 {
+		t.Fatal("the proposal must still be RAISED — barring auto-accept is not dropping the signal")
+	}
+}
+
+// The same path with the class the real producer sends (NVD is Observed) does auto-accept, so
+// the floor discriminates on provenance rather than simply blocking withdrawals.
+func TestReactToEnrichment_WithdrawalFromAnObservedSourceIsAutoAccepted(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+	rule := domain.NewPolicyRule("auto-not-affected-observed", domain.StanceNotAffected).
+		RequiringEvidence(value.TrustObserved)
+	s := writeSvc(repo, rule)
+
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", Withdrawn: true, WithdrawnTrust: value.TrustObserved,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if _, ok := repo.byID["fnd-1"].CurrentPosition(); !ok {
+		t.Fatal("an Observed withdrawal must auto-accept")
 	}
 }
 
