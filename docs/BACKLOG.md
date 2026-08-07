@@ -491,7 +491,9 @@ three angles, and two of them proposed fixes that would not have worked.
   bulk client bypasses the pre-existing per-record `epsskev.go`/`exploitdb.go` ACLs (a tidy-up follow-up: fold
   them out or align shapes). **Still open:** the **vendor-VEX / Red Hat CSAF** ACLs remain unwired (applicability
   overlay); and the NVD by-CVE backfill (below).
-- [ ] **Knowledge — NVD by-CVE backfill (targeted enrichment).** The modified-since watch only covers CVEs
+- [x] **Knowledge — NVD by-CVE backfill (targeted enrichment).** ✅ **DONE 2026-08-07** as
+  **EDR-KNOWLEDGE-01 D5a** — and it did not merely *add* a by-CVE path, it **replaced** the
+  modified-since watch entirely (see NVD-WATCH-1). Original report follows. The modified-since watch only covers CVEs
   changed within NVD's 120-day window; a card whose CVE fell out of that window (or was created after the
   last relevant modification) never gets NVD's authoritative CVSS/severity. Add a `FetchByCVEID` path and a
   targeted per-card enrichment trigger (e.g. on `FaultlineCreated`, or a backfill pass over cards missing an
@@ -945,6 +947,19 @@ three angles, and two of them proposed fixes that would not have worked.
   strategy question below.** One NVD request for a 24-hour slice returned **5.2 MB in 83.6 seconds**; the
   next nine requests answered in ~1.2s each, so this is NVD's server-side generation time, not throttling
   and not our rate limiting. A 120-day cold start is therefore **~2.8 hours** of walking, and no timeout or
+  **✅ DECIDED + IMPLEMENTED 2026-08-07 — EDR-KNOWLEDGE-01 D5a: NVD enrichment is per-CVE over the carded
+  set.** The measurement settled the open strategy question: 3,207 records fetched to apply 18 (**0.56%**),
+  at ~84s per day of window, making a 120-day cold start ~2.8 hours. `NVDClient.VulnsForCVE` fetches one
+  CVE by id; `app.BackfillService` sweeps the cards still missing an NVD Proposal, oldest first, capped per
+  run (`THEMIS_NVD_BACKFILL_LIMIT`, default 200). The relevance bound is now **structural** — only carded
+  CVEs are ever requested, so nothing is fetched that could be discarded — and coverage strictly improves:
+  a CVE whose last modification predates the window was unreachable by the walk at any budget.
+  **The walk is deleted**, with `WatchService`, `RelevanceFilteredSource`, the `ChangedVulnSource` port and
+  the watermark accessors. There is no watermark now, which is the structural point: the **queue is the
+  state**, so there is nothing to advance past unread work — the failure mode this entry was about. It also
+  aligns NVD with every other feed: OSV is queried by package, Red Hat and CSAF-VEX by CVE; NVD was the
+  last window walker.
+
   pacing constant changes that — the cost is proportional to NVD's record volume. **The per-CVE strategy
   (option 4) is no longer merely preferable; it is the only viable design**, and needs the
   EDR-KNOWLEDGE-01 D5 note.
