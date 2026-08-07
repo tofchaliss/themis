@@ -45,7 +45,7 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 
 | Service | Command | Port | Own database | Reads over HTTP | Migrate on startup |
 | ------- | ------- | ---- | ------------ | --------------- | ------------------ |
-| Registry | `cmd/registry` | `:8082` | `evidence` (shared) | — | `psql` schema load (step 4) |
+| Registry | `cmd/registry` | `:8082` | `evidence` (shared) | — | `THEMIS_REGISTRY_MIGRATE=1` (own bookkeeping table) |
 | Evidence | `cmd/evidence` | `:8081` | `evidence` | Registry (in-proc) | `THEMIS_EVIDENCE_MIGRATE=1` |
 | Knowledge | `cmd/knowledge` | `:8085` | `knowledge` | Evidence `:8081`, OSV | `THEMIS_KNOWLEDGE_MIGRATE=1` |
 | Governance | `cmd/governance` | `:8083` | `governance` | Intelligence `:8086` (if AI on) | `THEMIS_GOVERNANCE_MIGRATE=1` |
@@ -60,16 +60,16 @@ database holding one `event_log`) plus read-only HTTP APIs — no shared busines
 > end-to-end SBOM→VEX flow, every pipeline service must point `THEMIS_BUS_DATABASE_DSN` at the same `bus`
 > database.
 
-> **Port gotcha (`cmd/knowledge`).** Its `THEMIS_KNOWLEDGE_ADDR` default is `:8082`, which **collides with
-> Registry**. The rest of the system expects Knowledge on **:8085** (the Governance node's
-> `THEMIS_KNOWLEDGE_URL` default). **Always set `THEMIS_KNOWLEDGE_ADDR=:8085`** when running them together.
+> **Knowledge listens on `:8085`**, which is now its code default and matches the Governance node's
+> `THEMIS_KNOWLEDGE_URL` default. (It used to default to `:8082` and collide with Registry; fixed
+> 2026-08-07. Deployments that set `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly are unaffected.)
 
 > **Databases (5 required + 1 optional on one PostgreSQL server):** `evidence`, `knowledge`, `governance`,
 > `communication`, `bus` — plus **`intelligence`** when Δ3a semantic precedent is enabled (the Operational
 > Semantic Index; skip it to run the Gateway stateless).
 > Registry co-locates in the **`evidence`** database — Evidence validates a release id in-process via
-> `registry.ReleaseExists`, so the registry tables must live there (its schema is loaded with `psql`, not
-> self-migrated — see step 4). The database boundary keeps contexts structurally isolated.
+> `registry.ReleaseExists`, so the registry tables must live there. The database boundary keeps contexts
+> structurally isolated.
 > See [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
 
 ### 1. Install and start PostgreSQL
@@ -162,13 +162,20 @@ Each service serves under `/api/v1` and runs its relay + reader loops in the bac
 `*_MIGRATE=1` apply their own migrations on startup, and `THEMIS_BUS_MIGRATE=1` on Evidence creates the
 shared `bus` event_log. Logs go to `logs/`.
 
-**Registry first — load its schema by hand.** Registry co-locates its identity tables in the `evidence`
-database (Evidence reads them in-process), but it cannot self-migrate there: golang-migrate's single default
-`schema_migrations` table would clash with Evidence's, and passing `x-migrations-table` on the DSN to work
-around that **breaks the running service** — pgx forwards the unknown parameter to Postgres and every
-connection is rejected. Instead load the schema directly (the migrations are idempotent
-`CREATE TABLE IF NOT EXISTS`) and run Registry with a plain DSN and **no** migrate flag. Load **both**
-migrations — `000001` is the Product→Project→Release identity, `000002` is the enterprise **estate** graph
+**Registry self-migrates (since 2026-08-07).** Registry co-locates its identity tables in the `evidence`
+database because Evidence reads them in-process. Both binaries therefore migrate the same database, and
+golang-migrate's single default `schema_migrations` table used to make whichever ran second read the other's
+version and silently skip its own `CREATE TABLE`s. Registry now keeps its **own**
+`registry_schema_migrations` table, so `THEMIS_REGISTRY_MIGRATE=1` is safe.
+
+Give it the **plain** DSN. The migrations-table parameter is attached internally to a separate migration
+DSN and never reaches the connection pool — putting `x-migrations-table` on the shared DSN yourself still
+breaks the running service, because pgx forwards the unknown parameter to Postgres and every connection is
+rejected with `FATAL: unrecognized configuration parameter`.
+
+Loading the SQL by hand also still works (the migrations are idempotent `CREATE TABLE IF NOT EXISTS`), and
+is the right choice if the DB role running the service should not hold DDL rights. Load **both** —
+`000001` is the Product→Project→Release identity, `000002` is the enterprise **estate** graph
 (Customer / Microservice / Deployment) that the release blast-radius traversal needs (C1/C2); skip the second
 and `GET /releases/{id}/blast-radius` returns an empty estate and the priority multiplier stays at 1.0×:
 

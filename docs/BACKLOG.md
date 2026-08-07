@@ -401,14 +401,26 @@ three angles, and two of them proposed fixes that would not have worked.
   a resolvable product identifier and add the correlated component PURL as an OpenVEX `subcomponent`. Plugs
   into the Communication serializer registry (`internal/communication/adapters/.../openvex`). Surfaced
   2026-07-30 verifying the end-to-end deployment. See [[feedback-backlog-surfaced-followups]].
-- [ ] **(LOW) `cmd/knowledge` default listen port collides with Registry.** `THEMIS_KNOWLEDGE_ADDR`
+- [x] **(LOW) `cmd/knowledge` default listen port collides with Registry.** ✅ **FIXED 2026-08-07** — the
+  default is now `:8085`, matching the `THEMIS_KNOWLEDGE_URL` default every other node already used. Swept
+  the three places that documented the workaround (`CLAUDE.md`, `INSTALLATION.md`, `node.env.example`).
+  Deployments that set `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly are unaffected. Original report follows. `THEMIS_KNOWLEDGE_ADDR`
   defaults to `:8082` — the same as `cmd/registry` — but the rest of the system addresses Knowledge at
   `:8085` (Intelligence's `THEMIS_KNOWLEDGE_URL` default; `deploy/node.env.example`). Running Registry +
   Knowledge on defaults fails to bind the second one. Fix: change the `cmd/knowledge` default to `:8085`.
   Until then the INSTALLATION.md runbook sets `THEMIS_KNOWLEDGE_ADDR=:8085` explicitly. Plugs into
   `cmd/knowledge/main.go` `loadConfig`. Surfaced 2026-07-30 wiring the end-to-end deployment.
   See [[feedback-backlog-surfaced-followups]].
-- [ ] **(MED) `cmd/registry` cannot self-migrate into the `evidence` DB it shares with Evidence.**
+- [x] **(MED) `cmd/registry` cannot self-migrate into the `evidence` DB it shares with Evidence.**
+  ✅ **FIXED 2026-08-07** by the first of the two options the entry named — separating the migration DSN
+  from the pool DSN. `migrationDSN()` attaches `x-migrations-table=registry_schema_migrations` to a
+  **copy**, so golang-migrate sees it and pgx never does. That separation is the whole fix: the entry
+  recorded that the obvious one-DSN approach makes migration succeed and then kills the service
+  (`FATAL: unrecognized configuration parameter`), which is exactly the trap a future reader would fall
+  into, so a test now asserts the caller's DSN is returned unmutated. `THEMIS_REGISTRY_MIGRATE=1` is safe;
+  the manual `psql` load still works and remains the right choice when the service role should not hold DDL
+  rights. `INSTALLATION.md` and `CLAUDE.md` updated — both described the limitation as permanent.
+  Original report follows.
   The registry-backed SubjectRef reads registry tables in-process over Evidence's pool, so `cmd/registry`
   and `cmd/evidence` must share the `evidence` database. Both `applyMigrations` call `migrate.New` with the
   default `schema_migrations` table, so whichever migrates second reads the other's version and silently

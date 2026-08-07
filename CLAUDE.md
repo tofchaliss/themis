@@ -99,9 +99,8 @@ all six nodes.
   switch below), and `intelligence` (the Δ3a **Operational Semantic Index** — Intelligence's own KS2 vector
   store; present only when semantic precedent is enabled via `THEMIS_DATABASE_DSN` on the Intelligence node —
   it is derived/rebuildable, not truth, so the Gateway still owns no truth). Ports: Evidence `:8081`, Registry `:8082`,
-  Governance `:8083`, Communication `:8084`, Intelligence `:8086`, and **Knowledge `:8085`** — its code default
-  is `:8082`, which collides with Registry, so you **must** set `THEMIS_KNOWLEDGE_ADDR=:8085` (the port every
-  other node's `THEMIS_KNOWLEDGE_URL` already defaults to).
+  Governance `:8083`, Communication `:8084`, Intelligence `:8086`, and **Knowledge `:8085`** — which is now
+  also its code default (it used to default to `:8082` and collide with Registry; fixed 2026-08-07).
 - **`THEMIS_BUS_DATABASE_DSN` is the cross-context switch.** Set it on every node ⇒ the relay publishes and each
   reader drains the `bus` DB, so events actually cross contexts. Leave it unset ⇒ a log-only publisher and
   disabled readers (single-context dev; nothing propagates).
@@ -112,10 +111,11 @@ all six nodes.
   `THEMIS_AUTH_DATABASE_DSN=… THEMIS_AUTH_MIGRATE=1 go run ./cmd/authadmin create-key --name ci --scopes admin`
   (`--scopes` ∈ `admin`=read+write, `read`=read-only; prints the token **once**, stores only its bcrypt hash;
   `revoke-key --id` disables one). Auth is **inbound-edge only** — inter-service read clients send no key.
-- **Registry does not self-migrate** into the shared `evidence` DB — load its schema with
-  `psql -f internal/registry/adapters/store/migrations/000001_registry.up.sql` **and**
-  `…/000002_estate.up.sql` (the enterprise estate graph, C1) and run it with a **plain** DSN
-  (an `x-migrations-table` DSN param breaks the pgx pool at runtime).
+- **Registry self-migrates** into the shared `evidence` DB (`THEMIS_REGISTRY_MIGRATE=1`) as of 2026-08-07.
+  It keeps its own `registry_schema_migrations` bookkeeping table, so it no longer reads Evidence's version
+  and silently skip its own `CREATE TABLE`s. Give it the **plain** DSN: the migrations-table parameter is
+  attached internally to a separate migration DSN, because pgx forwards an unknown DSN parameter to Postgres
+  and every runtime connection would fail. Loading the SQL by hand still works and remains idempotent.
 - **Drive an SBOM:** `scripts/gf-upload-sbom.sh` registers Product→Project→Release and uploads (auto-detects
   CycloneDX/SPDX; streams large files via `curl --data-binary @-`; `-r` reuses a release). Evidence is
   content-addressed, so re-uploading byte-identical content **dedups** — a re-run needs changed bytes.

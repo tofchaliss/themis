@@ -35,7 +35,7 @@ import (
 // self-documented-config convention); there is no separate config reference.
 type config struct {
 	dsn            string // THEMIS_DATABASE_DSN — Postgres DSN (required).
-	addr           string // THEMIS_KNOWLEDGE_ADDR — listen address (default ":8082").
+	addr           string // THEMIS_KNOWLEDGE_ADDR — listen address (default ":8085"; NOT :8082, which is Registry).
 	migrate        bool   // THEMIS_KNOWLEDGE_MIGRATE=1 — apply the knowledge migrations on startup.
 	devPurge       bool   // THEMIS_KNOWLEDGE_DEV_PURGE=1 — expose DELETE /dev/knowledge (dev only).
 	migrationsPath string // THEMIS_KNOWLEDGE_MIGRATIONS — path to the knowledge migrations dir.
@@ -73,7 +73,7 @@ type config struct {
 func loadConfig() config {
 	return config{
 		dsn:            os.Getenv("THEMIS_DATABASE_DSN"),
-		addr:           envDefault("THEMIS_KNOWLEDGE_ADDR", ":8082"),
+		addr:           envDefault("THEMIS_KNOWLEDGE_ADDR", ":8085"),
 		migrate:        os.Getenv("THEMIS_KNOWLEDGE_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_KNOWLEDGE_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_KNOWLEDGE_MIGRATIONS", "internal/knowledge/adapters/store/migrations"),

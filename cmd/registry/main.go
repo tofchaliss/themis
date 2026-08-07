@@ -7,8 +7,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/go-chi/chi/v5"
@@ -134,8 +136,40 @@ func authedMount(ctx context.Context, router chi.Router, cfg config, logger *obs
 	return closeAuth
 }
 
+// registryMigrationsTable is Registry's OWN golang-migrate bookkeeping table.
+//
+// Registry co-locates its identity tables in the `evidence` database, because the
+// registry-backed SubjectRef reads them in-process over Evidence's pool. Both binaries
+// therefore migrate the same database, and golang-migrate defaults to one shared
+// `schema_migrations` table — so whichever migrated second read the other's version number,
+// concluded it was up to date, and silently skipped its own CREATE TABLEs.
+const registryMigrationsTable = "registry_schema_migrations"
+
+// migrationDSN returns dsn with the migrations-table parameter attached.
+//
+// It MUST be a separate string from the pool DSN, which is the trap this fixes: the obvious
+// approach — putting `x-migrations-table` on the one shared DSN — makes migration succeed and
+// then kills the service, because pgx forwards the unknown parameter to Postgres as a startup
+// option and every runtime connection fails with
+// `FATAL: unrecognized configuration parameter "x-migrations-table"`. golang-migrate reads it
+// from the URL; pgx must never see it.
+func migrationDSN(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("registry: unparseable DSN: %w", err)
+	}
+	q := u.Query()
+	q.Set("x-migrations-table", registryMigrationsTable)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 func applyMigrations(dsn, path string) error {
-	m, err := migrate.New("file://"+path, dsn)
+	mdsn, err := migrationDSN(dsn)
+	if err != nil {
+		return err
+	}
+	m, err := migrate.New("file://"+path, mdsn)
 	if err != nil {
 		return err
 	}
