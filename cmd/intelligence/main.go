@@ -168,6 +168,15 @@ func main() {
 			store.NewInboxConsumer(pool, intel.Consumer))
 		go readerLoop(reader, logger.Component("reader"))
 		logger.Info("governance position-stream reader enabled (index population)")
+
+		// A SECOND reader on the Knowledge stream keeps the index fresh when a Faultline's
+		// severity moves (Δ3a). Severity is half the embedded subject text, so without this the
+		// index only ever refreshed on Position events — never wrong, but silently ageing.
+		// Its own reader because the bus cursor is per (consumer, stream).
+		knReader := inbound.FaultlineSubscription.NewReader(busPool, logger.Component("reader-knowledge"),
+			store.NewInboxConsumer(pool, intel.Consumer))
+		go readerLoop(knReader, logger.Component("reader-knowledge"))
+		logger.Info("knowledge enrichment-stream reader enabled (index freshness)")
 	} else {
 		logger.Info("index population reader disabled (needs THEMIS_BUS_DATABASE_DSN + THEMIS_DATABASE_DSN)")
 	}
@@ -201,8 +210,11 @@ func rebuildIndex(ctx context.Context, st *store.Store, busPool *pgxpool.Pool) e
 		return err
 	}
 	if busPool != nil {
+		// BOTH cursors — a rebuild that reset only the Position cursor would replay Positions
+		// against an index the enrichment stream still believed it had already refreshed.
 		if _, err := busPool.Exec(ctx,
-			`DELETE FROM stream_cursor WHERE consumer = $1`, inbound.Subscription.Consumer); err != nil {
+			`DELETE FROM stream_cursor WHERE consumer = ANY($1)`,
+			[]string{inbound.Subscription.Consumer, inbound.FaultlineSubscription.Consumer}); err != nil {
 			return err
 		}
 	}

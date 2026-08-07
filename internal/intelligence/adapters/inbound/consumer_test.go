@@ -46,6 +46,16 @@ func (s stubEmbedder) Model() string                                    { return
 type captureStore struct {
 	recs []store.EmbeddingRecord
 	err  error
+	// cached is the stored (hash, vector) the embed-skip consults; zero value = nothing cached,
+	// so every existing test embeds exactly as it did before.
+	cachedHash   string
+	cachedVector []float32
+	cachedErr    error
+	cacheReads   int
+	// indexed is what IndexedForFaultline returns for the re-embed path.
+	indexed        []store.IndexedFinding
+	indexedErr     error
+	faultlineReads int
 }
 
 func (c *captureStore) Upsert(_ context.Context, r store.EmbeddingRecord) error {
@@ -54,6 +64,22 @@ func (c *captureStore) Upsert(_ context.Context, r store.EmbeddingRecord) error 
 	}
 	c.recs = append(c.recs, r)
 	return nil
+}
+
+func (c *captureStore) IndexedForFaultline(_ context.Context, _ string) ([]store.IndexedFinding, error) {
+	c.faultlineReads++
+	return c.indexed, c.indexedErr
+}
+
+func (c *captureStore) CachedEmbedding(_ context.Context, _ string) (string, []float32, bool, error) {
+	c.cacheReads++
+	if c.cachedErr != nil {
+		return "", nil, false, c.cachedErr
+	}
+	if c.cachedHash == "" {
+		return "", nil, false, nil
+	}
+	return c.cachedHash, c.cachedVector, true, nil
 }
 
 type captureIndex struct{ recs []store.EmbeddingRecord }
@@ -252,5 +278,286 @@ func TestHandleStoreErrorPropagates(t *testing.T) {
 	if err := c.Handle(context.Background(),
 		positionEnv("governance.position_established", "f1", "r", "fl", "CVE", "affected")); err == nil {
 		t.Fatal("expected the store error to propagate")
+	}
+}
+
+// --- Δ3a: skip the embed when the subject text is unchanged -------------------------------
+
+// A Position revise usually moves only the stance or the rationale — neither of which is
+// embedded, since SubjectText keys on component + severity. Re-embedding would spend an Ollama
+// round-trip to reproduce the vector already stored.
+func TestPrepareReusesTheCachedVectorWhenSubjectTextIsUnchanged(t *testing.T) {
+	pr := projOf([]string{"pkg:golang/openssl"}, "high")
+	emb := stubEmbedder{vec: []float32{9, 9, 9}} // if this is used, the assertion below fails
+	st, idx := &captureStore{}, &captureIndex{}
+	c := inbound.NewConsumer(pr, stubPosition{stance: "affected", rationale: "revised", found: true}, emb, st, idx)
+
+	// Seed the cache with the hash the consumer will compute for this same subject, and a
+	// distinguishable vector.
+	cached := []float32{0.5, 0.25}
+	st.cachedHash = inbound.SubjectTextHashFor("high", []string{"pkg:golang/openssl"})
+	st.cachedVector = cached
+
+	apply, err := c.Prepare(context.Background(),
+		positionEnv("governance.position_revised", "f1", "rel-1", "fl-1", "CVE-1", "affected"))
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if st.cacheReads != 1 {
+		t.Fatalf("cache reads = %d, want 1", st.cacheReads)
+	}
+	got := st.recs[0]
+	if len(got.Vector) != len(cached) || got.Vector[0] != cached[0] {
+		t.Fatalf("vector = %v, want the cached %v — the embedder must not have been called", got.Vector, cached)
+	}
+	// The row is still rewritten with the NEW labels: skipping the embed must not skip the
+	// update, or a revise would leave a stale stance in the index.
+	if got.Stance != "affected" || got.Rationale != "revised" {
+		t.Errorf("labels = %q/%q, want the revised ones", got.Stance, got.Rationale)
+	}
+}
+
+// A changed subject (here: severity moved) must re-embed. The cache is keyed by the text hash
+// precisely so that a real change is never served a stale vector.
+func TestPrepareReEmbedsWhenSubjectTextChanged(t *testing.T) {
+	pr := projOf([]string{"pkg:golang/openssl"}, "critical")
+	st, idx := &captureStore{}, &captureIndex{}
+	c := inbound.NewConsumer(pr, stubPosition{stance: "affected", found: true},
+		stubEmbedder{vec: []float32{7, 7}}, st, idx)
+
+	st.cachedHash = inbound.SubjectTextHashFor("high", []string{"pkg:golang/openssl"}) // stale severity
+	st.cachedVector = []float32{0.5, 0.25}
+
+	apply, err := c.Prepare(context.Background(),
+		positionEnv("governance.position_revised", "f1", "rel-1", "fl-1", "CVE-1", "affected"))
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got := st.recs[0].Vector; len(got) != 2 || got[0] != 7 {
+		t.Fatalf("vector = %v, want the freshly embedded one", got)
+	}
+}
+
+// The cache is an optimization, so a lookup failure must not stall index population: it falls
+// through to the embed, which is always correct — just slower. Refusing to make progress
+// because a cache could not be consulted would turn a storage hiccup into a stuck consumer.
+func TestPrepareEmbedsWhenTheCacheLookupFails(t *testing.T) {
+	pr := projOf([]string{"pkg:golang/openssl"}, "high")
+	st, idx := &captureStore{}, &captureIndex{}
+	st.cachedErr = errors.New("cache read failed")
+	c := inbound.NewConsumer(pr, stubPosition{stance: "affected", found: true},
+		stubEmbedder{vec: []float32{7, 7}}, st, idx)
+
+	apply, err := c.Prepare(context.Background(),
+		positionEnv("governance.position_revised", "f1", "rel-1", "fl-1", "CVE-1", "affected"))
+	if err != nil {
+		t.Fatalf("prepare must not fail on a cache error: %v", err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got := st.recs[0].Vector; len(got) != 2 || got[0] != 7 {
+		t.Fatalf("vector = %v, want the freshly embedded one", got)
+	}
+}
+
+// --- Δ3a: refresh the index when a Faultline's severity moves -----------------------------
+
+func TestFaultlineSubscriptionBindsTheKnowledgeStream(t *testing.T) {
+	if inbound.FaultlineSubscription.Stream != "knowledge" {
+		t.Fatalf("stream = %q, want knowledge", inbound.FaultlineSubscription.Stream)
+	}
+	if !inbound.FaultlineSubscription.InInterest("knowledge.faultline_enriched") {
+		t.Fatalf("interest missing the enrichment fact: %+v", inbound.FaultlineSubscription.Interest)
+	}
+	// The bus cursor is per (consumer, stream), so sharing the Position consumer's name would
+	// make the two streams fight over one cursor position.
+	if inbound.FaultlineSubscription.Consumer == inbound.Subscription.Consumer {
+		t.Fatal("the two subscriptions must not share a consumer name")
+	}
+}
+
+// Severity is half the embedded subject text, so an enrichment that moves it must refresh every
+// Finding already indexed on that card — the direction the index used to go stale in.
+func TestPrepareReEmbedsEveryIndexedFindingOnAnEnrichedFaultline(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexed = []store.IndexedFinding{
+		{FindingID: "f1", FaultlineID: "fl-1", ReleaseID: "rel-1", CVE: "CVE-1", Stance: "affected"},
+		{FindingID: "f2", FaultlineID: "fl-1", ReleaseID: "rel-2", CVE: "CVE-1", Stance: "not_affected"},
+	}
+	c := inbound.NewConsumer(
+		projOf([]string{"pkg:golang/openssl"}, "critical"), // the NEW severity
+		stubPosition{stance: "affected", rationale: "re-evaluated", found: true},
+		stubEmbedder{vec: []float32{4, 2}}, st, idx)
+
+	env := event.Envelope{ID: "e1", Type: "knowledge.faultline_enriched",
+		Payload: []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1"}`)}
+
+	apply, err := c.Prepare(context.Background(), env)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(st.recs) != 2 || len(idx.recs) != 2 {
+		t.Fatalf("store=%d index=%d, want both Findings refreshed", len(st.recs), len(idx.recs))
+	}
+	// The identity of each row is preserved — a re-embed updates vectors, it does not re-key.
+	if st.recs[0].FindingID != "f1" || st.recs[1].FindingID != "f2" {
+		t.Errorf("finding ids = %q/%q, want f1/f2", st.recs[0].FindingID, st.recs[1].FindingID)
+	}
+	if st.recs[1].ReleaseID != "rel-2" {
+		t.Errorf("release = %q, want the stored rel-2 rather than the first row's", st.recs[1].ReleaseID)
+	}
+}
+
+// A Faultline nothing is indexed under claims the envelope and does nothing: there is no vector
+// to refresh, and the Position event that eventually creates one will embed then.
+func TestPrepareEnrichmentForAnUnknownFaultlineIsANoOp(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	c := inbound.NewConsumer(projOf([]string{"pkg:x"}, "high"),
+		stubPosition{found: true}, stubEmbedder{vec: []float32{1}}, st, idx)
+
+	apply, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"unknown"}`)})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if apply == nil {
+		t.Fatal("want a no-op apply so the envelope is still claimed")
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(st.recs) != 0 {
+		t.Fatalf("wrote %d records for a Faultline with nothing indexed", len(st.recs))
+	}
+}
+
+// An index read failure is transient: no apply, so the envelope is retried rather than claimed
+// and the refresh lost.
+func TestPrepareEnrichmentRetriesOnIndexReadFailure(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexedErr = errors.New("db down")
+	c := inbound.NewConsumer(projOf([]string{"pkg:x"}, "high"),
+		stubPosition{found: true}, stubEmbedder{vec: []float32{1}}, st, idx)
+
+	apply, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)})
+	if err == nil || apply != nil {
+		t.Fatalf("want a retryable error and no apply, got err=%v apply=%v", err, apply != nil)
+	}
+}
+
+// Handle is the non-Preparer fallback and must cover the enrichment path too, or the Handler
+// contract is total only for Position events.
+func TestHandleReEmbedsOnEnrichment(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexed = []store.IndexedFinding{{FindingID: "f1", FaultlineID: "fl-1", ReleaseID: "rel-1", CVE: "CVE-1", Stance: "affected"}}
+	c := inbound.NewConsumer(projOf([]string{"pkg:x"}, "critical"),
+		stubPosition{stance: "affected", found: true}, stubEmbedder{vec: []float32{3}}, st, idx)
+
+	if err := c.Handle(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)}); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(st.recs) != 1 || len(idx.recs) != 1 {
+		t.Fatalf("store=%d index=%d, want one refresh", len(st.recs), len(idx.recs))
+	}
+}
+
+func TestHandleEnrichmentBadPayload(t *testing.T) {
+	c, _, _ := newConsumer(stubProjection{}, stubPosition{}, stubEmbedder{})
+	err := c.Handle(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte("not json")})
+	if err == nil {
+		t.Fatal("want an error for a malformed enrichment payload")
+	}
+}
+
+func TestPrepareEnrichmentBadPayload(t *testing.T) {
+	c, _, _ := newConsumer(stubProjection{}, stubPosition{}, stubEmbedder{})
+	if _, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte("{")}); err == nil {
+		t.Fatal("want an error for a malformed enrichment payload")
+	}
+}
+
+// An event carrying no faultline id is claimed and ignored rather than retried forever.
+func TestPrepareEnrichmentWithoutFaultlineIDIsANoOp(t *testing.T) {
+	st, _ := &captureStore{}, &captureIndex{}
+	c := inbound.NewConsumer(projOf([]string{"pkg:x"}, "high"), stubPosition{found: true},
+		stubEmbedder{vec: []float32{1}}, st, &captureIndex{})
+
+	apply, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"CVE":"CVE-1"}`)})
+	if err != nil || apply == nil {
+		t.Fatalf("want a no-op apply, got err=%v apply=%v", err, apply != nil)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if st.faultlineReads != 0 {
+		t.Errorf("index was queried %d times for an empty faultline id", st.faultlineReads)
+	}
+}
+
+// An indexed Finding whose subject text has become un-embeddable is skipped, not written as an
+// empty vector — the same rule the Position path applies.
+func TestPrepareEnrichmentSkipsUnembeddableFindings(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexed = []store.IndexedFinding{{FindingID: "f1", FaultlineID: "fl-1"}}
+	c := inbound.NewConsumer(projOf(nil, ""), stubPosition{found: true}, stubEmbedder{vec: []float32{1}}, st, idx)
+
+	apply, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(st.recs) != 0 {
+		t.Fatalf("wrote %d records, want none", len(st.recs))
+	}
+}
+
+// A read failure while rebuilding one Finding fails the whole event, so it is retried — safe
+// because re-embedding is idempotent.
+func TestPrepareEnrichmentPropagatesRebuildFailure(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexed = []store.IndexedFinding{{FindingID: "f1", FaultlineID: "fl-1"}}
+	c := inbound.NewConsumer(stubProjection{err: errors.New("gov down")},
+		stubPosition{found: true}, stubEmbedder{vec: []float32{1}}, st, idx)
+
+	if _, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)}); err == nil {
+		t.Fatal("want a retryable error")
+	}
+}
+
+// A write failure inside apply propagates, so the inbox transaction rolls back and the envelope
+// is not claimed.
+func TestApplyEnrichmentPropagatesWriteFailure(t *testing.T) {
+	st, idx := &captureStore{}, &captureIndex{}
+	st.indexed = []store.IndexedFinding{{FindingID: "f1", FaultlineID: "fl-1"}}
+	c := inbound.NewConsumer(projOf([]string{"pkg:x"}, "high"), stubPosition{found: true},
+		stubEmbedder{vec: []float32{1}}, st, idx)
+
+	apply, err := c.Prepare(context.Background(), event.Envelope{
+		ID: "e", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	st.err = errors.New("write failed")
+	if err := apply(context.Background()); err == nil {
+		t.Fatal("want the write failure to propagate so the inbox tx rolls back")
 	}
 }

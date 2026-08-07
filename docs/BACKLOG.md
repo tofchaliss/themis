@@ -141,13 +141,32 @@ three angles, and two of them proposed fixes that would not have worked.
 > fakeable today). The v0.3.x monolith defects D-NVD-2 / D-FEED-2 themselves stay open (this is the Phase-3
 > realization, not the v0.3.x fix).
 
-- [ ] **(LOW) Δ3a — re-embed on `knowledge.faultline_enriched`.** The population consumer
+- [x] **(LOW) Δ3a — re-embed on `knowledge.faultline_enriched`.** ✅ **DONE 2026-08-07.** Intelligence now
+  holds a **second** bus binding, `FaultlineSubscription` (stream `knowledge`, interest
+  `knowledge.faultline_enriched`), with its own consumer name — the cursor is per (consumer, stream), so
+  sharing the Position name would make the two streams fight over one position. On an enrichment the
+  consumer asks its **own index** which Findings it already holds for that Faultline (`IndexedForFaultline`)
+  and rebuilds each. Querying its own store rather than asking Governance is the point: the set needing
+  refresh is by definition the set already indexed, so no new read dependency is introduced to answer a
+  question the store already knows.
+  It reuses `buildRecord` unchanged, which means it **inherits the embed cache below** — an enrichment that
+  did not move the severity produces the same subject text, the hash matches, and no model call is made. So
+  subscribing to every enrichment costs one index read per event, not one embed per Finding. `rebuildIndex`
+  now clears **both** cursors; resetting only the Position cursor would replay Positions against an index the
+  enrichment stream still believed it had refreshed. Original report follows. The population consumer
   (`internal/intelligence/adapters/inbound`) indexes on Governance **Position** events only; a later Faultline
   severity change (which feeds `embed.SubjectText`) does not re-embed the affected findings until their next
   Position event. A freshness optimization, not correctness — the vector still matches on components. **Fix:**
   a second subscription (stream `knowledge`, interest `knowledge.faultline_enriched`) that re-embeds the
   faultline's findings. Surfaced building A4 (2026-08-04).
-- [ ] **(LOW) Δ3a — use `text_hash` to skip unchanged re-embeds.** `position_embeddings.text_hash` is
+- [x] **(LOW) Δ3a — use `text_hash` to skip unchanged re-embeds.** ✅ **DONE 2026-08-07.** `Store.TextHash`
+  existed, was documented for exactly this, and was consulted by nothing but its own test. It is now
+  `CachedEmbedding`, returning the hash **and the vector** — the missing half: knowing the text is unchanged
+  only avoids an embed if the stored vector comes back with it, because the row still has to be rewritten
+  with the new stance/rationale. A revise that moves only the labels (neither of which is embedded —
+  `SubjectText` keys on component + severity) now costs no model call. A cache-lookup failure falls through
+  to the embed rather than failing: the cache is an optimization, and refusing to progress because it could
+  not be consulted would let a storage hiccup stall index population. Original report follows. `position_embeddings.text_hash` is
   populated but not yet consulted: a Position revise always re-embeds even when the subject text is unchanged
   (only the stance/rationale label moved). Gate the Ollama embed on a hash mismatch, updating the labels
   in place otherwise — saves an embed call per revise. Surfaced building A4 (2026-08-04).

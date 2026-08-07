@@ -101,19 +101,70 @@ func (s *Store) LoadAll(ctx context.Context) ([]EmbeddingRecord, error) {
 	return out, rows.Err()
 }
 
-// TextHash returns the stored embed-text hash for a Finding so the population consumer can
-// skip re-embedding when the subject text is unchanged. found=false when no row exists.
-func (s *Store) TextHash(ctx context.Context, findingID string) (string, bool, error) {
-	var h string
-	err := s.exec(ctx).QueryRow(ctx,
-		`SELECT text_hash FROM position_embeddings WHERE finding_id = $1`, findingID).Scan(&h)
+// CachedEmbedding returns the stored embed-text hash AND vector for a Finding, so the
+// population consumer can skip the embed call when the subject text has not changed.
+//
+// It returns the vector, not just the hash, because knowing the text is unchanged is only half
+// the job: the row still has to be rewritten with the new stance/rationale, and rewriting it
+// needs a vector. Fetching the hash alone would prove an embed is unnecessary and then leave no
+// way to avoid it. found=false when no row exists (the first Position for a Finding).
+func (s *Store) CachedEmbedding(ctx context.Context, findingID string) (hash string, vector []float32, found bool, err error) {
+	var (
+		h      string
+		vecRaw []byte
+	)
+	err = s.exec(ctx).QueryRow(ctx,
+		`SELECT text_hash, vector FROM position_embeddings WHERE finding_id = $1`, findingID).
+		Scan(&h, &vecRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
+		return "", nil, false, nil
 	}
 	if err != nil {
-		return "", false, err
+		return "", nil, false, err
 	}
-	return h, true, nil
+	vec, derr := decodeVector(vecRaw)
+	if derr != nil {
+		// A corrupt stored vector must not stall the consumer: report not-found so the caller
+		// re-embeds and overwrites the bad row, rather than retrying a poison record forever.
+		return "", nil, false, nil
+	}
+	return h, vec, true, nil
+}
+
+// IndexedFinding is the identity of one already-indexed Finding — enough to rebuild its
+// embedding without asking any other context which Findings a Faultline touches.
+type IndexedFinding struct {
+	FindingID   string
+	FaultlineID string
+	ReleaseID   string
+	CVE         string
+	Stance      string
+}
+
+// IndexedForFaultline lists the Findings already indexed for a Faultline, so a change to that
+// Faultline's severity can re-embed exactly the rows whose subject text it feeds.
+//
+// It queries Intelligence's OWN index rather than asking Governance which Findings reference
+// the Faultline. That is the point: the index is derived and rebuildable, so the set that needs
+// refreshing is by definition the set already in it. Asking another context would add a read
+// dependency to answer a question this store already knows the answer to.
+func (s *Store) IndexedForFaultline(ctx context.Context, faultlineID string) ([]IndexedFinding, error) {
+	rows, err := s.exec(ctx).Query(ctx,
+		`SELECT finding_id, faultline_id, release_id, cve, stance
+		   FROM position_embeddings WHERE faultline_id = $1 ORDER BY finding_id`, faultlineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IndexedFinding
+	for rows.Next() {
+		var f IndexedFinding
+		if err := rows.Scan(&f.FindingID, &f.FaultlineID, &f.ReleaseID, &f.CVE, &f.Stance); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // Count returns the number of indexed embeddings (dev / test / telemetry).

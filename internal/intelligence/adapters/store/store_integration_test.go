@@ -163,22 +163,28 @@ func TestUpsertOverwritesByFindingID(t *testing.T) {
 	}
 }
 
-func TestTextHashFoundAndMissing(t *testing.T) {
+func TestCachedEmbeddingFoundAndMissing(t *testing.T) {
 	st, _ := newStore(t)
 	ctx := context.Background()
 
-	if _, ok, err := st.TextHash(ctx, "absent"); err != nil || ok {
+	if _, _, ok, err := st.CachedEmbedding(ctx, "absent"); err != nil || ok {
 		t.Fatalf("missing: got ok=%v err=%v, want ok=false err=nil", ok, err)
 	}
-	if err := st.Upsert(ctx, rec("042", "affected", []float32{0.5, 0.5})); err != nil {
+	want := []float32{0.5, 0.5}
+	if err := st.Upsert(ctx, rec("042", "affected", want)); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	h, ok, err := st.TextHash(ctx, "042")
+	h, vec, ok, err := st.CachedEmbedding(ctx, "042")
 	if err != nil || !ok {
 		t.Fatalf("present: got ok=%v err=%v, want ok=true err=nil", ok, err)
 	}
 	if h != "hash-042" {
 		t.Fatalf("hash: got %q want %q", h, "hash-042")
+	}
+	// The VECTOR is the point: knowing the text is unchanged only avoids an embed call if the
+	// stored vector comes back with it, since the row still has to be rewritten with new labels.
+	if len(vec) != len(want) || vec[0] != want[0] || vec[1] != want[1] {
+		t.Fatalf("vector: got %v want %v", vec, want)
 	}
 }
 
@@ -240,5 +246,45 @@ func TestMigrationsReversible(t *testing.T) {
 	st, _ := newStore(t)
 	if _, err := st.Count(context.Background()); err != nil {
 		t.Fatalf("count after reversible migrate: %v", err)
+	}
+}
+
+// The index is queried for its OWN rows on a Faultline rather than asking Governance which
+// Findings reference it: the set that needs refreshing after a severity change is by definition
+// the set already indexed.
+func TestIndexedForFaultline(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+
+	// Two Findings on one Faultline, plus one on another that must not be returned.
+	a := rec("a", "affected", []float32{1, 0})
+	b := rec("b", "not_affected", []float32{0, 1})
+	b.FaultlineID = a.FaultlineID
+	b.ReleaseID = "rel-b"
+	other := rec("c", "affected", []float32{1, 1})
+	for _, r := range []store.EmbeddingRecord{a, b, other} {
+		if err := st.Upsert(ctx, r); err != nil {
+			t.Fatalf("upsert %s: %v", r.FindingID, err)
+		}
+	}
+
+	got, err := st.IndexedForFaultline(ctx, a.FaultlineID)
+	if err != nil {
+		t.Fatalf("IndexedForFaultline: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d findings, want the 2 on this faultline only", len(got))
+	}
+	// Ordered by finding id, so a re-embed is deterministic rather than dependent on scan order.
+	if got[0].FindingID != "a" || got[1].FindingID != "b" {
+		t.Fatalf("ids = %q/%q, want a/b in order", got[0].FindingID, got[1].FindingID)
+	}
+	// Each row carries its OWN release and stance — rebuilding must not smear the first row's
+	// identity across the rest.
+	if got[1].ReleaseID != "rel-b" || got[1].Stance != "not_affected" {
+		t.Errorf("second row = %+v, want its own release and stance", got[1])
+	}
+	if n, err := st.IndexedForFaultline(ctx, "fl-nothing"); err != nil || len(n) != 0 {
+		t.Errorf("unknown faultline: got %d rows err=%v, want none", len(n), err)
 	}
 }
