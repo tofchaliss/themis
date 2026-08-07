@@ -1125,6 +1125,34 @@ three angles, and two of them proposed fixes that would not have worked.
   **Left open (see AI-204-1):** the 204 collapses *disabled*, *unreachable* and *declined* into one
   status, which is why this looked like the AI declining rather than a timeout.
 
+- [ ] **AI-GROUND-1 — the AI is grounded on the cross-package fix union KN-FIX-1 removed from the
+  display, and reasons from another package's version.** _(**Measured** on the VM 2026-08-07 — a real
+  `recommend_position` on `CVE-2007-4559` / `python3-ply 3.9-9.el8`.)_
+  The model returned `affected` at **confidence 0.99** with this reasoning: *"The fixed versions for
+  this vulnerability are `0:0.1.7-16.module+el8.9.0+1418+f0d66789` and `0:0.10.1-2.module+…`… Since
+  the component version (3.9-9.el8) falls within the affected range (<`0:0.1.7-16…`), it is confirmed
+  to be vulnerable."* Neither version belongs to `python-ply`. They come from the **flat
+  `fixed_versions` union** across every package the CVE touches — precisely the hazard KN-FIX-1
+  fixed for the posture view and did **not** fix here.
+  **Cause:** `readapi`'s assessment DTO carries `fixed_versions []string` and has no `fixes` field, so
+  Governance's `FindingAssessment` projection — the Gateway's ONLY business read (T10) — ships the
+  union. The attributed data exists on the card and never reaches the model.
+  **Second consequence, same root: prompt bloat.** The assessment measured **9,788 bytes** carrying
+  **95 affected ranges + 94 fix versions**, nearly all irrelevant to this component. Inference for one
+  Finding went from **48.9s → ~100s** the same day, which is what pushed it past the 60s ceiling in
+  AI-TIMEOUT-1. Improving the knowledge base **degraded** the AI seam, because the projection hands
+  the Knowledge view over wholesale and nothing makes card size visible as an Intelligence cost.
+  **Fix:** carry `fixes` (package-attributed) into the projection and **select** only the entries
+  matching the Finding's component before rendering — 94 entries become ~3. That is EDR-TRUST-01 **T9
+  (Selection)** applied to grounding: choosing what evidence to put in front of the model is a design
+  decision, and "pass everything we hold" is a default that stops working as the data improves.
+  It fixes the correctness bug and the latency together.
+  **Note the constitutional layer held:** the output was recorded as `evidence=inferred`, barred from
+  auto-accept by T4, and TRUST-8 flagged `[UNVERIFIED MENTIONS]` for a release UUID the model invented.
+  A wrong answer stayed advisory — but a human reading a 0.99-confidence rationale citing a real-looking
+  version string is being actively misled. **Dep:** KN-FIX-1 (landed). **Scope:** MEDIUM. **P1** — this
+  is the AI seam producing confidently wrong security advice.
+
 - [ ] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.**
   _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three
   causes with opposite responses: AI disabled (config gap), provider unreachable/timed out (outage),
