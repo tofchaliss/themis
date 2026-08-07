@@ -1099,6 +1099,24 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [ ] **KN-FIX-2 — existing cards never gain package attribution; they heal only on re-upload.**
+  _(**Measured** on the VM 2026-08-07: `CVE-2021-44228`'s card reports `with_pkg: 0` of 80 fixes,
+  while `CVE-2007-4559` — whose release was re-uploaded after KN-FIX-1 — reports 89.)_
+  Only **OSV** and **Red Hat** attribute a fix to a package; **NVD** (CPE-keyed) and the scanner ACL
+  genuinely cannot, and correctly record `unattributedFixes`. OSV is queried during **correlation**,
+  which runs on **upload** — so a card whose releases are not re-uploaded keeps its pre-KN-FIX-1 flat
+  list indefinitely, and its FIX column stays `N unattributed` forever. Meanwhile the per-CVE NVD
+  backfill keeps appending *unattributed* fixes to it, so the ratio gets worse, not better.
+  Consequence: on a real deployment the feature appears not to work for most of the estate, because
+  most releases are uploaded once. Content-addressing makes it worse — a re-upload of identical bytes
+  **dedups** and does not re-correlate, so "just upload it again" is not a workaround without changing
+  the SBOM.
+  **Options:** (a) a one-off re-attribution sweep that re-queries OSV per carded component and folds
+  the attributed proposals (append-only, so it is additive and safe to re-run); (b) accept and document
+  that attribution arrives with the next genuinely-new SBOM. **(a) is preferable** — it is the same
+  shape as the existing `BackfillService` and needs no new concepts. **Dep:** KN-FIX-1 (landed).
+  **Scope:** MEDIUM.
+
 - [ ] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.**
   _(**Measured** on the VM 2026-08-07 — release `ee006ff7`, posture rows 2 and 3 — with the formula
   **read from code** in `internal/knowledge/domain/priority.go`.)_
