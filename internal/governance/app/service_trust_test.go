@@ -479,3 +479,111 @@ func TestRecommendPosition_BusinessVerification(t *testing.T) {
 		}
 	})
 }
+
+// --- AI-GROUND-1: fix SELECTION on the projection (EDR-TRUST-01 T9) --------------------
+
+// withComponent seeds a Finding carrying one matched component, including its source package.
+func findingWithComponent(t *testing.T, c domain.MatchedComponent) domain.Finding {
+	t.Helper()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2007-4559")
+	if _, err := f.AbsorbComponent(c); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	return f
+}
+
+// The exact failure measured on the VM 2026-08-07: a card holding 94 fix versions across every
+// package CVE-2007-4559 touches was handed WHOLE to the model, which then reasoned that
+// python3-ply 3.9-9.el8 was affected because it sorted below 0:0.1.7-16 — a version belonging to
+// another package — and returned that at confidence 0.99.
+//
+// The projection must hand over only python-ply's fix. The rpm component resolves through its
+// SOURCE name, which is the only key that joins python3-ply to python-ply.
+func TestGetFindingAssessment_SelectsOnlyThisComponentsFixes(t *testing.T) {
+	repo := newRepo()
+	repo.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/python3-ply@3.9-9.el8", Name: "python3-ply",
+		Version: "3.9-9.el8", Ecosystem: "rpm", Source: "python-ply",
+	}))
+	known := app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2007-4559",
+		FixedVersions: []string{"0:0.1.7-16.module+el8.9.0", "0:3.11-10.module+el8.9.0", "0:5.4.1-1"},
+		Fixes: []app.FixedVersion{
+			{Package: "Cython", Version: "0:0.1.7-16.module+el8.9.0"},
+			{Package: "python-ply", Version: "0:3.11-10.module+el8.9.0"},
+			{Package: "PyYAML", Version: "0:5.4.1-1"},
+		},
+	}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(got.Knowledge.FixedVersions) != 1 || got.Knowledge.FixedVersions[0] != "0:3.11-10.module+el8.9.0" {
+		t.Errorf("fixed_versions = %v, want only python-ply's — another package's version is what produced a confidently wrong recommendation", got.Knowledge.FixedVersions)
+	}
+	if got.Knowledge.UnattributedFixes != 2 {
+		t.Errorf("unattributed = %d, want 2 (Cython + PyYAML)", got.Knowledge.UnattributedFixes)
+	}
+}
+
+// Maven publishes as groupId:artifactId while the PURL splits them with a slash, so the
+// namespace key is what joins pkg:maven/org.eclipse.jetty/jetty-http to its published fix.
+func TestGetFindingAssessment_MatchesMavenByNamespace(t *testing.T) {
+	repo := newRepo()
+	repo.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:maven/org.eclipse.jetty/jetty-http@12.0.27", Name: "jetty-http",
+		Version: "12.0.27", Ecosystem: "maven",
+	}))
+	known := app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2007-4559",
+		Fixes: []app.FixedVersion{
+			{Package: "org.eclipse.jetty:jetty-http", Version: "12.0.28"},
+			{Package: "org.apache.logging.log4j:log4j-core", Version: "2.17.1"},
+		},
+	}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got, _ := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if len(got.Knowledge.FixedVersions) != 1 || got.Knowledge.FixedVersions[0] != "12.0.28" {
+		t.Errorf("fixed_versions = %v, want jetty's 12.0.28", got.Knowledge.FixedVersions)
+	}
+}
+
+// The honest-absence contract. When no fix can be attributed to this component the list is
+// EMPTY and the count is reported — never the union. An empty list plus "94 unattributable"
+// leads a consumer to `insufficient`; the union leads it to a confident wrong answer.
+func TestGetFindingAssessment_ReportsRatherThanGuessesWhenNothingMatches(t *testing.T) {
+	repo := newRepo()
+	repo.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/somepkg@1.0", Name: "somepkg", Version: "1.0", Ecosystem: "rpm",
+	}))
+
+	t.Run("attributed fixes exist but none is ours", func(t *testing.T) {
+		known := app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2007-4559",
+			FixedVersions: []string{"1.2.3", "4.5.6"},
+			Fixes:         []app.FixedVersion{{Package: "other", Version: "1.2.3"}, {Package: "another", Version: "4.5.6"}}}
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+		got, _ := read.GetFindingAssessment(context.Background(), "fnd-1")
+		if len(got.Knowledge.FixedVersions) != 0 {
+			t.Errorf("fixed_versions = %v, want empty — passing another package's fix is the defect", got.Knowledge.FixedVersions)
+		}
+		if got.Knowledge.UnattributedFixes != 2 {
+			t.Errorf("unattributed = %d, want 2 so a consumer can tell this from 'no fix published'", got.Knowledge.UnattributedFixes)
+		}
+	})
+
+	// A pre-KN-FIX-1 card, or one enriched only by sources that cannot attribute (NVD keys on
+	// CPE, scanners report bare versions). The union must still not be passed on.
+	t.Run("card carries no attribution at all", func(t *testing.T) {
+		known := app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2007-4559",
+			FixedVersions: []string{"1.2.3", "4.5.6", "7.8.9"}}
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+		got, _ := read.GetFindingAssessment(context.Background(), "fnd-1")
+		if len(got.Knowledge.FixedVersions) != 0 {
+			t.Errorf("fixed_versions = %v, want empty", got.Knowledge.FixedVersions)
+		}
+		if got.Knowledge.UnattributedFixes != 3 {
+			t.Errorf("unattributed = %d, want 3", got.Knowledge.UnattributedFixes)
+		}
+	})
+}

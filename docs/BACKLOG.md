@@ -1125,8 +1125,8 @@ three angles, and two of them proposed fixes that would not have worked.
   **Left open (see AI-204-1):** the 204 collapses *disabled*, *unreachable* and *declined* into one
   status, which is why this looked like the AI declining rather than a timeout.
 
-- [ ] **AI-GROUND-1 — the AI is grounded on the cross-package fix union KN-FIX-1 removed from the
-  display, and reasons from another package's version.** _(**Measured** on the VM 2026-08-07 — a real
+- [x] **AI-GROUND-1 — the AI is grounded on the cross-package fix union KN-FIX-1 removed from the
+  display, and reasons from another package's version.** ✅ **CLOSED 2026-08-07.** _(**Measured** on the VM 2026-08-07 — a real
   `recommend_position` on `CVE-2007-4559` / `python3-ply 3.9-9.el8`.)_
   The model returned `affected` at **confidence 0.99** with this reasoning: *"The fixed versions for
   this vulnerability are `0:0.1.7-16.module+el8.9.0+1418+f0d66789` and `0:0.10.1-2.module+…`… Since
@@ -1152,6 +1152,25 @@ three angles, and two of them proposed fixes that would not have worked.
   A wrong answer stayed advisory — but a human reading a 0.99-confidence rationale citing a real-looking
   version string is being actively misled. **Dep:** KN-FIX-1 (landed). **Scope:** MEDIUM. **P1** — this
   is the AI seam producing confidently wrong security advice.
+  **✅ FIX (2026-08-07):** `source` now rides end-to-end — `knowledge.component_matched.v1` carries it
+  (additive/omitempty; it was already on the inventory component and was being dropped at the event
+  boundary), Governance persists it (`000006_component_source`), and `GetFindingAssessment` **selects**
+  the card's fixes down to the ones published for the Finding's own components before the projection
+  leaves Governance. Matching runs over `MatchedComponent.FixKeys()` — source package, then
+  `namespace:name` (Maven's groupId:artifactId), then bare name — because one component has several
+  names across naming authorities.
+  **Honest-absence contract:** when nothing matches, the fix list is left EMPTY and
+  `unattributed_fixes` reports the count. The prompt states it explicitly ("the record lists N fix
+  version(s), but for OTHER packages … do NOT compare this component's version against them"), so an
+  empty list cannot be read as "no fix exists" and the model is steered to `insufficient` rather than
+  to a confident wrong answer. Saying less beats saying something wrong when the output is a security
+  decision.
+  Guarded by `TestGetFindingAssessment_{SelectsOnlyThisComponentsFixes,MatchesMavenByNamespace,
+  ReportsRatherThanGuessesWhenNothingMatches}` + `TestMatchedComponentFixKeys` — all verified to FAIL
+  against the pass-the-union behaviour, reproducing the VM defect in the failure message.
+  **Also closes DASH-3** (the resolved fix is now on the Governance read surface: `fixes` +
+  `unattributed_fixes` on the assessment), and cuts the prompt from 94 fix versions to the handful
+  that apply, which is the latency half of AI-TIMEOUT-1.
 
 - [ ] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.**
   _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three

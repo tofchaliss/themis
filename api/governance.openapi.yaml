@@ -399,7 +399,26 @@ components:
           items: { type: string }
         fixed_versions:
           type: array
+          description: >-
+            Fix versions published for THIS Finding's components — selected from the card, not the
+            card's flat cross-package union (EDR-TRUST-01 T9). Empty when the card holds fixes that
+            cannot be attributed to this component; see unattributed_fixes.
           items: { type: string }
+        fixes:
+          type: array
+          description: The same selection with package attribution intact.
+          items:
+            type: object
+            properties:
+              package: { type: string }
+              version: { type: string }
+        unattributed_fixes:
+          type: integer
+          description: >-
+            How many of the card's fix versions could NOT be tied to this Finding's components.
+            Non-zero with an empty fixed_versions means "fixes exist but none is attributable
+            here" — materially different from "no fix published", and the two must not be
+            confused by a consumer.
         range_trust:
           type: string
           enum: [observed, asserted, inferred]

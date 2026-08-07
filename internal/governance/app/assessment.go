@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -18,10 +19,26 @@ type FaultlineKnowledge struct {
 	KEV            bool
 	ExploitPublic  bool
 	AffectedRanges []string
-	FixedVersions  []string
+	// FixedVersions holds the fixes that apply to THIS Finding's components — selected, not
+	// the card's flat union. See selectFixes.
+	FixedVersions []string
+	// Fixes is the same selection with its package attribution intact, so a consumer can say
+	// "upgrade python3-ply (source python-ply) to X" rather than emit a bare version string.
+	Fixes []FixedVersion
+	// UnattributedFixes counts fixes the card holds that could NOT be tied to this Finding's
+	// components. It is reported rather than silently dropped: "we hold 94 fix versions and
+	// none is attributable to your component" is a materially different statement from "no fix
+	// has been published", and a consumer must be able to tell them apart.
+	UnattributedFixes int
 	// RangeTrust is the trust class of the sources that contributed the ranges
 	// (EDR-TRUST-01 T2/T3), carried so a consumer knows what the range evidence is worth.
 	RangeTrust value.TrustClass
+}
+
+// FixedVersion is a published fix version together with the package it was published for.
+type FixedVersion struct {
+	Package string
+	Version string
 }
 
 // FaultlineKnowledgeReader reads a Faultline's enrichment from Knowledge's read API. It is a
@@ -66,7 +83,53 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 		return out, nil // no Knowledge seam wired (single-context dev)
 	}
 	if k, kerr := s.knowledge.GetFaultline(ctx, f.FaultlineID()); kerr == nil {
-		out.Knowledge = k
+		out.Knowledge = selectFixes(k, f.Components())
 	}
 	return out, nil
+}
+
+// selectFixes narrows a card's fix versions to the ones published for THIS Finding's components
+// (EDR-TRUST-01 T9 — Selection), and is the correctness half of AI-GROUND-1.
+//
+// A Faultline card is enterprise-wide: one card per CVE, carrying every package that CVE touches.
+// CVE-2007-4559's card holds 94 fix versions across Cython, PyYAML, numpy and dozens more. A
+// Finding is component-scoped, so handing it the whole union does not merely add noise — it
+// invites a false conclusion. Measured on a live model: given the union, a recommendation
+// reasoned that `python3-ply 3.9-9.el8` was affected because it sorted below
+// `0:0.1.7-16.module+el8.9.0`, a version belonging to an entirely different package, and returned
+// that at confidence 0.99.
+//
+// Matching runs over MatchedComponent.FixKeys() — source package, then namespace:name, then bare
+// name — because one component has several names across naming authorities.
+//
+// When nothing matches, the fix list is left EMPTY and the count is reported instead. That is a
+// deliberate choice to say less: an empty list with "94 unattributable" is honest and leads a
+// consumer (or a model) to `insufficient`, whereas the union leads it to a confident wrong answer.
+// Fewer facts beat wrong ones when the output is a security decision.
+func selectFixes(k FaultlineKnowledge, comps []domain.MatchedComponent) FaultlineKnowledge {
+	if len(k.Fixes) == 0 {
+		// The card carries no attributed fixes at all (an older card, or sources that cannot
+		// attribute — NVD keys on CPE, scanners report bare versions). Report the union's size
+		// rather than passing the union on.
+		k.UnattributedFixes = len(k.FixedVersions)
+		k.FixedVersions = nil
+		return k
+	}
+	wanted := make(map[string]bool)
+	for _, c := range comps {
+		for _, key := range c.FixKeys() {
+			wanted[strings.ToLower(key)] = true
+		}
+	}
+	mine := make([]FixedVersion, 0, len(k.Fixes))
+	versions := make([]string, 0, len(k.Fixes))
+	for _, f := range k.Fixes {
+		if wanted[strings.ToLower(f.Package)] {
+			mine = append(mine, f)
+			versions = append(versions, f.Version)
+		}
+	}
+	k.UnattributedFixes = len(k.Fixes) - len(mine)
+	k.Fixes, k.FixedVersions = mine, versions
+	return k
 }

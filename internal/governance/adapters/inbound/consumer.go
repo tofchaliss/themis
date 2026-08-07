@@ -102,12 +102,17 @@ type componentDTO struct {
 	Name      string `json:"Name"`
 	Version   string `json:"Version"`
 	Ecosystem string `json:"Ecosystem"`
+	// Source is the upstream source-package name for distro components (AI-GROUND-1). Absent
+	// on payloads predating the field, which leaves selection to the name/namespace keys.
+	Source string `json:"Source"`
 }
 
 func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 	comps := make([]domain.MatchedComponent, 0, len(d.Components))
 	for _, c := range d.Components {
-		comps = append(comps, domain.MatchedComponent{PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem})
+		comps = append(comps, domain.MatchedComponent{
+			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+		})
 	}
 	return app.InboundComponentMatched{FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Score: d.Score, Components: comps}
 }

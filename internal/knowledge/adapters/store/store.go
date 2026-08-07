@@ -275,7 +275,13 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 
 	event := domain.ComponentMatched{
 		FaultlineID: m.FaultlineID, CVE: m.CVE, ReleaseID: m.ReleaseID,
-		Components: []domain.MatchedComponent{{PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version, Ecosystem: m.Component.Ecosystem}},
+		// Source rides along (AI-GROUND-1): it is already on the inventory component and was
+		// being dropped here, which left every downstream consumer unable to tell which of a
+		// card's fix versions belongs to this component.
+		Components: []domain.MatchedComponent{{
+			PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version,
+			Ecosystem: m.Component.Ecosystem, Source: m.Component.Source,
+		}},
 		Score:      m.Score,
 		OccurredAt: m.OccurredAt.UTC(),
 	}

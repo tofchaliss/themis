@@ -112,7 +112,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
 	rows, err := s.querier(ctx).Query(ctx,
-		`SELECT purl, name, version, ecosystem FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
+		`SELECT purl, name, version, ecosystem, source FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	var out []domain.MatchedComponent
 	for rows.Next() {
 		var c domain.MatchedComponent
-		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem); err != nil {
+		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -268,9 +268,11 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding) error {
 	for _, c := range f.Components() {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem)
-			VALUES ($1,$2,$3,$4,$5) ON CONFLICT (finding_id, purl) DO NOTHING`,
-			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem); err != nil {
+			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem, source)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (finding_id, purl) DO UPDATE SET source = EXCLUDED.source
+			WHERE finding_components.source = '' AND EXCLUDED.source <> ''`,
+			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem, c.Source); err != nil {
 			return err
 		}
 	}

@@ -17,15 +17,23 @@ type FindingView struct {
 // enrichment (D5, decoded from Knowledge's FaultlineView/EnterpriseView JSON) — the
 // core risk signal grounding a recommendation.
 type FaultlineView struct {
-	ID             string
-	CVE            string
-	Severity       string
-	CVSSScore      float64
-	EPSS           float64
-	KEV            bool
-	ExploitPublic  bool
-	FixedVersions  []string
-	AffectedRanges []string
+	ID            string
+	CVE           string
+	Severity      string
+	CVSSScore     float64
+	EPSS          float64
+	KEV           bool
+	ExploitPublic bool
+	// FixedVersions are the fixes published for THIS finding's components, already SELECTED by
+	// Governance (EDR-TRUST-01 T9). They are NOT the card's cross-package union: given the union
+	// a model reasoned that python3-ply 3.9 was affected because it sorted below another
+	// package's 0:0.1.7-16, at confidence 0.99 (AI-GROUND-1).
+	FixedVersions []string
+	// UnattributedFixes counts fixes the card holds that could not be tied to this component.
+	// Surfaced to the model so an empty fix list is not read as "no fix exists" — the honest
+	// reading is "a fix may exist but we cannot say which", which argues for `insufficient`.
+	UnattributedFixes int
+	AffectedRanges    []string
 }
 
 // FixAvailable reports whether the Faultline has any known fixed version.

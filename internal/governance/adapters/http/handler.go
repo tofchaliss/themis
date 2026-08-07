@@ -75,6 +75,22 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
 		AffectedRanges: &ranges, FixedVersions: &fixes,
 	}
+	// The package-attributed selection and the count of what could not be attributed
+	// (AI-GROUND-1). Both ride out so a consumer can distinguish "no fix published" from
+	// "fixes exist but none of them is yours".
+	attributed := make([]struct {
+		Package *string `json:"package,omitempty"`
+		Version *string `json:"version,omitempty"`
+	}, 0, len(k.Fixes))
+	for _, f := range k.Fixes {
+		pkg, ver := f.Package, f.Version
+		attributed = append(attributed, struct {
+			Package *string `json:"package,omitempty"`
+			Version *string `json:"version,omitempty"`
+		}{Package: &pkg, Version: &ver})
+	}
+	unattributed := k.UnattributedFixes
+	kn.Fixes, kn.UnattributedFixes = &attributed, &unattributed
 	if k.RangeTrust != "" {
 		rt := gen.FaultlineKnowledgeRangeTrust(k.RangeTrust)
 		kn.RangeTrust = &rt

@@ -14,7 +14,7 @@ affected by a specific vulnerability, and explain why.
 - epss: {{.Faultline.EPSS}}
 - known_exploited (KEV): {{.Faultline.KEV}}
 - public_exploit: {{.Faultline.ExploitPublic}}
-- fixed_versions: {{range .Faultline.FixedVersions}}{{.}} {{end}}
+- fixed_versions (published for THIS finding's components only): {{range .Faultline.FixedVersions}}{{.}} {{end}}{{if and (eq (len .Faultline.FixedVersions) 0) (gt .Faultline.UnattributedFixes 0)}}none attributable — the vulnerability record lists {{.Faultline.UnattributedFixes}} fix version(s), but for OTHER packages, so no fix version is known for this component. Do NOT compare this component's version against them.{{end}}
 - affected_ranges: {{range .Faultline.AffectedRanges}}{{.}} {{end}}
 {{if .Precedents}}
 ## Prior enterprise decisions on this or similar findings (consider for consistency, do not blindly copy — a different CVE may not be comparable)

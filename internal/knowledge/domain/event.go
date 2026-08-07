@@ -88,6 +88,19 @@ type MatchedComponent struct {
 	Name      string
 	Version   string
 	Ecosystem string
+	// Source is the upstream SOURCE-package name for distro components (python3-pyyaml →
+	// PyYAML); "" for non-distro, where the binary name is the only name.
+	//
+	// It rides the wire because it is the ONLY key that joins a component to its published fix:
+	// vulnerability feeds attribute fixes to the source package, a PURL carries the binary one,
+	// and `python3-pyyaml → PyYAML` follows no derivable rule. Without it a consumer holding a
+	// Finding can only compare against the flat cross-package union — which is how a
+	// recommendation came to cite another package's version as this component's fix
+	// (AI-GROUND-1).
+	//
+	// Additive and optional (omitempty): a pre-change payload stays byte-identical and an older
+	// consumer ignores it (EVENTBUS D9 — no schema version bump).
+	Source string `json:"Source,omitempty"`
 }
 
 // ComponentMatched is the correlation output (D3/D8): a release's component matches a

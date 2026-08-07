@@ -48,15 +48,16 @@ type assessmentResponse struct {
 		} `json:"components"`
 	} `json:"finding"`
 	Knowledge struct {
-		FaultlineID    string   `json:"faultline_id"`
-		CVE            string   `json:"cve"`
-		Severity       string   `json:"severity"`
-		CVSSScore      float64  `json:"cvss_score"`
-		EPSS           float64  `json:"epss"`
-		KEV            bool     `json:"kev"`
-		ExploitPublic  bool     `json:"exploit_public"`
-		AffectedRanges []string `json:"affected_ranges"`
-		FixedVersions  []string `json:"fixed_versions"`
+		FaultlineID       string   `json:"faultline_id"`
+		CVE               string   `json:"cve"`
+		Severity          string   `json:"severity"`
+		CVSSScore         float64  `json:"cvss_score"`
+		EPSS              float64  `json:"epss"`
+		KEV               bool     `json:"kev"`
+		ExploitPublic     bool     `json:"exploit_public"`
+		AffectedRanges    []string `json:"affected_ranges"`
+		FixedVersions     []string `json:"fixed_versions"`
+		UnattributedFixes int      `json:"unattributed_fixes"`
 	} `json:"knowledge"`
 }
 
@@ -94,9 +95,10 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 			ID: body.Knowledge.FaultlineID, CVE: body.Knowledge.CVE,
 			Severity: body.Knowledge.Severity, CVSSScore: body.Knowledge.CVSSScore,
 			EPSS: body.Knowledge.EPSS, KEV: body.Knowledge.KEV,
-			ExploitPublic:  body.Knowledge.ExploitPublic,
-			AffectedRanges: body.Knowledge.AffectedRanges,
-			FixedVersions:  body.Knowledge.FixedVersions,
+			ExploitPublic:     body.Knowledge.ExploitPublic,
+			AffectedRanges:    body.Knowledge.AffectedRanges,
+			FixedVersions:     body.Knowledge.FixedVersions,
+			UnattributedFixes: body.Knowledge.UnattributedFixes,
 		},
 	}, nil
 }

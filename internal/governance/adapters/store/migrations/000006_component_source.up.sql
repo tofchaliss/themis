@@ -1,0 +1,11 @@
+-- The upstream SOURCE-package name for a matched component (AI-GROUND-1).
+--
+-- Vulnerability feeds attribute a fix to the SOURCE package (PyYAML), while a PURL carries the
+-- BINARY one (python3-pyyaml). Neither is derivable from the other, so without this column a
+-- consumer holding a Finding can only compare its component against the flat cross-package union
+-- of every fix on the card — which is how a recommendation came to cite an unrelated package's
+-- version as this component's fix.
+--
+-- Additive and nullable-by-default: existing rows keep '' and behave exactly as before (no
+-- source-key match, so selection falls back to the name/namespace keys).
+ALTER TABLE finding_components ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';

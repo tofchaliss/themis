@@ -45,7 +45,15 @@ type faultlineResponse struct {
 		ExploitPublic  bool     `json:"exploit_public"`
 		AffectedRanges []string `json:"affected_ranges"`
 		FixedVersions  []string `json:"fixed_versions"`
-		RangeTrust     string   `json:"range_trust"`
+		// Fixes is the PACKAGE-ATTRIBUTED form of the same data (KN-FIX-1). `fixed_versions`
+		// is a flat union across every package the CVE affects, so it cannot answer "what do I
+		// upgrade THIS component to" — reading it produced a recommendation citing another
+		// package's version (AI-GROUND-1).
+		Fixes []struct {
+			Package string `json:"package"`
+			Version string `json:"version"`
+		} `json:"fixes"`
+		RangeTrust string `json:"range_trust"`
 	} `json:"view"`
 }
 
@@ -68,6 +76,10 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return app.FaultlineKnowledge{}, err
 	}
+	fixes := make([]app.FixedVersion, 0, len(body.View.Fixes))
+	for _, f := range body.View.Fixes {
+		fixes = append(fixes, app.FixedVersion{Package: f.Package, Version: f.Version})
+	}
 	return app.FaultlineKnowledge{
 		FaultlineID:    body.ID,
 		CVE:            body.CVE,
@@ -78,6 +90,7 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 		ExploitPublic:  body.View.ExploitPublic,
 		AffectedRanges: body.View.AffectedRanges,
 		FixedVersions:  body.View.FixedVersions,
+		Fixes:          fixes,
 		RangeTrust:     value.TrustClass(body.View.RangeTrust),
 	}, nil
 }
