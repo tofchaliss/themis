@@ -45,13 +45,29 @@ type FindingService struct {
 	clock    Clock
 	policies []domain.PolicyRule
 	advisor  PositionAdvisor // optional AI seam (nil = AI disabled); set via WithAdvisor
+	// epssDriftThreshold is the EPSS rise that re-surfaces a suppressed Finding (GOV-14b).
+	// Zero means the domain default; the constructor seeds it so a zero value can never be
+	// mistaken for "re-surface on any change".
+	epssDriftThreshold float64
+}
+
+// WithEPSSDriftThreshold overrides the EPSS rise that counts as material drift
+// (THEMIS_EPSS_DRIFT_THRESHOLD) and returns the service for chaining. An out-of-range value falls
+// back to the domain default inside DetectDispositionDrift — a misconfigured knob must not silently
+// disable the safety net under a live suppression mechanism.
+func (s *FindingService) WithEPSSDriftThreshold(t float64) *FindingService {
+	s.epssDriftThreshold = t
+	return s
 }
 
 // NewFindingService wires the use-case ports and the Governance-owned auto-accept policies
 // (D11). A nil/empty policy set means no proposal is ever auto-accepted (all decisions are
 // human).
 func NewFindingService(repo Repository, ids IDGenerator, clock Clock, policies ...domain.PolicyRule) *FindingService {
-	return &FindingService{repo: repo, ids: ids, clock: clock, policies: policies}
+	return &FindingService{
+		repo: repo, ids: ids, clock: clock, policies: policies,
+		epssDriftThreshold: domain.DefaultEPSSDriftThreshold,
+	}
 }
 
 // WithAdvisor sets the optional Intelligence seam and returns the service for chaining.
@@ -219,6 +235,9 @@ type EnrichmentSignal struct {
 	// Only meaningful when Withdrawn.
 	WithdrawnTrust value.TrustClass
 	Score          int // CVE-intrinsic base priority 0–100 (C6); materialized onto the Findings.
+	// Signals is the current exploitability picture, compared against what a suppressing decision
+	// was taken with to detect drift (GOV-14b).
+	Signals domain.ExploitSignals
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D4). A
 	// not_affected statement whose package matches a Finding's component raises a system
 	// not_affected Proposal on that Finding (policy/human accepts — never auto-suppress).
@@ -330,6 +349,20 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 		if err := s.repo.SetBaseScore(ctx, sig.FaultlineID, sig.Score); err != nil {
 			return err
 		}
+		// The premise any LATER decision will record (GOV-14b). Written on every enrichment so a
+		// human accepting a risk tomorrow records what was true today, not what was true when the
+		// Finding opened.
+		if err := s.repo.SetSignals(ctx, sig.FaultlineID, sig.Signals); err != nil {
+			return err
+		}
+	}
+	// Disposition watch (GOV-14b / D14): re-surface any SUPPRESSED Finding whose premise has
+	// drifted. This is the safety net under `residual_priority` — zeroing a not_affected or
+	// accepted_risk Finding removes it from the queue, which is only safe if something brings it
+	// back when the world changes. Runs before the proposal pass and independently of it: a
+	// suppressed Finding raises no re-prioritize proposal, so without this it is never revisited.
+	if err := s.watchDispositions(ctx, sig); err != nil {
+		return err
 	}
 	// Severity / withdrawn re-prioritization: one system proposal per Finding of the Faultline.
 	if stance, rationale, raise := proposalFor(sig); raise {
@@ -663,3 +696,62 @@ func requireDecider(a domain.Actor) error {
 func resolvedEvent(f domain.Finding, at time.Time) any { return domain.NewFindingResolved(f, at) }
 func reopenedEvent(f domain.Finding, at time.Time) any { return domain.NewFindingReopened(f, at) }
 func archivedEvent(f domain.Finding, at time.Time) any { return domain.NewFindingArchived(f, at) }
+
+// watchDispositions emits a disposition-stale fact for every suppressed Finding on this Faultline
+// whose decision premise has drifted (GOV-14b).
+//
+// It NEVER changes the Position (D6/D11). The decision stands until a human or a governed policy
+// revises it; what this does is put the Finding back in front of someone. That separation is the
+// whole design: automatic re-opening of a governed decision would be exactly the auto-deciding the
+// context forbids, while leaving a suppression permanent makes `residual_priority` unsafe.
+//
+// Skipped entirely for a withdrawal, where the CVE has been retired upstream: re-surfacing a
+// Finding because its dead CVE's stale EPSS moved would be noise.
+func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSignal) error {
+	if sig.Withdrawn {
+		return nil
+	}
+	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		// READ first, write only on actual drift. Going straight to mutate would take the write
+		// path for every Finding on every enrichment — the overwhelmingly common case is "nothing
+		// suppressed, nothing moved", and that must cost a read, not a transaction and a version
+		// bump.
+		f, err := s.repo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		pos, ok := f.CurrentPosition()
+		if !ok || !domain.SuppressesTriage(pos.Stance()) {
+			continue // nothing suppressed here — not this watcher's business
+		}
+		drift := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
+		if !drift.Material() {
+			continue
+		}
+		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
+			// Re-checked inside the transaction: between the read above and this write the Position
+			// may have been revised, and re-surfacing a decision somebody has just re-taken would
+			// send them back to a queue they had already emptied.
+			pos, ok := f.CurrentPosition()
+			if !ok || !domain.SuppressesTriage(pos.Stance()) {
+				return nil, nil
+			}
+			d := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
+			if !d.Material() {
+				return nil, nil
+			}
+			return []OutboxNote{{
+				EventType:  EventDispositionStale,
+				Event:      domain.NewDispositionStale(*f, pos, d.Reason(), now),
+				OccurredAt: now,
+			}}, nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

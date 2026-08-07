@@ -9,6 +9,10 @@ import (
 // Deterministic exploitability priority levels (Layer-1, first-match), ported from the v0.3.x
 // monolith. These are CVE-INTRINSIC — the release-scoped blast multiplier and any VEX-state
 // modifier are deliberately NOT applied on the Faultline (they are Governance concerns).
+// nearCertainEPSS is the exploitation probability at which a CVE is treated as "already being
+// exploited" rather than merely likely — far above `elevated`'s 0.5, which covers elevated risk.
+const nearCertainEPSS = 0.9
+
 const (
 	PriorityCritical      = "critical"
 	PriorityHighPlus      = "high+"
@@ -46,7 +50,7 @@ func (v EnterpriseView) Priority() string {
 	//
 	// KEV remains stronger regardless: it is a CONFIRMED exploitation record where EPSS is a
 	// prediction, so the KEV arms above match first and this one cannot overtake them.
-	case v.EPSS >= 0.9 && c < 7:
+	case v.EPSS >= nearCertainEPSS && c < 7:
 		return PriorityHigh
 	case v.EPSS >= 0.5 && c >= 7 && !v.KEV && !v.ExploitPublic:
 		return PriorityElevated
@@ -64,6 +68,29 @@ func (v EnterpriseView) Score() int {
 	if v.Priority() == PriorityCritical {
 		return 100
 	}
+	// The score must not CONTRADICT the band (KN-EPSS-BAND-1 (b), decided 2026-08-07): anything the
+	// band calls `high` or `high+` scores at least the high baseline.
+	//
+	// The band is EXPLOITABILITY priority and the score is severity-led, so the two can disagree
+	// about the same CVE. Measured: CVE-2021-45105 (CVSS 5.9, EPSS 99.999%) banded `high` and
+	// scored 52, below a plain high at 70. Worse, and found while testing this: a **KEV-listed**
+	// low-CVSS CVE bands `high` — CONFIRMED active exploitation — and scored **25**, which puts it
+	// near the bottom of a triage queue sorted by score.
+	//
+	// The decision was NOT to let likelihood outrank severity in general; the 30% lift stands and
+	// impact still orders WITHIN a band. What is forbidden is a CVE scoring beneath the band it was
+	// just assigned, because two artefacts describing one CVE must not tell a reader opposite
+	// things. A floor does that without re-ranking anything the band did not already re-label.
+	if b := v.Priority(); b == PriorityHigh || b == PriorityHighPlus {
+		if base, computed := severityBaseline(value.SeverityHigh), v.scoreFromSeverity(); computed < base {
+			return base
+		}
+	}
+	return v.scoreFromSeverity()
+}
+
+// scoreFromSeverity is the severity-baseline computation, lifted by EPSS and KEV.
+func (v EnterpriseView) scoreFromSeverity() int {
 	base := severityBaseline(v.effectiveSeverity())
 	if base == 0 {
 		switch {

@@ -15,6 +15,7 @@ import (
 // --- fakes ---------------------------------------------------------------------------
 
 type fakeRepo struct {
+	lastSignals    domain.ExploitSignals
 	byID           map[domain.FindingID]domain.Finding
 	order          []domain.FindingID
 	saveCalls      int
@@ -22,10 +23,22 @@ type fakeRepo struct {
 	getByIDErr     error
 	getByKeyErr    error
 	byFaultlineErr error
-	saveErr        error
-	lastNotes      []app.OutboxNote
-	baseScores     map[string]int
-	setScoreErr    error
+	// byFaultlineCalls + byFaultlineErrOnCall fail a SPECIFIC call. ReactToEnrichment now walks
+	// the Faultline's Findings up to four times (disposition watch, re-prioritize, applicability,
+	// version-range), and a blanket error only ever exercises the first — the later three became
+	// unreachable the moment the watcher was added in front of them.
+	byFaultlineCalls     int
+	byFaultlineErrOnCall int
+	saveErr              error
+	lastNotes            []app.OutboxNote
+	baseScores           map[string]int
+	setScoreErr          error
+	setSignalsErr        error
+	// getByIDCalls + onGetByID let a test change what a SECOND read sees, so a re-check inside a
+	// transaction can be exercised — the disposition watcher reads, decides, then re-reads under
+	// the write, and that gap is where a Position can be revised beneath it.
+	getByIDCalls int
+	onGetByID    func(n int, f domain.Finding) domain.Finding
 }
 
 func (r *fakeRepo) SetBaseScore(_ context.Context, fl string, score int) error {
@@ -36,6 +49,24 @@ func (r *fakeRepo) SetBaseScore(_ context.Context, fl string, score int) error {
 		r.baseScores = map[string]int{}
 	}
 	r.baseScores[fl] = score
+	return nil
+}
+
+// SetSignals mirrors the real store: it APPLIES the picture to every Finding on the Faultline, so
+// a Position established afterwards snapshots it. A fake that only recorded the call would let the
+// disposition watcher pass its tests while never seeing a premise at all.
+func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
+	if r.setSignalsErr != nil {
+		return r.setSignalsErr
+	}
+	r.lastSignals = sig
+	for id, f := range r.byID {
+		if f.FaultlineID() != faultlineID {
+			continue
+		}
+		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+			f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version(), sig)
+	}
 	return nil
 }
 
@@ -61,6 +92,7 @@ func (r *fakeRepo) GetByKey(_ context.Context, rel, fl string) (domain.Finding, 
 }
 
 func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Finding, error) {
+	r.getByIDCalls++
 	if r.getByIDErr != nil {
 		return domain.Finding{}, r.getByIDErr
 	}
@@ -68,6 +100,11 @@ func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Findi
 	if !ok {
 		return domain.Finding{}, errors.New("not found")
 	}
+	if r.onGetByID != nil {
+		f = r.onGetByID(r.getByIDCalls, f)
+	}
+	// clone, ALWAYS: a returned aggregate must never alias the stored one, or a caller's in-flight
+	// mutation leaks back into the repo and optimistic-concurrency tests stop meaning anything.
 	return clone(f), nil
 }
 
@@ -79,6 +116,10 @@ func clone(f domain.Finding) domain.Finding {
 }
 
 func (r *fakeRepo) FindingsByFaultline(_ context.Context, fl string) ([]domain.FindingID, error) {
+	r.byFaultlineCalls++
+	if r.byFaultlineErrOnCall != 0 && r.byFaultlineCalls == r.byFaultlineErrOnCall {
+		return nil, errors.New("db down")
+	}
 	if r.byFaultlineErr != nil {
 		return nil, r.byFaultlineErr
 	}

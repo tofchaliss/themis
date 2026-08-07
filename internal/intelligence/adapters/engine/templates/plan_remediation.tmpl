@@ -7,12 +7,14 @@ release, explain what to fix first and why.
 
 ## Candidate upgrade actions (already grouped; highest impact first)
 Each action is ONE package upgrade that would close several findings at once. The grouping and the
-ordering are computed, not guesses — do not re-derive them.
+ordering are computed, not guesses — do not re-derive them. Ordering is by RISK REMOVED (the sum of
+what each step closes), which is why a step with many moderate findings can outrank one with a
+single severe finding.
 {{range $i, $a := .Release.PlanActions}}{{if lt $i 15}}
 {{add1 $i}}. upgrade {{join $a.Packages}}{{if gt (len $a.Packages) 1}}  <-- ONE unit: these ship together (a module stream); one update covers all of them{{end}}
    - ecosystem: {{$a.Ecosystem}}
    - installed: {{join $a.InstalledVersions}}
-   - closes {{len $a.FindingIDs}} finding(s), top priority {{$a.TopPriority}}
+   - closes {{len $a.FindingIDs}} finding(s); risk removed {{$a.RiskRemoved}}, worst item {{$a.TopPriority}}
    - cves (citable): {{join $a.CVEs}}
 {{end}}{{end}}
 ## Instructions

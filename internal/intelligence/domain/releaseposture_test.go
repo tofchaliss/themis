@@ -251,3 +251,129 @@ func TestPlanActions_DoesNotMergeOverlappingButUnequalCVESets(t *testing.T) {
 		}
 	}
 }
+
+// PLAN-2: the plan is ordered by RISK REMOVED, not by the single worst item.
+//
+// Measured on the VM: triage ordering put a step closing 6 findings above one closing 165. Triage
+// order answers "what is most dangerous?"; a plan is asked "what does this buy me?". The sum
+// weights every finding an action closes by how much of a problem it still is, and degenerates to
+// triage order when each action closes exactly one finding.
+func TestPlanActions_OrdersByRiskRemoved(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		// One severe finding: worst single item, but little total risk.
+		entry("f1", "CVE-1", 97, rpm("libsmbclient", "samba", "4.19")),
+		// Many moderate findings on one package: less severe individually, far more risk removed.
+		entry("f2", "CVE-2", 60, rpm("python3-ply", "python-ply", "3.9")),
+		entry("f3", "CVE-3", 60, rpm("python3-ply", "python-ply", "3.9")),
+		entry("f4", "CVE-4", 60, rpm("python3-ply", "python-ply", "3.9")),
+	}}
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2", len(got))
+	}
+	if got[0].Package != "python-ply" {
+		t.Errorf("first = %q (risk %d), want python-ply — 180 removed beats a single 97",
+			got[0].Package, got[0].RiskRemoved)
+	}
+	if got[0].RiskRemoved != 180 || got[0].TopPriority != 60 {
+		t.Errorf("action = %+v, want risk 180 and worst item 60", got[0])
+	}
+	// It still reports the single worst item, because "removes the most risk" and "contains the
+	// scariest thing" are both worth knowing and neither substitutes for the other.
+	if got[1].TopPriority != 97 {
+		t.Errorf("samba TopPriority = %d, want 97", got[1].TopPriority)
+	}
+}
+
+// A merged step's risk is the SUM of its members', so merging must happen BEFORE ordering —
+// otherwise the parts are ranked and the whole is silently promoted past its neighbours.
+func TestPlanActions_MergedStepIsOrderedByItsCombinedRisk(t *testing.T) {
+	c := func(name string) domain.PostureComponent {
+		return domain.PostureComponent{PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Ecosystem: "rpm", Source: name}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		// Two siblings, identical CVE set: 50 + 50 = 100 once merged.
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 50, Components: []domain.PostureComponent{c("httpd")}},
+		{FindingID: "f2", CVE: "CVE-1", ResidualPriority: 50, Components: []domain.PostureComponent{c("mod_http2")}},
+		// A standalone action that beats either sibling alone (60) but not their sum.
+		{FindingID: "f3", CVE: "CVE-9", ResidualPriority: 60, Components: []domain.PostureComponent{c("glibc")}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2", len(got))
+	}
+	if len(got[0].Packages) != 2 || got[0].RiskRemoved != 100 {
+		t.Errorf("first = %+v, want the merged httpd+mod_http2 step at risk 100", got[0])
+	}
+}
+
+// The full tiebreak ladder. Ordering must be TOTAL: any two actions have a defined order, so the
+// same posture always yields the same plan and a diff between runs means the data changed.
+func TestPlanActions_TiebreakLadder(t *testing.T) {
+	c := func(name string) domain.PostureComponent {
+		return domain.PostureComponent{PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Ecosystem: "rpm", Source: name}
+	}
+	mk := func(pkg string, prios ...int) []domain.PostureEntry {
+		var out []domain.PostureEntry
+		for i, pr := range prios {
+			out = append(out, domain.PostureEntry{
+				FindingID: pkg + string(rune('a'+i)), CVE: pkg + "-CVE-" + string(rune('a'+i)),
+				ResidualPriority: pr, Components: []domain.PostureComponent{c(pkg)},
+			})
+		}
+		return out
+	}
+
+	t.Run("equal risk falls through to the single worst item", func(t *testing.T) {
+		var e []domain.PostureEntry
+		e = append(e, mk("spread", 50, 50)...) // risk 100, worst 50
+		e = append(e, mk("sharp", 100)...)     // risk 100, worst 100
+		got := domain.ReleasePosture{ReleaseID: "r", Entries: e}.PlanActions()
+		if got[0].Package != "sharp" {
+			t.Errorf("first = %q, want sharp — same risk, but it contains the worse single item", got[0].Package)
+		}
+	})
+
+	t.Run("equal risk and worst item falls through to findings closed", func(t *testing.T) {
+		var e []domain.PostureEntry
+		e = append(e, mk("two", 50, 50)...)       // risk 100, worst 50, 2 findings
+		e = append(e, mk("three", 50, 25, 25)...) // risk 100, worst 50, 3 findings
+		got := domain.ReleasePosture{ReleaseID: "r", Entries: e}.PlanActions()
+		if got[0].Package != "three" {
+			t.Errorf("first = %q, want three — same risk and worst item, but it closes more", got[0].Package)
+		}
+	})
+
+	t.Run("wholly equal actions fall through to the package name", func(t *testing.T) {
+		var e []domain.PostureEntry
+		e = append(e, mk("zulu", 50)...)
+		e = append(e, mk("alpha", 50)...)
+		got := domain.ReleasePosture{ReleaseID: "r", Entries: e}.PlanActions()
+		if got[0].Package != "alpha" {
+			t.Errorf("first = %q, want alpha — identical on every measure, so name decides", got[0].Package)
+		}
+	})
+}
+
+// A merged step reports the worst item across ALL its members, not just the first one folded in.
+// Reporting the first would understate a merged step whose danger lives in a later sibling.
+func TestPlanActions_MergeCarriesTheWorstItemAcrossSiblings(t *testing.T) {
+	c := func(name string) domain.PostureComponent {
+		return domain.PostureComponent{PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Ecosystem: "rpm", Source: name}
+	}
+	// Identical CVE sets → merged. The SECOND sibling carries the worse finding.
+	p := domain.ReleasePosture{ReleaseID: "r", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 10, Components: []domain.PostureComponent{c("aaa")}},
+		{FindingID: "f2", CVE: "CVE-1", ResidualPriority: 90, Components: []domain.PostureComponent{c("zzz")}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 merged", len(got))
+	}
+	if got[0].TopPriority != 90 {
+		t.Errorf("TopPriority = %d, want 90 — the worst item is in the sibling folded in second", got[0].TopPriority)
+	}
+	if got[0].RiskRemoved != 100 {
+		t.Errorf("RiskRemoved = %d, want 100", got[0].RiskRemoved)
+	}
+}

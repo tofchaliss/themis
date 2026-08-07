@@ -38,6 +38,9 @@ type InboundFaultlineEnriched struct {
 	HeadlineTrust value.TrustClass
 	RangeTrust    value.TrustClass
 	SignalTrust   value.TrustClass
+	// EPSS is the reconciled exploitation probability, used to detect drift against a suppressing
+	// decision's premise (GOV-14b).
+	EPSS float64
 	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3).
 	AffectedRanges []string
 }
@@ -81,6 +84,7 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		RangeTrust:      e.RangeTrust,
 		SignalTrust:     e.SignalTrust,
 		AffectedRanges:  e.AffectedRanges,
+		Signals:         domain.ExploitSignals{KEV: e.KEV, ExploitPublic: e.ExploitPublic, EPSS: e.EPSS},
 	})
 }
 

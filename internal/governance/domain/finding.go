@@ -24,10 +24,15 @@ type Finding struct {
 	faultlineID string
 	cve         string // carried alias for thin events / reads (D8); the id is authoritative
 	components  []MatchedComponent
-	stage       Stage
-	proposals   []GovernanceProposal
-	positions   []Position
-	version     int
+	// signals is the CURRENT exploitability picture for this Finding's CVE, refreshed from each
+	// enrichment. It is denormalized onto the Finding for the same reason base_score is: a
+	// decision needs it at the moment it is taken, and reaching across to Knowledge then would
+	// make the record of WHY depend on a live read succeeding.
+	signals   ExploitSignals
+	stage     Stage
+	proposals []GovernanceProposal
+	positions []Position
+	version   int
 }
 
 // NewFinding opens a Finding for a (Release, Faultline) pair at stage Identified with no
@@ -54,7 +59,7 @@ func NewFinding(id FindingID, releaseID, faultlineID, cve string) (Finding, erro
 
 // ReconstituteFinding rebuilds a Finding from persisted state (store adapter). Persistence
 // is trusted; no re-validation is performed.
-func ReconstituteFinding(id FindingID, releaseID, faultlineID, cve string, components []MatchedComponent, stage Stage, proposals []GovernanceProposal, positions []Position, version int) Finding {
+func ReconstituteFinding(id FindingID, releaseID, faultlineID, cve string, components []MatchedComponent, stage Stage, proposals []GovernanceProposal, positions []Position, version int, signals ...ExploitSignals) Finding {
 	return Finding{
 		id:          id,
 		releaseID:   releaseID,
@@ -65,7 +70,19 @@ func ReconstituteFinding(id FindingID, releaseID, faultlineID, cve string, compo
 		proposals:   append([]GovernanceProposal(nil), proposals...),
 		positions:   append([]Position(nil), positions...),
 		version:     version,
+		// Variadic so every existing caller is untouched: a Finding rebuilt without signals reads
+		// as "nothing known", which is the CONSERVATIVE direction — any positive signal later
+		// looks like drift and re-surfaces the Finding, and a redundant review costs attention
+		// where a missed one costs a breach.
+		signals: firstSignal(signals),
 	}
+}
+
+func firstSignal(s []ExploitSignals) ExploitSignals {
+	if len(s) == 0 {
+		return ExploitSignals{}
+	}
+	return s[0]
 }
 
 // AbsorbComponent idempotently records a matched component as content (D5): a component
@@ -136,11 +153,14 @@ func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time) (Positio
 	}
 	f.proposals[idx].decide(StatusAccepted, by, at)
 	pos := Position{
-		version:       len(f.positions) + 1,
-		stance:        f.proposals[idx].stance,
-		rationale:     f.proposals[idx].rationale,
-		actor:         by,
-		inputs:        PositionInputs{AcceptedProposalID: id, FaultlineRef: f.faultlineID},
+		version:   len(f.positions) + 1,
+		stance:    f.proposals[idx].stance,
+		rationale: f.proposals[idx].rationale,
+		actor:     by,
+		// Snapshot the exploitability picture the decision is being taken WITH (GOV-14b). Taken
+		// from the Finding rather than passed in, so the human triage path records it exactly as
+		// the policy path does — a decision's premise must not depend on who took it.
+		inputs:        PositionInputs{AcceptedProposalID: id, FaultlineRef: f.faultlineID, DecidedWith: f.signals},
 		establishedAt: at.UTC(),
 	}
 	f.positions = append(f.positions, pos)
@@ -364,3 +384,12 @@ func (f Finding) CurrentReservation() (Reservation, bool) {
 	// be vouched for — reserve it rather than imply it was well-evidenced.
 	return Reservation{EvidenceTrust: value.TrustInferred}, true
 }
+
+// Signals returns the current exploitability picture recorded on this Finding (GOV-14b).
+func (f Finding) Signals() ExploitSignals { return f.signals }
+
+// RefreshSignals records the current exploitability picture. It is denormalized read-state, not a
+// decision: it bumps no version and emits nothing, exactly like the base score beside it. What
+// makes it matter is that AcceptProposal snapshots it, so every Position records the premise it
+// was taken on.
+func (f *Finding) RefreshSignals(s ExploitSignals) { f.signals = s }

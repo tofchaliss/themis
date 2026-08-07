@@ -70,6 +70,7 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 		{app.EventProposalRejected, domain.ProposalRejected{FindingID: "fnd-1", ProposalID: "p1", OccurredAt: now}},
 		{app.EventPositionEstablished, domain.PositionEstablished{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Version: 1, Stance: domain.StanceAffected, OccurredAt: now}},
 		{app.EventPositionRevised, domain.PositionRevised{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Version: 2, Stance: domain.StanceMitigated, OccurredAt: now}},
+		{app.EventDispositionStale, domain.DispositionStale{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceNotAffected), PositionVersion: 1, Reason: "a public exploit now exists for this CVE", OccurredAt: now}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {

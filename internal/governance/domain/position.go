@@ -9,6 +9,10 @@ import "time"
 type PositionInputs struct {
 	AcceptedProposalID ProposalID
 	FaultlineRef       string
+	// DecidedWith is the exploitability picture at the moment of the decision (GOV-14b). It is an
+	// INPUT to the decision, which is why it lives here rather than beside it: the watcher asks
+	// "has the premise moved?", and that is unanswerable from today's values alone.
+	DecidedWith ExploitSignals
 }
 
 // Position is one immutable version of an Enterprise Position — the authoritative,

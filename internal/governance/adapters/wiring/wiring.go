@@ -48,10 +48,17 @@ type Governance struct {
 // policies (D11).
 func Wire(
 	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
-	registryURL, knowledgeURL string, blastCap int, mitigatedWeight float64, policies ...domain.PolicyRule,
+	registryURL, knowledgeURL string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
+	policies ...domain.PolicyRule,
 ) Governance {
 	st := store.New(pool)
 	write := app.NewFindingService(st, idGen{}, sysClock{}, policies...)
+	// The disposition watcher's sensitivity (GOV-14b). An out-of-range value falls back to the
+	// domain default inside the rule — a misconfigured knob must not disable the safety net under
+	// a suppression mechanism that is already live.
+	if epssDriftThreshold > 0 {
+		write = write.WithEPSSDriftThreshold(epssDriftThreshold)
+	}
 	if advisor != nil {
 		write = write.WithAdvisor(advisor)
 	}

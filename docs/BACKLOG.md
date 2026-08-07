@@ -1238,7 +1238,15 @@ three angles, and two of them proposed fixes that would not have worked.
   The data is fine; only the presentation needs bounding, exactly as the FIX column did.
   **Dep:** none. **Scope:** SMALL.
 
-- [ ] **PLAN-2 — plan ordering is triage-ordering, and a remediation plan may want impact-ordering.**
+- [x] **PLAN-2 — plan ordering is triage-ordering, and a remediation plan may want impact-ordering.**
+  ✅ **DECIDED 2026-08-07: order by RISK REMOVED** — the SUM of residual priorities an action
+  closes — with the single worst item, findings-closed and package name as tiebreaks.
+  Neither obvious answer was right. `TopPriority` is triage order ("what is most dangerous?") and
+  put a step closing 6 findings above one closing 165; count alone ignores severity and promotes a
+  pile of trivia. The sum answers what a PLAN is actually asked — "what does this buy me?" — by
+  weighting each finding by how much of a problem it still is, and it degenerates to triage order
+  when every action closes exactly one finding. Merging now happens BEFORE ordering, since a merged
+  step's risk is the sum of its members'.
   _(**Measured** on the same run; **design question**, not a defect.)_ `PlanActions` sorts by
   `TopPriority` desc, then by findings-closed. The result: step 8 closes **165** findings, step 14
   (`openssh`) closes **40**, while step 3 (`samba`) closes **6** and sits near the top. Every number
@@ -1516,7 +1524,25 @@ three angles, and two of them proposed fixes that would not have worked.
   `internal/knowledge/adapters/feed/*`, `internal/kernel/value/rpmstream.go`,
   `internal/knowledge/app/correlate.go`. **Scope:** HIGH.
 
-- [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
+- [x] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
+  ✅ **CLOSED 2026-08-07 — the safety net under a live suppression mechanism now exists.**
+  `residual_priority` zeroed a not_affected / accepted_risk Finding from 2026-08-06, removing it
+  from the queue with nothing to bring it back. `domain.DetectDispositionDrift` compares the
+  exploitability picture a decision was TAKEN WITH against the picture now, and
+  `FindingService.watchDispositions` emits `governance.disposition_stale.v1` on material drift.
+  **It never changes the Position** (D6/D11) — it re-opens the QUESTION, so an acceptance does not
+  vanish, it EXPIRES when its premise changes.
+  **Deterministic rules:** a CVE entering KEV · a newly public exploit · EPSS rising by
+  `THEMIS_EPSS_DRIFT_THRESHOLD` (default 0.20, ABSOLUTE — a relative threshold fires constantly in
+  the noise near zero, where EPSS is least stable and a re-surfaced Finding least likely to be real).
+  **One-directional:** signals getting BETTER never re-open a suppression; re-surfacing a Finding
+  for getting safer trains people to ignore the signal.
+  **The premise had to be recorded to be compared.** `Finding.signals` is refreshed on every
+  enrichment (beside `base_score`, same denormalization and the same reason) and `AcceptProposal`
+  snapshots it into `PositionInputs.DecidedWith` — so the human triage path records it exactly as
+  the policy path does. Migration `000007_position_signals`. A pre-existing row reads as "decided
+  knowing nothing", which is CONSERVATIVE: any positive signal now looks like drift, and a redundant
+  review costs attention where a missed one costs a breach.
   _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
   half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —
   which is only **safe** because D14 pairs it with a watcher that re-surfaces the Finding when the premise

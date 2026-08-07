@@ -29,6 +29,12 @@ type FaultlineEnriched struct {
 	// Score is the CVE-intrinsic composite priority (0–100), snapshotted so Governance can
 	// apply its release-scoped blast multiplier without refetching the card (C6 → C2).
 	Score int
+	// EPSS is the reconciled exploitation probability (0.0–1.0). Carried so Governance can detect
+	// DRIFT against what a suppressing decision was taken with (GOV-14b) — KEV and ExploitPublic
+	// already ride here, and EPSS is the third signal D14 names. Additive/omitempty: a pre-change
+	// payload stays byte-identical and reads as 0, which is the conservative direction (any later
+	// rise looks like drift and re-surfaces the Finding).
+	EPSS float64 `json:"EPSS,omitempty"`
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D5) so Governance
 	// can raise a system not_affected Proposal on the affected Findings without fetching the card.
 	// Optional/additive (omitempty): a card with no vendor statement keeps the frozen v1 wire
@@ -134,6 +140,7 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		KEV:             v.KEV,
 		ExploitPublic:   v.ExploitPublic,
 		Score:           v.Score(),
+		EPSS:            v.EPSS,
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
 		AffectedRanges:  append([]string(nil), v.AffectedRanges...),
 		HeadlineTrust:   v.HeadlineTrust,

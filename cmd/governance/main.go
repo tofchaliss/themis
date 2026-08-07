@@ -49,11 +49,18 @@ type config struct {
 	// first, Governance hangs up, the Gateway sees its request context cancelled mid-provider-call
 	// and reports `provider_error` — so a caller-side timeout is misread as an Intelligence fault.
 	intelligenceTimeout time.Duration
-	registryURL         string  // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
-	knowledgeURL        string  // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
-	blastRadiusCap      int     // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
-	autoAccept          string  // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
-	mitigatedWeight     float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
+	registryURL         string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
+	knowledgeURL        string // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
+	blastRadiusCap      int    // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
+	autoAccept          string // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
+	// THEMIS_EPSS_DRIFT_THRESHOLD — the EPSS rise that re-surfaces a SUPPRESSED Finding
+	// (GOV-14b / D14). Default 0.20, ABSOLUTE not relative: 0.02 → 0.25 is a fringe CVE becoming
+	// a likely one, while 0.60 → 0.75 is the same story told louder. This is the safety net under
+	// `residual_priority` — zeroing a not_affected / accepted_risk Finding removes it from the
+	// queue, which is only safe because this brings it back when the premise moves. An
+	// out-of-range value falls back to the default; a misconfigured knob must not disable it.
+	epssDriftThreshold float64
+	mitigatedWeight    float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -78,6 +85,7 @@ func loadConfig() config {
 		blastRadiusCap:      envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
 		autoAccept:          envDefault("THEMIS_GOVERNANCE_AUTOACCEPT", autoAcceptObservedNotAffected),
 		mitigatedWeight:     envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
+		epssDriftThreshold:  envFloatDefault("THEMIS_EPSS_DRIFT_THRESHOLD", domain.DefaultEPSSDriftThreshold),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -134,7 +142,8 @@ func main() {
 	}
 
 	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL,
-		cfg.blastRadiusCap, cfg.mitigatedWeight, autoAcceptPolicies(cfg.autoAccept, logger)...)
+		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold,
+		autoAcceptPolicies(cfg.autoAccept, logger)...)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 

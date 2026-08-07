@@ -67,6 +67,7 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		}
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
+			EPSS:            dto.EPSS,
 			Applicabilities: apps,
 			AffectedRanges:  dto.AffectedRanges,
 			HeadlineTrust:   value.TrustClass(dto.HeadlineTrust),
@@ -124,6 +125,7 @@ type faultlineEnrichedDTO struct {
 	KEV             bool               `json:"KEV"`
 	ExploitPublic   bool               `json:"ExploitPublic"`
 	Score           int                `json:"Score"`           // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
+	EPSS            float64            `json:"EPSS"`            // exploitation probability, for disposition-drift detection (GOV-14b).
 	Applicabilities []applicabilityDTO `json:"Applicabilities"` // vendor VEX statements (EDR-VEX-01 D5); absent on an older payload.
 	// Per-field-group trust from Knowledge's reconciled view (EDR-TRUST-01 T2/T3). Empty
 	// on a payload predating the field — which is safe, because value.MaxTrust reads an

@@ -22,9 +22,10 @@ import (
 // --- fakes -----------------------------------------------------------------------------
 
 type fakeRepo struct {
-	byID  map[domain.FindingID]domain.Finding
-	order []domain.FindingID
-	err   error
+	lastSignals domain.ExploitSignals
+	byID        map[domain.FindingID]domain.Finding
+	order       []domain.FindingID
+	err         error
 }
 
 func newRepo() *fakeRepo { return &fakeRepo{byID: map[domain.FindingID]domain.Finding{}} }
@@ -65,6 +66,11 @@ func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Findi
 }
 
 func (r *fakeRepo) SetBaseScore(context.Context, string, int) error { return nil }
+
+func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
+	r.lastSignals = sig
+	return nil
+}
 
 func (r *fakeRepo) FindingsByFaultline(_ context.Context, fl string) ([]domain.FindingID, error) {
 	var out []domain.FindingID

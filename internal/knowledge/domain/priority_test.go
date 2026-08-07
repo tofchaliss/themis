@@ -42,8 +42,11 @@ func TestPriorityAndScore(t *testing.T) {
 		{"unknown sev no CVSS -> 0", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z}, PriorityInformational, 0},
 
 		// --- Score edges ---
-		{"KEV bump + clamp", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), EPSS: 0.9, KEV: true}, PriorityHigh, 100},           // 70 + 18.9 + 15 = 103.9 -> 100
-		{"unknown sev + KEV floor", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, KEV: true}, PriorityHigh, 65},                        // base 50 + 15
+		{"KEV bump + clamp", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), EPSS: 0.9, KEV: true}, PriorityHigh, 100}, // 70 + 18.9 + 15 = 103.9 -> 100
+		// Was 65 (base 50 + KEV 15). Now floored to the high baseline, because the band calls it
+		// `high` and a score beneath its own band tells a reader the opposite of the label
+		// (KN-EPSS-BAND-1 (b)).
+		{"unknown sev + KEV, floored to its band", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, KEV: true}, PriorityHigh, 70},
 		{"unknown sev + exploit floor", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, ExploitPublic: true}, PriorityInformational, 25}, // base 25
 		{"low baseline", EnterpriseView{Severity: value.SeverityLow, CVSS: cvss(t, 2.0)}, PriorityInformational, 10},
 	}
@@ -100,5 +103,74 @@ func TestPriority_NearCertainEPSSLiftsALowCVSSOutOfInformational(t *testing.T) {
 				t.Errorf("Priority() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// KN-EPSS-BAND-1 (b), decided 2026-08-07: the SCORE must not contradict the BAND.
+//
+// (a) made a near-certain-EPSS CVE band `high` however low its CVSS. The score still said 52,
+// below a 0%-EPSS `high` at 70 — one artefact saying "treat this as high", the other sorting it
+// beneath things it had just been declared equal to. The decision was NOT to let likelihood
+// outrank severity in general; it was to stop the two numbers disagreeing.
+func TestScore_DoesNotContradictTheBand(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view EnterpriseView
+		want int
+	}{
+		{
+			// The measured case: CVE-2021-45105, CVSS 5.9, EPSS 99.999%.
+			name: "a near-certain medium is floored at the high baseline",
+			view: EnterpriseView{Severity: value.SeverityMedium, EPSS: 0.99999},
+			want: 70,
+		},
+		{
+			// Below the near-certain threshold nothing changes: 40 + 40*0.6*0.3 = 47.
+			name: "an elevated-probability medium keeps its computed score",
+			view: EnterpriseView{Severity: value.SeverityMedium, EPSS: 0.6},
+			want: 47,
+		},
+		{
+			// The floor never LOWERS a score: a high with near-certain EPSS computes above 70.
+			name: "a high with near-certain EPSS keeps its lift",
+			view: EnterpriseView{Severity: value.SeverityHigh, EPSS: 0.99},
+			want: 91,
+		},
+		{
+			// Severity still dominates: a critical outranks any floored medium.
+			name: "a critical is unaffected",
+			view: EnterpriseView{Severity: value.SeverityCritical, EPSS: 0.0},
+			want: 90,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.view.Score(); got != tc.want {
+				t.Errorf("Score() = %d, want %d (band %q)", got, tc.want, tc.view.Priority())
+			}
+		})
+	}
+
+	// The invariant the floor exists to protect, stated directly: anything the band calls `high`
+	// scores at least the high baseline. Within a band the score may still order by severity —
+	// that is refinement, not contradiction. What is forbidden is a `high`-banded CVE scoring
+	// beneath the band it was just assigned.
+	//
+	// Note while writing this: a plain high-severity CVE with NO exploit signals bands
+	// `informational`, because the band is EXPLOITABILITY priority and not severity. That is the
+	// documented design and the score carries severity — but "informational" is a poor word for
+	// "no exploitability signal yet", and it is the same misreading KN-EPSS-BAND-1 (a) fixed one
+	// case of. Filed as KN-BAND-NAME-1.
+	for _, v := range []EnterpriseView{
+		{Severity: value.SeverityMedium, EPSS: 0.99999},        // floored by the new arm
+		{Severity: value.SeverityLow, KEV: true},               // banded high by the KEV arm
+		{Severity: value.SeverityCritical, CVSS: cvss(t, 9.1)}, // banded high by the c>=9 arm
+	} {
+		if v.Priority() != PriorityHigh {
+			t.Fatalf("fixture wrong: %+v bands %q, want high", v, v.Priority())
+		}
+		if got := v.Score(); got < severityBaseline(value.SeverityHigh) {
+			t.Errorf("banded %q but scored %d, below the high baseline %d — the score contradicts the band",
+				v.Priority(), got, severityBaseline(value.SeverityHigh))
+		}
 	}
 }

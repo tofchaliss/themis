@@ -43,6 +43,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventProposalRejected:    "governance.proposal_rejected.v1",
 	app.EventPositionEstablished: "governance.position_established.v1",
 	app.EventPositionRevised:     "governance.position_revised.v1",
+	app.EventDispositionStale:    "governance.disposition_stale.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -85,8 +86,12 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 		id, releaseID, faultlineID, cve, stage string
 		version                                int
 	)
-	row := s.querier(ctx).QueryRow(ctx, "SELECT id, release_id, faultline_id, cve, stage, version FROM findings WHERE "+where, args...)
-	if err := row.Scan(&id, &releaseID, &faultlineID, &cve, &stage, &version); err != nil {
+	var sig domain.ExploitSignals
+	row := s.querier(ctx).QueryRow(ctx,
+		"SELECT id, release_id, faultline_id, cve, stage, version, signal_kev, signal_exploit_public, signal_epss "+
+			"FROM findings WHERE "+where, args...)
+	if err := row.Scan(&id, &releaseID, &faultlineID, &cve, &stage, &version,
+		&sig.KEV, &sig.ExploitPublic, &sig.EPSS); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Finding{}, ErrNotFound
 		}
@@ -107,7 +112,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 	}
 
 	return domain.ReconstituteFinding(domain.FindingID(id), releaseID, faultlineID, cve,
-		components, domain.Stage(stage), proposals, positions, version), nil
+		components, domain.Stage(stage), proposals, positions, version, sig), nil
 }
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
@@ -169,7 +174,8 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 
 func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
-		SELECT version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at
+		SELECT version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
+		       decided_kev, decided_exploit_public, decided_epss
 		FROM finding_positions WHERE finding_id = $1 ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -182,13 +188,17 @@ func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position
 			version                                                   int
 			stance, rationale, actorKind, actorID, acceptedPID, flRef string
 			establishedAt                                             time.Time
+			sig                                                       domain.ExploitSignals
 		)
-		if err := rows.Scan(&version, &stance, &rationale, &actorKind, &actorID, &acceptedPID, &flRef, &establishedAt); err != nil {
+		if err := rows.Scan(&version, &stance, &rationale, &actorKind, &actorID, &acceptedPID, &flRef, &establishedAt,
+			&sig.KEV, &sig.ExploitPublic, &sig.EPSS); err != nil {
 			return nil, err
 		}
 		out = append(out, domain.ReconstitutePosition(version, domain.Stance(stance), rationale,
 			domain.Actor{Kind: domain.ActorKind(actorKind), ID: actorID},
-			domain.PositionInputs{AcceptedProposalID: domain.ProposalID(acceptedPID), FaultlineRef: flRef},
+			domain.PositionInputs{
+				AcceptedProposalID: domain.ProposalID(acceptedPID), FaultlineRef: flRef, DecidedWith: sig,
+			},
 			establishedAt))
 	}
 	return out, rows.Err()
@@ -306,11 +316,13 @@ func (s *Store) savePositions(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 	for _, pos := range f.Positions() {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_positions
-			  (finding_id, version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (finding_id, version) DO NOTHING`,
+			  (finding_id, version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
+			   decided_kev, decided_exploit_public, decided_epss)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (finding_id, version) DO NOTHING`,
 			string(f.ID()), pos.Version(), string(pos.Stance()), pos.Rationale(),
 			string(pos.Actor().Kind), pos.Actor().ID,
-			string(pos.Inputs().AcceptedProposalID), pos.Inputs().FaultlineRef, pos.EstablishedAt()); err != nil {
+			string(pos.Inputs().AcceptedProposalID), pos.Inputs().FaultlineRef, pos.EstablishedAt(),
+			pos.Inputs().DecidedWith.KEV, pos.Inputs().DecidedWith.ExploitPublic, pos.Inputs().DecidedWith.EPSS); err != nil {
 			return err
 		}
 	}
@@ -466,6 +478,16 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
 	_, err := s.exec(ctx).Exec(ctx,
 		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
+	return err
+}
+
+// SetSignals materializes the current exploitability picture onto every Finding for a Faultline
+// (GOV-14b), beside the base score and for the same reason: a decision must be able to record the
+// premise it rested on without a live cross-context read.
+func (s *Store) SetSignals(ctx context.Context, faultlineID string, sig domain.ExploitSignals) error {
+	_, err := s.exec(ctx).Exec(ctx,
+		`UPDATE findings SET signal_kev = $2, signal_exploit_public = $3, signal_epss = $4
+		 WHERE faultline_id = $1`, faultlineID, sig.KEV, sig.ExploitPublic, sig.EPSS)
 	return err
 }
 

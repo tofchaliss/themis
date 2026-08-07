@@ -33,6 +33,11 @@ const (
 	EventProposalRejected    = "governance.proposal_rejected"
 	EventPositionEstablished = "governance.position_established"
 	EventPositionRevised     = "governance.position_revised"
+	// EventDispositionStale announces that a SUPPRESSING decision's premise has drifted and the
+	// Finding should be looked at again (GOV-14b / D14). It is a completed fact, pushed — not a
+	// state change: the Position is untouched and remains in force until a human or a governed
+	// policy revises it. An acceptance does not vanish; it EXPIRES when its premise changes.
+	EventDispositionStale = "governance.disposition_stale"
 )
 
 // OutboxNote is one integration event queued for delivery in the aggregate's own
@@ -59,6 +64,9 @@ type Repository interface {
 	// Faultline (C6 — denormalized read-data, not aggregate state; Governance scales it by the
 	// blast multiplier for C2).
 	SetBaseScore(ctx context.Context, faultlineID string, score int) error
+	// SetSignals materializes the current exploitability picture onto the Faultline's Findings, so
+	// a decision taken later records the premise it rested on (GOV-14b).
+	SetSignals(ctx context.Context, faultlineID string, sig domain.ExploitSignals) error
 	// Save persists the aggregate + outbox notes atomically. created=true inserts a new
 	// Finding; otherwise it updates guarded by prevVersion and returns ErrConcurrent on a
 	// version mismatch. Appended proposals/positions are persisted idempotently by key.

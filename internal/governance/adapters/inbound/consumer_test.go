@@ -21,9 +21,10 @@ func mkEnv(typ string, payload []byte) event.Envelope {
 // --- minimal in-memory repo (drives the real FindingService) -------------------------
 
 type memRepo struct {
-	byID       map[domain.FindingID]domain.Finding
-	order      []domain.FindingID
-	baseScores map[string]int
+	lastSignals domain.ExploitSignals
+	byID        map[domain.FindingID]domain.Finding
+	order       []domain.FindingID
+	baseScores  map[string]int
 }
 
 func (r *memRepo) SetBaseScore(_ context.Context, fl string, score int) error {
@@ -31,6 +32,11 @@ func (r *memRepo) SetBaseScore(_ context.Context, fl string, score int) error {
 		r.baseScores = map[string]int{}
 	}
 	r.baseScores[fl] = score
+	return nil
+}
+
+func (r *memRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
+	r.lastSignals = sig
 	return nil
 }
 

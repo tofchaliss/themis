@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.disposition_stale.v1.schema.json",
+  "title": "governance.disposition_stale.v1",
+  "description": "Integration-contract v1 for the DispositionStale event (GOV-14b / EDR-GOVERNANCE-01 D14). A suppressing decision's premise has drifted and the Finding should be looked at again. It is a completed FACT, not a state change: the Position named here is untouched and remains in force until a human or a governed policy revises it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ReleaseID", "FaultlineID", "CVE", "Stance", "PositionVersion", "Reason", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "Stance": { "type": "string", "description": "The suppressing stance still in force. This event does not change it." },
+    "PositionVersion": { "type": "integer" },
+    "Reason": { "type": "string", "description": "What actually moved, in words — 'EPSS 3% -> 71%' earns a second look where 'signals changed' does not." },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -64,9 +64,19 @@ type UpgradeAction struct {
 	// FindingIDs are the Findings it would close — the provenance link back to the projection
 	// (T10 rule 3), so every claim in a plan is traceable to a row an authority vouched for.
 	FindingIDs []string
-	// TopPriority is the highest residual_priority among them: what ordering the plan by impact
-	// means in practice.
+	// TopPriority is the highest residual_priority among the findings this action closes — the
+	// single worst thing it deals with.
 	TopPriority int
+	// RiskRemoved is the SUM of residual priorities this action closes, and it is what the plan is
+	// ordered by (PLAN-2).
+	//
+	// Neither obvious ordering is right on its own. Sorting by TopPriority is TRIAGE order — "what
+	// is most dangerous?" — and it put a step closing 6 findings above one closing 165. Sorting by
+	// count ignores severity entirely and would promote a pile of trivia. The sum answers the
+	// question a PLAN is actually asked, "what does this buy me?", by weighting every finding it
+	// closes by how much of a problem that finding still is. It also degenerates correctly: with
+	// one finding per action it IS triage order.
+	RiskRemoved int
 }
 
 // PlanActions groups a release's OUTSTANDING Findings into upgrade actions, worst-first.
@@ -124,6 +134,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 				a.cveByPrio[e.CVE] = e.ResidualPriority
 			}
 			a.action.FindingIDs = append(a.action.FindingIDs, e.FindingID)
+			a.action.RiskRemoved += e.ResidualPriority
 			if e.ResidualPriority > a.action.TopPriority {
 				a.action.TopPriority = e.ResidualPriority
 			}
@@ -141,19 +152,28 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 		})
 		out = append(out, a.action)
 	}
-	// Highest impact first, then most Findings closed, then package name — fully deterministic,
-	// so the same projection always yields the same plan and a diff between two runs means the
-	// posture changed rather than the ordering wobbled.
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].TopPriority != out[j].TopPriority {
-			return out[i].TopPriority > out[j].TopPriority
+	// Merge BEFORE ordering: a merged action's RiskRemoved is the sum of its members', so ordering
+	// first would rank the parts and then silently promote the whole past its neighbours.
+	return sortPlan(mergeSiblings(out))
+}
+
+// sortPlan orders actions by risk removed, then by the single worst item, then by how many
+// Findings close, then by name — fully deterministic, so the same projection always yields the
+// same plan and a diff between two runs means the posture changed rather than the sort wobbled.
+func sortPlan(actions []UpgradeAction) []UpgradeAction {
+	sort.SliceStable(actions, func(i, j int) bool {
+		if actions[i].RiskRemoved != actions[j].RiskRemoved {
+			return actions[i].RiskRemoved > actions[j].RiskRemoved
 		}
-		if len(out[i].FindingIDs) != len(out[j].FindingIDs) {
-			return len(out[i].FindingIDs) > len(out[j].FindingIDs)
+		if actions[i].TopPriority != actions[j].TopPriority {
+			return actions[i].TopPriority > actions[j].TopPriority
 		}
-		return out[i].Package < out[j].Package
+		if len(actions[i].FindingIDs) != len(actions[j].FindingIDs) {
+			return len(actions[i].FindingIDs) > len(actions[j].FindingIDs)
+		}
+		return actions[i].Package < actions[j].Package
 	})
-	return mergeSiblings(out)
+	return actions
 }
 
 // mergeSiblings folds actions that close EXACTLY the same set of CVEs into one.
@@ -179,6 +199,10 @@ func mergeSiblings(actions []UpgradeAction) []UpgradeAction {
 		if i, ok := byCVEs[key]; ok {
 			out[i].Packages = append(out[i].Packages, a.Packages...)
 			out[i].FindingIDs = append(out[i].FindingIDs, a.FindingIDs...)
+			out[i].RiskRemoved += a.RiskRemoved
+			if a.TopPriority > out[i].TopPriority {
+				out[i].TopPriority = a.TopPriority
+			}
 			for _, v := range a.InstalledVersions {
 				if !slices.Contains(out[i].InstalledVersions, v) {
 					out[i].InstalledVersions = append(out[i].InstalledVersions, v)

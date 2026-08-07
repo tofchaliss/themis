@@ -100,8 +100,8 @@ func TestReactToEnrichment_ApplicabilityIgnoresNonNotAffected(t *testing.T) {
 	s := writeSvc(repo)
 
 	sig := app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{
-		{Package: "openssl", Status: "affected"},   // not a suppression
-		{Package: "", Status: "not_affected"},       // empty package — filtered out
+		{Package: "openssl", Status: "affected"}, // not a suppression
+		{Package: "", Status: "not_affected"},    // empty package — filtered out
 	}}
 	if err := s.ReactToEnrichment(context.Background(), sig); err != nil {
 		t.Fatal(err)

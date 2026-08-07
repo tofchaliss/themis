@@ -166,3 +166,34 @@ func NewPositionEvent(f Finding, pos Position, at time.Time) (*PositionEstablish
 	}
 	return nil, &e
 }
+
+// DispositionStale announces that a suppressing Position's premise has drifted (GOV-14b).
+//
+// It carries WHAT moved rather than merely that something did, because a re-surfaced Finding
+// arrives in a queue somebody already decided to empty — "EPSS 3% → 71%" earns the second look,
+// "signals changed" does not.
+type DispositionStale struct {
+	FindingID   FindingID
+	ReleaseID   string
+	FaultlineID string
+	CVE         string
+	// Stance is the suppressing stance still in force. The event does NOT change it.
+	Stance          string
+	PositionVersion int
+	Reason          string
+	OccurredAt      time.Time
+}
+
+// NewDispositionStale builds the re-surfacing fact for a Finding whose decision premise moved.
+func NewDispositionStale(f Finding, pos Position, reason string, at time.Time) DispositionStale {
+	return DispositionStale{
+		FindingID:       f.ID(),
+		ReleaseID:       f.ReleaseID(),
+		FaultlineID:     f.FaultlineID(),
+		CVE:             f.CVE(),
+		Stance:          string(pos.Stance()),
+		PositionVersion: pos.Version(),
+		Reason:          reason,
+		OccurredAt:      at.UTC(),
+	}
+}
