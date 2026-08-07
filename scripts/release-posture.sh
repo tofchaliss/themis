@@ -78,7 +78,18 @@ printf '\n\n'
 filter='.residual_priority > 0'
 [ "$SHOW_ALL" = "1" ] && filter='true'
 
-rows=$(echo "$posture" | jq -r --argjson n "$TOP" "[.[] | select($filter)] | sort_by(-.residual_priority) | .[0:\$n] | .[] | [.residual_priority, .effective_priority, .base_score, .blast_multiplier, .cve, (.stance // \"-\"), (.reservation // \"-\"), .faultline_id, .finding_id] | @tsv")
+# `dash` substitutes for null AND for the empty string. jq's `//` only catches null, and an
+# undecided Finding carries stance "" — which would emit an empty TSV field. Bash treats tab as
+# whitespace in IFS, so it COLLAPSES runs of them, and one empty field silently shifts every
+# later column left. (It did, on first run: the caveat column showed faultline UUIDs.)
+jqprog='
+  def dash: if . == null or . == "" then "-" else . end;
+  [.[] | select(FILTER)] | sort_by(-.residual_priority) | .[0:$n] | .[]
+  | [.residual_priority, .effective_priority, .base_score, .blast_multiplier,
+     (.cve|dash), (.stance|dash), (.reservation|dash), (.faultline_id|dash), (.finding_id|dash)]
+  | @tsv'
+jqprog=${jqprog/FILTER/$filter}
+rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
 
 {
   printf 'RANK\tBAND\tCVE\tRESID\tEFFECT\tBLAST\tKEV\tEPSS\tCOMPONENT\tFIX\tSTANCE\tCAVEAT\n'
