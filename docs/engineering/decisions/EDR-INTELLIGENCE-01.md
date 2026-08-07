@@ -430,6 +430,24 @@ a report and the runtime — which is what T10 requires. **Deliberately not incl
 version* per component, which would need a new event field, a migration and a stamping path. The plan
 therefore names the package to upgrade and what it closes; exact versions stay one drill-down away.
 
+### Correction, same day — what "anchor to the projection" actually forbids
+
+The first live run refused a plan: the model cited `PyYAML (rpm)` and Grounding Verification
+discarded the whole answer. The initial `Grounds` implementation — and a test asserting it — treated
+a package name as **the runtime's own derivation** and therefore ungrounded.
+
+That was wrong. `PyYAML` is `component.source`, a field the projection carries. What the runtime
+derives is the **grouping**; the name is data. T10 rule 4 forbids validating against a derived
+**view** — not against projection fields that the view happens to surface. Component `name` and
+`source` now ground; the action heading dropped its ` (ecosystem)` bracket so a citation can match
+exactly; and decorated forms (`python-ply (rpm)`) still fail, because matching stays exact.
+
+The general lesson is about where the mistake was findable: a prompt and a validator are an
+interface with **no compiler between them**. The disagreement could only surface by running a real
+model and reading what it produced — which is why `Outcome.Detail` (TRUST-6) was load-bearing here.
+`business_invalid` alone would have sent the investigation to the gate; `ungrounded evidence
+"PyYAML (rpm)"` pointed straight at the rule that was too strict.
+
 ### Deferred
 
 - **Fix versions on the posture entry** — makes the plan self-contained; see the note above.

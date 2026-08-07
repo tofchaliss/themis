@@ -119,13 +119,27 @@ func TestReleasePosture_Grounds(t *testing.T) {
 			t.Errorf("Grounds(%q) = false, want true — it is in the projection", ref)
 		}
 	}
+	// The component's NAME and SOURCE ground too. They look like the plan's own labels — an action
+	// is headed "upgrade python-ply" — but `python-ply` is `component.source`, a field the
+	// projection carries. What the runtime derived is the GROUPING, not the name.
+	//
+	// This assertion was originally inverted, on the reasoning that a package name is "the
+	// runtime's own derivation". A live model then cited `PyYAML (rpm)` and an otherwise sound
+	// plan was discarded for naming the package it had been told to reason about. Rule 4 forbids
+	// validating against a derived VIEW — not against projection fields that view surfaces.
+	for _, ref := range []string{"python-ply", "python3-ply"} {
+		if !p.Grounds(ref) {
+			t.Errorf("Grounds(%q) = false — it is a component field the projection carries", ref)
+		}
+	}
 	for _, ref := range []string{
-		"",              // an empty citation grounds nothing
-		"rel-2",         // a different release
-		"CVE-2099-0001", // a CVE the release does not carry
-		"f9",            // a Finding on another release
-		"python-ply",    // the SHAPED plan's package name — deliberately NOT grounding, because
-		// it is the runtime's own derivation, not a projection element
+		"",                 // an empty citation grounds nothing
+		"rel-2",            // a different release
+		"CVE-2099-0001",    // a CVE the release does not carry
+		"f9",               // a Finding on another release
+		"python-ply (rpm)", // a DECORATED name is not a citation: matching is exact, so a model
+		// dressing a reference up cannot slip past by accident
+		"openssl", // a package this release does not contain
 	} {
 		if p.Grounds(ref) {
 			t.Errorf("Grounds(%q) = true, want false", ref)

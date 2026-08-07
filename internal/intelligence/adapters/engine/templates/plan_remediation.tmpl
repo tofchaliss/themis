@@ -9,7 +9,8 @@ release, explain what to fix first and why.
 Each action is ONE package upgrade that would close several findings at once. The grouping and the
 ordering are computed, not guesses — do not re-derive them.
 {{range $i, $a := .Release.PlanActions}}{{if lt $i 15}}
-{{add1 $i}}. upgrade {{$a.Package}}{{if $a.Ecosystem}} ({{$a.Ecosystem}}){{end}}
+{{add1 $i}}. upgrade {{$a.Package}}
+   - ecosystem: {{$a.Ecosystem}}
    - installed: {{join $a.InstalledVersions}}
    - closes {{len $a.FindingIDs}} finding(s), top priority {{$a.TopPriority}}
    - cves (citable): {{join $a.CVEs}}
@@ -27,9 +28,8 @@ Rules:
 - Cite evidence ONLY as one of these exact identifiers:
     * the release id: {{.Release.ReleaseID}}
     * a CVE id copied verbatim from a `cves (citable)` line above
-  A PACKAGE NAME IS NOT A VALID REFERENCE — not the heading of an action, not with its ecosystem in
-  brackets. A package name is this system's own grouping label, not a record it can check, so citing
-  one voids the entire answer. Cite the CVE the action closes instead.
+    * a package name copied verbatim from an `upgrade ...` heading above — the bare name only,
+      with no ecosystem, version or brackets appended
   Every ref is verified against the release posture; one unrecognised ref discards the whole plan.
 - You are producing an ADVISORY plan, not a decision. Do not state that any finding is
   not-affected, resolved, or safe to ignore — those are governed decisions a human makes elsewhere.

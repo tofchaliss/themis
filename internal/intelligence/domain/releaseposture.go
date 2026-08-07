@@ -157,11 +157,18 @@ func (p ReleasePosture) OutstandingCount() int {
 
 // Grounds reports whether an evidence citation refers to something in the authoritative
 // projection (T8/T10 rule 4) — the release itself, one of its Findings, a CVE it carries, or a
-// component PURL it lists.
+// component it lists (by purl, by name, or by source package).
 //
 // It anchors to the PROJECTION, never to the shaped UpgradeAction view. A runtime validating
-// against its own transformation would be checking the model against something it produced
-// itself, so a buggy grouping would be confirmed rather than caught.
+// against its own transformation would check the model against something it produced itself, so a
+// buggy grouping would be confirmed rather than caught.
+//
+// The component NAME and SOURCE are grounded, and drawing that line correctly took a live refusal
+// to see. They look like the plan's own labels — an action is headed "upgrade PyYAML" — but
+// `PyYAML` is `component.source`, a field the projection carries. What the runtime derived is the
+// GROUPING; the name is data. Refusing it discarded an otherwise sound plan whose only fault was
+// citing the package it was told to reason about. Rule 4 forbids validating against a derived
+// VIEW, not against projection fields the view happens to surface.
 func (p ReleasePosture) Grounds(ref string) bool {
 	if ref == "" {
 		return false
@@ -174,7 +181,7 @@ func (p ReleasePosture) Grounds(ref string) bool {
 			return true
 		}
 		for _, c := range e.Components {
-			if ref == c.PURL {
+			if ref == c.PURL || (c.Name != "" && ref == c.Name) || (c.Source != "" && ref == c.Source) {
 				return true
 			}
 		}
