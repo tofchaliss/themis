@@ -68,12 +68,19 @@ customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq -
 # derivable by any rule — it is data. Evidence's inventory is the only place that mapping exists, so
 # build purl->source once here; without it every fix lookup misses and the FIX column reads
 # "94 unattributed" for a card that knows the answer perfectly well.
-srcmap='{}'
+#
+# Held in a FILE, not a variable: a real inventory runs to hundreds of components, and passing the
+# accumulated map back through `jq --argjson` on each iteration overflowed ARG_MAX ("Argument list
+# too long"). jq then received no map, every lookup fell through to an empty package name, and an
+# empty name matched the UNATTRIBUTED bucket -- printing all 94 versions of every package into one
+# cell. A silent size limit turning into confidently wrong output is worth the temp file.
+srcfile="${TMPDIR:-/tmp}/themis-posture-src.$$.json"
+trap 'rm -f "$srcfile"' EXIT
 for ev in $(get "$EVIDENCE/api/v1/evidence?release=$REL" 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
-  inv=$(get "$EVIDENCE/api/v1/evidence/$ev/inventory" 2>/dev/null || echo '{}')
-  srcmap=$(jq -n --argjson acc "$srcmap" --argjson inv "$inv" \
-    '$acc + (($inv.components // []) | map({key: .purl, value: (.source // .name)}) | from_entries)')
-done
+  get "$EVIDENCE/api/v1/evidence/$ev/inventory" 2>/dev/null || true
+done | jq -s 'map(.components // []) | add // [] | map({key: .purl, value: (.source // .name)}) | from_entries' \
+  > "$srcfile" 2>/dev/null || echo '{}' > "$srcfile"
+[ -s "$srcfile" ] || echo '{}' > "$srcfile"
 
 posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || { echo "cannot read posture for $REL" >&2; exit 1; }
 total=$(echo "$posture" | jq 'length')
@@ -132,11 +139,15 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     # exists, without pretending to know which one applies.
     # Prefer the source-package name from Evidence; fall back to the PURL's binary name for
     # non-distro components (npm, pypi, go), where the two are the same thing.
-    pkg=$(jq -rn --argjson m "$srcmap" --arg u "$purl" --arg b "$(echo "$comp" | sed 's#.*/##; s#@.*##')" \
-      '$m[$u] // $b')
+    pkg=$(jq -r --arg u "$purl" --arg b "$(echo "$comp" | sed 's#.*/##; s#@.*##')" '.[$u] // $b' "$srcfile")
+    # An empty package name would match the unattributed bucket, so refuse the lookup outright.
+    [ -n "$pkg" ] || pkg=' no-such-package'
+    # Shown newest-first and capped: one package legitimately has many published fixes (separate
+    # el8 module streams), and a cell holding 90 of them is as unreadable as no answer at all.
     fix=$(echo "$fl" | jq -r --arg p "$pkg" '
-      ((.view.fixes // []) | map(select((.package // "") | ascii_downcase == ($p|ascii_downcase))) | map(.version)) as $mine
-      | if ($mine|length) > 0 then ($mine|join(", "))
+      ((.view.fixes // []) | map(select((.package // "") | ascii_downcase == ($p|ascii_downcase))) | map(.version) | unique | reverse) as $mine
+      | if ($mine|length) > 3 then (($mine[0:3]|join(", ")) + " (+\($mine|length - 3))")
+        elif ($mine|length) > 0 then ($mine|join(", "))
         elif ((.view.fixed_versions // [])|length) == 0 then "none published"
         else "\((.view.fixed_versions|length)) unattributed"
         end')
