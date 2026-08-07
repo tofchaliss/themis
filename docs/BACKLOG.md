@@ -1080,6 +1080,23 @@ three angles, and two of them proposed fixes that would not have worked.
   API change), or expose the resolved fix directly on the finding assessment. The second is smaller and
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
+
+- [ ] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
+  view now makes it visible.** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_
+  Five of the top fifteen rows pin **Python interpreter** CVEs onto unrelated packages:
+  `CVE-2019-9636` (urlsplit) and `CVE-2007-4559` (tarfile) appear against `python3-pyyaml` and
+  `python3-ply`, with fixes of `PyYAML 3.12-16` / `python-ply 3.11-10`. Those fix versions are **not**
+  a correlation error on our side — OSV genuinely attributes them, because a RHSA for a module stream
+  (`python38`, `python39`) lists *every* RPM rebuilt in that stream as affected-and-fixed, not only the
+  package carrying the flaw. Our ACL records what the feed published; the feed publishes the module.
+  Consequence: an operator reading the top of the list is told to upgrade `python3-ply` for a tarfile
+  bug. The instruction is not wrong (upgrading the module does resolve it) but the attribution is
+  misleading, and it pushes genuinely package-specific findings down the ranking.
+  **Options:** (a) detect the `module+elX` marker in the fixed version and label the row as a
+  stream-level rebuild rather than a package fix; (b) prefer a non-module fix when the card holds both
+  (rows 11/13 show `5.3.1-1` — the real PyYAML fix — alongside stream rebuilds); (c) leave as-is and
+  document. **Do not** drop module entries: they are the correct remediation on a modular system.
+  **Dep:** none. **Scope:** MEDIUM — display/precedence, no new truth. Revisit with DASH-3.
   **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
   plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
 
