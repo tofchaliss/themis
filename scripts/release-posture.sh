@@ -189,8 +189,12 @@ if [ "$PLAN" = "1" ]; then
   case "$code" in
     200) echo "$out" | head -n -1 | jq -r '.information // "(no plan text returned)"' | fold -s -w 100 ;;
     204)
+      # BOTH headers: the reason names the class of failure, the detail names the instance.
+      # "business_invalid" alone does not say WHICH citation was ungrounded, and that is the
+      # only thing an operator can act on (the TRUST-6 argument, applied at the edge).
       why=$(grep -i '^X-Themis-AI-Reason:' "$hdrfile" 2>/dev/null | sed 's/^[^:]*: *//; s/\r$//')
-      printf 'no plan: %s\n' "${why:-reason not reported}" ;;
+      det=$(grep -i '^X-Themis-AI-Detail:' "$hdrfile" 2>/dev/null | sed 's/^[^:]*: *//; s/\r$//')
+      printf 'no plan: %s%s\n' "${why:-reason not reported}" "${det:+ — $det}" ;;
     *) printf 'no plan: HTTP %s\n' "$code" ;;
   esac
   printf '\n'
