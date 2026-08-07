@@ -130,12 +130,12 @@ func TestRedHatClient_MainStreamFixesOnly(t *testing.T) {
 		t.Fatal("want a vuln-facts proposal")
 	}
 	want := []string{"openssl-1:1.0.2k-16.el8_10", "openssl-1:3.0.1-47.el9_2"} // el8 + el9 main-stream, in doc order
-	if len(vf.FixedVersions) != len(want) {
-		t.Fatalf("FixedVersions = %v, want %v (main-stream only)", vf.FixedVersions, want)
+	if len(vf.FixVersions()) != len(want) {
+		t.Fatalf("FixedVersions = %v, want %v (main-stream only)", vf.FixVersions(), want)
 	}
 	for i := range want {
-		if vf.FixedVersions[i] != want[i] {
-			t.Errorf("FixedVersions[%d] = %q, want %q", i, vf.FixedVersions[i], want[i])
+		if vf.FixVersions()[i] != want[i] {
+			t.Errorf("FixedVersions[%d] = %q, want %q", i, vf.FixVersions()[i], want[i])
 		}
 	}
 }

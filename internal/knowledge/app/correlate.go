@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -147,20 +148,16 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		// is at or above a same-EL-stream vendor fix (Red Hat/Rocky/Alma), the backported fix is
 		// present and this occurrence is NOT affected — drop the match.
 		//
-		// The fixes come from THIS ITEM'S OWN Proposal, never from the card's reconciled view
-		// (KN-FIX-1). The view's FixedVersions is a union across every package the CVE affects,
-		// with no package association — so comparing an installed build against it could satisfy
-		// the verdict using a DIFFERENT package's fix and silently drop a live vulnerability.
-		// Worked example: a card covering glibc and perl-Carp carries
-		// ["0:2.28-251.el8_10.38", "0:1.42-397.el8"]; installed glibc 2.28-251.el8_10.31 clears
-		// perl-Carp's 1.42 and the glibc finding disappears.
+		// The fixes are looked up BY PACKAGE (KN-FIX-1). The view's flat FixedVersions is a union
+		// across every package the CVE affects, so comparing an installed build against it could
+		// satisfy the verdict using a DIFFERENT package's fix and silently drop a live
+		// vulnerability. Measured on a live release: 31 real occurrences disappeared that way,
+		// mostly python3-ply@3.9 and python3-pyyaml@3.12 clearing CPython's 3.6.8 fixes.
 		//
-		// The item's Proposal is package-scoped by construction — OSV is queried BY PACKAGE, so
-		// its record is about this component and nothing else. Using it narrows the verdict (a
-		// fix known only to another source is not applied here), and narrowing is the safe
-		// direction: keeping a match costs triage time, dropping one costs a breach.
-		if vf, ok := item.Proposal.VulnFacts(); ok &&
-			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, vf.FixedVersions) {
+		// FixesFor aggregates every source's fix for THIS package and excludes unattributed ones,
+		// so the verdict rests on evidence about this component and nothing else.
+		if fixes := f.View().FixesFor(componentPackage(item.Component)); len(fixes) > 0 &&
+			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, fixes) {
 			continue
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
@@ -187,4 +184,18 @@ func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceI
 		return 0, err
 	}
 	return s.ApplyCorrelation(ctx, plan)
+}
+
+// componentPackage is the name a vulnerability database knows a component by. Distro databases
+// key on the SOURCE package (openssl-libs is fixed by the openssl advisory), so that wins when
+// present; everything else uses the component's own name.
+//
+// It must agree with what the feed ACLs record as a fix's package, or FixesFor silently matches
+// nothing and the fixed-verdict quietly stops working — a failure that looks like extra findings
+// rather than like a bug.
+func componentPackage(c InventoryComponent) string {
+	if s := strings.TrimSpace(c.Source); s != "" {
+		return s
+	}
+	return strings.TrimSpace(c.Name)
 }

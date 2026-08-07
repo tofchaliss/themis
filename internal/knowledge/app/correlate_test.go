@@ -180,9 +180,9 @@ func TestCorrelate_FixedVerdictIgnoresAnotherPackagesFix(t *testing.T) {
 	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{other, vulnerable}}}
 	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
 		// perl-Carp's fix lands on the card first and is the trap.
-		other.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixed(t, "osv", "0:1.42-397.el8")}},
+		other.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixedFor(t, "osv", "perl-Carp", "0:1.42-397.el8")}},
 		// glibc's own fix (.38) is ABOVE the installed .31 — still vulnerable.
-		vulnerable.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixed(t, "osv", "0:2.28-251.el8_10.38")}},
+		vulnerable.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixedFor(t, "osv", "glibc", "0:2.28-251.el8_10.38")}},
 	}}
 	matches := newMatches()
 	s := correlation(t, inv, disc, matches, newRepo())
@@ -259,5 +259,25 @@ func TestCoordinator_SBOMReadErrorPropagates(t *testing.T) {
 		correlation(t, fakeInventory{err: errors.New("evidence down")}, fakeDiscovery{}, newMatches(), newRepo()), nil)
 	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{EvidenceID: "ev", ReleaseID: "rel", Kind: "sbom"}); err == nil {
 		t.Error("a read-phase (inventory) error must propagate from OnEvidenceRegistered")
+	}
+}
+
+// componentPackage prefers the SOURCE package, because distro databases key on it (openssl-libs
+// is fixed by the openssl advisory). Getting this wrong makes FixesFor match nothing and the
+// fixed-verdict silently stop firing — a failure that looks like extra findings, not like a bug.
+func TestCorrelate_FixedVerdictUsesTheSourcePackage(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/openssl-libs@1.0.2k-17.el8_10", Name: "openssl-libs",
+		Version: "1.0.2k-17.el8_10", Ecosystem: "rhel", Source: "openssl",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		// The fix is attributed to the SOURCE package, as a distro feed states it.
+		comp.PURL: {{CVE: cve(t, "CVE-2024-12"), Proposal: vulnFactsFixedFor(t, "redhat", "openssl", "1.0.2k-16.el8_10")}},
+	}}
+	matches := newMatches()
+	if n, err := correlation(t, inv, disc, matches, newRepo()).Correlate(ctx, "rel-1", "ev-1"); err != nil || n != 0 {
+		t.Fatalf("n=%d err=%v, want 0 — the installed build carries the source package's fix", n, err)
 	}
 }

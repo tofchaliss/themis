@@ -125,9 +125,9 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 	// main-stream fixed builds ride here so they reach the reconciled view's FixedVersions.
 	if cvss, cok := parseRedHatCVSS(doc.CVSS3.BaseScore, doc.CVSS3.Vector); cok {
 		facts := domain.VulnFacts{
-			Severity:      severityFrom(redhatSeverityLabel(doc.ThreatSeverity), cvss),
-			CVSS:          cvss,
-			FixedVersions: fixes,
+			Severity: severityFrom(redhatSeverityLabel(doc.ThreatSeverity), cvss),
+			CVSS:     cvss,
+			Fixes:    nevraFixes(fixes),
 		}
 		if p, perr := domain.NewVulnFactsProposal("redhat", observedAt, facts); perr == nil {
 			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})

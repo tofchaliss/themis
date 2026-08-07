@@ -120,8 +120,22 @@ components:
             type: string
         fixed_versions:
           type: array
+          description: >
+            Flat union of every fix version on the card, across ALL affected packages. Use it for
+            "is a fix published?" and NEVER to decide about one component — a version here may
+            belong to a different package entirely. Use `fixes` for that.
           items:
             type: string
+        fixes:
+          type: array
+          description: >
+            Fix versions ATTRIBUTED to the package each applies to. One CVE routinely affects many
+            packages (a RHEL module advisory can name hundreds), and only this form can answer
+            "what fixes MY component?". `package` is absent when the source did not say — NVD's
+            CPE data and scanner reports state a fix without naming the package — and an
+            unattributed fix must never satisfy a per-component verdict.
+          items:
+            $ref: '#/components/schemas/FixedVersion'
         epss:
           type: number
         kev:
@@ -146,6 +160,13 @@ components:
           description: Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).
           items:
             $ref: '#/components/schemas/Applicability'
+    FixedVersion:
+      type: object
+      properties:
+        package:
+          type: string
+        version:
+          type: string
     Applicability:
       type: object
       properties:

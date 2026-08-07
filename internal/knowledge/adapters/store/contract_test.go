@@ -9,9 +9,9 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
-	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // Integration-contract v1 guard (M5 EB-03 / D9 / BCK-0046). Each published event type's

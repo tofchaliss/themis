@@ -84,7 +84,7 @@ func TestEqualStrings(t *testing.T) {
 	}{
 		{nil, nil, true},
 		{[]string{"a"}, []string{"a"}, true},
-		{[]string{"a"}, []string{"a", "b"}, false},   // length mismatch
+		{[]string{"a"}, []string{"a", "b"}, false},      // length mismatch
 		{[]string{"a", "b"}, []string{"a", "c"}, false}, // element mismatch
 	}
 	for i, c := range cases {

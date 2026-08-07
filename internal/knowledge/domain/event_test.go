@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 func TestKnowledgeEvents(t *testing.T) {

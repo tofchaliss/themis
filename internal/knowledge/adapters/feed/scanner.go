@@ -54,7 +54,11 @@ func (a scannerACL) Translate(raw []byte) ([]Translated, error) {
 		Severity:       severityFrom(rec.Severity, cvss),
 		CVSS:           cvss,
 		AffectedRanges: rec.Affected,
-		FixedVersions:  rec.Fixed,
+		// A scanner report states fixed versions without naming the package, so they stay
+		// UNATTRIBUTED: usable for "is a fix published?" and deliberately unusable for a
+		// per-component verdict (KN-FIX-1). Guessing the package here would reintroduce exactly
+		// the mis-attribution that defect was.
+		Fixes: unattributedFixes(rec.Fixed),
 	})
 	if err != nil {
 		return nil, err

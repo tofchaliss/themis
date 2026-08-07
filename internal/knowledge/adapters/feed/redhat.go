@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // redhatRecord is the subset of a Red Hat Security Data record the ACL consumes. Red
@@ -45,10 +45,25 @@ func (a redhatACL) Translate(raw []byte) ([]Translated, error) {
 		return nil, fmt.Errorf("redhat: %w", err)
 	}
 	p, err := domain.NewVulnFactsProposal(a.Source(), at, domain.VulnFacts{
-		Severity: severityFrom(rec.Severity, cvss), CVSS: cvss, AffectedRanges: rec.AffectedPackages, FixedVersions: rec.FixedPackages,
+		Severity: severityFrom(rec.Severity, cvss), CVSS: cvss, AffectedRanges: rec.AffectedPackages,
+		Fixes: nevraFixes(rec.FixedPackages),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return []Translated{{CVE: cve, Proposal: p}}, nil
+}
+
+// nevraFixes attributes each vendor fix to its package. Red Hat states fixes as NEVRA
+// ("openssl-1:1.0.2k-16.el8"), so the package name is already present and only needs extracting —
+// without it the fix joins an unattributable union (KN-FIX-1).
+func nevraFixes(nevras []string) []domain.FixedVersion {
+	if len(nevras) == 0 {
+		return nil
+	}
+	out := make([]domain.FixedVersion, 0, len(nevras))
+	for _, n := range nevras {
+		out = append(out, domain.FixedVersion{Package: value.RPMPackageName(n), Version: n})
+	}
+	return out
 }

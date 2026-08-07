@@ -3,8 +3,8 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 func cve(t *testing.T, s string) value.CVEID {

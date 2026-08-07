@@ -3,9 +3,10 @@ package feed
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // osvRecord is the curated subset of an OSV record the ACL consumes. Language ecosystems key
@@ -32,6 +33,13 @@ type osvSeverity struct {
 }
 
 type osvAffected struct {
+	// Package.Name is the association KN-FIX-1 was about. OSV states, per affected entry, WHICH
+	// package a range and its fix apply to — and this struct used to decode only Ranges, throwing
+	// the name away at parse time. Everything downstream then had a union it could not attribute.
+	Package struct {
+		Ecosystem string `json:"ecosystem"`
+		Name      string `json:"name"`
+	} `json:"package"`
 	Ranges []struct {
 		Events []struct {
 			Introduced string `json:"introduced"`
@@ -71,22 +79,26 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 		return nil, fmt.Errorf("osv: %w", err)
 	}
 
-	var ranges, fixes []string
+	var ranges []string
+	var fixes []domain.FixedVersion
 	for _, aff := range rec.Affected {
+		pkg := strings.TrimSpace(aff.Package.Name)
 		for _, rng := range aff.Ranges {
 			for _, ev := range rng.Events {
 				if r := rangeString(ev.Introduced, ev.Fixed); r != "" {
 					ranges = append(ranges, r)
 				}
 				if ev.Fixed != "" {
-					fixes = append(fixes, ev.Fixed)
+					// Paired with the package this affected-entry is about, so a consumer can ask
+					// "what fixes MY component?" instead of guessing from a union.
+					fixes = append(fixes, domain.FixedVersion{Package: pkg, Version: ev.Fixed})
 				}
 			}
 		}
 	}
 
 	facts := domain.VulnFacts{
-		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, FixedVersions: fixes,
+		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, Fixes: fixes,
 	}
 	out := make([]Translated, 0, len(cves))
 	for _, cve := range cves {

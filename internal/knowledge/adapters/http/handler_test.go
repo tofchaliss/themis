@@ -1,6 +1,7 @@
 package http_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -214,5 +215,69 @@ func TestGetFeedHealthError(t *testing.T) {
 	srv := feedServer(t, fakeRepo{}, fakeProjection{}, fakeFeedStore{err: errors.New("db down")})
 	if status, _ := get(t, srv.URL+"/feeds"); status != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", status)
+	}
+}
+
+// The read API must expose fixes ATTRIBUTED to their package, not only the flat union — that
+// union is what let a dashboard print "upgrade python3-ply 3.9 to 0.1.7", a different package's
+// fix (KN-FIX-1). A consumer can only act on the attributed form.
+func TestGetFaultlineById_ExposesAttributedFixes(t *testing.T) {
+	cveID, _ := value.NewCVEID("CVE-2024-1")
+	f, _ := domain.NewFaultline("fl-1", cveID)
+	c, _ := value.NewCVSS(7.5, "")
+	p, _ := domain.NewVulnFactsProposal("osv", time.Unix(1_700_000_000, 0), domain.VulnFacts{
+		Severity: value.SeverityHigh, CVSS: c,
+		Fixes: []domain.FixedVersion{
+			{Package: "glibc", Version: "2.28-251.el8_10.38"},
+			{Version: "9.9.9"}, // unattributed: the source did not say which package
+		},
+	})
+	f.FoldProposal(p, domain.NewPrecedence("osv"), domain.NewTrustPolicy(nil))
+	srv := server(t, fakeRepo{card: f, found: true}, fakeProjection{})
+
+	status, body := get(t, srv.URL+"/faultlines/fl-1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var v struct {
+		View struct {
+			FixedVersions []string `json:"fixed_versions"`
+			Fixes         []struct {
+				Package string `json:"package"`
+				Version string `json:"version"`
+			} `json:"fixes"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.View.Fixes) != 2 {
+		t.Fatalf("fixes = %+v, want both entries", v.View.Fixes)
+	}
+	var glibc, bare int
+	for _, fx := range v.View.Fixes {
+		if fx.Package == "glibc" && fx.Version == "2.28-251.el8_10.38" {
+			glibc++
+		}
+		if fx.Package == "" && fx.Version == "9.9.9" {
+			bare++
+		}
+	}
+	if glibc != 1 || bare != 1 {
+		t.Errorf("fixes = %+v, want the attributed one and the unattributed one distinguishable", v.View.Fixes)
+	}
+	// The flat list still carries everything, for "is a fix published at all?".
+	if len(v.View.FixedVersions) != 2 {
+		t.Errorf("fixed_versions = %v, want both versions", v.View.FixedVersions)
+	}
+}
+
+// A card with no fixes omits the field entirely, so it is byte-identical on the wire to one
+// written before `fixes` existed.
+func TestGetFaultlineById_OmitsFixesWhenThereAreNone(t *testing.T) {
+	srv := server(t, fakeRepo{card: sampleCard(t), found: true}, fakeProjection{})
+	_, body := get(t, srv.URL+"/faultlines/fl-1")
+	if bytes.Contains(body, []byte(`"fixes"`)) {
+		t.Errorf("empty fixes must be omitted, got: %s", body)
 	}
 }

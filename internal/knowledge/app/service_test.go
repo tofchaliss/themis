@@ -52,6 +52,23 @@ func (r *fakeRepo) Save(_ context.Context, f domain.Faultline, _ bool, _ int, no
 	return nil
 }
 
+// vulnFactsFixedFor states a fix for an EXPLICIT package — used where the version string alone
+// carries no name (a bare EVR), so the test controls the attribution it is exercising.
+func vulnFactsFixedFor(t *testing.T, source, pkg string, fixed ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "")
+	fixes := make([]domain.FixedVersion, 0, len(fixed))
+	for _, f := range fixed {
+		fixes = append(fixes, domain.FixedVersion{Package: pkg, Version: f})
+	}
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, Fixes: fixes})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 type seqIDs struct{ n int }
 
 func (s *seqIDs) NewID() string { s.n++; return "fl-" + string(rune('0'+s.n)) }
@@ -102,11 +119,18 @@ func vulnFactsRanged(t *testing.T, source string, ranges ...string) domain.Propo
 
 // vulnFactsFixed builds a vuln-facts Proposal carrying fixed versions (e.g. Red Hat main-stream
 // fix NEVRAs), so a reconciled view exposes them to correlation's stream-scoped fixed gate.
+// vulnFactsFixed mirrors the Red Hat ACL: a vendor fix is stated as a NEVRA, so its package is
+// extracted from the string. Using UnattributedFixes here instead would make the fixed-verdict
+// tests pass for the wrong reason — an unattributed fix can never fire the verdict (KN-FIX-1).
 func vulnFactsFixed(t *testing.T, source string, fixed ...string) domain.Proposal {
 	t.Helper()
 	c, _ := value.NewCVSS(7.5, "")
+	fixes := make([]domain.FixedVersion, 0, len(fixed))
+	for _, f := range fixed {
+		fixes = append(fixes, domain.FixedVersion{Package: value.RPMPackageName(f), Version: f})
+	}
 	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
-		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, FixedVersions: fixed})
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, Fixes: fixes})
 	if err != nil {
 		t.Fatalf("proposal: %v", err)
 	}

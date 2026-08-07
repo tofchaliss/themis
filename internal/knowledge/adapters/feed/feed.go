@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // Translated pairs a canonical CVE with a Proposal produced from a feed record. The
@@ -131,4 +131,10 @@ func severityFrom(label string, cvss value.CVSS) value.Severity {
 		return s
 	}
 	return cvss.Severity()
+}
+
+// unattributedFixes is the package-local alias for domain.UnattributedFixes, used by the ACLs
+// whose sources state a fix without naming the package (NVD's CPE data, scanner reports).
+func unattributedFixes(versions []string) []domain.FixedVersion {
+	return domain.UnattributedFixes(versions)
 }

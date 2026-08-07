@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -17,10 +18,19 @@ type EnterpriseView struct {
 	CVSS           value.CVSS
 	SeveritySource string // which source won the headline severity (explainability, CON-0003)
 	AffectedRanges []string
-	FixedVersions  []string
-	EPSS           float64
-	KEV            bool
-	ExploitPublic  bool
+	// Fixes are the remediations, each attributed to the package it applies to. This is the
+	// authoritative form — use FixesFor to ask "what fixes MY component?".
+	Fixes []FixedVersion
+	// FixedVersions is the flat union of Fixes' versions, kept for wire compatibility and for
+	// "is a fix published at all?" questions.
+	//
+	// It is DELIBERATELY not usable for a per-component decision: it is a union across every
+	// package the CVE affects, so a version in it may belong to a different package entirely
+	// (KN-FIX-1). Anything deciding about one component must go through Fixes/FixesFor.
+	FixedVersions []string
+	EPSS          float64
+	KEV           bool
+	ExploitPublic bool
 
 	// Trust is tracked per field-group, not for the view as a whole (EDR-TRUST-01 T3).
 	// A single view-level class would be actively wrong: one vendor VEX statement
@@ -82,7 +92,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 
 	var best headlineCandidate
 	rangeSet := map[string]struct{}{}
-	fixSet := map[string]struct{}{}
+	fixSet := map[FixedVersion]struct{}{}
 	epssChosen := false
 	var epssTime time.Time
 	appSet := map[Applicability]struct{}{}
@@ -102,13 +112,13 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 			}
 			// Ranges and fixed versions are a union, so the group inherits the highest-risk
 			// class among every source that contributed to it (T3).
-			if len(f.AffectedRanges) > 0 || len(f.FixedVersions) > 0 {
+			if len(f.AffectedRanges) > 0 || len(f.Fixes) > 0 {
 				view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(p.source))
 			}
 			for _, rng := range f.AffectedRanges {
 				rangeSet[rng] = struct{}{}
 			}
-			for _, fx := range f.FixedVersions {
+			for _, fx := range f.Fixes {
 				fixSet[fx] = struct{}{}
 			}
 		case KindExploitSignal:
@@ -137,7 +147,8 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 		view.HeadlineTrust = trust.ClassOf(best.source)
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
-	view.FixedVersions = sortedKeys(fixSet)
+	view.Fixes = sortedFixes(fixSet)
+	view.FixedVersions = flatVersions(view.Fixes)
 	view.Applicabilities = sortedApplicabilities(appSet)
 	return view
 }
@@ -205,7 +216,7 @@ func (v EnterpriseView) equal(o EnterpriseView) bool {
 		return false
 	}
 	return equalStrings(v.AffectedRanges, o.AffectedRanges) &&
-		equalStrings(v.FixedVersions, o.FixedVersions) &&
+		equalFixes(v.Fixes, o.Fixes) &&
 		equalApplicabilities(v.Applicabilities, o.Applicabilities)
 }
 
@@ -275,3 +286,61 @@ func equalApplicabilities(a, b []Applicability) bool {
 	}
 	return true
 }
+
+// FixesFor returns the fix versions attributed to a specific package.
+//
+// Only exactly-attributed fixes are returned: an unattributed one (Package "") is excluded, not
+// treated as a wildcard. That is the whole point — a decision about one component must rest on
+// evidence about THAT component, and "the source did not say which package" is not evidence
+// about any of them. Callers that want everything published take FixedVersions instead, and must
+// not decide with it.
+func (v EnterpriseView) FixesFor(pkg string) []string {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return nil
+	}
+	var out []string
+	for _, f := range v.Fixes {
+		if strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
+			out = append(out, f.Version)
+		}
+	}
+	return out
+}
+
+// sortedFixes orders the reconciled fix set deterministically (package, then version), so the
+// same Proposals in any order yield byte-identical output.
+func sortedFixes(set map[FixedVersion]struct{}) []FixedVersion {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]FixedVersion, 0, len(set))
+	for f := range set {
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Package != out[j].Package {
+			return out[i].Package < out[j].Package
+		}
+		return out[i].Version < out[j].Version
+	})
+	return out
+}
+
+// flatVersions derives the legacy flat list: every distinct version, sorted.
+func flatVersions(fixes []FixedVersion) []string {
+	if len(fixes) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, f := range fixes {
+		seen[f.Version] = struct{}{}
+	}
+	return sortedKeys(seen)
+}
+
+// equalFixes compares two reconciled fix sets. slices.Equal rather than a hand-rolled loop
+// because the element-wise branch is unreachable here: Fixes is a sorted set derived from an
+// append-only union, so it grows monotonically and differing content always differs in length.
+// A hand-rolled loop would carry a branch no test could reach honestly.
+func equalFixes(a, b []FixedVersion) bool { return slices.Equal(a, b) }

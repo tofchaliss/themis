@@ -78,3 +78,30 @@ func rpmEVR(nevra string) string {
 	}
 	return s
 }
+
+// RPMPackageName extracts the package name from an RPM NEVRA ("openssl-1:1.0.2k-16.el8" ->
+// "openssl"), returning "" for a bare EVR that names no package.
+//
+// It is the inverse of rpmEVR: RPM versions and releases never contain a hyphen, so a NEVRA is
+// exactly name + "-" + version + "-" + release and the name is everything before the last two
+// segments. Two segments alone is a bare EVR, which names nothing.
+//
+// It exists so a vendor fix expressed as a NEVRA can be ATTRIBUTED to its package. A fix whose
+// package is unknown cannot be used to decide about a component (KN-FIX-1) — the association is
+// what makes the verdict about the right software.
+func RPMPackageName(nevra string) string {
+	s := StripVersionQualifiers(strings.TrimSpace(nevra))
+	if i := strings.LastIndex(s, "."); i >= 0 {
+		for _, arch := range rpmArchSuffixes {
+			if s[i+1:] == arch {
+				s = s[:i]
+				break
+			}
+		}
+	}
+	parts := strings.Split(s, "-")
+	if len(parts) < 3 {
+		return "" // bare EVR (or unparseable) — names no package
+	}
+	return strings.Join(parts[:len(parts)-2], "-")
+}

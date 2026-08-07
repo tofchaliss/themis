@@ -112,6 +112,7 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		SeveritySource: strptr(v.SeveritySource),
 		AffectedRanges: &ranges,
 		FixedVersions:  &fixes,
+		Fixes:          fixesOut(v.Fixes),
 		Epss:           f32ptr(v.EPSS),
 		Kev:            &kev,
 		ExploitPublic:  &pub,
@@ -154,3 +155,17 @@ func strptr(s string) *string { return &s }
 func f32ptr(f float64) *float32 { v := float32(f); return &v }
 
 func intptr(i int) *int { return &i }
+
+// fixesOut renders the package-attributed fixes. Omitted when empty so a card with nothing to
+// say is byte-identical on the wire to one written before the field existed.
+func fixesOut(fixes []domain.FixedVersion) *[]gen.FixedVersion {
+	if len(fixes) == 0 {
+		return nil
+	}
+	out := make([]gen.FixedVersion, 0, len(fixes))
+	for _, f := range fixes {
+		pkg, ver := f.Package, f.Version
+		out = append(out, gen.FixedVersion{Package: &pkg, Version: &ver})
+	}
+	return &out
+}

@@ -28,8 +28,8 @@ func TestScannerACL_Translate(t *testing.T) {
 	if !ok || vf.Severity != value.SeverityHigh || vf.CVSS.Score() != 7.5 {
 		t.Errorf("vuln facts = %+v ok=%v, want high/7.5", vf, ok)
 	}
-	if len(vf.FixedVersions) != 1 || vf.FixedVersions[0] != "2.0" {
-		t.Errorf("fixed = %v", vf.FixedVersions)
+	if len(vf.FixVersions()) != 1 || vf.FixVersions()[0] != "2.0" {
+		t.Errorf("fixed = %v", vf.FixVersions())
 	}
 }
 

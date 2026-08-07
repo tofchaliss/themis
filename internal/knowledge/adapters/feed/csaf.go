@@ -61,9 +61,9 @@ type csafProductRef struct {
 type csafFullProductName = csafProductRef
 
 type csafRelationship struct {
-	Category        string             `json:"category"`
-	ProductRef      string             `json:"product_reference"`
-	RelatesTo       string             `json:"relates_to_product_reference"`
+	Category        string              `json:"category"`
+	ProductRef      string              `json:"product_reference"`
+	RelatesTo       string              `json:"relates_to_product_reference"`
 	FullProductName csafFullProductName `json:"full_product_name"`
 }
 

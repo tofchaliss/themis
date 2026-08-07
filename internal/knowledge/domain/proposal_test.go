@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 var obs = time.Unix(1_700_000_000, 0)
@@ -33,7 +33,7 @@ func TestProposalKind_Valid(t *testing.T) {
 func TestNewVulnFactsProposal(t *testing.T) {
 	ranges := []string{"<3.0.11"}
 	p, err := domain.NewVulnFactsProposal("nvd", obs, domain.VulnFacts{
-		Severity: value.SeverityHigh, CVSS: mustCVSS(t, 7.5), AffectedRanges: ranges, FixedVersions: []string{"3.0.11"},
+		Severity: value.SeverityHigh, CVSS: mustCVSS(t, 7.5), AffectedRanges: ranges, Fixes: domain.UnattributedFixes([]string{"3.0.11"}),
 	})
 	if err != nil {
 		t.Fatalf("valid: %v", err)
@@ -113,5 +113,25 @@ func TestNewApplicabilityProposal(t *testing.T) {
 	}
 	if _, err := domain.NewApplicabilityProposal("", obs, domain.Applicability{Package: "p", Status: "affected"}); err == nil {
 		t.Error("empty source: expected error")
+	}
+}
+
+// FixVersions flattens for display; UnattributedFixes wraps versions a source did not attribute.
+// Both drop the package, which is why neither may be used to decide about a component.
+func TestVulnFacts_FixVersionsAndUnattributedFixes(t *testing.T) {
+	if got := domain.UnattributedFixes(nil); got != nil {
+		t.Errorf("UnattributedFixes(nil) = %v, want nil", got)
+	}
+	fixes := domain.UnattributedFixes([]string{"1.0", "2.0"})
+	if len(fixes) != 2 || fixes[0].Package != "" || fixes[0].Version != "1.0" {
+		t.Fatalf("UnattributedFixes = %+v, want two unattributed entries", fixes)
+	}
+	var empty domain.VulnFacts
+	if got := empty.FixVersions(); got != nil {
+		t.Errorf("FixVersions on empty = %v, want nil", got)
+	}
+	f := domain.VulnFacts{Fixes: []domain.FixedVersion{{Package: "glibc", Version: "2.28"}, {Version: "3.0"}}}
+	if got := f.FixVersions(); len(got) != 2 || got[0] != "2.28" || got[1] != "3.0" {
+		t.Fatalf("FixVersions = %v, want [2.28 3.0] — attribution dropped, versions kept", got)
 	}
 }

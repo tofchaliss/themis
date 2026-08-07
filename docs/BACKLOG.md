@@ -1092,7 +1092,24 @@ three angles, and two of them proposed fixes that would not have worked.
   therefore dangerous — subset.
   The +31 is a **lower bound**: the fixed run also had a more NVD-enriched card set, and richer cards carry
   more fix versions, which under the old code would have dropped *more*.
-  **What REMAINS (re-scoped to MEDIUM, display + model):** `EnterpriseView.FixedVersions` is still a
+  **✅ FULLY CLOSED 2026-08-07 — the model now carries the package.** The dashboard made the case: **16 of
+  the top 20 rows** could not say what to upgrade to, showing "94 candidates", "302 candidates". A tool that
+  ranks problems and cannot answer *what do I do about it* is half a tool, so the remaining half was not
+  cosmetic after all.
+  `domain.FixedVersion{Package, Version}` replaces the bare string; `VulnFacts.Fixes` and
+  `EnterpriseView.Fixes` carry it, with `FixedVersions` retained as the derived flat union for
+  "is a fix published?". **`EnterpriseView.FixesFor(pkg)` is the only way to decide about a component** —
+  exact match, and an unattributed fix (Package "") is deliberately NOT a wildcard, because "the source did
+  not say which package" is not evidence about any of them.
+  **The loss began at the ACL, not the model.** `osvAffected` decoded `ranges` and threw away
+  `package.name` — OSV states the association and Themis discarded it at parse time. OSV now pairs each fix
+  with its package; Red Hat extracts it from the NEVRA (`value.RPMPackageName`); NVD's CPE data and scanner
+  reports state fixes without a package and are recorded **unattributed** rather than guessed.
+  Correlation's fixed-verdict now reads `FixesFor(componentPackage(...))`, which is *better* than the
+  interim fix: it aggregates every source's fix for that package instead of only the discovering one.
+  Migration-free — the codec decodes a pre-KN-FIX-1 card's flat list as unattributed fixes, so old rows
+  load and degrade to "published, package unknown" rather than to a wrong decision. `fixes` is additive on
+  the v1 API, omitted when empty. `EnterpriseView.FixedVersions` is still a
   package-less union, so `GET /faultlines/{id}`, the FindingAssessment projection and any dashboard cannot
   say "the fix for YOUR component" — `scripts/release-posture.sh` now prints a candidate count rather than
   a confident wrong version. Fixing that properly still wants `VulnFacts` to carry

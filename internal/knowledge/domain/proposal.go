@@ -34,7 +34,54 @@ type VulnFacts struct {
 	Severity       value.Severity
 	CVSS           value.CVSS
 	AffectedRanges []string
-	FixedVersions  []string
+	// Fixes are the versions that resolve the vulnerability, each PAIRED WITH THE PACKAGE it
+	// applies to.
+	//
+	// The package matters because one CVE routinely affects many packages — a RHEL module stream
+	// advisory can name hundreds — and a bare list of versions cannot say which belongs to which.
+	// Flattening them caused KN-FIX-1: a fixed-verdict compared an installed build against
+	// another package's fix and silently dropped 31 live vulnerabilities on one release, and a
+	// dashboard offered "upgrade python3-ply 3.9 to 0.1.7".
+	//
+	// Package may be empty when a source does not say (NVD reports fixes without naming the
+	// package). An unattributed fix is usable for display but must never satisfy a per-component
+	// verdict — see EnterpriseView.FixesFor.
+	Fixes []FixedVersion
+}
+
+// UnattributedFixes wraps versions a source did not attribute to a package. They remain visible
+// as "a fix is published" and can never satisfy a per-component verdict (see
+// EnterpriseView.FixesFor), which is the safe reading of "the source did not say".
+func UnattributedFixes(versions []string) []FixedVersion {
+	if len(versions) == 0 {
+		return nil
+	}
+	out := make([]FixedVersion, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, FixedVersion{Version: v})
+	}
+	return out
+}
+
+// FixVersions is the flat list of fix versions, for display and for "is a fix published?".
+// It deliberately drops the package attribution, so nothing deciding about one component may
+// use it — that is what FixesFor is for.
+func (f VulnFacts) FixVersions() []string {
+	if len(f.Fixes) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(f.Fixes))
+	for _, fx := range f.Fixes {
+		out = append(out, fx.Version)
+	}
+	return out
+}
+
+// FixedVersion is one remediation: the version that fixes the vulnerability, and the package it
+// fixes it in.
+type FixedVersion struct {
+	Package string // "" when the source did not attribute it
+	Version string
 }
 
 // ExploitSignal is an exploit-signal payload: exploitation likelihood / known status.
@@ -87,7 +134,7 @@ func NewVulnFactsProposal(source string, observedAt time.Time, facts VulnFacts) 
 		Severity:       facts.Severity,
 		CVSS:           facts.CVSS,
 		AffectedRanges: append([]string(nil), facts.AffectedRanges...),
-		FixedVersions:  append([]string(nil), facts.FixedVersions...),
+		Fixes:          append([]FixedVersion(nil), facts.Fixes...),
 	}
 	return Proposal{source: source, observedAt: observedAt.UTC(), kind: KindVulnFacts, vulnFacts: &copyFacts}, nil
 }
@@ -132,7 +179,7 @@ func (p Proposal) VulnFacts() (VulnFacts, bool) {
 	}
 	f := *p.vulnFacts
 	f.AffectedRanges = append([]string(nil), p.vulnFacts.AffectedRanges...)
-	f.FixedVersions = append([]string(nil), p.vulnFacts.FixedVersions...)
+	f.Fixes = append([]FixedVersion(nil), p.vulnFacts.Fixes...)
 	return f, true
 }
 

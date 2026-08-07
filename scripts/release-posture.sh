@@ -104,15 +104,24 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     # CVSS: `critical` means CVSS>=9 AND KEV-listed; `high+` means CVSS>=9 with a public exploit.
     fl=$(get "$KNOWLEDGE/api/v1/faultlines/$flid" 2>/dev/null || echo '{}')
     band=$(echo "$fl" | jq -r '.view.priority // "-"')
+    comp=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end' | sed 's#pkg:[a-z]*/##; s#?.*##')
     kev=$(echo "$fl" | jq -r 'if .view.kev then "yes" else "-" end')
     epss=$(echo "$fl" | jq -r 'if .view.epss then (.view.epss * 100 | floor | tostring + "%") else "-" end')
-    # fixed_versions is the deterministic mitigation — but the card's list is a UNION across every
-    # package the CVE affects, with no package association (KN-FIX-1). Picking [0] showed
-    # "upgrade python3-ply 3.9 to 0.1.7", which is a different package's fix. Until the model
-    # carries the package, show a single unambiguous value or say how many candidates there are —
-    # never a confident wrong one.
-    fix=$(echo "$fl" | jq -r '(.view.fixed_versions // []) | if length == 0 then "none published" elif length == 1 then .[0] else "\(length) candidates (see card)" end')
-    comp=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end' | sed 's#pkg:[a-z]*/##; s#?.*##')
+    # THE fix for THIS component, from the package-attributed `fixes` (KN-FIX-1). The flat
+    # `fixed_versions` is a union across every package the CVE affects — reading it printed
+    # "upgrade python3-ply 3.9 to 0.1.7", a different package's fix entirely. Matching on the
+    # package name is what turns the column from a hazard into an instruction.
+    #
+    # Falls back to a candidate count when nothing is attributed to this package: a card whose
+    # source never named the package (NVD CPE data, scanner reports) still shows that a fix
+    # exists, without pretending to know which one applies.
+    pkg=$(echo "$comp" | sed 's#.*/##; s#@.*##')
+    fix=$(echo "$fl" | jq -r --arg p "$pkg" '
+      ((.view.fixes // []) | map(select((.package // "") | ascii_downcase == ($p|ascii_downcase))) | map(.version)) as $mine
+      | if ($mine|length) > 0 then ($mine|join(", "))
+        elif ((.view.fixed_versions // [])|length) == 0 then "none published"
+        else "\((.view.fixed_versions|length)) unattributed"
+        end')
     printf '%s\t%s\t%s\t%s\t%s\t%sx\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$rank" "$band" "$cve" "$resid" "$effect" "$blast" "$kev" "$epss" "$comp" "$fix" "$stance" "$reservation"
   done <<< "$rows"

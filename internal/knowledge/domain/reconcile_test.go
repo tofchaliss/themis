@@ -6,8 +6,8 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 func exploit(t *testing.T, source string, at time.Time, epss float64, kev, pub bool) domain.Proposal {
@@ -76,7 +76,7 @@ func TestReconcile_UnionAndSignals(t *testing.T) {
 	newer := time.Unix(1_700_000_000, 0)
 
 	withFixes, err := domain.NewVulnFactsProposal("nvd", obs, domain.VulnFacts{
-		Severity: value.SeverityHigh, CVSS: mustCVSS(t, 7.5), FixedVersions: []string{"3.0.11", "2.0.9"},
+		Severity: value.SeverityHigh, CVSS: mustCVSS(t, 7.5), Fixes: domain.UnattributedFixes([]string{"3.0.11", "2.0.9"}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -230,4 +230,84 @@ func viewEqual(a, b domain.EnterpriseView) bool {
 		}
 	}
 	return true
+}
+
+// FixesFor is what makes a fix actionable: it answers "what fixes MY component?" where the flat
+// FixedVersions can only answer "is anything published?". The distinction is KN-FIX-1 — a union
+// across every package a CVE affects, read as if it were about one of them, both misled
+// operators and silently dropped 31 live vulnerabilities on one release.
+func TestEnterpriseView_FixesForIsExactAndExcludesUnattributed(t *testing.T) {
+	v := domain.Reconcile([]domain.Proposal{
+		fixesProposal(t, "osv",
+			domain.FixedVersion{Package: "glibc", Version: "0:2.28-251.el8_10.38"},
+			domain.FixedVersion{Package: "perl-Carp", Version: "0:1.42-397.el8"},
+			domain.FixedVersion{Version: "9.9.9"}, // unattributed
+		),
+	}, domain.NewPrecedence("osv"), domain.NewTrustPolicy(nil))
+
+	if got := v.FixesFor("glibc"); len(got) != 1 || got[0] != "0:2.28-251.el8_10.38" {
+		t.Fatalf("FixesFor(glibc) = %v, want only glibc's fix", got)
+	}
+	// Case-insensitive, because package names arrive from feeds with inconsistent casing.
+	if got := v.FixesFor("GLIBC"); len(got) != 1 {
+		t.Errorf("FixesFor is case-sensitive; got %v", got)
+	}
+	// An UNATTRIBUTED fix is not a wildcard. "The source did not say which package" is not
+	// evidence about any package, so it must never satisfy a per-component decision.
+	if got := v.FixesFor("openssl"); len(got) != 0 {
+		t.Fatalf("FixesFor(openssl) = %v, want none — an unattributed fix must not match everything", got)
+	}
+	if got := v.FixesFor(""); len(got) != 0 {
+		t.Errorf("FixesFor(\"\") = %v, want none", got)
+	}
+	// The flat list still carries everything, including the unattributed one, for "is a fix
+	// published?" — it just cannot be used to decide.
+	if len(v.FixedVersions) != 3 {
+		t.Errorf("FixedVersions = %v, want all 3 versions", v.FixedVersions)
+	}
+}
+
+// fixesProposal builds a vuln-facts Proposal carrying explicitly attributed fixes.
+func fixesProposal(t *testing.T, source string, fixes ...domain.FixedVersion) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "")
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, Fixes: fixes})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
+// A change in the FIXES is a view change even when the flat version list is identical — the
+// package attribution is part of what the card knows, and Governance re-evaluates on it.
+func TestReconcile_FixAttributionChangeIsAViewChange(t *testing.T) {
+	prec, pol := domain.NewPrecedence("osv"), domain.NewTrustPolicy(nil)
+	f, err := domain.NewFaultline("FL-1", cve(t, "CVE-2024-0001"))
+	if err != nil {
+		t.Fatalf("NewFaultline: %v", err)
+	}
+	f.FoldProposal(fixesProposal(t, "osv", domain.FixedVersion{Version: "1.0"}), prec, pol)
+	// Same version, now attributed. The flat list is unchanged; the card's knowledge is not.
+	res := f.FoldProposal(fixesProposal(t, "osv", domain.FixedVersion{Package: "glibc", Version: "1.0"}), prec, pol)
+	if !res.ViewChanged {
+		t.Fatal("expected ViewChanged: a fix gaining its package changes what the card can decide")
+	}
+}
+
+// A fix set that differs only in LENGTH is still a different view — the short-circuit in
+// equalFixes must not report equality just because the shared prefix matches.
+func TestReconcile_FixCountChangeIsAViewChange(t *testing.T) {
+	prec, pol := domain.NewPrecedence("osv"), domain.NewTrustPolicy(nil)
+	f, err := domain.NewFaultline("FL-1", cve(t, "CVE-2024-0001"))
+	if err != nil {
+		t.Fatalf("NewFaultline: %v", err)
+	}
+	f.FoldProposal(fixesProposal(t, "osv", domain.FixedVersion{Package: "glibc", Version: "1.0"}), prec, pol)
+	res := f.FoldProposal(fixesProposal(t, "osv",
+		domain.FixedVersion{Package: "glibc", Version: "1.0"},
+		domain.FixedVersion{Package: "glibc", Version: "2.0"}), prec, pol)
+	if !res.ViewChanged {
+		t.Fatal("expected ViewChanged: a second published fix is new knowledge")
+	}
 }

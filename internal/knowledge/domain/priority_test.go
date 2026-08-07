@@ -25,8 +25,8 @@ func TestPriorityAndScore(t *testing.T) {
 	}{
 		// --- Priority Layer-1 rules (first match) ---
 		{"crit: c>=9 & KEV", EnterpriseView{Severity: value.SeverityCritical, CVSS: cvss(t, 9.8), KEV: true}, PriorityCritical, 100},
-		{"high+: c>=9 & exploit", EnterpriseView{CVSS: cvss(t, 9.8), ExploitPublic: true}, PriorityHighPlus, 90}, // sev derived from CVSS 9.8 -> critical base 90
-		{"high: KEV & c<9", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), KEV: true}, PriorityHigh, 85}, // 70 + 15
+		{"high+: c>=9 & exploit", EnterpriseView{CVSS: cvss(t, 9.8), ExploitPublic: true}, PriorityHighPlus, 90},                         // sev derived from CVSS 9.8 -> critical base 90
+		{"high: KEV & c<9", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), KEV: true}, PriorityHigh, 85},               // 70 + 15
 		{"elevated: EPSS>=.5 & c>=7", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), EPSS: 0.6}, PriorityElevated, 83}, // 70 + 70*.6*.3 = 82.6
 		{"high: c>=9 plain", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 9.1)}, PriorityHigh, 70},
 		{"informational: low c", EnterpriseView{Severity: value.SeverityMedium, CVSS: cvss(t, 5.0)}, PriorityInformational, 40},
@@ -42,8 +42,8 @@ func TestPriorityAndScore(t *testing.T) {
 		{"unknown sev no CVSS -> 0", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z}, PriorityInformational, 0},
 
 		// --- Score edges ---
-		{"KEV bump + clamp", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), EPSS: 0.9, KEV: true}, PriorityHigh, 100}, // 70 + 18.9 + 15 = 103.9 -> 100
-		{"unknown sev + KEV floor", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, KEV: true}, PriorityHigh, 65},               // base 50 + 15
+		{"KEV bump + clamp", EnterpriseView{Severity: value.SeverityHigh, CVSS: cvss(t, 7.5), EPSS: 0.9, KEV: true}, PriorityHigh, 100},           // 70 + 18.9 + 15 = 103.9 -> 100
+		{"unknown sev + KEV floor", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, KEV: true}, PriorityHigh, 65},                        // base 50 + 15
 		{"unknown sev + exploit floor", EnterpriseView{Severity: value.SeverityUnknown, CVSS: z, ExploitPublic: true}, PriorityInformational, 25}, // base 25
 		{"low baseline", EnterpriseView{Severity: value.SeverityLow, CVSS: cvss(t, 2.0)}, PriorityInformational, 10},
 	}

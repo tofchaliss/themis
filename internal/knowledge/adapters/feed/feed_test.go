@@ -41,7 +41,7 @@ func TestRegistry_GoldenFiles(t *testing.T) {
 		t.Errorf("nvd cve = %s", nvd.CVE)
 	}
 	f, ok := nvd.Proposal.VulnFacts()
-	if !ok || f.Severity != "high" || f.CVSS.Score() != 7.5 || len(f.AffectedRanges) != 1 || len(f.FixedVersions) != 1 {
+	if !ok || f.Severity != "high" || f.CVSS.Score() != 7.5 || len(f.AffectedRanges) != 1 || len(f.FixVersions()) != 1 {
 		t.Errorf("nvd vuln-facts = %+v ok=%v", f, ok)
 	}
 
@@ -51,7 +51,7 @@ func TestRegistry_GoldenFiles(t *testing.T) {
 		t.Errorf("osv cve (from alias) = %s", osv.CVE)
 	}
 	of, _ := osv.Proposal.VulnFacts()
-	if of.Severity != "high" || len(of.AffectedRanges) != 2 || len(of.FixedVersions) != 1 {
+	if of.Severity != "high" || len(of.AffectedRanges) != 2 || len(of.FixVersions()) != 1 {
 		t.Errorf("osv ranges/fixes = %+v", of)
 	}
 

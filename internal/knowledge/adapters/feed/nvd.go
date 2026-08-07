@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // nvdRecord is the subset of an NVD CVE record the ACL consumes.
@@ -42,7 +42,10 @@ func (a nvdACL) Translate(raw []byte) ([]Translated, error) {
 		return nil, fmt.Errorf("nvd: %w", err)
 	}
 	p, err := domain.NewVulnFactsProposal(a.Source(), at, domain.VulnFacts{
-		Severity: severityFrom(rec.BaseSeverity, cvss), CVSS: cvss, AffectedRanges: rec.Affected, FixedVersions: rec.Fixed,
+		Severity: severityFrom(rec.BaseSeverity, cvss), CVSS: cvss, AffectedRanges: rec.Affected,
+		// NVD's CPE data yields version boundaries without a package name, so these stay
+		// unattributed — visible as "a fix exists", never used to decide about a component.
+		Fixes: unattributedFixes(rec.Fixed),
 	})
 	if err != nil {
 		return nil, err
