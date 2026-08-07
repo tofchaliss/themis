@@ -307,8 +307,8 @@ func TestNVDClient_NonOKStatusIsError(t *testing.T) {
 	}
 }
 
-// compile-time confirmation the client is a ChangedVulnSource.
-var _ app.ChangedVulnSource = (*feed.NVDClient)(nil)
+// compile-time confirmation the client satisfies the per-CVE enrichment port (D5a).
+var _ app.CVEVulnSource = (*feed.NVDClient)(nil)
 
 // Pacing exists because the SLICING walk made rate limiting suddenly matter. The old
 // whole-window fetch was capped at 10 requests per poll, so the truncation that made it wrong

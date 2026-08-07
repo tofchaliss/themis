@@ -338,23 +338,42 @@ func (s *Store) ReconcileStuckStages(ctx context.Context) (int, error) {
 	return int(ct.RowsAffected()), nil
 }
 
-// LastSuccess returns the scheduled-watch watermark, or the zero time if the watch has
-// never completed a pass (D5/D11).
-func (s *Store) LastSuccess(ctx context.Context) (time.Time, error) {
-	var t time.Time
-	err := s.pool.QueryRow(ctx, `SELECT last_success FROM knowledge_watch_state WHERE id = 1`).Scan(&t)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, nil
+// CVEsMissingSource returns carded CVEs that carry no Proposal from `source`, oldest card
+// first, capped at limit — the work queue for the per-CVE enrichment sweep (D5a).
+//
+// Ordering by card age rather than arbitrarily makes the sweep DETERMINISTIC and fair: a large
+// estate drains front-to-back over successive runs instead of re-rolling the same dice and
+// leaving some cards permanently unenriched. Cards that already carry the source are excluded,
+// so a settled estate costs one query and no fetches.
+//
+// This replaces the watch watermark that used to live here. There is no watermark now, and that
+// is the point: the queue IS the state, so there is nothing to advance past unread work — the
+// failure mode NVD-WATCH-1 was.
+func (s *Store) CVEsMissingSource(ctx context.Context, source string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
 	}
-	return t, err
-}
-
-// SetLastSuccess advances the scheduled-watch watermark.
-func (s *Store) SetLastSuccess(ctx context.Context, t time.Time) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO knowledge_watch_state (id, last_success) VALUES (1, $1)
-		ON CONFLICT (id) DO UPDATE SET last_success = EXCLUDED.last_success`, t)
-	return err
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.cve
+		  FROM faultlines f
+		 WHERE NOT EXISTS (
+		       SELECT 1 FROM faultline_proposals p
+		        WHERE p.faultline_id = f.id AND p.source = $1)
+		 ORDER BY f.created_at, f.cve
+		 LIMIT $2`, source, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var cve string
+		if err := rows.Scan(&cve); err != nil {
+			return nil, err
+		}
+		out = append(out, cve)
+	}
+	return out, rows.Err()
 }
 
 // KnownCVEs returns the set of canonical CVEs that already have a card — the relevance

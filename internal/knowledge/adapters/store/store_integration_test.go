@@ -510,28 +510,41 @@ func TestRecordMatch(t *testing.T) {
 	}
 }
 
-func TestWatchState(t *testing.T) {
+func TestCVEsMissingSource(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 	st := store.New(pool)
 
-	if ts, err := st.LastSuccess(ctx); err != nil || !ts.IsZero() {
-		t.Errorf("empty watermark = %v err=%v, want zero time", ts, err)
-	}
-	want := time.Unix(1_700_000_000, 0).UTC()
-	if err := st.SetLastSuccess(ctx, want); err != nil {
+	prec := domain.NewPrecedence("nvd", "osv")
+	pol := domain.NewTrustPolicy(nil)
+	// Two cards: one already carries an "nvd" Proposal, the other only "osv".
+	a, _ := domain.NewFaultline("fl-nvd", cveID(t, "CVE-2024-0001"))
+	a.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, pol)
+	if err := st.Save(ctx, a, true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := st.LastSuccess(ctx); err != nil || !got.Equal(want) {
-		t.Errorf("watermark = %v err=%v, want %v", got, err, want)
-	}
-	// A second set upserts the single row.
-	want2 := want.Add(time.Hour)
-	if err := st.SetLastSuccess(ctx, want2); err != nil {
+	b, _ := domain.NewFaultline("fl-osv", cveID(t, "CVE-2024-0002"))
+	b.FoldProposal(vulnFacts(t, "osv", value.SeverityMedium), prec, pol)
+	if err := st.Save(ctx, b, true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := st.LastSuccess(ctx); !got.Equal(want2) {
-		t.Errorf("watermark after update = %v, want %v", got, want2)
+
+	got, err := st.CVEsMissingSource(ctx, "nvd", 10)
+	if err != nil {
+		t.Fatalf("CVEsMissingSource: %v", err)
+	}
+	if len(got) != 1 || got[0] != "CVE-2024-0002" {
+		t.Fatalf("got %v, want only the card with no nvd Proposal", got)
+	}
+	// A settled estate returns nothing, so a sweep costs one query and no fetches.
+	if none, err := st.CVEsMissingSource(ctx, "osv", 10); err != nil {
+		t.Fatalf("CVEsMissingSource: %v", err)
+	} else if len(none) != 1 || none[0] != "CVE-2024-0001" {
+		t.Fatalf("got %v, want only the card with no osv Proposal", none)
+	}
+	// A non-positive limit does no work at all rather than fetching everything.
+	if zero, err := st.CVEsMissingSource(ctx, "nvd", 0); err != nil || zero != nil {
+		t.Fatalf("limit 0 = %v err=%v, want nil", zero, err)
 	}
 }
 

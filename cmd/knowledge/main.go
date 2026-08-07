@@ -7,10 +7,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,11 +42,12 @@ type config struct {
 	evidenceURL    string // THEMIS_EVIDENCE_URL — Evidence read-API base URL (inventory source; default "http://localhost:8081").
 	osvURL         string // THEMIS_OSV_URL — OSV query base URL (lazy discovery; default "https://api.osv.dev").
 
-	nvdEnabled      bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
-	nvdURL          string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
-	nvdAPIKey       string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
-	nvdDiscovery    bool          // THEMIS_NVD_DISCOVERY=1 — add NVD to correlation discovery: a per-component, CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a finding (A2). Default off (external NVD call per component at correlation time; an NVD API key is strongly recommended for large inventories — NVD throttles).
-	nvdPollInterval time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
+	nvdEnabled       bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
+	nvdURL           string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
+	nvdAPIKey        string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
+	nvdDiscovery     bool          // THEMIS_NVD_DISCOVERY=1 — add NVD to correlation discovery: a per-component, CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a finding (A2). Default off (external NVD call per component at correlation time; an NVD API key is strongly recommended for large inventories — NVD throttles).
+	nvdBackfillLimit int           // THEMIS_NVD_BACKFILL_LIMIT — carded CVEs enriched per sweep (default 200). Cost is one small request per CVE, so this bounds a sweep to a predictable duration; a large estate drains over successive sweeps.
+	nvdPollInterval  time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -80,11 +81,12 @@ func loadConfig() config {
 		evidenceURL:    envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		osvURL:         envDefault("THEMIS_OSV_URL", "https://api.osv.dev"),
 
-		nvdEnabled:      os.Getenv("THEMIS_NVD_ENABLED") == "1",
-		nvdURL:          os.Getenv("THEMIS_NVD_URL"),
-		nvdAPIKey:       os.Getenv("THEMIS_NVD_API_KEY"),
-		nvdDiscovery:    os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
-		nvdPollInterval: parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
+		nvdEnabled:       os.Getenv("THEMIS_NVD_ENABLED") == "1",
+		nvdURL:           os.Getenv("THEMIS_NVD_URL"),
+		nvdAPIKey:        os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdDiscovery:     os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
+		nvdBackfillLimit: envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
+		nvdPollInterval:  parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -146,10 +148,11 @@ func main() {
 	}
 
 	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
-		Enabled:   cfg.nvdEnabled,
-		BaseURL:   cfg.nvdURL,
-		APIKey:    cfg.nvdAPIKey,
-		Discovery: cfg.nvdDiscovery,
+		Enabled:       cfg.nvdEnabled,
+		BackfillLimit: cfg.nvdBackfillLimit,
+		BaseURL:       cfg.nvdURL,
+		APIKey:        cfg.nvdAPIKey,
+		Discovery:     cfg.nvdDiscovery,
 		// 180s, not 60s. A single 2000-record NVD page was measured at 5.2 MB / 83.6 seconds on
 		// 2026-08-07 — server-side generation time, not throttling — so the old 60s ceiling
 		// killed the request mid-body and failed the whole poll.
@@ -172,11 +175,13 @@ func main() {
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
 
-	// Scheduled NVD modified-since watch (D5): enriches already-carded CVEs with authoritative
-	// CVSS/severity. Off unless THEMIS_NVD_ENABLED=1.
-	if kn.Watch != nil {
-		go watchLoop(kn.Watch, kn.Health, cfg.nvdPollInterval, logger.Component("watch"))
-		logger.Info("nvd modified-since watch enabled", observability.String("interval", cfg.nvdPollInterval.String()))
+	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
+	// CVSS/severity onto its card. Off unless THEMIS_NVD_ENABLED=1.
+	if kn.Backfill != nil {
+		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"))
+		logger.Info("nvd per-CVE enrichment enabled",
+			observability.String("interval", cfg.nvdPollInterval.String()),
+			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit))
 	}
 
 	// Scheduled exploit-signal enrichment (D5): folds EPSS/KEV/public-exploit onto already-carded
@@ -267,38 +272,34 @@ func recordFeed(health *app.FeedHealthService, source string, pollErr error, log
 // watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
 // every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
 // failure is logged and retried next tick (the watermark only advances on a clean pass).
-func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
-	poll := func() {
-		n, err := watch.Poll(context.Background())
+// backfillLoop runs the per-CVE NVD enrichment sweep on a fixed cadence (D5a).
+//
+// Simpler than the window walk it replaces, because there is no window: each run asks the store
+// which carded CVEs still lack an NVD Proposal, fetches those by id, and stops at the cap. There
+// is no watermark to advance and therefore no way to skip — the queue IS the state, and a CVE
+// stays on it until it is enriched.
+func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := bf.Enrich(context.Background())
 		if err != nil {
-			logger.Error("nvd watch poll failed", observability.Err(err))
+			logger.Error("nvd enrichment sweep failed", observability.Err(err))
 			recordFeed(health, "nvd", err, logger)
-			// A window the client could not read in full is its own outcome, distinct from a
-			// transport failure and emphatically distinct from success — that conflation is
-			// exactly what NVD-WATCH-1 was.
-			outcome := observability.FeedPollFailed
-			if errors.Is(err, feed.ErrWindowTruncated) {
-				outcome = observability.FeedPollTruncated
-			}
-			observability.Default().RecordFeedPoll("nvd", outcome)
+			observability.Default().RecordFeedPoll("nvd", observability.FeedPollFailed)
 			return
 		}
 		recordFeed(health, "nvd", nil, logger)
-		// Logged on EVERY successful poll, including a zero fold. Suppressing the zero case
-		// made a feed that saw 5% of its window indistinguishable from a quiet one
-		// (NVD-WATCH-1): "no log line" and "nothing to say" must not be the same signal.
-		logger.Info("nvd watch poll complete", observability.Int("folded", n))
-		// Counted as well as logged, so "has nvd completed a poll in the last 24h?" and "is it
-		// folding anything?" become alertable questions rather than grep exercises.
+		// Logged on EVERY sweep including a zero fold: an estate with nothing left to enrich and
+		// a feed that has stopped working must not look alike (NVD-WATCH-1).
+		logger.Info("nvd enrichment sweep complete", observability.Int("folded", n))
 		observability.Default().RecordFeedPoll("nvd", observability.FeedPollComplete)
 		observability.Default().RecordFeedRecords("nvd", observability.FeedRecordsFolded, n)
 	}
-	time.Sleep(15 * time.Second) // let the service settle before the first (up-to-120-day) poll
-	poll()
+	time.Sleep(15 * time.Second) // let the service settle before the first sweep
+	sweep()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		poll()
+		sweep()
 	}
 }
 
@@ -454,6 +455,16 @@ func applyMigrations(dsn, path string) error {
 		return err
 	}
 	return nil
+}
+
+// envIntDefault reads an int knob, falling back to def when unset or unparseable.
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 func envDefault(key, def string) string {

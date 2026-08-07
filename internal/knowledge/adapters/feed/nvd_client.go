@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
 
@@ -556,6 +557,36 @@ func parseNVDTime(s string) time.Time {
 
 // ensure the port is satisfied at compile time.
 var (
-	_ app.ChangedVulnSource = (*NVDClient)(nil)
+	_ app.CVEVulnSource     = (*NVDClient)(nil)
 	_ app.PackageVulnSource = (*NVDClient)(nil)
 )
+
+// VulnsForCVE fetches ONE CVE by id — the per-subject enrichment path (EDR-KNOWLEDGE-01 D5a),
+// and the shape every other feed in this context already uses.
+//
+// This replaces the modified-since window walk for enrichment. The walk asked NVD what changed
+// everywhere and then discarded almost all of it: measured 2026-08-07, 3,207 records fetched to
+// apply 18, at ~84 seconds per day of window. Asking by id makes the relevance bound structural
+// rather than a post-fetch filter — nothing is retrieved that could be discarded — and it also
+// covers MORE, because a CVE whose last modification predates the window was unreachable by the
+// walk at any page budget.
+//
+// found=false when NVD has no record, or has one it has never scored: a Proposal carrying no
+// severity would add a source to the card without adding a fact, and the reconciled headline
+// would gain a contender with nothing to contend.
+func (c *NVDClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.ProposalFor, bool, error) {
+	q := url.Values{}
+	q.Set("cveId", cve.String())
+	resp, err := c.get(ctx, q, "nvd by-cve")
+	if err != nil {
+		return app.ProposalFor{}, false, err
+	}
+	for _, v := range resp.Vulnerabilities {
+		pf, ok, terr := c.translate(v.CVE)
+		if terr != nil || !ok {
+			continue
+		}
+		return pf, true, nil
+	}
+	return app.ProposalFor{}, false, nil
+}

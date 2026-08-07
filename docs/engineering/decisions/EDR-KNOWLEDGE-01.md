@@ -150,6 +150,44 @@ is still enterprise-wide, reused across releases) and Book II §6.6.
 PoC reference: `osv/component_fetcher.go` (query-by-package at scan time), `usecase/watch` (NVD
 modified-since watch), NVD by-CVE backfill for targeted enrichment.
 
+#### D5a — NVD enrichment is per-CVE over the carded set, not a modified-since window walk (2026-08-07)
+
+Context: D5's third bullet already requires that "enrichment of a card's fields is targeted per-card, not
+bulk." The NVD realization did not honour it. The scheduled watch asked NVD *"what changed everywhere?"*,
+then discarded almost all of it against the relevance bound — which is bulk retrieval wearing a lazy
+label. Every other feed in the greenfield was already per-subject: OSV is queried by package, Red Hat and
+the CSAF feeds by CVE. NVD was the last window walker.
+
+Measured on a live deployment (2026-08-07), which is what turned a stylistic inconsistency into a
+decision:
+
+- one 24-hour slice of NVD's modified-since window: **5.2 MB, 83.6 seconds** (server-side generation, not
+  throttling — the following nine requests answered in ~1.2s each);
+- a 120-day cold start is therefore **~2.8 hours** of walking;
+- of **3,207** records fetched across two polls, **18** were relevant — **0.56%**.
+
+Decision:
+
+- **NVD enrichment sweeps the CARDED CVE set**, fetching each by id (`/cves/2.0?cveId=CVE-…`), in the same
+  shape as the Red Hat and CSAF-VEX feeds. Cost becomes proportional to the **estate**, not to NVD's churn.
+- **The modified-since watch is retired** as the enrichment mechanism. D5's discovery path 2 ("which CVEs
+  changed recently → create cards for new hits") is untouched as a *concept*, but nothing implements it
+  today: the watch was relevance-bounded, so it never created a card — it only ever enriched. Removing it
+  loses no capability that exists.
+- **The sweep is bounded per run** (a cap on CVEs per poll) and prioritises cards with no NVD proposal
+  yet, so a large estate drains over successive polls rather than stalling on the first — the same
+  incremental, lossless shape the window walk was given on 2026-08-07.
+- **Relevance needs no filter.** Asking only about carded CVEs makes the bound structural instead of a
+  post-fetch discard, which is the strongest form of D5: not "fetch everything and drop what does not
+  apply" but "only ask about what applies."
+
+Consequence for cost: a 237-card estate becomes ~237 requests of a few KB each, versus hundreds of
+thousands of records — roughly two orders of magnitude less work for strictly more coverage, because a
+card whose CVE last changed outside the window was never reachable by the walk at all.
+
+ADR basis: unchanged — this restores D5's own per-card enrichment rule rather than amending it. Book I
+§3.1–3.3 (relevance) applies with more force, not less.
+
 ### D6 — One ACL per feed translating into a single common Proposal, typed by kind
 
 Decision:

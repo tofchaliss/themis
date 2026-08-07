@@ -54,7 +54,7 @@ type Knowledge struct {
 	Store    *store.Store
 	Consumer *inbound.Consumer
 	Relay    *store.Relay
-	Watch    *app.WatchService            // nil when the NVD watch is disabled
+	Backfill *app.BackfillService         // nil when NVD enrichment is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
 	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
@@ -67,9 +67,11 @@ type Knowledge struct {
 // root schedules its Poll.
 type NVDConfig struct {
 	Enabled bool
-	BaseURL string       // "" → the client default (services.nvd.nist.gov)
-	APIKey  string       // optional; empty uses NVD's lower unauthenticated rate limit
-	HTTP    *http.Client // optional; nil → http.DefaultClient
+	// BackfillLimit caps how many carded CVEs one enrichment sweep fetches (0 → the default).
+	BackfillLimit int
+	BaseURL       string       // "" → the client default (services.nvd.nist.gov)
+	APIKey        string       // optional; empty uses NVD's lower unauthenticated rate limit
+	HTTP          *http.Client // optional; nil → http.DefaultClient
 
 	// Discovery adds NVD to the correlation discovery fan-out (A2): a per-component,
 	// CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a
@@ -146,8 +148,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		Health:   health,
 	}
 	if nvd.Enabled {
-		changed := feed.NewRelevanceFilteredSource("nvd", feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
-		kn.Watch = app.NewWatchService(changed, st, fold, sysClock{})
+		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance
+		// bound becomes structural — only CVEs the enterprise holds are ever requested — so
+		// there is no RelevanceFilteredSource to wrap it in and nothing fetched to discard.
+		kn.Backfill = app.NewBackfillService("nvd",
+			feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, fold, nvd.BackfillLimit)
 	}
 	if signals.Enabled {
 		src := feed.NewExploitSignalClient(signals.EPSSURL, signals.KEVURL, signals.ExploitDBURL, signals.HTTP)
