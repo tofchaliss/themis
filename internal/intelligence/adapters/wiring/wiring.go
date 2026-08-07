@@ -10,6 +10,7 @@ package wiring
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/themis-project/themis/internal/intelligence/adapters/admission"
 	"github.com/themis-project/themis/internal/intelligence/adapters/embed"
@@ -39,6 +40,15 @@ type Config struct {
 	UseFake        bool   // dev/CI: use the deterministic fake provider AND fake embedder (no model)
 	Logger         *observability.Logger
 	HTTPClient     *http.Client
+	// ProviderTimeout is the Gateway's per-invocation deadline around provider I/O. 0 → the
+	// Gateway default (60s).
+	//
+	// It MUST be set from the same source as HTTPClient.Timeout. There are two independent
+	// deadlines on one call — the HTTP client's and the Gateway's — and the shorter always wins.
+	// This field was previously never populated, so raising THEMIS_LLM_TIMEOUT moved only the
+	// HTTP client and every call still died at the hard-coded 60s with `provider_error`. The
+	// documented remedy for a slow local model therefore did nothing.
+	ProviderTimeout time.Duration
 
 	// Δ3a Operational Semantic Index (optional). Store == nil → a stateless Gateway (no semantic
 	// precedent; the exact-CVE fallback still grounds recommendations).
@@ -98,12 +108,13 @@ func Wire(cfg Config) (Intelligence, error) {
 		return Intelligence{}, err
 	}
 	gw, err := app.NewGateway(app.GatewayConfig{
-		Registry:   domain.DefaultRegistry(),
-		Projection: proj,
-		Precedent:  prc,
-		Redactor:   admission.NewBasicRedactor(), // C7 secret/PII scrub (authorizer = deployment seam)
-		Prompt:     pr,
-		Engines:    engines,
+		Registry:        domain.DefaultRegistry(),
+		Projection:      proj,
+		Precedent:       prc,
+		Redactor:        admission.NewBasicRedactor(), // C7 secret/PII scrub (authorizer = deployment seam)
+		Prompt:          pr,
+		Engines:         engines,
+		ProviderTimeout: cfg.ProviderTimeout,
 	})
 	if err != nil {
 		return Intelligence{}, err

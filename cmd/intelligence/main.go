@@ -133,9 +133,13 @@ func main() {
 		ResponseFormat: cfg.respFormat,
 		Logger:         logger,
 		HTTPClient:     &http.Client{Timeout: cfg.llmTimeout},
-		Store:          st,
-		EmbedModel:     cfg.embedModel,
-		TopK:           cfg.topK,
+		// The SAME duration drives the Gateway's per-invocation deadline. Two deadlines on one
+		// call and the shorter wins, so setting only the HTTP client left every invocation
+		// capped at the Gateway's hard-coded 60s and made THEMIS_LLM_TIMEOUT inert above 60s.
+		ProviderTimeout: cfg.llmTimeout,
+		Store:           st,
+		EmbedModel:      cfg.embedModel,
+		TopK:            cfg.topK,
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))

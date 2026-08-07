@@ -1099,6 +1099,36 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [x] **AI-TIMEOUT-1 — `THEMIS_LLM_TIMEOUT` was inert above 60s, so every slow model reported
+  `provider_error`.** _(**Measured** on the VM 2026-08-07; **fixed** the same session.)_
+  Three `recommend_position` calls aborted at **59.995s / 59.991s / 59.989s** with
+  `reason: "provider_error"` while the Intelligence process had `THEMIS_LLM_TIMEOUT=300s` set. An
+  earlier call the same day had *succeeded* in 48.9s, so the model worked — it had simply grown past
+  60s.
+  **Cause:** two independent deadlines on one invocation. `cmd/intelligence/main.go` applied
+  `THEMIS_LLM_TIMEOUT` to the provider **HTTP client**, but `wiring.Wire` built `GatewayConfig`
+  **without** `ProviderTimeout`, so the Gateway fell back to the hard-coded `defaultProviderTimeout
+  = 60s`. The shorter deadline always wins, so the documented knob could only ever be *lowered*.
+  CLAUDE.md's stated remedy ("raise it for a slower/larger local model") therefore did nothing.
+  **Fix:** `wiring.Config` gains `ProviderTimeout`, threaded from the same `cfg.llmTimeout` that
+  builds the HTTP client. Guarded by `TestWireHonoursTheConfiguredProviderTimeout` — verified to FAIL
+  (2.00s elapsed vs a 150ms configured deadline) with the field unwired.
+  **Surfaced by:** the `--ai` path of `scripts/release-posture.sh` returning 204 for every Finding.
+  **Left open (see AI-204-1):** the 204 collapses *disabled*, *unreachable* and *declined* into one
+  status, which is why this looked like the AI declining rather than a timeout.
+
+- [ ] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.**
+  _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three
+  causes with opposite responses: AI disabled (config gap), provider unreachable/timed out (outage),
+  and the model correctly declining for want of grounding (`insufficient` — the Δ2 fourth outcome,
+  and the seam working as designed). The script's own message admits it: *"AI disabled, unreachable,
+  or it declined"*. Diagnosing the timeout above required reading the Intelligence node's log.
+  TRUST-6 already closed the producer half — `app.Outcome.Detail` carries the reason inside the
+  Gateway (the log line shows `reason: "provider_error"`) — but Governance's `/recommend` discards it
+  at the last hop. **Fix:** carry the reason outward, additively (a response body on the 204, or a
+  distinct status for the config/outage cases). A correct refusal is the AI's most valuable
+  behaviour and currently looks identical to an outage. **Dep:** none. **Scope:** SMALL.
+
 - [ ] **KN-FIX-2 — existing cards never gain package attribution; they heal only on re-upload.**
   _(**Measured** on the VM 2026-08-07: `CVE-2021-44228`'s card reports `with_pkg: 0` of 80 fixes,
   while `CVE-2007-4559` — whose release was re-uploaded after KN-FIX-1 — reports 89.)_
