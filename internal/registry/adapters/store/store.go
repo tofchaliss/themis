@@ -82,6 +82,66 @@ func (s *Store) ListReleases(ctx context.Context, project domain.ProjectID) ([]d
 	return out, rows.Err()
 }
 
+// ListProducts returns products, optionally filtered by exact name (DASH-1).
+//
+// Exact match, not a prefix or a LIKE: the caller here is a human or a GUI who KNOWS the product
+// they mean, and a fuzzy match would return a set they then have to disambiguate — which is the
+// problem this endpoint exists to remove, not a smaller version of it.
+func (s *Store) ListProducts(ctx context.Context, name string) ([]domain.Product, error) {
+	q, args := `SELECT id, name FROM products ORDER BY name`, []any{}
+	if name != "" {
+		q, args = `SELECT id, name FROM products WHERE name = $1 ORDER BY name`, []any{name}
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []domain.Product
+	for rows.Next() {
+		var id, n string
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		p, err := domain.NewProduct(domain.ProductID(id), n)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListProjects returns the projects under a product, optionally filtered by exact name (DASH-1).
+func (s *Store) ListProjects(ctx context.Context, product domain.ProductID, name string) ([]domain.Project, error) {
+	q := `SELECT id, name FROM projects WHERE product_id = $1 ORDER BY name`
+	args := []any{string(product)}
+	if name != "" {
+		q = `SELECT id, name FROM projects WHERE product_id = $1 AND name = $2 ORDER BY name`
+		args = append(args, name)
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []domain.Project
+	for rows.Next() {
+		var id, n string
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		p, err := domain.NewProject(domain.ProjectID(id), product, n)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // ProductExists reports whether a Product with the given id exists.
 func (s *Store) ProductExists(ctx context.Context, productID string) (bool, error) {
 	return s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id = $1)`, productID)

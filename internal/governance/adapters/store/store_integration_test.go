@@ -446,3 +446,49 @@ func (p *fakePublisher) Publish(_ context.Context, env event.Envelope) error {
 	p.delivered = append(p.delivered, env)
 	return nil
 }
+
+// DASH-2 / PLAN-3: the band and the per-component fix selection are materialized onto the Finding
+// and come back on the posture rollup, so a dashboard renders in ONE read rather than ~460.
+func TestSetBandAndFixes_RidesThePostureRollup(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	f := newFinding(t, "fnd-band", "rel-band", "fl-band", "CVE-2024-9")
+	if err := s.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	fixes := []app.FixedVersion{{Package: "python-ply", Version: "0:3.11-10"}}
+	if err := s.SetBandAndFixes(ctx, string(f.ID()), "high", fixes); err != nil {
+		t.Fatalf("SetBandAndFixes: %v", err)
+	}
+
+	rows, err := s.ReleasePosture(ctx, "rel-band")
+	if err != nil {
+		t.Fatalf("posture: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Band != "high" {
+		t.Errorf("band = %q, want high — a rollup that cannot answer 'which are critical?' needs a read per row", rows[0].Band)
+	}
+	if len(rows[0].Fixes) != 1 || rows[0].Fixes[0].Package != "python-ply" || rows[0].Fixes[0].Version != "0:3.11-10" {
+		t.Errorf("fixes = %+v, want the selected python-ply fix", rows[0].Fixes)
+	}
+
+	// Empty is the honest default for a Finding nothing has been stamped onto yet — not a guess.
+	bare := newFinding(t, "fnd-bare", "rel-band", "fl-bare", "CVE-2024-8")
+	if err := s.Save(ctx, bare, true, 0, nil); err != nil {
+		t.Fatalf("save bare: %v", err)
+	}
+	rows, err = s.ReleasePosture(ctx, "rel-band")
+	if err != nil {
+		t.Fatalf("posture: %v", err)
+	}
+	for _, r := range rows {
+		if r.FindingID == "fnd-bare" && (r.Band != "" || len(r.Fixes) != 0) {
+			t.Errorf("an unstamped Finding must read empty, got band=%q fixes=%+v", r.Band, r.Fixes)
+		}
+	}
+}

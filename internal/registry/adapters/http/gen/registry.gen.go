@@ -31,6 +31,19 @@ type Problem struct {
 	Title  *string `json:"title,omitempty"`
 }
 
+// ProductView defines model for ProductView.
+type ProductView struct {
+	Id   *string `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+}
+
+// ProjectView defines model for ProjectView.
+type ProjectView struct {
+	Id        *string `json:"id,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	ProductId *string `json:"product_id,omitempty"`
+}
+
 // RegisterCustomerRequest defines model for RegisterCustomerRequest.
 type RegisterCustomerRequest struct {
 	Name string `json:"name"`
@@ -76,6 +89,31 @@ type Release struct {
 	Version   *string `json:"version,omitempty"`
 }
 
+// ReleaseView defines model for ReleaseView.
+type ReleaseView struct {
+	Id        *string `json:"id,omitempty"`
+	ProjectId *string `json:"project_id,omitempty"`
+	Version   *string `json:"version,omitempty"`
+}
+
+// ListProductsParams defines parameters for ListProducts.
+type ListProductsParams struct {
+	// Name Exact product name. Absent = all products.
+	Name *string `form:"name,omitempty" json:"name,omitempty"`
+}
+
+// ListProjectsOfProductParams defines parameters for ListProjectsOfProduct.
+type ListProjectsOfProductParams struct {
+	// Name Exact project name.
+	Name *string `form:"name,omitempty" json:"name,omitempty"`
+}
+
+// ListReleasesOfProjectParams defines parameters for ListReleasesOfProject.
+type ListReleasesOfProjectParams struct {
+	// Version Exact release version — completes the product/project/version traversal a human actually has.
+	Version *string `form:"version,omitempty" json:"version,omitempty"`
+}
+
 // ListReleasesParams defines parameters for ListReleases.
 type ListReleasesParams struct {
 	Project string `form:"project" json:"project"`
@@ -107,15 +145,24 @@ type ServerInterface interface {
 	// Register a deployment of a microservice for a customer; returns a stable Deployment ID.
 	// (POST /microservices/{id}/deployments)
 	RegisterDeployment(w http.ResponseWriter, r *http.Request, id string)
+	// List products, optionally filtered by exact name.
+	// (GET /products)
+	ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams)
 	// Register a product; returns a stable Product ID.
 	// (POST /products)
 	RegisterProduct(w http.ResponseWriter, r *http.Request)
 	// Register a microservice under a product; returns a stable Microservice ID.
 	// (POST /products/{id}/microservices)
 	RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string)
+	// List the projects under a product.
+	// (GET /products/{id}/projects)
+	ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, id string, params ListProjectsOfProductParams)
 	// Register a project under a product; returns a stable Project ID.
 	// (POST /projects)
 	RegisterProject(w http.ResponseWriter, r *http.Request)
+	// List the releases under a project.
+	// (GET /projects/{id}/releases)
+	ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams)
 	// List the releases of a project.
 	// (GET /releases)
 	ListReleases(w http.ResponseWriter, r *http.Request, params ListReleasesParams)
@@ -146,6 +193,12 @@ func (_ Unimplemented) RegisterDeployment(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List products, optionally filtered by exact name.
+// (GET /products)
+func (_ Unimplemented) ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Register a product; returns a stable Product ID.
 // (POST /products)
 func (_ Unimplemented) RegisterProduct(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +211,21 @@ func (_ Unimplemented) RegisterMicroservice(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List the projects under a product.
+// (GET /products/{id}/projects)
+func (_ Unimplemented) ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, id string, params ListProjectsOfProductParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Register a project under a product; returns a stable Project ID.
 // (POST /projects)
 func (_ Unimplemented) RegisterProject(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the releases under a project.
+// (GET /projects/{id}/releases)
+func (_ Unimplemented) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -237,6 +302,39 @@ func (siw *ServerInterfaceWrapper) RegisterDeployment(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListProducts operation middleware
+func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProductsParams
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProducts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RegisterProduct operation middleware
 func (siw *ServerInterfaceWrapper) RegisterProduct(w http.ResponseWriter, r *http.Request) {
 
@@ -277,11 +375,95 @@ func (siw *ServerInterfaceWrapper) RegisterMicroservice(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListProjectsOfProduct operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectsOfProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProjectsOfProductParams
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjectsOfProduct(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RegisterProject operation middleware
 func (siw *ServerInterfaceWrapper) RegisterProject(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReleasesOfProject operation middleware
+func (siw *ServerInterfaceWrapper) ListReleasesOfProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReleasesOfProjectParams
+
+	// ------------- Optional query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReleasesOfProject(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -510,13 +692,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/microservices/{id}/deployments", wrapper.RegisterDeployment)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/products", wrapper.ListProducts)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/products", wrapper.RegisterProduct)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/products/{id}/microservices", wrapper.RegisterMicroservice)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/products/{id}/projects", wrapper.ListProjectsOfProduct)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/projects", wrapper.RegisterProject)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/projects/{id}/releases", wrapper.ListReleasesOfProject)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases", wrapper.ListReleases)
@@ -539,24 +730,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7Fjbbtw2EP0Vgu1Dgm5W68vT5qlJCsNoixpG31IjoKXxiqlE0sOhW8FYoE/9gKJfmC8pSN0oW9pd194C",
-	"afymCzUcnnPmDKlbnurSaAWKLF/ecgRrtLIQbs5QXxZQ+stUKwJF/lIYU8hUkNQq+Wi18s9smkMp/NXX",
-	"CFd8yb9K+rhJ/dYmbbz1ej3jGdgUpfFh+JJ/h6hxzv2LZrQP9qYQls5FJl24NagNIEloUi1AWPggM39H",
-	"lQG+5JZQqhVfz7hT8trBh9RZ0iWgjQZJRbACDLMhXDuJkPHl+zjiyPcXs/Z7ffkRUvKTRAgNk8uAhCxG",
-	"EyNJBYy8WY/EP4eVtAT4tsniHK4dWLo/nxLlRMx4gWHUxYZ53oEpdFWCosmZWkCmcAd1I1GrslHL5oTi",
-	"YMNPN2X5o0xRW8AbmcK+ETlDnbmU/oNp/KOHTjPzw3x+42zcySIaO9ue0nldDZMpmTrlKR3cAFpZu8PW",
-	"rNo4/VebE6s96n5Ku4Ags4ngYbU7xpw9avV3JvePpLrStW/ErlivGCtmnTEaSaoVC078O7EXZ7mw8OqI",
-	"rRBAXUkospfs0x9/M2xgYpQDa+TLPv35F2s0Fq6b5TJL6FJyKAomM1AkqWK5BBSY5hUTKmOF1r8yZ9ov",
-	"7JydtgO/6T4HplVRvWZKMwupQ//WkiBgL070DaASKgWmf1OWUS7o5fwXxTsn5D/nUErLutV+e3YaSWHJ",
-	"D+aL+cKjqg0oYSRf8qP5Yn7EZ9wIygNNycDoja4V64kMneo06+Ds3ZTXygBLb3RWPVmbmzLt9VCKhA7C",
-	"g6jjHi4OnjyNrlxG2m47BrK5x/d4sZiK2qUZdfEZt64sBVZRJCZYy8RrhkAOlWXCi+GyANZCwk7f1c0+",
-	"KSMvt8mtzNZJ1jWhHbjsO1ZQA4oSKIjg/S2XfoleIa3dLXkwmSEHswjPu7V6sV+F3G+3/zeNzPjx4eET",
-	"aKrXBNNXTLBYNuxKb5Fdj3MvvKYZ7iCxxkP37BZ3Nhpfilk0NIyQ1raue4zVLjEwju0kxnvGz9Apxra8",
-	"z14xLqmBNziVbdFZDO1AbH6ztJs9hH3c3u0hPiA8cz9pJ2GPu532djfcMd6c/gN2Kxgh/Adpqd0FT1jI",
-	"tQOseg8xA2k8wEgGNC4eRKMkKO12PuvTTn8YEYiiGqP1p+8f6/Yet3AYaRGuW3gDToi+ucLabPdbYXfO",
-	"u88VNl5hDYlxhXkaRyqsPWPeq7DQwCfL7ASoJ3w/ffoR5bVTVW2oouN/S8EJUIT+ZTUBa3JZCEuvsPtp",
-	"OoVx/G/1M8M5Tn0vjvVWO1VbVv0XuDtb2IgCBJHmYBnlqN0qD8Oh/umxQmHyeZ2b31m0sDos+JInwsjk",
-	"5oCvL9b/BAAA//8=",
+	"7Flfb9s2EP8qB27AWsy1nLZPLvbQNkMWbEODtN0euqClpbPFjiIV/kkrBAb2tA8w7BP2kwykRIl2pDhe",
+	"7Wzd+mRaIo/Hu9/97o66JKksSilQGE2ml0ShLqXQ6P+cKDnjWLhhKoVBYdyQliVnKTVMiuStlsI902mO",
+	"BXWjLxXOyZR8kXRyk/qtToK85XI5IhnqVLHSiSFT8q1SUo2Je9HMdsKecKrNKc2Y9X9LJUtUhmGjKkeq",
+	"8TXL3D9TlUimRBvFxIIsR8QKdm7xdWq1kQUqHU1iwuACld9N4bllCjMyfRVL7Fl/Ngrr5ewtpsZtEllo",
+	"VbkMDWW8VzHDDMeeN8t++ZlNzU8M313dY+DgghZbiHfDXYgfudVO135/9O1+igumDaqnjYlP8dyiNlc1",
+	"GT5R7D0/6+yafQ6x5LIqUJjBnYK3h0CF4oIpKYomFK5XKBa2uvQ6LX9kqZIa1QVLcd8WaeB1C9u4R9tu",
+	"sxlSsRbR3NFmlU7rUB9UqaxVHsLBBSrNaurbqFWQ0626XrGagG8Yj2vbsWxAuD/tjWP8Y04/tPlWJLND",
+	"BdwjJuayZuU459QmVxVoW5ZSGSYW4PPcewN3TnKq8d4DWChEMWfIs7vw4bc/QTV+ApMjNPEDH37/AxqQ",
+	"+3FzZNBG2dRYRTmwDIVhpoKcoaIqzSugIgMu5a9gy7BCj+E4TPy6XY4gBa8egZCgMbXKvdWGGoQ7R/IC",
+	"laAiRZDvhAaTU3N3/IsgbZ4hL3IsmIb2tI9PjiMsTsnBeDKeOKvKEgUtGZmSB+PJ+AEZkZKa3LspWUmj",
+	"paxDxjnS1wHHWWvOjs5JDU3U5onMqp0VEUNZY7kaC0ZZ9A+ieub+5GDnarTx2lPUhDmYjZ19H04mQ1Jb",
+	"NaMaaUS0LQqqqkgSUAieeAQKjVVCA3VgmHGEYBI4PqxLqaSIkolOLlm2TLI2C97Al13K9GhQtEDjQfDq",
+	"kjB3RIeQwLdT4llu1QejyJ7rsXq2X4Rczff/NYyMyMP793eAqQ4TIOdAIYYNzOUG2HV27oDXZGNv0gWa",
+	"q+T7IkdA4fiolEyYZpfcFlSAHx69PIY7h4+ff3fv4O4YfmYml9aAyZkeAYWmVP9KgwOwo0imwQqFNM29",
+	"UlZw1NqzdEo5d8fkCmlWQS55Vr94+fL40DMmvDl59vwFJI1U/QZK5ZqEzFP+u5yluZOP72lqeFULlbbk",
+	"LmM4XWjmWBXwPdNGg5GgsJAXOCajtbj6gWlzEkxzJaLWWiK3GzSGBBdhY3g8087M3wDlPLzSbhsfjOcW",
+	"VdVFo//ZGH8r2J9shX1msNA3aPraFqbLzlQpWvXFw7Pvx2s4dTZrzzoC6WdSziuYM+4jB2ZV7ZvaSr6A",
+	"uJbWGp32nKHWquv/S4JqXNVDFKFcusISdWZaSVabc1PcKH2C2amvz/ucn/ohtZKPrMg24Cw27RDYmg4j",
+	"TlC9VO0nPZt3jLFznI0Gid/3EzWl/csZvr1FuinDOyQ9/LvI8BnBJeHgxHVMdB5vfbwxIfhuce8JIb4H",
+	"+RztgwnEI39zoIeeO45x7/E6xkM5d22Mh87bx3gDgtuK8UZBaJpxX206m3E0qAPC3dnDwZIw0yjqhpS3",
+	"RTNNjfVVUU4HK8LQ9P/jlBHfCd0uZQRMxOhylm0AtBVkBpCyZvRyhVu2qD1uyQlbOWCyOwf4TrOz/qaa",
+	"PWi7X4peuxf+TNH9FB2Iay2Ieig6XIW2FB387yl6MMyO0HQO309p/xHhdaOo2geNHaGJrD+rBsyazDjV",
+	"5p5qv5wO2Tj+wPqJ2TlWfS+M9VRaUVNW/Sm4vQLTkQv8hZPP1UraRe6nY303v1C0zMe1bq4ZCWa1ipMp",
+	"SWjJkosDsjxb/hUAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

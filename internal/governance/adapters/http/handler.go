@@ -341,6 +341,16 @@ func toComponents(in []domain.MatchedComponent) []gen.Component {
 	return out
 }
 
+// toFixedVersions maps the selected fixes to the wire shape.
+func toFixedVersions(in []app.FixedVersion) []gen.FixedVersion {
+	out := make([]gen.FixedVersion, 0, len(in))
+	for _, f := range in {
+		pkg, ver := f.Package, f.Version
+		out = append(out, gen.FixedVersion{Package: &pkg, Version: &ver})
+	}
+	return out
+}
+
 func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	has := e.HasPosition
 	base := e.BaseScore
@@ -362,6 +372,16 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if len(e.Components) > 0 {
 		comps := toComponents(e.Components)
 		out.Components = &comps
+	}
+	// The band and the per-component fix selection (DASH-2 / PLAN-3): what turns this rollup from
+	// a list of ids into something a dashboard can render in one call.
+	if e.Band != "" {
+		band := e.Band
+		out.Band = &band
+	}
+	if len(e.Fixes) > 0 {
+		fixes := toFixedVersions(e.Fixes)
+		out.Fixes = &fixes
 	}
 	// Omitted when the Position rests on Observed evidence — an absent reservation reads as
 	// "nothing to caveat", which is exactly right, and keeps the common row unchanged.

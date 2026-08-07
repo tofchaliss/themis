@@ -25,6 +25,7 @@ type fakeRepo struct {
 	customers     map[string]bool
 	blast         int
 	blastErr      error
+	listErr       error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -71,6 +72,40 @@ func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Re
 		return domain.Release{}, store.ErrNotFound
 	}
 	return rel, nil
+}
+func (r *fakeRepo) ListProducts(_ context.Context, name string) ([]domain.Product, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	out := make([]domain.Product, 0, len(r.products))
+	for id := range r.products {
+		p, err := domain.NewProduct(domain.ProductID(id), "product-"+id)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" && p.Name() != name {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+func (r *fakeRepo) ListProjects(_ context.Context, product domain.ProductID, name string) ([]domain.Project, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	out := make([]domain.Project, 0, len(r.projects))
+	for id := range r.projects {
+		p, err := domain.NewProject(domain.ProjectID(id), product, "project-"+id)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" && p.Name() != name {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 func (r *fakeRepo) ListReleases(_ context.Context, _ domain.ProjectID) ([]domain.Release, error) {
 	out := make([]domain.Release, 0, len(r.releases))
@@ -294,5 +329,92 @@ func TestGetReleaseNotFound(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("get missing release status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// DASH-1: the product → project → release traversal a human actually has.
+//
+// Before this, a release's posture was reachable only by a caller that already held the UUID
+// `POST /releases` printed. Every runbook in the repo worked around it by capturing that id, and an
+// operator who knew "product mrf, release 20.1.0" had to query Postgres directly — exactly the
+// coupling a read API exists to remove.
+func TestTraversalEndpoints(t *testing.T) {
+	srv := newServer(t, newFakeRepo())
+
+	status, raw := post(t, srv.URL+"/products", map[string]string{"name": "Themis"})
+	if status != http.StatusCreated {
+		t.Fatalf("register product: %d %s", status, raw)
+	}
+	prodID := idOf(t, raw)
+	status, raw = post(t, srv.URL+"/projects", map[string]string{"product_id": prodID, "name": "api"})
+	if status != http.StatusCreated {
+		t.Fatalf("register project: %d %s", status, raw)
+	}
+	projID := idOf(t, raw)
+	if status, raw = post(t, srv.URL+"/releases", map[string]string{"project_id": projID, "version": "1.0.0"}); status != http.StatusCreated {
+		t.Fatalf("register release: %d %s", status, raw)
+	}
+
+	getJSON := func(path string) (int, []map[string]any) {
+		t.Helper()
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, nil
+		}
+		var out []map[string]any
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode %s: %v (%s)", path, err, body)
+		}
+		return resp.StatusCode, out
+	}
+
+	if code, list := getJSON("/products"); code != http.StatusOK || len(list) != 1 {
+		t.Errorf("GET /products = %d %v", code, list)
+	}
+	if code, list := getJSON("/products/" + prodID + "/projects"); code != http.StatusOK || len(list) != 1 {
+		t.Errorf("GET projects = %d %v", code, list)
+	}
+	if code, list := getJSON("/projects/" + projID + "/releases"); code != http.StatusOK || len(list) != 1 {
+		t.Errorf("GET releases = %d %v", code, list)
+	}
+	// The version filter completes the traversal: "product mrf, release 20.1.0" becomes reachable
+	// without anyone holding a UUID.
+	if code, list := getJSON("/projects/" + projID + "/releases?version=1.0.0"); code != http.StatusOK || len(list) != 1 {
+		t.Errorf("GET releases?version = %d %v", code, list)
+	}
+	if code, list := getJSON("/projects/" + projID + "/releases?version=9.9.9"); code != http.StatusOK || len(list) != 0 {
+		t.Errorf("a non-matching version must return an empty list, got %d %v", code, list)
+	}
+
+	// A missing parent is a 404, not an empty 200. "This product has no projects" and "there is no
+	// such product" are different answers, and collapsing them sends a caller hunting for a typo
+	// in the wrong place.
+	if code, _ := getJSON("/products/no-such/projects"); code != http.StatusNotFound {
+		t.Errorf("unknown product = %d, want 404", code)
+	}
+	if code, _ := getJSON("/projects/no-such/releases"); code != http.StatusNotFound {
+		t.Errorf("unknown project = %d, want 404", code)
+	}
+}
+
+// A store failure must surface as a 500 rather than an empty list — an empty list reads as "you
+// have no products", which is a very different thing to tell someone.
+func TestTraversalEndpoints_StoreFailure(t *testing.T) {
+	repo := newFakeRepo()
+	repo.listErr = errors.New("db down")
+	srv := newServer(t, repo)
+
+	resp, err := http.Get(srv.URL + "/products")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 }

@@ -363,6 +363,14 @@ components:
           type: string
         decided_id:
           type: string
+    FixedVersion:
+      type: object
+      properties:
+        package:
+          type: string
+          description: The package the fix is published for — the SOURCE package for distro components.
+        version:
+          type: string
     Component:
       type: object
       properties:
@@ -454,6 +462,21 @@ components:
             a reusable business view, and the grouping is a GROUP BY, not reasoning).
           items:
             $ref: '#/components/schemas/Component'
+        band:
+          type: string
+          description: >-
+            Knowledge's EXPLOITABILITY band (critical | high+ | high | elevated | informational) —
+            not raw CVSS. `critical` means CVSS>=9 AND KEV-listed; `high+` means CVSS>=9 with a
+            public exploit. Carried here so "which of these are critical?" is one read (DASH-2)
+            rather than one Knowledge call per Faultline.
+        fixes:
+          type: array
+          description: >-
+            Fix versions published for THIS Finding's own components — selected, never the card's
+            cross-package union, which is what led a recommendation to cite another package's
+            version (AI-GROUND-1). Empty means none is attributable to these components.
+          items:
+            $ref: '#/components/schemas/FixedVersion'
         base_score:
           type: integer
           description: CVE-intrinsic composite priority (0-100), from Knowledge (C6).

@@ -11,7 +11,7 @@ ordering are computed, not guesses — do not re-derive them. Ordering is by RIS
 what each step closes), which is why a step with many moderate findings can outrank one with a
 single severe finding.
 {{range $i, $a := .Release.PlanActions}}{{if lt $i 15}}
-{{add1 $i}}. upgrade {{join $a.Packages}}{{if gt (len $a.Packages) 1}}  <-- ONE unit: these ship together (a module stream); one update covers all of them{{end}}
+{{add1 $i}}. upgrade {{first3 $a.Packages}}{{if gt (len $a.Packages) 1}}  <-- ONE unit: these {{len $a.Packages}} packages ship together (a module stream); a single update covers all of them{{end}}
    - ecosystem: {{$a.Ecosystem}}
    - installed: {{join $a.InstalledVersions}}
    - closes {{len $a.FindingIDs}} finding(s); risk removed {{$a.RiskRemoved}}, worst item {{$a.TopPriority}}

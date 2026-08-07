@@ -104,6 +104,42 @@ func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Re
 	return r.releases[string(id)], nil
 }
 
+func (r *fakeRepo) ListProducts(_ context.Context, name string) ([]domain.Product, error) {
+	if r.errList != nil {
+		return nil, r.errList
+	}
+	out := make([]domain.Product, 0, len(r.products))
+	for id := range r.products {
+		p, err := domain.NewProduct(domain.ProductID(id), "product-"+id)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" && p.Name() != name {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) ListProjects(_ context.Context, product domain.ProductID, name string) ([]domain.Project, error) {
+	if r.errList != nil {
+		return nil, r.errList
+	}
+	out := make([]domain.Project, 0, len(r.projects))
+	for id := range r.projects {
+		p, err := domain.NewProject(domain.ProjectID(id), product, "project-"+id)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" && p.Name() != name {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 func (r *fakeRepo) ListReleases(_ context.Context, _ domain.ProjectID) ([]domain.Release, error) {
 	if r.errList != nil {
 		return nil, r.errList
@@ -242,6 +278,10 @@ func TestReadPaths(t *testing.T) {
 	repo := newFakeRepo()
 	rel, _ := domain.NewRelease("rel-1", "proj-1", "1.0")
 	repo.releases["rel-1"] = rel
+	// The project must exist: ListReleases now distinguishes "this project has no releases" from
+	// "there is no such project", and collapsing them sends a caller hunting for a typo in the
+	// wrong place (DASH-1).
+	repo.projects["proj-1"] = true
 	svc := newService(repo)
 
 	if ok, err := svc.ReleaseExists(ctx, "rel-1"); err != nil || !ok {
@@ -257,6 +297,9 @@ func TestReadPaths(t *testing.T) {
 	list, err := svc.ListReleases(ctx, "proj-1")
 	if err != nil || len(list) != 1 {
 		t.Errorf("ListReleases = %+v, %v", list, err)
+	}
+	if _, err := svc.ListReleases(ctx, "no-such-project"); !errors.Is(err, app.ErrUnknownProject) {
+		t.Errorf("ListReleases(unknown) = %v, want ErrUnknownProject — an empty list would read as 'no releases'", err)
 	}
 }
 
@@ -357,5 +400,49 @@ func TestBlastRadius(t *testing.T) {
 	be.errBlast = errors.New("db down")
 	if _, err := newService(be).BlastRadius(ctx, "rel-1"); err == nil {
 		t.Error("blast error: expected error")
+	}
+}
+
+// DASH-1 at the app layer: "this parent has no children" and "there is no such parent" are
+// different answers, and collapsing them sends a caller hunting for a typo in the wrong place.
+func TestListProductsAndProjects(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	repo.products["prod-1"] = true
+	repo.projects["proj-1"] = true
+	svc := newService(repo)
+
+	if got, err := svc.ListProducts(ctx, ""); err != nil || len(got) != 1 {
+		t.Errorf("ListProducts = %+v, %v", got, err)
+	}
+	if got, err := svc.ListProjects(ctx, "prod-1", ""); err != nil || len(got) != 1 {
+		t.Errorf("ListProjects = %+v, %v", got, err)
+	}
+	if _, err := svc.ListProjects(ctx, "no-such-product", ""); !errors.Is(err, app.ErrUnknownProduct) {
+		t.Errorf("ListProjects(unknown) = %v, want ErrUnknownProduct", err)
+	}
+
+	// An EXISTENCE-check failure must surface too: a read error there is not "no such product",
+	// and answering 404 on a database blip would send someone looking for a typo that is not there.
+	boom := newFakeRepo()
+	boom.errProductExists = errors.New("db down")
+	if _, err := newService(boom).ListProjects(ctx, "prod-1", ""); err == nil {
+		t.Error("a ProductExists failure must surface from ListProjects")
+	}
+	boom2 := newFakeRepo()
+	boom2.errProjectExists = errors.New("db down")
+	if _, err := newService(boom2).ListReleases(ctx, "proj-1"); err == nil {
+		t.Error("a ProjectExists failure must surface from ListReleases")
+	}
+
+	// A store failure must surface rather than read as "you have none".
+	failing := newFakeRepo()
+	failing.products["prod-1"] = true
+	failing.errList = errors.New("db down")
+	if _, err := newService(failing).ListProducts(ctx, ""); err == nil {
+		t.Error("a store failure must surface from ListProducts")
+	}
+	if _, err := newService(failing).ListProjects(ctx, "prod-1", ""); err == nil {
+		t.Error("a store failure must surface from ListProjects")
 	}
 }

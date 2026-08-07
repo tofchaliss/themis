@@ -268,8 +268,9 @@ func TestWatchDispositions_DriftDisappearsUnderTheWrite(t *testing.T) {
 	}
 }
 
-// ReactToEnrichment walks the Faultline's Findings up to four times — disposition watch,
-// re-prioritize, applicability, version-range — and each walk must surface its own read failure.
+// ReactToEnrichment walks the Faultline's Findings up to FIVE times — materialize band/fixes,
+// disposition watch, re-prioritize, applicability, version-range — and each walk must surface its
+// own read failure.
 //
 // A blanket error only ever exercises the FIRST walk, and adding the watcher in front of the other
 // three silently made their error branches unreachable. Failing a specific call is what keeps each
@@ -280,13 +281,14 @@ func TestReactToEnrichment_EachFindingsWalkSurfacesItsOwnReadFailure(t *testing.
 	sig := func() app.EnrichmentSignal {
 		return app.EnrichmentSignal{
 			FaultlineID: "fl-1", KEV: true, HighSeverity: true,
+			Band:            "high",
 			Signals:         domain.ExploitSignals{KEV: true},
 			Applicabilities: []app.Applicability{{Package: "openssl", Status: "not_affected", Justification: "vulnerable_code_not_present"}},
 			AffectedRanges:  []string{"<2.0.0"},
 			RangeTrust:      value.TrustObserved,
 		}
 	}
-	for call := 1; call <= 4; call++ {
+	for call := 1; call <= 5; call++ {
 		t.Run("walk "+string(rune('0'+call)), func(t *testing.T) {
 			repo := newRepo()
 			repo.seed(suppressed(t, domain.StanceAcceptedRisk, domain.ExploitSignals{}))
@@ -311,4 +313,81 @@ func TestWatchDispositions_WriteFailureSurfaces(t *testing.T) {
 	}); err == nil {
 		t.Fatal("a write failure in the disposition watch must surface")
 	}
+}
+
+// DASH-2 / PLAN-3: the band and the per-component fix selection are MATERIALIZED onto each Finding
+// at enrichment, so a release rollup carries both without a read per row.
+//
+// Rendering one posture table previously cost ~460 API calls — one Knowledge read per Faultline for
+// the band, one Governance assessment per Finding for the component. A rollup whose cost is linear
+// in its own length cannot serve a dashboard.
+func TestReactToEnrichment_MaterializesBandAndSelectedFixes(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/python3-ply@3.9", Name: "python3-ply", Ecosystem: "rpm", Source: "python-ply",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", Band: "high",
+		Fixes: []app.FixedVersion{
+			{Package: "python-ply", Version: "0:3.11-10"}, // this component's
+			{Package: "PyYAML", Version: "0:5.4.1-1"},     // another package on the same card
+		},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+
+	if repo.lastBand != "high" {
+		t.Errorf("band = %q, want high", repo.lastBand)
+	}
+	// SELECTED, not the union: handing a Finding the whole card is what produced a recommendation
+	// citing another package's version (AI-GROUND-1).
+	if len(repo.lastFixes) != 1 || repo.lastFixes[0].Package != "python-ply" {
+		t.Errorf("fixes = %+v, want only python-ply's", repo.lastFixes)
+	}
+}
+
+// Nothing to stamp is a no-op, not a write. An older payload carries neither field, and rewriting
+// every Finding on the Faultline to store the same empty values would be pure cost.
+func TestReactToEnrichment_NoBandOrFixesIsANoOp(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+	repo.lastBand = "sentinel"
+
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1",
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if repo.lastBand != "sentinel" {
+		t.Errorf("band was written on an empty payload: %q", repo.lastBand)
+	}
+}
+
+// Both failure paths surface: the Finding read that feeds the selection, and the write itself.
+func TestMaterializeBandAndFixes_FailuresSurface(t *testing.T) {
+	t.Run("read failure", func(t *testing.T) {
+		repo := newRepo()
+		repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+		repo.getByIDErr = errors.New("db down")
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+			FaultlineID: "fl-1", Band: "high",
+		}); err == nil {
+			t.Fatal("a Finding read failure must surface")
+		}
+	})
+	t.Run("write failure", func(t *testing.T) {
+		repo := newRepo()
+		repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1"))
+		repo.setBandErr = errors.New("db down")
+		if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+			FaultlineID: "fl-1", Band: "high",
+		}); err == nil {
+			t.Fatal("a band/fixes write failure must surface")
+		}
+	})
 }

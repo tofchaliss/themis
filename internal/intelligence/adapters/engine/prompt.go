@@ -20,6 +20,18 @@ var planRemediationTmpl string
 // plan needs lives in ReleasePosture.PlanActions, not in a template function.
 var promptFuncs = template.FuncMap{
 	"add1": func(i int) int { return i + 1 },
+	// first3 caps a long list: a merged module-stream step legitimately covers 33 packages, and
+	// printing all 33 turned one plan step into five wrapped lines of noise (PLAN-1). The COLLAPSE
+	// is right; the rendering was not.
+	"first3": func(v []string) string {
+		if len(v) == 0 {
+			return "(none)"
+		}
+		if len(v) <= 3 {
+			return strings.Join(v, ", ")
+		}
+		return strings.Join(v[:3], ", ") + fmt.Sprintf(" +%d more", len(v)-3)
+	},
 	"join": func(v []string) string {
 		if len(v) == 0 {
 			return "(none)"

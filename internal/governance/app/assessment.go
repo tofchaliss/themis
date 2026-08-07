@@ -106,6 +106,31 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 // deliberate choice to say less: an empty list with "94 unattributable" is honest and leads a
 // consumer (or a model) to `insufficient`, whereas the union leads it to a confident wrong answer.
 // Fewer facts beat wrong ones when the output is a security decision.
+// selectFixesFor narrows a fix list to the entries published for the given components, over
+// MatchedComponent.FixKeys() — the source package, then namespace:name, then the bare name.
+//
+// Shared by the read-time projection and the enrichment-time materialization, because two
+// implementations of "which fix is mine?" would eventually disagree, and the disagreement would
+// show up as a dashboard and a plan recommending different versions for the same component.
+func selectFixesFor(fixes []FixedVersion, comps []domain.MatchedComponent) []FixedVersion {
+	if len(fixes) == 0 {
+		return nil
+	}
+	wanted := make(map[string]bool)
+	for _, c := range comps {
+		for _, key := range c.FixKeys() {
+			wanted[strings.ToLower(key)] = true
+		}
+	}
+	out := make([]FixedVersion, 0, len(fixes))
+	for _, f := range fixes {
+		if wanted[strings.ToLower(f.Package)] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func selectFixes(k FaultlineKnowledge, comps []domain.MatchedComponent) FaultlineKnowledge {
 	if len(k.Fixes) == 0 {
 		// The card carries no attributed fixes at all (an older card, or sources that cannot
@@ -115,19 +140,10 @@ func selectFixes(k FaultlineKnowledge, comps []domain.MatchedComponent) Faultlin
 		k.FixedVersions = nil
 		return k
 	}
-	wanted := make(map[string]bool)
-	for _, c := range comps {
-		for _, key := range c.FixKeys() {
-			wanted[strings.ToLower(key)] = true
-		}
-	}
-	mine := make([]FixedVersion, 0, len(k.Fixes))
-	versions := make([]string, 0, len(k.Fixes))
-	for _, f := range k.Fixes {
-		if wanted[strings.ToLower(f.Package)] {
-			mine = append(mine, f)
-			versions = append(versions, f.Version)
-		}
+	mine := selectFixesFor(k.Fixes, comps)
+	versions := make([]string, 0, len(mine))
+	for _, f := range mine {
+		versions = append(versions, f.Version)
 	}
 	k.UnattributedFixes = len(k.Fixes) - len(mine)
 	k.Fixes, k.FixedVersions = mine, versions

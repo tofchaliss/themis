@@ -28,6 +28,78 @@ paths:
                 $ref: '#/components/schemas/RegisterResponse'
         '400':
           $ref: '#/components/responses/Problem'
+    get:
+      operationId: listProducts
+      summary: List products, optionally filtered by exact name.
+      description: >-
+        The entry point for a human or a GUI (DASH-1). Without this, a release's posture is
+        unreachable unless the caller already holds the UUID that `POST /releases` printed —
+        which is exactly the coupling a read API exists to remove.
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema: { type: string }
+          description: Exact product name. Absent = all products.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductView'
+  /products/{id}/projects:
+    get:
+      operationId: listProjectsOfProduct
+      summary: List the projects under a product.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: name
+          in: query
+          required: false
+          schema: { type: string }
+          description: Exact project name.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectView'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /projects/{id}/releases:
+    get:
+      operationId: listReleasesOfProject
+      summary: List the releases under a project.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: query
+          required: false
+          schema: { type: string }
+          description: Exact release version — completes the product/project/version traversal a human actually has.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReleaseView'
+        '404':
+          $ref: '#/components/responses/Problem'
   /projects:
     post:
       operationId: registerProject
@@ -247,6 +319,23 @@ components:
           type: string
         version:
           type: string
+    ProductView:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+    ProjectView:
+      type: object
+      properties:
+        id: { type: string }
+        product_id: { type: string }
+        name: { type: string }
+    ReleaseView:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        version: { type: string }
     RegisterCustomerRequest:
       type: object
       required: [name]

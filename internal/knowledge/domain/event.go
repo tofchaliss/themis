@@ -35,6 +35,18 @@ type FaultlineEnriched struct {
 	// payload stays byte-identical and reads as 0, which is the conservative direction (any later
 	// rise looks like drift and re-surfaces the Finding).
 	EPSS float64 `json:"EPSS,omitempty"`
+	// Priority is the reconciled EXPLOITABILITY band (critical | high+ | high | elevated |
+	// informational). Carried so a Governance rollup can answer "which of these are critical?"
+	// without one Knowledge call per Faultline (DASH-2) — measured: rendering one posture table
+	// cost ~460 calls, and every one of them was for this field and the fix list below.
+	//
+	// The band is Knowledge's to compute: it is exploitability-aware rather than raw CVSS, and a
+	// second implementation in Governance would be a second policy that eventually disagrees.
+	Priority string `json:"Priority,omitempty"`
+	// Fixes are the reconciled fix versions WITH the package each applies to (KN-FIX-1). Governance
+	// selects the ones matching a Finding's components and stamps them, so a release-scoped view
+	// can say what to upgrade to without a per-Finding read (PLAN-3).
+	Fixes []FixedVersion `json:"Fixes,omitempty"`
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D5) so Governance
 	// can raise a system not_affected Proposal on the affected Findings without fetching the card.
 	// Optional/additive (omitempty): a card with no vendor statement keeps the frozen v1 wire
@@ -141,6 +153,8 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		ExploitPublic:   v.ExploitPublic,
 		Score:           v.Score(),
 		EPSS:            v.EPSS,
+		Priority:        v.Priority(),
+		Fixes:           append([]FixedVersion(nil), v.Fixes...),
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
 		AffectedRanges:  append([]string(nil), v.AffectedRanges...),
 		HeadlineTrust:   v.HeadlineTrust,

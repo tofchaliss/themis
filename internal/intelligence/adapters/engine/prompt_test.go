@@ -161,3 +161,38 @@ func TestRenderPlanRemediation_EmptyActionList(t *testing.T) {
 		t.Errorf("prompt lost its subject:\n%s", got)
 	}
 }
+
+// PLAN-1: a merged module-stream step legitimately covers dozens of packages — 33 on a measured
+// release — and printing all of them turned one step into five wrapped lines. The COLLAPSE is
+// right; the rendering was not.
+func TestRenderPlanRemediation_CapsALongPackageList(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	var entries []domain.PostureEntry
+	for _, name := range []string{"perl-Carp", "perl-Data-Dumper", "perl-Digest", "perl-Encode", "perl-Exporter"} {
+		entries = append(entries, domain.PostureEntry{
+			FindingID: name, CVE: "CVE-2025-40909", ResidualPriority: 50,
+			Components: []domain.PostureComponent{{
+				PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Ecosystem: "rpm", Source: name,
+			}},
+		})
+	}
+	got, err := r.Render("plan_remediation", domain.AssembledContext{
+		Release: domain.ReleasePosture{ReleaseID: "rel-1", Entries: entries},
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(got, "+2 more") {
+		t.Errorf("a 5-package merged step must be capped:\n%s", got)
+	}
+	// The count is still stated, so a reader knows the step is bigger than the three names shown.
+	if !strings.Contains(got, "these 5 packages ship together") {
+		t.Errorf("the step must say how many packages it really covers:\n%s", got)
+	}
+	if strings.Contains(got, "perl-Exporter") {
+		t.Errorf("the fifth package should not be printed inline:\n%s", got)
+	}
+}

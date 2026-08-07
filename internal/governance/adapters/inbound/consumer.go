@@ -68,6 +68,8 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
 			EPSS:            dto.EPSS,
+			Priority:        dto.Priority,
+			Fixes:           toAppFixes(dto.Fixes),
 			Applicabilities: apps,
 			AffectedRanges:  dto.AffectedRanges,
 			HeadlineTrust:   value.TrustClass(dto.HeadlineTrust),
@@ -126,6 +128,8 @@ type faultlineEnrichedDTO struct {
 	ExploitPublic   bool               `json:"ExploitPublic"`
 	Score           int                `json:"Score"`           // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
 	EPSS            float64            `json:"EPSS"`            // exploitation probability, for disposition-drift detection (GOV-14b).
+	Priority        string             `json:"Priority"`        // exploitability band, materialized onto the posture (DASH-2).
+	Fixes           []fixDTO           `json:"Fixes"`           // package-attributed fixes, selected per component (PLAN-3).
 	Applicabilities []applicabilityDTO `json:"Applicabilities"` // vendor VEX statements (EDR-VEX-01 D5); absent on an older payload.
 	// Per-field-group trust from Knowledge's reconciled view (EDR-TRUST-01 T2/T3). Empty
 	// on a payload predating the field — which is safe, because value.MaxTrust reads an
@@ -135,6 +139,11 @@ type faultlineEnrichedDTO struct {
 	HeadlineTrust  string   `json:"HeadlineTrust"`
 	RangeTrust     string   `json:"RangeTrust"`
 	SignalTrust    string   `json:"SignalTrust"`
+}
+
+type fixDTO struct {
+	Package string `json:"Package"`
+	Version string `json:"Version"`
 }
 
 type applicabilityDTO struct {
@@ -147,4 +156,13 @@ type faultlineSupersededDTO struct {
 	FaultlineID string `json:"FaultlineID"`
 	CVE         string `json:"CVE"`
 	Trust       string `json:"Trust"`
+}
+
+// toAppFixes maps the wire fixes into Governance's own vocabulary (no cross-context import).
+func toAppFixes(in []fixDTO) []app.FixedVersion {
+	out := make([]app.FixedVersion, 0, len(in))
+	for _, f := range in {
+		out = append(out, app.FixedVersion{Package: f.Package, Version: f.Version})
+	}
+	return out
 }

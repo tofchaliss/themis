@@ -15,6 +15,9 @@ import (
 // --- fakes ---------------------------------------------------------------------------
 
 type fakeRepo struct {
+	lastBand       string
+	setBandErr     error
+	lastFixes      []app.FixedVersion
 	lastSignals    domain.ExploitSignals
 	byID           map[domain.FindingID]domain.Finding
 	order          []domain.FindingID
@@ -67,6 +70,15 @@ func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.
 		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 			f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version(), sig)
 	}
+	return nil
+}
+
+func (r *fakeRepo) SetBandAndFixes(_ context.Context, findingID, band string, fixes []app.FixedVersion) error {
+	if r.setBandErr != nil {
+		return r.setBandErr
+	}
+	r.lastBand = band
+	r.lastFixes = fixes
 	return nil
 }
 

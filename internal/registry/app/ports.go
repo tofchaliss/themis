@@ -14,6 +14,11 @@ type Repository interface {
 
 	GetRelease(ctx context.Context, id domain.ReleaseID) (domain.Release, error)
 	ListReleases(ctx context.Context, project domain.ProjectID) ([]domain.Release, error)
+	// ListProducts / ListProjects complete the product→project→release traversal a human has
+	// (DASH-1). Without them a posture is reachable only by a caller that already holds the UUID
+	// `POST /releases` printed.
+	ListProducts(ctx context.Context, name string) ([]domain.Product, error)
+	ListProjects(ctx context.Context, product domain.ProductID, name string) ([]domain.Project, error)
 
 	// Existence checks back membership validation and Evidence's SubjectRef. They
 	// take opaque string ids so callers need not construct a typed id first.

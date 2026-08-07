@@ -22,6 +22,8 @@ import (
 // --- fakes -----------------------------------------------------------------------------
 
 type fakeRepo struct {
+	lastBand    string
+	lastFixes   []app.FixedVersion
 	lastSignals domain.ExploitSignals
 	byID        map[domain.FindingID]domain.Finding
 	order       []domain.FindingID
@@ -69,6 +71,12 @@ func (r *fakeRepo) SetBaseScore(context.Context, string, int) error { return nil
 
 func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
 	r.lastSignals = sig
+	return nil
+}
+
+func (r *fakeRepo) SetBandAndFixes(_ context.Context, findingID, band string, fixes []app.FixedVersion) error {
+	r.lastBand = band
+	r.lastFixes = fixes
 	return nil
 }
 

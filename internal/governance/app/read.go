@@ -66,6 +66,16 @@ type PostureEntry struct {
 	// it is a reusable business view, which is what EDR-TRUST-01 T10 requires of a Domain
 	// Projection, and it is why the grouping happens here as a GROUP BY rather than in a model.
 	Components []domain.MatchedComponent
+	// Band is Knowledge's exploitability band (critical | high+ | high | elevated | informational).
+	// It is exploitability-aware rather than raw CVSS, which is why it is Knowledge's to compute
+	// and Governance's only to serve — a second implementation here would be a second policy that
+	// eventually disagrees. Carried on the rollup so "which of these are critical?" is one read
+	// (DASH-2), not one per Faultline.
+	Band string
+	// Fixes are the fix versions published for THIS Finding's own components — selected, not the
+	// card's cross-package union (AI-GROUND-1). Carried so a release-scoped plan can say what to
+	// upgrade TO without a per-Finding read (PLAN-3).
+	Fixes []FixedVersion
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads

@@ -144,6 +144,13 @@ func (h *Handler) GetRelease(w http.ResponseWriter, r *http.Request, id string) 
 func (h *Handler) ListReleases(w http.ResponseWriter, r *http.Request, params gen.ListReleasesParams) {
 	rels, err := h.svc.ListReleases(r.Context(), domain.ProjectID(params.Project))
 	if err != nil {
+		// An unknown project is a 404, not an empty 200 (DASH-1). This endpoint used to return an
+		// empty list for a project that does not exist, which reads as "no releases yet" and is
+		// the same confusion the new traversal endpoints were added to remove.
+		if errors.Is(err, app.ErrUnknownProject) {
+			writeProblem(w, http.StatusNotFound, "project not found", err.Error())
+			return
+		}
 		writeProblem(w, http.StatusInternalServerError, "cannot list releases", err.Error())
 		return
 	}
@@ -152,6 +159,78 @@ func (h *Handler) ListReleases(w http.ResponseWriter, r *http.Request, params ge
 		out = append(out, toRelease(rel))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ListProducts handles GET /products[?name=]. It is the entry point of the product → project →
+// release traversal a human actually has (DASH-1): without it, a release's posture is reachable
+// only by a caller that already holds the UUID `POST /releases` printed.
+func (h *Handler) ListProducts(w http.ResponseWriter, r *http.Request, params gen.ListProductsParams) {
+	prods, err := h.svc.ListProducts(r.Context(), strval(params.Name))
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot list products", err.Error())
+		return
+	}
+	out := make([]gen.ProductView, 0, len(prods))
+	for _, p := range prods {
+		id, name := string(p.ID()), p.Name()
+		out = append(out, gen.ProductView{Id: &id, Name: &name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ListProjectsOfProduct handles GET /products/{id}/projects[?name=].
+func (h *Handler) ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, id string, params gen.ListProjectsOfProductParams) {
+	projs, err := h.svc.ListProjects(r.Context(), domain.ProductID(id), strval(params.Name))
+	if err != nil {
+		// "no such product" is a 404, not an empty 200. Collapsing them sends a caller hunting for
+		// a typo in the wrong place.
+		if errors.Is(err, app.ErrUnknownProduct) {
+			writeProblem(w, http.StatusNotFound, "product not found", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot list projects", err.Error())
+		return
+	}
+	out := make([]gen.ProjectView, 0, len(projs))
+	for _, p := range projs {
+		pid, prod, name := string(p.ID()), string(p.ProductID()), p.Name()
+		out = append(out, gen.ProjectView{Id: &pid, ProductId: &prod, Name: &name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ListReleasesOfProject handles GET /projects/{id}/releases[?version=], completing the traversal.
+func (h *Handler) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params gen.ListReleasesOfProjectParams) {
+	rels, err := h.svc.ListReleases(r.Context(), domain.ProjectID(id))
+	if err != nil {
+		if errors.Is(err, app.ErrUnknownProject) {
+			writeProblem(w, http.StatusNotFound, "project not found", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot list releases", err.Error())
+		return
+	}
+	// Version filtering is applied HERE rather than in the store: it is a presentation filter over
+	// a list the store already returns whole, and pushing it down would add a second query shape
+	// for no gain at this cardinality (a project has tens of releases, not millions).
+	want := strval(params.Version)
+	out := make([]gen.ReleaseView, 0, len(rels))
+	for _, rel := range rels {
+		if want != "" && rel.Version() != want {
+			continue
+		}
+		rid, proj, ver := string(rel.ID()), string(rel.ProjectID()), rel.Version()
+		out = append(out, gen.ReleaseView{Id: &rid, ProjectId: &proj, Version: &ver})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// strval dereferences an optional query parameter; absent reads as "no filter".
+func strval(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // --- error mapping + mappers -----------------------------------------------

@@ -383,7 +383,7 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
-		       f.base_score, COALESCE(pr.evidence_trust, '')
+		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes
 		FROM findings f
 		-- The reservation (EDR-TRUST-01 T12) is DERIVED, never stored: join the current
 		-- Position to the proposal it accepted and read that proposal's evidence class. A
@@ -405,10 +405,18 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			curStance                   *string
 			curVersion                  *int
 			baseScore                   int
-			evidenceTrust               string
+			evidenceTrust, band         string
+			fixesRaw                    []byte
 		)
-		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore, &evidenceTrust); err != nil {
+		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore,
+			&evidenceTrust, &band, &fixesRaw); err != nil {
 			return nil, err
+		}
+		var fixes []app.FixedVersion
+		if len(fixesRaw) > 0 {
+			if err := json.Unmarshal(fixesRaw, &fixes); err != nil {
+				return nil, err
+			}
 		}
 		e := app.PostureEntry{
 			FindingID:   domain.FindingID(id),
@@ -416,6 +424,8 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			CVE:         cve,
 			Stage:       domain.Stage(stage),
 			BaseScore:   baseScore,
+			Band:        band,
+			Fixes:       fixes,
 		}
 		if curStance != nil {
 			e.Stance = domain.Stance(*curStance)
@@ -478,6 +488,24 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
 	_, err := s.exec(ctx).Exec(ctx,
 		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
+	return err
+}
+
+// SetBandAndFixes materializes Knowledge's exploitability band and the per-Finding SELECTED fix
+// versions (DASH-2 / PLAN-3).
+//
+// The fixes are selected per Finding, so this is one statement per Finding rather than one per
+// Faultline — unlike the band, which is CVE-intrinsic and the same for every Finding on the card.
+// Both together are what let a release posture answer "which are critical, and what do I upgrade?"
+// in a single read.
+func (s *Store) SetBandAndFixes(ctx context.Context, findingID, band string, fixes []app.FixedVersion) error {
+	raw, err := json.Marshal(fixes)
+	if err != nil {
+		return err
+	}
+	_, err = s.exec(ctx).Exec(ctx,
+		`UPDATE findings SET band = $2, selected_fixes = $3 WHERE id = $1`,
+		findingID, band, string(raw))
 	return err
 }
 

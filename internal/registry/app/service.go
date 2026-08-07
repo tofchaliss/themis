@@ -155,7 +155,36 @@ func (s *RegistryService) GetRelease(ctx context.Context, id domain.ReleaseID) (
 	return s.repo.GetRelease(ctx, id)
 }
 
+// ListProducts returns products, optionally filtered by exact name (DASH-1).
+func (s *RegistryService) ListProducts(ctx context.Context, name string) ([]domain.Product, error) {
+	return s.repo.ListProducts(ctx, name)
+}
+
+// ListProjects returns the Projects under a Product, optionally filtered by exact name (DASH-1).
+// A product that does not exist is reported as such rather than as an empty list — "no projects"
+// and "no such product" are different answers and a caller must be able to tell them apart.
+func (s *RegistryService) ListProjects(ctx context.Context, product domain.ProductID, name string) ([]domain.Project, error) {
+	ok, err := s.repo.ProductExists(ctx, string(product))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrUnknownProduct
+	}
+	return s.repo.ListProjects(ctx, product, name)
+}
+
 // ListReleases returns the Releases belonging to a Project.
 func (s *RegistryService) ListReleases(ctx context.Context, project domain.ProjectID) ([]domain.Release, error) {
+	// Same distinction as ListProjects: "this project has no releases" and "there is no such
+	// project" are different answers, and collapsing them sends a caller hunting for a typo in
+	// the wrong place.
+	ok, err := s.repo.ProjectExists(ctx, string(project))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrUnknownProject
+	}
 	return s.repo.ListReleases(ctx, project)
 }

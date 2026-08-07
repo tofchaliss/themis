@@ -313,3 +313,50 @@ func TestMigration_DownUp(t *testing.T) {
 		t.Fatalf("releases table missing after down/up: %v", err)
 	}
 }
+
+// DASH-1: the product → project → release traversal, with exact-name lookup at each level.
+//
+// Exact match, not a prefix: the caller is a human or a GUI who KNOWS the product they mean, and a
+// fuzzy match returns a set they then have to disambiguate — which is the problem this exists to
+// remove, not a smaller version of it.
+func TestListProductsAndProjects(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	prodID, _, _ := seed(t, s)
+
+	// A second product + project, so a filter has something to exclude.
+	other, _ := domain.NewProduct("prod-2", "Other")
+	if err := s.SaveProduct(ctx, other); err != nil {
+		t.Fatalf("save other product: %v", err)
+	}
+	proj2, _ := domain.NewProject("proj-2", prodID, "worker")
+	if err := s.SaveProject(ctx, proj2); err != nil {
+		t.Fatalf("save second project: %v", err)
+	}
+
+	all, err := s.ListProducts(ctx, "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("ListProducts(all) = %d, %v; want 2", len(all), err)
+	}
+	one, err := s.ListProducts(ctx, "Themis")
+	if err != nil || len(one) != 1 || one[0].Name() != "Themis" {
+		t.Fatalf("ListProducts(Themis) = %+v, %v", one, err)
+	}
+	if none, err := s.ListProducts(ctx, "Them"); err != nil || len(none) != 0 {
+		t.Errorf("a PREFIX must not match — the lookup is exact: %+v, %v", none, err)
+	}
+
+	projs, err := s.ListProjects(ctx, prodID, "")
+	if err != nil || len(projs) != 2 {
+		t.Fatalf("ListProjects = %d, %v; want 2", len(projs), err)
+	}
+	named, err := s.ListProjects(ctx, prodID, "api")
+	if err != nil || len(named) != 1 || named[0].Name() != "api" {
+		t.Fatalf("ListProjects(api) = %+v, %v", named, err)
+	}
+	// Scoped to the product: a project of another product must never leak in.
+	if leaked, err := s.ListProjects(ctx, "prod-2", ""); err != nil || len(leaked) != 0 {
+		t.Errorf("projects leaked across products: %+v, %v", leaked, err)
+	}
+}

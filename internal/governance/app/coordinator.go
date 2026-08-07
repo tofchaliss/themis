@@ -41,6 +41,11 @@ type InboundFaultlineEnriched struct {
 	// EPSS is the reconciled exploitation probability, used to detect drift against a suppressing
 	// decision's premise (GOV-14b).
 	EPSS float64
+	// Priority is Knowledge's exploitability band, materialized onto the posture (DASH-2).
+	Priority string
+	// Fixes are the package-attributed fix versions; Governance selects the ones matching each
+	// Finding's components and stamps them (PLAN-3).
+	Fixes []FixedVersion
 	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3).
 	AffectedRanges []string
 }
@@ -85,6 +90,8 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		SignalTrust:     e.SignalTrust,
 		AffectedRanges:  e.AffectedRanges,
 		Signals:         domain.ExploitSignals{KEV: e.KEV, ExploitPublic: e.ExploitPublic, EPSS: e.EPSS},
+		Band:            e.Priority,
+		Fixes:           e.Fixes,
 	})
 }
 

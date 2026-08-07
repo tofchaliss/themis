@@ -238,6 +238,12 @@ type EnrichmentSignal struct {
 	// Signals is the current exploitability picture, compared against what a suppressing decision
 	// was taken with to detect drift (GOV-14b).
 	Signals domain.ExploitSignals
+	// Band is Knowledge's exploitability band, materialized onto every Finding of the Faultline so
+	// a release rollup can answer "which are critical?" without a read per Faultline (DASH-2).
+	Band string
+	// Fixes are the card's package-attributed fixes; the ones matching a Finding's own components
+	// are selected and stamped, so a plan can say what to upgrade TO (PLAN-3).
+	Fixes []FixedVersion
 	// Applicabilities carries the reconciled vendor VEX statements (EDR-VEX-01 D4). A
 	// not_affected statement whose package matches a Finding's component raises a system
 	// not_affected Proposal on that Finding (policy/human accepts — never auto-suppress).
@@ -353,6 +359,12 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 		// human accepting a risk tomorrow records what was true today, not what was true when the
 		// Finding opened.
 		if err := s.repo.SetSignals(ctx, sig.FaultlineID, sig.Signals); err != nil {
+			return err
+		}
+		// The band + the per-component fix selection (DASH-2 / PLAN-3). Materialized here rather
+		// than joined at read time because both arrive by EVENT from another bounded context, and
+		// a join would be the cross-database read the context boundary exists to forbid.
+		if err := s.materializeBandAndFixes(ctx, sig); err != nil {
 			return err
 		}
 	}
@@ -750,6 +762,36 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 				OccurredAt: now,
 			}}, nil
 		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// materializeBandAndFixes stamps Knowledge's exploitability band and each Finding's OWN fix
+// versions onto the Findings of a Faultline (DASH-2 / PLAN-3).
+//
+// The band is CVE-intrinsic and identical for every Finding on the card. The fixes are not: a card
+// holds fixes for every package the CVE touches, and handing a Finding the union is what produced
+// a recommendation citing another package's version (AI-GROUND-1). So the selection runs per
+// Finding, against that Finding's own components.
+//
+// Skipped for a withdrawal: a retired CVE has no band worth showing and no fix worth applying.
+func (s *FindingService) materializeBandAndFixes(ctx context.Context, sig EnrichmentSignal) error {
+	if sig.Band == "" && len(sig.Fixes) == 0 {
+		return nil // nothing to stamp — an older payload, or a card with neither
+	}
+	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		f, err := s.repo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		mine := selectFixesFor(sig.Fixes, f.Components())
+		if err := s.repo.SetBandAndFixes(ctx, string(id), sig.Band, mine); err != nil {
 			return err
 		}
 	}

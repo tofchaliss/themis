@@ -1,0 +1,2 @@
+ALTER TABLE findings DROP COLUMN IF EXISTS selected_fixes;
+ALTER TABLE findings DROP COLUMN IF EXISTS band;

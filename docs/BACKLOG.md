@@ -1101,7 +1101,16 @@ three angles, and two of them proposed fixes that would not have worked.
   **Dep:** none. **Scope:** MEDIUM — first enrichment works today, so this is about staying correct over
   time rather than getting correct now.
 
-- [ ] **DASH-1 — There is no way to reach a release's posture without already knowing its UUID.**
+- [x] **DASH-1 — There is no way to reach a release's posture without already knowing its UUID.**
+  ✅ **CLOSED 2026-08-07.** Registry gains `GET /products[?name=]`, `GET /products/{id}/projects[?name=]`
+  and `GET /projects/{id}/releases[?version=]` — the product → project → release traversal a human
+  actually has. Lookups are EXACT, not prefix: the caller knows the product they mean, and a fuzzy
+  match returns a set they then have to disambiguate, which is the problem this removes rather than
+  a smaller version of it.
+  **A missing parent is a 404, not an empty 200.** "This product has no projects" and "there is no
+  such product" are different answers, and collapsing them sends a caller hunting for a typo that is
+  not there. `GET /releases?project=` was fixed to match — it used to return an empty list for a
+  project that does not exist.
   _(Surfaced answering "how do I get a release dashboard?", 2026-08-07.)_ Governance's
   `GET /releases/{id}/posture` is a good rollup and is sorted-by-`residual_priority` away from being a
   triage dashboard. What is missing is everything *before* it: Registry exposes only `POST /products`,
@@ -1115,7 +1124,16 @@ three angles, and two of them proposed fixes that would not have worked.
   **Dep:** none. **Scope:** MEDIUM — small surface, and it is the difference between an API a human can
   navigate and one only a script that just created the objects can use.
 
-- [ ] **DASH-2 — Posture exists per release only; there is no product or project rollup.**
+- [x] **DASH-2 — Posture exists per release only; there is no product or project rollup.**
+  ✅ **THE ENTRY-ROW HALF CLOSED 2026-08-07.** `PostureEntry` now carries `band` (Knowledge's
+  exploitability band), `components` (with the source package) and `fixes` (the per-component
+  selection), all materialized at enrichment like `base_score` before them.
+  **Measured effect:** rendering one posture table cost **~460 API calls** — one Knowledge read per
+  Faultline for the band, one Governance assessment per Finding for the component. It is now ONE
+  read plus one Knowledge call per displayed row for KEV/EPSS. A rollup whose cost is linear in its
+  own length cannot serve a dashboard.
+  **Still open:** the product/project ROLLUP itself. DASH-1 now makes the traversal possible, so a
+  caller can enumerate releases and merge client-side; a server-side rollup is a separate endpoint.
   _(Same conversation.)_ "Show me everything critical across product `mrf`" has no answer: `posture` is
   keyed by a single release id, so a caller must enumerate releases (which DASH-1 makes impossible over
   the API) and merge client-side. The estate graph for the *blast* direction already exists (C1:
@@ -1238,7 +1256,10 @@ three angles, and two of them proposed fixes that would not have worked.
   verification asks "were you given this identifier", not "does it mean what you think". Only the
   selection fix could close that gap; guardrail and data quality are complementary.
 
-- [ ] **PLAN-1 — a merged plan step can list 33 packages inline, and the step becomes unreadable.**
+- [x] **PLAN-1 — a merged plan step can list 33 packages inline, and the step becomes unreadable.**
+  ✅ **CLOSED 2026-08-07.** The prompt renders the first three package names plus `+N more`, and the
+  step states how many packages it really covers. The collapse was right; only the rendering needed
+  bounding — the same lesson as the FIX column.
   _(**Measured** on the VM 2026-08-07, first working `plan_remediation@v1` run, step 8.)_
   The sibling merge (KN-MODULE-1 / same-CVE-set collapse) worked — arguably too well. One step read:
   `upgrade perl-Carp, perl-Data-Dumper, perl-Digest, … perl-threads-shared – closes 165 findings`,
@@ -1272,7 +1293,13 @@ three angles, and two of them proposed fixes that would not have worked.
   marginally better ordered.
   **Dep:** none. **Scope:** SMALL for (b); the DECISION is the work, and it belongs in an EDR.
 
-- [ ] **PLAN-3 — the plan says what to upgrade but not what to upgrade TO.**
+- [x] **PLAN-3 — the plan says what to upgrade but not what to upgrade TO.**
+  ✅ **CLOSED 2026-08-07 together with DASH-2.** `knowledge.faultline_enriched.v1` now carries the
+  package-attributed `Fixes`; Governance selects the ones matching each Finding's own components and
+  stamps them (migration `000008`), and they ride the posture row. The selection logic is SHARED
+  with the read-time projection (`selectFixesFor`), because two implementations of "which fix is
+  mine?" would eventually disagree — and the disagreement would show up as a dashboard and a plan
+  recommending different versions for the same component.
   _(Known and accepted at build time; recorded so it is not mistaken for an oversight.)_
   `PostureEntry` carries components but not their selected fix versions, so a step reads
   `upgrade PyYAML` rather than `upgrade PyYAML to 0:5.4.1-1.module+el8.10.0+1582`. The per-Finding
