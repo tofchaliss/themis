@@ -1063,6 +1063,23 @@ three angles, and two of them proposed fixes that would not have worked.
   `view.priority` (critical | high+ | high | elevated | informational) and it is exploitability-aware
   rather than raw CVSS — carrying it onto the posture entry (additively, as `residual_priority` was)
   would make the rollup self-sufficient.
+
+- [ ] **DASH-3 — "What do I upgrade this to?" cannot be answered from the Governance read surface.**
+  _(Measured on the VM 2026-08-07, after KN-FIX-1 landed.)_ A Finding's components carry only the PURL,
+  which holds the **binary** package name (`pkg:rpm/rocky/python3-pyyaml@…`). Fix versions on the
+  Faultline are keyed by the **source** package name (`PyYAML`), because that is what distro
+  vulnerability feeds publish. The two are not derivable from each other — `python3-pyyaml → PyYAML`
+  and `python3-ply → python-ply` follow no shared rule. Only Evidence's inventory holds the mapping
+  (`component.source`).
+  Consequence: every client that wants to show a fix must fetch the release's evidence documents, pull
+  each inventory, and build a purl→source map before it can call `FixesFor`. `scripts/release-posture.sh`
+  now does exactly that (measured: without it, 16 of the top 20 rows read "N unattributed" for cards
+  that held the right answer). A GUI would have to re-implement the same join.
+  **Fix:** either carry `source` onto the Governance Finding component (it is already on the Knowledge
+  `FaultlineMatched` event's inventory view, so no new truth — but it is a domain + event + store +
+  API change), or expose the resolved fix directly on the finding assessment. The second is smaller and
+  answers the question the caller actually has.
+  **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
   **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
   plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
 

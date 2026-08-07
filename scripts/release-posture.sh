@@ -40,6 +40,7 @@ done
 REGISTRY="${THEMIS_REGISTRY_URL:-http://localhost:8082}"
 GOVERNANCE="${THEMIS_GOVERNANCE_URL:-http://localhost:8083}"
 KNOWLEDGE="${THEMIS_KNOWLEDGE_URL:-http://localhost:8085}"
+EVIDENCE="${THEMIS_EVIDENCE_URL:-http://localhost:8081}"
 
 # Inbound-edge auth is optional (EDR-SECURITY-01): send the key only when one is configured.
 get() {
@@ -60,6 +61,19 @@ version=$(echo "$release" | jq -r '.version // "unknown"')
 # counts KEYS — which reported "2 customers" for a release reaching none, and made Governance's
 # correct 1.0x multiplier look like a bug.
 customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq -r '.unique_customers // 0' 2>/dev/null || echo 0)
+
+# Distro packages carry THREE names for one thing: the binary RPM shipped (python3-pyyaml), the
+# source RPM it was built from (PyYAML), and the upstream project. Vulnerability feeds key fixes on
+# the SOURCE name, the SBOM's PURL carries the BINARY name, and `python3-pyyaml -> PyYAML` is not
+# derivable by any rule — it is data. Evidence's inventory is the only place that mapping exists, so
+# build purl->source once here; without it every fix lookup misses and the FIX column reads
+# "94 unattributed" for a card that knows the answer perfectly well.
+srcmap='{}'
+for ev in $(get "$EVIDENCE/api/v1/evidence?release=$REL" 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
+  inv=$(get "$EVIDENCE/api/v1/evidence/$ev/inventory" 2>/dev/null || echo '{}')
+  srcmap=$(jq -n --argjson acc "$srcmap" --argjson inv "$inv" \
+    '$acc + (($inv.components // []) | map({key: .purl, value: (.source // .name)}) | from_entries)')
+done
 
 posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || { echo "cannot read posture for $REL" >&2; exit 1; }
 total=$(echo "$posture" | jq 'length')
@@ -104,7 +118,8 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     # CVSS: `critical` means CVSS>=9 AND KEV-listed; `high+` means CVSS>=9 with a public exploit.
     fl=$(get "$KNOWLEDGE/api/v1/faultlines/$flid" 2>/dev/null || echo '{}')
     band=$(echo "$fl" | jq -r '.view.priority // "-"')
-    comp=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end' | sed 's#pkg:[a-z]*/##; s#?.*##')
+    purl=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end')
+    comp=$(echo "$purl" | sed 's#pkg:[a-z]*/##; s#?.*##')
     kev=$(echo "$fl" | jq -r 'if .view.kev then "yes" else "-" end')
     epss=$(echo "$fl" | jq -r 'if .view.epss then (.view.epss * 100 | floor | tostring + "%") else "-" end')
     # THE fix for THIS component, from the package-attributed `fixes` (KN-FIX-1). The flat
@@ -115,7 +130,10 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     # Falls back to a candidate count when nothing is attributed to this package: a card whose
     # source never named the package (NVD CPE data, scanner reports) still shows that a fix
     # exists, without pretending to know which one applies.
-    pkg=$(echo "$comp" | sed 's#.*/##; s#@.*##')
+    # Prefer the source-package name from Evidence; fall back to the PURL's binary name for
+    # non-distro components (npm, pypi, go), where the two are the same thing.
+    pkg=$(jq -rn --argjson m "$srcmap" --arg u "$purl" --arg b "$(echo "$comp" | sed 's#.*/##; s#@.*##')" \
+      '$m[$u] // $b')
     fix=$(echo "$fl" | jq -r --arg p "$pkg" '
       ((.view.fixes // []) | map(select((.package // "") | ascii_downcase == ($p|ascii_downcase))) | map(.version)) as $mine
       | if ($mine|length) > 0 then ($mine|join(", "))
