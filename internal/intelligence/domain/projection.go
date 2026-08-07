@@ -24,7 +24,13 @@ func (p FindingAssessment) Grounds(ref string) bool {
 		return false
 	}
 	switch ref {
-	case p.Finding.ID, p.Finding.FaultlineID, p.Finding.CVE, p.Knowledge.ID, p.Knowledge.CVE:
+	// ReleaseID belongs here for the same reason as the rest: it is IN the projection and is
+	// handed to the model, so a citation of it refers to something authoritative. Omitting it
+	// made Grounding Verification refuse an evidence ref naming the very release the Finding is
+	// scoped to — and made the TRUST-8 rationale scan report a correctly-cited release as
+	// invented. Found by that scan's own test, 2026-08-07.
+	case p.Finding.ID, p.Finding.ReleaseID, p.Finding.FaultlineID, p.Finding.CVE,
+		p.Knowledge.ID, p.Knowledge.CVE:
 		return true
 	}
 	for _, purl := range p.Finding.Components {

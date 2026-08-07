@@ -87,7 +87,7 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 // logTelemetry emits the per-invocation execution record (D9), privacy-safe (no
 // prompt content).
 func (h *Handler) logTelemetry(oc app.Outcome) {
-	h.logger.Info("capability invoked",
+	fields := []observability.Field{
 		observability.String("capability", oc.CapabilityID),
 		observability.String("correlation_id", oc.CorrelationID),
 		observability.String("provider", oc.Provider),
@@ -96,7 +96,14 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 		observability.Duration("duration", oc.Duration),
 		observability.Bool("produced", oc.Produced),
 		observability.String("reason", oc.Reason),
-	)
+	}
+	// `detail` says WHICH check refused the output, and is present only when something did
+	// (TRUST-6). Omitted on a clean run so the common line is unchanged, and never echoed in
+	// the HTTP response — the 204 stays opaque by design.
+	if oc.Detail != "" {
+		fields = append(fields, observability.String("detail", oc.Detail))
+	}
+	h.logger.Info("capability invoked", fields...)
 }
 
 // selectionFrom reads the Selection from the request, accepting the deprecated finding_id
@@ -119,7 +126,7 @@ func toGenProposal(p domain.Proposal, correlationID string) gen.Proposal {
 	}
 	conf := float32(p.Confidence)
 	stance := string(p.Recommendation.Stance)
-	return gen.Proposal{
+	out := gen.Proposal{
 		Capability:    strPtr(p.Capability),
 		FindingId:     strPtr(p.Recommendation.FindingID),
 		Stance:        &stance,
@@ -131,6 +138,13 @@ func toGenProposal(p domain.Proposal, correlationID string) gen.Proposal {
 		DecidedBy:     strPtr(p.Metadata.DecidedBy),
 		CorrelationId: strPtr(correlationID),
 	}
+	// Omitted when the rationale invented nothing, so a clean proposal is byte-identical on
+	// the wire and an absent field reads as "nothing to caveat".
+	if len(p.RationaleWarnings) > 0 {
+		w := p.RationaleWarnings
+		out.RationaleWarnings = &w
+	}
+	return out
 }
 
 func strPtr(s string) *string { return &s }

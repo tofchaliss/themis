@@ -43,4 +43,12 @@ type Proposal struct {
 	Evidence       []Evidence
 	Reasoning      string
 	Metadata       Metadata
+	// RationaleWarnings lists identifier-shaped tokens the free-text Reasoning names that the
+	// grounding does not contain (TRUST-8). Empty on a clean proposal.
+	//
+	// It is ADVISORY, never a rejection: the structured Evidence above passed Grounding
+	// Verification, so the proposal is well-formed — this only marks that its narrative
+	// mentions ids nobody supplied, which is the failure mode a reviewer cannot see. An empty
+	// slice does not certify the narrative; it only says no ids were invented.
+	RationaleWarnings []string
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
@@ -63,6 +64,31 @@ type Outcome struct {
 	// recorded as enterprise truth and never reaches Governance — a human reads it and it is
 	// discarded. Empty for a Decision capability.
 	Information string
+	// Detail is WHY the outcome ended as it did, in the words of the check that ended it —
+	// telemetry only, never returned to the caller (TRUST-6).
+	//
+	// Reason alone is a constant, and four very different failures collapse into
+	// ReasonBusinessInvalid: a wrong finding_id echo, a confidence outside [0,1], a
+	// disallowed stance, and an ungrounded evidence ref. They call for opposite fixes — a
+	// stricter response schema, a prompt change, or a thicker projection — and on a live VM
+	// the missing distinction made a real 204 undiagnosable from logs.
+	//
+	// It stays out of the HTTP response deliberately. A 204 must remain opaque: "AI disabled",
+	// "AI unreachable" and "AI declined" are one outcome by design, because the pipeline is
+	// correct in all three. Leaking which one occurred would put the Gateway's operational
+	// state into a business API that treats AI as optional.
+	Detail string
+}
+
+// redact scrubs a diagnostic string with the same discipline as the prompt (R1 / D10). It is
+// applied to every Outcome.Detail because those messages quote model output verbatim, and a
+// model that hallucinated a secret into its response must not have it copied into telemetry
+// on the way out.
+func (g *Gateway) redact(s string) string {
+	if g.redactor == nil {
+		return s
+	}
+	return g.redactor.Redact(s)
 }
 
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
@@ -244,6 +270,11 @@ func (g *Gateway) Invoke(
 
 		var out domain.RawOutput
 		schemaOK := false
+		// The last structural complaint across attempts, kept so an exhausted retry budget can
+		// say WHAT was wrong instead of only that something was (TRUST-6). Unparseable JSON and
+		// a schema violation call for different fixes — the response-format mode versus the
+		// prompt — and both look identical in ReasonSchemaInvalid alone.
+		var lastSchemaErr error
 		for attempt := 0; attempt < maxAttempts; attempt++ {
 			res, eerr := eng.Execute(ctx, in)
 			if eerr != nil {
@@ -259,9 +290,11 @@ func (g *Gateway) Invoke(
 			oc.Provider, oc.Model, oc.TokensUsed = res.Provider, res.Model, res.TokensUsed
 			parsed, parseErr := domain.ParseOutput([]byte(res.Raw))
 			if parseErr != nil {
+				lastSchemaErr = parseErr
 				continue // malformed JSON — retry
 			}
 			if serr := validator.ValidateSchema([]byte(res.Raw)); serr != nil {
+				lastSchemaErr = serr
 				continue // structural violation — retry
 			}
 			out = parsed
@@ -271,6 +304,9 @@ func (g *Gateway) Invoke(
 		if !schemaOK {
 			oc.Duration = g.now().Sub(start)
 			oc.Reason = ReasonSchemaInvalid
+			if lastSchemaErr != nil {
+				oc.Detail = g.redact(lastSchemaErr.Error())
+			}
 			return domain.Proposal{}, oc
 		}
 		// Information capabilities stop here (T7). The answer is rendered for a human and
@@ -294,12 +330,23 @@ func (g *Gateway) Invoke(
 		if verr := validator.ValidateBusiness(out, subjectFindingID, ac); verr != nil {
 			oc.Duration = g.now().Sub(start)
 			oc.Reason = ReasonBusinessInvalid
+			// Which of the four checks refused it (TRUST-6). Redacted with the same discipline
+			// as the prompt, because the message quotes model output back verbatim.
+			oc.Detail = g.redact(verr.Error())
 			return domain.Proposal{}, oc
 		}
 		oc.Duration = g.now().Sub(start)
 		oc.DecidedBy = "llm:" + out.RecommendedStance
 		oc.Produced, oc.Reason = true, ReasonOK
-		return g.buildProposal(out, capb, oc), oc
+		// The proposal is valid — its structured evidence is grounded. Scan the free-text
+		// rationale for identifiers nobody supplied and carry them as a warning (TRUST-8). This
+		// never blocks: prose cannot be verified, so a hallucinated id in the narrative is a
+		// caveat for the human who decides, not grounds for refusing a well-formed proposal.
+		warn := domain.UngroundedMentions(out.Reasoning, ac)
+		if len(warn) > 0 {
+			oc.Detail = g.redact("ungrounded rationale mentions: " + strings.Join(warn, ", "))
+		}
+		return g.buildProposal(out, capb, oc, warn...), oc
 	}
 
 	// Every plan step deferred without producing — the honest "insufficient" outcome.
@@ -311,7 +358,7 @@ func (g *Gateway) Invoke(
 
 // buildProposal assembles the advisory Proposal from validated output, stamping the
 // execution provenance (including which step decided) onto the metadata.
-func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc Outcome) domain.Proposal {
+func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc Outcome, rationaleWarnings ...string) domain.Proposal {
 	return domain.BuildProposal(out, capb, domain.Metadata{
 		CorrelationID: oc.CorrelationID,
 		Provider:      oc.Provider,
@@ -319,5 +366,5 @@ func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc
 		TokensUsed:    oc.TokensUsed,
 		Duration:      oc.Duration,
 		DecidedBy:     oc.DecidedBy,
-	})
+	}, rationaleWarnings...)
 }

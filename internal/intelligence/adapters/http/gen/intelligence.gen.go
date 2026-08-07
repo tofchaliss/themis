@@ -73,8 +73,11 @@ type Proposal struct {
 	FindingId *string     `json:"finding_id,omitempty"`
 	Model     *string     `json:"model,omitempty"`
 	Provider  *string     `json:"provider,omitempty"`
-	Reasoning *string     `json:"reasoning,omitempty"`
-	Stance    *string     `json:"stance,omitempty"`
+
+	// RationaleWarnings Identifier-shaped tokens the free-text `reasoning` names that the authoritative grounding does NOT contain (EDR-TRUST-01 T8). ADVISORY — the proposal's structured `evidence` already passed Grounding Verification, so this does not invalidate it; it marks that the narrative cites ids nobody supplied, which is the failure a reviewer cannot see. Absent/empty means no ids were invented, NOT that the narrative is true — prose is not verifiable and is never claimed to be.
+	RationaleWarnings *[]string `json:"rationale_warnings,omitempty"`
+	Reasoning         *string   `json:"reasoning,omitempty"`
+	Stance            *string   `json:"stance,omitempty"`
 }
 
 // Selection What the capability is invoked against. `ids` is a set because a user may pick several things of one kind (e.g. several Findings for a VEX draft); how many a given capability accepts is that capability's declared cardinality, enforced before any grounding is assembled.
@@ -268,29 +271,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"rFfbbhs3E36VAf8fqA2sVnLsXlS+chO3MAqkRuIeANuIR8tZ7cRccjPkSl0YAvoQea4+RJ+kIFdHS20S",
-	"IFfmckZz4HzzzfhJFa5unCUbvBo/KSHfOOspfVyLmxiq47FwNpAN8YhNY7jAwM4O33tn450vKqoxnv4v",
-	"VKqx+t9wY3fYS/1wZW+xWGRKky+Em2hGjdWliJNcRcFSOxq7nLEmW1A8N+IaksB9aI9sdfwbuobUWPkg",
-	"bKdqkankfu9+ka1u3OQ9FSFqXtmZe6Q39KElnxLbjagXA0KBDU7YcOgAp8jWB0B4S4aKqAkDQGg9yQC1",
-	"FvIeJ4aAbJAOGsc2QGNaD6EiiLkELpnEQ8PFI2k4unz1ZnDz5pe3N4PRCdx8d5zD27ZpTAfEoSKBB9+m",
-	"gB/ASTKiqREqMJCGh5KtZjt9x/rhfEtzztYDlzBxoQIUgkbIkw35nVXZs3csnAiZVMx3rPdf4ed0QANb",
-	"isAayhgOGaopSHcOU7IkKSguASfJm8r2q7OJuHe1ykWNg7T0HBSvNrmiYfTJ6yrPMTxF82NY2syAtR/D",
-	"7V07Gp0WrNNful885HBRFNREK/H3zhIIGUJP4B3QH+wD2ykUaEyszCNRA3Mnj/FyXrGh+O4d1DyNGZ6D",
-	"UO1mBFgGkv5J99JchvipfliD6DBAt9pvt2iaArI5CP/AwdBnNsC1uMZ5NPsONpA/6KRwttw05lJs23pC",
-	"0oufY2rPgqaCNel3k24fcr9VXFTQGLTgAzWw1IW///wId0paQ+O+xj6gLaiv852KDXKnjKkPSg+ikbbo",
-	"hQPV/lMFW/PR5jlRBLt9aO/5qp2mwyVrxEWz8i90ht7Z+HFI2uf4meXeoO3Ak2NI7LLFdeyBEwXqFe3l",
-	"8MDaP0QJgqcAEyqw9bQkQKixS7wGnmYkaCBUbKceXJmaLlI2HFE+zdcKP/Rv1jc2wq+Xv4MWLMPxOVRu",
-	"DjXaDhCmPCO7Q8Opn30MJMTIN6JvfISLQSENBYpmi/E6A7Klk4I0TKh0QhAtT8W1yX/KyHuqJ4b0IZZk",
-	"7Xcwsl9dtle98GQfGf338ze/qeg/50YOr12cNNrVyDZKYuoD8ETwbGpEcJNtazW+XcFQRegkklP32QF0",
-	"CH1oWSLx3vbSLCV5v4ebqMy2dIcGZCBjeBobAn7EQHPs4Oi6Qk+DU5gKkS2ZjM7gr48nx6l9I8SEsAg8",
-	"28Gab6XEgnJYD12LNWm4uNrWmnRx8mxm8JJlt+bqefKwiqWvrwcOMGOMjvXg4voKfrJubkhPCa6Xrecz",
-	"kNb2U5rslC1lMEPDGgPFNoBQCRH4gFPyGaDVIBRasakTgrRFaCPkUM/YO+lgRa0payfwYnQGrx287Lco",
-	"mFdkY1gRq2zJw9Gdsg6a5a/uVAYIJYsPg8Kg9+CxJHBtKFxNxzlcrPw4a7rxsnPj+AKhwknK+Rx2CuTm",
-	"1oN1EKQN1XJs9bMiIrFmv6t+cX2lMjUj8X2xT/JRPopgdg1ZbFiN1Wk+yk9jq2CoUlcM17Vi8sMn1oth",
-	"zyBpwLh+yYptlUbDlV4vWS834yaaE6wpkHg1vn1SHL1HFypTERRqrFirbQD3m8NmA30O9vtemXz43unu",
-	"qy2zu+vjYrepYkzpYmubfjEafc1Nuh/dB1bpizV0DwAyjzV8MTrbb+fXG/zB0RKYOoPW9m0Uz06gtThD",
-	"NpGs+pbGHWwm82d9oofiXz/I5n+BqH/2RfrffpH9tI7VNUq3vdT3/LJFLitaMh0c+c4WlTjrWn+c90/s",
-	"SWYrSLZi1FgNseHh7EQt7hf/BAAA//8=",
+	"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",
+	"8ZDiSLLaQbITZ2Zmgi1PVi/N5n7z/wAAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -38,7 +38,11 @@ type wireProposal struct {
 	Confidence float64 `json:"confidence"`
 	Reasoning  string  `json:"reasoning"`
 	DecidedBy  string  `json:"decided_by"`
-	Evidence   []struct {
+	// RationaleWarnings: identifiers the free-text reasoning names that the Gateway's grounding
+	// did not contain (EDR-TRUST-01 T8). Advisory — carried through so the human deciding sees
+	// the caveat next to the narrative it applies to.
+	RationaleWarnings []string `json:"rationale_warnings"`
+	Evidence          []struct {
 		Kind string `json:"kind"`
 		Ref  string `json:"ref"`
 	} `json:"evidence"`
@@ -82,12 +86,13 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		return app.Recommendation{}, false, err
 	}
 	return app.Recommendation{
-		Stance:     wp.Stance,
-		Confidence: wp.Confidence,
-		Reasoning:  wp.Reasoning,
-		Capability: wp.Capability,
-		DecidedBy:  wp.DecidedBy,
-		Evidence:   evidenceRefs(wp),
+		Stance:            wp.Stance,
+		Confidence:        wp.Confidence,
+		Reasoning:         wp.Reasoning,
+		Capability:        wp.Capability,
+		DecidedBy:         wp.DecidedBy,
+		Evidence:          evidenceRefs(wp),
+		RationaleWarnings: wp.RationaleWarnings,
 	}, true, nil
 }
 

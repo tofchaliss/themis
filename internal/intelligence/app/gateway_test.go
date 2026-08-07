@@ -656,3 +656,113 @@ func TestRecommendPositionIsADecisionCapability(t *testing.T) {
 		t.Fatalf("output class = %q, want %q", got, domain.OutputDecision)
 	}
 }
+
+// --- TRUST-6: the outcome says WHICH check refused, not merely that one did ------------
+
+// Four checks collapse into ReasonBusinessInvalid, and they call for opposite fixes — a
+// stricter response schema, a prompt change, or a thicker projection. On a live VM the missing
+// distinction made a real 204 undiagnosable from logs.
+//
+// Only TWO are reachable here, and that is worth knowing rather than working around: the output
+// JSON schema bounds `confidence` to [0,1] and constrains `recommended_stance` to an enum, so
+// those two ValidateBusiness checks are defence-in-depth behind ValidateSchema and surface as
+// schema_invalid instead. They stay in the validator because the schema is per-capability
+// configuration and the invariants are not.
+func TestInvokeBusinessInvalid_DetailNamesTheFailedCheck(t *testing.T) {
+	for _, tc := range []struct{ name, raw, want string }{
+		{"wrong finding_id echo",
+			`{"finding_id":"NOPE","recommended_stance":"affected","confidence":0.8,"evidence":[],"reasoning":"x"}`,
+			"finding_id"},
+		{"ungrounded evidence ref",
+			`{"finding_id":"F1","recommended_stance":"affected","confidence":0.8,` +
+				`"evidence":[{"kind":"cve","ref":"CVE-9999-9999"}],"reasoning":"x"}`,
+			"ungrounded evidence"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: tc.raw}}})
+			_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+			if oc.Reason != ReasonBusinessInvalid {
+				t.Fatalf("reason = %q, want %q", oc.Reason, ReasonBusinessInvalid)
+			}
+			if !strings.Contains(oc.Detail, tc.want) {
+				t.Fatalf("detail = %q, want it to name %q — the reason constant alone cannot", oc.Detail, tc.want)
+			}
+		})
+	}
+}
+
+// An exhausted schema-retry budget must also say what was wrong. Unparseable JSON and a schema
+// violation point at different fixes (the response-format mode versus the prompt) and are
+// identical in ReasonSchemaInvalid alone.
+func TestInvokeSchemaInvalid_DetailSurvivesTheRetryLoop(t *testing.T) {
+	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: "not json"}, {raw: "still not json"}}})
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonSchemaInvalid {
+		t.Fatalf("reason = %q, want %q", oc.Reason, ReasonSchemaInvalid)
+	}
+	if oc.Detail == "" {
+		t.Fatal("detail is empty — the last structural complaint must survive the retry loop")
+	}
+}
+
+// Detail quotes model output verbatim, so it goes through the same redaction as the prompt: a
+// model that hallucinated a secret into its response must not have it copied into telemetry on
+// the way out.
+func TestInvokeDetailIsRedacted(t *testing.T) {
+	bad := `{"finding_id":"NOPE","recommended_stance":"affected","confidence":0.8,"evidence":[],"reasoning":"x"}`
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(),
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: bad}}}},
+		Redactor: tagRedactor{},
+	})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if !strings.HasPrefix(oc.Detail, "REDACTED:") {
+		t.Fatalf("detail = %q, want it redacted before it reaches telemetry", oc.Detail)
+	}
+}
+
+// --- TRUST-8: an ungrounded id in the NARRATIVE warns, but never blocks ----------------
+
+// The proposal is valid — its structured evidence passed Grounding Verification — so a
+// hallucinated id in the prose is a caveat for the human who decides, not grounds for refusing
+// a well-formed proposal. Prose cannot be verified, and pretending otherwise would reject
+// correct recommendations for writing style.
+func TestInvokeUngroundedRationaleMentionWarnsWithoutBlocking(t *testing.T) {
+	raw := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,` +
+		`"evidence":[{"kind":"cve","ref":"CVE-1"}],` +
+		`"reasoning":"Included in release ee006ff7-f278-496e-8b31-ff0aba181db3."}`
+	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: raw}}})
+	p, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+
+	if !oc.Produced || oc.Reason != ReasonOK {
+		t.Fatalf("outcome = %+v, want ok/true — a warned proposal is still a valid proposal", oc)
+	}
+	want := "ee006ff7-f278-496e-8b31-ff0aba181db3"
+	if len(p.RationaleWarnings) != 1 || p.RationaleWarnings[0] != want {
+		t.Fatalf("warnings = %v, want [%s]", p.RationaleWarnings, want)
+	}
+	if !strings.Contains(oc.Detail, want) {
+		t.Fatalf("detail = %q, want the invented id recorded in telemetry too", oc.Detail)
+	}
+	// The narrative is preserved unedited — the caveat annotates, never rewrites, what the
+	// model said. Editing model output would destroy the audit trail it is evidence of.
+	if !strings.Contains(p.Reasoning, want) {
+		t.Fatalf("reasoning = %q, want the original text intact", p.Reasoning)
+	}
+}
+
+// A clean rationale carries no warning and no detail: a caveat on every proposal is one a
+// reviewer learns to ignore.
+func TestInvokeCleanRationaleCarriesNoWarning(t *testing.T) {
+	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	p, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if len(p.RationaleWarnings) != 0 {
+		t.Fatalf("warnings = %v, want none", p.RationaleWarnings)
+	}
+	if oc.Detail != "" {
+		t.Fatalf("detail = %q, want empty on a clean run", oc.Detail)
+	}
+}

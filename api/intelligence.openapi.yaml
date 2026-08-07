@@ -105,6 +105,17 @@ components:
             $ref: '#/components/schemas/Evidence'
         reasoning:
           type: string
+        rationale_warnings:
+          type: array
+          description: >
+            Identifier-shaped tokens the free-text `reasoning` names that the authoritative
+            grounding does NOT contain (EDR-TRUST-01 T8). ADVISORY — the proposal's structured
+            `evidence` already passed Grounding Verification, so this does not invalidate it;
+            it marks that the narrative cites ids nobody supplied, which is the failure a
+            reviewer cannot see. Absent/empty means no ids were invented, NOT that the
+            narrative is true — prose is not verifiable and is never claimed to be.
+          items:
+            type: string
         provider:
           type: string
         model:

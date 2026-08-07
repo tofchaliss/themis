@@ -622,7 +622,19 @@ three angles, and two of them proposed fixes that would not have worked.
   `knowledge.faultline_superseded.v1` (additively, as `faultline_enriched` did in group 3) so it reflects
   what actually drove the supersession. **Scope:** LOW now the regression is closed.
 
-- [ ] **TRUST-6 — `business_invalid` discards *which* Grounding Verification check failed.**
+- [x] **TRUST-6 — `business_invalid` discards *which* Grounding Verification check failed.**
+  ✅ **CLOSED 2026-08-07.** `app.Outcome` gained a `Detail` field carrying the check's own message, set on
+  **both** collapsing branches: `ReasonBusinessInvalid` (from `verr`) and `ReasonSchemaInvalid` (a new
+  `lastSchemaErr` kept across the retry loop, so an exhausted budget can say *what* was malformed instead of
+  only that something was). Redacted through the same path as the prompt, since the messages quote model
+  output verbatim. Surfaced as a `detail` log field, omitted on a clean run. **Deliberately NOT in the HTTP
+  response:** the 204 stays opaque, because "AI disabled", "AI unreachable" and "AI declined" are one
+  outcome by design and leaking which occurred would put the Gateway's operational state into a business
+  API that treats AI as optional. **Found while testing:** only **two** of the four `ValidateBusiness`
+  checks are reachable — the per-capability output schema bounds `confidence` and constrains
+  `recommended_stance`, so those two surface as `schema_invalid` first. They stay in the validator as
+  defence-in-depth (the schema is configuration; the invariants are not), and the test records why.
+  Original report follows.
   _(Surfaced during the `phase3-trust-model` VM verification run, 2026-08-06.)_
   `domain.Validator.ValidateBusiness` returns a fully-formed error naming the failure — wrong `finding_id`
   echo, confidence outside `[0,1]`, disallowed stance, or ungrounded evidence ref — but
@@ -675,7 +687,26 @@ three angles, and two of them proposed fixes that would not have worked.
   **Dep:** needs a policy decision before code. **Scope:** MEDIUM — blocks demonstrating T4/T6 on a
   live system and leaves the VEX auto-suppression path dormant.
 
-- [ ] **TRUST-8 — The AI rationale a human reads is the least-verified field in the proposal.**
+- [x] **TRUST-8 — The AI rationale a human reads is the least-verified field in the proposal.**
+  ✅ **CLOSED 2026-08-07** via candidate **(b)**, the deterministic option — chosen over prompt-engineering
+  because it is verifiable rather than hopeful, and cannot itself hallucinate.
+  `domain.UngroundedMentions(text, ac)` scans free text for identifier-shaped tokens (UUID / CVE id / PURL)
+  that the authoritative grounding does not contain, deduped, sorted for stable telemetry, and capped at 5.
+  It flags **false precision, not bad writing**: prose, version numbers and package names never trip it.
+  Carried as `Proposal.RationaleWarnings` → `rationale_warnings` on the v1 API (additive, omitted when
+  empty) → the Governance seam → **embedded in the recorded proposal rationale** as an `UNVERIFIED MENTIONS`
+  caveat. Embedded rather than stored beside it on purpose: the rationale is what the deciding human reads,
+  so a caveat kept anywhere else is one a reviewer can miss, and it is preserved verbatim in the immutable
+  Position inputs if the proposal is ever accepted. The original narrative is never edited — annotating
+  preserves the audit trail that model output *is*.
+  **It warns, never blocks.** The structured evidence already passed Grounding Verification, so the proposal
+  is well-formed; prose is not verifiable and refusing on it would reject correct recommendations for style.
+  An empty result does **not** certify the narrative — it only means no ids were invented, and that
+  asymmetry is stated in the code.
+  **Found by its own test:** `FindingAssessment.Grounds` did not accept `Finding.ReleaseID`, though the
+  projection carries it and hands it to the model — so Grounding Verification would have **refused an
+  evidence ref naming the very release the Finding is scoped to**, and the scan reported a correctly-cited
+  release as invented. Fixed. Original report follows.
   _(Observed on a live model during the `phase3-trust-model` VM verification run, 2026-08-06.)_
   T8 Grounding Verification checks the **structured** `evidence[].ref` array by set membership against the
   `AssembledContext` (`ac.Grounds(ev.Ref)`), and Governance's Business Verification checks the same refs with

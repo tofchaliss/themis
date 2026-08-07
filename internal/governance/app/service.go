@@ -98,6 +98,18 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 		provenance = " [" + rec.DecidedBy + "]"
 	}
 	rationale := fmt.Sprintf("AI recommendation%s (confidence %.2f): %s", provenance, rec.Confidence, rec.Reasoning)
+	// The caveat rides INSIDE the recorded rationale, not beside it (TRUST-8). The rationale is
+	// the field a human reads when exercising the decision T4 reserves for them, and it is the
+	// least-verified part of an AI proposal: its structured evidence was grounded and
+	// Business-Verified above, while the narrative was not — prose cannot be. Anything stored
+	// elsewhere is something a reviewer can miss; embedded, the warning cannot be read apart
+	// from the sentence it qualifies, and it is preserved verbatim in the immutable Position
+	// inputs if this proposal is ever accepted.
+	if len(rec.RationaleWarnings) > 0 {
+		rationale += fmt.Sprintf(" [UNVERIFIED MENTIONS — the reasoning above names identifiers "+
+			"that were not in its grounding, so treat those specifics as unreliable: %s]",
+			strings.Join(rec.RationaleWarnings, ", "))
+	}
 	proposer := domain.Actor{Kind: domain.ActorAI, ID: rec.Capability}
 	// Inferred by definition: the output of non-deterministic reasoning. The constitutional
 	// check (T4) bars it from automatic acceptance under any policy — a human decides.

@@ -88,6 +88,12 @@ type Recommendation struct {
 	// grounding check measured the model against context it was handed, so only the context
 	// owner can confirm the claim is consistent with the system of record.
 	Evidence []string
+	// RationaleWarnings lists identifiers the free-text Reasoning names that the Gateway's
+	// grounding did not contain (T8 / TRUST-8). Advisory: the recommendation is well-formed and
+	// its structured Evidence is separately Business-Verified below — this only marks that the
+	// NARRATIVE cites ids nobody supplied. It is carried into the recorded rationale so the
+	// caveat sits beside the prose it qualifies, where the deciding human reads it.
+	RationaleWarnings []string
 }
 
 // IDGenerator assigns new opaque Finding / Governance-Proposal identities.

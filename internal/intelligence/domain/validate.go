@@ -121,7 +121,7 @@ func ParseOutput(raw []byte) (RawOutput, error) {
 
 // BuildProposal (stage 3) constructs the advisory Proposal envelope from validated
 // output. Only reachable after stages 1 + 2 pass.
-func BuildProposal(out RawOutput, capb Capability, meta Metadata) Proposal {
+func BuildProposal(out RawOutput, capb Capability, meta Metadata, rationaleWarnings ...string) Proposal {
 	ev := make([]Evidence, 0, len(out.Evidence))
 	for _, e := range out.Evidence {
 		ev = append(ev, Evidence(e))
@@ -133,5 +133,8 @@ func BuildProposal(out RawOutput, capb Capability, meta Metadata) Proposal {
 		Evidence:       ev,
 		Reasoning:      out.Reasoning,
 		Metadata:       meta,
+		// Variadic so every existing caller and test is unchanged: a proposal with a clean
+		// rationale is byte-identical to before.
+		RationaleWarnings: rationaleWarnings,
 	}
 }
