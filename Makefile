@@ -21,7 +21,12 @@ COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/eviden
 # the go-forward tree via `make check-ci`, not the whole repo.
 COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/...
 
-.PHONY: all build clean tidy test test-integration test-property lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
+# The same go-forward trees as plain directories, for tooling that takes paths rather than
+# package patterns (currently test-property-greenfield). Derived, not restated, so the two
+# cannot disagree about what "greenfield" means.
+GREENFIELD_DIRS := $(patsubst ./%/...,%,$(COVERAGE_PKGS_GREENFIELD))
+
+.PHONY: all build clean tidy test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
 	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline e2e-llm e2e-embed verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
@@ -53,6 +58,23 @@ tidy:
 test:
 	$(GO) test $(GO_TEST_FLAGS) ./...
 
+# FROZEN_PKG_RE matches the reference-only v0.3.x tree: the monolith's ring packages, its
+# binary, and its acceptance suite. Expressed as an exclusion over `go list ./...` rather than
+# an allow-list so a newly scaffolded greenfield package is gated the moment it exists — an
+# allow-list silently omits what nobody remembered to add.
+FROZEN_PKG_RE := /internal/(domain|usecase|adapter|infrastructure)(/|$$)|/cmd/themis(/|$$)|/tests/acceptance(/|$$)
+
+# Greenfield-only unit tests (used by check-ci), the counterpart to coverage-greenfield.
+#
+# The frozen tree is excluded because its failures are neither actionable nor fixable here: it
+# is reference-only, and it contains at least one genuinely flaky property (a non-idempotent
+# redactor in internal/adapter/notify — backlog CI-PROP-1) that reddens the gate at random. A
+# pre-merge gate that fails for reasons no one is allowed to fix is a gate people learn to
+# re-run until it passes, which is worse than no gate. `make test` still runs everything.
+test-greenfield:
+	@pkgs=$$($(GO) list ./... | grep -vE '$(FROZEN_PKG_RE)'); \
+	$(GO) test $(GO_TEST_FLAGS) $$pkgs
+
 test-integration:
 	$(GO) test $(GO_TEST_FLAGS) -tags=integration -p 1 ./...
 
@@ -62,7 +84,28 @@ test-integration:
 # Only packages that import rapid are passed, because the -rapid.checks flag is
 # unknown to test binaries that do not register it.
 test-property:
-	@pkgs=$$(grep -rlE 'pgregory\.net/rapid' --include='*_test.go' internal tests | sed -e 's#/[^/]*$$##' -e 's#^#./#' | sort -u); \
+	@$(MAKE) --no-print-directory property-run ROOTS="internal tests"
+
+# Greenfield-only property run (used by CI), mirroring the coverage / coverage-greenfield pair.
+# The roots are DERIVED from COVERAGE_PKGS_GREENFIELD so the two gates cannot drift: adding a
+# context to that one variable scopes coverage and properties together.
+#
+# Why CI runs this and not test-property (CI-PROP-1): the nightly deep run
+# (RAPID_CHECKS=20000) explores far more of the input space than `make check`'s 1000, and the
+# frozen v0.3.x tree contains a known non-idempotent redactor that surfaces there roughly one
+# run in four. That defect cannot be fixed — the tree is reference-only — so gating CI on it
+# means a scheduled job that is red a quarter of the time, which trains everyone to ignore it
+# and would then hide a real GREENFIELD property failure. Scoping the gate keeps the signal
+# meaningful; `make test-property` still runs everything for anyone who wants it.
+test-property-greenfield:
+	@$(MAKE) --no-print-directory property-run ROOTS="$(GREENFIELD_DIRS)"
+
+# property-run is the shared body: find the packages under ROOTS that import rapid and run only
+# their property tests. Exits cleanly when a root has none, so a newly scaffolded context
+# without property tests does not fail the build.
+property-run:
+	@pkgs=$$(grep -rlE 'pgregory\.net/rapid' --include='*_test.go' $(ROOTS) | sed -e 's#/[^/]*$$##' -e 's#^#./#' | sort -u); \
+	if [ -z "$$pkgs" ]; then echo "property packages: none under $(ROOTS)"; exit 0; fi; \
 	echo "property packages:" $$pkgs; \
 	$(GO) test $(GO_TEST_FLAGS) $$pkgs -run 'Property|Prop_' -rapid.checks=$${RAPID_CHECKS:-1000}
 
@@ -117,11 +160,12 @@ arch-test:
 
 check: build test lint clean-arch arch-test coverage deadcode
 
-# CI gate — greenfield-scoped: same as `check` but coverage covers only the go-forward
-# tree (the frozen v0.3.x legacy integration tests are green only on macOS and are
-# reference-only). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
+# CI gate — greenfield-scoped: same as `check`, but BOTH the unit tests and coverage cover only
+# the go-forward tree (the frozen v0.3.x legacy tests are green only on macOS's coarse clock,
+# are reference-only, and include a known-flaky property that cannot be fixed under the freeze —
+# CI-PROP-1). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
 # for local use.
-check-ci: build test lint clean-arch arch-test coverage-greenfield deadcode
+check-ci: build test-greenfield lint clean-arch arch-test coverage-greenfield deadcode
 
 # golang-migrate registers the postgres driver only with -tags postgres.
 MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1

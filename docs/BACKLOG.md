@@ -1069,7 +1069,31 @@ three angles, and two of them proposed fixes that would not have worked.
   straight dependency on pre-merge e2e proof. Natural fix is to run e2e on `pr.yml` too (folds into the
   pipeline-e2e item above once `make e2e-pipeline` exists).
 
-- [ ] **CI-PROP-1 — The scheduled Property Tests job fails intermittently on a FROZEN-tree defect.**
+- [x] **CI-PROP-1 — CI fails intermittently on a FROZEN-tree defect.** ✅ **FIXED 2026-08-07 via option
+  (a).** **Severity was understated when filed:** it is not nightly-only. `make check-ci` — the *pre-merge*
+  gate — ran `go test ./...` across the whole repo, so the flaky property could redden the main gate at
+  rapid's default check count, and did, roughly ten minutes after the entry claimed otherwise. The earlier
+  green runs were luck.
+  **Fix, mirroring the `coverage` / `coverage-greenfield` pair that already existed:** `test-greenfield` and
+  `test-property-greenfield`, with `check-ci` and the property workflow switched to them. `make check` and
+  `make test-property` still run the whole repo. The exclusion is expressed as a regex over
+  `go list ./...` rather than an allow-list, so a newly scaffolded greenfield package is gated the moment it
+  exists — an allow-list silently omits whatever nobody remembered to add. `GREENFIELD_DIRS` is *derived*
+  from `COVERAGE_PKGS_GREENFIELD` for the same reason. Verified with three consecutive green `check-ci`
+  runs.
+  **Found while fixing it — a second, worse hole.** `make test-property` selects with
+  `-run 'Property|Prop_'`, and `TestReconcile_OrderIndependent` — the **D2 determinism guarantee, the
+  single most important invariant in Knowledge** — did not match. It had therefore run only at rapid's
+  built-in 100 examples under `make test`, and had been excluded from **every** 1000-, 5000- and
+  20000-example sweep the project has ever done, while appearing to be covered by the property gate.
+  Renamed, swept at 20000 (passes), and the convention is now **enforced** by
+  `TestRapidPropertiesAreNamedForTheDeepRun` in `tests/architecture`, which parses each greenfield test
+  file and fails on any rapid test whose name the filter would skip. A convention enforced by nothing is
+  one that has already been broken somewhere nobody has looked.
+  **What is NOT fixed:** the redactor itself. `internal/adapter/notify` is reference-only under the freeze,
+  the mechanism is recorded below, and the defect is now simply out of the gate's scope rather than
+  suppressed. Original report follows.
+- [ ] **CI-PROP-1 (original report) — The scheduled Property Tests job fails intermittently on a FROZEN-tree defect.**
   _(Found 2026-08-07 while verifying the post-merge CI on `main`.)_ The nightly `Property Tests` workflow
   runs `make test-property RAPID_CHECKS=20000`; the same tests run at the default 1000 checks in `make
   check`, which is why this is invisible pre-merge. `TestRedactLogMessageIdempotentProperty` in

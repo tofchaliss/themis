@@ -49,5 +49,11 @@ jobs:
           fi
           echo "rapid_checks=$checks" >> "$GITHUB_OUTPUT"
 
-      - name: Run property tests
-        run: make test-property RAPID_CHECKS=${{ steps.checks.outputs.rapid_checks }}
+      # Greenfield-scoped, exactly as check-ci scopes coverage (backlog CI-PROP-1). The frozen
+      # v0.3.x tree holds a known non-idempotent redactor that surfaces roughly one nightly run
+      # in four at 20000 examples and CANNOT be fixed — the tree is reference-only. Gating on it
+      # meant a scheduled job red a quarter of the time, which trains everyone to ignore it and
+      # would then hide a real greenfield property failure. `make test-property` still runs the
+      # whole repo for anyone who wants it.
+      - name: Run property tests (greenfield)
+        run: make test-property-greenfield RAPID_CHECKS=${{ steps.checks.outputs.rapid_checks }}

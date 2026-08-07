@@ -146,9 +146,15 @@ func TestReconcile_ApplicabilityAndEmpty(t *testing.T) {
 	}
 }
 
-// TestReconcile_OrderIndependent is the determinism property (D2): the same Proposals
+// TestReconcile_OrderIndependentProperty is the determinism property (D2): the same Proposals
 // in any order reconcile to the same enterprise view.
-func TestReconcile_OrderIndependent(t *testing.T) {
+//
+// The name must end in `Property` — `make test-property` selects with `-run 'Property|Prop_'`,
+// so a rapid test named otherwise runs ONLY at rapid's default 100 examples under `make test`
+// and never in the deep nightly run. This one was missed by that convention until 2026-08-07,
+// which meant the single most important invariant in Knowledge was excluded from every 1000-,
+// 5000- and 20000-example sweep the project has ever done.
+func TestReconcile_OrderIndependentProperty(t *testing.T) {
 	prec := domain.NewPrecedence("redhat", "nvd", "osv")
 	rapid.Check(t, func(rt *rapid.T) {
 		ps := genProposals(rt)
