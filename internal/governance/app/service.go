@@ -89,7 +89,7 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	// A failed check is a silent no-proposal, not an error: AI producing nothing usable is a
 	// normal outcome and must never block a human's request (D13).
 	for _, ref := range rec.Evidence {
-		if !f.Vouches(ref) {
+		if !vouchesRef(f, ref) {
 			return "", false, nil
 		}
 	}
@@ -231,6 +231,35 @@ func proposalFor(sig EnrichmentSignal) (stance domain.Stance, rationale string, 
 	default:
 		return "", "", false
 	}
+}
+
+// vouchesRef is Business Verification's reference check, tolerating a human-readable LABEL
+// around the identifier — the same narrow tolerance the Intelligence runtime applies in its
+// Grounding Verification (T8).
+//
+// It has to match, or the false refusal is merely RELOCATED: the runtime would accept
+// `faultline b1be6f86-…` and Governance would then reject the identical string, turning a
+// cosmetic problem into a mysterious one. The two checks answer different questions — is this
+// anchored in what the model was given, versus is this consistent with the system of record —
+// but they read the same field, so they must agree on what the field says.
+//
+// Exact match first; only then extract identifier tokens, each of which must still clear the
+// Finding's own exact check. No substring matching: "not CVE-2024-1" must not vouch, and
+// "CVE-2024-1" must not match inside "CVE-2024-10".
+func vouchesRef(f domain.Finding, ref string) bool {
+	if f.Vouches(ref) {
+		return true
+	}
+	tokens := value.IdentifierTokens(ref)
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, tok := range tokens {
+		if !f.Vouches(tok) {
+			return false
+		}
+	}
+	return true
 }
 
 // evidenceTrustFor returns the trust class of the evidence backing an enrichment-driven

@@ -976,6 +976,27 @@ three angles, and two of them proposed fixes that would not have worked.
   about us" stop being the same signal — the relevance filter drops records inside
   `RelevanceFilteredSource`, before `Poll` can count them.
 
+- [x] **TRUST-10 — A correct evidence ref was refused because the model LABELLED it.**
+  _(Found on the VM 2026-08-07, by TRUST-6's new `detail` field, minutes after deploying it.)_ A live
+  `recommend_position` returned `business_invalid`, and the detail read
+  `ungrounded evidence "faultline b1be6f86-2ecd-451f-9411-95f1f32fd501"`. That id **is** the Finding's
+  faultline — the model cited the right reference and prefixed it with the word "faultline". Grounding
+  Verification is exact set membership, so it refused on formatting.
+  **Why this matters more than it looks:** a false refusal is not a safe failure. It inflates the AI seam's
+  apparent failure rate, and it hides the *real* refusals — a hallucinated id and a correctly-labelled one
+  produced the identical outcome, which is precisely the ambiguity TRUST-6 was filed to remove one level up.
+  **Fix:** `value.IdentifierTokens` in the kernel extracts identifier-shaped tokens (UUID / CVE / PURL) from
+  free text; `groundsRef` (Intelligence) and `vouchesRef` (Governance) try an exact match first and only
+  then require **every extracted token** to clear the same exact check. Both sides changed together on
+  purpose — had only the runtime been relaxed, the refusal would merely have MOVED to Business
+  Verification and become harder to diagnose.
+  **The tolerance is deliberately narrow, and substring matching was rejected:** `"CVE-2024-1000"` is a
+  substring of `"CVE-2024-10000"`, so a grounded id would vouch for a different one. Whole anchored tokens
+  plus exact membership keeps the guarantee — the model still has to name something it was given; it just
+  stops being punished for saying so in a sentence. A ref carrying no identifier grounds nothing.
+  Also de-duplicates the regexes TRUST-8's rationale scan had defined separately, so the two checks now
+  agree by construction on what counts as an identifier.
+
 - [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
   _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
   half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —

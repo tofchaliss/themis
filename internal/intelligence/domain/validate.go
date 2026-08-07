@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/themis-project/themis/internal/kernel/value"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -91,7 +92,7 @@ func (v *Validator) ValidateBusiness(out RawOutput, subjectFindingID string, ac 
 		return fmt.Errorf("%w: stance %q not allowed", ErrBusinessInvalid, out.RecommendedStance)
 	}
 	for _, ev := range out.Evidence {
-		if !ac.Grounds(ev.Ref) {
+		if !groundsRef(ac, ev.Ref) {
 			return fmt.Errorf("%w: ungrounded evidence %q", ErrBusinessInvalid, ev.Ref)
 		}
 	}
@@ -137,4 +138,33 @@ func BuildProposal(out RawOutput, capb Capability, meta Metadata, rationaleWarni
 		// rationale is byte-identical to before.
 		RationaleWarnings: rationaleWarnings,
 	}
+}
+
+// groundsRef checks a model-supplied reference against the authoritative grounding, tolerating a
+// human-readable LABEL around the identifier.
+//
+// Exact match first: a bare, correct ref is the normal case and costs nothing. Only if that
+// fails does it extract identifier tokens and require each to be grounded exactly. Models
+// routinely emit `faultline b1be6f86-…` where the grounding set holds `b1be6f86-…` (observed on
+// a live model 2026-08-07), and refusing that is a FALSE refusal: the answer was right and only
+// the formatting was not, which inflates the apparent failure rate of the AI seam and hides the
+// real refusals among the cosmetic ones.
+//
+// The tolerance is deliberately narrow. It does NOT substring-match — that would ground "not
+// CVE-2024-1", and would match "CVE-2024-1" inside "CVE-2024-10". Every extracted token must
+// still clear exact set membership, and a ref carrying no identifier at all grounds nothing.
+func groundsRef(ac AssembledContext, ref string) bool {
+	if ac.Grounds(ref) {
+		return true
+	}
+	tokens := value.IdentifierTokens(ref)
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, tok := range tokens {
+		if !ac.Grounds(tok) {
+			return false // every identifier it names must be one it was given
+		}
+	}
+	return true
 }

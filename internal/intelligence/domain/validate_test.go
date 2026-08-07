@@ -121,3 +121,63 @@ func TestBuildProposal(t *testing.T) {
 		t.Errorf("metadata not carried: %+v", p.Metadata)
 	}
 }
+
+// realisticContext uses ids of the shapes a deployment actually carries — the label-tolerance
+// works by extracting identifier-shaped tokens, so a fixture using "FL1" would prove nothing.
+func realisticContext() AssembledContext {
+	const (
+		fid  = "48f6d9fd-dee5-4edd-b04a-59edcfb0ddfc"
+		flid = "b1be6f86-2ecd-451f-9411-95f1f32fd501"
+	)
+	return AssembledContext{Projection: FindingAssessment{
+		Finding:   FindingView{ID: fid, FaultlineID: flid, CVE: "CVE-2025-14087"},
+		Knowledge: FaultlineView{ID: flid, CVE: "CVE-2025-14087"},
+	}}
+}
+
+func mustValidator(t *testing.T) *Validator {
+	t.Helper()
+	v, err := NewValidator(RecommendPositionV1())
+	if err != nil {
+		t.Fatalf("NewValidator: %v", err)
+	}
+	return v
+}
+
+// A model asked to cite a reference frequently LABELS it. Observed on a live model 2026-08-07:
+// a recommendation cited the correct faultline id as `faultline <uuid>` and was refused as
+// ungrounded. The answer was right and only the formatting was not — a false refusal, which
+// inflates the AI seam's apparent failure rate and hides the real refusals among cosmetic ones.
+func TestValidateBusiness_AcceptsALabelledButCorrectRef(t *testing.T) {
+	out := RawOutput{
+		FindingID: "48f6d9fd-dee5-4edd-b04a-59edcfb0ddfc", RecommendedStance: "affected", Confidence: 0.9,
+		Evidence: []RawEvidence{{Kind: "faultline", Ref: "faultline b1be6f86-2ecd-451f-9411-95f1f32fd501"}},
+	}
+	if err := mustValidator(t).ValidateBusiness(out, out.FindingID, realisticContext()); err != nil {
+		t.Fatalf("ValidateBusiness: %v — a labelled but correct id must not be refused", err)
+	}
+}
+
+// The tolerance is narrow: every identifier the ref names must still be one the model was
+// given. A label around a WRONG id is still ungrounded.
+func TestValidateBusiness_StillRefusesALabelledWrongRef(t *testing.T) {
+	out := RawOutput{
+		FindingID: "48f6d9fd-dee5-4edd-b04a-59edcfb0ddfc", RecommendedStance: "affected", Confidence: 0.9,
+		Evidence: []RawEvidence{{Kind: "faultline", Ref: "faultline 11111111-2222-3333-4444-555555555555"}},
+	}
+	if err := mustValidator(t).ValidateBusiness(out, out.FindingID, realisticContext()); err == nil {
+		t.Fatal("a labelled but UNGROUNDED id must still be refused")
+	}
+}
+
+// A ref carrying no identifier at all grounds nothing — extraction must not become a way to
+// pass verification with prose.
+func TestValidateBusiness_RefusesARefWithNoIdentifier(t *testing.T) {
+	out := RawOutput{
+		FindingID: "48f6d9fd-dee5-4edd-b04a-59edcfb0ddfc", RecommendedStance: "affected", Confidence: 0.9,
+		Evidence: []RawEvidence{{Kind: "note", Ref: "the vulnerability record"}},
+	}
+	if err := mustValidator(t).ValidateBusiness(out, out.FindingID, realisticContext()); err == nil {
+		t.Fatal("a ref naming no identifier must be refused")
+	}
+}

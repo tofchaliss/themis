@@ -194,3 +194,51 @@ func TestRecommendPosition_CleanRationaleCarriesNoCaveat(t *testing.T) {
 		}
 	}
 }
+
+// Business Verification tolerates a human-readable LABEL around an identifier, matching the
+// Intelligence runtime's Grounding Verification. If the two disagreed the false refusal would
+// merely be RELOCATED: the runtime would accept `faultline <uuid>` and Governance would reject
+// the identical string, turning a cosmetic problem into a mysterious one.
+func TestRecommendPosition_AcceptsALabelledButCorrectEvidenceRef(t *testing.T) {
+	// A UUID-shaped faultline, because the tolerance works by extracting identifier-shaped
+	// tokens — a fixture using "fl-1" would prove nothing either way.
+	const flid = "b1be6f86-2ecd-451f-9411-95f1f32fd501"
+	repo := newRepo()
+	f, err := domain.NewFinding("F1", "rel-1", flid, "CVE-2025-14087")
+	if err != nil {
+		t.Fatalf("NewFinding: %v", err)
+	}
+	repo.seed(f)
+	id := f.ID()
+	adv := &fakeAdvisor{produced: true, rec: app.Recommendation{
+		Stance: "affected", Confidence: 0.9, Capability: "recommend_position@v1",
+		Reasoning: "in range",
+		Evidence:  []string{"faultline " + flid}, // the Finding's faultline, labelled
+	}}
+	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
+
+	if _, produced, err := svc.RecommendPosition(context.Background(), id); err != nil || !produced {
+		t.Fatalf("produced=%v err=%v — a labelled but correct ref must not be refused", produced, err)
+	}
+}
+
+// The tolerance stays narrow: a label around an id this Finding does not vouch for is still
+// refused, and a ref naming no identifier at all grounds nothing.
+func TestRecommendPosition_StillRefusesLabelledWrongAndIdentifierlessRefs(t *testing.T) {
+	for _, tc := range []struct{ name, ref string }{
+		{"labelled wrong id", "faultline 11111111-2222-3333-4444-555555555555"},
+		{"no identifier at all", "the vulnerability record"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepo()
+			id := seedFinding(t, repo)
+			adv := &fakeAdvisor{produced: true, rec: app.Recommendation{
+				Stance: "affected", Capability: "c", Evidence: []string{tc.ref},
+			}}
+			svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(adv)
+			if _, produced, err := svc.RecommendPosition(context.Background(), id); err != nil || produced {
+				t.Fatalf("produced=%v err=%v, want the recommendation refused", produced, err)
+			}
+		})
+	}
+}
