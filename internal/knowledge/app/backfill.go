@@ -130,10 +130,16 @@ func (s *BackfillService) Enrich(ctx context.Context) (int, error) {
 		if !facts.Found {
 			continue
 		}
-		if _, err := s.fold.FoldProposal(ctx, facts.Proposal.CVE, facts.Proposal.Proposal); err != nil {
+		_, recorded, err := s.fold.FoldProposal(ctx, facts.Proposal.CVE, facts.Proposal.Proposal)
+		if err != nil {
 			return folded, err // a store failure is not per-record; stop and retry the sweep
 		}
-		folded++
+		// Only a recorded Proposal counts: a restatement is dropped by the aggregate
+		// (KN-PROPOSAL-BLOAT-1), and reporting it as folded would hide a feed that has stopped
+		// producing new facts behind a healthy-looking number.
+		if recorded {
+			folded++
+		}
 	}
 	return folded, nil
 }

@@ -57,6 +57,11 @@ func Reconstitute(id FaultlineID, cve value.CVEID, proposals []Proposal, view En
 // whether the app publishes FaultlineEnriched — an event fires only on an actual change.
 type FoldResult struct {
 	ViewChanged bool
+	// Recorded reports whether the Proposal was appended at all. A verbatim restatement from a
+	// source is dropped (KN-PROPOSAL-BLOAT-1), and a caller that counts "folded" must be able to
+	// tell that from a real append — otherwise a sweep writing nothing logs the same number as a
+	// sweep doing full work, which is how a stalled feed comes to look healthy.
+	Recorded bool
 }
 
 // FoldProposal appends a source Proposal (append-only, recorded for audit even if it
@@ -81,14 +86,14 @@ func (f *Faultline) FoldProposal(p Proposal, prec Precedence, trust TrustPolicy)
 	// count sits on the hot path of every fold and grows monotonically forever. A 118× multiplier
 	// is invisible at 239 cards and decides p99 at 50,000.
 	if f.repeatsLatestFrom(p) {
-		return FoldResult{ViewChanged: false}
+		return FoldResult{ViewChanged: false, Recorded: false}
 	}
 	prev := f.view
 	f.proposals = append(f.proposals, p)
 	f.view = Reconcile(f.proposals, prec, trust)
 	f.stage = f.stage.advanceTo(StageEnriched)
 	f.version++
-	return FoldResult{ViewChanged: !f.view.equal(prev)}
+	return FoldResult{ViewChanged: !f.view.equal(prev), Recorded: true}
 }
 
 // MarkCorrelated advances the card to at least Correlated when a component match has

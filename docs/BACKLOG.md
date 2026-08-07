@@ -1229,6 +1229,11 @@ three angles, and two of them proposed fixes that would not have worked.
   and writes nothing), and idempotent for free now that the aggregate drops verbatim restatements.
 
 - [x] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.** ✅ **CLOSED 2026-08-07.**
+  **✅ VM-VERIFIED 2026-08-07:** `CVE-2021-45105` (CVSS 5.9, EPSS 99.999%) and `CVE-2021-44832`
+  (CVSS 6.6, EPSS 97.9%) now band **`high`**; `CVE-2021-44228` (CVSS 10) and `CVE-2021-45046`
+  (CVSS 9) stay **`critical`**, untouched — exactly the scope intended. Note the RANKING is
+  unchanged: `residual_priority` comes from `Score()`, whose EPSS lift is still capped at 30% of the
+  severity baseline, so 45105 remains at 52. That is option (b), deliberately still open.
   **Fix (option a, the minimum):** EPSS gets its own band arm mirroring KEV's — `EPSS >= 0.9 && CVSS < 7 → high`. Scoped tightly to what was MISLABELLED: the 0.9 floor is far above `elevated`'s 0.5 (this arm is for "already being exploited", not elevated probability), and `< 7` leaves every CVE the `elevated` rule already handles exactly where it was. A first attempt used `< 9` and silently re-banded high-CVSS cases that already had a sensible label — caught by its own test, then narrowed. KEV still wins: it is a CONFIRMED exploitation record where EPSS is a prediction. **Option (b) — raising the score's 30% lift cap so likelihood can overtake severity — remains open and needs an EDR decision.**
   _(**Measured** on the VM 2026-08-07 — release `ee006ff7`, posture rows 2 and 3 — with the formula
   **read from code** in `internal/knowledge/domain/priority.go`.)_
@@ -1282,6 +1287,14 @@ three angles, and two of them proposed fixes that would not have worked.
   **Cost, taken deliberately:** a card no longer records "we re-confirmed this at T2".
   `feed_health.last_success_at` answers it per source, and since feeds are relevance-bounded (D5 — a
   sweep visits every carded CVE together) per-source is a faithful proxy for per-card.
+  **✅ VM-VERIFIED 2026-08-07:** the 18:12 sweep ran on the new binary and `faultline_proposals`
+  stayed at **31,196** where the old behaviour would have added ~236. The 28k existing rows remain —
+  append-only means never deleting — so what is fixed is the *growth*, not the history.
+  **A follow-on defect, found by that same check and fixed in the same commit:** the sweep still
+  logged `folded: 236` while writing zero rows, because it counted cards VISITED. A stalled feed and
+  a fully-caught-up one reported the same number — the precise failure mode NVD-WATCH-1 exists to
+  prevent. `FoldResult` gained `Recorded`, `FaultlineService.FoldProposal` now returns it, and the
+  three sweeps (signals, NVD backfill, re-attribution) count only what was actually appended.
 
 - [x] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
   view now makes it visible.** ✅ **CLOSED 2026-08-07 (option b).** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_

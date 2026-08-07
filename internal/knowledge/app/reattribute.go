@@ -86,10 +86,15 @@ func (s *ReattributeService) Sweep(ctx context.Context) (int, error) {
 			if !sameCVE(pf.CVE, c.CVE) {
 				continue
 			}
-			if _, ferr := s.fold.FoldProposal(ctx, pf.CVE, pf.Proposal); ferr != nil {
+			_, recorded, ferr := s.fold.FoldProposal(ctx, pf.CVE, pf.Proposal)
+			if ferr != nil {
 				continue
 			}
-			folded++
+			// A re-run over already-attributed cards records nothing, and must report zero —
+			// that is precisely the signal that the sweep has finished its work.
+			if recorded {
+				folded++
+			}
 		}
 	}
 	return folded, nil

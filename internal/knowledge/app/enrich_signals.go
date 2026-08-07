@@ -66,10 +66,16 @@ func (s *SignalEnrichmentService) Enrich(ctx context.Context) (int, error) {
 		if err != nil {
 			continue // one malformed signal (e.g. EPSS out of range) — keep sweeping
 		}
-		if _, err := s.fold.FoldProposal(ctx, cveID, p); err != nil {
+		// Count what was RECORDED, not what was visited. The aggregate drops a source's verbatim
+		// restatement (KN-PROPOSAL-BLOAT-1), so counting visits made a sweep that wrote nothing
+		// report the same number as one doing full work — a stalled feed looking healthy.
+		_, recorded, err := s.fold.FoldProposal(ctx, cveID, p)
+		if err != nil {
 			return folded, err
 		}
-		folded++
+		if recorded {
+			folded++
+		}
 	}
 	return folded, nil
 }

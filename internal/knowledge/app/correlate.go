@@ -129,7 +129,7 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan CorrelationPlan) (int, error) {
 	newMatches := 0
 	for _, item := range plan.Items {
-		f, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
+		f, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
 		if err != nil {
 			return newMatches, err
 		}

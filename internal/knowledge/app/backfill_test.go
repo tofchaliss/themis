@@ -89,7 +89,7 @@ func TestBackfill_WithdrawnCVESupersedesItsCard(t *testing.T) {
 	repo := newRepo()
 	fold := foldSvc(repo)
 	// Card exists first — a withdrawal is only meaningful for something we hold.
-	if _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
+	if _, _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
 		vulnFacts(t, "osv", value.SeverityMedium)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestBackfill_WithdrawnCVESupersedesItsCard(t *testing.T) {
 func TestBackfill_WithdrawalWinsOverStaleFacts(t *testing.T) {
 	repo := newRepo()
 	fold := foldSvc(repo)
-	if _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
+	if _, _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
 		vulnFacts(t, "osv", value.SeverityMedium)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestBackfill_WithdrawalWinsOverStaleFacts(t *testing.T) {
 func TestBackfill_WithdrawalIsIdempotent(t *testing.T) {
 	repo := newRepo()
 	fold := foldSvc(repo)
-	if _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
+	if _, _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
 		vulnFacts(t, "osv", value.SeverityMedium)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestBackfill_StoreFailureStopsTheSweep(t *testing.T) {
 func TestBackfill_SupersedeStoreFailureStopsTheSweep(t *testing.T) {
 	repo := newRepo()
 	fold := foldSvc(repo)
-	if _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
+	if _, _, err := fold.FoldProposal(context.Background(), cve(t, "CVE-2021-20095"),
 		vulnFacts(t, "osv", value.SeverityMedium)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

@@ -177,7 +177,7 @@ func TestKnownCVEs(t *testing.T) {
 		t.Fatalf("empty store: got (%v, %v), want (∅, nil)", set, err)
 	}
 	for _, id := range []string{"CVE-2024-10", "CVE-2024-11"} {
-		if _, err := svc.FoldProposal(ctx, cveID(t, id), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+		if _, _, err := svc.FoldProposal(ctx, cveID(t, id), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 			t.Fatalf("fold %s: %v", id, err)
 		}
 	}
@@ -206,7 +206,7 @@ func TestSaveAndReload(t *testing.T) {
 	st := store.New(pool)
 
 	// Fold a proposal → creates the card.
-	f, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"))
+	f, _, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh, "<3.0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,11 +245,11 @@ func TestViewChangeEmitsOneEvent(t *testing.T) {
 	s := service(pool)
 
 	// Create → Created + Enriched (2 events).
-	if _, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-2"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+	if _, _, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-2"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 		t.Fatal(err)
 	}
 	// Duplicate fold → no view change → no new event.
-	if _, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-2"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+	if _, _, err := s.FoldProposal(ctx, cveID(t, "CVE-2024-2"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox"); n != 2 {
@@ -306,7 +306,7 @@ func TestConcurrentEnrichConverges(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, errs[i] = s.FoldProposal(ctx, c, vulnFacts(t, fmt.Sprintf("src-%d", i), value.SeverityMedium))
+			_, _, errs[i] = s.FoldProposal(ctx, c, vulnFacts(t, fmt.Sprintf("src-%d", i), value.SeverityMedium))
 		}(i)
 	}
 	close(start)
@@ -355,7 +355,7 @@ func TestRelay_DeliverAndRetry(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 	// One fold → 2 outbox notes (created + enriched).
-	if _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-5"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+	if _, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-5"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -457,7 +457,7 @@ func TestDuplicateCreateIsConcurrent(t *testing.T) {
 func TestPurge(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
-	if _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-10"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+	if _, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-10"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 		t.Fatal(err)
 	}
 	_ = store.NewRelay(pool, &fakePublisher{}, 0) // batch<=0 → default
@@ -507,7 +507,7 @@ func TestRecordMatch(t *testing.T) {
 	ctx := context.Background()
 	st := store.New(pool)
 
-	f, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-11"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-11"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestAffectedReleasesAndReconcile(t *testing.T) {
 	ctx := context.Background()
 	st := store.New(pool)
 
-	f, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-12"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-12"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +687,7 @@ func TestCardsNeedingAttribution(t *testing.T) {
 	svc := service(pool)
 
 	// Card A: unattributed fixes + a fully-detailed match → eligible.
-	a, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-21"), vulnFactsFixed(t, "nvd", "1.2.3"))
+	a, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-21"), vulnFactsFixed(t, "nvd", "1.2.3"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,7 +702,7 @@ func TestCardsNeedingAttribution(t *testing.T) {
 	}
 
 	// Card B: fixes ALREADY attributed → nothing to do, must not be returned.
-	b, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-22"), vulnFactsFixedFor(t, "osv", "openssl", "3.0.1"))
+	b, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-22"), vulnFactsFixedFor(t, "osv", "openssl", "3.0.1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +715,7 @@ func TestCardsNeedingAttribution(t *testing.T) {
 
 	// Card C: unattributed, but its match predates migration 000005 and carries a PURL alone.
 	// A component we cannot re-query is one we must not guess about, so it is skipped.
-	c, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-23"), vulnFactsFixed(t, "nvd", "9.9.9"))
+	c, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2024-23"), vulnFactsFixed(t, "nvd", "9.9.9"))
 	if err != nil {
 		t.Fatal(err)
 	}

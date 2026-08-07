@@ -98,7 +98,7 @@ func (s *VEXApplicabilityService) PlanVEX(ctx context.Context, evidenceID string
 // re-folding an applicability Proposal converges.
 func (s *VEXApplicabilityService) ApplyVEX(ctx context.Context, plan VEXPlan) error {
 	for _, item := range plan.Items {
-		if _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal); err != nil {
+		if _, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal); err != nil {
 			return err
 		}
 	}

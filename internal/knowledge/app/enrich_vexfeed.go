@@ -45,7 +45,7 @@ func (s *VexEnrichmentService) Enrich(ctx context.Context) (int, error) {
 			continue // no vendor VEX for this CVE, or a transient fetch error — skip it
 		}
 		for _, p := range props {
-			if _, ferr := s.fold.FoldProposal(ctx, p.CVE, p.Proposal); ferr != nil {
+			if _, _, ferr := s.fold.FoldProposal(ctx, p.CVE, p.Proposal); ferr != nil {
 				return folded, ferr
 			}
 			folded++

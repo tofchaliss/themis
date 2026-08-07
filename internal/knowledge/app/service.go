@@ -91,14 +91,18 @@ func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVE
 // which converge because Proposals are additive and reconciliation is deterministic. It
 // returns the folded aggregate so the caller can read the reconciled view (e.g.
 // correlation gating a match against the reconciled affected range — D3).
-func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.Faultline, error) {
+// The bool reports whether the Proposal was RECORDED. A source restating itself verbatim is
+// dropped (KN-PROPOSAL-BLOAT-1), and a sweep that counts its work must not count those: a feed
+// writing nothing would otherwise log the same number as one doing full work, which is how a
+// stalled feed comes to look healthy.
+func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.Faultline, bool, error) {
 	if cve.IsZero() {
-		return domain.Faultline{}, fmt.Errorf("knowledge: zero cve")
+		return domain.Faultline{}, false, fmt.Errorf("knowledge: zero cve")
 	}
 	for attempt := 0; attempt < maxSaveRetries; attempt++ {
 		existing, found, err := s.repo.GetByCVE(ctx, cve.String())
 		if err != nil {
-			return domain.Faultline{}, err
+			return domain.Faultline{}, false, err
 		}
 		now := s.clock.Now()
 
@@ -114,24 +118,25 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 		} else {
 			f, err = domain.NewFaultline(domain.FaultlineID(s.ids.NewID()), cve)
 			if err != nil {
-				return domain.Faultline{}, err
+				return domain.Faultline{}, false, err
 			}
 			created = true
 			notes = append(notes, OutboxNote{EventType: EventFaultlineCreated, Event: domain.NewFaultlineCreated(f, now), OccurredAt: now})
 		}
 
-		if res := f.FoldProposal(p, s.prec, s.trust); res.ViewChanged {
+		res := f.FoldProposal(p, s.prec, s.trust)
+		if res.ViewChanged {
 			notes = append(notes, OutboxNote{EventType: EventFaultlineEnriched, Event: domain.NewFaultlineEnriched(f, now), OccurredAt: now})
 		}
 
 		switch err := s.repo.Save(ctx, f, created, prevVersion, notes); {
 		case err == nil:
-			return f, nil
+			return f, res.Recorded, nil
 		case errors.Is(err, ErrConcurrent):
 			continue // reload and retry; additive folds converge
 		default:
-			return domain.Faultline{}, err
+			return domain.Faultline{}, false, err
 		}
 	}
-	return domain.Faultline{}, ErrConcurrent
+	return domain.Faultline{}, false, ErrConcurrent
 }

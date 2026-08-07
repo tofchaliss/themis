@@ -35,7 +35,7 @@ func TestFaultlineLifecycleDemo(t *testing.T) {
 	cve := cveID(t, "CVE-2024-9999")
 
 	t.Log("STEP 1 — first source Proposal (NVD, high): the card is CREATED and ENRICHED.")
-	f, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh, ">=1.0,<3.0"))
+	f, _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh, ">=1.0,<3.0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestFaultlineLifecycleDemo(t *testing.T) {
 	}
 
 	t.Log("STEP 2 — higher-authority source (Red Hat, critical): the enterprise view CHANGES (headline flips).")
-	if _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
+	if _, _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
 		t.Fatal(err)
 	}
 	card, _, _ = st.GetByCVE(ctx, cve.String())
@@ -60,7 +60,7 @@ func TestFaultlineLifecycleDemo(t *testing.T) {
 	}
 
 	t.Log("STEP 3 — lower-authority source (OSV, low): appended, but the headline does NOT change (deterministic precedence).")
-	if _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "osv", value.SeverityLow)); err != nil {
+	if _, _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "osv", value.SeverityLow)); err != nil {
 		t.Fatal(err)
 	}
 	card, _, _ = st.GetByCVE(ctx, cve.String())
@@ -146,7 +146,7 @@ func TestFaultlineReuseAcrossSBOMs(t *testing.T) {
 
 	t.Log("SBOM #1 (release rel-A): first sighting of CVE-2024-9999 on foo → a NEW card is created.")
 	cve1 := cveID(t, "CVE-2024-9999")
-	f1, err := svc.FoldProposal(ctx, cve1, vulnFacts(t, "nvd", value.SeverityHigh))
+	f1, _, err := svc.FoldProposal(ctx, cve1, vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestFaultlineReuseAcrossSBOMs(t *testing.T) {
 	t.Log("SBOM #2 (release rel-B): the SAME CVE arrives as distro alias 'ALPINE-CVE-2024-9999' on a different component.")
 	cve2 := cveID(t, "ALPINE-CVE-2024-9999") // normalizes to the same canonical CVE
 	t.Logf("  'ALPINE-CVE-2024-9999' normalizes to canonical %s (== SBOM #1's CVE)", cve2)
-	f2, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical))
+	f2, _, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestFaultlineReuseAcrossSBOMs(t *testing.T) {
 	}
 
 	t.Log("Re-scan of SBOM #2 (same facts re-delivered): the card is not duplicated, the match is idempotent, the view converges.")
-	if _, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
+	if _, _, err := svc.FoldProposal(ctx, cve2, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
 		t.Fatal(err)
 	}
 	dup, err := st.RecordMatch(ctx, app.Match{ReleaseID: "rel-B", FaultlineID: id1, CVE: "CVE-2024-9999",

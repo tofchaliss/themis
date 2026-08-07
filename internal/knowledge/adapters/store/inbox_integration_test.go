@@ -273,10 +273,10 @@ func TestInboxCorrelatesSharedCVEWithoutHalt(t *testing.T) {
 	cve := cveID(t, "CVE-2024-777")
 	inner := &recordingApply{fn: func(ctx context.Context) error {
 		// Two components in one SBOM both resolve to CVE-2024-777, folded within one inbox tx.
-		if _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+		if _, _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 			return err
 		}
-		_, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "osv", value.SeverityLow))
+		_, _, err := svc.FoldProposal(ctx, cve, vulnFacts(t, "osv", value.SeverityLow))
 		return err
 	}}
 	inbox := store.NewInboxConsumer(pool, inner)

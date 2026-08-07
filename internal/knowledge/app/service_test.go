@@ -147,7 +147,7 @@ func noteTypes(notes []app.OutboxNote) []string {
 
 func TestFoldProposal_CreatesCard(t *testing.T) {
 	repo := newRepo()
-	f, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, _, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
@@ -167,18 +167,18 @@ func TestFoldProposal_EnrichAndNoOp(t *testing.T) {
 	ctx := context.Background()
 	c := cve(t, "CVE-2024-1")
 
-	if _, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityMedium)); err != nil {
+	if _, _, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityMedium)); err != nil {
 		t.Fatal(err)
 	}
 	// A higher-authority proposal changes the view → Enriched only (card exists).
-	if _, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
+	if _, _, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
 		t.Fatal(err)
 	}
 	if got := noteTypes(repo.lastNotes); len(got) != 1 || got[0] != app.EventFaultlineEnriched {
 		t.Errorf("notes = %v, want [enriched]", got)
 	}
 	// Re-folding an identical proposal changes nothing → no events.
-	if _, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
+	if _, _, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
 		t.Fatal(err)
 	}
 	if got := noteTypes(repo.lastNotes); len(got) != 0 {
@@ -189,7 +189,7 @@ func TestFoldProposal_EnrichAndNoOp(t *testing.T) {
 func TestFoldProposal_RetryConverges(t *testing.T) {
 	repo := newRepo()
 	repo.conflictFor = 2 // first two saves conflict, third wins
-	f, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
+	f, _, err := svc(repo, &seqIDs{}).FoldProposal(context.Background(), cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
@@ -203,29 +203,29 @@ func TestFoldProposal_Errors(t *testing.T) {
 	p := vulnFacts(t, "nvd", value.SeverityHigh)
 
 	// Zero CVE.
-	if _, err := svc(newRepo(), &seqIDs{}).FoldProposal(ctx, value.CVEID{}, p); err == nil {
+	if _, _, err := svc(newRepo(), &seqIDs{}).FoldProposal(ctx, value.CVEID{}, p); err == nil {
 		t.Error("zero cve: expected error")
 	}
 	// Get error propagates.
 	ge := newRepo()
 	ge.getErr = errors.New("db down")
-	if _, err := svc(ge, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
+	if _, _, err := svc(ge, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
 		t.Error("get error: expected error")
 	}
 	// Non-concurrent save error propagates.
 	se := newRepo()
 	se.saveErr = errors.New("write failed")
-	if _, err := svc(se, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
+	if _, _, err := svc(se, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
 		t.Error("save error: expected error")
 	}
 	// Retry exhausted → ErrConcurrent.
 	ce := newRepo()
 	ce.conflictFor = 99
-	if _, err := svc(ce, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); !errors.Is(err, app.ErrConcurrent) {
+	if _, _, err := svc(ce, &seqIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); !errors.Is(err, app.ErrConcurrent) {
 		t.Errorf("exhausted retries err = %v, want ErrConcurrent", err)
 	}
 	// New-faultline construction failure (empty id from the generator).
-	if _, err := svc(newRepo(), emptyIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
+	if _, _, err := svc(newRepo(), emptyIDs{}).FoldProposal(ctx, cve(t, "CVE-2024-1"), p); err == nil {
 		t.Error("empty id: expected NewFaultline error")
 	}
 }
@@ -257,7 +257,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 		repo := newRepo()
 		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
 			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
-		if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+		if _, _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 		repo.saveErr = errors.New("db down")
@@ -272,7 +272,7 @@ func TestSupersedeFaultline_Edges(t *testing.T) {
 		repo := newRepo()
 		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
 			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
-		if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+		if _, _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 		repo.saveCalls, repo.conflictFor = 0, 1 // first save conflicts, second succeeds
@@ -307,7 +307,7 @@ func TestSupersedeFaultline_CarriesTheReportingSourcesTrustClass(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newRepo()
 			svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), policy)
-			if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			if _, _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 				t.Fatalf("seed: %v", err)
 			}
 			if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), tc.source); err != nil {
@@ -329,12 +329,34 @@ func TestSupersedeFaultline_ExhaustedRetriesReportConcurrent(t *testing.T) {
 	repo := newRepo()
 	svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
 		domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
-	if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+	if _, _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	repo.saveCalls, repo.conflictFor = 0, 1_000 // every save conflicts
 	changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"), "nvd")
 	if !errors.Is(err, app.ErrConcurrent) || changed {
 		t.Fatalf("changed=%v err=%v, want ErrConcurrent", changed, err)
+	}
+}
+
+// FoldProposal's `recorded` flag is what lets a sweep report honestly (KN-PROPOSAL-BLOAT-1).
+// Observed on the VM: after the dedup landed, the exploit-signal sweep still logged "folded: 236"
+// while writing ZERO rows — a stalled feed and a fully-caught-up one produced the same number.
+func TestFoldProposal_ReportsWhetherTheProposalWasRecorded(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	s := svc(repo, &seqIDs{})
+	c := cve(t, "CVE-2024-1")
+
+	if _, recorded, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityHigh)); err != nil || !recorded {
+		t.Fatalf("first fold: recorded=%v err=%v, want recorded", recorded, err)
+	}
+	if _, recorded, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityHigh)); err != nil || recorded {
+		t.Errorf("restatement: recorded=%v err=%v, want NOT recorded", recorded, err)
+	}
+	// A genuinely new fact from the same source is recorded even though it may not change the
+	// view — "recorded" is about the audit log, "ViewChanged" is about the event.
+	if _, recorded, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityCritical)); err != nil || !recorded {
+		t.Errorf("changed fact: recorded=%v err=%v, want recorded", recorded, err)
 	}
 }

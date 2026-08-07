@@ -55,7 +55,7 @@ func (s *ScannerReportService) Ingest(ctx context.Context, releaseID, evidenceID
 		// A scanner report is already a version-matched finding (the scanner did the matching),
 		// so it is recorded as-is — the reconciled-range gate applies only to the OSV/NVD
 		// discovery path in CorrelationService, not to authoritative scanner evidence.
-		f, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
+		f, _, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
 		if err != nil {
 			return newMatches, err
 		}
