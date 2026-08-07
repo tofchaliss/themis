@@ -495,12 +495,25 @@ three angles, and two of them proposed fixes that would not have worked.
   `x-migrations-table` rides only on migrate), or give registry its own DB behind a read-API SubjectRef
   instead of the in-process read. Plugs into `cmd/registry/main.go` (+ `cmd/evidence/main.go`).
   Surfaced 2026-07-30 wiring the end-to-end deployment. See [[feedback-backlog-surfaced-followups]].
-- [ ] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
+- [x] **(LOW) Consolidate the inbox ctx-tx unit-of-work into a shared `platform/uow` helper.** The
   `txCtxKey` / `withTx` / `txFromCtx` + `InboxConsumer` are duplicated per consuming context (Governance,
   Communication, later Knowledge). It is business-agnostic infra and could collapse into one platform package
   (a third after `observability` + `eventbus`), trading a little context independence for less duplication.
-  Deferred: adding a platform package is an architecture decision to justify against the EDR; revisit if the
-  duplication grows or a third/fourth consumer lands. See [[feedback-backlog-surfaced-followups]].
+  **✅ DECIDED 2026-08-07: NOT extracting it, and closing the entry.** The revisit trigger fired —
+  three consumers now exist (Governance, Communication, Knowledge) — so the question was actually
+  asked rather than deferred again. The answer did not change, and the reason is worth recording so
+  a fourth consumer does not reopen it by reflex.
+  **What is duplicated is ~8–10 lines per context:** a context key, `withTx`, `txFromCtx`. It is
+  plumbing, not policy — there is no rule in it that could drift between copies, which is the usual
+  reason duplication becomes dangerous.
+  **What extraction would cost:** a fourth platform package that three bounded contexts must agree
+  on forever. Platform packages are deliberately restricted (only adapters + the composition root
+  may import them) precisely because they are the one place contexts couple, and a transaction
+  abstraction is a poor thing to couple on — the moment one context needs a savepoint, a different
+  isolation level, or a nested unit of work, the shared helper either grows options for everyone or
+  gets forked back.
+  **Trivial duplication is cheaper than coupling.** Revisit only if the copies start to DIVERGE in
+  behaviour rather than merely to exist.
 - [~] **Knowledge — real feed-fetch HTTP clients (PARTIALLY DONE).** OSV query-by-package (incl. distro
   ecosystems — separate PR) and the **NVD modified-since watch** are now wired: `cmd/knowledge` builds
   `feed.NewNVDClient` behind a `feed.RelevanceFilteredSource` (D5 relevance bound — only CVEs that already
@@ -707,6 +720,16 @@ three angles, and two of them proposed fixes that would not have worked.
   appears (e.g. a signed build manifest), because then two statements on one card would deserve different
   classes. **Where it plugs in:** `internal/knowledge/domain/reconcile.go` + a `.v2` payload schema.
   **Scope:** MEDIUM when a mixed-trust applicability source lands; LOW until then.
+  **✅ THE DEFERRAL NOW HAS AN EXPIRY (2026-08-07).** `TestApplicabilitySourcesAreUniformlyAsserted`
+  fails the build the moment any applicability-producing source (`redhat`, `vexfeed`, `vex`) is
+  classified as anything but Asserted — which is precisely when the deferral stops being correct. A
+  second test keeps that source list honest against `shippedSources()`, since the guard is only
+  sound while the list is complete.
+  **Why a guard rather than the fix:** implementing it today would change `Reconcile`'s dedup key
+  and require a `.v2` payload schema, to represent a distinction that does not yet exist. What
+  needed fixing was not the model but the RISK that the deferral rots silently — and it would have
+  failed silently: the dedup key would collapse a derivable statement into an asserted one, and the
+  survivor's provenance would be whichever the map happened to keep.
 
 - [x] **TRUST-2 — The shipped-source list for the classification guard is manual.**
   ✅ **CLOSED 2026-08-07.** `shippedSources()` now **derives** the enumeration instead of restating it:
@@ -1843,9 +1866,10 @@ three angles, and two of them proposed fixes that would not have worked.
   `.github/workflows/property-tests.yml`. **Scope:** LOW to fix, MEDIUM if left — a permanently-noisy gate
   is a gate nobody reads.
 
-- [ ] **Bump GitHub Actions off Node 20 (LOW).** `actions/checkout@v4` and `actions/setup-go@v5` are being
-  force-migrated to Node 24 (runner deprecation warning on every run). Cosmetic today; bump to the Node-24
-  action majors next time `.github/workflows/*` are touched.
+- [x] **Bump GitHub Actions off Node 20 (LOW).** ✅ **CLOSED 2026-08-07** — done while the workflows
+  were open anyway for the e2e-evidence gate, which is exactly the "next time they are touched" this
+  entry was waiting for. `actions/checkout@v4 → v5`, `actions/setup-go@v5 → v6` across all four
+  workflows, clearing the runner deprecation warning on every run.
 
 ---
 

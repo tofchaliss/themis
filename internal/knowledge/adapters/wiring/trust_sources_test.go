@@ -107,3 +107,49 @@ func TestShippedSourcesCoversTheFeedRegistry(t *testing.T) {
 		t.Errorf("the uploaded-VEX source %q is missing from shippedSources()", app.VEXDocumentSource)
 	}
 }
+
+// applicabilitySources are the sources that can raise an APPLICABILITY proposal — a vendor VEX
+// statement about a package. Kept beside the guard below because that guard is only sound while
+// this list is complete; adding an applicability-producing source without adding it here is the
+// one way to slip past.
+var applicabilitySources = []string{"redhat", "vexfeed", "vex"}
+
+// TRUST-1's deferral has an expiry, and this is it.
+//
+// `domain.Applicability` carries no per-statement trust class, and that is CORRECT today only
+// because every applicability originates from vendor VEX or an uploaded VEX document — uniformly
+// **Asserted**, so a per-statement class would carry no information. The moment a source with a
+// DIFFERENT class can raise an applicability (a signed build manifest would be Observed; an AI
+// capability would be Inferred), two statements on one card deserve different classes and the
+// reconciled view can no longer represent that.
+//
+// Worse, it would fail SILENTLY: `Reconcile` uses `Applicability{Package, Status, Justification}`
+// as its dedup key, so a derivable statement and an asserted one saying the same thing collapse
+// into one — and the surviving entry's provenance is whichever the map happened to keep.
+//
+// This test fails the build at exactly that moment, so the deferral cannot quietly become a defect.
+func TestApplicabilitySourcesAreUniformlyAsserted(t *testing.T) {
+	policy := newTrustPolicy()
+	for _, src := range applicabilitySources {
+		if c := policy.ClassOf(src); c != value.TrustAsserted {
+			t.Errorf("applicability source %q is now %q, not Asserted — TRUST-1 is no longer deferrable: "+
+				"domain.Applicability needs a per-statement trust class, and Reconcile's dedup key must stop "+
+				"collapsing statements of different provenance", src, c)
+		}
+	}
+}
+
+// The guard is only sound while applicabilitySources is complete. A source that produces
+// applicability proposals but is missing from that list would slip past the check above, so this
+// asserts every name in it is a real, classified source.
+func TestApplicabilitySourcesAreAllShipped(t *testing.T) {
+	shipped := map[string]bool{}
+	for _, s := range shippedSources() {
+		shipped[s] = true
+	}
+	for _, src := range applicabilitySources {
+		if !shipped[src] {
+			t.Errorf("applicability source %q is not a shipped source — the list has drifted from reality", src)
+		}
+	}
+}
