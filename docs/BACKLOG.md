@@ -543,7 +543,19 @@ three angles, and two of them proposed fixes that would not have worked.
   behind the `Deliverer` / `Redactor` ports; the exactly-once/idempotent/outcome-recorded mechanics are done.
   Plugs into `internal/communication/adapters/delivery`.
 
-- [ ] **Communication — delegated auto-publish policy.** Currently **all** artifact creation is
+- [x] **Communication — delegated auto-publish policy.**
+  ✅ **DECIDED 2026-08-07: NOT NOW, and the reason is worth keeping.** Publishing is the one action
+  in Themis that is **outward-facing and irreversible** — a CycloneDX-VEX or CSAF document sent to a
+  customer cannot be recalled, and a wrong `not_affected` published under the enterprise's name is a
+  materially different mistake from a wrong one held internally. Every other automatic step here
+  (auto-accept, correlation, enrichment) is internal and revisable.
+  Adding a delegated trigger is genuinely a small change — an alternate trigger source beside the
+  human one, no model change (D4). What is missing is not the code but a **reason**: no use case has
+  asked for it, so the policy would be designed against an imagined operator. The stricter-than-
+  CON-0015 initial scope stands until a real workflow needs it, at which point the trigger, its
+  conditions and its audit trail can be designed together instead of guessed.
+  **Revisit when:** an operator asks to stop hand-triggering a class of publication, or a
+  contractual SLA requires publication within a window a human cannot guarantee. Currently **all** artifact creation is
   human-triggered (a deliberate stricter-than-CON-0015 initial scope). A Governance-defined delegated
   auto-publish policy becomes an alternate **trigger source** alongside the human trigger — no model change.
   (EDR-COMMUNICATION-01 D4 "for the time being".)
