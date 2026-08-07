@@ -1066,8 +1066,28 @@ three angles, and two of them proposed fixes that would not have worked.
   **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
   plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
 
-- [ ] **🔴 KN-FIX-1 (HIGH) — Fixed versions carry no package, so a card's fix list is a cross-package
+- [x] **🔴 KN-FIX-1 (HIGH) — Fixed versions carry no package, so a card's fix list is a cross-package
   union — and `RPMFixedByStream` can silently DROP a real match because of it.**
+  ✅ **THE DANGEROUS HALF FIXED 2026-08-07 — and by one line, not the domain change this entry proposed.**
+  `ApplyCorrelation` already holds `item.Proposal`: the Proposal that discovered *this* component. It now
+  passes that Proposal's own `FixedVersions` to the verdict instead of the card's reconciled union. OSV is
+  queried **by package**, so its record is about this component and nothing else — the association the
+  domain model lacks is already present at the call site, and reading it there is *more* correct than
+  filtering a union would be.
+  It also narrows the verdict: a fix known only to another source is no longer applied at correlation time.
+  That is the safe direction — keeping a match costs triage time, dropping one costs a breach.
+  **Reproduced before fixing, which mattered.** The first regression test PASSED against the broken code:
+  the card accumulates the union *as items fold*, so the trap only springs for a component processed AFTER
+  another package's fix has landed. With the order corrected the old behaviour records **1 match where 2
+  are due** — the glibc finding genuinely disappears. That ordering dependence is also why it was never
+  seen in production: it needs a multi-package RPM card whose lower-versioned fix folds first.
+  **What REMAINS (re-scoped to MEDIUM, display + model):** `EnterpriseView.FixedVersions` is still a
+  package-less union, so `GET /faultlines/{id}`, the FindingAssessment projection and any dashboard cannot
+  say "the fix for YOUR component" — `scripts/release-posture.sh` now prints a candidate count rather than
+  a confident wrong version. Fixing that properly still wants `VulnFacts` to carry
+  `[]FixedVersion{Package, Version}` plus an additive `knowledge.faultline_enriched.v1` field, which is a
+  domain model change and a decision. **No longer a correctness risk** — only a presentation gap.
+  Original report follows.
   _(Found 2026-08-07 building the release-posture view, from wrong output on live data.)_
   `domain.VulnFacts.FixedVersions` is a bare `[]string`. `Reconcile` unions them across every Proposal on
   the card (`fixSet`, reconcile.go), and OSV emits one Proposal per (CVE, package) — so a CVE affecting N

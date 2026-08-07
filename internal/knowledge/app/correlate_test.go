@@ -154,6 +154,50 @@ func TestCorrelate_SkipsRPMFixedByStream(t *testing.T) {
 	}
 }
 
+// KN-FIX-1 regression. The fixed-verdict must use THIS item's own Proposal, never the card's
+// reconciled FixedVersions — which is a union across every package the CVE affects, with no
+// package association.
+//
+// Here glibc 2.28-251.el8_10.31 is genuinely vulnerable (its own fix is .38), but a SECOND
+// package on the same card carries a lower same-stream fix (perl-Carp 1.42-397.el8). Reading the
+// union, 2.28 clears 1.42, the verdict fires, and the glibc match is silently dropped — a false
+// negative with no Finding, no log line and no metric. Reading the item's own Proposal, only
+// glibc's fix is considered and the match survives.
+func TestCorrelate_FixedVerdictIgnoresAnotherPackagesFix(t *testing.T) {
+	ctx := context.Background()
+	vulnerable := app.InventoryComponent{
+		PURL: "pkg:rpm/rocky/glibc@2.28-251.el8_10.31", Name: "glibc",
+		Version: "2.28-251.el8_10.31", Ecosystem: "rocky",
+	}
+	// A second component on the SAME CVE whose fix is numerically far below glibc's version.
+	other := app.InventoryComponent{
+		PURL: "pkg:rpm/rocky/perl-Carp@1.42-396.el8", Name: "perl-Carp",
+		Version: "1.42-396.el8", Ecosystem: "rocky",
+	}
+	// ORDER MATTERS, and that is part of what makes the bug insidious: the card accumulates the
+	// union as items fold, so the trap only springs for a component processed AFTER another
+	// package's fix has landed on the card. perl-Carp folds first here.
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{other, vulnerable}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		// perl-Carp's fix lands on the card first and is the trap.
+		other.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixed(t, "osv", "0:1.42-397.el8")}},
+		// glibc's own fix (.38) is ABOVE the installed .31 — still vulnerable.
+		vulnerable.PURL: {{CVE: cve(t, "CVE-2024-99"), Proposal: vulnFactsFixed(t, "osv", "0:2.28-251.el8_10.38")}},
+	}}
+	matches := newMatches()
+	s := correlation(t, inv, disc, matches, newRepo())
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	// Both occurrences are vulnerable and both must be recorded. Before the fix, glibc's match
+	// was dropped by perl-Carp's fix version.
+	if n != 2 {
+		t.Fatalf("recorded %d matches, want 2 — a fix for a DIFFERENT package must never drop a live one", n)
+	}
+}
+
 func TestCorrelate_Errors(t *testing.T) {
 	ctx := context.Background()
 	proposals := map[string][]app.ProposalFor{"p": {{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "nvd", value.SeverityHigh)}}}

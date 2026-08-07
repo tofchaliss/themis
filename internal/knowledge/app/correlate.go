@@ -145,9 +145,22 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		}
 		// Vendor fixed-verdict (EDR-VEX-01 Phase 3): for an rpm component, if the installed build
 		// is at or above a same-EL-stream vendor fix (Red Hat/Rocky/Alma), the backported fix is
-		// present and this occurrence is NOT affected — drop the match. Stream-scoped and
-		// conservative (any uncertainty stays affected), so it never hides a live vulnerability.
-		if value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, f.View().FixedVersions) {
+		// present and this occurrence is NOT affected — drop the match.
+		//
+		// The fixes come from THIS ITEM'S OWN Proposal, never from the card's reconciled view
+		// (KN-FIX-1). The view's FixedVersions is a union across every package the CVE affects,
+		// with no package association — so comparing an installed build against it could satisfy
+		// the verdict using a DIFFERENT package's fix and silently drop a live vulnerability.
+		// Worked example: a card covering glibc and perl-Carp carries
+		// ["0:2.28-251.el8_10.38", "0:1.42-397.el8"]; installed glibc 2.28-251.el8_10.31 clears
+		// perl-Carp's 1.42 and the glibc finding disappears.
+		//
+		// The item's Proposal is package-scoped by construction — OSV is queried BY PACKAGE, so
+		// its record is about this component and nothing else. Using it narrows the verdict (a
+		// fix known only to another source is not applied here), and narrowing is the safe
+		// direction: keeping a match costs triage time, dropping one costs a breach.
+		if vf, ok := item.Proposal.VulnFacts(); ok &&
+			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, vf.FixedVersions) {
 			continue
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
