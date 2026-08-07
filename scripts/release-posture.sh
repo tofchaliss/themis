@@ -56,7 +56,10 @@ release=$(get "$REGISTRY/api/v1/releases/$REL" 2>/dev/null || echo '{}')
 version=$(echo "$release" | jq -r '.version // "unknown"')
 # Blast radius is the ENTERPRISE half of priority (C2): how many customers this release reaches.
 # It is why two releases with the same CVE can rank differently.
-customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+# `.unique_customers`, not `length`: the endpoint returns an OBJECT, and `length` on an object
+# counts KEYS — which reported "2 customers" for a release reaching none, and made Governance's
+# correct 1.0x multiplier look like a bug.
+customers=$(get "$REGISTRY/api/v1/releases/$REL/blast-radius" 2>/dev/null | jq -r '.unique_customers // 0' 2>/dev/null || echo 0)
 
 posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || { echo "cannot read posture for $REL" >&2; exit 1; }
 total=$(echo "$posture" | jq 'length')
@@ -103,8 +106,12 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
     band=$(echo "$fl" | jq -r '.view.priority // "-"')
     kev=$(echo "$fl" | jq -r 'if .view.kev then "yes" else "-" end')
     epss=$(echo "$fl" | jq -r 'if .view.epss then (.view.epss * 100 | floor | tostring + "%") else "-" end')
-    # fixed_versions is the deterministic mitigation — the actual remediation, before any AI.
-    fix=$(echo "$fl" | jq -r '(.view.fixed_versions // []) | if length == 0 then "none published" else .[0] end')
+    # fixed_versions is the deterministic mitigation — but the card's list is a UNION across every
+    # package the CVE affects, with no package association (KN-FIX-1). Picking [0] showed
+    # "upgrade python3-ply 3.9 to 0.1.7", which is a different package's fix. Until the model
+    # carries the package, show a single unambiguous value or say how many candidates there are —
+    # never a confident wrong one.
+    fix=$(echo "$fl" | jq -r '(.view.fixed_versions // []) | if length == 0 then "none published" elif length == 1 then .[0] else "\(length) candidates (see card)" end')
     comp=$(get "$GOVERNANCE/api/v1/findings/$fid/assessment" 2>/dev/null | jq -r '(.finding.components // []) | if length == 0 then "-" else .[0].purl end' | sed 's#pkg:[a-z]*/##; s#?.*##')
     printf '%s\t%s\t%s\t%s\t%s\t%sx\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$rank" "$band" "$cve" "$resid" "$effect" "$blast" "$kev" "$epss" "$comp" "$fix" "$stance" "$reservation"

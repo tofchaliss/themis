@@ -1066,6 +1066,41 @@ three angles, and two of them proposed fixes that would not have worked.
   **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
   plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
 
+- [ ] **🔴 KN-FIX-1 (HIGH) — Fixed versions carry no package, so a card's fix list is a cross-package
+  union — and `RPMFixedByStream` can silently DROP a real match because of it.**
+  _(Found 2026-08-07 building the release-posture view, from wrong output on live data.)_
+  `domain.VulnFacts.FixedVersions` is a bare `[]string`. `Reconcile` unions them across every Proposal on
+  the card (`fixSet`, reconcile.go), and OSV emits one Proposal per (CVE, package) — so a CVE affecting N
+  packages produces ONE list of N unrelated fix versions with nothing saying which belongs to which.
+  **Visible symptom (live, release 47cc2043):** the posture rendered `python3-ply@3.9-9.el8 → fix
+  0:0.1.7-16.module+el8.9.0`, `python3-pyyaml@3.12 → 0:0.29.14-4.module`, `perl-Carp@1.42-396 → 0:0.001-10`,
+  and `jetty-http@12.0.27 → 10.0.28` (a downgrade). Every one is another package's fix.
+  **The dangerous consequence is not display.** `correlate.go:150` calls
+  `value.RPMFixedByStream(ecosystem, installedVersion, f.View().FixedVersions)` and **drops the match** when
+  it returns true. That function walks the flat list and returns true if the installed version is `>=` ANY
+  fix sharing its EL major — with no check that the fix is for the same package. Worked example: a card
+  affecting both `glibc` and `perl-Carp` carries `["0:2.28-251.el8_10.38", "0:1.42-397.el8"]`; the installed
+  `glibc 2.28-251.el8_10.31` compares against perl-Carp's `1.42-397.el8`, `2.28 >= 1.42`, and the **glibc
+  finding is silently dropped** although the installed build is vulnerable.
+  That is a **false negative in vulnerability detection** — the defect class the codebase elsewhere calls
+  "the most dangerous". `RPMFixedByStream`'s own doc claims it is "conservative (any uncertainty stays
+  affected), so it never hides a live vulnerability"; that claim holds for a single-package fix list and is
+  **untrue** for a cross-package union.
+  **Not yet observed firing** — the live cards that would show it happen not to carry a lower-versioned
+  same-stream fix from another package. The mechanism is present regardless, and it fails silently: a
+  dropped match produces no Finding, no log line and no metric.
+  **Fix:** associate the package with the fix. `VulnFacts` gains per-package fixed versions (e.g.
+  `[]FixedVersion{Package, Version}`), the OSV/NVD/Red Hat ACLs populate it (OSV already knows the package —
+  it is queried by package), `Reconcile` keys the set by package, and `RPMFixedByStream` filters to the
+  component's own package before comparing. This is a **domain model change** plus an additive change to
+  `knowledge.faultline_enriched.v1`, so it needs a decision before code.
+  **Interim mitigation to consider:** gate the RPM fixed-verdict on the card having exactly one distinct
+  fixed version, or disable it (`correlate.go:150`) until the association exists. Dropping a true match is
+  strictly worse than keeping a false one — a redundant Finding costs triage time, a missing one costs a
+  breach. **Where it plugs in:** `internal/knowledge/domain/{proposal,reconcile}.go`,
+  `internal/knowledge/adapters/feed/*`, `internal/kernel/value/rpmstream.go`,
+  `internal/knowledge/app/correlate.go`. **Scope:** HIGH.
+
 - [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
   _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
   half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —
