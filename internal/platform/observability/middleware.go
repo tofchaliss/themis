@@ -6,6 +6,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // CorrelationHeader carries a cross-node correlation id so a workflow can be reconstructed
@@ -46,8 +49,41 @@ func RequestLogger(l *Logger) func(http.Handler) http.Handler {
 			}
 			w.Header().Set(CorrelationHeader, cid)
 
+			// A span per request — the third R1 signal. Started unconditionally: with no OTLP
+			// endpoint the global provider is a no-op costing a few nanoseconds, and making
+			// instrumentation conditional is how instrumentation rots.
+			//
+			// The span carries the CORRELATION ID, which is what makes traces and logs joinable.
+			// A trace nobody can line up against a log line answers "where did the time go" but
+			// not "what happened to MY request" — and today's debugging needed the second.
+			ctx, span := Tracer("themis/http").Start(r.Context(), r.Method,
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(
+					attribute.String("http.request.method", r.Method),
+					attribute.String("themis.correlation_id", cid),
+				))
+			defer span.End()
+
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(sw, r)
+			next.ServeHTTP(sw, r.WithContext(ctx))
+
+			// The route TEMPLATE is only known AFTER routing — chi fills its RouteContext as the
+			// request descends the tree, which is why the metrics call below reads it here too.
+			// So the span is named provisionally and RENAMED once the pattern exists; naming it
+			// up front produced "GET other" for every request, collapsing every endpoint into one
+			// span name and making the traces useless for exactly the question they answer.
+			route := routePattern(r)
+			span.SetName(r.Method + " " + route)
+			span.SetAttributes(
+				attribute.String("http.route", route),
+				attribute.Int("http.response.status_code", sw.status),
+			)
+			// A 5xx marks the span as failed so a trace backend can surface it without a query
+			// that already knows which statuses matter. A 4xx does NOT: a rejected request is the
+			// server working, and marking it an error is how error rates stop meaning anything.
+			if sw.status >= 500 {
+				span.SetStatus(codes.Error, http.StatusText(sw.status))
+			}
 
 			d := time.Since(start)
 			l.Info("http request",

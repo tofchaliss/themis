@@ -15,11 +15,15 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/bridges/otelzap"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otellogglobal "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -119,6 +123,31 @@ func Setup(ctx context.Context, cfg Config) (*Logger, func(context.Context) erro
 	// the situation this closes: a node running for a week with no countable evidence of what
 	// it did.
 	metricsOnce.Do(func() { defaultMetrics = NewMetrics(cfg.Service) })
+
+	// Traces, the third R1 signal. Gated on the SAME OTLP endpoint as logs: a trace has no pull
+	// model — unlike metrics, which a Prometheus scrape collects with no egress configured — so it
+	// exists only when there is somewhere to send it.
+	//
+	// Egress decision (2026-08-07): Prometheus-SCRAPE for metrics, OTLP for traces. One new
+	// dependency instead of two, and metrics keep working on a node with no collector at all,
+	// which is the deployment this repo actually documents.
+	if strings.TrimSpace(cfg.OTLPEndpoint) != "" {
+		tp, terr := newOTelTraces(ctx, cfg)
+		if terr != nil {
+			return nil, nil, terr
+		}
+		otel.SetTracerProvider(tp)
+		// Both providers must be flushed. Chaining rather than replacing: dropping the log
+		// shutdown here would silently lose the last batch of logs on every clean exit.
+		logShutdown := shutdown
+		shutdown = func(c context.Context) error {
+			terr := tp.Shutdown(c)
+			if lerr := logShutdown(c); lerr != nil {
+				return lerr
+			}
+			return terr
+		}
+	}
 	return &Logger{z: z}, shutdown, nil
 }
 
@@ -138,6 +167,30 @@ func newOTelLogs(ctx context.Context, cfg Config) (*sdklog.LoggerProvider, error
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)),
 	), nil
 }
+
+// newOTelTraces builds the TracerProvider. It shares the log exporter's endpoint and TLS setting,
+// because a deployment that has somewhere to send logs has somewhere to send traces, and two knobs
+// for one collector is a configuration people get wrong in exactly one direction.
+func newOTelTraces(ctx context.Context, cfg Config) (*sdktrace.TracerProvider, error) {
+	opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(cfg.OTLPEndpoint)}
+	if cfg.OTLPInsecure {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exp, err := otlptracehttp.New(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(cfg.Service))
+	return sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		sdktrace.WithBatcher(exp),
+	), nil
+}
+
+// Tracer returns a named tracer from the configured provider. With no OTLP endpoint this is the
+// global no-op provider, so a caller may always start a span — the cost of an unexported span is
+// a few nanoseconds, and making instrumentation conditional is how instrumentation rots.
+func Tracer(name string) trace.Tracer { return otel.Tracer(name) }
 
 // leveledCore applies the configured minimum level to a wrapped core (the otelzap core does
 // not filter by level itself), so console and OTel honor the same severity threshold.

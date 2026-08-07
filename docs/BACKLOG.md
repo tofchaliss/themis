@@ -1752,7 +1752,27 @@ three angles, and two of them proposed fixes that would not have worked.
   frozen legacy tree — the greenfield had **no metrics at all**. Metric names are exporter-agnostic, so
   moving onto an OTel pipeline later is wiring, not a rename.
 
-- [ ] **OTel traces (the third R1 signal), and the OTLP metric/trace exporters.** _(Split out 2026-08-07
+- [x] **OTel traces (the third R1 signal), and the OTLP metric/trace exporters.**
+  ✅ **CLOSED 2026-08-07.** **Egress decision: Prometheus-SCRAPE for metrics, OTLP for traces** —
+  one new dependency (`otlptracehttp`) instead of two, and metrics keep working on a node with no
+  collector at all, which is the deployment `INSTALLATION.md` actually documents. A trace has no
+  pull model, so it needs egress; a counter does not.
+  `Setup` now builds a `TracerProvider` gated on the SAME `THEMIS_OTLP_ENDPOINT` as logs — a
+  deployment with somewhere to send logs has somewhere to send traces, and two knobs for one
+  collector is a configuration people get wrong in exactly one direction. Both providers are
+  flushed on shutdown (chained, not replaced: dropping the log shutdown would have silently lost
+  the last batch of logs on every clean exit).
+  `RequestLogger` starts a server span per request, **unconditionally** — with no endpoint the
+  global provider is a no-op costing nanoseconds, and instrumentation added later never gets added.
+  The span carries the **correlation id**, which is what makes traces and logs joinable: a trace
+  nobody can line up against a log answers "where did the time go" but not "what happened to MY
+  request", and today's debugging needed the second.
+  **One subtlety worth keeping:** the span is named provisionally and RENAMED after the handler
+  returns, because chi fills its RouteContext as the request descends the tree. Naming it up front
+  produced `GET other` for every request — every endpoint collapsed into one span name, which is
+  exactly the cardinality mistake the metric labels avoid, inverted.
+  **Still open:** OTLP metric export (`otlpmetrichttp`). Only needed if the scrape model stops
+  fitting — a decision to take when a deployment asks for it, not before. _(Split out 2026-08-07
   when metrics landed.)_ `Setup` wires a LoggerProvider and now a Prometheus registry; a **TracerProvider**
   with request/DB spans is still absent, and there is no OTLP pipeline for traces or metrics.
   **Why it was not done with the metrics half:** it needs new modules —
