@@ -9,7 +9,7 @@ release, explain what to fix first and why.
 Each action is ONE package upgrade that would close several findings at once. The grouping and the
 ordering are computed, not guesses — do not re-derive them.
 {{range $i, $a := .Release.PlanActions}}{{if lt $i 15}}
-{{add1 $i}}. upgrade {{$a.Package}}
+{{add1 $i}}. upgrade {{join $a.Packages}}{{if gt (len $a.Packages) 1}}  <-- ONE unit: these ship together (a module stream); one update covers all of them{{end}}
    - ecosystem: {{$a.Ecosystem}}
    - installed: {{join $a.InstalledVersions}}
    - closes {{len $a.FindingIDs}} finding(s), top priority {{$a.TopPriority}}

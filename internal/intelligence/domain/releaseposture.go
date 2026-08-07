@@ -1,6 +1,10 @@
 package domain
 
-import "sort"
+import (
+	"slices"
+	"sort"
+	"strings"
+)
 
 // ReleasePosture is Intelligence's read-only view of Governance's release-scoped Domain
 // Projection (EDR-TRUST-01 T10) — the authoritative answer to "what is outstanding on this
@@ -42,8 +46,15 @@ type PostureComponent struct {
 // runtime a consumer of the domain rather than a producer of truth, and it is why grounding
 // still anchors to the projection rather than to this view (T10 rule 4).
 type UpgradeAction struct {
-	// Package is the source package to upgrade — the name a fix is published under.
+	// Package is the source package to upgrade — the name a fix is published under. When several
+	// packages ship as one unit it is the first of Packages, and Packages holds them all.
 	Package string
+	// Packages are every package this single action covers. Usually one. A RHEL/Rocky module
+	// stream is the exception: an advisory rebuilds every RPM in the stream, so `perl-Carp`,
+	// `perl-Digest`, `perl-Encode` and a dozen more each look like separate work while being one
+	// `dnf module update` (KN-MODULE-1). Presenting them as separate steps turned seven of the
+	// top fifteen actions into the same task.
+	Packages []string
 	// Ecosystem disambiguates two packages that share a name across ecosystems.
 	Ecosystem string
 	// InstalledVersions are the versions currently present, deduplicated.
@@ -122,6 +133,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 	out := make([]UpgradeAction, 0, len(order))
 	for _, k := range order {
 		a := byKey[k]
+		a.action.Packages = []string{a.action.Package}
 		// Worst CVE first within an action, so a truncated render still shows the reason the
 		// action matters rather than an arbitrary member of the set.
 		sort.SliceStable(a.action.CVEs, func(i, j int) bool {
@@ -141,7 +153,49 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 		}
 		return out[i].Package < out[j].Package
 	})
+	return mergeSiblings(out)
+}
+
+// mergeSiblings folds actions that close EXACTLY the same set of CVEs into one.
+//
+// Two packages resolved by the identical CVE set are two names for one remediation. On a modular
+// distro that is the normal case, not an edge case: a module-stream advisory rebuilds every RPM in
+// the stream, so one `dnf module update` surfaced as `perl-Carp`, `perl-Data-Dumper`, `perl-Digest`
+// … each "closes 5 findings, worst CVE-2025-40909" — seven of the top fifteen steps, all the same
+// task. A plan that reads as fifteen jobs when it is eight is a plan that gets the schedule wrong.
+//
+// The CVE set is the right key because it needs no data the projection does not already carry.
+// Detecting the `.module+el` marker would be more direct but lives on the FIX VERSION, which the
+// posture deliberately does not carry yet — and this generalises beyond RPM to any ecosystem where
+// one advisory covers several artifacts.
+//
+// Merging is CONSERVATIVE: sets must match exactly. Two packages sharing four CVEs of five are
+// genuinely different work and stay separate, because collapsing them would hide the fifth.
+func mergeSiblings(actions []UpgradeAction) []UpgradeAction {
+	byCVEs := map[string]int{} // cve-set key → index in out
+	out := make([]UpgradeAction, 0, len(actions))
+	for _, a := range actions {
+		key := a.Ecosystem + "\x00" + strings.Join(sortedCopy(a.CVEs), "\x00")
+		if i, ok := byCVEs[key]; ok {
+			out[i].Packages = append(out[i].Packages, a.Packages...)
+			out[i].FindingIDs = append(out[i].FindingIDs, a.FindingIDs...)
+			for _, v := range a.InstalledVersions {
+				if !slices.Contains(out[i].InstalledVersions, v) {
+					out[i].InstalledVersions = append(out[i].InstalledVersions, v)
+				}
+			}
+			continue
+		}
+		byCVEs[key] = len(out)
+		out = append(out, a)
+	}
 	return out
+}
+
+func sortedCopy(in []string) []string {
+	c := append([]string(nil), in...)
+	sort.Strings(c)
+	return c
 }
 
 // OutstandingCount reports how many Findings on the release still need attention.

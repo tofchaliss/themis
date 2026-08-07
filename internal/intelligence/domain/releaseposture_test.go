@@ -185,3 +185,69 @@ func TestPlanActions_TiesBreakOnPackageName(t *testing.T) {
 			got[0].Package, got[1].Package)
 	}
 }
+
+// A module-stream advisory rebuilds every RPM in the stream, so one `dnf module update` arrives as
+// a dozen packages each closing the identical CVE set. Measured on a live release: seven of the
+// top fifteen plan steps were the same task. A plan reading as fifteen jobs when it is eight gets
+// the schedule wrong.
+func TestPlanActions_MergesPackagesResolvedByTheSameCVEs(t *testing.T) {
+	perl := func(name string) domain.PostureComponent {
+		return domain.PostureComponent{
+			PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Version: "1", Ecosystem: "rpm", Source: name,
+		}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2025-40909", ResidualPriority: 60, Components: []domain.PostureComponent{perl("perl-Carp")}},
+		{FindingID: "f2", CVE: "CVE-2025-40909", ResidualPriority: 60, Components: []domain.PostureComponent{perl("perl-Digest")}},
+		{FindingID: "f3", CVE: "CVE-2025-40909", ResidualPriority: 60, Components: []domain.PostureComponent{{
+			PURL: "pkg:rpm/rocky/perl-Encode@2", Name: "perl-Encode", Version: "2",
+			Ecosystem: "rpm", Source: "perl-Encode",
+		}}},
+		// A genuinely separate upgrade, same priority — must NOT be swallowed.
+		{FindingID: "f4", CVE: "CVE-2026-1", ResidualPriority: 60, Components: []domain.PostureComponent{perl("samba")}},
+	}}
+
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2 — the three perl packages are one module update", len(got))
+	}
+	var merged domain.UpgradeAction
+	for _, a := range got {
+		if len(a.Packages) > 1 {
+			merged = a
+		}
+	}
+	if len(merged.Packages) != 3 {
+		t.Fatalf("merged action = %+v, want all three perl packages", merged)
+	}
+	if len(merged.FindingIDs) != 3 {
+		t.Errorf("findings = %d, want 3 — merging must not lose what the step closes", len(merged.FindingIDs))
+	}
+	// Siblings ship at their own versions, and the merged step must carry each one: an operator
+	// reading "installed: 1" for a set that also has a 2 deployed would stop one build short.
+	if len(merged.InstalledVersions) != 2 {
+		t.Errorf("installed = %v, want both distinct builds across the merged packages", merged.InstalledVersions)
+	}
+}
+
+// Merging is CONSERVATIVE: the CVE sets must match EXACTLY. Two packages sharing most of their
+// CVEs are genuinely different work, and collapsing them would hide the one that differs.
+func TestPlanActions_DoesNotMergeOverlappingButUnequalCVESets(t *testing.T) {
+	c := func(name string) domain.PostureComponent {
+		return domain.PostureComponent{PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Ecosystem: "rpm", Source: name}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 50, Components: []domain.PostureComponent{c("a")}},
+		{FindingID: "f2", CVE: "CVE-1", ResidualPriority: 50, Components: []domain.PostureComponent{c("b")}},
+		{FindingID: "f3", CVE: "CVE-2", ResidualPriority: 40, Components: []domain.PostureComponent{c("b")}}, // b has one more
+	}}
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2 kept separate — b carries a CVE a does not", len(got))
+	}
+	for _, a := range got {
+		if len(a.Packages) != 1 {
+			t.Errorf("action %+v merged, but the CVE sets differ", a)
+		}
+	}
+}

@@ -448,6 +448,20 @@ model and reading what it produced — which is why `Outcome.Detail` (TRUST-6) w
 `business_invalid` alone would have sent the investigation to the gate; `ungrounded evidence
 "PyYAML (rpm)"` pointed straight at the rule that was too strict.
 
+### Sibling merge — one module update is one step
+
+The first well-formed live plan listed `perl-Carp`, `perl-Data-Dumper`, `perl-Digest`,
+`perl-Digest-MD5`, `perl-Encode`, `perl-Exporter` and `perl-File-Path` as seven separate steps,
+each "closes 5 findings, worst CVE-2025-40909" — **seven of the top fifteen steps were one
+`dnf module update`**. A plan reading as fifteen jobs when it is eight gets the schedule wrong.
+
+`PlanActions` therefore merges actions whose CVE sets are **exactly** equal. The CVE set is the key
+because it needs no data the projection lacks: detecting the `.module+el` marker would be more
+direct but lives on the *fix version*, which the posture deliberately does not carry, and the CVE-set
+rule generalises to any ecosystem where one advisory covers several artifacts. Merging is
+conservative — sets must match exactly, so two packages sharing four CVEs of five stay separate
+rather than hiding the fifth.
+
 ### Deferred
 
 - **Fix versions on the posture entry** — makes the plan self-contained; see the note above.
