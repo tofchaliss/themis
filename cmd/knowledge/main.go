@@ -46,6 +46,7 @@ type config struct {
 	nvdURL           string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
 	nvdAPIKey        string        // THEMIS_NVD_API_KEY — NVD API key (higher rate limit; optional).
 	nvdDiscovery     bool          // THEMIS_NVD_DISCOVERY=1 — add NVD to correlation discovery: a per-component, CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a finding (A2). Default off (external NVD call per component at correlation time; an NVD API key is strongly recommended for large inventories — NVD throttles).
+	nvdStaleAfter    time.Duration // THEMIS_NVD_STALE_AFTER — how long a card's NVD facts stay fresh before the sweep revisits it (Go duration, default 168h). Revisiting is what catches revised scores and CVEs withdrawn upstream; an enrich-once sweep is correct on the day it runs and quietly stale months later.
 	nvdBackfillLimit int           // THEMIS_NVD_BACKFILL_LIMIT — carded CVEs enriched per sweep (default 200). Cost is one small request per CVE, so this bounds a sweep to a predictable duration; a large estate drains over successive sweeps.
 	nvdPollInterval  time.Duration // THEMIS_NVD_POLL_INTERVAL — Go duration between watch polls (default 6h; falls back to 6h if unparseable).
 
@@ -86,6 +87,7 @@ func loadConfig() config {
 		nvdAPIKey:        os.Getenv("THEMIS_NVD_API_KEY"),
 		nvdDiscovery:     os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
 		nvdBackfillLimit: envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
+		nvdStaleAfter:    parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
 		nvdPollInterval:  parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
@@ -150,6 +152,7 @@ func main() {
 	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
 		Enabled:       cfg.nvdEnabled,
 		BackfillLimit: cfg.nvdBackfillLimit,
+		StaleAfter:    cfg.nvdStaleAfter,
 		BaseURL:       cfg.nvdURL,
 		APIKey:        cfg.nvdAPIKey,
 		Discovery:     cfg.nvdDiscovery,
@@ -181,7 +184,8 @@ func main() {
 		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"))
 		logger.Info("nvd per-CVE enrichment enabled",
 			observability.String("interval", cfg.nvdPollInterval.String()),
-			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit))
+			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit),
+			observability.String("stale_after", cfg.nvdStaleAfter.String()))
 	}
 
 	// Scheduled exploit-signal enrichment (D5): folds EPSS/KEV/public-exploit onto already-carded

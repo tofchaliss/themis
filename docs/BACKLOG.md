@@ -1012,7 +1012,13 @@ three angles, and two of them proposed fixes that would not have worked.
   Also de-duplicates the regexes TRUST-8's rationale scan had defined separately, so the two checks now
   agree by construction on what counts as an identifier.
 
-- [ ] **NVD-REFRESH-1 — The per-CVE sweep enriches a card once and never revisits it.**
+- [x] **NVD-REFRESH-1 — The per-CVE sweep enriches a card once and never revisits it.**
+  ✅ **FIXED 2026-08-07, together with KN-WITHDRAW-1 — they are the same mechanism.**
+  `Store.CVEsMissingSource` became `CVEsNeedingRefresh(source, staleAfter, limit)`: never-enriched cards
+  first, then any whose newest Proposal from that source is older than `THEMIS_NVD_STALE_AFTER` (default
+  7 days). Superseded cards are excluded — the lifecycle is terminal there, so re-fetching them would spend
+  requests to learn nothing and keep a retired card in rotation forever. Cost and cap are unchanged; only
+  the ordering is. Original report follows.
   _(Surfaced verifying D5a on the VM, 2026-08-07 — a limitation of the change made that day, recorded the
   same day.)_ `Store.CVEsMissingSource` selects cards with **no** Proposal from the source, so once a card
   carries an NVD Proposal it is never fetched again. First enrichment is now complete and fast (236 of 239
@@ -1053,7 +1059,19 @@ three angles, and two of them proposed fixes that would not have worked.
   the Faultline and already reach Governance. **Scope:** MEDIUM-HIGH — it is the safety net under a
   suppression mechanism that is already live.
 
-- [ ] **KN-WITHDRAW-1 — The CVE-withdrawal path is consumer-only: Knowledge never supersedes a Faultline.**
+- [x] **KN-WITHDRAW-1 — The CVE-withdrawal path is consumer-only: Knowledge never supersedes a Faultline.**
+  ✅ **FIXED 2026-08-07.** `app.CVEFacts` gives the per-CVE port a **third outcome** — facts, absence, or
+  **withdrawn** — because collapsing withdrawal into absence is what left rejected CVEs alive: "we have no
+  data" leaves the card alone, "this was rejected upstream" retires it. `NVDClient.VulnsForCVE` now reads
+  `vulnStatus` (matched on a contained `rejected` token, since NVD has used both "Rejected" and "Rejected
+  by CNA"), and `FaultlineService.SupersedeFaultline` closes the producer half of a path whose consumer
+  half was already complete.
+  **Withdrawal is checked BEFORE facts and short-circuits:** a rejected record may still carry old metrics,
+  and folding them would refresh a card that should be retired. Idempotent, since the lifecycle is
+  forward-only — a repeated sweep changes nothing and announces nothing.
+  **It only works because of NVD-REFRESH-1.** An enrich-once queue would have caught `CVE-2021-20095` (which
+  has no NVD Proposal) and missed every card rejected *after* it was enriched. Withdrawal detection is
+  exactly as good as the refresh policy, which is why the two shipped together. Original report follows.
   **🔴 LIVE INSTANCE FOUND 2026-08-07.** `CVE-2021-20095` is carded in the VM deployment; NVD reports
   `vulnStatus: "Rejected"`. Nothing reads that field, so the card is alive, its Finding is open, and it will
   demand triage forever. This is no longer hypothetical.

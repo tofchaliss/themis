@@ -181,8 +181,12 @@ type nvdLiveResponse struct {
 }
 
 type nvdLiveCVE struct {
-	ID             string      `json:"id"`
-	LastModified   string      `json:"lastModified"`
+	ID           string `json:"id"`
+	LastModified string `json:"lastModified"`
+	// VulnStatus is NVD's analysis state. "Rejected" means the CVE was withdrawn upstream —
+	// the signal that retires a card (KN-WITHDRAW-1). It was in every response all along and
+	// read by nothing.
+	VulnStatus     string      `json:"vulnStatus"`
 	Metrics        nvdMetrics  `json:"metrics"`
 	Configurations []nvdConfig `json:"configurations"`
 }
@@ -574,19 +578,34 @@ var (
 // found=false when NVD has no record, or has one it has never scored: a Proposal carrying no
 // severity would add a source to the card without adding a fact, and the reconciled headline
 // would gain a contender with nothing to contend.
-func (c *NVDClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.ProposalFor, bool, error) {
+func (c *NVDClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.CVEFacts, error) {
 	q := url.Values{}
 	q.Set("cveId", cve.String())
 	resp, err := c.get(ctx, q, "nvd by-cve")
 	if err != nil {
-		return app.ProposalFor{}, false, err
+		return app.CVEFacts{}, err
 	}
 	for _, v := range resp.Vulnerabilities {
+		// Withdrawal first: a rejected record may still carry old metrics, and enriching from
+		// them would refresh a card that should be retired.
+		if nvdRejected(v.CVE.VulnStatus) {
+			return app.CVEFacts{Withdrawn: true}, nil
+		}
 		pf, ok, terr := c.translate(v.CVE)
 		if terr != nil || !ok {
 			continue
 		}
-		return pf, true, nil
+		return app.CVEFacts{Proposal: pf, Found: true}, nil
 	}
-	return app.ProposalFor{}, false, nil
+	return app.CVEFacts{}, nil
+}
+
+// nvdRejected reports whether NVD's vulnStatus means the CVE was withdrawn.
+//
+// Matched case-insensitively on a contained token rather than by equality: NVD has used both
+// "Rejected" and "Rejected by CNA", and a status this consequential must not be missed over
+// wording. Erring toward detection is the safe direction — the consequence is that a card is
+// superseded, which is a governed, reversible-by-reopening event, not a deletion.
+func nvdRejected(status string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(status)), "rejected")
 }

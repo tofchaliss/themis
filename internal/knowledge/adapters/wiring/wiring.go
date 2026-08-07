@@ -69,9 +69,12 @@ type NVDConfig struct {
 	Enabled bool
 	// BackfillLimit caps how many carded CVEs one enrichment sweep fetches (0 → the default).
 	BackfillLimit int
-	BaseURL       string       // "" → the client default (services.nvd.nist.gov)
-	APIKey        string       // optional; empty uses NVD's lower unauthenticated rate limit
-	HTTP          *http.Client // optional; nil → http.DefaultClient
+	// StaleAfter is how long a card's NVD facts stay fresh before the sweep revisits it
+	// (0 → the default). Revisiting is what catches revised scores and withdrawn CVEs.
+	StaleAfter time.Duration
+	BaseURL    string       // "" → the client default (services.nvd.nist.gov)
+	APIKey     string       // optional; empty uses NVD's lower unauthenticated rate limit
+	HTTP       *http.Client // optional; nil → http.DefaultClient
 
 	// Discovery adds NVD to the correlation discovery fan-out (A2): a per-component,
 	// CPE-product-gated keyword query so a CVE only NVD's CPE data covers still yields a
@@ -152,7 +155,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// bound becomes structural — only CVEs the enterprise holds are ever requested — so
 		// there is no RelevanceFilteredSource to wrap it in and nothing fetched to discard.
 		kn.Backfill = app.NewBackfillService("nvd",
-			feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, fold, nvd.BackfillLimit)
+			feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, fold, nvd.BackfillLimit, nvd.StaleAfter)
 	}
 	if signals.Enabled {
 		src := feed.NewExploitSignalClient(signals.EPSSURL, signals.KEVURL, signals.ExploitDBURL, signals.HTTP)

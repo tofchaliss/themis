@@ -510,7 +510,7 @@ func TestRecordMatch(t *testing.T) {
 	}
 }
 
-func TestCVEsMissingSource(t *testing.T) {
+func TestCVEsNeedingRefresh(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 	st := store.New(pool)
@@ -529,7 +529,10 @@ func TestCVEsMissingSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := st.CVEsMissingSource(ctx, "nvd", 10)
+	// A staleness window wider than the fixture's observed_at (2023-11-14), so nothing already
+	// enriched counts as stale and only never-enriched cards come back.
+	const neverStale = 20 * 365 * 24 * time.Hour
+	got, err := st.CVEsNeedingRefresh(ctx, "nvd", neverStale, 10)
 	if err != nil {
 		t.Fatalf("CVEsMissingSource: %v", err)
 	}
@@ -537,13 +540,33 @@ func TestCVEsMissingSource(t *testing.T) {
 		t.Fatalf("got %v, want only the card with no nvd Proposal", got)
 	}
 	// A settled estate returns nothing, so a sweep costs one query and no fetches.
-	if none, err := st.CVEsMissingSource(ctx, "osv", 10); err != nil {
+	if none, err := st.CVEsNeedingRefresh(ctx, "osv", neverStale, 10); err != nil {
 		t.Fatalf("CVEsMissingSource: %v", err)
 	} else if len(none) != 1 || none[0] != "CVE-2024-0001" {
 		t.Fatalf("got %v, want only the card with no osv Proposal", none)
 	}
+	// A ZERO staleness window makes everything due — this is the refresh half (NVD-REFRESH-1):
+	// an already-enriched card must come back once its facts age out, or the sweep would report
+	// an empty queue while carrying stale scores and live cards for withdrawn CVEs.
+	if all, err := st.CVEsNeedingRefresh(ctx, "nvd", 0, 10); err != nil || len(all) != 2 {
+		t.Fatalf("got %v err=%v, want BOTH cards due when nothing is fresh", all, err)
+	}
+	// Never-enriched sorts first, so a large estate drains front-to-back.
+	if all, _ := st.CVEsNeedingRefresh(ctx, "nvd", 0, 10); all[0] != "CVE-2024-0002" {
+		t.Errorf("first due = %q, want the never-enriched card", all[0])
+	}
+	// A superseded card is excluded: the lifecycle is terminal, so re-fetching it would spend
+	// requests to learn nothing and keep a retired card in rotation forever.
+	b.Supersede()
+	if err := st.Save(ctx, b, false, b.Version()-1, nil); err != nil {
+		t.Fatalf("supersede save: %v", err)
+	}
+	if due, err := st.CVEsNeedingRefresh(ctx, "nvd", 0, 10); err != nil || len(due) != 1 || due[0] != "CVE-2024-0001" {
+		t.Fatalf("got %v err=%v, want the superseded card excluded", due, err)
+	}
+
 	// A non-positive limit does no work at all rather than fetching everything.
-	if zero, err := st.CVEsMissingSource(ctx, "nvd", 0); err != nil || zero != nil {
+	if zero, err := st.CVEsNeedingRefresh(ctx, "nvd", time.Hour, 0); err != nil || zero != nil {
 		t.Fatalf("limit 0 = %v err=%v, want nil", zero, err)
 	}
 }

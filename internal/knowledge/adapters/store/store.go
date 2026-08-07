@@ -338,29 +338,41 @@ func (s *Store) ReconcileStuckStages(ctx context.Context) (int, error) {
 	return int(ct.RowsAffected()), nil
 }
 
-// CVEsMissingSource returns carded CVEs that carry no Proposal from `source`, oldest card
-// first, capped at limit — the work queue for the per-CVE enrichment sweep (D5a).
+// CVEsNeedingRefresh returns the carded CVEs a source is due to visit: never-enriched cards
+// first, then those whose newest Proposal from that source is older than staleAfter. Capped at
+// limit.
 //
-// Ordering by card age rather than arbitrarily makes the sweep DETERMINISTIC and fair: a large
-// estate drains front-to-back over successive runs instead of re-rolling the same dice and
-// leaving some cards permanently unenriched. Cards that already carry the source are excluded,
-// so a settled estate costs one query and no fetches.
+// Ordering never-enriched first, then oldest-enriched, makes the sweep DETERMINISTIC and fair:
+// a large estate drains front-to-back instead of re-rolling the same dice and leaving some cards
+// permanently unvisited.
+//
+// It selects by STALENESS rather than by absence, which is the difference between a sweep that
+// is correct on the day it runs and one that stays correct. Upstream data changes — scores get
+// revised, severities corrected, CVEs rejected — and an enrich-once queue would report itself
+// empty while carrying stale facts and live cards for withdrawn CVEs.
+//
+// Superseded cards are excluded: the lifecycle is terminal there, so re-fetching them would
+// spend requests to learn nothing and would keep a retired card in the rotation forever.
 //
 // This replaces the watch watermark that used to live here. There is no watermark now, and that
-// is the point: the queue IS the state, so there is nothing to advance past unread work — the
-// failure mode NVD-WATCH-1 was.
-func (s *Store) CVEsMissingSource(ctx context.Context, source string, limit int) ([]string, error) {
+// is the structural point: the QUERY is the state, so there is nothing to advance past unread
+// work — the failure mode NVD-WATCH-1 was.
+func (s *Store) CVEsNeedingRefresh(ctx context.Context, source string, staleAfter time.Duration, limit int) ([]string, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.cve
 		  FROM faultlines f
-		 WHERE NOT EXISTS (
-		       SELECT 1 FROM faultline_proposals p
-		        WHERE p.faultline_id = f.id AND p.source = $1)
-		 ORDER BY f.created_at, f.cve
-		 LIMIT $2`, source, limit)
+		  LEFT JOIN LATERAL (
+		       SELECT max(p.observed_at) AS last_at
+		         FROM faultline_proposals p
+		        WHERE p.faultline_id = f.id AND p.source = $1
+		  ) e ON TRUE
+		 WHERE f.stage <> 'superseded'
+		   AND (e.last_at IS NULL OR e.last_at < $2)
+		 ORDER BY e.last_at ASC NULLS FIRST, f.created_at, f.cve
+		 LIMIT $3`, source, time.Now().UTC().Add(-staleAfter), limit)
 	if err != nil {
 		return nil, err
 	}

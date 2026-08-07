@@ -205,3 +205,74 @@ func TestFoldProposal_Errors(t *testing.T) {
 		t.Error("empty id: expected NewFaultline error")
 	}
 }
+
+// SupersedeFaultline is the producer half of the withdrawal path (KN-WITHDRAW-1). Its edges
+// matter because it is driven by an external feed's opinion about a CVE.
+func TestSupersedeFaultline_Edges(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("zero cve is rejected", func(t *testing.T) {
+		svc := app.NewFaultlineService(newRepo(), &seqIDs{}, fixedClock{},
+			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+		if _, err := svc.SupersedeFaultline(ctx, value.CVEID{}); err == nil {
+			t.Fatal("want an error for a zero CVE")
+		}
+	})
+
+	t.Run("a read failure propagates", func(t *testing.T) {
+		repo := newRepo()
+		repo.getErr = errors.New("db down")
+		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
+			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1")); err == nil {
+			t.Fatal("want the read error propagated")
+		}
+	})
+
+	t.Run("a write failure propagates", func(t *testing.T) {
+		repo := newRepo()
+		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
+			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+		if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		repo.saveErr = errors.New("db down")
+		if _, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1")); err == nil {
+			t.Fatal("want the write error propagated")
+		}
+	})
+
+	// A concurrent modification is retried, because superseding is additive-to-terminal and
+	// converges — the same reasoning that lets FoldProposal retry.
+	t.Run("a concurrency conflict retries and converges", func(t *testing.T) {
+		repo := newRepo()
+		svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
+			domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+		if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		repo.saveCalls, repo.conflictFor = 0, 1 // first save conflicts, second succeeds
+		changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"))
+		if err != nil || !changed {
+			t.Fatalf("changed=%v err=%v, want a retried success", changed, err)
+		}
+	})
+}
+
+// Exhausting the retry budget surfaces as ErrConcurrent rather than a silent no-op: a card that
+// could not be superseded must not look like one that was already terminal, or a withdrawn CVE
+// would be quietly left alive.
+func TestSupersedeFaultline_ExhaustedRetriesReportConcurrent(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	svc := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{},
+		domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	if _, err := svc.FoldProposal(ctx, cve(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	repo.saveCalls, repo.conflictFor = 0, 1_000 // every save conflicts
+	changed, err := svc.SupersedeFaultline(ctx, cve(t, "CVE-2024-1"))
+	if !errors.Is(err, app.ErrConcurrent) || changed {
+		t.Fatalf("changed=%v err=%v, want ErrConcurrent", changed, err)
+	}
+}

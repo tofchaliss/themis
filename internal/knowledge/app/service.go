@@ -34,6 +34,54 @@ func NewFaultlineService(
 	return &FaultlineService{repo: repo, ids: ids, clock: clock, prec: prec, trust: trust}
 }
 
+// SupersedeFaultline retires the card for a CVE that has been WITHDRAWN or REJECTED upstream
+// (D7 — a card is never deleted, only superseded).
+//
+// It closes the producer half of a path whose consumer half was already complete: the event type
+// was registered, its v1 payload schema frozen, and Governance's coordinator turned it into a
+// re-evaluation signal — but nothing in Knowledge ever called Supersede(), so a rejected CVE kept
+// its card and its Finding kept demanding triage indefinitely. Observed live 2026-08-07:
+// CVE-2021-20095 carries NVD `vulnStatus: "Rejected"` and was still open.
+//
+// found=false for a CVE with no card — a source may report a withdrawal for something the
+// enterprise never held, which is not an error and not work.
+//
+// Idempotent: the lifecycle is forward-only, so superseding an already-superseded card changes
+// nothing and emits nothing. A re-delivery or a repeated sweep is therefore free.
+func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVEID) (bool, error) {
+	if cve.IsZero() {
+		return false, fmt.Errorf("knowledge: zero cve")
+	}
+	for attempt := 0; attempt < maxSaveRetries; attempt++ {
+		f, found, err := s.repo.GetByCVE(ctx, cve.String())
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, nil
+		}
+		prevVersion := f.Version()
+		if !f.Supersede() {
+			return false, nil // already terminal — nothing changed, nothing to announce
+		}
+		now := s.clock.Now()
+		notes := []OutboxNote{{
+			EventType:  EventFaultlineSuperseded,
+			Event:      domain.NewFaultlineSuperseded(f, now),
+			OccurredAt: now,
+		}}
+		switch err := s.repo.Save(ctx, f, false, prevVersion, notes); {
+		case err == nil:
+			return true, nil
+		case errors.Is(err, ErrConcurrent):
+			continue
+		default:
+			return false, err
+		}
+	}
+	return false, ErrConcurrent
+}
+
 // FoldProposal finds-or-creates the Faultline for a canonical CVE and folds a source
 // Proposal into it, reconciling the enterprise view and publishing completed-fact
 // events on state change (D2/D8/D9). It retries on optimistic-concurrency conflicts,
