@@ -883,7 +883,7 @@ three angles, and two of them proposed fixes that would not have worked.
   the Communication serializers that render a rationale. **Dep:** none. **Scope:** MEDIUM — no correctness
   impact today, direct impact on human decision quality.
 
-- [ ] **TRUST-9 — The version-range verdict (T5) fires on exactly one transition — "no usable range at
+- [x] **TRUST-9 — The version-range verdict (T5) fires on exactly one transition — "no usable range at
   correlation, usable range later" — and nothing demonstrates it end-to-end.** _(Established during the
   `phase3-trust-model` VM verification run, 2026-08-06.)_ Two independent gates evaluate the same predicate
   at different times, and the first one starves the second:
@@ -1309,6 +1309,33 @@ three angles, and two of them proposed fixes that would not have worked.
   version is one drill-down away.
   **Fix:** stamp the selected fixes onto the Finding at enrichment, exactly as `base_score` is, then
   surface them on `PostureEntry`. **Dep:** AI-GROUND-1 (landed). **Scope:** MEDIUM.
+
+- [x] **🔴 RANGE-PARSE-1 (P1) — an UNPARSEABLE affected range read as "provably not affected", and
+  the shipped policy auto-accepted it.** _(Found 2026-08-07 writing the TRUST-9 demonstration; fixed
+  the same hour.)_
+  `AffectedRange.hasUsableConstraint` accepted any non-empty token that was not the `none` sentinel,
+  so a malformed range — `"garbage"`, `"affected"`, a stray prose fragment from a feed — counted as
+  a usable constraint. `matchConstraint` then returned false for it (no grammar rule matched),
+  `Matches` returned false, and `Applicability` read a failed match as **`RangeOutOfRange`**.
+  **The full chain:** malformed range → `ProvablyOutOfRange` true → Governance raises a system
+  `not_affected` proposal on `observed` evidence → the shipped **D15 `auto-not-affected-observed`
+  policy AUTO-ACCEPTS it** → `residual_priority` drops to 0 → the Finding leaves the queue. A feed
+  emitting one bad range would have silently suppressed a live vulnerability, with a governed
+  Position recording it as decided.
+  **What makes it the worst class:** every layer behaved as written. The range rule is documented as
+  "certain in one direction only… a parse gap must never drop a real vulnerability", and
+  `ProvablyOutOfRange` implements that correctly — it defers unless the verdict is `OutOfRange`. The
+  defect was one layer below, in what COUNTS as a verdict.
+  **Fix:** `parsableConstraint` mirrors `matchConstraint`'s cases, so the two agree on what the
+  grammar accepts — a token one accepts and the other rejects is precisely how a parse gap becomes a
+  verdict. A bare token must additionally LOOK like a version (starts with a digit, no whitespace);
+  the cost of rejecting an odd-but-real version is a deferred verdict, the cost of accepting a
+  non-version is a silent suppression.
+  Guarded by `TestApplicability_UnparseableRangeIsUndecidable` (7 malformed shapes),
+  `..._RealRangesStayDecidable` (the narrowing must not trade a silent suppression for a silent
+  deferral) and `..._MixedGroupUsesTheParsableComparator`.
+  **How it was found is the point:** by writing the test TRUST-9 asked for. The assertion was
+  "an undecidable range must suppress nothing" — and it suppressed.
 
 - [x] **PLAN-4 — `plan_remediation` has no real-model e2e; three live refusals were found by hand.**
   ✅ **CLOSED 2026-08-07 — and it was worse than filed.** The repository's ONLY real-model test

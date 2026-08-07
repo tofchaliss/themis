@@ -11,12 +11,12 @@ func TestNewCVEID_NormalizeAndValidate(t *testing.T) {
 		in   string
 		want string
 	}{
-		"canonical":       {"CVE-2024-1234", "CVE-2024-1234"},
-		"lowercase":       {"cve-2024-1234", "CVE-2024-1234"},
-		"whitespace":      {"  CVE-2024-1234  ", "CVE-2024-1234"},
-		"alpineAlias":     {"ALPINE-CVE-2024-1234", "CVE-2024-1234"},
-		"distroAliasLow":  {"alpine-cve-2024-1234", "CVE-2024-1234"},
-		"longSequential":  {"CVE-2024-1234567", "CVE-2024-1234567"},
+		"canonical":      {"CVE-2024-1234", "CVE-2024-1234"},
+		"lowercase":      {"cve-2024-1234", "CVE-2024-1234"},
+		"whitespace":     {"  CVE-2024-1234  ", "CVE-2024-1234"},
+		"alpineAlias":    {"ALPINE-CVE-2024-1234", "CVE-2024-1234"},
+		"distroAliasLow": {"alpine-cve-2024-1234", "CVE-2024-1234"},
+		"longSequential": {"CVE-2024-1234567", "CVE-2024-1234567"},
 	} {
 		got, err := value.NewCVEID(tc.in)
 		if err != nil {

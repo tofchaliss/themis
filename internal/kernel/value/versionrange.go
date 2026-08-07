@@ -150,18 +150,60 @@ func (r AffectedRange) Applicability(installedVersion string) RangeVerdict {
 	return RangeOutOfRange
 }
 
-// hasUsableConstraint reports whether any group carries at least one real comparator
-// (anything other than an empty token or the "none" sentinel). An all-"none"/empty
-// range is a parse gap, not a decidable "outside the range".
+// hasUsableConstraint reports whether any group carries at least one comparator this package can
+// actually EVALUATE. An unusable range is a parse gap, not a decidable "outside the range".
+//
+// It used to accept any non-empty token that was not the "none" sentinel, which meant a token the
+// grammar does not recognise — a feed emitting `"affected"`, a stray prose fragment, anything
+// malformed — counted as usable. `matchConstraint` then returned false for it, `Matches` returned
+// false, and `Applicability` read that as **RangeOutOfRange**. The whole chain turned "we could not
+// parse this" into "provably not affected", which the shipped D15 policy AUTO-ACCEPTS.
+//
+// That is the most dangerous defect class in this system, and it is exactly what the doc on this
+// function already claimed to prevent. Found 2026-08-07 writing the TRUST-9 demonstration: the
+// test asserted an undecidable range must suppress nothing, and it suppressed.
 func (r AffectedRange) hasUsableConstraint() bool {
 	for _, group := range r.Groups {
 		for _, raw := range strings.Split(group, ",") {
-			if c := strings.TrimSpace(raw); c != "" && c != "none" {
+			if parsableConstraint(strings.TrimSpace(raw)) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// parsableConstraint reports whether matchConstraint can evaluate this token at all.
+//
+// It mirrors that function's cases deliberately: the two must agree, because a token one accepts
+// and the other rejects is precisely how a parse gap becomes a verdict. `none` is excluded — it is
+// the explicit "no constraint" sentinel, not a comparator.
+func parsableConstraint(c string) bool {
+	if c == "" || c == "none" {
+		return false
+	}
+	if c == "*" || c == "unknown" {
+		return true
+	}
+	for _, op := range []string{"<=", ">=", "<", ">"} {
+		if strings.HasPrefix(c, op) {
+			return strings.TrimSpace(c[len(op):]) != ""
+		}
+	}
+	// A bare token is an EXACT version, and only if it looks like one. `matchConstraint` compares
+	// it with `candidate == version`, so a prose fragment can never match — and must therefore not
+	// be treated as a constraint that failed.
+	return looksLikeVersion(c)
+}
+
+// looksLikeVersion reports whether a bare token is plausibly a version literal: it must start with
+// a digit and contain no whitespace. Deliberately narrow — the cost of rejecting an odd-but-real
+// version is a deferred verdict, while the cost of accepting a non-version is a silent suppression.
+func looksLikeVersion(c string) bool {
+	if c == "" || strings.ContainsAny(c, " \t") {
+		return false
+	}
+	return isVersionDigit(c[0])
 }
 
 // BuildConstraintGroup composes a single AND constraint group from optional range
