@@ -1099,6 +1099,30 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [ ] **KN-EPSS-BAND-1 — a CVE with 99% exploitation probability is labelled `informational`.**
+  _(**Measured** on the VM 2026-08-07 — release `ee006ff7`, posture rows 2 and 3 — with the formula
+  **read from code** in `internal/knowledge/domain/priority.go`.)_
+  Observed: `CVE-2021-45105` (log4j, CVSS 5.9, **EPSS 99%**) scores **52**, band `informational`, and
+  ranks **below** `CVE-2026-34480` (**EPSS 0%**) at **70**. The arithmetic checks out — `40 + 40×0.99×0.3
+  = 52` vs `70 + 70×0×0.3 = 70` — so this is the design working as written, not a computation bug.
+  Two distinct consequences, and only the first is clearly wrong:
+  1. **The label is a false statement.** `Priority()` admits EPSS only through the `elevated` rule,
+     which also demands `effectiveCVSS() >= 7`. A medium-CVSS CVE therefore falls to the `default`
+     arm and is reported as `informational` **however certain its exploitation is**. "Informational"
+     is a claim, not a neutral fallback: it tells an operator this needs no action, about a
+     vulnerability EPSS rates near-certain to be attacked. Compare KEV, which *does* get its own arm
+     (`v.KEV && c < 9 → high`) precisely so a low-CVSS KEV entry cannot be buried.
+  2. **EPSS can never promote across a severity tier.** The lift is `base × EPSS × 0.3`, so medium
+     (40) caps at 52 and can never reach high (70). Severity strictly dominates likelihood. That is a
+     defensible position — impact over probability — but it is currently implicit, and it means the
+     ranking answers "how bad if exploited" rather than the "what do I fix first" the posture view
+     claims to answer.
+  **Options:** (a) give EPSS its own band arm mirroring KEV's (`EPSS >= 0.9 → high`, say), which fixes
+  the false label without touching the score; (b) raise the lift cap so a near-certain medium can
+  overtake a dormant high; (c) keep both and document severity-dominance explicitly in the EDR so the
+  band is read correctly. **(a) is the minimum** — the label is wrong today regardless of the ranking
+  philosophy. **Dep:** none. **Scope:** SMALL for (a); (b) needs an EDR decision (D-series, Knowledge).
+
 - [ ] **KN-PROPOSAL-BLOAT-1 — the EPSS/KEV sweep re-folds byte-identical signals, so 99.2% of the
   proposal log records no new information.** _(**Measured** on the VM 2026-08-07.)_
   `faultline_proposals` holds **28,128** rows from source `epsskev` across **239** cards — ~118 per
