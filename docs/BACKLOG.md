@@ -923,6 +923,24 @@ three angles, and two of them proposed fixes that would not have worked.
   `internal/knowledge/app/watch.go` (watermark advance), `cmd/knowledge/main.go` (`watchLoop` logging).
   **Dep:** none. **Scope:** HIGH — the NVD watch is currently non-functional in any deployment whose CVEs
   are not in the first 20,000 records of the window, and it fails silently while reporting healthy.
+  **⚠️ TWO CORRECTIONS TO THIS ENTRY, both found on the VM 2026-08-07 — read them before acting on it.**
+  **(1) The watermark is `knowledge_watch_state.last_success`, NOT `feed_health.last_success_at`.** This
+  entry and its commit message both named the wrong table. I grepped `LastSuccess`, saw feed-health code
+  nearby, and did not follow the port to `Store.LastSuccess`. The load-bearing claim survives — a truncated
+  poll DID advance the watermark past records it never read, and the fix (truncation → error →
+  `SetLastSuccess` never called) works whichever table holds it — but the mechanism narrative pointed at the
+  wrong one. It also invalidated a test I thought I had run: the 2026-08-06 `update feed_health …` reset
+  never touched the watch, so "a full-window poll completed in under 60 seconds" was measuring a window of
+  minutes, not 120 days. That inference is withdrawn.
+  **(2) The slicing walk needed request PACING, which the fix omitted — and the bug it replaced was hiding
+  the need.** Resetting the real watermark to 120 days and polling produced
+  `context deadline exceeded … while reading body`: the walk issues a few hundred requests back to back,
+  NVD throttles per rolling 30 seconds (5 unauthenticated, 50 with a key), and a throttled request
+  eventually exceeds the client timeout and fails the whole poll. The OLD code was capped at
+  `nvdMaxPages`, so it made at most 10 requests per poll — **the truncation that made it wrong was also,
+  accidentally, keeping it inside the rate limit.** Fixed by deriving a minimum inter-request gap from the
+  API key (700ms keyed, 6.5s unkeyed), applied only to the public endpoint so a mirror or a test server is
+  unpaced. A 120-day first poll therefore takes roughly three minutes; subsequent polls are one slice.
   **✅ PARTIALLY FIXED 2026-08-06 — the silence and the skip are gone; the strategy question remains.**
   `NVDClient.ChangedSince` no longer requests the window whole. It **walks it in contiguous slices**
   (`nvdSliceWindow`, 24h), and a slice holding more than the page budget is **halved and retried** — the

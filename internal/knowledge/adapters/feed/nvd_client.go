@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -68,6 +69,18 @@ type NVDClient struct {
 	apiKey  string
 	http    *http.Client
 	acl     nvdACL
+
+	// Request pacing. NVD rate-limits per rolling 30 seconds — 5 requests unauthenticated, 50
+	// with an API key — and throttled requests slow down rather than fail fast, so an unpaced
+	// burst eventually exceeds the client timeout and takes the whole poll down.
+	//
+	// This did not matter until slicing arrived: the old whole-window fetch was capped at
+	// nvdMaxPages, so a poll made at most 10 requests and the truncation that made it wrong
+	// was ALSO, accidentally, keeping it inside the rate limit. Walking a 120-day window in
+	// 24-hour slices makes a few hundred requests, which NVD will not serve back-to-back.
+	mu      sync.Mutex
+	minGap  time.Duration
+	lastReq time.Time
 }
 
 // NewNVDClient builds a client against the NVD base URL (default NVDBaseURL). An empty
@@ -80,7 +93,60 @@ func NewNVDClient(baseURL, apiKey string, hc *http.Client) *NVDClient {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	return &NVDClient{baseURL: strings.TrimRight(baseURL, "/"), apiKey: strings.TrimSpace(apiKey), http: hc}
+	key := strings.TrimSpace(apiKey)
+	return &NVDClient{
+		baseURL: strings.TrimRight(baseURL, "/"), apiKey: key, http: hc,
+		minGap: nvdMinRequestGap(key, baseURL),
+	}
+}
+
+// nvdMinRequestGap is the minimum spacing between requests, derived from NVD's published rolling
+// 30-second budget with a margin: 50 requests with a key, 5 without. Deriving it from the key
+// rather than exposing a knob keeps pacing correct by construction — an operator cannot set a
+// value that gets their deployment throttled.
+//
+// It applies ONLY to the public NVD endpoint. The budget is a property of that service, not of
+// the protocol, so a self-hosted mirror or a test server is not paced — which also keeps the
+// suite fast without any test having to know pacing exists.
+func nvdMinRequestGap(apiKey, baseURL string) time.Duration {
+	if strings.TrimRight(strings.TrimSpace(baseURL), "/") != NVDBaseURL {
+		return 0
+	}
+	if apiKey != "" {
+		return 700 * time.Millisecond // ~43 req / 30s, under the 50 budget
+	}
+	return 6500 * time.Millisecond // ~4.6 req / 30s, under the 5 budget
+}
+
+// NVDRequestGapForTest exposes the pacing policy to the package's external test.
+func NVDRequestGapForTest(apiKey, baseURL string) time.Duration { return nvdMinRequestGap(apiKey, baseURL) }
+
+// pace blocks until the minimum gap since the previous request has elapsed. It honors context
+// cancellation, so a shutdown or a timeout during a long walk aborts promptly instead of
+// sleeping through it.
+func (c *NVDClient) pace(ctx context.Context) error {
+	c.mu.Lock()
+	wait := time.Duration(0)
+	now := time.Now()
+	if !c.lastReq.IsZero() {
+		if elapsed := now.Sub(c.lastReq); elapsed < c.minGap {
+			wait = c.minGap - elapsed
+		}
+	}
+	c.lastReq = now.Add(wait)
+	c.mu.Unlock()
+
+	if wait <= 0 {
+		return nil
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 type nvdLiveResponse struct {
@@ -296,6 +362,9 @@ func (c *NVDClient) fetchKeyword(ctx context.Context, keyword string, startIndex
 
 // get issues one NVD 2.0 CVE-API query and decodes the page.
 func (c *NVDClient) get(ctx context.Context, q url.Values, label string) (nvdLiveResponse, error) {
+	if err := c.pace(ctx); err != nil {
+		return nvdLiveResponse{}, err
+	}
 	u := c.baseURL + "/rest/json/cves/2.0?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

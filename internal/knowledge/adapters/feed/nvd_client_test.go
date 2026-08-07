@@ -265,3 +265,60 @@ func TestNVDClient_NonOKStatusIsError(t *testing.T) {
 
 // compile-time confirmation the client is a ChangedVulnSource.
 var _ app.ChangedVulnSource = (*feed.NVDClient)(nil)
+
+// Pacing exists because the SLICING walk made rate limiting suddenly matter. The old
+// whole-window fetch was capped at 10 requests per poll, so the truncation that made it wrong
+// was also, accidentally, keeping it inside NVD's rolling 30-second budget. Walking 120 days in
+// 24-hour slices makes a few hundred requests, which NVD throttles until the client times out
+// and the whole poll fails — observed on a live VM, 2026-08-07.
+func TestNVDRequestGap_DerivedFromKeyAndEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, base string
+		wantPaced       bool
+	}{
+		{"public endpoint with a key is paced", "k", feed.NVDBaseURL, true},
+		{"public endpoint without a key is paced harder", "", feed.NVDBaseURL, true},
+		{"a self-hosted mirror is not paced", "k", "https://nvd.internal.example", false},
+		{"a test server is not paced", "", "http://127.0.0.1:1234", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := feed.NVDRequestGapForTest(tc.key, tc.base)
+			if tc.wantPaced != (got > 0) {
+				t.Fatalf("gap = %v, wantPaced=%v", got, tc.wantPaced)
+			}
+		})
+	}
+	// No key means a far smaller budget (5 vs 50 per 30s), so the gap must be much larger.
+	keyed := feed.NVDRequestGapForTest("k", feed.NVDBaseURL)
+	unkeyed := feed.NVDRequestGapForTest("", feed.NVDBaseURL)
+	if unkeyed <= keyed {
+		t.Fatalf("unkeyed gap %v must exceed keyed gap %v", unkeyed, keyed)
+	}
+	// Both must stay inside NVD's published rolling budget.
+	if 30*time.Second/keyed > 50 {
+		t.Errorf("keyed pacing allows %d req/30s, over NVD's 50 budget", 30*time.Second/keyed)
+	}
+	if 30*time.Second/unkeyed > 5 {
+		t.Errorf("unkeyed pacing allows %d req/30s, over NVD's 5 budget", 30*time.Second/unkeyed)
+	}
+}
+
+// The unpaced path (test server / mirror) must issue requests back to back, or the whole suite
+// slows down and nobody notices until CI takes minutes.
+func TestNVDClient_UnpacedEndpointIssuesRequestsImmediately(t *testing.T) {
+	var slices []nvdSlice
+	srv := recordingNVDServer(t, &slices)
+	defer srv.Close()
+	c := feed.NewNVDClient(srv.URL, "", srv.Client())
+
+	start := time.Now()
+	if _, err := c.ChangedSince(context.Background(), time.Now().Add(-72*time.Hour)); err != nil {
+		t.Fatalf("ChangedSince: %v", err)
+	}
+	if len(slices) < 3 {
+		t.Fatalf("issued %d requests, want at least 3 slices for a 72h window", len(slices))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v for %d unpaced requests — pacing must not apply off the public endpoint", d, len(slices))
+	}
+}
