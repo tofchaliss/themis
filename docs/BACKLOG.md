@@ -1012,6 +1012,26 @@ three angles, and two of them proposed fixes that would not have worked.
   Also de-duplicates the regexes TRUST-8's rationale scan had defined separately, so the two checks now
   agree by construction on what counts as an identifier.
 
+- [ ] **NVD-REFRESH-1 — The per-CVE sweep enriches a card once and never revisits it.**
+  _(Surfaced verifying D5a on the VM, 2026-08-07 — a limitation of the change made that day, recorded the
+  same day.)_ `Store.CVEsMissingSource` selects cards with **no** Proposal from the source, so once a card
+  carries an NVD Proposal it is never fetched again. First enrichment is now complete and fast (236 of 239
+  cards, 2m45s); **updates are not covered at all**.
+  **This is a real trade, not an oversight to hide.** The modified-since walk it replaced was *designed* to
+  catch changes — badly, seeing ~5% of its window, but it was the mechanism. The sweep covers
+  first-enrichment completely and change-detection not at all. NVD data does change: scores get revised,
+  severities corrected, and CVEs **rejected** (see KN-WITHDRAW-1, with a live instance).
+  **Fix:** sweep by **staleness** rather than by absence — order by "never enriched first, then
+  oldest-enriched", and include a card whose newest Proposal from that source is older than a configurable
+  interval. `faultline_proposals.observed_at` already carries what is needed, so it is a query change plus
+  one knob, not new state. Cost stays bounded and estate-proportional: the same cap per sweep, just a
+  different ordering. It also makes withdrawal detection reachable for every card rather than only for
+  never-enriched ones.
+  **Where it plugs in:** `internal/knowledge/adapters/store/store.go` (`CVEsMissingSource` becomes
+  `CVEsNeedingRefresh`), `internal/knowledge/app/backfill.go`, one env knob.
+  **Dep:** none. **Scope:** MEDIUM — first enrichment works today, so this is about staying correct over
+  time rather than getting correct now.
+
 - [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
   _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
   half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —
@@ -1034,6 +1054,17 @@ three angles, and two of them proposed fixes that would not have worked.
   suppression mechanism that is already live.
 
 - [ ] **KN-WITHDRAW-1 — The CVE-withdrawal path is consumer-only: Knowledge never supersedes a Faultline.**
+  **🔴 LIVE INSTANCE FOUND 2026-08-07.** `CVE-2021-20095` is carded in the VM deployment; NVD reports
+  `vulnStatus: "Rejected"`. Nothing reads that field, so the card is alive, its Finding is open, and it will
+  demand triage forever. This is no longer hypothetical.
+  **The per-CVE sweep (D5a) makes the fix nearly free** — it already fetches each carded CVE's full NVD
+  record, `vulnStatus` is in the response, and `Faultline.Supersede()`, the event, its frozen v1 schema and
+  Governance's consumer all exist. What is missing is a handful of lines to read the status and call the
+  aggregate, plus the trust class TRUST-4 wants on the event (a withdrawal is genuinely Observed).
+  **But see NVD-REFRESH-1 below:** the sweep only visits cards with NO NVD proposal, so it would catch this
+  one (which has none) and miss any card rejected *after* it was enriched. Withdrawal detection is only as
+  good as the refresh policy.
+
   _(Found 2026-08-07 while investigating TRUST-4.)_ The forward-only lifecycle ends at **Superseded** — "a
   card is never deleted, only superseded" is a stated key invariant — and the *consuming* half is fully
   built: `app.EventFaultlineSuperseded` is registered in the store's topic map as
