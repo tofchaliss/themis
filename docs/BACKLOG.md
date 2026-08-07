@@ -27,8 +27,8 @@ per-context follow-ups below.
 ### 0. Cluster index — read this before picking work
 
 **Added 2026-08-06.** The item list below is organized by *where code lives*, which is right for finding
-things and wrong for deciding what to do. **31 open items resolve to 10 problems** (re-derived
-2026-08-07 against the code, not the text). Fix a cluster, not an
+things and wrong for deciding what to do. **13 open items resolve to 5 areas**, none of them P0 or
+P1 (re-derived 2026-08-07 against the code, not the text). Fix a cluster, not an
 item — several entries in each cluster close together, and some close for free.
 
 Ordered by priority. "Measured" means the claim rests on an observation from a running system, not a
@@ -36,29 +36,25 @@ code reading.
 
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
-| **N1** | **The AI seam's own failure mode is untestable** | **P0** | Every fake-provider test passed while the live capability was refused **three times running**, each a prompt↔grounding-gate disagreement. Those two have no compiler between them, and a fake returns whatever the test author already believed. `make check-ci` is blind to this by construction. | PLAN-4 · G-AI-2 |
-| **N2** | **Decisions waiting on a human, not on code** | **P1** | Four open items are blocked on a *choice*, not effort. They have the longest lead time and the least code, so they should be decided first and batched. | PLAN-2 (plan order vs triage order) · KN-EPSS-BAND-1 (b) (may likelihood outrank severity?) · GOV-14b (disposition watcher) · auto-publish policy |
-| **N3** | **Believed-correct, never demonstrated** | **P1** | Assurance gap, unchanged from the last audit. The version-range verdict, the four-context pipeline, and store fault paths have no end-to-end coverage; a regression in any would be silent. | TRUST-9 · SBOM→published-VEX e2e · store fault-injection · PR-gate e2e blind spot |
-| **N4** | **The read surface cannot serve a GUI** | **P1** | You still cannot reach a posture without already knowing a UUID, and there is no product/project rollup. `scripts/release-posture.sh` is the working spec: everything it does by hand is a gap here. | DASH-1 · DASH-2 · PLAN-1 · PLAN-3 |
-| **N5** | **Governance can decide, but has little to decide with** | **P2** | D15 ships exactly one auto-accept rule, so most of the T4 bar is exercised only by tests. The governed road exists and is lightly paved. | structured AI-proposal fields · accepted-risk expiry · TRUST-1 · TRUST-3 |
-| **N6** | **Enrichment coverage gaps** | **P2** | Down from P0: D5a made NVD relevance-bounded and per-CVE, which closed NVD-WATCH-1 and most of the old C1. What remains is format coverage, not blindness. | CVSS v4.0 in feed ACLs · feed-health-after-poll (residual) · KN-FIX-2 backfill (landed but inert) |
-| **N7** | **Published artifacts are not round-trippable** | **P2** | Themis cannot re-ingest its own OpenVEX, and identifies products by bare UUID. Poor for a standards-based platform whose output is the product. | VEX round-trip mismatch · OpenVEX bare-UUID product |
-| **N8** | **Observability is two-thirds wired** | **P3** | Metrics landed 2026-08-06; traces did not. Three findings that day were caused by a missing signal rather than wrong logic — and today's timeout hunt was solved by a log field, not a trace. | OTel traces + OTLP exporters |
-| **N9** | **AI harness build-out** | **P3** | Roadmap, not defects. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a component-embedding |
-| **N10** | **Papercuts** | **P3** | Individually trivial; several are one-line fixes open for weeks purely because nobody batched them. | platform/uow · GH Actions Node 20 · Communication channels · glossary · tracer-bullet reslice · CI-PROP-1 remainder |
+| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a component-embedding |
+| **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
+| **R3** | **Communication has one delivery channel, and it is a log line** | **P2** | The exactly-once / idempotent / outcome-recorded mechanics are done; what is missing is anywhere real to send an artifact. | concrete delivery channels (SMTP / Slack / webhook) |
+| **R4** | **Guarded deferrals** | **P3** | Correct today, with a TEST that fails the build the moment they stop being correct. They are on the list to be found, not to be done. | TRUST-1 (applicabilities uniformly Asserted) · TRUST-3 (no AI→Knowledge path exists yet) |
+| **R5** | **Consciously deferred, with the trade stated** | **P3** | Judged not worth doing now, in writing, so nobody re-decides them by reflex. | store fault-injection · feed-health-after-poll residual · Δ3a component-embedding design |
 
-**What changed on 2026-08-07 (why this index was re-derived):** ten items closed, so the previous
-C1–C9 no longer described the tree. **C1 dropped from P0 to N6/P2** — D5a made NVD enrichment
-per-CVE and relevance-bounded, which closed NVD-WATCH-1 outright and the feed-health premise with
-it. **C4 and C5 are gone entirely** (TRUST-4, TRUST-6, TRUST-8 all closed). **C2 shrank to N5** —
-the blast multiplier and posture-by-stance shipped. A new **N1** takes the P0 slot, because the
-class of defect that hurt most today is the one the quality gate cannot see.
+**Re-derived 2026-08-07 (third time today, and the last).** The N1–N10 clusters are gone because the
+work in them is done: **31 open → 13**, and the four P0/P1 clusters closed entirely. What remains has
+no P0 and no P1 — the highest-priority open item is roadmap.
 
-**Suggested next three moves:** (1) **N1** — add `plan_remediation` to `make e2e-llm`; it is small
-and it is the only guard against a defect class that reaches production silently. (2) **N2** —
-decide the four open questions in one sitting; they are cheap to decide and block work that is
-cheap to do. (3) **N4** — the read surface, which is the actual prerequisite for a GUI and where
-`release-posture.sh` has already written the specification.
+**The shape of the list changed, not just its length.** It used to be dominated by "we believe this
+works"; it is now dominated by "we have decided not to build this yet". Every remaining entry states
+either a capability nobody has asked for, a deferral with its trade written down, or a guard that
+fires when a deferral expires.
+
+**Suggested next move:** there is no defect to fix. The next work is a CHOICE — most likely **R1**
+(the AI harness: Δ4 evaluation loop, model escalation, budget enforcement) or **R3** (a real delivery
+channel, which is what makes a published artifact reach anyone). Both are features. Pick by what a
+user is waiting for, not by this list.
 
 **Filing rule going forward:** a new item names its cluster, and states whether its claim is **measured**
 or **read from code**. Three items in C1 were filed separately over three weeks describing one defect from
@@ -1798,7 +1794,11 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### E. Process / optional refinements
 
-- [ ] **Tracer-bullet reslice for Evidence** (optional). Fold these demoable vertical slices into
+- [x] **Tracer-bullet reslice for Evidence** (optional). ✅ **CLOSED 2026-08-07 as MOOT.** The slices
+  were a re-scaffolding aid for `phase3-evidence/tasks.md`; that change shipped (M6, 7/7, with a
+  5-scenario e2e) and is archived. Re-slicing delivered work would produce a plan for something that
+  already exists. Kept below only as the reasoning trail for how the vertical was sequenced.
+  **Original (optional) note follows.** Fold these demoable vertical slices into
   `phase3-evidence/tasks.md` if it is re-scaffolded (pre-scaffold draft archived at
   `openspec/changes/archive/2026-07-15-phase3-evidence-prescaffold/`):
   1. Kernel registry vertical (register/lookup Release) — root.
@@ -1810,8 +1810,15 @@ three angles, and two of them proposed fixes that would not have worked.
   7. `EvidenceRegistered` via outbox + relay (2).
   8. List by release (2, 4); dev-only purge (2).
 
-- [ ] **Domain glossary upkeep.** Grilling has not been maintaining a domain glossary; the real
-  `/grill-with-docs` (`grilling` + `domain-modeling`) would start doing so on future EDRs.
+- [x] **Domain glossary upkeep.** ✅ **CLOSED 2026-08-07 — recorded as a PRACTICE, not a task.**
+  It has no completion state: a glossary is maintained or it is not, and an open checkbox for
+  "keep doing a thing" is a checkbox that stays open forever and dilutes the list around it.
+  **The practice:** an EDR that introduces a term defines it in its own Glossary section
+  (`EDR-INTELLIGENCE-01` has one; it is the model). Terms that cross contexts belong in the
+  architecture book's ubiquitous-language chapter, not in a per-EDR glossary — a term with two
+  definitions in two EDRs is exactly the drift a glossary exists to prevent.
+  **Re-open only** if a concrete term is found carrying two meanings, which is a defect with a
+  name rather than a standing chore.
 
 - [x] **Extend CI with the pipeline e2e (post-M5).** ✅ **DONE** (verified 2026-08-07): `make e2e-pipeline`
   runs on **both** `pr.yml` (pre-merge gate) and `main.yml`, alongside `make check-ci`. It remains outside
@@ -1869,7 +1876,13 @@ three angles, and two of them proposed fixes that would not have worked.
   **What is NOT fixed:** the redactor itself. `internal/adapter/notify` is reference-only under the freeze,
   the mechanism is recorded below, and the defect is now simply out of the gate's scope rather than
   suppressed. Original report follows.
-- [ ] **CI-PROP-1 (original report) — The scheduled Property Tests job fails intermittently on a FROZEN-tree defect.**
+- [x] **CI-PROP-1 (original report) — The scheduled Property Tests job fails intermittently on a FROZEN-tree defect.**
+  ✅ **CLOSED 2026-08-07 via option (a).** `property-tests.yml` runs `make test-property-greenfield`,
+  scoping the gate to the go-forward tree exactly as `check-ci` already scopes coverage. The UNDERLYING
+  non-idempotence in `internal/adapter/notify` is unfixed and stays that way — the tree is frozen and
+  this is not the one sanctioned exception. What mattered was the SIGNAL: a scheduled job red a
+  quarter of the time trains everyone to ignore it, and would then hide a real greenfield property
+  failure. `make test-property` still runs the whole repo for anyone who wants it. Original report follows.
   _(Found 2026-08-07 while verifying the post-merge CI on `main`.)_ The nightly `Property Tests` workflow
   runs `make test-property RAPID_CHECKS=20000`; the same tests run at the default 1000 checks in `make
   check`, which is why this is invisible pre-merge. `TestRedactLogMessageIdempotentProperty` in
