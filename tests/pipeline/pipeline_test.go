@@ -43,6 +43,7 @@ import (
 	govinbound "github.com/themis-project/themis/internal/governance/adapters/inbound"
 	govstore "github.com/themis-project/themis/internal/governance/adapters/store"
 	govwiring "github.com/themis-project/themis/internal/governance/adapters/wiring"
+	govdomain "github.com/themis-project/themis/internal/governance/domain"
 
 	kninbound "github.com/themis-project/themis/internal/knowledge/adapters/inbound"
 	knstore "github.com/themis-project/themis/internal/knowledge/adapters/store"
@@ -324,7 +325,13 @@ func newPipeline(t *testing.T) *pipeline {
 	// Governance: consumes the Knowledge stream; serves posture + triage.
 	govPool := mustPool(t, dsnFor("governance"))
 	t.Cleanup(govPool.Close)
-	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", 0)
+	// Wired exactly as cmd/governance does, including the one shipped auto-accept policy
+	// (EDR-GOVERNANCE-01 D15) — the pipeline proof should exercise the real composition, not a
+	// permissive or empty one. It changes nothing in this scenario: the human governs an
+	// `affected` Position, and the rule only ever accepts a system-raised `not_affected` on
+	// Observed evidence.
+	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", 0,
+		govdomain.DefaultMitigatedWeight, govdomain.AutoAcceptObservedNotAffectedPolicy())
 	governanceSrv := httptest.NewServer(mount(gov.Handler))
 	t.Cleanup(governanceSrv.Close)
 	govReader := govinbound.Subscription.NewReader(busPool, log, govstore.NewInboxConsumer(govPool, gov.Consumer))

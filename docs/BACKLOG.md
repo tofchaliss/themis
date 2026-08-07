@@ -116,12 +116,18 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ---
 
-### B. Full-pipeline verification (blocked on M5)
+### B. Full-pipeline verification
 
-- [ ] **SBOM → published-VEX pipeline e2e** — one wired end-to-end test across all four contexts. All
-  contexts + cross-context seams are built and each seam is contract-tested per-context (inbound consumer
-  tests + read-API-client httptest drive the exact wire JSON). The single wired run **awaits M5** (the bus).
-  See the staged testing table in `PHASE3-STATUS.md`.
+- [x] **SBOM → published-VEX pipeline e2e** ✅ **DONE** (M5 landed; verified still true 2026-08-07).
+  `tests/pipeline/pipeline_test.go` `TestPipeline_SBOMToPublishedVEX` is a black-box run across **five**
+  services — Registry → Evidence → Knowledge → Governance → Communication — over the **real** event bus
+  (database-per-context + the `bus` DB), asserting only through public HTTP APIs and never reading a
+  context's tables. It registers a release, uploads an SBOM, lets correlation open a Finding, has a human
+  govern an `affected` Position, triggers an OpenVEX publication, and asserts the rendered artifact names
+  the CVE. **CI runs it on both `pr.yml` and `main.yml`** (`make e2e-pipeline`), so it is a merge gate, not
+  an optional target. As of 2026-08-07 it also wires the shipped auto-accept policy (D15), so the proof
+  exercises the real composition rather than an empty one. _(This entry sat open claiming "awaits M5" long
+  after M5 landed — see the C3 note on stale assurance items.)_
 
 ---
 
@@ -735,6 +741,21 @@ three angles, and two of them proposed fixes that would not have worked.
   arrives with ranges attached (OSV), the answer may legitimately be zero.
   **Where it plugs in:** `tests/pipeline/`, `internal/governance/app/service.go` (telemetry counter).
   **Dep:** none. **Scope:** MEDIUM — the code is believed correct, the assurance is missing.
+  **✅ CORRECTED + PARTLY COVERED 2026-08-07.** The "nothing covers it" claim was **wrong**, and filing it
+  without checking was the error: `internal/governance/app/service_trust_test.go` already had six
+  `reactToVersionRange` tests (raises, AI-disabled, defers-when-in-range, idempotent, and two error paths).
+  Added `service_shipped_policy_test.go`, which closes the part that genuinely was missing — every existing
+  policy test built a **floor-less** `NewPolicyRule`, so nothing exercised the rule a real deployment runs.
+  It drives `domain.AutoAcceptObservedNotAffectedPolicy()` (D15) through the two system paths side by side:
+  the version-range verdict (Observed) auto-accepts to a Position whose **actor is the policy**, while a
+  vendor `not_affected` (Asserted) — same stance, same system proposer — is refused and left open for a
+  human. Same stance, same proposer, different evidence, opposite outcomes: the sharpest demonstration
+  available that trust decides, not the producing component (T1/T2). Also asserts `affected` never
+  auto-accepts. **What is still genuinely open:** the *production reachability* question — no deployment has
+  yet produced a `range:` proposal, because correlation's own gate means a Finding exists only for a
+  component that was in range at match time. The unit tests prove the code; they cannot prove the wave
+  occurs in the field. Instrumenting how many `range:` proposals real deployments raise remains the open
+  work, and the answer may legitimately be zero for OSV-only estates.
 
 - [ ] **NVD-WATCH-1 — The modified-since watch silently examines ~5% of its window and reports success.**
   _(Found on a live VM during the `phase3-trust-model` verification run, 2026-08-06 — a pre-existing feed
@@ -847,14 +868,24 @@ three angles, and two of them proposed fixes that would not have worked.
 - [ ] **Domain glossary upkeep.** Grilling has not been maintaining a domain glossary; the real
   `/grill-with-docs` (`grilling` + `domain-modeling`) would start doing so on future EDRs.
 
-- [ ] **Extend CI with the pipeline e2e (post-M5).** CI is **live on `main`** (PR #53):
+- [x] **Extend CI with the pipeline e2e (post-M5).** ✅ **DONE** (verified 2026-08-07): `make e2e-pipeline`
+  runs on **both** `pr.yml` (pre-merge gate) and `main.yml`, alongside `make check-ci`. It remains outside
+  `make check-ci` deliberately, as planned. Original note follows. CI is **live on `main`** (PR #53):
   `.github/workflows/{pr,main}.yml` run a greenfield-scoped **`make check-ci`** (+ `make e2e-evidence` on
   `main`). When M5 lands `make e2e-pipeline` (`phase3-event-infrastructure` tasks 9.1 / 10.4), add an
   `e2e-pipeline` step to `main.yml` (mirroring `e2e-evidence`), and to `pr.yml` if pre-merge pipeline proof is
   wanted. Kept **out of `make check-ci`** deliberately (e2e is slow; consistent with `e2e-evidence`). Optional:
   a `make e2e` / `make ci` aggregate target.
 
-- [ ] **Close the PR-gate e2e blind spot (LOW — revisit post-M5).** `make e2e-evidence` runs only on the
+- [ ] **Close the PR-gate e2e blind spot (LOW — mostly closed 2026-08-07).** **Update:** `pr.yml` now runs
+  `make e2e-pipeline`, so the *pipeline* e2e is a pre-merge gate and the original failure mode (a change
+  that breaks e2e merging green) is largely closed. Confirmed live the same day: the D14/D15 `Wire`
+  signature changes broke `tests/pipeline` compilation, which `make check-ci` **cannot** see because the
+  file carries `//go:build e2e` — `go build ./...` skips tagged files entirely. The PR gate would have
+  caught it. **What remains:** `make e2e-evidence` still runs only on `main.yml`, so the Evidence-specific
+  e2e keeps the old blind spot. Also worth a cheap guard: a `go vet -tags=e2e ./tests/...` step (or folding
+  the tag into the lint pass) would surface a *compilation* break in seconds instead of after a full
+  embedded-Postgres e2e run. Original note follows. `make e2e-evidence` runs only on the
   post-merge `main.yml`, not on `pr.yml` (it carries the `e2e` build tag, excluded from `check`/`check-ci`), so
   a change that breaks e2e merges **green** and only reddens `main` afterward. This bit us: PR #55 renamed
   `evidence_outbox.evidence_id` → `subject` (M5 migration `000002`) without updating the e2e `outboxCount`
