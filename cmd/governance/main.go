@@ -36,18 +36,24 @@ import (
 // config is read from the environment. Every option is documented here (the
 // self-documented-config convention); there is no separate config reference.
 type config struct {
-	dsn             string  // THEMIS_DATABASE_DSN — Postgres DSN (required).
-	addr            string  // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
-	migrate         bool    // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
-	devPurge        bool    // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
-	migrationsPath  string  // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
-	aiEnabled       bool    // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
-	intelligenceURL string  // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
-	registryURL     string  // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
-	knowledgeURL    string  // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
-	blastRadiusCap  int     // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
-	autoAccept      string  // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
-	mitigatedWeight float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
+	dsn             string // THEMIS_DATABASE_DSN — Postgres DSN (required).
+	addr            string // THEMIS_GOVERNANCE_ADDR — listen address (default ":8083").
+	migrate         bool   // THEMIS_GOVERNANCE_MIGRATE=1 — apply the governance migrations on startup.
+	devPurge        bool   // THEMIS_GOVERNANCE_DEV_PURGE=1 — expose DELETE /dev/governance (dev only; never in production).
+	migrationsPath  string // THEMIS_GOVERNANCE_MIGRATIONS — path to the governance migrations dir.
+	aiEnabled       bool   // THEMIS_GOVERNANCE_AI_ENABLED=1 (and THEMIS_INTELLIGENCE_ENABLED!=0) — wire the real Intelligence client (D13 disable gate).
+	intelligenceURL string // THEMIS_INTELLIGENCE_URL — Intelligence Gateway base URL (when AI enabled).
+	// THEMIS_INTELLIGENCE_TIMEOUT — how long Governance waits for a recommendation (Go duration,
+	// default 60s). It must be >= the Gateway's own per-invocation budget (THEMIS_LLM_TIMEOUT on
+	// the Intelligence node), because whichever deadline is SHORTER decides. When this one fires
+	// first, Governance hangs up, the Gateway sees its request context cancelled mid-provider-call
+	// and reports `provider_error` — so a caller-side timeout is misread as an Intelligence fault.
+	intelligenceTimeout time.Duration
+	registryURL         string  // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
+	knowledgeURL        string  // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
+	blastRadiusCap      int     // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
+	autoAccept          string  // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
+	mitigatedWeight     float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -59,18 +65,19 @@ type config struct {
 
 func loadConfig() config {
 	return config{
-		dsn:             os.Getenv("THEMIS_DATABASE_DSN"),
-		addr:            envDefault("THEMIS_GOVERNANCE_ADDR", ":8083"),
-		migrate:         os.Getenv("THEMIS_GOVERNANCE_MIGRATE") == "1",
-		devPurge:        os.Getenv("THEMIS_GOVERNANCE_DEV_PURGE") == "1",
-		migrationsPath:  envDefault("THEMIS_GOVERNANCE_MIGRATIONS", "internal/governance/adapters/store/migrations"),
-		aiEnabled:       os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
-		intelligenceURL: envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
-		registryURL:     envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
-		knowledgeURL:    envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
-		blastRadiusCap:  envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
-		autoAccept:      envDefault("THEMIS_GOVERNANCE_AUTOACCEPT", autoAcceptObservedNotAffected),
-		mitigatedWeight: envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
+		dsn:                 os.Getenv("THEMIS_DATABASE_DSN"),
+		addr:                envDefault("THEMIS_GOVERNANCE_ADDR", ":8083"),
+		migrate:             os.Getenv("THEMIS_GOVERNANCE_MIGRATE") == "1",
+		devPurge:            os.Getenv("THEMIS_GOVERNANCE_DEV_PURGE") == "1",
+		migrationsPath:      envDefault("THEMIS_GOVERNANCE_MIGRATIONS", "internal/governance/adapters/store/migrations"),
+		aiEnabled:           os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
+		intelligenceURL:     envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
+		intelligenceTimeout: envDurationDefault("THEMIS_INTELLIGENCE_TIMEOUT", 60*time.Second),
+		registryURL:         envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
+		knowledgeURL:        envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
+		blastRadiusCap:      envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
+		autoAccept:          envDefault("THEMIS_GOVERNANCE_AUTOACCEPT", autoAcceptObservedNotAffected),
+		mitigatedWeight:     envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -114,7 +121,7 @@ func main() {
 	// the no-op advisor disables it. The pipeline is correct either way.
 	var advisor app.PositionAdvisor = intelligence.NoopAdvisor{}
 	if cfg.aiEnabled {
-		advisor = intelligence.NewClient(cfg.intelligenceURL, &http.Client{Timeout: 60 * time.Second})
+		advisor = intelligence.NewClient(cfg.intelligenceURL, &http.Client{Timeout: cfg.intelligenceTimeout})
 		logger.Info("AI enrichment enabled", observability.String("intelligence_url", cfg.intelligenceURL))
 	}
 
@@ -242,6 +249,16 @@ func applyMigrations(dsn, path string) error {
 func envDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// envDurationDefault reads a Go duration env var, falling back to def when unset or unparseable.
+func envDurationDefault(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return def
 }

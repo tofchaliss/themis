@@ -1114,6 +1114,14 @@ three angles, and two of them proposed fixes that would not have worked.
   builds the HTTP client. Guarded by `TestWireHonoursTheConfiguredProviderTimeout` — verified to FAIL
   (2.00s elapsed vs a 150ms configured deadline) with the field unwired.
   **Surfaced by:** the `--ai` path of `scripts/release-posture.sh` returning 204 for every Finding.
+  **INSUFFICIENT — a THIRD deadline was found on re-test (same session).** With both the HTTP client
+  and the Gateway deadline at 300s, calls STILL died at 59.994s / 59.992s. `cmd/governance/main.go`
+  built the Intelligence client with a **hard-coded `60 * time.Second` and no env var at all**. When
+  it fires, Governance cancels the request, the Gateway sees its context cancelled mid-provider-call,
+  and logs `provider_error` — so the Intelligence log line was Intelligence *observing Governance
+  hang up*, not an Intelligence fault. Added `THEMIS_INTELLIGENCE_TIMEOUT` (default 60s, unchanged
+  behaviour) and documented in `deploy/node.env.example` that **three** deadlines govern one
+  recommendation and the shortest decides — raising one alone changes nothing.
   **Left open (see AI-204-1):** the 204 collapses *disabled*, *unreachable* and *declined* into one
   status, which is why this looked like the AI declining rather than a timeout.
 
