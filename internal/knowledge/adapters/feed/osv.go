@@ -71,10 +71,25 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 	}
 
 	vector := ""
-	if len(rec.Severity) > 0 {
-		vector = rec.Severity[0].Score
+	// PICK the best vector rather than taking the first. OSV lists CVSS_V2, CVSS_V3 and CVSS_V4
+	// entries side by side, so `Severity[0]` let whichever the feed happened to order first decide
+	// the enterprise's severity — a v2 vector silently outranking a v3.1 one.
+	vectors := make([]string, 0, len(rec.Severity))
+	for _, sev := range rec.Severity {
+		vectors = append(vectors, sev.Score) // OSV's `score` field holds the VECTOR string
 	}
-	cvss, err := value.NewCVSS(rec.DatabaseSpecific.CVSSScore, vector)
+	vector = value.PreferredCVSSVector(vectors)
+
+	// DERIVE the base score from the vector when OSV publishes no number. OSV carries the vector
+	// in `severity[]` and the number only in a database-specific extension, so a record with a
+	// vector and no extension landed severity=unknown / score=0 — and an unknown severity scores
+	// zero, which sorts a real vulnerability to the bottom of a triage queue. Deriving from the
+	// published formula is reproducible evidence, not a guess.
+	score := rec.DatabaseSpecific.CVSSScore
+	if score == 0 {
+		score = value.BaseScoreFromVector(vector)
+	}
+	cvss, err := value.NewCVSS(score, vector)
 	if err != nil {
 		return nil, fmt.Errorf("osv: %w", err)
 	}

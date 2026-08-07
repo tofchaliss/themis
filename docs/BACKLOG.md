@@ -520,7 +520,26 @@ three angles, and two of them proposed fixes that would not have worked.
   targeted per-card enrichment trigger (e.g. on `FaultlineCreated`, or a backfill pass over cards missing an
   NVD proposal). Plugs into `internal/knowledge/adapters/feed` + a new backfill worker. Surfaced 2026-07-30.
 
-- [ ] **Knowledge — CVSS v4.0 in feed ACLs + Reconcile.** The feed ACLs and `Reconcile` headline-severity
+- [x] **Knowledge — CVSS v4.0 in feed ACLs + Reconcile.** ✅ **CLOSED 2026-08-07 for OSV; NVD was
+  already done.** NVD parses `cvssMetricV40` (the v0.3.x D-NVD-2 fix, carried forward). The real gap
+  was OSV, and it was TWO defects in one line:
+  1. `Severity[0]` let whichever vector the feed ordered FIRST decide the enterprise's severity. OSV
+     lists CVSS_V2, CVSS_V3 and CVSS_V4 side by side, so a **v2 vector could silently outrank a
+     v3.1 one** — a downgrade of the evidence with no trace. `value.PreferredCVSSVector` now ranks
+     them by what this system can DO with them (v3.1 → v3.0 → v4.0 → v2).
+  2. The numeric score came only from OSV's database-specific extension, so a record with a vector
+     and no extension landed `severity=unknown` / `score=0` — and unknown scores zero, which sorts a
+     real vulnerability to the BOTTOM of a triage queue. `value.BaseScoreFromVector` derives the
+     **v3.x** base score from the vector per the published formula; a source's own published score
+     still wins, because deriving over it would replace a source's verdict with our arithmetic.
+  **A third defect fell out of it:** `CVSSVectorVersion` treated ANY prefix-less non-empty string as
+  a v2 vector, so `"garbage"` was selected as a vector. Same shape as RANGE-PARSE-1 — a recogniser
+  loose enough to accept anything turns unparseable input into a value the system acts on. It now
+  requires v2's `Au:` discriminator.
+  **Still open:** v4.0 SCORING. A v4.0-only record keeps its vector and scores 0 rather than having
+  a number invented for it; the v4 formula is materially more complex than v3's and deserves its own
+  change. Ranking v4 below v3 in `PreferredCVSSVector` is a CAPABILITY ordering that should be
+  revisited when it lands. The feed ACLs and `Reconcile` headline-severity
   selection must parse **CVSS 4.0** (NVD `cvssMetricV40`; OSV v4.0 vectors), else recent CVEs land
   `severity=unknown` / `risk=0` — the go-forward equivalent of the v0.3.x **D-NVD-2** gap (root cause + fix in
   **Part 2 — D-NVD-2** below). Fold v4.0 into the source precedence when the real feed clients
