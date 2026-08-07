@@ -277,12 +277,7 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 func toFindingView(f domain.Finding) gen.FindingView {
 	id, rel, fl, cve, stage := string(f.ID()), f.ReleaseID(), f.FaultlineID(), f.CVE(), string(f.Stage())
 
-	comps := make([]gen.Component, 0, len(f.Components()))
-	for _, c := range f.Components() {
-		comps = append(comps, gen.Component{
-			Purl: strptr(c.PURL), Name: strptr(c.Name), Version: strptr(c.Version), Ecosystem: strptr(c.Ecosystem),
-		})
-	}
+	comps := toComponents(f.Components())
 	positions := make([]gen.PositionView, 0, len(f.Positions()))
 	for _, p := range f.Positions() {
 		positions = append(positions, toPositionView(p))
@@ -333,6 +328,19 @@ func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
 	}
 }
 
+// toComponents maps matched components to the wire shape, carrying `source` — the only key that
+// joins a component to its published fix (AI-GROUND-1).
+func toComponents(in []domain.MatchedComponent) []gen.Component {
+	out := make([]gen.Component, 0, len(in))
+	for _, c := range in {
+		out = append(out, gen.Component{
+			Purl: strptr(c.PURL), Name: strptr(c.Name), Version: strptr(c.Version),
+			Ecosystem: strptr(c.Ecosystem), Source: strptr(c.Source),
+		})
+	}
+	return out
+}
+
 func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	has := e.HasPosition
 	base := e.BaseScore
@@ -350,6 +358,10 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		BlastMultiplier:   &mult,
 		EffectivePriority: &eff,
 		ResidualPriority:  &res,
+	}
+	if len(e.Components) > 0 {
+		comps := toComponents(e.Components)
+		out.Components = &comps
 	}
 	// Omitted when the Position rests on Observed evidence — an absent reservation reads as
 	// "nothing to caveat", which is exactly right, and keeps the common row unchanged.

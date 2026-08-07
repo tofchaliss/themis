@@ -15,6 +15,9 @@
 #   scripts/release-posture.sh <release-id> [--top N] [--ai N] [--all]
 #
 #   --top N   how many rows to show (default 20)
+#   --plan    ask the Intelligence Gateway for a release-scoped remediation plan: what to upgrade,
+#             in what order, and what each step closes. ADVISORY and ephemeral (EDR-TRUST-01 T7) —
+#             it recommends no stance on any Finding, so nothing enters Governance.
 #   --ai N    ask the Intelligence Gateway to recommend a position for the top N undecided
 #             Findings (default 0 = off). SLOW: a grounded recommendation on a local model takes
 #             ~30-60s each, so start with 1 or 2.
@@ -27,12 +30,15 @@ REL="${1:-}"
 [ -n "$REL" ] || { echo "usage: $0 <release-id> [--top N] [--ai N] [--all]" >&2; exit 2; }
 shift
 
-TOP=20; AI=0; SHOW_ALL=0; FIXWIDTH=40
+TOP=20; AI=0; SHOW_ALL=0; FIXWIDTH=40; PLAN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --top) TOP="$2"; shift 2 ;;
     --ai)  AI="$2";  shift 2 ;;
     --all) SHOW_ALL=1; shift ;;
+    # Ask the Gateway for a release-scoped remediation PLAN (plan_remediation@v1). Advisory and
+    # ephemeral: it proposes no stance on any Finding, so nothing enters Governance.
+    --plan) PLAN=1; shift ;;
     # --fix-width 0 disables clipping, for piping into a file or a wide terminal.
     --fix-width) FIXWIDTH="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -164,6 +170,31 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
       "$rank" "$band" "$cve" "$resid" "$effect" "$blast" "$kev" "$epss" "$comp" "$fix" "$stance" "$reservation"
   done <<< "$rows"
 } | column -t -s $'\t'
+
+# ── Release remediation plan (optional, advisory) ─────────────────────────────────────────────
+# An INFORMATION capability (EDR-TRUST-01 T7): the answer is rendered for a human and discarded.
+# It proposes no stance, so there is nothing to accept or reject and nothing reaches Governance.
+#
+# The grouping — "these nine CVEs share one module upgrade" — is computed by Governance's posture
+# projection before the model is called. The model is asked only for the part needing judgement:
+# sequencing and trade-offs.
+if [ "$PLAN" = "1" ]; then
+  printf '\n\033[1mREMEDIATION PLAN\033[0m — advisory; recommends no stance and enters no record.\n\n'
+  INTELLIGENCE="${THEMIS_INTELLIGENCE_URL:-http://localhost:8086}"
+  body=$(jq -nc --arg r "$REL" '{subject:{type:"release",ids:[$r]}}')
+  rm -f "$hdrfile"
+  out=$(post "$INTELLIGENCE/api/v1/capabilities/plan_remediation/invoke" \
+        -H 'Content-Type: application/json' -d "$body" -D "$hdrfile" -w '\n%{http_code}')
+  code=$(echo "$out" | tail -1)
+  case "$code" in
+    200) echo "$out" | head -n -1 | jq -r '.information // "(no plan text returned)"' | fold -s -w 100 ;;
+    204)
+      why=$(grep -i '^X-Themis-AI-Reason:' "$hdrfile" 2>/dev/null | sed 's/^[^:]*: *//; s/\r$//')
+      printf 'no plan: %s\n' "${why:-reason not reported}" ;;
+    *) printf 'no plan: HTTP %s\n' "$code" ;;
+  esac
+  printf '\n'
+fi
 
 # ── AI mitigation assistance (optional, advisory) ─────────────────────────────────────────────
 # The Gateway PROPOSES; it never decides (EDR-TRUST-01 T4). Anything it returns is recorded as an

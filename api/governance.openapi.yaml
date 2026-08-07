@@ -374,6 +374,13 @@ components:
           type: string
         ecosystem:
           type: string
+        source:
+          type: string
+          description: >-
+            The upstream SOURCE-package name for distro components (python3-pyyaml -> PyYAML); empty
+            for non-distro. It is the only key that joins a component to its published fix, because
+            feeds attribute fixes to the source package while a PURL carries the binary one, and
+            neither is derivable from the other (AI-GROUND-1).
     FindingAssessment:
       type: object
       properties:
@@ -438,6 +445,15 @@ components:
           type: string
         has_position:
           type: boolean
+        components:
+          type: array
+          description: >-
+            The release components this Finding was opened for, each carrying the SOURCE package a
+            fix is published under. Present on the rollup so a release-scoped consumer can group by
+            "what do I upgrade" without one read per Finding (EDR-TRUST-01 T10 — the projection is
+            a reusable business view, and the grouping is a GROUP BY, not reasoning).
+          items:
+            $ref: '#/components/schemas/Component'
         base_score:
           type: integer
           description: CVE-intrinsic composite priority (0-100), from Knowledge (C6).

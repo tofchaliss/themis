@@ -37,6 +37,9 @@ const (
 	NeedFinding ContextNeed = "finding"
 	// NeedFaultline is the Finding's Faultline enrichment, read from Knowledge's read API.
 	NeedFaultline ContextNeed = "faultline"
+	// NeedReleasePosture is the release-scoped Domain Projection owned by Governance: every
+	// Finding on a Release with its priority and components (T10).
+	NeedReleasePosture ContextNeed = "release_posture"
 )
 
 // OutputClass is what a capability produces, and it decides the entire path the output takes

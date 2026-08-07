@@ -68,6 +68,10 @@ func (f fakeProjection) GetAssessment(context.Context, string) (domain.FindingAs
 	return f.proj, f.err
 }
 
+func (f fakeProjection) GetReleasePosture(context.Context, string) (domain.ReleasePosture, error) {
+	return domain.ReleasePosture{}, nil
+}
+
 func groundedProjection() fakeProjection {
 	return fakeProjection{proj: domain.FindingAssessment{
 		Finding:   domain.FindingView{ID: "F1", FaultlineID: "FL1"},

@@ -46,6 +46,10 @@ func (s stubProjectionReader) GetAssessment(context.Context, string) (domain.Fin
 	return s.p, nil
 }
 
+func (s stubProjectionReader) GetReleasePosture(context.Context, string) (domain.ReleasePosture, error) {
+	return domain.ReleasePosture{}, nil
+}
+
 func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Embedder) *app.Gateway {
 	t.Helper()
 	pr, err := engine.NewPromptRenderer()

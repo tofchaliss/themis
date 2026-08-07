@@ -371,6 +371,75 @@ unchanged in behaviour). Note the **100% coverage tier** on `domain/`: `Subject`
 the rewritten `Grounds()` need complete branch coverage or `make check` fails. On grill closure, scaffold
 `openspec/changes/phase3-intelligence-d3c/`.
 
+## Revision 6 (2026-08-07) — the first release-scoped capability: `plan_remediation@v1`
+
+Δ3c's surface (absorbed into EDR-TRUST-01 T7–T10) existed but nothing used it: the catalog held one
+capability, Finding-scoped and Decision-class. This revision ships the Release half.
+
+### The capability
+
+| | |
+| --- | --- |
+| **ID** | `plan_remediation@v1` |
+| **Selection Type** | `release`, cardinality **1..1** (T9 — the bound doubles as the fan-out guard) |
+| **Output class** | **Information** (T7) — ephemeral, never enterprise truth, nothing to accept |
+| **Projection** | Governance's `ReleasePosture`, enriched with each Finding's components |
+| **Plan** | LLM only — no Knowledge step |
+
+### Why Information and not Decision
+
+A plan proposes no stance on any Finding, so there is nothing for Governance to govern. This is what
+makes a release-scoped capability **safe to add**: the worst outcome of a wrong plan is a human
+disagreeing with it, never a vulnerability silently suppressed. `recommend_position` remains the only
+path to enterprise truth, and it remains Finding-scoped and per-item on purpose.
+
+### Why the grouping is NOT the model's job
+
+`ReleasePosture.PlanActions` collapses outstanding Findings into upgrade actions **deterministically**,
+before the prompt is rendered. On a measured release, 231 Findings reduce to ~12 package upgrades
+because one module-stream rebuild closes nine CVEs. Asking a model to rediscover that from 231 rows
+would be slow, expensive and non-reproducible — grouping is a `GROUP BY`, not reasoning (T10). The
+model is asked only for what needs judgement: sequencing, trade-offs, and what to say about actions
+with no clean fix.
+
+The actions are a **shaping** of the projection, not a second source (T10 rule 2): every field is
+reduced from what the projection contained, and each action carries its `FindingIDs` so every claim
+is traceable back (rule 3). Grounding still anchors to the **projection**, never to the shaped view
+(rule 4) — validating against its own transformation would let a buggy grouping confirm itself.
+
+### No Knowledge (precedent) step
+
+Semantic precedent is scoped to past **Positions on Findings**. A release plan is not a position, so
+retrieval would spend embedding calls on grounding that does not apply.
+
+### Two defects this surfaced and closed
+
+1. **The Information path never ran Grounding Verification.** It returned as soon as the schema
+   validated. T8 makes grounding the **only** gate on that class — no Governance stage follows it —
+   so the one load-bearing check was unexecuted. `Validator.ValidateGrounding` now exists as a
+   standalone gate and both output classes run it.
+2. **A successful Information Response was returned as `204`.** The handler treated
+   "no Proposal" as "no content", discarding the answer at the last hop — the same class of loss as
+   AI-204-1 one layer up. It is now `200` with an `InformationResponse` body.
+
+### Projection change (Governance)
+
+`PostureEntry` gains `components` (carrying `source`, per AI-GROUND-1), filled by ONE extra query per
+release rather than one per row. It is a reusable business view — the same join serves a dashboard,
+a report and the runtime — which is what T10 requires. **Deliberately not included:** the *fix
+version* per component, which would need a new event field, a migration and a stamping path. The plan
+therefore names the package to upgrade and what it closes; exact versions stay one drill-down away.
+
+### Deferred
+
+- **Fix versions on the posture entry** — makes the plan self-contained; see the note above.
+- **The severity band on the posture entry** (DASH-2) — would let a plan speak in bands rather than
+  raw priorities.
+- **Multi-release plans** — a different projection and a different capability, not this one invoked
+  repeatedly (T9).
+
+---
+
 ## Decisions
 
 ### D1 — Intelligence is a supporting Gateway (owns no truth), beside the pipeline, the exclusive provider entry

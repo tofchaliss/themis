@@ -12,6 +12,22 @@ import (
 //go:embed templates/recommend_position.tmpl
 var recommendPositionTmpl string
 
+//go:embed templates/plan_remediation.tmpl
+var planRemediationTmpl string
+
+// promptFuncs are the few helpers the templates need. Deliberately tiny: a prompt template is an
+// adapter asset, and logic that grows here is logic that has escaped the domain — the grouping a
+// plan needs lives in ReleasePosture.PlanActions, not in a template function.
+var promptFuncs = template.FuncMap{
+	"add1": func(i int) int { return i + 1 },
+	"join": func(v []string) string {
+		if len(v) == 0 {
+			return "(none)"
+		}
+		return strings.Join(v, ", ")
+	},
+}
+
 // PromptRenderer builds provider-facing prompts from the assembled context (D6). The
 // templates are Gateway-owned adapter assets — no prompt strings live in the domain
 // or app rings. It implements app.PromptRenderer.
@@ -19,10 +35,12 @@ type PromptRenderer struct {
 	templates map[string]*template.Template
 }
 
-// NewPromptRenderer builds the Δ1 renderer with the embedded recommend_position
-// template.
+// NewPromptRenderer builds the renderer with the embedded capability templates.
 func NewPromptRenderer() (*PromptRenderer, error) {
-	return newRenderer(map[string]string{"recommend_position": recommendPositionTmpl})
+	return newRenderer(map[string]string{
+		"recommend_position": recommendPositionTmpl,
+		"plan_remediation":   planRemediationTmpl,
+	})
 }
 
 // newRenderer parses the given capability-id -> template-text map (unexported so
@@ -30,7 +48,7 @@ func NewPromptRenderer() (*PromptRenderer, error) {
 func newRenderer(src map[string]string) (*PromptRenderer, error) {
 	tmpls := make(map[string]*template.Template, len(src))
 	for id, text := range src {
-		t, err := template.New(id).Parse(text)
+		t, err := template.New(id).Funcs(promptFuncs).Parse(text)
 		if err != nil {
 			return nil, fmt.Errorf("parse prompt template %q: %w", id, err)
 		}

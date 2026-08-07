@@ -57,6 +57,15 @@ type PostureEntry struct {
 	// with the evidence it describes. Surfacing it here is part of the decision, not a
 	// refinement — a reservation nobody computes is a reservation nobody sees.
 	Reservation value.TrustClass
+	// Components are the release components this Finding was opened for, carrying the source
+	// package a fix is published under (AI-GROUND-1).
+	//
+	// They are on the ROLLUP, not only on the per-Finding read, because "what do I upgrade to
+	// close these 231 Findings" is a release-scoped question and answering it one Finding at a
+	// time is 231 round-trips. The same join serves a dashboard, a report and the AI runtime —
+	// it is a reusable business view, which is what EDR-TRUST-01 T10 requires of a Domain
+	// Projection, and it is why the grouping happens here as a GROUP BY rather than in a model.
+	Components []domain.MatchedComponent
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads

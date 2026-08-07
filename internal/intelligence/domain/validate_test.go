@@ -181,3 +181,48 @@ func TestValidateBusiness_RefusesARefWithNoIdentifier(t *testing.T) {
 		t.Fatal("a ref naming no identifier must be refused")
 	}
 }
+
+// ValidateGrounding is Grounding Verification standing alone, because an Information Response has
+// no Governance stage behind it — this is its ONLY gate (T8), and it therefore must be callable
+// without dragging in the stance/confidence checks that only a Decision Proposal has.
+func TestValidateGrounding(t *testing.T) {
+	v := mustValidator(t)
+	ac := realisticContext()
+	grounded := RawOutput{Evidence: []RawEvidence{{Kind: "cve", Ref: "CVE-2025-14087"}}}
+	if err := v.ValidateGrounding(grounded, ac); err != nil {
+		t.Errorf("a grounded citation must pass: %v", err)
+	}
+	// No evidence at all is not a grounding failure — there is nothing ungrounded about
+	// citing nothing. Whether a capability REQUIRES citations is its schema's business.
+	if err := v.ValidateGrounding(RawOutput{}, ac); err != nil {
+		t.Errorf("no citations should pass grounding: %v", err)
+	}
+	bad := RawOutput{Evidence: []RawEvidence{{Kind: "cve", Ref: "CVE-9999-9999"}}}
+	if err := v.ValidateGrounding(bad, ac); !errors.Is(err, ErrBusinessInvalid) {
+		t.Errorf("ungrounded citation → ErrBusinessInvalid, got %v", err)
+	}
+}
+
+// AssembledContext.Grounds routes to whichever projection the capability's Selection Type
+// produced. Getting this wrong would ground a release plan against an empty Finding projection —
+// which refuses everything — or, worse, the reverse.
+func TestAssembledContext_GroundsRoutesToTheRightProjection(t *testing.T) {
+	release := AssembledContext{Release: ReleasePosture{
+		ReleaseID: "rel-1",
+		Entries:   []PostureEntry{{FindingID: "f1", CVE: "CVE-1"}},
+	}}
+	if !release.Grounds("CVE-1") || !release.Grounds("rel-1") {
+		t.Error("a release context must ground against the release posture")
+	}
+	if release.Grounds("48f6d9fd-dee5-4edd-b04a-59edcfb0ddfc") {
+		t.Error("a release context must not ground against a Finding projection it does not hold")
+	}
+
+	finding := groundedContext()
+	if !finding.Grounds("FL1") {
+		t.Error("a finding context must ground against the FindingAssessment")
+	}
+	if finding.Grounds("rel-1") {
+		t.Error("a finding context must not ground against a release it does not hold")
+	}
+}

@@ -30,3 +30,32 @@ const recommendPositionSchema = `{
     "reasoning": { "type": "string" }
   }
 }`
+
+// planRemediationSchema is the JSON Schema for plan_remediation@v1's raw model output.
+//
+// It carries no stance and no confidence: an Information Response makes no claim that aspires to
+// become enterprise truth (T7), so there is nothing to be confident ABOUT and nothing for
+// Governance to accept. What it must carry is `evidence` — the citations Grounding Verification
+// checks, which on this path is the only gate the output passes through (T8).
+const planRemediationSchema = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject_id", "evidence", "reasoning"],
+  "properties": {
+    "subject_id": { "type": "string", "minLength": 1 },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "ref": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reasoning": { "type": "string", "minLength": 1 }
+  }
+}`

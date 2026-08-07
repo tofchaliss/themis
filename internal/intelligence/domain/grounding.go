@@ -68,6 +68,9 @@ type PrecedentPosition struct {
 // are excluded from Grounds by construction.
 type AssembledContext struct {
 	Projection FindingAssessment
+	// Release is the authoritative projection when the subject is a Release (T9/T10). Exactly
+	// one of Projection / Release is populated, decided by the capability's Selection Type.
+	Release    ReleasePosture
 	Precedents []PrecedentPosition
 }
 
@@ -79,4 +82,9 @@ func (c AssembledContext) Faultline() FaultlineView { return c.Projection.Knowle
 
 // Grounds delegates to the authoritative projection (T10 rule 4). A shaped view can never
 // widen what counts as grounded — that is the whole point of anchoring to authority.
-func (c AssembledContext) Grounds(ref string) bool { return c.Projection.Grounds(ref) }
+func (c AssembledContext) Grounds(ref string) bool {
+	if c.Release.ReleaseID != "" {
+		return c.Release.Grounds(ref)
+	}
+	return c.Projection.Grounds(ref)
+}

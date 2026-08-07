@@ -185,13 +185,15 @@ func (g *Gateway) Invoke(
 		oc.Reason = ReasonSelectionMismatch
 		return domain.Proposal{}, oc
 	}
-	subjectFindingID := sel.First()
+	// The subject id, whatever its Selection Type — a Finding for recommend_position, a Release
+	// for a release-scoped capability (T9).
+	subjectID := sel.First()
 	oc.OutputClass = capb.Output
 	validator := g.validators[capabilityID]
 
 	// Pre-invocation authorization (C7): reject BEFORE any grounding or provider call.
 	if g.authorizer != nil {
-		if aerr := g.authorizer.Authorize(ctx, capabilityID, subjectFindingID); aerr != nil {
+		if aerr := g.authorizer.Authorize(ctx, capabilityID, subjectID); aerr != nil {
 			oc.Reason = ReasonUnauthorized
 			return domain.Proposal{}, oc
 		}
@@ -205,15 +207,39 @@ func (g *Gateway) Invoke(
 		defer cancel()
 	}
 
-	// Receive the Domain Projection — one read, no composition (T10).
-	proj, err := g.projection.GetAssessment(ctx, subjectFindingID)
-	if err != nil || proj.Finding.ID == "" {
-		oc.Reason = ReasonNoGrounding
-		return domain.Proposal{}, oc
-	}
-	ac := domain.AssembledContext{Projection: proj}
-
 	start := g.now()
+
+	// Receive the Domain Projection — one read, no composition (T10). WHICH projection is
+	// decided by the capability's Selection Type, not by the runtime knowing any topology: it
+	// asks the reader for the projection of the type it declared and is handed an authoritative
+	// one back.
+	var ac domain.AssembledContext
+	switch capb.SelectionType {
+	case domain.SelectionRelease:
+		posture, perr := g.projection.GetReleasePosture(ctx, subjectID)
+		if perr != nil || posture.ReleaseID == "" {
+			oc.Reason = ReasonNoGrounding
+			return domain.Proposal{}, oc
+		}
+		// A release with nothing outstanding is not a grounding failure — it is a real answer,
+		// and one worth giving without spending a model call on it.
+		if posture.OutstandingCount() == 0 {
+			oc.Duration = g.now().Sub(start)
+			oc.Information = "No outstanding Findings on this release: every Finding has a recorded decision."
+			oc.DecidedBy = "rule:nothing-outstanding"
+			oc.Reason = ReasonOK
+			return domain.Proposal{}, oc
+		}
+		ac = domain.AssembledContext{Release: posture}
+	default:
+		proj, perr := g.projection.GetAssessment(ctx, subjectID)
+		if perr != nil || proj.Finding.ID == "" {
+			oc.Reason = ReasonNoGrounding
+			return domain.Proposal{}, oc
+		}
+		ac = domain.AssembledContext{Projection: proj}
+	}
+
 	for _, step := range capb.Plan {
 		// Knowledge (retrieval) step (Δ3a): best-effort semantic precedent grounding. Unlike
 		// Rule/LLM, precedent is OPTIONAL — a missing or failing Knowledge engine degrades to no
@@ -313,8 +339,33 @@ func (g *Gateway) Invoke(
 		// discarded; BuildProposal is not reachable on this path, so an Information Response
 		// has no route to enterprise truth even if a future edit forgot the rule.
 		if capb.Output == domain.OutputInformation {
+			// Grounding Verification runs HERE too, and is the ONLY gate on this path (T8): no
+			// Governance stage follows an Information Response, so a citation naming something
+			// the projection never contained has nothing downstream to catch it.
+			//
+			// This check was missing: the branch returned as soon as the schema validated, which
+			// left the one load-bearing gate on this output class unexecuted. A schema says the
+			// answer is well-SHAPED; only grounding says it is about anything real.
+			if gerr := validator.ValidateGrounding(out, ac); gerr != nil {
+				oc.Duration = g.now().Sub(start)
+				oc.Reason = ReasonBusinessInvalid
+				oc.Detail = g.redact(gerr.Error())
+				return domain.Proposal{}, oc
+			}
 			oc.Duration = g.now().Sub(start)
+			// The same rationale scan the Decision path applies (TRUST-8): prose cannot be
+			// schema-checked, and an Information Response is read by a human AS-IS, so an
+			// invented identifier inside it must be flagged rather than presented plainly.
+			//
+			// The caveat is embedded in the text rather than carried beside it, for the reason
+			// TRUST-8 gives: anything stored elsewhere is something a reviewer can miss, and this
+			// answer has no structured fields for a UI to render warnings next to — it IS prose.
 			oc.Information = out.Reasoning
+			if warn := domain.UngroundedMentions(out.Reasoning, ac); len(warn) > 0 {
+				oc.Information += fmt.Sprintf(" [UNVERIFIED MENTIONS — the plan above names identifiers "+
+					"that were not in its grounding, so treat those specifics as unreliable: %s]",
+					strings.Join(warn, ", "))
+			}
 			oc.DecidedBy = "llm:information"
 			oc.Reason = ReasonOK
 			return domain.Proposal{}, oc // produced stays FALSE: there is no proposal to record
@@ -327,7 +378,7 @@ func (g *Gateway) Invoke(
 			oc.Reason = ReasonInsufficient
 			return domain.Proposal{}, oc
 		}
-		if verr := validator.ValidateBusiness(out, subjectFindingID, ac); verr != nil {
+		if verr := validator.ValidateBusiness(out, subjectID, ac); verr != nil {
 			oc.Duration = g.now().Sub(start)
 			oc.Reason = ReasonBusinessInvalid
 			// Which of the four checks refused it (TRUST-6). Redacted with the same discipline

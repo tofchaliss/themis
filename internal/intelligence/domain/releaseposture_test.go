@@ -1,0 +1,173 @@
+package domain_test
+
+import (
+	"testing"
+
+	"github.com/themis-project/themis/internal/intelligence/domain"
+)
+
+func entry(fid, cve string, prio int, comps ...domain.PostureComponent) domain.PostureEntry {
+	return domain.PostureEntry{FindingID: fid, CVE: cve, ResidualPriority: prio, Components: comps}
+}
+
+func rpm(name, source, version string) domain.PostureComponent {
+	return domain.PostureComponent{
+		PURL: "pkg:rpm/rocky/" + name + "@" + version, Name: name,
+		Version: version, Ecosystem: "rpm", Source: source,
+	}
+}
+
+// The point of a release-scoped capability: many Findings collapse to few actions, because one
+// module-stream rebuild closes several CVEs. Measured on a real release, 231 Findings reduce to
+// roughly a dozen package upgrades — a grouping a model should never be asked to rediscover.
+func TestPlanActions_CollapsesFindingsIntoUpgrades(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-2007-4559", 97, rpm("python3-ply", "python-ply", "3.9-9.el8")),
+		entry("f2", "CVE-2021-3177", 96, rpm("python3-ply", "python-ply", "3.9-9.el8")),
+		entry("f3", "CVE-2019-6446", 95, rpm("python3-pyyaml", "PyYAML", "3.12-12.el8")),
+		entry("f4", "CVE-2026-4480", 94, rpm("libsmbclient", "samba", "4.19.4-15.el8_10")),
+	}}
+
+	got := p.PlanActions()
+	if len(got) != 3 {
+		t.Fatalf("actions = %d, want 3 — four Findings, but two share one python-ply upgrade", len(got))
+	}
+	// Ordered by impact: python-ply carries the worst Finding (97).
+	if got[0].Package != "python-ply" || got[0].TopPriority != 97 {
+		t.Errorf("first action = %+v, want python-ply at 97", got[0])
+	}
+	if len(got[0].CVEs) != 2 || len(got[0].FindingIDs) != 2 {
+		t.Errorf("python-ply action = %+v, want both CVEs and both Findings", got[0])
+	}
+	// The SOURCE package names the action, because that is the name a fix is published under —
+	// telling an operator to upgrade "python3-pyyaml" to a "PyYAML" version is the AI-GROUND-1
+	// mismatch resurfacing in the plan.
+	if got[1].Package != "PyYAML" && got[2].Package != "PyYAML" {
+		t.Errorf("actions = %+v, want one named by the source package PyYAML", got)
+	}
+}
+
+// A decided Finding is not work. Including it would pad the plan with actions nobody needs to
+// take — and a plan whose items are already done is a plan people stop reading.
+func TestPlanActions_ExcludesDecidedFindings(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-1", 0, rpm("python3-ply", "python-ply", "3.9")), // decided
+		entry("f2", "CVE-2", 50, rpm("libsmbclient", "samba", "4.19.4")),
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 || got[0].Package != "samba" {
+		t.Fatalf("actions = %+v, want only the outstanding samba upgrade", got)
+	}
+	if p.OutstandingCount() != 1 {
+		t.Errorf("outstanding = %d, want 1", p.OutstandingCount())
+	}
+}
+
+// Non-distro components have no source package; the binary name IS the published name.
+func TestPlanActions_FallsBackToTheComponentName(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 71, Components: []domain.PostureComponent{
+			{PURL: "pkg:pypi/urllib3@1.26.20", Name: "urllib3", Version: "1.26.20", Ecosystem: "pypi"},
+		}},
+		// A component naming nothing at all is skipped rather than producing a blank action.
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 60, Components: []domain.PostureComponent{
+			{PURL: "pkg:rpm/rocky/x@1", Ecosystem: "rpm"},
+		}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 || got[0].Package != "urllib3" {
+		t.Fatalf("actions = %+v, want only the named urllib3 upgrade", got)
+	}
+}
+
+// The plan must be deterministic: the same projection always yields the same ordering, so a diff
+// between two runs means the posture changed rather than the sort wobbled.
+func TestPlanActions_IsDeterministic(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-1", 50, rpm("a", "a-src", "1")),
+		entry("f2", "CVE-2", 50, rpm("b", "b-src", "1")),
+		entry("f3", "CVE-3", 50, rpm("b", "b-src", "2")),
+	}}
+	first := p.PlanActions()
+	for i := 0; i < 5; i++ {
+		got := p.PlanActions()
+		for j := range got {
+			if got[j].Package != first[j].Package {
+				t.Fatalf("run %d differs at %d: %q vs %q", i, j, got[j].Package, first[j].Package)
+			}
+		}
+	}
+	// Equal priority → more Findings closed wins.
+	if first[0].Package != "b-src" {
+		t.Errorf("first = %q, want b-src (closes two Findings at the same priority)", first[0].Package)
+	}
+}
+
+// Grounding anchors to the PROJECTION, never to the shaped plan (T10 rule 4). A runtime that
+// validated against its own transformation would confirm a buggy grouping instead of catching it.
+func TestReleasePosture_Grounds(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-2007-4559", 97, rpm("python3-ply", "python-ply", "3.9-9.el8")),
+	}}
+	for _, ref := range []string{
+		"rel-1",                               // the release itself
+		"f1",                                  // a Finding on it
+		"CVE-2007-4559",                       // a CVE it carries
+		"pkg:rpm/rocky/python3-ply@3.9-9.el8", // a component purl it lists
+	} {
+		if !p.Grounds(ref) {
+			t.Errorf("Grounds(%q) = false, want true — it is in the projection", ref)
+		}
+	}
+	for _, ref := range []string{
+		"",              // an empty citation grounds nothing
+		"rel-2",         // a different release
+		"CVE-2099-0001", // a CVE the release does not carry
+		"f9",            // a Finding on another release
+		"python-ply",    // the SHAPED plan's package name — deliberately NOT grounding, because
+		// it is the runtime's own derivation, not a projection element
+	} {
+		if p.Grounds(ref) {
+			t.Errorf("Grounds(%q) = true, want false", ref)
+		}
+	}
+}
+
+// One package can be installed at several versions across a release (different images, different
+// module streams). The action must list each once — a repeated version reads as more work than
+// there is, and a missing one hides a build somebody still has to upgrade.
+func TestPlanActions_DeduplicatesInstalledVersions(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-1", 90, rpm("python3-ply", "python-ply", "3.9-9.el8")),
+		entry("f2", "CVE-2", 80, rpm("python3-ply", "python-ply", "3.9-9.el8")),  // same version again
+		entry("f3", "CVE-3", 70, rpm("python3-ply", "python-ply", "3.11-1.el8")), // a second build
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1", len(got))
+	}
+	if len(got[0].InstalledVersions) != 2 {
+		t.Errorf("installed = %v, want the two distinct builds", got[0].InstalledVersions)
+	}
+	if len(got[0].CVEs) != 3 || len(got[0].FindingIDs) != 3 {
+		t.Errorf("action = %+v, want all three findings counted", got[0])
+	}
+}
+
+// The last tiebreak: equal priority AND equal finding count. Without it two actions could swap
+// places between runs on identical data, and a plan that reorders itself is a plan nobody can
+// diff — "did the posture change, or did the sort?" is not a question an operator should have.
+func TestPlanActions_TiesBreakOnPackageName(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-1", 50, rpm("zlib", "zlib-src", "1")),
+		entry("f2", "CVE-2", 50, rpm("acl", "acl-src", "1")),
+	}}
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2", len(got))
+	}
+	if got[0].Package != "acl-src" || got[1].Package != "zlib-src" {
+		t.Errorf("order = %q, %q — want alphabetical when priority and count tie",
+			got[0].Package, got[1].Package)
+	}
+}

@@ -84,6 +84,20 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 			"check the subject type and how many ids the capability takes")
 		return
 	}
+	// An Information Response is CONTENT, and returning it as 204 would have thrown the answer
+	// away at the last hop — the same class of loss as AI-204-1 one layer up. It is deliberately
+	// NOT a Proposal: `produced` stays false, nothing reaches Governance, and there is nothing to
+	// accept (T7).
+	if !oc.Produced && oc.Reason == app.ReasonOK && oc.Information != "" {
+		writeJSON(w, http.StatusOK, gen.InformationResponse{
+			Capability:    strptr(oc.CapabilityID),
+			SubjectId:     strptr(oc.Selection.First()),
+			Information:   strptr(oc.Information),
+			DecidedBy:     strptr(oc.DecidedBy),
+			CorrelationId: strptr(correlationID),
+		})
+		return
+	}
 	if !oc.Produced {
 		// Carry WHY on the 204 (AI-204-1). A bare 204 collapses causes that demand opposite
 		// responses: AI disabled (fix your config), the provider unreachable or timed out (an
@@ -105,6 +119,9 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 
 	writeJSON(w, http.StatusOK, toGenProposal(proposal, correlationID))
 }
+
+// strptr returns a pointer to s — the generated wire types use optional (pointer) fields.
+func strptr(s string) *string { return &s }
 
 // logTelemetry emits the per-invocation execution record (D9), privacy-safe (no
 // prompt content).

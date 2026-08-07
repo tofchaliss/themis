@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -40,6 +41,22 @@ func (e SelectionType) Valid() bool {
 type Evidence struct {
 	Kind *string `json:"kind,omitempty"`
 	Ref  *string `json:"ref,omitempty"`
+}
+
+// InformationResponse An answer rendered for a human (EDR-TRUST-01 T7). It is **ephemeral**: it is not recorded as enterprise truth, there is nothing to accept or reject, and no Governance stage follows it — which is why Grounding Verification is its only gate and is treated as load-bearing.
+type InformationResponse struct {
+	// Capability The originating capability ref, e.g. "plan_remediation@v1".
+	Capability    *string `json:"capability,omitempty"`
+	CorrelationId *string `json:"correlation_id,omitempty"`
+
+	// DecidedBy Which plan step produced it, e.g. "llm:information" or "rule:nothing-outstanding".
+	DecidedBy *string `json:"decided_by,omitempty"`
+
+	// Information The answer itself. Any identifier the prose names that was NOT in the model's grounding is flagged inline with an `[UNVERIFIED MENTIONS ...]` caveat rather than carried in a separate field — prose cannot be schema-checked, and a caveat stored elsewhere is one a reader can miss (TRUST-8).
+	Information *string `json:"information,omitempty"`
+
+	// SubjectId What the answer is about — a Release id for a release-scoped capability.
+	SubjectId *string `json:"subject_id,omitempty"`
 }
 
 // InvokeRequest Invoke a capability against a Selection - a user-addressable entry point plus the identifiers picked (EDR-TRUST-01 T9). Supply either `subject` or the deprecated `finding_id`; `subject` wins if both are present.
@@ -91,8 +108,75 @@ type Selection struct {
 // SelectionType The user-addressable entry point. Not a domain entity - see EDR-TRUST-01 T9.
 type SelectionType string
 
+// InvokeCapability200JSONResponseBody defines parameters for InvokeCapability.
+type InvokeCapability200JSONResponseBody struct {
+	union json.RawMessage
+}
+
 // InvokeCapabilityJSONRequestBody defines body for InvokeCapability for application/json ContentType.
 type InvokeCapabilityJSONRequestBody = InvokeRequest
+
+// AsProposal returns the union data inside the InvokeCapability200JSONResponseBody as a Proposal
+func (t InvokeCapability200JSONResponseBody) AsProposal() (Proposal, error) {
+	var body Proposal
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromProposal overwrites any union data inside the InvokeCapability200JSONResponseBody as the provided Proposal
+func (t *InvokeCapability200JSONResponseBody) FromProposal(v Proposal) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeProposal performs a merge with any union data inside the InvokeCapability200JSONResponseBody, using the provided Proposal
+func (t *InvokeCapability200JSONResponseBody) MergeProposal(v Proposal) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsInformationResponse returns the union data inside the InvokeCapability200JSONResponseBody as a InformationResponse
+func (t InvokeCapability200JSONResponseBody) AsInformationResponse() (InformationResponse, error) {
+	var body InformationResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromInformationResponse overwrites any union data inside the InvokeCapability200JSONResponseBody as the provided InformationResponse
+func (t *InvokeCapability200JSONResponseBody) FromInformationResponse(v InformationResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeInformationResponse performs a merge with any union data inside the InvokeCapability200JSONResponseBody, using the provided InformationResponse
+func (t *InvokeCapability200JSONResponseBody) MergeInformationResponse(v InformationResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t InvokeCapability200JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *InvokeCapability200JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -271,33 +355,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"rFdrbhvJEb5KoRNgZWD48CNAQv1S1s5CCGALtuIksASzOF3DqVVP92x1D7kDgUAOsefKIXKSoHr4kkjs",
-	"A9hfGnaX6vnVV9WPpgxNGzz5FM3s0QjFNvhI+ceNhIWjRj/L4BP5pJ/Yto5LTBz85PsYvJ7FsqYG9euP",
-	"QpWZmT9MDnonw22c7PRtNpvCWIqlcKtqzMy8EwkyNnqxlVZl71ZsyZek362EliTx4NoDe6t/U9+SmZmY",
-	"hP3SbAqTzZ+cb4rdSVh8T2VSyWu/Cg/0kX7oKObAnno0XANCiS0u2HHqAZfIPiZA+ESOSpWEESB0kWSE",
-	"1grFiAtHQD5JD21gn6B1XYRUE2gsiSsmidBy+UAWLt69/Ti6/fiPT7ej6Uu4/cuLMXzq2tb1QJxqEpjH",
-	"Ljs8hyBZiaVWqMREFuYVe8t++ZXt/PJIcs0+AlewCKkGFIJWKJJP4ztvimd5LIMIuVzMr2xPs/Ahf6CD",
-	"I0FgC5W6Q44aStJfwpI8SXaKK8BFtmaK0+ocPB5M7WIxsyQdPQfF20Os6BhjtrqLcwaPqn4GW50FsI0z",
-	"+HLXTaevS7b5L91v5mO4KktqVYv+f/AEQo4wEsQA9CPHxH4JJTqnlXkgamEd5EEP1zU70rz30PBSI7wE",
-	"oSasCLBKJENKT8LcuvhL/bAH0XmAHrXf06JZSsjuLPwTJ0e/sgFuJLQhojs1cID8WSNl8NWhMbfXvmsW",
-	"JMP1c0ydaLBUsiX7ddGfQu6fNZc1tA49xEQtbGXhf//5Ce6MdI5mQ41jQl/SUOc7ow1yZ5xrzt6eRSMd",
-	"0QsnauIvFWzPR4d0ogj2p9A+sdUES+dL1kpQtXKeznDoP/q6RvHsl/EMU+15ZRRrbMlCCg/kB9KphGiU",
-	"6McEcyGMQXXMwWNDeo8pC2GX6iCcMPGKYCmhy7GADRTh/YdbUPpH9s/56s8vxnD19vP1pw8f/53ro8ra",
-	"Lay+iRCTdGXqRMlql+w5oBNC20OLMZKF7/bmPpNwtR0thTZnqjkOTviQgP0KHVtMBJwugRM0KA9HYXgt",
-	"Rg6h5ERRCQF8WATbQ1RWZbKFtnRZA2+zg+w6UZYXWjGtSaBEr8Yi0RiuMpNNqGlTDw2hV31Z7ZqE1CHy",
-	"SZVqjs64oVako5yaVkLMJ6p9lSPNowK9zae0UuMOuckFhAUN5LIH5mmvP0Pgvr5npYd++JXUcGCmM+25",
-	"DfNoLnLUXASdaNsROYY52zjXG4RICRZUYhdpOyyhwT7PQIgaNzottV9GCFUmaB3vcEHj5Xgv8Lehv4Yh",
-	"gPD53b/AClbpxSXUYQ0N+h4Qlrwi/2RkZ+6PQ8ExHV19E5VaHCo6SxTLHvW4APJVkJIsLKgKCg7fH/WE",
-	"RhQjNQtH9txEZRuf8MkpE7C/Hi5fntZw+P0857c1/eyOMYb3QbcSGxrtUqWD1MNIQQzPNgwlQvJdY2Zf",
-	"dpRlFDp5IJr74gw6hH7oWHRIfxluixzk/QluVJh9Fc4tU4mc46USAHyHidbYw8VNjZFGr2EpRL5icraA",
-	"//708sWeSoSwHPr5UNDYSYUljWG/oCmZWbi6PpZa9LqlHPa17UQ+2sEus4WdL0N9o5LKipUN0I6ubq7h",
-	"7z6sHdklwc2WpmMB0m3JlfySPRWw4yVtA0i1EEFMuKRY5PYWSp343AkHQkS74hikh90YzlEHgVfTN/A+",
-	"wLfDxg3rmry6pVhlTxEu7owPe5a9MwUgVCwxjUqHMULEiiB0qQwNKT/v7ATv+tm2c3XVAaEySI75Ep4U",
-	"KKwHokvSpXq74gx7hSKx4fhU/Orm2hRmRRKHYr8cT8dTBXNoyWPLZmZej6fj19oqmOrcFZN9rZji5JHt",
-	"ZjIwSF5GwrCQa1vlYXBt9wv5t4fVRNUJNpRIopl9eTSs1tWEKYyCwswMW3MM4GHLPLxWnoP9fhCmmP4a",
-	"bP+7PXyePjU2T5tKfcoHRy+vV9Pp7/nqGta8M8+uqz10zwByrDV8NX1z2s7vD/iDiy0wbQGdH9pIv4NA",
-	"53GF7JSshpbGJ9jM6t8MgZ7zf5+Qw7tR5d/8Jvk//Sb9eXVvGpT++AE48MsRuexoyfVwEXtf1hJ86OKL",
-	"8ZDiSLLaQbITZ2Zmgi1PVi/N5n7z/wAAAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

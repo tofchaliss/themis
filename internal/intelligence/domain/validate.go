@@ -27,6 +27,10 @@ var addResource = func(c *jsonschema.Compiler, url string, doc any) error {
 // Gateway prompt asks the model to emit. BuildProposal maps it onto the Proposal
 // envelope.
 type RawOutput struct {
+	// SubjectID names what the output is ABOUT for capabilities whose subject is not a Finding
+	// (T9). recommend_position keeps using FindingID; a release-scoped capability sets this.
+	// Reusing `finding_id` for a release would have made the wire lie about what it holds.
+	SubjectID         string        `json:"subject_id"`
 	FindingID         string        `json:"finding_id"`
 	RecommendedStance string        `json:"recommended_stance"`
 	Confidence        float64       `json:"confidence"`
@@ -91,6 +95,23 @@ func (v *Validator) ValidateBusiness(out RawOutput, subjectFindingID string, ac 
 	if !stanceAllowed(Stance(out.RecommendedStance), v.capb.AllowedStances) {
 		return fmt.Errorf("%w: stance %q not allowed", ErrBusinessInvalid, out.RecommendedStance)
 	}
+	for _, ev := range out.Evidence {
+		if !groundsRef(ac, ev.Ref) {
+			return fmt.Errorf("%w: ungrounded evidence %q", ErrBusinessInvalid, ev.Ref)
+		}
+	}
+	return nil
+}
+
+// ValidateGrounding is Grounding Verification on its own (T8): every cited reference must name
+// something the authoritative projection contained.
+//
+// It is separated from ValidateBusiness because the two gates protect different things and apply
+// to different output classes. For an **Information Response** this is the ONLY gate — no
+// Governance stage follows it — so it must run on that path too. It previously did not: the
+// Information branch returned as soon as the schema validated, which left the one load-bearing
+// check on that class unexecuted.
+func (v *Validator) ValidateGrounding(out RawOutput, ac AssembledContext) error {
 	for _, ev := range out.Evidence {
 		if !groundsRef(ac, ev.Ref) {
 			return fmt.Errorf("%w: ungrounded evidence %q", ErrBusinessInvalid, ev.Ref)

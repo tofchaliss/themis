@@ -16,6 +16,7 @@
 //	THEMIS_LLM_API_KEY   (optional bearer token)
 //
 // Example:
+//
 //	THEMIS_EMBED_MODELS=nomic-embed-text,bge-large,mxbai-embed-large make e2e-embed
 package embed_test
 

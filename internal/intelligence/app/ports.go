@@ -95,6 +95,10 @@ type PromptRenderer interface {
 // violation.
 type ProjectionReader interface {
 	GetAssessment(ctx context.Context, findingID string) (domain.FindingAssessment, error)
+	// GetReleasePosture fetches the release-scoped projection — every Finding on a Release with
+	// its priority and components. Governance owns it (it owns the Release Selection Type's
+	// security view), and a dashboard and a report read the same thing.
+	GetReleasePosture(ctx context.Context, releaseID string) (domain.ReleasePosture, error)
 }
 
 // PrecedentReader is a Knowledge Provider (D5, Δ2 C6): reads our own past Enterprise

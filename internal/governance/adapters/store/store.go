@@ -416,7 +416,49 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.attachComponents(ctx, releaseID, out)
+}
+
+// attachComponents fills each posture row's components in ONE additional query (AI-GROUND-1 /
+// the release-scoped Domain Projection).
+//
+// One query for the whole release, not one per row: a release carries hundreds of Findings, and
+// a per-row read would make the rollup's cost linear in its own length — the N+1 that already
+// makes `release-posture.sh` issue ~460 calls to render one table.
+func (s *Store) attachComponents(ctx context.Context, releaseID string, entries []app.PostureEntry) ([]app.PostureEntry, error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.finding_id, c.purl, c.name, c.version, c.ecosystem, c.source
+		FROM finding_components c
+		JOIN findings f ON f.id = c.finding_id
+		WHERE f.release_id = $1
+		ORDER BY c.finding_id, c.purl`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byFinding := make(map[string][]domain.MatchedComponent, len(entries))
+	for rows.Next() {
+		var fid string
+		var c domain.MatchedComponent
+		if err := rows.Scan(&fid, &c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source); err != nil {
+			return nil, err
+		}
+		byFinding[fid] = append(byFinding[fid], c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		entries[i].Components = byFinding[string(entries[i].FindingID)]
+	}
+	return entries, nil
 }
 
 // SetBaseScore materializes Knowledge's CVE-intrinsic base score onto every Finding for a

@@ -63,7 +63,47 @@ func RecommendPositionV1() Capability {
 	}
 }
 
-// DefaultRegistry is the Δ1 catalog: just recommend_position@v1.
+// PlanRemediationV1 is the release-scoped remediation planner: given one Release, it explains
+// what to fix first and why, over the outstanding Findings in Governance's release posture.
+//
+// It is an **Information** capability (T7). A plan proposes no stance on any Finding, so nothing
+// enters Governance, there is nothing to accept or reject, and the output is ephemeral. That is
+// not a limitation — it is what makes a release-scoped capability safe to add: the worst outcome
+// of a wrong plan is a human disagreeing with it, never a vulnerability silently suppressed.
+//
+// The GROUPING is deliberately not the model's job. ReleasePosture.PlanActions collapses the
+// Findings into upgrade actions deterministically before the prompt is rendered, because "these
+// nine CVEs share one module upgrade" is a GROUP BY, not reasoning (T10). The model is asked for
+// the part that genuinely needs judgement: sequencing, trade-offs, and what to say about the
+// actions that have no clean fix.
+//
+// It carries no Knowledge step: precedent retrieval is scoped to past Positions on Findings, and
+// a release plan is not a position. Adding it would spend embedding calls on grounding that does
+// not apply.
+func PlanRemediationV1() Capability {
+	return Capability{
+		ID:      "plan_remediation",
+		Version: "v1",
+		// Exactly one Release. The bound doubles as the fan-out guard (T9): a plan spanning
+		// several releases is a different capability with a different projection, not this one
+		// invoked repeatedly.
+		SelectionType: SelectionRelease,
+		MinSelection:  1,
+		MaxSelection:  1,
+		Output:        OutputInformation,
+		Needs:         []ContextNeed{NeedReleasePosture},
+		Plan: ExecutionPlan{
+			{Engine: EngineLLM, Prompt: "plan_remediation"},
+		},
+		OutputSchema: planRemediationSchema,
+		// No stances: an Information Response recommends nothing (T7).
+		AllowedStances: nil,
+		Routing:        RoutingRequirements{Privacy: PrivacyInternal, LocalOnly: true},
+	}
+}
+
+// DefaultRegistry is the shipped catalog: recommend_position@v1 (Decision, one Finding) and
+// plan_remediation@v1 (Information, one Release).
 func DefaultRegistry() *Registry {
-	return NewRegistry(RecommendPositionV1())
+	return NewRegistry(RecommendPositionV1(), PlanRemediationV1())
 }

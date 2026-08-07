@@ -30,11 +30,18 @@ paths:
               $ref: '#/components/schemas/InvokeRequest'
       responses:
         '200':
-          description: A validated advisory Proposal.
+          description: >-
+            The capability's result. Which shape depends on the capability's declared OUTPUT CLASS
+            (EDR-TRUST-01 T7): a **Decision** capability returns a validated advisory `Proposal`
+            that may enter Governance; an **Information** capability returns an
+            `InformationResponse` — an answer rendered for a human that is ephemeral and can never
+            become enterprise truth. The two are distinguished by which field is present.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Proposal'
+                oneOf:
+                  - $ref: '#/components/schemas/Proposal'
+                  - $ref: '#/components/schemas/InformationResponse'
         '204':
           description: No proposal (declined, ungrounded, or unavailable) — a safe outcome.
         '400':
@@ -52,6 +59,31 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    InformationResponse:
+      type: object
+      description: >-
+        An answer rendered for a human (EDR-TRUST-01 T7). It is **ephemeral**: it is not recorded
+        as enterprise truth, there is nothing to accept or reject, and no Governance stage follows
+        it — which is why Grounding Verification is its only gate and is treated as load-bearing.
+      properties:
+        capability:
+          type: string
+          description: The originating capability ref, e.g. "plan_remediation@v1".
+        subject_id:
+          type: string
+          description: What the answer is about — a Release id for a release-scoped capability.
+        information:
+          type: string
+          description: >-
+            The answer itself. Any identifier the prose names that was NOT in the model's
+            grounding is flagged inline with an `[UNVERIFIED MENTIONS ...]` caveat rather than
+            carried in a separate field — prose cannot be schema-checked, and a caveat stored
+            elsewhere is one a reader can miss (TRUST-8).
+        decided_by:
+          type: string
+          description: Which plan step produced it, e.g. "llm:information" or "rule:nothing-outstanding".
+        correlation_id:
+          type: string
     InvokeRequest:
       type: object
       description: >

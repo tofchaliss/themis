@@ -25,6 +25,10 @@ func (s stubProjection) GetAssessment(context.Context, string) (domain.FindingAs
 	return s.p, s.err
 }
 
+func (s stubProjection) GetReleasePosture(context.Context, string) (domain.ReleasePosture, error) {
+	return domain.ReleasePosture{}, nil
+}
+
 type stubPosition struct {
 	stance, rationale string
 	found             bool

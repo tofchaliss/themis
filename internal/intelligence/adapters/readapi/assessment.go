@@ -102,3 +102,62 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 		},
 	}, nil
 }
+
+// posturePayload mirrors Governance's release-posture wire shape.
+type posturePayload struct {
+	FindingID         string `json:"finding_id"`
+	CVE               string `json:"cve"`
+	Stance            string `json:"stance"`
+	ResidualPriority  int    `json:"residual_priority"`
+	EffectivePriority int    `json:"effective_priority"`
+	Components        []struct {
+		PURL      string `json:"purl"`
+		Name      string `json:"name"`
+		Version   string `json:"version"`
+		Ecosystem string `json:"ecosystem"`
+		Source    string `json:"source"`
+	} `json:"components"`
+}
+
+// GetReleasePosture fetches the release-scoped Domain Projection from Governance
+// (GET /api/v1/releases/{id}/posture) — every Finding on the Release with its priority and
+// components, produced by the context that owns the Release's security view.
+//
+// One read, like the Finding projection beside it: the runtime does not fetch per-Finding detail
+// to complete it, which is exactly the orchestration T10 rule 1 forbids. Anything the plan needs
+// and the posture lacks is a gap in the projection, to be closed in Governance where a dashboard
+// benefits equally — not patched here with a second call.
+func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID string) (domain.ReleasePosture, error) {
+	url := c.baseURL + "/api/v1/releases/" + releaseID + "/posture"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return domain.ReleasePosture{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return domain.ReleasePosture{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return domain.ReleasePosture{}, fmt.Errorf("governance: release posture %s: status %d", releaseID, resp.StatusCode)
+	}
+	var body []posturePayload
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return domain.ReleasePosture{}, err
+	}
+
+	out := domain.ReleasePosture{ReleaseID: releaseID, Entries: make([]domain.PostureEntry, 0, len(body))}
+	for _, e := range body {
+		entry := domain.PostureEntry{
+			FindingID: e.FindingID, CVE: e.CVE, Stance: e.Stance,
+			ResidualPriority: e.ResidualPriority, EffectivePriority: e.EffectivePriority,
+		}
+		for _, c := range e.Components {
+			entry.Components = append(entry.Components, domain.PostureComponent{
+				PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+			})
+		}
+		out.Entries = append(out.Entries, entry)
+	}
+	return out, nil
+}
