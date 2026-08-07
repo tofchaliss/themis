@@ -1295,6 +1295,14 @@ three angles, and two of them proposed fixes that would not have worked.
   a fully-caught-up one reported the same number — the precise failure mode NVD-WATCH-1 exists to
   prevent. `FoldResult` gained `Recorded`, `FaultlineService.FoldProposal` now returns it, and the
   three sweeps (signals, NVD backfill, re-attribution) count only what was actually appended.
+  **✅ BOTH VM-VERIFIED 2026-08-07 19:15.** Over ~45 minutes on the new binary: the NVD backfill
+  logged `folded: 0` on **eight consecutive** sweeps (it reported `198` every run before), and the
+  exploit-signal sweep logged `folded: 5`. `faultline_proposals` moved **31,196 → 31,201** — the row
+  count matches the reported folds exactly, where the old behaviour would have written 236 rows to
+  carry those same 5 facts (a 47× reduction on this estate).
+  The `0` is the point: that line was previously a constant, which reads as health and carries no
+  signal — a broken parser, a dead feed and a settled estate all printed `198`. It now makes a real
+  claim ("nothing upstream changed") and will move the moment that stops being true.
 
 - [x] **KN-MODULE-1 — RHEL/Rocky *module stream* advisories inflate the affected set, and the posture
   view now makes it visible.** ✅ **CLOSED 2026-08-07 (option b).** _(Measured on the VM 2026-08-07, top-15 posture for release 20.3.0.)_
