@@ -1038,6 +1038,34 @@ three angles, and two of them proposed fixes that would not have worked.
   **Dep:** none. **Scope:** MEDIUM — first enrichment works today, so this is about staying correct over
   time rather than getting correct now.
 
+- [ ] **DASH-1 — There is no way to reach a release's posture without already knowing its UUID.**
+  _(Surfaced answering "how do I get a release dashboard?", 2026-08-07.)_ Governance's
+  `GET /releases/{id}/posture` is a good rollup and is sorted-by-`residual_priority` away from being a
+  triage dashboard. What is missing is everything *before* it: Registry exposes only `POST /products`,
+  `POST /projects`, `POST /releases` and `GET /releases/{id}` — **no list, no lookup by name, no
+  product→projects→releases traversal**. So an operator who knows "product mrf, release 20.1.0" cannot get
+  to the posture at all without querying Postgres directly, which is exactly the coupling the read APIs
+  exist to avoid. Every runbook in the repo works around it by capturing the id `gf-upload-sbom.sh` prints.
+  **Fix:** read endpoints on Registry — `GET /products`, `GET /products/{id}/projects`,
+  `GET /projects/{id}/releases`, and lookup-by-name query params. Spec-first, so the handlers are
+  generated. **Where it plugs in:** `api/registry.openapi.yaml` + `internal/registry/adapters/http`.
+  **Dep:** none. **Scope:** MEDIUM — small surface, and it is the difference between an API a human can
+  navigate and one only a script that just created the objects can use.
+
+- [ ] **DASH-2 — Posture exists per release only; there is no product or project rollup.**
+  _(Same conversation.)_ "Show me everything critical across product `mrf`" has no answer: `posture` is
+  keyed by a single release id, so a caller must enumerate releases (which DASH-1 makes impossible over
+  the API) and merge client-side. The estate graph for the *blast* direction already exists (C1:
+  Product→Microservice→Deployment→Customer), so the model supports the traversal — the read surface does
+  not.
+  **Also missing from the entry rows themselves:** `PostureEntry` carries `base_score` but **no severity
+  band**, so "which are critical?" needs one Knowledge call per faultline. Knowledge already computes
+  `view.priority` (critical | high+ | high | elevated | informational) and it is exploitability-aware
+  rather than raw CVSS — carrying it onto the posture entry (additively, as `residual_priority` was)
+  would make the rollup self-sufficient.
+  **Fix:** `GET /products/{id}/posture` and/or `GET /projects/{id}/posture` aggregating across releases,
+  plus `priority` on `PostureEntry`. **Dep:** DASH-1 for the traversal. **Scope:** MEDIUM.
+
 - [ ] **GOV-14b — Disposition re-evaluation watcher: "decided for now, watched for change".**
   _(The second half of GOV-14 / EDR-GOVERNANCE-01 D14; split out 2026-08-06 when the `residual_priority`
   half landed.)_ `residual_priority` zeroes a `not_affected` or `accepted_risk` Finding's triage number —
