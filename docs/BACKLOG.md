@@ -1171,6 +1171,22 @@ three angles, and two of them proposed fixes that would not have worked.
   **Also closes DASH-3** (the resolved fix is now on the Governance read surface: `fixes` +
   `unattributed_fixes` on the assessment), and cuts the prompt from 94 fix versions to the handful
   that apply, which is the latency half of AI-TIMEOUT-1.
+  **✅ VM-VERIFIED 2026-08-07** on the same Finding that produced the defect. The assessment now
+  returns **6** fix versions — 3 attributed to `python-ply`, 3 to `PyYAML`, the two source packages
+  of this Finding's `python3-ply` + `python3-pyyaml` components — with **177 withheld** as
+  `unattributed_fixes`. 6 + 177 = 183, exactly the card's attributed total measured independently,
+  so the selection drops nothing and invents nothing. The re-run recommendation cites
+  `0:3.11-10.module+el8…` and `0:5.4.1-1.module+el8…` instead of Cython's `0:0.1.7-16`: same
+  `affected` verdict, now reached from the right evidence rather than by coincidence.
+  **Still open, unrelated to this fix:** TRUST-8 flagged `[UNVERIFIED MENTIONS]` on both runs — this
+  model reliably fabricates a UUID-shaped token when narrating, even with the real release id in the
+  prompt. The guardrail catches it every time; the observation belongs to G-AI-2 (narrative quality),
+  and it argues that a UI must render the stance and cited versions as DATA and the reasoning as
+  commentary — never let an operator copy an identifier out of the prose.
+  Note the division of labour: TRUST-8 could **not** have caught the original defect, because the
+  versions cited were real strings present in the grounding — just from other packages. Grounding
+  verification asks "were you given this identifier", not "does it mean what you think". Only the
+  selection fix could close that gap; guardrail and data quality are complementary.
 
 - [ ] **AI-204-1 — a 204 from `/recommend` cannot be told apart from a correct refusal.**
   _(Surfaced 2026-08-07 diagnosing AI-TIMEOUT-1.)_ `recommend` returns a bare 204 for at least three
