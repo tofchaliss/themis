@@ -226,3 +226,35 @@ func TestAssembledContext_GroundsRoutesToTheRightProjection(t *testing.T) {
 		t.Error("a finding context must not ground against a release it does not hold")
 	}
 }
+
+// A merged plan step is headed by its package LIST ("upgrade httpd, mod_http2"), and a live model
+// cited exactly that string as one evidence ref — the third time across two rounds of prompt
+// tightening that it cited the heading of the item it was discussing. The behaviour is stable
+// enough to accommodate; accommodating it costs nothing, because every element is still matched
+// against the authoritative projection.
+func TestValidateGrounding_CommaSeparatedCitations(t *testing.T) {
+	v := mustValidator(t)
+	ac := AssembledContext{Release: ReleasePosture{
+		ReleaseID: "rel-1",
+		Entries: []PostureEntry{{
+			FindingID: "f1", CVE: "CVE-1",
+			Components: []PostureComponent{
+				{PURL: "pkg:rpm/rocky/httpd@1", Name: "httpd", Source: "httpd"},
+				{PURL: "pkg:rpm/rocky/mod_http2@1", Name: "mod_http2", Source: "mod_http2"},
+			},
+		}},
+	}}
+	ev := func(ref string) RawOutput { return RawOutput{Evidence: []RawEvidence{{Kind: "package", Ref: ref}}} }
+
+	if err := v.ValidateGrounding(ev("httpd, mod_http2"), ac); err != nil {
+		t.Errorf("a list of grounded names must ground: %v", err)
+	}
+	// Strictness is unchanged: ONE invented element fails the whole ref, exactly as a bare
+	// invented name would. A list must not become a way to smuggle something past.
+	if err := v.ValidateGrounding(ev("httpd, openssl"), ac); !errors.Is(err, ErrBusinessInvalid) {
+		t.Errorf("a list containing an ungrounded name must fail, got %v", err)
+	}
+	if err := v.ValidateGrounding(ev(" , , "), ac); !errors.Is(err, ErrBusinessInvalid) {
+		t.Errorf("a ref of only separators names nothing and must fail, got %v", err)
+	}
+}

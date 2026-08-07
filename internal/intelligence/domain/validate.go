@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/themis-project/themis/internal/kernel/value"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -177,6 +179,32 @@ func BuildProposal(out RawOutput, capb Capability, meta Metadata, rationaleWarni
 func groundsRef(ac AssembledContext, ref string) bool {
 	if ac.Grounds(ref) {
 		return true
+	}
+	// A COMMA-SEPARATED ref is a list of citations written into one field. It grounds only if
+	// EVERY element does, which is strictly no weaker than checking them separately.
+	//
+	// This exists because models reliably cite the thing that heads the item they are discussing,
+	// and a merged plan step is headed by its package LIST ("upgrade httpd, mod_http2"). Observed
+	// three times on a live model across two rounds of prompt-tightening: the behaviour is stable
+	// enough to accommodate rather than fight. Accommodating it costs nothing — each element is
+	// still matched against the authoritative projection, so a list containing one invented name
+	// fails exactly as a bare invented name would.
+	if strings.Contains(ref, ",") {
+		parts := strings.Split(ref, ",")
+		grounded := 0
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if !ac.Grounds(p) {
+				return false
+			}
+			grounded++
+		}
+		if grounded > 0 {
+			return true
+		}
 	}
 	tokens := value.IdentifierTokens(ref)
 	if len(tokens) == 0 {
