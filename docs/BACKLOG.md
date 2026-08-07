@@ -1069,6 +1069,33 @@ three angles, and two of them proposed fixes that would not have worked.
   straight dependency on pre-merge e2e proof. Natural fix is to run e2e on `pr.yml` too (folds into the
   pipeline-e2e item above once `make e2e-pipeline` exists).
 
+- [ ] **CI-PROP-1 — The scheduled Property Tests job fails intermittently on a FROZEN-tree defect.**
+  _(Found 2026-08-07 while verifying the post-merge CI on `main`.)_ The nightly `Property Tests` workflow
+  runs `make test-property RAPID_CHECKS=20000`; the same tests run at the default 1000 checks in `make
+  check`, which is why this is invisible pre-merge. `TestRedactLogMessageIdempotentProperty` in
+  **`internal/adapter/notify`** — the frozen v0.3.x tree — fails roughly **1 run in 4** at 20k checks.
+  **Mechanism (isolated, not inferred):** `redactLogMessage` rewrites `password <secret>` to
+  `password=****`, INSERTING an `=`. Its own output then matches its own keyword-with-`=` pattern, so a
+  second pass yields `password==****`, a third `password===****`:
+
+      in    = "authpassword !!!!!! https://h.example/webhook/!!!!!!"
+      once  = "authpassword=**** https://****/webhook/****"
+      twice = "authpassword==**** https://****/webhook/****"
+
+  **Not a leak** — the secret is gone after the first pass, and `TestRedactLogMessageNoLeakProperty`
+  passes. It is a non-idempotence bug that only bites when a message is redacted twice (two layers both
+  scrubbing, or a re-log of an already-scrubbed line).
+  **The fix is BARRED:** `internal/adapter/notify` is the frozen v0.3.x tree, reference-only, and the one
+  sanctioned exception on record is the NVD CVSS-4.0 maintenance fix. This is not that.
+  **The real cost is the CI signal, not the bug.** A scheduled job that is red a quarter of the time trains
+  everyone to ignore it, and it will then hide a *greenfield* property failure when one appears. Options,
+  none taken here because each is a process decision: (a) scope `test-property` to the greenfield tree the
+  way `check-ci` already scopes coverage — the cleanest, and consistent with the frozen-tree policy;
+  (b) skip this one test under a build tag with a pointer to this entry; (c) take the fix as a second
+  sanctioned exception. **Where it plugs in:** `Makefile` (`test-property` package selection) or
+  `.github/workflows/property-tests.yml`. **Scope:** LOW to fix, MEDIUM if left — a permanently-noisy gate
+  is a gate nobody reads.
+
 - [ ] **Bump GitHub Actions off Node 20 (LOW).** `actions/checkout@v4` and `actions/setup-go@v5` are being
   force-migrated to Node 24 (runner deprecation warning on every run). Cosmetic today; bump to the Node-24
   action majors next time `.github/workflows/*` are touched.
