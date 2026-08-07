@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -48,13 +49,34 @@ func RequestLogger(l *Logger) func(http.Handler) http.Handler {
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(sw, r)
 
+			d := time.Since(start)
 			l.Info("http request",
 				String("method", r.Method),
 				String("path", r.URL.Path),
 				Int("status", sw.status),
-				Duration("duration", time.Since(start)),
+				Duration("duration", d),
 				String("correlation_id", cid),
 			)
+			// The same request, counted. The log line answers "what happened to this request";
+			// the counter answers "what is happening to requests" — error RATE and latency
+			// distribution, which no volume of individual lines gives you.
+			//
+			// routePattern, not r.URL.Path: the raw path embeds ids, and a per-id metric label
+			// is unbounded cardinality — the classic way to take down a metrics backend.
+			Default().RecordHTTPRequest(r.Method, routePattern(r), sw.status, d)
 		})
 	}
+}
+
+// routePattern returns the chi route TEMPLATE (e.g. "/findings/{id}") rather than the concrete
+// path, so a million Finding ids collapse into one time series instead of a million. Falls back
+// to "other" when no pattern is available, which is safer than falling back to the raw path:
+// an unbounded label is worse than a coarse one.
+func routePattern(r *http.Request) string {
+	if rc := chi.RouteContext(r.Context()); rc != nil {
+		if p := rc.RoutePattern(); p != "" {
+			return p
+		}
+	}
+	return "other"
 }

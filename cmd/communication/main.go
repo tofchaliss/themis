@@ -121,6 +121,10 @@ func main() {
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
+	// Operational metrics, OUTSIDE the authenticated /api/v1 group: this is data for the
+	// platform's own scraper, carries no business content, and gating it would mean handing
+	// scrape credentials to monitoring.
+	router.Handle("/metrics", observability.Default().Handler())
 	closeAuth := authedMount(ctx, router, cfg, logger, comm.Handler)
 	defer closeAuth()
 

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -210,6 +211,10 @@ func main() {
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
+	// Operational metrics, OUTSIDE the authenticated /api/v1 group: this is data for the
+	// platform's own scraper, carries no business content, and gating it would mean handing
+	// scrape credentials to monitoring.
+	router.Handle("/metrics", observability.Default().Handler())
 	closeAuth := authedMount(ctx, router, cfg, logger, kn.Handler)
 	defer closeAuth()
 	if cfg.devPurge {
@@ -265,6 +270,14 @@ func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval 
 		if err != nil {
 			logger.Error("nvd watch poll failed", observability.Err(err))
 			recordFeed(health, "nvd", err, logger)
+			// A window the client could not read in full is its own outcome, distinct from a
+			// transport failure and emphatically distinct from success — that conflation is
+			// exactly what NVD-WATCH-1 was.
+			outcome := observability.FeedPollFailed
+			if errors.Is(err, feed.ErrWindowTruncated) {
+				outcome = observability.FeedPollTruncated
+			}
+			observability.Default().RecordFeedPoll("nvd", outcome)
 			return
 		}
 		recordFeed(health, "nvd", nil, logger)
@@ -272,6 +285,10 @@ func watchLoop(watch *app.WatchService, health *app.FeedHealthService, interval 
 		// made a feed that saw 5% of its window indistinguishable from a quiet one
 		// (NVD-WATCH-1): "no log line" and "nothing to say" must not be the same signal.
 		logger.Info("nvd watch poll complete", observability.Int("folded", n))
+		// Counted as well as logged, so "has nvd completed a poll in the last 24h?" and "is it
+		// folding anything?" become alertable questions rather than grep exercises.
+		observability.Default().RecordFeedPoll("nvd", observability.FeedPollComplete)
+		observability.Default().RecordFeedRecords("nvd", observability.FeedRecordsFolded, n)
 	}
 	time.Sleep(15 * time.Second) // let the service settle before the first (up-to-120-day) poll
 	poll()

@@ -941,10 +941,37 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### D. Observability (R1) — remaining signals
 
-- [ ] **OTel traces + metrics.** `internal/platform/observability` currently wires **logs** (zap console +
-  OTel logs via the `otelzap` bridge, config-driven). R1/BCK-0051 covers all three OTel signals; the natural
-  extension is a **TracerProvider + MeterProvider** in `Setup`, plus request/DB spans and operational
-  counters. The Intelligence Gateway (M4) leans hardest on OTel and is a good driver for this.
+- [x] **Metrics (the second R1 signal).** ✅ **DONE 2026-08-07.** `internal/platform/observability` now owns
+  a service-scoped Prometheus registry alongside the logger, initialized in `Setup` and served at
+  **`/metrics` on all six nodes** — mounted OUTSIDE the authenticated `/api/v1` group, because it is data
+  for the platform's own scraper, carries no business content, and gating it would mean handing scrape
+  credentials to monitoring.
+  **The counters are the ones this session's defects needed**, not a generic starter set. Every gap found
+  on 2026-08-06 was a question about a RATE or a TOTAL that logs answer badly — "is this feed enriching
+  anything?", "how often is the AI refused, and by which check?" — and you cannot alert on the absence of a
+  log line. `themis_feed_polls_total{source,outcome}` makes `truncated` its own series so "healthy" can
+  never again mean "saw 5% of the window" (NVD-WATCH-1); `themis_feed_records_total{source,stage}` splits
+  **discovered** from **folded**, disambiguating "the feed returned nothing" from "it returned plenty, none
+  of it about us"; `themis_ai_invocations_total{capability,reason,produced}` turns TRUST-6 into a dashboard
+  question. Plus request rate and latency by **route template** — never the concrete path, since a per-id
+  label is unbounded cardinality.
+  Every recorder is **nil-safe**, so a unit test that never called `Setup` records nothing rather than
+  panicking: instrumentation must never be able to break the code it observes.
+  Uses `prometheus/client_golang`, already a chosen dependency (STACK.md) and previously used only in the
+  frozen legacy tree — the greenfield had **no metrics at all**. Metric names are exporter-agnostic, so
+  moving onto an OTel pipeline later is wiring, not a rename.
+
+- [ ] **OTel traces (the third R1 signal), and the OTLP metric/trace exporters.** _(Split out 2026-08-07
+  when metrics landed.)_ `Setup` wires a LoggerProvider and now a Prometheus registry; a **TracerProvider**
+  with request/DB spans is still absent, and there is no OTLP pipeline for traces or metrics.
+  **Why it was not done with the metrics half:** it needs new modules —
+  `go.opentelemetry.io/otel/exporters/otlp/otlptracehttp` and `.../otlpmetrichttp` are not dependencies
+  today (only the *logs* exporter is), and adding dependencies is a decision this did not need to take to
+  deliver the counters. The SDK itself (`otel/sdk`, `otel/trace`, `otel/metric`) is already present.
+  **Decision needed:** whether telemetry egress is OTLP-to-collector (add both exporters; metrics then move
+  off the Prometheus registry or dual-export) or Prometheus-scrape-plus-OTLP-traces (add only the trace
+  exporter). **Where it plugs in:** `internal/platform/observability` (`Setup`), the HTTP middleware
+  (server spans), and the pgx pool (DB spans). **Dep:** the exporter choice above. **Scope:** MEDIUM.
 
 ---
 

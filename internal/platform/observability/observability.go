@@ -114,6 +114,11 @@ func Setup(ctx context.Context, cfg Config) (*Logger, func(context.Context) erro
 	if cfg.Service != "" {
 		z = z.With(zap.String("service", cfg.Service))
 	}
+	// Metrics are always on — unlike OTel log export, which needs a collector, a Prometheus
+	// registry costs nothing and needs nothing external. Making it conditional would recreate
+	// the situation this closes: a node running for a week with no countable evidence of what
+	// it did.
+	metricsOnce.Do(func() { defaultMetrics = NewMetrics(cfg.Service) })
 	return &Logger{z: z}, shutdown, nil
 }
 

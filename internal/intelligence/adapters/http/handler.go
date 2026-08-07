@@ -104,6 +104,10 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 		fields = append(fields, observability.String("detail", oc.Detail))
 	}
 	h.logger.Info("capability invoked", fields...)
+	// Counted by terminal reason. This is the metric that would have made TRUST-6 a dashboard
+	// question rather than a log investigation: "what fraction of invocations are refused, and
+	// for which reason" is a rate, and rates do not come from log lines.
+	observability.Default().RecordAIInvocation(oc.CapabilityID, oc.Reason, oc.Produced)
 }
 
 // selectionFrom reads the Selection from the request, accepting the deprecated finding_id
