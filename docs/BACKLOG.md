@@ -27,7 +27,8 @@ per-context follow-ups below.
 ### 0. Cluster index — read this before picking work
 
 **Added 2026-08-06.** The item list below is organized by *where code lives*, which is right for finding
-things and wrong for deciding what to do. 36 open items resolve to **9 problems**. Fix a cluster, not an
+things and wrong for deciding what to do. **31 open items resolve to 10 problems** (re-derived
+2026-08-07 against the code, not the text). Fix a cluster, not an
 item — several entries in each cluster close together, and some close for free.
 
 Ordered by priority. "Measured" means the claim rests on an observation from a running system, not a
@@ -35,31 +36,29 @@ code reading.
 
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
-| **C1** | **Feed enrichment is silently blind** | **P0** | No card in any deployment carries authoritative NVD severity, so `base_score`, `priority` and triage order all rest on OSV alone — and nothing reports a problem. *Measured 2026-08-06.* | NVD-WATCH-1 · NVD by-CVE backfill · feed-health-after-poll · feed-health-omits-OSV · CVSS v4.0 in ACLs · Wolfi unmapped · (PARITY-GAP A2) |
-| **C2** | **Governance can decide, but has nothing to decide with** | **P1** | No policy is wired anywhere, so auto-accept never fires and the T4 bar is untestable; posture priority ignores decisions already taken. The governed road exists and is unpaved. | TRUST-7 · posture-ignores-stance · per-Finding blast multiplier · structured AI-proposal fields · accepted-risk expiry |
-| **C3** | **Believed-correct, never demonstrated** | **P1** | Assurance gap. The version-range verdict, the four-context pipeline, and store fault paths have no end-to-end coverage; a regression in any would be silent. | TRUST-9 · SBOM→published-VEX e2e · store fault-injection · CI pipeline e2e · PR-gate e2e blind spot |
-| **C4** | **AI output is legible to machines, not to humans** | **P2** | We cannot explain an AI refusal, and the narrative a human decides on is the least-verified field in it. Blocks operating the AI seam, not the model itself. | TRUST-6 · TRUST-8 · G-AI-2 |
-| **C5** | **Trust vocabulary is hand-waved at three edges** | **P2** | The model is sound in the middle; applicabilities, the AI→Knowledge source, and the withdrawal path each carry a stated rather than sourced class, and the source table is maintained by hand. | TRUST-1 · TRUST-2 · TRUST-3 · TRUST-4 |
-| **C6** | **Published artifacts are not round-trippable** | **P2** | Themis cannot re-ingest its own OpenVEX, and identifies products by bare UUID. Poor for a standards-based platform whose output is the product. | VEX round-trip mismatch · OpenVEX bare-UUID product |
-| **C7** | **Observability is half-wired** | **P2** | Logs only — no traces, no metrics. Three separate findings on 2026-08-06 were caused by a missing signal rather than by wrong logic. | OTel traces + metrics · (the reporting halves of NVD-WATCH-1 and TRUST-6) |
-| **C8** | **AI harness build-out** | **P3** | Roadmap, not defects. Keep separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a re-embed / text_hash / component-embedding |
-| **C9** | **Papercuts and unbuilt features** | **P3** | Individually trivial. Several are one-line fixes that have been open for weeks purely because nobody batched them. | port collision · registry self-migrate · platform/uow · TRUST-5 dead config · GH Actions Node 20 · Communication channels · auto-publish policy · glossary · tracer-bullet reslice |
+| **N1** | **The AI seam's own failure mode is untestable** | **P0** | Every fake-provider test passed while the live capability was refused **three times running**, each a prompt↔grounding-gate disagreement. Those two have no compiler between them, and a fake returns whatever the test author already believed. `make check-ci` is blind to this by construction. | PLAN-4 · G-AI-2 |
+| **N2** | **Decisions waiting on a human, not on code** | **P1** | Four open items are blocked on a *choice*, not effort. They have the longest lead time and the least code, so they should be decided first and batched. | PLAN-2 (plan order vs triage order) · KN-EPSS-BAND-1 (b) (may likelihood outrank severity?) · GOV-14b (disposition watcher) · auto-publish policy |
+| **N3** | **Believed-correct, never demonstrated** | **P1** | Assurance gap, unchanged from the last audit. The version-range verdict, the four-context pipeline, and store fault paths have no end-to-end coverage; a regression in any would be silent. | TRUST-9 · SBOM→published-VEX e2e · store fault-injection · PR-gate e2e blind spot |
+| **N4** | **The read surface cannot serve a GUI** | **P1** | You still cannot reach a posture without already knowing a UUID, and there is no product/project rollup. `scripts/release-posture.sh` is the working spec: everything it does by hand is a gap here. | DASH-1 · DASH-2 · PLAN-1 · PLAN-3 |
+| **N5** | **Governance can decide, but has little to decide with** | **P2** | D15 ships exactly one auto-accept rule, so most of the T4 bar is exercised only by tests. The governed road exists and is lightly paved. | structured AI-proposal fields · accepted-risk expiry · TRUST-1 · TRUST-3 |
+| **N6** | **Enrichment coverage gaps** | **P2** | Down from P0: D5a made NVD relevance-bounded and per-CVE, which closed NVD-WATCH-1 and most of the old C1. What remains is format coverage, not blindness. | CVSS v4.0 in feed ACLs · feed-health-after-poll (residual) · KN-FIX-2 backfill (landed but inert) |
+| **N7** | **Published artifacts are not round-trippable** | **P2** | Themis cannot re-ingest its own OpenVEX, and identifies products by bare UUID. Poor for a standards-based platform whose output is the product. | VEX round-trip mismatch · OpenVEX bare-UUID product |
+| **N8** | **Observability is two-thirds wired** | **P3** | Metrics landed 2026-08-06; traces did not. Three findings that day were caused by a missing signal rather than wrong logic — and today's timeout hunt was solved by a log field, not a trace. | OTel traces + OTLP exporters |
+| **N9** | **AI harness build-out** | **P3** | Roadmap, not defects. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a component-embedding |
+| **N10** | **Papercuts** | **P3** | Individually trivial; several are one-line fixes open for weeks purely because nobody batched them. | platform/uow · GH Actions Node 20 · Communication channels · glossary · tracer-bullet reslice · CI-PROP-1 remainder |
 
-**Suggested next three moves:** (1) fix **C1** — it invalidates the priority numbers every other feature is
-read through; (2) sweep the trivial half of **C9** in one PR to shrink the list by ~6; (3) take **C2**,
-which needs a policy *decision* before any code and so has the longest lead time.
+**What changed on 2026-08-07 (why this index was re-derived):** ten items closed, so the previous
+C1–C9 no longer described the tree. **C1 dropped from P0 to N6/P2** — D5a made NVD enrichment
+per-CVE and relevance-bounded, which closed NVD-WATCH-1 outright and the feed-health premise with
+it. **C4 and C5 are gone entirely** (TRUST-4, TRUST-6, TRUST-8 all closed). **C2 shrank to N5** —
+the blast multiplier and posture-by-stance shipped. A new **N1** takes the P0 slot, because the
+class of defect that hurt most today is the one the quality gate cannot see.
 
-**Session 2026-08-07 — 10 defects closed, 6 opened, all VM-verified.** Closed: KN-FIX-1 (cross-package
-fix union dropped 31 live matches) · AI-GROUND-1 **P1** (the AI reasoned from another package's
-version at confidence 0.99) · AI-TIMEOUT-1 (three deadlines, two hard-coded) · TRUST-4 · AI-204-1 ·
-KN-EPSS-BAND-1 · KN-PROPOSAL-BLOAT-1 (28k proposals, 221 distinct) · KN-MODULE-1 · KN-FIX-2 ·
-DASH-3. Shipped: `plan_remediation@v1`, the first release-scoped AI capability.
-**The pattern worth remembering:** every one of these was a *correct component producing a
-misleading whole* — `folded: 236` when zero rows were written, `94 candidates`, `informational` on a
-99%-EPSS CVE, a bare `204`, `confidence 0.99` from another package's data. None failed a test,
-because no unit was wrong. All were found by **reading real output on real data**, which is why
-`scripts/release-posture.sh` earned its keep out of all proportion to its size: it is the only thing
-that reads across every context at once and shows a human the result.
+**Suggested next three moves:** (1) **N1** — add `plan_remediation` to `make e2e-llm`; it is small
+and it is the only guard against a defect class that reaches production silently. (2) **N2** —
+decide the four open questions in one sitting; they are cheap to decide and block work that is
+cheap to do. (3) **N4** — the read surface, which is the actual prerequisite for a GUI and where
+`release-posture.sh` has already written the specification.
 
 **Filing rule going forward:** a new item names its cluster, and states whether its claim is **measured**
 or **read from code**. Three items in C1 were filed separately over three weeks describing one defect from
@@ -310,7 +309,11 @@ three angles, and two of them proposed fixes that would not have worked.
   genuinely multi-request, so a first poll does take minutes. **What changed:** `themis_feed_polls_total`
   now distinguishes *never polled* from *polled and failed* without waiting for a health row, so the
   "fresh node looks feed-dark" symptom is observable immediately. **What remains:** `GET /feeds` still has
-  no row until the first success. Note that stamping health at poll *start*, as originally proposed, would
+  no row until the first success. **Further corrected 2026-08-07 (D5a):** the window walk this entry
+  measured no longer exists — the NVD sweep is per-CVE over the carded set, so a first poll is
+  proportional to the estate rather than to the feed's churn, and `folded: N` is logged on every
+  sweep including zero. What remains is only the `GET /feeds` empty-until-first-success detail.
+  Note that stamping health at poll *start*, as originally proposed, would
   make a broken feed report healthy **sooner** — the right shape is a distinct `pending` state, not an
   early success. Original report follows. The first NVD watch poll is a 120-day
   modified-since query (~12 min), so `nvd` health does not surface until it completes — a fresh node looks
@@ -434,7 +437,13 @@ three angles, and two of them proposed fixes that would not have worked.
   through `cmd/governance` → `Wire` → `NewReadService` (which normalizes < 2 to the default); a fixed +0.1/customer
   slope clamped to 2.0×. Closes the feed-parity PARTIAL for `intelligence.blast_radius_cap`. Surfaced + fixed
   2026-08-01 (feed-parity check).
-- [ ] **(MED) Risk score — add the release-scoped blast multiplier per-Finding in Governance.** The
+- [x] **(MED) Risk score — add the release-scoped blast multiplier per-Finding in Governance.**
+  ✅ **CLOSED — shipped as C2 and re-verified 2026-08-07.** `ReadService.ReleasePosture` fetches the
+  blast radius ONCE per release and stamps `Multiplier` + `EffectivePriority = BaseScore × mult`
+  on every entry (`internal/governance/app/read.go`); the estate graph (C1, PR #75) supplies the
+  unique-customer count and the multiplier saturates at `THEMIS_BLAST_RADIUS_CAP`. Fail-safe to
+  1.0× when Registry is unreachable. `residual_priority` (D14) then scales by what was decided.
+  Original text follows for the reasoning trail. The
   Knowledge Faultline now carries a CVE-intrinsic `priority`/`score` (Layer-1 level + severity+EPSS+KEV
   base, `internal/knowledge/domain/priority.go`). The monolith's composite also multiplied by a blast
   factor (1.0–2.0× off the unique-customer/affected-release count) — a *release-scoped* input that belongs
@@ -916,7 +925,14 @@ three angles, and two of them proposed fixes that would not have worked.
   occurs in the field. Instrumenting how many `range:` proposals real deployments raise remains the open
   work, and the answer may legitimately be zero for OSV-only estates.
 
-- [ ] **NVD-WATCH-1 — The modified-since watch silently examines ~5% of its window and reports success.**
+- [x] **NVD-WATCH-1 — The modified-since watch silently examines ~5% of its window and reports success.**
+  ✅ **CLOSED 2026-08-07 — the walk it describes was DELETED, not repaired.** EDR-KNOWLEDGE-01 **D5a**
+  replaced it with a per-CVE sweep over the carded set, which makes the relevance bound structural:
+  only CVEs the enterprise holds are ever requested, so there is no window to truncate and nothing
+  fetched to discard. The reporting half is closed too — `backfillLoop` logs on EVERY sweep
+  including a zero fold, so "nothing left to enrich" and "the feed stopped working" no longer look
+  alike. VM-verified: eight consecutive `folded: 0` sweeps after the estate caught up, and the count
+  moves the moment real facts change.
   _(Found on a live VM during the `phase3-trust-model` verification run, 2026-08-06 — a pre-existing feed
   defect, unrelated to the trust model.)_ `NVDClient.ChangedSince` pages with `nvdPageSize = 2000` and
   `nvdMaxPages = 10`, so **one poll reads at most 20,000 records**. Measured against the live NVD API, a
@@ -1094,7 +1110,12 @@ three angles, and two of them proposed fixes that would not have worked.
   rather than raw CVSS — carrying it onto the posture entry (additively, as `residual_priority` was)
   would make the rollup self-sufficient.
 
-- [ ] **DASH-3 — "What do I upgrade this to?" cannot be answered from the Governance read surface.**
+- [x] **DASH-3 — "What do I upgrade this to?" cannot be answered from the Governance read surface.**
+  ✅ **CLOSED 2026-08-07 by AI-GROUND-1.** `component.source` now rides end-to-end (event → store →
+  API), and `GET /findings/{id}/assessment` returns `fixes` (package-attributed) +
+  `unattributed_fixes`. `GET /releases/{id}/posture` carries components with `source` too, so the
+  join no longer has to be re-implemented per caller. Verified on the VM: 6 attributed fixes
+  returned where the flat union previously returned 94.
   _(Measured on the VM 2026-08-07, after KN-FIX-1 landed.)_ A Finding's components carry only the PURL,
   which holds the **binary** package name (`pkg:rpm/rocky/python3-pyyaml@…`). Fix versions on the
   Faultline are keyed by the **source** package name (`PyYAML`), because that is what distro
