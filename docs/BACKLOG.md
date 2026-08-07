@@ -586,6 +586,11 @@ three angles, and two of them proposed fixes that would not have worked.
   eval loop + the model router. **Dep:** builds on the Δ2 "can't determine" outcome; needs §D observability
   metrics together with the Δ4 eval/LLMOps plane. **Scope:** define the outcome in Δ2; build the
   metric/escalation/feedback in Δ3–Δ4.
+  **✅ (a) LANDED 2026-08-07 — the can't-determine RATE is now observable.**
+  `themis_ai_invocations_total{capability,reason,produced}` is recorded on every invocation, so
+  `reason="insufficient"` over total is a live query with no new machinery. **(b) escalation** and
+  **(c) the eval loop** remain open and still need Δ4. Note the ordering that emerged in practice:
+  the metric had to exist before the signal meant anything, and it now does.
 
 - [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
@@ -1258,7 +1263,17 @@ three angles, and two of them proposed fixes that would not have worked.
   **Fix:** stamp the selected fixes onto the Finding at enrichment, exactly as `base_score` is, then
   surface them on `PostureEntry`. **Dep:** AI-GROUND-1 (landed). **Scope:** MEDIUM.
 
-- [ ] **PLAN-4 — `plan_remediation` has no real-model e2e; three live refusals were found by hand.**
+- [x] **PLAN-4 — `plan_remediation` has no real-model e2e; three live refusals were found by hand.**
+  ✅ **CLOSED 2026-08-07 — and it was worse than filed.** The repository's ONLY real-model test
+  (`llm_e2e_test.go`) had **not compiled since the T10 refactor** renamed the read seam
+  (`readapi.NewFindingClient` → `NewAssessmentClient`). `make e2e-llm` was dead code, silently, for
+  days — because no gate ever set `-tags=llm`, so nothing type-checked it.
+  **Fix, in two parts:** (1) the test is rewritten against the current seam and now covers BOTH
+  capabilities, with `plan_remediation` fixtured on a MERGED step whose heading renders as a package
+  list — the exact citation form refused live. A 204 whose reason is `business_invalid` now FAILS
+  the test: a declined recommendation is the seam working, but an ungrounded citation means our
+  prompt and our gate disagree. (2) `make vet-tags` type-checks `integration`, `e2e`, `llm` and
+  `postgres`, and is wired into `check` and `check-ci`, so no tagged file can rot unnoticed again.
   _(Surfaced 2026-08-07 building the capability.)_ Every test uses a fake provider, and all of them
   passed while the live capability was refused **three times running** — `PyYAML (rpm)`, then the
   bare heading, then `httpd, mod_http2`. Each was a disagreement between the PROMPT and the
