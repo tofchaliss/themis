@@ -240,3 +240,38 @@ func TestOSVClient_NonOKStatusIsError(t *testing.T) {
 
 // compile-time confirmation the client is a PackageVulnSource.
 var _ app.PackageVulnSource = (*feed.OSVClient)(nil)
+
+// Wolfi and Chainguard are ROLLING distros: no numbered release, so their OSV ecosystems carry
+// no version and their PURLs may omit a version suffix entirely. The versioned-distro parser
+// rejected both as unresolvable, so a Wolfi-based image correlated nothing.
+func TestOSVDistroEcosystem_RollingDistros(t *testing.T) {
+	for _, tc := range []struct{ name, purl, want string }{
+		{"wolfi without a version suffix", "pkg:apk/wolfi/openssl@3.1.4-r1?distro=wolfi", "Wolfi"},
+		{"wolfi with a date suffix", "pkg:apk/wolfi/openssl@3.1.4-r1?distro=wolfi-20230201", "Wolfi"},
+		{"chainguard", "pkg:apk/chainguard/openssl@3.1.4-r1?distro=chainguard", "Chainguard"},
+		{"case-insensitive", "pkg:apk/wolfi/openssl@3.1.4-r1?distro=Wolfi", "Wolfi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := feed.OSVDistroEcosystemForTest(tc.purl); got != tc.want {
+				t.Fatalf("ecosystem = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The versioned distros must be unaffected by the rolling-distro shortcut.
+func TestOSVDistroEcosystem_VersionedDistrosStillResolve(t *testing.T) {
+	for _, tc := range []struct{ purl, want string }{
+		{"pkg:rpm/rocky/openssl@1.1.1?distro=rocky-8.10", "Rocky Linux:8"},
+		{"pkg:rpm/alma/openssl@1.1.1?distro=alma-9.3", "AlmaLinux:9"},
+		{"pkg:deb/debian/openssl@1.1.1?distro=debian-12", "Debian:12"},
+		{"pkg:apk/alpine/openssl@1.1.1?distro=alpine-3.18.4", "Alpine:v3.18"},
+		{"pkg:rpm/redhat/openssl@1.1.1?distro=rhel-9.3", "Red Hat"},
+		{"pkg:rpm/unknown/openssl@1.1.1?distro=notadistro-1", ""},
+		{"pkg:rpm/unknown/openssl@1.1.1", ""},
+	} {
+		if got := feed.OSVDistroEcosystemForTest(tc.purl); got != tc.want {
+			t.Errorf("%s: ecosystem = %q, want %q", tc.purl, got, tc.want)
+		}
+	}
+}

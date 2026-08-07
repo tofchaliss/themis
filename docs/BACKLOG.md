@@ -280,11 +280,27 @@ three angles, and two of them proposed fixes that would not have worked.
   - **Fast-follow (LOW):** Governance's inbound consumer makes a Registry blast-radius HTTP call inside *its*
     inbox tx too (C2) — the same class, far smaller (one localhost call, not N throttled ones). Adopt the same
     `Preparer` seam there for symmetry before it ever matters at scale.
-- [ ] **(LOW) Feed-health omits the always-on OSV feed.** `RecordSuccess`/`RecordFailure` are called only by the
+- [x] **(LOW) Feed-health omits the always-on OSV feed.** ✅ **FIXED 2026-08-07.**
+  `feed.HealthRecordingSource` wraps the discovery source so every OSV query records success or
+  failure under the shared tier taxonomy — so `GET /feeds` evaluates OSV against its tier's staleness
+  rules rather than as a special case. It was omitted because health was recorded by the *scheduled*
+  workers, which have a poll loop to hang it off; OSV has none, being queried per component at
+  correlation time. The consequence: the one feed that runs on **every single upload** was the one feed
+  with no health record, so an OSV outage read as "correlation found nothing", indistinguishable from
+  "nothing to find". A health-write failure is deliberately swallowed — health is an observation *about*
+  the pipeline and must never fail it. Original report follows. `RecordSuccess`/`RecordFailure` are called only by the
   opt-in schedulers (NVD watch, EPSS/KEV sweep), never by OSV correlation — so with only OSV running, the
   feed-health surface (B1) is empty even though the primary feed is healthy. Have correlation stamp OSV health on
   each discovery pass. `internal/knowledge/app` + `adapters/feed`. Surfaced 2026-07-31.
-- [ ] **(LOW) Feed-health records only *after* a full poll.** The first NVD watch poll is a 120-day
+- [ ] **(LOW) Feed-health records only *after* a full poll.** **Premise corrected + partly mitigated
+  2026-08-07.** The "~12 min" figure was never real: measured on the VM, a full-window poll completed in
+  **under 60 seconds** — because it truncated at 20,000 records (NVD-WATCH-1). With slicing it is now
+  genuinely multi-request, so a first poll does take minutes. **What changed:** `themis_feed_polls_total`
+  now distinguishes *never polled* from *polled and failed* without waiting for a health row, so the
+  "fresh node looks feed-dark" symptom is observable immediately. **What remains:** `GET /feeds` still has
+  no row until the first success. Note that stamping health at poll *start*, as originally proposed, would
+  make a broken feed report healthy **sooner** — the right shape is a distinct `pending` state, not an
+  early success. Original report follows. The first NVD watch poll is a 120-day
   modified-since query (~12 min), so `nvd` health does not surface until it completes — a fresh node looks
   feed-dark for minutes. Stamp health at poll *start*, or use a smaller first window. `cmd/knowledge` `watchLoop`.
   Surfaced 2026-07-31.
@@ -364,7 +380,11 @@ three angles, and two of them proposed fixes that would not have worked.
   `THEMIS_LLM_TIMEOUT` (Go duration, default 60s). Surfaced 2026-08-02 (VM AI-recommend test). **FIXED same day:**
   added `THEMIS_LLM_TIMEOUT` (envDurationDefault, default 60s) threaded into the provider `http.Client` in
   `cmd/intelligence/main.go`; documented in `deploy/node.env.example`. See [[feedback-backlog-surfaced-followups]].
-- [ ] **(LOW) Wolfi distro unmapped in OSV discovery.** `osvDistroEcosystem` (`adapters/feed/osv_client.go`) maps
+- [x] **(LOW) Wolfi distro unmapped in OSV discovery.** ✅ **FIXED 2026-08-07** — and it was not the
+  one-line addition the entry assumed. Wolfi and Chainguard are **rolling** distros: no numbered release,
+  so their OSV ecosystems carry no version and their PURLs may omit a version suffix entirely. The parser
+  split on `-` and returned "" when it found no version, so adding a `case "wolfi":` to the switch would
+  never have been reached. They are matched **before** the version split instead. Original report follows. `osvDistroEcosystem` (`adapters/feed/osv_client.go`) maps
   Rocky/Alma/Red Hat/Debian/Alpine but has no `wolfi` case; the legacy monolith had a `wolfi_osv_url` feed. Add the
   Wolfi ecosystem mapping. Surfaced 2026-08-01 during the legacy→greenfield feed-parity check.
 - [x] **(HIGH) OSV distro correlation misses Red Hat/Rocky/Alma CVEs — the ACL ignores OSV's `upstream` field. — FIXED 2026-08-02 (code green, uncommitted).**

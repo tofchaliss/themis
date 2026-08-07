@@ -46,7 +46,7 @@ func TestRelevanceFilteredSource(t *testing.T) {
 	b := app.ProposalFor{CVE: newCVEID(t, "CVE-2024-2")}
 
 	// Only CVEs that already have a card pass through.
-	src := feed.NewRelevanceFilteredSource(
+	src := feed.NewRelevanceFilteredSource("nvd",
 		fakeRawChanged{out: []app.ProposalFor{a, b}},
 		&fakeKnownCVEs{set: map[string]struct{}{"CVE-2024-1": {}}})
 	got, err := src.ChangedSince(ctx, time.Time{})
@@ -58,14 +58,14 @@ func TestRelevanceFilteredSource(t *testing.T) {
 	}
 
 	// Empty known set -> nothing survives.
-	src = feed.NewRelevanceFilteredSource(fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{set: map[string]struct{}{}})
+	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{set: map[string]struct{}{}})
 	if got, _ := src.ChangedSince(ctx, time.Time{}); len(got) != 0 {
 		t.Errorf("empty-known: got %d, want 0", len(got))
 	}
 
 	// No changes -> nothing, and the known set is not consulted.
 	known := &fakeKnownCVEs{err: errors.New("must not be called")}
-	src = feed.NewRelevanceFilteredSource(fakeRawChanged{out: nil}, known)
+	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: nil}, known)
 	if got, err := src.ChangedSince(ctx, time.Time{}); err != nil || len(got) != 0 {
 		t.Errorf("no-changes: got (%+v,%v)", got, err)
 	}
@@ -74,13 +74,13 @@ func TestRelevanceFilteredSource(t *testing.T) {
 	}
 
 	// Raw error propagates.
-	src = feed.NewRelevanceFilteredSource(fakeRawChanged{err: errors.New("boom")}, &fakeKnownCVEs{})
+	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{err: errors.New("boom")}, &fakeKnownCVEs{})
 	if _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
 		t.Error("raw error: expected error")
 	}
 
 	// Known-set error propagates.
-	src = feed.NewRelevanceFilteredSource(fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{err: errors.New("boom")})
+	src = feed.NewRelevanceFilteredSource("nvd", fakeRawChanged{out: []app.ProposalFor{a}}, &fakeKnownCVEs{err: errors.New("boom")})
 	if _, err := src.ChangedSince(ctx, time.Time{}); err == nil {
 		t.Error("known error: expected error")
 	}

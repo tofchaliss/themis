@@ -124,7 +124,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// vendor-severity + not_affected statements therefore headline the reconciled distro view.
 	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), newTrustPolicy())
 	evClient := evidence.NewClient(evidenceBaseURL, nil)
-	var disc app.PackageVulnSource = feed.NewOSVClient(osvBaseURL, nil)
+	health := app.NewFeedHealthService(st, sysClock{})
+	// OSV is the always-on discovery feed — queried per component on every upload, with no poll
+	// loop to hang health off. Wrapping it is what puts the one feed that runs constantly into
+	// GET /feeds alongside the scheduled ones (B1).
+	disc := feed.NewHealthRecordingSource("osv", feed.NewOSVClient(osvBaseURL, nil), health)
 	if nvd.Discovery {
 		// NVD joins the discovery fan-out beside OSV (A2). The reconciled version-range gate in
 		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
@@ -134,7 +138,6 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
-	health := app.NewFeedHealthService(st, sysClock{})
 	kn := Knowledge{
 		Handler:  knhttp.NewHandler(read, health).Router(),
 		Store:    st,
@@ -143,7 +146,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		Health:   health,
 	}
 	if nvd.Enabled {
-		changed := feed.NewRelevanceFilteredSource(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
+		changed := feed.NewRelevanceFilteredSource("nvd", feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st)
 		kn.Watch = app.NewWatchService(changed, st, fold, sysClock{})
 	}
 	if signals.Enabled {

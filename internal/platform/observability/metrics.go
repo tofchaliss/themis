@@ -56,7 +56,7 @@ func NewMetrics(service string) *Metrics {
 		// and those need opposite responses. Two counters disambiguate what one cannot.
 		feedRecords: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "themis_feed_records_total",
-			Help: "Feed records by source and stage (discovered = returned by the feed, folded = relevant and applied).",
+			Help: "Feed records by source and stage (discovered = returned by the feed, relevant = survived the relevance bound, folded = applied).",
 		}, []string{"source", "stage"}),
 		aiInvocations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "themis_ai_invocations_total",
@@ -85,9 +85,13 @@ const (
 	FeedPollFailed    = "failed"
 )
 
-// Feed record stages.
+// Feed record stages. `discovered` is what the feed returned, `relevant` what survived the D5
+// relevance bound (a CVE the enterprise already has carded), `folded` what was actually applied.
+// Three stages rather than two because the two drops have different meanings: discovered→relevant
+// is the relevance bound working as designed, relevant→folded is a fold that did nothing.
 const (
 	FeedRecordsDiscovered = "discovered"
+	FeedRecordsRelevant   = "relevant"
 	FeedRecordsFolded     = "folded"
 )
 

@@ -188,13 +188,27 @@ func osvPackageName(comp app.InventoryComponent) string {
 // osvDistroEcosystem maps a distro package (apk/deb/rpm) to its OSV ecosystem string from the
 // PURL "distro=" qualifier (e.g. "rocky-8.10" -> "Rocky Linux:8"). Returns "" when the distro
 // or its version can't be resolved — the component is then skipped by VulnsForPackage.
+//
+// Rolling distros (Wolfi, Chainguard) are handled before the version split: they have no
+// numbered release, so their OSV ecosystem is the bare name and their PURL may carry no version
+// suffix at all.
 func osvDistroEcosystem(purl string) string {
-	distro := value.PURLQualifier(purl, "distro")
+	distro := strings.ToLower(strings.TrimSpace(value.PURLQualifier(purl, "distro")))
+	// ROLLING distros first, before the version split. Wolfi and Chainguard ship no numbered
+	// release, so their OSV ecosystems carry no version — and their PURLs may omit the "-<date>"
+	// suffix entirely, which the split below would reject as unresolvable. Matching on the
+	// prefix covers both `distro=wolfi` and `distro=wolfi-20230201`.
+	switch {
+	case distro == "wolfi" || strings.HasPrefix(distro, "wolfi-"):
+		return "Wolfi"
+	case distro == "chainguard" || strings.HasPrefix(distro, "chainguard-"):
+		return "Chainguard"
+	}
 	i := strings.IndexByte(distro, '-')
 	if i <= 0 || i+1 >= len(distro) {
 		return ""
 	}
-	name := strings.ToLower(distro[:i])
+	name := distro[:i]
 	ver := distro[i+1:]
 	switch name {
 	case "rocky", "rockylinux":
@@ -317,3 +331,8 @@ func truncateForError(b []byte) string {
 
 // ensure the port is satisfied at compile time.
 var _ app.PackageVulnSource = (*OSVClient)(nil)
+
+// OSVDistroEcosystemForTest exposes the distro→OSV-ecosystem mapping to the package's external
+// test, which cannot reach the unexported function. Kept minimal and test-only in name so it is
+// never mistaken for part of the client's surface.
+func OSVDistroEcosystemForTest(purl string) string { return osvDistroEcosystem(purl) }
