@@ -1081,6 +1081,17 @@ three angles, and two of them proposed fixes that would not have worked.
   another package's fix has landed. With the order corrected the old behaviour records **1 match where 2
   are due** — the glibc finding genuinely disappears. That ordering dependence is also why it was never
   seen in production: it needs a multi-package RPM card whose lower-versioned fix folds first.
+  **🔬 MEASURED ON THE VM, 2026-08-07 — the bug WAS firing.** A/B on identical SBOM content: the release
+  correlated by the old code recorded **537** matches, the one correlated by the fixed code **568** —
+  **+31 restored, 0 lost** (both diffs run). The restored set names the mechanism exactly: 29 of 31 are
+  `python3-ply@3.9-9.el8` and `python3-pyyaml@3.12-12.el8`, whose version numbers sit ABOVE the CPython
+  fix versions (`0:3.6.8-…el8`) sharing their cards — so `3.9 >= 3.6.8` satisfied the verdict using a
+  different package's fix and the occurrence vanished. `libtiff@4.0.9-36.el8_10` accounts for the other 2.
+  **Exposure across the estate:** **165 of 239 cards** carry more than one fix version, the worst holding
+  **303**; at least 10 carry 4 fixes with a parseable `.elN` marker, which is the comparable — and
+  therefore dangerous — subset.
+  The +31 is a **lower bound**: the fixed run also had a more NVD-enriched card set, and richer cards carry
+  more fix versions, which under the old code would have dropped *more*.
   **What REMAINS (re-scoped to MEDIUM, display + model):** `EnterpriseView.FixedVersions` is still a
   package-less union, so `GET /faultlines/{id}`, the FindingAssessment projection and any dashboard cannot
   say "the fix for YOUR component" — `scripts/release-posture.sh` now prints a candidate count rather than
