@@ -561,7 +561,19 @@ three angles, and two of them proposed fixes that would not have worked.
   classes. **Where it plugs in:** `internal/knowledge/domain/reconcile.go` + a `.v2` payload schema.
   **Scope:** MEDIUM when a mixed-trust applicability source lands; LOW until then.
 
-- [ ] **TRUST-2 — The shipped-source list for the classification guard is manual.**
+- [x] **TRUST-2 — The shipped-source list for the classification guard is manual.**
+  ✅ **CLOSED 2026-08-07.** `shippedSources()` now **derives** the enumeration instead of restating it:
+  registering a feed ACL is how a source becomes reachable at all, so `feed.NewRegistry().Sources()` already
+  knows every one of them, plus the single non-ACL source — the operator-uploaded VEX path, now named
+  `app.VEXDocumentSource` at its definition rather than as a bare literal. Adding a feed therefore cannot
+  skip classification: the guard fails the build before the source can fail closed in production.
+  **The guard now runs in BOTH directions.** `TestTrustTableClassifiesOnlyShippedSources` catches the
+  opposite drift — a table entry for a source nothing produces. That is not cosmetic: a stale entry reads as
+  a considered decision about a live source, so the next reviewer answers a question about something that is
+  not there, and a genuinely missing classification is easier to miss in a table padded with fiction. Three
+  such entries had already accumulated (`epss`, `kev`, `scanner-report` — none is a real source id; the
+  sweep records under `epsskev`) and were removed. A calibration test was asserting against one of them.
+  Original report follows.
   _(Surfaced implementing `phase3-trust-model` group 2, 2026-08-06.)_
   `TestEveryKnownSourceIsClassified` asserts that every source Knowledge can record a Proposal under is
   present in `trustBySource`, but the "every source" list is **hand-maintained** in the test. Adding a feed
@@ -621,6 +633,15 @@ three angles, and two of them proposed fixes that would not have worked.
   Governance** rather than a fact carried from the source. Move it onto
   `knowledge.faultline_superseded.v1` (additively, as `faultline_enriched` did in group 3) so it reflects
   what actually drove the supersession. **Scope:** LOW now the regression is closed.
+  **⏸ DEFERRED WITH CAUSE 2026-08-07 — the field would go on an event nobody emits.** Investigating the fix
+  found that `Faultline.Supersede()` has **no production caller at all** (`grep '\.Supersede('` returns only
+  tests and the unrelated Communication aggregate). The event type is registered in the store's topic map
+  and Governance's coordinator handles it, but Knowledge never publishes it — so the whole withdrawal path
+  is **consumer-only** and the `Withdrawn` branch in `evidenceTrustFor` is unreachable in production. Adding
+  a trust field to an unpublished event is speculative design against an unbuilt producer, which is likely
+  to be wrong by the time the producer exists. **The requirement stands and moves to the producer's
+  ticket:** whoever wires supersession carries the class on the event rather than restating it in
+  Governance. See **KN-WITHDRAW-1** below for the producer gap itself.
 
 - [x] **TRUST-6 — `business_invalid` discards *which* Grounding Verification check failed.**
   ✅ **CLOSED 2026-08-07.** `app.Outcome` gained a `Detail` field carrying the check's own message, set on
@@ -870,6 +891,27 @@ three angles, and two of them proposed fixes that would not have worked.
   already carries the drift signals. **Dep:** none — the EPSS/KEV/exploit signals it needs are already on
   the Faultline and already reach Governance. **Scope:** MEDIUM-HIGH — it is the safety net under a
   suppression mechanism that is already live.
+
+- [ ] **KN-WITHDRAW-1 — The CVE-withdrawal path is consumer-only: Knowledge never supersedes a Faultline.**
+  _(Found 2026-08-07 while investigating TRUST-4.)_ The forward-only lifecycle ends at **Superseded** — "a
+  card is never deleted, only superseded" is a stated key invariant — and the *consuming* half is fully
+  built: `app.EventFaultlineSuperseded` is registered in the store's topic map as
+  `knowledge.faultline_superseded.v1`, the payload has a frozen v1 schema, and Governance's coordinator
+  turns it into an `EnrichmentSignal{Withdrawn: true}` that raises a re-evaluation proposal. But
+  **`Faultline.Supersede()` is never called outside tests**, so the event is never emitted and none of that
+  runs.
+  **What is missing is the trigger, not the machinery.** A CVE gets **REJECTED** or **withdrawn** upstream
+  (NVD publishes `vulnStatus: "Rejected"`; OSV marks a record withdrawn), and nothing in the feed ACLs reads
+  either signal. So a withdrawn CVE keeps its card, keeps its Findings, and keeps demanding triage
+  attention forever — the exact case D11 cites as the motivating example for governed auto-accept ("CVE
+  withdrawn upstream → auto-accept Not-Affected"), which therefore cannot fire today.
+  **Fix:** read the withdrawal signal in the NVD and OSV ACLs, carry it to a `SupersedeFaultline` use case
+  that calls `Supersede()` and emits the event, and — per TRUST-4 — put the **evidence trust class on the
+  event** at that point, since a withdrawal is genuinely Observed (re-fetch and the CVE is still rejected)
+  and Governance currently has to assume it. **Where it plugs in:**
+  `internal/knowledge/adapters/feed/{nvd,osv}.go` (detect), `internal/knowledge/app` (a supersede use case),
+  `knowledge.faultline_superseded.v1` (additive trust field). **Dep:** none. **Scope:** MEDIUM — a stated
+  key invariant with no code path to reach it, and it strands the one auto-accept case the EDRs name.
 
 ---
 

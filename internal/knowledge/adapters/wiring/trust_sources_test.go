@@ -4,27 +4,19 @@ import (
 	"testing"
 
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
+	"github.com/themis-project/themis/internal/knowledge/app"
 )
 
-// shippedSources is every source id Knowledge can currently record a Proposal under.
+// Every shipped source must be classified. The list is DERIVED (see shippedSources in
+// trust_sources.go) — registering a feed ACL is how a source becomes reachable at all, so a new
+// feed cannot skip classification: this fails the build before it can fail closed in production.
 //
-// This list is the **manual half** of the classification guard: it must be extended when
-// a feed or ACL is added. Deriving it from a single shipped-source registry — so adding a
-// feed cannot skip classification at all — is filed in `docs/BACKLOG.md`. Until then this
-// test at least fails loudly rather than letting an unclassified source fail closed
-// silently in production.
-var shippedSources = []string{
-	"osv", "nvd", "epss", "kev", "epsskev", "exploitdb",
-	"redhat", "vexfeed", "vex",
-	"scanner", "scanner-report",
-}
-
-// Every shipped source must be classified. An unregistered source still fails closed to
-// Asserted at runtime, but that is a safety net, not a substitute for deciding — a feed
-// republishing a public record would be silently under-trusted and its conclusions kept
-// out of policy auto-acceptance for no reason.
+// An unregistered source still degrades to Asserted at runtime, but that is a safety net, not a
+// substitute for deciding. A feed republishing a public record would otherwise be silently
+// under-trusted and its conclusions kept out of the one auto-accept rule that ships (D15).
 func TestEveryKnownSourceIsClassified(t *testing.T) {
-	for _, s := range shippedSources {
+	for _, s := range shippedSources() {
 		if _, ok := trustBySource[s]; !ok {
 			t.Errorf("source %q is shipped but not classified in trustBySource — decide whether its "+
 				"output is reproducible (Observed), declared (Asserted), or reasoned (Inferred)", s)
@@ -51,7 +43,7 @@ func TestShippedTrustClassifications(t *testing.T) {
 	}{
 		{"osv", value.TrustObserved, "a public record — re-fetching reproduces it"},
 		{"nvd", value.TrustObserved, "a public record"},
-		{"kev", value.TrustObserved, "a public catalog"},
+		{"epsskev", value.TrustObserved, "the EPSS/KEV/ExploitDB sweep — public catalogs, reproducible on re-fetch"},
 		{"redhat", value.TrustAsserted, "a judgment about the vendor's own build; nothing can re-run it"},
 		{"vexfeed", value.TrustAsserted, "vendor VEX statements are declarations"},
 		{"scanner", value.TrustAsserted, "a scanner verdict rests on its own matching heuristics"},
@@ -73,5 +65,45 @@ func TestNoShippedSourceIsInferredYet(t *testing.T) {
 			t.Errorf("source %q is classified Inferred; if the AI→Knowledge proposal path has landed, "+
 				"remove this test and confirm the constitutional bar (T4) covers it", s)
 		}
+	}
+}
+
+// The guard runs in BOTH directions. The forward check stops a shipped source going
+// unclassified; this one stops the table describing sources that no longer exist.
+//
+// A stale entry is not harmless. It reads as a considered decision about a live source, so the
+// next person to review "what is this feed worth?" answers a question about something that is
+// not there, and a genuinely missing classification is easier to overlook in a table padded
+// with fiction. Three such entries ("epss", "kev", "scanner-report") had accumulated and were
+// removed when this check was added.
+func TestTrustTableClassifiesOnlyShippedSources(t *testing.T) {
+	shipped := map[string]bool{}
+	for _, s := range shippedSources() {
+		shipped[s] = true
+	}
+	for s := range trustBySource {
+		if !shipped[s] {
+			t.Errorf("trustBySource classifies %q, which nothing ships — remove it, or register the "+
+				"source that produces it", s)
+		}
+	}
+}
+
+// The derived enumeration must actually reach the sources the ACL registry knows about. If
+// this ever returns fewer than the registry does, the derivation has been broken and the
+// forward guard silently stops guarding.
+func TestShippedSourcesCoversTheFeedRegistry(t *testing.T) {
+	got := map[string]bool{}
+	for _, s := range shippedSources() {
+		got[s] = true
+	}
+	for _, s := range feed.NewRegistry().Sources() {
+		if !got[s] {
+			t.Errorf("feed registry source %q is missing from shippedSources()", s)
+		}
+	}
+	// The one non-ACL source: an operator-uploaded VEX document.
+	if !got[app.VEXDocumentSource] {
+		t.Errorf("the uploaded-VEX source %q is missing from shippedSources()", app.VEXDocumentSource)
 	}
 }

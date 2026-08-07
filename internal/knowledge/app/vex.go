@@ -7,6 +7,12 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
+// VEXDocumentSource is the source id recorded on Proposals distilled from an OPERATOR-UPLOADED
+// VEX document. It is the one Knowledge source that is not a feed ACL, so it is named here
+// rather than discovered from the feed registry — and it must appear in the shipped-source
+// enumeration the trust-classification guard walks (TRUST-2), or it could ship unclassified.
+const VEXDocumentSource = "vex"
+
 // VEXStatement is one applicability statement parsed from a VEX document (adapter-produced):
 // a vendor's status for a (CVE, package) pair.
 type VEXStatement struct {
@@ -76,7 +82,7 @@ func (s *VEXApplicabilityService) PlanVEX(ctx context.Context, evidenceID string
 		if err != nil {
 			continue // skip an unparseable CVE id
 		}
-		p, err := domain.NewApplicabilityProposal("vex", now, domain.Applicability{
+		p, err := domain.NewApplicabilityProposal(VEXDocumentSource, now, domain.Applicability{
 			Package: st.Package, Status: st.Status, Justification: st.Justification,
 		})
 		if err != nil {

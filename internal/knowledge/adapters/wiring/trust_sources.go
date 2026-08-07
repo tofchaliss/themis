@@ -2,6 +2,8 @@ package wiring
 
 import (
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
+	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
@@ -22,9 +24,7 @@ var trustBySource = map[string]value.TrustClass{
 	// Public records, independently published and reproducible on re-fetch.
 	"osv":       value.TrustObserved,
 	"nvd":       value.TrustObserved,
-	"epss":      value.TrustObserved,
-	"kev":       value.TrustObserved,
-	"epsskev":   value.TrustObserved,
+	"epsskev":   value.TrustObserved, // the combined EPSS/KEV/ExploitDB sweep records under this one id
 	"exploitdb": value.TrustObserved,
 
 	// Vendor statements about the vendor's own builds. Asserted is **not** a reliability
@@ -41,9 +41,25 @@ var trustBySource = map[string]value.TrustClass{
 	// What Knowledge ingests from a scanner is its *verdict* ("this component is affected"),
 	// which rests on the scanner's own matching heuristics; scanners routinely disagree on
 	// the same artifact, so the verdict is a judgment, not an observation.
-	"scanner":        value.TrustAsserted,
-	"scanner-report": value.TrustAsserted,
+	"scanner": value.TrustAsserted,
 }
 
 // newTrustPolicy builds the injected source→trust-class policy.
 func newTrustPolicy() domain.TrustPolicy { return domain.NewTrustPolicy(trustBySource) }
+
+// shippedSources enumerates every source id Knowledge can record a Proposal under, DERIVED
+// rather than hand-listed (TRUST-2).
+//
+// It was a literal slice maintained in the test, which meant adding a feed and forgetting both
+// the trust table and the list still compiled — and the new source then failed closed to
+// Asserted, silently. Safe, but wrong for a feed republishing a public record, whose
+// conclusions would be needlessly kept out of policy auto-acceptance (and, since
+// EDR-GOVERNANCE-01 D15, out of the one auto-accept rule that ships).
+//
+// Almost every source is a feed ACL, and the ACL registry already knows them all — registering
+// an ACL is how a feed becomes reachable at all, so deriving from it makes classification
+// impossible to skip. The only exception is the operator-uploaded VEX path, which is not a feed;
+// it is named at its definition and added explicitly here.
+func shippedSources() []string {
+	return append(feed.NewRegistry().Sources(), app.VEXDocumentSource)
+}
