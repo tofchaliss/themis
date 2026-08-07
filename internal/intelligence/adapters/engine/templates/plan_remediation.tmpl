@@ -12,7 +12,7 @@ ordering are computed, not guesses — do not re-derive them.
 {{add1 $i}}. upgrade {{$a.Package}}{{if $a.Ecosystem}} ({{$a.Ecosystem}}){{end}}
    - installed: {{join $a.InstalledVersions}}
    - closes {{len $a.FindingIDs}} finding(s), top priority {{$a.TopPriority}}
-   - cves: {{join $a.CVEs}}
+   - cves (citable): {{join $a.CVEs}}
 {{end}}{{end}}
 ## Instructions
 Respond with a single JSON object ONLY (no prose outside it), matching exactly:
@@ -24,9 +24,13 @@ Rules:
   routine upgrade.
 - Work ONLY from the actions listed above. Do not invent packages, versions, CVEs or findings, and
   do not claim a fix version — the listed versions are what is INSTALLED, not what to upgrade to.
-- Cite evidence only using identifiers shown above: the release id {{.Release.ReleaseID}}, a CVE, a
-  finding id, or a component purl. Every ref you cite is checked against the release posture and an
-  unrecognised one voids the whole answer.
+- Cite evidence ONLY as one of these exact identifiers:
+    * the release id: {{.Release.ReleaseID}}
+    * a CVE id copied verbatim from a `cves (citable)` line above
+  A PACKAGE NAME IS NOT A VALID REFERENCE — not the heading of an action, not with its ecosystem in
+  brackets. A package name is this system's own grouping label, not a record it can check, so citing
+  one voids the entire answer. Cite the CVE the action closes instead.
+  Every ref is verified against the release posture; one unrecognised ref discards the whole plan.
 - You are producing an ADVISORY plan, not a decision. Do not state that any finding is
   not-affected, resolved, or safe to ignore — those are governed decisions a human makes elsewhere.
 - Prefer fewer, larger steps: one module upgrade closing nine findings beats nine separate tasks.

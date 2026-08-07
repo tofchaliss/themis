@@ -137,3 +137,27 @@ func TestPromptJoinHelperOnEmpty(t *testing.T) {
 		t.Errorf("empty lists must render as (none):\n%s", got)
 	}
 }
+
+// A release can have outstanding Findings whose components name nothing actionable, leaving the
+// action list EMPTY. The template must still render — a prompt that errors here would surface as
+// `provider_error`, i.e. an outage, for what is really "we have nothing concrete to suggest".
+func TestRenderPlanRemediation_EmptyActionList(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ac := domain.AssembledContext{Release: domain.ReleasePosture{
+		ReleaseID: "rel-1",
+		Entries: []domain.PostureEntry{{
+			FindingID: "f1", CVE: "CVE-1", ResidualPriority: 50,
+			Components: []domain.PostureComponent{{PURL: "pkg:rpm/rocky/x@1", Ecosystem: "rpm"}}, // unnamed
+		}},
+	}}
+	got, err := r.Render("plan_remediation", ac)
+	if err != nil {
+		t.Fatalf("Render with no actions must not error: %v", err)
+	}
+	if !strings.Contains(got, "rel-1") {
+		t.Errorf("prompt lost its subject:\n%s", got)
+	}
+}
