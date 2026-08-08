@@ -4,8 +4,10 @@
 # /etc/systemd/system/themis@.service, then enables and starts all six.
 #
 # Prerequisites (see INSTALLATION.md Part A):
-#   - PostgreSQL running with the `themis` role and the 5 databases (evidence/knowledge/
-#     governance/communication/bus) already created.
+#   - PostgreSQL running with the `themis` role and the databases (evidence/knowledge/
+#     governance/communication/bus, plus auth and intelligence if you use them) already created.
+#     THEMIS_PGPW must be the password that role ACTUALLY has: it is baked into six env files
+#     here and nothing reconciles them later, so a mismatch surfaces only at the next restart.
 #   - The service binaries built: go build -o bin/ ./cmd/registry ./cmd/evidence \
 #       ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence
 #   - Any manually-started ./bin/* processes stopped (they'd hold the ports):
@@ -29,11 +31,16 @@ BUS="${BASE}/bus?sslmode=disable"
 [[ -x "$REPO/bin/registry" ]] || { echo "error: $REPO/bin/registry not found — build the binaries first (see header)"; exit 1; }
 [[ -f "$REPO/deploy/systemd/themis@.service.in" ]] || { echo "error: run from the repo root"; exit 1; }
 
-# Registry co-locates in the evidence DB and cannot self-migrate (see INSTALLATION.md) — load
-# its schema directly (idempotent CREATE TABLE IF NOT EXISTS) so its unit runs with a plain DSN.
-echo "loading registry schema into the evidence database (idempotent) ..."
-PGPASSWORD="$PGPW" psql -h "$PGHOST" -p "$PGPORT" -U themis -d evidence -v ON_ERROR_STOP=1 \
-  -f "$REPO/internal/registry/adapters/store/migrations/000001_registry.up.sql" >/dev/null
+# Registry self-migrates into the shared evidence DB as of 2026-08-07, keeping its own
+# `registry_schema_migrations` bookkeeping table so it never reads Evidence's version. Its unit
+# gets the PLAIN DSN — the migrations-table parameter is attached internally to a separate
+# migration DSN, because pgx forwards an unknown DSN parameter to Postgres and every runtime
+# connection would then fail.
+#
+# This script used to psql the registry schema in by hand instead. That was silently WRONG once a
+# second registry migration existed: it loaded 000001 only, so 000002_estate (customers,
+# microservices, deployments — the whole estate graph behind blast-radius) was never created on a
+# fresh install, and C1/C2 failed on a system that looked correctly installed.
 
 install -d -m 0750 /etc/themis
 
@@ -48,9 +55,10 @@ write_env() { # $1=service ; stdin=service-specific KEY=VALUE lines
   echo "  wrote $f"
 }
 
-# Registry: plain DSN, NO migrate flag (schema loaded above).
+# Registry: plain DSN + self-migrate (its own bookkeeping table, see above).
 write_env registry <<EOF
 THEMIS_DATABASE_DSN=${BASE}/evidence?sslmode=disable
+THEMIS_REGISTRY_MIGRATE=1
 THEMIS_REGISTRY_ADDR=:8082
 EOF
 
@@ -80,6 +88,7 @@ THEMIS_GOVERNANCE_AI_ENABLED=1
 THEMIS_INTELLIGENCE_URL=http://localhost:8086
 THEMIS_GOVERNANCE_MIGRATE=1
 THEMIS_GOVERNANCE_ADDR=:8083
+# THEMIS_INTELLIGENCE_TIMEOUT=300s   # raise WITH THEMIS_LLM_TIMEOUT on the intelligence node
 EOF
 
 # Communication: reads Positions back from Governance.
@@ -92,11 +101,18 @@ THEMIS_COMMUNICATION_ADDR=:8084
 EOF
 
 # Intelligence: stateless AI gateway over Ollama.
+#
+# THEMIS_LLM_TIMEOUT here and THEMIS_INTELLIGENCE_TIMEOUT on the Governance node are TWO HALVES OF
+# ONE DEADLINE and the shorter one decides. Raising only this side does nothing visible: Governance
+# hangs up first, the Gateway sees its request context cancelled mid-provider-call, and logs
+# `provider_error` — so a caller-side timeout reads as an Intelligence fault. Both default to 60s;
+# for a slower or larger local model raise BOTH.
 write_env intelligence <<EOF
 THEMIS_GOVERNANCE_URL=http://localhost:8083
 THEMIS_OLLAMA_URL=http://localhost:11434
 THEMIS_INTELLIGENCE_MODEL=${MODEL}
 THEMIS_INTELLIGENCE_ADDR=:8086
+# THEMIS_LLM_TIMEOUT=300s
 EOF
 
 sed "s#@REPO@#${REPO}#g; s#@USER@#${RUN_USER}#g" \
