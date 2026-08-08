@@ -1777,18 +1777,41 @@ three angles, and two of them proposed fixes that would not have worked.
   returns, because chi fills its RouteContext as the request descends the tree. Naming it up front
   produced `GET other` for every request — every endpoint collapsed into one span name, which is
   exactly the cardinality mistake the metric labels avoid, inverted.
-  **Still open:** OTLP metric export (`otlpmetrichttp`). Only needed if the scrape model stops
-  fitting — a decision to take when a deployment asks for it, not before. _(Split out 2026-08-07
-  when metrics landed.)_ `Setup` wires a LoggerProvider and now a Prometheus registry; a **TracerProvider**
-  with request/DB spans is still absent, and there is no OTLP pipeline for traces or metrics.
-  **Why it was not done with the metrics half:** it needs new modules —
-  `go.opentelemetry.io/otel/exporters/otlp/otlptracehttp` and `.../otlpmetrichttp` are not dependencies
-  today (only the *logs* exporter is), and adding dependencies is a decision this did not need to take to
-  deliver the counters. The SDK itself (`otel/sdk`, `otel/trace`, `otel/metric`) is already present.
-  **Decision needed:** whether telemetry egress is OTLP-to-collector (add both exporters; metrics then move
-  off the Prometheus registry or dual-export) or Prometheus-scrape-plus-OTLP-traces (add only the trace
-  exporter). **Where it plugs in:** `internal/platform/observability` (`Setup`), the HTTP middleware
-  (server spans), and the pgx pool (DB spans). **Dep:** the exporter choice above. **Scope:** MEDIUM.
+  **Still open (split out 2026-08-07, LOW):** OTLP **metric** export (`otlpmetrichttp`), and **DB spans**
+  on the pgx pool. Neither is needed by the egress decision above — metrics are scraped, and the server
+  span already attributes latency to a route. Revisit if a deployment asks for push-model metrics, or when
+  a slow request needs the query broken out from the handler. **Where:** `observability.Setup` + the pgx
+  pool constructor.
+
+- [ ] **F5 — a node that cannot start is indistinguishable from a healthy one.** **MED.** Found on the VM
+  2026-08-08: `themis@governance` had been crash-looping for **81 restarts** — it could not authenticate to
+  run its migrations, so it exited, and `Restart=always` restarted it forever. Nothing surfaced that. The
+  only reason it was caught is that someone read `schema_migrations.version` by hand and noticed it was 6
+  where it should have been 9. The exit itself is CORRECT — a node must refuse to serve on a schema it
+  could not verify — so the gap is not the behaviour but the silence around it.
+  **Two things are missing and they are different.** (a) `/healthz` + `/readyz` (already tracked as **F5**
+  in `PARITY-GAP.md`), so an orchestrator or a check script can see "never became ready". (b) A **startup
+  failure counter or log-once-at-error that a scrape can catch** — note that `/metrics` cannot help here,
+  because a node that exits before binding its port serves no metrics at all. Whatever watches for this
+  must live outside the node.
+  **Do not fix by making migration failure non-fatal.** Serving on an unverified schema is the worse
+  outcome; the fix is making the failure loud, not soft.
+
+- [ ] **Rotating the DB password silently arms a fleet-wide outage.** **MED, operability.** Same VM
+  incident. `install-systemd.sh` bakes `THEMIS_PGPW` into six `/etc/themis/*.env` files and nothing
+  reconciles them afterwards, so the `themis` role's password and the DSNs had drifted apart (the role held
+  the literal example password from `INSTALLATION.md`, the env files held a different one).
+  **Why it stayed hidden for so long is the interesting part:** `pgx` pools keep serving on connections
+  opened BEFORE the password changed. Every node reports healthy — not because the credential works, but
+  because nothing has asked it to prove it since. They then all fail together at the next restart, at a
+  moment nobody chose. Governance failed first and loudest only because it is the one that must
+  authenticate at startup to migrate.
+  **Done so far (2026-08-08):** `INSTALLATION.md` now GENERATES the password instead of naming one (a
+  literal credential in a runbook becomes a real one the first time somebody follows it), and documents the
+  rotation procedure beside the installer.
+  **Still open:** a `themisctl`-style verb, or a flag on `install-systemd.sh`, that rewrites the env files
+  and restarts the fleet as one operation — plus a startup-time credential check that fails with
+  "DSN in /etc/themis/<svc>.env is not accepted by the server" rather than a bare driver error.
 
 ---
 

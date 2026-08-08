@@ -96,8 +96,11 @@ the password **once** in a shell variable and reuse it everywhere — the runboo
 so there is no second place to keep in sync:
 
 ```sh
-# Use only letters/digits — @ : / # ' $ would break the connection URL. Keep this exported for later steps.
-export PGPW='ChangeMe4Themis'
+# GENERATE the password — do not paste a literal one from a document. A named example in a runbook
+# becomes a real production credential the first time someone follows the runbook, and it is then in
+# every copy of that document. Letters/digits only: @ : / # ' $ would break the connection URL.
+export PGPW=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+# Record it in your secret store NOW — it is printed nowhere else. Keep it exported for later steps.
 
 sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
 for db in evidence knowledge governance communication bus auth intelligence; do
@@ -481,9 +484,22 @@ sure the databases exist (step 1), then stop any hand-started copies so they don
 ```sh
 # from the repo root, as root, with the DB password (and your Ollama model tag):
 pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)' || true
-sudo THEMIS_PGPW='<db-password>' THEMIS_INTELLIGENCE_MODEL='<ollama-model:tag>' \
+sudo THEMIS_PGPW="$PGPW" THEMIS_INTELLIGENCE_MODEL='<ollama-model:tag>' \
   ./deploy/systemd/install-systemd.sh
 ```
+
+> **`THEMIS_PGPW` must be the password the `themis` role actually has** — pass `$PGPW` from step 1 rather
+> than retyping one. The installer bakes it into six `EnvironmentFile`s, and **changing the role's password
+> afterwards does not update them.** That failure is nastier than it sounds: `pgx` pools keep serving on
+> connections opened before the change, so every node looks healthy for hours or days and they all fail
+> together at the next restart — governance loudest, because it refuses to start at all when it cannot
+> authenticate to run its migrations. If you ever rotate the password, rewrite the env files in the same
+> maintenance window:
+>
+> ```sh
+> sudo NEWPW="$NEWPW" bash -c 'for f in /etc/themis/*.env; do sed -i "s|://themis:[^@]*@|://themis:${NEWPW}@|g" "$f"; done'
+> sudo systemctl restart 'themis@*'
+> ```
 
 It loads the registry schema (idempotent), writes one `EnvironmentFile` per service under `/etc/themis/`
 (mode 0640), installs a single templated `themis@.service`, and enables + starts
