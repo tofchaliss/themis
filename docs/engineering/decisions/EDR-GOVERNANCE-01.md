@@ -297,7 +297,15 @@ Decision:
     Position event (D8).
 - **Heavier rollups via disposable, event-built projections** (BCK-0047), never scanning aggregates:
   - **Release security posture** — all Findings + current Positions for Release R (the primary
-    customer-facing view).
+    customer-facing view). **A posture ROW must answer the posture question on its own** (DASH-2,
+    2026-08-07): it carries the exploitability `band`, the matched `components` (with the SOURCE
+    package a fix is published under), and the per-component `fixes` — all materialized at enrichment
+    like `base_score` before them. Measured: rendering one table cost **~460 API calls** (one Knowledge
+    read per Faultline for the band, one Governance assessment per Finding for the component), because
+    the rollup carried none of it. **A rollup whose cost is linear in its own length cannot serve a
+    dashboard**, and every client working around that gap was re-implementing the same join.
+    Materialized rather than joined for the reason `base_score` is: the values arrive by EVENT from
+    another bounded context, and a join would be the cross-database read the context boundary forbids.
   - **Faultline blast radius** — which Releases are affected by Faultline F (the Governance-side mirror of
     the projection Knowledge deliberately does not own — EDR-KNOWLEDGE-01 D3/D10).
   - Filters by stance / severity / lifecycle stage.
@@ -441,6 +449,36 @@ Standing lens: every decision keeps a deterministic core + an optional automatio
 PoC contrast: the PoC exposes a single composite risk score with no separation of intrinsic severity from
 enterprise disposition, and never re-evaluates an accepted/suppressed finding when its exploit signals change —
 an acceptance is permanent until someone manually revisits it.
+
+**Implementation status (2026-08-07).** The two halves of this decision shipped a day apart, and the gap
+between them was a live risk worth recording: `residual_priority` landed 2026-08-06 and the WATCHER did
+not, so for one day Themis had the suppression without the safety net — an acceptance was permanent in
+exactly the way the PoC contrast above criticises.
+
+The watcher (GOV-14b) now exists:
+
+- **The premise is recorded, because drift is unanswerable without it.** `PositionInputs.DecidedWith`
+  snapshots the exploit signals at the moment of the decision, and `PositionInputs.ReviewBy` records the
+  date the decider asked to revisit it. Both are INPUTS the decision rested on — "has the premise moved?"
+  cannot be answered from today's values alone. The signals are denormalized onto the Finding
+  (`Finding.RefreshSignals`, refreshed on every enrichment beside `base_score`) so the HUMAN triage path
+  records them exactly as the policy path does; a decision's premise must not depend on who took it.
+- **Two triggers, one outcome.** `DetectDispositionDrift` asks *"has the world changed?"* (a CVE entering
+  KEV, a newly public exploit, EPSS rising by `THEMIS_EPSS_DRIFT_THRESHOLD` — default 0.20, **absolute**,
+  because a relative threshold fires constantly in the noise near zero where EPSS is least stable).
+  `Expired` asks *"has anyone looked at this lately?"* — the accepted-risk timer this EDR's own follow-up
+  called for, folded into the same sweep rather than built as a second worker, because two workers emitting
+  one event type would mean two places to keep the never-auto-decide guarantee.
+- **Drift is ONE-DIRECTIONAL.** Signals getting *better* never re-open a suppression: the decision remains
+  at least as well founded as it was, and re-surfacing a Finding for getting safer trains people to ignore
+  the signal.
+- **Zero `ReviewBy` means no date was AGREED** — not "never expires", and not "expired in year 1".
+  Inventing a deadline the decider did not set would re-surface every suppression on the next enrichment.
+- The event is `governance.disposition_stale.v1`, carrying **what moved** in words. "EPSS 3% → 71%" earns a
+  second look in a queue somebody already decided to empty; "signals changed" does not.
+
+**Reversing vendor VEX** remains the one named drift signal not yet implemented — it needs the
+per-statement applicability trust class (TRUST-1), which is itself correctly deferred behind a guard.
 
 ### D15 — The shipped auto-accept policy is exactly one rule: system-raised `not_affected` resting on **Observed** evidence
 

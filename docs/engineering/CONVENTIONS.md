@@ -34,8 +34,25 @@ debug), generalized to all nodes.
 logger whose core **tees** to stdout (console/JSON) **and** an OTel `LoggerProvider` via the `otelzap`
 bridge — a single `log.Info(…)` emits a console line **and** an OpenTelemetry log record. The level, console
 format, and OTLP endpoint are read by `ConfigFromEnv` (`THEMIS_LOG_LEVEL` / `THEMIS_LOG_FORMAT` /
-`THEMIS_OTLP_LOGS_ENDPOINT` / `THEMIS_OTLP_INSECURE`); OTel export is on only when an endpoint is set. A
-`RequestLogger` middleware logs every HTTP request with a correlation id. The pure `domain`/`app` rings never
+`THEMIS_OTLP_ENDPOINT` — `THEMIS_OTLP_LOGS_ENDPOINT` still honored as a fallback — / `THEMIS_OTLP_INSECURE`);
+OTel export is on only when an endpoint is set. A `RequestLogger` middleware logs every HTTP request with a
+correlation id.
+
+**All three signals are now live (2026-08-07).** Metrics (2026-08-06) are a Prometheus registry scraped at
+`/metrics`; **traces** are an OTLP `TracerProvider` with a server span per HTTP request. Two deliberate
+choices:
+
+- **The span is named after the route pattern, not the raw path** — `GET /api/v1/findings/{id}`, not one
+  span name per finding id. Because chi only fills its `RouteContext` *during* routing, the middleware names
+  the span provisionally and **renames it after the handler returns**; naming it up front would have
+  produced `GET other` for every request.
+- **Every span carries `themis.correlation_id`**, the same id the log line carries — that shared key is what
+  makes a trace and its logs joinable. A trace without it is a latency chart; with it, it is an
+  investigation.
+
+**Metrics are pull, traces are push**, on purpose: a counter survives having no collector (it accumulates
+until someone scrapes) while a span does not (it has no pull model), so metrics stay useful on an isolated
+node and traces cost one exporter dependency rather than two. The pure `domain`/`app` rings never
 log (enforced by depguard — only adapters + the composition root import the package), so the package sits at
 the platform layer, outside any bounded context. Each greenfield node (`cmd/{evidence,registry,governance,
 communication}`) wires it at startup; example config in `deploy/node.env.example`.

@@ -45,7 +45,8 @@ named here are now addressed in-flight.
 
 Also shipped: a deterministic no-AI **SBOM→VEX CI gate** (#67, now a PR gate) and four decision records
 (`EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01`, + realization notes on `EDR-KNOWLEDGE-01`). **Remaining
-tail:** A3–A6, B2/B5/B6, C3–C5, the D-series notifications, E1–E11 input-integrity, F4–F8 observability.
+tail:** A3–A6, B2/B5/B6, C3–C5, the D-series notifications, E1–E11 input-integrity, F5/F7/F8 observability
+(F4 metrics and F6 traces closed 2026-08-06/07).
 
 ## A. Correlation & version matching
 
@@ -127,9 +128,9 @@ input-only in both). The gaps are in notifications and in VEX content fidelity.
 | **F1** | Inbound API auth (API keys + scopes) | `X-API-Key` bcrypt key store, 3-tier scopes (admin/read/product), product-authz, expiry/revocation | **zero** — every service mounts only `RequestLogger`; no `securitySchemes` in any spec | HIGH | ⚠️ (doc rated "M"; there is literally no auth surface) |
 | **F2** | HMAC-verified CI-scan webhook | `POST /webhooks/scan`, `X-Themis-Signature` HMAC-SHA256, constant-time compare | absent | HIGH | 📋 (§ prior B, rated "S") |
 | **F3** | Admin key-management CLI (`create-key`/`revoke-key`) | `infrastructure/cli/admin.go` | absent (nothing to manage — no auth) | MED-HIGH | 🆕 (subsumed by F1, distinct work) |
-| **F4** | Prometheus `/metrics` + metric catalog | promhttp + 8 metrics (ingestion/queue/watch/notify) | **none** — `platform/observability` is logs-only | MED | 🆕 |
+| **F4** | Prometheus `/metrics` + metric catalog | promhttp + 8 metrics (ingestion/queue/watch/notify) | **CLOSED 2026-08-06** — `observability.Metrics` (promhttp registry on `/metrics`, feed-poll/record + HTTP counters) | MED | ✅ |
 | **F5** | `/healthz` + `/readyz` probes | both, per service | absent in all 6 services (k8s liveness/readiness gap) | MED | 🆕 |
-| **F6** | OTel tracing spans | pipeline-stage spans (`domain/tracing.go`) | no `TracerProvider`; CONVENTIONS R1 met for **logs only**, not metrics/traces | MED | 🆕 |
+| **F6** | OTel tracing spans | pipeline-stage spans (`domain/tracing.go`) | **CLOSED 2026-08-07** — OTLP `TracerProvider` + a server span per request, named by **route pattern** (renamed post-handler, since chi only fills its RouteContext during routing) and carrying `themis.correlation_id` so traces join their logs. **CONVENTIONS R1 is now complete: logs + metrics + traces.** | MED | ✅ |
 | **F7** | Job isolation on failure | in-process pool: one poison job fails in isolation, pool keeps draining | eventbus **poison-halt stops the whole consumer stream** — no dead-letter, no per-subject isolation | MED | 🆕 (deliberate D8, but an availability regression) |
 | **F8** | Inbound body-size (MaxBytes) limit | MaxBytes middleware | absent | LOW | 🆕 |
 
@@ -158,7 +159,8 @@ Ranked by "blocks real production use" first, then coverage-correctness, then co
 6. **C1 + C2 + C3 + C4 — asset graph, blast multiplier, VEX/state score modifier, accepted-risk TTL.** Risk
    fidelity; C1 is the large one (a new asset-graph model, likely its own context).
 7. **E1 + E2 — schema validation + trust policy.** Input-integrity hardening.
-8. **F4 + F5 + F6 + F7 — metrics, probes, traces, dead-letter.** Operability; each is self-contained.
+8. **F5 + F7 — probes, dead-letter.** Operability; each is self-contained. (F4 metrics and F6 traces are
+   done — see the table.)
 9. Long tail: A3–A6, B5–B6, C5–C6, D3–D7, E3–E11, F8.
 
 ## Where greenfield is *ahead* (no action)

@@ -50,6 +50,7 @@ make test               # unit tests (no build tags)
 make test-integration   # integration tests: -tags=integration -p 1 (real embedded Postgres)
 make test-property      # property tests (rapid), -rapid.checks=1000 by default
 make lint               # golangci-lint v2
+make vet-tags           # type-check EVERY build tag (integration · e2e · llm · postgres)
 make clean-arch         # go-cleanarch: monolith + each greenfield context (see below)
 make arch-test          # ./tests/architecture — the Go architecture test
 make coverage           # scripts/check-coverage.sh, per-package tiers
@@ -60,20 +61,44 @@ make e2e-pipeline       # M5 multi-context pipeline over the event bus (-tags=e2
 make e2e-llm            # Intelligence real-model e2e against a live OpenAI-compatible server
 ```
 
-`make check` runs: **build · test · lint · clean-arch · arch-test · coverage · deadcode** — and coverage pulls in
-the integration tests. Every OpenSpec `tasks.md` group ends by making this green. `make check-ci` is the
+`make check` runs: **build · vet-tags · test · lint · clean-arch · arch-test · coverage · deadcode** — and
+coverage pulls in the integration tests.
+
+**`vet-tags` exists because a tagged file is invisible to `go build`, `go vet` and the test run unless
+its tag is set, so it rots silently.** Found 2026-08-07: `llm_e2e_test.go` had not compiled since the
+T10 refactor renamed the read seam — the repository's only real-model test was dead code for days, and
+nothing noticed because no gate ever set `-tags=llm`. It is type-check only (no execution), and it
+caught two more stale tagged callers within the hour. Every OpenSpec `tasks.md` group ends by making this green. `make check-ci` is the
 same gate but swaps `coverage` for `coverage-greenfield` (go-forward tree only); it — not `make check` — is
 what `.github/workflows/{pr,main}.yml` enforce, because the frozen v0.3.x legacy integration tests are green
 only on macOS's coarse clock.
 
-`make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives `recommend_position`
-against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
+`make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives
+`recommend_position` **and `plan_remediation`** against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
 `THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
 bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
-`THEMIS_LLM_TIMEOUT` (Go duration, default `60s`) is the provider HTTP-client timeout — **raise it for a
-slower/larger local model** whose grounded `recommend_position` exceeds 60s, else the call aborts with
-`provider_error` and the Gateway returns an `insufficient` (204), which reads like a bad recommendation but is
-really a timeout.
+
+It guards a defect class `make check-ci` **cannot** see: the prompt and the Grounding Verification gate
+are an interface with no compiler between them, and a fake provider returns whatever the test author
+already believed. Measured 2026-08-07 — every fake-provider test passed while the live
+`plan_remediation` capability was refused **three times running**, each for a citation form the prompt
+had invited and the gate rejected. A 204 whose reason is `business_invalid` therefore FAILS the test:
+a declined recommendation is the seam working, an ungrounded citation is the two halves disagreeing.
+**THREE deadlines govern one recommendation, and the SHORTEST decides** — raising one alone changes
+nothing (AI-TIMEOUT-1, measured 2026-08-07):
+
+1. `THEMIS_INTELLIGENCE_TIMEOUT` on the **Governance** node — how long it waits for a recommendation.
+2. `THEMIS_LLM_TIMEOUT` on the **Intelligence** node — the provider HTTP client **and** the Gateway's
+   per-invocation runaway guard (one variable drives both, so they cannot disagree).
+
+Both default to `60s`. For a slower or larger local model, **raise both**: with only the Intelligence
+side raised, Governance hangs up first, the Gateway sees its request context cancelled mid-provider-call
+and logs `provider_error` — so a caller-side timeout is misread as an Intelligence fault. Three calls
+aborting at 59.99s with `THEMIS_LLM_TIMEOUT=300s` set is exactly what that looks like.
+
+A no-proposal `204` now states its cause on `X-Themis-AI-Reason` (AI-204-1): `disabled` · `unreachable` ·
+`insufficient` (the model correctly declined — the seam working) · `provider_error` · `business_invalid`.
+Before that, all of them read as "the AI declined".
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
 
@@ -159,16 +184,34 @@ The contexts and their pipeline order:
 
 **Kernel/Registry** (shared value objects + Product→Project→Release identity, plus the enterprise **estate
 graph** Product→Microservice→Deployment→Customer and a `GET /releases/{id}/blast-radius` traversal that counts
-the unique customers a release reaches — C1) → **Evidence** (immutable,
+the unique customers a release reaches — C1; plus the `GET /products` → `/products/{id}/projects` →
+`/projects/{id}/releases` traversal, so a posture is reachable by name instead of only by a UUID somebody
+captured at upload — DASH-1) → **Evidence** (immutable,
 content-addressed SBOM/VEX; canonical inventory) → **Knowledge** (Faultline aggregate; order-independent
 reconciliation; feed ACLs; correlation) → **Governance** (Findings + append-only Enterprise Positions — AI
 proposes, humans/policy decide; triage priority is `base_score × blast-multiplier`, the multiplier derived
 from Registry's blast-radius over the read seam `THEMIS_REGISTRY_URL`, **fail-safe to 1.0** when Registry is
-unreachable, and saturating to 2.0× at `THEMIS_BLAST_RADIUS_CAP` unique customers (default 10) — C2) →
+unreachable, and saturating to 2.0× at `THEMIS_BLAST_RADIUS_CAP` unique customers (default 10) — C2.
+A suppressing decision (`not_affected` / `accepted_risk`) records **the premise it rested on** — the
+exploit signals at decision time, and an optional `review_by` date — and a **disposition watcher**
+re-surfaces it via `governance.disposition_stale.v1` when that premise drifts (a CVE enters KEV, an
+exploit becomes public, EPSS rises past `THEMIS_EPSS_DRIFT_THRESHOLD`) or the review date passes. It
+**never changes the Position**: it re-opens the QUESTION, so an acceptance does not vanish — it expires.
+That watcher is the safety net under `residual_priority`, which removes a suppressed Finding from the
+queue — GOV-14b) →
 **Communication** (deterministic Publication materialization + serializer
 registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; all provider/LLM code is
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and
 it reads via read APIs / writes via proposal-intake.
+
+Two capabilities ship, and their **output classes** decide everything about the path they take (T7):
+`recommend_position@v1` is a **Decision** capability over one Finding — its stance aspires to become an
+Enterprise Position, so it enters Governance as an advisory proposal on `inferred` evidence that no policy
+may auto-accept. `plan_remediation@v1` is an **Information** capability over one Release — a remediation
+plan, ephemeral, proposing no stance, so nothing reaches Governance and there is nothing to accept. That
+is what makes a release-scoped capability safe to add: the worst outcome of a wrong plan is a human
+disagreeing with it. The plan's GROUPING (231 Findings → ~12 package upgrades) is a deterministic
+`GROUP BY` computed before the prompt — the model is asked only for what needs judgement.
 
 ### Enforcement details worth knowing
 

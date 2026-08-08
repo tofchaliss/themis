@@ -55,8 +55,18 @@ curl -s -X POST localhost:8086/api/v1/capabilities/recommend_position/invoke \
 > ([API.md](API.md)). The **automated** grounding→validation→proposal path is fully proven without any of
 > this — see `go test ./internal/intelligence/...` (`e2e_test.go` drives the whole stack over httptest).
 
-**Automated real-model check.** `make e2e-llm` runs `recommend_position` over a **real** OpenAI-compatible
-server and asserts the output passes validation (`200` with an `llm:<stance>` provenance, or an honest `204`).
+**Automated real-model check.** `make e2e-llm` runs **both shipped capabilities** —
+`recommend_position` (Decision, one Finding) and `plan_remediation` (Information, one Release) — over a
+**real** OpenAI-compatible server and asserts the output passes validation (`200` with an `llm:<stance>`
+provenance for a Decision, `200` carrying `information` for a plan, or an honest `204`).
+
+**Why a real model and not a fake.** The prompt and the Grounding Verification gate are an interface with
+**no compiler between them**, and a fake provider returns whatever the test author already believed — so a
+fake can never surface a disagreement between the two. Measured 2026-08-07: every fake-provider test passed
+while the live `plan_remediation` capability was refused **three times running**, each for a citation form
+the prompt had invited and the gate rejected. A `204` whose reason is `business_invalid` therefore **fails**
+this test: a declined recommendation is the seam working as designed, an ungrounded citation is our own two
+halves disagreeing.
 The provider is a pure OpenAI-compatible client, so it works with **Ollama**, **LM Studio**, or **vLLM** — but
 they differ on two knobs the provider now supports: an optional bearer token (`THEMIS_LLM_API_KEY`) and the
 structured-output mode (`THEMIS_LLM_RESPONSE_FORMAT`: empty `json_object` for Ollama; `json_schema` for LM
@@ -71,6 +81,19 @@ THEMIS_LLM_URL=http://<host>:1234 THEMIS_LLM_MODEL=<model> \
 ```
 
 Verified 2026-07-25 against LM Studio (WhiteRabbitNeo-V3-7B) → a validated `affected` proposal in ~16s.
+Re-verified 2026-08-07 against Ollama (cyberpal20b) → a grounded remediation plan in ~73s.
+
+> **This file did not compile for several days** (until 2026-08-07), because a refactor renamed the read
+> seam it used and **no gate ever set `-tags=llm`**. A tagged file is invisible to `go build`, `go vet` and
+> the test run unless its tag is set. `make vet-tags` — now part of `check` and `check-ci` — type-checks
+> `integration`, `e2e`, `llm` and `postgres` in seconds, which is the difference between a tagged test being
+> opt-in and being abandoned.
+
+**Timeouts: raise BOTH sides.** Three deadlines govern one recommendation and the shortest decides —
+`THEMIS_INTELLIGENCE_TIMEOUT` on Governance, and `THEMIS_LLM_TIMEOUT` on Intelligence (which drives the
+provider client *and* the Gateway's runaway guard). Both default to `60s`. Raising only the Intelligence
+side leaves Governance hanging up first, and the Gateway then logs `provider_error` for what is really a
+caller-side timeout.
 
 **3. The human-triggered Governance seam.** A human asks Governance for an AI recommendation; Governance
 (when AI is enabled) invokes the Gateway and records an **advisory AI proposal** — never auto-accepted:

@@ -149,7 +149,9 @@ service in the runbook below):
 ```sh
 export THEMIS_LOG_LEVEL=info          # debug | info | warn | error
 export THEMIS_LOG_FORMAT=json         # json (prod) | console (dev)
-export THEMIS_OTLP_LOGS_ENDPOINT=     # empty = console-only; e.g. otel-collector:4318 to export
+export THEMIS_OTLP_ENDPOINT=          # empty = console-only; e.g. otel-collector:4318 exports logs AND traces
+                                      # (THEMIS_OTLP_LOGS_ENDPOINT is still read as a fallback)
+                                      # Metrics are NOT pushed here — they are scraped from each node's /metrics
 # Per-service, THEMIS_DATABASE_DSN points at that service's OWN database; the four pipeline services
 # additionally point THEMIS_BUS_DATABASE_DSN at the shared `bus` database (this is what wires end-to-end).
 export PGBASE="postgres://themis:$PGPW@localhost:5432"   # $PGPW from step 1 — re-export it in a new shell

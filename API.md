@@ -81,7 +81,10 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | Method | Path | Operation |
 | ------ | ---- | --------- |
 | POST | `/products` | `registerProduct` |
+| GET | `/products` | `listProducts` — the estate entry point (DASH-1): without it a caller had to already know a product id to read anything |
+| GET | `/products/{id}/projects` | `listProjectsOfProduct` (DASH-1) |
 | POST | `/projects` | `registerProject` |
+| GET | `/projects/{id}/releases` | `listReleasesOfProject` (DASH-1) |
 | POST | `/releases` | `registerRelease` |
 | GET | `/releases` | `listReleases` |
 | GET | `/releases/{id}` | `getRelease` (backs Evidence's `SubjectRef` / `ReleaseExists`) |
@@ -115,7 +118,8 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | POST | `/findings/{id}/proposals/{proposalId}/reject` | `rejectProposal` |
 | POST | `/findings/{id}/resolve` · `/reopen` · `/archive` | lifecycle transitions |
 | POST | `/findings/{id}/recommend` | `recommendPosition` — **on-demand AI seam** (records an advisory AI proposal, never auto-accepted; `204` when AI is off/unavailable/declines) |
-| GET | `/releases/{releaseId}/posture` | `getReleasePosture` |
+| GET | `/findings/{id}/assessment` | `getFindingAssessment` — the **Domain Projection** (EDR-TRUST-01 T10): the release-scoped concern plus what Knowledge knows about the CVE, in one read. Named for the business view, not for a consumer — a dashboard, a report and the AI runtime all read this same shape, and the AI grounds its citations *against* it. Knowledge is best-effort: unreachable degrades to the Finding alone rather than failing. |
+| GET | `/releases/{releaseId}/posture` | `getReleasePosture` — one row per Finding carrying `effective_priority`, `residual_priority`, the exploitability `band`, the matched `components` (with the source package a fix ships under) and the `fixes` published for *those* components. The band/components/fixes are on the rollup so a release-scoped question costs **one** read rather than one per Finding (DASH-2). |
 | GET | `/faultlines/{faultlineId}/blast-radius` | `getBlastRadius` |
 
 ### Communication — Publications (VEX / advisory / report)
@@ -132,7 +136,19 @@ collaborate only via events + read APIs — they never share a database. Errors 
 
 | Method | Path | Operation |
 | ------ | ---- | --------- |
-| POST | `/capabilities/{id}/invoke` | `invokeCapability` — reactive, synchronous; returns a validated advisory Proposal (`200`) or `204` "no proposal" (a safe outcome). Δ1 capability: `recommend_position`. |
+| POST | `/capabilities/{id}/invoke` | `invokeCapability` — reactive, synchronous; returns a validated advisory output (`200`) or `204` "no output" (a safe outcome, **never** an error). |
+
+Two capabilities ship, and they differ in **output class** (EDR-TRUST-01 T7), which is the thing to
+understand before calling either:
+
+| Capability | Subject | Output class | What it is |
+| --- | --- | --- | --- |
+| `recommend_position` | one Finding | **Decision** | Proposes a stance. Goes to Governance as an advisory Proposal a human or policy must accept — it is never auto-applied. |
+| `plan_remediation` | one Release | **Information** | Groups the release's Findings into upgrade actions ordered by risk removed. It proposes no stance and reaches no Position, so nothing needs to accept it. |
+
+A `204` carries **`X-Themis-AI-Reason`** (and `X-Themis-AI-Detail`) explaining which gate declined —
+`insufficient`, `provider_error`, `grounding_invalid`, `business_invalid`, … A caller that treats every
+`204` as "the AI had nothing to say" will misread a timeout as a verdict; read the header.
 
 See [TESTING.md](TESTING.md) for runnable request/response examples, and
 [`docs/engineering/decisions/`](docs/engineering/decisions/) for the design rationale behind each context.

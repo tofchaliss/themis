@@ -472,3 +472,44 @@ No amendment to the decisions above; these record how two under-realizations wer
   change (precedence `nvd>osv` + the range union already absorb NVD-discovered facts). **Known limitation:**
   one NVD call per component ⇒ an API key is strongly recommended for large inventories (NVD throttles);
   request caching is a tracked follow-up.
+
+## Realization notes (2026-08-06/07 — fix attribution, proposal hygiene, CVSS selection)
+
+Again no amendment to the decisions above — four under-realizations brought up to the EDR.
+
+- **KN-FIX-1 — a fix version must name the package it fixes (realizes D6 + D2).** A Faultline's
+  `FixedVersions` was a **flat union** across every package the card covers, because the feed ACLs dropped
+  OSV's per-`affected` package name on the way in. The union is not wrong as a card-level fact, but it is
+  unusable as an *action*: a card covering `libxml2` and `python3-libxml2` published `2.9.14` and `2.9.14-6`
+  with nothing saying which belongs to which, so no consumer could answer "what do I upgrade this component
+  to". The ACLs now carry the package (OSV states it per affected entry; Red Hat states it in the RPM
+  bound), correlation looks the fixed-verdict up **by the matched component's own package**, and the flat
+  union is retained only so cards written before this still decode. Two ACLs deliberately do **not**
+  attribute — NVD keys on CPE, and a scanner reports a bare version — and guessing a package for them would
+  reintroduce exactly the false association this fixes.
+- **KN-PROPOSAL-BLOAT-1 — append-only is not "append everything" (realizes D9).** Every enrichment pass
+  appended a Proposal even when the feed restated a fact **verbatim**, so a card enriched every 12h grew an
+  unbounded audit trail of identical rows. Append-only exists so a *change* of source opinion is never lost;
+  a restatement carries no change, so `FoldProposal` now drops the verbatim duplicate and reports
+  `recorded=false`. That flag matters beyond storage: a sweep that counted *visits* rather than *writes*
+  reported healthy work while writing nothing, which is precisely how a feed that has stopped saying
+  anything new stays invisible.
+- **KN-FIX-2 — a re-attribution sweep, because "upload it again" is not a workaround (realizes D11).** Only
+  OSV and Red Hat attribute a fix to a package, and OSV is queried during **correlation** — i.e. on upload.
+  So a card folded before KN-FIX-1 existed, or one whose releases are simply never re-uploaded, keeps a flat
+  unattributed fix list forever. The obvious remedy fails on a real invariant: Evidence is
+  **content-addressed**, so re-uploading identical bytes dedups and no correlation runs. `ReattributeService`
+  (`THEMIS_REATTRIBUTE_INTERVAL`, default 6h) instead re-asks the discovery feeds about components already in
+  the estate. It is always on — it needs no feed the node is not already using — bounded per run, and
+  **self-terminating**: once everything is attributed it finds nothing, and KN-PROPOSAL-BLOAT-1 means it
+  writes nothing.
+- **CVSS vector selection + v3.x derivation (realizes D2).** OSV publishes several severity vectors per
+  advisory and Themis took the first one, which could be CVSS **v2** — a different scale — silently
+  mis-scoring the card. `value.PreferredCVSSVector` now picks in order **v3.1 → v3.0 → v4.0 → v2**, and
+  `BaseScoreFromVector` derives the base score from the vector when the feed publishes a vector but no score.
+  The v3.1-first order is deliberate: it is the version the ecosystem actually agrees on, and a *derivable*
+  v3.1 score beats a v4.0 vector Themis cannot yet compute. **The bug worth remembering is in the
+  recogniser, not the maths**: `looksLikeCVSSv2` originally accepted *any* prefix-less string as v2, so
+  garbage sorted ahead of a real vector — the same shape as RANGE-PARSE-1 (`EDR-TRUST-01` T5). A recogniser
+  must never be looser than the evaluator that consumes it; it now requires the `AV:`/`Au:` metrics that only
+  a genuine v2 vector carries.

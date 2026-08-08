@@ -39,10 +39,14 @@ import (
 // service is the node's service.name (e.g. "evidence").
 func ConfigFromEnv(service string) Config {
 	return Config{
-		Service:      service,
-		Level:        os.Getenv("THEMIS_LOG_LEVEL"),
-		Format:       os.Getenv("THEMIS_LOG_FORMAT"),
-		OTLPEndpoint: os.Getenv("THEMIS_OTLP_LOGS_ENDPOINT"),
+		Service: service,
+		Level:   os.Getenv("THEMIS_LOG_LEVEL"),
+		Format:  os.Getenv("THEMIS_LOG_FORMAT"),
+		// THEMIS_OTLP_ENDPOINT is the canonical name; THEMIS_OTLP_LOGS_ENDPOINT is honoured as a
+		// fallback because it was the original name and is in shipped deployments. The rename is
+		// not cosmetic: this endpoint now drives LOGS AND TRACES, so a name saying "logs" tells an
+		// operator the wrong thing about what enabling it does.
+		OTLPEndpoint: envFirst("THEMIS_OTLP_ENDPOINT", "THEMIS_OTLP_LOGS_ENDPOINT"),
 		OTLPInsecure: os.Getenv("THEMIS_OTLP_INSECURE") == "1",
 	}
 }
@@ -78,6 +82,17 @@ func Any(key string, val any) Field                { return zap.Any(key, val) }
 // Logger is the structured, dual-channel logger every node uses (R1).
 type Logger struct {
 	z *zap.Logger
+}
+
+// envFirst returns the first of the named variables that is set, so a renamed option can keep
+// honouring its old name without a deployment having to change on the same day the code does.
+func envFirst(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Setup builds the dual-channel logger + (when configured) an OTel LoggerProvider from cfg,

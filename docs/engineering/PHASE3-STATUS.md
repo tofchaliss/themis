@@ -400,10 +400,21 @@ Note (Option A in effect): `/grill-with-docs` is user-invoked, but the model can
 
 **All pending and deferred work lives in one place: [`docs/BACKLOG.md`](../BACKLOG.md) (Part 1)**, with the
 full monolith→greenfield gap inventory in [`PARITY-GAP.md`](PARITY-GAP.md). Between them they track the next
-line (GOV-14 / D14, Intelligence Δ3 / Δ4), the remaining parity tail (notifications D2–D7, input-integrity
-E1–E11, metrics/traces/probes F4–F8, and the A/B/C follow-ups), and the standing per-context follow-ups
-(Governance accepted-risk expiry worker; Communication concrete channels + delegated auto-publish; store
-fault-injection coverage; OTel traces + metrics). Update those files, not this section, as items open or close.
+line, the remaining parity tail (input-integrity E1–E11 and the A/B/C follow-ups), and the standing
+per-context follow-ups. Update those files, not this section, as items open or close.
+
+**Session 2026-08-07 closed the P0/P1 tail.** The backlog went **31 open → 13, with no P0 and no P1
+remaining**; the highest-priority open item is now roadmap (the AI harness), not a defect. Closed that
+day: GOV-14b (the disposition watcher — the safety net under `residual_priority`, which had shipped a
+day earlier WITHOUT it), the accepted-risk expiry worker (folded into that same sweep), DASH-1/DASH-2
+(the read surface a GUI needs), OTel traces, CVSS vector selection + v3.x derivation, and the first
+release-scoped AI capability (`plan_remediation@v1`).
+
+Three defects found that day are worth knowing about because they share a shape — **a recogniser looser
+than the evaluator that consumes it**, which turns the evaluator's *failure* into a *verdict*:
+**RANGE-PARSE-1** (P1: an unparseable affected range read as "provably not affected" and the shipped
+policy auto-accepted it), the CVSS v2 vector recogniser accepting any prefix-less string, and the plan
+prompt inviting citations the grounding gate refused. See `EDR-TRUST-01` T5 and `docs/BACKLOG.md`.
 
 ## Key file pointers
 
@@ -416,7 +427,11 @@ fault-injection coverage; OTel traces + metrics). Update those files, not this s
   **R1 is realized (2026-07-18) by `internal/platform/observability`** (zap console + OTel logs via the
   `otelzap` bridge, one `Setup`; config-driven level/format/OTLP endpoint via `ConfigFromEnv`; a
   `RequestLogger` correlation-id middleware; domain/app stay log-free by depguard). All four greenfield cmds
-  wire it; example config at `deploy/node.env.example`.
+  wire it; example config at `deploy/node.env.example`. **R1 is COMPLETE as of 2026-08-07**: metrics
+  (Prometheus registry, 2026-08-06) and **traces** (OTLP `TracerProvider` + a server span per request,
+  carrying the correlation id so traces and logs are joinable) both landed. Egress decision:
+  **Prometheus-scrape for metrics, OTLP for traces** — one exporter dependency instead of two, and metrics
+  keep working on a node with no collector, because a trace has no pull model and a counter does.
 - Changes: **none active** — `phase3-trust-model` IMPLEMENTED + ARCHIVED 2026-08-06 (**63/63**, 11 groups),
   from `EDR-TRUST-01` (T1–T12). Cross-context by construction (Knowledge + Governance + Intelligence);
   **group order is the migration order** and groups 6→7 must not be reordered. All other Phase-3 changes are

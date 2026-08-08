@@ -193,6 +193,28 @@ Rules in scope at adoption (both Observed): **version-range applicability** and 
 Anticipated as evidence arrives (initially Asserted): feature-disabled, build-time exclusion, static
 configuration, platform incompatibility.
 
+**A deterministic rule must be certain in ONE direction only, and a parse gap is not a verdict**
+(RANGE-PARSE-1, found and fixed 2026-08-07). The version-range rule decides `not_affected` when every
+component is provably OUT of range and defers on everything else — an in-range component, an undecidable
+comparison, a missing version, or no range at all. That is what `ProvablyOutOfRange` implements, and it
+implemented it correctly. The defect was one layer below, in what COUNTS as a verdict:
+`AffectedRange.hasUsableConstraint` accepted any non-empty token as a constraint, so a malformed range
+(`"garbage"`, a stray prose fragment from a feed) counted as usable, `matchConstraint` could not evaluate
+it and returned false, and `Applicability` read a **failed match** as `RangeOutOfRange`.
+
+The full chain: a malformed range → the rule raises a system `not_affected` on `observed` evidence → the
+shipped D15 policy **auto-accepts it** → `residual_priority` drops to zero → the Finding leaves the queue
+with a governed Position recording it as decided. One bad range from a feed would have silently suppressed
+a live vulnerability — the exact failure this whole trust model exists to prevent, reached without any
+layer misbehaving.
+
+The lesson generalises past this rule: **wherever a recogniser (`canHandle`) sits in front of an evaluator,
+the two are a contract with no compiler between them**, and the drift always fails in the same direction —
+the loose recogniser turns the strict evaluator's *failure* into a *verdict*. The fix makes
+`parsableConstraint` mirror `matchConstraint` case for case, so their agreement is readable in one place.
+The same shape was found the same day in CVSS vector recognition, where any prefix-less string counted as
+a v2 vector.
+
 Rationale:
 
 - A provable verdict is a computation, not a reasoning task. Routing it through a language model is slower,
@@ -302,6 +324,26 @@ Verification is **not** performed twice. Two distinct boundaries protect two dis
 
 - **Grounding Verification applies to both output classes** (T7). For an Information Response it is the **only**
   gate — no Governance stage follows it — and must be treated as load-bearing accordingly.
+
+**Implementation note (2026-08-07).** "Applies to both output classes" was the decision and NOT the
+behaviour: the Information branch returned as soon as the schema validated, so the one load-bearing gate
+on that class never ran. `Validator.ValidateGrounding` now exists as a standalone gate and both classes
+call it — found while shipping the first Information capability, which is to say the rule was written
+before anything exercised it.
+
+Two refinements the first live model forced, both about what counts as a citation rather than about the
+gate itself:
+
+- **A component's `name` and `source` GROUND.** They look like the runtime's own labels — a plan step is
+  headed "upgrade PyYAML" — but `PyYAML` is `component.source`, a projection field. What the runtime
+  derived is the GROUPING; the name is data. Rule 4 forbids validating against a derived VIEW, not
+  against projection fields that view surfaces. Refusing them discarded an otherwise sound plan for
+  naming the package it had been told to reason about.
+- **A comma-separated ref grounds only if EVERY element does.** Models reliably cite the heading of the
+  item they are discussing, and a merged plan step is headed by its package list. Accepting the list
+  costs nothing — each element is still matched against the projection — and refusing it three times
+  taught only that the prompt and the gate disagreed.
+
 - **Business Verification applies only to Decision Proposals**, and runs at acceptance time, against current
   truth (not against the context the reasoning used, which may since have changed).
 
