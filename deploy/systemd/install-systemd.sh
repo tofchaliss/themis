@@ -44,6 +44,16 @@ BUS="${BASE}/bus?sslmode=disable"
 
 install -d -m 0750 /etc/themis
 
+# These files hold the database password, so they are root-only (0600).
+#
+# The service account does NOT need to read them: systemd parses EnvironmentFile= as PID 1, as
+# root, BEFORE dropping to User=. This used to be 0640 root:$RUN_USER, which (a) leaked the DB
+# password to every member of the operator's primary group, and (b) failed outright on any host
+# without a per-user group of the same name — `chown: invalid group: root:<user>` — because that
+# convention is a Debian/Ubuntu default, not a guarantee. Enterprise hosts with central groups
+# have no such group and the install died here.
+#
+# Consequence worth knowing: running a node BY HAND now needs sudo to source its env file.
 write_env() { # $1=service ; stdin=service-specific KEY=VALUE lines
   local f="/etc/themis/$1.env"
   {
@@ -51,7 +61,7 @@ write_env() { # $1=service ; stdin=service-specific KEY=VALUE lines
     echo "THEMIS_LOG_FORMAT=json"
     cat
   } > "$f"
-  chmod 0640 "$f"; chown "root:$RUN_USER" "$f"
+  chmod 0600 "$f"; chown root:root "$f"
   echo "  wrote $f"
 }
 
