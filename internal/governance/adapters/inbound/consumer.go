@@ -97,7 +97,11 @@ type componentMatchedDTO struct {
 	CVE         string         `json:"CVE"`
 	ReleaseID   string         `json:"ReleaseID"`
 	Score       int            `json:"Score"` // card's CVE-intrinsic score at match time (C6); 0 when an older payload omits it.
-	Components  []componentDTO `json:"Components"`
+	// Priority and Fixes at MATCH time (BUG-3b). Empty on a payload predating the field, which
+	// reads as the old behaviour: the Finding waits for an enrichment event that may never come.
+	Priority   string         `json:"Priority"`
+	Fixes      []fixDTO       `json:"Fixes"`
+	Components []componentDTO `json:"Components"`
 }
 
 type componentDTO struct {
@@ -117,7 +121,10 @@ func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
 		})
 	}
-	return app.InboundComponentMatched{FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Score: d.Score, Components: comps}
+	return app.InboundComponentMatched{
+		FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Score: d.Score,
+		Band: d.Priority, Fixes: toAppFixes(d.Fixes), Components: comps,
+	}
 }
 
 type faultlineEnrichedDTO struct {

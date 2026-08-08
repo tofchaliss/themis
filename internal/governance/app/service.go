@@ -161,7 +161,9 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 // path for a Finding; a new Finding starts Identified with no Position, emitting
 // FindingOpened. Re-delivery is idempotent: an existing Finding absorbs only new components
 // and, if nothing changed, performs no write. Retries on optimistic-concurrency conflicts.
-func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, releaseID, faultlineID, cve string, baseScore int, comps []domain.MatchedComponent) (domain.FindingID, error) {
+func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, in OpenFindingInput) (domain.FindingID, error) {
+	releaseID, faultlineID, cve, comps := in.ReleaseID, in.FaultlineID, in.CVE, in.Components
+	baseScore := in.BaseScore
 	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(faultlineID) == "" {
 		return "", ErrInvalidMatch
 	}
@@ -210,6 +212,20 @@ func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, releaseID, fau
 			// SetBaseScore joins the inbox tx, so it sees this just-saved Finding.
 			if baseScore > 0 {
 				if err := s.repo.SetBaseScore(ctx, faultlineID, baseScore); err != nil {
+					return "", err
+				}
+			}
+			// Same stamp, same reason, one field later (BUG-3b): the band and this Finding's OWN
+			// fixes. Without it a Finding opened after its card's last enrichment carries neither
+			// forever — materializeBandAndFixes only ever visits Findings that already exist, and
+			// a card no feed says anything new about emits no further enrichment to repair it.
+			//
+			// Selection runs here rather than downstream for the AI-GROUND-1 reason: a card holds
+			// fixes for every package it touches, and handing this Finding the union is what
+			// produced a recommendation citing another package's version.
+			if in.Band != "" || len(in.Fixes) > 0 {
+				mine := selectFixesFor(in.Fixes, f.Components())
+				if err := s.repo.SetBandAndFixes(ctx, string(f.ID()), in.Band, mine); err != nil {
 					return "", err
 				}
 			}

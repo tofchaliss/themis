@@ -132,7 +132,22 @@ type ComponentMatched struct {
 	// Score is the card's CVE-intrinsic composite score (0–100) at match time (C6). Carried so
 	// Governance can stamp base_score at finding-open — otherwise a Finding born on an
 	// already-enriched card is stranded at 0 until the next enrichment event (BUG-3).
-	Score      int
+	Score int
+	// Priority and Fixes ride here for exactly the reason Score does, and their absence was the
+	// same defect one field later (BUG-3b). DASH-2 delivered the band and the fix list on
+	// FaultlineEnriched ALONE, so a Finding opened AFTER its card's last enrichment never
+	// received either — the enrichment handler looks up the card's Findings and finds none.
+	//
+	// "The next enrichment repairs it" is not a fallback that can be relied on: enrichment is
+	// relevance-bounded, and KN-PROPOSAL-BLOAT-1 now drops a source's verbatim restatement, so a
+	// card nothing new is said about emits NO further event. Measured on a clean estate: of 120
+	// Findings, the one CVE that no later feed touched (CVE-2026-59949 — enriched at bus seq 12,
+	// its Finding opened at seq 205) had a band on its card and none on its Finding, permanently.
+	//
+	// Additive + omitempty (EVENTBUS D9): an older payload stays byte-identical and reads empty,
+	// which is the pre-change behaviour.
+	Priority   string         `json:"Priority,omitempty"`
+	Fixes      []FixedVersion `json:"Fixes,omitempty"`
 	OccurredAt time.Time
 }
 
@@ -183,6 +198,8 @@ func NewComponentMatched(f Faultline, releaseID string, components []MatchedComp
 		ReleaseID:   releaseID,
 		Components:  append([]MatchedComponent(nil), components...),
 		Score:       f.View().Score(),
+		Priority:    f.View().Priority(),
+		Fixes:       append([]FixedVersion(nil), f.View().Fixes...),
 		OccurredAt:  at.UTC(),
 	}
 }

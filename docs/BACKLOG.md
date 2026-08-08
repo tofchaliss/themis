@@ -1783,6 +1783,34 @@ three angles, and two of them proposed fixes that would not have worked.
   a slow request needs the query broken out from the handler. **Where:** `observability.Setup` + the pgx
   pool constructor.
 
+- [x] **BUG-3b — a Finding opened after its card's last enrichment never gets a band or a fix
+  list.** ✅ **CLOSED 2026-08-08.** Found on a clean-slate VM run: of 120 Findings, exactly one
+  (`CVE-2026-59949`) showed a blank `band` on the posture while its Faultline card carried
+  `informational`. The bus made it unambiguous — `knowledge.faultline_enriched` at **seq 12**,
+  `governance.finding_opened` at **seq 205**. Governance handled the enrichment when the Finding
+  did not yet exist, `materializeBandAndFixes` found no Findings for that card, and stamped
+  nothing.
+
+  **Why nothing repaired it.** The obvious answer — "the next enrichment stamps it" — does not
+  hold, and the reason is a fix that is itself correct: enrichment is **relevance-bounded**
+  (D5), and **KN-PROPOSAL-BLOAT-1** now drops a source's verbatim restatement, so a card that
+  no feed says anything new about emits **no further event**. The 119 Findings that were fine
+  were fine only because later Red Hat/NVD sweeps happened to touch their cards. A 2026 CVE that
+  no vendor feed carries yet gets exactly one enrichment, and it fires before the Finding exists.
+
+  **This is BUG-3 one field later.** `ComponentMatched.Score` already carries the card's score to
+  the birth path for exactly this reason — its comment says so verbatim: *"otherwise a Finding
+  born on an already-enriched card is stranded at 0 until the next enrichment event"*. DASH-2
+  then added `band` and `fixes` on the **enrichment event alone** and reintroduced the same
+  defect. **Fix:** `Priority` + `Fixes` now ride `ComponentMatched` (additive/omitempty, EVENTBUS
+  D9) and are stamped at finding-open, with the per-Finding fix selection running there too so
+  the union never reaches a Finding (AI-GROUND-1).
+
+  **The lesson worth keeping is about the shape, not the field:** a value delivered only by an
+  event is invisible to anything created after that event. Every derived field on a Finding needs
+  an answer to "what if the Finding is born late?" — and the answer cannot be "another event will
+  come".
+
 - [ ] **F5 — a node that cannot start is indistinguishable from a healthy one.** **MED.** Found on the VM
   2026-08-08: `themis@governance` had been crash-looping for **81 restarts** — it could not authenticate to
   run its migrations, so it exited, and `Restart=always` restarted it forever. Nothing surfaced that. The

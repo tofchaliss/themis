@@ -11,6 +11,22 @@ import (
 // Knowledge rather than importing Knowledge's packages (no cross-context imports); the
 // inbound adapter translates the wire event into these.
 
+// OpenFindingInput is the birth-path input for a Finding. It is a struct rather than a
+// parameter list because the list had reached three strings, an int and two slices, where
+// transposing `cve` and `band` would compile and be wrong.
+type OpenFindingInput struct {
+	ReleaseID   string
+	FaultlineID string
+	CVE         string
+	Components  []domain.MatchedComponent
+	// BaseScore, Band and Fixes are the card's facts AT MATCH TIME, stamped onto the Finding as
+	// it is born so it never depends on a later enrichment event that may never arrive
+	// (BUG-3 / BUG-3b). Zero/empty means the card had none yet, and the field is left alone.
+	BaseScore int
+	Band      string
+	Fixes     []FixedVersion
+}
+
 // InboundComponentMatched is Knowledge's ComponentMatched fact: a Release component matched
 // a Faultline (D5).
 type InboundComponentMatched struct {
@@ -19,6 +35,11 @@ type InboundComponentMatched struct {
 	ReleaseID   string
 	Components  []domain.MatchedComponent
 	Score       int // CVE-intrinsic base priority 0–100 (C6) of the card at match time; stamped onto the Finding at open so it is not stranded at 0 on an already-enriched card (BUG-3).
+	// Band and Fixes of the card at match time, stamped at open for the same reason as Score
+	// (BUG-3b). Without them a Finding opened after its card's LAST enrichment carries neither
+	// forever, because the enrichment handler stamps only Findings that already exist.
+	Band  string
+	Fixes []FixedVersion
 }
 
 // InboundFaultlineEnriched is Knowledge's FaultlineEnriched fact: a Faultline's enterprise
@@ -72,7 +93,10 @@ func NewCoordinator(svc *FindingService) *Coordinator { return &Coordinator{svc:
 
 // OnComponentMatched opens-or-updates the (Release, Faultline) Finding for a match (D5).
 func (c *Coordinator) OnComponentMatched(ctx context.Context, m InboundComponentMatched) error {
-	_, err := c.svc.OpenOrUpdateFinding(ctx, m.ReleaseID, m.FaultlineID, m.CVE, m.Score, m.Components)
+	_, err := c.svc.OpenOrUpdateFinding(ctx, OpenFindingInput{
+		ReleaseID: m.ReleaseID, FaultlineID: m.FaultlineID, CVE: m.CVE,
+		BaseScore: m.Score, Band: m.Band, Fixes: m.Fixes, Components: m.Components,
+	})
 	return err
 }
 

@@ -286,6 +286,8 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			Ecosystem: m.Component.Ecosystem, Source: m.Component.Source,
 		}},
 		Score:      m.Score,
+		Priority:   m.Priority,
+		Fixes:      append([]domain.FixedVersion(nil), m.Fixes...),
 		OccurredAt: m.OccurredAt.UTC(),
 	}
 	payload, err := json.Marshal(event)

@@ -52,6 +52,10 @@ type Match struct {
 	CVE         string
 	Component   InventoryComponent
 	Score       int // the card's composite score at match time (C6/BUG-3); rides the ComponentMatched event so Governance can stamp base_score at finding-open.
+	// Priority and Fixes ride for the same reason as Score: a Finding opened after its card's
+	// last enrichment would otherwise never receive a band or a fix list (BUG-3b).
+	Priority    string
+	Fixes       []domain.FixedVersion
 	OccurredAt  time.Time
 }
 
@@ -162,7 +166,9 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
-			Component: item.Component, Score: f.View().Score(), OccurredAt: s.clock.Now(),
+			Component: item.Component, Score: f.View().Score(),
+			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			OccurredAt: s.clock.Now(),
 		})
 		if err != nil {
 			return newMatches, err
