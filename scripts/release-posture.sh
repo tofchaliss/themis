@@ -113,6 +113,7 @@ jqprog='
      (.cve|dash), (.stance|dash), (.reservation|dash), (.faultline_id|dash), (.finding_id|dash),
      (.band|dash),
      ((.components // []) | if length == 0 then "-" else .[0].purl end),
+     ((.components // []) | length),
      ((.fixes // []) | map(.version) | if length == 0 then "" else join(", ") end),
      ((.fixes // []) | length)]
   | @tsv'
@@ -122,10 +123,15 @@ rows=$(echo "$posture" | jq -r --argjson n "$TOP" "$jqprog")
 {
   printf 'RANK\tBAND\tCVE\tRESID\tEFFECT\tBLAST\tKEV\tEPSS\tCOMPONENT\tFIX\tSTANCE\tCAVEAT\n'
   rank=0
-  while IFS=$'\t' read -r resid effect base blast cve stance reservation flid fid band purl fixlist fixn; do
+  while IFS=$'\t' read -r resid effect base blast cve stance reservation flid fid band purl compn fixlist fixn; do
     [ -n "$cve" ] || continue
     rank=$((rank + 1))
     comp=$(echo "$purl" | sed 's#pkg:[a-z]*/##; s#?.*##')
+    # Show the OTHER matched components as a count. Printing components[0] beside fixes drawn
+    # from ALL of them made a 3-component Finding read as "setuptools -> a PyYAML fix" — the
+    # exact cross-package contamination KN-FIX-1 removed, manufactured by the renderer. A column
+    # that silently drops rows does not just omit information, it asserts something false.
+    [ "${compn:-1}" -gt 1 ] 2>/dev/null && comp="$comp (+$((compn - 1)))"
 
     # The BAND, the COMPONENT and the FIX now ride the posture row itself (DASH-2 / PLAN-3).
     # This loop used to make TWO calls per row — one Knowledge read for the band and one

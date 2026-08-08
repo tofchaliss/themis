@@ -274,8 +274,19 @@ func proposalFor(sig EnrichmentSignal) (stance domain.Stance, rationale string, 
 	switch {
 	case sig.Withdrawn:
 		return domain.StanceNotAffected, "CVE withdrawn or rejected upstream (Faultline superseded)", true
-	case sig.KEV || sig.HighSeverity:
-		return domain.StanceAffected, "severity increased / now KEV-listed — re-prioritize", true
+	// KEV and HighSeverity are DISTINCT reasons and must not share one rationale. This arm used
+	// to be `sig.KEV || sig.HighSeverity` returning "severity increased / now KEV-listed", which
+	// asserted BOTH facts whichever one fired — so every high-severity non-KEV CVE (the common
+	// case) carried a permanent, append-only record claiming a KEV listing that did not exist.
+	// A rationale is the audit trail's answer to "why was this raised"; one that names the wrong
+	// evidence is worse than a vague one, because it will be believed.
+	//
+	// KEV is checked first: it is a CONFIRMED exploitation record, so when both hold it is the
+	// stronger reason to state.
+	case sig.KEV:
+		return domain.StanceAffected, "CVE is listed in CISA KEV (known exploited) — re-prioritize", true
+	case sig.HighSeverity:
+		return domain.StanceAffected, "severity is high or critical — re-prioritize", true
 	default:
 		return "", "", false
 	}
