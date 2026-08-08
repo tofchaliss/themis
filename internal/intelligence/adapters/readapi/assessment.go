@@ -117,6 +117,18 @@ type posturePayload struct {
 		Ecosystem string `json:"ecosystem"`
 		Source    string `json:"source"`
 	} `json:"components"`
+	// Fixes are the versions published for THIS Finding's own components (PLAN-3). The runtime
+	// decodes them for ONE reason (EDR-CORRELATION-01 D8 step 1): a distro module-stream fix
+	// carries a build marker (`.module+el8.4.0+570+c2eaf144`), which is the only signal in the
+	// projection that several packages are one `dnf module update` rather than several jobs.
+	//
+	// It does NOT make them upgrade targets in the prompt. The plan still never states a fix
+	// version, because a model told a version is a target will recommend upgrading to the build
+	// already installed.
+	Fixes []struct {
+		Package string `json:"package"`
+		Version string `json:"version"`
+	} `json:"fixes"`
 }
 
 // GetReleasePosture fetches the release-scoped Domain Projection from Governance
@@ -156,6 +168,9 @@ func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID stri
 			entry.Components = append(entry.Components, domain.PostureComponent{
 				PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
 			})
+		}
+		for _, f := range e.Fixes {
+			entry.Fixes = append(entry.Fixes, domain.PostureFix{Package: f.Package, Version: f.Version})
 		}
 		out.Entries = append(out.Entries, entry)
 	}

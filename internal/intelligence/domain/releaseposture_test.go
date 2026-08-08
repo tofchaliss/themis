@@ -433,3 +433,74 @@ func TestPlanActions_MergedSiblingsDoNotDoubleCountSharedFindings(t *testing.T) 
 		t.Errorf("TopPriority = %d, want 70", got[0].TopPriority)
 	}
 }
+
+// EDR-CORRELATION-01 D8 step 1 — a module-stream rebuild is ONE action, not one per package.
+//
+// Measured on a live release: a single advisory rebuilt 23 packages (babel, Cython, mod_wsgi,
+// numpy, scipy … and PyYAML), and the plan presented them as separate jobs. They are one
+// `dnf module update`. The signal is the build marker every RPM from that rebuild carries.
+func TestPlanActions_GroupsAModuleStreamRebuildIntoOneAction(t *testing.T) {
+	mod := func(pkg string) domain.PostureFix {
+		return domain.PostureFix{Package: pkg, Version: "0:1.0-1.module+el8.4.0+570+c2eaf144"}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2023-24329", ResidualPriority: 70,
+			Components: []domain.PostureComponent{
+				rpm2("python3-pyyaml", "PyYAML", "3.12"),
+				rpm2("python3-babel", "babel", "2.5"),
+				rpm2("python3-numpy", "numpy", "1.17"),
+			},
+			Fixes: []domain.PostureFix{mod("PyYAML"), mod("babel"), mod("numpy")}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 — three packages, one module rebuild: %+v", len(got), got)
+	}
+	if len(got[0].Packages) != 3 {
+		t.Errorf("Packages = %v, want all three named so each stays citable (PLAN-6)", got[0].Packages)
+	}
+	if len(got[0].FindingIDs) != 1 || got[0].RiskRemoved != 70 {
+		t.Errorf("action = %+v, want one Finding at 70 — the same Finding must not count per package", got[0])
+	}
+}
+
+// The same package can be fixed by a module rebuild for one CVE and by an ordinary upgrade for
+// another — PyYAML is fixed by the python38 stream for CVE-2020-1747 and by plain 5.1 for
+// CVE-2017-18342. Keying on the PACKAGE would merge them and claim one command closes both.
+func TestPlanActions_SamePackageSplitsWhenOnlyOneFixIsAModuleRebuild(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2020-1747", ResidualPriority: 70,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{{Package: "PyYAML", Version: "0:5.3.1-1.module+el8.4.0+570+c2eaf144"}}},
+		{FindingID: "f2", CVE: "CVE-2017-18342", ResidualPriority: 60,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{{Package: "PyYAML", Version: "5.1"}}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 2 {
+		t.Fatalf("actions = %d, want 2 — one module rebuild and one ordinary upgrade: %+v", len(got), got)
+	}
+}
+
+// Two DIFFERENT stream builds stay separate: merging el8.4 with el8.5 would tell an operator one
+// command covers work it does not. Conservative in the same direction as mergeSiblings.
+func TestPlanActions_DifferentModuleBuildsDoNotMerge(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 70,
+			Components: []domain.PostureComponent{rpm2("python3-a", "a", "1")},
+			Fixes:      []domain.PostureFix{{Package: "a", Version: "0:1-1.module+el8.4.0+570+c2eaf144"}}},
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 60,
+			Components: []domain.PostureComponent{rpm2("python3-b", "b", "1")},
+			Fixes:      []domain.PostureFix{{Package: "b", Version: "0:1-1.module+el8.5.0+672+ab6eb015"}}},
+	}}
+	if got := p.PlanActions(); len(got) != 2 {
+		t.Errorf("actions = %d, want 2 — different stream builds are different work: %+v", len(got), got)
+	}
+}
+
+func rpm2(name, source, version string) domain.PostureComponent {
+	return domain.PostureComponent{
+		PURL: "pkg:rpm/rocky/" + name + "@" + version, Name: name,
+		Version: version, Ecosystem: "rpm", Source: source,
+	}
+}

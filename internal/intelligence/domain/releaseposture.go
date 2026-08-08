@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -25,6 +26,16 @@ type PostureEntry struct {
 	ResidualPriority  int
 	EffectivePriority int
 	Components        []PostureComponent
+	// Fixes are the versions published for this Finding's own components (PLAN-3), used ONLY to
+	// recognise a module-stream rebuild (EDR-CORRELATION-01 D8 step 1). They are never presented
+	// as upgrade targets.
+	Fixes []PostureFix
+}
+
+// PostureFix is a published fix version paired with the package it applies to (KN-FIX-1).
+type PostureFix struct {
+	Package string
+	Version string
 }
 
 // PostureComponent is one release component a Finding was opened for.
@@ -79,6 +90,57 @@ type UpgradeAction struct {
 	RiskRemoved int
 }
 
+// moduleBuild matches the build marker a distro module-stream rebuild leaves on every RPM it
+// produces — `.module+el8.4.0+570+c2eaf144`. Every package rebuilt by one advisory carries the
+// SAME marker, which is what makes it a grouping key.
+//
+// It deliberately captures the whole marker including the EL version, so a fix in el8.4 and a fix
+// in el8.5 stay separate actions. That is conservative in the right direction: merging two
+// different stream builds would tell an operator one command covers work it does not.
+var moduleBuild = regexp.MustCompile(`\.module\+el[0-9.]+\+[0-9]+\+[0-9a-f]+`)
+
+// namedStream matches the explicit `name:stream-version.context` form some vendors publish
+// (`python38:3.8-8030020200818121840.4190259b`). Preferred when present because it NAMES the
+// stream, which the build marker cannot.
+//
+// The leading `[a-z]` is load-bearing. An RPM NEVRA is `epoch:version-release`, so
+// `0:1-1.module+el8.4.0+570+c2eaf144` structurally matches `name:stream-context` and was parsed
+// as the stream "0:1" — collapsing every module build with the same epoch:version into one
+// action, including builds from different EL minors. A module name always starts with a letter
+// (`python38`, `perl`, `nodejs`); an epoch never does.
+//
+// This is the same defect as RANGE-PARSE-1 and the CVSS v2 recogniser: a pattern looser than the
+// thing it claims to recognise, turning a non-match into a confident wrong answer.
+var namedStream = regexp.MustCompile(`^([a-z][a-z0-9_.-]*:[0-9][0-9a-z.]*)-`)
+
+// streamKeyFor returns the module-stream identity of the fix published for one component, or ""
+// when the fix is an ordinary package version.
+//
+// This is EDR-CORRELATION-01 D8 step 1, and it is the ONE piece of that EDR needing no new data:
+// the marker was already on the posture's fix list, and mergeSiblings' comment said this was
+// impossible only because "the posture deliberately does not carry [the fix version] yet".
+// PLAN-3/DASH-2 means it carries it now, so the premise that forced the CVE-set heuristic has
+// expired.
+//
+// Why grouping happens per COMPONENT rather than per package: a package can be fixed by a module
+// rebuild for one CVE and by an ordinary upgrade for another (PyYAML is fixed by the python38
+// stream for CVE-2020-1747 and by plain 5.1 for CVE-2017-18342). Keying on the package would put
+// both in one action and claim a single command closes both.
+func streamKeyFor(fixes []PostureFix, pkg string) string {
+	for _, f := range fixes {
+		if f.Package != pkg {
+			continue
+		}
+		if m := namedStream.FindStringSubmatch(f.Version); m != nil {
+			return m[1]
+		}
+		if m := moduleBuild.FindString(f.Version); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
 // PlanActions groups a release's OUTSTANDING Findings into upgrade actions, worst-first.
 //
 // This is the whole reason a release-scoped capability is worth having: 231 Findings on a real
@@ -94,6 +156,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 		cveSeen   map[string]bool
 		verSeen   map[string]bool
 		findSeen  map[string]bool // PLAN-4: a Finding counts ONCE per action, however many of its components resolve to this package
+		pkgSeen   map[string]bool // the packages one action covers — more than one only for a module-stream rebuild
 		cveByPrio map[string]int
 	}
 	byKey := map[string]*acc{}
@@ -115,7 +178,12 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 			if pkg == "" {
 				continue // nothing actionable to name
 			}
+			// A module-stream rebuild is ONE action covering every package it rebuilt
+			// (EDR-CORRELATION-01 D8 step 1); anything else is keyed by its own package.
 			key := c.Ecosystem + "\x00" + pkg
+			if stream := streamKeyFor(e.Fixes, pkg); stream != "" {
+				key = c.Ecosystem + "\x00stream\x00" + stream
+			}
 			a, ok := byKey[key]
 			if !ok {
 				a = &acc{
@@ -123,10 +191,17 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 					cveSeen:   map[string]bool{},
 					verSeen:   map[string]bool{},
 					findSeen:  map[string]bool{},
+					pkgSeen:   map[string]bool{},
 					cveByPrio: map[string]int{},
 				}
 				byKey[key] = a
 				order = append(order, key)
+			}
+			// Every package the action covers, in first-seen order (deterministic: the posture
+			// arrives in a fixed order). For a non-module action this stays a single name.
+			if !a.pkgSeen[pkg] {
+				a.pkgSeen[pkg] = true
+				a.action.Packages = append(a.action.Packages, pkg)
 			}
 			if c.Version != "" && !a.verSeen[c.Version] {
 				a.verSeen[c.Version] = true
@@ -157,7 +232,6 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 	out := make([]UpgradeAction, 0, len(order))
 	for _, k := range order {
 		a := byKey[k]
-		a.action.Packages = []string{a.action.Package}
 		// Worst CVE first within an action, so a truncated render still shows the reason the
 		// action matters rather than an arbitrary member of the set.
 		sort.SliceStable(a.action.CVEs, func(i, j int) bool {

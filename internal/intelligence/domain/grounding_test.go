@@ -125,3 +125,28 @@ func TestGroundsRef_TruncatedPackageHeading(t *testing.T) {
 		})
 	}
 }
+
+// The named `python38:3.8-...` form is preferred when present, because it NAMES the stream where
+// the build marker only identifies it.
+func TestStreamKeyPrefersTheNamedStream(t *testing.T) {
+	fixes := []PostureFix{{Package: "PyYAML", Version: "python38:3.8-8030020200818121840.4190259b"}}
+	if got := streamKeyFor(fixes, "PyYAML"); got != "python38:3.8" {
+		t.Errorf("streamKeyFor = %q, want %q", got, "python38:3.8")
+	}
+	// An ordinary version is not a stream, and must not become a grouping key.
+	if got := streamKeyFor([]PostureFix{{Package: "PyYAML", Version: "5.1"}}, "PyYAML"); got != "" {
+		t.Errorf("streamKeyFor(ordinary version) = %q, want empty", got)
+	}
+	// An RPM NEVRA must NOT read as a named stream. `0:1-1.module+el8.4.0+570+c2eaf144` is
+	// epoch:version-release, and a looser pattern parsed it as the stream "0:1" — merging every
+	// module build sharing an epoch:version, across different EL minors. Caught by
+	// TestPlanActions_DifferentModuleBuildsDoNotMerge; asserted here at the recogniser.
+	nevra := []PostureFix{{Package: "PyYAML", Version: "0:1-1.module+el8.4.0+570+c2eaf144"}}
+	if got := streamKeyFor(nevra, "PyYAML"); got != ".module+el8.4.0+570+c2eaf144" {
+		t.Errorf("streamKeyFor(NEVRA) = %q, want the BUILD marker, not an epoch parsed as a stream", got)
+	}
+	// A fix for a DIFFERENT package must not be borrowed (AI-GROUND-1's rule, applied here).
+	if got := streamKeyFor([]PostureFix{{Package: "other", Version: "0:1-1.module+el8.4.0+570+c2eaf144"}}, "PyYAML"); got != "" {
+		t.Errorf("streamKeyFor(other package's fix) = %q, want empty", got)
+	}
+}

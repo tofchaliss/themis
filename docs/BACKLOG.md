@@ -1961,6 +1961,16 @@ three angles, and two of them proposed fixes that would not have worked.
   * *Flaw-faithful* — the flaw is in CPython; only `python3-libs` is affected and the other 77 are
     packaging scope recorded as vulnerability claims.
 
+  **STEP 1 IMPLEMENTED 2026-08-08** (`EDR-CORRELATION-01` D8.1): the plan now groups a module-stream
+  rebuild into ONE action. The Intelligence read seam did not decode `fixes` at all — so the planner
+  had never seen a fix version — and that was the whole gap: the build marker
+  (`.module+el8.4.0+570+c2eaf144`) rides on the fix, and every RPM from one rebuild carries the same
+  one. Grouping is keyed per (Finding, COMPONENT) rather than per package, because a package can be
+  fixed by a module rebuild for one CVE and an ordinary upgrade for another (PyYAML: the python38
+  stream for CVE-2020-1747, plain 5.1 for CVE-2017-18342) — keying on the package would claim one
+  command closes both. No new gathering, no wire change. **Step 2 (carrier attribution) remains
+  open.**
+
   **Recommendation — both, in this order.**
   1. **Scope-faithful, needs no new data.** Model a module advisory as ONE claim with a package
      SCOPE rather than N claims. The stream id is already on the fix version
