@@ -1896,9 +1896,17 @@ three angles, and two of them proposed fixes that would not have worked.
   category error, and it is the clamp that exposed it. **Where:** `domain.EffectivePriority`,
   `app.ReleasePosture`, `api/governance.openapi.yaml`.
 
-- [ ] **CORR-1 — a distro module-stream advisory becomes one Finding PER PACKAGE, so a CPython
-  flaw is recorded as a PyYAML vulnerability.** **P1 / needs an EDR before code.** Found on a
-  clean-slate VM run 2026-08-08.
+- [ ] **CORR-1 — a distro advisory's package list is recorded as a per-package vulnerability claim,
+  so a CPython flaw is attributed to PyYAML.** **P1 — DESIGN DECIDED 2026-08-08 in
+  [`EDR-CORRELATION-01`](engineering/decisions/EDR-CORRELATION-01.md); implementation open.**
+
+  **Title corrected.** This entry first said "becomes one Finding PER PACKAGE". That was wrong. The
+  Finding count is RIGHT — 120 Faultlines, 120 Findings, one per CVE, and a release running the
+  superseded `python38` stream genuinely IS exposed to every CVE that stream's advisory fixes. What
+  is wrong is narrower: **each Finding names every package in the advisory as its matched
+  components**, so 78 of 120 Findings list `PyYAML` for CVEs in CPython, urllib3 and lxml.
+
+  Found on a clean-slate VM run 2026-08-08.
 
   **What was observed.** Of 120 outstanding Findings on one release, **78** named `PyYAML` as a
   component source and **51** named `python-ply` — and MOST of the CVEs attributed to PyYAML are not
