@@ -377,3 +377,59 @@ func TestPlanActions_MergeCarriesTheWorstItemAcrossSiblings(t *testing.T) {
 		t.Errorf("RiskRemoved = %d, want 100", got[0].RiskRemoved)
 	}
 }
+
+// PLAN-4 — a Finding must count ONCE per action, however many of its components resolve to that
+// action's package, and once across a merge, however many siblings close it.
+//
+// Measured on a live release of 120 Findings: the merged perl step claimed to close 160, and the
+// plan's fifteen steps claimed 367 between them. Both inflations were real double counts. CVEs
+// and installed versions were already deduped in the same loop; Findings were not — which is why
+// this went unnoticed, since every OTHER number in the action was right.
+//
+// A plan whose arithmetic exceeds the thing it plans over does not read as an off-by-N to a human.
+// It reads as a reason to disbelieve the plan, including the parts that were correct.
+func TestPlanActions_CountsEachFindingOncePerAction(t *testing.T) {
+	// One CVE hitting many subpackages of one source package — the module-stream case.
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-2026-42496", 70,
+			rpm("perl-Carp", "perl", "1.42-396.el8"),
+			rpm("perl-Encode", "perl", "3.08-461.el8"),
+			rpm("perl-Errno", "perl", "1.28-421.el8"),
+		),
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 — three components, one source package", len(got))
+	}
+	if n := len(got[0].FindingIDs); n != 1 {
+		t.Errorf("FindingIDs = %d (%v), want 1 — one Finding, counted once", n, got[0].FindingIDs)
+	}
+	if got[0].RiskRemoved != 70 {
+		t.Errorf("RiskRemoved = %d, want 70 — not 210, which is the same Finding three times", got[0].RiskRemoved)
+	}
+}
+
+func TestPlanActions_MergedSiblingsDoNotDoubleCountSharedFindings(t *testing.T) {
+	// Two packages closed by the identical CVE set — so mergeSiblings folds them — that close the
+	// SAME two Findings. The merged step must report those two Findings, not four.
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-A", 70, rpm("perl-Carp", "perl-Carp", "1.42"), rpm("perl-Digest", "perl-Digest", "1.20")),
+		entry("f2", "CVE-B", 30, rpm("perl-Carp", "perl-Carp", "1.42"), rpm("perl-Digest", "perl-Digest", "1.20")),
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 merged step", len(got))
+	}
+	if n := len(got[0].FindingIDs); n != 2 {
+		t.Errorf("FindingIDs = %d (%v), want 2 — the merge must not repeat a shared Finding", n, got[0].FindingIDs)
+	}
+	// Recomputed from the deduped set, not summed across members (70+30, not 2x(70+30)).
+	if got[0].RiskRemoved != 100 {
+		t.Errorf("RiskRemoved = %d, want 100 — summing members double-counts shared Findings", got[0].RiskRemoved)
+	}
+	// Ordering rests on RiskRemoved, so an inflated sum does not merely misreport — it can put
+	// the wrong step first.
+	if got[0].TopPriority != 70 {
+		t.Errorf("TopPriority = %d, want 70", got[0].TopPriority)
+	}
+}

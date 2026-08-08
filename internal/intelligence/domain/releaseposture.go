@@ -93,15 +93,20 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 		action    UpgradeAction
 		cveSeen   map[string]bool
 		verSeen   map[string]bool
+		findSeen  map[string]bool // PLAN-4: a Finding counts ONCE per action, however many of its components resolve to this package
 		cveByPrio map[string]int
 	}
 	byKey := map[string]*acc{}
 	var order []string
+	// Residual priority by Finding, so a merged action can RECOMPUTE its risk from its deduped
+	// Finding set rather than summing its members' totals (PLAN-4).
+	prio := map[string]int{}
 
 	for _, e := range p.Entries {
 		if e.ResidualPriority <= 0 {
 			continue // already decided — not work
 		}
+		prio[e.FindingID] = e.ResidualPriority
 		for _, c := range e.Components {
 			pkg := c.Source
 			if pkg == "" {
@@ -117,6 +122,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 					action:    UpgradeAction{Package: pkg, Ecosystem: c.Ecosystem},
 					cveSeen:   map[string]bool{},
 					verSeen:   map[string]bool{},
+					findSeen:  map[string]bool{},
 					cveByPrio: map[string]int{},
 				}
 				byKey[key] = a
@@ -133,8 +139,15 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 			if e.ResidualPriority > a.cveByPrio[e.CVE] {
 				a.cveByPrio[e.CVE] = e.ResidualPriority
 			}
-			a.action.FindingIDs = append(a.action.FindingIDs, e.FindingID)
-			a.action.RiskRemoved += e.ResidualPriority
+			// Once per Finding, not once per component (PLAN-4). CVEs and versions were already
+			// deduped above; Findings were not, so a Finding matching several components of one
+			// package — a module-stream rebuild, or a CVE hitting 37 perl subpackages — was
+			// counted once for each, inflating both the count and the risk it claims to remove.
+			if !a.findSeen[e.FindingID] {
+				a.findSeen[e.FindingID] = true
+				a.action.FindingIDs = append(a.action.FindingIDs, e.FindingID)
+				a.action.RiskRemoved += e.ResidualPriority
+			}
 			if e.ResidualPriority > a.action.TopPriority {
 				a.action.TopPriority = e.ResidualPriority
 			}
@@ -154,7 +167,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 	}
 	// Merge BEFORE ordering: a merged action's RiskRemoved is the sum of its members', so ordering
 	// first would rank the parts and then silently promote the whole past its neighbours.
-	return sortPlan(mergeSiblings(out))
+	return sortPlan(mergeSiblings(out, prio))
 }
 
 // sortPlan orders actions by risk removed, then by the single worst item, then by how many
@@ -191,15 +204,29 @@ func sortPlan(actions []UpgradeAction) []UpgradeAction {
 //
 // Merging is CONSERVATIVE: sets must match exactly. Two packages sharing four CVEs of five are
 // genuinely different work and stay separate, because collapsing them would hide the fifth.
-func mergeSiblings(actions []UpgradeAction) []UpgradeAction {
+// Merged members share their CVE set, so they overwhelmingly share their FINDINGS too —
+// concatenating the id lists and summing the risk counted the same Finding once per sibling.
+// Measured on a live release of 120 Findings: the merged perl step claimed to close 160, and the
+// plan's fifteen steps claimed 367 in total. A plan whose arithmetic exceeds the thing it is
+// planning over is not a rounding error to a reader; it is a reason to disbelieve the plan.
+// `prio` supplies each Finding's residual priority so the merged risk is recomputed from the
+// deduped set rather than accumulated (PLAN-4).
+func mergeSiblings(actions []UpgradeAction, prio map[string]int) []UpgradeAction {
 	byCVEs := map[string]int{} // cve-set key → index in out
+	seen := map[int]map[string]bool{}
 	out := make([]UpgradeAction, 0, len(actions))
 	for _, a := range actions {
 		key := a.Ecosystem + "\x00" + strings.Join(sortedCopy(a.CVEs), "\x00")
 		if i, ok := byCVEs[key]; ok {
 			out[i].Packages = append(out[i].Packages, a.Packages...)
-			out[i].FindingIDs = append(out[i].FindingIDs, a.FindingIDs...)
-			out[i].RiskRemoved += a.RiskRemoved
+			for _, id := range a.FindingIDs {
+				if seen[i][id] {
+					continue
+				}
+				seen[i][id] = true
+				out[i].FindingIDs = append(out[i].FindingIDs, id)
+				out[i].RiskRemoved += prio[id]
+			}
 			if a.TopPriority > out[i].TopPriority {
 				out[i].TopPriority = a.TopPriority
 			}
@@ -211,6 +238,10 @@ func mergeSiblings(actions []UpgradeAction) []UpgradeAction {
 			continue
 		}
 		byCVEs[key] = len(out)
+		seen[len(out)] = map[string]bool{}
+		for _, id := range a.FindingIDs {
+			seen[len(out)][id] = true
+		}
 		out = append(out, a)
 	}
 	return out

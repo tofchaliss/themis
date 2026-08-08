@@ -1811,6 +1811,40 @@ three angles, and two of them proposed fixes that would not have worked.
   an answer to "what if the Finding is born late?" — and the answer cannot be "another event will
   come".
 
+- [x] **PLAN-4 — a remediation plan claimed to close more Findings than the release has.**
+  ✅ **CLOSED 2026-08-08.** On a live release of **120** Findings, `plan_remediation` reported a
+  merged perl step closing **160**, and its fifteen steps claimed **367** between them. Two
+  compounding double counts, both specific to Findings — `CVEs` and `InstalledVersions` were
+  deduped in the very same loop, which is why it went unseen: every *other* number in the action
+  was right.
+
+  1. `PlanActions` appended `FindingIDs` and added `RiskRemoved` **once per component**. A CVE
+     hitting 37 perl subpackages that share a source package counted its Finding 37 times.
+  2. `mergeSiblings` concatenated id lists and **summed** `RiskRemoved` across merged packages —
+     and siblings are merged precisely because they close the SAME CVE set, so they close largely
+     the same Findings.
+
+  **Fix:** a per-action `findSeen` set, and a merge that dedupes ids and RECOMPUTES risk from the
+  deduped set via a `findingID → residual_priority` map. Regression tests verified against the
+  unfixed source (they report `[f1 f1 f1]`/210 and `[f1 f2 f1 f2]`/200 without it).
+
+  **Why it mattered more than the arithmetic:** `RiskRemoved` is what `sortPlan` ORDERS by
+  (PLAN-2), so an inflated sum did not merely misreport a step — it could place the wrong step
+  first. And a plan whose numbers exceed the thing it plans over does not read to a human as an
+  off-by-N; it reads as a reason to disbelieve the plan, including the parts that were correct.
+
+- [ ] **PLAN-5 — one Finding can be claimed by several upgrade steps, and it is unclear whether
+  that is right.** LOW, open question. After PLAN-4 no single step double counts, but a Finding
+  whose components span several packages still appears in each of their steps, so the plan's
+  steps can still sum to more than the release's outstanding count. That may be correct — a
+  CVE-2024-6345 Finding matching `setuptools`, `python3-ply` and `python3-pyyaml` probably IS
+  closed by the setuptools upgrade alone, and the other two are co-listed packages rather than
+  independent requirements. But "probably" is doing real work in that sentence, and the plan
+  currently states it as fact in three places. Deciding this needs the correlation question
+  answered first: when a card lists ranges for several packages, is a match on each of them a
+  separate claim or one claim seen three times? Until then the numbers are per-step honest and
+  the total is not meaningful — which is worth saying in the rendered output.
+
 - [ ] **F5 — a node that cannot start is indistinguishable from a healthy one.** **MED.** Found on the VM
   2026-08-08: `themis@governance` had been crash-looping for **81 restarts** — it could not authenticate to
   run its migrations, so it exited, and `Restart=always` restarted it forever. Nothing surfaced that. The
