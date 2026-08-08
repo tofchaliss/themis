@@ -1873,7 +1873,7 @@ three angles, and two of them proposed fixes that would not have worked.
   clean-slate VM run 2026-08-08.
 
   **What was observed.** Of 120 outstanding Findings on one release, **78** named `PyYAML` as a
-  component source and **51** named `python-ply` — and the CVEs attributed to PyYAML are not
+  component source and **51** named `python-ply` — and MOST of the CVEs attributed to PyYAML are not
   PyYAML CVEs: `CVE-2023-24329` (CPython `urllib.parse`), `CVE-2020-26137` (urllib3),
   `CVE-2024-4032` (CPython `ipaddress`), `CVE-2021-43818` (lxml), `CVE-2019-16935`
   (CPython `DocXMLRPCServer`). 50 Findings carry exactly 2 components; 4 carry 37.
@@ -1895,16 +1895,48 @@ three angles, and two of them proposed fixes that would not have worked.
   RPM in the stream, so A1 passes them all. The gate answers "is this version affected?" when the
   missing question is "is this package the one that carries the flaw?"
 
+  **MEASURED 2026-08-08 — and it refuted the obvious discriminator.** The first hypothesis was
+  "genuine CVEs name one package, artifacts name many". The data says otherwise:
+
+  | CVE | osv packages named | nvd | note |
+  | --- | --- | --- | --- |
+  | CVE-2023-24329 (CPython urllib) | **62** | 0 | artifact |
+  | CVE-2020-26137 (urllib3) | **42** | 0 | artifact |
+  | CVE-2020-1747 (**a real PyYAML CVE**) | **23** | 0 | genuine — and STILL names 23 |
+  | CVE-2017-18342 (real PyYAML CVE) | 1 | 0 | upstream PyPI entry, not a distro advisory |
+
+  A genuine PyYAML CVE pulls in babel, Cython, mod_wsgi, numpy, scipy and 18 more, because the
+  advisory rebuilds the stream. **Breadth does not separate genuine from artifact**, so no
+  threshold on package count can work.
+
+  **NVD names ZERO packages in every case** — as `VulnFacts.Fixes` already documents ("NVD reports
+  fixes without naming the package"). So there is no upstream package identity stored ANYWHERE, and
+  the discrimination cannot be made from data Themis currently holds. That is the finding that
+  decides the EDR's shape: this is a GATHERING question before it is a filtering one.
+
+  **Scale — it is not a pyyaml problem.** Cards by how many packages their fixes name: 27 cards name
+  1; ~85 name 23–66; 5 name 112–113; **3 name 183**. Only 27 of 120 cards carry a single-package
+  advisory, so nearly every distro card on this release is a whole-stream advisory recorded as N
+  package claims.
+
   **Two defensible readings, and the decision is which one Themis makes:**
   * *Distro-faithful* — the old `python3-pyyaml` build IS part of a superseded stream and does need
     updating, so 78 Findings is correct and the package name is merely poor labelling.
   * *Flaw-faithful* — the flaw is in CPython; only `python3-libs` is affected and the other 77 are
     packaging scope recorded as vulnerability claims.
 
-  **Recommendation:** keep the matches (the work is real — an old build does need updating) but
-  model the advisory as ONE claim with a package SCOPE, not N claims. That is the direct reading of
-  EDR-VEX-01's "gathering is not knowing": a vendor statement is evidence about a shipping unit,
-  and treating its package list as N independent assertions is obeying it in a shape it never made.
+  **Recommendation — both, in this order.**
+  1. **Scope-faithful, needs no new data.** Model a module advisory as ONE claim with a package
+     SCOPE rather than N claims. The stream id is already on the fix version
+     (`python38:3.8-8030020200818121840.4190259b`, `.module+el8.4.0+570+c2eaf144`), so the signal
+     is in hand today. This is the direct reading of EDR-VEX-01's "gathering is not knowing": a
+     vendor statement is evidence about a shipping unit, and treating its package list as N
+     independent assertions is obeying it in a shape it never made. It fixes the plan headline
+     immediately ("update the python38 stream", not "upgrade PyYAML").
+  2. **Flaw-faithful, needs new gathering.** Capture which package actually CARRIES the flaw —
+     NVD's CPE product is the obvious source and is currently discarded. Only this can say
+     "python3-libs is vulnerable, the other 22 are along for the rebuild", and only this reduces
+     the Finding count rather than merely relabelling it.
 
   **Blast radius if left:** the plan's headline step is not actionable ("upgrade PyYAML" fixes
   almost none of its 78); the posture over-counts; and `recommend_position` reasons about a Finding
