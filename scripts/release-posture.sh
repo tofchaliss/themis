@@ -96,6 +96,14 @@ printf '  %s Findings — \033[1m%s need attention\033[0m, %s already decided' "
 printf '\n\n'
 
 # ── Rows ──────────────────────────────────────────────────────────────────────────────────────
+# Sorted by residual_priority, then by BASE SCORE as a tiebreak (GOV-15).
+#
+# The tiebreak is load-bearing, not cosmetic. The blast multiplier is per-release CONSTANT, so it
+# cannot change the relative order of a release's own Findings — but EffectivePriority CLAMPS to
+# 100, and at a 2.0x multiplier every Finding with base >= 50 pins there. Measured on a 12-customer
+# estate: all 120 rows read 100, and the worst item on the release (base 76) fell out of the top
+# three because the order among equal values is arbitrary. Falling back to base_score restores the
+# ranking the clamp erased.
 # Sorted by residual_priority: intrinsic severity scaled by what was DECIDED (EDR-GOVERNANCE-01
 # D14). This is the "what do I still have to do" ranking — a Finding marked not_affected drops to
 # zero without losing the effective_priority that records how bad it actually is.
@@ -108,7 +116,7 @@ filter='.residual_priority > 0'
 # later column left. (It did, on first run: the caveat column showed faultline UUIDs.)
 jqprog='
   def dash: if . == null or . == "" then "-" else . end;
-  [.[] | select(FILTER)] | sort_by(-.residual_priority) | .[0:$n] | .[]
+  [.[] | select(FILTER)] | sort_by(-.residual_priority, -.base_score) | .[0:$n] | .[]
   | [.residual_priority, .effective_priority, .base_score, .blast_multiplier,
      (.cve|dash), (.stance|dash), (.reservation|dash), (.faultline_id|dash), (.finding_id|dash),
      (.band|dash),
@@ -198,7 +206,7 @@ fi
 printf '\n\033[1mAI ASSISTANCE\033[0m — advisory only; every recommendation below is recorded as a\n'
 printf 'proposal on inferred evidence and is constitutionally barred from auto-acceptance.\n\n'
 
-echo "$posture" | jq -r --argjson n "$AI" '[.[] | select(.residual_priority > 0 and .has_position == false)] | sort_by(-.residual_priority) | .[0:$n] | .[] | [.cve, .finding_id] | @tsv' |
+echo "$posture" | jq -r --argjson n "$AI" '[.[] | select(.residual_priority > 0 and .has_position == false)] | sort_by(-.residual_priority, -.base_score) | .[0:$n] | .[] | [.cve, .finding_id] | @tsv' |
 while IFS=$'\t' read -r cve fid; do
   [ -n "$fid" ] || continue
   printf '  %s (%s) ... ' "$cve" "$fid"

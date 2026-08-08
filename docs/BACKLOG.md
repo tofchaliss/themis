@@ -1868,6 +1868,34 @@ three angles, and two of them proposed fixes that would not have worked.
   can obey is a defect in the rule. This is the third time this capability has been refused for an
   invited citation form (see CLAUDE.md on `make e2e-llm`); it is the first time something guards it.
 
+- [ ] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
+  improve.** **MED.** Measured on the VM 2026-08-08 with a 12-customer estate: multiplier 2.0x,
+  and **every one of the release's 120 Findings reported `effective_priority` 100**. The worst item
+  on the release (`CVE-2019-10086`, base 76) dropped out of the top three, because with every value
+  equal the order among them is arbitrary.
+
+  **Why it is structural, not a tuning problem.** The multiplier is per-release CONSTANT — the same
+  2.0x applies to every Finding on the release. Multiplying a set by a constant cannot change its
+  relative order, so within a release the multiplier is by construction a no-op for ranking; its
+  only legitimate job is comparison ACROSS releases. But `EffectivePriority` CLAMPS to 100, and a
+  clamp is not order-preserving: at 2.0x everything with base >= 50 pins there. Net effect inside a
+  release is therefore strictly negative — no ordering gained, all ordering lost — and it degrades
+  exactly when the estate is largest, which is when triage matters most.
+
+  **It is not only display.** `--ai N` selects "the top N undecided" through the same sort, so on a
+  saturated release the Gateway is handed an ARBITRARY N Findings rather than the worst N.
+
+  **Done 2026-08-08:** `release-posture.sh` now sorts `residual_priority` then `base_score`, at both
+  sort sites, which restores the ranking the clamp erased for CLI users.
+
+  **Still open — needs a decision, not a patch.** The API has the same defect and a GUI would hit it
+  unchanged. Options: (a) stop clamping, letting `effective_priority` exceed 100 — it is "effective",
+  not a percentage; (b) keep the clamp for display but return an unclamped ordering value; (c) make
+  the multiplier a secondary sort key rather than a factor, which matches what it actually means.
+  **(c) is probably right** — a release-scoped amplifier expressed as a per-Finding multiplier is a
+  category error, and it is the clamp that exposed it. **Where:** `domain.EffectivePriority`,
+  `app.ReleasePosture`, `api/governance.openapi.yaml`.
+
 - [ ] **CORR-1 — a distro module-stream advisory becomes one Finding PER PACKAGE, so a CPython
   flaw is recorded as a PyYAML vulnerability.** **P1 / needs an EDR before code.** Found on a
   clean-slate VM run 2026-08-08.
