@@ -1868,8 +1868,58 @@ three angles, and two of them proposed fixes that would not have worked.
   can obey is a defect in the rule. This is the third time this capability has been refused for an
   invited citation form (see CLAUDE.md on `make e2e-llm`); it is the first time something guards it.
 
+- [ ] **CORR-1 — a distro module-stream advisory becomes one Finding PER PACKAGE, so a CPython
+  flaw is recorded as a PyYAML vulnerability.** **P1 / needs an EDR before code.** Found on a
+  clean-slate VM run 2026-08-08.
+
+  **What was observed.** Of 120 outstanding Findings on one release, **78** named `PyYAML` as a
+  component source and **51** named `python-ply` — and the CVEs attributed to PyYAML are not
+  PyYAML CVEs: `CVE-2023-24329` (CPython `urllib.parse`), `CVE-2020-26137` (urllib3),
+  `CVE-2024-4032` (CPython `ipaddress`), `CVE-2021-43818` (lxml), `CVE-2019-16935`
+  (CPython `DocXMLRPCServer`). 50 Findings carry exactly 2 components; 4 carry 37.
+
+  **The mechanism.** Rocky/RHEL ship these as MODULE STREAMS. One advisory rebuilds every RPM in
+  the stream, so the advisory (via OSV's Rocky feed — 11 of this card's proposals — and via Red Hat
+  CSAF) lists `python3-pyyaml`, `python3-ply`, `python3-libs` … as affected. Correlation records a
+  match on each. The card's own fix list says it outright: the fix version is
+  `python38:3.8-8080020230531142020.a822e92f` — a stream id, not a package version.
+
+  **Everything above it is working correctly, which is why it hid.** Correlation faithfully
+  recorded what the feed said; reconciliation, the band, fix attribution, plan grouping and the
+  grounding gate all did their jobs on the data handed to them. PLAN-4 and PLAN-6 were real, and
+  fixing them only made the plan state its wrong premise more clearly.
+
+  **It is the half of A1 that stayed open.** A1 wired the version-range gate into correlation so a
+  match is dropped when a component is *provably out of range*, failing open on
+  `RangeUndecidable`. For a module-stream advisory the range is decidable and SATISFIED for every
+  RPM in the stream, so A1 passes them all. The gate answers "is this version affected?" when the
+  missing question is "is this package the one that carries the flaw?"
+
+  **Two defensible readings, and the decision is which one Themis makes:**
+  * *Distro-faithful* — the old `python3-pyyaml` build IS part of a superseded stream and does need
+    updating, so 78 Findings is correct and the package name is merely poor labelling.
+  * *Flaw-faithful* — the flaw is in CPython; only `python3-libs` is affected and the other 77 are
+    packaging scope recorded as vulnerability claims.
+
+  **Recommendation:** keep the matches (the work is real — an old build does need updating) but
+  model the advisory as ONE claim with a package SCOPE, not N claims. That is the direct reading of
+  EDR-VEX-01's "gathering is not knowing": a vendor statement is evidence about a shipping unit,
+  and treating its package list as N independent assertions is obeying it in a shape it never made.
+
+  **Blast radius if left:** the plan's headline step is not actionable ("upgrade PyYAML" fixes
+  almost none of its 78); the posture over-counts; and `recommend_position` reasons about a Finding
+  whose component list says PyYAML for a urllib3 CVE — which the grounding gate will VERIFY, because
+  grounding checks consistency with our record, not whether our record is right. **That is the
+  sharpest lesson here: Grounding Verification cannot catch a well-formed wrong premise.**
+
+  **Where it plugs in:** `internal/knowledge/app/correlate.go` (the A1 gate), the feed ACLs that
+  flatten an advisory's package list, and `mergeSiblings`. **Note the premise has changed for the
+  latter:** its comment says detecting `.module+el` "lives on the FIX VERSION, which the posture
+  deliberately does not carry yet" — PLAN-3/DASH-2 means it carries it now, so stream-aware
+  grouping is available without new data. **Dep:** an EDR settling the two readings above.
+
 - [ ] **PLAN-5 — one Finding can be claimed by several upgrade steps, and it is unclear whether
-  that is right.** LOW, open question. After PLAN-4 no single step double counts, but a Finding
+  that is right.** LOW — **largely ANSWERED by CORR-1, and not the way this entry guessed.** After PLAN-4 no single step double counts, but a Finding
   whose components span several packages still appears in each of their steps, so the plan's
   steps can still sum to more than the release's outstanding count. That may be correct — a
   CVE-2024-6345 Finding matching `setuptools`, `python3-ply` and `python3-pyyaml` probably IS
