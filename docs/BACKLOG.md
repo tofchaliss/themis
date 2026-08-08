@@ -1833,6 +1833,28 @@ three angles, and two of them proposed fixes that would not have worked.
   first. And a plan whose numbers exceed the thing it plans over does not read to a human as an
   off-by-N; it reads as a reason to disbelieve the plan, including the parts that were correct.
 
+- [x] **PLAN-6 — the plan prompt invited a citation the grounding gate refuses.**
+  ✅ **CLOSED 2026-08-08.** Live: `plan_remediation` returned `204` /
+  `business_invalid — ungrounded evidence "perl-Carp, perl-constant, perl-Data-Dumper +29 more"`.
+  That string is not a package — it is the merged action's DISPLAY heading, capped at three names
+  by PLAN-1 for readability. The citation rule still read *"a package name copied verbatim from an
+  `upgrade ...` heading"*, so the model copied the heading verbatim, exactly as instructed, and
+  `Grounds()` correctly refused it (it anchors to the PROJECTION, never to the shaped
+  `UpgradeAction` view — T10 rule 4). **The model obeyed; the prompt was wrong.**
+
+  **Fix:** a `packages (citable)` line carrying the FULL list, with the citation rule pointing at
+  it and explicitly warning off the truncated heading. Readability of the human-facing line and
+  completeness of the machine-facing citation list are separate requirements; PLAN-1 satisfied the
+  first by breaking the second.
+
+  **The durable part is the test, not the fix.** `TestPlanPromptOnlyOffersGroundableCitations`
+  asserts that every identifier the prompt OFFERS as citable satisfies `Grounds()`. The prompt and
+  the gate are an interface with no compiler between them, and a fake provider returns whatever the
+  test author already believed — so nothing else in the suite could catch a disagreement. It
+  asserts the INSTRUCTIONS are satisfiable, not that the model behaves: a rule no compliant answer
+  can obey is a defect in the rule. This is the third time this capability has been refused for an
+  invited citation form (see CLAUDE.md on `make e2e-llm`); it is the first time something guards it.
+
 - [ ] **PLAN-5 — one Finding can be claimed by several upgrade steps, and it is unclear whether
   that is right.** LOW, open question. After PLAN-4 no single step double counts, but a Finding
   whose components span several packages still appears in each of their steps, so the plan's

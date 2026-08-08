@@ -192,7 +192,110 @@ func TestRenderPlanRemediation_CapsALongPackageList(t *testing.T) {
 	if !strings.Contains(got, "these 5 packages ship together") {
 		t.Errorf("the step must say how many packages it really covers:\n%s", got)
 	}
-	if strings.Contains(got, "perl-Exporter") {
-		t.Errorf("the fifth package should not be printed inline:\n%s", got)
+	// The cap is about the HEADING, and this assertion is scoped to the heading line on purpose.
+	//
+	// It used to assert the fifth package appeared NOWHERE in the prompt, which conflated two
+	// different things and turned out to be actively harmful: PLAN-6 requires the full package
+	// list to be present on a `packages (citable)` line, because a model told to cite from the
+	// truncated heading cites "perl-Carp, perl-constant, perl-Data-Dumper +29 more" — not a
+	// package, ungrounded, whole plan discarded.
+	//
+	// Readability of the human-facing line and completeness of the machine-facing citation list
+	// are separate requirements, and the earlier assertion could only be satisfied by sacrificing
+	// the second one.
+	var heading string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, ". upgrade ") {
+			heading = line
+			break
+		}
+	}
+	if heading == "" {
+		t.Fatalf("no upgrade heading found:\n%s", got)
+	}
+	if strings.Contains(heading, "perl-Exporter") {
+		t.Errorf("the fifth package must not be printed inline in the heading: %q", heading)
+	}
+	// ...but it MUST still be citable, or the step covering it cannot be justified.
+	if !strings.Contains(got, "- packages (citable):") || !strings.Contains(got, "perl-Exporter") {
+		t.Errorf("every merged package must appear on the citable line:\n%s", got)
+	}
+}
+
+// PLAN-6 — every identifier the prompt OFFERS as citable must satisfy Grounds().
+//
+// The prompt and the Grounding Verification gate are an interface with no compiler between them,
+// and a fake provider returns whatever the test author already believed — so nothing else in the
+// suite can catch a disagreement between them. This test is that compiler.
+//
+// The live failure it encodes: PLAN-1 capped the `upgrade ...` heading at three packages with a
+// "+29 more" suffix, for readability. The citation rule still said "copied verbatim from an
+// `upgrade ...` heading", so the model dutifully cited
+// "perl-Carp, perl-constant, perl-Data-Dumper +29 more" — not a package, ungrounded, whole plan
+// discarded with `business_invalid`. The model was obeying the prompt; the prompt was wrong.
+//
+// Note what is being asserted: not that the model behaves, but that the INSTRUCTIONS are
+// satisfiable. A rule no compliant answer can obey is a defect in the rule.
+func TestPlanPromptOnlyOffersGroundableCitations(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	comp := func(name, source string) domain.PostureComponent {
+		return domain.PostureComponent{
+			PURL: "pkg:rpm/rocky/" + name + "@1.0", Name: name, Version: "1.0",
+			Ecosystem: "rpm", Source: source,
+		}
+	}
+	// Two Findings closed by the identical CVE set across FIVE packages, so mergeSiblings folds
+	// them into one action whose display heading must be truncated — the exact shape that broke.
+	var comps []domain.PostureComponent
+	for _, n := range []string{"perl-Carp", "perl-constant", "perl-Data-Dumper", "perl-Digest", "perl-Encode"} {
+		comps = append(comps, comp(n, n))
+	}
+	posture := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2026-1", ResidualPriority: 70, Components: comps},
+		{FindingID: "f2", CVE: "CVE-2026-2", ResidualPriority: 30, Components: comps},
+	}}
+	got, err := r.Render("plan_remediation", domain.AssembledContext{Release: posture})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Sanity: the heading really is truncated here, or this test proves nothing.
+	if !strings.Contains(got, "+2 more") {
+		t.Fatalf("expected a truncated heading in this fixture:\n%s", got)
+	}
+
+	offered := 0
+	for _, line := range strings.Split(got, "\n") {
+		l := strings.TrimSpace(line)
+		var list string
+		switch {
+		case strings.HasPrefix(l, "- packages (citable):"):
+			list = strings.TrimPrefix(l, "- packages (citable):")
+		case strings.HasPrefix(l, "- cves (citable):"):
+			list = strings.TrimPrefix(l, "- cves (citable):")
+		default:
+			continue
+		}
+		for _, ref := range strings.Split(list, ",") {
+			ref = strings.TrimSpace(ref)
+			if ref == "" || ref == "(none)" {
+				continue
+			}
+			offered++
+			if !posture.Grounds(ref) {
+				t.Errorf("prompt offers %q as citable, but Grounds() rejects it — "+
+					"the plan would be discarded for obeying the instructions", ref)
+			}
+		}
+	}
+	if offered == 0 {
+		t.Fatal("no citable identifiers found — the prompt must name what may be cited")
+	}
+	// And the truncated display heading must NOT be what the rules point at.
+	if strings.Contains(got, "copied verbatim from an `upgrade ...` heading") {
+		t.Error("citation rule points at the truncated heading; it must point at `packages (citable)`")
 	}
 }

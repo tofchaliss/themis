@@ -15,6 +15,7 @@ single severe finding.
    - ecosystem: {{$a.Ecosystem}}
    - installed: {{join $a.InstalledVersions}}
    - closes {{len $a.FindingIDs}} finding(s); risk removed {{$a.RiskRemoved}}, worst item {{$a.TopPriority}}
+   - packages (citable): {{join $a.Packages}}
    - cves (citable): {{join $a.CVEs}}
 {{end}}{{end}}
 ## Instructions
@@ -36,8 +37,10 @@ Rules:
 - Cite evidence ONLY as one of these exact identifiers:
     * the release id: {{.Release.ReleaseID}}
     * a CVE id copied verbatim from a `cves (citable)` line above
-    * a package name copied verbatim from an `upgrade ...` heading above — the bare name only,
-      with no ecosystem, version or brackets appended
+    * a package name copied verbatim from a `packages (citable)` line above — ONE bare name, with
+      no ecosystem, version or brackets appended. Cite from that line, NOT from the `upgrade ...`
+      heading: the heading is shortened for reading and may end in "+N more", which is not a
+      package and will discard the plan.
   Every ref is verified against the release posture; one unrecognised ref discards the whole plan.
 - You are producing an ADVISORY plan, not a decision. Do not state that any finding is
   not-affected, resolved, or safe to ignore — those are governed decisions a human makes elsewhere.
