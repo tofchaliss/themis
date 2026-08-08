@@ -6,10 +6,14 @@
 # this script see exactly the same thing.
 #
 # It is also, deliberately, the specification for what a GUI needs. Anything this script has to do
-# by hand — enumerate, join, re-fetch — is a gap in the read surface, tracked as DASH-1/DASH-2:
-#   * a release UUID must be supplied, because Registry has no list or lookup-by-name;
-#   * the severity BAND costs one Knowledge call per Faultline, because PostureEntry carries
-#     base_score but not the band Knowledge already computes.
+# by hand — enumerate, join, re-fetch — is a gap in the read surface. Two such gaps are now CLOSED:
+#   * DASH-1 — a release UUID no longer has to be captured at upload: Registry serves
+#     GET /products -> /products/{id}/projects -> /projects/{id}/releases, so a posture is
+#     reachable by NAME. (This script still takes a UUID; the traversal is the caller's.)
+#   * DASH-2 — the severity BAND, the matched COMPONENT and the published FIX ride the posture
+#     row itself. This loop used to cost two extra calls per row.
+# One N+1 remains on purpose: KEV/EPSS are exploit SIGNALS rather than posture, so they stay on
+# Knowledge and are paid for only on the rows actually shown. See docs/BACKLOG.md.
 #
 # Usage:
 #   scripts/release-posture.sh <release-id> [--top N] [--ai N] [--all]
