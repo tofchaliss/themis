@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -176,9 +177,27 @@ func BuildProposal(out RawOutput, capb Capability, meta Metadata, rationaleWarni
 // The tolerance is deliberately narrow. It does NOT substring-match — that would ground "not
 // CVE-2024-1", and would match "CVE-2024-1" inside "CVE-2024-10". Every extracted token must
 // still clear exact set membership, and a ref carrying no identifier at all grounds nothing.
+// truncationSuffix matches the "+29 more" tail the PROMPT renderer appends when it caps a merged
+// action's package list for readability (PLAN-1).
+var truncationSuffix = regexp.MustCompile(`\s*\+\s*\d+\s+more\s*$`)
+
 func groundsRef(ac AssembledContext, ref string) bool {
 	if ac.Grounds(ref) {
 		return true
+	}
+	// Strip OUR OWN truncation marker before judging the citation (PLAN-6).
+	//
+	// This is normalisation, not leniency: "+29 more" is not something the model claimed, it is
+	// something the renderer wrote. Removing it changes which names are checked not at all — every
+	// remaining name is still matched against the authoritative projection, so a list containing
+	// one invented package fails exactly as before.
+	//
+	// It is fixed HERE rather than in the prompt because the prompt has already been tightened
+	// three times against this same behaviour and it recurred each time. A model citing the
+	// heading of the item it is discussing is stable behaviour; a gate that rejects a string its
+	// own renderer produced is a defect on our side of the interface.
+	if stripped := truncationSuffix.ReplaceAllString(ref, ""); stripped != ref && stripped != "" {
+		return groundsRef(ac, stripped)
 	}
 	// A COMMA-SEPARATED ref is a list of citations written into one field. It grounds only if
 	// EVERY element does, which is strictly no weaker than checking them separately.

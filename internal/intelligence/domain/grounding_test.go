@@ -87,3 +87,41 @@ func TestEmptyProjectionGroundsNothing(t *testing.T) {
 		}
 	}
 }
+
+// PLAN-6, second attempt — the LIVE ref, verbatim from the VM.
+//
+// The first attempt tightened the prompt. It failed identically, because a model citing the
+// heading of the item it is discussing is stable behaviour, not noise — groundsRef's own comment
+// had already recorded that across two earlier rounds. Fixing it in the prompt a third time was
+// repeating a step that had twice been shown not to work.
+//
+// The gate now strips "+N more" first, because the renderer wrote that suffix, not the model.
+// The second and third cases are the ones that matter: normalising our own artifact must not
+// weaken what the citation actually asserts.
+func TestGroundsRef_TruncatedPackageHeading(t *testing.T) {
+	posture := ReleasePosture{ReleaseID: "rel-1", Entries: []PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2026-1", ResidualPriority: 70, Components: []PostureComponent{
+			{Name: "perl-Carp", Source: "perl-Carp", Ecosystem: "rpm"},
+			{Name: "perl-constant", Source: "perl-constant", Ecosystem: "rpm"},
+			{Name: "perl-Data-Dumper", Source: "perl-Data-Dumper", Ecosystem: "rpm"},
+		}},
+	}}
+	ac := AssembledContext{Release: posture}
+
+	for _, tc := range []struct {
+		name, ref string
+		want      bool
+	}{
+		{"the live ref, verbatim", "perl-Carp, perl-constant, perl-Data-Dumper +29 more", true},
+		{"an invented name still fails", "perl-Carp, not-a-package +29 more", false},
+		{"a bare invented name still fails", "not-a-package", false},
+		{"the suffix alone grounds nothing", "+29 more", false},
+		{"no suffix, all real", "perl-Carp, perl-constant", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := groundsRef(ac, tc.ref); got != tc.want {
+				t.Errorf("groundsRef(%q) = %v, want %v", tc.ref, got, tc.want)
+			}
+		})
+	}
+}

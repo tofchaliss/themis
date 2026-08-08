@@ -1847,6 +1847,19 @@ three angles, and two of them proposed fixes that would not have worked.
   completeness of the machine-facing citation list are separate requirements; PLAN-1 satisfied the
   first by breaking the second.
 
+  **The first attempt was wrong, and the way it was wrong is the lesson.** I tightened the PROMPT.
+  It failed byte-identically on the next live run — because `groundsRef`'s own comment already
+  recorded that this citation behaviour had survived *two* earlier rounds of prompt-tightening and
+  concluded it should be "accommodated rather than fought". I did a third round without reading
+  the note that said the first two had not worked. Two live runs producing an IDENTICAL ungrounded
+  ref should also have been the tell: a model varies, generated text does not.
+
+  **The actual fix is a normalisation in the gate:** strip the `+N more` suffix before judging the
+  citation, because the RENDERER wrote that suffix, not the model. This is not leniency — every
+  remaining name is still matched against the projection, so a list containing one invented package
+  fails exactly as before (asserted). A gate that rejects a string its own renderer produced is a
+  defect on our side of the interface, not the model's.
+
   **The durable part is the test, not the fix.** `TestPlanPromptOnlyOffersGroundableCitations`
   asserts that every identifier the prompt OFFERS as citable satisfies `Grounds()`. The prompt and
   the gate are an interface with no compiler between them, and a fake provider returns whatever the
