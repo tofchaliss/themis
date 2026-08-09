@@ -1880,6 +1880,33 @@ three angles, and two of them proposed fixes that would not have worked.
   can obey is a defect in the rule. This is the third time this capability has been refused for an
   invited citation form (see CLAUDE.md on `make e2e-llm`); it is the first time something guards it.
 
+- [x] **AI-REDACT-1 — the PII redactor masked package names out of the middle of their own PURLs,
+  silently disabling `recommend_position`.** ✅ **CLOSED 2026-08-09. P1.**
+
+  First live invocation of the Decision capability, and it was refused:
+  `business_invalid — ungrounded evidence "pkg:rpm/rocky/[REDACTED]%2Bel8.3.0%2B125%2B5da1ae29?…"`.
+
+  **Mechanism.** A purl is `pkg:type/namespace/name@version`, and the email pattern
+  `[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}` reads
+  `javapackages-filesystem@5.3.0-2.module` as local-part + domain `5.3.0-2` + TLD `module`. Any
+  purl whose version ends in `.<letters>` is destroyed — the RPM **module-stream** form that
+  dominates this estate, and Maven's `5.3.0.RELEASE` too (verified against the unfixed code).
+
+  **Two harms, and the second is the serious one.** (1) The model cites the mangled purl and
+  Grounding Verification correctly rejects it, discarding the recommendation. (2) The redaction
+  runs on the OUTBOUND prompt, so **the model never learns which package it is assessing** — a
+  control meant to stop data leaving instead removed the subject of the question. And the whole
+  thing surfaced as `X-Themis-AI-Reason: business_invalid`, i.e. as "the AI declined".
+
+  **Fix:** purls are protected from the PII patterns and restored afterwards. Recorded trade: a
+  secret embedded inside a purl is no longer masked — a purl is a package coordinate, credentials
+  do not live there, so the exposure is theoretical while the breakage was total.
+
+  **Worth keeping:** this is the fourth defect this week where a recogniser was looser than the
+  thing it recognises (RANGE-PARSE-1, the CVSS v2 vector, the module `name:stream` regex, this).
+  A pattern that "looks like" an email, a version, or a stream will eventually meet a string that
+  looks like one and is not.
+
 - [ ] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
   improve.** **MED.** Measured on the VM 2026-08-08 with a 12-customer estate: multiplier 2.0x,
   and **every one of the release's 120 Findings reported `effective_priority` 100**. The worst item
