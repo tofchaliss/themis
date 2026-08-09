@@ -131,7 +131,12 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
 	// the reconcile policy is "distro-authoritative first, then NVD, then others"). Red Hat's
 	// vendor-severity + not_affected statements therefore headline the reconciled distro view.
-	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), newTrustPolicy())
+	fold := app.NewFaultlineService(st, idGen{}, sysClock{}, domain.NewPrecedence("redhat", "nvd", "osv"), newTrustPolicy()).
+		// Carrier attribution lands on NVD's cadence, later than correlation. This lets a card
+		// that gains it correct the classes already stamped on its matches (CORR-1 D3/D4);
+		// without it, a stable estate — where no new correlation runs — keeps every component
+		// `unknown` forever.
+		WithMatchReader(st)
 	evClient := evidence.NewClient(evidenceBaseURL, nil)
 	health := app.NewFeedHealthService(st, sysClock{})
 	// OSV is the always-on discovery feed — queried per component on every upload, with no poll

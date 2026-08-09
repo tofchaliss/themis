@@ -467,3 +467,33 @@ func (s *Store) CardsNeedingAttribution(ctx context.Context, limit int) ([]app.U
 	}
 	return out, rows.Err()
 }
+
+// MatchesForFaultline lists the occurrences recorded against a card — which release, which
+// component (EDR-CORRELATION-01 D4).
+//
+// It exists because carrier attribution arrives on NVD's cadence, which is later than
+// correlation. Without a way to revisit the matches already recorded, the class stamped at match
+// time would be the one that lasts, and on a stable estate — where no new correlation ever runs —
+// every component would stay `unknown` forever.
+func (s *Store) MatchesForFaultline(ctx context.Context, faultlineID string) ([]app.MatchedOccurrence, error) {
+	rows, err := s.querier(ctx).Query(ctx, `
+		SELECT release_id, component_purl, component_name, component_version,
+		       component_ecosystem, component_source
+		  FROM faultline_matches
+		 WHERE faultline_id = $1
+		 ORDER BY release_id, component_purl`, faultlineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []app.MatchedOccurrence
+	for rows.Next() {
+		var o app.MatchedOccurrence
+		if err := rows.Scan(&o.ReleaseID, &o.Component.PURL, &o.Component.Name,
+			&o.Component.Version, &o.Component.Ecosystem, &o.Component.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}

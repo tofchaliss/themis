@@ -741,3 +741,56 @@ func TestCardsNeedingAttribution(t *testing.T) {
 		t.Errorf("component = %+v, want the full detail needed to re-query", got[0].Component)
 	}
 }
+
+// MatchesForFaultline is what lets a card correct classes stamped before its carrier attribution
+// arrived (EDR-CORRELATION-01 D4). It must return the FULL component, not just an id: the class
+// is recomputed from the component's package, so a row that lost `source` on the way back would
+// silently reclassify a carrier as scope.
+func TestMatchesForFaultline(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2019-10086"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := f.ID()
+
+	for _, m := range []app.Match{
+		{ReleaseID: "rel-1", FaultlineID: id, CVE: "CVE-2019-10086", OccurredAt: time.Now().UTC(),
+			Component: app.InventoryComponent{
+				PURL: "pkg:rpm/rocky/javapackages-filesystem@5.3.0", Name: "javapackages-filesystem",
+				Version: "5.3.0", Ecosystem: "rpm", Source: "javapackages-tools",
+			}},
+		{ReleaseID: "rel-2", FaultlineID: id, CVE: "CVE-2019-10086", OccurredAt: time.Now().UTC(),
+			Component: app.InventoryComponent{
+				PURL: "pkg:rpm/rocky/apache-commons-beanutils@1.9.3", Name: "apache-commons-beanutils",
+				Version: "1.9.3", Ecosystem: "rpm", Source: "apache-commons-beanutils",
+			}},
+	} {
+		if _, err := st.RecordMatch(ctx, m); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+	}
+
+	occ, err := st.MatchesForFaultline(ctx, string(id))
+	if err != nil {
+		t.Fatalf("MatchesForFaultline: %v", err)
+	}
+	if len(occ) != 2 {
+		t.Fatalf("occurrences = %d, want 2", len(occ))
+	}
+	// Ordered by release then purl, so a re-announcement is deterministic.
+	if occ[0].ReleaseID != "rel-1" || occ[1].ReleaseID != "rel-2" {
+		t.Errorf("order = %s,%s, want rel-1,rel-2", occ[0].ReleaseID, occ[1].ReleaseID)
+	}
+	if occ[0].Component.Source != "javapackages-tools" || occ[0].Component.Name != "javapackages-filesystem" {
+		t.Errorf("component round-trip lost detail: %+v", occ[0].Component)
+	}
+	// A card nobody has matched yields nothing rather than an error.
+	empty, err := st.MatchesForFaultline(ctx, "no-such-card")
+	if err != nil || len(empty) != 0 {
+		t.Errorf("unmatched card: occ=%v err=%v, want empty/nil", empty, err)
+	}
+}

@@ -157,6 +157,32 @@ where the match is made and rides `ComponentMatched` to Governance, alongside `S
 second copy of the attribution policy, and two copies of a policy eventually disagree — the same reasoning
 that put trust classes on the wire in EDR-TRUST-01 rather than re-deriving them downstream.
 
+### D5a — Classification is REVISITED when carrier attribution arrives late
+
+D5 puts classification at correlation. That is where the match is made — but not where the
+evidence lands. NVD enriches on its own cadence (`THEMIS_NVD_STALE_AFTER`, default 168h), so on a
+fresh card the sequence is: correlate (no carriers → `unknown`), then enrich (carriers arrive).
+Nothing revisited the classes already stamped.
+
+**Measured on the VM the day this shipped: 370 components, every one `unknown`, while the cards
+were being enriched around them.** On a stable estate no new correlation ever runs, so the class
+stamped at match time is the class forever — step 2 would have shipped inert.
+
+Knowledge therefore **re-announces** a card's recorded matches when its carrier products go from
+empty to non-empty: `MatchesForFaultline` lists the occurrences, each is re-classified, and a
+`ComponentMatched` is emitted per occurrence.
+
+- Scoped to the **empty→non-empty transition**, so it fires once per card rather than on every
+  enrichment.
+- Idempotent downstream: re-delivering a match adds no component, and Governance's upsert only
+  overwrites a class with a **non-empty** one — an `unknown` can never erase a decided class.
+- Classification stays in Knowledge (D5 intact). Governance receives a verdict, never a policy.
+
+**This is the third appearance of one shape** — BUG-3 (`base_score`), BUG-3b (`band`/`fixes`), and
+now the claim class. A derived value written at one event, whose inputs arrive at another, is
+stale forever unless something revisits it. The question to ask of any new derived field is not
+"where is it computed?" but **"what happens if its inputs arrive later?"**
+
 ### D6 — Consumers use `carrier` for ACTION and the full set for OBLIGATION
 
 - **`plan_remediation`** groups by carrier. "Upgrade PyYAML — closes 78" becomes "update the `python38`

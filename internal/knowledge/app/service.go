@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/domain"
@@ -23,6 +24,17 @@ type FaultlineService struct {
 	clock Clock
 	prec  domain.Precedence
 	trust domain.TrustPolicy
+	// matches is optional (nil = no re-announcement). It exists so a card that gains carrier
+	// attribution after correlation can correct the classes already stamped on its matches.
+	matches MatchReader
+}
+
+// WithMatchReader wires the optional match reader and returns the service for chaining. Kept off
+// the constructor so every existing caller is unaffected; without it the service behaves exactly
+// as before, which is the correct degradation for single-context dev.
+func (s *FaultlineService) WithMatchReader(m MatchReader) *FaultlineService {
+	s.matches = m
+	return s
 }
 
 // NewFaultlineService wires the use-case ports, the reconciliation precedence policy, and
@@ -95,6 +107,30 @@ func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVE
 // dropped (KN-PROPOSAL-BLOAT-1), and a sweep that counts its work must not count those: a feed
 // writing nothing would otherwise log the same number as one doing full work, which is how a
 // stalled feed comes to look healthy.
+// reannounceMatches builds a ComponentMatched note per recorded occurrence of a card, carrying the
+// freshly-computed claim class. No-op when no match reader is wired (single-context dev).
+func (s *FaultlineService) reannounceMatches(ctx context.Context, f domain.Faultline, now time.Time) ([]OutboxNote, error) {
+	if s.matches == nil {
+		return nil, nil
+	}
+	occ, err := s.matches.MatchesForFaultline(ctx, string(f.ID()))
+	if err != nil {
+		return nil, err
+	}
+	view := f.View()
+	notes := make([]OutboxNote, 0, len(occ))
+	for _, o := range occ {
+		comp := domain.MatchedComponent{
+			PURL: o.Component.PURL, Name: o.Component.Name, Version: o.Component.Version,
+			Ecosystem: o.Component.Ecosystem, Source: o.Component.Source,
+			ClaimClass: domain.ClassifyClaim(view.CarrierProducts, componentPackage(o.Component), o.Component.Name),
+		}
+		ev := domain.NewComponentMatched(f, o.ReleaseID, []domain.MatchedComponent{comp}, now)
+		notes = append(notes, OutboxNote{EventType: EventComponentMatched, Event: ev, OccurredAt: now})
+	}
+	return notes, nil
+}
+
 func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.Faultline, bool, error) {
 	if cve.IsZero() {
 		return domain.Faultline{}, false, fmt.Errorf("knowledge: zero cve")
@@ -124,9 +160,29 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 			notes = append(notes, OutboxNote{EventType: EventFaultlineCreated, Event: domain.NewFaultlineCreated(f, now), OccurredAt: now})
 		}
 
+		hadCarriers := len(f.View().CarrierProducts) > 0
 		res := f.FoldProposal(p, s.prec, s.trust)
 		if res.ViewChanged {
 			notes = append(notes, OutboxNote{EventType: EventFaultlineEnriched, Event: domain.NewFaultlineEnriched(f, now), OccurredAt: now})
+		}
+		// Carrier attribution arriving for the first time RE-ANNOUNCES this card's existing
+		// matches (EDR-CORRELATION-01 D3/D4).
+		//
+		// Classification happens at correlation, but the evidence for it — NVD's CPE products —
+		// arrives on NVD's own cadence, which is usually LATER. Without this the class stamped at
+		// match time is the one that lasts: on a stable estate no new correlation ever runs, so
+		// every component would stay `unknown` forever and step 2 would be inert. Measured on the
+		// VM: 370 components, all unknown, while the cards were being enriched around them.
+		//
+		// Scoped to the empty→non-empty transition so it fires ONCE per card rather than on every
+		// enrichment, and it is idempotent downstream: Governance's upsert only overwrites a class
+		// with a non-empty one, and re-delivering a match adds no component.
+		if !hadCarriers && len(f.View().CarrierProducts) > 0 {
+			more, rerr := s.reannounceMatches(ctx, f, now)
+			if rerr != nil {
+				return domain.Faultline{}, false, rerr
+			}
+			notes = append(notes, more...)
 		}
 
 		switch err := s.repo.Save(ctx, f, created, prevVersion, notes); {

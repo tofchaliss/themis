@@ -62,6 +62,20 @@ type Match struct {
 	OccurredAt time.Time
 }
 
+// MatchedOccurrence is a match already recorded for a card: which release, which component. It
+// is enough to RE-ANNOUNCE that match when what the match MEANS changes.
+type MatchedOccurrence struct {
+	ReleaseID string
+	Component InventoryComponent
+}
+
+// MatchReader lists the occurrences recorded against a card. It exists for one job: when carrier
+// attribution arrives AFTER correlation (EDR-CORRELATION-01 D4 — NVD enriches on its own
+// cadence), the classes stamped at match time are stale and nothing else would ever revisit them.
+type MatchReader interface {
+	MatchesForFaultline(ctx context.Context, faultlineID string) ([]MatchedOccurrence, error)
+}
+
 // MatchRecorder records matches idempotently and queues the ComponentMatched event; it
 // also advances the matched card to the Correlated stage (D3/D7). It returns whether the
 // match was new so a re-scan of the same occurrence emits no duplicate.
