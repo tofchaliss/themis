@@ -47,6 +47,12 @@ type EnterpriseView struct {
 	SignalTrust   value.TrustClass // highest-risk class among sources contributing exploit signals
 
 	Applicabilities []Applicability
+
+	// CarrierProducts is the union of every flaw-describing source's opinion about WHICH product
+	// carries this CVE (EDR-CORRELATION-01 D4). Empty means nobody has said — which classifies
+	// every component as ClaimUnknown, i.e. treated as a carrier. Absence of evidence must never
+	// hide a live vulnerability.
+	CarrierProducts []string
 }
 
 // Precedence is the fixed, source-agnostic ranking policy that decides which source
@@ -93,6 +99,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	var best headlineCandidate
 	rangeSet := map[string]struct{}{}
 	fixSet := map[FixedVersion]struct{}{}
+	carrierSet := map[string]struct{}{}
 	epssChosen := false
 	var epssTime time.Time
 	appSet := map[Applicability]struct{}{}
@@ -121,6 +128,14 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 			for _, fx := range f.Fixes {
 				fixSet[fx] = struct{}{}
 			}
+			// A UNION, like ranges and fixes: several sources may each name a carrier, and a CVE
+			// can genuinely affect more than one product. Union is also the fail-safe direction —
+			// a carrier named by any source keeps its components classified as carriers.
+			for _, cp := range f.CarrierProducts {
+				if strings.TrimSpace(cp) != "" {
+					carrierSet[cp] = struct{}{}
+				}
+			}
 		case KindExploitSignal:
 			s := p.exploitSignal
 			view.KEV = view.KEV || s.KEV
@@ -147,6 +162,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 		view.HeadlineTrust = trust.ClassOf(best.source)
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
+	view.CarrierProducts = sortedKeys(carrierSet)
 	view.Fixes = sortedFixes(fixSet)
 	view.FixedVersions = flatVersions(view.Fixes)
 	view.Applicabilities = sortedApplicabilities(appSet)

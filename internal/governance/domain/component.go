@@ -16,7 +16,21 @@ type MatchedComponent struct {
 	// fix, because feeds attribute fixes to the source package while the PURL carries the
 	// binary one (AI-GROUND-1).
 	Source string
+	// ClaimClass says WHY this component matched the Faultline: `carrier` (evidence says it
+	// carries the flaw), `scope` (it was in a distro advisory's rebuild set, with no such
+	// evidence), or empty = unknown. Decided by Knowledge at correlation and carried here
+	// (EDR-CORRELATION-01 D3/D5); Governance never re-derives it.
+	//
+	// Governance keeps every component regardless (D2) — the obligation to replace a superseded
+	// build is real. The class governs what a consumer may SAY: an upgrade plan and the AI's
+	// grounding use carriers, the posture shows everything.
+	ClaimClass string
 }
+
+// ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown
+// counts: absence of attribution evidence must never hide a live vulnerability, the same
+// fail-safe direction as the range gate's undecidable verdict.
+func (c MatchedComponent) ActsAsCarrier() bool { return c.ClaimClass != "scope" }
 
 // FixKey returns the names this component may be published under, most specific first: the
 // source package, then `namespace:name` (Maven's groupId:artifactId), then the bare name.

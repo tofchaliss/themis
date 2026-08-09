@@ -17,6 +17,10 @@ type nvdRecord struct {
 	BaseSeverity string   `json:"base_severity"`
 	Affected     []string `json:"affected"`
 	Fixed        []string `json:"fixed"`
+	// Products are the CPE products NVD says are vulnerable — the only stored answer to "which
+	// package CARRIES this flaw" (EDR-CORRELATION-01 D4). The client already extracted these for
+	// the A2 discovery gate and then threw them away.
+	Products []string `json:"products"`
 }
 
 // nvdACL translates NVD CVE records into vuln-facts Proposals.
@@ -46,6 +50,9 @@ func (a nvdACL) Translate(raw []byte) ([]Translated, error) {
 		// NVD's CPE data yields version boundaries without a package name, so these stay
 		// unattributed — visible as "a fix exists", never used to decide about a component.
 		Fixes: unattributedFixes(rec.Fixed),
+		// NVD cannot attribute a FIX to a package, but it can say which product carries the
+		// FLAW — and those are different questions (EDR-CORRELATION-01 D4).
+		CarrierProducts: rec.Products,
 	})
 	if err != nil {
 		return nil, err

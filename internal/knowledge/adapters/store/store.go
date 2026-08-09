@@ -284,6 +284,7 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		Components: []domain.MatchedComponent{{
 			PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version,
 			Ecosystem: m.Component.Ecosystem, Source: m.Component.Source,
+			ClaimClass: m.ClaimClass,
 		}},
 		Score:      m.Score,
 		Priority:   m.Priority,

@@ -2029,6 +2029,28 @@ three angles, and two of them proposed fixes that would not have worked.
      vendor statement is evidence about a shipping unit, and treating its package list as N
      independent assertions is obeying it in a shape it never made. It fixes the plan headline
      immediately ("update the python38 stream", not "upgrade PyYAML").
+  **STEP 2 IMPLEMENTED 2026-08-09.** Carrier attribution end to end:
+  * **Gather** — `nvdVulnerableProducts` keeps the CPE products the client already parsed for the
+    A2 gate and threw away; a NON-distro OSV record's package name is a carrier, a distro one is
+    not (that is what `isDistroEcosystem` decides, and it is the whole discrimination — breadth
+    could not do it).
+  * **Reconcile** — `EnterpriseView.CarrierProducts`, a union across sources, blank-free and sorted.
+  * **Classify** — `domain.ClassifyClaim` at correlation, riding `ComponentMatched.ClaimClass`.
+  * **Carry** — governance migration `000010`, `claim_class` on `finding_components`, exposed on
+    the posture's components.
+  * **Consume** — `PlanActions` names only carriers (D6). The AI is no longer handed a component
+    the flaw does not live in.
+
+  **The comparison errs toward CARRIER on purpose.** The first implementation demanded exact
+  normalized equality and classified `apache-commons-beanutils` as `scope` for its own CVE, because
+  NVD names it `commons-beanutils`. Under-matching would mark a genuinely vulnerable package as
+  scope, which a consumer could then drop; over-matching only costs precision. Only one of those
+  hides a vulnerability, so equality-or-containment it is.
+
+  **Migration is a no-op by construction:** `claim_class DEFAULT ''` is unknown, every consumer
+  treats unknown as carrier, so existing rows keep exactly their present behaviour and nothing
+  needs backfilling.
+
   2. **Flaw-faithful, needs new gathering.** Capture which package actually CARRIES the flaw —
      NVD's CPE product is the obvious source and is currently discarded. Only this can say
      "python3-libs is vulnerable, the other 22 are along for the rebuild", and only this reduces

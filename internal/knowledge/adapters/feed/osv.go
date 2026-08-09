@@ -96,8 +96,17 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 
 	var ranges []string
 	var fixes []domain.FixedVersion
+	var carriers []string
 	for _, aff := range rec.Affected {
 		pkg := strings.TrimSpace(aff.Package.Name)
+		// A NON-DISTRO ecosystem entry names the project the flaw lives in, so its package IS a
+		// carrier (EDR-CORRELATION-01 D4). A distro entry does not: an RLSA/RHSA lists every RPM
+		// rebuilt by one advisory, and reading that list as N vulnerability claims is the whole
+		// of CORR-1. Measured: a genuine PyYAML CVE named 23 packages, a CPython one named 62 —
+		// breadth cannot tell them apart, so the ECOSYSTEM has to.
+		if pkg != "" && !isDistroEcosystem(aff.Package.Ecosystem) {
+			carriers = append(carriers, pkg)
+		}
 		for _, rng := range aff.Ranges {
 			for _, ev := range rng.Events {
 				if r := rangeString(ev.Introduced, ev.Fixed); r != "" {
@@ -114,6 +123,7 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 
 	facts := domain.VulnFacts{
 		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, Fixes: fixes,
+		CarrierProducts: carriers,
 	}
 	out := make([]Translated, 0, len(cves))
 	for _, cve := range cves {
@@ -124,6 +134,30 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 		out = append(out, Translated{CVE: cve, Proposal: p})
 	}
 	return out, nil
+}
+
+// distroEcosystems are OSV ecosystems whose records describe a SHIPMENT rather than a flaw. Their
+// package lists are rebuild scope, so they cannot name a carrier (EDR-CORRELATION-01 D1/D4).
+//
+// Matched by prefix because OSV qualifies these with a release — `Rocky Linux:8`, `Red Hat:rhel_8`,
+// `Debian:12`, `Alpine:v3.19`.
+var distroEcosystems = []string{
+	"rocky", "red hat", "redhat", "almalinux", "alma", "alpine", "debian", "ubuntu", "suse",
+	"opensuse", "mageia", "photon", "chainguard", "wolfi", "oracle", "rhel", "centos",
+}
+
+// isDistroEcosystem reports whether an OSV ecosystem describes a distribution's shipment.
+func isDistroEcosystem(eco string) bool {
+	e := strings.ToLower(strings.TrimSpace(eco))
+	if e == "" {
+		return true // unknown provenance: assume shipment, which never INVENTS a carrier
+	}
+	for _, d := range distroEcosystems {
+		if strings.HasPrefix(e, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // rangeString renders an OSV introduced/fixed event pair as a human-readable range.

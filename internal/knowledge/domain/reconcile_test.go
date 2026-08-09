@@ -331,3 +331,38 @@ func TestFixesFor_PrefersADirectFixOverAModuleStreamRebuild(t *testing.T) {
 		t.Errorf("first fix = %q, want the direct 0:3.11-11.el8 — a consumer showing one row shows this", got[0])
 	}
 }
+
+// Carrier products are a UNION across flaw-describing sources, and blanks are dropped.
+//
+// Union is the fail-safe direction: a carrier named by ANY source keeps its components classified
+// as carriers, so a source that is silent about attribution can never demote one to `scope`
+// (EDR-CORRELATION-01 D4).
+func TestReconcileUnionsCarrierProducts(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	mk := func(src string, carriers ...string) domain.Proposal {
+		p, err := domain.NewVulnFactsProposal(src, at, domain.VulnFacts{
+			Severity: value.SeverityHigh, CarrierProducts: carriers,
+		})
+		if err != nil {
+			t.Fatalf("proposal: %v", err)
+		}
+		return p
+	}
+	v := domain.Reconcile([]domain.Proposal{
+		mk("nvd", "pyyaml", "  "), // a blank must not become a carrier
+		mk("osv", "urllib3", "pyyaml"),
+	}, domain.NewPrecedence("nvd", "osv"), domain.NewTrustPolicy(nil))
+
+	if len(v.CarrierProducts) != 2 {
+		t.Fatalf("CarrierProducts = %v, want the two real names, deduped and blank-free", v.CarrierProducts)
+	}
+	// Sorted, so a card renders and diffs deterministically.
+	if v.CarrierProducts[0] != "pyyaml" || v.CarrierProducts[1] != "urllib3" {
+		t.Errorf("CarrierProducts = %v, want [pyyaml urllib3]", v.CarrierProducts)
+	}
+	// No source naming a carrier ⇒ empty ⇒ every component classifies as unknown ⇒ carrier.
+	bare := domain.Reconcile([]domain.Proposal{mk("nvd")}, domain.NewPrecedence("nvd", "osv"), domain.NewTrustPolicy(nil))
+	if len(bare.CarrierProducts) != 0 {
+		t.Errorf("CarrierProducts = %v, want empty when nobody attributes", bare.CarrierProducts)
+	}
+}

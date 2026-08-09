@@ -48,6 +48,13 @@ type VulnFacts struct {
 	// package). An unattributed fix is usable for display but must never satisfy a per-component
 	// verdict — see EnterpriseView.FixesFor.
 	Fixes []FixedVersion
+	// CarrierProducts are the products this source says CARRY the flaw, as opposed to the
+	// packages an advisory happens to rebuild alongside them (EDR-CORRELATION-01 D4).
+	//
+	// Only a source that describes the FLAW can fill this: NVD's CPE configurations, or an OSV
+	// record from a non-distro ecosystem. A distro advisory cannot — its package list is
+	// shipping scope, and it carries no CVE→package mapping within itself.
+	CarrierProducts []string
 }
 
 // UnattributedFixes wraps versions a source did not attribute to a package. They remain visible
@@ -146,6 +153,10 @@ func NewVulnFactsProposal(source string, observedAt time.Time, facts VulnFacts) 
 		CVSS:           facts.CVSS,
 		AffectedRanges: append([]string(nil), facts.AffectedRanges...),
 		Fixes:          append([]FixedVersion(nil), facts.Fixes...),
+		// Defensive copy like the rest: a caller mutating its slice afterwards must not be able
+		// to change a Proposal that has already been recorded. The append-only audit trail is
+		// only trustworthy if a recorded Proposal is immutable.
+		CarrierProducts: append([]string(nil), facts.CarrierProducts...),
 	}
 	return Proposal{source: source, observedAt: observedAt.UTC(), kind: KindVulnFacts, vulnFacts: &copyFacts}, nil
 }

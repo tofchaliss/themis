@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -353,6 +354,36 @@ func cpeProduct(criteria string) string {
 	return parts[4]
 }
 
+// nvdVulnerableProducts lists the distinct products NVD marks vulnerable for a CVE.
+//
+// This is the same walk nvdConfigsMatchProduct does, kept instead of collapsed to a boolean. The
+// data was always here — it was extracted to gate A2 discovery and then dropped, which is why
+// "which package carries this flaw" had no answer anywhere in the system.
+func nvdVulnerableProducts(configs []nvdConfig) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, cfg := range configs {
+		for _, node := range cfg.Nodes {
+			for _, m := range node.CPEMatch {
+				if !m.Vulnerable {
+					continue
+				}
+				p := cpeProduct(m.Criteria)
+				if p == "" || p == "*" || p == "-" {
+					continue
+				}
+				if _, dup := seen[p]; dup {
+					continue
+				}
+				seen[p] = struct{}{}
+				out = append(out, p)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // nvdConfigsMatchProduct reports whether any vulnerable CPE match names a product that
 // normalized-equals name — the precision gate that turns a fuzzy keyword hit into a real
 // "this CVE is about this component". Exact normalized equality (not substring) keeps false
@@ -455,6 +486,10 @@ func (c *NVDClient) translate(cve nvdLiveCVE) (app.ProposalFor, bool, error) {
 		BaseSeverity: severity,
 		Affected:     affected,
 		Fixed:        fixed,
+		// The CPE products, kept rather than discarded (EDR-CORRELATION-01 D4). NVD describes the
+		// FLAW, so it can say which product carries it; a distro advisory describes a SHIPMENT and
+		// cannot.
+		Products: nvdVulnerableProducts(cve.Configurations),
 	}
 	raw, err := json.Marshal(rec)
 	if err != nil {

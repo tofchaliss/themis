@@ -400,6 +400,17 @@ components:
             for non-distro. It is the only key that joins a component to its published fix, because
             feeds attribute fixes to the source package while a PURL carries the binary one, and
             neither is derivable from the other (AI-GROUND-1).
+        claim_class:
+          type: string
+          description: >-
+            Why this component matched (EDR-CORRELATION-01 D3): `carrier` - evidence says it carries
+            the flaw; `scope` - it was in a distro advisory's rebuild set with no such evidence;
+            empty - unknown, which every consumer treats as `carrier`.
+
+            A module-stream advisory rebuilds every RPM in the stream and lists them all as
+            affected, so without this a CPython flaw reads as a vulnerability of python3-pyyaml.
+            The component is kept either way - replacing a superseded build is real work - but an
+            upgrade plan and the AI's grounding use carriers only.
     FindingAssessment:
       type: object
       properties:

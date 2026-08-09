@@ -93,10 +93,10 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 // tags, so keys are the exported field names — decoding is case-insensitive).
 
 type componentMatchedDTO struct {
-	FaultlineID string         `json:"FaultlineID"`
-	CVE         string         `json:"CVE"`
-	ReleaseID   string         `json:"ReleaseID"`
-	Score       int            `json:"Score"` // card's CVE-intrinsic score at match time (C6); 0 when an older payload omits it.
+	FaultlineID string `json:"FaultlineID"`
+	CVE         string `json:"CVE"`
+	ReleaseID   string `json:"ReleaseID"`
+	Score       int    `json:"Score"` // card's CVE-intrinsic score at match time (C6); 0 when an older payload omits it.
 	// Priority and Fixes at MATCH time (BUG-3b). Empty on a payload predating the field, which
 	// reads as the old behaviour: the Finding waits for an enrichment event that may never come.
 	Priority   string         `json:"Priority"`
@@ -112,6 +112,10 @@ type componentDTO struct {
 	// Source is the upstream source-package name for distro components (AI-GROUND-1). Absent
 	// on payloads predating the field, which leaves selection to the name/namespace keys.
 	Source string `json:"Source"`
+	// ClaimClass — carrier | scope | "" (unknown). Absent on payloads predating
+	// EDR-CORRELATION-01, which reads as unknown and is therefore treated as carrier: exactly
+	// the pre-change behaviour.
+	ClaimClass string `json:"ClaimClass"`
 }
 
 func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
@@ -119,6 +123,7 @@ func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 	for _, c := range d.Components {
 		comps = append(comps, domain.MatchedComponent{
 			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+			ClaimClass: c.ClaimClass,
 		})
 	}
 	return app.InboundComponentMatched{

@@ -119,6 +119,18 @@ type MatchedComponent struct {
 	// Additive and optional (omitempty): a pre-change payload stays byte-identical and an older
 	// consumer ignores it (EVENTBUS D9 — no schema version bump).
 	Source string `json:"Source,omitempty"`
+	// ClaimClass says WHY this component matched: `carrier` (evidence says it carries the flaw),
+	// `scope` (it was in an advisory's rebuild set with no such evidence), or empty/unknown
+	// (nobody has said). EDR-CORRELATION-01 D3/D5.
+	//
+	// It is decided HERE, at correlation, because that is where the match is made and where the
+	// card's carrier products are in hand. Deriving it downstream would put a second copy of the
+	// attribution policy in Governance, and two copies of a policy eventually disagree — the same
+	// reasoning that put trust classes on the wire rather than re-deriving them.
+	//
+	// Additive/omitempty: an older payload decodes to unknown, which every consumer treats as
+	// carrier — the pre-change behaviour exactly.
+	ClaimClass ClaimClass `json:"ClaimClass,omitempty"`
 }
 
 // ComponentMatched is the correlation output (D3/D8): a release's component matches a

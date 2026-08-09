@@ -17,6 +17,10 @@ type viewDTO struct {
 	CVSSVector     string   `json:"cvss_vector"`
 	SeveritySource string   `json:"severity_source"`
 	AffectedRanges []string `json:"affected_ranges"`
+	// CarrierProducts — which product CARRIES the flaw (EDR-CORRELATION-01 D4). Additive and
+	// omitempty: a card written before this decodes to empty, which classifies every component
+	// as ClaimUnknown and therefore as a carrier — exactly the pre-change behaviour.
+	CarrierProducts []string `json:"carrier_products,omitempty"`
 	// Fixes is the authoritative, package-attributed form; FixedVersions is its flat union,
 	// retained so a card written before KN-FIX-1 still decodes and so the wire shape is unchanged.
 	Fixes           []fixedVersionDTO  `json:"fixes,omitempty"`
@@ -50,7 +54,8 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 	dto := viewDTO{
 		Severity: string(v.Severity), CVSSScore: v.CVSS.Score(), CVSSVector: v.CVSS.Vector(),
 		SeveritySource: v.SeveritySource, AffectedRanges: v.AffectedRanges,
-		Fixes: fixesToDTO(v.Fixes), FixedVersions: v.FixedVersions,
+		CarrierProducts: v.CarrierProducts,
+		Fixes:           fixesToDTO(v.Fixes), FixedVersions: v.FixedVersions,
 		EPSS: v.EPSS, KEV: v.KEV, ExploitPublic: v.ExploitPublic,
 		HeadlineTrust: string(v.HeadlineTrust), RangeTrust: string(v.RangeTrust), SignalTrust: string(v.SignalTrust),
 	}
@@ -71,10 +76,11 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 	}
 	v := domain.EnterpriseView{
 		Severity: value.Severity(dto.Severity), CVSS: cvss, SeveritySource: dto.SeveritySource,
-		AffectedRanges: dto.AffectedRanges,
-		Fixes:          fixesFromDTO(dto.Fixes, dto.FixedVersions),
-		FixedVersions:  dto.FixedVersions,
-		EPSS:           dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
+		AffectedRanges:  dto.AffectedRanges,
+		CarrierProducts: dto.CarrierProducts,
+		Fixes:           fixesFromDTO(dto.Fixes, dto.FixedVersions),
+		FixedVersions:   dto.FixedVersions,
+		EPSS:            dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
 		HeadlineTrust: value.TrustClass(dto.HeadlineTrust),
 		RangeTrust:    value.TrustClass(dto.RangeTrust),
 		SignalTrust:   value.TrustClass(dto.SignalTrust),
@@ -88,11 +94,12 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 // proposalPayloadDTO is the persisted (jsonb) shape of a Proposal's kind-specific
 // payload (source/observed-at/kind live in their own columns).
 type proposalPayloadDTO struct {
-	Severity       string            `json:"severity,omitempty"`
-	CVSSScore      float64           `json:"cvss_score,omitempty"`
-	CVSSVector     string            `json:"cvss_vector,omitempty"`
-	AffectedRanges []string          `json:"affected_ranges,omitempty"`
-	Fixes          []fixedVersionDTO `json:"fixes,omitempty"`
+	Severity        string            `json:"severity,omitempty"`
+	CVSSScore       float64           `json:"cvss_score,omitempty"`
+	CVSSVector      string            `json:"cvss_vector,omitempty"`
+	AffectedRanges  []string          `json:"affected_ranges,omitempty"`
+	CarrierProducts []string          `json:"carrier_products,omitempty"`
+	Fixes           []fixedVersionDTO `json:"fixes,omitempty"`
 	// FixedVersions is the pre-KN-FIX-1 shape, still DECODED so stored Proposals keep working;
 	// nothing writes it any more.
 	FixedVersions []string `json:"fixed_versions,omitempty"`
@@ -113,6 +120,7 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 		dto.CVSSScore = f.CVSS.Score()
 		dto.CVSSVector = f.CVSS.Vector()
 		dto.AffectedRanges = f.AffectedRanges
+		dto.CarrierProducts = f.CarrierProducts
 		dto.Fixes = fixesToDTO(f.Fixes)
 	case domain.KindExploitSignal:
 		s, _ := p.ExploitSignal()
@@ -141,6 +149,7 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 		}
 		return domain.NewVulnFactsProposal(source, observedAt, domain.VulnFacts{
 			Severity: value.Severity(dto.Severity), CVSS: cvss, AffectedRanges: dto.AffectedRanges,
+			CarrierProducts: dto.CarrierProducts,
 			// A Proposal stored before KN-FIX-1 has only the flat list; decode it as unattributed
 			// rather than dropping it. Unattributed fixes never satisfy a per-component verdict,
 			// so an old row degrades to "a fix exists" instead of to a wrong decision.

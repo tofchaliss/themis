@@ -68,3 +68,21 @@ func TestMatchedComponentFixKeys(t *testing.T) {
 		})
 	}
 }
+
+// Unknown must act as a carrier. A gap in attribution evidence cannot be allowed to hide a live
+// vulnerability — the same fail-safe direction as the range gate's undecidable verdict
+// (EDR-CORRELATION-01 D3).
+func TestMatchedComponentActsAsCarrier(t *testing.T) {
+	for _, tc := range []struct {
+		class string
+		want  bool
+	}{
+		{"carrier", true},
+		{"", true}, // unknown
+		{"scope", false},
+	} {
+		if got := (domain.MatchedComponent{ClaimClass: tc.class}).ActsAsCarrier(); got != tc.want {
+			t.Errorf("ClaimClass %q ActsAsCarrier = %v, want %v", tc.class, got, tc.want)
+		}
+	}
+}

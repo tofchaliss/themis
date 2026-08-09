@@ -111,11 +111,12 @@ type posturePayload struct {
 	ResidualPriority  int    `json:"residual_priority"`
 	EffectivePriority int    `json:"effective_priority"`
 	Components        []struct {
-		PURL      string `json:"purl"`
-		Name      string `json:"name"`
-		Version   string `json:"version"`
-		Ecosystem string `json:"ecosystem"`
-		Source    string `json:"source"`
+		PURL       string `json:"purl"`
+		Name       string `json:"name"`
+		Version    string `json:"version"`
+		Ecosystem  string `json:"ecosystem"`
+		Source     string `json:"source"`
+		ClaimClass string `json:"claim_class"`
 	} `json:"components"`
 	// Fixes are the versions published for THIS Finding's own components (PLAN-3). The runtime
 	// decodes them for ONE reason (EDR-CORRELATION-01 D8 step 1): a distro module-stream fix
@@ -167,6 +168,7 @@ func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID stri
 		for _, c := range e.Components {
 			entry.Components = append(entry.Components, domain.PostureComponent{
 				PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+				ClaimClass: c.ClaimClass,
 			})
 		}
 		for _, f := range e.Fixes {

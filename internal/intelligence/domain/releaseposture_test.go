@@ -644,3 +644,57 @@ func TestPlanActions_NoActionCountsAFindingTwice(t *testing.T) {
 		t.Errorf("InstalledVersions = %v, want the later build's 9.9 carried across the merge", py.InstalledVersions)
 	}
 }
+
+// EDR-CORRELATION-01 D6 — a plan names only the packages that CARRY the flaw.
+//
+// The case this exists for, observed live: CVE-2019-10086 is Apache Commons BeanUtils, and
+// `javapackages-filesystem` was rebuilt beside it in one module stream. Asked about the CVE and
+// handed that component, the model wrote that it "affects the Java packages filesystem component"
+// at confidence 0.95 — and Grounding Verification PASSED it, because the projection said so.
+//
+// The Finding is not lost: it appears under the package that does carry it. Only the bystander is
+// dropped from the ACTION, because "upgrade javapackages-filesystem" is not a task anyone can
+// carry out to fix a BeanUtils flaw.
+func TestPlanActions_NamesOnlyCarriers(t *testing.T) {
+	carrier := domain.PostureComponent{
+		PURL: "pkg:rpm/rocky/apache-commons-beanutils@1.9.3", Name: "apache-commons-beanutils",
+		Source: "apache-commons-beanutils", Version: "1.9.3", Ecosystem: "rpm", ClaimClass: "carrier",
+	}
+	bystander := domain.PostureComponent{
+		PURL: "pkg:rpm/rocky/javapackages-filesystem@5.3.0", Name: "javapackages-filesystem",
+		Source: "javapackages-filesystem", Version: "5.3.0", Ecosystem: "rpm", ClaimClass: "scope",
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2019-10086", ResidualPriority: 76,
+			Components: []domain.PostureComponent{carrier, bystander}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 — only the carrier is actionable: %+v", len(got), got)
+	}
+	if got[0].Package != "apache-commons-beanutils" {
+		t.Errorf("action names %q, want the carrier", got[0].Package)
+	}
+	// The Finding is still closed by that action — nothing was dropped from the plan's coverage.
+	if len(got[0].FindingIDs) != 1 || got[0].RiskRemoved != 76 {
+		t.Errorf("action = %+v, want the Finding still counted once at 76", got[0])
+	}
+}
+
+// Unknown attribution behaves exactly as before this change: a card NVD has not enriched yields
+// components with no class, and every one of them stays actionable.
+func TestPlanActions_UnknownAttributionKeepsEveryComponent(t *testing.T) {
+	// Distinct CVEs, so mergeSiblings does not fold them for the unrelated reason that they close
+	// the identical CVE set — this test is about attribution, not merging.
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 50, Components: []domain.PostureComponent{
+			{Name: "a", Source: "a", Ecosystem: "rpm"}, // no ClaimClass at all
+		}},
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 40, Components: []domain.PostureComponent{
+			{Name: "b", Source: "b", Ecosystem: "rpm"},
+		}},
+	}}
+	if got := p.PlanActions(); len(got) != 2 {
+		t.Errorf("actions = %d, want 2 — unknown must not drop anything: %+v", len(got), got)
+	}
+}

@@ -54,9 +54,12 @@ type Match struct {
 	Score       int // the card's composite score at match time (C6/BUG-3); rides the ComponentMatched event so Governance can stamp base_score at finding-open.
 	// Priority and Fixes ride for the same reason as Score: a Finding opened after its card's
 	// last enrichment would otherwise never receive a band or a fix list (BUG-3b).
-	Priority    string
-	Fixes       []domain.FixedVersion
-	OccurredAt  time.Time
+	Priority string
+	Fixes    []domain.FixedVersion
+	// ClaimClass is why this component matched — carrier, scope, or unknown
+	// (EDR-CORRELATION-01 D3). Decided here, where the card's carrier products are in hand.
+	ClaimClass domain.ClaimClass
+	OccurredAt time.Time
 }
 
 // MatchRecorder records matches idempotently and queues the ComponentMatched event; it
@@ -168,6 +171,12 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, Score: f.View().Score(),
 			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
+			// recorded either way — D2 keeps everything, because an old build inside a superseded
+			// stream genuinely does need replacing. What changes is what a consumer may SAY about
+			// it: a plan and the AI's grounding use carriers, the posture keeps the obligation.
+			ClaimClass: domain.ClassifyClaim(
+				f.View().CarrierProducts, componentPackage(item.Component), item.Component.Name),
 			OccurredAt: s.clock.Now(),
 		})
 		if err != nil {

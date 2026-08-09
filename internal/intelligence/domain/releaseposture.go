@@ -48,7 +48,15 @@ type PostureComponent struct {
 	// is the name a fix is published under, and therefore the name a remediation action is
 	// expressed in (AI-GROUND-1).
 	Source string
+	// ClaimClass is why this component matched: `carrier`, `scope`, or empty = unknown
+	// (EDR-CORRELATION-01 D3). Decided by Knowledge; the runtime consumes it and never
+	// re-derives it (T10).
+	ClaimClass string
 }
+
+// ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown
+// counts — absence of attribution evidence must never hide a live vulnerability.
+func (c PostureComponent) ActsAsCarrier() bool { return c.ClaimClass != "scope" }
 
 // UpgradeAction is one unit of remediation work: upgrade this package, and these Findings close.
 //
@@ -174,6 +182,16 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 		}
 		prio[e.FindingID] = e.ResidualPriority
 		for _, c := range e.Components {
+			// EDR-CORRELATION-01 D6: a plan is ACTION, so it names only the packages that carry
+			// the flaw. A `scope` component was rebuilt alongside the fix and telling someone to
+			// "upgrade PyYAML" to resolve a CPython CVE is not a task they can carry out.
+			//
+			// The Finding is NOT dropped — it still appears under whichever package does carry
+			// it, and the obligation to replace the superseded build remains on the posture (D2).
+			// Unknown counts as carrier, so a card NVD has not enriched behaves exactly as before.
+			if !c.ActsAsCarrier() {
+				continue
+			}
 			pkg := c.Source
 			if pkg == "" {
 				pkg = c.Name
