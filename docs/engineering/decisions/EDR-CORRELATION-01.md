@@ -92,6 +92,31 @@ the validator: **there is no gate that catches a well-formed wrong premise.** Th
 faithfully from what it was given. Fixing the reasoning is impossible; fixing what it is given is
 the whole remedy.
 
+## Step 2 verified live, 2026-08-09
+
+Classification working in BOTH directions on real estate data — the flaw separated from the
+rebuild, and the real carrier not demoted:
+
+| CVE | NVD carriers | component | class |
+| --- | --- | --- | --- |
+| CVE-2020-14343 (a PyYAML flaw) | `["pyyaml"]` | `python3-pyyaml` | **carrier** |
+| | | `pyyaml` | **carrier** |
+| | | `python3-ply` | **scope** |
+| CVE-2022-40897 (setuptools) | `["setuptools"]` | `setuptools` | **carrier** |
+| | | `python3-ply` | **scope** |
+| | | `python3-pyyaml` | **scope** |
+
+`python3-pyyaml` classifying as **carrier** for a `pyyaml` CVE is the distro-wrapper normalization
+working; it is also the case that made the comparison err toward carrier, after an exact-equality
+first attempt marked `apache-commons-beanutils` as scope for its own CVE.
+
+**Coverage is partial and that is by design.** Distribution on the estate: 1206 unknown, 77
+carrier, 20 scope — because only the cards NVD had refreshed carry carrier products. The rest fill
+in on the normal 168h cadence. `unknown` is exactly the pre-change behaviour, so the feature is
+correct from the first card and grows more effective over time rather than needing a flag day.
+`CVE-2019-10086` is the visible example: no carriers gathered yet, so every component stays
+unknown and nothing about it changed.
+
 ## Decisions
 
 ### D1 — A distro advisory's package list is SCOPE, not N vulnerability claims
