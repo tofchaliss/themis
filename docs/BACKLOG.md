@@ -672,7 +672,19 @@ three angles, and two of them proposed fixes that would not have worked.
   release-comparison read-API that does not exist. **Where it plugs in:** the Knowledge engine's ranking, given
   a release-diff signal. **Scope:** cosine-similarity ranking is done; delta-aware ranking is the open remainder.
 
-- [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.** _(Gap surfaced in the M4 Δ2 grill,
+- [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.**
+  **PARTIALLY CLOSED 2026-08-09 — the per-capability window ceiling is enforced.** `app.Budget`
+  (fixed window, anchored to first use), pre-checked immediately before the provider call and
+  debited with the provider's ACTUAL token count. Every attempt debits, including one whose output
+  fails schema validation — a retry consumes the model exactly as a success does, and a ledger that
+  counted only successes would let a schema-thrashing capability spend without limit.
+  Config: `THEMIS_INTELLIGENCE_BUDGET_TOKENS` / `_WINDOW`; unset = unlimited, and that default is
+  load-bearing (a budget switched on by accident is indistinguishable downstream from an AI outage).
+  Exhaustion is its own reason, `budget_exhausted`, never `insufficient`.
+  **Still open:** the other three scopes (per-run cost ceiling beyond the existing prompt-size
+  guard, the autonomous pool, the global enterprise ceiling) and **degrade-not-fail model
+  downgrade**, which cannot be built until a second chat model exists — the box has one.
+ _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 builds the **meter** (per-call time / input-size / token count recorded via telemetry) plus
   one **runaway guard** (a per-request timeout + a cap on prompt input size) — nothing more. The actual
   **budget-enforcement logic** — the four EDR scopes (per-run / per-context / autonomous-pool / global,

@@ -38,6 +38,8 @@ type fakeEngine struct {
 type engineReply struct {
 	raw string
 	err error
+	// tokens lets a test drive the D4 budget ledger; 0 falls back to the default cost below.
+	tokens int
 }
 
 func (e *fakeEngine) Kind() domain.EngineKind { return domain.EngineLLM }
@@ -54,7 +56,11 @@ func (e *fakeEngine) Execute(_ context.Context, in ExecInput) (EngineResult, err
 	if r.err != nil {
 		return EngineResult{}, r.err
 	}
-	return EngineResult{Raw: r.raw, Provider: "fakeprov", Model: "fakemodel", TokensUsed: 5}, nil
+	tokens := r.tokens
+	if tokens == 0 {
+		tokens = 5
+	}
+	return EngineResult{Raw: r.raw, Provider: "fakeprov", Model: "fakemodel", TokensUsed: tokens}, nil
 }
 
 // fakeProjection stands in for Governance's FindingAssessment Domain Projection. The runtime
@@ -768,5 +774,59 @@ func TestInvokeCleanRationaleCarriesNoWarning(t *testing.T) {
 	}
 	if oc.Detail != "" {
 		t.Fatalf("detail = %q, want empty on a clean run", oc.Detail)
+	}
+}
+
+// D4 — the per-capability window ceiling refuses BEFORE the provider call, and says so with its
+// own reason.
+//
+// budget_exhausted is deliberately not folded into `insufficient`: nothing is broken, nothing
+// declined on the merits, and it resolves by itself when the window rolls. Reporting it as
+// insufficient would send an operator to debug a model that behaved perfectly.
+func TestInvokeRefusesWhenTheBudgetIsExhausted(t *testing.T) {
+	// 1200 against a 1000 ceiling: the first call overshoots, which is the designed behaviour —
+	// admission is on remaining > 0 because a call's cost is unknowable until it returns.
+	eng := &fakeEngine{replies: []engineReply{{raw: okRaw, tokens: 1200}, {raw: okRaw, tokens: 1200}}}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(),
+		Prompt: fakePrompt{}, Engines: []Engine{eng},
+		BudgetTokens: 1000, BudgetWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	sel := domain.NewSelection(domain.SelectionFinding, "F1")
+
+	// First call is admitted and spends past the ceiling — admission is on remaining > 0, because
+	// a call's cost is unknowable until it returns.
+	if _, oc := g.Invoke(context.Background(), "recommend_position", sel, "c1"); !oc.Produced {
+		t.Fatalf("first call must be admitted: %+v", oc)
+	}
+	// Second is refused, and refused BEFORE the provider: the engine must not be called again.
+	calls := eng.calls
+	_, oc := g.Invoke(context.Background(), "recommend_position", sel, "c2")
+	if oc.Produced || oc.Reason != ReasonBudgetExhausted {
+		t.Errorf("outcome = %+v, want budget_exhausted/false", oc)
+	}
+	if oc.DecidedBy != "guard:budget" {
+		t.Errorf("DecidedBy = %q, want guard:budget", oc.DecidedBy)
+	}
+	if eng.calls != calls {
+		t.Errorf("engine was called %d extra times — the ceiling must refuse before the provider", eng.calls-calls)
+	}
+}
+
+// Unset budget = unlimited, which is the default and today's behaviour. Enforcement must be a
+// decision, never a side effect of upgrading.
+func TestInvokeUnbudgetedIsUnlimited(t *testing.T) {
+	eng := &fakeEngine{replies: []engineReply{
+		{raw: okRaw, tokens: 100_000}, {raw: okRaw, tokens: 100_000},
+	}}
+	g := newTestGateway(t, fakePrompt{}, eng)
+	sel := domain.NewSelection(domain.SelectionFinding, "F1")
+	for i := 0; i < 2; i++ {
+		if _, oc := g.Invoke(context.Background(), "recommend_position", sel, "c"); !oc.Produced {
+			t.Fatalf("call %d refused with no budget configured: %+v", i, oc)
+		}
 	}
 }

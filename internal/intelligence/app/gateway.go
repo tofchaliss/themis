@@ -33,6 +33,11 @@ const (
 	ReasonSchemaInvalid   = "schema_invalid"
 	ReasonBusinessInvalid = "business_invalid"
 	ReasonUnauthorized    = "unauthorized" // admission denied the caller before any provider call (C7)
+	// ReasonBudgetExhausted — the capability's spend ceiling for this window is used up (D4).
+	// A distinct reason because the operator response is unlike every other no-proposal: nothing
+	// is broken, nothing declined on the merits, and it will resolve by itself when the window
+	// rolls. Folding it into `insufficient` would send someone to debug a model that behaved.
+	ReasonBudgetExhausted = "budget_exhausted"
 	// ReasonSelectionMismatch: the Selection's type or cardinality is not what the capability
 	// declared (T9). Rejected at the door — before any grounding is assembled or any provider
 	// is called — so a release id sent to a Finding-scoped capability surfaces as exactly that,
@@ -106,17 +111,24 @@ type Gateway struct {
 	dispatcher      *Dispatcher
 	maxPromptBytes  int
 	providerTimeout time.Duration
+	budget          *Budget // nil or unconfigured = unlimited (the default)
 	now             func() time.Time
 }
 
 // GatewayConfig wires the Gateway's ports. Engines are indexed by kind into the
 // Dispatcher; Δ2 wires the Rule engine and the LLM engine.
 type GatewayConfig struct {
-	Registry        *domain.Registry
-	Projection      ProjectionReader
-	Precedent       PrecedentReader // optional richer grounding (Δ2 C6); nil disables it
-	Authorizer      Authorizer      // optional pre-invocation authz (Δ2 C7); nil = allow-all
-	Redactor        Redactor        // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
+	Registry   *domain.Registry
+	Projection ProjectionReader
+	Precedent  PrecedentReader // optional richer grounding (Δ2 C6); nil disables it
+	Authorizer Authorizer      // optional pre-invocation authz (Δ2 C7); nil = allow-all
+	Redactor   Redactor        // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
+	// BudgetTokens / BudgetWindow enforce D4's per-capability spend ceiling. Both must be > 0 to
+	// enforce anything; unset = unlimited, which is today's behaviour and the safe default —
+	// a budget switched on by accident refuses recommendations, and a refusal is indistinguishable
+	// from the AI being unavailable to everyone downstream (D13).
+	BudgetTokens    int
+	BudgetWindow    time.Duration
 	Prompt          PromptRenderer
 	Engines         []Engine
 	MaxPromptBytes  int              // runaway-prompt cap (0 → default); over-cap → insufficient
@@ -159,6 +171,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		dispatcher:      NewDispatcher(cfg.Engines...),
 		maxPromptBytes:  maxPrompt,
 		providerTimeout: timeout,
+		budget:          NewBudget(cfg.BudgetTokens, cfg.BudgetWindow),
 		now:             now,
 	}, nil
 }
@@ -292,6 +305,13 @@ func (g *Gateway) Invoke(
 		if g.redactor != nil {
 			prompt = g.redactor.Redact(prompt)
 		}
+		// D4 per-capability window ceiling, checked immediately before the provider call — after
+		// the free deterministic steps, so a Rule short-circuit never spends budget it did not use.
+		if !g.budget.Allow(g.now()) {
+			oc.Duration = g.now().Sub(start)
+			oc.DecidedBy, oc.Reason = "guard:budget", ReasonBudgetExhausted
+			return domain.Proposal{}, oc
+		}
 		in := ExecInput{Prompt: prompt, JSONSchema: capb.OutputSchema, Temperature: 0, Routing: capb.Routing, Context: ac}
 
 		var out domain.RawOutput
@@ -314,6 +334,11 @@ func (g *Gateway) Invoke(
 				return domain.Proposal{}, oc
 			}
 			oc.Provider, oc.Model, oc.TokensUsed = res.Provider, res.Model, res.TokensUsed
+			// Debit what the call ACTUALLY cost, not an estimate. Every attempt debits, including
+			// one whose output fails schema validation: a retry consumes the model exactly as a
+			// successful call does, and a ledger that only counts successes would let a
+			// schema-thrashing capability spend without limit.
+			g.budget.Debit(g.now(), res.TokensUsed)
 			parsed, parseErr := domain.ParseOutput([]byte(res.Raw))
 			if parseErr != nil {
 				lastSchemaErr = parseErr
@@ -411,11 +436,11 @@ func (g *Gateway) Invoke(
 // execution provenance (including which step decided) onto the metadata.
 func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc Outcome, rationaleWarnings ...string) domain.Proposal {
 	return domain.BuildProposal(out, capb, domain.Metadata{
-		CorrelationID: oc.CorrelationID,
-		Provider:      oc.Provider,
-		Model:         oc.Model,
-		TokensUsed:    oc.TokensUsed,
-		Duration:      oc.Duration,
+		CorrelationID:  oc.CorrelationID,
+		Provider:       oc.Provider,
+		Model:          oc.Model,
+		TokensUsed:     oc.TokensUsed,
+		Duration:       oc.Duration,
 		DecidedBy:      oc.DecidedBy,
 		PrecedentsUsed: oc.PrecedentsUsed,
 	}, rationaleWarnings...)

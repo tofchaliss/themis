@@ -53,7 +53,13 @@ type config struct {
 	migrationsPath string // THEMIS_INTELLIGENCE_MIGRATIONS — path to the intelligence migrations dir.
 	embedModel     string // THEMIS_INTELLIGENCE_EMBED_MODEL — embedding model (default "nomic-embed-text"); ignored with the fake provider.
 	topK           int    // THEMIS_INTELLIGENCE_PRECEDENT_TOPK — semantic precedents retrieved per recommendation (default 5).
-	rebuild        bool   // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
+	// THEMIS_INTELLIGENCE_BUDGET_TOKENS / _WINDOW — D4's per-capability spend ceiling. Both must
+	// be > 0 to enforce; unset = unlimited, which is today's behaviour and the safe default: a
+	// budget switched on by accident refuses recommendations, and a refusal reads downstream as
+	// the AI being unavailable (D13).
+	budgetTokens int
+	budgetWindow time.Duration
+	rebuild      bool // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. Set ⇒ the reader drains Governance Position events to populate the index; empty ⇒ no population (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
@@ -79,6 +85,8 @@ func loadConfig() config {
 		migrationsPath: envDefault("THEMIS_INTELLIGENCE_MIGRATIONS", "internal/intelligence/adapters/store/migrations"),
 		embedModel:     envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
 		topK:           envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
+		budgetTokens:   envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
+		budgetWindow:   envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
 		rebuild:        os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
@@ -140,6 +148,8 @@ func main() {
 		Store:           st,
 		EmbedModel:      cfg.embedModel,
 		TopK:            cfg.topK,
+		BudgetTokens:    cfg.budgetTokens,
+		BudgetWindow:    cfg.budgetWindow,
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))

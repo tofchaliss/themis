@@ -55,6 +55,9 @@ type Config struct {
 	Store      *store.Store
 	EmbedModel string // embedding model for RC-1 (e.g. "nomic-embed-text"); ignored when UseFake
 	TopK       int    // semantic precedents to retrieve (0 → the engine default)
+	// BudgetTokens / BudgetWindow — D4's per-capability spend ceiling; both unset = unlimited.
+	BudgetTokens int
+	BudgetWindow time.Duration
 }
 
 // Intelligence is the wired Gateway surface. Index and Consumer are non-nil only when a Store
@@ -124,6 +127,8 @@ func Wire(cfg Config) (Intelligence, error) {
 		Prompt:          pr,
 		Engines:         engines,
 		ProviderTimeout: cfg.ProviderTimeout,
+		BudgetTokens:    cfg.BudgetTokens,
+		BudgetWindow:    cfg.BudgetWindow,
 	})
 	if err != nil {
 		return Intelligence{}, err
