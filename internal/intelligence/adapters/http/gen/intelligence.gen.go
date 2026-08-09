@@ -55,6 +55,10 @@ type InformationResponse struct {
 	// Information The answer itself. Any identifier the prose names that was NOT in the model's grounding is flagged inline with an `[UNVERIFIED MENTIONS ...]` caveat rather than carried in a separate field — prose cannot be schema-checked, and a caveat stored elsewhere is one a reader can miss (TRUST-8).
 	Information *string `json:"information,omitempty"`
 
+	// PrecedentsUsed How many past Enterprise Positions grounded this recommendation — semantic neighbours retrieved from the Operational Semantic Index (Delta-3a) plus any exact-CVE fallback.
+	// It is the only externally visible evidence that the retrieval plane contributed at all. A caller comparing two recommendations cannot otherwise tell whether the enterprise's own decision history was consulted, which makes the claim that it changes outcomes unfalsifiable from outside.
+	PrecedentsUsed *int `json:"precedents_used,omitempty"`
+
 	// SubjectId What the answer is about — a Release id for a release-scoped capability.
 	SubjectId *string `json:"subject_id,omitempty"`
 }
@@ -89,7 +93,11 @@ type Proposal struct {
 	Evidence  *[]Evidence `json:"evidence,omitempty"`
 	FindingId *string     `json:"finding_id,omitempty"`
 	Model     *string     `json:"model,omitempty"`
-	Provider  *string     `json:"provider,omitempty"`
+
+	// PrecedentsUsed How many past Enterprise Positions grounded this recommendation — semantic neighbours retrieved from the Operational Semantic Index (Delta-3a) plus any exact-CVE fallback.
+	// The only externally visible evidence that the retrieval plane contributed. Without it a caller cannot tell whether the enterprise's own decision history was consulted, which leaves the claim that it changes outcomes unfalsifiable from outside.
+	PrecedentsUsed *int    `json:"precedents_used,omitempty"`
+	Provider       *string `json:"provider,omitempty"`
 
 	// RationaleWarnings Identifier-shaped tokens the free-text `reasoning` names that the authoritative grounding does NOT contain (EDR-TRUST-01 T8). ADVISORY — the proposal's structured `evidence` already passed Grounding Verification, so this does not invalidate it; it marks that the narrative cites ids nobody supplied, which is the failure a reviewer cannot see. Absent/empty means no ids were invented, NOT that the narrative is true — prose is not verifiable and is never claimed to be.
 	RationaleWarnings *[]string `json:"rationale_warnings,omitempty"`
@@ -355,42 +363,47 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"F88F+/8JAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

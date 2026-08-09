@@ -31,6 +31,13 @@ type Metadata struct {
 	// (a deterministic short-circuit) or "llm:<stance>" (the model). It is the
 	// testability hook for the two-step plan and the metric source for can't-determine.
 	DecidedBy string
+	// PrecedentsUsed is how many past Enterprise Positions grounded the LLM step — semantic
+	// neighbours from the Operational Semantic Index (Δ3a) plus any exact-CVE fallback.
+	//
+	// It is the ONLY externally visible evidence that the retrieval plane contributed. Without it
+	// Δ3a's whole claim — that our own governance history changes a recommendation — is
+	// unfalsifiable from outside: the number was computed and then read by nothing.
+	PrecedentsUsed int
 }
 
 // Proposal is Intelligence's only output: a structured, schema-validated advisory

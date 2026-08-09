@@ -79,6 +79,16 @@ components:
             grounding is flagged inline with an `[UNVERIFIED MENTIONS ...]` caveat rather than
             carried in a separate field — prose cannot be schema-checked, and a caveat stored
             elsewhere is one a reader can miss (TRUST-8).
+        precedents_used:
+          type: integer
+          description: >-
+            How many past Enterprise Positions grounded this recommendation — semantic neighbours
+            retrieved from the Operational Semantic Index (Delta-3a) plus any exact-CVE fallback.
+
+            It is the only externally visible evidence that the retrieval plane contributed at all.
+            A caller comparing two recommendations cannot otherwise tell whether the enterprise's
+            own decision history was consulted, which makes the claim that it changes outcomes
+            unfalsifiable from outside.
         decided_by:
           type: string
           description: Which plan step produced it, e.g. "llm:information" or "rule:nothing-outstanding".
@@ -152,6 +162,15 @@ components:
           type: string
         model:
           type: string
+        precedents_used:
+          type: integer
+          description: >-
+            How many past Enterprise Positions grounded this recommendation — semantic neighbours
+            retrieved from the Operational Semantic Index (Delta-3a) plus any exact-CVE fallback.
+
+            The only externally visible evidence that the retrieval plane contributed. Without it a
+            caller cannot tell whether the enterprise's own decision history was consulted, which
+            leaves the claim that it changes outcomes unfalsifiable from outside.
         decided_by:
           type: string
           description: Which plan step decided — "rule:<stance>" or "llm:<stance>".

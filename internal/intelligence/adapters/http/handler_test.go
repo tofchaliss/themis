@@ -187,3 +187,37 @@ func TestInvokeCapability_SelectionMismatchIsBadRequestNot204(t *testing.T) {
 		t.Errorf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// Δ3a provenance must reach the caller. PrecedentsUsed was computed in the Gateway and read by
+// NOTHING — set on one line, surfaced nowhere — so "the enterprise's own decision history changed
+// this recommendation" was unfalsifiable from outside. A number nobody can see cannot support a
+// claim, and Δ3a's entire value rests on that claim.
+func TestInvokeSurfacesPrecedentsUsed(t *testing.T) {
+	p := producedProposal()
+	p.Metadata.DecidedBy = "llm:affected"
+	p.Metadata.PrecedentsUsed = 3
+	inv := &fakeInvoker{proposal: p, outcome: app.Outcome{Produced: true, Reason: app.ReasonOK}}
+	rr := do(t, NewHandler(inv, nil), `{"finding_id":"F1"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var got gen.Proposal
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.PrecedentsUsed == nil || *got.PrecedentsUsed != 3 {
+		t.Errorf("precedents_used = %v, want 3 — the retrieval plane's contribution must be visible", got.PrecedentsUsed)
+	}
+	// Zero must still be REPORTED, not omitted: "no precedent was found" and "nobody looked" are
+	// different answers, and only one of them is a reason to distrust the recommendation.
+	p0 := producedProposal()
+	inv0 := &fakeInvoker{proposal: p0, outcome: app.Outcome{Produced: true, Reason: app.ReasonOK}}
+	rr0 := do(t, NewHandler(inv0, nil), `{"finding_id":"F1"}`)
+	var got0 gen.Proposal
+	if err := json.NewDecoder(rr0.Body).Decode(&got0); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got0.PrecedentsUsed == nil || *got0.PrecedentsUsed != 0 {
+		t.Errorf("precedents_used = %v, want an explicit 0", got0.PrecedentsUsed)
+	}
+}

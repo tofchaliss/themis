@@ -170,16 +170,19 @@ func toGenProposal(p domain.Proposal, correlationID string) gen.Proposal {
 	conf := float32(p.Confidence)
 	stance := string(p.Recommendation.Stance)
 	out := gen.Proposal{
-		Capability:    strPtr(p.Capability),
-		FindingId:     strPtr(p.Recommendation.FindingID),
-		Stance:        &stance,
-		Confidence:    &conf,
-		Evidence:      &evidence,
-		Reasoning:     strPtr(p.Reasoning),
-		Provider:      strPtr(p.Metadata.Provider),
-		Model:         strPtr(p.Metadata.Model),
-		DecidedBy:     strPtr(p.Metadata.DecidedBy),
-		CorrelationId: strPtr(correlationID),
+		Capability: strPtr(p.Capability),
+		FindingId:  strPtr(p.Recommendation.FindingID),
+		Stance:     &stance,
+		Confidence: &conf,
+		Evidence:   &evidence,
+		Reasoning:  strPtr(p.Reasoning),
+		Provider:   strPtr(p.Metadata.Provider),
+		Model:      strPtr(p.Metadata.Model),
+		DecidedBy:  strPtr(p.Metadata.DecidedBy),
+		// Δ3a provenance: how many past Positions grounded this. It is what makes "our own
+		// decision history changed the answer" checkable rather than asserted.
+		PrecedentsUsed: intPtr(p.Metadata.PrecedentsUsed),
+		CorrelationId:  strPtr(correlationID),
 	}
 	// Omitted when the rationale invented nothing, so a clean proposal is byte-identical on
 	// the wire and an absent field reads as "nothing to caveat".
@@ -201,3 +204,6 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func writeProblem(w http.ResponseWriter, status int, title, detail string) {
 	writeJSON(w, status, gen.Problem{Title: strPtr(title), Detail: strPtr(detail)})
 }
+
+// intPtr returns a pointer to i, for the generated optional response fields.
+func intPtr(i int) *int { return &i }

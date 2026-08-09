@@ -416,6 +416,7 @@ func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc
 		Model:         oc.Model,
 		TokensUsed:    oc.TokensUsed,
 		Duration:      oc.Duration,
-		DecidedBy:     oc.DecidedBy,
+		DecidedBy:      oc.DecidedBy,
+		PrecedentsUsed: oc.PrecedentsUsed,
 	}, rationaleWarnings...)
 }
