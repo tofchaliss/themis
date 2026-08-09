@@ -118,8 +118,9 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | POST | `/findings/{id}/proposals/{proposalId}/reject` | `rejectProposal` |
 | POST | `/findings/{id}/resolve` · `/reopen` · `/archive` | lifecycle transitions |
 | POST | `/findings/{id}/recommend` | `recommendPosition` — **on-demand AI seam** (records an advisory AI proposal, never auto-accepted; `204` when AI is off/unavailable/declines) |
+| GET | `/findings/{id}/proposals` (on the Finding read) | Each proposal now carries **`evidence_trust`** — `observed` \| `asserted` \| `inferred`. It is the field the constitutional check turns on (an `inferred` proposal can never be auto-accepted by any policy), and it is surfaced because a human exercising that check was otherwise shown an AI proposal and a system proposal rendered identically. |
 | GET | `/findings/{id}/assessment` | `getFindingAssessment` — the **Domain Projection** (EDR-TRUST-01 T10): the release-scoped concern plus what Knowledge knows about the CVE, in one read. Named for the business view, not for a consumer — a dashboard, a report and the AI runtime all read this same shape, and the AI grounds its citations *against* it. Knowledge is best-effort: unreachable degrades to the Finding alone rather than failing. |
-| GET | `/releases/{releaseId}/posture` | `getReleasePosture` — one row per Finding carrying `effective_priority`, `residual_priority`, the exploitability `band`, the matched `components` (with the source package a fix ships under) and the `fixes` published for *those* components. The band/components/fixes are on the rollup so a release-scoped question costs **one** read rather than one per Finding (DASH-2). |
+| GET | `/releases/{releaseId}/posture` | `getReleasePosture` — one row per Finding carrying `effective_priority`, `residual_priority`, the exploitability `band`, the matched `components` (with the source package a fix ships under, and each component's **`claim_class`**) and the `fixes` published for *those* components. The band/components/fixes are on the rollup so a release-scoped question costs **one** read rather than one per Finding (DASH-2). |
 | GET | `/faultlines/{faultlineId}/blast-radius` | `getBlastRadius` |
 
 ### Communication — Publications (VEX / advisory / report)
@@ -146,9 +147,25 @@ understand before calling either:
 | `recommend_position` | one Finding | **Decision** | Proposes a stance. Goes to Governance as an advisory Proposal a human or policy must accept — it is never auto-applied. |
 | `plan_remediation` | one Release | **Information** | Groups the release's Findings into upgrade actions ordered by risk removed. It proposes no stance and reaches no Position, so nothing needs to accept it. |
 
-A `204` carries **`X-Themis-AI-Reason`** (and `X-Themis-AI-Detail`) explaining which gate declined —
-`insufficient`, `provider_error`, `grounding_invalid`, `business_invalid`, … A caller that treats every
-`204` as "the AI had nothing to say" will misread a timeout as a verdict; read the header.
+A `200` response carries **`precedents_used`** — how many past Enterprise Positions grounded the
+answer, retrieved from the Operational Semantic Index (Δ3a) plus any exact-CVE fallback. Zero is
+reported explicitly rather than omitted, because *"no precedent was found"* and *"nobody looked"* are
+different answers and only one of them is a reason to distrust the result.
+
+A `204` carries **`X-Themis-AI-Reason`** (and `X-Themis-AI-Detail`) explaining which gate declined:
+
+| Reason | What it means | What an operator should do |
+| --- | --- | --- |
+| `disabled` | no AI wired on this node | nothing — the pipeline is unaffected |
+| `unreachable` | provider transport failed or timed out | check the model runtime; check BOTH timeouts (see below) |
+| `insufficient` | the model correctly declined, or a guard fired | nothing — this is the seam working |
+| `schema_invalid` | the output was not valid against the capability's schema | usually an oversized prompt truncating the answer |
+| `business_invalid` | the claim did not check out against our own truth | a prompt/gate disagreement — the citation form was refused |
+| `budget_exhausted` | the capability's spend ceiling for this window is used up | nothing; it clears when the window rolls |
+| `provider_error` | the provider failed | check the model runtime |
+
+A caller that treats every `204` as "the AI had nothing to say" will misread a timeout, a budget
+pause and a correct refusal as the same event.
 
 See [TESTING.md](TESTING.md) for runnable request/response examples, and
 [`docs/engineering/decisions/`](docs/engineering/decisions/) for the design rationale behind each context.

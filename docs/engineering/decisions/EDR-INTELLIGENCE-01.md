@@ -586,6 +586,32 @@ Decision:
 - **Governance owns the budgets/policies** (INT-0066); the **Gateway enforces**; budgets are config, not
   code.
 
+**Realization note (2026-08-09) — the per-capability scope is enforced; the rest is not yet.**
+`app.Budget` implements the second envelope: a fixed window anchored to first use, pre-checked
+immediately before the provider call (after the free deterministic steps, so a short-circuit never
+spends budget it did not use) and debited with the provider's ACTUAL token count.
+
+Four choices worth recording, because each could reasonably have gone the other way:
+
+- **Unset = unlimited, and enforcement is opt-in.** A budget switched on by accident refuses
+  recommendations, and a refusal is indistinguishable downstream from the AI being unavailable
+  (D13). Off is the safe default; on is a decision.
+- **Fixed window anchored to FIRST USE**, not to a wall-clock boundary — otherwise a node restarting
+  at 13:59 gets a full budget twice in two minutes and a restart loop becomes a budget bypass.
+- **Admission on `remaining > 0`, never on an estimate.** A call's cost is unknowable until it
+  returns, so the last admitted call may overshoot by one invocation. That is a better failure than
+  refusing work on a number the system invented from prompt length.
+- **Every attempt debits, including one whose output fails schema validation.** A retry consumes the
+  model exactly as a success does; a ledger counting only successes lets a schema-thrashing
+  capability spend without limit. (Observed: one invocation burned 8,192 tokens producing nothing.)
+
+Exhaustion is its own outcome, `budget_exhausted`, never folded into `insufficient`: nothing is
+broken, nothing declined on the merits, and it clears when the window rolls.
+
+**Still deferred:** the per-run cost ceiling beyond the existing prompt-size guard, the autonomous
+pool, the global enterprise ceiling, and **degrade-not-fail model downgrade** — which cannot be
+built while a deployment has a single model. Downgrade needs somewhere to go.
+
 ADR basis: INT-0064 (cost/token telemetry per run), INT-0062 (cost-aware model routing), INT-0066
 (governance policy sets thresholds and what may run; provider never sets policy), INT-0069
 (privacy/security admission), INT-0059 (Gateway rate limiting), INT-0065 (cost feeds evaluation), INT-0070

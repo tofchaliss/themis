@@ -257,8 +257,19 @@ OpenVEX / CSAF out.
   Vendor VEX (Red Hat / CSAF feeds) is *gathered, not obeyed*: a reconciled `not_affected` statement raises a
   **system Proposal** on the Findings whose component it covers, which policy auto-accepts or a human decides —
   it never auto-suppresses (EDR-VEX-01; "Gathering Is Not Knowing").
+- **A distro advisory's package list is SCOPE, not N vulnerability claims** (EDR-CORRELATION-01). A
+  module-stream advisory rebuilds every RPM in the stream and lists them all as affected; read as N
+  claims, a CPython flaw becomes a vulnerability of `python3-pyyaml`. Each matched component
+  therefore carries a **`claim_class`** — `carrier` (evidence says it carries the flaw), `scope` (it
+  was in the rebuild set), or empty = `unknown`. **Unknown is treated as `carrier` everywhere**: a
+  gap in attribution evidence must never hide a live vulnerability. Nothing is dropped — replacing a
+  superseded build is real work — but a remediation plan and the AI's grounding use carriers only.
+  Carrier products come from NVD's CPE configurations and from non-distro OSV records; a distro
+  record cannot supply them.
 - **AI is advisory** — the Intelligence Gateway *proposes* a position; humans or policy decide. It is
-  disable-able and never auto-decides.
+  disable-able and never auto-decides. Its spend is bounded per capability per window
+  (`THEMIS_INTELLIGENCE_BUDGET_TOKENS`/`_WINDOW`; unset = unlimited, which is the default because a
+  budget switched on by accident is indistinguishable downstream from an AI outage).
 
 ## Scripts & tooling
 

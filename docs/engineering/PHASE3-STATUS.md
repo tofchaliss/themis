@@ -448,6 +448,14 @@ arrives late).
 2.0× and pins every `effective_priority` to 100 (GOV-15). Trim to ~3 before using the posture for
 anything where ranking matters. Δ3a is enabled on the Intelligence node; both AI timeouts are 300s.
 
+**Landed after the checkpoint above was first written:** Δ3a enabled and verified live
+(`precedents_used: 4`); `precedents_used` surfaced on the API (it had been computed and read by
+nothing); **AI-CTX-1** — an unbounded `affected_ranges` field exhausted the model's budget, giving
+`schema_invalid` after 164s/8192 tokens, now 45s/1841 tokens; **G-AI-4** per-capability spend
+ceiling enforced; `evidence_trust` exposed on proposals; and `scripts/vm-verify.sh`, a single
+read-only report replacing the five or six hand-written one-liners deployment verification used to
+take.
+
 **18 items open** in `docs/BACKLOG.md`; no P0. The highest-value open work is the AI harness (2),
 then F5 (a node that cannot start is indistinguishable from a healthy one) and F1 auth — which is
 **built but never enabled** on this deployment.
