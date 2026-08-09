@@ -363,6 +363,17 @@ components:
           type: string
         decided_id:
           type: string
+        evidence_trust:
+          type: string
+          description: >-
+            The trust class of the evidence this proposal rests on (EDR-TRUST-01 T2/T3) —
+            `observed`, `asserted` or `inferred`. It is the field the constitutional check (T4)
+            turns on: an `inferred` proposal can never be auto-accepted by any policy.
+
+            Surfaced because a human exercising the decision T4 reserves for them was shown two
+            proposals that looked equally authoritative, with nothing to say that one rested on
+            re-derivable fact and the other on a model's reasoning. A guarantee nobody can see is
+            one nobody can act on. Additive/optional on v1 — an older client ignores it.
     FixedVersion:
       type: object
       properties:

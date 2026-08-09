@@ -326,6 +326,11 @@ func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
 		Status:       strptr(string(p.Status())),
 		DecidedKind:  strptr(string(p.DecidedBy().Kind)),
 		DecidedId:    strptr(p.DecidedBy().ID),
+		// The trust class this proposal rests on (T2/T3). It is what the constitutional check
+		// (T4) turns on, and it was invisible: a human was shown an AI proposal and a system
+		// proposal side by side with nothing distinguishing re-derivable fact from a model's
+		// reasoning. A guarantee nobody can see is one nobody can act on.
+		EvidenceTrust: strptr(string(p.EvidenceTrust())),
 	}
 }
 

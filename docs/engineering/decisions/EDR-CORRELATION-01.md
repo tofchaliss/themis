@@ -72,6 +72,26 @@ failing open on `RangeUndecidable`. For a module-stream advisory the range is de
 every RPM in the stream, so A1 passes them all. A1 asks "is this version affected?"; the missing question is
 "is this package the one that carries the flaw?"
 
+## Confirmed live, 2026-08-09
+
+D6 predicted that the AI would cite a package the flaw does not live in, and that Grounding
+Verification would verify it. The first successful `recommend_position` invocation did exactly that,
+unprompted:
+
+> *"The **CVE-2019-10086** vulnerability affects the **Java packages filesystem** component version
+> 5.3.0-2, which is included in the release … CVSS score of 7.3 … it is still recommended to update
+> the component to a fixed version as soon as possible."* — confidence **0.95**
+
+`CVE-2019-10086` is **Apache Commons BeanUtils**. `javapackages-filesystem` is a bystander in the
+same module rebuild. The recommendation is fluent, internally consistent, correctly scored, and
+about the wrong package — and it PASSED the grounding gate, because the projection genuinely lists
+that component.
+
+This is the clearest available statement of why D6 restricts the projection rather than tightening
+the validator: **there is no gate that catches a well-formed wrong premise.** The model reasoned
+faithfully from what it was given. Fixing the reasoning is impossible; fixing what it is given is
+the whole remedy.
+
 ## Decisions
 
 ### D1 — A distro advisory's package list is SCOPE, not N vulnerability claims

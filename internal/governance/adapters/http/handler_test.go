@@ -506,3 +506,46 @@ func TestGetFindingAssessment(t *testing.T) {
 		}
 	})
 }
+
+// The trust class must reach the READ API, because it is the field the constitutional check
+// turns on and a human is the one exercising that check.
+//
+// Observed live 2026-08-09: a Finding carried a system proposal on re-derivable evidence and an
+// AI proposal on `inferred`, and GET /findings/{id} rendered them identically. A reviewer could
+// not tell which one policy is forbidden to auto-accept — a guarantee nobody can see is one
+// nobody can act on (T4, CON-0003 explainability).
+func TestGetFindingExposesProposalEvidenceTrust(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	sys, _ := domain.NewGovernanceProposal("p-sys", domain.Actor{Kind: domain.ActorSystem, ID: "knowledge-enrichment"},
+		domain.StanceAffected, "severity is high or critical", fixedClock{}.Now(), value.TrustObserved)
+	_ = f.RaiseProposal(sys)
+	ai, _ := domain.NewGovernanceProposal("p-ai", domain.Actor{Kind: domain.ActorAI, ID: "recommend_position@v1"},
+		domain.StanceAffected, "AI recommendation", fixedClock{}.Now(), value.TrustInferred)
+	_ = f.RaiseProposal(ai)
+	repo.seed(f)
+	srv := server(t, repo, fakeProjection{})
+
+	status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var v struct {
+		Proposals []map[string]any `json:"proposals"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	for _, p := range v.Proposals {
+		got[p["proposer_id"].(string)] = p["evidence_trust"]
+	}
+	if got["knowledge-enrichment"] != string(value.TrustObserved) {
+		t.Errorf("system proposal evidence_trust = %v, want observed", got["knowledge-enrichment"])
+	}
+	// The one that matters: an AI proposal must be visibly `inferred`, because that is what bars
+	// it from auto-acceptance under any policy.
+	if got["recommend_position@v1"] != string(value.TrustInferred) {
+		t.Errorf("AI proposal evidence_trust = %v, want inferred", got["recommend_position@v1"])
+	}
+}
