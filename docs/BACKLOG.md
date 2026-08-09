@@ -1961,6 +1961,17 @@ three angles, and two of them proposed fixes that would not have worked.
   * *Flaw-faithful* — the flaw is in CPython; only `python3-libs` is affected and the other 77 are
     packaging scope recorded as vulnerability claims.
 
+  **STEP 1 REFINED 2026-08-09 after the first live run.** Keying on the module BUILD marker alone
+  was too conservative and produced the defect it was meant to avoid: `PyYAML` labelled FOUR
+  separate plan steps and `python-ply` a fifth, because one stream is rebuilt many times over its
+  life and every advisory leaves a different marker (`+el8.4.0+570+c2eaf144`,
+  `+el8.5.0+672+ab6eb015`, …). To an operator that reads as "upgrade PyYAML" five times with
+  nothing to tell the steps apart. The original reasoning — "merging el8.4 with el8.5 would claim
+  one command covers work it does not" — is BACKWARDS for a stream: from an old build, one
+  `dnf module update` moves you past all of them. Sibling builds now fold on the PACKAGE SET (an
+  identical rebuild scope is the same stream), still exact-match, so {PyYAML} and
+  {PyYAML, python-ply} stay separate.
+
   **STEP 1 IMPLEMENTED 2026-08-08** (`EDR-CORRELATION-01` D8.1): the plan now groups a module-stream
   rebuild into ONE action. The Intelligence read seam did not decode `fixes` at all — so the planner
   had never seen a fix version — and that was the whole gap: the build marker

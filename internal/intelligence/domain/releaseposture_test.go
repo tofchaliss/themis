@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
@@ -502,5 +503,144 @@ func rpm2(name, source, version string) domain.PostureComponent {
 	return domain.PostureComponent{
 		PURL: "pkg:rpm/rocky/" + name + "@" + version, Name: name,
 		Version: version, Ecosystem: "rpm", Source: source,
+	}
+}
+
+// EDR-CORRELATION-01 D8.1, second attempt — sibling BUILDS of one stream are one action.
+//
+// Keying on the build marker alone was too conservative and produced the very defect it meant to
+// avoid. Measured on a live release: PyYAML labelled FOUR separate steps, because one stream is
+// rebuilt many times over its life and every advisory leaves a different marker. To an operator
+// that reads as "upgrade PyYAML" five times with nothing to tell the steps apart.
+//
+// The original reasoning — "merging el8.4 with el8.5 claims one command covers work it does not" —
+// is backwards for a stream: from an old build, ONE `dnf module update` moves you past all of them.
+func TestPlanActions_FoldsSiblingBuildsOfOneStream(t *testing.T) {
+	fix := func(pkg, marker string) domain.PostureFix {
+		return domain.PostureFix{Package: pkg, Version: "0:1-1.module+el" + marker}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 70,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{fix("PyYAML", "8.4.0+570+c2eaf144")}},
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 30,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{fix("PyYAML", "8.5.0+672+ab6eb015")}},
+		{FindingID: "f3", CVE: "CVE-3", ResidualPriority: 20,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{fix("PyYAML", "8.9.0+1531+a18208f5")}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1 — three builds of one stream are one `dnf module update`: %+v", len(got), got)
+	}
+	if len(got[0].FindingIDs) != 3 || got[0].RiskRemoved != 120 {
+		t.Errorf("action = %+v, want 3 Findings and risk 120", got[0])
+	}
+}
+
+// Merging stays EXACT-MATCH on the package set. A rebuild covering {PyYAML} and one covering
+// {PyYAML, python-ply} are different scopes and stay separate — collapsing them would hide the
+// second package from the operator.
+func TestPlanActions_DifferentRebuildScopesStaySeparate(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 70,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{{Package: "PyYAML", Version: "0:1-1.module+el8.4.0+570+c2eaf144"}}},
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 30,
+			Components: []domain.PostureComponent{
+				rpm2("python3-pyyaml", "PyYAML", "3.12"), rpm2("python3-ply", "python-ply", "3.9")},
+			Fixes: []domain.PostureFix{
+				{Package: "PyYAML", Version: "0:1-1.module+el8.5.0+672+ab6eb015"},
+				{Package: "python-ply", Version: "0:1-1.module+el8.5.0+672+ab6eb015"}}},
+	}}
+	if got := p.PlanActions(); len(got) != 2 {
+		t.Errorf("actions = %d, want 2 — different rebuild scopes are different work: %+v", len(got), got)
+	}
+}
+
+// The merge's bookkeeping, exercised where it actually bites: a Finding closed by TWO builds of
+// one stream must count once (PLAN-4 again, one level up), a worse item arriving in a later build
+// must raise TopPriority, and a second installed version must be recorded without duplicating a
+// CVE both builds address.
+func TestPlanActions_StreamMergeBookkeeping(t *testing.T) {
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		// f1 matches TWO components of the same package at different installed versions, and its
+		// fixes come from two different builds — so it reaches the merge twice.
+		{FindingID: "f1", CVE: "CVE-SHARED", ResidualPriority: 40,
+			Components: []domain.PostureComponent{
+				rpm2("python3-pyyaml", "PyYAML", "3.12"),
+				rpm2("python38-pyyaml", "PyYAML", "5.0"),
+			},
+			Fixes: []domain.PostureFix{{Package: "PyYAML", Version: "0:1-1.module+el8.4.0+570+c2eaf144"}}},
+		// A later build carrying a WORSE item, plus the same CVE again.
+		{FindingID: "f2", CVE: "CVE-SHARED", ResidualPriority: 90,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "3.12")},
+			Fixes:      []domain.PostureFix{{Package: "PyYAML", Version: "0:1-1.module+el8.9.0+1531+a18208f5"}}},
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %d, want 1: %+v", len(got), got)
+	}
+	a := got[0]
+	if len(a.FindingIDs) != 2 || a.RiskRemoved != 130 {
+		t.Errorf("findings=%v risk=%d, want 2 findings and 130 — f1 must not count twice", a.FindingIDs, a.RiskRemoved)
+	}
+	if a.TopPriority != 90 {
+		t.Errorf("TopPriority = %d, want 90 — a worse item in a later build must raise it", a.TopPriority)
+	}
+	if len(a.CVEs) != 1 {
+		t.Errorf("CVEs = %v, want the shared CVE recorded once", a.CVEs)
+	}
+	if len(a.InstalledVersions) != 2 {
+		t.Errorf("InstalledVersions = %v, want both recorded", a.InstalledVersions)
+	}
+}
+
+// The property mergeStreamBuilds relies on instead of a dedup branch: no action counts a Finding
+// twice. Asserted across a whole plan rather than trusted from a comment, and checked on a shape
+// that exercises every merge path — sibling builds, a shared package set, and multi-component
+// Findings.
+func TestPlanActions_NoActionCountsAFindingTwice(t *testing.T) {
+	mod := func(pkg, marker string) domain.PostureFix {
+		return domain.PostureFix{Package: pkg, Version: "0:1-1.module+el" + marker}
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-1", ResidualPriority: 70,
+			Components: []domain.PostureComponent{
+				rpm2("python3-pyyaml", "PyYAML", "3.12"), rpm2("python38-pyyaml", "PyYAML", "5.0")},
+			Fixes: []domain.PostureFix{mod("PyYAML", "8.4.0+570+c2eaf144")}},
+		{FindingID: "f2", CVE: "CVE-2", ResidualPriority: 50,
+			Components: []domain.PostureComponent{rpm2("python3-pyyaml", "PyYAML", "9.9")},
+			Fixes:      []domain.PostureFix{mod("PyYAML", "8.9.0+1531+a18208f5")}},
+		// A DIFFERENT rebuild (its own marker), so it forms its own single-package action. Giving
+		// it f1's marker would put python-ply and PyYAML in one rebuild scope — correct behaviour,
+		// but it would leave two differently-scoped actions both labelled "PyYAML" and this test
+		// would be asserting against whichever it happened to pick.
+		{FindingID: "f3", CVE: "CVE-3", ResidualPriority: 30,
+			Components: []domain.PostureComponent{rpm2("python3-ply", "python-ply", "3.9")},
+			Fixes:      []domain.PostureFix{mod("python-ply", "8.6.0+843+5a13dac3")}},
+	}}
+	for _, a := range p.PlanActions() {
+		seen := map[string]bool{}
+		for _, id := range a.FindingIDs {
+			if seen[id] {
+				t.Errorf("action %q counts Finding %s twice: %+v", a.Package, id, a)
+			}
+			seen[id] = true
+		}
+	}
+	// The two PyYAML builds fold, and the later build's installed version is carried across.
+	var py domain.UpgradeAction
+	for _, a := range p.PlanActions() {
+		if a.Package == "PyYAML" {
+			py = a
+		}
+	}
+	if len(py.FindingIDs) != 2 || py.RiskRemoved != 120 {
+		t.Errorf("PyYAML action = %+v, want both Findings and risk 120", py)
+	}
+	if !slices.Contains(py.InstalledVersions, "9.9") {
+		t.Errorf("InstalledVersions = %v, want the later build's 9.9 carried across the merge", py.InstalledVersions)
 	}
 }

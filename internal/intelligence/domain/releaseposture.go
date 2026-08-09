@@ -68,6 +68,9 @@ type UpgradeAction struct {
 	Packages []string
 	// Ecosystem disambiguates two packages that share a name across ecosystems.
 	Ecosystem string
+	// Stream is the module-stream identity behind this action, empty for an ordinary upgrade. It
+	// exists so sibling BUILDS of one stream can be folded (EDR-CORRELATION-01 D8 step 1).
+	Stream string
 	// InstalledVersions are the versions currently present, deduplicated.
 	InstalledVersions []string
 	// CVEs are the vulnerabilities this one upgrade would address, worst-first.
@@ -181,13 +184,14 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 			// A module-stream rebuild is ONE action covering every package it rebuilt
 			// (EDR-CORRELATION-01 D8 step 1); anything else is keyed by its own package.
 			key := c.Ecosystem + "\x00" + pkg
-			if stream := streamKeyFor(e.Fixes, pkg); stream != "" {
+			stream := streamKeyFor(e.Fixes, pkg)
+			if stream != "" {
 				key = c.Ecosystem + "\x00stream\x00" + stream
 			}
 			a, ok := byKey[key]
 			if !ok {
 				a = &acc{
-					action:    UpgradeAction{Package: pkg, Ecosystem: c.Ecosystem},
+					action:    UpgradeAction{Package: pkg, Ecosystem: c.Ecosystem, Stream: stream},
 					cveSeen:   map[string]bool{},
 					verSeen:   map[string]bool{},
 					findSeen:  map[string]bool{},
@@ -241,7 +245,7 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 	}
 	// Merge BEFORE ordering: a merged action's RiskRemoved is the sum of its members', so ordering
 	// first would rank the parts and then silently promote the whole past its neighbours.
-	return sortPlan(mergeSiblings(out, prio))
+	return sortPlan(mergeSiblings(mergeStreamBuilds(out, prio), prio))
 }
 
 // sortPlan orders actions by risk removed, then by the single worst item, then by how many
@@ -316,6 +320,64 @@ func mergeSiblings(actions []UpgradeAction, prio map[string]int) []UpgradeAction
 		for _, id := range a.FindingIDs {
 			seen[len(out)][id] = true
 		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// mergeStreamBuilds folds actions that are REBUILDS OF THE SAME STREAM into one.
+//
+// Keying on the build marker alone was too conservative and produced the defect it was meant to
+// avoid. Measured on a live release: `PyYAML` labelled FOUR separate steps and `python-ply` a
+// fifth, because one stream is rebuilt many times over its life and each advisory leaves a
+// different marker (`+el8.4.0+570+c2eaf144`, `+el8.5.0+672+ab6eb015`, …). To an operator that reads
+// as "upgrade PyYAML" five times with nothing to tell the steps apart.
+//
+// The original reasoning — "merging el8.4 with el8.5 would claim one command covers work it does
+// not" — is backwards for a STREAM. If you are on an old build, a single `dnf module update` moves
+// you past every one of those builds at once. They ARE one command.
+//
+// The identity that survives is the PACKAGE SET: an identical rebuild scope is the same stream.
+// Merging stays exact-match, so a rebuild covering {PyYAML} and one covering {PyYAML, python-ply}
+// remain separate — different scopes are different work, and collapsing them would hide the
+// second package.
+func mergeStreamBuilds(actions []UpgradeAction, prio map[string]int) []UpgradeAction {
+	byScope := map[string]int{}
+	out := make([]UpgradeAction, 0, len(actions))
+	for _, a := range actions {
+		if a.Stream == "" { // an ordinary upgrade is not a stream rebuild
+			out = append(out, a)
+			continue
+		}
+		key := a.Ecosystem + "\x00" + strings.Join(sortedCopy(a.Packages), "\x00")
+		if i, ok := byScope[key]; ok {
+			// No dedup needed here, and the reason is a property rather than an assumption:
+			// streamKeyFor is a function of (Finding, package), so one Finding maps to exactly
+			// ONE stream key per package. Two actions sharing a package SET therefore cannot
+			// share a Finding, and a dedup branch here would be unreachable code guarding an
+			// impossible case. The property itself is asserted by
+			// TestPlanActions_NoActionCountsAFindingTwice, which checks it across a whole plan
+			// rather than trusting this comment.
+			for _, id := range a.FindingIDs {
+				out[i].FindingIDs = append(out[i].FindingIDs, id)
+				out[i].RiskRemoved += prio[id]
+			}
+			for _, cve := range a.CVEs {
+				if !slices.Contains(out[i].CVEs, cve) {
+					out[i].CVEs = append(out[i].CVEs, cve)
+				}
+			}
+			for _, v := range a.InstalledVersions {
+				if !slices.Contains(out[i].InstalledVersions, v) {
+					out[i].InstalledVersions = append(out[i].InstalledVersions, v)
+				}
+			}
+			if a.TopPriority > out[i].TopPriority {
+				out[i].TopPriority = a.TopPriority
+			}
+			continue
+		}
+		byScope[key] = len(out)
 		out = append(out, a)
 	}
 	return out
