@@ -93,10 +93,38 @@ func (f *Finding) AbsorbComponent(c MatchedComponent) (bool, error) {
 	if err := validComponent(c); err != nil {
 		return false, err
 	}
-	for _, existing := range f.components {
-		if existing.PURL == c.PURL {
-			return false, nil
+	for i, existing := range f.components {
+		if existing.PURL != c.PURL {
+			continue
 		}
+		// A RE-DELIVERY carrying new information about a component we already hold is a change,
+		// not a no-op (EDR-CORRELATION-01 D5a).
+		//
+		// This used to return false unconditionally, and the caller's `!created && !added` early
+		// return then skipped the save entirely — so a re-announced claim class never reached the
+		// database. Measured on the VM: Knowledge re-announced 111 cards' matches with corrected
+		// classes and 875 components stayed `unknown`, because every one of those events was
+		// discarded here as an idempotent duplicate.
+		//
+		// The same trap already applied to `source`: the store's upsert has a
+		// `WHERE finding_components.source = ''` backfill clause that could never run, because
+		// nothing saved on a re-delivery.
+		//
+		// Only ever fills IN — an empty incoming value never erases a known one, so an
+		// unattributed re-delivery cannot undo attribution that has already been established.
+		changed := false
+		if existing.Source == "" && c.Source != "" {
+			f.components[i].Source = c.Source
+			changed = true
+		}
+		if c.ClaimClass != "" && c.ClaimClass != existing.ClaimClass {
+			f.components[i].ClaimClass = c.ClaimClass
+			changed = true
+		}
+		if changed {
+			f.version++
+		}
+		return changed, nil
 	}
 	f.components = append(f.components, c)
 	f.version++

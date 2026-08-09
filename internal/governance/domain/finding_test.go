@@ -375,3 +375,55 @@ func TestReconstituteFinding(t *testing.T) {
 		t.Error("Components() must return a defensive copy")
 	}
 }
+
+// A re-delivery carrying NEW information about a component we already hold is a change, not a
+// no-op (EDR-CORRELATION-01 D5a).
+//
+// Measured on the VM: Knowledge re-announced 111 cards' matches with corrected claim classes and
+// 875 components stayed `unknown`, because AbsorbComponent reported "already have it" and the
+// caller's `!created && !added` early return then skipped the save entirely. The information
+// arrived, crossed the bus, and was discarded one function from its destination.
+func TestAbsorbComponent_RedeliveryFillsInNewInformation(t *testing.T) {
+	f, err := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2019-10086")
+	if err != nil {
+		t.Fatalf("new finding: %v", err)
+	}
+	base := domain.MatchedComponent{PURL: "pkg:rpm/rocky/javapackages-filesystem@5.3.0", Name: "javapackages-filesystem"}
+	if added, err := f.AbsorbComponent(base); err != nil || !added {
+		t.Fatalf("first absorb: added=%v err=%v", added, err)
+	}
+	v0 := f.Version()
+
+	// The identical component again changes nothing — still idempotent.
+	if changed, err := f.AbsorbComponent(base); err != nil || changed {
+		t.Errorf("identical re-delivery: changed=%v err=%v, want false/nil", changed, err)
+	}
+	if f.Version() != v0 {
+		t.Errorf("version moved on a no-op re-delivery: %d -> %d", v0, f.Version())
+	}
+
+	// Now carrying attribution: source and claim class fill in, and it MUST report a change or
+	// the caller will never persist it.
+	enriched := base
+	enriched.Source = "javapackages-tools"
+	enriched.ClaimClass = "scope"
+	if changed, err := f.AbsorbComponent(enriched); err != nil || !changed {
+		t.Fatalf("enriching re-delivery: changed=%v err=%v, want true/nil", changed, err)
+	}
+	if len(f.Components()) != 1 {
+		t.Fatalf("components = %d, want 1 — a re-delivery must not duplicate", len(f.Components()))
+	}
+	got := f.Components()[0]
+	if got.Source != "javapackages-tools" || got.ClaimClass != "scope" {
+		t.Errorf("component = %+v, want source and class filled in", got)
+	}
+
+	// An EMPTY incoming value must never erase what is already known: an unattributed
+	// re-delivery cannot undo attribution already established.
+	if changed, err := f.AbsorbComponent(base); err != nil || changed {
+		t.Errorf("unattributed re-delivery: changed=%v, want false — it must not erase", changed)
+	}
+	if got := f.Components()[0]; got.Source != "javapackages-tools" || got.ClaimClass != "scope" {
+		t.Errorf("attribution was erased by an empty re-delivery: %+v", got)
+	}
+}
