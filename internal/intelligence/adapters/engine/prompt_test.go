@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -347,5 +348,61 @@ func TestRenderLogsThePlanGrouping(t *testing.T) {
 	// A non-plan capability must not compute or log a grouping — there is none to describe.
 	if _, err := withLog.Render("recommend_position", domain.AssembledContext{}); err != nil {
 		t.Fatalf("render recommend_position: %v", err)
+	}
+}
+
+// PLAN-6, generalised — every `ref` value the prompt SHOWS must ground, not only the ones it lists
+// as citable.
+//
+// The response-format example read `"ref":"..."` and a live model cited the literal string "...",
+// which is ungrounded and discards the whole plan. That was the THIRD refusal caused by something
+// the prompt displayed: the truncated `upgrade` heading, then the `<--` annotations, then this. A
+// placeholder is indistinguishable from content to a model filling in a shape, so the example is
+// now built from this request's own data and is self-grounding.
+//
+// This test extends TestPlanPromptOnlyOffersGroundableCitations from "what the prompt lists" to
+// "what the prompt shows", which is the surface the model actually copies from.
+func TestPlanPromptShowsNoUngroundableRef(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	posture := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		{FindingID: "f1", CVE: "CVE-2026-1", ResidualPriority: 70, Components: []domain.PostureComponent{
+			{Name: "python3-pyyaml", Source: "PyYAML", Version: "3.12", Ecosystem: "rpm"},
+		}},
+	}}
+	got, err := r.Render("plan_remediation", domain.AssembledContext{Release: posture})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	refs := regexp.MustCompile(`"ref"\s*:\s*"([^"]*)"`).FindAllStringSubmatch(got, -1)
+	if len(refs) == 0 {
+		t.Fatal("the prompt shows no example ref — the model has no shape to copy")
+	}
+	for _, m := range refs {
+		if !posture.Grounds(m[1]) {
+			t.Errorf("prompt shows ref %q, which Grounds() rejects — a model copying the example "+
+				"would have its whole plan discarded", m[1])
+		}
+	}
+	// And the ellipsis placeholder must be gone from the response format entirely.
+	if strings.Contains(got, `"ref":"..."`) || strings.Contains(got, `"ref": "..."`) {
+		t.Error("the response-format example still contains an ellipsis placeholder as a ref")
+	}
+
+	// An EMPTY plan has no real CVE to show, and must then omit the example rather than fall back
+	// to a placeholder — the failure this whole change is about.
+	empty, err := r.Render("plan_remediation", domain.AssembledContext{
+		Release: domain.ReleasePosture{ReleaseID: "rel-1"},
+	})
+	if err != nil {
+		t.Fatalf("Render empty: %v", err)
+	}
+	// Scoped to an actual `"ref": "value"` pair: the field NAME still appears in the prose
+	// describing the response shape, and that is not something a model can copy as an identifier.
+	if m := regexp.MustCompile(`"ref"\s*:\s*"([^"]*)"`).FindAllString(empty, -1); len(m) > 0 {
+		t.Errorf("an empty plan must show no example ref value, got %v", m)
 	}
 }

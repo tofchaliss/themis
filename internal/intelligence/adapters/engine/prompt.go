@@ -33,6 +33,26 @@ var promptFuncs = template.FuncMap{
 		}
 		return strings.Join(v[:3], ", ") + fmt.Sprintf(" +%d more", len(v)-3)
 	},
+	// sampleCVE returns a REAL citable CVE from this request's own plan, so the response-format
+	// example is SELF-GROUNDING: a model that copies the example verbatim still emits a ref that
+	// passes Grounding Verification.
+	//
+	// The example used to read `"ref":"..."`, and a live model cited the literal string "..." —
+	// ungrounded, whole plan discarded. That is the third time this capability was refused for
+	// something the PROMPT showed it (after the truncated `upgrade` heading and the `<--`
+	// annotations). Placeholders in an example are indistinguishable from content to a model
+	// filling in a shape.
+	//
+	// Empty plan → empty string, and the template then omits the example entirely rather than
+	// printing a placeholder by another name.
+	"sampleCVE": func(actions []domain.UpgradeAction) string {
+		for _, a := range actions {
+			if len(a.CVEs) > 0 {
+				return a.CVEs[0]
+			}
+		}
+		return ""
+	},
 	"join": func(v []string) string {
 		if len(v) == 0 {
 			return "(none)"

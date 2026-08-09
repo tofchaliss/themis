@@ -1860,6 +1860,18 @@ three angles, and two of them proposed fixes that would not have worked.
   fails exactly as before (asserted). A gate that rejects a string its own renderer produced is a
   defect on our side of the interface, not the model's.
 
+  **THIRD occurrence 2026-08-09, and it closes the class.** The response-format example read
+  `{"subject_id":"…","evidence":[{"kind":"...","ref":"..."}],…}` and a live model cited the literal
+  string `"..."` — ungrounded, whole plan discarded. Three refusals now, each for something the
+  PROMPT displayed: the truncated `upgrade` heading, the `<--` annotations, and this placeholder.
+  **A placeholder is indistinguishable from content to a model filling in a shape.**
+
+  Fixed by making the example **self-grounding**: it is built from this request's own plan
+  (`sampleCVE`), so a model copying it verbatim still emits a ref that passes. An empty plan omits
+  the example entirely rather than falling back to a placeholder by another name.
+  `TestPlanPromptShowsNoUngroundableRef` generalises the guard from "what the prompt LISTS as
+  citable" to "what the prompt SHOWS" — which is the surface a model actually copies from.
+
   **The durable part is the test, not the fix.** `TestPlanPromptOnlyOffersGroundableCitations`
   asserts that every identifier the prompt OFFERS as citable satisfies `Grounds()`. The prompt and
   the gate are an interface with no compiler between them, and a fake provider returns whatever the

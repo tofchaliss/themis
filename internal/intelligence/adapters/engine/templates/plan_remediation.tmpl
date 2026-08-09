@@ -20,8 +20,17 @@ single severe finding.
    - cves (citable): {{join $a.CVEs}}
 {{end}}{{end}}
 ## Instructions
-Respond with a single JSON object ONLY (no prose outside it), matching exactly:
-{"subject_id":"{{.Release.ReleaseID}}","evidence":[{"kind":"...","ref":"..."}],"reasoning":"..."}
+Respond with a single JSON object ONLY (no prose outside it), with exactly these three fields:
+  subject_id  the release id, exactly as given above
+  evidence    a list of {"kind","ref"}, each ref copied character-for-character from a
+              `packages (citable)` or `cves (citable)` line
+  reasoning   the plan itself (format below)
+{{$sample := sampleCVE .Release.PlanActions}}{{if $sample}}
+A well-formed response begins:
+{"subject_id":"{{.Release.ReleaseID}}","evidence":[{"kind":"cve","ref":"{{$sample}}"}],"reasoning":"1. upgrade ...
+{{end}}
+NEVER emit a placeholder — not "...", not "<package>", not "CVE-ID" — as a ref. Every ref must be a
+real identifier copied from a citable line above. One unrecognised ref discards the whole plan.
 
 Rules:
 - `reasoning` is the plan itself, written for an engineer about to do the work. Write it as a
