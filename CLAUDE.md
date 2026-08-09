@@ -271,6 +271,14 @@ OpenVEX / CSAF out.
   workflow, so a future GUI calls exactly the same endpoints. It is also the working spec for DASH-1/DASH-2 —
   what it has to do by hand (supply a release UUID; one Knowledge call per Faultline for the severity band)
   is precisely what the read surface is missing.
+- `scripts/vm-verify.sh` — **one read-only report** for a running deployment: unit states, migration
+  versions, pipeline counts, bus reader lag, feed proposals, carrier-attribution coverage, AI
+  invocation reasons, and (with a release id) a posture sample. Replaces the five or six
+  hand-written one-liners that verification used to take, which is where the mistakes lived. The
+  EXPECTED migration version is read from the migrations directory, never hard-coded — a literal
+  would be right the day it was written and silently wrong after (the defect that left the systemd
+  installer loading only the first registry migration). Strictly read-only: mutations stay in a
+  human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
 - `scripts/release-smoke-test.sh` — one-command release test (build → fresh DB → migrate → run → register →
   upload the SBOM under `scripts/` → verify components + enrichment). Wrapped by the `/themis-release-test`
   skill.
