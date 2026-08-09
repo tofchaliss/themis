@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 func TestPromptRendererHappy(t *testing.T) {
@@ -297,5 +299,53 @@ func TestPlanPromptOnlyOffersGroundableCitations(t *testing.T) {
 	// And the truncated display heading must NOT be what the rules point at.
 	if strings.Contains(got, "copied verbatim from an `upgrade ...` heading") {
 		t.Error("citation rule points at the truncated heading; it must point at `packages (citable)`")
+	}
+}
+
+// The deterministic half of a plan must be readable WITHOUT a model.
+//
+// Before this, PlanActions was called only from inside the template, so the grouping existed
+// nowhere an operator could see it: a `GROUP BY` bug and a bad generation were indistinguishable
+// from outside. Measured cost on 2026-08-08 — a plan collapsed from 15 steps to 4 and nothing on
+// the box could say whether that was correct.
+func TestRenderLogsThePlanGrouping(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	comp := func(name, source string) domain.PostureComponent {
+		return domain.PostureComponent{
+			PURL: "pkg:rpm/rocky/" + name + "@1", Name: name, Version: "1",
+			Ecosystem: "rpm", Source: source,
+		}
+	}
+	// More than 15 actions, so the truncation branch runs: the log must not describe work the
+	// prompt never showed the model.
+	var entries []domain.PostureEntry
+	for i := 0; i < 18; i++ {
+		pkg := fmt.Sprintf("pkg%02d", i)
+		entries = append(entries, domain.PostureEntry{
+			FindingID: pkg, CVE: fmt.Sprintf("CVE-2026-%04d", i), ResidualPriority: 90 - i,
+			Components: []domain.PostureComponent{comp("lib"+pkg, pkg)},
+		})
+	}
+	ac := domain.AssembledContext{Release: domain.ReleasePosture{ReleaseID: "rel-1", Entries: entries}}
+
+	// Nil logger is the default and must be a silent no-op, not a panic: instrumentation must
+	// never be able to break the code it observes.
+	if _, err := r.Render("plan_remediation", ac); err != nil {
+		t.Fatalf("render with no logger: %v", err)
+	}
+
+	withLog := r.WithLogger(observability.Nop())
+	if withLog != r {
+		t.Error("WithLogger must return the same renderer for chaining")
+	}
+	if _, err := withLog.Render("plan_remediation", ac); err != nil {
+		t.Fatalf("render with logger: %v", err)
+	}
+	// A non-plan capability must not compute or log a grouping — there is none to describe.
+	if _, err := withLog.Render("recommend_position", domain.AssembledContext{}); err != nil {
+		t.Fatalf("render recommend_position: %v", err)
 	}
 }

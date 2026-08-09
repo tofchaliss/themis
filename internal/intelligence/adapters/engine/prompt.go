@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 //go:embed templates/recommend_position.tmpl
@@ -45,6 +46,24 @@ var promptFuncs = template.FuncMap{
 // or app rings. It implements app.PromptRenderer.
 type PromptRenderer struct {
 	templates map[string]*template.Template
+	// logger is optional (nil = silent). It exists so the DETERMINISTIC half of a plan is
+	// observable without a model — see WithLogger.
+	logger *observability.Logger
+}
+
+// WithLogger makes the computed plan grouping visible, and returns the renderer for chaining.
+//
+// Without it the `GROUP BY` behind a plan can only be inspected THROUGH the model, so a grouping
+// bug and a bad generation look identical from outside — which is exactly the ambiguity that cost
+// a VM round trip on 2026-08-08 (a plan collapsed from 15 steps to 4 and nothing could say whether
+// that was correct). The grouping is the part that is supposed to be deterministic and auditable;
+// it should not require an LLM to read it.
+//
+// It lives on the RENDERER because `Render` is called from the app ring, which depguard forbids
+// from logging (CONVENTIONS R1). Adapters may log; app may not.
+func (r *PromptRenderer) WithLogger(l *observability.Logger) *PromptRenderer {
+	r.logger = l
+	return r
 }
 
 // NewPromptRenderer builds the renderer with the embedded capability templates.
@@ -75,9 +94,43 @@ func (r *PromptRenderer) Render(capabilityID string, ctx domain.AssembledContext
 	if !ok {
 		return "", fmt.Errorf("no prompt template for capability %q", capabilityID)
 	}
+	r.logPlanGrouping(capabilityID, ctx)
 	var sb strings.Builder
 	if err := t.Execute(&sb, ctx); err != nil {
 		return "", fmt.Errorf("render prompt %q: %w", capabilityID, err)
 	}
 	return sb.String(), nil
+}
+
+// logPlanGrouping records the computed upgrade actions for a release-scoped plan.
+//
+// It calls PlanActions a second time (the template calls it too). That is safe and the equality is
+// PROVABLE rather than assumed: PlanActions is pure — no clock, no randomness, no I/O — so two
+// calls on the same posture return the same thing. A log that recomputed something impure would be
+// worse than no log, because it would describe a prompt that was never sent.
+func (r *PromptRenderer) logPlanGrouping(capabilityID string, ctx domain.AssembledContext) {
+	if r.logger == nil || capabilityID != "plan_remediation" {
+		return
+	}
+	actions := ctx.Release.PlanActions()
+	r.logger.Info("plan grouping computed",
+		observability.String("release_id", ctx.Release.ReleaseID),
+		observability.Int("outstanding_findings", ctx.Release.OutstandingCount()),
+		observability.Int("actions", len(actions)))
+	for i, a := range actions {
+		if i >= 15 {
+			// The prompt itself only carries 15 (see the template). Logging more would describe
+			// work the model was never shown.
+			r.logger.Info("plan grouping truncated",
+				observability.Int("not_shown", len(actions)-15))
+			break
+		}
+		r.logger.Info("plan action",
+			observability.Int("rank", i+1),
+			observability.String("package", a.Package),
+			observability.Int("packages_in_unit", len(a.Packages)),
+			observability.Int("closes_findings", len(a.FindingIDs)),
+			observability.Int("risk_removed", a.RiskRemoved),
+			observability.String("ecosystem", a.Ecosystem))
+	}
 }

@@ -107,6 +107,15 @@ func Wire(cfg Config) (Intelligence, error) {
 	if err != nil {
 		return Intelligence{}, err
 	}
+	// Make the deterministic plan grouping readable without a model. The `GROUP BY` is the half
+	// of a plan that is supposed to be auditable; without this it could only be inspected through
+	// the LLM's prose, where a grouping bug and a bad generation look the same.
+	// Nil-guarded: cfg.Logger is unset in tests and in any caller that wires the Gateway without
+	// observability. Instrumentation must never be able to break the code it observes — the same
+	// rule the metric recorders follow.
+	if cfg.Logger != nil {
+		pr = pr.WithLogger(cfg.Logger.Component("plan"))
+	}
 	gw, err := app.NewGateway(app.GatewayConfig{
 		Registry:        domain.DefaultRegistry(),
 		Projection:      proj,
