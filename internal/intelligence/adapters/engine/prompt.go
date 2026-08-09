@@ -53,6 +53,24 @@ var promptFuncs = template.FuncMap{
 		}
 		return ""
 	},
+	// capList bounds a list in the prompt and SAYS how much it dropped.
+	//
+	// A module-stream card carries one affected range per rebuilt package per EL minor — measured
+	// on a live estate: ~100 ranges and 266 unattributed fixes on a single card. That filled the
+	// model's budget and it stopped mid-JSON: `schema_invalid: unexpected end of JSON input`,
+	// after 164 seconds. The recommendation was not wrong, it was never finished.
+	//
+	// Truncating silently would be worse than the overflow: the model would reason from a subset
+	// while believing it had the whole. The "+N more" tail is what keeps the omission honest.
+	"capList": func(v []string, n int) string {
+		if len(v) == 0 {
+			return "(none)"
+		}
+		if len(v) <= n {
+			return strings.Join(v, " ")
+		}
+		return strings.Join(v[:n], " ") + fmt.Sprintf(" … +%d more (not shown)", len(v)-n)
+	},
 	"join": func(v []string) string {
 		if len(v) == 0 {
 			return "(none)"

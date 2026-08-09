@@ -15,14 +15,20 @@ affected by a specific vulnerability, and explain why.
 - known_exploited (KEV): {{.Faultline.KEV}}
 - public_exploit: {{.Faultline.ExploitPublic}}
 - fixed_versions (published for THIS finding's components only): {{range .Faultline.FixedVersions}}{{.}} {{end}}{{if and (eq (len .Faultline.FixedVersions) 0) (gt .Faultline.UnattributedFixes 0)}}none attributable — the vulnerability record lists {{.Faultline.UnattributedFixes}} fix version(s), but for OTHER packages, so no fix version is known for this component. Do NOT compare this component's version against them.{{end}}
-- affected_ranges: {{range .Faultline.AffectedRanges}}{{.}} {{end}}
+- affected_ranges (sample; the deterministic version-range engine has ALREADY evaluated the full
+  set against this component and did not settle it — do not attempt to redo that comparison):
+  {{capList .Faultline.AffectedRanges 12}}
 {{if .Precedents}}
 ## Prior enterprise decisions on this or similar findings (consider for consistency, do not blindly copy — a different CVE may not be comparable)
 {{range .Precedents}}- release {{.ReleaseID}}{{if .SourceCVE}} · cve {{.SourceCVE}}{{end}}{{if .Component}} · {{.Component}}{{end}}{{if gt .Score 0.0}} · similarity {{printf "%.2f" .Score}}{{end}}: {{.Stance}} — {{.Rationale}}
 {{end}}{{end}}
 ## Instructions
 Respond with a single JSON object ONLY (no prose), matching exactly:
-{"finding_id":"{{.Finding.ID}}","recommended_stance":"affected|not_affected|mitigated|insufficient","confidence":0.0,"evidence":[{"kind":"...","ref":"..."}],"reasoning":"..."}
+{"finding_id":"{{.Finding.ID}}","recommended_stance":"affected|not_affected|mitigated|insufficient","confidence":0.0,"evidence":[{"kind":"cve","ref":"{{.Finding.CVE}}"}],"reasoning":"why, in one short paragraph"}
+
+Every `ref` must be a real identifier copied from the Finding or enrichment above — the finding_id,
+the cve, or one of the component identifiers. NEVER emit a placeholder such as "..." as a ref: one
+unrecognised ref discards the whole recommendation.
 
 Rules:
 - recommended_stance must be one of: affected, not_affected, mitigated, or insufficient (use insufficient when the evidence is not enough to determine — an honest "no recommendation").

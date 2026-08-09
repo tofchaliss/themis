@@ -1907,6 +1907,33 @@ three angles, and two of them proposed fixes that would not have worked.
   A pattern that "looks like" an email, a version, or a stream will eventually meet a string that
   looks like one and is not.
 
+- [x] **AI-CTX-1 — an unbounded projection field exhausted the model's budget, and the failure read
+  as a bad model.** ✅ **CLOSED 2026-08-09. P1 for the Decision capability.**
+
+  First `recommend_position` run after Δ3a was enabled returned `204` /
+  `schema_invalid: unexpected end of JSON input`, after **164 seconds** and **8192 tokens**. The
+  recommendation was not wrong — it was never finished.
+
+  **Cause:** the prompt printed `affected_ranges` as the card's FULL union. A module-stream card
+  carries one range per rebuilt package per EL minor: measured live, ~100 ranges plus 266
+  unattributed fixes on one card. The context filled and the model stopped mid-JSON.
+
+  It fails on exactly the cards this estate is made of, so the Decision capability was effectively
+  unusable — and the symptom (`schema_invalid`) points at the model, not at the prompt that caused
+  it.
+
+  **Fix:** `capList` bounds the sample at 12 and states `+N more (not shown)`. Silent truncation
+  would be WORSE than the overflow — the model would reason from a subset believing it had the
+  whole set — so the honest tail is the load-bearing part, and the test asserts both halves.
+
+  The prompt now also says the deterministic range engine has already evaluated the full set and
+  did not settle it. That is T5 stated to the model: ranges are the RULE step's input, and asking
+  the LLM to redo a comparison the rule engine already lost is spending context on nothing.
+
+  **Second fix in the same file:** `recommend_position` still showed `"ref":"..."` — the exact
+  placeholder that caused three `plan_remediation` refusals (PLAN-6). It was fixed in one template
+  and not the other. Now a real CVE from the Finding, plus an explicit prohibition.
+
 - [ ] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
   improve.** **MED.** Measured on the VM 2026-08-08 with a 12-customer estate: multiplier 2.0x,
   and **every one of the release's 120 Findings reported `effective_priority` 100**. The worst item

@@ -406,3 +406,49 @@ func TestPlanPromptShowsNoUngroundableRef(t *testing.T) {
 		t.Errorf("an empty plan must show no example ref value, got %v", m)
 	}
 }
+
+// AI-CTX-1 — an unbounded projection field can exhaust the model's budget, and the failure looks
+// like a bad model rather than a bad prompt.
+//
+// Measured live: a module-stream card carried ~100 affected ranges and 266 unattributed fixes.
+// recommend_position ran for 164 seconds, hit 8192 tokens, stopped mid-JSON, and returned
+// `schema_invalid: unexpected end of JSON input`. The recommendation was not wrong — it was never
+// finished.
+//
+// Truncating SILENTLY would be worse than the overflow: the model would reason from a subset while
+// believing it had the whole set. The test therefore asserts both halves — bounded, and honest
+// about what it dropped.
+func TestRecommendPromptBoundsAffectedRanges(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ranges := make([]string, 0, 100)
+	for i := 0; i < 100; i++ {
+		ranges = append(ranges, fmt.Sprintf("<0:1.%d-1.module+el8.3.0+74+855e3f5d", i))
+	}
+	ac := domain.AssembledContext{Projection: domain.FindingAssessment{
+		Finding:   domain.FindingView{ID: "fnd-1", ReleaseID: "rel-1", CVE: "CVE-2019-10086", Components: []string{"pkg:rpm/x@1"}},
+		Knowledge: domain.FaultlineView{ID: "fl-1", Severity: "high", AffectedRanges: ranges},
+	}}
+	got, err := r.Render("recommend_position", ac)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(got, "<0:1.99-1.module") {
+		t.Error("the 100th range was printed inline — the list is not bounded")
+	}
+	if !strings.Contains(got, "+88 more (not shown)") {
+		t.Errorf("the prompt must say how much it dropped:\n%s", got)
+	}
+	// The example ref must be a REAL identifier, not a placeholder (the PLAN-6 class).
+	refs := regexp.MustCompile(`"ref"\s*:\s*"([^"]*)"`).FindAllStringSubmatch(got, -1)
+	if len(refs) == 0 {
+		t.Fatal("no example ref shown — the model has no shape to copy")
+	}
+	for _, m := range refs {
+		if m[1] == "..." || m[1] == "" {
+			t.Errorf("prompt shows placeholder ref %q — a model copying it has its whole recommendation discarded", m[1])
+		}
+	}
+}
