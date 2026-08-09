@@ -403,6 +403,55 @@ full monolith→greenfield gap inventory in [`PARITY-GAP.md`](PARITY-GAP.md). Be
 line, the remaining parity tail (input-integrity E1–E11 and the A/B/C follow-ups), and the standing
 per-context follow-ups. Update those files, not this section, as items open or close.
 
+## Checkpoint — session 2026-08-08/09 (clean-slate VM rebuild + the AI harness)
+
+**Resume here.** 27 commits, all on `main`, `make check-ci` + `make vet-tags` green at every one.
+
+**The VM was rebuilt from scratch** (7 databases, one generated credential, six nodes under
+systemd). Migrations current: registry 2 · evidence 2 · knowledge 5 · governance 10 ·
+communication 4. Three releases ingested; feeds osv/nvd/epsskev/redhat all writing.
+
+**Verified working end-to-end on real data:** DASH-1 traversal · DASH-2 enriched posture (0.5s for
+20 rows) · KN-FIX-1 fix attribution · C1/C2 blast radius incl. **fail-safe under a Registry
+outage** · `plan_remediation` · `recommend_position` (advisory, nothing auto-decided) ·
+**Δ3a semantic precedent** (`precedents_used: 4` on a live recommendation).
+
+**Two EDR decisions landed:** `EDR-CORRELATION-01` (new — advisory scope is not a vulnerability
+claim; both steps implemented and verified) and D5a within it (re-classify when attribution
+arrives late).
+
+**Defects found and fixed this session, by class:**
+
+- *Deployment* — installer never created the estate tables; `chown` non-portable; a runbook's
+  example password had become a live credential.
+- *Seams between events* — BUG-3b (band/fixes stamped at the wrong event), D5a (classification
+  before its evidence), `AbsorbComponent` discarding a re-delivery that carried new information.
+- *Prompt↔gate disagreement* — PLAN-6 three times (truncated heading, `<--` annotations, `"..."`
+  placeholder), AI-CTX-1 (an unbounded projection field exhausted the model's budget: 8192 tokens
+  → truncated JSON; now 1841 tokens and 45s).
+- *Computed-then-discarded* — the plan grouping, a proposal's evidence trust, `precedents_used`.
+  All three were auditable facts that existed nowhere observable.
+- *Recogniser looser than its evaluator* — the CVSS v2 vector, my own module `name:stream` regex,
+  the PII redactor destroying PURLs (which silently disabled `recommend_position` entirely).
+
+**Where we stopped.** Working the AI list in priority order:
+1. ✅ **Done** — Δ3a enabled and its acceptance test passed; AI-CTX-1 fixed. The `insufficient`
+   path is wired and metered but not naturally triggerable on this estate (no card is thin enough).
+2. ⏳ **In progress** — G-AI-4's per-capability window ceiling is enforced
+   (`THEMIS_INTELLIGENCE_BUDGET_TOKENS`/`_WINDOW`, unset = unlimited). **Blocked next:**
+   degrade-not-fail (G-AI-4) and escalation (G-AI-2b) both need a **model router**, and the box has
+   exactly one chat model. Clearing it is one `ollama pull`.
+3. Not started — G-AI-3 (needs a release-comparison read API), G-AI-5 (inert while local-only).
+4. Not started — structured AI-proposal fields, TRUST-3, PLAN-5.
+
+**VM state to know:** the estate carries **12 customers**, which saturates the blast multiplier at
+2.0× and pins every `effective_priority` to 100 (GOV-15). Trim to ~3 before using the posture for
+anything where ranking matters. Δ3a is enabled on the Intelligence node; both AI timeouts are 300s.
+
+**18 items open** in `docs/BACKLOG.md`; no P0. The highest-value open work is the AI harness (2),
+then F5 (a node that cannot start is indistinguishable from a healthy one) and F1 auth — which is
+**built but never enabled** on this deployment.
+
 **Session 2026-08-07 closed the P0/P1 tail.** The backlog went **31 open → 13, with no P0 and no P1
 remaining**; the highest-priority open item is now roadmap (the AI harness), not a defect. Closed that
 day: GOV-14b (the disposition watcher — the safety net under `residual_priority`, which had shipped a
