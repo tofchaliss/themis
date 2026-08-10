@@ -1,9 +1,9 @@
-package embed_test
+package domain_test
 
 import (
 	"testing"
 
-	"github.com/themis-project/themis/internal/intelligence/adapters/embed"
+	"github.com/themis-project/themis/internal/intelligence/domain"
 )
 
 func TestSubjectText(t *testing.T) {
@@ -20,7 +20,7 @@ func TestSubjectText(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := embed.SubjectText(tc.severity, tc.components); got != tc.want {
+			if got := domain.SubjectText(tc.severity, tc.components); got != tc.want {
 				t.Fatalf("SubjectText(%q, %v) = %q, want %q", tc.severity, tc.components, got, tc.want)
 			}
 		})
@@ -29,8 +29,8 @@ func TestSubjectText(t *testing.T) {
 
 // The composition must be identical for the same inputs — population and query rely on it.
 func TestSubjectTextIsStable(t *testing.T) {
-	a := embed.SubjectText("high", []string{"pkg:golang/openssl"})
-	b := embed.SubjectText("high", []string{"pkg:golang/openssl"})
+	a := domain.SubjectText("high", []string{"pkg:golang/openssl"})
+	b := domain.SubjectText("high", []string{"pkg:golang/openssl"})
 	if a != b {
 		t.Fatalf("not stable: %q != %q", a, b)
 	}

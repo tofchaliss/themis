@@ -215,6 +215,17 @@ is what makes a release-scoped capability safe to add: the worst outcome of a wr
 disagreeing with it. The plan's GROUPING (231 Findings → ~12 package upgrades) is a deterministic
 `GROUP BY` computed before the prompt — the model is asked only for what needs judgement.
 
+**Semantic retrieval is a service with two consumers, not a step inside the AI path** (`app.PrecedentService`).
+The Gateway grounds `recommend_position` on it, and `GET /findings/{id}/similar` serves the *same instance*
+to a security engineer with **no model in the path** — same question, one answer, whoever asks. Two rules
+keep it small: **filters are query semantics** and live inside the search (`include_same_release`), while
+**redaction is an output boundary** applied at each consumer's edge (a prompt and an HTTP response are
+different exits) — and redaction is a projection, never an edit to the stored Position. The service owns
+the ordering rule that used to be implicit: semantic neighbours first, the exact-CVE fallback **only** when
+semantic found nothing. Every failure degrades to no-precedent; a missing precedent never blocks a
+recommendation or a page load. Contradictory precedent is why `recommend_position` honestly returns
+`insufficient` — and is exactly what the human endpoint exists to show.
+
 ### Enforcement details worth knowing
 
 - **clean-arch runs per naming scheme.** `go-cleanarch`'s flat model can't mix the monolith's

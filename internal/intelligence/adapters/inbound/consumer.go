@@ -14,9 +14,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/themis-project/themis/internal/intelligence/adapters/embed"
 	"github.com/themis-project/themis/internal/intelligence/adapters/store"
 	"github.com/themis-project/themis/internal/intelligence/app"
+	"github.com/themis-project/themis/internal/intelligence/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 )
@@ -28,7 +28,7 @@ const (
 	eventPositionRevised     = "governance.position_revised"
 )
 
-// eventFaultlineEnriched is Knowledge's enrichment fact. Severity feeds embed.SubjectText, so a
+// eventFaultlineEnriched is Knowledge's enrichment fact. Severity feeds domain.SubjectText, so a
 // severity change makes every indexed Finding on that card stale.
 const eventFaultlineEnriched = "knowledge.faultline_enriched"
 
@@ -218,7 +218,7 @@ func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*stor
 	if err != nil {
 		return nil, err
 	}
-	text := embed.SubjectText(proj.Knowledge.Severity, proj.Finding.Components)
+	text := domain.SubjectText(proj.Knowledge.Severity, proj.Finding.Components)
 	if text == "" {
 		return nil, nil
 	}
@@ -293,7 +293,7 @@ func textHash(text string) string {
 // the consumer computes it rather than hard-coding a hex string that silently stops matching
 // when SubjectText changes.
 func SubjectTextHashFor(severity string, components []string) string {
-	return textHash(embed.SubjectText(severity, components))
+	return textHash(domain.SubjectText(severity, components))
 }
 
 // faultlineEventDTO mirrors the one field of Knowledge's FaultlineEnriched this consumer needs.

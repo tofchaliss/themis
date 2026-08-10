@@ -852,6 +852,48 @@ ADR basis: INT-0056 (owns no truth → removable without correctness loss), CON-
 assistive), BCK-0051 (config-driven observability), CONVENTIONS R2 (self-documented config). Consistent with
 D1/D2/D8; realized by the Δ1 disable gate (Revision 2).
 
+### Realization note (2026-08-10) — retrieval is a service with two consumers, not an engine step
+
+Δ3a shipped semantic retrieval as an **engine** (`EngineKnowledge`) invoked from the capability's execution
+plan. That located it correctly in the *plan* and incorrectly in the *architecture*: the answer it produced
+— "the best precedent available for this Finding" — had no name and no seam. It was an emergent property of
+statement order inside `Gateway.invoke`: a semantic search during the plan walk, and the Δ2 exact-CVE
+fallback several branches later at the LLM step, joined by the unwritten rule *fall back only when semantic
+found nothing*.
+
+That was invisible while the model was the only consumer. It became load-bearing the moment a **second**
+consumer appeared — a read API showing the same precedent to a security engineer (`GET
+/findings/{id}/similar`, output class **Information**, T7). Reimplementing the rule at the second call site
+would have let one claim have two answers depending on who asked.
+
+**What changed.** `app.PrecedentService` now owns the whole composite (embed → search → filter → fallback)
+and both consumers call it; `adapters/engine/knowledge.go` is deleted. `domain.SubjectText` moved from
+`adapters/embed` to the domain ring — it is a **rule** ("what does a Finding look like to the index") shared
+by the index writer and the index reader, and the app ring cannot import an adapter.
+
+**Two orthogonality rules, decided with the endpoint** and worth keeping when RC-2 arrives:
+
+- **Filters are query semantics** and live *inside* the search (`excludeReleaseID`, `include_same_release`):
+  they change which neighbours are candidates.
+- **Redaction is an output boundary** and lives at *each consumer's edge* — the prompt bound for a provider,
+  and the HTTP response bound for an engineer, are different exits with different rules. Applying it inside
+  the service would bake one consumer's policy into a shared seam. Redaction is a projection: the stored
+  Position is never modified.
+
+**Two defects the extraction surfaced**, both of the *computed-then-discarded / read-then-unused* family
+this repository keeps meeting:
+
+1. `plan_remediation` is Release-scoped, so `ac.Finding()` is the zero value — yet every invocation reached
+   the LLM-step fallback and asked Governance for the precedents of an **empty Faultline id**. A read whose
+   result the capability had no use for. The service skips it (`FaultlineID == ""`).
+2. The Knowledge-step tests stubbed the *engine*, above the rule, so they passed against a projection
+   carrying no components and no severity — a subject whose `SubjectText` composes to `""` and is correctly
+   skipped before the embedder is called. A stub above a rule cannot exercise the rule.
+
+Behaviour for `recommend_position` is unchanged, guarded by `adapters/wiring/demo_e2e_test.go` (a semantic
+precedent flips a recommendation). Consistent with D1 (owns no truth), D5 (read APIs only), D12
+(operational, rebuildable state) and `EDR-TRUST-01` T7.
+
 ## Traceability → issues
 
 One issue per implementable decision; each cross-references its decision + ADR. Suggested delivery: an

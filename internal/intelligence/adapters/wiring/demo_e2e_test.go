@@ -66,8 +66,11 @@ func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Emb
 			Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-NEW", Severity: "high"},
 		}},
 		Prompt: pr,
+		// The retrieval seam is a service, not an engine: the same instance the read API
+		// (GET /findings/{id}/similar) serves engineers from. No exact-CVE fallback reader
+		// here, so the demo exercises the semantic path alone.
+		Precedents: app.NewPrecedentService(emb, idx, nil, 5),
 		Engines: []app.Engine{
-			engine.NewKnowledgeEngine(emb, idx, 5),
 			engine.NewLLMEngine(provider.NewStaticRouter(prov)),
 		},
 	})
@@ -100,7 +103,7 @@ func TestDemoSemanticPrecedentChangesRecommendation(t *testing.T) {
 	// Index a semantically similar past decision: a DIFFERENT CVE on the SAME component (openssl),
 	// decided not_affected in another release. Embed the SAME text the query embeds so the vectors
 	// are comparable (this is exactly what the population consumer does).
-	vec, err := emb.Embed(ctx, embed.SubjectText("high", []string{"pkg:golang/openssl"}))
+	vec, err := emb.Embed(ctx, domain.SubjectText("high", []string{"pkg:golang/openssl"}))
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

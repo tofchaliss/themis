@@ -31,10 +31,19 @@ type Invoker interface {
 	Invoke(ctx context.Context, capabilityID string, sel domain.Selection, correlationID string) (domain.Proposal, app.Outcome)
 }
 
+// PrecedentRetriever is the read side of the shared retrieval seam (*app.PrecedentService
+// satisfies it). The handler is given the SAME instance the Gateway grounds on — that is the
+// whole point of the endpoint, and wiring a second one would quietly defeat it.
+type PrecedentRetriever interface {
+	RetrieveForFinding(ctx context.Context, findingID string, topK int, includeSameRelease bool) ([]domain.PrecedentPosition, error)
+}
+
 // Handler serves the reactive invoke API and logs execution telemetry.
 type Handler struct {
-	invoker Invoker
-	logger  *observability.Logger
+	invoker    Invoker
+	precedents PrecedentRetriever
+	redactor   app.Redactor
+	logger     *observability.Logger
 }
 
 // NewHandler builds the handler. A nil logger falls back to a no-op.
@@ -43,6 +52,16 @@ func NewHandler(inv Invoker, logger *observability.Logger) *Handler {
 		logger = observability.Nop()
 	}
 	return &Handler{invoker: inv, logger: logger}
+}
+
+// WithPrecedents enables GET /findings/{id}/similar over the given retrieval seam, scrubbing
+// each result through the redactor on the way out (the output-boundary half of the split
+// described on app.PrecedentService). Left unset, the route answers 404 — a node wired without
+// a retrieval plane has no precedent to show, and saying so is better than an empty list that
+// reads as "we looked and found nothing".
+func (h *Handler) WithPrecedents(p PrecedentRetriever, r app.Redactor) *Handler {
+	h.precedents, h.redactor = p, r
+	return h
 }
 
 // Routes returns the chi router serving the invoke API at root paths (the /api/v1
@@ -122,6 +141,61 @@ func (h *Handler) InvokeCapability(w http.ResponseWriter, r *http.Request, id st
 
 // strptr returns a pointer to s — the generated wire types use optional (pointer) fields.
 func strptr(s string) *string { return &s }
+
+// GetSimilarFindings handles GET /findings/{id}/similar — the retrieval seam served straight to
+// a human, with no model in the path.
+//
+// It is the OUTPUT BOUNDARY for this consumer: the service returns unredacted precedent, and
+// every rationale is scrubbed here, on the way out of the process. The stored Position is
+// untouched — redaction is a projection, not an edit.
+//
+// There is no "declined" outcome to represent, so unlike the invoke endpoint this never answers
+// 204: either the Finding exists and we report what resembles it (possibly nothing), or it does
+// not and that is a 404.
+func (h *Handler) GetSimilarFindings(w http.ResponseWriter, r *http.Request, id string, params gen.GetSimilarFindingsParams) {
+	if h.precedents == nil {
+		writeProblem(w, http.StatusNotFound, "precedent retrieval not enabled",
+			"this node runs without a retrieval plane; set THEMIS_DATABASE_DSN on the Intelligence node")
+		return
+	}
+	topK := 0
+	if params.K != nil {
+		topK = *params.K
+	}
+	includeSame := params.IncludeSameRelease != nil && *params.IncludeSameRelease
+
+	found, err := h.precedents.RetrieveForFinding(r.Context(), id, topK, includeSame)
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "no such finding", "")
+		return
+	}
+
+	out := gen.SimilarFindings{FindingId: id, Precedents: toGenPrecedents(app.RedactPrecedents(h.redactor, found))}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// toGenPrecedents maps the domain view to the wire shape. Precedents is built non-nil so an
+// empty result serializes as `[]` rather than `null`: a caller distinguishing "no precedent"
+// from "field missing" should not have to.
+func toGenPrecedents(in []domain.PrecedentPosition) []gen.PrecedentPosition {
+	out := make([]gen.PrecedentPosition, 0, len(in))
+	for _, p := range in {
+		item := gen.PrecedentPosition{ReleaseId: p.ReleaseID, Stance: p.Stance}
+		if p.SourceCVE != "" {
+			item.SourceCve = strPtr(p.SourceCVE)
+		}
+		if p.Component != "" {
+			item.Component = strPtr(p.Component)
+		}
+		if p.Rationale != "" {
+			item.Rationale = strPtr(p.Rationale)
+		}
+		score := p.Score
+		item.Score = &score
+		out = append(out, item)
+	}
+	return out
+}
 
 // logTelemetry emits the per-invocation execution record (D9), privacy-safe (no
 // prompt content).
