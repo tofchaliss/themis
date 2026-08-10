@@ -439,7 +439,7 @@ a package name as **the runtime's own derivation** and therefore ungrounded.
 That was wrong. `PyYAML` is `component.source`, a field the projection carries. What the runtime
 derives is the **grouping**; the name is data. T10 rule 4 forbids validating against a derived
 **view** — not against projection fields that the view happens to surface. Component `name` and
-`source` now ground; the action heading dropped its ` (ecosystem)` bracket so a citation can match
+`source` now ground; the action heading dropped its `(ecosystem)` bracket so a citation can match
 exactly; and decorated forms (`python-ply (rpm)`) still fail, because matching stays exact.
 
 The general lesson is about where the mistake was findable: a prompt and a validator are an

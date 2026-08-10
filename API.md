@@ -89,6 +89,17 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | GET | `/releases` | `listReleases` |
 | GET | `/releases/{id}` | `getRelease` (backs Evidence's `SubjectRef` / `ReleaseExists`) |
 
+The **estate graph** (EDR-ESTATE-01, C1) hangs off the same identity spine. It is what turns a technical
+severity into a business one: without it every Finding on every release ranks alike, because nothing knows
+how many customers a release reaches.
+
+| Method | Path | Operation |
+| ------ | ---- | --------- |
+| POST | `/products/{id}/microservices` | `registerMicroservice` |
+| POST | `/microservices/{id}/deployments` | `registerDeployment` — binds a microservice to a customer in an environment (`customer_id` + `environment`) |
+| POST | `/customers` | `registerCustomer` |
+| GET | `/releases/{id}/blast-radius` | `getBlastRadius` — the unique-customer count behind Governance's blast multiplier (C2). Governance **fail-safes to 1.0×** when this is unreachable, so an outage here de-amplifies priority rather than blocking triage |
+
 ### Evidence — SBOM/VEX ingestion + immutable evidence
 
 | Method | Path | Operation |
@@ -97,6 +108,7 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | GET | `/evidence` | `listEvidence` |
 | GET | `/evidence/{id}` | `getEvidence` |
 | GET | `/evidence/{id}/inventory` | `getEvidenceInventory` (raw + canonical inventory) |
+| GET | `/evidence/{id}/document` | `getEvidenceDocument` — the stored bytes, verbatim. Knowledge reads uploaded VEX through this seam and parses it itself (EDR-VEX-01 Phase 1): Evidence serves evidence, it does not interpret it |
 
 ### Knowledge — Faultlines (one card per canonical CVE)
 
@@ -105,6 +117,7 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | GET | `/faultlines?cve=` | `getFaultlineByCVE` |
 | GET | `/faultlines/{id}` | `getFaultlineById` (enrichment: severity, EPSS, KEV, exploit, fixed/affected versions) |
 | GET | `/faultlines/{id}/releases` | `getFaultlineReleases` |
+| GET | `/feeds` | `getFeedHealth` (B1) — per-feed poll outcomes plus `signals_stale` / `degraded_feeds`. The point is that a *silent* feed and a *healthy* one are otherwise identical from the outside: enrichment that quietly stopped looks exactly like an estate with no new signals |
 
 ### Governance — Findings + Enterprise Positions (the authority)
 
@@ -116,7 +129,7 @@ collaborate only via events + read APIs — they never share a database. Errors 
 | POST | `/findings/{id}/proposals` | `raiseProposal` |
 | POST | `/findings/{id}/proposals/{proposalId}/accept` | `acceptProposal` (human/policy only) |
 | POST | `/findings/{id}/proposals/{proposalId}/reject` | `rejectProposal` |
-| POST | `/findings/{id}/resolve` · `/reopen` · `/archive` | lifecycle transitions |
+| POST | `/findings/{id}/resolve` · `/reopen` · `/archive` | `resolveFinding` · `reopenFinding` · `archiveFinding` — lifecycle transitions |
 | POST | `/findings/{id}/recommend` | `recommendPosition` — **on-demand AI seam** (records an advisory AI proposal, never auto-accepted; `204` when AI is off/unavailable/declines) |
 | GET | `/findings/{id}/proposals` (on the Finding read) | Each proposal now carries **`evidence_trust`** — `observed` \| `asserted` \| `inferred`. It is the field the constitutional check turns on (an `inferred` proposal can never be auto-accepted by any policy), and it is surfaced because a human exercising that check was otherwise shown an AI proposal and a system proposal rendered identically. |
 | GET | `/findings/{id}/assessment` | `getFindingAssessment` — the **Domain Projection** (EDR-TRUST-01 T10): the release-scoped concern plus what Knowledge knows about the CVE, in one read. Named for the business view, not for a consumer — a dashboard, a report and the AI runtime all read this same shape, and the AI grounds its citations *against* it. Knowledge is best-effort: unreachable degrades to the Finding alone rather than failing. |

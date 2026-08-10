@@ -54,8 +54,9 @@ choices:
 until someone scrapes) while a span does not (it has no pull model), so metrics stay useful on an isolated
 node and traces cost one exporter dependency rather than two. The pure `domain`/`app` rings never
 log (enforced by depguard — only adapters + the composition root import the package), so the package sits at
-the platform layer, outside any bounded context. Each greenfield node (`cmd/{evidence,registry,governance,
-communication}`) wires it at startup; example config in `deploy/node.env.example`.
+the platform layer, outside any bounded context. **All six** greenfield nodes
+(`cmd/{registry,evidence,knowledge,governance,communication,intelligence}`) wire it at startup and each
+mounts `/metrics`; example config in `deploy/node.env.example`.
 
 ## R2 — Configuration is self-documented in the config file, with comments
 
