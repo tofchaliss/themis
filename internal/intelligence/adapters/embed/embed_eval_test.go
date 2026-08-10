@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/intelligence/adapters/embed"
+	"github.com/themis-project/themis/internal/intelligence/domain"
 )
 
 // evalItem is one labeled finding. Items sharing a group are "similar" (same component /
@@ -73,9 +74,9 @@ type composition struct {
 
 var compositions = []composition{
 	{"components", func(it evalItem) string { return strings.Join(it.components, " ") }},
-	{"components+severity", func(it evalItem) string { return embed.SubjectText(it.severity, it.components) }}, // production
-	{"components+severity+cve", func(it evalItem) string { return it.cve + " " + embed.SubjectText(it.severity, it.components) }},
-	{"components+severity+description", func(it evalItem) string { return embed.SubjectText(it.severity, it.components) + " " + it.description }},
+	{"components+severity", func(it evalItem) string { return domain.SubjectText(it.severity, it.components) }}, // production
+	{"components+severity+cve", func(it evalItem) string { return it.cve + " " + domain.SubjectText(it.severity, it.components) }},
+	{"components+severity+description", func(it evalItem) string { return domain.SubjectText(it.severity, it.components) + " " + it.description }},
 }
 
 type metrics struct {

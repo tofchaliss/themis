@@ -50,6 +50,72 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/similar:
+    get:
+      operationId: getSimilarFindings
+      summary: Past Enterprise Positions that resemble this Finding (semantic precedent, no AI).
+      description: >-
+        The Operational Semantic Index (KS2, Δ3a) served directly to a human. It answers "what
+        have we already decided that looks like this?" — semantically similar PAST Positions,
+        typically on a DIFFERENT CVE affecting the same component, ranked by cosine similarity.
+
+
+        This is the same retrieval seam `recommend_position` grounds on. Serving both from one
+        service is deliberate: an engineer and the model must never be shown different answers to
+        the same question.
+
+
+        **No model runs.** There is no prompt, no token spend, no budget ceiling and nothing to
+        hallucinate — so unlike `/capabilities/{id}/invoke` this endpoint does not have a "declined"
+        outcome. An empty list means no precedent was found, which on a young deployment is the
+        ordinary answer.
+
+
+        **Read-only and advisory** (output class Information, EDR-TRUST-01 T7): it proposes no
+        stance, reaches no Position, and nothing here needs accepting. Themis stays authoritative —
+        every result points back to the Position it was derived from, and the index is a derived,
+        rebuildable lens over that truth, never truth itself.
+
+
+        Contradictory results are a feature, not a fault. Where the enterprise ruled the same shape
+        of problem two different ways, both appear — which is precisely the case in which
+        `recommend_position` honestly declines, and precisely what a human needs to see.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Finding id — the subject whose Assessment projection composes the query.
+          schema:
+            type: string
+        - name: k
+          in: query
+          required: false
+          description: Maximum neighbours to return (1-50). Omitted uses the node's configured default.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+        - name: include_same_release
+          in: query
+          required: false
+          description: >-
+            Keep the subject's own Release in the candidate set. Off by default: a Finding is not
+            precedent for itself, and its siblings on the same Release were usually decided in one
+            sitting. Set it to ask the different question "what else did we decide on this release?".
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Ranked precedent, most similar first. An empty list means none was found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarFindings'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -59,6 +125,51 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    SimilarFindings:
+      type: object
+      required: [finding_id, precedents]
+      properties:
+        finding_id:
+          type: string
+          description: The subject Finding the query was composed from.
+        precedents:
+          type: array
+          description: Ranked precedent, most similar first. Empty when none was found.
+          items:
+            $ref: '#/components/schemas/PrecedentPosition'
+    PrecedentPosition:
+      type: object
+      required: [release_id, stance]
+      description: >-
+        One past Enterprise Position, retrieved as precedent. Every field traces back to a
+        Position that Themis owns — this is a lens over KS1, not a record in its own right.
+      properties:
+        release_id:
+          type: string
+          description: The Release the past decision was taken on.
+        stance:
+          type: string
+          description: The decided stance (e.g. affected, not_affected, accepted_risk).
+        source_cve:
+          type: string
+          description: >-
+            CVE of the precedent decision. It usually DIFFERS from the subject's CVE — matching
+            across CVEs on a shared component is the whole point of semantic precedent.
+        component:
+          type: string
+          description: Representative component of the precedent decision.
+        rationale:
+          type: string
+          description: >-
+            Why that decision was taken, passed through the node's redaction boundary before
+            leaving the process. The stored Position is never modified by redaction.
+        score:
+          type: number
+          format: double
+          description: >-
+            Cosine similarity in [0,1] for a semantically retrieved precedent. 0 marks an
+            exact-CVE match, which is found by lookup rather than by similarity and therefore
+            has no meaningful score — not "least similar".
     InformationResponse:
       type: object
       description: >-

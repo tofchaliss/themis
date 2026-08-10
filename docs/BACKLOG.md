@@ -199,6 +199,16 @@ three angles, and two of them proposed fixes that would not have worked.
   **Refinement:** enrich the embed text with vuln-class / CWE (ties to the R5 "+description" signal) or
   filter/weight retrieved precedent by vuln-similarity, not just component (overlaps G-AI-3). Not a defect.
 
+  **Re-weighted 2026-08-10, and partly answered by exposing retrieval directly.**
+  `GET /findings/{id}/similar` (`app.PrecedentService`, the same seam the Gateway grounds on) serves this
+  same retrieved set to a human with no model in the path. For that consumer the "defect" inverts: a
+  self-contradictory set is not ambiguity to resolve but the single most useful thing to show — *we ruled
+  this shape of problem two different ways, here are both*. So the scaling risk is narrower than filed:
+  precision decay makes the AI **quieter** (more honest declines) while making the human view **richer**.
+  It also finally gives the refinement an evaluation signal — until now retrieval quality was measured only
+  against the synthetic labelled corpus in `make e2e-embed`; "was this precedent relevant?" is now an
+  answerable question on live data, which is what Δ4's eval loop needs and had no source for.
+
 - [x] **Knowledge consumer inbox (M5 EB-06) — DONE in Group 8.** Built alongside `cmd/knowledge`:
   `internal/knowledge/adapters/inbound` (decode `EvidenceRegistered` → correlation + Subscription),
   `000003_knowledge_inbox` `processed_events` migration + `InboxConsumer`, and `Save`/`RecordMatch` join the

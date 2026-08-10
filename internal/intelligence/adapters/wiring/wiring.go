@@ -2,10 +2,14 @@
 // Gateway from config — read-API Knowledge Providers, the Rule + LLM engines over their
 // provider (Ollama by default, a dev fake optionally), the prompt renderer, and the reactive
 // HTTP API. When a Store is supplied it additionally builds the Δ3a retrieval plane: an
-// embedder, the in-memory Operational Semantic Index, the Knowledge engine, and the bus
-// population consumer — so `recommend_position` is grounded in semantically similar past
-// Positions. With no Store the Gateway is stateless (the Knowledge step skips; the exact-CVE
-// fallback still grounds).
+// embedder, the in-memory Operational Semantic Index, and the bus population consumer — so
+// `recommend_position` is grounded in semantically similar past Positions. With no Store the
+// Gateway is stateless (semantic retrieval skips; the exact-CVE fallback still grounds).
+//
+// Retrieval itself is an app-level service (app.PrecedentService), not an engine, and exactly
+// ONE instance is built here for both of its consumers: the Gateway grounds a recommendation
+// on it, and the read API (GET /findings/{id}/similar) shows the same result to an engineer.
+// Wiring two would let the model and the human be told different things.
 package wiring
 
 import (
@@ -91,20 +95,33 @@ func Wire(cfg Config) (Intelligence, error) {
 	llmEng := engine.NewLLMEngine(provider.NewStaticRouter(prov))
 	engines := []app.Engine{llmEng}
 
-	// Δ3a retrieval plane, built only when a store is configured.
+	// Δ3a retrieval plane, built only when a store is configured. ONE PrecedentService is built
+	// here and handed to BOTH the Gateway (grounding for recommend_position) and the read
+	// handler (GET /findings/{id}/similar) — the single-seam rule from app/precedent.go. Wiring
+	// them separately would be the bug that rule exists to prevent.
+	//
+	// Without a store there is no semantic index, but the service is still built: the exact-CVE
+	// fallback needs no embeddings, so a stateless Gateway keeps the precedent it always had and
+	// the read API degrades to exact-CVE matches rather than 404ing.
 	var idx *index.Memory
 	var consumer *inbound.Consumer
+	var emb app.Embedder
 	if cfg.Store != nil {
-		var emb app.Embedder
 		if cfg.UseFake {
 			emb = embed.NewFakeEmbedder(fakeEmbedDim)
 		} else {
 			emb = embed.NewOllamaEmbedder(cfg.OllamaURL, cfg.EmbedModel, cfg.HTTPClient).WithAPIKey(cfg.APIKey)
 		}
 		idx = index.NewMemory()
-		engines = append(engines, engine.NewKnowledgeEngine(emb, idx, cfg.TopK))
 		consumer = inbound.NewConsumer(proj, prc, emb, cfg.Store, idx)
 	}
+	// index.Memory is a concrete pointer; a nil one must reach the service as a nil INTERFACE,
+	// not a non-nil interface wrapping a nil pointer, or the nil check inside it never fires.
+	var vidx app.VectorIndex
+	if idx != nil {
+		vidx = idx
+	}
+	precedents := app.NewPrecedentService(emb, vidx, prc, cfg.TopK).WithProjection(proj)
 
 	pr, err := engine.NewPromptRenderer()
 	if err != nil {
@@ -119,11 +136,15 @@ func Wire(cfg Config) (Intelligence, error) {
 	if cfg.Logger != nil {
 		pr = pr.WithLogger(cfg.Logger.Component("plan"))
 	}
+	// ONE redactor instance for both output boundaries: the prompt bound for a provider, and
+	// the HTTP response bound for an engineer. Same discipline, applied twice, because they are
+	// genuinely different exits from the process.
+	redactor := admission.NewBasicRedactor()
 	gw, err := app.NewGateway(app.GatewayConfig{
 		Registry:        domain.DefaultRegistry(),
 		Projection:      proj,
-		Precedent:       prc,
-		Redactor:        admission.NewBasicRedactor(), // C7 secret/PII scrub (authorizer = deployment seam)
+		Precedents:      precedents,
+		Redactor:        redactor, // C7 secret/PII scrub (authorizer = deployment seam)
 		Prompt:          pr,
 		Engines:         engines,
 		ProviderTimeout: cfg.ProviderTimeout,
@@ -134,7 +155,7 @@ func Wire(cfg Config) (Intelligence, error) {
 		return Intelligence{}, err
 	}
 	return Intelligence{
-		Handler:  intelhttp.NewHandler(gw, cfg.Logger).Routes(),
+		Handler:  intelhttp.NewHandler(gw, cfg.Logger).WithPrecedents(precedents, redactor).Routes(),
 		Gateway:  gw,
 		Index:    idx,
 		Consumer: consumer,

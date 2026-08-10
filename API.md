@@ -151,6 +151,46 @@ how many customers a release reaches.
 | Method | Path | Operation |
 | ------ | ---- | --------- |
 | POST | `/capabilities/{id}/invoke` | `invokeCapability` — reactive, synchronous; returns a validated advisory output (`200`) or `204` "no output" (a safe outcome, **never** an error). |
+| GET | `/findings/{id}/similar` | `getSimilarFindings` — **semantic precedent, no model in the path.** See below. |
+
+#### Precedent without AI — `GET /findings/{id}/similar`
+
+The Operational Semantic Index (KS2, Δ3a) served straight to a security engineer: *"what have we
+already decided that looks like this?"* It returns past Enterprise Positions ranked by cosine
+similarity — typically on a **different CVE** affecting the same component, which is the whole
+point of semantic precedent and something an exact-CVE lookup can never produce.
+
+It is the **same retrieval seam** `recommend_position` grounds on (`app.PrecedentService`), served
+to a second consumer. That is deliberate: an engineer and the model must never be shown different
+answers to the same question.
+
+Because no model runs, this endpoint has no "declined" outcome and never returns `204`. Either the
+Finding exists and we report what resembles it — possibly nothing, which on a young deployment is
+the ordinary answer — or it does not, and that is a `404`.
+
+| Query parameter | Default | Meaning |
+| --- | --- | --- |
+| `k` | node default (`THEMIS_INTELLIGENCE_PRECEDENT_TOPK`) | Maximum neighbours, 1–50. |
+| `include_same_release` | `false` | Keep the subject's own Release in the candidate set. Off by default — a Finding is not precedent for itself, and its siblings were usually decided in one sitting. Set it to ask the different question *"what else did we decide on this release?"* |
+
+Each result carries `release_id` · `stance` · `source_cve` · `component` · `rationale` · `score`.
+`score` is cosine similarity in [0,1]; **`0` marks an exact-CVE match**, found by lookup rather
+than by similarity, so it means "no meaningful score" rather than "least similar".
+
+`rationale` passes through the node's redaction boundary on the way out. Redaction is a
+projection — the stored Position is never modified, and re-reading it yields the original text.
+
+Two things are worth expecting rather than reporting as bugs:
+
+- **Contradictory results are a feature.** Where the enterprise ruled the same shape of problem two
+  different ways, both appear. That is precisely the case in which `recommend_position` honestly
+  declines with `insufficient` — and precisely what a human needs to see.
+- **A node with no retrieval plane answers `404`**, not an empty list. "This node cannot look" and
+  "we looked and found nothing" are different facts.
+
+Output class **Information** (EDR-TRUST-01 T7): read-only, proposes no stance, reaches no Position,
+nothing to accept. Themis stays authoritative — every result traces back to the Position it derives
+from, and the index is a rebuildable lens over that truth, never truth itself.
 
 Two capabilities ship, and they differ in **output class** (EDR-TRUST-01 T7), which is the thing to
 understand before calling either:
