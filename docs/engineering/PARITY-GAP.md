@@ -33,7 +33,7 @@ named here are now addressed in-flight.
 
 | Gap(s) | PR | What landed |
 | --- | --- | --- |
-| **F1 / F2 / F3** | #65 | inbound `X-API-Key` auth + method-based scopes + HMAC webhook seam + `cmd/authadmin` (opt-in via `THEMIS_AUTH_DATABASE_DSN`) |
+| **F1 / F3** (not F2) | #65 | inbound `X-API-Key` auth + method-based scopes + `cmd/authadmin` (opt-in via `THEMIS_AUTH_DATABASE_DSN`). It also shipped the **HMAC webhook verifier**, but no route mounts it — **F2 stays open**; see its row below |
 | **B1** | #66 | feed-health wired end-to-end (`feed_health` store + `GET /feeds` with `signals_stale` / `degraded_feeds`) |
 | **A1** | #68 | reconciled version-range gate wired into correlation (realizes EDR-KNOWLEDGE-01 D3) |
 | **A2** | #69 (stacked on #68) | NVD as a bounded, opt-in discovery source (keyword + CPE-product + version triple-gate) |
@@ -45,8 +45,9 @@ named here are now addressed in-flight.
 
 Also shipped: a deterministic no-AI **SBOM→VEX CI gate** (#67, now a PR gate) and four decision records
 (`EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01`, + realization notes on `EDR-KNOWLEDGE-01`). **Remaining
-tail:** A3–A6, B2/B5/B6, C3–C5, the D-series notifications, E1–E11 input-integrity, F5/F7/F8 observability
-(F4 metrics and F6 traces closed 2026-08-06/07).
+tail:** A3–A5 (**A6 narrowed** to `related`-only 2026-08-10), B2/B5 (**B6 closed** 2026-08-10), C3–C5, the
+D-series notifications, E1–E11 input-integrity, **F2** (verifier built, endpoint absent), F5/F7/F8
+observability (F4 metrics and F6 traces closed 2026-08-06/07).
 
 ## A. Correlation & version matching
 
@@ -63,7 +64,7 @@ whatever OSV's server-side `version` filter returns.
 | **A3** | Distro-authoritative identity guard | `version_match.go:57` `PackageIdentityMatch` (rejects el8-openssl-style upstream over-match) | no local guard; protection only implicit via OSV per-distro ecosystem+source+epoch scoping | LOW-MED | 🆕 |
 | **A4** | Ubuntu ecosystem mapping | `MapEcosystem` handles ubuntu→Ubuntu | `osvDistroEcosystem` has no ubuntu case (returns "") | LOW | ⚠️ (§C named it as a future-add, not a lost capability) |
 | **A5** | Alpine package-name normalization | `osv/package_name.go` (`so:` / `py3-` → `python3-`) | absent | LOW | 🆕 |
-| **A6** | CVE alias breadth | `resolveCVEID` scans `aliases` + `upstream` + `related` | greenfield OSV ACL reads `id` + `aliases` only (`feed/osv.go`) | LOW | 🆕 |
+| **A6** | CVE alias breadth | `resolveCVEID` scans `aliases` + `upstream` + `related` | **NARROWED 2026-08-10.** `upstream` was added 2026-08-03 (a distro advisory is keyed `RHSA-…` with a null `aliases`, so without it every RHEL/Rocky/Alma record resolved to no CVE — `feed/osv.go` now reads `id`/`aliases`/`upstream`). Only **`related`** is still unread | LOW | 🆕 |
 
 ## B. Enrichment & feeds
 
@@ -77,7 +78,7 @@ Shipped and confirmed: **NVD watch (#61)**, **EPSS/KEV/ExploitDB sweep (#62)** �
 | **B3** | Red Hat VEX / CSAF applicability | full subsystem — fetch client + per-EL-stream verdict + epoch rpm compare + scheduler | **✅ CLOSED 2026-08-01.** `RedHatClient` per-CVE Hydra fetch → vendor vuln-facts + `not_affected` applicability + **main-stream `affected_release` fix NEVRAs**; relevance-bounded (`THEMIS_REDHAT_ENABLED`); precedence ranks `redhat` distro-authoritative; **stream-scoped epoch-rpm fixed verdict** in correlation (`value.RPMFixedByStream`, conservative — no false-fixed); covers RHEL/Rocky/Alma. (PRs: Phase-2 suppression #76, feed #77, verdict local.) | HIGH→**done** | ✅ |
 | **B4** | Generic vendor-VEX feed | full subsystem — CSAF parser + fetch + scheduler | **✅ CLOSED 2026-08-01.** `feed.CSAFVexClient` — a **per-CVE** (relevance-bounded, D5 — NOT a bulk crawler) multi-base fetch of `<base>/<year>/cve-<id>.json` from any CSAF trusted provider; real CSAF 2.0 parser (`parseCSAFVEX`, resolves `product_tree` PURLs → package names) → `not_affected` applicability → Phase-2 suppression. `THEMIS_VEXFEED_ENABLED`/`_URLS`/`_POLL_INTERVAL`. (Bulk CSAF-dir/zip crawl deliberately rejected — it would transiently mirror the feed, violating D5, exactly where the legacy crawler failed.) | MED-HIGH→**done** | ✅ |
 | **B5** | NVD by-CVE backfill (cards outside the 120-day window) | `cvss_backfill.go` `FetchByCVEID` + scheduler | absent; a card whose CVE last changed >120 days ago never gets NVD CVSS | MED | 📋 (§C) |
-| **B6** | `feed.Registry` + per-record ACLs wired | n/a | `NewRegistry()` has **no production caller**; redhat/vex/epsskev/exploitdb per-record ACLs are dead on the prod path | LOW | 📋 (§C, but broader than the EPSS/KEV note) |
+| **B6** | `feed.Registry` + per-record ACLs wired | n/a | **✅ CLOSED — verified 2026-08-10.** The audit's "`NewRegistry()` has no production caller" no longer holds: `knowledge/adapters/wiring/trust_sources.go` calls `feed.NewRegistry().Sources()` to derive the trust-classification source set, so the registry and its per-record ACLs are on the production path | LOW→**done** | ✅ |
 
 ## C. Triage / positions / risk / blast-radius
 
@@ -126,7 +127,7 @@ input-only in both). The gaps are in notifications and in VEX content fidelity.
 | ID | Capability | Monolith | Greenfield | Sev | Status |
 | --- | --- | --- | --- | --- | --- |
 | **F1** | Inbound API auth (API keys + scopes) | `X-API-Key` bcrypt key store, 3-tier scopes (admin/read/product), product-authz, expiry/revocation | **zero** — every service mounts only `RequestLogger`; no `securitySchemes` in any spec | HIGH | ⚠️ (doc rated "M"; there is literally no auth surface) |
-| **F2** | HMAC-verified CI-scan webhook | `POST /webhooks/scan`, `X-Themis-Signature` HMAC-SHA256, constant-time compare | absent | HIGH | 📋 (§ prior B, rated "S") |
+| **F2** | HMAC-verified CI-scan webhook | `POST /webhooks/scan`, `X-Themis-Signature` HMAC-SHA256, constant-time compare | **HALF-BUILT — re-verified 2026-08-10.** The *verifier* exists (`platform/auth/hmac.go`: `WebhookVerifier.Verify` + `Middleware`, constant-time compare, `X-Themis-Signature`). What is absent is everything it would protect: **no route** mounts it, no `/webhooks/scan` in any OpenAPI spec, and `THEMIS_WEBHOOK_SECRET` is read by no greenfield binary. PR #65 shipped the seam, not the endpoint | HIGH | ⚠️ |
 | **F3** | Admin key-management CLI (`create-key`/`revoke-key`) | `infrastructure/cli/admin.go` | absent (nothing to manage — no auth) | MED-HIGH | 🆕 (subsumed by F1, distinct work) |
 | **F4** | Prometheus `/metrics` + metric catalog | promhttp + 8 metrics (ingestion/queue/watch/notify) | **CLOSED 2026-08-06** — `observability.Metrics` (promhttp registry on `/metrics`, feed-poll/record + HTTP counters) | MED | ✅ |
 | **F5** | `/healthz` + `/readyz` probes | both, per service | absent in all 6 services (k8s liveness/readiness gap) | MED | 🆕 |

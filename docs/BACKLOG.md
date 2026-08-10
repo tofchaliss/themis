@@ -26,35 +26,46 @@ per-context follow-ups below.
 
 ### 0. Cluster index — read this before picking work
 
-**Added 2026-08-06.** The item list below is organized by *where code lives*, which is right for finding
-things and wrong for deciding what to do. **13 open items resolve to 5 areas**, none of them P0 or
-P1 (re-derived 2026-08-07 against the code, not the text). Fix a cluster, not an
-item — several entries in each cluster close together, and some close for free.
+**Added 2026-08-06 · counts re-derived 2026-08-10.** The item list below is organized by *where code
+lives*, which is right for finding things and wrong for deciding what to do. **17 open items resolve to 7
+areas**, none of them P0 or P1. Fix a cluster, not an item — several entries in each cluster close
+together, and some close for free.
 
-Ordered by priority. "Measured" means the claim rests on an observation from a running system, not a
+Ordered by priority; **cluster IDs are stable, so they are not in numeric order** — R6/R7 were added after
+R1–R5 and outrank them. "Measured" means the claim rests on an observation from a running system, not a
 code reading.
 
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
-| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 · G-AI-5 · Δ3a component-embedding |
+| **R7** | **The blast multiplier destroys the order it exists to create** | **P2, measured** | A per-release CONSTANT multiplied over a set cannot reorder that set — but `EffectivePriority` **clamps at 100**, and a clamp is not order-preserving. At a 12-customer estate every Finding with base ≥ 50 pins to 100 and the worst item on the release leaves the top three. Inside a release the multiplier is strictly negative: no ordering gained, all ordering lost. | GOV-15 |
+| **R6** | **A node that fails announces nothing** | **P2, measured** | Both halves of one VM incident. A crash-looping node restarted **81 times** unnoticed because nothing surfaces "never became ready"; and a rotated DB password stays invisible because `pgx` keeps serving pre-rotation connections — every node reports healthy until they all fail together at the next restart. | F5 (`/healthz` + `/readyz` + a startup-failure signal) · DB-password rotation reconciliation |
+| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 (partially closed) · G-AI-5 · PLAN-5 · Δ3a component-embedding |
 | **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
 | **R3** | **Communication has one delivery channel, and it is a log line** | **P2** | The exactly-once / idempotent / outcome-recorded mechanics are done; what is missing is anywhere real to send an artifact. | concrete delivery channels (SMTP / Slack / webhook) |
 | **R4** | **Guarded deferrals** | **P3** | Correct today, with a TEST that fails the build the moment they stop being correct. They are on the list to be found, not to be done. | TRUST-1 (applicabilities uniformly Asserted) · TRUST-3 (no AI→Knowledge path exists yet) |
 | **R5** | **Consciously deferred, with the trade stated** | **P3** | Judged not worth doing now, in writing, so nobody re-decides them by reflex. | store fault-injection · feed-health-after-poll residual · Δ3a component-embedding design |
 
-**Re-derived 2026-08-07 (third time today, and the last).** The N1–N10 clusters are gone because the
-work in them is done: **31 open → 13**, and the four P0/P1 clusters closed entirely. What remains has
-no P0 and no P1 — the highest-priority open item is roadmap.
+**Re-derived 2026-08-07 (third time that day).** The N1–N10 clusters are gone because the work in them is
+done: **31 open → 13**, and the four P0/P1 clusters closed entirely.
 
-**The shape of the list changed, not just its length.** It used to be dominated by "we believe this
-works"; it is now dominated by "we have decided not to build this yet". Every remaining entry states
-either a capability nobody has asked for, a deferral with its trade written down, or a guard that
-fires when a deferral expires.
+**Re-counted 2026-08-10 against the checkboxes.** The 13 above was right on 2026-08-07 and then went stale
+in the ordinary way: the 2026-08-08/09 VM session filed four new items (GOV-15, F5, DB-password rotation,
+PLAN-5) and closed one (CORR-1, both steps implemented + verified live). **17 open**, plus three M5
+maturations nested under a completed parent that the clusters deliberately do not carry (Kafka transport
+swap · subject-aware scheduler · explicit integration DTOs — the contract is stable, only the mechanism
+evolves). Three counts have circulated — 13 (clusters), 18 (`PHASE3-STATUS.md`, before CORR-1 closed) and
+21 (raw `- [ ]`); they differ only by those two conventions, not by disagreement.
 
-**Suggested next move:** there is no defect to fix. The next work is a CHOICE — most likely **R1**
-(the AI harness: Δ4 evaluation loop, model escalation, budget enforcement) or **R3** (a real delivery
-channel, which is what makes a published artifact reach anyone). Both are features. Pick by what a
-user is waiting for, not by this list.
+**The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
+"we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
+R6 (silent failure) — both found by running the system rather than by reading it, which is the argument for
+the VM sessions in one line.
+
+**Suggested next move:** **R7** or **R6** before any feature. Both are correctness/operability, both were
+observed live, and both are small next to R1. After them the next work is a CHOICE — most likely **R1**
+(the AI harness: Δ4 evaluation loop, model escalation, the remaining budget scopes) or **R3** (a real
+delivery channel, which is what makes a published artifact reach anyone). Pick by what a user is waiting
+for, not by this list.
 
 **Filing rule going forward:** a new item names its cluster, and states whether its claim is **measured**
 or **read from code**. Three items in C1 were filed separately over three weeks describing one defect from
@@ -1974,9 +1985,16 @@ three angles, and two of them proposed fixes that would not have worked.
   category error, and it is the clamp that exposed it. **Where:** `domain.EffectivePriority`,
   `app.ReleasePosture`, `api/governance.openapi.yaml`.
 
-- [ ] **CORR-1 — a distro advisory's package list is recorded as a per-package vulnerability claim,
-  so a CPython flaw is attributed to PyYAML.** **P1 — DESIGN DECIDED 2026-08-08 in
-  [`EDR-CORRELATION-01`](engineering/decisions/EDR-CORRELATION-01.md); implementation open.**
+- [x] **CORR-1 — a distro advisory's package list is recorded as a per-package vulnerability claim,
+  so a CPython flaw is attributed to PyYAML.** **✅ CLOSED — both steps implemented and verified live
+  2026-08-09** ([`EDR-CORRELATION-01`](engineering/decisions/EDR-CORRELATION-01.md), design decided
+  2026-08-08). Step 1 (module-stream grouping, D8.1) landed 2026-08-08; step 2 (carrier attribution —
+  `claim_class` ∈ `carrier` / `scope` / `unknown`, with **unknown treated as `carrier` everywhere**, plus
+  D5a re-classification when attribution arrives late) landed 2026-08-09. **The narrative below is kept
+  verbatim as the reasoning of record** — the measurement that started it, the two candidate readings, and
+  the recommendation — because it is why the fix took the shape it did. Read the STEP 1 / STEP 2 markers
+  inside it for what actually shipped; the "Recommendation" and "Blast radius if left" passages are
+  historical, not open work.
 
   **Title corrected.** This entry first said "becomes one Finding PER PACKAGE". That was wrong. The
   Finding count is RIGHT — 120 Faultlines, 120 Findings, one per CVE, and a release running the

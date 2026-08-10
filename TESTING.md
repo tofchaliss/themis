@@ -167,7 +167,15 @@ recall@1/@3 + MRR + embed latency, so you pick the best `THEMIS_INTELLIGENCE_EMB
 
 ```sh
 THEMIS_EMBED_MODELS=nomic-embed-text,mxbai-embed-large make e2e-embed
+
+# point it at a non-default embedding server (default http://localhost:11434):
+THEMIS_EMBED_URL=http://ollama-box:11434 THEMIS_EMBED_MODELS=nomic-embed-text make e2e-embed
 ```
+
+**Run 2026-08-05 on the VM Ollama:** `nomic-embed-text` with the `components+severity` composition scored
+recall@1 = 1.00, MRR = 1.00 at ~46 ms. Adding the CVE id was neutral; adding the description **hurt**
+(recall@1 = 0.83) — a longer text is not a better embedding when the discriminating signal is the component
+set. No model change was needed; detail in `docs/engineering/RAG-SESSION-2-SPIKE.md` §4.
 
 ### Other services (per-context APIs)
 

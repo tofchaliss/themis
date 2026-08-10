@@ -456,7 +456,8 @@ ceiling enforced; `evidence_trust` exposed on proposals; and `scripts/vm-verify.
 read-only report replacing the five or six hand-written one-liners deployment verification used to
 take.
 
-**18 items open** in `docs/BACKLOG.md`; no P0. The highest-value open work is the AI harness (2),
+**17 items open** in `docs/BACKLOG.md` (was 18 here; CORR-1 closed once step 2 landed — recounted in the
+2026-08-10 doc/code parity pass below); no P0. The highest-value open work is the AI harness (R1),
 then F5 (a node that cannot start is indistinguishable from a healthy one) and F1 auth — which is
 **built but never enabled** on this deployment.
 
@@ -472,6 +473,38 @@ than the evaluator that consumes it**, which turns the evaluator's *failure* int
 **RANGE-PARSE-1** (P1: an unparseable affected range read as "provably not affected" and the shipped
 policy auto-accepted it), the CVSS v2 vector recogniser accepting any prefix-less string, and the plan
 prompt inviting citations the grounding gate refused. See `EDR-TRUST-01` T5 and `docs/BACKLOG.md`.
+
+## Doc/code parity pass — 2026-08-10
+
+Every mechanically checkable claim in the docs was diffed against the code. **The system descriptions were
+accurate; the drift was all in tracking tables.** Verified correct and left alone: the six port defaults,
+the migration versions (registry 2 · evidence 2 · knowledge 5 · governance 10 · communication 4, up/down
+23/23), the `make check` / `check-ci` composition, the coverage tiers, every `make` target and every test
+name cited anywhere in the docs, all of `STACK.md`'s stack against `go.mod`, and — the strong one —
+**all 40 generated handler operations against all six OpenAPI specs**. `go build ./...` and
+`go test ./tests/architecture` both green, so the no-cross-context-imports guarantee still holds.
+
+Eleven discrepancies were corrected: `STACK.md` credited Evidence with JSON-schema validation it does not
+do (its trust gate is `json.Valid` only — the gap PARITY-GAP **E1** already tracked, so two "read before
+you implement" docs disagreed) and omitted `golang.org/x/crypto`; **B6** was refuted by one line
+(`trust_sources.go` calls `feed.NewRegistry()`) and is now closed; **A6** narrowed to `related`-only since
+`upstream` landed; **F2**'s progress row implied it shipped when only the verifier exists and no route
+mounts it; `INSTALLATION.md` still warned about the pre-2026-08-07 Knowledge port default; `CONVENTIONS.md`
+R1 named four of six nodes; `API.md` was missing six operations (the whole estate/blast-radius group, the
+raw-document seam, `GET /feeds`); **CORR-1** was still checkbox-open with its own body recording both steps
+implemented; and the three circulating open-counts were reconciled to **17**.
+
+**The one finding NOT fixed here, because it is code:** `scripts/gf-upload-sbom.sh` sends no `X-API-Key`
+while `release-posture.sh`, `list-open-vulns.sh` and `vm-verify.sh` all do — so following
+`INSTALLATION.md` §4a (enable auth) and then §5 (drive an SBOM) in order yields a 401. Its header comment
+still asserts "the greenfield services are unauthenticated (dev)".
+
+**The pattern worth carrying forward:** prose stayed current, tables rotted. A prose update is one edit; a
+table update means finding the right row among forty. Two of these classes are a shell script away from
+never recurring — a spec-vs-`API.md` operationId diff, and an "every `THEMIS_*` in code appears in
+`deploy/node.env.example`" check. The second one, run once, also found that
+**`THEMIS_BUS_DATABASE_DSN` — the cross-context switch — was referenced by `node.env.example` as
+"(shared, above)" but defined nowhere in it.**
 
 ## Key file pointers
 

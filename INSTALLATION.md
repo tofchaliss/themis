@@ -202,7 +202,8 @@ THEMIS_EVIDENCE_MIGRATE=1 THEMIS_BUS_MIGRATE=1 THEMIS_EVIDENCE_ADDR=:8081 \
   ./bin/evidence > logs/evidence.log 2>&1 &
 
 # Knowledge — correlates the SBOM's components against CVEs (reads Evidence inventory + OSV).
-# NOTE the explicit :8085 — the code default :8082 collides with Registry.
+# :8085 is the code default since 2026-08-07 (it used to default to :8082 and collide with Registry);
+# it stays spelled out here so the runbook reads the same as the systemd units and vm-verify.sh.
 THEMIS_DATABASE_DSN="$PGBASE/knowledge?sslmode=disable" \
 THEMIS_EVIDENCE_URL=http://localhost:8081 \
 THEMIS_KNOWLEDGE_MIGRATE=1 THEMIS_KNOWLEDGE_ADDR=:8085 \

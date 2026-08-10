@@ -68,13 +68,15 @@ coverage pulls in the integration tests.
 its tag is set, so it rots silently.** Found 2026-08-07: `llm_e2e_test.go` had not compiled since the
 T10 refactor renamed the read seam — the repository's only real-model test was dead code for days, and
 nothing noticed because no gate ever set `-tags=llm`. It is type-check only (no execution), and it
-caught two more stale tagged callers within the hour. Every OpenSpec `tasks.md` group ends by making this green. `make check-ci` is the
+caught two more stale tagged callers within the hour. Every OpenSpec `tasks.md` group ends by making this
+green. `make check-ci` is the
 same gate but swaps `coverage` for `coverage-greenfield` (go-forward tree only); it — not `make check` — is
 what `.github/workflows/{pr,main}.yml` enforce, because the frozen v0.3.x legacy integration tests are green
 only on macOS's coarse clock.
 
 `make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives
-`recommend_position` **and `plan_remediation`** against a real OpenAI-compatible endpoint and needs `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
+`recommend_position` **and `plan_remediation`** against a real OpenAI-compatible endpoint and needs
+`THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
 `THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
 bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
 
@@ -244,7 +246,8 @@ Go 1.25 · PostgreSQL via `pgx/v5` · `golang-migrate/v4` · `chi/v5` · `oapi-c
 `santhosh-tekuri/jsonschema/v6` · OpenTelemetry + `zap` + `prometheus/client_golang` · std-lib `testing` +
 `pgregory.net/rapid` (property) + `fergusstrange/embedded-postgres` (integration). No ORM, no heavy web
 framework, **no external broker** — event delivery is a Postgres transactional outbox + relay draining into a
-dedicated `bus` database (`internal/platform/eventbus`); a broker can slot behind the same event envelope later. Standards-only formats: CycloneDX/SPDX in; CycloneDX-VEX /
+dedicated `bus` database (`internal/platform/eventbus`); a broker can slot behind the same event envelope
+later. Standards-only formats: CycloneDX/SPDX in; CycloneDX-VEX /
 OpenVEX / CSAF out.
 
 ## Key invariants
