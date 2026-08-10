@@ -177,6 +177,37 @@ recall@1 = 1.00, MRR = 1.00 at ~46 ms. Adding the CVE id was neutral; adding the
 (recall@1 = 0.83) — a longer text is not a better embedding when the discriminating signal is the component
 set. No model change was needed; detail in `docs/engineering/RAG-SESSION-2-SPIKE.md` §4.
 
+#### Precedent without a model — `GET /findings/{id}/similar`
+
+The retrieval half of Δ3a, served directly to a human. **No model runs**, so this is the fastest way to
+tell whether the semantic index is working — and it isolates a retrieval problem from a generation one,
+which a `204` from `recommend_position` cannot.
+
+```sh
+# what have we already decided that looks like this Finding?
+curl -s "localhost:8086/api/v1/findings/$FID/similar?k=5" | jq .
+
+# widen to the subject's own release ("what else did we decide here?")
+curl -s "localhost:8086/api/v1/findings/$FID/similar?include_same_release=true" | jq .
+```
+
+Reading the result:
+
+- `precedents: []` — the index is reachable and nothing resembles this Finding. Normal on a young
+  deployment: the index holds only decisions that have actually been made.
+- **`score: 0`** — an exact-CVE match, found by lookup rather than similarity. It is not "least similar";
+  it means the semantic index returned nothing and the fallback answered.
+- **`source_cve` differing from the subject's CVE is the point**, not a bug. Matching across CVEs on a
+  shared component is what RC-1 exists to do.
+- **Contradictory stances in one result set** are informative here and are also the exact condition under
+  which `recommend_position` returns `204 insufficient` — the model declines rather than guessing between
+  two of your own past decisions. Seeing both is how you confirm that is what happened.
+- `404` — either no such Finding, or this node has no retrieval plane (no `THEMIS_DATABASE_DSN` on the
+  Intelligence node). A node that cannot look says so instead of returning an empty list.
+
+To prove the seam is shared, invoke `recommend_position` on the same Finding: its `precedents_used` count
+must equal the number of items this endpoint returns.
+
 ### Other services (per-context APIs)
 
 Each context is testable in isolation via its own API ([API.md](API.md)) — e.g. register a Release

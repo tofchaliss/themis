@@ -63,7 +63,12 @@ This decision exists to make **Use Case #4 — Vulnerability Validation / Triage
 never-before-seen CVE gets a `recommend_position` grounded in semantically similar **past** enterprise
 decisions, citing them (advisory; human decides). The demo **is** the Δ3a acceptance test.
 - **#4 (primary demo):** precedent-grounded triage recommendation.
-- **#5 (stretch):** "findings similar to this one" — same retrieval primitive.
+- **#5 (stretch):** "findings similar to this one" — same retrieval primitive. **DELIVERED 2026-08-10** as
+  `GET /findings/{id}/similar`, and the evidence since promoted it from stretch to the *lead* use case: the
+  primitive scored recall@1 = 1.00 (R5), and its one known weakness argues **for** the human-facing form.
+  Contradictory precedent makes `recommend_position` decline; for an engineer, "we ruled this two ways on
+  two releases" is the most useful thing on the page. Serving it needs no model, so it costs no tokens, has
+  no budget ceiling, no `204` taxonomy and nothing to hallucinate.
 - **#6 / #9 / #15:** foundation only; need later deltas (Δ4 autonomy/LLMOps or a Q&A capability).
 
 ## 5. Open items / caveats before this is final

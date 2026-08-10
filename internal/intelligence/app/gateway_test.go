@@ -327,7 +327,9 @@ func gatewayWithPrecedent(t *testing.T, prompt PromptRenderer, prec PrecedentRea
 	proj := groundedProjection()
 	g, err := NewGateway(GatewayConfig{
 		Registry: domain.DefaultRegistry(), Projection: proj,
-		Precedent: prec, Prompt: prompt, Engines: engines,
+		// No embedder/index: the exact-CVE fallback alone, which is what these tests cover.
+		Precedents: NewPrecedentService(nil, nil, prec, 0),
+		Prompt:     prompt, Engines: engines,
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -368,29 +370,49 @@ func TestInvokePrecedentErrorDegrades(t *testing.T) {
 
 // --- Δ3a Knowledge step: semantic precedent + exact-CVE fallback -------------
 
-// fakeKnowledgeEngine is a stub EngineKnowledge returning canned semantic precedents (or err).
-type fakeKnowledgeEngine struct {
+// fakeSemantic stands in for the embedder + vector index behind a PrecedentService: it returns
+// canned semantic precedents, or fails the embed to exercise the degrade path. `calls` counts
+// index searches, so a test can still assert the retrieval ran exactly once.
+type fakeSemantic struct {
 	precedents []domain.PrecedentPosition
-	err        error
+	embedErr   error
 	calls      int
 }
 
-func (e *fakeKnowledgeEngine) Kind() domain.EngineKind { return domain.EngineKnowledge }
-
-func (e *fakeKnowledgeEngine) Execute(_ context.Context, _ ExecInput) (EngineResult, error) {
-	e.calls++
-	if e.err != nil {
-		return EngineResult{}, e.err
+func (f *fakeSemantic) Embed(context.Context, string) ([]float32, error) {
+	if f.embedErr != nil {
+		return nil, f.embedErr
 	}
-	return EngineResult{Precedents: e.precedents}, nil
+	return []float32{1, 0}, nil
 }
 
-func gatewayRuleKnowledgeLLM(t *testing.T, prompt PromptRenderer, prec PrecedentReader, know Engine, llm Engine) *Gateway {
+func (f *fakeSemantic) Model() string { return "fake" }
+
+func (f *fakeSemantic) Search(_ []float32, _ int, _ string) []domain.PrecedentPosition {
+	f.calls++
+	return f.precedents
+}
+
+// knowledgeGateway builds a Gateway whose Knowledge step is served by a real PrecedentService
+// over the fakes — the same service the read API uses, so these tests cover both consumers'
+// retrieval behaviour rather than a stub of it.
+// The projection MUST carry components and severity: they are what domain.SubjectText embeds,
+// and a subject that composes to "" is correctly skipped before the embedder is called. The
+// previous stub-engine version of these tests passed without them, because a stub above the
+// rule cannot exercise the rule.
+func knowledgeGateway(t *testing.T, prompt PromptRenderer, sem *fakeSemantic, prec PrecedentReader, llm Engine) *Gateway {
 	t.Helper()
-	proj := groundedProjection()
+	proj := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{
+			ID: "F1", FaultlineID: "FL1", ReleaseID: "R1",
+			Components: []string{"pkg:golang/openssl"},
+		},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", Severity: "high"},
+	}}
 	g, err := NewGateway(GatewayConfig{
 		Registry: domain.DefaultRegistry(), Projection: proj,
-		Precedent: prec, Prompt: prompt, Engines: []Engine{know, llm},
+		Precedents: NewPrecedentService(sem, sem, prec, 5),
+		Prompt:     prompt, Engines: []Engine{llm},
 	})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -399,19 +421,19 @@ func gatewayRuleKnowledgeLLM(t *testing.T, prompt PromptRenderer, prec Precedent
 }
 
 func TestKnowledgeStepFillsSemanticPrecedents(t *testing.T) {
-	know := &fakeKnowledgeEngine{precedents: []domain.PrecedentPosition{
+	know := &fakeSemantic{precedents: []domain.PrecedentPosition{
 		{ReleaseID: "R2", SourceCVE: "CVE-2", Component: "pkg:golang/openssl", Stance: "not_affected", Rationale: "unreachable", Score: 0.91},
 		{ReleaseID: "R3", SourceCVE: "CVE-3", Stance: "affected", Rationale: "reachable", Score: 0.77},
 	}}
 	cp := &capturePrompt{}
-	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := knowledgeGateway(t, cp, know, nil, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
 	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Fatalf("outcome = %+v, want produced", oc)
 	}
 	if know.calls != 1 {
-		t.Errorf("knowledge engine calls = %d, want 1", know.calls)
+		t.Errorf("index searches = %d, want 1", know.calls)
 	}
 	if oc.PrecedentsUsed != 2 {
 		t.Errorf("PrecedentsUsed = %d, want 2 (provenance)", oc.PrecedentsUsed)
@@ -422,10 +444,10 @@ func TestKnowledgeStepFillsSemanticPrecedents(t *testing.T) {
 }
 
 func TestKnowledgeStepPreemptsExactCVEFallback(t *testing.T) {
-	know := &fakeKnowledgeEngine{precedents: []domain.PrecedentPosition{{ReleaseID: "R2", SourceCVE: "CVE-2", Stance: "not_affected", Score: 0.9}}}
+	know := &fakeSemantic{precedents: []domain.PrecedentPosition{{ReleaseID: "R2", SourceCVE: "CVE-2", Stance: "not_affected", Score: 0.9}}}
 	prec := &fakePrecedent{positions: []domain.PrecedentPosition{{ReleaseID: "R9", Stance: "affected"}}}
 	cp := &capturePrompt{}
-	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := knowledgeGateway(t, cp, know, prec, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
 	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
@@ -440,10 +462,10 @@ func TestKnowledgeStepPreemptsExactCVEFallback(t *testing.T) {
 }
 
 func TestKnowledgeEmptyFallsBackToExactCVE(t *testing.T) {
-	know := &fakeKnowledgeEngine{precedents: nil} // cold / incomplete index
+	know := &fakeSemantic{precedents: nil} // cold / incomplete index
 	prec := &fakePrecedent{positions: []domain.PrecedentPosition{{ReleaseID: "R9", Stance: "affected", Rationale: "same cve elsewhere"}}}
 	cp := &capturePrompt{}
-	g := gatewayRuleKnowledgeLLM(t, cp, prec, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := knowledgeGateway(t, cp, know, prec, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
 	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
@@ -461,16 +483,17 @@ func TestKnowledgeEmptyFallsBackToExactCVE(t *testing.T) {
 }
 
 func TestKnowledgeStepErrorDegrades(t *testing.T) {
-	know := &fakeKnowledgeEngine{err: errors.New("embedder down")}
+	know := &fakeSemantic{embedErr: errors.New("embedder down")}
 	cp := &capturePrompt{}
-	g := gatewayRuleKnowledgeLLM(t, cp, nil, know, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	g := knowledgeGateway(t, cp, know, nil, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
 
 	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
 	if !oc.Produced {
 		t.Errorf("a Knowledge-engine failure must degrade, not block: %+v", oc)
 	}
-	if know.calls != 1 {
-		t.Errorf("knowledge calls = %d, want 1", know.calls)
+	// The embed failed, so the index is never searched — the degrade happens as early as it can.
+	if know.calls != 0 {
+		t.Errorf("index searches = %d, want 0 (embed failed first)", know.calls)
 	}
 	if len(cp.got.Precedents) != 0 || oc.PrecedentsUsed != 0 {
 		t.Errorf("expected no precedent on knowledge error, got %+v / used=%d", cp.got.Precedents, oc.PrecedentsUsed)

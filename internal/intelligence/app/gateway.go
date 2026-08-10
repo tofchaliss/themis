@@ -101,12 +101,15 @@ func (g *Gateway) redact(s string) string {
 // capability's execution plan, validates, and returns an advisory Proposal — or a
 // first-class "no proposal" Outcome. It owns no truth and writes nothing (D1).
 type Gateway struct {
-	registry        *domain.Registry
-	validators      map[string]*domain.Validator
-	projection      ProjectionReader
-	precedent       PrecedentReader // optional (nil = no precedent grounding)
-	authorizer      Authorizer      // optional (nil = allow-all)
-	redactor        Redactor        // optional (nil = no redaction)
+	registry   *domain.Registry
+	validators map[string]*domain.Validator
+	projection ProjectionReader
+	// precedents is the shared retrieval seam (Δ3a). The read API serves engineers from this
+	// same service, so a human and the model see one retrieval result. Optional: nil = no
+	// precedent grounding, which is the supported stateless-Gateway deployment.
+	precedents      *PrecedentService
+	authorizer      Authorizer // optional (nil = allow-all)
+	redactor        Redactor   // optional (nil = no redaction)
 	prompt          PromptRenderer
 	dispatcher      *Dispatcher
 	maxPromptBytes  int
@@ -120,9 +123,12 @@ type Gateway struct {
 type GatewayConfig struct {
 	Registry   *domain.Registry
 	Projection ProjectionReader
-	Precedent  PrecedentReader // optional richer grounding (Δ2 C6); nil disables it
-	Authorizer Authorizer      // optional pre-invocation authz (Δ2 C7); nil = allow-all
-	Redactor   Redactor        // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
+	// Precedents is the shared retrieval seam — build it once with NewPrecedentService and pass
+	// the SAME instance to the read handler, so the model and the engineer cannot be served
+	// different answers to "what resembles this?". nil disables precedent grounding.
+	Precedents *PrecedentService
+	Authorizer Authorizer // optional pre-invocation authz (Δ2 C7); nil = allow-all
+	Redactor   Redactor   // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
 	// BudgetTokens / BudgetWindow enforce D4's per-capability spend ceiling. Both must be > 0 to
 	// enforce anything; unset = unlimited, which is today's behaviour and the safe default —
 	// a budget switched on by accident refuses recommendations, and a refusal is indistinguishable
@@ -164,7 +170,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		registry:        cfg.Registry,
 		validators:      validators,
 		projection:      cfg.Projection,
-		precedent:       cfg.Precedent,
+		precedents:      cfg.Precedents,
 		authorizer:      cfg.Authorizer,
 		redactor:        cfg.Redactor,
 		prompt:          cfg.Prompt,
@@ -254,15 +260,17 @@ func (g *Gateway) Invoke(
 	}
 
 	for _, step := range capb.Plan {
-		// Knowledge (retrieval) step (Δ3a): best-effort semantic precedent grounding. Unlike
-		// Rule/LLM, precedent is OPTIONAL — a missing or failing Knowledge engine degrades to no
-		// precedent and never blocks the recommendation, so it is handled before the generic
-		// dispatcher lookup (an unwired index is a graceful skip, not a fatal ProviderError).
+		// Knowledge (retrieval) step (Δ3a): best-effort precedent grounding, delegated whole to
+		// the PrecedentService — the same seam the read API serves engineers from, so the model
+		// and the human are shown the same retrieval result. Unlike Rule/LLM this step is
+		// OPTIONAL: an unwired service degrades to no precedent rather than failing the plan.
+		//
+		// The service owns BOTH sources and the order between them (semantic first, exact-CVE
+		// only when semantic found nothing). That rule used to live here, split across this
+		// branch and the LLM step below, where a second consumer could not reuse it.
 		if step.Engine == domain.EngineKnowledge {
-			if eng, ok := g.dispatcher.For(step.Engine); ok {
-				if res, kerr := eng.Execute(ctx, ExecInput{Context: ac}); kerr == nil && len(res.Precedents) > 0 {
-					ac.Precedents = res.Precedents
-				}
+			if g.precedents != nil {
+				ac.Precedents = g.precedents.Retrieve(ctx, QueryFromAssessment(ac.Projection))
 			}
 			continue
 		}
@@ -274,15 +282,13 @@ func (g *Gateway) Invoke(
 			return domain.Proposal{}, oc
 		}
 
-		// LLM step (the generative fallback). Semantic precedent from the Knowledge step already
-		// rides ac.Precedents; fall back to the Δ2 exact-CVE blast-radius pull ONLY when that
-		// found none (a cold or incomplete index) — so a rule short-circuit still costs no read,
-		// and a read failure degrades to no precedent, never blocks (C6).
-		if len(ac.Precedents) == 0 && g.precedent != nil {
-			if prec, prErr := g.precedent.GetPrecedents(ctx, ac.Finding().FaultlineID, ac.Finding().ReleaseID); prErr == nil {
-				ac.Precedents = prec
-			}
-		}
+		// LLM step (the generative fallback). Precedent — semantic AND the exact-CVE fallback —
+		// was settled by the Knowledge step above, so nothing is fetched here.
+		//
+		// The exact-CVE pull used to live at THIS line, which meant a capability with no
+		// Knowledge step in its plan still issued it: plan_remediation is Release-scoped, so
+		// ac.Finding() is the zero value and every invocation asked for the precedents of an
+		// empty Faultline id. A read whose result the capability has no use for.
 		oc.PrecedentsUsed = len(ac.Precedents)
 		// Render a prompt per step, run with a bounded schema retry, then business-validate.
 		prompt, perr := g.prompt.Render(capabilityID, ac)
