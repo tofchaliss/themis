@@ -12,10 +12,15 @@ import (
 // viewDTO is the persisted (jsonb) shape of the materialized enterprise view. CVSS is
 // split into score + vector because value.CVSS is not directly JSON-encodable.
 type viewDTO struct {
-	Severity       string   `json:"severity"`
-	CVSSScore      float64  `json:"cvss_score"`
-	CVSSVector     string   `json:"cvss_vector"`
-	SeveritySource string   `json:"severity_source"`
+	Severity       string  `json:"severity"`
+	CVSSScore      float64 `json:"cvss_score"`
+	CVSSVector     string  `json:"cvss_vector"`
+	SeveritySource string  `json:"severity_source"`
+	// Summary/SummarySource — additive and omitempty: a card written before this decodes to
+	// empty and gains its summary on the next fold (the NVD stale-sweep revisits every card),
+	// which correctly reports one view change.
+	Summary        string   `json:"summary,omitempty"`
+	SummarySource  string   `json:"summary_source,omitempty"`
 	AffectedRanges []string `json:"affected_ranges"`
 	// CarrierProducts — which product CARRIES the flaw (EDR-CORRELATION-01 D4). Additive and
 	// omitempty: a card written before this decodes to empty, which classifies every component
@@ -53,7 +58,8 @@ type applicabilityDTO struct {
 func marshalView(v domain.EnterpriseView) ([]byte, error) {
 	dto := viewDTO{
 		Severity: string(v.Severity), CVSSScore: v.CVSS.Score(), CVSSVector: v.CVSS.Vector(),
-		SeveritySource: v.SeveritySource, AffectedRanges: v.AffectedRanges,
+		SeveritySource: v.SeveritySource, Summary: v.Summary, SummarySource: v.SummarySource,
+		AffectedRanges:  v.AffectedRanges,
 		CarrierProducts: v.CarrierProducts,
 		Fixes:           fixesToDTO(v.Fixes), FixedVersions: v.FixedVersions,
 		EPSS: v.EPSS, KEV: v.KEV, ExploitPublic: v.ExploitPublic,
@@ -76,6 +82,8 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 	}
 	v := domain.EnterpriseView{
 		Severity: value.Severity(dto.Severity), CVSS: cvss, SeveritySource: dto.SeveritySource,
+		Summary:         dto.Summary,
+		SummarySource:   dto.SummarySource,
 		AffectedRanges:  dto.AffectedRanges,
 		CarrierProducts: dto.CarrierProducts,
 		Fixes:           fixesFromDTO(dto.Fixes, dto.FixedVersions),
@@ -94,6 +102,7 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 // proposalPayloadDTO is the persisted (jsonb) shape of a Proposal's kind-specific
 // payload (source/observed-at/kind live in their own columns).
 type proposalPayloadDTO struct {
+	Summary         string            `json:"summary,omitempty"`
 	Severity        string            `json:"severity,omitempty"`
 	CVSSScore       float64           `json:"cvss_score,omitempty"`
 	CVSSVector      string            `json:"cvss_vector,omitempty"`
@@ -116,6 +125,7 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 	switch p.Kind() {
 	case domain.KindVulnFacts:
 		f, _ := p.VulnFacts()
+		dto.Summary = f.Summary
 		dto.Severity = string(f.Severity)
 		dto.CVSSScore = f.CVSS.Score()
 		dto.CVSSVector = f.CVSS.Vector()
@@ -148,6 +158,7 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 			return domain.Proposal{}, err
 		}
 		return domain.NewVulnFactsProposal(source, observedAt, domain.VulnFacts{
+			Summary:  dto.Summary,
 			Severity: value.Severity(dto.Severity), CVSS: cvss, AffectedRanges: dto.AffectedRanges,
 			CarrierProducts: dto.CarrierProducts,
 			// A Proposal stored before KN-FIX-1 has only the flat list; decode it as unattributed

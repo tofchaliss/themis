@@ -110,6 +110,8 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		CvssScore:      f32ptr(v.CVSS.Score()),
 		CvssVector:     strptr(v.CVSS.Vector()),
 		SeveritySource: strptr(v.SeveritySource),
+		Summary:        strptr(v.Summary),
+		SummarySource:  strptr(v.SummarySource),
 		AffectedRanges: &ranges,
 		FixedVersions:  &fixes,
 		Fixes:          fixesOut(v.Fixes),

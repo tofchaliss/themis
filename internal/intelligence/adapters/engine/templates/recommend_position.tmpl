@@ -9,7 +9,8 @@ affected by a specific vulnerability, and explain why.
 {{range .Finding.Components}}  - {{.}}
 {{end}}
 ## Vulnerability enrichment (faultline {{.Faultline.ID}})
-- severity: {{.Faultline.Severity}}
+{{if .Faultline.Summary}}- what_it_is: {{.Faultline.Summary}}
+{{end}}- severity: {{.Faultline.Severity}}
 - cvss_score: {{.Faultline.CVSSScore}}
 - epss: {{.Faultline.EPSS}}
 - known_exploited (KEV): {{.Faultline.KEV}}

@@ -32,6 +32,21 @@ func (k ProposalKind) Valid() bool {
 // VulnFacts is a vuln-facts payload: a source's account of severity, score, affected
 // package/version ranges, and fix versions.
 type VulnFacts struct {
+	// Summary is the source's own short description of WHAT the vulnerability is — NVD's
+	// English description, OSV's summary. It is evidence like every other field here, and it
+	// exists because for the pipeline's first two months it was delivered by every feed and
+	// dropped at this door: no screen, no report and no AI prompt could say what a CVE was
+	// about, so a human had nothing to anchor a decision on and the model recommended
+	// positions on vulnerabilities whose nature was never captured.
+	//
+	// It is deliberately NOT AI-generated. A feed's sentence is asserted by an authority,
+	// stable, and citable; a generated one is inferred, differs per invocation, and would
+	// vanish on an AI-off deployment (D13). The AI may later EXPLAIN on top of this; it never
+	// substitutes for it.
+	//
+	// Bounded at ingestion (TruncateSummary) — AI-CTX-1 is what an unbounded text field does
+	// to a model's budget, and a description field is the classic unbounded text field.
+	Summary        string
 	Severity       value.Severity
 	CVSS           value.CVSS
 	AffectedRanges []string
@@ -126,8 +141,27 @@ type Proposal struct {
 func (f VulnFacts) sameAs(other VulnFacts) bool {
 	return f.Severity == other.Severity &&
 		f.CVSS == other.CVSS &&
+		f.Summary == other.Summary &&
 		slices.Equal(f.AffectedRanges, other.AffectedRanges) &&
 		slices.Equal(f.Fixes, other.Fixes)
+}
+
+// maxSummaryRunes bounds a stored summary. ~3 sentences of NVD prose; larger only means the
+// tail of a long advisory nobody reads in a table row — and every byte stored here later
+// rides a prompt.
+const maxSummaryRunes = 480
+
+// TruncateSummary normalizes a source description for storage: whitespace collapsed to
+// single spaces (feed descriptions arrive with markdown line wrapping) and length capped at
+// maxSummaryRunes with a visible ellipsis. One rule, owned by the domain, so every ACL
+// bounds identically — a cap that lives per-ACL drifts per-ACL.
+func TruncateSummary(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= maxSummaryRunes {
+		return s
+	}
+	return string(r[:maxSummaryRunes-1]) + "…"
 }
 
 func validSourceAndTime(source string, observedAt time.Time) error {
@@ -149,6 +183,7 @@ func NewVulnFactsProposal(source string, observedAt time.Time, facts VulnFacts) 
 		return Proposal{}, errors.New("proposal: invalid severity")
 	}
 	copyFacts := VulnFacts{
+		Summary:        facts.Summary,
 		Severity:       facts.Severity,
 		CVSS:           facts.CVSS,
 		AffectedRanges: append([]string(nil), facts.AffectedRanges...),

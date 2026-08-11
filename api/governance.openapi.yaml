@@ -426,6 +426,12 @@ components:
       properties:
         faultline_id: { type: string }
         cve: { type: string }
+        summary:
+          type: string
+          description: >-
+            The winning source's short account of WHAT the CVE is, carried from Knowledge's
+            reconciled view — so the human judging a proposal and the AI grounding on this
+            projection read the same sentence. Descriptive only; nothing decides on it.
         severity: { type: string }
         cvss_score: { type: number }
         epss: { type: number }

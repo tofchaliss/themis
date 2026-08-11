@@ -17,8 +17,12 @@ type FindingView struct {
 // enrichment (D5, decoded from Knowledge's FaultlineView/EnterpriseView JSON) — the
 // core risk signal grounding a recommendation.
 type FaultlineView struct {
-	ID            string
-	CVE           string
+	ID  string
+	CVE string
+	// Summary is Knowledge's reconciled short account of WHAT the CVE is — already bounded at
+	// ingestion, so it cannot blow the prompt budget (the AI-CTX-1 class). Grounding
+	// Verification does not anchor to it; it informs the model the way it informs a human.
+	Summary       string
 	Severity      string
 	CVSSScore     float64
 	EPSS          float64
