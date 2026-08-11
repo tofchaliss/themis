@@ -32,7 +32,18 @@ session at [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.
   `openspec validate` reporting "no deltas" is expected, and you archive with
   `openspec archive <name> --skip-specs -y`.
 - **Commit and push only when the user explicitly asks.** Do not commit, push, or open PRs on your own
-  initiative, even after a green `make check`.
+  initiative, even after a green `make check`. `gh pr create` and `gh pr merge` are on the **deny** list in
+  `.claude/settings.local.json`, beside `rm -rf /` and `git push --force` — that is the enforcement, and it
+  is deliberate. Removing it is itself an explicit ask, and it goes back afterwards.
+- **Merging a STACK: never `--delete-branch` the base.** Merge the base PR without it, retarget the child
+  PR, *then* delete. Deleting the base closes the child instead of retargeting it — and because this repo
+  **squash**-merges, the base's original commit is not an ancestor of `main` afterwards, so simply
+  repointing the child at `main` makes its diff double-count everything the base already landed.
+  Either behaviour alone is recoverable; together they lose the PR and poison the diff (done 2026-08-10 to
+  PR #91, recovered as #92). **To recover:** confirm the squash was content-identical
+  (`git diff <original-base-commit> <squash-commit>` must be empty — that is what makes the next step
+  conflict-free), branch fresh from the merged `main`, cherry-pick the child's commit onto it, and open a
+  new PR. Do not reach for `git push --force`; it is denied, and this path does not need it.
 - **The `.cursor/rules/*.mdc` files are `alwaysApply: true` but describe the frozen v0.3.x PoC** (the
   `usecase/adapter/infrastructure` layers, the three-layer data model, "treat as current intent"). For
   greenfield work they are superseded by this file, the ADRs/EDRs, `STACK.md`, and `CONVENTIONS.md` — do not
