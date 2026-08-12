@@ -57,6 +57,7 @@ type Knowledge struct {
 	Backfill *app.BackfillService         // nil when NVD enrichment is disabled
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
+	Alpine   *app.AlpineEnrichmentService // nil when the Alpine secdb feed is disabled
 	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
 	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 	// Reattribute re-asks the discovery feeds about components already in the estate, so cards
@@ -110,6 +111,18 @@ type RedHatConfig struct {
 	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
+// AlpineConfig configures the optional Alpine secdb feed (GUI-2, EDR-VEX-01 D7). When Enabled,
+// Wire builds the branch-DB client and an AlpineEnrichmentService on Knowledge.Alpine (nil when
+// disabled); the composition root schedules its Enrich. The secdb is not per-CVE addressable, so
+// the D5 bound is applied inside the client: whole branch DBs are fetched and only records
+// matching carded CVEs are kept. Branches must be configured — no machine-readable index exists.
+type AlpineConfig struct {
+	Enabled  bool
+	BaseURL  string       // "" → the client default (secdb.alpinelinux.org)
+	Branches []string     // secdb branches to sweep, e.g. ["v3.18", "v3.19"]
+	HTTP     *http.Client // optional; nil → http.DefaultClient
+}
+
 // VexfeedConfig configures the optional generic vendor CSAF-VEX feed (parity B4, EDR-VEX-01 D2).
 // When Enabled, Wire builds the multi-base per-CVE CSAF-VEX client and a VexEnrichmentService on
 // Knowledge.Vexfeed (nil when disabled); the composition root schedules its Enrich.
@@ -125,7 +138,7 @@ type VexfeedConfig struct {
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, vexfeed VexfeedConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, vexfeed VexfeedConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -174,6 +187,9 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	}
 	if redhat.Enabled {
 		kn.RedHat = app.NewRedHatEnrichmentService(feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP), st, fold)
+	}
+	if alpine.Enabled {
+		kn.Alpine = app.NewAlpineEnrichmentService(feed.NewAlpineClient(alpine.BaseURL, alpine.Branches, alpine.HTTP), st, fold)
 	}
 	if vexfeed.Enabled {
 		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)

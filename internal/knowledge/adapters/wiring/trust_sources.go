@@ -26,6 +26,10 @@ var trustBySource = map[string]value.TrustClass{
 	"nvd":       value.TrustObserved,
 	"epsskev":   value.TrustObserved, // the combined EPSS/KEV/ExploitDB sweep records under this one id
 	"exploitdb": value.TrustObserved,
+	// The Alpine secdb is a public per-branch record of fixed apk versions — re-fetching
+	// reproduces it, and unlike the Red Hat feed it carries no judgment statements (no
+	// not_affected, no severity), only fix bounds. Observed, not Asserted (EDR-VEX-01 D7).
+	"alpine": value.TrustObserved,
 
 	// Vendor statements about the vendor's own builds. Asserted is **not** a reliability
 	// judgment — Red Hat is entirely trustworthy and is also the sole authority on their

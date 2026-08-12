@@ -65,6 +65,11 @@ type config struct {
 	redhatURL          string        // THEMIS_REDHAT_URL — Red Hat Security Data API base URL (empty → the public Hydra default; no API key needed).
 	redhatPollInterval time.Duration // THEMIS_REDHAT_POLL_INTERVAL — Go duration between Red Hat sweeps (default 12h; falls back to 12h if unparseable).
 
+	alpineEnabled      bool          // THEMIS_ALPINE_ENABLED=1 — enable the scheduled Alpine secdb feed (branch-DB fetch, fixed apk version bounds folded onto already-carded CVEs; EDR-VEX-01 D7; default off).
+	alpineURL          string        // THEMIS_ALPINE_URL — Alpine secdb base URL (empty → the public secdb.alpinelinux.org default).
+	alpineBranches     []string      // THEMIS_ALPINE_BRANCHES — comma-separated secdb branches to sweep (e.g. v3.20,v3.21). A branch absent upstream 404s harmlessly, so the default over-covers; set it to the branches your estate actually ships.
+	alpinePollInterval time.Duration // THEMIS_ALPINE_POLL_INTERVAL — Go duration between Alpine sweeps (default 12h; falls back to 12h if unparseable).
+
 	vexfeedEnabled      bool          // THEMIS_VEXFEED_ENABLED=1 — enable the generic CSAF-VEX vendor feed (per-CVE not_affected applicability on already-carded CVEs; default off).
 	vexfeedURLs         []string      // THEMIS_VEXFEED_URLS — comma-separated CSAF-VEX directory base URLs (per-CVE files at /<year>/cve-<id>.json).
 	vexfeedPollInterval time.Duration // THEMIS_VEXFEED_POLL_INTERVAL — Go duration between CSAF-VEX sweeps (default 12h; falls back to 12h if unparseable).
@@ -105,6 +110,11 @@ func loadConfig() config {
 		redhatEnabled:      os.Getenv("THEMIS_REDHAT_ENABLED") == "1",
 		redhatURL:          os.Getenv("THEMIS_REDHAT_URL"),
 		redhatPollInterval: parseDurationDefault(os.Getenv("THEMIS_REDHAT_POLL_INTERVAL"), 12*time.Hour),
+
+		alpineEnabled:      os.Getenv("THEMIS_ALPINE_ENABLED") == "1",
+		alpineURL:          os.Getenv("THEMIS_ALPINE_URL"),
+		alpineBranches:     splitCSV(envDefault("THEMIS_ALPINE_BRANCHES", "v3.18,v3.19,v3.20,v3.21,v3.22")),
+		alpinePollInterval: parseDurationDefault(os.Getenv("THEMIS_ALPINE_POLL_INTERVAL"), 12*time.Hour),
 
 		vexfeedEnabled:      os.Getenv("THEMIS_VEXFEED_ENABLED") == "1",
 		vexfeedURLs:         splitCSV(os.Getenv("THEMIS_VEXFEED_URLS")),
@@ -176,6 +186,12 @@ func main() {
 		Enabled: cfg.redhatEnabled,
 		BaseURL: cfg.redhatURL,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
+	}, wiring.AlpineConfig{
+		Enabled:  cfg.alpineEnabled,
+		BaseURL:  cfg.alpineURL,
+		Branches: cfg.alpineBranches,
+		// 60s, not 30s: a sweep fetches whole branch DBs (a few MB each), not one small per-CVE doc.
+		HTTP: &http.Client{Timeout: 60 * time.Second},
 	}, wiring.VexfeedConfig{
 		Enabled:  cfg.vexfeedEnabled,
 		BaseURLs: cfg.vexfeedURLs,
@@ -211,6 +227,15 @@ func main() {
 	if kn.RedHat != nil {
 		go redhatLoop(kn.RedHat, kn.Health, cfg.redhatPollInterval, logger.Component("redhat"))
 		logger.Info("red hat vendor feed enabled", observability.String("interval", cfg.redhatPollInterval.String()))
+	}
+
+	// Scheduled Alpine secdb feed (D5, EDR-VEX-01 D7): folds fixed apk version bounds onto
+	// already-carded CVEs — the one distro that had correlation but no vendor fix data (GUI-2).
+	// Off unless THEMIS_ALPINE_ENABLED=1.
+	if kn.Alpine != nil {
+		go alpineLoop(kn.Alpine, kn.Health, cfg.alpinePollInterval, logger.Component("alpine"))
+		logger.Info("alpine secdb feed enabled",
+			observability.Int("branches", len(cfg.alpineBranches)), observability.String("interval", cfg.alpinePollInterval.String()))
 	}
 
 	// Scheduled generic CSAF-VEX vendor feed (D5, parity B4): folds not_affected applicability from
@@ -387,6 +412,32 @@ func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, 
 		}
 	}
 	time.Sleep(25 * time.Second) // let the service settle; per-CVE fetches scale with the card set
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
+// alpineLoop runs the scheduled Alpine secdb feed: one sweep shortly after startup, then every
+// interval. It fetches the configured branch DBs and folds fixed apk version bounds onto
+// already-carded CVEs (the D5 filter is inside the client — uncarded records are discarded in
+// memory); a failure is logged and retried next tick (the sweep is idempotent).
+func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := al.Enrich(context.Background())
+		if err != nil {
+			logger.Error("alpine enrichment failed", observability.Err(err))
+			recordFeed(health, "alpine", err, logger)
+			return
+		}
+		recordFeed(health, "alpine", nil, logger)
+		if n > 0 {
+			logger.Info("alpine enrichment folded", observability.Int("folded", n))
+		}
+	}
+	time.Sleep(25 * time.Second) // let the service settle; branch DBs are fetched whole
 	sweep()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

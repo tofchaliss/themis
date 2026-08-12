@@ -95,6 +95,35 @@ Applicability Proposals are append-only and reconciled by source precedence like
 statement supersedes an earlier one deterministically. The VEX `justification` is carried through to the
 Governance rationale so a suppression is explainable (CON-0003 / CON-0016).
 
+### D7 — Alpine secdb: fetch the branch DB, fold only carded CVEs (GUI-2, added 2026-08-12)
+
+Alpine is the one distro in the estate with correlation but **no vendor fix data**: RHEL/Rocky/Alma get
+severity + `not_affected` + fixed NEVRAs from D2/Phase 3, Ubuntu/Debian ride OSV, Alpine had nothing. The
+authoritative source is the **Alpine secdb** (`https://secdb.alpinelinux.org/<branch>/{main,community}.json`)
+— the same DB Trivy/Grype/OSV themselves derive from. *Alternative considered:* rely on OSV's Alpine
+ecosystem records (already queried at correlation) — rejected because that path runs per component at
+**upload time only**, so a fix published *after* the SBOM landed never reaches the card; the gap GUI-2
+measured is precisely the enrichment half.
+
+The secdb is **not per-CVE addressable**, so the D5-compliant reading inverts the Red Hat direction:
+fetch the whole (small) per-branch DB, fold **only** the records whose CVE is already carded, and discard
+the rest in memory — enrichment of existing cards, never a mirror; nothing about an uncarded CVE is ever
+persisted. What it folds: one `alpine` **vuln-facts** Proposal per carded CVE carrying `Fixes`
+(package → fixed apk version, per branch) and `SeverityUnknown` — the secdb states no severity/CVSS, and
+the reconciled headline skips unknown severities, so the Proposal contributes fix bounds and nothing else.
+
+Classifications (each build-enforced): **trust = Observed** (a public record, reproducible on re-fetch;
+unlike Red Hat's feed it contains no judgment statements) · **tier = Tier-2 recommended** (the sole vendor
+fix source for apk estates) · precedence unchanged (fixes union across sources; `alpine` never contends
+for the severity headline). Branches come from `THEMIS_ALPINE_BRANCHES` (comma-separated) because no
+machine-readable branch index exists; a configured branch the server lacks is a normal gap, not an error.
+
+**Split out, exactly as Red Hat split PR2/PR3:** the **apk fixed-verdict** (a matched apk at/above its
+branch fix opens no Finding — correlation's gate, the analogue of `value.RPMFixedByStream`) needs an apk
+version comparator (`-r` revisions, `_alpha/_beta/_pre/_rc/_p` suffixes) with property tests, and ships
+separately. Bounds-first already puts the published fix version on the posture, which is most of GUI-2's
+measured value.
+
 ## Not in scope (explicit non-goals)
 
 VEX *export* fidelity (a separate serializer concern); cryptographic VEX signature verification (stub in both

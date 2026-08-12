@@ -51,7 +51,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	r := &Registry{acls: map[string]ACL{}}
 	for _, a := range []ACL{
-		nvdACL{}, osvACL{}, redhatACL{}, epssKevACL{}, exploitDBACL{}, vexACL{}, scannerACL{},
+		nvdACL{}, osvACL{}, redhatACL{}, alpineACL{}, epssKevACL{}, exploitDBACL{}, vexACL{}, scannerACL{},
 	} {
 		r.acls[a.Source()] = a
 	}

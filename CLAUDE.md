@@ -151,10 +151,13 @@ all six nodes.
   `THEMIS_NVD_ENABLED=1` (authoritative CVSS/severity via the modified-since watch),
   `THEMIS_EPSSKEV_ENABLED=1` (EPSS/KEV/ExploitDB signal sweep),
   `THEMIS_REDHAT_ENABLED=1` (per-CVE Red Hat vendor severity + `not_affected` applicability + RPM fixed-version
-  bounds; covers RHEL/Rocky/Alma — EDR-VEX-01 Phase 3), and
+  bounds; covers RHEL/Rocky/Alma — EDR-VEX-01 Phase 3),
+  `THEMIS_ALPINE_ENABLED=1` + `THEMIS_ALPINE_BRANCHES=<v3.20,…>` (Alpine secdb fixed apk version bounds; the
+  branch DB is fetched whole and uncarded records discarded in memory — EDR-VEX-01 D7), and
   `THEMIS_VEXFEED_ENABLED=1` + `THEMIS_VEXFEED_URLS=<csaf-base,…>` (generic per-CVE CSAF-VEX directories at
   `<base>/<year>/cve-<id>.json` — EDR-VEX-01 B4). Each feed also honors `_URL`/`_POLL_INTERVAL` (default 12h).
-  OSV distro + language correlation is always on.
+  OSV distro + language correlation is always on, and records per-distro feed-health rows
+  (`osv/alpine`, `osv/rocky`, … — informational tier, so a quiet distro never reads as degraded).
 
 ## Architecture
 
