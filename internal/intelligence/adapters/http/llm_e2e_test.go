@@ -171,6 +171,47 @@ func TestE2ERealLLM_PlanRemediation(t *testing.T) {
 	}
 }
 
+// TestE2ERealLLM_ExplainVulnerability drives the finding-scoped Information capability
+// (explain_vulnerability@v1, GUI-1) against a real model. Its specific risk is prose-shaped:
+// the prompt hands the model a stored SUMMARY as grounding text, and a model paraphrasing that
+// summary may invent identifier-shaped tokens along the way — which only the live pairing of
+// this prompt with this gate can exercise (the fake provider returns whatever the test author
+// already believed).
+func TestE2ERealLLM_ExplainVulnerability(t *testing.T) {
+	url, model := llmEndpoint(t)
+
+	gov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"finding":{"id":"F1","release_id":"R1","faultline_id":"FL1","cve":"CVE-2021-44228",
+			           "stage":"identified","components":[{"purl":"pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0"}]},
+			"knowledge":{"faultline_id":"FL1","cve":"CVE-2021-44228","severity":"critical","cvss_score":10,
+			             "epss":0.97,"kev":true,"exploit_public":true,
+			             "summary":"JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP endpoints.",
+			             "fixed_versions":["2.17.0"],"affected_ranges":["<2.17.0"]}}`))
+	}))
+	defer gov.Close()
+
+	h := NewHandler(realGateway(t, gov.URL, url, model), nil)
+	rr := invoke(t, h, "explain_vulnerability", `{"subject":{"type":"finding","ids":["F1"]}}`)
+	t.Logf("explain_vulnerability on %q @ %s → HTTP %d\n%s", model, url, rr.Code, rr.Body.String())
+
+	switch rr.Code {
+	case http.StatusOK:
+		body := rr.Body.String()
+		// An Information Response is NOT a Proposal: nothing on this path may reach Governance (T7).
+		if strings.Contains(body, `"recommendation"`) || strings.Contains(body, `"stance"`) {
+			t.Errorf("an Information Response must carry no proposal/stance; body=%s", body)
+		}
+		if !strings.Contains(body, `"information"`) {
+			t.Errorf("a 200 must carry the explanation text; body=%s", body)
+		}
+	case http.StatusNoContent:
+		assertNotAGroundingDisagreement(t, rr)
+	default:
+		t.Fatalf("unexpected status %d; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 // assertNotAGroundingDisagreement fails a 204 that was caused by the prompt and the grounding gate
 // disagreeing, while tolerating the outcomes that are genuinely fine.
 //
