@@ -1261,6 +1261,30 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [ ] **KN-FIX-3 — fix attribution is ecosystem- and stream-blind, and version normalization is
+  inconsistent.** **MED-HIGH, measured on the VM 2026-08-12** — the first live estate carrying
+  BOTH ecosystems' bounds on shared cards (the Alpine secdb feed, EDR-VEX-01 D7, landed 78
+  proposals via shared CVEs). One Rocky EL8 finding's drawer (CVE-2020-10543, component `perl`)
+  then attributed **four** fixes to the one package, three of them wrong for it:
+  `4:5.26.3-419.el8` (correct EL8 NEVRA) · **`5.30.3-r0` (an Alpine apk version on an rpm
+  component — the cross-ecosystem leak)** · `perl-4:5.16.3-299.el7_9` (an EL7 fix on an EL8
+  finding) · `perl-4:5.26.3-419.el8` (the SAME EL8 fix again, name-prefixed — two code paths
+  normalize NEVRA versions differently, so one fix renders twice).
+  **Root cause:** `FixesFor(package)` keys on the bare package name; `domain.FixedVersion`
+  carries no ecosystem and no stream, and nothing dedups across normalization variants.
+  **Why it matters beyond the drawer:** the same per-component selection populates
+  `FaultlineView.FixedVersions` — the AI grounding — so an apk version can ride into a Rocky
+  recommendation or plan as "the published fix": the AI-GROUND-1 failure class returning through
+  a new door.
+  **Fix shape (a domain-model change — design before code):** `FixedVersion` gains the source
+  ecosystem (the feed knows it: redhat=rpm, alpine=apk, NVD/OSV per record); `FixesFor` filters
+  by the asking component's ecosystem; NEVRA versions normalize through ONE path (name always
+  stripped); stream-scoping for display can reuse `RPMReleaseMajor`. Store codec + event schema
+  are additive-optional on v1.
+  **Interim operational note:** on an estate with no Alpine SBOMs the Alpine feed currently adds
+  only mis-attributable bounds — `THEMIS_ALPINE_ENABLED=0` is the honest setting there until
+  this lands or Alpine evidence exists. **Dep:** none. **Scope:** MEDIUM.
+
 - [x] **AI-TIMEOUT-1 — `THEMIS_LLM_TIMEOUT` was inert above 60s, so every slow model reported
   `provider_error`.** _(**Measured** on the VM 2026-08-07; **fixed** the same session.)_
   Three `recommend_position` calls aborted at **59.995s / 59.991s / 59.989s** with
