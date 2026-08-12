@@ -28,3 +28,7 @@
 
 # local tooling artifact (large, generated) — never versioned
 /scripts/oamp.json
+
+# local build strays
+/dashboard
+gui-example.jpeg
