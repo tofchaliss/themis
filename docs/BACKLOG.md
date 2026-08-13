@@ -685,6 +685,28 @@ under the 2026-08-07 re-derivation standard.
   embedded-Postgres integration tests; only error-path lines remain. The store tier is intentionally set to
   80% until this lands.
 
+- [ ] **KN-RECOR-1 — no post-upload re-discovery: a CVE published AFTER a release's last upload is
+  invisible until the next upload.** _(Surfaced in a Q&A walkthrough, 2026-08-13.)_ Discovery
+  (OSV always-on + NVD A2 when enabled) runs only at CORRELATION time — an upload-driven
+  snapshot. The enrichment sweeps are deliberately card-bounded (D5: enrich existing cards,
+  never mirror a feed), so they keep KNOWN CVEs fresh forever but can never card a new one.
+  Verified: every scheduled loop in `cmd/knowledge` (relay, reattribute, nvd-backfill, signals,
+  redhat, alpine, vexfeed, reader) is enrichment-shaped, and the reattribute sweep explicitly
+  refuses to become "an undeclared discovery pass". Consequence: a CI-driven estate (frequent
+  uploads) is fine; a static/appliance estate is blind to new CVEs between uploads — for a
+  monthly release cadence, up to a month.
+  **Mitigations that exist today:** the next SBOM upload (content-addressed — needs changed
+  bytes, which a new build has) or a scanner-report upload, both of which record matches.
+  **Fix shape (design-first — an EDR-KNOWLEDGE-01 addendum):** a bounded RE-DISCOVERY sweep in
+  the BackfillService mold — per distinct inventoried component, staleness-queued, capped per
+  run, reusing the existing `PackageVulnSource` fan-out and the correlation apply path so new
+  cards get MATCHES (a card without a match opens no Finding and is invisible in posture).
+  D5-compliant by construction: per-component queries against the estate, never a feed mirror.
+  Distinct from [[G-AI-1]] (on-demand gathering for CVEs the feeds have not ingested, AI-asked,
+  Δ4-gated) — this is scheduled, feed-known, and needs no AI. **Dep:** none. **Scope:** MEDIUM.
+  **Priority: MED** (HIGH for static estates; the current VM estate uploads rarely, so it is
+  live there).
+
 - [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.** _(Gap surfaced in the
   M4 Δ2 grill, 2026-07-24.)_ When `recommend_position` runs against a CVE our feeds have **not yet ingested**,
   there is no _Information_ to reason over — and without an affected range even the version-range step can't
