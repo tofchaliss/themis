@@ -98,7 +98,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 
 	var best headlineCandidate
 	rangeSet := map[string]struct{}{}
-	fixSet := map[FixedVersion]struct{}{}
+	fixSet := newFixFold()
 	carrierSet := map[string]struct{}{}
 	epssChosen := false
 	var epssTime time.Time
@@ -126,7 +126,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 				rangeSet[rng] = struct{}{}
 			}
 			for _, fx := range f.Fixes {
-				fixSet[fx] = struct{}{}
+				fixSet.add(fx)
 			}
 			// A UNION, like ranges and fixes: several sources may each name a carrier, and a CVE
 			// can genuinely affect more than one product. Union is also the fail-safe direction —
@@ -163,7 +163,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
 	view.CarrierProducts = sortedKeys(carrierSet)
-	view.Fixes = sortedFixes(fixSet)
+	view.Fixes = fixSet.sorted()
 	view.FixedVersions = flatVersions(view.Fixes)
 	view.Applicabilities = sortedApplicabilities(appSet)
 	return view
@@ -303,18 +303,25 @@ func equalApplicabilities(a, b []Applicability) bool {
 	return true
 }
 
-// FixesFor returns the fix versions attributed to a specific package.
+// FixesFor returns the fix versions attributed to a specific package, in a specific ecosystem.
 //
 // Only exactly-attributed fixes are returned: an unattributed one (Package "") is excluded, not
 // treated as a wildcard. That is the whole point — a decision about one component must rest on
 // evidence about THAT component, and "the source did not say which package" is not evidence
 // about any of them. Callers that want everything published take FixedVersions instead, and must
 // not decide with it.
-func (v EnterpriseView) FixesFor(pkg string) []string {
+//
+// A known ecosystem is a filter; an unknown one is not (EDR-VEX-01 D8). A fix whose ecosystem is
+// known and DIFFERENT from the asking component's is excluded — an Alpine apk bound is not a fix
+// for a Rocky rpm, however exactly the package names match (KN-FIX-3, measured). A fix whose
+// ecosystem is unknown still answers everything, the same fail-open direction as
+// ClaimUnknown → carrier: only positive evidence of mismatch excludes.
+func (v EnterpriseView) FixesFor(pkg, ecosystem string) []string {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
 		return nil
 	}
+	compEco := value.CanonicalEcosystem(ecosystem)
 	// Package-specific fixes come FIRST, module-stream rebuilds after (KN-MODULE-1). A modular
 	// advisory lists every RPM rebuilt in the stream, so a card can hold both a direct fix and a
 	// stream rebuild for the same package — and "upgrade to the direct fix" is the better
@@ -326,6 +333,9 @@ func (v EnterpriseView) FixesFor(pkg string) []string {
 		if !strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
 			continue
 		}
+		if f.Ecosystem != "" && compEco != "" && f.Ecosystem != compEco {
+			continue
+		}
 		if value.IsRPMModuleStream(f.Version) {
 			module = append(module, f.Version)
 			continue
@@ -335,16 +345,58 @@ func (v EnterpriseView) FixesFor(pkg string) []string {
 	return append(direct, module...)
 }
 
-// sortedFixes orders the reconciled fix set deterministically (package, then version), so the
-// same Proposals in any order yield byte-identical output.
-func sortedFixes(set map[FixedVersion]struct{}) []FixedVersion {
-	if len(set) == 0 {
+// fixFold accumulates the reconciled fix set. It is where the D8 single-normalization and the
+// ecosystem merge live, and BOTH must be order-independent (the D2 determinism guarantee):
+//
+//   - every rpm-class fix version is normalized through value.RPMEVR before keying, so the
+//     Red Hat form ("perl-4:5.26.3-419.el8") and the OSV form ("4:5.26.3-419.el8") of the same
+//     fix collapse to ONE entry instead of rendering twice;
+//   - the ecosystems contributed for one (package, version) are collected as a SET and resolved
+//     at the end: exactly one known ecosystem → that one; none or conflicting known ones → ""
+//     (unknown, which filters nothing — fail open). A pairwise merge would be order-dependent
+//     (merge(merge(rpm,apk),apk) ≠ merge(rpm,merge(apk,apk))); the set is not.
+type fixFold struct {
+	ecos map[FixedVersion]map[string]struct{} // keyed with Ecosystem zeroed; value = contributed ecosystems
+}
+
+func newFixFold() *fixFold {
+	return &fixFold{ecos: map[FixedVersion]map[string]struct{}{}}
+}
+
+func (ff *fixFold) add(f FixedVersion) {
+	eco := value.CanonicalEcosystem(f.Ecosystem)
+	if value.ClassifyEcosystem(eco) == value.VersionClassRPM {
+		// The ONE rpm normalization path (D8): name always stripped. Only an ecosystem-known rpm
+		// fix normalizes — a generic version must never have hyphen-segments taken from it.
+		f.Version = value.RPMEVR(f.Version)
+	}
+	key := FixedVersion{Package: f.Package, Version: f.Version}
+	if ff.ecos[key] == nil {
+		ff.ecos[key] = map[string]struct{}{}
+	}
+	if eco != "" {
+		ff.ecos[key][eco] = struct{}{}
+	}
+}
+
+// sorted resolves each entry's ecosystem set and orders the result deterministically (package,
+// version, ecosystem), so the same Proposals in any order yield byte-identical output.
+func (ff *fixFold) sorted() []FixedVersion {
+	if len(ff.ecos) == 0 {
 		return nil
 	}
-	out := make([]FixedVersion, 0, len(set))
-	for f := range set {
+	out := make([]FixedVersion, 0, len(ff.ecos))
+	for key, set := range ff.ecos {
+		f := key
+		if len(set) == 1 {
+			for eco := range set {
+				f.Ecosystem = eco
+			}
+		}
 		out = append(out, f)
 	}
+	// (package, version) is the fold key, so no two entries tie on both — an ecosystem tiebreak
+	// would be an unreachable branch (the equalFixes reasoning).
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Package != out[j].Package {
 			return out[i].Package < out[j].Package

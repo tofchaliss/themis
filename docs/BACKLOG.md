@@ -1261,8 +1261,22 @@ three angles, and two of them proposed fixes that would not have worked.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
-- [ ] **KN-FIX-3 — fix attribution is ecosystem- and stream-blind, and version normalization is
-  inconsistent.** **MED-HIGH, measured on the VM 2026-08-12** — the first live estate carrying
+- [x] **KN-FIX-3 — fix attribution is ecosystem- and stream-blind, and version normalization is
+  inconsistent.** ✅ **CLOSED 2026-08-13 (design: EDR-VEX-01 D8).** `FixedVersion` gained the
+  canonical `Ecosystem` (`value.CanonicalEcosystem` — feeds state it: redhat→rpm, alpine→apk,
+  OSV per record); a known ecosystem filters, an unknown one never does (fail-open, the
+  ClaimUnknown→carrier direction). ONE rpm normalization path: reconciliation runs every
+  rpm-class fix through `value.RPMEVR` before folding, so the Red Hat and OSV spellings collapse
+  — and because the view is recomputed from all Proposals on every fold, this heals persisted
+  cards. The append-only history heals via decode-time SOURCE stamping in the store codec
+  (redhat/alpine are single-ecosystem — provenance is evidence; osv/nvd deliberately not
+  stamped). Governance's `selectFixesFor` gained the same ecosystem check plus rpm EL-stream
+  display scoping (`RPMReleaseMajor`, fail-open) — excluded fixes join `UnattributedFixes`, so
+  "held but not yours" stays distinct from "no fix published". The fixed-VERDICT
+  (`RPMFixedByStream`) was never at risk and is untouched. The measured perl drawer is the
+  regression test at both layers (`TestReconcile_OneNEVRANormalizationAndEcosystemScoping`,
+  `TestGetFindingAssessment_ExcludesWrongEcosystemAndWrongStreamFixes`). GUI-2b is now unblocked.
+  _Original filing (measured on the VM 2026-08-12):_ — the first live estate carrying
   BOTH ecosystems' bounds on shared cards (the Alpine secdb feed, EDR-VEX-01 D7, landed 78
   proposals via shared CVEs). One Rocky EL8 finding's drawer (CVE-2020-10543, component `perl`)
   then attributed **four** fixes to the one package, three of them wrong for it:

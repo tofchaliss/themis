@@ -35,10 +35,13 @@ type FaultlineKnowledge struct {
 	RangeTrust value.TrustClass
 }
 
-// FixedVersion is a published fix version together with the package it was published for.
+// FixedVersion is a published fix version together with the package — and, when the source said,
+// the canonical ecosystem — it was published for. Ecosystem "" means "not stated" and never
+// excludes (only positive evidence of mismatch does — EDR-VEX-01 D8).
 type FixedVersion struct {
-	Package string
-	Version string
+	Package   string
+	Version   string
+	Ecosystem string
 }
 
 // FaultlineKnowledgeReader reads a Faultline's enrichment from Knowledge's read API. It is a
@@ -112,23 +115,61 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 // Shared by the read-time projection and the enrichment-time materialization, because two
 // implementations of "which fix is mine?" would eventually disagree, and the disagreement would
 // show up as a dashboard and a plan recommending different versions for the same component.
+//
+// The name match alone is not enough (KN-FIX-3, measured: a Rocky rpm `perl` Finding was offered
+// an Alpine apk version, an EL7 build, and its real fix side by side). A fix must also survive
+// two positive-evidence checks against the component it name-matched (fixAppliesTo); anything
+// excluded joins the UnattributedFixes count rather than silently vanishing.
 func selectFixesFor(fixes []FixedVersion, comps []domain.MatchedComponent) []FixedVersion {
 	if len(fixes) == 0 {
 		return nil
 	}
-	wanted := make(map[string]bool)
-	for _, c := range comps {
-		for _, key := range c.FixKeys() {
-			wanted[strings.ToLower(key)] = true
-		}
-	}
 	out := make([]FixedVersion, 0, len(fixes))
 	for _, f := range fixes {
-		if wanted[strings.ToLower(f.Package)] {
-			out = append(out, f)
+		for _, c := range comps {
+			if fixAppliesTo(f, c) {
+				out = append(out, f)
+				break
+			}
 		}
 	}
 	return out
+}
+
+// fixAppliesTo reports whether one published fix is honestly attributable to one component.
+// Every check excludes only on POSITIVE evidence of mismatch and fails open on absence
+// (EDR-VEX-01 D8) — the same direction as ClaimUnknown → carrier:
+//
+//  1. the fix's package must be one of the component's names (FixKeys);
+//  2. a KNOWN fix ecosystem must equal the component's canonical ecosystem — an apk bound is
+//     not a fix for an rpm, however exactly the names match;
+//  3. an rpm fix whose `.elN` major is known must share the installed build's — the EL7 backport
+//     is not what an EL8 host upgrades to. Display/grounding honesty only: the fixed-VERDICT
+//     (value.RPMFixedByStream) always enforced this and is untouched.
+func fixAppliesTo(f FixedVersion, c domain.MatchedComponent) bool {
+	nameOK := false
+	for _, key := range c.FixKeys() {
+		if strings.EqualFold(key, f.Package) {
+			nameOK = true
+			break
+		}
+	}
+	if !nameOK {
+		return false
+	}
+	fixEco := value.CanonicalEcosystem(f.Ecosystem)
+	if fixEco != "" {
+		if compEco := value.CanonicalEcosystem(c.Ecosystem); compEco != "" && compEco != fixEco {
+			return false
+		}
+		if fixEco == "rpm" {
+			fixMajor, instMajor := value.RPMReleaseMajor(f.Version), value.RPMReleaseMajor(c.Version)
+			if fixMajor != "" && instMajor != "" && fixMajor != instMajor {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func selectFixes(k FaultlineKnowledge, comps []domain.MatchedComponent) FaultlineKnowledge {

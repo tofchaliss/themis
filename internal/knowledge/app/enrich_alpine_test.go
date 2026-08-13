@@ -66,7 +66,7 @@ func TestAlpineEnrich_FoldsFixBoundsAndPassesTheKnownSetIn(t *testing.T) {
 	if !ok {
 		t.Fatal("expected CVE-2024-1 card")
 	}
-	if fixes := card.View().FixesFor("openssl"); len(fixes) != 1 || fixes[0] != "3.1.4-r5" {
+	if fixes := card.View().FixesFor("openssl", "apk"); len(fixes) != 1 || fixes[0] != "3.1.4-r5" {
 		t.Errorf("FixesFor(openssl) = %v, want the apk fix bound", fixes)
 	}
 	// The whole point of SeverityUnknown: the fix bound lands without contending for the

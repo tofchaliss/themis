@@ -153,7 +153,8 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 			// A Proposal stored before KN-FIX-1 has only the flat list; decode it as unattributed
 			// rather than dropping it. Unattributed fixes never satisfy a per-component verdict,
 			// so an old row degrades to "a fix exists" instead of to a wrong decision.
-			Fixes: fixesFromDTO(dto.Fixes, dto.FixedVersions),
+			// stampFixEcosystems then backfills a missing ecosystem from the source (D8).
+			Fixes: stampFixEcosystems(source, fixesFromDTO(dto.Fixes, dto.FixedVersions)),
 		})
 	case domain.KindExploitSignal:
 		return domain.NewExploitSignalProposal(source, observedAt, domain.ExploitSignal{EPSS: dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic})
@@ -164,10 +165,12 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 	}
 }
 
-// fixedVersionDTO persists a remediation with the package it applies to.
+// fixedVersionDTO persists a remediation with the package (and, since KN-FIX-3, the ecosystem)
+// it applies to. Ecosystem is additive-optional: a row written before it decodes to "".
 type fixedVersionDTO struct {
-	Package string `json:"package,omitempty"`
-	Version string `json:"version"`
+	Package   string `json:"package,omitempty"`
+	Version   string `json:"version"`
+	Ecosystem string `json:"ecosystem,omitempty"`
 }
 
 func fixesToDTO(fixes []domain.FixedVersion) []fixedVersionDTO {
@@ -176,7 +179,7 @@ func fixesToDTO(fixes []domain.FixedVersion) []fixedVersionDTO {
 	}
 	out := make([]fixedVersionDTO, 0, len(fixes))
 	for _, f := range fixes {
-		out = append(out, fixedVersionDTO{Package: f.Package, Version: f.Version})
+		out = append(out, fixedVersionDTO{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
 	}
 	return out
 }
@@ -189,7 +192,7 @@ func fixesFromDTO(fixes []fixedVersionDTO, legacy []string) []domain.FixedVersio
 	if len(fixes) > 0 {
 		out := make([]domain.FixedVersion, 0, len(fixes))
 		for _, f := range fixes {
-			out = append(out, domain.FixedVersion{Package: f.Package, Version: f.Version})
+			out = append(out, domain.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
 		}
 		return out
 	}
@@ -201,4 +204,32 @@ func fixesFromDTO(fixes []fixedVersionDTO, legacy []string) []domain.FixedVersio
 		out = append(out, domain.FixedVersion{Version: v})
 	}
 	return out
+}
+
+// sourceEcosystem is the decode-time healing table for the append-only history (EDR-VEX-01 D8).
+// Proposals are immutable, so a fix persisted before Ecosystem existed can never be edited to
+// carry one — but the SOURCE column was always stored, and these feeds each publish for exactly
+// one ecosystem, so the ecosystem is derivable from provenance alone. Interpretation at the
+// boundary, not mutation of the record: the stored bytes are untouched, and because the view is
+// recomputed from all Proposals on every fold, every live card heals on its next enrichment with
+// no migration. Multi-ecosystem sources (osv, nvd, scanners) are deliberately absent — for them
+// only the per-record field the ACL now writes is evidence.
+var sourceEcosystem = map[string]string{
+	"redhat": "rpm",
+	"alpine": "apk",
+}
+
+// stampFixEcosystems fills an EMPTY fix ecosystem from the proposal's source. A non-empty one is
+// never overwritten — what the record states beats what provenance implies.
+func stampFixEcosystems(source string, fixes []domain.FixedVersion) []domain.FixedVersion {
+	eco, ok := sourceEcosystem[source]
+	if !ok {
+		return fixes
+	}
+	for i := range fixes {
+		if fixes[i].Ecosystem == "" {
+			fixes[i].Ecosystem = eco
+		}
+	}
+	return fixes
 }

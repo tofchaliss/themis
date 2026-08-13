@@ -114,7 +114,7 @@ func (c *AlpineClient) ProposalsForKnown(ctx context.Context, known map[string]s
 						}
 						seen[key] = struct{}{}
 						fixesByCVE[cveID.String()] = append(fixesByCVE[cveID.String()],
-							domain.FixedVersion{Package: name, Version: fixVersion})
+							domain.FixedVersion{Package: name, Version: fixVersion, Ecosystem: "apk"})
 					}
 				}
 			}

@@ -50,7 +50,7 @@ func (a alpineACL) Translate(raw []byte) ([]Translated, error) {
 		// skips unknown — the Proposal contributes the fix bound and nothing else (EDR-VEX-01 D7).
 		p, perr := domain.NewVulnFactsProposal(a.Source(), at, domain.VulnFacts{
 			Severity: value.SeverityUnknown,
-			Fixes:    []domain.FixedVersion{{Package: pkg, Version: fixVersion}},
+			Fixes:    []domain.FixedVersion{{Package: pkg, Version: fixVersion, Ecosystem: "apk"}},
 		})
 		if perr != nil {
 			return nil, perr
