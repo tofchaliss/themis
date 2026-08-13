@@ -127,13 +127,15 @@ EOF
 
 # Dashboard: the GUI node (EDR-GUI-01 D10) — static SPA + same-origin proxy to the six
 # read APIs above; a view, no database of its own. The two commented lines are the
-# production posture: mint a read key for the proxy (authadmin create-key --name dashboard
-# --scopes read) and point the auth DSN at the shared auth DB so operators must sign in
+# production posture: mint an ADMIN key for the proxy (authadmin create-key --name dashboard
+# --scopes admin — it must be write-capable or the governed loop's accepts/publishes die at
+# the node edge; WHO may write is enforced per-operator at the dashboard's own gate, D11)
+# and point the auth DSN at the shared auth DB so operators must sign in
 # (their scope then decides what the GUI lets them do — read keys cannot decide). Remember
 # D3: beyond a firewalled network, front :8090 with a TLS-terminating proxy.
 write_env dashboard <<EOF
 THEMIS_DASHBOARD_ADDR=:8090
-# THEMIS_API_KEY=<mint with: authadmin create-key --name dashboard --scopes read>
+# THEMIS_API_KEY=<mint with: authadmin create-key --name dashboard --scopes admin>
 # THEMIS_AUTH_DATABASE_DSN=${BASE}/auth?sslmode=disable
 EOF
 

@@ -68,7 +68,11 @@ would be waste, and SSO is the v2 answer behind the D2 seam.
 ### D4 — Node credentials stay server-side (unchanged from the spike)
 
 The proxy injects `X-API-Key` from `THEMIS_API_KEY` toward the six nodes. Two keys exist on
-purpose: the operator's key states who is deciding; the node key states the dashboard may read.
+purpose: the operator's key states who is deciding; the node key states the dashboard may act.
+*(Clarified 2026-08-13, caught writing the deploy steps: the node key must be **write-capable**
+— the governed loop's accepts and publishes are forwarded under it, so a read-scoped node key
+would 403 every accept at the node edge. That is safe precisely because D11 enforces the
+OPERATOR'S scope at the proxy before the node key is ever attached.)*
 Per-operator pass-through (the operator's own key forwarded to the nodes, so node-side audit sees
 the human) is the v2 upgrade and only needs the proxy to swap which key it injects.
 

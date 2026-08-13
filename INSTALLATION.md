@@ -484,8 +484,10 @@ number on screen is fetched live). Run it beside the pipeline:
 ```sh
 # open edge (dev / firewalled trial) — the node logs AUTH DISABLED:
 ./bin/dashboard &
-# with node-side auth enabled (4a), give the proxy a READ key so it may fetch:
-#   THEMIS_API_KEY=<key minted with: authadmin create-key --name dashboard --scopes read>
+# with node-side auth enabled (4a), give the proxy an ADMIN key (write-capable — the
+# governed loop's accepts/publishes go through it; per-operator write PERMISSION is
+# enforced at the dashboard's own gate, so a read-scoped operator still cannot decide):
+#   THEMIS_API_KEY=<key minted with: authadmin create-key --name dashboard --scopes admin>
 # to require operator sign-in (each operator pastes their OWN key once; a server-side
 # session takes over, and their scope decides what the GUI lets them do):
 #   THEMIS_AUTH_DATABASE_DSN="postgres://themis:$PGPW@localhost:5432/auth?sslmode=disable"
