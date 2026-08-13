@@ -729,6 +729,17 @@ under the 2026-08-07 re-derivation standard.
   entry's (c) needs), never on timeouts, never while degraded, never for Information
   capabilities. **(c) the eval loop** remains open and still needs Δ4.
 
+- [ ] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
+  invocation under-reports its cost in telemetry.** _(Surfaced 2026-08-13 during the router's live
+  escalation test.)_ The Gateway overwrites `oc.TokensUsed` per attempt, so an invocation with a
+  schema retry or an escalation logs only the final call's tokens (measured: an escalated
+  invocation whose two calls cost ~1900 + 2116 tokens logged `tokens:2116`). The BUDGET is
+  unaffected — it debits every attempt — so this is a telemetry/provenance imprecision, not a
+  spend leak. **Fix shape:** accumulate (`oc.TokensUsed += res.TokensUsed`); note the proposal
+  metadata's `TokensUsed` inherits the same field, so its meaning changes from "final call" to
+  "invocation total" — the total is the honest number for both. **Dep:** none. **Scope:** SMALL.
+  **Priority: LOW.**
+
 - [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
   other releases, handed to the AI **clearly labeled** (which release, component version, decision + rationale)
