@@ -34,4 +34,4 @@ One PR off `main` (carrying the two backlog filings), `make check-ci` green, end
       sweep on a live estate
 - [x] 3.2 node.env.example + CLAUDE.md notes; INSTALLATION.md scanner-report mention
 - [x] 3.3 Backlog: KN-SCAN-1 + KN-RECOR-1 closed with evidence
-- [ ] 3.4 `make check-ci` + `make vet-tags` green; archive this change
+- [x] 3.4 `make check-ci` + `make vet-tags` green; archive this change
