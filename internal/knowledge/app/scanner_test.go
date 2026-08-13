@@ -11,12 +11,13 @@ import (
 )
 
 type fakeScannerSource struct {
-	props []app.ScannerProposal
-	err   error
+	props   []app.ScannerProposal
+	skipped int
+	err     error
 }
 
-func (f fakeScannerSource) ScannerProposals(_ context.Context, _ string) ([]app.ScannerProposal, error) {
-	return f.props, f.err
+func (f fakeScannerSource) ScannerProposals(_ context.Context, _ string) ([]app.ScannerProposal, int, error) {
+	return f.props, f.skipped, f.err
 }
 
 func scannerService(t *testing.T, src app.ScannerReportSource, matches *fakeMatches, repo *fakeRepo) *app.ScannerReportService {
@@ -38,6 +39,11 @@ func TestScannerReport_IngestAndIdempotent(t *testing.T) {
 	n, err := svc.Ingest(context.Background(), "rel-1", "ev-1")
 	if err != nil || n != 2 {
 		t.Fatalf("Ingest = %d, %v; want 2, nil", n, err)
+	}
+	// The plan carries the release and the skip count through to the log line.
+	plan, err := svc.PlanIngest(context.Background(), "rel-1", "ev-1")
+	if err != nil || plan.ReleaseID != "rel-1" || len(plan.Items) != 2 {
+		t.Fatalf("PlanIngest = %+v, %v; want the 2-item plan for rel-1", plan, err)
 	}
 	// Re-ingesting the same report records no new matches (idempotent).
 	n2, err := svc.Ingest(context.Background(), "rel-1", "ev-1")
@@ -67,5 +73,36 @@ func TestScannerReport_Errors(t *testing.T) {
 	if _, err := scannerService(t, fakeScannerSource{props: []app.ScannerProposal{prop}}, badMatches, newRepo()).
 		Ingest(context.Background(), "rel-1", "ev-1"); err == nil {
 		t.Error("expected match-recorder error")
+	}
+}
+
+// The coordinator dispatch (KN-SCAN-1): a scanner-report evidence event reaches the scanner
+// service through the same plan/apply shape as sbom and vex — this exact dispatch used to
+// return a nil apply, which made a successful upload a silent no-op.
+func TestCoordinator_ScannerReportIngests(t *testing.T) {
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}},
+	}}
+	matches := newMatches()
+	coord := app.NewCoordinator(nil, nil).WithScanner(scannerService(t, src, matches, newRepo()))
+
+	if err := coord.OnEvidenceRegistered(context.Background(),
+		app.EvidenceRegistered{EvidenceID: "ev-9", ReleaseID: "rel-9", Kind: "scanner-report"}); err != nil {
+		t.Fatalf("OnEvidenceRegistered: %v", err)
+	}
+	if len(matches.recorded) != 1 {
+		t.Fatalf("recorded = %d matches, want the finding matched", len(matches.recorded))
+	}
+}
+
+// A read-phase failure (Evidence unreachable, wrong kind) propagates so the inbox retries the
+// event rather than silently committing nothing.
+func TestCoordinator_ScannerReadErrorPropagates(t *testing.T) {
+	coord := app.NewCoordinator(nil, nil).
+		WithScanner(scannerService(t, fakeScannerSource{err: errors.New("evidence down")}, newMatches(), newRepo()))
+	if err := coord.OnEvidenceRegistered(context.Background(),
+		app.EvidenceRegistered{EvidenceID: "ev-9", ReleaseID: "rel-9", Kind: "scanner-report"}); err == nil {
+		t.Fatal("a scanner read-phase error must propagate")
 	}
 }

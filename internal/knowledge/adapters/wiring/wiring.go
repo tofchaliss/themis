@@ -64,6 +64,18 @@ type Knowledge struct {
 	// folded before fix-attribution existed gain it without a new SBOM (KN-FIX-2). Always set —
 	// it rides the always-on OSV discovery source, not an opt-in feed.
 	Reattribute *app.ReattributeService
+	// Rediscovery re-runs the full discovery fan-out for the stalest correlated releases
+	// (KN-RECOR-1), so a CVE published after a release's last upload still reaches its
+	// inventory. Always set — like Reattribute, it rides the always-on discovery source; the
+	// composition root decides whether to run its loop.
+	Rediscovery *app.RediscoveryService
+}
+
+// RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
+// (24h staleness, 3 releases per sweep).
+type RediscoveryConfig struct {
+	StaleAfter time.Duration
+	Limit      int
 }
 
 // NVDConfig configures the optional scheduled NVD modified-since watch (EDR-KNOWLEDGE-01 D5).
@@ -138,7 +150,7 @@ type VexfeedConfig struct {
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, vexfeed VexfeedConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -161,18 +173,24 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
 		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
 	}
-	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{})
+	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st)
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
+	// Uploaded scanner report (KN-SCAN-1): the same client serves the document, the scanner
+	// ACL translates each finding, and matches record so Governance opens Findings. Before
+	// this line existed, a scanner-report upload was accepted by Evidence and silently
+	// no-op'd here — the "wiring is no gate" class.
+	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{})
 	kn := Knowledge{
 		Handler:  knhttp.NewHandler(read, health).Router(),
 		Store:    st,
-		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc)),
+		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
 		Health:   health,
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
+		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

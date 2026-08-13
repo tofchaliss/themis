@@ -157,6 +157,11 @@ all six nodes.
 - **Drive an SBOM:** `scripts/gf-upload-sbom.sh` registers Product→Project→Release and uploads (auto-detects
   CycloneDX/SPDX; streams large files via `curl --data-binary @-`; `-r` reuses a release). Evidence is
   content-addressed, so re-uploading byte-identical content **dedups** — a re-run needs changed bytes.
+  A **scanner report** (`kind:"scanner-report"`, curated per-finding JSON with the component each finding
+  names — see TESTING.md) uploads through the same endpoint and folds + matches at scanner (Asserted)
+  trust (KN-SCAN-1). Discovery otherwise runs at upload time only; the **re-discovery sweep**
+  (KN-RECOR-1, default ON, `THEMIS_REDISCOVERY_*`) re-runs it for the stalest correlated releases so a
+  CVE published after a release's last upload still reaches its inventory.
 - **Opt-in enrichment** (off by default — no silent outbound calls; all **relevance-bounded** per
   EDR-KNOWLEDGE-01 D5, i.e. feeds enrich *existing* Faultlines and never mirror the full feed):
   `THEMIS_NVD_ENABLED=1` (authoritative CVSS/severity via the modified-since watch),

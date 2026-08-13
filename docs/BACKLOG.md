@@ -685,6 +685,58 @@ under the 2026-08-07 re-derivation standard.
   embedded-Postgres integration tests; only error-path lines remain. The store tier is intentionally set to
   80% until this lands.
 
+- [x] **KN-SCAN-1 — scanner-report ingestion is UNWIRED: Evidence accepts the upload (201) and
+  Knowledge silently no-ops it.** ✅ **CLOSED 2026-08-13, same day** (phase3-knowledge-staying-current):
+  `evidence.ScannerSource` (document read + ACL per finding, skip-and-count), the curated report
+  schema finally carries the component each finding names, `ScannerReportService` gained the D7
+  plan/apply split, the coordinator dispatches the kind, and wiring connects it. Scanner matches
+  now stamp Score/Priority/Fixes/ClaimClass like the discovery path (the old Ingest omitted them). _(Found 2026-08-13, same Q&A as KN-RECOR-1 — checking whether
+  the "SBOM once + periodic scan reports" operating model works today.)_ The pieces exist:
+  `domain.KindScannerReport` (Evidence accepts the kind), `app.ScannerReportService` (built,
+  tested — folds proposals AND records matches so Findings open), and the scanner feed ACL
+  (`adapters/feed/scanner.go`). What is missing is the seam between them: no adapter implements
+  `app.ScannerReportSource` (an Evidence read-API client for the `scanner-report` kind — named a
+  "documented prerequisite" in scanner.go's own comment), the coordinator dispatches the kind to
+  a nil apply ("handled elsewhere" — there is no elsewhere), and nothing wires the service.
+  **Why it matters:** the upload SUCCEEDS — an operator on a static estate who re-scans an image
+  and uploads the report reasonably believes the new CVEs are in; nothing surfaces that they are
+  not. The "wiring is no gate" class (parity audit, A1's shape) in the go-forward tree.
+  **Fix shape:** an Evidence document-read client for the kind (the `…/document` endpoint
+  exists — EDR-VEX-01 D1 built it for VEX) + the scanner ACL behind `ScannerReportSource` + a
+  `scanner-report` branch in `Coordinator.PrepareEvidenceRegistered` (read/plan outside the tx,
+  apply inside — the D7 split, same as sbom/vex) + wiring. Scanner trust stays Asserted — a
+  scanner never sets truth. **Dep:** none. **Scope:** MEDIUM. **Priority: MED-HIGH** (silent
+  acceptance; and with [[KN-RECOR-1]] open it is the ONLY intended discovery path for static
+  estates — both halves of the static-estate story are currently missing).
+
+- [x] **KN-RECOR-1 — no post-upload re-discovery: a CVE published AFTER a release's last upload is
+  invisible until the next upload.** ✅ **CLOSED 2026-08-13, same day** (phase3-knowledge-staying-current):
+  the `correlated_releases` ledger (migration 000006, stamped inside ApplyCorrelation's unit of
+  work — latest evidence wins, zero-item plans still stamp) + `RediscoveryService` re-running the
+  EXISTING idempotent correlation for the stalest releases + a default-ON loop
+  (`THEMIS_REDISCOVERY_ENABLED=0` to disable, `_INTERVAL` 1h / `_STALE_AFTER` 24h / `_LIMIT` 3).
+  The cross-release consequence closes with it: a CVE carded by one release's upload reaches its
+  sibling releases on their next sweep. _(Surfaced in a Q&A walkthrough, 2026-08-13.)_ Discovery
+  (OSV always-on + NVD A2 when enabled) runs only at CORRELATION time — an upload-driven
+  snapshot. The enrichment sweeps are deliberately card-bounded (D5: enrich existing cards,
+  never mirror a feed), so they keep KNOWN CVEs fresh forever but can never card a new one.
+  Verified: every scheduled loop in `cmd/knowledge` (relay, reattribute, nvd-backfill, signals,
+  redhat, alpine, vexfeed, reader) is enrichment-shaped, and the reattribute sweep explicitly
+  refuses to become "an undeclared discovery pass". Consequence: a CI-driven estate (frequent
+  uploads) is fine; a static/appliance estate is blind to new CVEs between uploads — for a
+  monthly release cadence, up to a month.
+  **Mitigations that exist today:** the next SBOM upload (content-addressed — needs changed
+  bytes, which a new build has) or a scanner-report upload, both of which record matches.
+  **Fix shape (design-first — an EDR-KNOWLEDGE-01 addendum):** a bounded RE-DISCOVERY sweep in
+  the BackfillService mold — per distinct inventoried component, staleness-queued, capped per
+  run, reusing the existing `PackageVulnSource` fan-out and the correlation apply path so new
+  cards get MATCHES (a card without a match opens no Finding and is invisible in posture).
+  D5-compliant by construction: per-component queries against the estate, never a feed mirror.
+  Distinct from [[G-AI-1]] (on-demand gathering for CVEs the feeds have not ingested, AI-asked,
+  Δ4-gated) — this is scheduled, feed-known, and needs no AI. **Dep:** none. **Scope:** MEDIUM.
+  **Priority: MED** (HIGH for static estates; the current VM estate uploads rarely, so it is
+  live there).
+
 - [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.** _(Gap surfaced in the
   M4 Δ2 grill, 2026-07-24.)_ When `recommend_position` runs against a CVE our feeds have **not yet ingested**,
   there is no _Information_ to reason over — and without an affected range even the version-range step can't

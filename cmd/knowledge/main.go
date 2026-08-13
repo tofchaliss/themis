@@ -55,6 +55,14 @@ type config struct {
 	// everything is attributed it finds nothing and writes nothing, so the cadence is cheap.
 	reattributeInterval time.Duration
 
+	// KN-RECOR-1 re-discovery sweep: DEFAULT ON (like re-attribution, it rides the always-on
+	// discovery source; the blind spot it closes — a CVE published after a release's last
+	// upload staying invisible — must not be opt-in). THEMIS_REDISCOVERY_ENABLED=0 disables.
+	rediscoveryEnabled    bool          // THEMIS_REDISCOVERY_ENABLED — "0" disables (default on).
+	rediscoveryInterval   time.Duration // THEMIS_REDISCOVERY_INTERVAL — loop tick (default 1h).
+	rediscoveryStaleAfter time.Duration // THEMIS_REDISCOVERY_STALE_AFTER — how old a release's last discovery may grow (default 24h).
+	rediscoveryLimit      int           // THEMIS_REDISCOVERY_LIMIT — releases per sweep (default 3); a large estate drains across ticks.
+
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
 	kevURL          string        // THEMIS_KEV_URL — CISA KEV JSON catalog URL (default; empty skips KEV).
@@ -100,6 +108,10 @@ func loadConfig() config {
 		nvdStaleAfter:       parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
 		nvdPollInterval:     parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
 		reattributeInterval: parseDurationDefault(os.Getenv("THEMIS_REATTRIBUTE_INTERVAL"), 6*time.Hour),
+		rediscoveryEnabled:    os.Getenv("THEMIS_REDISCOVERY_ENABLED") != "0",
+		rediscoveryInterval:   parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_INTERVAL"), time.Hour),
+		rediscoveryStaleAfter: parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_STALE_AFTER"), 24*time.Hour),
+		rediscoveryLimit:      envIntDefault("THEMIS_REDISCOVERY_LIMIT", 0),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -196,6 +208,9 @@ func main() {
 		Enabled:  cfg.vexfeedEnabled,
 		BaseURLs: cfg.vexfeedURLs,
 		HTTP:     &http.Client{Timeout: 30 * time.Second},
+	}, wiring.RediscoveryConfig{
+		StaleAfter: cfg.rediscoveryStaleAfter,
+		Limit:      cfg.rediscoveryLimit,
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
@@ -203,6 +218,16 @@ func main() {
 	// Re-attribution (KN-FIX-2). Always on: it needs no feed the node is not already using.
 	if kn.Reattribute != nil {
 		go reattributeLoop(kn.Reattribute, cfg.reattributeInterval, logger.Component("reattribute"))
+	}
+
+	if cfg.rediscoveryEnabled {
+		go rediscoveryLoop(kn.Rediscovery, cfg.rediscoveryInterval, logger.Component("rediscovery"))
+		logger.Info("re-discovery sweep enabled (KN-RECOR-1)",
+			observability.String("interval", cfg.rediscoveryInterval.String()),
+			observability.String("stale_after", cfg.rediscoveryStaleAfter.String()),
+			observability.Int("releases_per_sweep", cfg.rediscoveryLimit))
+	} else {
+		logger.Warn("re-discovery sweep DISABLED — a CVE published after a release's last upload will not reach its inventory until the next upload")
 	}
 
 	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
@@ -312,6 +337,32 @@ func recordFeed(health *app.FeedHealthService, source string, pollErr error, log
 // watchLoop runs the scheduled NVD modified-since watch: one poll shortly after startup, then
 // every interval. It enriches already-carded CVEs with authoritative NVD CVSS/severity; a
 // failure is logged and retried next tick (the watermark only advances on a clean pass).
+// rediscoveryLoop re-runs the discovery fan-out for the stalest correlated releases
+// (KN-RECOR-1), so a CVE published after a release's last upload still reaches its inventory
+// — the static-estate blind spot where every dashboard stayed green while the estate went
+// blind. Bounded per sweep and idempotent end to end (correlation converges; matches dedup),
+// so the cadence is cheap on a quiet estate.
+func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		swept, matches, err := rs.Sweep(context.Background())
+		if err != nil {
+			logger.Error("re-discovery sweep failed", observability.Err(err))
+			return
+		}
+		// Logged on every sweep including zero: "nothing was stale" and "the sweep stopped
+		// working" must not look alike (the NVD-WATCH-1 reasoning). A non-zero match count is
+		// the headline event — a CVE reached inventory nobody re-uploaded.
+		logger.Info("re-discovery sweep complete",
+			observability.Int("releases", swept), observability.Int("new_matches", matches))
+	}
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
 // reattributeLoop re-asks the discovery feeds about components already in the estate, so cards
 // folded before fix-attribution existed gain it without waiting for a new SBOM (KN-FIX-2).
 //

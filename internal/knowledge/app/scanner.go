@@ -17,12 +17,15 @@ type ScannerProposal struct {
 }
 
 // ScannerReportSource reads a release's scanner-report findings from Evidence and
-// translates them to bound Proposals (EDR-KNOWLEDGE-01 D5/D6). The concrete adapter — an
-// Evidence read-API client for the `scanner-report` kind + the scanner ACL — is the
-// documented **prerequisite**; this port keeps ScannerReportService testable now and
-// swappable later, exactly as M7 did for the discovery/watch sources.
+// translates them to bound Proposals (EDR-KNOWLEDGE-01 D5/D6). The concrete adapter is an
+// Evidence read-API client for the `scanner-report` kind + the scanner ACL (KN-SCAN-1).
+//
+// skipped counts findings the translation could not use (malformed record, no canonical
+// CVE). They are counted rather than fatal because one bad finding must not void a
+// 400-finding report — and counted rather than silent because "we ingested the report"
+// and "we ingested most of the report" must not look alike in the log line.
 type ScannerReportSource interface {
-	ScannerProposals(ctx context.Context, evidenceID string) ([]ScannerProposal, error)
+	ScannerProposals(ctx context.Context, evidenceID string) (props []ScannerProposal, skipped int, err error)
 }
 
 // ScannerReportService folds a scanner report's findings into the enterprise cards as
@@ -42,26 +45,52 @@ func NewScannerReportService(src ScannerReportSource, fold *FaultlineService, ma
 	return &ScannerReportService{source: src, fold: fold, matches: matches, clock: clock}
 }
 
-// Ingest folds every finding of one scanner report and records its matches. Idempotent — a
-// re-run re-folds Proposals (which converge deterministically) and records no duplicate
-// match. Returns the number of new matches.
-func (s *ScannerReportService) Ingest(ctx context.Context, releaseID, evidenceID string) (int, error) {
-	props, err := s.source.ScannerProposals(ctx, evidenceID)
+// ScannerPlan is the read phase's output: every usable finding of one report, ready to fold
+// and record, plus how many findings were skipped in translation.
+type ScannerPlan struct {
+	ReleaseID string
+	Items     []ScannerProposal
+	Skipped   int
+}
+
+// PlanIngest runs the READ phase with no transaction: fetch the report document from
+// Evidence and translate its findings. All network I/O happens here, outside the inbox
+// transaction — the same D7 read/write split correlation and VEX use, so the write
+// transaction never pins the cluster xmin and stalls the bus reader.
+func (s *ScannerReportService) PlanIngest(ctx context.Context, releaseID, evidenceID string) (ScannerPlan, error) {
+	props, skipped, err := s.source.ScannerProposals(ctx, evidenceID)
 	if err != nil {
-		return 0, err
+		return ScannerPlan{}, err
 	}
+	return ScannerPlan{ReleaseID: releaseID, Items: props, Skipped: skipped}, nil
+}
+
+// ApplyIngest runs the WRITE phase inside the caller's transaction: fold every finding and
+// record its match. Idempotent — a re-run re-folds Proposals (which converge
+// deterministically; verbatim restatements are dropped) and records no duplicate match.
+// Returns the number of new matches.
+//
+// A scanner report is already a version-matched finding (the scanner did the matching), so
+// it is recorded as-is — the reconciled-range gate applies only to the OSV/NVD discovery
+// path in CorrelationService, not to scanner evidence about the concrete image.
+func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan) (int, error) {
 	newMatches := 0
-	for _, p := range props {
-		// A scanner report is already a version-matched finding (the scanner did the matching),
-		// so it is recorded as-is — the reconciled-range gate applies only to the OSV/NVD
-		// discovery path in CorrelationService, not to authoritative scanner evidence.
+	for _, p := range plan.Items {
 		f, _, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
 		if err != nil {
 			return newMatches, err
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
-			ReleaseID: releaseID, FaultlineID: f.ID(), CVE: p.CVE.String(),
-			Component: p.Component, OccurredAt: s.clock.Now(),
+			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: p.CVE.String(),
+			Component: p.Component, Score: f.View().Score(), Priority: f.View().Priority(),
+			Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			// Why this component matched, decided against the reconciled card exactly as the
+			// discovery path decides it (EDR-CORRELATION-01 D3): a scanner names the component
+			// it scanned, but whether that component CARRIES the flaw is the card's knowledge,
+			// not the scanner's.
+			ClaimClass: domain.ClassifyClaim(
+				f.View().CarrierProducts, componentPackage(p.Component), p.Component.Name),
+			OccurredAt: s.clock.Now(),
 		})
 		if err != nil {
 			return newMatches, err
@@ -71,4 +100,14 @@ func (s *ScannerReportService) Ingest(ctx context.Context, releaseID, evidenceID
 		}
 	}
 	return newMatches, nil
+}
+
+// Ingest runs both phases back-to-back — the direct (non-inbox) entry point; the event path
+// uses PlanIngest + ApplyIngest so document I/O stays outside the inbox transaction.
+func (s *ScannerReportService) Ingest(ctx context.Context, releaseID, evidenceID string) (int, error) {
+	plan, err := s.PlanIngest(ctx, releaseID, evidenceID)
+	if err != nil {
+		return 0, err
+	}
+	return s.ApplyIngest(ctx, plan)
 }
