@@ -123,6 +123,8 @@ THEMIS_OLLAMA_URL=http://localhost:11434
 THEMIS_INTELLIGENCE_MODEL=${MODEL}
 THEMIS_INTELLIGENCE_ADDR=:8086
 # THEMIS_LLM_TIMEOUT=300s
+# THEMIS_INTELLIGENCE_MODEL_ESCALATION=   # larger model: honest 'insufficient' retries once here (G-AI-2b)
+# THEMIS_INTELLIGENCE_MODEL_ECONOMY=      # smaller model: near-exhausted budget degrades here (G-AI-4)
 EOF
 
 # Dashboard: the GUI node (EDR-GUI-01 D10) — static SPA + same-origin proxy to the six

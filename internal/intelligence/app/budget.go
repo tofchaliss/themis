@@ -83,6 +83,18 @@ func (b *Budget) Debit(now time.Time, tokens int) {
 	b.spent += tokens
 }
 
+// Limit reports the window ceiling; 0 when unlimited. The degrade-not-fail check needs the
+// ceiling and not only the remainder — "low" is a fraction of the whole window, and deriving
+// it from Remaining alone would make the threshold drift with consumption.
+func (b *Budget) Limit() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.limit
+}
+
 // Remaining reports the tokens left in the current window; -1 when unlimited. Exposed so the
 // operator-facing reason can say how long the pause lasts instead of only that it happened.
 func (b *Budget) Remaining(now time.Time) int {

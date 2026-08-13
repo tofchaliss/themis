@@ -10,11 +10,15 @@ import (
 	"github.com/themis-project/themis/internal/intelligence/domain"
 )
 
-// Δ2 admission-gate defaults (measure now, enforce lightly — C5). Real multi-scope budget
-// enforcement + degrade-not-fail model routing is deferred (G-AI-4).
+// Admission-gate defaults (C5). The per-capability window ceiling and degrade-not-fail
+// tier routing are live; the remaining D4 scopes (per-run cost ceiling, autonomous pool,
+// global enterprise ceiling) wait for the planes that give them meaning.
 const (
 	defaultMaxPromptBytes  = 200_000          // runaway-prompt guard (~100× a normal prompt)
 	defaultProviderTimeout = 60 * time.Second // per-invocation deadline around provider I/O
+	// defaultDegradeFraction is degrade-not-fail's low-water mark (G-AI-4): below this
+	// fraction of the window ceiling, invocations route to the economy tier when one exists.
+	defaultDegradeFraction = 0.20
 )
 
 // maxAttempts is the schema-validation retry budget (D7): one initial attempt plus one
@@ -52,16 +56,22 @@ const (
 // Outcome is the per-invocation telemetry record (D9). It carries no sensitive prompt
 // content (D10) — only provenance and the terminal reason.
 type Outcome struct {
-	CapabilityID   string
-	CorrelationID  string
-	Provider       string
-	Model          string
-	TokensUsed     int
-	InputBytes     int // rendered prompt size — a metered cost input (C5); 0 on a rule short-circuit
-	Duration       time.Duration
-	Produced       bool
-	Reason         string
-	DecidedBy      string             // "llm:<stance>" / "guard:<reason>" — what decided
+	CapabilityID  string
+	CorrelationID string
+	Provider      string
+	Model         string
+	TokensUsed    int
+	InputBytes    int // rendered prompt size — a metered cost input (C5); 0 on a rule short-circuit
+	Duration      time.Duration
+	Produced      bool
+	Reason        string
+	DecidedBy     string // "llm:<stance>" / "guard:<reason>" — what decided
+	// Tier is the model tier that produced the terminal LLM outcome ("primary" /
+	// "escalation" / "economy"; empty when no LLM step ran). Telemetry, not semantics:
+	// an escalated decline is still `insufficient` — but "the bigger model could not
+	// tell either" versus "we never tried a bigger model" is exactly the distinction
+	// G-AI-2 needs observable.
+	Tier           string
 	Selection      domain.Selection   // what the invocation was about (T9 provenance)
 	OutputClass    domain.OutputClass // which branch ran (T7): information or decision
 	PrecedentsUsed int                // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance)
@@ -115,7 +125,12 @@ type Gateway struct {
 	maxPromptBytes  int
 	providerTimeout time.Duration
 	budget          *Budget // nil or unconfigured = unlimited (the default)
-	now             func() time.Time
+	// router, when set, enables the tier decisions (phase3-intelligence-router): escalation
+	// on an honest decline (G-AI-2b) and degrade-not-fail on a low budget (G-AI-4). nil =
+	// single-model deployment; both behaviours simply never fire.
+	router      Router
+	degradeFrac float64
+	now         func() time.Time
 }
 
 // GatewayConfig wires the Gateway's ports. Engines are indexed by kind into the
@@ -133,13 +148,23 @@ type GatewayConfig struct {
 	// enforce anything; unset = unlimited, which is today's behaviour and the safe default —
 	// a budget switched on by accident refuses recommendations, and a refusal is indistinguishable
 	// from the AI being unavailable to everyone downstream (D13).
-	BudgetTokens    int
-	BudgetWindow    time.Duration
-	Prompt          PromptRenderer
-	Engines         []Engine
-	MaxPromptBytes  int              // runaway-prompt cap (0 → default); over-cap → insufficient
-	ProviderTimeout time.Duration    // per-invocation deadline (0 → default)
-	Now             func() time.Time // defaults to time.Now
+	BudgetTokens int
+	BudgetWindow time.Duration
+	// Router enables the tier decisions (escalation + degrade-not-fail). Optional: nil is
+	// the single-model deployment and disables both. It is the SAME router the LLM engine
+	// selects through — the Gateway only asks it what is Available; the engine does the
+	// selecting, so there is exactly one place a model is ever chosen (INT-0062).
+	Router Router
+	// BudgetDegradeFraction is the low-water mark for degrade-not-fail: when the window's
+	// remaining tokens fall below limit×fraction and an economy model exists, the invocation
+	// routes there instead of spending the primary's rate. 0 → default 0.20; it only means
+	// anything when the budget is enforced and an economy tier is configured.
+	BudgetDegradeFraction float64
+	Prompt                PromptRenderer
+	Engines               []Engine
+	MaxPromptBytes        int              // runaway-prompt cap (0 → default); over-cap → insufficient
+	ProviderTimeout       time.Duration    // per-invocation deadline (0 → default)
+	Now                   func() time.Time // defaults to time.Now
 }
 
 // NewGateway precompiles a validator per registered capability and indexes the engines
@@ -166,6 +191,10 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 	if timeout <= 0 {
 		timeout = defaultProviderTimeout
 	}
+	degrade := cfg.BudgetDegradeFraction
+	if degrade <= 0 {
+		degrade = defaultDegradeFraction
+	}
 	return &Gateway{
 		registry:        cfg.Registry,
 		validators:      validators,
@@ -178,6 +207,8 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		maxPromptBytes:  maxPrompt,
 		providerTimeout: timeout,
 		budget:          NewBudget(cfg.BudgetTokens, cfg.BudgetWindow),
+		router:          cfg.Router,
+		degradeFrac:     degrade,
 		now:             now,
 	}, nil
 }
@@ -318,53 +349,89 @@ func (g *Gateway) Invoke(
 			oc.DecidedBy, oc.Reason = "guard:budget", ReasonBudgetExhausted
 			return domain.Proposal{}, oc
 		}
-		in := ExecInput{Prompt: prompt, JSONSchema: capb.OutputSchema, Temperature: 0, Routing: capb.Routing, Context: ac}
+		// Degrade-not-fail (G-AI-4): with the window nearly spent and a distinct economy model
+		// configured, route there instead of the primary — spend shrinks before it stops. The
+		// Allow gate above is untouched: full exhaustion still refuses, because the economy
+		// model's tokens are real tokens too.
+		tier, degraded := TierPrimary, false
+		if g.router != nil && g.router.Available(TierEconomy) {
+			if lim := g.budget.Limit(); lim > 0 {
+				if rem := g.budget.Remaining(g.now()); rem >= 0 && float64(rem) < float64(lim)*g.degradeFrac {
+					tier, degraded = TierEconomy, true
+				}
+			}
+		}
 
 		var out domain.RawOutput
-		schemaOK := false
-		// The last structural complaint across attempts, kept so an exhausted retry budget can
-		// say WHAT was wrong instead of only that something was (TRUST-6). Unparseable JSON and
-		// a schema violation call for different fixes — the response-format mode versus the
-		// prompt — and both look identical in ReasonSchemaInvalid alone.
-		var lastSchemaErr error
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			res, eerr := eng.Execute(ctx, in)
-			if eerr != nil {
+		// The tier loop (G-AI-2b): primary once — plus, when the model honestly declines a
+		// Decision capability, ONE escalation pass on the larger model (appended below). All
+		// other terminal outcomes return from inside the loop exactly as before.
+		tiers := []ModelTier{tier}
+		for ti := 0; ti < len(tiers); ti++ {
+			oc.Tier = string(tiers[ti])
+			in := ExecInput{Prompt: prompt, JSONSchema: capb.OutputSchema, Temperature: 0,
+				Routing: capb.Routing, Tier: tiers[ti], Context: ac}
+
+			schemaOK := false
+			// The last structural complaint across attempts, kept so an exhausted retry budget can
+			// say WHAT was wrong instead of only that something was (TRUST-6). Unparseable JSON and
+			// a schema violation call for different fixes — the response-format mode versus the
+			// prompt — and both look identical in ReasonSchemaInvalid alone.
+			var lastSchemaErr error
+			for attempt := 0; attempt < maxAttempts; attempt++ {
+				res, eerr := eng.Execute(ctx, in)
+				if eerr != nil {
+					oc.Duration = g.now().Sub(start)
+					if errors.Is(eerr, context.DeadlineExceeded) {
+						// runaway-timeout guard → honest insufficient, not a hard error.
+						oc.DecidedBy, oc.Reason = "guard:timeout", ReasonInsufficient
+					} else {
+						oc.Reason = ReasonProviderError
+					}
+					return domain.Proposal{}, oc
+				}
+				oc.Provider, oc.Model, oc.TokensUsed = res.Provider, res.Model, res.TokensUsed
+				// Debit what the call ACTUALLY cost, not an estimate. Every attempt debits, including
+				// one whose output fails schema validation — and including an escalation pass: a
+				// retry consumes the model exactly as a successful call does, and a ledger that
+				// only counts successes would let a schema-thrashing capability spend without limit.
+				g.budget.Debit(g.now(), res.TokensUsed)
+				parsed, parseErr := domain.ParseOutput([]byte(res.Raw))
+				if parseErr != nil {
+					lastSchemaErr = parseErr
+					continue // malformed JSON — retry
+				}
+				if serr := validator.ValidateSchema([]byte(res.Raw)); serr != nil {
+					lastSchemaErr = serr
+					continue // structural violation — retry
+				}
+				out = parsed
+				schemaOK = true
+				break
+			}
+			if !schemaOK {
 				oc.Duration = g.now().Sub(start)
-				if errors.Is(eerr, context.DeadlineExceeded) {
-					// runaway-timeout guard → honest insufficient, not a hard error.
-					oc.DecidedBy, oc.Reason = "guard:timeout", ReasonInsufficient
-				} else {
-					oc.Reason = ReasonProviderError
+				oc.Reason = ReasonSchemaInvalid
+				if lastSchemaErr != nil {
+					oc.Detail = g.redact(lastSchemaErr.Error())
 				}
 				return domain.Proposal{}, oc
 			}
-			oc.Provider, oc.Model, oc.TokensUsed = res.Provider, res.Model, res.TokensUsed
-			// Debit what the call ACTUALLY cost, not an estimate. Every attempt debits, including
-			// one whose output fails schema validation: a retry consumes the model exactly as a
-			// successful call does, and a ledger that only counts successes would let a
-			// schema-thrashing capability spend without limit.
-			g.budget.Debit(g.now(), res.TokensUsed)
-			parsed, parseErr := domain.ParseOutput([]byte(res.Raw))
-			if parseErr != nil {
-				lastSchemaErr = parseErr
-				continue // malformed JSON — retry
+			// Escalation fires ONLY on the honest decline of a Decision capability (below) —
+			// never on schema/business failures (those are contract problems; a bigger model
+			// would mask which lever to pull) and never on timeouts (a slower model times out
+			// worse). Anything but `insufficient` on the primary ends the loop here.
+			if out.RecommendedStance == string(domain.StanceInsufficient) &&
+				capb.Output == domain.OutputDecision && tiers[ti] == TierPrimary && !degraded &&
+				g.router != nil && g.router.Available(TierEscalation) && g.budget.Allow(g.now()) {
+				// The upgrade counterpart of degrade-not-fail (G-AI-2b): the larger model may
+				// extract more from the SAME grounding — the prompt is identical by design, so
+				// a different answer can only come from the model. Skipped while degraded:
+				// escalating out of a low-budget window would defeat why we degraded.
+				tiers = append(tiers, TierEscalation)
+				continue
 			}
-			if serr := validator.ValidateSchema([]byte(res.Raw)); serr != nil {
-				lastSchemaErr = serr
-				continue // structural violation — retry
-			}
-			out = parsed
-			schemaOK = true
 			break
-		}
-		if !schemaOK {
-			oc.Duration = g.now().Sub(start)
-			oc.Reason = ReasonSchemaInvalid
-			if lastSchemaErr != nil {
-				oc.Detail = g.redact(lastSchemaErr.Error())
-			}
-			return domain.Proposal{}, oc
 		}
 		// Information capabilities stop here (T7). The answer is rendered for a human and
 		// discarded; BuildProposal is not reachable on this path, so an Information Response

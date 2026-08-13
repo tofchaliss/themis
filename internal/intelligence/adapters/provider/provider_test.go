@@ -31,15 +31,57 @@ func TestFakeProvider(t *testing.T) {
 	}
 }
 
-func TestStaticRouter(t *testing.T) {
+func TestTieredRouter_SingleModelDeployment(t *testing.T) {
 	f := NewFakeProvider("x")
-	r := NewStaticRouter(f)
-	p, err := r.Select(domain.RoutingRequirements{LocalOnly: true})
-	if err != nil {
-		t.Fatalf("Select err: %v", err)
+	r := NewTieredRouter(f, nil, nil)
+	for _, tier := range []app.ModelTier{app.TierPrimary, app.TierEscalation, app.TierEconomy, "bogus"} {
+		p, err := r.Select(domain.RoutingRequirements{LocalOnly: true}, tier)
+		if err != nil || p != f {
+			t.Errorf("Select(%q) = (%v, %v), want the primary — an unconfigured tier must never fail an invocation", tier, p, err)
+		}
 	}
-	if p != f {
-		t.Error("router must return the single configured provider")
+	if r.Available(app.TierEscalation) || r.Available(app.TierEconomy) {
+		t.Error("unconfigured tiers reported Available — the Gateway would escalate into a fallback for nothing")
+	}
+	if !r.Available(app.TierPrimary) {
+		t.Error("the primary must always be Available")
+	}
+}
+
+func TestTieredRouter_SelectsConfiguredTiers(t *testing.T) {
+	pri := NewOllamaProvider("http://x", "big", nil)
+	esc := NewOllamaProvider("http://x", "bigger", nil)
+	eco := NewOllamaProvider("http://x", "small", nil)
+	r := NewTieredRouter(pri, esc, eco)
+
+	cases := map[app.ModelTier]string{
+		app.TierPrimary: "big", app.TierEscalation: "bigger", app.TierEconomy: "small",
+	}
+	for tier, want := range cases {
+		p, err := r.Select(domain.RoutingRequirements{}, tier)
+		if err != nil || p.Model() != want {
+			t.Errorf("Select(%q) = model %q (err %v), want %q", tier, p.Model(), err, want)
+		}
+		if !r.Available(tier) {
+			t.Errorf("Available(%q) = false, want true", tier)
+		}
+	}
+	if r.Available("bogus") {
+		t.Error("an unknown tier reported Available")
+	}
+}
+
+// A tier model equal to the primary is UNCONFIGURED: escalating or degrading to the same
+// model is a spend with nothing to show for it, and honoring the misconfiguration would make
+// both behaviours look broken ("it escalated and nothing changed").
+func TestTieredRouter_SameModelAsPrimaryIsUnconfigured(t *testing.T) {
+	pri := NewOllamaProvider("http://x", "big", nil)
+	r := NewTieredRouter(pri, NewOllamaProvider("http://x", "big", nil), NewOllamaProvider("http://x", "big", nil))
+	if r.Available(app.TierEscalation) || r.Available(app.TierEconomy) {
+		t.Error("a tier configured with the primary's own model must not be Available")
+	}
+	if p, _ := r.Select(domain.RoutingRequirements{}, app.TierEscalation); p != pri {
+		t.Error("Select on a neutralized tier must fall back to the primary instance")
 	}
 }
 

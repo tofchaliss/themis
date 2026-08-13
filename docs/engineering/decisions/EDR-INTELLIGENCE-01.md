@@ -609,8 +609,14 @@ Exhaustion is its own outcome, `budget_exhausted`, never folded into `insufficie
 broken, nothing declined on the merits, and it clears when the window rolls.
 
 **Still deferred:** the per-run cost ceiling beyond the existing prompt-size guard, the autonomous
-pool, the global enterprise ceiling, and **degrade-not-fail model downgrade** — which cannot be
-built while a deployment has a single model. Downgrade needs somewhere to go.
+pool, and the global enterprise ceiling.
+
+**Degrade-not-fail LANDED 2026-08-13 (phase3-intelligence-router):** the downgrade now has
+somewhere to go — an optional economy tier (`THEMIS_INTELLIGENCE_MODEL_ECONOMY`). When the
+window's remaining tokens fall below a configurable fraction of the ceiling (default 0.20),
+invocations route to the smaller model instead of refusing: spend shrinks before it stops. Full
+exhaustion still answers `budget_exhausted` — degrade never removes the ceiling, because the
+economy model's tokens are real tokens too.
 
 ADR basis: INT-0064 (cost/token telemetry per run), INT-0062 (cost-aware model routing), INT-0066
 (governance policy sets thresholds and what may run; provider never sets policy), INT-0069
@@ -654,6 +660,14 @@ Decision:
 - **Model routing** (INT-0062): the capability **declares requirements** (reasoning depth, latency, cost,
   privacy/regulatory class, availability); the **Gateway** picks the provider/model at runtime against
   those + enterprise policy + budget (D4). Callers **never name a provider or model**.
+  *Implemented 2026-08-13 (phase3-intelligence-router):* a **tiered router** — primary plus optional
+  escalation/economy models. The tier is a RUNTIME decision the Gateway makes (an honest
+  `insufficient` on a Decision capability escalates ONCE to the larger model — G-AI-2b; a
+  nearly-spent budget window degrades to the smaller one — D4), threaded to the router through the
+  engine so a model is chosen in exactly one place. Escalation never fires on schema/business
+  failures (contract problems — a bigger model would mask which lever to pull) nor on timeouts (a
+  slower model times out worse). This tier-aware selection point is also where G-AI-5 clearance
+  routing will attach when a non-local provider exists.
 - **Provider-specific everything** — prompts, SDKs, auth, response quirks — is **confined to the Gateway**
   (INT-0070); swapping a provider changes **nothing** in the Backend or Domain, and future tech (knowledge
   graphs, agents, planners) plugs in through the same capability abstraction.

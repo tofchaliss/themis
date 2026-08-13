@@ -719,9 +719,15 @@ under the 2026-08-07 re-derivation standard.
   metric/escalation/feedback in Δ3–Δ4.
   **✅ (a) LANDED 2026-08-07 — the can't-determine RATE is now observable.**
   `themis_ai_invocations_total{capability,reason,produced}` is recorded on every invocation, so
-  `reason="insufficient"` over total is a live query with no new machinery. **(b) escalation** and
-  **(c) the eval loop** remain open and still need Δ4. Note the ordering that emerged in practice:
-  the metric had to exist before the signal meant anything, and it now does.
+  `reason="insufficient"` over total is a live query with no new machinery.
+  **✅ (b) ESCALATION LANDED 2026-08-13 (phase3-intelligence-router):** an honest `insufficient`
+  on a Decision capability retries ONCE on `THEMIS_INTELLIGENCE_MODEL_ESCALATION` (when set and
+  distinct and the budget still admits); the escalated answer stands, and an escalated decline
+  carries `Tier=escalation` in telemetry — "the bigger model could not tell either" versus "we
+  never tried" is now observable. Deliberately narrow: never fires on schema/business failures
+  (contract problems — escalating would mask which lever to pull, the distinction this very
+  entry's (c) needs), never on timeouts, never while degraded, never for Information
+  capabilities. **(c) the eval loop** remains open and still needs Δ4.
 
 - [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
@@ -749,9 +755,14 @@ under the 2026-08-07 re-derivation standard.
   Config: `THEMIS_INTELLIGENCE_BUDGET_TOKENS` / `_WINDOW`; unset = unlimited, and that default is
   load-bearing (a budget switched on by accident is indistinguishable downstream from an AI outage).
   Exhaustion is its own reason, `budget_exhausted`, never `insufficient`.
+  **✅ DEGRADE-NOT-FAIL LANDED 2026-08-13 (phase3-intelligence-router):** the downgrade has
+  somewhere to go — `THEMIS_INTELLIGENCE_MODEL_ECONOMY`. Below the low-water mark
+  (`THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT`, default 0.20 of the window ceiling) invocations
+  route to the smaller model instead of refusing; full exhaustion still answers
+  `budget_exhausted`, because the economy model's tokens are real tokens too. A degraded
+  invocation never escalates.
   **Still open:** the other three scopes (per-run cost ceiling beyond the existing prompt-size
-  guard, the autonomous pool, the global enterprise ceiling) and **degrade-not-fail model
-  downgrade**, which cannot be built until a second chat model exists — the box has one.
+  guard, the autonomous pool, the global enterprise ceiling).
  _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 builds the **meter** (per-call time / input-size / token count recorded via telemetry) plus
   one **runaway guard** (a per-request timeout + a cap on prompt input size) — nothing more. The actual

@@ -36,14 +36,22 @@ const fakeEmbedDim = 256
 
 // Config wires the Gateway's dependencies from the node configuration.
 type Config struct {
-	GovernanceURL  string // Governance read-API base URL (the FindingAssessment projection — the runtime's ONLY business read)
-	OllamaURL      string // Ollama base URL (OpenAI-compatible; used by both the LLM and the embedder)
-	Model          string // pinned LLM model, e.g. "llama3.1:8b"
-	APIKey         string // optional bearer token for an authenticated OpenAI-compatible server
-	ResponseFormat string // structured-output mode: "" json_object (Ollama) | json_schema (LM Studio/OpenAI) | text | none
-	UseFake        bool   // dev/CI: use the deterministic fake provider AND fake embedder (no model)
-	Logger         *observability.Logger
-	HTTPClient     *http.Client
+	GovernanceURL string // Governance read-API base URL (the FindingAssessment projection — the runtime's ONLY business read)
+	OllamaURL     string // Ollama base URL (OpenAI-compatible; used by both the LLM and the embedder)
+	Model         string // pinned LLM model, e.g. "llama3.1:8b"
+	// EscalationModel / EconomyModel are the optional router tiers (phase3-intelligence-router):
+	// a LARGER model an honest `insufficient` retries on once (G-AI-2b), and a SMALLER model a
+	// nearly-spent budget window degrades to (G-AI-4). Empty = tier unconfigured; a value equal
+	// to Model is treated as unconfigured too (escalating to the same model spends for nothing).
+	EscalationModel string
+	EconomyModel    string
+	// BudgetDegradeFraction is the degrade-not-fail low-water mark (0 → the Gateway default 0.20).
+	BudgetDegradeFraction float64
+	APIKey                string // optional bearer token for an authenticated OpenAI-compatible server
+	ResponseFormat        string // structured-output mode: "" json_object (Ollama) | json_schema (LM Studio/OpenAI) | text | none
+	UseFake               bool   // dev/CI: use the deterministic fake provider AND fake embedder (no model)
+	Logger                *observability.Logger
+	HTTPClient            *http.Client
 	// ProviderTimeout is the Gateway's per-invocation deadline around provider I/O. 0 → the
 	// Gateway default (60s).
 	//
@@ -83,16 +91,40 @@ func Wire(cfg Config) (Intelligence, error) {
 	proj := readapi.NewAssessmentClient(cfg.GovernanceURL, cfg.HTTPClient)
 	prc := readapi.NewPrecedentClient(cfg.GovernanceURL, cfg.HTTPClient)
 
-	var prov app.Provider
+	var prov, escProv, ecoProv app.Provider
 	if cfg.UseFake {
 		prov = provider.NewFakeProvider(
 			`{"finding_id":"","recommended_stance":"not_affected","confidence":0,"evidence":[],"reasoning":"dev fake provider"}`)
 	} else {
-		prov = provider.NewOllamaProvider(cfg.OllamaURL, cfg.Model, cfg.HTTPClient).
-			WithAPIKey(cfg.APIKey).WithResponseFormat(cfg.ResponseFormat)
+		ollama := func(model string) app.Provider {
+			return provider.NewOllamaProvider(cfg.OllamaURL, model, cfg.HTTPClient).
+				WithAPIKey(cfg.APIKey).WithResponseFormat(cfg.ResponseFormat)
+		}
+		prov = ollama(cfg.Model)
+		// Optional router tiers: same server, same client, different model. The router itself
+		// treats a tier model equal to the primary as unconfigured (see NewTieredRouter).
+		if cfg.EscalationModel != "" {
+			escProv = ollama(cfg.EscalationModel)
+		}
+		if cfg.EconomyModel != "" {
+			ecoProv = ollama(cfg.EconomyModel)
+		}
 	}
 	// No rule engine: provable verdicts run in the backend, before AI (EDR-TRUST-01 T5).
-	llmEng := engine.NewLLMEngine(provider.NewStaticRouter(prov))
+	// ONE router instance serves both consumers: the LLM engine selects through it, and the
+	// Gateway asks it what is Available — a model is chosen in exactly one place (INT-0062).
+	rtr := provider.NewTieredRouter(prov, escProv, ecoProv)
+	// Say when a configured tier was neutralized (its model equals the primary's): silently
+	// ignoring the config would make escalation look broken to the operator who typo'd it.
+	if cfg.Logger != nil {
+		if escProv != nil && !rtr.Available(app.TierEscalation) {
+			cfg.Logger.Warn("escalation model equals the primary — tier disabled (escalating to the same model spends for nothing)")
+		}
+		if ecoProv != nil && !rtr.Available(app.TierEconomy) {
+			cfg.Logger.Warn("economy model equals the primary — tier disabled")
+		}
+	}
+	llmEng := engine.NewLLMEngine(rtr)
 	engines := []app.Engine{llmEng}
 
 	// Δ3a retrieval plane, built only when a store is configured. ONE PrecedentService is built
@@ -141,15 +173,17 @@ func Wire(cfg Config) (Intelligence, error) {
 	// genuinely different exits from the process.
 	redactor := admission.NewBasicRedactor()
 	gw, err := app.NewGateway(app.GatewayConfig{
-		Registry:        domain.DefaultRegistry(),
-		Projection:      proj,
-		Precedents:      precedents,
-		Redactor:        redactor, // C7 secret/PII scrub (authorizer = deployment seam)
-		Prompt:          pr,
-		Engines:         engines,
-		ProviderTimeout: cfg.ProviderTimeout,
-		BudgetTokens:    cfg.BudgetTokens,
-		BudgetWindow:    cfg.BudgetWindow,
+		Registry:              domain.DefaultRegistry(),
+		Projection:            proj,
+		Precedents:            precedents,
+		Redactor:              redactor, // C7 secret/PII scrub (authorizer = deployment seam)
+		Prompt:                pr,
+		Engines:               engines,
+		ProviderTimeout:       cfg.ProviderTimeout,
+		BudgetTokens:          cfg.BudgetTokens,
+		BudgetWindow:          cfg.BudgetWindow,
+		Router:                rtr,
+		BudgetDegradeFraction: cfg.BudgetDegradeFraction,
 	})
 	if err != nil {
 		return Intelligence{}, err

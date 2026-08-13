@@ -84,6 +84,16 @@ THEMIS_LLM_URL=http://<host>:1234 THEMIS_LLM_MODEL=<model> \
 Verified 2026-07-25 against LM Studio (WhiteRabbitNeo-V3-7B) → a validated `affected` proposal in ~16s.
 Re-verified 2026-08-07 against Ollama (cyberpal20b) → a grounded remediation plan in ~73s.
 
+**Router tiers (phase3-intelligence-router).** To exercise escalation live, pull a second model
+(`ollama pull <bigger-model>`), set `THEMIS_INTELLIGENCE_MODEL_ESCALATION=<bigger-model:tag>` on the
+Intelligence node, restart, and invoke `recommend_position` against a Finding known to decline (the
+all-`scope` carrier cases are reliable decliners). The journal's `capability invoked` line then carries
+`tier=escalation` — either with a produced proposal (the bigger model extracted more from the same
+grounding) or with `reason=insufficient` ("the bigger model could not tell either", the telemetry
+G-AI-2b exists for). Degrade-not-fail is the same shape with `_MODEL_ECONOMY` plus a small
+`THEMIS_INTELLIGENCE_BUDGET_TOKENS`/`_WINDOW`: near-exhausted invocations log `tier=economy`; fully
+exhausted ones still answer `budget_exhausted`.
+
 > **This file did not compile for several days** (until 2026-08-07), because a refactor renamed the read
 > seam it used and **no gate ever set `-tags=llm`**. A tagged file is invisible to `go build`, `go vet` and
 > the test run unless its tag is set. `make vet-tags` — now part of `check` and `check-ci` — type-checks

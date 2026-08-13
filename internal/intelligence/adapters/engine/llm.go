@@ -25,9 +25,11 @@ func NewLLMEngine(r app.Router) *LLMEngine { return &LLMEngine{router: r} }
 func (e *LLMEngine) Kind() domain.EngineKind { return domain.EngineLLM }
 
 // Execute routes to a provider and runs the rendered prompt, returning the raw
-// output plus provenance.
+// output plus provenance. The tier is the Gateway's runtime decision (escalation /
+// degrade); the engine just hands it to the router — models are chosen in exactly
+// one place (INT-0062).
 func (e *LLMEngine) Execute(ctx context.Context, in app.ExecInput) (app.EngineResult, error) {
-	p, err := e.router.Select(in.Routing)
+	p, err := e.router.Select(in.Routing, in.Tier)
 	if err != nil {
 		return app.EngineResult{}, fmt.Errorf("llm engine: route: %w", err)
 	}

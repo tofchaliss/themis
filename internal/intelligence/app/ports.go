@@ -30,11 +30,33 @@ type CompletionResult struct {
 	TokensUsed int
 }
 
+// ModelTier is the runtime routing decision the Gateway makes per invocation
+// (D6 · INT-0062, phase3-intelligence-router). It is deliberately APP-ring vocabulary:
+// a capability declares requirements and never names a model or a tier — the tier is
+// chosen by the Gateway from what happened at runtime (an honest decline escalates, a
+// nearly-spent budget degrades), which is exactly the kind of infrastructure decision
+// INT-0062 confines here.
+type ModelTier string
+
+const (
+	// TierPrimary is the deployment's default chat model (THEMIS_INTELLIGENCE_MODEL).
+	TierPrimary ModelTier = "primary"
+	// TierEscalation is the larger model an honest `insufficient` retries on ONCE
+	// (G-AI-2b) — the upgrade counterpart of degrade-not-fail. Optional.
+	TierEscalation ModelTier = "escalation"
+	// TierEconomy is the smaller model a nearly-spent budget window routes to
+	// (G-AI-4 degrade-not-fail) — spend shrinks before it stops. Optional.
+	TierEconomy ModelTier = "economy"
+)
+
 // Router picks the Provider for a capability's routing requirements at runtime
-// (D6 · INT-0062). Δ1 has one provider so routing is trivial; the port lets Δ2 add
-// cost/privacy-aware selection without touching callers.
+// (D6 · INT-0062). Select falls back to the primary provider for an unconfigured
+// tier, so a mis-threaded tier can never fail an invocation; Available reports
+// whether a DISTINCT model backs the tier, so the Gateway can decide whether an
+// escalation or degrade is worth anything before spending it.
 type Router interface {
-	Select(req domain.RoutingRequirements) (Provider, error)
+	Select(req domain.RoutingRequirements, tier ModelTier) (Provider, error)
+	Available(tier ModelTier) bool
 }
 
 // Engine is a kind of reasoning. Execute runs one plan step and returns its output —
@@ -53,7 +75,10 @@ type ExecInput struct {
 	JSONSchema  string
 	Temperature float64
 	Routing     domain.RoutingRequirements
-	Context     domain.AssembledContext // grounding — read by the retrieval engine
+	// Tier is the Gateway's runtime model-tier decision for this step ("" = primary).
+	// The LLM engine hands it to the Router; retrieval engines ignore it.
+	Tier    ModelTier
+	Context domain.AssembledContext // grounding — read by the retrieval engine
 }
 
 // EngineResult is one engine's output. A generative engine (LLM) fills Raw + provenance for
