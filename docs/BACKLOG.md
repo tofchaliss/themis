@@ -685,8 +685,12 @@ under the 2026-08-07 re-derivation standard.
   embedded-Postgres integration tests; only error-path lines remain. The store tier is intentionally set to
   80% until this lands.
 
-- [ ] **KN-SCAN-1 — scanner-report ingestion is UNWIRED: Evidence accepts the upload (201) and
-  Knowledge silently no-ops it.** _(Found 2026-08-13, same Q&A as KN-RECOR-1 — checking whether
+- [x] **KN-SCAN-1 — scanner-report ingestion is UNWIRED: Evidence accepts the upload (201) and
+  Knowledge silently no-ops it.** ✅ **CLOSED 2026-08-13, same day** (phase3-knowledge-staying-current):
+  `evidence.ScannerSource` (document read + ACL per finding, skip-and-count), the curated report
+  schema finally carries the component each finding names, `ScannerReportService` gained the D7
+  plan/apply split, the coordinator dispatches the kind, and wiring connects it. Scanner matches
+  now stamp Score/Priority/Fixes/ClaimClass like the discovery path (the old Ingest omitted them). _(Found 2026-08-13, same Q&A as KN-RECOR-1 — checking whether
   the "SBOM once + periodic scan reports" operating model works today.)_ The pieces exist:
   `domain.KindScannerReport` (Evidence accepts the kind), `app.ScannerReportService` (built,
   tested — folds proposals AND records matches so Findings open), and the scanner feed ACL
@@ -705,8 +709,14 @@ under the 2026-08-07 re-derivation standard.
   acceptance; and with [[KN-RECOR-1]] open it is the ONLY intended discovery path for static
   estates — both halves of the static-estate story are currently missing).
 
-- [ ] **KN-RECOR-1 — no post-upload re-discovery: a CVE published AFTER a release's last upload is
-  invisible until the next upload.** _(Surfaced in a Q&A walkthrough, 2026-08-13.)_ Discovery
+- [x] **KN-RECOR-1 — no post-upload re-discovery: a CVE published AFTER a release's last upload is
+  invisible until the next upload.** ✅ **CLOSED 2026-08-13, same day** (phase3-knowledge-staying-current):
+  the `correlated_releases` ledger (migration 000006, stamped inside ApplyCorrelation's unit of
+  work — latest evidence wins, zero-item plans still stamp) + `RediscoveryService` re-running the
+  EXISTING idempotent correlation for the stalest releases + a default-ON loop
+  (`THEMIS_REDISCOVERY_ENABLED=0` to disable, `_INTERVAL` 1h / `_STALE_AFTER` 24h / `_LIMIT` 3).
+  The cross-release consequence closes with it: a CVE carded by one release's upload reaches its
+  sibling releases on their next sweep. _(Surfaced in a Q&A walkthrough, 2026-08-13.)_ Discovery
   (OSV always-on + NVD A2 when enabled) runs only at CORRELATION time — an upload-driven
   snapshot. The enrichment sweeps are deliberately card-bounded (D5: enrich existing cards,
   never mirror a feed), so they keep KNOWN CVEs fresh forever but can never card a new one.

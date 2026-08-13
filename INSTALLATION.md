@@ -385,6 +385,12 @@ curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 > start Evidence with `THEMIS_EVIDENCE_KNOWN_RELEASES=rel-demo` (a dev stub SubjectRef) and upload
 > with `subject_release_id:"rel-demo"`.
 
+> **Between builds:** discovery runs at upload time, and the **re-discovery sweep** (default on,
+> `THEMIS_REDISCOVERY_*`) re-runs it for the stalest releases so new CVEs reach a registered
+> estate with nobody uploading anything. An **image-scan report** can also be uploaded as
+> `kind:"scanner-report"` for second-opinion findings at scanner trust — the curated document
+> shape and a Trivy conversion recipe are in TESTING.md.
+
 ### 5a. Test vendor-VEX suppression + the fixed verdict (EDR-VEX-01)
 
 A vendor `not_affected` statement (uploaded or from a feed) never silently drops a Finding — it becomes a

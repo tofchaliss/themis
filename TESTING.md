@@ -264,6 +264,33 @@ The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-v
 
 ---
 
+### Scanner reports + the re-discovery sweep (KN-SCAN-1 / KN-RECOR-1)
+
+**Upload an image-scan report** (kept current between SBOM uploads — the scanner is a second
+detection engine at Asserted trust; it never sets truth). The curated document is
+`{"findings":[…]}` where each finding carries the scanner-ACL record fields **plus the component
+it names**. Convert Trivy JSON with jq, then POST it as evidence:
+
+```sh
+trivy image --format json --output trivy.json <image:tag>
+jq '{findings:[.Results[] as $r | $r.Vulnerabilities[]? | {cve:.VulnerabilityID,
+     observed_at:(now|todate), scanner:"trivy", severity:.Severity,
+     cvss_score:(.CVSS.nvd.V3Score // 0), cvss_vector:(.CVSS.nvd.V3Vector // ""),
+     affected:[], fixed:(if .FixedVersion then [.FixedVersion] else [] end),
+     component:{purl:(.PkgIdentifier.PURL // ""), name:.PkgName,
+                version:.InstalledVersion, ecosystem:($r.Type // ""), source:""}}]}'   trivy.json > scan-report.json
+# POST like an SBOM but kind=scanner-report (see gf-upload-sbom.sh for the envelope shape)
+```
+
+Findings the translation cannot use are skipped and counted, never fatal — one malformed
+finding must not void a 400-finding report.
+
+**Watch a re-discovery sweep** (default ON): `journalctl -u themis@knowledge | grep re-discovery`
+— every sweep logs `releases` and `new_matches`, including zeros ("nothing was stale" and "the
+sweep stopped working" must not look alike). A non-zero `new_matches` is the headline event: a
+CVE reached inventory nobody re-uploaded. To force one, set `THEMIS_REDISCOVERY_STALE_AFTER=1m`
+temporarily and restart — every correlated release becomes due on the next tick.
+
 ### Trust model (EDR-TRUST-01)
 
 The trust model is exercised entirely by the unit/integration suite — no live stack needed.

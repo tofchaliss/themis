@@ -92,12 +92,34 @@ type CorrelationService struct {
 	discover  PackageVulnSource
 	fold      *FaultlineService
 	matches   MatchRecorder
+	ledger    ReleaseLedger // optional: nil = no re-discovery ledger (KN-RECOR-1)
 	clock     Clock
 }
 
 // NewCorrelationService wires the correlation ports.
 func NewCorrelationService(inv InventoryReader, disc PackageVulnSource, fold *FaultlineService, matches MatchRecorder, clock Clock) *CorrelationService {
 	return &CorrelationService{inventory: inv, discover: disc, fold: fold, matches: matches, clock: clock}
+}
+
+// WithLedger adds the re-discovery ledger (KN-RECOR-1): every ApplyCorrelation then records
+// which evidence it correlated and when, which is what the scheduled sweep drains. Separate
+// from the constructor so existing call sites keep compiling; production wiring always sets it.
+func (s *CorrelationService) WithLedger(l ReleaseLedger) *CorrelationService {
+	s.ledger = l
+	return s
+}
+
+// CorrelatedRelease is one ledger row: the release and the evidence its inventory came from.
+type CorrelatedRelease struct {
+	ReleaseID  string
+	EvidenceID string
+}
+
+// ReleaseLedger remembers when discovery last ran per release (KN-RECOR-1). Upsert happens
+// inside ApplyCorrelation's unit of work; StaleReleases feeds the re-discovery sweep.
+type ReleaseLedger interface {
+	UpsertCorrelatedRelease(ctx context.Context, releaseID, evidenceID string, at time.Time) error
+	StaleReleases(ctx context.Context, olderThan time.Time, limit int) ([]CorrelatedRelease, error)
 }
 
 // PlannedMatch is one discovered (component, CVE, source Proposal) triple awaiting fold +
@@ -117,7 +139,10 @@ type PlannedMatch struct {
 // (EDR-EVENTBUS-01 D7). The read/write split is why the inbox runs Prepare outside its tx.
 type CorrelationPlan struct {
 	ReleaseID string
-	Items     []PlannedMatch
+	// EvidenceID is the inventory the plan was built from — recorded on the re-discovery
+	// ledger (KN-RECOR-1) so a later sweep re-reads the same (or a newer) inventory.
+	EvidenceID string
+	Items      []PlannedMatch
 }
 
 // PlanCorrelation runs correlation's READ phase with NO transaction: it reads the release's
@@ -129,7 +154,7 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 	if err != nil {
 		return CorrelationPlan{}, err
 	}
-	plan := CorrelationPlan{ReleaseID: releaseID}
+	plan := CorrelationPlan{ReleaseID: releaseID, EvidenceID: evidenceID}
 	for _, comp := range inv.Components {
 		discovered, err := s.discover.VulnsForPackage(ctx, comp)
 		if err != nil {
@@ -148,6 +173,14 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 // FoldProposal converges and RecordMatch dedups, so a re-apply records no duplicate. Returns
 // the number of new matches.
 func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan CorrelationPlan) (int, error) {
+	// The re-discovery ledger (KN-RECOR-1), stamped unconditionally — a release whose plan
+	// held zero items still HAD its discovery run, and must not look eternally stale to the
+	// sweep. In the same unit of work as the matches, so ledger and matches commit together.
+	if s.ledger != nil && plan.EvidenceID != "" {
+		if err := s.ledger.UpsertCorrelatedRelease(ctx, plan.ReleaseID, plan.EvidenceID, s.clock.Now()); err != nil {
+			return 0, err
+		}
+	}
 	newMatches := 0
 	for _, item := range plan.Items {
 		f, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)

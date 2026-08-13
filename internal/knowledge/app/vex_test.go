@@ -83,9 +83,14 @@ func TestCoordinator_DispatchesByKind(t *testing.T) {
 	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-9"); !found {
 		t.Error("a VEX evidence must fold a card")
 	}
-	// A non-sbom / non-vex kind is ignored (and does not touch the nil correlate service).
+	// An unknown kind is ignored (and does not touch the nil correlate service). A
+	// scanner-report on a coordinator with NO scanner service wired is likewise a no-op —
+	// the dispatch is guarded, not assumed.
+	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{Kind: "attestation"}); err != nil {
+		t.Errorf("unknown kinds must be ignored: %v", err)
+	}
 	if err := coord.OnEvidenceRegistered(ctx, app.EvidenceRegistered{Kind: "scanner-report"}); err != nil {
-		t.Errorf("other kinds must be ignored: %v", err)
+		t.Errorf("scanner-report without a wired scanner service must be a no-op: %v", err)
 	}
 }
 
