@@ -110,8 +110,12 @@ func loadConfig() config {
 		reattributeInterval: parseDurationDefault(os.Getenv("THEMIS_REATTRIBUTE_INTERVAL"), 6*time.Hour),
 		rediscoveryEnabled:    os.Getenv("THEMIS_REDISCOVERY_ENABLED") != "0",
 		rediscoveryInterval:   parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_INTERVAL"), time.Hour),
-		rediscoveryStaleAfter: parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_STALE_AFTER"), 24*time.Hour),
-		rediscoveryLimit:      envIntDefault("THEMIS_REDISCOVERY_LIMIT", 0),
+		rediscoveryStaleAfter: parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_STALE_AFTER"), app.DefaultRediscoveryStaleAfter),
+		// The default is resolved HERE, not left to the service's internal fallback: this value
+		// is what the startup line logs, and a log that says 0 while the service means 3 is the
+		// misleading-telemetry class NVD-WATCH-1 exists to prevent (measured live 2026-08-13:
+		// the first deployed startup line printed releases_per_sweep=0).
+		rediscoveryLimit: envIntDefault("THEMIS_REDISCOVERY_LIMIT", app.DefaultRediscoveryLimit),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
