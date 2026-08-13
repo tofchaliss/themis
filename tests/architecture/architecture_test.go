@@ -242,3 +242,36 @@ func TestContextFirstArchitecture(t *testing.T) {
 		}
 	}
 }
+
+// TestDashboardIsAView enforces EDR-GUI-01 D1: the dashboard (cmd/dashboard +
+// internal/dashboard) is a VIEW, never a context — it may import the shared platform
+// packages and nothing from any bounded context or the registry. Every fact it
+// renders is fetched live over a read API; an import here would be a context leaking
+// into the presentation layer. Depguard's dashboard-is-a-view rule enforces the same
+// thing at lint time; this is the module-level backstop.
+func TestDashboardIsAView(t *testing.T) {
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(cfg, module+"/internal/dashboard/...", module+"/cmd/dashboard")
+	if err != nil {
+		t.Fatalf("load dashboard packages: %v", err)
+	}
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		t.Fatalf("dashboard packages contained %d load error(s)", n)
+	}
+
+	forbidden := append([]string{"registry"}, boundedContexts...)
+	for _, p := range pkgs {
+		for imp := range p.Imports {
+			if !strings.HasPrefix(imp, module+"/internal/") {
+				continue // stdlib / drivers are fine
+			}
+			for _, f := range forbidden {
+				base := module + "/internal/" + f
+				if imp == base || strings.HasPrefix(imp, base+"/") {
+					t.Errorf("dashboard violation: %s imports %s — the dashboard is a view and talks to contexts only over their read APIs (EDR-GUI-01 D1)",
+						p.PkgPath, imp)
+				}
+			}
+		}
+	}
+}

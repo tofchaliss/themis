@@ -66,6 +66,7 @@ declare -a infra_pkgs=(
 	platform/eventbus
 	platform/observability
 	platform/auth
+	dashboard/proxy
 	registry/adapters/store
 	registry/adapters/http
 	adapter/osv
