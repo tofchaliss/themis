@@ -50,6 +50,6 @@ Each group is its own PR off `main`, `make check-ci` green, and ends with `make 
 
 - [x] 4.1 `deploy/systemd/` seventh unit + generator entry; `nohup` lifecycle retired
 - [x] 4.2 INSTALLATION.md Part A step + `deploy/node.env.example` dashboard block
-- [ ] 4.3 Delete `gui/dashboard-spike` (safe — 1.5 moved everything normative to `main`)
-- [ ] 4.4 Archive this change: `openspec archive phase3-gui-dashboard --skip-specs -y`;
+- [x] 4.3 Delete `gui/dashboard-spike` (safe — 1.5 moved everything normative to `main`)
+- [x] 4.4 Archive this change: `openspec archive phase3-gui-dashboard --skip-specs -y`;
       `make vet-tags` green
