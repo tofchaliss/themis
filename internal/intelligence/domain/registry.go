@@ -102,8 +102,48 @@ func PlanRemediationV1() Capability {
 	}
 }
 
-// DefaultRegistry is the shipped catalog: recommend_position@v1 (Decision, one Finding) and
-// plan_remediation@v1 (Information, one Release).
+// ExplainVulnerabilityV1 is the finding-scoped explainer (GUI-1): given one Finding, it says
+// what the vulnerability MEANS for this enterprise — these components at these versions, this
+// release, these published fix bounds — in plain language a non-specialist can act on.
+//
+// It is an **Information** capability (T7), like plan_remediation: an explanation proposes no
+// stance, so nothing enters Governance, there is nothing to accept, and the output is ephemeral.
+// The worst outcome of a wrong explanation is a human disagreeing with a paragraph.
+//
+// The layering rule (decided 2026-08-11, when the CVE summary was made evidence): the STORED
+// summary is what the public record says the flaw IS, renders first wherever this output
+// appears, and is never replaced by this capability. The explanation is the overlay the summary
+// cannot provide — what the flaw means HERE. The prompt hands the model the stored summary as
+// grounding and asks only for the contextual half.
+//
+// It carries no Knowledge (precedent) step: precedent retrieval is scoped to past Positions,
+// and an explanation is not a position — the drawer already shows "similar past decisions" to
+// the human directly through the same PrecedentService the Decision path grounds on. Spending
+// embedding calls here would ground prose in decisions it must not appear to be making.
+func ExplainVulnerabilityV1() Capability {
+	return Capability{
+		ID:      "explain_vulnerability",
+		Version: "v1",
+		// Exactly one Finding: the context that makes an explanation worth reading — which
+		// component, which release — is per-Finding by construction.
+		SelectionType: SelectionFinding,
+		MinSelection:  1,
+		MaxSelection:  1,
+		Output:        OutputInformation,
+		Needs:         []ContextNeed{NeedFinding, NeedFaultline},
+		Plan: ExecutionPlan{
+			{Engine: EngineLLM, Prompt: "explain_vulnerability"},
+		},
+		OutputSchema: explainVulnerabilitySchema,
+		// No stances: an Information Response recommends nothing (T7).
+		AllowedStances: nil,
+		Routing:        RoutingRequirements{Privacy: PrivacyInternal, LocalOnly: true},
+	}
+}
+
+// DefaultRegistry is the shipped catalog: recommend_position@v1 (Decision, one Finding),
+// plan_remediation@v1 (Information, one Release), and explain_vulnerability@v1 (Information,
+// one Finding).
 func DefaultRegistry() *Registry {
-	return NewRegistry(RecommendPositionV1(), PlanRemediationV1())
+	return NewRegistry(RecommendPositionV1(), PlanRemediationV1(), ExplainVulnerabilityV1())
 }

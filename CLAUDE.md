@@ -86,7 +86,7 @@ what `.github/workflows/{pr,main}.yml` enforce, because the frozen v0.3.x legacy
 only on macOS's coarse clock.
 
 `make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives
-`recommend_position` **and `plan_remediation`** against a real OpenAI-compatible endpoint and needs
+`recommend_position`, **`plan_remediation` and `explain_vulnerability`** against a real OpenAI-compatible endpoint and needs
 `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
 `THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
 bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
@@ -217,14 +217,16 @@ registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; 
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and
 it reads via read APIs / writes via proposal-intake.
 
-Two capabilities ship, and their **output classes** decide everything about the path they take (T7):
+Three capabilities ship, and their **output classes** decide everything about the path they take (T7):
 `recommend_position@v1` is a **Decision** capability over one Finding — its stance aspires to become an
 Enterprise Position, so it enters Governance as an advisory proposal on `inferred` evidence that no policy
-may auto-accept. `plan_remediation@v1` is an **Information** capability over one Release — a remediation
-plan, ephemeral, proposing no stance, so nothing reaches Governance and there is nothing to accept. That
-is what makes a release-scoped capability safe to add: the worst outcome of a wrong plan is a human
-disagreeing with it. The plan's GROUPING (231 Findings → ~12 package upgrades) is a deterministic
-`GROUP BY` computed before the prompt — the model is asked only for what needs judgement.
+may auto-accept. `plan_remediation@v1` (Information, one Release) and `explain_vulnerability@v1`
+(Information, one Finding — GUI-1: what the flaw means for THESE components, grounded on the stored CVE
+summary, which it overlays and never replaces) are **Information** capabilities — ephemeral, proposing no
+stance, so nothing reaches Governance and there is nothing to accept. That is what makes them safe to add:
+the worst outcome of a wrong plan or explanation is a human disagreeing with it. The plan's GROUPING
+(231 Findings → ~12 package upgrades) is a deterministic `GROUP BY` computed before the prompt — the model
+is asked only for what needs judgement.
 
 **Semantic retrieval is a service with two consumers, not a step inside the AI path** (`app.PrecedentService`).
 The Gateway grounds `recommend_position` on it, and `GET /findings/{id}/similar` serves the *same instance*
