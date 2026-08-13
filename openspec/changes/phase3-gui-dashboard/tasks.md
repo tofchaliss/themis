@@ -21,18 +21,18 @@ Each group is its own PR off `main`, `make check-ci` green, and ends with `make 
 
 ## 2. Phase 2 — the authenticated edge (D2, D3, D4, D11, D12, D13)
 
-- [ ] 2.1 `internal/dashboard/session`: login form (key paste), key verification via
+- [x] 2.1 `internal/dashboard/session`: login form (key paste), key verification via
       `internal/platform/auth`, in-memory session store, HttpOnly + SameSite=Strict cookie,
       `Secure` flag when TLS, ~8h idle expiry
-- [ ] 2.2 `/whoami`: operator name + scopes from the session; SPA greys write controls from it
-- [ ] 2.3 D11 scope gate at the proxy: read scope → GETs + the two Information invokes;
+- [x] 2.2 `/whoami`: operator name + scopes from the session; SPA greys write controls from it
+- [x] 2.3 D11 scope gate at the proxy: read scope → GETs + the two Information invokes;
       writes (incl. `recommend_position` invoke) → admin, else 403
-- [ ] 2.4 D12 write-time re-verification: every mutation re-checks the operator key is active
-- [ ] 2.5 D13 identity validation: body `proposer_id`/`actor_id` must match the session
+- [x] 2.4 D12 write-time re-verification: every mutation re-checks the operator key is active
+- [x] 2.5 D13 identity validation: body `proposer_id`/`actor_id` must match the session
       operator on mutation routes, else 403; SPA threads `WHO` from `/whoami`
-- [ ] 2.6 `THEMIS_AUTH_REQUIRED=1` now unlocks (boots WITH auth); TLS-fronting expectation
+- [x] 2.6 `THEMIS_AUTH_REQUIRED=1` now unlocks (boots WITH auth); TLS-fronting expectation
       documented in `deploy/node.env.example`
-- [ ] 2.7 The full D11/D13 route-class test matrix; `make vet-tags` green
+- [x] 2.7 The full D11/D13 route-class test matrix; `make vet-tags` green
 
 ## 3. Phase 3 — AI surfaces + publish loop (D6, D9)
 

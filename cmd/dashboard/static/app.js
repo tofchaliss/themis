@@ -36,8 +36,14 @@ function toast(msg) {
 
 class NodeDown extends Error { constructor(node) { super(`${node} unreachable`); this.node = node; } }
 
+/* A 401 means the session expired or the key was revoked mid-use (D12): the only
+   honest continuation is the login form — data fetched on a dead session would render
+   as a broken page, not as "signed out". */
+function sessionGone() { location.href = "/login"; }
+
 async function apiGET(node, path) {
   const r = await fetch(`/api/${node}${path}`, { headers: { Accept: "application/json" } });
+  if (r.status === 401) { sessionGone(); throw new Error("session expired"); }
   if (r.status === 502) throw new NodeDown(node);
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`${node} ${path} → ${r.status}`);
@@ -51,6 +57,7 @@ async function apiPOST(node, path, body) {
     headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (r.status === 401) { sessionGone(); throw new Error("session expired"); }
   if (r.status === 502) throw new NodeDown(node);
   return r;
 }
@@ -77,17 +84,27 @@ $("#theme-toggle").addEventListener("click", () =>
   applyTheme(document.documentElement.dataset.theme === "midnight" ? "enterprise" : "midnight"));
 applyTheme(localStorage.getItem("themis-theme") || "enterprise");
 
-/* ---------- who is looking (config-supplied until auth lands) ---------- */
+/* ---------- who is looking (the authenticated session, or config when auth is off) ---------- */
 
 let WHO = "operator"; // filled by /whoami; becomes actor_id / proposer_id on decisions
+let CAN_WRITE = true; // D11: the proxy is the enforcement; this greying is the courtesy
 
 (async () => {
   try {
     const r = await fetch("/whoami");
-    const { user } = await r.json();
-    WHO = user || "operator";
+    if (r.status === 401) { sessionGone(); return; }
+    const j = await r.json();
+    const user = j.user || "operator";
+    WHO = user;
+    CAN_WRITE = j.can_write !== false;
+    if (!CAN_WRITE) document.body.classList.add("readonly");
     $("#user-name").textContent = user;
     $("#user-initials").textContent = user.split(/[\s._-]+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "·";
+    if (Array.isArray(j.scopes)) {
+      // Scopes only exist on an authenticated session — that is when sign-out means something.
+      $("#user-chip").title = `Signed in as ${user} (${j.scopes.join(", ") || "no scopes"})`;
+      $("#logout-form").style.display = "";
+    }
   } catch { $("#user-name").textContent = "operator"; $("#user-initials").textContent = "OP"; }
 })();
 

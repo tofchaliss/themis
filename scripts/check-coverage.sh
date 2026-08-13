@@ -67,6 +67,7 @@ declare -a infra_pkgs=(
 	platform/observability
 	platform/auth
 	dashboard/proxy
+	dashboard/session
 	registry/adapters/store
 	registry/adapters/http
 	adapter/osv

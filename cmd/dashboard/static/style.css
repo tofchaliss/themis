@@ -416,3 +416,18 @@ mark.unverified {
   background: var(--ink); color: var(--page); padding: 9px 16px; border-radius: 8px;
   font-size: 13px; box-shadow: var(--shadow);
 }
+
+/* D11 read-only courtesy: a read-scoped operator sees write controls disabled with the
+   reason on hover. The PROXY is the enforcement — this only makes the boundary visible
+   before a click instead of after a 403. recommend_position counts as a write (it records
+   a Proposal in Governance); the two Information invokes stay live. */
+body.readonly #dc-raise,
+body.readonly #dc-raise-accept,
+body.readonly .dc-accept,
+body.readonly .dc-reject,
+body.readonly #btn-publish,
+body.readonly #btn-recommend {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}

@@ -36,9 +36,12 @@
       <button id="theme-toggle" class="theme-toggle" title="Switch style (Enterprise / Midnight)" aria-label="Switch between Enterprise and Midnight style">
         <span class="tt-icon" aria-hidden="true">☀</span><span class="tt-name">Enterprise</span>
       </button>
-      <span id="user-chip" class="user-chip" title="Signed-in user (from THEMIS_DASHBOARD_USER until authentication lands)">
+      <span id="user-chip" class="user-chip" title="Signed-in user (from THEMIS_DASHBOARD_USER when auth is off)">
         <i id="user-initials">·</i><span id="user-name"></span>
       </span>
+      <form id="logout-form" method="post" action="/logout" style="display:none">
+        <button type="submit" class="theme-toggle" title="End this session">Sign out</button>
+      </form>
     </div>
   </header>
 

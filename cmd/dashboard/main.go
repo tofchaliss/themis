@@ -23,6 +23,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/themis-project/themis/internal/dashboard/proxy"
+	"github.com/themis-project/themis/internal/dashboard/session"
+	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -52,17 +54,20 @@ type config struct {
 	// work, D8); empty = the embedded assets (production).
 	assetsDir string
 
-	// userName — THEMIS_DASHBOARD_USER. Display name shown in the topbar (default
-	// "operator"). The Phase-1 stopgap identity: Phase 2 (D2/D12) replaces this with
-	// the authenticated session's operator, answered through the same /whoami, and
-	// the page needs no change.
+	// userName — THEMIS_DASHBOARD_USER. Display name shown in the topbar when auth is
+	// OFF (default "operator"). With an auth DSN set, /whoami answers with the
+	// authenticated session's operator instead (D2) and this value is unused.
 	userName string
 
+	// authDSN — THEMIS_AUTH_DATABASE_DSN. The inbound-edge auth switch, same as every
+	// node (D3): set ⇒ the browser must sign in (login form → server-side session,
+	// D12) and the proxy enforces operator scope + identity (D11/D13); unset ⇒ the
+	// edge is open (dev) and the node logs AUTH DISABLED.
+	authDSN string
+
 	// authRequired — THEMIS_AUTH_REQUIRED. The production guard shared with every
-	// node: "1" means this deployable may never boot with an open edge. The Phase-1
-	// dashboard HAS no authenticated edge (login is Phase 2, D3), so with the flag
-	// set it refuses to boot at all — that is the guard working, making the Phase-1
-	// exposure window an explicit operator choice instead of a silent default.
+	// node: "1" hard-fails startup when authDSN is empty, so this deployable can
+	// never silently boot with an open edge.
 	authRequired bool
 }
 
@@ -78,20 +83,22 @@ func loadConfig() config {
 		apiKey:           os.Getenv("THEMIS_API_KEY"),
 		assetsDir:        os.Getenv("THEMIS_DASHBOARD_ASSETS"),
 		userName:         envDefault("THEMIS_DASHBOARD_USER", "operator"),
+		authDSN:          os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
 		authRequired:     os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
 	}
 }
 
-// errAuthRequired is the Phase-1 boot refusal (D3 amendment, grilled 2026-08-13).
+// errAuthRequired is the boot refusal (D3): the production guard means "never boot with
+// an open edge", and with no auth DSN the edge would be open.
 var errAuthRequired = errors.New(
-	"THEMIS_AUTH_REQUIRED=1 but the dashboard's authenticated edge (login/session) is not yet wired: " +
-		"this deployable cannot honor the flag and refuses to boot open — unset the flag only on a " +
+	"THEMIS_AUTH_REQUIRED=1 but THEMIS_AUTH_DATABASE_DSN is empty: the dashboard refuses to boot " +
+		"with an open edge — set the auth DSN (login becomes mandatory) or unset the flag only on a " +
 		"network where an open dashboard edge is an accepted, explicit choice")
 
 // guardAuth is the boot-or-refuse decision, separated from main so the refusal is
 // testable — a guard that only runs in production is a guard nobody has seen work.
 func guardAuth(cfg config) error {
-	if cfg.authRequired {
+	if cfg.authRequired && cfg.authDSN == "" {
 		return errAuthRequired
 	}
 	return nil
@@ -111,8 +118,6 @@ func main() {
 		logger.Error("refusing to start", observability.Err(err))
 		os.Exit(1)
 	}
-	// The same honesty contract every node has: an open edge announces itself.
-	logger.Info("AUTH DISABLED — the dashboard edge is open (login/session lands in Phase 2, EDR-GUI-01 D3)")
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
@@ -133,21 +138,57 @@ func main() {
 		logger.Error("bad node URL", observability.Err(err))
 		os.Exit(1)
 	}
-	router.Handle("/api/*", p)
-
-	// Who is looking at the page. Config-supplied in Phase 1; the seam the
-	// authenticated session (D2/D12) answers through in Phase 2.
-	router.Get("/whoami", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"user": cfg.userName})
-	})
 
 	assets, err := assetHandler(cfg.assetsDir)
 	if err != nil {
 		logger.Error("assets failed", observability.Err(err))
 		os.Exit(1)
 	}
-	router.Handle("/*", assets)
+
+	if cfg.authDSN != "" {
+		// The authenticated edge (D2/D3/D11/D12/D13): login + server-side session,
+		// scope + identity enforcement at the proxy, /whoami from the session.
+		authenticator, closeAuth, aerr := auth.Open(ctx, cfg.authDSN)
+		if aerr != nil {
+			logger.Error("auth store", observability.Err(aerr))
+			os.Exit(1)
+		}
+		defer closeAuth()
+		mgr := session.NewManager(session.KeyVerifier{Keys: authenticator.Keys}, 0, nil)
+		sh := session.Handler{Manager: mgr}
+		gate := proxy.Gate{Principal: sh.Principal, Reverify: sh.Reverify}
+
+		router.Get("/login", sh.LoginPage)
+		router.Post("/login", sh.Login)
+		router.Post("/logout", sh.Logout)
+		router.Handle("/api/*", gate.Wrap(p))
+		router.Get("/whoami", func(w http.ResponseWriter, r *http.Request) {
+			principal, ok := sh.Principal(r)
+			if !ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"title": "authentication required"})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"user":      principal.Name,
+				"scopes":    principal.Scopes,
+				"can_write": principal.AuthorizeWrite(),
+			})
+		})
+		router.Handle("/*", sh.RequireSession(assets))
+		logger.Info("auth ENABLED — browser sessions over the shared auth store (EDR-GUI-01 D3)")
+	} else {
+		// The same honesty contract every node has: an open edge announces itself.
+		logger.Info("AUTH DISABLED — the dashboard edge is open (set THEMIS_AUTH_DATABASE_DSN to require sign-in, EDR-GUI-01 D3)")
+		router.Handle("/api/*", p)
+		router.Get("/whoami", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"user": cfg.userName, "can_write": true})
+		})
+		router.Handle("/*", assets)
+	}
 
 	if cfg.apiKey != "" {
 		logger.Info("proxy auth: X-API-Key injection ENABLED")
