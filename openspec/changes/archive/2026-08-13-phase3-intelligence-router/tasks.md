@@ -30,4 +30,4 @@ One PR off `main`, `make check-ci` green, ending with `make vet-tags` green.
 - [x] 3.2 Docs: node.env.example, systemd installer comment, CLAUDE.md env notes, TESTING.md
 - [x] 3.3 EDR-INTELLIGENCE-01: implementation notes on D4 (degrade landed) + D6 (tiered router
       landed); BACKLOG: G-AI-2b closed, G-AI-4 degrade half closed
-- [ ] 3.4 `make check-ci` + `make vet-tags` green; archive this change
+- [x] 3.4 `make check-ci` + `make vet-tags` green; archive this change
