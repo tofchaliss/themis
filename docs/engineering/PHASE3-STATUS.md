@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-06 · **Read this first when resuming.**
+**Updated:** 2026-08-13 · **Read this first when resuming.** (Latest checkpoint: §"Checkpoint — session 2026-08-13" below.)
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -505,6 +505,64 @@ never recurring — a spec-vs-`API.md` operationId diff, and an "every `THEMIS_*
 `deploy/node.env.example`" check. The second one, run once, also found that
 **`THEMIS_BUS_DATABASE_DSN` — the cross-context switch — was referenced by `node.env.example` as
 "(shared, above)" but defined nowhere in it.**
+
+## Checkpoint — session 2026-08-13 (RESUME HERE)
+
+One session, four arcs, **eleven PRs merged (#93–#103), zero open PRs, zero pending branches**
+at close. Every feature below is on `main` AND deployed + live-verified on the VM estate.
+
+**1 — Knowledge correctness (morning).** KN-FIX-3 closed (EDR-VEX-01 **D8**): fix attribution is
+ecosystem-scoped (`FixedVersion.Ecosystem`, canonical via `value.CanonicalEcosystem`; known
+filters, unknown never does), ONE rpm NEVRA normalization path in `Reconcile` (`value.RPMEVR`),
+codec decode-time source-stamping heals the append-only history, Governance selection adds the
+ecosystem + EL-stream display checks. **Healing observed live**: the measured 4-fix perl card
+re-folded to 3 correctly-stamped fixes 60s after deploy, zero migration. Merged with the morning
+stack: #93 cve-summary, #94 explain_vulnerability@v1 (retargeted child), #95 distro-feeds.
+
+**2 — GUI-6 shipped (midday).** EDR-GUI-01 **Accepted (grilled, D1–D13)** — the grill added D11
+(the proxy is the v1 scope-enforcement point; `recommend_position`'s invoke is a WRITE), D12
+(dashboard-local in-memory sessions; every mutation re-verifies the key — revocation bites on
+the write path), D13 (identity claims validated at the proxy, 403 on mismatch), TLS-fronting in
+D3, and the Phase-1 guard + docs-ride-the-PR amendments. All four phases built (#96): tested
+proxy package, authenticated edge, D9 queue preview, seventh systemd unit. **Live-verified
+11/11** (curl matrix + browser). Spike branch deleted; `phase3-gui-dashboard` archived (#97).
+Pre-live catch: the proxy node key must be **admin** (D4 wording fixed) — a read node key 403s
+the governed loop at the node edge.
+
+**3 — AI harness (afternoon).** The tiered model router (#99, `phase3-intelligence-router`
+archived): `app.ModelTier` runtime vocabulary, escalate ONCE on `llm:insufficient` (Decision
+only — never schema/business/timeout/degraded), degrade-not-fail to an economy model below the
+budget low-water mark. **G-AI-2b closed, G-AI-4 degrade-half closed; G-AI-5 attaches at the same
+Select.** Escalation **witnessed live**: cyberpal declined → WhiteRabbitNeo-V3-7B (hf.co pull)
+answered → Grounding Verification refused its hallucinated NEVRA (`tier=escalation`,
+`business_invalid` + detail). AI-TEL-1 filed+merged (#100); AI-204-2 filed (#102).
+
+**4 — Staying current (evening, from a Q&A walkthrough).** Two silent gaps found, designed,
+built, merged (#101, `phase3-knowledge-staying-current` archived), deployed, verified same day:
+**KN-SCAN-1** (scanner-report uploads were accepted then silently no-op'd — the seam + the
+component-carrying document schema now exist; trivy→report jq recipe in TESTING.md) and
+**KN-RECOR-1** (discovery ran only at upload time — now the `correlated_releases` ledger +
+default-ON re-discovery sweep re-runs the idempotent correlation for stale releases;
+`THEMIS_REDISCOVERY_*`). **First production sweep: `releases:3, new_matches:5`** — five
+CVE-2026-* Findings reached months-old inventory with nobody uploading anything. One
+live-measured log fix followed (#103, effective limit in the startup line).
+
+**Tooling:** `vm-verify` fixed twice (#98 — reader lag now counts same-context PENDING events;
+the Feeds section had NEVER printed) → the estate's first fully green report.
+
+**VM state at close:** all 7 units on `main`@472c3a8-era binaries (knowledge rebuilt last;
+others from the #95/#96 rebuild — the #103 log fix is cosmetic, picked up next rebuild).
+Dashboard auth ON (`THEMIS_AUTH_REQUIRED=1`; operator keys minted: fchaliss admin ×2 — first
+revoked in the D12 test — viewer read, dashboard-node admin). Node-edge F1 auth still OFF
+(cheap to enable now — keys exist). Alpine feed ON. Escalation model configured
+(WhiteRabbitNeo Q4_K_M) + `THEMIS_LLM_TIMEOUT=300s`. Re-discovery ledger seeded; steady state
+= hourly `releases:0` sweeps. **Both DB passwords are burned in chat** (2026-08-12 +
+2026-08-13) — rotation = all `/etc/themis/*.env` (now seven) + simultaneous restart.
+
+**Next session, weighted:** 1) **R7 (GOV-15 clamp) + R6 (F5 + password rotation)** — the top
+measured defects, patient for days now. 2) Optional live rounds: scanner-report ingestion
+(needs trivy), triage the five sweep-born Findings, degrade-path live test. 3) The two big AI
+blockers (Δ4 plane; release-comparison read API — "Must ask") when ready for design-first work.
 
 ## Key file pointers
 
