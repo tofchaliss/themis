@@ -98,23 +98,30 @@ printf '    evidence=%s  faultlines=%s  matches=%s  findings=%s  positions=%s  p
   "${EV:-?}" "${FL:-?}" "${MA:-?}" "${FN:-?}" "${PO:-?}" "${PU:-?}"
 printf '    bus events=%s\n' "${BUS:-?}"
 
-# A consumer far behind the log is the shape of a stalled reader. It is worth surfacing because the
-# stall is silent: the gap-free watermark simply stops admitting rows and nothing errors.
+# A consumer with UNDELIVERED events of its own source context is the shape of a stalled reader —
+# worth surfacing because the stall is silent: the gap-free watermark simply stops admitting rows
+# and nothing errors. Measured false positive fixed 2026-08-13: the old metric compared the cursor
+# against the GLOBAL head (behind = BUS - seq), but a cursor only rides its own context's rows, so
+# a healthy reader whose source went quiet was flagged "1685 events behind" while the pending
+# count — the honest measure — was zero.
 if [ -n "${BUS:-}" ] && [ "${BUS:-0}" -gt 0 ]; then
   while IFS='|' read -r consumer stream seq; do
     [ -z "$consumer" ] && continue
-    behind=$((BUS - seq))
-    if [ "$behind" -gt 100 ]; then
-      flag "reader '$consumer' on '$stream' is $behind events behind (cursor $seq of $BUS)"
+    pending=$(q bus "select count(*) from event_log where source_context='${stream}' and seq > ${seq}")
+    if [ "${pending:-0}" -gt 100 ]; then
+      flag "reader '$consumer' on '$stream' has $pending undelivered '$stream' events (cursor $seq of $BUS)"
     else
-      ok "reader $consumer/$stream at $seq"
+      ok "reader $consumer/$stream at $seq (${pending:-0} pending)"
     fi
   done < <(q bus 'select consumer, source_context, last_seq from stream_cursor order by consumer')
 fi
 
 # ── Knowledge: feeds and attribution ───────────────────────────────────────────────────────────
 hdr "Feeds"
-q knowledge "select source||' '||count(*) from faultline_proposals group by source order by 2 desc" \
+# order by count(*) — the select is ONE concatenated column, so the previous `order by 2` was a
+# PostgreSQL error that q's stderr suppression swallowed: the Feeds section printed EMPTY on every
+# run and nobody could tell (found 2026-08-13 when an operator noticed the gap).
+q knowledge "select source||' '||count(*) from faultline_proposals group by source order by count(*) desc" \
   | while read -r line; do info "$line proposals"; done
 # A feed with failures is reported; a feed that ran and found nothing is NOT a fault — enrichment
 # is relevance-bounded, so a sweep over a cold estate correctly does nothing.
