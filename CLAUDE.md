@@ -32,7 +32,18 @@ session at [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.
   `openspec validate` reporting "no deltas" is expected, and you archive with
   `openspec archive <name> --skip-specs -y`.
 - **Commit and push only when the user explicitly asks.** Do not commit, push, or open PRs on your own
-  initiative, even after a green `make check`.
+  initiative, even after a green `make check`. `gh pr create` and `gh pr merge` are on the **deny** list in
+  `.claude/settings.local.json`, beside `rm -rf /` and `git push --force` — that is the enforcement, and it
+  is deliberate. Removing it is itself an explicit ask, and it goes back afterwards.
+- **Merging a STACK: never `--delete-branch` the base.** Merge the base PR without it, retarget the child
+  PR, *then* delete. Deleting the base closes the child instead of retargeting it — and because this repo
+  **squash**-merges, the base's original commit is not an ancestor of `main` afterwards, so simply
+  repointing the child at `main` makes its diff double-count everything the base already landed.
+  Either behaviour alone is recoverable; together they lose the PR and poison the diff (done 2026-08-10 to
+  PR #91, recovered as #92). **To recover:** confirm the squash was content-identical
+  (`git diff <original-base-commit> <squash-commit>` must be empty — that is what makes the next step
+  conflict-free), branch fresh from the merged `main`, cherry-pick the child's commit onto it, and open a
+  new PR. Do not reach for `git push --force`; it is denied, and this path does not need it.
 - **The `.cursor/rules/*.mdc` files are `alwaysApply: true` but describe the frozen v0.3.x PoC** (the
   `usecase/adapter/infrastructure` layers, the three-layer data model, "treat as current intent"). For
   greenfield work they are superseded by this file, the ADRs/EDRs, `STACK.md`, and `CONVENTIONS.md` — do not
@@ -75,7 +86,7 @@ what `.github/workflows/{pr,main}.yml` enforce, because the frozen v0.3.x legacy
 only on macOS's coarse clock.
 
 `make e2e-llm` is **opt-in** (`//go:build llm`, excluded from `make check`): it drives
-`recommend_position` **and `plan_remediation`** against a real OpenAI-compatible endpoint and needs
+`recommend_position`, **`plan_remediation` and `explain_vulnerability`** against a real OpenAI-compatible endpoint and needs
 `THEMIS_LLM_URL` / `THEMIS_LLM_MODEL` (plus
 `THEMIS_LLM_API_KEY` and `THEMIS_LLM_RESPONSE_FORMAT=json_schema` for servers like LM Studio that require a
 bearer token and reject `json_object`); it skips if the endpoint is unreachable. See `TESTING.md`.
@@ -209,14 +220,16 @@ registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; 
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and
 it reads via read APIs / writes via proposal-intake.
 
-Two capabilities ship, and their **output classes** decide everything about the path they take (T7):
+Three capabilities ship, and their **output classes** decide everything about the path they take (T7):
 `recommend_position@v1` is a **Decision** capability over one Finding — its stance aspires to become an
 Enterprise Position, so it enters Governance as an advisory proposal on `inferred` evidence that no policy
-may auto-accept. `plan_remediation@v1` is an **Information** capability over one Release — a remediation
-plan, ephemeral, proposing no stance, so nothing reaches Governance and there is nothing to accept. That
-is what makes a release-scoped capability safe to add: the worst outcome of a wrong plan is a human
-disagreeing with it. The plan's GROUPING (231 Findings → ~12 package upgrades) is a deterministic
-`GROUP BY` computed before the prompt — the model is asked only for what needs judgement.
+may auto-accept. `plan_remediation@v1` (Information, one Release) and `explain_vulnerability@v1`
+(Information, one Finding — GUI-1: what the flaw means for THESE components, grounded on the stored CVE
+summary, which it overlays and never replaces) are **Information** capabilities — ephemeral, proposing no
+stance, so nothing reaches Governance and there is nothing to accept. That is what makes them safe to add:
+the worst outcome of a wrong plan or explanation is a human disagreeing with it. The plan's GROUPING
+(231 Findings → ~12 package upgrades) is a deterministic `GROUP BY` computed before the prompt — the model
+is asked only for what needs judgement.
 
 **Semantic retrieval is a service with two consumers, not a step inside the AI path** (`app.PrecedentService`).
 The Gateway grounds `recommend_position` on it, and `GET /findings/{id}/similar` serves the *same instance*

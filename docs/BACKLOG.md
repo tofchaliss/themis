@@ -39,7 +39,7 @@ code reading.
 |---|---|---|---|---|
 | **R7** | **The blast multiplier destroys the order it exists to create** | **P2, measured** | A per-release CONSTANT multiplied over a set cannot reorder that set — but `EffectivePriority` **clamps at 100**, and a clamp is not order-preserving. At a 12-customer estate every Finding with base ≥ 50 pins to 100 and the worst item on the release leaves the top three. Inside a release the multiplier is strictly negative: no ordering gained, all ordering lost. | GOV-15 |
 | **R6** | **A node that fails announces nothing** | **P2, measured** | Both halves of one VM incident. A crash-looping node restarted **81 times** unnoticed because nothing surfaces "never became ready"; and a rotated DB password stays invisible because `pgx` keeps serving pre-rotation connections — every node reports healthy until they all fail together at the next restart. | F5 (`/healthz` + `/readyz` + a startup-failure signal) · DB-password rotation reconciliation |
-| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 (partially closed) · G-AI-5 · PLAN-5 · Δ3a component-embedding |
+| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 (partially closed) · G-AI-5 · PLAN-5 · Δ3a component-embedding · GUI-1 (explain-in-context) |
 | **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
 | **R3** | **Communication has one delivery channel, and it is a log line** | **P2** | The exactly-once / idempotent / outcome-recorded mechanics are done; what is missing is anywhere real to send an artifact. | concrete delivery channels (SMTP / Slack / webhook) |
 | **R4** | **Guarded deferrals** | **P3** | Correct today, with a TEST that fails the build the moment they stop being correct. They are on the list to be found, not to be done. | TRUST-1 (applicabilities uniformly Asserted) · TRUST-3 (no AI→Knowledge path exists yet) |
@@ -47,6 +47,11 @@ code reading.
 
 **Re-derived 2026-08-07 (third time that day).** The N1–N10 clusters are gone because the work in them is
 done: **31 open → 13**, and the four P0/P1 clusters closed entirely.
+
+**GUI batch filed 2026-08-11:** the first live dashboard days added six items (GUI-1…6 in §C) —
+one R1 roadmap capability, one MED-HIGH data gap (Alpine, GUI-2), three LOW-MED feed items, one
+productization marker. The CVE-summary gap those days ALSO found was fixed the same day
+(`feat/knowledge-cve-summary`), so it is deliberately not an entry. Still no P0/P1.
 
 **Re-counted 2026-08-10 against the checkboxes.** The 13 above was right on 2026-08-07 and then went stale
 in the ordinary way: the 2026-08-08/09 VM session filed four new items (GOV-15, F5, DB-password rotation,
@@ -150,6 +155,48 @@ three angles, and two of them proposed fixes that would not have worked.
 ---
 
 ### C. Deferred follow-ups inside completed contexts
+
+#### GUI-session follow-ups (filed 2026-08-11 — surfaced by the first live dashboard days)
+
+The dashboard spike (`gui/dashboard-spike`, `docs/engineering/DASHBOARD-SPIKE.md`) put a human in
+front of the product for the first time. What it surfaced and what was FIXED the same days: the
+missing CVE summary (delivered by every feed, parsed by nothing — closed on
+`feat/knowledge-cve-summary`) and a set of pure GUI issues. What stays open is below. All are
+**read from code / user observation on the VM**, not measured defects; none qualifies as P0/P1
+under the 2026-08-07 re-derivation standard.
+
+- [ ] **GUI-1 — AI "explain this vulnerability in our context" capability.** Cluster **R1** (AI
+  harness), **P2 — roadmap, deliberately NOT a defect.** An Information-class capability (T7, like
+  `plan_remediation`): grounded ON the stored feed summary + the assessment projection, it says
+  what no feed can — "…and your `python3-libs` sits in billing-api's request path." Ephemeral,
+  clearly AI-labeled, never a substitute for the stored summary (that layering was decided
+  2026-08-11 when the summary was made evidence; see the `VulnFacts.Summary` doc comment).
+- [ ] **GUI-2 — Alpine secdb enrichment feed.** **MED-HIGH for estates shipping Alpine** — the
+  genuine distro data gap this session found: RHEL/Rocky/Alma get vendor severity, `not_affected`
+  and fixed NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but **Alpine has correlation
+  only** — no vendor fixed-version bounds, no apk fixed-verdict. Source:
+  `security.alpinelinux.org` per-branch secdb. Needs the **D5 reading written first** (the DB is
+  not per-CVE addressable: fetch the small branch DB, fold ONLY records matching carded CVEs,
+  discard the rest — enrichment, not mirroring), as an EDR-VEX-01 delta. Mirrors B3's shape.
+- [ ] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** LOW-MED, efficiency. Today the Red
+  Hat feed re-asks Hydra per carded CVE per interval; `…/csaf/v2/advisories/changes.csv` is a
+  change signal — intersect with carded CVEs, fetch only what moved. Same D5 bound, far fewer
+  requests. Also verify first whether `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir
+  (`…/csaf/v2/vex/`) already covers the need with zero new code.
+- [ ] **GUI-4 — per-distro feed-health rows.** LOW-MED, visibility. `GET /feeds` shows one `osv`
+  row, so Alpine data flowing and Alpine data quietly absent look identical; RHEL+Rocky+Alma hide
+  behind one `redhat` row. Record OSV distro queries per ecosystem (`osv/alpine`, `osv/rocky`…).
+  This is the visibility half of what the user reported as "add feeds for rhel/rocky/alpine" —
+  the rhel/rocky DATA already flows; only Alpine (GUI-2) is a real gap.
+- [ ] **GUI-5 — Rocky errata feed for RXSA-only advisories.** LOW-MED. The Red Hat feed covers
+  Rocky by clone (EDR-VEX-01 decision — correct for rebuilds), but **RXSA** advisories
+  (Rocky-exclusive/SIG packages) exist in no Red Hat data. A Rocky errata (Apollo) feed scoped to
+  that gap; do not duplicate the clone coverage.
+- [ ] **GUI-6 — productize the dashboard.** **P2 — roadmap.** The spike branch never merges; when
+  the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
+  OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
+  publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
+  the running requirements capture.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

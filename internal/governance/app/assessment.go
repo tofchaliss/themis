@@ -11,8 +11,12 @@ import (
 // FaultlineKnowledge is what Knowledge knows about a CVE, read over its read API and mapped
 // into Governance's own view type — no cross-context import (Book III §3.5).
 type FaultlineKnowledge struct {
-	FaultlineID    string
-	CVE            string
+	FaultlineID string
+	CVE         string
+	// Summary is the source's short account of WHAT the CVE is — carried so a human judging a
+	// proposal (and the AI grounding on this same projection) can see the nature of the flaw,
+	// not only its numbers. Descriptive; nothing decides on it.
+	Summary        string
 	Severity       string
 	CVSSScore      float64
 	EPSS           float64

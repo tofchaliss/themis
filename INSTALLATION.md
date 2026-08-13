@@ -133,8 +133,8 @@ Creating the databases needs the `postgres` superuser (`sudo -u postgres`) becau
 ```sh
 go build ./...     # compile-check everything (silent output = success)
 # then produce the service binaries the runbook runs (cleaner than `go run` for six background processes):
-go build -o bin/ ./cmd/registry ./cmd/evidence ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence
-ls bin/            # registry evidence knowledge governance communication intelligence
+go build -o bin/ ./cmd/registry ./cmd/evidence ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence ./cmd/dashboard
+ls bin/            # registry evidence knowledge governance communication intelligence dashboard
 ```
 
 `make build` builds only the frozen v0.3.x monolith (→ `./bin/themis`) — you don't need it for the
@@ -475,6 +475,31 @@ export THEMIS_INTELLIGENCE_URL=http://localhost:8086
 Design: [`docs/engineering/decisions/EDR-INTELLIGENCE-01.md`](docs/engineering/decisions/EDR-INTELLIGENCE-01.md)
 (Revision 2) + [`docs/engineering/THEMIS-AI-HARNESS.md`](docs/engineering/THEMIS-AI-HARNESS.md).
 
+### 6a. Dashboard (the GUI node — EDR-GUI-01)
+
+`bin/dashboard` serves the Themis GUI at **`:8090`**: a static single-page app plus a same-origin
+reverse proxy to the six read APIs — a **view**, never a context (no database, no truth; every
+number on screen is fetched live). Run it beside the pipeline:
+
+```sh
+# open edge (dev / firewalled trial) — the node logs AUTH DISABLED:
+./bin/dashboard &
+# with node-side auth enabled (4a), give the proxy an ADMIN key (write-capable — the
+# governed loop's accepts/publishes go through it; per-operator write PERMISSION is
+# enforced at the dashboard's own gate, so a read-scoped operator still cannot decide):
+#   THEMIS_API_KEY=<key minted with: authadmin create-key --name dashboard --scopes admin>
+# to require operator sign-in (each operator pastes their OWN key once; a server-side
+# session takes over, and their scope decides what the GUI lets them do):
+#   THEMIS_AUTH_DATABASE_DSN="postgres://themis:$PGPW@localhost:5432/auth?sslmode=disable"
+# production guard (refuses to boot with an open edge):
+#   THEMIS_AUTH_REQUIRED=1
+```
+
+Beyond a firewalled network, **front `:8090` with a TLS-terminating reverse proxy** (send
+`X-Forwarded-Proto: https` so the session cookie turns `Secure`) — the login paste is the one
+moment an operator's long-lived key transits the wire. All options are documented in
+[`deploy/node.env.example`](deploy/node.env.example).
+
 ### 7. Run as systemd services (survive logout / reboot)
 
 Steps 4–6 run the services as background jobs of your shell — fine for a trial, but they die when the shell
@@ -484,7 +509,7 @@ sure the databases exist (step 1), then stop any hand-started copies so they don
 
 ```sh
 # from the repo root, as root, with the DB password (and your Ollama model tag):
-pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)' || true
+pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence|dashboard)' || true
 sudo THEMIS_PGPW="$PGPW" THEMIS_INTELLIGENCE_MODEL='<ollama-model:tag>' \
   ./deploy/systemd/install-systemd.sh
 ```

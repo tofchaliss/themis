@@ -17,6 +17,16 @@ type EnterpriseView struct {
 	Severity       value.Severity
 	CVSS           value.CVSS
 	SeveritySource string // which source won the headline severity (explainability, CON-0003)
+	// Summary is the winning source's short account of WHAT this vulnerability is, chosen by
+	// the same precedence discipline as the headline but in an INDEPENDENT race: a source that
+	// wins severity with no description must not blank the description another source supplied
+	// (Red Hat routinely carries severity without prose while OSV carries the summary).
+	//
+	// Deliberately outside the trust field-groups: it is descriptive, no verdict consumes it,
+	// and Grounding Verification anchors to the projection's facts, never to prose. Giving it
+	// a trust class would imply something reads it to decide; nothing may.
+	Summary        string
+	SummarySource  string // which source won the summary (explainability, same rule as SeveritySource)
 	AffectedRanges []string
 	// Fixes are the remediations, each attributed to the package it applies to. This is the
 	// authoritative form — use FixesFor to ask "what fixes MY component?".
@@ -97,6 +107,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	view := EnterpriseView{Severity: value.SeverityUnknown}
 
 	var best headlineCandidate
+	var bestSummary summaryCandidate
 	rangeSet := map[string]struct{}{}
 	fixSet := newFixFold()
 	carrierSet := map[string]struct{}{}
@@ -115,6 +126,15 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 				}
 				if c.beats(best) {
 					best = c
+				}
+			}
+			if f.Summary != "" {
+				sc := summaryCandidate{
+					set: true, rank: prec.rankOf(p.source), observedAt: p.observedAt,
+					source: p.source, text: f.Summary,
+				}
+				if sc.beats(bestSummary) {
+					bestSummary = sc
 				}
 			}
 			// Ranges and fixed versions are a union, so the group inherits the highest-risk
@@ -161,6 +181,10 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 		// not a fold across losing candidates that contributed nothing to it.
 		view.HeadlineTrust = trust.ClassOf(best.source)
 	}
+	if bestSummary.set {
+		view.Summary = bestSummary.text
+		view.SummarySource = bestSummary.source
+	}
 	view.AffectedRanges = sortedKeys(rangeSet)
 	view.CarrierProducts = sortedKeys(carrierSet)
 	view.Fixes = fixSet.sorted()
@@ -202,6 +226,34 @@ func (c headlineCandidate) beats(o headlineCandidate) bool {
 	return c.source < o.source
 }
 
+// summaryCandidate is a contender for the reconciled summary — the headline discipline
+// (precedence, then recency) applied in its own race, since presence of prose and presence
+// of a severity are independent per source. The trailing text/source keys only make the
+// order total; they never override authority.
+type summaryCandidate struct {
+	set        bool
+	rank       int
+	observedAt time.Time
+	source     string
+	text       string
+}
+
+func (c summaryCandidate) beats(o summaryCandidate) bool {
+	if !o.set {
+		return true
+	}
+	if c.rank != o.rank {
+		return c.rank < o.rank
+	}
+	if !c.observedAt.Equal(o.observedAt) {
+		return c.observedAt.After(o.observedAt)
+	}
+	if c.source != o.source {
+		return c.source < o.source
+	}
+	return c.text < o.text
+}
+
 // severityRank orders severities from least to most severe for deterministic
 // tiebreaking (not for headline selection — precedence decides that).
 func severityRank(s value.Severity) int {
@@ -223,6 +275,7 @@ func severityRank(s value.Severity) int {
 
 func (v EnterpriseView) equal(o EnterpriseView) bool {
 	if v.Severity != o.Severity || v.CVSS != o.CVSS || v.SeveritySource != o.SeveritySource ||
+		v.Summary != o.Summary || v.SummarySource != o.SummarySource ||
 		v.EPSS != o.EPSS || v.KEV != o.KEV || v.ExploitPublic != o.ExploitPublic {
 		return false
 	}

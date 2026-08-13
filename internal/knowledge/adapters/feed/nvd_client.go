@@ -187,7 +187,13 @@ type nvdLiveCVE struct {
 	// VulnStatus is NVD's analysis state. "Rejected" means the CVE was withdrawn upstream —
 	// the signal that retires a card (KN-WITHDRAW-1). It was in every response all along and
 	// read by nothing.
-	VulnStatus     string      `json:"vulnStatus"`
+	VulnStatus string `json:"vulnStatus"`
+	// Descriptions carry NVD's prose in several languages; the English one is the summary the
+	// enterprise stores. Delivered on every record since the feed first ran; parsed by nothing.
+	Descriptions []struct {
+		Lang  string `json:"lang"`
+		Value string `json:"value"`
+	} `json:"descriptions"`
 	Metrics        nvdMetrics  `json:"metrics"`
 	Configurations []nvdConfig `json:"configurations"`
 }
@@ -467,6 +473,20 @@ func (c *NVDClient) get(ctx context.Context, q url.Values, label string) (nvdLiv
 	return parsed, nil
 }
 
+// nvdEnglishDescription picks the English description ("en" first, else the first entry — a
+// record with only another language still beats an empty field).
+func nvdEnglishDescription(cve nvdLiveCVE) string {
+	for _, d := range cve.Descriptions {
+		if d.Lang == "en" {
+			return d.Value
+		}
+	}
+	if len(cve.Descriptions) > 0 {
+		return cve.Descriptions[0].Value
+	}
+	return ""
+}
+
 // translate maps one live NVD CVE onto the curated nvdRecord the NVD ACL consumes, so the
 // single translation definition (the ACL) still owns the domain mapping. ok=false when
 // the CVE has no CVSS metric under any version.
@@ -481,6 +501,7 @@ func (c *NVDClient) translate(cve nvdLiveCVE) (app.ProposalFor, bool, error) {
 	rec := nvdRecord{
 		ID:           cve.ID,
 		ObservedAt:   observed.Format(time.RFC3339),
+		Summary:      nvdEnglishDescription(cve),
 		BaseScore:    score,
 		VectorString: vector,
 		BaseSeverity: severity,

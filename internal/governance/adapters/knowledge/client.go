@@ -39,6 +39,7 @@ type faultlineResponse struct {
 	CVE  string `json:"cve"`
 	View struct {
 		Severity       string   `json:"severity"`
+		Summary        string   `json:"summary"`
 		CVSSScore      float64  `json:"cvss_score"`
 		EPSS           float64  `json:"epss"`
 		KEV            bool     `json:"kev"`
@@ -84,6 +85,7 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	return app.FaultlineKnowledge{
 		FaultlineID:    body.ID,
 		CVE:            body.CVE,
+		Summary:        body.View.Summary,
 		Severity:       body.View.Severity,
 		CVSSScore:      body.View.CVSSScore,
 		EPSS:           body.View.EPSS,

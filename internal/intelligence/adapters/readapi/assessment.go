@@ -50,6 +50,7 @@ type assessmentResponse struct {
 	Knowledge struct {
 		FaultlineID       string   `json:"faultline_id"`
 		CVE               string   `json:"cve"`
+		Summary           string   `json:"summary"`
 		Severity          string   `json:"severity"`
 		CVSSScore         float64  `json:"cvss_score"`
 		EPSS              float64  `json:"epss"`
@@ -93,6 +94,7 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 		},
 		Knowledge: domain.FaultlineView{
 			ID: body.Knowledge.FaultlineID, CVE: body.Knowledge.CVE,
+			Summary:  body.Knowledge.Summary,
 			Severity: body.Knowledge.Severity, CVSSScore: body.Knowledge.CVSSScore,
 			EPSS: body.Knowledge.EPSS, KEV: body.Knowledge.KEV,
 			ExploitPublic:     body.Knowledge.ExploitPublic,

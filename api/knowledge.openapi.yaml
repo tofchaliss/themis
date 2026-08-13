@@ -108,6 +108,16 @@ components:
       properties:
         severity:
           type: string
+        summary:
+          type: string
+          description: >-
+            The winning source's short account of WHAT this vulnerability is (e.g. NVD's English
+            description or OSV's summary), chosen by the same precedence rule as the headline
+            severity but in an independent race. Bounded at ingestion. Descriptive only — no
+            verdict consumes it, and it carries no trust class for exactly that reason.
+        summary_source:
+          type: string
+          description: Which source won the summary (explainability, mirrors severity_source).
         cvss_score:
           type: number
         cvss_vector:

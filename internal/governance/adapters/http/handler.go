@@ -73,6 +73,7 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 	cvss, epss := float32(k.CVSSScore), float32(k.EPSS)
 	kn := gen.FaultlineKnowledge{
 		FaultlineId: strptr(k.FaultlineID), Cve: strptr(k.CVE), Severity: strptr(k.Severity),
+		Summary:   strptr(k.Summary),
 		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
 		AffectedRanges: &ranges, FixedVersions: &fixes,
 	}

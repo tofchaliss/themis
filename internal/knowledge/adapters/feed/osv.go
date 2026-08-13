@@ -15,8 +15,12 @@ import (
 // the addressed CVE(s) live in `upstream` — so the ACL must read that field or every distro
 // record is dropped as "no canonical CVE" (BACKLOG: distro OSV correlation).
 type osvRecord struct {
-	ID               string        `json:"id"`
-	Modified         string        `json:"modified"`
+	ID       string `json:"id"`
+	Modified string `json:"modified"`
+	// Summary/Details are OSV's description of the flaw. Both were delivered on every record
+	// and parsed by nothing — the reason no screen could say what a CVE was about.
+	Summary          string        `json:"summary"`
+	Details          string        `json:"details"`
 	Aliases          []string      `json:"aliases"`
 	Upstream         []string      `json:"upstream"`
 	Severity         []osvSeverity `json:"severity"`
@@ -127,6 +131,7 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 	}
 
 	facts := domain.VulnFacts{
+		Summary:  osvSummary(rec),
 		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, Fixes: fixes,
 		CarrierProducts: carriers,
 	}
@@ -139,6 +144,23 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 		out = append(out, Translated{CVE: cve, Proposal: p})
 	}
 	return out, nil
+}
+
+// osvSummary picks the short description: OSV's summary is written as a one-liner; when a
+// record carries only details (long markdown), the first paragraph stands in. Either way the
+// domain cap bounds what is stored — details can run to pages.
+func osvSummary(rec osvRecord) string {
+	if s := strings.TrimSpace(rec.Summary); s != "" {
+		return domain.TruncateSummary(s)
+	}
+	d := strings.TrimSpace(rec.Details)
+	if d == "" {
+		return ""
+	}
+	if i := strings.Index(d, "\n\n"); i > 0 {
+		d = d[:i]
+	}
+	return domain.TruncateSummary(d)
 }
 
 // distroEcosystems are OSV ecosystems whose records describe a SHIPMENT rather than a flaw. Their

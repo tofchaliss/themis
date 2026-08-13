@@ -55,10 +55,11 @@ curl -s -X POST localhost:8086/api/v1/capabilities/recommend_position/invoke \
 > ([API.md](API.md)). The **automated** grounding→validation→proposal path is fully proven without any of
 > this — see `go test ./internal/intelligence/...` (`e2e_test.go` drives the whole stack over httptest).
 
-**Automated real-model check.** `make e2e-llm` runs **both shipped capabilities** —
-`recommend_position` (Decision, one Finding) and `plan_remediation` (Information, one Release) — over a
-**real** OpenAI-compatible server and asserts the output passes validation (`200` with an `llm:<stance>`
-provenance for a Decision, `200` carrying `information` for a plan, or an honest `204`).
+**Automated real-model check.** `make e2e-llm` runs **all three shipped capabilities** —
+`recommend_position` (Decision, one Finding), `plan_remediation` (Information, one Release) and
+`explain_vulnerability` (Information, one Finding — GUI-1) — over a **real** OpenAI-compatible server and
+asserts the output passes validation (`200` with an `llm:<stance>` provenance for a Decision, `200`
+carrying `information` for a plan/explanation, or an honest `204`).
 
 **Why a real model and not a fake.** The prompt and the Grounding Verification gate are an interface with
 **no compiler between them**, and a fake provider returns whatever the test author already believed — so a
