@@ -39,7 +39,7 @@ code reading.
 |---|---|---|---|---|
 | **R7** | **The blast multiplier destroys the order it exists to create** | **P2, measured** | A per-release CONSTANT multiplied over a set cannot reorder that set — but `EffectivePriority` **clamps at 100**, and a clamp is not order-preserving. At a 12-customer estate every Finding with base ≥ 50 pins to 100 and the worst item on the release leaves the top three. Inside a release the multiplier is strictly negative: no ordering gained, all ordering lost. | GOV-15 |
 | **R6** | **A node that fails announces nothing** | **P2, measured** | Both halves of one VM incident. A crash-looping node restarted **81 times** unnoticed because nothing surfaces "never became ready"; and a rotated DB password stays invisible because `pgx` keeps serving pre-rotation connections — every node reports healthy until they all fail together at the next restart. | F5 (`/healthz` + `/readyz` + a startup-failure signal) · DB-password rotation reconciliation |
-| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ2–Δ4 · G-AI-1 · G-AI-2(b,c) · G-AI-3 · G-AI-4 (partially closed) · G-AI-5 · PLAN-5 · Δ3a component-embedding · GUI-1 (explain-in-context) |
+| **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ4 · G-AI-1 · G-AI-2(c) · G-AI-3 · G-AI-4 (remaining scopes) · G-AI-5 · PLAN-5 · Δ3a component-embedding · AI-TEL-1 · AI-204-2 — *(closed 2026-08-13: G-AI-2b escalation, G-AI-4 degrade-not-fail, GUI-1 explain)* |
 | **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
 | **R3** | **Communication has one delivery channel, and it is a log line** | **P2** | The exactly-once / idempotent / outcome-recorded mechanics are done; what is missing is anywhere real to send an artifact. | concrete delivery channels (SMTP / Slack / webhook) |
 | **R4** | **Guarded deferrals** | **P3** | Correct today, with a TEST that fails the build the moment they stop being correct. They are on the list to be found, not to be done. | TRUST-1 (applicabilities uniformly Asserted) · TRUST-3 (no AI→Knowledge path exists yet) |
@@ -165,7 +165,7 @@ missing CVE summary (delivered by every feed, parsed by nothing — closed on
 **read from code / user observation on the VM**, not measured defects; none qualifies as P0/P1
 under the 2026-08-07 re-derivation standard.
 
-- [ ] **GUI-1 — AI "explain this vulnerability in our context" capability.** Cluster **R1** (AI
+- [x] **GUI-1 — AI "explain this vulnerability in our context" capability.** ✅ **CLOSED 2026-08-13** (`explain_vulnerability@v1` shipped in PR #94; drawer auto-run shipped with the keeper dashboard, PR #96). Cluster **R1** (AI
   harness), **P2 — roadmap, deliberately NOT a defect.** An Information-class capability (T7, like
   `plan_remediation`): grounded ON the stored feed summary + the assessment projection, it says
   what no feed can — "…and your `python3-libs` sits in billing-api's request path." Ephemeral,
@@ -192,7 +192,7 @@ under the 2026-08-07 re-derivation standard.
   Rocky by clone (EDR-VEX-01 decision — correct for rebuilds), but **RXSA** advisories
   (Rocky-exclusive/SIG packages) exist in no Red Hat data. A Rocky errata (Apollo) feed scoped to
   that gap; do not duplicate the clone coverage.
-- [ ] **GUI-6 — productize the dashboard.** **P2 — roadmap.** The spike branch never merges; when
+- [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
@@ -791,6 +791,20 @@ under the 2026-08-07 re-derivation standard.
   metadata's `TokensUsed` inherits the same field, so its meaning changes from "final call" to
   "invocation total" — the total is the honest number for both. **Dep:** none. **Scope:** SMALL.
   **Priority: LOW.**
+
+- [ ] **AI-204-2 — an honest decline could state its DETERMINISTIC sub-cause when the backend already
+  knows it.** _(Observed live 2026-08-12 diagnosing CVE-2026-42496; filed 2026-08-13.)_ That decline
+  was fully explainable BEFORE the model ran: all 37 matched components were `claim_class=scope`
+  (zero carriers), so the grounding could not support a stance — a fact the deterministic backend
+  holds, no model needed. Today the 204's `X-Themis-AI-Reason: insufficient` and the journal's
+  `llm:insufficient` say only that the model declined; an operator re-derives the why by hand (the
+  2026-08-12 session took a three-part diagnostic to get there). **Fix shape:** when the projection
+  is deterministically thin — zero carrier components, or no attributed fixes and no ranges — stamp
+  that fact into `Outcome.Detail` (telemetry only; the 204 stays opaque per AI-204-1's invariant)
+  BEFORE the LLM step, so a decline's journal line carries "grounding: 37 components all
+  scope-class" alongside `llm:insufficient`. Composes with G-AI-2c: the eval loop needs exactly
+  this signal to tell "model can't reason" from "grounding had nothing to reason about".
+  **Dep:** none. **Scope:** SMALL-MEDIUM. **Priority: LOW-MED.**
 
 - [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
