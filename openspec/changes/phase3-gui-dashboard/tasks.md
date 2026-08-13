@@ -36,17 +36,20 @@ Each group is its own PR off `main`, `make check-ci` green, and ends with `make 
 
 ## 3. Phase 3 — AI surfaces + publish loop (D6, D9)
 
-- [ ] 3.1 AI honesty surfaces: reason-taxonomy panels (persistent, labeled), `decided_by` +
+- [x] 3.1 AI honesty surfaces: reason-taxonomy panels (persistent, labeled), `decided_by` +
       `precedents_used` chips, local-only mark, `[UNVERIFIED MENTIONS …]` highlighting
-- [ ] 3.2 Explain (GUI-1) auto-run on drawer open: session cache, non-blocking, enabled-only
-- [ ] 3.3 Publication document viewer (read + download) ported from the spike
-- [ ] 3.4 D9 publishable-queue preview: `POST /previews` on queue rows
-- [ ] 3.5 Tests for the new proxy routes + panels' data plumbing; `make vet-tags` green
+      *(rode in with the Phase-1 wholesale asset port — verified present)*
+- [x] 3.2 Explain (GUI-1) auto-run on drawer open: session cache, non-blocking, enabled-only
+      *(rode in with the Phase-1 asset port)*
+- [x] 3.3 Publication document viewer (read + download) ported from the spike
+      *(rode in with the Phase-1 asset port; Phase 3 extracted the shared docView overlay)*
+- [x] 3.4 D9 publishable-queue preview: `POST /previews` on queue rows
+- [x] 3.5 Tests for the new proxy routes + panels' data plumbing; `make vet-tags` green
 
 ## 4. Phase 4 — ship (D10)
 
-- [ ] 4.1 `deploy/systemd/` seventh unit + generator entry; `nohup` lifecycle retired
-- [ ] 4.2 INSTALLATION.md Part A step + `deploy/node.env.example` dashboard block
+- [x] 4.1 `deploy/systemd/` seventh unit + generator entry; `nohup` lifecycle retired
+- [x] 4.2 INSTALLATION.md Part A step + `deploy/node.env.example` dashboard block
 - [ ] 4.3 Delete `gui/dashboard-spike` (safe — 1.5 moved everything normative to `main`)
 - [ ] 4.4 Archive this change: `openspec archive phase3-gui-dashboard --skip-specs -y`;
       `make vet-tags` green
