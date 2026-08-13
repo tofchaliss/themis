@@ -177,6 +177,12 @@ components:
           type: string
         version:
           type: string
+        ecosystem:
+          type: string
+          description: >
+            Canonical ecosystem the fix was published for (rpm, apk, npm, ...). Absent when the
+            source did not say; a consumer must treat an absent ecosystem as matching any
+            component (only positive evidence of mismatch excludes).
     Applicability:
       type: object
       properties:

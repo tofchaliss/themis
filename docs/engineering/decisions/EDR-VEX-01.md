@@ -95,6 +95,78 @@ Applicability Proposals are append-only and reconciled by source precedence like
 statement supersedes an earlier one deterministically. The VEX `justification` is carried through to the
 Governance rationale so a suppression is explainable (CON-0003 / CON-0016).
 
+### D7 — Alpine secdb: fetch the branch DB, fold only carded CVEs (GUI-2, added 2026-08-12)
+
+Alpine is the one distro in the estate with correlation but **no vendor fix data**: RHEL/Rocky/Alma get
+severity + `not_affected` + fixed NEVRAs from D2/Phase 3, Ubuntu/Debian ride OSV, Alpine had nothing. The
+authoritative source is the **Alpine secdb** (`https://secdb.alpinelinux.org/<branch>/{main,community}.json`)
+— the same DB Trivy/Grype/OSV themselves derive from. *Alternative considered:* rely on OSV's Alpine
+ecosystem records (already queried at correlation) — rejected because that path runs per component at
+**upload time only**, so a fix published *after* the SBOM landed never reaches the card; the gap GUI-2
+measured is precisely the enrichment half.
+
+The secdb is **not per-CVE addressable**, so the D5-compliant reading inverts the Red Hat direction:
+fetch the whole (small) per-branch DB, fold **only** the records whose CVE is already carded, and discard
+the rest in memory — enrichment of existing cards, never a mirror; nothing about an uncarded CVE is ever
+persisted. What it folds: one `alpine` **vuln-facts** Proposal per carded CVE carrying `Fixes`
+(package → fixed apk version, per branch) and `SeverityUnknown` — the secdb states no severity/CVSS, and
+the reconciled headline skips unknown severities, so the Proposal contributes fix bounds and nothing else.
+
+Classifications (each build-enforced): **trust = Observed** (a public record, reproducible on re-fetch;
+unlike Red Hat's feed it contains no judgment statements) · **tier = Tier-2 recommended** (the sole vendor
+fix source for apk estates) · precedence unchanged (fixes union across sources; `alpine` never contends
+for the severity headline). Branches come from `THEMIS_ALPINE_BRANCHES` (comma-separated) because no
+machine-readable branch index exists; a configured branch the server lacks is a normal gap, not an error.
+
+**Split out, exactly as Red Hat split PR2/PR3:** the **apk fixed-verdict** (a matched apk at/above its
+branch fix opens no Finding — correlation's gate, the analogue of `value.RPMFixedByStream`) needs an apk
+version comparator (`-r` revisions, `_alpha/_beta/_pre/_rc/_p` suffixes) with property tests, and ships
+separately. Bounds-first already puts the published fix version on the posture, which is most of GUI-2's
+measured value.
+
+### D8 — Fix attribution is ecosystem-scoped, and NEVRA versions normalize once (KN-FIX-3, added 2026-08-13)
+
+D7 created the first estate carrying two ecosystems' fix bounds on shared cards, and it made a latent
+defect observable (**measured**: one Rocky EL8 `perl` Finding attributed FOUR fixes — the correct EL8
+NEVRA, an Alpine apk version, an EL7 NEVRA, and the same EL8 fix twice under two normalizations).
+`FixesFor(pkg)` keyed on the bare package name, `FixedVersion` carried no ecosystem, and Red Hat stored
+fixes as full NEVRAs while OSV stored bare EVRs. The selection also populates the AI grounding
+(`FaultlineKnowledge.FixedVersions`), so a wrong-ecosystem "published fix" rides into recommendations —
+the AI-GROUND-1 class through a new door.
+
+**The decision, in four parts:**
+
+1. **`FixedVersion` gains `Ecosystem`** — the canonical ecosystem key (`rpm`, `apk`, `npm`, `pypi`, …;
+   `""` = the source did not say), via a shared kernel canonicalizer so feed names ("Rocky Linux") and
+   PURL types ("rpm") meet on one vocabulary. Each feed states what it knows: `redhat` → `rpm`,
+   `alpine` → `apk`, OSV → per affected-entry ecosystem. *Alternative considered:* keying fixes on
+   `(package, ecosystem)` pairs in a new structure — rejected; the additive field keeps every stored
+   card and the v1 wire shape decoding unchanged.
+2. **A known ecosystem is a filter; an unknown one is not.** `FixesFor` (and Governance's
+   `selectFixesFor`) exclude a fix whose ecosystem is known and different from the asking component's;
+   an empty ecosystem still matches everything. Same fail-open direction as `ClaimUnknown → carrier`:
+   absence of attribution evidence must never hide a published fix — only *positive* evidence of
+   mismatch excludes.
+3. **One NEVRA normalization path, at reconcile time.** `Reconcile` normalizes every rpm-class fix
+   version through the kernel's EVR extraction (name always stripped) *before* folding into the set, so
+   the Red Hat form and the OSV form of the same fix collapse to one entry. Reconcile is where it
+   belongs because the view is **recomputed from all Proposals on every fold** — normalizing there
+   heals every persisted card with no migration, where a feed-side fix would only help future data.
+4. **Decode-time source stamping heals the append-only history.** Proposals are immutable, so the 78
+   live Alpine bounds (and every stored Red Hat fix) can never be edited to carry an ecosystem. The
+   store codec — which already interprets legacy shapes (the KN-FIX-1 flat-list fallback) — stamps an
+   *empty* fix ecosystem from the proposal's **source** for the single-ecosystem feeds
+   (`redhat` → `rpm`, `alpine` → `apk`) on decode. Interpretation at the boundary, not mutation of the
+   record: the stored bytes are untouched, and the next fold of any card re-derives a clean view.
+
+**Display stream-scoping rides along:** Governance's per-Finding selection additionally excludes an
+rpm fix whose `.elN` major is known and differs from the installed component's (the EL7-on-EL8 row),
+reusing `value.RPMReleaseMajor`, fail-open when either side lacks a marker. The fixed-*verdict*
+(`RPMFixedByStream`) was never at risk — it already refuses cross-stream and non-`.elN` compares — so
+this is honesty of display and grounding, not a correctness gate. Excluded fixes join the
+`UnattributedFixes` count rather than vanishing: "held but not attributable to yours" stays a
+different statement from "no fix published".
+
 ## Not in scope (explicit non-goals)
 
 VEX *export* fidelity (a separate serializer concern); cryptographic VEX signature verification (stub in both

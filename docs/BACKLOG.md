@@ -1308,6 +1308,44 @@ under the 2026-08-07 re-derivation standard.
   answers the question the caller actually has.
   **Dep:** none — KN-FIX-1 is the enabler and has landed. **Scope:** MEDIUM.
 
+- [x] **KN-FIX-3 — fix attribution is ecosystem- and stream-blind, and version normalization is
+  inconsistent.** ✅ **CLOSED 2026-08-13 (design: EDR-VEX-01 D8).** `FixedVersion` gained the
+  canonical `Ecosystem` (`value.CanonicalEcosystem` — feeds state it: redhat→rpm, alpine→apk,
+  OSV per record); a known ecosystem filters, an unknown one never does (fail-open, the
+  ClaimUnknown→carrier direction). ONE rpm normalization path: reconciliation runs every
+  rpm-class fix through `value.RPMEVR` before folding, so the Red Hat and OSV spellings collapse
+  — and because the view is recomputed from all Proposals on every fold, this heals persisted
+  cards. The append-only history heals via decode-time SOURCE stamping in the store codec
+  (redhat/alpine are single-ecosystem — provenance is evidence; osv/nvd deliberately not
+  stamped). Governance's `selectFixesFor` gained the same ecosystem check plus rpm EL-stream
+  display scoping (`RPMReleaseMajor`, fail-open) — excluded fixes join `UnattributedFixes`, so
+  "held but not yours" stays distinct from "no fix published". The fixed-VERDICT
+  (`RPMFixedByStream`) was never at risk and is untouched. The measured perl drawer is the
+  regression test at both layers (`TestReconcile_OneNEVRANormalizationAndEcosystemScoping`,
+  `TestGetFindingAssessment_ExcludesWrongEcosystemAndWrongStreamFixes`). GUI-2b is now unblocked.
+  _Original filing (measured on the VM 2026-08-12):_ — the first live estate carrying
+  BOTH ecosystems' bounds on shared cards (the Alpine secdb feed, EDR-VEX-01 D7, landed 78
+  proposals via shared CVEs). One Rocky EL8 finding's drawer (CVE-2020-10543, component `perl`)
+  then attributed **four** fixes to the one package, three of them wrong for it:
+  `4:5.26.3-419.el8` (correct EL8 NEVRA) · **`5.30.3-r0` (an Alpine apk version on an rpm
+  component — the cross-ecosystem leak)** · `perl-4:5.16.3-299.el7_9` (an EL7 fix on an EL8
+  finding) · `perl-4:5.26.3-419.el8` (the SAME EL8 fix again, name-prefixed — two code paths
+  normalize NEVRA versions differently, so one fix renders twice).
+  **Root cause:** `FixesFor(package)` keys on the bare package name; `domain.FixedVersion`
+  carries no ecosystem and no stream, and nothing dedups across normalization variants.
+  **Why it matters beyond the drawer:** the same per-component selection populates
+  `FaultlineView.FixedVersions` — the AI grounding — so an apk version can ride into a Rocky
+  recommendation or plan as "the published fix": the AI-GROUND-1 failure class returning through
+  a new door.
+  **Fix shape (a domain-model change — design before code):** `FixedVersion` gains the source
+  ecosystem (the feed knows it: redhat=rpm, alpine=apk, NVD/OSV per record); `FixesFor` filters
+  by the asking component's ecosystem; NEVRA versions normalize through ONE path (name always
+  stripped); stream-scoping for display can reuse `RPMReleaseMajor`. Store codec + event schema
+  are additive-optional on v1.
+  **Interim operational note:** on an estate with no Alpine SBOMs the Alpine feed currently adds
+  only mis-attributable bounds — `THEMIS_ALPINE_ENABLED=0` is the honest setting there until
+  this lands or Alpine evidence exists. **Dep:** none. **Scope:** MEDIUM.
+
 - [x] **AI-TIMEOUT-1 — `THEMIS_LLM_TIMEOUT` was inert above 60s, so every slow model reported
   `provider_error`.** _(**Measured** on the VM 2026-08-07; **fixed** the same session.)_
   Three `recommend_position` calls aborted at **59.995s / 59.991s / 59.989s** with

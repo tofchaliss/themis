@@ -156,6 +156,9 @@ type faultlineEnrichedDTO struct {
 type fixDTO struct {
 	Package string `json:"Package"`
 	Version string `json:"Version"`
+	// Ecosystem is additive (KN-FIX-3): absent on a payload predating it, which decodes to ""
+	// = "not stated" and filters nothing.
+	Ecosystem string `json:"Ecosystem"`
 }
 
 type applicabilityDTO struct {
@@ -174,7 +177,7 @@ type faultlineSupersededDTO struct {
 func toAppFixes(in []fixDTO) []app.FixedVersion {
 	out := make([]app.FixedVersion, 0, len(in))
 	for _, f := range in {
-		out = append(out, app.FixedVersion{Package: f.Package, Version: f.Version})
+		out = append(out, app.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
 	}
 	return out
 }

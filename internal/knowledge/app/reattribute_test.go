@@ -84,7 +84,7 @@ func TestReattributeSweep_FoldsAttributedFixesForExistingCards(t *testing.T) {
 	if !found {
 		t.Fatal("card not persisted")
 	}
-	if got := f.View().FixesFor("python-ply"); len(got) != 1 || got[0] != "0:3.11-10" {
+	if got := f.View().FixesFor("python-ply", "rpm"); len(got) != 1 || got[0] != "0:3.11-10" {
 		t.Errorf("FixesFor(python-ply) = %v, want the attributed fix", got)
 	}
 }

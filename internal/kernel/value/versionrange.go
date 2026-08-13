@@ -38,6 +38,29 @@ func NormalizeEcosystem(ecosystem string) string {
 	}
 }
 
+// CanonicalEcosystem maps an ecosystem name from ANY naming authority — a PURL type
+// ("rpm", "apk", "npm") or a feed's ecosystem label ("Rocky Linux", "Alpine", "PyPI") — to one
+// canonical lowercase key, so a fix recorded by a feed and a component parsed from an SBOM can
+// meet on the same vocabulary (EDR-VEX-01 D8). The rpm family collapses to "rpm", the apk family
+// to "apk", the Debian family to "deb"; everything else keeps its normalized name (npm, pypi,
+// go, …). Empty in, empty out — "the source did not say" stays distinguishable.
+func CanonicalEcosystem(ecosystem string) string {
+	eco := NormalizeEcosystem(ecosystem)
+	if eco == "" {
+		return ""
+	}
+	switch ClassifyEcosystem(eco) {
+	case VersionClassAPK:
+		return "apk"
+	case VersionClassRPM:
+		return "rpm"
+	}
+	if eco == "deb" || strings.Contains(eco, "debian") || strings.Contains(eco, "ubuntu") {
+		return "deb"
+	}
+	return eco
+}
+
 // ClassifyEcosystem maps an ecosystem (PURL type or feed ecosystem name) to its
 // version comparison class. Distro families that share rpm ordering — Red Hat,
 // Rocky, Alma, CentOS, Fedora — all map to rpm; Alpine/apk/Wolfi maps to apk.

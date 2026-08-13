@@ -587,3 +587,60 @@ func TestGetFindingAssessment_ReportsRatherThanGuessesWhenNothingMatches(t *test
 		}
 	})
 }
+
+// The measured KN-FIX-3 drawer (CVE-2020-10543): one Rocky EL8 perl Finding was offered FOUR
+// fixes — the correct EL8 NEVRA, an Alpine apk version, an EL7 build, and a duplicate spelling.
+// The name match is real on all of them; what must exclude the wrong ones is POSITIVE evidence
+// of mismatch: a known different ecosystem, or a known different EL stream. Both excluded fixes
+// join the unattributed count — "held but not yours" stays distinct from "no fix published".
+func TestGetFindingAssessment_ExcludesWrongEcosystemAndWrongStreamFixes(t *testing.T) {
+	repo := newRepo()
+	repo.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/perl@4:5.26.3-416.el8", Name: "perl",
+		Version: "4:5.26.3-416.el8", Ecosystem: "rpm", Source: "perl",
+	}))
+	known := app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2020-10543",
+		Fixes: []app.FixedVersion{
+			{Package: "perl", Version: "4:5.26.3-419.el8", Ecosystem: "rpm"},
+			{Package: "perl", Version: "5.30.3-r0", Ecosystem: "apk"},
+			{Package: "perl", Version: "4:5.16.3-299.el7_9", Ecosystem: "rpm"},
+		},
+	}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(got.Knowledge.FixedVersions) != 1 || got.Knowledge.FixedVersions[0] != "4:5.26.3-419.el8" {
+		t.Errorf("fixed_versions = %v, want only the same-stream rpm fix", got.Knowledge.FixedVersions)
+	}
+	if got.Knowledge.UnattributedFixes != 2 {
+		t.Errorf("unattributed = %d, want 2 (the apk bound + the EL7 build)", got.Knowledge.UnattributedFixes)
+	}
+}
+
+// Absence of evidence never excludes (D8 fail-open): a fix with no stated ecosystem, or a
+// component/fix without a resolvable EL marker, keeps matching by name.
+func TestGetFindingAssessment_UnknownEcosystemOrStreamFailsOpen(t *testing.T) {
+	repo := newRepo()
+	repo.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/perl@5.26.3", Name: "perl",
+		Version: "5.26.3", Ecosystem: "rpm", Source: "perl", // no .elN marker on the install
+	}))
+	known := app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2020-10543",
+		Fixes: []app.FixedVersion{
+			{Package: "perl", Version: "4:5.26.3-419.el8", Ecosystem: "rpm"}, // fix has a stream, install doesn't → keep
+			{Package: "perl", Version: "5.32.0"},                            // source did not say → keep
+		},
+	}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(got.Knowledge.FixedVersions) != 2 {
+		t.Errorf("fixed_versions = %v, want both kept — only positive mismatch evidence excludes", got.Knowledge.FixedVersions)
+	}
+}

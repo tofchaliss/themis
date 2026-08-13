@@ -51,8 +51,9 @@ type faultlineResponse struct {
 		// upgrade THIS component to" — reading it produced a recommendation citing another
 		// package's version (AI-GROUND-1).
 		Fixes []struct {
-			Package string `json:"package"`
-			Version string `json:"version"`
+			Package   string `json:"package"`
+			Version   string `json:"version"`
+			Ecosystem string `json:"ecosystem"` // absent = source did not say → filters nothing
 		} `json:"fixes"`
 		RangeTrust string `json:"range_trust"`
 	} `json:"view"`
@@ -79,7 +80,7 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	}
 	fixes := make([]app.FixedVersion, 0, len(body.View.Fixes))
 	for _, f := range body.View.Fixes {
-		fixes = append(fixes, app.FixedVersion{Package: f.Package, Version: f.Version})
+		fixes = append(fixes, app.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
 	}
 	return app.FaultlineKnowledge{
 		FaultlineID:    body.ID,

@@ -280,3 +280,29 @@ func TestApplicability_MixedGroupUsesTheParsableComparator(t *testing.T) {
 		t.Error("a group carrying a real comparator must remain decidable")
 	}
 }
+
+func TestCanonicalEcosystem(t *testing.T) {
+	cases := map[string]string{
+		"":            "",
+		"rpm":         "rpm",
+		"Rocky Linux": "rpm",
+		"almalinux":   "rpm",
+		"Red Hat":     "rpm",
+		"Alpine":      "apk",
+		"apk":         "apk",
+		"wolfi":       "apk",
+		"deb":         "deb",
+		"Debian":      "deb",
+		"Ubuntu":      "deb",
+		"npm":         "npm",
+		"PyPI":        "pypi",
+		"Python":      "pypi",
+		"golang":      "go",
+		"Maven":       "maven",
+	}
+	for in, want := range cases {
+		if got := CanonicalEcosystem(in); got != want {
+			t.Errorf("CanonicalEcosystem(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

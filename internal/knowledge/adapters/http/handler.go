@@ -167,7 +167,14 @@ func fixesOut(fixes []domain.FixedVersion) *[]gen.FixedVersion {
 	out := make([]gen.FixedVersion, 0, len(fixes))
 	for _, f := range fixes {
 		pkg, ver := f.Package, f.Version
-		out = append(out, gen.FixedVersion{Package: &pkg, Version: &ver})
+		fv := gen.FixedVersion{Package: &pkg, Version: &ver}
+		// Omitted when unknown, so a card whose sources never said stays byte-identical on the
+		// wire — and so a consumer can tell "generic" apart from "not stated" (KN-FIX-3).
+		if f.Ecosystem != "" {
+			eco := f.Ecosystem
+			fv.Ecosystem = &eco
+		}
+		out = append(out, fv)
 	}
 	return &out
 }

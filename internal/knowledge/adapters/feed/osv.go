@@ -118,8 +118,13 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 				}
 				if ev.Fixed != "" {
 					// Paired with the package this affected-entry is about, so a consumer can ask
-					// "what fixes MY component?" instead of guessing from a union.
-					fixes = append(fixes, domain.FixedVersion{Package: pkg, Version: ev.Fixed})
+					// "what fixes MY component?" instead of guessing from a union — and with the
+					// entry's canonical ecosystem, so a Rocky bound never answers for an Alpine
+					// component or vice versa (KN-FIX-3).
+					fixes = append(fixes, domain.FixedVersion{
+						Package: pkg, Version: ev.Fixed,
+						Ecosystem: value.CanonicalEcosystem(aff.Package.Ecosystem),
+					})
 				}
 			}
 		}

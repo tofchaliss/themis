@@ -12,6 +12,7 @@ var tierBySource = map[string]domain.Tier{
 	"epsskev":   domain.Tier1Critical,
 	"osv":       domain.Tier2Recommended,
 	"redhat":    domain.Tier2Recommended,
+	"alpine":    domain.Tier2Recommended, // the sole vendor fix source for apk estates (EDR-VEX-01 D7)
 	"exploitdb": domain.Tier2Recommended,
 	"vexfeed":   domain.Tier3Enrichment,
 	"scanner":   domain.Tier1Critical, // scanner evidence (Trivy/Grype) — Tier-1 per the taxonomy

@@ -177,7 +177,7 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		//
 		// FixesFor aggregates every source's fix for THIS package and excludes unattributed ones,
 		// so the verdict rests on evidence about this component and nothing else.
-		if fixes := f.View().FixesFor(componentPackage(item.Component)); len(fixes) > 0 &&
+		if fixes := f.View().FixesFor(componentPackage(item.Component), item.Component.Ecosystem); len(fixes) > 0 &&
 			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, fixes) {
 			continue
 		}

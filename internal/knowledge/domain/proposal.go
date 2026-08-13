@@ -105,6 +105,15 @@ func (f VulnFacts) FixVersions() []string {
 type FixedVersion struct {
 	Package string // "" when the source did not attribute it
 	Version string
+	// Ecosystem is the canonical ecosystem key the fix was published FOR ("rpm", "apk", "npm",
+	// …; value.CanonicalEcosystem vocabulary), or "" when the source did not say.
+	//
+	// It exists because a bare (package, version) pair cannot say WHOSE package it fixes
+	// (KN-FIX-3): with Alpine and Red Hat bounds on one shared card, a Rocky rpm component was
+	// offered an Alpine apk version as "the published fix" — and the same selection feeds the
+	// AI grounding, so the mis-attribution rode into recommendations (the AI-GROUND-1 class).
+	// A known ecosystem is a filter; an unknown one never excludes (see EnterpriseView.FixesFor).
+	Ecosystem string
 }
 
 // ExploitSignal is an exploit-signal payload: exploitation likelihood / known status.

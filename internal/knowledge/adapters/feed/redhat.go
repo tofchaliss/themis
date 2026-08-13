@@ -63,7 +63,7 @@ func nevraFixes(nevras []string) []domain.FixedVersion {
 	}
 	out := make([]domain.FixedVersion, 0, len(nevras))
 	for _, n := range nevras {
-		out = append(out, domain.FixedVersion{Package: value.RPMPackageName(n), Version: n})
+		out = append(out, domain.FixedVersion{Package: value.RPMPackageName(n), Version: n, Ecosystem: "rpm"})
 	}
 	return out
 }

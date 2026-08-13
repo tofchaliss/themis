@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -245,19 +246,19 @@ func TestEnterpriseView_FixesForIsExactAndExcludesUnattributed(t *testing.T) {
 		),
 	}, domain.NewPrecedence("osv"), domain.NewTrustPolicy(nil))
 
-	if got := v.FixesFor("glibc"); len(got) != 1 || got[0] != "0:2.28-251.el8_10.38" {
+	if got := v.FixesFor("glibc", "rpm"); len(got) != 1 || got[0] != "0:2.28-251.el8_10.38" {
 		t.Fatalf("FixesFor(glibc) = %v, want only glibc's fix", got)
 	}
 	// Case-insensitive, because package names arrive from feeds with inconsistent casing.
-	if got := v.FixesFor("GLIBC"); len(got) != 1 {
+	if got := v.FixesFor("GLIBC", "rpm"); len(got) != 1 {
 		t.Errorf("FixesFor is case-sensitive; got %v", got)
 	}
 	// An UNATTRIBUTED fix is not a wildcard. "The source did not say which package" is not
 	// evidence about any package, so it must never satisfy a per-component decision.
-	if got := v.FixesFor("openssl"); len(got) != 0 {
+	if got := v.FixesFor("openssl", "rpm"); len(got) != 0 {
 		t.Fatalf("FixesFor(openssl) = %v, want none — an unattributed fix must not match everything", got)
 	}
-	if got := v.FixesFor(""); len(got) != 0 {
+	if got := v.FixesFor("", "rpm"); len(got) != 0 {
 		t.Errorf("FixesFor(\"\") = %v, want none", got)
 	}
 	// The flat list still carries everything, including the unattributed one, for "is a fix
@@ -323,7 +324,7 @@ func TestFixesFor_PrefersADirectFixOverAModuleStreamRebuild(t *testing.T) {
 		{Package: "python-ply", Version: "0:3.11-10.module+el8.9.0+1418+f0d66789"},
 		{Package: "PyYAML", Version: "0:5.4.1-1.el8"},
 	}}
-	got := v.FixesFor("python-ply")
+	got := v.FixesFor("python-ply", "rpm")
 	if len(got) != 3 {
 		t.Fatalf("FixesFor = %v, want all three python-ply fixes — none may be dropped", got)
 	}
@@ -364,5 +365,67 @@ func TestReconcileUnionsCarrierProducts(t *testing.T) {
 	bare := domain.Reconcile([]domain.Proposal{mk("nvd")}, domain.NewPrecedence("nvd", "osv"), domain.NewTrustPolicy(nil))
 	if len(bare.CarrierProducts) != 0 {
 		t.Errorf("CarrierProducts = %v, want empty when nobody attributes", bare.CarrierProducts)
+	}
+}
+
+// The measured KN-FIX-3 card (CVE-2020-10543): Red Hat states fixes as full NEVRAs, OSV as bare
+// EVRs, and D7's Alpine feed adds an apk bound — one Rocky perl drawer rendered FOUR fixes,
+// three wrong for it. Reconciliation must (a) collapse the two rpm normalizations of the SAME
+// fix into one entry, and (b) let FixesFor answer per ecosystem.
+func TestReconcile_OneNEVRANormalizationAndEcosystemScoping(t *testing.T) {
+	v := domain.Reconcile([]domain.Proposal{
+		fixesProposal(t, "redhat",
+			domain.FixedVersion{Package: "perl", Version: "perl-4:5.26.3-419.el8", Ecosystem: "rpm"},
+			domain.FixedVersion{Package: "perl", Version: "perl-4:5.16.3-299.el7_9", Ecosystem: "rpm"},
+		),
+		fixesProposal(t, "osv",
+			domain.FixedVersion{Package: "perl", Version: "4:5.26.3-419.el8", Ecosystem: "rpm"},
+		),
+		fixesProposal(t, "alpine",
+			domain.FixedVersion{Package: "perl", Version: "5.30.3-r0", Ecosystem: "apk"},
+		),
+	}, domain.NewPrecedence("redhat", "osv"), domain.NewTrustPolicy(nil))
+
+	// 4 contributed forms, 3 real fixes: the Red Hat and OSV spellings of the EL8 fix are one.
+	if len(v.Fixes) != 3 {
+		t.Fatalf("Fixes = %v, want 3 — the two rpm forms of the EL8 fix must collapse", v.Fixes)
+	}
+	for _, f := range v.Fixes {
+		if strings.HasPrefix(f.Version, "perl-") {
+			t.Errorf("fix %v kept its name prefix — rpm versions must normalize through one path", f)
+		}
+	}
+	if got := v.FixesFor("perl", "rpm"); len(got) != 2 {
+		t.Errorf("FixesFor(perl, rpm) = %v, want the two rpm fixes and never the apk bound", got)
+	}
+	if got := v.FixesFor("perl", "apk"); len(got) != 1 || got[0] != "5.30.3-r0" {
+		t.Errorf("FixesFor(perl, apk) = %v, want only the apk bound", got)
+	}
+	// An unknown COMPONENT ecosystem filters nothing — absence of evidence never hides a fix.
+	if got := v.FixesFor("perl", ""); len(got) != 3 {
+		t.Errorf("FixesFor(perl, \"\") = %v, want all 3", got)
+	}
+}
+
+// The ecosystem merge is a SET, not a pairwise fold, so it is order-independent (D2): exactly one
+// known ecosystem wins; conflicting known ones resolve to unknown (which filters nothing — fail
+// open); a source that did not say never dilutes one that did.
+func TestReconcile_FixEcosystemMergeIsOrderIndependent(t *testing.T) {
+	known := fixesProposal(t, "redhat", domain.FixedVersion{Package: "foo", Version: "1.2.3-1", Ecosystem: "rpm"})
+	unknown := fixesProposal(t, "nvd", domain.FixedVersion{Package: "foo", Version: "1.2.3-1"})
+	conflicting := fixesProposal(t, "alpine", domain.FixedVersion{Package: "foo", Version: "1.2.3-1", Ecosystem: "apk"})
+	prec, trust := domain.NewPrecedence("redhat"), domain.NewTrustPolicy(nil)
+
+	for _, order := range [][]domain.Proposal{{known, unknown}, {unknown, known}} {
+		v := domain.Reconcile(order, prec, trust)
+		if len(v.Fixes) != 1 || v.Fixes[0].Ecosystem != "rpm" {
+			t.Errorf("known+unknown → %v, want one fix carrying rpm", v.Fixes)
+		}
+	}
+	for _, order := range [][]domain.Proposal{{known, conflicting}, {conflicting, known}} {
+		v := domain.Reconcile(order, prec, trust)
+		if len(v.Fixes) != 1 || v.Fixes[0].Ecosystem != "" {
+			t.Errorf("conflicting ecosystems → %v, want one fix resolved to unknown", v.Fixes)
+		}
 	}
 }

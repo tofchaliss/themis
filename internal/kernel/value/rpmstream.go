@@ -45,24 +45,28 @@ func RPMFixedByStream(ecosystem, installed string, fixedVersions []string) bool 
 	if instMajor == "" {
 		return false // can't place the install in an EL stream → never claim fixed
 	}
-	inst := rpmEVR(installed)
+	inst := RPMEVR(installed)
 	for _, fix := range fixedVersions {
 		if RPMReleaseMajor(fix) != instMajor {
 			continue // different EL major (or no marker) → not comparable
 		}
-		if compareRPMVersion(inst, rpmEVR(fix)) >= 0 {
+		if compareRPMVersion(inst, RPMEVR(fix)) >= 0 {
 			return true // installed >= same-stream fix → the fix is present
 		}
 	}
 	return false
 }
 
-// rpmEVR normalizes an RPM NEVRA or bare version to its epoch:version-release for comparison: it
+// RPMEVR normalizes an RPM NEVRA or bare version to its epoch:version-release for comparison: it
 // strips a trailing .arch and takes the last two hyphen-separated segments (version-release),
 // which drops a package-name prefix ("openssl-1:1.0.2k-16.el8" → "1:1.0.2k-16.el8") while
 // leaving an already-bare EVR ("1.0.2k-16.el8") unchanged. RPM versions and releases never
 // contain a hyphen, so the last-two split is exact for a NEVRA and a no-op for an EVR.
-func rpmEVR(nevra string) string {
+//
+// Exported as THE single rpm fix-version normalization (EDR-VEX-01 D8): Red Hat states fixes as
+// full NEVRAs while OSV states bare EVRs, and two normalization paths rendered the same fix
+// twice. Knowledge's reconciliation runs every rpm-class fix through this before folding.
+func RPMEVR(nevra string) string {
 	s := StripVersionQualifiers(strings.TrimSpace(nevra))
 	if i := strings.LastIndex(s, "."); i >= 0 {
 		for _, arch := range rpmArchSuffixes {
@@ -82,7 +86,7 @@ func rpmEVR(nevra string) string {
 // RPMPackageName extracts the package name from an RPM NEVRA ("openssl-1:1.0.2k-16.el8" ->
 // "openssl"), returning "" for a bare EVR that names no package.
 //
-// It is the inverse of rpmEVR: RPM versions and releases never contain a hyphen, so a NEVRA is
+// It is the inverse of RPMEVR: RPM versions and releases never contain a hyphen, so a NEVRA is
 // exactly name + "-" + version + "-" + release and the name is everything before the last two
 // segments. Two segments alone is a bare EVR, which names nothing.
 //
