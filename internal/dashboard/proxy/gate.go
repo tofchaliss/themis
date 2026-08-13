@@ -28,22 +28,26 @@ type Gate struct {
 // making the proxy buffer gigabytes.
 const maxIdentityBody = 1 << 20
 
-// infoInvokes are the two Information-capability invokes (T7): POST in shape, but they
-// write nothing and propose no stance, so a read-scoped operator may run them (D11). The
-// recommend_position invoke is deliberately ABSENT — it records an advisory Proposal in
-// Governance, which makes it a write however reversible it looks.
-var infoInvokes = map[string]bool{
+// statelessPosts are POST routes that RECORD NOTHING, so a read-scoped operator may use
+// them (D11): the two Information-capability invokes (T7 — they propose no stance and
+// nothing reaches Governance) and the publication preview (a non-recording render —
+// "what WOULD this position render as", D9). The recommend_position invoke is
+// deliberately ABSENT — it records an advisory Proposal in Governance, which makes it a
+// write however reversible it looks. Membership requires positive evidence of
+// statelessness, never "it looks read-ish".
+var statelessPosts = map[string]bool{
 	"/api/intelligence/capabilities/plan_remediation/invoke":      true,
 	"/api/intelligence/capabilities/explain_vulnerability/invoke": true,
+	"/api/communication/previews":                                 true,
 }
 
-// isRead classifies a request for D11: read methods, plus the Information invokes.
+// isRead classifies a request for D11: read methods, plus the stateless POSTs.
 func isRead(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
 	}
-	return infoInvokes[r.URL.Path]
+	return statelessPosts[r.URL.Path]
 }
 
 // Wrap enforces, in order: a session exists (401), the scope covers the route class

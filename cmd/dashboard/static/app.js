@@ -451,6 +451,10 @@ async function viewRelease(releaseId, version) {
     const entry = posture.find((p) => p.finding_id === tr.dataset.id);
     openDrawer(entry);
   }));
+  main.querySelectorAll(".q-preview").forEach((btn) => btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openPreview(queue[Number(btn.dataset.qi)]);
+  }));
 
   const planBtn = $("#btn-plan");
   planBtn.addEventListener("click", async () => {
@@ -548,22 +552,20 @@ function pubTable(pubs) {
 
 /* Open a recorded Publication as the document it is. The payload is capped +
    regenerable server-side, so GET /publications/{id} always has content. */
-async function openPublication(id) {
-  let p;
-  try { p = await apiGET("communication", `/publications/${encodeURIComponent(id)}`); }
-  catch (e) { toast(e instanceof NodeDown ? "Communication unreachable." : e.message); return; }
-  if (!p) { toast("Publication not found."); return; }
-  let text = p.payload || "";
+/* docView is the shared document overlay: the published artifact and the D9 preview are
+   the same reading surface, differing only in their chips and filename. */
+function docView({ cve, format, stance, extraChips = "", payload }) {
+  let text = payload || "";
   try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* markdown/text formats stay as-is */ }
-  const ext = { markdown: "md", text: "txt" }[p.format] || "json";
+  const ext = { markdown: "md", text: "txt" }[format] || "json";
   const scrim = document.createElement("div");
   scrim.className = "docview-scrim";
   scrim.innerHTML = `<div class="docview" role="dialog" aria-label="publication document">
     <div class="docview-top">
-      <span class="mono">${esc(p.cve)}</span>
-      <span class="chip">${esc(p.format)}</span>
-      ${stanceChip(p.stance, true)}
-      ${p.superseded ? `<span class="chip chip-warn">superseded</span>` : ""}
+      <span class="mono">${esc(cve)}</span>
+      <span class="chip">${esc(format)}</span>
+      ${stanceChip(stance, true)}
+      ${extraChips}
       <a class="btn" id="docview-dl">Download</a>
       <button class="btn" id="docview-close">Close</button>
     </div>
@@ -577,16 +579,45 @@ async function openPublication(id) {
     if (e.key === "Escape") { close(); document.removeEventListener("keydown", onEsc); }
   });
   const dl = $("#docview-dl", scrim);
-  dl.href = URL.createObjectURL(new Blob([p.payload || ""], { type: "text/plain" }));
-  dl.download = `${p.cve || "publication"}.${p.format || "artifact"}.${ext}`;
+  dl.href = URL.createObjectURL(new Blob([payload || ""], { type: "text/plain" }));
+  dl.download = `${cve || "publication"}.${format || "artifact"}.${ext}`;
+}
+
+async function openPublication(id) {
+  let p;
+  try { p = await apiGET("communication", `/publications/${encodeURIComponent(id)}`); }
+  catch (e) { toast(e instanceof NodeDown ? "Communication unreachable." : e.message); return; }
+  if (!p) { toast("Publication not found."); return; }
+  docView({
+    cve: p.cve, format: p.format, stance: p.stance, payload: p.payload,
+    extraChips: p.superseded ? `<span class="chip chip-warn">superseded</span>` : "",
+  });
+}
+
+/* The D9 preview: render the queue row's CURRENT Position as the artifact it would
+   publish, without recording anything — the whole point is seeing the document before
+   the decision to publish it exists anywhere. */
+async function openPreview(q) {
+  let r;
+  try {
+    r = await apiPOST("communication", "/previews",
+      { finding_id: q.finding_id, artifact_type: "vex", format: "openvex" });
+  } catch (e) { toast(e instanceof NodeDown ? "Communication unreachable." : e.message); return; }
+  if (!r.ok) { toast(`Preview failed: ${await problemDetail(r)}`); return; }
+  const { payload } = await r.json();
+  docView({
+    cve: q.cve, format: "openvex", stance: q.stance, payload,
+    extraChips: `<span class="chip chip-warn" title="A non-recording render (D9): nothing was published or stored — this is what POST /publications WOULD produce">preview — not recorded</span>`,
+  });
 }
 
 function queueTable(queue) {
   return `<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>CVE</th><th>Stance</th><th class="num">Version</th><th>Stale</th></tr></thead>
-    <tbody>${queue.map((q) => `<tr>
+    <thead><tr><th>CVE</th><th>Stance</th><th class="num">Version</th><th>Stale</th><th></th></tr></thead>
+    <tbody>${queue.map((q, i) => `<tr>
       <td><span class="mono">${esc(q.cve)}</span></td><td>${stanceChip(q.stance, true)}</td>
-      <td class="num">${esc(q.version)}</td><td>${q.stale ? `<span class="chip chip-warn"><i></i>stale</span>` : "current"}</td></tr>`).join("")}</tbody></table></div>`;
+      <td class="num">${esc(q.version)}</td><td>${q.stale ? `<span class="chip chip-warn"><i></i>stale</span>` : "current"}</td>
+      <td><button class="btn q-preview" data-qi="${i}" title="Render this position as OpenVEX without recording anything (D9)">Preview</button></td></tr>`).join("")}</tbody></table></div>`;
 }
 
 /* --- Feeds --- */
