@@ -64,7 +64,7 @@ func planGateway(t *testing.T, proj app.ProjectionReader, prov app.Provider) *ap
 		Registry:   domain.DefaultRegistry(),
 		Projection: proj,
 		Prompt:     pr,
-		Engines:    []app.Engine{engine.NewLLMEngine(provider.NewStaticRouter(prov))},
+		Engines:    []app.Engine{engine.NewLLMEngine(provider.NewTieredRouter(prov, nil, nil))},
 	})
 	if err != nil {
 		t.Fatalf("gateway: %v", err)

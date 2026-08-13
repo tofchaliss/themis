@@ -28,9 +28,11 @@ type fakeRouter struct {
 	err      error
 }
 
-func (r fakeRouter) Select(_ domain.RoutingRequirements) (app.Provider, error) {
+func (r fakeRouter) Select(_ domain.RoutingRequirements, _ app.ModelTier) (app.Provider, error) {
 	return r.provider, r.err
 }
+
+func (r fakeRouter) Available(tier app.ModelTier) bool { return tier == app.TierPrimary }
 
 func TestLLMEngineKind(t *testing.T) {
 	e := NewLLMEngine(fakeRouter{provider: fakeProvider{}})

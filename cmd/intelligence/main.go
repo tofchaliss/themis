@@ -38,14 +38,18 @@ import (
 // config is read from the environment; every option is documented here (the
 // self-documented-config convention, R2) and in deploy/node.env.example.
 type config struct {
-	addr          string        // THEMIS_INTELLIGENCE_ADDR — listen address (default ":8086").
-	governanceURL string        // THEMIS_GOVERNANCE_URL — Governance read-API base URL.
-	ollamaURL     string        // THEMIS_OLLAMA_URL — Ollama (OpenAI-compatible) base URL (LLM + embedder).
-	model         string        // THEMIS_INTELLIGENCE_MODEL — pinned LLM model (default "llama3.1:8b").
-	useFake       bool          // THEMIS_INTELLIGENCE_PROVIDER=fake — dev/CI provider + embedder (no model).
-	apiKey        string        // THEMIS_LLM_API_KEY — optional bearer token for an authenticated server.
-	respFormat    string        // THEMIS_LLM_RESPONSE_FORMAT — structured-output mode (json_object|json_schema|text|none).
-	llmTimeout    time.Duration // THEMIS_LLM_TIMEOUT — provider HTTP client timeout (Go duration, default 60s). Raise for a slower/larger local model whose grounded recommend exceeds 60s (else the call aborts with provider_error → an "insufficient" 204).
+	addr          string // THEMIS_INTELLIGENCE_ADDR — listen address (default ":8086").
+	governanceURL string // THEMIS_GOVERNANCE_URL — Governance read-API base URL.
+	ollamaURL     string // THEMIS_OLLAMA_URL — Ollama (OpenAI-compatible) base URL (LLM + embedder).
+	model         string // THEMIS_INTELLIGENCE_MODEL — pinned LLM model (default "llama3.1:8b").
+	// Router tiers (phase3-intelligence-router; both optional, empty = unconfigured):
+	escalationModel string        // THEMIS_INTELLIGENCE_MODEL_ESCALATION — LARGER model an honest `insufficient` retries on once (G-AI-2b).
+	economyModel    string        // THEMIS_INTELLIGENCE_MODEL_ECONOMY — SMALLER model a nearly-spent budget window degrades to (G-AI-4).
+	degradePct      float64       // THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT — degrade low-water mark as a fraction of the window ceiling (default 0.20).
+	useFake         bool          // THEMIS_INTELLIGENCE_PROVIDER=fake — dev/CI provider + embedder (no model).
+	apiKey          string        // THEMIS_LLM_API_KEY — optional bearer token for an authenticated server.
+	respFormat      string        // THEMIS_LLM_RESPONSE_FORMAT — structured-output mode (json_object|json_schema|text|none).
+	llmTimeout      time.Duration // THEMIS_LLM_TIMEOUT — provider HTTP client timeout (Go duration, default 60s). Raise for a slower/larger local model whose grounded recommend exceeds 60s (else the call aborts with provider_error → an "insufficient" 204).
 
 	// Δ3a Operational Semantic Index (semantic precedent, RC-1). Optional — empty DSN = stateless.
 	dsn            string // THEMIS_DATABASE_DSN — the Intelligence store DSN (position_embeddings + inbox). Empty ⇒ semantic precedent disabled (exact-CVE fallback only).
@@ -80,14 +84,17 @@ func loadConfig() config {
 		respFormat:    os.Getenv("THEMIS_LLM_RESPONSE_FORMAT"),
 		llmTimeout:    envDurationDefault("THEMIS_LLM_TIMEOUT", 60*time.Second),
 
-		dsn:            os.Getenv("THEMIS_DATABASE_DSN"),
-		migrate:        os.Getenv("THEMIS_INTELLIGENCE_MIGRATE") == "1",
-		migrationsPath: envDefault("THEMIS_INTELLIGENCE_MIGRATIONS", "internal/intelligence/adapters/store/migrations"),
-		embedModel:     envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
-		topK:           envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
-		budgetTokens:   envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
-		budgetWindow:   envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
-		rebuild:        os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
+		dsn:             os.Getenv("THEMIS_DATABASE_DSN"),
+		migrate:         os.Getenv("THEMIS_INTELLIGENCE_MIGRATE") == "1",
+		migrationsPath:  envDefault("THEMIS_INTELLIGENCE_MIGRATIONS", "internal/intelligence/adapters/store/migrations"),
+		embedModel:      envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
+		topK:            envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
+		budgetTokens:    envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
+		escalationModel: os.Getenv("THEMIS_INTELLIGENCE_MODEL_ESCALATION"),
+		economyModel:    os.Getenv("THEMIS_INTELLIGENCE_MODEL_ECONOMY"),
+		degradePct:      envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
+		budgetWindow:    envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
+		rebuild:         os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -133,23 +140,26 @@ func main() {
 	defer closeBus()
 
 	intel, err := wiring.Wire(wiring.Config{
-		GovernanceURL:  cfg.governanceURL,
-		OllamaURL:      cfg.ollamaURL,
-		Model:          cfg.model,
-		UseFake:        cfg.useFake,
-		APIKey:         cfg.apiKey,
-		ResponseFormat: cfg.respFormat,
-		Logger:         logger,
-		HTTPClient:     &http.Client{Timeout: cfg.llmTimeout},
+		GovernanceURL:   cfg.governanceURL,
+		OllamaURL:       cfg.ollamaURL,
+		Model:           cfg.model,
+		EscalationModel: cfg.escalationModel,
+		EconomyModel:    cfg.economyModel,
+		UseFake:         cfg.useFake,
+		APIKey:          cfg.apiKey,
+		ResponseFormat:  cfg.respFormat,
+		Logger:          logger,
+		HTTPClient:      &http.Client{Timeout: cfg.llmTimeout},
 		// The SAME duration drives the Gateway's per-invocation deadline. Two deadlines on one
 		// call and the shorter wins, so setting only the HTTP client left every invocation
 		// capped at the Gateway's hard-coded 60s and made THEMIS_LLM_TIMEOUT inert above 60s.
-		ProviderTimeout: cfg.llmTimeout,
-		Store:           st,
-		EmbedModel:      cfg.embedModel,
-		TopK:            cfg.topK,
-		BudgetTokens:    cfg.budgetTokens,
-		BudgetWindow:    cfg.budgetWindow,
+		ProviderTimeout:       cfg.llmTimeout,
+		Store:                 st,
+		EmbedModel:            cfg.embedModel,
+		TopK:                  cfg.topK,
+		BudgetTokens:          cfg.budgetTokens,
+		BudgetWindow:          cfg.budgetWindow,
+		BudgetDegradeFraction: cfg.degradePct,
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))
@@ -331,6 +341,15 @@ func envDurationDefault(key string, def time.Duration) time.Duration {
 }
 
 // envIntDefault parses a positive int from key, falling back to def when unset or unparseable.
+func envFloatDefault(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < 1 {
+			return f
+		}
+	}
+	return def
+}
+
 func envIntDefault(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

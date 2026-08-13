@@ -300,6 +300,12 @@ OpenVEX / CSAF out.
   disable-able and never auto-decides. Its spend is bounded per capability per window
   (`THEMIS_INTELLIGENCE_BUDGET_TOKENS`/`_WINDOW`; unset = unlimited, which is the default because a
   budget switched on by accident is indistinguishable downstream from an AI outage).
+  **Model tiers are runtime Gateway decisions** (phase3-intelligence-router; callers never name a
+  model — INT-0062): an honest `insufficient` on a Decision capability retries ONCE on
+  `THEMIS_INTELLIGENCE_MODEL_ESCALATION` (never on schema/business failures — those are contract
+  problems, and escalating would mask which lever to pull — nor on timeouts); a nearly-spent budget
+  window degrades to `THEMIS_INTELLIGENCE_MODEL_ECONOMY` instead of refusing (exhaustion still
+  refuses). Both tiers optional; a tier model equal to the primary is treated as unset.
 
 ## Scripts & tooling
 

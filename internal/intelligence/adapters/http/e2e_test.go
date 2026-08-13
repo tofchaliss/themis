@@ -43,7 +43,7 @@ func buildE2EGrounded(t *testing.T, providerResponse, purl, affectedRanges strin
 		Projection: readapi.NewAssessmentClient(gov.URL, gov.Client()),
 		Prompt:     pr,
 		Engines: []app.Engine{
-			engine.NewLLMEngine(provider.NewStaticRouter(provider.NewFakeProvider(providerResponse))),
+			engine.NewLLMEngine(provider.NewTieredRouter(provider.NewFakeProvider(providerResponse), nil, nil)),
 		},
 	})
 	if err != nil {
@@ -146,7 +146,7 @@ func TestE2EReplaysFromARecordedProjectionFixture(t *testing.T) {
 		Registry:   domain.DefaultRegistry(),
 		Projection: readapi.NewAssessmentClient(srv.URL, srv.Client()),
 		Prompt:     pr,
-		Engines:    []app.Engine{engine.NewLLMEngine(provider.NewStaticRouter(provider.NewFakeProvider(llm)))},
+		Engines:    []app.Engine{engine.NewLLMEngine(provider.NewTieredRouter(provider.NewFakeProvider(llm), nil, nil))},
 	})
 	if err != nil {
 		t.Fatalf("gateway: %v", err)

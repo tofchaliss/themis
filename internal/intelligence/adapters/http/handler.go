@@ -210,6 +210,13 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 		observability.Bool("produced", oc.Produced),
 		observability.String("reason", oc.Reason),
 	}
+	// `tier` says which model tier produced the terminal LLM outcome (escalation/economy —
+	// phase3-intelligence-router). Logged only when the router made a non-primary decision, so
+	// the common line is unchanged — and so "the bigger model could not tell either" is
+	// observable on a live node, which is the half of G-AI-2b that exists for operators.
+	if oc.Tier != "" && oc.Tier != string(app.TierPrimary) {
+		fields = append(fields, observability.String("tier", oc.Tier))
+	}
 	// `detail` says WHICH check refused the output, and is present only when something did
 	// (TRUST-6). Omitted on a clean run so the common line is unchanged, and never echoed in
 	// the HTTP response — the 204 stays opaque by design.

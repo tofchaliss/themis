@@ -71,7 +71,7 @@ func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Emb
 		// here, so the demo exercises the semantic path alone.
 		Precedents: app.NewPrecedentService(emb, idx, nil, 5),
 		Engines: []app.Engine{
-			engine.NewLLMEngine(provider.NewStaticRouter(prov)),
+			engine.NewLLMEngine(provider.NewTieredRouter(prov, nil, nil)),
 		},
 	})
 	if err != nil {

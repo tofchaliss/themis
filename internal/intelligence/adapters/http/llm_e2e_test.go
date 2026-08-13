@@ -68,7 +68,7 @@ func realGateway(t *testing.T, governanceURL, url, model string) *app.Gateway {
 		Registry:        domain.DefaultRegistry(),
 		Projection:      readapi.NewAssessmentClient(governanceURL, nil),
 		Prompt:          pr,
-		Engines:         []app.Engine{engine.NewLLMEngine(provider.NewStaticRouter(realProvider(url, model)))},
+		Engines:         []app.Engine{engine.NewLLMEngine(provider.NewTieredRouter(realProvider(url, model), nil, nil))},
 		ProviderTimeout: 300 * time.Second,
 	})
 	if err != nil {
