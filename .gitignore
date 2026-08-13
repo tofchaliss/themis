@@ -28,3 +28,7 @@
 
 # local tooling artifact (large, generated) — never versioned
 /scripts/oamp.json
+
+# spike-era strays — never commit
+/dashboard
+/gui-example.jpeg

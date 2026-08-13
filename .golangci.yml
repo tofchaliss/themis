@@ -245,6 +245,23 @@ linters:
               desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
             - pkg: github.com/themis-project/themis/internal/registry
               desc: auth is platform edge-security beneath the pipeline — it depends only on the kernel + drivers, not the registry context
+        dashboard-is-a-view:
+          files:
+            - "internal/dashboard/**"
+            - "cmd/dashboard/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: the dashboard is a view — it talks to contexts only over their read APIs (EDR-GUI-01 D1)
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: the dashboard is a view — it talks to contexts only over their read APIs (EDR-GUI-01 D1)
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: the dashboard is a view — it talks to contexts only over their read APIs (EDR-GUI-01 D1)
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: the dashboard is a view — it talks to contexts only over their read APIs (EDR-GUI-01 D1)
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: the dashboard is a view — it talks to contexts only over their read APIs (EDR-GUI-01 D1)
+            - pkg: github.com/themis-project/themis/internal/registry
+              desc: the dashboard is a view — it reads the estate over the Registry read API, never the package (EDR-GUI-01 D1)
         no-format-leakage:
           files:
             - "**/*.go"

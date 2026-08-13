@@ -9,9 +9,9 @@
 #     THEMIS_PGPW must be the password that role ACTUALLY has: it is baked into six env files
 #     here and nothing reconciles them later, so a mismatch surfaces only at the next restart.
 #   - The service binaries built: go build -o bin/ ./cmd/registry ./cmd/evidence \
-#       ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence
+#       ./cmd/knowledge ./cmd/governance ./cmd/communication ./cmd/intelligence ./cmd/dashboard
 #   - Any manually-started ./bin/* processes stopped (they'd hold the ports):
-#       pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence)'
+#       pkill -f 'bin/(registry|evidence|knowledge|governance|communication|intelligence|dashboard)'
 #
 # Run from the repo root, as root, with the DB password in THEMIS_PGPW:
 #   sudo THEMIS_PGPW='...' [THEMIS_INTELLIGENCE_MODEL=cyberpal20b:latest] ./deploy/systemd/install-systemd.sh
@@ -125,12 +125,26 @@ THEMIS_INTELLIGENCE_ADDR=:8086
 # THEMIS_LLM_TIMEOUT=300s
 EOF
 
+# Dashboard: the GUI node (EDR-GUI-01 D10) — static SPA + same-origin proxy to the six
+# read APIs above; a view, no database of its own. The two commented lines are the
+# production posture: mint an ADMIN key for the proxy (authadmin create-key --name dashboard
+# --scopes admin — it must be write-capable or the governed loop's accepts/publishes die at
+# the node edge; WHO may write is enforced per-operator at the dashboard's own gate, D11)
+# and point the auth DSN at the shared auth DB so operators must sign in
+# (their scope then decides what the GUI lets them do — read keys cannot decide). Remember
+# D3: beyond a firewalled network, front :8090 with a TLS-terminating proxy.
+write_env dashboard <<EOF
+THEMIS_DASHBOARD_ADDR=:8090
+# THEMIS_API_KEY=<mint with: authadmin create-key --name dashboard --scopes admin>
+# THEMIS_AUTH_DATABASE_DSN=${BASE}/auth?sslmode=disable
+EOF
+
 sed "s#@REPO@#${REPO}#g; s#@USER@#${RUN_USER}#g" \
   "$REPO/deploy/systemd/themis@.service.in" > /etc/systemd/system/themis@.service
 echo "  wrote /etc/systemd/system/themis@.service (User=${RUN_USER}, WorkingDirectory=${REPO})"
 
 systemctl daemon-reload
-UNITS="themis@registry themis@evidence themis@knowledge themis@governance themis@communication themis@intelligence"
+UNITS="themis@registry themis@evidence themis@knowledge themis@governance themis@communication themis@intelligence themis@dashboard"
 systemctl enable --now $UNITS
 echo
 echo "started:"

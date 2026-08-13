@@ -19,14 +19,14 @@ COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/eviden
 # usecase,adapter,infrastructure}, tests/acceptance) is reference-only and has
 # platform-dependent integration tests green only on macOS's coarse clock, so CI gates
 # the go-forward tree via `make check-ci`, not the whole repo.
-COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/...
+COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/... ./internal/dashboard/...
 
 # The same go-forward trees as plain directories, for tooling that takes paths rather than
 # package patterns (currently test-property-greenfield). Derived, not restated, so the two
 # cannot disagree about what "greenfield" means.
 GREENFIELD_DIRS := $(patsubst ./%/...,%,$(COVERAGE_PKGS_GREENFIELD))
 
-.PHONY: all build vet-tags clean tidy test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
+.PHONY: all build vet-tags clean tidy js-check test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
 	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline e2e-llm e2e-embed verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
@@ -112,6 +112,11 @@ property-run:
 lint:
 	golangci-lint run ./...
 
+# The dashboard SPA has no compiler; a syntax error ships silently without this gate
+# (EDR-GUI-01 D7). node is present on dev machines and CI runners alike.
+js-check:
+	@for f in cmd/dashboard/static/*.js; do node --check $$f || exit 1; done; echo "js-check: OK"
+
 coverage:
 	$(GO) test $(GO_TEST_FLAGS) -tags=integration -p 1 -coverprofile=$(COVERAGE_OUT) -covermode=atomic $(COVERAGE_PKGS)
 	$(GO) tool cover -func=$(COVERAGE_OUT) | tee $(COVERAGE_TXT)
@@ -158,14 +163,14 @@ clean-arch:
 arch-test:
 	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
 
-check: build vet-tags test lint clean-arch arch-test coverage deadcode
+check: build vet-tags test lint js-check clean-arch arch-test coverage deadcode
 
 # CI gate — greenfield-scoped: same as `check`, but BOTH the unit tests and coverage cover only
 # the go-forward tree (the frozen v0.3.x legacy tests are green only on macOS's coarse clock,
 # are reference-only, and include a known-flaky property that cannot be fixed under the freeze —
 # CI-PROP-1). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
 # for local use.
-check-ci: build vet-tags test-greenfield lint clean-arch arch-test coverage-greenfield deadcode
+check-ci: build vet-tags test-greenfield lint js-check clean-arch arch-test coverage-greenfield deadcode
 
 # Type-check EVERY build tag, not just the untagged default.
 #
