@@ -254,6 +254,29 @@ Left side down is the only write path, unchanged by new tools (one curated shape
 Right side up is why no backend exists for the view: the join's two inputs — the verbatim
 per-tool document (immune to first-wins dedup) and the posture — are already stored.
 
+### Operator workflow, end to end (stages; [today] = works on v0.4.1)
+
+1. **Build** emits the SBOM (Syft, SPDX/CDX JSON — the composition claim) and N scan reports
+   (Trivy/Grype/… — judgment claims). [today]
+2. **SBOM first**: register + upload (`gf-upload-sbom.sh` or the GUI) → correlation folds
+   cards, records `discovery` matches, Governance opens one Finding per (release, CVE). [today]
+3. **Each scan report uploads as its own evidence row** — [today] via the jq recipe + the
+   Scanner report kind; [Phase C] raw tool JSON dropped on the form, translated in-browser;
+   [Phase A] `provenance_source` labels the row (`scanner-report · trivy · Aug 14`).
+4. **Ingestion per report**: the one scanner ACL folds Proposals at Asserted; matches record
+   FIRST-WINS with `detection_origin: scanner/<tool>` — overlap with discovery records
+   nothing (the Finding exists), scanner-first/only occurrences appear with the chip. [today]
+5. **Per-scan report** [Phase B]: the "Scans" section lists each report (tool · date ·
+   asserted/matched/decided/unmatched); click-through joins the stored document to the
+   posture by CVE in the browser — each tool claim beside its Finding state, drawer
+   deep-links, and the no-Finding remainder labeled (skipped / out-of-range / vendor-fixed).
+6. **Deciding is unchanged**: one decision per (release, CVE) however many tools asserted it;
+   origin chips inform the human and never enter policy, priority, or grounding. [today]
+7. **Over time**: re-discovery keeps old releases current; re-scans dedup when identical and
+   append a new dated row when changed (per-tool scan history for free). [today]
+8. **The fix build** is a new Release whose evidence simply opens no Finding for the fixed
+   CVE — fix verification by absence; the one-call fixed/new/persisting diff is IDEA-1. [today]
+
 ### Phasing (each its own PR, `make check-ci` green)
 
 - **Phase A — labeling (the only backend touch):** `provenance_source` on `EvidenceSummary` +

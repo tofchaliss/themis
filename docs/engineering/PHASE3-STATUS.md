@@ -1,6 +1,6 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-13 · **Read this first when resuming.** (Latest checkpoint: §"Checkpoint — session 2026-08-13" below.)
+**Updated:** 2026-08-14 · **Read this first when resuming.** (Latest checkpoint: §"Checkpoint — session 2026-08-14" below.)
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
@@ -506,7 +506,7 @@ never recurring — a spec-vs-`API.md` operationId diff, and an "every `THEMIS_*
 **`THEMIS_BUS_DATABASE_DSN` — the cross-context switch — was referenced by `node.env.example` as
 "(shared, above)" but defined nowhere in it.**
 
-## Checkpoint — session 2026-08-13 (RESUME HERE)
+## Checkpoint — session 2026-08-13
 
 One session, four arcs, **eleven PRs merged (#93–#103), zero open PRs, zero pending branches**
 at close. Every feature below is on `main` AND deployed + live-verified on the VM estate.
@@ -563,6 +563,57 @@ revoked in the D12 test — viewer read, dashboard-node admin). Node-edge F1 aut
 measured defects, patient for days now. 2) Optional live rounds: scanner-report ingestion
 (needs trivy), triage the five sweep-born Findings, degrade-path live test. 3) The two big AI
 blockers (Δ4 plane; release-comparison read API — "Must ask") when ready for design-first work.
+
+## Checkpoint — session 2026-08-14 (RESUME HERE)
+
+**One arc shipped + released, one design decided.** All work merged or on the single docs
+branch `docs/edr-gui-multi-scanner` (which also carries the previously-unmerged 2026-08-13
+checkpoint — merging it closes the board).
+
+**1 — v0.4.1 RELEASED (PR #104, squash `9615470`, tag `v0.4.1`).** GUI-7a: `scanner-report`
+in the dashboard upload kind selector (curated `{findings:[…]}` auto-detected; `format` only
+for sbom). KN-SCAN-2: per-component **`detection_origin`** (`discovery` | `scanner/<name>`)
+threaded Match → `ComponentMatched` (additive/omitempty, D9) → `finding_components`
+(governance migration **000011**, first-wins upsert) → read API → a "found by scanner/…"
+drawer chip (discovery unmarked). Deliberate deviation from the filed fix shape: the engine
+name is NOT the proposal source — source stays the closed-vocabulary `scanner` (TRUST-2
+enumerability); origin is display provenance, never authority. Also trued-up the
+`component_matched` v1 contract schema (additive fields were undeclared against
+`additionalProperties:false`; the guard sample now sets every additive field).
+**Live-verified before merge on a fresh-wiped estate:** six data DBs dropped (`auth` kept —
+keys survived), all 7 units rebuilt from the branch; Anchore/Syft SPDX SBOM → 100 cards /
+343 matches / 100 Findings; a real Trivy report through the new GUI selector → two
+`scanner/trivy` components (setuptools@70.3.0, CVE-2026-59890 + CVE-2025-47273) beside
+discovery's setuptools@39.2.0 on the SAME Findings; chip confirmed in the drawer.
+
+**2 — Multi-scanner design DECIDED (EDR-GUI-01 amendment D14–D16, this branch).** The use
+case "N tools' reports against one SBOM, a report per individual scan": D14 — no new
+ingestion door (one evidence row per report; `provenance_source` labels the tool; the ONE
+API change is `provenance_source` on `EvidenceSummary`). D15 — the per-scan report is a
+client-side **document ⋈ posture** join (the stored curated document is the complete
+per-tool record, immune to first-wins dedup; no new backend truth). D16 — tool dialects
+translate in the browser (per-tool JS translators; curated shape stays the wire contract;
+realizes GUI-7b per tool). Phases A (labeling) → B (Scans view) → C (translators, Trivy
+first, recommend Grype second) → D (deferred server-side per-report ledger). Flow diagram in
+the EDR.
+
+**Filed this session:** KN-SCAN-3 (LOW — canonicalize Trivy ecosystem vocabulary in
+`scanner_source.go`; TESTING.md recipe maps it meanwhile, measured live: `python-pkg` beside
+`pypi`); **IDEA-1** (`docs/backlog-ideas/ideas.md`, seeded) — release-comparison read API /
+fix-verification view ("is CVE X fixed in build Y?"), second consumer beside G-AI-3's
+delta-aware precedent ranking. GUI-7b remains open but now has its decided design (D16).
+
+**VM state at close:** all 7 units on the v0.4.1-content binaries (built from the feature
+branch — content-identical to the squash; **move the VM checkout to `main` on next touch**).
+Fresh estate: MRF / cdmrf-oamp / v20.1.0.0-118 = `6de84695-fd0a-410a-b49f-1ae568760d60`
+(SBOM + Trivy report uploaded). Dashboard auth ON; node-edge F1 auth OFF. **DB password
+pasted in chat again (third time)** — R6 rotation increasingly overdue.
+
+**Next session, weighted:** 1) Review + merge `docs/edr-gui-multi-scanner` (this branch: EDR
+amendment + 08-13/08-14 checkpoints + backlog updates). 2) **R7 (GOV-15 clamp) + R6 (F5 +
+password rotation)** — still the top measured defects, patient since 2026-08-09. 3)
+Multi-scanner Phases A+B (small, one PR) when GUI work resumes. 4) The Δ4 plane / IDEA-1
+when ready for design-first work.
 
 ## Key file pointers
 
