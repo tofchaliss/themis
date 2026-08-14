@@ -153,12 +153,91 @@ against the session's operator on the known mutation routes and refuses a mismat
 parsing and re-serializing every mutation body (a transparent proxy turns opaque), and refusing
 a lie loudly is the Themis direction. A well-behaved SPA never notices the check exists.
 
+## Amendment — 2026-08-14: multi-scanner reports against one release (D14–D16)
+
+Motivated by the v0.4.1 live session (GUI-7a + KN-SCAN-2): scanner-report upload and
+per-engine detection origin shipped, and the immediate next question was operational —
+*"upload scan reports from several tools (Trivy, Grype, Black Duck, Xray, Cortex) against the
+same SBOM, and show the user a report per individual scan."* These decisions extend the EDR;
+the discussion of record is this amendment.
+
+### D14 — Multi-scanner ingestion needs no new door
+
+Uploading N tools' reports against one release already works mechanically and stays that way:
+each report is its **own Evidence row** (content-addressed — different tools produce different
+bytes, so nothing collides), each ingests through the one scanner ACL at Asserted trust, and
+each match carries its engine in `detection_origin` (KN-SCAN-2). What v1 adds is only
+**labeling**: the upload form sets `provenance_source` (the register API has carried
+provenance fields all along — unused by the GUI until now, auto-filled from the report's
+`scanner` field), so a release's evidence list can say *which tool, when* per row.
+
+**The one API change this amendment needs** (flagged per the "Must ask" rule, decided here):
+`provenance_source` added to `EvidenceSummary` — the list shape the GUI's evidence table
+reads. Additive, read-only, already present on the sibling `EvidenceFacts` shape; without it
+the table cannot label rows by tool without one extra GET per row.
+
+### D15 — The per-scan report is a VIEW: stored document ⋈ posture, joined client-side
+
+The question "what did scan X find, and what happened to each finding?" is answered without
+new backend truth. The **stored curated document is already the complete per-tool record** —
+this is the load-bearing observation. Match recording is first-wins (a second tool re-claiming
+the same CVE+component records nothing), so the *match* table cannot reconstruct any one
+tool's full result set — but it doesn't have to: every report's own assertions sit verbatim
+and immutable in Evidence, retrievable by the same `GetDocument` the ingestion path uses. The
+per-scan view therefore fetches the report document through the proxy and **joins its
+findings to the release posture by CVE, in the browser**: per asserted finding — the tool's
+claim (CVE, component, severity-as-claimed) beside the enterprise state (Finding open /
+position / priority, deep-link to the drawer), plus the honest remainder
+(asserted-but-no-Finding: skipped in translation, out-of-range, or vendor-fixed). Counts
+(asserted / matched / decided / unmatched) derive from the same join, which also discharges
+the GUI-7 requirement that "ingested the report" and "ingested most of the report" never look
+alike.
+
+Alternatives, rejected for v1: **(a)** a Knowledge per-report ingest ledger + read API — real
+machinery whose only v1 consumer would be this view; deferred until a server-side consumer
+exists (AI/automation wanting per-scan queries — noted for the R1 harness). **(b)** a
+Governance per-scan projection — wrong context; raw scanner assertions are Information, not
+decisions, and Governance holds one Finding per (release, CVE) regardless of who asserted it.
+This is D1 discipline: the dashboard is a view; a client-side join over two existing reads is
+presentation, not truth.
+
+### D16 — Tool dialects translate in the browser; the curated shape stays the wire contract
+
+Multi-tool support means N raw formats (there is no shared scan-result standard). The
+translation layer lives **client-side in the dashboard**: one JS translator per tool,
+auto-detected from the raw JSON's shape, emitting the same curated `{findings:[…]}` document
+the CLI jq recipes emit — Trivy first (a port of the TESTING.md recipe), further tools
+(Grype/Xray/Black Duck/Cortex) by demand, each a pure function with its own tests. The server
+never learns a vendor dialect: the curated shape remains the single wire contract, the scanner
+ACL remains the single interpretation point, and KN-SCAN-3 (in-code ecosystem
+canonicalization) is the server-side safety net for dialect residue — the failure mode
+measured live 2026-08-14 (`python-pkg` leaking beside `pypi`). Alternatives, rejected: a
+server-side translator ACL (new API surface; a bounded context owning N vendor dialects
+contradicts curated-at-the-door, and Evidence deliberately stores scanner bytes without
+parsing them); jq-recipes-only (the measured GUI-7b demand is precisely that operators should
+not need a terminal). This realizes GUI-7b for every tool that has a translator.
+
+### Phasing (each its own PR, `make check-ci` green)
+
+- **Phase A — labeling (the only backend touch):** `provenance_source` on `EvidenceSummary` +
+  regen; upload form sends provenance; evidence table shows tool + `filed_at`.
+- **Phase B — the per-scan view (D15):** a "Scans" section on the release posture listing
+  scanner-report evidence (tool, date, finding count); click-through to the document⋈posture
+  report with drawer deep-links.
+- **Phase C — in-browser translators (D16):** Trivy translator (raw Trivy JSON accepted in
+  the upload form); further tools by demand.
+- **Phase D — deferred, recorded:** server-side per-report ledger/read API (when an AI or
+  automation consumer exists); cross-tool disagreement as an enrichment signal (two engines
+  asserting different severities on one CVE is information the cards could carry).
+
 ## Not in scope (explicit non-goals)
 
 SSO/OIDC (v2 — lands behind the D2 seam); per-operator key pass-through to nodes (v2 — D4);
 Evidence raw-document browsing and Faultline-centric navigation (unproven demand — the spike
-deliberately skipped them and nobody asked); write operations beyond the governed loop the read
-APIs already expose; mobile layout.
+deliberately skipped them and nobody asked; **amended 2026-08-14:** demand arrived for
+*scanner-report* documents specifically — D15 reads them through the proxy for the per-scan
+view; general raw-document browsing stays out); write operations beyond the governed loop the
+read APIs already expose; mobile layout.
 
 ## Phased implementation (each its own PR, `make check-ci` green)
 
