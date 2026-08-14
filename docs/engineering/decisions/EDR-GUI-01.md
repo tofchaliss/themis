@@ -217,6 +217,43 @@ contradicts curated-at-the-door, and Evidence deliberately stores scanner bytes 
 parsing them); jq-recipes-only (the measured GUI-7b demand is precisely that operators should
 not need a terminal). This realizes GUI-7b for every tool that has a translator.
 
+### The shape in one picture
+
+```text
+   Trivy raw     Grype raw     Xray/BlackDuck/…            Syft SBOM (SPDX/CDX JSON)
+       │             │              │                                │
+       ▼             ▼              ▼                                │
+   BROWSER: per-tool JS translators (Phase C / D16)                  │
+                     │                                               │
+                     ▼                                               │
+        ONE curated {findings:[…]} document                          │
+                     │  POST kind=scanner-report                     │  POST kind=sbom
+                     │  provenance_source=<tool>  ← Phase A          │
+                     ▼                                               ▼
+   EVIDENCE — one immutable row per report (verbatim document +      │
+              provenance_source + filed_at) ⇒ the COMPLETE           │
+              per-tool record, forever (the D15 insight)             │
+         │ bus                                             GetDocument (read)
+         ▼                                                          │
+   KNOWLEDGE — one scanner ACL · fold at Asserted ·                 │
+               RecordMatch FIRST-WINS ·                             │
+               detection_origin = scanner/<tool> | discovery        │
+         │ ComponentMatched                                         │
+         ▼                                                          │
+   GOVERNANCE — ONE Finding per (release, CVE);                     │
+                components carry detection_origin                   │
+         │ posture (read)                                           │
+         ▼                                                          ▼
+   DASHBOARD "Scans" view (Phase B / D15) — a VIEW, no new truth:
+     per-scan report = stored document ⋈ posture, JOINED BY CVE in the
+     browser; per finding: tool's claim ↔ Finding state → drawer link;
+     asserted-but-no-Finding shown honestly (skipped/out-of-range/fixed)
+```
+
+Left side down is the only write path, unchanged by new tools (one curated shape, one ACL).
+Right side up is why no backend exists for the view: the join's two inputs — the verbatim
+per-tool document (immune to first-wins dedup) and the posture — are already stored.
+
 ### Phasing (each its own PR, `make check-ci` green)
 
 - **Phase A — labeling (the only backend touch):** `provenance_source` on `EvidenceSummary` +
