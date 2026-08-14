@@ -859,6 +859,8 @@ under the 2026-08-07 re-derivation standard.
   (down-weight a decision on a very different release), which still needs a Registry/Evidence
   release-comparison read-API that does not exist. **Where it plugs in:** the Knowledge engine's ranking, given
   a release-diff signal. **Scope:** cosine-similarity ranking is done; delta-aware ranking is the open remainder.
+  *(The missing machinery is captured as **IDEA-1** in [`backlog-ideas/ideas.md`](backlog-ideas/ideas.md),
+  2026-08-14 — the operator fix-verification use case joined this AI one as its second consumer.)*
 
 - [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.**
   **PARTIALLY CLOSED 2026-08-09 — the per-capability window ceiling is enforced.** `app.Budget`
