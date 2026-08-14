@@ -288,6 +288,14 @@ jq '{findings:[.Results[] as $r | $r.Vulnerabilities[]? | {cve:.VulnerabilityID,
 Findings the translation cannot use are skipped and counted, never fatal — one malformed
 finding must not void a 400-finding report.
 
+**Or skip the jq entirely:** the dashboard's SBOM-manager form accepts **raw Trivy JSON**
+directly — the same translation runs in the browser (EDR-GUI-01 D16; the server only ever
+sees the curated document), the Kind selector flips to "Scanner report" automatically, and
+the file note shows the finding count plus how many were skipped. Either road, the release
+posture's **Scans** card (D15) then lists the report with its per-scan view: every claim
+the tool asserted joined by CVE to the enterprise posture, with asserted / matched /
+decided / no-Finding counts.
+
 The `ecosystem` mapping exists because Trivy speaks its own vocabulary (`python-pkg`,
 `node-pkg`, …) where the pipeline speaks purl types (`pypi`, `npm`) — measured live
 2026-08-14: a Trivy setuptools finding landed as ecosystem `python-pkg` beside discovery's

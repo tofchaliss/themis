@@ -197,7 +197,10 @@ under the 2026-08-07 re-derivation standard.
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
   the running requirements capture.
-- [ ] **GUI-7 — dashboard cannot upload a scanner report (filed 2026-08-14).** LOW-MED, usability.
+- [x] **GUI-7 — dashboard cannot upload a scanner report (filed 2026-08-14).** LOW-MED, usability.
+  ✅ **CLOSED 2026-08-14** — (a) shipped same day; (b) realized by multi-scanner Phase C below
+  (raw Trivy JSON translated in-browser; further tools by demand per D16, which is a design
+  posture, not an open defect).
   ✅ **(a) SHIPPED 2026-08-14** — `scanner-report` in the SBOM-manager kind selector, curated
   `{findings:[…]}` shape auto-detected with a finding count in the file note, and `format` sent
   only for the sbom kind (`cmd/dashboard/static/app.js`). **(b) remains open:** accept a **raw**
@@ -211,8 +214,23 @@ under the 2026-08-07 re-derivation standard.
   store→wiring→app→handler — the column existed since Evidence migration 000001; the D14-flagged
   API change, additive/read-only), the upload form auto-fills it from the report's per-finding
   `scanner` field (scanner-report kind only), and the evidence table gained Source (tool chip) +
-  Filed (relative time) columns. Phase B (per-scan "Scans" view, D15) and Phase C (in-browser
-  translators, D16) remain.
+  Filed (relative time) columns.
+  ✅ **Phase B SHIPPED 2026-08-14** (D15): the release posture's "Scans" card lists each
+  scanner-report row (tool chip · filed · async asserted-count), click-through to
+  `#/scan/<evidenceId>` — the stored document fetched through the proxy and joined to the
+  posture by CVE in the browser; per claim the tool's assertion beside the enterprise state
+  (band/stance/priority bar, drawer deep-link); asserted/matched/decided/no-Finding tiles; the
+  honest remainder rendered dimmed with a filtered-at-ingestion label. No new backend truth.
+  ✅ **Phase C SHIPPED 2026-08-14** (D16): raw Trivy JSON accepted by the upload form —
+  `detectTranslator` + `translateTrivy` (a pure-function port of the TESTING.md jq recipe,
+  including the ecosystem vocabulary map), Kind auto-set to scanner-report, skip count in the
+  file note, curated document is what uploads. Phase D stays deferred as recorded.
+- [ ] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** LOW, quality.
+  D16 says each translator is "a pure function with its own tests", but the repo has no JS
+  test runner and `cmd/dashboard/static/app.js` is untested by design (the spike-ported GUI is
+  tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
+  a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
+  engine when a second translator lands. Until then the translator is exercised only live.
 - [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
   (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
   stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the

@@ -781,6 +781,59 @@ async function viewFeeds() {
   }
 }
 
+/* --- Scanner-report translators (EDR-GUI-01 D16, multi-scanner Phase C).
+   Tool dialects translate HERE, in the browser: one pure function per tool,
+   auto-detected from the raw JSON's shape, all emitting the same curated
+   {findings:[…]} document the CLI jq recipes emit (TESTING.md). The server
+   never learns a vendor dialect — the curated shape stays the single wire
+   contract and the scanner ACL the single interpretation point. Findings a
+   translation cannot use are skipped and counted, never fatal: one malformed
+   finding must not void a 400-finding report. --- */
+
+/* Trivy speaks its own ecosystem vocabulary where the pipeline speaks purl
+   types — unmapped values pass through (KN-SCAN-3 is the server-side net). */
+const TRIVY_ECOSYSTEMS = {
+  "python-pkg": "pypi", "node-pkg": "npm", "gobinary": "golang",
+  "gomod": "golang", "jar": "maven", "pom": "maven", "gemspec": "gem",
+};
+
+function translateTrivy(j) {
+  const findings = [];
+  let skipped = 0;
+  const observed = new Date().toISOString();
+  for (const r of j.Results || []) {
+    for (const v of (r && r.Vulnerabilities) || []) {
+      if (!v || !v.VulnerabilityID || !v.PkgName) { skipped++; continue; }
+      findings.push({
+        cve: v.VulnerabilityID,
+        observed_at: observed,
+        scanner: "trivy",
+        severity: v.Severity || "",
+        cvss_score: (v.CVSS && v.CVSS.nvd && v.CVSS.nvd.V3Score) || 0,
+        cvss_vector: (v.CVSS && v.CVSS.nvd && v.CVSS.nvd.V3Vector) || "",
+        affected: [],
+        fixed: v.FixedVersion ? [v.FixedVersion] : [],
+        component: {
+          purl: (v.PkgIdentifier && v.PkgIdentifier.PURL) || "",
+          name: v.PkgName,
+          version: v.InstalledVersion || "",
+          ecosystem: TRIVY_ECOSYSTEMS[r.Type] || r.Type || "",
+          source: "",
+        },
+      });
+    }
+  }
+  return { findings, skipped };
+}
+
+/* Further tools (Grype/Xray/Black Duck/Cortex) register here by demand (D16). */
+function detectTranslator(j) {
+  if (j && Array.isArray(j.Results) && (j.SchemaVersion !== undefined || j.ArtifactName !== undefined)) {
+    return { tool: "trivy", translate: translateTrivy };
+  }
+  return null;
+}
+
 /* --- SBOM manager (VM feedback #8 — the tab that will grow) --- */
 
 async function viewSBOM() {
@@ -794,8 +847,10 @@ async function viewSBOM() {
   main.innerHTML = `
     <div class="card">
       <h2 class="card-title">Upload evidence</h2>
-      <p class="card-sub">An SBOM (CycloneDX / SPDX) or a VEX, filed against a release. Format is
-        detected from the file; byte-identical re-uploads dedup to the same evidence id.</p>
+      <p class="card-sub">An SBOM (CycloneDX / SPDX), a VEX, or a scanner report, filed against a release.
+        Format is detected from the file; raw Trivy JSON is translated to the curated shape in the browser
+        (the server only ever sees the curated document — D16); byte-identical re-uploads dedup to the same
+        evidence id.</p>
       <div class="form-grid">
         <label>Product
           <select id="sb-product"><option value="">— pick a product —</option>
@@ -850,6 +905,7 @@ async function viewSBOM() {
     if (!f) { detect.textContent = "Pick a .json file — CycloneDX and SPDX are detected automatically."; gate(); return; }
     fileText = await f.text();
     let findings = null; // a curated scanner report ({findings:[…]} — TESTING.md's jq recipe)
+    let translated = null; // a raw tool report a D16 translator recognized
     try {
       const j = JSON.parse(fileText);
       fileFormat = j.bomFormat === "CycloneDX" ? "cyclonedx" : (j.spdxVersion ? "spdx" : null);
@@ -858,13 +914,28 @@ async function viewSBOM() {
         // The tool labels the evidence row (provenance_source — EDR-GUI-01 D14 / Phase A).
         const named = j.findings.find((x) => x && typeof x.scanner === "string" && x.scanner);
         fileScanner = named ? named.scanner : null;
+      } else if (!fileFormat) {
+        const tr = detectTranslator(j);
+        if (tr) {
+          // The curated shape stays the wire contract: what uploads is the translation,
+          // never the vendor dialect (D16). Kind follows automatically — a translated
+          // report uploaded as an SBOM would be a footgun, not a choice.
+          const out = tr.translate(j);
+          fileText = JSON.stringify({ findings: out.findings });
+          fileScanner = tr.tool;
+          findings = out.findings.length;
+          translated = { tool: tr.tool, skipped: out.skipped };
+          $("#sb-kind").value = "scanner-report";
+        }
       }
     } catch { fileText = null; detect.textContent = "That file is not valid JSON — the trust gate would refuse it, so this form does too."; gate(); return; }
     detect.textContent = fileFormat
       ? `Detected ${fileFormat === "cyclonedx" ? "CycloneDX" : "SPDX"} · ${(f.size / 1024).toFixed(0)} KB`
-      : (findings !== null
-        ? `Detected scanner report${fileScanner ? ` (${fileScanner})` : ""} · ${findings} findings — set Kind to “Scanner report”. Raw Trivy JSON is not this shape; convert it first (TESTING.md).`
-        : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`);
+      : (translated
+        ? `Raw ${translated.tool} JSON — translated in-browser · ${findings} findings${translated.skipped ? ` (${translated.skipped} skipped: no CVE id or package name)` : ""} · Kind set to “Scanner report”.`
+        : (findings !== null
+          ? `Detected scanner report${fileScanner ? ` (${fileScanner})` : ""} · ${findings} findings — set Kind to “Scanner report”.`
+          : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`));
     gate();
   });
 
