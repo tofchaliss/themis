@@ -29,9 +29,9 @@ func scannerService(t *testing.T, src app.ScannerReportSource, matches *fakeMatc
 func TestScannerReport_IngestAndIdempotent(t *testing.T) {
 	src := fakeScannerSource{props: []app.ScannerProposal{
 		{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
-			Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}},
+			Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}, Origin: "scanner/trivy"},
 		{CVE: cve(t, "CVE-2024-2"), Proposal: vulnFacts(t, "scanner", value.SeverityMedium),
-			Component: app.InventoryComponent{PURL: "pkg:pypi/bar@2"}},
+			Component: app.InventoryComponent{PURL: "pkg:pypi/bar@2"}, Origin: "scanner"},
 	}}
 	matches := newMatches()
 	svc := scannerService(t, src, matches, newRepo())
@@ -39,6 +39,14 @@ func TestScannerReport_IngestAndIdempotent(t *testing.T) {
 	n, err := svc.Ingest(context.Background(), "rel-1", "ev-1")
 	if err != nil || n != 2 {
 		t.Fatalf("Ingest = %d, %v; want 2, nil", n, err)
+	}
+	// KN-SCAN-2: the source adapter's origin rides the recorded match unchanged, so the
+	// posture can say which engine found the occurrence.
+	if got := matches.byPURL["pkg:pypi/foo@1"].DetectionOrigin; got != "scanner/trivy" {
+		t.Errorf("detection origin = %q, want scanner/trivy", got)
+	}
+	if got := matches.byPURL["pkg:pypi/bar@2"].DetectionOrigin; got != "scanner" {
+		t.Errorf("detection origin = %q, want scanner", got)
 	}
 	// The plan carries the release and the skip count through to the log line.
 	plan, err := svc.PlanIngest(context.Background(), "rel-1", "ev-1")

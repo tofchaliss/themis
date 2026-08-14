@@ -278,12 +278,22 @@ jq '{findings:[.Results[] as $r | $r.Vulnerabilities[]? | {cve:.VulnerabilityID,
      cvss_score:(.CVSS.nvd.V3Score // 0), cvss_vector:(.CVSS.nvd.V3Vector // ""),
      affected:[], fixed:(if .FixedVersion then [.FixedVersion] else [] end),
      component:{purl:(.PkgIdentifier.PURL // ""), name:.PkgName,
-                version:.InstalledVersion, ecosystem:($r.Type // ""), source:""}}]}'   trivy.json > scan-report.json
+                version:.InstalledVersion,
+                ecosystem:(($r.Type // "") | {"python-pkg":"pypi","node-pkg":"npm","gobinary":"golang",
+                           "gomod":"golang","jar":"maven","pom":"maven","gemspec":"gem"}[.] // .),
+                source:""}}]}'   trivy.json > scan-report.json
 # POST like an SBOM but kind=scanner-report (see gf-upload-sbom.sh for the envelope shape)
 ```
 
 Findings the translation cannot use are skipped and counted, never fatal — one malformed
 finding must not void a 400-finding report.
+
+The `ecosystem` mapping exists because Trivy speaks its own vocabulary (`python-pkg`,
+`node-pkg`, …) where the pipeline speaks purl types (`pypi`, `npm`) — measured live
+2026-08-14: a Trivy setuptools finding landed as ecosystem `python-pkg` beside discovery's
+`pypi` for the same package. Harmless (an unknown ecosystem never filters and never hides —
+the KN-FIX-3 fail-safe), but mapped here so the two roads read as one ecosystem; the durable
+in-code canonicalization is KN-SCAN-3.
 
 **Watch a re-discovery sweep** (default ON): `journalctl -u themis@knowledge | grep re-discovery`
 — every sweep logs `releases` and `new_matches`, including zeros ("nothing was stale" and "the

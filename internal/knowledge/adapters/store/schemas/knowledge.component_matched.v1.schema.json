@@ -20,11 +20,28 @@
           "PURL": { "type": "string" },
           "Name": { "type": "string" },
           "Version": { "type": "string" },
-          "Ecosystem": { "type": "string" }
+          "Ecosystem": { "type": "string" },
+          "Source": { "type": "string", "description": "Upstream SOURCE-package name for distro components; additive/omitempty (AI-GROUND-1)." },
+          "ClaimClass": { "type": "string", "enum": ["carrier", "scope"], "description": "Why this component matched; absent = unknown, treated as carrier (EDR-CORRELATION-01 D3). Additive/omitempty." },
+          "DetectionOrigin": { "type": "string", "description": "Which engine produced the match: `discovery` or `scanner/<name>` (bare `scanner` when the report names no engine). Display provenance, never authority; absent on older payloads (KN-SCAN-2). Additive/omitempty." }
         }
       }
     },
     "Score": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Card's CVE-intrinsic composite score at match time (C6); optional — 0 when an older payload omits it. Governance stamps base_score at finding-open (BUG-3)." },
+    "Priority": { "type": "string", "description": "Card's priority band at match time; additive/omitempty (BUG-3b)." },
+    "Fixes": {
+      "type": ["array", "null"],
+      "description": "Card's published fix versions at match time; additive/omitempty (BUG-3b, ecosystem added by KN-FIX-3).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "Package": { "type": "string" },
+          "Version": { "type": "string" },
+          "Ecosystem": { "type": "string" }
+        }
+      }
+    },
     "OccurredAt": { "type": "string", "format": "date-time" }
   }
 }

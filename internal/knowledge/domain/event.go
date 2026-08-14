@@ -131,6 +131,16 @@ type MatchedComponent struct {
 	// Additive/omitempty: an older payload decodes to unknown, which every consumer treats as
 	// carrier — the pre-change behaviour exactly.
 	ClaimClass ClaimClass `json:"ClaimClass,omitempty"`
+	// DetectionOrigin says WHICH ENGINE produced this match: `discovery` (feed correlation
+	// against the inventory, including the re-discovery sweep) or `scanner/<name>` (an uploaded
+	// scanner report; bare `scanner` when the report names no engine). Display provenance ONLY
+	// (KN-SCAN-2): it never carries authority — the source tier taxonomy does — and it is not
+	// the proposal source, which stays a closed vocabulary so the trust/precedence tables remain
+	// enumerable (TRUST-2). Matches are first-wins (ON CONFLICT DO NOTHING), so one match has
+	// exactly one origin: whoever found it first.
+	//
+	// Additive/omitempty: an older payload decodes to "", which a consumer shows as unknown.
+	DetectionOrigin string `json:"DetectionOrigin,omitempty"`
 }
 
 // ComponentMatched is the correlation output (D3/D8): a release's component matches a

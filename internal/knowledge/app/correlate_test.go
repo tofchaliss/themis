@@ -30,11 +30,16 @@ func (f fakeDiscovery) VulnsForPackage(_ context.Context, c app.InventoryCompone
 
 type fakeMatches struct {
 	recorded map[string]bool
-	err      error
-	calls    int
+	// byPURL keeps the first-recorded Match per component, so tests can assert what rode
+	// the record (claim class, detection origin) and not merely that one happened.
+	byPURL map[string]app.Match
+	err    error
+	calls  int
 }
 
-func newMatches() *fakeMatches { return &fakeMatches{recorded: map[string]bool{}} }
+func newMatches() *fakeMatches {
+	return &fakeMatches{recorded: map[string]bool{}, byPURL: map[string]app.Match{}}
+}
 
 func (f *fakeMatches) RecordMatch(_ context.Context, m app.Match) (bool, error) {
 	f.calls++
@@ -46,6 +51,7 @@ func (f *fakeMatches) RecordMatch(_ context.Context, m app.Match) (bool, error) 
 		return false, nil
 	}
 	f.recorded[key] = true
+	f.byPURL[m.Component.PURL] = m
 	return true, nil
 }
 
@@ -84,6 +90,11 @@ func TestCorrelate_MatchesAndIdempotent(t *testing.T) {
 	// The card was created by the fold.
 	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-1"); !found {
 		t.Error("expected the folded faultline to exist")
+	}
+	// Every discovery-path match — the re-discovery sweep included, it runs through this same
+	// Correlate — is stamped `discovery`, distinguishing it from a scanner's (KN-SCAN-2).
+	if got := matches.byPURL["pkg:deb/debian/openssl@3.0"].DetectionOrigin; got != app.OriginDiscovery {
+		t.Errorf("detection origin = %q, want %q", got, app.OriginDiscovery)
 	}
 
 	// Re-running records no new matches (idempotent).

@@ -168,7 +168,7 @@ func do(t *testing.T, method, url string, body any) (int, []byte) {
 func TestGetFinding(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
-	_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a"})
+	_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a", DetectionOrigin: "scanner/trivy"})
 	// A raised + accepted proposal exercises the proposal + position + current-position mappers.
 	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "confirmed", fixedClock{}.Now(), value.TrustAsserted)
 	_ = f.RaiseProposal(p)
@@ -194,6 +194,10 @@ func TestGetFinding(t *testing.T) {
 	}
 	if v.Id != "fnd-1" || v.ReleaseId != "rel-1" || v.Stage != "position_established" || len(v.Components) != 1 {
 		t.Errorf("view = %+v", v)
+	}
+	// KN-SCAN-2: the wire carries which engine found the occurrence.
+	if got, _ := v.Components[0]["detection_origin"].(string); got != "scanner/trivy" {
+		t.Errorf("detection_origin = %q, want scanner/trivy", got)
 	}
 	if len(v.Proposals) != 1 || len(v.Positions) != 1 || v.CurrentPosition == nil {
 		t.Errorf("proposals/positions/current = %d/%d/%v", len(v.Proposals), len(v.Positions), v.CurrentPosition)

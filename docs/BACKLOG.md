@@ -197,6 +197,43 @@ under the 2026-08-07 re-derivation standard.
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
   the running requirements capture.
+- [ ] **GUI-7 — dashboard cannot upload a scanner report (filed 2026-08-14).** LOW-MED, usability.
+  ✅ **(a) SHIPPED 2026-08-14** — `scanner-report` in the SBOM-manager kind selector, curated
+  `{findings:[…]}` shape auto-detected with a finding count in the file note, and `format` sent
+  only for the sbom kind (`cmd/dashboard/static/app.js`). **(b) remains open:** accept a **raw**
+  Trivy JSON and translate it to the curated document — a design question (client-side JS mirror
+  of the TESTING.md jq recipe vs a server-side translator ACL; a translator that lives
+  server-side belongs to a context, not the dashboard — "Must ask" before building). Skip counts
+  must surface in the UI when (b) lands: "ingested most of the report" and "ingested the report"
+  must not look alike to an operator.
+- [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
+  (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
+  stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the
+  record's previously-dropped `scanner` field, bare `scanner` when unnamed) →
+  `ComponentMatched` (additive/omitempty, schema declared — the contract schema was also
+  trued-up to declare the already-shipping additive fields it silently omitted) → Governance
+  `finding_components.detection_origin` (migration 000011, first-wins upsert) → the read API
+  (`detection_origin` on Component) → a "found by scanner/…" chip on the drawer's matched
+  components (discovery stays unmarked — it is the default, not a signal). **One deliberate
+  deviation from the filed fix shape:** the engine name did NOT go into the proposal source —
+  source stays the closed-vocabulary `scanner` so the trust/precedence tables remain enumerable
+  (TRUST-2); the card's proposal history therefore still reads generic `scanner`, and the
+  per-engine answer lives on the match/Finding, which is where the operator asks it. Provenance
+  only, never authority. **Live-verified 2026-08-14 on a fresh-wiped estate:** Anchore/Syft SPDX
+  SBOM → 100 cards / 343 discovery matches / 100 Findings; a real Trivy report uploaded through
+  the new GUI selector produced two `scanner/trivy` components (setuptools@70.3.0 on
+  CVE-2026-59890 + CVE-2025-47273) sitting beside discovery's setuptools@39.2.0 on the SAME
+  Findings — the two-engines-one-decision shape, with provenance distinguishing the rows.
+- [ ] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).** LOW,
+  measured live the same day: Trivy names ecosystems in its own vocabulary (`python-pkg`,
+  `node-pkg`, `gobinary`, …) and the curated recipe used to pass it verbatim, so a scanner row
+  read ecosystem `python-pkg` beside discovery's `pypi` for the same package. Harmless by
+  construction — `value.CanonicalEcosystem` doesn't know these names, and an unknown ecosystem
+  never filters a fix nor hides anything (KN-FIX-3 fail-safe) — but the two roads should read as
+  one vocabulary. The TESTING.md jq recipe now maps the common types (same-day fix); this item
+  is the durable half: canonicalize at the seam where the component is parsed
+  (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
+  future recipe/client to remember.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
@@ -822,6 +859,8 @@ under the 2026-08-07 re-derivation standard.
   (down-weight a decision on a very different release), which still needs a Registry/Evidence
   release-comparison read-API that does not exist. **Where it plugs in:** the Knowledge engine's ranking, given
   a release-diff signal. **Scope:** cosine-similarity ranking is done; delta-aware ranking is the open remainder.
+  *(The missing machinery is captured as **IDEA-1** in [`backlog-ideas/ideas.md`](backlog-ideas/ideas.md),
+  2026-08-14 — the operator fix-verification use case joined this AI one as its second consumer.)*
 
 - [ ] **G-AI-4 — Budget enforcement policy deferred; Δ2 measures only.**
   **PARTIALLY CLOSED 2026-08-09 — the per-capability window ceiling is enforced.** `app.Budget`

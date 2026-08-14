@@ -75,7 +75,14 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 		{app.EventFaultlineSuperseded, domain.FaultlineSuperseded{FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
 		{app.EventComponentMatched, domain.ComponentMatched{
 			FaultlineID: "fl-1", CVE: "CVE-2024-1", ReleaseID: "rel-1",
-			Components: []domain.MatchedComponent{{PURL: "pkg:deb/debian/openssl@3.0.11", Name: "openssl", Version: "3.0.11", Ecosystem: "deb"}},
+			// Every additive field is set so the schema actually validates it — a sample that
+			// leaves an omitempty field empty removes that field from the contract guard.
+			Components: []domain.MatchedComponent{{
+				PURL: "pkg:deb/debian/openssl@3.0.11", Name: "openssl", Version: "3.0.11", Ecosystem: "deb",
+				Source: "openssl", ClaimClass: domain.ClaimCarrier, DetectionOrigin: "scanner/trivy",
+			}},
+			Score: 72, Priority: "high",
+			Fixes:      []domain.FixedVersion{{Package: "openssl", Version: "3.0.12", Ecosystem: "deb"}},
 			OccurredAt: now,
 		}},
 	}

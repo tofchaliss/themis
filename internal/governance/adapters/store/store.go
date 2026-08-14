@@ -117,7 +117,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
 	rows, err := s.querier(ctx).Query(ctx,
-		`SELECT purl, name, version, ecosystem, source, claim_class FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
+		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	var out []domain.MatchedComponent
 	for rows.Next() {
 		var c domain.MatchedComponent
-		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass); err != nil {
+		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -280,14 +280,18 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding) error {
 	for _, c := range f.Components() {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem, source, claim_class)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
+			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem, source, claim_class, detection_origin)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			ON CONFLICT (finding_id, purl) DO UPDATE SET
 				source = CASE WHEN finding_components.source = '' THEN EXCLUDED.source ELSE finding_components.source END,
 				-- A later, better-attributed classification may arrive once NVD has enriched the
 				-- card; an EMPTY (unknown) one must never overwrite a decided class.
-				claim_class = CASE WHEN EXCLUDED.claim_class <> '' THEN EXCLUDED.claim_class ELSE finding_components.claim_class END`,
-			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem, c.Source, c.ClaimClass); err != nil {
+				claim_class = CASE WHEN EXCLUDED.claim_class <> '' THEN EXCLUDED.claim_class ELSE finding_components.claim_class END,
+				-- First-wins, like source: Knowledge records one match per occurrence, so a
+				-- non-empty origin only ever arrives once — but an empty one (an older payload
+				-- replayed) must never blank a recorded origin.
+				detection_origin = CASE WHEN finding_components.detection_origin = '' THEN EXCLUDED.detection_origin ELSE finding_components.detection_origin END`,
+			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem, c.Source, c.ClaimClass, c.DetectionOrigin); err != nil {
 			return err
 		}
 	}
@@ -461,7 +465,7 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 		return entries, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.finding_id, c.purl, c.name, c.version, c.ecosystem, c.source, c.claim_class
+		SELECT c.finding_id, c.purl, c.name, c.version, c.ecosystem, c.source, c.claim_class, c.detection_origin
 		FROM finding_components c
 		JOIN findings f ON f.id = c.finding_id
 		WHERE f.release_id = $1
@@ -475,7 +479,7 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 	for rows.Next() {
 		var fid string
 		var c domain.MatchedComponent
-		if err := rows.Scan(&fid, &c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass); err != nil {
+		if err := rows.Scan(&fid, &c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin); err != nil {
 			return nil, err
 		}
 		byFinding[fid] = append(byFinding[fid], c)

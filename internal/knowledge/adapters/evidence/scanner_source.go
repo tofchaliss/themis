@@ -34,9 +34,12 @@ type scannerReportDoc struct {
 }
 
 // findingComponent is the half of a finding the ACL deliberately does not know: WHICH
-// component the scanner matched. The ACL translates what the flaw IS; the component is
-// match context, so it is parsed here where matches are being prepared.
+// component the scanner matched, and WHICH ENGINE said so. The ACL translates what the
+// flaw IS; the component and the engine name are match context, so they are parsed here
+// where matches are being prepared (KN-SCAN-2 — before this, the record's `scanner` field
+// was accepted and dropped, so two engines' reports were indistinguishable downstream).
 type findingComponent struct {
+	Scanner   string `json:"scanner"`
 	Component struct {
 		PURL      string `json:"purl"`
 		Name      string `json:"name"`
@@ -81,6 +84,10 @@ func (s *ScannerSource) ScannerProposals(ctx context.Context, evidenceID string)
 			skipped++
 			continue
 		}
+		origin := "scanner"
+		if fc.Scanner != "" {
+			origin = "scanner/" + fc.Scanner
+		}
 		props = append(props, app.ScannerProposal{
 			CVE:      translated[0].CVE,
 			Proposal: translated[0].Proposal,
@@ -88,6 +95,7 @@ func (s *ScannerSource) ScannerProposals(ctx context.Context, evidenceID string)
 				PURL: fc.Component.PURL, Name: fc.Component.Name, Version: fc.Component.Version,
 				Ecosystem: fc.Component.Ecosystem, Source: fc.Component.Source,
 			},
+			Origin: origin,
 		})
 	}
 	return props, skipped, nil

@@ -119,7 +119,7 @@ func TestConsumer_ComponentMatched(t *testing.T) {
 	repo := newMemRepo()
 	// A payload shaped like Knowledge's ComponentMatched (PascalCase keys, no json tags).
 	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2024-1","ReleaseID":"rel-1",
-		"Components":[{"PURL":"pkg:apk/openssl@3","Name":"openssl","Version":"3","Ecosystem":"Alpine"}]}`)
+		"Components":[{"PURL":"pkg:apk/openssl@3","Name":"openssl","Version":"3","Ecosystem":"Alpine","DetectionOrigin":"scanner/trivy"}]}`)
 	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.component_matched", payload)); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -129,6 +129,11 @@ func TestConsumer_ComponentMatched(t *testing.T) {
 	f := repo.byID[repo.order[0]]
 	if f.ReleaseID() != "rel-1" || f.FaultlineID() != "fl-1" || len(f.Components()) != 1 || f.Components()[0].PURL != "pkg:apk/openssl@3" {
 		t.Errorf("finding = %+v", f)
+	}
+	// KN-SCAN-2: origin is carried, never re-derived — Governance's answer to "which engine
+	// found this" is whatever Knowledge said.
+	if f.Components()[0].DetectionOrigin != "scanner/trivy" {
+		t.Errorf("detection origin = %q, want scanner/trivy", f.Components()[0].DetectionOrigin)
 	}
 }
 
