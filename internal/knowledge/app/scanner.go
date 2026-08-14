@@ -14,6 +14,11 @@ type ScannerProposal struct {
 	CVE       value.CVEID
 	Proposal  domain.Proposal
 	Component InventoryComponent
+	// Origin is the match's DetectionOrigin — `scanner/<name>` from the record's `scanner`
+	// field, bare `scanner` when the report names no engine (KN-SCAN-2). It is provenance,
+	// not the proposal source: the source stays the closed-vocabulary `scanner` so the
+	// trust/precedence tables remain enumerable (TRUST-2).
+	Origin string
 }
 
 // ScannerReportSource reads a release's scanner-report findings from Evidence and
@@ -90,7 +95,8 @@ func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan
 			// not the scanner's.
 			ClaimClass: domain.ClassifyClaim(
 				f.View().CarrierProducts, componentPackage(p.Component), p.Component.Name),
-			OccurredAt: s.clock.Now(),
+			DetectionOrigin: p.Origin,
+			OccurredAt:      s.clock.Now(),
 		})
 		if err != nil {
 			return newMatches, err

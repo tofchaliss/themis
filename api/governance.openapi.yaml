@@ -411,6 +411,15 @@ components:
             affected, so without this a CPython flaw reads as a vulnerability of python3-pyyaml.
             The component is kept either way - replacing a superseded build is real work - but an
             upgrade plan and the AI's grounding use carriers only.
+        detection_origin:
+          type: string
+          description: >-
+            Which engine produced this match (KN-SCAN-2): `discovery` - feed correlation against
+            the release inventory, including the re-discovery sweep; `scanner/<name>` - an
+            uploaded scanner report (bare `scanner` when the report names no engine); empty -
+            unknown (the match predates the field). Display provenance ONLY - it never enters a
+            decision, a policy, or the AI's grounding; authority stays with the trust class and
+            the source tier.
     FindingAssessment:
       type: object
       properties:

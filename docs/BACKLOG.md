@@ -197,6 +197,29 @@ under the 2026-08-07 re-derivation standard.
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
   the running requirements capture.
+- [ ] **GUI-7 — dashboard cannot upload a scanner report (filed 2026-08-14).** LOW-MED, usability.
+  ✅ **(a) SHIPPED 2026-08-14** — `scanner-report` in the SBOM-manager kind selector, curated
+  `{findings:[…]}` shape auto-detected with a finding count in the file note, and `format` sent
+  only for the sbom kind (`cmd/dashboard/static/app.js`). **(b) remains open:** accept a **raw**
+  Trivy JSON and translate it to the curated document — a design question (client-side JS mirror
+  of the TESTING.md jq recipe vs a server-side translator ACL; a translator that lives
+  server-side belongs to a context, not the dashboard — "Must ask" before building). Skip counts
+  must surface in the UI when (b) lands: "ingested most of the report" and "ingested the report"
+  must not look alike to an operator.
+- [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
+  (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
+  stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the
+  record's previously-dropped `scanner` field, bare `scanner` when unnamed) →
+  `ComponentMatched` (additive/omitempty, schema declared — the contract schema was also
+  trued-up to declare the already-shipping additive fields it silently omitted) → Governance
+  `finding_components.detection_origin` (migration 000011, first-wins upsert) → the read API
+  (`detection_origin` on Component) → a "found by scanner/…" chip on the drawer's matched
+  components (discovery stays unmarked — it is the default, not a signal). **One deliberate
+  deviation from the filed fix shape:** the engine name did NOT go into the proposal source —
+  source stays the closed-vocabulary `scanner` so the trust/precedence tables remain enumerable
+  (TRUST-2); the card's proposal history therefore still reads generic `scanner`, and the
+  per-engine answer lives on the match/Finding, which is where the operator asks it. Provenance
+  only, never authority.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

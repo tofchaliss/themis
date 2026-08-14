@@ -59,8 +59,15 @@ type Match struct {
 	// ClaimClass is why this component matched — carrier, scope, or unknown
 	// (EDR-CORRELATION-01 D3). Decided here, where the card's carrier products are in hand.
 	ClaimClass domain.ClaimClass
-	OccurredAt time.Time
+	// DetectionOrigin is which engine produced this match — `discovery` or `scanner/<name>`
+	// (KN-SCAN-2). Provenance for display, never authority; see domain.MatchedComponent.
+	DetectionOrigin string
+	OccurredAt      time.Time
 }
+
+// OriginDiscovery is the DetectionOrigin of every feed-correlation match, including the
+// re-discovery sweep — both run through the same Correlate path, deliberately.
+const OriginDiscovery = "discovery"
 
 // MatchedOccurrence is a match already recorded for a card: which release, which component. It
 // is enough to RE-ANNOUNCE that match when what the match MEANS changes.
@@ -224,7 +231,8 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			// it: a plan and the AI's grounding use carriers, the posture keeps the obligation.
 			ClaimClass: domain.ClassifyClaim(
 				f.View().CarrierProducts, componentPackage(item.Component), item.Component.Name),
-			OccurredAt: s.clock.Now(),
+			DetectionOrigin: OriginDiscovery,
+			OccurredAt:      s.clock.Now(),
 		})
 		if err != nil {
 			return newMatches, err

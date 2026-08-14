@@ -672,10 +672,10 @@ async function viewSBOM() {
         <label>Release
           <select id="sb-release" disabled><option value="">—</option></select></label>
         <label>Kind
-          <select id="sb-kind"><option value="sbom">SBOM</option><option value="vex">VEX</option></select></label>
+          <select id="sb-kind"><option value="sbom">SBOM</option><option value="vex">VEX</option><option value="scanner-report">Scanner report</option></select></label>
         <label>Document
           <input type="file" id="sb-file" accept=".json,application/json">
-          <span class="file-note" id="sb-detect">Pick a .json file — CycloneDX and SPDX are detected automatically.</span></label>
+          <span class="file-note" id="sb-detect">Pick a .json file — CycloneDX, SPDX and scanner reports are detected automatically.</span></label>
         <div><button class="btn btn-primary" id="sb-upload" disabled>Upload</button></div>
       </div>
     </div>
@@ -716,13 +716,17 @@ async function viewSBOM() {
     const f = fileInput.files[0];
     if (!f) { detect.textContent = "Pick a .json file — CycloneDX and SPDX are detected automatically."; gate(); return; }
     fileText = await f.text();
+    let findings = null; // a curated scanner report ({findings:[…]} — TESTING.md's jq recipe)
     try {
       const j = JSON.parse(fileText);
       fileFormat = j.bomFormat === "CycloneDX" ? "cyclonedx" : (j.spdxVersion ? "spdx" : null);
+      if (Array.isArray(j.findings)) findings = j.findings.length;
     } catch { fileText = null; detect.textContent = "That file is not valid JSON — the trust gate would refuse it, so this form does too."; gate(); return; }
     detect.textContent = fileFormat
       ? `Detected ${fileFormat === "cyclonedx" ? "CycloneDX" : "SPDX"} · ${(f.size / 1024).toFixed(0)} KB`
-      : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`;
+      : (findings !== null
+        ? `Detected scanner report · ${findings} findings — set Kind to “Scanner report”. Raw Trivy JSON is not this shape; convert it first (TESTING.md).`
+        : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`);
     gate();
   });
 
@@ -730,7 +734,9 @@ async function viewSBOM() {
     uploadBtn.disabled = true; uploadBtn.innerHTML = `<span class="spin"></span> Uploading…`;
     try {
       const body = { kind: $("#sb-kind").value, subject_release_id: sel.release.value, document: fileText };
-      if (fileFormat) body.format = fileFormat;
+      // format names an SBOM standard; Evidence uses it only for the sbom kind, so a VEX or
+      // scanner-report upload never sends one.
+      if (fileFormat && body.kind === "sbom") body.format = fileFormat;
       const r = await fetch("/api/evidence/evidence", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
@@ -869,7 +875,7 @@ async function openDrawer(entry) {
     <section>
       <h3 class="section-h">Matched components</h3>
       ${(f.components || entry.components || []).map((c) =>
-        `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}</div>`
+        `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}${c.detection_origin && c.detection_origin !== "discovery" ? ` <span class="chip chip-accent" title="which engine produced this match (KN-SCAN-2) — provenance only, never authority; unmarked components came from feed discovery">found by ${esc(c.detection_origin)}</span>` : ""}</div>`
       ).join("") || `<div class="empty">none recorded</div>`}
     </section>
 

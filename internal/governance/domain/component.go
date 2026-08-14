@@ -25,6 +25,14 @@ type MatchedComponent struct {
 	// build is real. The class governs what a consumer may SAY: an upgrade plan and the AI's
 	// grounding use carriers, the posture shows everything.
 	ClaimClass string
+	// DetectionOrigin says WHICH ENGINE produced this match — `discovery` (feed correlation)
+	// or `scanner/<name>` (an uploaded scanner report) — carried in from Knowledge (KN-SCAN-2).
+	// Display provenance ONLY: it never enters a decision, a policy, or the AI's grounding;
+	// authority lives in the trust class and the source tier, and this field exists precisely
+	// so an operator can see the difference without it mattering to governance. "" = unknown
+	// (a payload predating the field). Knowledge records matches first-wins, so the value is
+	// whoever found the occurrence first.
+	DetectionOrigin string
 }
 
 // ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown

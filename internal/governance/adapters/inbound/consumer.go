@@ -116,6 +116,9 @@ type componentDTO struct {
 	// EDR-CORRELATION-01, which reads as unknown and is therefore treated as carrier: exactly
 	// the pre-change behaviour.
 	ClaimClass string `json:"ClaimClass"`
+	// DetectionOrigin — `discovery` | `scanner/<name>` | "" (unknown, on payloads predating
+	// KN-SCAN-2). Display provenance only; carried, never acted on.
+	DetectionOrigin string `json:"DetectionOrigin"`
 }
 
 func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
@@ -123,7 +126,7 @@ func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 	for _, c := range d.Components {
 		comps = append(comps, domain.MatchedComponent{
 			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
-			ClaimClass: c.ClaimClass,
+			ClaimClass: c.ClaimClass, DetectionOrigin: c.DetectionOrigin,
 		})
 	}
 	return app.InboundComponentMatched{

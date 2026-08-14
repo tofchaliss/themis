@@ -131,7 +131,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	f := newFinding(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
-	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:apk/openssl@3", Name: "openssl", Version: "3", Ecosystem: "Alpine"}); err != nil {
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:apk/openssl@3", Name: "openssl", Version: "3", Ecosystem: "Alpine", DetectionOrigin: "scanner/trivy"}); err != nil {
 		t.Fatal(err)
 	}
 	notes := []app.OutboxNote{{EventType: app.EventFindingOpened, Event: domain.NewFindingOpened(f, epoch), OccurredAt: epoch}}
@@ -148,6 +148,10 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if len(got.Components()) != 1 || got.Components()[0].PURL != "pkg:apk/openssl@3" {
 		t.Errorf("components = %+v", got.Components())
+	}
+	// KN-SCAN-2: detection origin survives the column round-trip.
+	if got.Components()[0].DetectionOrigin != "scanner/trivy" {
+		t.Errorf("detection origin = %q, want scanner/trivy", got.Components()[0].DetectionOrigin)
 	}
 
 	// GetByKey resolves the same aggregate.

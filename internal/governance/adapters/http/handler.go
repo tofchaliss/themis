@@ -343,7 +343,7 @@ func toComponents(in []domain.MatchedComponent) []gen.Component {
 		out = append(out, gen.Component{
 			Purl: strptr(c.PURL), Name: strptr(c.Name), Version: strptr(c.Version),
 			Ecosystem: strptr(c.Ecosystem), Source: strptr(c.Source),
-			ClaimClass: strptr(c.ClaimClass),
+			ClaimClass: strptr(c.ClaimClass), DetectionOrigin: strptr(c.DetectionOrigin),
 		})
 	}
 	return out
