@@ -219,7 +219,21 @@ under the 2026-08-07 re-derivation standard.
   source stays the closed-vocabulary `scanner` so the trust/precedence tables remain enumerable
   (TRUST-2); the card's proposal history therefore still reads generic `scanner`, and the
   per-engine answer lives on the match/Finding, which is where the operator asks it. Provenance
-  only, never authority.
+  only, never authority. **Live-verified 2026-08-14 on a fresh-wiped estate:** Anchore/Syft SPDX
+  SBOM → 100 cards / 343 discovery matches / 100 Findings; a real Trivy report uploaded through
+  the new GUI selector produced two `scanner/trivy` components (setuptools@70.3.0 on
+  CVE-2026-59890 + CVE-2025-47273) sitting beside discovery's setuptools@39.2.0 on the SAME
+  Findings — the two-engines-one-decision shape, with provenance distinguishing the rows.
+- [ ] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).** LOW,
+  measured live the same day: Trivy names ecosystems in its own vocabulary (`python-pkg`,
+  `node-pkg`, `gobinary`, …) and the curated recipe used to pass it verbatim, so a scanner row
+  read ecosystem `python-pkg` beside discovery's `pypi` for the same package. Harmless by
+  construction — `value.CanonicalEcosystem` doesn't know these names, and an unknown ecosystem
+  never filters a fix nor hides anything (KN-FIX-3 fail-safe) — but the two roads should read as
+  one vocabulary. The TESTING.md jq recipe now maps the common types (same-day fix); this item
+  is the durable half: canonicalize at the seam where the component is parsed
+  (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
+  future recipe/client to remember.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
