@@ -753,6 +753,153 @@ async function viewScan(evidenceId, releaseId, version) {
   }));
 }
 
+/* --- Compare releases (IDEA-1, the operator half): fixed / new / persisting by CVE.
+   "Fixed" is deliberately ABSENCE PROVEN BY NEW EVIDENCE — the fix build registers as a
+   new Release, its evidence correlates, and the CVE's Finding simply does not open there
+   while the old release keeps its honest record. The diff is a client-side join over two
+   existing posture reads: a view, no new truth (D1/D15 discipline). The read-only
+   comparison ENDPOINT sketched in IDEA-1 stays open for its AI consumer (G-AI-3). --- */
+
+async function viewCompare() {
+  setRail("compare");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "Compare releases" }]);
+  loading("compare");
+
+  let products = [];
+  try { products = asArray(await apiGET("registry", "/products")); }
+  catch (e) { main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`; return; }
+
+  main.innerHTML = `
+    <div class="card">
+      <h2 class="card-title">Compare two releases</h2>
+      <p class="card-sub">Fix verification by absence: a CVE is <b>fixed</b> when the new release's evidence opens
+        no Finding for it while the old release keeps its record. Pick a baseline (the release you shipped) and a
+        candidate (the build that claims to fix things) from the same project.</p>
+      <div class="form-grid">
+        <label>Product
+          <select id="cmp-product"><option value="">— pick a product —</option>
+            ${products.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label>
+        <label>Project
+          <select id="cmp-project" disabled><option value="">—</option></select></label>
+        <label>Baseline release
+          <select id="cmp-a" disabled><option value="">—</option></select></label>
+        <label>Candidate release
+          <select id="cmp-b" disabled><option value="">—</option></select></label>
+        <div><button class="btn btn-primary" id="cmp-run" disabled>Compare</button></div>
+      </div>
+    </div>
+    <div id="cmp-out"></div>`;
+
+  const sel = { product: $("#cmp-product"), project: $("#cmp-project"), a: $("#cmp-a"), b: $("#cmp-b") };
+  const runBtn = $("#cmp-run"), out = $("#cmp-out");
+  const gate = () => { runBtn.disabled = !(sel.a.value && sel.b.value && sel.a.value !== sel.b.value); };
+
+  sel.product.addEventListener("change", async () => {
+    sel.project.innerHTML = `<option value="">—</option>`; sel.project.disabled = true;
+    for (const s of [sel.a, sel.b]) { s.innerHTML = `<option value="">—</option>`; s.disabled = true; }
+    gate();
+    if (!sel.product.value) return;
+    const projects = asArray(await apiGET("registry", `/products/${encodeURIComponent(sel.product.value)}/projects`));
+    sel.project.innerHTML = `<option value="">— pick a project —</option>` +
+      projects.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("");
+    sel.project.disabled = false;
+  });
+
+  sel.project.addEventListener("change", async () => {
+    for (const s of [sel.a, sel.b]) { s.innerHTML = `<option value="">—</option>`; s.disabled = true; }
+    gate();
+    if (!sel.project.value) return;
+    const releases = asArray(await apiGET("registry", `/projects/${encodeURIComponent(sel.project.value)}/releases`));
+    const opts = releases.map((r) => `<option value="${esc(r.id)}">v${esc(r.version)}</option>`).join("");
+    sel.a.innerHTML = `<option value="">— baseline —</option>` + opts;
+    sel.b.innerHTML = `<option value="">— candidate —</option>` + opts;
+    sel.a.disabled = sel.b.disabled = false;
+  });
+
+  sel.a.addEventListener("change", gate);
+  sel.b.addEventListener("change", gate);
+
+  runBtn.addEventListener("click", async () => {
+    const aId = sel.a.value, bId = sel.b.value;
+    const aVer = sel.a.selectedOptions[0].textContent, bVer = sel.b.selectedOptions[0].textContent;
+    runBtn.disabled = true; runBtn.innerHTML = `<span class="spin"></span> Comparing…`;
+    out.innerHTML = `<div class="loading"><span class="spin"></span></div>`;
+    try {
+      const [postA, postB, evA, evB] = await Promise.all([
+        apiGET("governance", `/releases/${encodeURIComponent(aId)}/posture`).then(asArray),
+        apiGET("governance", `/releases/${encodeURIComponent(bId)}/posture`).then(asArray),
+        apiGET("evidence", `/evidence?release=${encodeURIComponent(aId)}`).then(asArray),
+        apiGET("evidence", `/evidence?release=${encodeURIComponent(bId)}`).then(asArray),
+      ]);
+
+      // The honesty guard: "fixed" is absence proven by NEW EVIDENCE. A release with no
+      // evidence has proven nothing — diffing against it would read every CVE as fixed.
+      const noEv = [[aVer, evA], [bVer, evB]].filter(([, ev]) => !ev.length).map(([v]) => v);
+      if (noEv.length) {
+        out.innerHTML = `<div class="err">No evidence is filed against ${esc(noEv.join(" and "))} —
+          absence of a Finding there proves nothing yet. Upload the release's SBOM first (and give
+          correlation a moment); only then does "no Finding" mean "fixed".</div>`;
+        return;
+      }
+
+      const bucketTable = (list, emptyMsg) => list.length ? postureTable(list) : `<div class="empty">${emptyMsg}</div>`;
+      const inB = new Map(postB.map((p) => [p.cve, p]));
+      const inA = new Set(postA.map((p) => p.cve));
+      const byPriority = (x, y) => (y.residual_priority - x.residual_priority) || (y.effective_priority - x.effective_priority);
+      const fixed = postA.filter((p) => !inB.has(p.cve)).sort(byPriority);
+      const fresh = postB.filter((p) => !inA.has(p.cve)).sort(byPriority);
+      const persisting = postB.filter((p) => inA.has(p.cve)).sort(byPriority);
+
+      out.innerHTML = `
+        <div class="grid-tiles">
+          <div class="tile tile-a"><div class="tile-value">${fixed.length}</div><div class="tile-label">Fixed</div>
+            <div class="tile-note">on ${esc(aVer)}, no Finding on ${esc(bVer)}</div></div>
+          <div class="tile tile-d"><div class="tile-value">${fresh.length}</div><div class="tile-label">New</div>
+            <div class="tile-note">on ${esc(bVer)} only</div></div>
+          <div class="tile tile-b"><div class="tile-value">${persisting.length}</div><div class="tile-label">Persisting</div>
+            <div class="tile-note">open on both — the fix did not cover these</div></div>
+          <div class="tile tile-c"><div class="tile-value">${persisting.filter((p) => p.has_position).length}</div><div class="tile-label">Decided</div>
+            <div class="tile-note">of the persisting, carry a Position</div></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Fixed in ${esc(bVer)} <span class="chip chip-good"><i></i>${fixed.length}</span></h2>
+          <p class="card-sub">These Findings exist on ${esc(aVer)} and open no Finding on ${esc(bVer)} — shown with
+            their baseline state, which stays on record (a fix closes the question forward, it never rewrites history).
+            A just-uploaded candidate may still be correlating; re-check once its posture settles.</p>
+          <div data-cmp="fixed">${bucketTable(fixed, `<b>Nothing fixed</b>Every baseline Finding still opens on the candidate.`)}</div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">New in ${esc(bVer)} <span class="chip chip-crit"><i></i>${fresh.length}</span></h2>
+          <p class="card-sub">No Finding on ${esc(aVer)} — introduced by new components, or published after the
+            baseline's last correlation (the re-discovery sweep keeps old releases current).</p>
+          <div data-cmp="fresh">${bucketTable(fresh, `<b>Nothing new</b>The candidate introduces no Finding the baseline did not already have.`)}</div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Persisting <span class="chip chip-warn"><i></i>${persisting.length}</span></h2>
+          <p class="card-sub">Open on both releases, shown with the candidate's state. Positions do not carry
+            across releases — a persisting CVE on the candidate is decided there, or it is undecided.</p>
+          <div data-cmp="persisting">${bucketTable(persisting, `<b>Nothing persists</b>No CVE is open on both releases.`)}</div>
+        </div>`;
+
+      const buckets = { fixed, fresh, persisting };
+      for (const [key, list] of Object.entries(buckets)) {
+        out.querySelectorAll(`[data-cmp="${key}"] tr.rowlink`).forEach((tr) => tr.addEventListener("click", () => {
+          const entry = list.find((p) => p.finding_id === tr.dataset.id);
+          if (entry) openDrawer(entry);
+        }));
+      }
+    } catch (e) {
+      out.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+    } finally {
+      runBtn.disabled = false; runBtn.textContent = "Compare";
+      gate();
+    }
+  });
+}
+
 /* --- Feeds --- */
 
 async function viewFeeds() {
@@ -1306,6 +1453,7 @@ function route() {
   if (scan) return viewScan(decodeURIComponent(scan[1]), decodeURIComponent(scan[2]), scan[3] ? decodeURIComponent(scan[3]) : "");
   if (h.startsWith("#/estate")) return viewEstate();
   if (h.startsWith("#/sbom")) return viewSBOM();
+  if (h.startsWith("#/compare")) return viewCompare();
   if (h.startsWith("#/feeds")) return viewFeeds();
   return viewOverview();
 }

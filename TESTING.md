@@ -296,6 +296,12 @@ posture's **Scans** card (D15) then lists the report with its per-scan view: eve
 the tool asserted joined by CVE to the enterprise posture, with asserted / matched /
 decided / no-Finding counts.
 
+**Verify a fix build** (IDEA-1's operator half): the dashboard's **Compare** tab diffs two
+releases of the same project by CVE — **fixed** (Finding on the baseline, none on the
+candidate: absence proven by new evidence), **new**, and **persisting**, each row deep-linking
+to its Finding. It refuses to diff against a release with no evidence filed — a missing SBOM
+would wrongly read as "everything fixed". Client-side over the two posture reads; no endpoint.
+
 The `ecosystem` mapping exists because Trivy speaks its own vocabulary (`python-pkg`,
 `node-pkg`, …) where the pipeline speaks purl types (`pypi`, `npm`) — measured live
 2026-08-14: a Trivy setuptools finding landed as ecosystem `python-pkg` beside discovery's

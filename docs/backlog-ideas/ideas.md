@@ -37,3 +37,13 @@ read-only; stores nothing; no new truth.
 **Graduation path:** "Must ask" design-first (new API surface) — already flagged in
 `PHASE3-STATUS.md` §2026-08-13 as one of the two big AI blockers. Filing here records the
 operator-facing motivation beside the AI-facing one.
+
+**Status 2026-08-14 — consumer 1 (operator fix-verification) REALIZED in the GUI, no
+endpoint:** the dashboard's **Compare** tab (`#/compare`, on `feat/gui-multi-scanner-phase-a`)
+diffs two releases' postures by CVE entirely client-side — fixed / new / persisting tiles +
+tables with drawer deep-links, and an honesty guard that refuses to diff against a release
+with no evidence (absence proves nothing until new evidence exists). Two existing posture
+reads, a browser join, no new truth — the D1/D15 discipline, so no "Must ask" surface was
+touched. Consumers 2–3 (delta-aware precedent ranking, a `compare_releases` capability) still
+need the server-side read — the endpoint half of this idea stays open, and the GUI view is
+its working spec: what the browser joins by hand is exactly what the endpoint must return.
