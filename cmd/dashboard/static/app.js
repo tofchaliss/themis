@@ -686,7 +686,7 @@ async function viewSBOM() {
 
   const sel = { product: $("#sb-product"), project: $("#sb-project"), release: $("#sb-release") };
   const fileInput = $("#sb-file"), detect = $("#sb-detect"), uploadBtn = $("#sb-upload");
-  let fileText = null, fileFormat = null;
+  let fileText = null, fileFormat = null, fileScanner = null;
 
   const gate = () => { uploadBtn.disabled = !(sel.release.value && fileText); };
 
@@ -712,7 +712,7 @@ async function viewSBOM() {
   sel.release.addEventListener("change", () => { gate(); refreshEvidence(sel.release.value); });
 
   fileInput.addEventListener("change", async () => {
-    fileText = null; fileFormat = null;
+    fileText = null; fileFormat = null; fileScanner = null;
     const f = fileInput.files[0];
     if (!f) { detect.textContent = "Pick a .json file — CycloneDX and SPDX are detected automatically."; gate(); return; }
     fileText = await f.text();
@@ -720,12 +720,17 @@ async function viewSBOM() {
     try {
       const j = JSON.parse(fileText);
       fileFormat = j.bomFormat === "CycloneDX" ? "cyclonedx" : (j.spdxVersion ? "spdx" : null);
-      if (Array.isArray(j.findings)) findings = j.findings.length;
+      if (Array.isArray(j.findings)) {
+        findings = j.findings.length;
+        // The tool labels the evidence row (provenance_source — EDR-GUI-01 D14 / Phase A).
+        const named = j.findings.find((x) => x && typeof x.scanner === "string" && x.scanner);
+        fileScanner = named ? named.scanner : null;
+      }
     } catch { fileText = null; detect.textContent = "That file is not valid JSON — the trust gate would refuse it, so this form does too."; gate(); return; }
     detect.textContent = fileFormat
       ? `Detected ${fileFormat === "cyclonedx" ? "CycloneDX" : "SPDX"} · ${(f.size / 1024).toFixed(0)} KB`
       : (findings !== null
-        ? `Detected scanner report · ${findings} findings — set Kind to “Scanner report”. Raw Trivy JSON is not this shape; convert it first (TESTING.md).`
+        ? `Detected scanner report${fileScanner ? ` (${fileScanner})` : ""} · ${findings} findings — set Kind to “Scanner report”. Raw Trivy JSON is not this shape; convert it first (TESTING.md).`
         : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`);
     gate();
   });
@@ -737,6 +742,8 @@ async function viewSBOM() {
       // format names an SBOM standard; Evidence uses it only for the sbom kind, so a VEX or
       // scanner-report upload never sends one.
       if (fileFormat && body.kind === "sbom") body.format = fileFormat;
+      // The report's own scanner field labels the row — provenance only, never authority (D14).
+      if (fileScanner && body.kind === "scanner-report") body.provenance_source = fileScanner;
       const r = await fetch("/api/evidence/evidence", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
@@ -763,10 +770,12 @@ async function viewSBOM() {
     try {
       const ev = asArray(await apiGET("evidence", `/evidence?release=${encodeURIComponent(releaseId)}`));
       host.innerHTML = ev.length ? `<div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Kind</th><th>Evidence id</th><th>Fingerprint</th></tr></thead>
+        <thead><tr><th>Kind</th><th>Source</th><th>Evidence id</th><th>Fingerprint</th><th>Filed</th></tr></thead>
         <tbody>${ev.map((e) => `<tr><td>${esc(e.kind)}</td>
+          <td>${e.provenance_source ? `<span class="chip chip-accent" title="who produced the document (D14) — labeling only, never authority">${esc(e.provenance_source)}</span>` : "—"}</td>
           <td><span class="mono">${esc(e.id)}</span></td>
-          <td><span class="mono">${esc((e.fingerprint || "").slice(0, 16))}…</span></td></tr>`).join("")}</tbody></table></div>
+          <td><span class="mono">${esc((e.fingerprint || "").slice(0, 16))}…</span></td>
+          <td title="${esc(e.filed_at || "")}">${esc(timeAgo(e.filed_at))}</td></tr>`).join("")}</tbody></table></div>
         <p class="card-sub" style="margin-top:10px"><a href="#/release/${esc(releaseId)}">Open this release's posture →</a></p>`
         : `<div class="empty"><b>No evidence filed yet</b>Upload the first SBOM above.</div>`;
     } catch (e) { host.innerHTML = `<div class="err">${esc(e.message)}</div>`; }

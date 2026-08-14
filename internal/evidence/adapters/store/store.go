@@ -176,16 +176,17 @@ func (s *Store) Purge(ctx context.Context) error {
 
 // Summary is a list-view row for evidence filed against a release.
 type Summary struct {
-	ID          domain.EvidenceID
-	Kind        domain.Kind
-	Fingerprint string
-	FiledAt     time.Time
+	ID               domain.EvidenceID
+	Kind             domain.Kind
+	Fingerprint      string
+	ProvenanceSource string
+	FiledAt          time.Time
 }
 
 // ListByRelease returns evidence summaries for a release, newest first.
 func (s *Store) ListByRelease(ctx context.Context, releaseID string) ([]Summary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, kind, fingerprint, filed_at FROM evidence
+		SELECT id, kind, fingerprint, provenance_source, filed_at FROM evidence
 		WHERE subject_release_id = $1 ORDER BY filed_at DESC, id
 	`, releaseID)
 	if err != nil {
@@ -197,7 +198,7 @@ func (s *Store) ListByRelease(ctx context.Context, releaseID string) ([]Summary,
 	for rows.Next() {
 		var id, kind string
 		var sum Summary
-		if err := rows.Scan(&id, &kind, &sum.Fingerprint, &sum.FiledAt); err != nil {
+		if err := rows.Scan(&id, &kind, &sum.Fingerprint, &sum.ProvenanceSource, &sum.FiledAt); err != nil {
 			return nil, err
 		}
 		sum.ID = domain.EvidenceID(id)

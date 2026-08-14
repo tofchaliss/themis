@@ -85,7 +85,7 @@ func (m *memRepo) ListByRelease(_ context.Context, releaseID string) ([]app.Evid
 	var out []app.EvidenceSummary
 	for _, e := range m.byID {
 		if e.Subject().ReleaseID == releaseID {
-			out = append(out, app.EvidenceSummary{ID: e.ID(), Kind: e.Kind(), Fingerprint: e.Fingerprint().String(), FiledAt: e.FiledAt()})
+			out = append(out, app.EvidenceSummary{ID: e.ID(), Kind: e.Kind(), Fingerprint: e.Fingerprint().String(), ProvenanceSource: e.Provenance().Source, FiledAt: e.FiledAt()})
 		}
 	}
 	return out, nil
@@ -109,7 +109,7 @@ func inventory(t *testing.T) domain.Inventory {
 }
 
 func acceptTrust() app.TrustOutcome {
-	return app.TrustOutcome{Fingerprint: value.NewContentFingerprint([]byte("raw")), Status: domain.TrustAccepted}
+	return app.TrustOutcome{Fingerprint: value.NewContentFingerprint([]byte("raw")), Status: domain.TrustAccepted, Provenance: domain.Provenance{Source: "trivy"}}
 }
 
 func server(trust app.TrustGate, p app.Parser, subject app.SubjectRefValidator, repo app.Repository) http.Handler {
@@ -199,7 +199,8 @@ func TestReads(t *testing.T) {
 	if rec := do(t, h, http.MethodGet, "/evidence/ev-1/inventory", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "openssl") {
 		t.Errorf("get inventory: %d %s", rec.Code, rec.Body)
 	}
-	if rec := do(t, h, http.MethodGet, "/evidence?release=rel-1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ev-1") {
+	if rec := do(t, h, http.MethodGet, "/evidence?release=rel-1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ev-1") ||
+		!strings.Contains(rec.Body.String(), `"provenance_source":"trivy"`) {
 		t.Errorf("list: %d %s", rec.Code, rec.Body)
 	}
 

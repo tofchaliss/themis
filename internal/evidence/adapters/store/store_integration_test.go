@@ -263,6 +263,9 @@ func TestGetAndList(t *testing.T) {
 	if len(list) != 1 || list[0].ID != r.ID {
 		t.Errorf("list = %+v", list)
 	}
+	if list[0].ProvenanceSource != "trivy" {
+		t.Errorf("list provenance_source = %q, want trivy", list[0].ProvenanceSource)
+	}
 
 	if _, err := s.GetByID(ctx, "nope"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetByID(nope) = %v, want ErrNotFound", err)

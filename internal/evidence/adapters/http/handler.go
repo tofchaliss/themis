@@ -166,7 +166,7 @@ func toSummaries(list []app.EvidenceSummary) []gen.EvidenceSummary {
 	out := make([]gen.EvidenceSummary, 0, len(list))
 	for _, s := range list {
 		filed := s.FiledAt
-		out = append(out, gen.EvidenceSummary{Id: strptr(string(s.ID)), Kind: strptr(string(s.Kind)), Fingerprint: strptr(s.Fingerprint), FiledAt: &filed})
+		out = append(out, gen.EvidenceSummary{Id: strptr(string(s.ID)), Kind: strptr(string(s.Kind)), Fingerprint: strptr(s.Fingerprint), ProvenanceSource: strptr(s.ProvenanceSource), FiledAt: &filed})
 	}
 	return out
 }

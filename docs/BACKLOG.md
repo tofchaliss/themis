@@ -206,6 +206,13 @@ under the 2026-08-07 re-derivation standard.
   server-side belongs to a context, not the dashboard — "Must ask" before building). Skip counts
   must surface in the UI when (b) lands: "ingested most of the report" and "ingested the report"
   must not look alike to an operator.
+  ✅ **Multi-scanner Phase A SHIPPED 2026-08-14** (EDR-GUI-01 amendment D14, the labeling
+  phase): `provenance_source` on `EvidenceSummary` (spec + regen, threaded
+  store→wiring→app→handler — the column existed since Evidence migration 000001; the D14-flagged
+  API change, additive/read-only), the upload form auto-fills it from the report's per-finding
+  `scanner` field (scanner-report kind only), and the evidence table gained Source (tool chip) +
+  Filed (relative time) columns. Phase B (per-scan "Scans" view, D15) and Phase C (in-browser
+  translators, D16) remain.
 - [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
   (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
   stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the

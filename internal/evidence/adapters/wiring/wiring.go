@@ -85,7 +85,7 @@ func (b repoBridge) ListByRelease(ctx context.Context, releaseID string) ([]app.
 	}
 	out := make([]app.EvidenceSummary, len(rows))
 	for i, r := range rows {
-		out[i] = app.EvidenceSummary{ID: r.ID, Kind: r.Kind, Fingerprint: r.Fingerprint, FiledAt: r.FiledAt}
+		out[i] = app.EvidenceSummary{ID: r.ID, Kind: r.Kind, Fingerprint: r.Fingerprint, ProvenanceSource: r.ProvenanceSource, FiledAt: r.FiledAt}
 	}
 	return out, nil
 }

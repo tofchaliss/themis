@@ -181,6 +181,11 @@ components:
           type: string
         fingerprint:
           type: string
+        provenance_source:
+          type: string
+          description: >
+            Who produced the document (e.g. the scanner tool name) — labeling only, never
+            authority (EDR-GUI-01 D14). Empty when the uploader did not say.
         filed_at:
           type: string
           format: date-time

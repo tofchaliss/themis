@@ -54,10 +54,11 @@ type Repository interface {
 
 // EvidenceSummary is a list-view row for evidence filed against a release.
 type EvidenceSummary struct {
-	ID          domain.EvidenceID
-	Kind        domain.Kind
-	Fingerprint string
-	FiledAt     time.Time
+	ID               domain.EvidenceID
+	Kind             domain.Kind
+	Fingerprint      string
+	ProvenanceSource string
+	FiledAt          time.Time
 }
 
 // IDGenerator assigns new opaque Evidence identities (implemented by an adapter
