@@ -399,6 +399,8 @@ async function viewRelease(releaseId, version) {
   try { blast = await apiGET("registry", `/releases/${encodeURIComponent(releaseId)}/blast-radius`); } catch { /* estate optional */ }
   try { pubs = asArray(await apiGET("communication", `/publications?release=${encodeURIComponent(releaseId)}`)); } catch { /* optional */ }
   try { queue = asArray(await apiGET("communication", "/publishable-positions")).filter((q) => q.release_id === releaseId); } catch { /* optional */ }
+  let scans = [];
+  try { scans = asArray(await apiGET("evidence", `/evidence?release=${encodeURIComponent(releaseId)}`)).filter((e) => e.kind === "scanner-report"); } catch { /* optional */ }
 
   posture.sort((a, b) => (b.residual_priority - a.residual_priority) || (b.effective_priority - a.effective_priority));
 
@@ -432,6 +434,14 @@ async function viewRelease(releaseId, version) {
       ${postureTable(posture)}
     </div>
 
+    ${scans.length ? `<div class="card">
+      <h2 class="card-title">Scans</h2>
+      <p class="card-sub">Each scanner report filed against this release. The stored document is the complete
+        per-tool record — match recording is first-wins, so only the document can say what one tool asserted (D15).
+        Open a report to see every claim beside its enterprise state.</p>
+      ${scansTable(scans, releaseId, version)}
+    </div>` : ""}
+
     <div class="card">
       <h2 class="card-title">Remediation plan <span class="chip chip-accent" title="Information class (T7): rendered now, stored nowhere — the worst outcome is you disagreeing with it">AI · ephemeral</span> ${LOCAL_ONLY_CHIP}</h2>
       <p class="card-sub">Groups this release's open findings into the package upgrades that clear them — the grouping is deterministic, the model only writes the narrative. Nothing is recorded; ask again any time.</p>
@@ -455,6 +465,10 @@ async function viewRelease(releaseId, version) {
     ev.stopPropagation();
     openPreview(queue[Number(btn.dataset.qi)]);
   }));
+  main.querySelectorAll("tr.scanlink").forEach((tr) => tr.addEventListener("click", () => {
+    location.hash = `#/scan/${tr.dataset.id}?rel=${encodeURIComponent(releaseId)}&v=${encodeURIComponent(version || "")}`;
+  }));
+  fillScanCounts(scans);
 
   const planBtn = $("#btn-plan");
   planBtn.addEventListener("click", async () => {
@@ -618,6 +632,125 @@ function queueTable(queue) {
       <td><span class="mono">${esc(q.cve)}</span></td><td>${stanceChip(q.stance, true)}</td>
       <td class="num">${esc(q.version)}</td><td>${q.stale ? `<span class="chip chip-warn"><i></i>stale</span>` : "current"}</td>
       <td><button class="btn q-preview" data-qi="${i}" title="Render this position as OpenVEX without recording anything (D9)">Preview</button></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+/* --- Scans: the per-scan report is a VIEW — stored document ⋈ posture, joined by CVE
+   in the browser (EDR-GUI-01 D15). No backend truth exists for this page: the verbatim
+   per-tool document (immune to first-wins match dedup) and the posture are both already
+   stored, and the join is presentation. --- */
+
+const scanToolChip = (source) => source
+  ? `<span class="chip chip-accent" title="who produced the document (D14) — labeling only, never authority">${esc(source)}</span>`
+  : `<span class="chip chip-info" title="uploaded without a provenance_source — reports uploaded before Phase A, or hand-curated ones, have no tool label">unlabeled</span>`;
+
+function scansTable(scans, releaseId, version) {
+  return `<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Tool</th><th>Filed</th><th class="num">Findings asserted</th><th>Evidence id</th></tr></thead>
+    <tbody>${scans.map((s) => `<tr class="rowlink scanlink" data-id="${esc(s.id)}" title="Open the per-scan report">
+      <td>${scanToolChip(s.provenance_source)}</td>
+      <td title="${esc(s.filed_at || "")}">${esc(timeAgo(s.filed_at))}</td>
+      <td class="num" data-scancount="${esc(s.id)}"><span class="spin"></span></td>
+      <td><span class="mono">${esc(s.id)}</span></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+/* Counts fill in AFTER the posture renders — one small document fetch per scan,
+   never blocking the page (a missing document reads as "?", not as a broken view). */
+function fillScanCounts(scans) {
+  scans.forEach(async (s) => {
+    const cell = main.querySelector(`[data-scancount="${CSS.escape(s.id)}"]`);
+    if (!cell) return;
+    try {
+      const doc = await apiGET("evidence", `/evidence/${encodeURIComponent(s.id)}/document`);
+      const report = doc ? JSON.parse(doc.document) : null;
+      cell.textContent = report && Array.isArray(report.findings) ? report.findings.length : "?";
+    } catch { cell.textContent = "?"; }
+  });
+}
+
+async function viewScan(evidenceId, releaseId, version) {
+  setRail("estate");
+  const relHref = `#/release/${releaseId}?v=${encodeURIComponent(version || "")}`;
+  crumbs([{ label: "Overview", href: "#/" }, { label: "Estate", href: "#/estate" },
+          { label: version ? `Release v${version}` : "Release", href: relHref }, { label: "Scan report" }]);
+  loading("scan report");
+
+  let facts = null, doc = null, posture = [];
+  try {
+    [facts, doc, posture] = await Promise.all([
+      apiGET("evidence", `/evidence/${encodeURIComponent(evidenceId)}`),
+      apiGET("evidence", `/evidence/${encodeURIComponent(evidenceId)}/document`),
+      apiGET("governance", `/releases/${encodeURIComponent(releaseId)}/posture`).then(asArray),
+    ]);
+  } catch (e) {
+    main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+    return;
+  }
+  if (!doc) { main.innerHTML = `<div class="err">Evidence document not found.</div>`; return; }
+
+  let report = null;
+  try { report = JSON.parse(doc.document); } catch { /* handled below */ }
+  const findings = report && Array.isArray(report.findings) ? report.findings : null;
+  if (!findings) {
+    main.innerHTML = `<div class="err">This document is not a curated scanner report ({findings:[…]}) — nothing to join.</div>`;
+    return;
+  }
+
+  // The join: one Finding per (release, CVE) however many tools asserted it, so CVE is the key.
+  const byCVE = new Map(posture.map((p) => [p.cve, p]));
+  const rows = findings.map((f) => ({ f, entry: f && f.cve ? byCVE.get(f.cve) : undefined }));
+  rows.sort((a, b) => ((b.entry ? b.entry.residual_priority : -1) - (a.entry ? a.entry.residual_priority : -1)));
+
+  const asserted = findings.length;
+  const matched = rows.filter((r) => r.entry).length;
+  const decided = rows.filter((r) => r.entry && r.entry.has_position).length;
+  const unmatched = asserted - matched;
+
+  main.innerHTML = `
+    <div class="grid-tiles">
+      <div class="tile tile-b"><div class="tile-value">${asserted}</div><div class="tile-label">Asserted</div>
+        <div class="tile-note">findings in this report</div></div>
+      <div class="tile tile-a"><div class="tile-value">${matched}</div><div class="tile-label">Matched</div>
+        <div class="tile-note">have a Finding on this release</div></div>
+      <div class="tile tile-c"><div class="tile-value">${decided}</div><div class="tile-label">Decided</div>
+        <div class="tile-note">carry an Enterprise Position</div></div>
+      <div class="tile tile-d"><div class="tile-value">${unmatched}</div><div class="tile-label">No Finding</div>
+        <div class="tile-note">filtered at ingestion — the claim stays in this report</div></div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Scan report ${scanToolChip(facts ? facts.provenance_source : "")}
+        <span class="chip" title="${esc(facts && facts.filed_at ? facts.filed_at : "")}">filed ${esc(timeAgo(facts && facts.filed_at))}</span></h2>
+      <p class="card-sub">Every claim this tool asserted, beside what the enterprise did with it. "Ingested the
+        report" and "ingested most of the report" must never look alike: a claim with no Finding was skipped in
+        translation, out of the correlated range, or vendor-fixed — filtered, not lost.</p>
+      ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>CVE</th><th>Claimed severity</th><th>Component as claimed</th><th>Claimed fix</th>
+        <th>Band</th><th>Stance</th><th>Priority — residual over effective</th></tr></thead>
+        <tbody>${rows.map(({ f, entry }) => entry ? `
+          <tr class="rowlink" data-id="${esc(entry.finding_id)}" title="Open finding detail">
+            <td class="cve"><span class="mono">${esc(f.cve)}</span></td>
+            <td>${esc((f.severity || "").toLowerCase() || "—")}${f.cvss_score ? ` <span class="mono">${esc(String(f.cvss_score))}</span>` : ""}</td>
+            <td><span class="mono">${esc(f.component && f.component.name ? f.component.name : "?")}${f.component && f.component.version ? "@" + esc(f.component.version) : ""}</span></td>
+            <td>${(f.fixed || []).length ? `<span class="mono">${esc(f.fixed[0])}</span>` : "—"}</td>
+            <td>${bandChip(entry.band)}</td>
+            <td>${stanceChip(entry.stance, entry.has_position)}</td>
+            <td>${pbar(entry.effective_priority, entry.residual_priority)}</td>
+          </tr>` : `
+          <tr class="dim">
+            <td class="cve"><span class="mono">${esc(f && f.cve ? f.cve : "?")}</span></td>
+            <td>${esc(((f && f.severity) || "").toLowerCase() || "—")}${f && f.cvss_score ? ` <span class="mono">${esc(String(f.cvss_score))}</span>` : ""}</td>
+            <td><span class="mono">${esc(f && f.component && f.component.name ? f.component.name : "?")}${f && f.component && f.component.version ? "@" + esc(f.component.version) : ""}</span></td>
+            <td>${(f && f.fixed || []).length ? `<span class="mono">${esc(f.fixed[0])}</span>` : "—"}</td>
+            <td colspan="3"><span class="chip chip-info" title="skipped in translation, out of the correlated range, or vendor-fixed — the assertion is preserved verbatim in this stored report">no Finding — filtered at ingestion</span></td>
+          </tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><b>Empty report</b>This document asserts no findings.</div>`}
+      <p class="card-sub" style="margin-top:10px"><a href="${esc(relHref)}">← Back to the release posture</a></p>
+    </div>`;
+
+  main.querySelectorAll("tr.rowlink[data-id]").forEach((tr) => tr.addEventListener("click", () => {
+    const entry = posture.find((p) => p.finding_id === tr.dataset.id);
+    if (entry) openDrawer(entry);
+  }));
 }
 
 /* --- Feeds --- */
@@ -1098,6 +1231,8 @@ function route() {
   const h = location.hash || "#/";
   const rel = h.match(/^#\/release\/([^?]+)(?:\?v=([^&]*))?/);
   if (rel) return viewRelease(decodeURIComponent(rel[1]), rel[2] ? decodeURIComponent(rel[2]) : "");
+  const scan = h.match(/^#\/scan\/([^?]+)\?rel=([^&]*)(?:&v=([^&]*))?/);
+  if (scan) return viewScan(decodeURIComponent(scan[1]), decodeURIComponent(scan[2]), scan[3] ? decodeURIComponent(scan[3]) : "");
   if (h.startsWith("#/estate")) return viewEstate();
   if (h.startsWith("#/sbom")) return viewSBOM();
   if (h.startsWith("#/feeds")) return viewFeeds();

@@ -236,6 +236,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .tbl td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .tbl tbody tr:hover { background: var(--hover); }
 .tbl tbody tr.rowlink { cursor: pointer; }
+/* A scan claim with no Finding (D15's honest remainder) reads quieter than a live row. */
+.tbl tbody tr.dim td { color: var(--ink2); }
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tbl-wrap { overflow-x: auto; }
 
