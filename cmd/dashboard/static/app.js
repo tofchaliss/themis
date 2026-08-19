@@ -753,12 +753,15 @@ async function viewScan(evidenceId, releaseId, version) {
   }));
 }
 
-/* --- Compare releases (IDEA-1, the operator half): fixed / new / persisting by CVE.
+/* --- Compare releases (IDEA-1): fixed / new / persisting by CVE.
    "Fixed" is deliberately ABSENCE PROVEN BY NEW EVIDENCE — the fix build registers as a
    new Release, its evidence correlates, and the CVE's Finding simply does not open there
-   while the old release keeps its honest record. The diff is a client-side join over two
-   existing posture reads: a view, no new truth (D1/D15 discipline). The read-only
-   comparison ENDPOINT sketched in IDEA-1 stays open for its AI consumer (G-AI-3). --- */
+   while the old release keeps its honest record. The diff comes from Governance's
+   comparison read (EDR-GOVERNANCE-01 D16, GET /releases/{id}/compare/{candidate}) — the
+   server owns the join, the buckets, the ordering AND the honesty guard (422 when a side
+   has no evidence; 502 when Evidence cannot be asked), so the GUI and the AI consumers
+   read one answer. This view used to compute the join client-side; it was the working
+   spec for the endpoint and now merely renders it. --- */
 
 async function viewCompare() {
   setRail("compare");
@@ -825,30 +828,27 @@ async function viewCompare() {
     runBtn.disabled = true; runBtn.innerHTML = `<span class="spin"></span> Comparing…`;
     out.innerHTML = `<div class="loading"><span class="spin"></span></div>`;
     try {
-      const [postA, postB, evA, evB] = await Promise.all([
-        apiGET("governance", `/releases/${encodeURIComponent(aId)}/posture`).then(asArray),
-        apiGET("governance", `/releases/${encodeURIComponent(bId)}/posture`).then(asArray),
-        apiGET("evidence", `/evidence?release=${encodeURIComponent(aId)}`).then(asArray),
-        apiGET("evidence", `/evidence?release=${encodeURIComponent(bId)}`).then(asArray),
-      ]);
-
-      // The honesty guard: "fixed" is absence proven by NEW EVIDENCE. A release with no
-      // evidence has proven nothing — diffing against it would read every CVE as fixed.
-      const noEv = [[aVer, evA], [bVer, evB]].filter(([, ev]) => !ev.length).map(([v]) => v);
-      if (noEv.length) {
-        out.innerHTML = `<div class="err">No evidence is filed against ${esc(noEv.join(" and "))} —
-          absence of a Finding there proves nothing yet. Upload the release's SBOM first (and give
-          correlation a moment); only then does "no Finding" mean "fixed".</div>`;
+      // The dedicated fetch (not apiGET): the endpoint's refusals carry their reason in the
+      // Problem detail — 422 "a side has no evidence" and 502 "cannot verify evidence" are
+      // honest answers to render, not transport failures to swallow.
+      const r = await fetch(`/api/governance/releases/${encodeURIComponent(aId)}/compare/${encodeURIComponent(bId)}`,
+        { headers: { Accept: "application/json" } });
+      if (r.status === 401) { sessionGone(); return; }
+      if (!r.ok) {
+        let detail = await r.json().then((j) => [j.title, j.detail].filter(Boolean).join(" — ")).catch(() => "");
+        // The Problem names releases by id; the operator picked them by version.
+        detail = detail.replaceAll(aId, aVer).replaceAll(bId, bVer);
+        out.innerHTML = `<div class="err">${esc(detail || `governance → ${r.status}`)}</div>`;
         return;
       }
+      const cmp = await r.json();
 
+      // Buckets arrive joined + sorted (residual then effective priority, descending);
+      // fixed rows carry the baseline's state, new/persisting the candidate's.
       const bucketTable = (list, emptyMsg) => list.length ? postureTable(list) : `<div class="empty">${emptyMsg}</div>`;
-      const inB = new Map(postB.map((p) => [p.cve, p]));
-      const inA = new Set(postA.map((p) => p.cve));
-      const byPriority = (x, y) => (y.residual_priority - x.residual_priority) || (y.effective_priority - x.effective_priority);
-      const fixed = postA.filter((p) => !inB.has(p.cve)).sort(byPriority);
-      const fresh = postB.filter((p) => !inA.has(p.cve)).sort(byPriority);
-      const persisting = postB.filter((p) => inA.has(p.cve)).sort(byPriority);
+      const fixed = asArray(cmp.fixed);
+      const fresh = asArray(cmp.new);
+      const persisting = asArray(cmp.persisting);
 
       out.innerHTML = `
         <div class="grid-tiles">

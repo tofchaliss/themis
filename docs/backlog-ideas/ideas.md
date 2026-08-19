@@ -47,3 +47,14 @@ reads, a browser join, no new truth — the D1/D15 discipline, so no "Must ask" 
 touched. Consumers 2–3 (delta-aware precedent ranking, a `compare_releases` capability) still
 need the server-side read — the endpoint half of this idea stays open, and the GUI view is
 its working spec: what the browser joins by hand is exactly what the endpoint must return.
+
+**Status 2026-08-19 — the endpoint half SHIPPED (EDR-GOVERNANCE-01 D16): IDEA-1 is REALIZED.**
+Governance now serves `GET /releases/{releaseId}/compare/{candidateId}` → `{fixed, new,
+persisting}` in `PostureEntry` rows (fixed carries the baseline's state, new/persisting the
+candidate's; sorted by residual then effective priority). The honesty guard moved server-side
+and fails CLOSED: 422 names the evidence-less release, 502 when Evidence cannot be asked —
+verified over a new `governance/adapters/evidence` read seam (`THEMIS_EVIDENCE_URL`). The
+Compare tab now renders this endpoint instead of joining client-side, so the GUI and the AI
+consumers read one answer. What remains for consumers 2–3 is only their own work (G-AI-3
+ranking; a `compare_releases` capability as an overlay) — the machinery they were blocked on
+exists.
