@@ -527,6 +527,52 @@ all, since `Inferred` fails the constitutional stage before policy is consulted.
 PoC contrast: the PoC had no notion of a governed auto-accept — suppression was either manual or implicit in
 feed handling, with no recorded authority and no evidence floor.
 
+### D16 — Release comparison is a Governance read: `GET /releases/{id}/compare/{candidate}`, guarded by evidence presence, fail-closed
+
+Context: IDEA-1 (release-comparison read + fix-verification view, filed 2026-08-14) asked the question "diff
+two releases' postures — what was fixed, what is new, what persists". Its operator half shipped 2026-08-17 as
+the dashboard's Compare tab: a **client-side** join over two `GET /releases/{id}/posture` reads, with an
+honesty guard refusing to diff against a release that has no evidence. That realized consumer 1 and left
+consumers 2–3 (delta-aware precedent ranking G-AI-3, a future `compare_releases` Information capability)
+blocked on a server-side read — and left the diff's semantics owned by a browser function no other consumer
+can call.
+
+Decision:
+
+- **The comparison is a Governance read**: `GET /releases/{releaseId}/compare/{candidateId}` returns
+  `{fixed, new, persisting}`, each bucket an array of the existing `PostureEntry` shape. `fixed` rows carry
+  the **baseline's** state (a fix closes the question forward; it never rewrites the baseline's record);
+  `new` and `persisting` carry the **candidate's**. Buckets are sorted by `residual_priority` then
+  `effective_priority`, descending — the server owns the ordering, exactly as the Compare tab computed it.
+- **Why Governance and not Knowledge**: the diff is over posture rows — stance, Position, residual priority —
+  which are Governance's projections; Knowledge deliberately knows nothing about decisions
+  (EDR-KNOWLEDGE-01 D3/D10). Why not browser-only (the status quo): the AI consumers cannot call a browser,
+  and every future consumer would re-implement the join and eventually disagree — the PrecedentService rule
+  applies (same question, one answer, whoever asks). Why not a new service: one read over existing
+  projections earns no deployable.
+- **The honesty guard is part of the contract, and it fails CLOSED.** "Fixed" is absence proven by NEW
+  evidence; a release with no evidence has proven nothing, and diffing against it would read every baseline
+  CVE as fixed. The endpoint refuses with **422** (naming the evidence-less side) when either release has no
+  evidence filed, and refuses with **502** when Evidence cannot be asked. This deliberately inverts the
+  blast-radius fail-safe (C2, multiplier 1.0 on outage): that degradation under-claims and is safe; a compare
+  that degrades silently **over-claims "fixed"**, which is the one lie this feature exists to prevent.
+- **Evidence presence arrives over a read seam**, `internal/governance/adapters/evidence` — a small HTTP
+  client on `GET /evidence?release=` implementing an app `EvidencePresenceReader` port, mirroring the
+  existing Registry (blast-radius) and Knowledge (assessment) seams. Configured by `THEMIS_EVIDENCE_URL`;
+  unset means the compare endpoint honestly refuses (fail-closed, not fail-open) while every other
+  Governance read is unaffected.
+- **The Compare tab becomes a consumer of this endpoint** — the browser join it replaces was the working
+  spec, and keeping both alive would be two implementations of one answer.
+
+ADR basis: D10 (read side: projections for rollups), D14 (`residual_priority` as the triage ordering),
+EDR-KNOWLEDGE-01 D3/D10 (Knowledge owns no decision state), EDR-ESTATE-01 C2 (the read-seam pattern and why
+its fail-safe direction does not transfer here), IDEA-1 (`docs/backlog-ideas/ideas.md` — the consumer
+inventory). Standing lens: deterministic core first — this read is the machinery G-AI-3 needs, and any AI
+`compare_releases` capability is an overlay on it, never a second implementation.
+
+PoC contrast: the PoC had no cross-release diff at all; fix verification was a human eyeballing two scan
+reports.
+
 ## Traceability → issues
 
 One issue per implementable decision; each cross-references its decision + ADR. Suggested delivery: an

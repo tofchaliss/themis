@@ -251,6 +251,40 @@ paths:
                   $ref: '#/components/schemas/PostureEntry'
         '500':
           $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/compare/{candidateId}:
+    get:
+      operationId: compareReleases
+      summary: >-
+        Diff two releases' postures by CVE — fixed / new / persisting (EDR-GOVERNANCE-01 D16,
+        IDEA-1's read half). "Fixed" is absence proven by new evidence, so the read refuses
+        (422) when either release has no evidence filed, and refuses (502) when Evidence
+        cannot be asked — it never fails open.
+      parameters:
+        - name: releaseId
+          in: path
+          description: The baseline release (the one that shipped).
+          required: true
+          schema:
+            type: string
+        - name: candidateId
+          in: path
+          description: The candidate release (the build that claims to fix things).
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseComparison'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/blast-radius:
     get:
       operationId: getBlastRadius
@@ -475,6 +509,30 @@ components:
           type: string
           enum: [observed, asserted, inferred]
           description: Trust class of the sources contributing the ranges (EDR-TRUST-01 T2/T3).
+    ReleaseComparison:
+      type: object
+      description: >-
+        The cross-release posture diff (D16). fixed rows carry the BASELINE's state (a fix
+        closes the question forward, it never rewrites history); new and persisting carry the
+        CANDIDATE's. Each bucket is sorted by residual_priority then effective_priority,
+        descending.
+      properties:
+        baseline_release_id:
+          type: string
+        candidate_release_id:
+          type: string
+        fixed:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostureEntry'
+        new:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostureEntry'
+        persisting:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostureEntry'
     PostureEntry:
       type: object
       properties:

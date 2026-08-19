@@ -147,6 +147,44 @@ func (h *Handler) GetReleasePosture(w http.ResponseWriter, r *http.Request, rele
 	writeJSON(w, http.StatusOK, out)
 }
 
+// CompareReleases handles GET /releases/{releaseId}/compare/{candidateId} — the
+// cross-release posture diff (D16). The honesty guard maps to explicit statuses: 422 when a
+// side has no evidence (absence proves nothing yet), 502 when Evidence cannot be asked —
+// never a silent empty diff, which would read as "everything fixed".
+func (h *Handler) CompareReleases(w http.ResponseWriter, r *http.Request, releaseID, candidateID string) {
+	cmp, err := h.read.CompareReleases(r.Context(), releaseID, candidateID)
+	if err != nil {
+		var noEv *app.NoEvidenceError
+		switch {
+		case errors.As(err, &noEv):
+			writeProblem(w, http.StatusUnprocessableEntity, "release has no evidence", err.Error())
+		case errors.Is(err, app.ErrEvidenceUnavailable):
+			writeProblem(w, http.StatusBadGateway, "cannot verify evidence", err.Error())
+		default:
+			writeProblem(w, http.StatusInternalServerError, "cannot compare releases", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, toReleaseComparison(cmp))
+}
+
+func toReleaseComparison(c app.ReleaseComparison) gen.ReleaseComparison {
+	bucket := func(entries []app.PostureEntry) *[]gen.PostureEntry {
+		out := make([]gen.PostureEntry, 0, len(entries))
+		for _, e := range entries {
+			out = append(out, toPostureEntry(e))
+		}
+		return &out
+	}
+	return gen.ReleaseComparison{
+		BaselineReleaseId:  strptr(c.BaselineReleaseID),
+		CandidateReleaseId: strptr(c.CandidateReleaseID),
+		Fixed:              bucket(c.Fixed),
+		New:                bucket(c.New),
+		Persisting:         bucket(c.Persisting),
+	}
+}
+
 // GetBlastRadius handles GET /faultlines/{faultlineId}/blast-radius.
 func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request, faultlineID string) {
 	releases, err := h.read.FaultlineBlastRadius(r.Context(), faultlineID)

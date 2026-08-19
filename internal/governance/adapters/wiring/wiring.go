@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/governance/adapters/evidence"
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
 	"github.com/themis-project/themis/internal/governance/adapters/inbound"
 	"github.com/themis-project/themis/internal/governance/adapters/knowledge"
@@ -43,12 +44,13 @@ type Governance struct {
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
 // Intelligence advisor (the D13 disable gate — pass a real client to enable AI, a no-op or
 // nil to disable it), the Registry read-API base URL for the blast-radius multiplier (empty ⇒
-// the multiplier defaults to 1.0 — fail-safe, C2), the blast-radius saturation cap (any value
-// < 2 is normalized to domain.DefaultBlastRadiusCap), and optional Governance-owned auto-accept
-// policies (D11).
+// the multiplier defaults to 1.0 — fail-safe, C2), the Knowledge and Evidence read-API base
+// URLs (empty degrades the assessment projection / refuses the compare read respectively —
+// D16), the blast-radius saturation cap (any value < 2 is normalized to
+// domain.DefaultBlastRadiusCap), and optional Governance-owned auto-accept policies (D11).
 func Wire(
 	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
-	registryURL, knowledgeURL string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
+	registryURL, knowledgeURL, evidenceURL string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
 	policies ...domain.PolicyRule,
 ) Governance {
 	st := store.New(pool)
@@ -78,6 +80,11 @@ func Wire(
 	// blast-radius reader takes: a missing seam degrades the view, never the request.
 	if knowledgeURL != "" {
 		read = read.WithKnowledge(knowledge.NewClient(knowledgeURL, &http.Client{Timeout: 10 * time.Second}))
+	}
+	// The Evidence presence seam under the compare read (D16). Empty ⇒ CompareReleases refuses —
+	// fail-CLOSED, unlike the two seams above: a degraded compare would over-claim "fixed".
+	if evidenceURL != "" {
+		read = read.WithEvidence(evidence.NewClient(evidenceURL, &http.Client{Timeout: 10 * time.Second}))
 	}
 	relay := store.NewRelay(pool, pub, 100)
 	return Governance{

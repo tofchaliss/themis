@@ -330,7 +330,7 @@ func newPipeline(t *testing.T) *pipeline {
 	// permissive or empty one. It changes nothing in this scenario: the human governs an
 	// `affected` Position, and the rule only ever accepts a system-raised `not_affected` on
 	// Observed evidence.
-	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", 0,
+	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", "", 0,
 		govdomain.DefaultMitigatedWeight, govdomain.DefaultEPSSDriftThreshold,
 		govdomain.AutoAcceptObservedNotAffectedPolicy())
 	governanceSrv := httptest.NewServer(mount(gov.Handler))

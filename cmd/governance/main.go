@@ -51,6 +51,7 @@ type config struct {
 	intelligenceTimeout time.Duration
 	registryURL         string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
 	knowledgeURL        string // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
+	evidenceURL         string // THEMIS_EVIDENCE_URL — Evidence read-API base URL for the compare read's evidence-presence guard (EDR-GOVERNANCE-01 D16); empty ⇒ GET /releases/{id}/compare/{candidate} refuses (fail-CLOSED — a compare that cannot verify evidence would over-claim "fixed"). Every other read is unaffected.
 	blastRadiusCap      int    // THEMIS_BLAST_RADIUS_CAP — unique-customer count at which the blast multiplier saturates to 2.0× (C2). Default 10 (legacy `intelligence.blast_radius_cap` parity); values < 2 are normalized to the default.
 	autoAccept          string // THEMIS_GOVERNANCE_AUTOACCEPT — the Governance-owned auto-accept policy (EDR-GOVERNANCE-01 D15). `observed_not_affected` (default) ships one rule: open + system-raised + not_affected + evidence class `observed` (re-derivable — the version-range verdict and upstream CVE withdrawal). `off` disables auto-accept entirely, so every suppression waits for a human. Vendor VEX (Asserted) is deliberately NOT auto-accepted under either setting.
 	// THEMIS_EPSS_DRIFT_THRESHOLD — the EPSS rise that re-surfaces a SUPPRESSED Finding
@@ -82,6 +83,7 @@ func loadConfig() config {
 		intelligenceTimeout: envDurationDefault("THEMIS_INTELLIGENCE_TIMEOUT", 60*time.Second),
 		registryURL:         envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		knowledgeURL:        envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
+		evidenceURL:         envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		blastRadiusCap:      envIntDefault("THEMIS_BLAST_RADIUS_CAP", domain.DefaultBlastRadiusCap),
 		autoAccept:          envDefault("THEMIS_GOVERNANCE_AUTOACCEPT", autoAcceptObservedNotAffected),
 		mitigatedWeight:     envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
@@ -141,7 +143,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL,
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.evidenceURL,
 		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold,
 		autoAcceptPolicies(cfg.autoAccept, logger)...)
 

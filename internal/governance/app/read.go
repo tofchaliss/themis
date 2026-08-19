@@ -88,6 +88,9 @@ type ReadService struct {
 	// knowledge may be nil — the FindingAssessment projection then carries the Finding alone
 	// (single-context dev, or a Knowledge outage). Best-effort by design (T10).
 	knowledge FaultlineKnowledgeReader
+	// evidence may be nil — CompareReleases then refuses (D16, fail-CLOSED: a compare that
+	// cannot verify evidence presence would over-claim "fixed"). Every other read is unaffected.
+	evidence EvidencePresenceReader
 	// mitigatedWeight is the one configurable stance weight (D14); the rest are structural.
 	// Seeded to domain.DefaultMitigatedWeight by the constructor so a zero value can never be
 	// mistaken for "suppress everything mitigated".

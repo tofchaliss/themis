@@ -48,6 +48,7 @@ declare -a infra_pkgs=(
 	governance/adapters/intelligence
 	governance/adapters/registry
 	governance/adapters/knowledge
+	governance/adapters/evidence
 	communication/adapters/serializer
 	communication/adapters/store
 	communication/adapters/governance
