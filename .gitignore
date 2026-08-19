@@ -32,3 +32,6 @@
 # spike-era strays — never commit
 /dashboard
 /gui-example.jpeg
+
+# macOS
+.DS_Store

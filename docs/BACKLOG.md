@@ -231,6 +231,26 @@ under the 2026-08-07 re-derivation standard.
   tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
   a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
   engine when a second translator lands. Until then the translator is exercised only live.
+- [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
+  (filed 2026-08-17, live test).** LOW. Seen on the VM in the first D15 live round: a curated
+  report's `GHSA-6v7p-g79w-8964` (msgpack) row renders "no Finding — filtered at ingestion"
+  — correctly for that document, but the scan view's browser join (`viewScan`, join by literal
+  `f.cve` against posture `p.cve`) would say the same even when the release DOES carry the
+  corresponding CVE, because Knowledge normalizes aliases into the card while the client join
+  never sees them. Honest today (the chip's wording covers it), silently pessimistic tomorrow:
+  any tool that emits GHSA/DSA/RHSA ids inflates the "No Finding" tile. Fix shape: expose the
+  card's alias set on the posture row (or a Knowledge alias-resolve read) and join through it.
+- [ ] **GUI-12 — raw-scanner re-upload dedup is defeated by the translation timestamp
+  (filed 2026-08-17 from code, MEASURED live the same day).** LOW→MED: no longer speculative.
+  Evidence's byte-identical dedup was verified live against a curated re-upload — but
+  `translateTrivy` stamps every finding's `observed_at` at translation time, so the SAME raw
+  Trivy file uploaded twice yields two different curated documents and two scan rows.
+  **Reproduced in the Round-2 live test 2026-08-17:** an already-uploaded report re-uploaded
+  as raw JSON was accepted again and added a second row to the Scans list. Arguably two
+  observations at two times; practically a double-click (or a re-run CI job) files duplicate
+  scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
+  derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
+  or omit it client-side and let the server stamp ingestion time.
 - [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
   (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
   stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the
@@ -2417,6 +2437,17 @@ under the 2026-08-07 re-derivation standard.
 ---
 
 ### E. Process / optional refinements
+
+- [ ] **Record the GUI's vanilla-JS-no-framework choice as an explicit decision (LOW, docs-only).**
+  Surfaced 2026-08-17: EDR-GUI-01 fixes D1 (a view, one static binary), D7 (a `node --check` JS
+  syntax gate — meaningful only because there is no build step), and D8 (`go:embed` assets), and
+  STACK.md rejects heavy frameworks on the Go side — but nowhere is "hand-written vanilla JS, no
+  React/Vue/htmx, no npm/bundler" stated as a decision with named alternatives, per the
+  component-grounding practice. The rationale exists (single-binary deliverable, zero JS
+  supply-chain surface, no Node toolchain in a `go build`-only repo, app is stateless
+  render-functions-of-JSON); it just lives implicitly across D1/D7/D8. One paragraph in
+  EDR-GUI-01 (or a STACK.md row) closes it — worth writing before the GUI grows enough that a
+  framework question gets re-litigated from scratch.
 
 - [x] **Tracer-bullet reslice for Evidence** (optional). ✅ **CLOSED 2026-08-07 as MOOT.** The slices
   were a re-scaffolding aid for `phase3-evidence/tasks.md`; that change shipped (M6, 7/7, with a
