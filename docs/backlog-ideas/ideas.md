@@ -48,7 +48,11 @@ touched. Consumers 2–3 (delta-aware precedent ranking, a `compare_releases` ca
 need the server-side read — the endpoint half of this idea stays open, and the GUI view is
 its working spec: what the browser joins by hand is exactly what the endpoint must return.
 
-**Status 2026-08-19 — the endpoint half SHIPPED (EDR-GOVERNANCE-01 D16): IDEA-1 is REALIZED.**
+**Status 2026-08-19 — the endpoint half SHIPPED (EDR-GOVERNANCE-01 D16) and LIVE-VERIFIED the
+same day: IDEA-1 is REALIZED.** Witnessed on the VM: MRF v20.1.0.0-109 vs v20.1.0.0-118 diffed
+through the Compare tab over the Governance read (104-Finding candidate posture); the honesty
+guard earned its keep on the way there — it is what surfaced the silently-swallowed duplicate
+upload (EV-DEDUP-1) and the >1 MiB proxy truncation (GUI-14).
 Governance now serves `GET /releases/{releaseId}/compare/{candidateId}` → `{fixed, new,
 persisting}` in `PostureEntry` rows (fixed carries the baseline's state, new/persisting the
 candidate's; sorted by residual then effective priority). The honesty guard moved server-side
