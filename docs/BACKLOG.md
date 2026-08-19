@@ -251,6 +251,21 @@ under the 2026-08-07 re-derivation standard.
   scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
   derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
   or omit it client-side and let the server stamp ingestion time.
+- [x] **EV-DEDUP-1 — the same bytes filed against a DIFFERENT release were silently swallowed:
+  `created=false` read as success while the new release received no evidence.** ✅ **CLOSED
+  2026-08-19 (measured live: a fix-verification candidate stayed empty and only the compare's
+  422 revealed it).** EDR-EVIDENCE-01 D3 (one observation, one record — dedup by bytes alone)
+  holds; the defect was the SILENCE. Now: same bytes + same release ⇒ benign dedup (unchanged);
+  same bytes + different release ⇒ **409** naming the release + evidence id the content already
+  resolves to (`ContentFiledElsewhereError`, spec'd on POST /evidence, rendered verbatim by the
+  GUI toast). Integration-tested (`TestSave_Idempotent` cross-release arm).
+- [ ] **EV-DEDUP-2 — should one observation be attachable to MANY releases?** LOW, design-first.
+  The D3 refusal (EV-DEDUP-1) is honest but leaves "the same document genuinely describes two
+  releases" (a re-tagged image; two releases cut from one build) unsupported — today the second
+  release needs byte-different content. Supporting it means an association model (document
+  stored once, filings per release, events per filing) — a real D3 revision with correlation
+  and read-API implications. Needs an EDR decision before code; rarely bites in practice
+  because real SBOMs carry serialNumber/timestamp and differ per build.
 - [x] **GUI-14 — every SBOM over 1 MiB uploaded via the GUI died as a fake 502 "node
   unreachable".** ✅ **CLOSED 2026-08-19 (measured live the same day, first real-size SBOM
   through the authed dashboard).** The write-gate's D13 identity check buffered a mutation

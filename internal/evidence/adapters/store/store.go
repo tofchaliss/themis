@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
 )
@@ -77,10 +78,17 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// Dedup: a byte-identical record already exists — return its id, no event.
-		var existingID string
-		if err := tx.QueryRow(ctx, `SELECT id FROM evidence WHERE fingerprint = $1`, e.Fingerprint().String()).Scan(&existingID); err != nil {
+		// A byte-identical record already exists. Same release ⇒ benign dedup (idempotent
+		// re-run, D3): return its id, no event. DIFFERENT release ⇒ refuse LOUDLY — the
+		// caller's release received nothing, and returning the other release's id used to
+		// read as success (measured live 2026-08-19).
+		var existingID, existingRelease string
+		if err := tx.QueryRow(ctx, `SELECT id, subject_release_id FROM evidence WHERE fingerprint = $1`,
+			e.Fingerprint().String()).Scan(&existingID, &existingRelease); err != nil {
 			return SaveResult{}, fmt.Errorf("evidence: resolve dedup id: %w", err)
+		}
+		if existingRelease != e.Subject().ReleaseID {
+			return SaveResult{}, &app.ContentFiledElsewhereError{EvidenceID: existingID, ReleaseID: existingRelease}
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return SaveResult{}, err

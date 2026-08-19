@@ -57,6 +57,16 @@ ADR-BCK-0049); **any difference → new evidence, new ID**, old one untouched (i
 *Rejected:* dedup by bytes + subject — a byte-identical file is the same observation regardless of
 what it's pointed at.
 
+> **Realization note (2026-08-19, measured live):** the rejection above holds — one observation, one
+> record — but its realization had a silent edge: the same bytes filed against a **different** release
+> returned the existing id with `Created=false`, indistinguishable from success, and the new release
+> received **no evidence at all** (discovered when a fix-verification candidate stayed empty). The fix
+> keeps D3 and makes the refusal loud: same bytes + same release ⇒ benign dedup (idempotent re-run,
+> unchanged); same bytes + **different** release ⇒ **409** naming the release and evidence id the
+> content already resolves to (`ContentFiledElsewhereError`). Whether one observation should be
+> *attachable* to multiple releases (an association model rather than a refusal) is an open design
+> question tracked in the backlog — it would be a real D3 revision and is not decided here.
+
 ### D4 — Store raw frozen + one canonical inventory; standards only (Q4)
 
 Keep the **raw file frozen forever** (audit record) **and** translate it once, at the door, into **one

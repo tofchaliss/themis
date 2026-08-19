@@ -156,7 +156,9 @@ all six nodes.
   and every runtime connection would fail. Loading the SQL by hand still works and remains idempotent.
 - **Drive an SBOM:** `scripts/gf-upload-sbom.sh` registers Product→Project→Release and uploads (auto-detects
   CycloneDX/SPDX; streams large files via `curl --data-binary @-`; `-r` reuses a release). Evidence is
-  content-addressed, so re-uploading byte-identical content **dedups** — a re-run needs changed bytes.
+  content-addressed, so re-uploading byte-identical content to the same release **dedups**, and the
+  same bytes pointed at a different release refuse loudly with 409 (EDR-EVIDENCE-01 D3 note) — a
+  re-run needs changed bytes.
   A **scanner report** (`kind:"scanner-report"`, curated per-finding JSON with the component each finding
   names — see TESTING.md) uploads through the same endpoint and folds + matches at scanner (Asserted)
   trust (KN-SCAN-1). Discovery otherwise runs at upload time only; the **re-discovery sweep**

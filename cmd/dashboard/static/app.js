@@ -999,7 +999,9 @@ async function viewSBOM() {
         release (and, if needed, its product/project) is registered on upload, the same
         Product→Project→Release chain scripts/gf-upload-sbom.sh drives. Format is detected from the file;
         raw Trivy JSON is translated to the curated shape in the browser (the server only ever sees the
-        curated document — D16); byte-identical re-uploads dedup to the same evidence id.</p>
+        curated document — D16); byte-identical re-uploads to the same release dedup to the same
+        evidence id, and the same bytes pointed at a different release are refused — a new build
+        needs its own document.</p>
       <div class="form-grid">
         <label>Product
           <select id="sb-product"><option value="">— pick a product —</option>
@@ -1194,7 +1196,11 @@ async function viewSBOM() {
       if (r.status === 201) {
         toast("Evidence registered — correlation runs in the background; check the release posture shortly.");
       } else if (r.status === 200 && j.created === false) {
-        toast("Already registered — byte-identical content dedups to the same evidence id.");
+        toast("Already registered against this release — byte-identical content dedups to the same evidence id.");
+      } else if (r.status === 409) {
+        // The content is byte-identical to a document filed against ANOTHER release —
+        // this release received nothing (a new build needs its own document).
+        toast(`Refused: ${j.detail || j.title || "content already filed against another release"}`);
       } else if (r.status === 422 || r.status === 400) {
         toast(`Rejected: ${j.detail || j.title || r.status} — check the release id and document.`);
       } else if (r.status === 502) {

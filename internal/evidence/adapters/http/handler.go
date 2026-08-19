@@ -108,6 +108,7 @@ func (h *Handler) ListEvidence(w http.ResponseWriter, r *http.Request, params ge
 
 func writeRegisterError(w http.ResponseWriter, err error) {
 	var ufe *parser.UnsupportedFormatError
+	var cfe *app.ContentFiledElsewhereError
 	switch {
 	case errors.As(err, &ufe):
 		supported := make([]string, len(ufe.Supported))
@@ -119,6 +120,9 @@ func writeRegisterError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusUnprocessableEntity, "unknown subject release", err.Error(), nil)
 	case errors.Is(err, app.ErrRejected):
 		writeProblem(w, http.StatusUnprocessableEntity, "artifact rejected by trust gate", err.Error(), nil)
+	case errors.As(err, &cfe):
+		// 409, never a silent created=false: the caller's release received nothing (D3 note).
+		writeProblem(w, http.StatusConflict, "content already filed against another release", err.Error(), nil)
 	default:
 		writeProblem(w, http.StatusBadRequest, "cannot register evidence", err.Error(), nil)
 	}

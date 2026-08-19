@@ -26,13 +26,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/RegisterEvidenceResponse'
         '200':
-          description: Already registered (idempotent — byte-identical upload).
+          description: Already registered (idempotent — byte-identical upload to the SAME release).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RegisterEvidenceResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '409':
+          description: >-
+            Byte-identical content is already filed against a DIFFERENT release — this
+            release received nothing (D3 note; a new build needs its own document).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
     get:

@@ -41,6 +41,7 @@ func (s stubSubject) ReleaseExists(context.Context, string) (bool, error) { retu
 type memRepo struct {
 	byID    map[domain.EvidenceID]domain.Evidence
 	created bool
+	saveErr error
 	getErr  error
 	listErr error
 	rawKind string
@@ -58,6 +59,9 @@ func (m *memRepo) GetRawDocument(_ context.Context, _ domain.EvidenceID) (string
 }
 
 func (m *memRepo) Save(_ context.Context, e domain.Evidence, _ []byte, _ domain.EvidenceRegistered) (domain.EvidenceID, bool, error) {
+	if m.saveErr != nil {
+		return "", false, m.saveErr
+	}
 	m.byID[e.ID()] = e
 	return e.ID(), m.created, nil
 }
@@ -174,6 +178,15 @@ func TestRegister_Errors(t *testing.T) {
 		rec := do(t, h, http.MethodPost, "/evidence", `{"kind":"sbom","format":"trivy","subject_release_id":"rel-1","document":"{}"}`)
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "supported_formats") {
 			t.Errorf("status = %d body = %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("content filed against another release is 409, naming it", func(t *testing.T) {
+		r := repo()
+		r.saveErr = &app.ContentFiledElsewhereError{EvidenceID: "ev-9", ReleaseID: "rel-other"}
+		h := server(stubTrust{out: acceptTrust()}, stubParser{inv: inv}, stubSubject{ok: true}, r)
+		rec := do(t, h, http.MethodPost, "/evidence", `{"kind":"sbom","subject_release_id":"rel-1","document":"{}"}`)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "rel-other") {
+			t.Errorf("status = %d body = %s, want 409 naming rel-other", rec.Code, rec.Body)
 		}
 	})
 	t.Run("build error (zero fingerprint)", func(t *testing.T) {

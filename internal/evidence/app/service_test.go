@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,4 +221,14 @@ func mustEvidence(t *testing.T) domain.Evidence {
 		t.Fatal(err)
 	}
 	return e
+}
+
+// The refusal must NAME both sides — the operator's next action (find that release, or
+// produce the new build's own document) depends on reading them (D3 note, 2026-08-19).
+func TestContentFiledElsewhereError_NamesBothSides(t *testing.T) {
+	err := &app.ContentFiledElsewhereError{EvidenceID: "ev-9", ReleaseID: "rel-old"}
+	msg := err.Error()
+	if !strings.Contains(msg, "rel-old") || !strings.Contains(msg, "ev-9") {
+		t.Errorf("message must name the release and the evidence id: %q", msg)
+	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
+	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -155,6 +156,22 @@ func TestSave_Idempotent(t *testing.T) {
 	}
 	if got := count(t, pool, "SELECT count(*) FROM evidence_outbox"); got != 1 {
 		t.Errorf("outbox rows = %d, want 1 (one event only)", got)
+	}
+
+	// Same bytes, DIFFERENT release → a loud refusal naming where the content lives,
+	// never a silent created=false that leaves rel-2 with no evidence (D3 note,
+	// measured live 2026-08-19).
+	e3, ev3 := sampleEvidence(t, "ev-3", "rel-2", []byte("raw-A"))
+	_, err = s.Save(ctx, e3, []byte("raw-A"), ev3)
+	var cfe *app.ContentFiledElsewhereError
+	if !errors.As(err, &cfe) {
+		t.Fatalf("cross-release duplicate: err = %v, want ContentFiledElsewhereError", err)
+	}
+	if cfe.ReleaseID != "rel-1" || cfe.EvidenceID != string(r1.ID) {
+		t.Errorf("refusal names release %q evidence %q, want rel-1 / %s", cfe.ReleaseID, cfe.EvidenceID, r1.ID)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM evidence"); got != 1 {
+		t.Errorf("evidence rows after refusal = %d, want 1 (nothing stored)", got)
 	}
 }
 

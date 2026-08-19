@@ -14,6 +14,21 @@ var ErrUnknownSubject = errors.New("evidence: unknown subject release")
 // ErrRejected is returned when the trust gate rejects the artifact.
 var ErrRejected = errors.New("evidence: artifact rejected by trust gate")
 
+// ContentFiledElsewhereError refuses a filing whose byte-identical content is already
+// filed against a DIFFERENT release. D3 holds — one observation, one record — but the
+// refusal must be LOUD: silently returning the existing id left the new release with no
+// evidence and nobody told (measured live 2026-08-19, the fix-verification candidate).
+// Same-release re-uploads still dedup benignly.
+type ContentFiledElsewhereError struct {
+	EvidenceID string // the existing record the content resolves to
+	ReleaseID  string // the release that record is filed against
+}
+
+func (e *ContentFiledElsewhereError) Error() string {
+	return "evidence: byte-identical content is already filed against release " + e.ReleaseID +
+		" (evidence " + e.EvidenceID + ") — this release received nothing; a new build needs its own document"
+}
+
 // RegisterCommand is the input to Register.
 type RegisterCommand struct {
 	Raw              []byte
