@@ -251,6 +251,18 @@ under the 2026-08-07 re-derivation standard.
   scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
   derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
   or omit it client-side and let the server stamp ingestion time.
+- [x] **GUI-13 — the SBOM manager could not file a NEW build: every selector was a dropdown of
+  what already exists.** ✅ **CLOSED 2026-08-19 (filed same day, live VM finding).** The upload
+  form offered only registered Product/Project/Release — but a fresh SBOM is BY DEFINITION a
+  build that is not registered yet (the fix-verification loop's candidate), so the GUI could
+  receive a scan against an old build and never a new build at all; first registration lived
+  only in `scripts/gf-upload-sbom.sh` (which itself always creates a fresh chain unless `-r`,
+  and predates auth). Fix: each selector gains “＋ New…” revealing a name/version field; upload
+  registers the missing Product→Project→Release chain first (existing Registry write endpoints —
+  no new API surface; the D11 gate already classifies them as writes), then files the document
+  against the new release. Reuse-not-duplicate guard: typing a name that already exists in the
+  loaded list is refused with "pick it from the list". After registration the entries solidify
+  into the dropdowns, selected, so the follow-up scan upload needs no re-typing.
 - [x] **KN-SCAN-2 — detection origin is invisible past the card.** ✅ **CLOSED 2026-08-14**
   (filed same day). `DetectionOrigin` now rides the whole path: both `RecordMatch` producers
   stamp it (`discovery` for correlation + the re-discovery sweep; `scanner/<name>` from the

@@ -343,7 +343,7 @@ async function viewEstate() {
     const col = $("#col-products");
     col.innerHTML = products.length ? products.map((p) =>
       `<div class="list-row" data-id="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}<span class="mono">${esc(p.id.slice(0, 8))}</span></div>`
-    ).join("") : `<div class="empty"><b>No products yet</b>Register one: POST /api/v1/products on the Registry, or run scripts/gf-upload-sbom.sh.</div>`;
+    ).join("") : `<div class="empty"><b>No products yet</b>Upload the first SBOM via the <a href="#/sbom">SBOM manager</a> (“＋ New product…” registers the chain), or run scripts/gf-upload-sbom.sh.</div>`;
     col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
       col.querySelectorAll(".list-row").forEach((r) => r.classList.remove("active"));
       row.classList.add("active");
@@ -995,17 +995,23 @@ async function viewSBOM() {
     <div class="card">
       <h2 class="card-title">Upload evidence</h2>
       <p class="card-sub">An SBOM (CycloneDX / SPDX), a VEX, or a scanner report, filed against a release.
-        Format is detected from the file; raw Trivy JSON is translated to the curated shape in the browser
-        (the server only ever sees the curated document — D16); byte-identical re-uploads dedup to the same
-        evidence id.</p>
+        A build that is not registered yet is the normal case for a fresh SBOM — pick “＋ New…” and the
+        release (and, if needed, its product/project) is registered on upload, the same
+        Product→Project→Release chain scripts/gf-upload-sbom.sh drives. Format is detected from the file;
+        raw Trivy JSON is translated to the curated shape in the browser (the server only ever sees the
+        curated document — D16); byte-identical re-uploads dedup to the same evidence id.</p>
       <div class="form-grid">
         <label>Product
           <select id="sb-product"><option value="">— pick a product —</option>
-            ${products.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label>
+            ${products.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}
+            <option value="__new__">＋ New product…</option></select>
+          <input type="text" id="sb-product-new" placeholder="new product name" style="display:none"></label>
         <label>Project
-          <select id="sb-project" disabled><option value="">—</option></select></label>
+          <select id="sb-project" disabled><option value="">—</option></select>
+          <input type="text" id="sb-project-new" placeholder="new project name" style="display:none"></label>
         <label>Release
-          <select id="sb-release" disabled><option value="">—</option></select></label>
+          <select id="sb-release" disabled><option value="">—</option></select>
+          <input type="text" id="sb-release-new" placeholder="version, e.g. 20.1.0.1-110" style="display:none"></label>
         <label>Kind
           <select id="sb-kind"><option value="sbom">SBOM</option><option value="vex">VEX</option><option value="scanner-report">Scanner report</option></select></label>
         <label>Document
@@ -1020,31 +1026,64 @@ async function viewSBOM() {
     </div>`;
 
   const sel = { product: $("#sb-product"), project: $("#sb-project"), release: $("#sb-release") };
+  const inp = { product: $("#sb-product-new"), project: $("#sb-project-new"), release: $("#sb-release-new") };
   const fileInput = $("#sb-file"), detect = $("#sb-detect"), uploadBtn = $("#sb-upload");
   let fileText = null, fileFormat = null, fileScanner = null;
+  let loadedProjects = [], loadedReleases = []; // for reuse-not-duplicate guards on "＋ New"
 
-  const gate = () => { uploadBtn.disabled = !(sel.release.value && fileText); };
+  const NEW = "__new__";
+  const showNew = (input, show) => { input.style.display = show ? "" : "none"; if (!show) input.value = ""; };
+  const onlyNew = (select, label) => { select.innerHTML = `<option value="${NEW}" selected>＋ New ${label}…</option>`; select.disabled = false; };
+
+  // Upload needs a release: an existing one, or a fully-named new chain (a "＋ New" pick
+  // upstream forces "＋ New" downstream — a product that does not exist has no projects).
+  const gate = () => {
+    const relOK = sel.release.value && (sel.release.value !== NEW || (
+      inp.release.value.trim() &&
+      (sel.project.value !== NEW || inp.project.value.trim()) &&
+      (sel.product.value !== NEW || inp.product.value.trim())));
+    uploadBtn.disabled = !(relOK && fileText);
+  };
+  for (const input of Object.values(inp)) input.addEventListener("input", gate);
 
   sel.product.addEventListener("change", async () => {
+    const isNew = sel.product.value === NEW;
+    showNew(inp.product, isNew);
+    loadedProjects = []; loadedReleases = [];
+    if (isNew) { onlyNew(sel.project, "project"); onlyNew(sel.release, "release"); showNew(inp.project, true); showNew(inp.release, true); refreshEvidence(""); gate(); return; }
     sel.project.innerHTML = `<option value="">—</option>`; sel.project.disabled = true;
-    sel.release.innerHTML = `<option value="">—</option>`; sel.release.disabled = true; gate();
+    sel.release.innerHTML = `<option value="">—</option>`; sel.release.disabled = true;
+    showNew(inp.project, false); showNew(inp.release, false); refreshEvidence(""); gate();
     if (!sel.product.value) return;
-    const projects = asArray(await apiGET("registry", `/products/${encodeURIComponent(sel.product.value)}/projects`));
+    loadedProjects = asArray(await apiGET("registry", `/products/${encodeURIComponent(sel.product.value)}/projects`));
     sel.project.innerHTML = `<option value="">— pick a project —</option>` +
-      projects.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("");
+      loadedProjects.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("") +
+      `<option value="${NEW}">＋ New project…</option>`;
     sel.project.disabled = false;
   });
 
   sel.project.addEventListener("change", async () => {
-    sel.release.innerHTML = `<option value="">—</option>`; sel.release.disabled = true; gate();
+    const isNew = sel.project.value === NEW;
+    showNew(inp.project, isNew);
+    loadedReleases = [];
+    if (isNew) { onlyNew(sel.release, "release"); showNew(inp.release, true); refreshEvidence(""); gate(); return; }
+    sel.release.innerHTML = `<option value="">—</option>`; sel.release.disabled = true;
+    showNew(inp.release, false); refreshEvidence(""); gate();
     if (!sel.project.value) return;
-    const releases = asArray(await apiGET("registry", `/projects/${encodeURIComponent(sel.project.value)}/releases`));
+    loadedReleases = asArray(await apiGET("registry", `/projects/${encodeURIComponent(sel.project.value)}/releases`));
     sel.release.innerHTML = `<option value="">— pick a release —</option>` +
-      releases.map((r) => `<option value="${esc(r.id)}">v${esc(r.version)}</option>`).join("");
+      loadedReleases.map((r) => `<option value="${esc(r.id)}">v${esc(r.version)}</option>`).join("") +
+      `<option value="${NEW}">＋ New release…</option>`;
     sel.release.disabled = false;
   });
 
-  sel.release.addEventListener("change", () => { gate(); refreshEvidence(sel.release.value); });
+  sel.release.addEventListener("change", () => {
+    const isNew = sel.release.value === NEW;
+    showNew(inp.release, isNew);
+    gate();
+    if (isNew) { $("#sb-list").innerHTML = `<div class="empty"><b>A new release starts empty</b>Upload its first document above — it is registered on upload.</div>`; return; }
+    refreshEvidence(sel.release.value);
+  });
 
   fileInput.addEventListener("change", async () => {
     fileText = null; fileFormat = null; fileScanner = null;
@@ -1086,10 +1125,64 @@ async function viewSBOM() {
     gate();
   });
 
+  // regCreate registers one Registry entity and returns its id; a refusal surfaces verbatim.
+  async function regCreate(path, body, what) {
+    const r = await apiPOST("registry", path, body);
+    if (r.status !== 201 && r.status !== 200) throw new Error(`cannot register ${what}: ${await problemDetail(r)}`);
+    const j = await r.json();
+    if (!j.id) throw new Error(`cannot register ${what}: the Registry returned no id`);
+    return j.id;
+  }
+
+  // solidify turns a just-registered entity into a normal dropdown entry, selected — so a
+  // follow-up upload (a scan against the build just filed) needs no re-typing.
+  function solidify(select, input, id, label) {
+    const opt = document.createElement("option");
+    opt.value = id; opt.textContent = label;
+    select.insertBefore(opt, select.querySelector(`option[value="${NEW}"]`));
+    select.value = id;
+    showNew(input, false);
+  }
+
+  // resolveRelease returns the release id to file against, registering the "＋ New" chain
+  // first (product → project → release — the same order scripts/gf-upload-sbom.sh drives).
+  // Typing a name that already exists in the dropdown is refused: reuse is a pick, never a
+  // duplicate registration.
+  async function resolveRelease() {
+    if (sel.release.value !== NEW) return sel.release.value;
+    let productId = sel.product.value;
+    if (productId === NEW) {
+      const name = inp.product.value.trim();
+      const dup = products.find((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (dup) throw new Error(`A product named “${name}” already exists — pick it from the list instead.`);
+      productId = await regCreate("/products", { name }, "product");
+      products.push({ id: productId, name });
+      solidify(sel.product, inp.product, productId, name);
+    }
+    let projectId = sel.project.value;
+    if (projectId === NEW) {
+      const name = inp.project.value.trim();
+      const dup = loadedProjects.find((j) => j.name.toLowerCase() === name.toLowerCase());
+      if (dup) throw new Error(`A project named “${name}” already exists here — pick it from the list instead.`);
+      projectId = await regCreate("/projects", { product_id: productId, name }, "project");
+      loadedProjects.push({ id: projectId, name });
+      solidify(sel.project, inp.project, projectId, name);
+    }
+    const version = inp.release.value.trim();
+    const dup = loadedReleases.find((r) => r.version === version);
+    if (dup) throw new Error(`Release v${version} already exists — pick it from the list instead.`);
+    const releaseId = await regCreate("/releases", { project_id: projectId, version }, "release");
+    loadedReleases.push({ id: releaseId, version });
+    solidify(sel.release, inp.release, releaseId, `v${version}`);
+    toast(`Registered v${version} — new release id ${releaseId.slice(0, 8)}…`);
+    return releaseId;
+  }
+
   uploadBtn.addEventListener("click", async () => {
     uploadBtn.disabled = true; uploadBtn.innerHTML = `<span class="spin"></span> Uploading…`;
     try {
-      const body = { kind: $("#sb-kind").value, subject_release_id: sel.release.value, document: fileText };
+      const releaseId = await resolveRelease();
+      const body = { kind: $("#sb-kind").value, subject_release_id: releaseId, document: fileText };
       // format names an SBOM standard; Evidence uses it only for the sbom kind, so a VEX or
       // scanner-report upload never sends one.
       if (fileFormat && body.kind === "sbom") body.format = fileFormat;
