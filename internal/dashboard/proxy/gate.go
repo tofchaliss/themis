@@ -28,6 +28,17 @@ type Gate struct {
 // making the proxy buffer gigabytes.
 const maxIdentityBody = 1 << 20
 
+// documentPosts are mutation routes whose payload is a DOCUMENT, not a decision: they
+// carry no identity claims for D13 to check, and their bodies routinely exceed
+// maxIdentityBody (a real SBOM is megabytes). They skip the identity buffer and stream
+// through intact. Measured 2026-08-19 (GUI-14): the buffer used to hand the proxy a
+// TRUNCATED body under a full-length Content-Length, so every SBOM over 1 MiB died
+// mid-forward as a fake 502 "node unreachable". Membership requires a route that is a
+// pure document intake, never one whose body can name an actor.
+var documentPosts = map[string]bool{
+	"/api/evidence/evidence": true,
+}
+
 // statelessPosts are POST routes that RECORD NOTHING, so a read-scoped operator may use
 // them (D11): the two Information-capability invokes (T7 — they propose no stance and
 // nothing reaches Governance) and the publication preview (a non-recording render —
@@ -70,7 +81,7 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
 			return
 		}
-		if !g.identityMatches(w, r, p) {
+		if !documentPosts[r.URL.Path] && !g.identityMatches(w, r, p) {
 			return // identityMatches wrote the problem
 		}
 		if g.Reverify != nil {
@@ -93,9 +104,18 @@ func (g Gate) identityMatches(w http.ResponseWriter, r *http.Request, p auth.Pri
 	if r.Body == nil {
 		return true
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, maxIdentityBody))
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxIdentityBody+1))
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, "unreadable body", err.Error())
+		return false
+	}
+	// Over the cap ⇒ refuse HONESTLY (413), never forward: handing the proxy a truncated
+	// body under a full-length Content-Length kills the outbound write and reads as a fake
+	// 502 (GUI-14) — and skipping the check instead would let a padded body smuggle an
+	// identity claim past D13. Decision bodies are tiny; a document belongs in documentPosts.
+	if len(raw) > maxIdentityBody {
+		writeProblem(w, http.StatusRequestEntityTooLarge, "body too large for a decision",
+			"mutation bodies are capped at 1 MiB; document uploads use the evidence route")
 		return false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw)) // the forwarded request needs the body back

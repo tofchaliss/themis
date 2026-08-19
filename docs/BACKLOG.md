@@ -251,6 +251,19 @@ under the 2026-08-07 re-derivation standard.
   scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
   derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
   or omit it client-side and let the server stamp ingestion time.
+- [x] **GUI-14 — every SBOM over 1 MiB uploaded via the GUI died as a fake 502 "node
+  unreachable".** ✅ **CLOSED 2026-08-19 (measured live the same day, first real-size SBOM
+  through the authed dashboard).** The write-gate's D13 identity check buffered a mutation
+  body via `LimitReader(1 MiB)` and handed the proxy ONLY the truncated bytes while
+  Content-Length still promised the full file — the outbound write died mid-stream and the
+  proxy's ErrorHandler reported the healthy Evidence node as unreachable. Invisible until now
+  because every prior GUI write (decisions, scanner reports) fit under the cap. Fix, both
+  halves honest: `documentPosts` routes (the evidence upload — a pure document intake, no
+  identity claims to check) skip the identity buffer and stream through INTACT at any size;
+  every other mutation over the cap refuses with a real 413 ("body too large for a
+  decision") instead of forwarding truncated — which also closes the padding bypass that
+  merely skipping the check would have opened in D13. Scope/session/reverify still enforced
+  on document routes. Test: `TestGate_LargeBodies`.
 - [x] **GUI-13 — the SBOM manager could not file a NEW build: every selector was a dropdown of
   what already exists.** ✅ **CLOSED 2026-08-19 (filed same day, live VM finding).** The upload
   form offered only registered Product/Project/Release — but a fresh SBOM is BY DEFINITION a

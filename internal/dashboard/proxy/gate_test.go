@@ -166,3 +166,38 @@ func TestGate_NilReverify(t *testing.T) {
 		t.Fatalf("nil reverify write = %d, want 200", rec.Code)
 	}
 }
+
+// GUI-14, measured live 2026-08-19: the identity buffer used to hand the proxy a
+// TRUNCATED body under a full-length Content-Length, so every SBOM over 1 MiB died
+// mid-forward as a fake 502. Document routes stream through intact; oversized decision
+// bodies refuse honestly.
+func TestGate_LargeBodies(t *testing.T) {
+	big := strings.Repeat("x", (1<<20)+64) // just over the identity cap
+
+	// A document route forwards the FULL body — byte-for-byte, however large.
+	h, forwarded := gateFor(adminOp, true, true)
+	rec := do(h, http.MethodPost, "/api/evidence/evidence", `{"kind":"sbom","document":"`+big+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("document upload = %d, want 200", rec.Code)
+	}
+	if wantLen := len(`{"kind":"sbom","document":"`+big+`"}`) + len("hit:"); len(*forwarded) != wantLen {
+		t.Errorf("forwarded body truncated: got %d bytes, want %d", len(*forwarded), wantLen)
+	}
+
+	// A decision route refuses an oversized body with 413 — never a truncated forward,
+	// and never a skipped identity check a padded body could hide a claim behind.
+	h, forwarded = gateFor(adminOp, true, true)
+	rec = do(h, http.MethodPost, "/api/governance/findings/f-1/proposals", `{"actor_id":"mallory","pad":"`+big+`"}`)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized decision = %d, want 413", rec.Code)
+	}
+	if *forwarded != "" {
+		t.Error("an oversized decision body must never reach the backend")
+	}
+
+	// A document route is still a WRITE: scope and session are enforced before it streams.
+	h, _ = gateFor(readOp, true, true)
+	if rec = do(h, http.MethodPost, "/api/evidence/evidence", `{"kind":"sbom"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("read-only operator upload = %d, want 403", rec.Code)
+	}
+}
