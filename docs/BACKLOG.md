@@ -61,6 +61,21 @@ swap · subject-aware scheduler · explicit integration DTOs — the contract is
 evolves). Three counts have circulated — 13 (clusters), 18 (`PHASE3-STATUS.md`, before CORR-1 closed) and
 21 (raw `- [ ]`); they differ only by those two conventions, not by disagreement.
 
+**Tiered enhancement roadmap (2026-08-21, PROPOSED — EDR-ENHANCE-T1…T5).** The open items above,
+arranged as an execution sequence rather than a filing system. The tiers do not replace the
+R-clusters — they order them: each tier maps to existing IDs (no duplication), and only two items
+are NEW with this roadmap (GUI-15, AI-CMP-1, filed below). One decision record per tier under
+`docs/engineering/decisions/EDR-ENHANCE-T<n>.md`, all **awaiting confirmation before any
+implementation**:
+
+| Tier | Theme | Items (existing IDs) | Order rule |
+| --- | --- | --- | --- |
+| **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
+| **T2** | Correctness & robustness | **R7** (GOV-15) · **R6** (F5 + DB-rotation) · GUI-11 · EV-DEDUP-2 (EDR only) · R4/R5 stay guarded/deferred | **first — outranks all capability tiers** |
+| **T3** | Enterprise & platform | **R2** (structured AI-proposal fields) · **R3** (SMTP/webhook delivery) · F2 · GUI-15 · GUI-3 · GUI-5 · (Kafka swap stays parked) | after T2, R-table order within |
+| **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
+| **T5** | AI capabilities (R1) | AI-CMP-1 · G-AI-3 · G-AI-1 · G-AI-2(c) · G-AI-4 · G-AI-5 · Δ4 (eval harness, then autonomy) | entry via AI-CMP-1 → G-AI-3 |
+
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
 R6 (silent failure) — both found by running the system rather than by reading it, which is the argument for
@@ -225,6 +240,13 @@ under the 2026-08-07 re-derivation standard.
   `detectTranslator` + `translateTrivy` (a pure-function port of the TESTING.md jq recipe,
   including the ecosystem vocabulary map), Kind auto-set to scanner-report, skip count in the
   file note, curated document is what uploads. Phase D stays deferred as recorded.
+- [ ] **GUI-15 — second in-browser scanner translator: Grype first, Xray / Black Duck by demand
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. EDR-GUI-01 D16
+  fixed the shape — one pure translate function + a detector per tool, the curated `{findings:[…]}`
+  document staying the only wire contract — and Trivy proved it live. Grype is the closest dialect
+  and the most requested; each further tool registers only on demand. **Dep:** GUI-10's test
+  harness lands first, so the second translator is born tested (the first one's live-only testing
+  is exactly the gap GUI-10 records). **Scope:** SMALL per tool.
 - [ ] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** LOW, quality.
   D16 says each translator is "a pure function with its own tests", but the repo has no JS
   test runner and `cmd/dashboard/static/app.js` is untested by design (the spike-ported GUI is
@@ -928,6 +950,16 @@ under the 2026-08-07 re-derivation standard.
   this signal to tell "model can't reason" from "grounding had nothing to reason about".
   **Dep:** none. **Scope:** SMALL-MEDIUM. **Priority: LOW-MED.**
 
+- [ ] **AI-CMP-1 — `compare_releases@v1`: an Information capability narrating the comparison read
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T5).** MED as the T5 entry point. IDEA-1's
+  consumer 3, unblocked by EDR-GOVERNANCE-01 D16: the deterministic
+  `GET /releases/{id}/compare/{candidate}` now exists, so the capability is an overlay — the model
+  is handed the `{fixed,new,persisting}` buckets verbatim and narrates what the fix achieved,
+  missed, and what to do next, citing only rows it was given (the Grounding Verification gate
+  applies unchanged). Information class (T7): ephemeral, proposes no stance, nothing reaches
+  Governance — the worst outcome is a human disagreeing with prose. 204 semantics per
+  AI-204-1/AI-204-2. **Dep:** none (D16 shipped in v0.4.2); composes with [[G-AI-3]], which reuses
+  the same delta machinery for precedent ranking. **Scope:** MEDIUM.
 - [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
   other releases, handed to the AI **clearly labeled** (which release, component version, decision + rationale)
