@@ -5,6 +5,37 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-08-21
+### Added
+- Governance (EDR-GOVERNANCE-01 D16, IDEA-1): the **release-comparison read** —
+  `GET /releases/{releaseId}/compare/{candidateId}` returns `{fixed, new, persisting}` buckets of
+  `PostureEntry` rows (fixed carries the baseline's state, new/persisting the candidate's; sorted by
+  residual then effective priority). The honesty guard is part of the contract and fails CLOSED:
+  422 names the evidence-less release, 502 when Evidence cannot be asked — over a new
+  `governance/adapters/evidence` presence seam (`THEMIS_EVIDENCE_URL`, default `:8081`).
+- GUI multi-scanner (EDR-GUI-01 D14–D16): `provenance_source` labels evidence rows (Phase A); the
+  per-scan **Scans** view — stored document ⋈ posture, joined in the browser (Phase B); raw Trivy
+  JSON translated in the browser, the curated shape staying the only wire contract (Phase C).
+- GUI: the **Compare** tab — fixed / new / persisting between two releases by CVE, rendered from the
+  Governance comparison read (the client-side join it specified is retired). Live-verified
+  2026-08-19 (MRF v20.1.0.0-109 vs -118).
+- GUI (GUI-13): the SBOM manager can file a **new build** — "＋ New…" on each selector registers the
+  Product→Project→Release chain on upload; typing an existing name is refused (reuse is a pick,
+  never a duplicate registration).
+### Fixed
+- Dashboard write-gate (GUI-14): SBOMs over 1 MiB no longer die as a fake 502 "node unreachable" —
+  document routes stream past the D13 identity buffer intact; any other over-cap mutation gets an
+  honest 413 (which also closes the padding bypass a skipped check would have opened).
+- Evidence (EV-DEDUP-1): byte-identical content aimed at a **different** release now refuses loudly
+  with 409 naming the release and evidence id it already resolves to — never a silent
+  `created=false` that leaves the new release empty. Same-release re-uploads still dedup benignly
+  (D3 upheld; realization note in EDR-EVIDENCE-01).
+### Docs
+- EDR-GOVERNANCE-01 **D16** (comparison read, fail-closed guard, why Governance); IDEA-1 marked
+  realized + live-verified; EV-DEDUP-2 (one observation ↔ many releases) filed as an open design
+  question; GUI-11/GUI-12 filed from the 2026-08-17 live test; developer onboarding & architecture
+  guide added (`docs/ONBOARDING-GUIDE.{html,pdf}`).
+
 ## [0.4.1] - 2026-08-14
 ### Added
 - GUI (GUI-7a): scanner-report evidence kind in the dashboard's SBOM-manager upload — curated
