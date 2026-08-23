@@ -37,7 +37,7 @@ code reading.
 
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
-| **R7** | **The blast multiplier destroys the order it exists to create** | **P2, measured** | A per-release CONSTANT multiplied over a set cannot reorder that set — but `EffectivePriority` **clamps at 100**, and a clamp is not order-preserving. At a 12-customer estate every Finding with base ≥ 50 pins to 100 and the worst item on the release leaves the top three. Inside a release the multiplier is strictly negative: no ordering gained, all ordering lost. | GOV-15 |
+| **R7** | ~~The blast multiplier destroys the order it exists to create~~ ✅ **CLOSED 2026-08-23** | ~~P2, measured~~ | Resolved by **EDR-GOVERNANCE-01 D17**: the output clamp is removed — `effective_priority`/`residual_priority` are unclamped ranking numbers (0–200; the bound lives on the multiplier's saturation). A constant multiplier now provably preserves within-release order and amplifies across releases as C2 intended. | GOV-15 ✅ |
 | **R6** | **A node that fails announces nothing** | **P2, measured** | Both halves of one VM incident. A crash-looping node restarted **81 times** unnoticed because nothing surfaces "never became ready"; and a rotated DB password stays invisible because `pgx` keeps serving pre-rotation connections — every node reports healthy until they all fail together at the next restart. | F5 (`/healthz` + `/readyz` + a startup-failure signal) · DB-password rotation reconciliation |
 | **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ4 · G-AI-1 · G-AI-2(c) · G-AI-3 · G-AI-4 (remaining scopes) · G-AI-5 · PLAN-5 · Δ3a component-embedding · AI-TEL-1 · AI-204-2 — *(closed 2026-08-13: G-AI-2b escalation, G-AI-4 degrade-not-fail, GUI-1 explain)* |
 | **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
@@ -2264,8 +2264,15 @@ under the 2026-08-07 re-derivation standard.
   placeholder that caused three `plan_remediation` refusals (PLAN-6). It was fixed in one template
   and not the other. Now a real CVE from the Finding, plus an explicit prohibition.
 
-- [ ] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
-  improve.** **MED.** Measured on the VM 2026-08-08 with a 12-customer estate: multiplier 2.0x,
+- [x] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
+  improve.** ✅ **CLOSED 2026-08-23 (EDR-GOVERNANCE-01 D17, the first T2 delivery).** The decision
+  went to option (a)+: **remove the output clamp** — `effective_priority`/`residual_priority` are
+  unclamped ranking numbers, range 0–200 (the bound moved to the input: `BlastMultiplier` already
+  saturates at 2.0×). Option (c) (blast as secondary key) was REJECTED with reasons in D17: it
+  would silently delete C2's cross-release amplification intent. Regression test
+  `TestEffectivePriority_SaturatedEstatePreservesOrder`; the GUI's priority bar now spans the full
+  0–200 track. Original filing kept below for the record.
+  **MED.** Measured on the VM 2026-08-08 with a 12-customer estate: multiplier 2.0x,
   and **every one of the release's 120 Findings reported `effective_priority` 100**. The worst item
   on the release (`CVE-2019-10086`, base 76) dropped out of the top three, because with every value
   equal the order among them is arbitrary.

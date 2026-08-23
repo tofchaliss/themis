@@ -41,8 +41,8 @@ type PostureEntry struct {
 	// Multiplier is the release's blast-radius amplification (1.0–2.0×) from the estate graph
 	// (C2); 1.0 when the estate is empty or unreachable (fail-safe).
 	Multiplier float64
-	// EffectivePriority is BaseScore × Multiplier, clamped to 100 — how bad this is here,
-	// independent of what was decided about it (D14).
+	// EffectivePriority is BaseScore × Multiplier, UNCLAMPED (range 0–200, D17) — how bad this
+	// is here, independent of what was decided about it (D14). A ranking number, not a percentage.
 	EffectivePriority int
 	// ResidualPriority is EffectivePriority × StanceWeight(Stance) — the number a human sorts
 	// the triage queue by (D14). A not_affected or accepted_risk Finding reads 0 here while

@@ -581,16 +581,19 @@ components:
         effective_priority:
           type: integer
           description: >
-            base_score x blast_multiplier, clamped to 100 - how bad this is here, INDEPENDENT of
-            what was decided about it (EDR-GOVERNANCE-01 D14).
+            base_score x blast_multiplier - how bad this is here, INDEPENDENT of what was decided
+            about it (EDR-GOVERNANCE-01 D14). NOT clamped (D17/GOV-15): a ranking number, not a
+            percentage - range 0-200 (multiplier saturates at 2.0x). A clamp is not
+            order-preserving, and at a saturated estate it flattened every base >= 50 to 100.
         residual_priority:
           type: integer
           description: >
-            effective_priority x stance_weight(stance), clamped to 100 - the number to SORT a
-            triage queue by (D14). not_affected and accepted_risk weigh 0, mitigated 0.5
-            (configurable), deferred 0.9, and affected / under_investigation / no-position 1.0.
-            A dispositioned Finding drops out of the queue without losing the intrinsic severity
-            that effective_priority still reports.
+            effective_priority x stance_weight(stance) - the number to SORT a triage queue by
+            (D14). Unclamped like effective_priority (D17); weight <= 1.0 keeps it <= effective.
+            not_affected and accepted_risk weigh 0, mitigated 0.5 (configurable), deferred 0.9,
+            and affected / under_investigation / no-position 1.0. A dispositioned Finding drops
+            out of the queue without losing the intrinsic severity that effective_priority still
+            reports.
         reservation:
           type: string
           enum: [asserted, inferred]

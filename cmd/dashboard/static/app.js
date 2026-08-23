@@ -167,13 +167,16 @@ const LOCAL_ONLY_CHIP = `<span class="chip" title="the AI path is hard-marked lo
 const aiProse = (t) => esc(t).replace(/\[UNVERIFIED MENTIONS[^\]]*\]/g,
   (m) => `<mark class="unverified" title="this identifier was NOT in the model's grounding — verify before acting on it">${m}</mark>`);
 
-/* The signature mark: residual over effective. */
+/* The signature mark: residual over effective. The track spans the FULL range 0–200
+   (base ≤ 100 × blast ≤ 2.0, unclamped per EDR-GOVERNANCE-01 D17/GOV-15): a bar past the
+   midpoint is blast amplification made visible, and the numbers are ranking numbers, not
+   percentages — clamping them here would re-create in pixels the ordering bug D17 removed. */
 function pbar(effective, residual) {
-  const eff = Math.max(0, Math.min(100, effective | 0));
-  const res = Math.max(0, Math.min(100, residual | 0));
+  const eff = Math.max(0, Math.min(200, effective | 0));
+  const res = Math.max(0, Math.min(200, residual | 0));
   const hot = res >= 70 ? " hot" : "";
-  return `<div class="pbar" title="effective ${eff} → residual ${res} (what remains after the decision)">
-    <div class="pbar-track"><span class="pbar-eff" style="width:${eff}%"></span><span class="pbar-res${hot}" style="width:${res}%"></span></div>
+  return `<div class="pbar" title="effective ${eff} → residual ${res} (what remains after the decision; scale 0–200 = base × blast)">
+    <div class="pbar-track"><span class="pbar-eff" style="width:${eff / 2}%"></span><span class="pbar-res${hot}" style="width:${res / 2}%"></span></div>
     <span class="pbar-num">${res}</span></div>`;
 }
 

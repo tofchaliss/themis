@@ -414,7 +414,8 @@ everything); the greenfield is context-first with Governance isolated behind eve
 Decision:
 
 - The release-posture rollup (D10) carries **two** priority numbers, separating **impact** from **disposition**:
-  - **`effective_priority`** = `base_score × blast_multiplier` (C2), clamped to 100 — the CVE-intrinsic,
+  - **`effective_priority`** = `base_score × blast_multiplier` (C2), ~~clamped to 100~~ **unclamped
+    as of D17** (the clamp was the GOV-15 ordering defect) — the CVE-intrinsic,
     release-scoped severity, **independent of stance** (unchanged). Answers *"how bad is this here, regardless of
     what we decided?"*
   - **`residual_priority`** = `effective_priority × stanceWeight(stance)` — the **triage** number a human sorts
@@ -572,6 +573,43 @@ inventory). Standing lens: deterministic core first — this read is the machine
 
 PoC contrast: the PoC had no cross-release diff at all; fix verification was a human eyeballing two scan
 reports.
+
+### D17 — `effective_priority` and `residual_priority` are unclamped ranking numbers (0–200), never percentages
+
+Context: GOV-15, **measured on the VM 2026-08-08** — a 12-customer estate saturates the blast multiplier at
+2.0×, and D14's 100-clamp then pinned **every one of a release's 120 Findings with base ≥ 50 to exactly
+100**. The release's worst Finding (base 76) fell out of the top three because the order among equals is
+arbitrary — and `--ai N`, which selects "the top N undecided" through the same sort, was handed an
+arbitrary N. The defect is structural, not a tuning problem: the multiplier is a per-release CONSTANT, so
+within a release it cannot reorder anything — but a clamp is not order-preserving, and it destroys exactly
+the ordering the numbers exist to provide, degrading worst at the largest estates, where triage matters
+most.
+
+Decision:
+
+- **Remove the output clamp from both numbers.** `effective_priority = round(base × mult)` and
+  `residual_priority = round(effective × stance_weight)`, floor 0, no ceiling. The range is naturally
+  bounded at **200** because `BlastMultiplier` already saturates at 2.0× and base is ≤ 100 — the bound
+  moved to the input, where it belongs.
+- **The numbers are ranking numbers, not percentages.** The API descriptions say so explicitly; the GUI's
+  priority bar spans the full 0–200 track (a bar past the midpoint is blast amplification made visible)
+  rather than re-creating the clamp in pixels.
+- Within a release the multiplier is now an honest no-op for ordering (constant × set preserves order);
+  ACROSS releases it amplifies exactly as C2 intended — a 40-customer service's Finding outranks the same
+  base score in a zero-customer dev tool.
+
+Rejected alternatives: **(b) clamp for display + a second unclamped ordering field** — two numbers meaning
+one thing eventually disagree, and every consumer must learn which to sort by; **(c) blast as a secondary
+sort key only** — it looks principled ("a release-scoped amplifier as a per-Finding multiplier is a
+category error") but silently deletes C2's cross-release amplification intent: base would dominate totally
+and the estate graph would no longer move any ordering anywhere. The category-error observation is real,
+and the honest response is documentation (the multiplier's job is cross-release), not neutering.
+
+Wire impact: additive-semantic — field names and types are unchanged; values may now exceed 100.
+`release-posture.sh` already sorts residual-then-base (patched 2026-08-08) and is unaffected.
+
+ADR basis: D14 (the two-number posture model — unchanged except the clamp), EDR-ESTATE-01 C2 (the
+amplification intent this decision preserves), GOV-15 (the measurement).
 
 ## Traceability → issues
 

@@ -31,10 +31,17 @@ func BlastMultiplier(uniqueCustomers, cap int) float64 {
 	return float64(int(score*100+0.5)) / 100 // round to 2 decimal places
 }
 
-// EffectivePriority scales a CVE-intrinsic base score (0–100) by the blast multiplier and
-// clamps to 100 — how bad this is here, **regardless of what was decided** (D14).
+// EffectivePriority scales a CVE-intrinsic base score (0–100) by the blast multiplier —
+// how bad this is here, **regardless of what was decided** (D14).
+//
+// It is deliberately NOT clamped (D17 / GOV-15, measured 2026-08-08): the multiplier is a
+// per-release CONSTANT, so within a release it can never reorder — but a 100-clamp is not
+// order-preserving, and at a saturated estate it pinned every base ≥ 50 to 100, dropping the
+// release's worst Finding out of the top three and handing `--ai N` an arbitrary N. The value
+// is a RANKING NUMBER, not a percentage: range 0–200 (base ≤ 100 × multiplier ≤ 2.0, the
+// saturation BlastMultiplier already guarantees).
 func EffectivePriority(base int, mult float64) int {
-	return clampPriority(float64(base) * mult)
+	return roundPriority(float64(base) * mult)
 }
 
 // DefaultMitigatedWeight is the stance weight for `mitigated` when no operator override is set
@@ -78,15 +85,16 @@ func StanceWeight(s Stance, mitigatedWeight float64) float64 {
 // weight. It answers "what still needs my attention?", where EffectivePriority answers "how bad
 // is this here?". Keeping both is the whole point: a dispositioned Finding drops out of the top
 // of the queue without losing the intrinsic severity that justifies revisiting it later.
+// Like EffectivePriority it is unclamped (D17): weight ≤ 1.0 keeps residual ≤ effective, so the
+// range is the same 0–200 and the ordering the weight produces is never flattened.
 func ResidualPriority(effective int, weight float64) int {
-	return clampPriority(float64(effective) * weight)
+	return roundPriority(float64(effective) * weight)
 }
 
-func clampPriority(v float64) int {
+// roundPriority rounds to the nearest integer with a floor of 0 (defensive against a negative
+// base). No upper clamp — that is the substance of D17.
+func roundPriority(v float64) int {
 	n := int(v + 0.5)
-	if n > 100 {
-		return 100
-	}
 	if n < 0 {
 		return 0
 	}

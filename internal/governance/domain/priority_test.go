@@ -44,16 +44,34 @@ func TestEffectivePriority(t *testing.T) {
 	}{
 		{90, 1.0, 90},   // no amplification
 		{50, 1.4, 70},   // 50 × 1.4
-		{80, 2.0, 100},  // 80 × 2.0 = 160 → clamped to 100
-		{100, 1.0, 100}, // already max
+		{80, 2.0, 160},  // NOT clamped (D17): the value is a ranking number, not a percentage
+		{100, 2.0, 200}, // the range maximum: base 100 at a saturated estate
+		{100, 1.0, 100},
 		{0, 2.0, 0},     // zero base stays zero
 		{33, 1.15, 38},  // rounds (37.95 → 38)
-		{-5, 1.0, 0},    // a negative base clamps to 0 (defensive)
+		{-5, 1.0, 0},    // a negative base floors to 0 (defensive)
 	}
 	for _, tt := range tests {
 		if got := domain.EffectivePriority(tt.base, tt.mult); got != tt.want {
 			t.Errorf("EffectivePriority(%d, %v) = %d, want %d", tt.base, tt.mult, got, tt.want)
 		}
+	}
+}
+
+// The GOV-15 regression (measured on the VM 2026-08-08, D17): at a saturated estate the old
+// 100-clamp pinned every base ≥ 50 to 100, so the release's worst Finding fell out of the top
+// of an ordering that had become arbitrary. Unclamped, a constant multiplier PRESERVES the
+// base order — always.
+func TestEffectivePriority_SaturatedEstatePreservesOrder(t *testing.T) {
+	const mult = 2.0 // a 12-customer estate at the default cap
+	bases := []int{76, 60, 55, 50}
+	prev := domain.EffectivePriority(bases[0], mult)
+	for _, b := range bases[1:] {
+		cur := domain.EffectivePriority(b, mult)
+		if cur >= prev {
+			t.Fatalf("order destroyed: base %d → %d, previous %d", b, cur, prev)
+		}
+		prev = cur
 	}
 }
 
@@ -116,7 +134,7 @@ func TestResidualPriority(t *testing.T) {
 		{"an undecided Finding is unchanged", 70, 1.0, 70},
 		{"mitigated halves it (rounded)", 70, 0.5, 35},
 		{"deferred barely moves it", 70, 0.9, 63},
-		{"clamped to 100", 100, 1.5, 100},
+		{"not clamped (D17); weight ≤ 1.0 in practice keeps residual ≤ effective", 100, 1.5, 150},
 		{"never negative", 70, -1, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,7 +155,7 @@ func TestResidualPriority_SuppressionDoesNotDestroyIntrinsicSeverity(t *testing.
 	if res != 0 {
 		t.Fatalf("residual = %d, want 0 for a not_affected Finding", res)
 	}
-	if eff != 100 {
-		t.Fatalf("effective = %d, want the intrinsic severity preserved (clamped 90 x 1.5)", eff)
+	if eff != 135 {
+		t.Fatalf("effective = %d, want the intrinsic severity preserved (90 x 1.5, unclamped per D17)", eff)
 	}
 }
