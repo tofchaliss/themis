@@ -152,6 +152,38 @@ mandates context-first. Separate module — unnecessary overhead now.
 
 ---
 
+### D10 — (PROPOSED 2026-08-23, EV-DEDUP-2 — awaiting confirmation) Filings: one observation, many releases
+
+Context: the D3 realization note (2026-08-19) made cross-release duplicates refuse loudly (409), which is
+honest but leaves a legitimate scenario unsupported: **the same document genuinely describing two
+releases** — a re-tagged image, two releases cut from one build. Today the second release requires
+byte-different content. EV-DEDUP-2 asks whether one observation should be *attachable* to many releases.
+
+Proposed decision — **separate the observation from the filing**:
+
+- **The observation stays one record** (D3 upheld): one row per fingerprint, raw bytes stored once,
+  immutable.
+- **A new `evidence_filings` table** carries the association: `(evidence_id, subject_release_id,
+  filed_at)`, unique on the pair. Registering content that already exists against a NEW release creates a
+  **filing**, not a duplicate observation — and emits `EvidenceRegistered` for that filing, so correlation
+  runs for the new release exactly as a first upload would.
+- **Semantics table**: same bytes + same release ⇒ dedup (200, unchanged) · same bytes + new release ⇒
+  new filing (201; replaces today's 409) · new bytes ⇒ new observation + first filing (201, unchanged).
+- **Reads keep their shapes**: list-by-release traverses filings; get-by-id gains a `filed_against` list
+  (additive). The GUI needs no change beyond rendering the additive field if desired.
+- **Migration**: backfill one filing per existing row from its `subject_release_id`; the column then
+  denormalizes the FIRST filing (kept for compatibility) or is dropped in a follow-up — decide at
+  implementation.
+
+Rejected alternatives: **status quo** (the 409) — honest but makes a true statement impossible to file;
+**duplicate full rows per release** (uniqueness on `(fingerprint, release)`) — simplest code but stores
+the raw bytes N times and contradicts D3's one-observation stance the moment anyone asks "how many times
+was this SEEN".
+
+Impact if confirmed: Evidence store migration + Save/Register semantics + event emission per filing +
+additive read fields; Knowledge/Governance unchanged (they consume events and read APIs whose shapes hold).
+Not scheduled: this decision was T2's deliverable; implementation enters the queue only when confirmed.
+
 ## Remaining dependency
 
 - **Resolved — Shared Kernel ownership** of Product/Release identity (from D5): owned by the Shared Kernel

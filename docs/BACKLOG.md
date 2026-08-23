@@ -232,7 +232,15 @@ under the 2026-08-07 re-derivation standard.
   a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
   engine when a second translator lands. Until then the translator is exercised only live.
 - [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
-  (filed 2026-08-17, live test).** LOW. Seen on the VM in the first D15 live round: a curated
+  (filed 2026-08-17, live test).** LOW → **re-scoped 2026-08-23 (T2 execution): DESIGN-FIRST,
+  blocked on a Knowledge domain decision.** The T2 plan assumed the card's alias set existed to
+  expose — it does not: every feed ACL normalizes GHSA/DSA/RHSA ids to the canonical CVE at
+  ingestion and DISCARDS them (`osv.go` folds `rec.ID`+`rec.Aliases` to one CVE; nothing persists
+  the aliases). The real fix is therefore a Faultline addition — an append-only union `aliases`
+  set captured at ingestion, reconciled, stored, exposed on the card read (plus a per-release
+  bulk read for the browser join) — a domain-model + migration + ACL change needing its own
+  EDR-KNOWLEDGE-01 decision before code. Honest today (the chip's wording covers it); implement
+  when the alias decision is taken.
   report's `GHSA-6v7p-g79w-8964` (msgpack) row renders "no Finding — filtered at ingestion"
   — correctly for that document, but the scan view's browser join (`viewScan`, join by literal
   `f.cve` against posture `p.cve`) would say the same even when the release DOES carry the
@@ -260,6 +268,11 @@ under the 2026-08-07 re-derivation standard.
   resolves to (`ContentFiledElsewhereError`, spec'd on POST /evidence, rendered verbatim by the
   GUI toast). Integration-tested (`TestSave_Idempotent` cross-release arm).
 - [ ] **EV-DEDUP-2 — should one observation be attachable to MANY releases?** LOW, design-first.
+  **Design DELIVERED 2026-08-23 (T2's last item): EDR-EVIDENCE-01 D10 (PROPOSED)** — observation
+  stays one record (D3 upheld); a new `evidence_filings` association table carries
+  (evidence, release); same bytes + new release becomes a FILING with its own
+  `EvidenceRegistered` event (correlation runs for the new release), replacing the 409.
+  Implementation enters the queue only when D10 is confirmed.
   The D3 refusal (EV-DEDUP-1) is honest but leaves "the same document genuinely describes two
   releases" (a re-tagged image; two releases cut from one build) unsupported — today the second
   release needs byte-different content. Supporting it means an association model (document
