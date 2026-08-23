@@ -19,6 +19,7 @@ import (
 type Handler struct {
 	read   *app.ReadService
 	health *app.FeedHealthService
+	gather *app.GatherService // nil / sourceless ⇒ POST /faultlines/gather refuses honestly
 }
 
 // NewHandler builds a Handler.
@@ -26,9 +27,57 @@ func NewHandler(read *app.ReadService, health *app.FeedHealthService) *Handler {
 	return &Handler{read: read, health: health}
 }
 
+// WithGather wires the on-demand per-CVE gather (G-AI-1) and returns the handler for chaining.
+func (h *Handler) WithGather(g *app.GatherService) *Handler {
+	h.gather = g
+	return h
+}
+
 // Router returns an http.Handler serving the Knowledge routes; mount it under the
 // OpenAPI base path (/api/v1).
 func (h *Handler) Router() http.Handler { return gen.Handler(h) }
+
+// GatherCVE handles POST /faultlines/gather — the on-demand, operator-triggered per-CVE fetch
+// (G-AI-1). Gathering Is Not Knowing: everything folds as ordinary source Proposals.
+func (h *Handler) GatherCVE(w http.ResponseWriter, r *http.Request) {
+	if !h.gather.Enabled() {
+		writeProblem(w, http.StatusServiceUnavailable, "no gather source wired",
+			"this node has no per-CVE source configured for on-demand gathering")
+		return
+	}
+	var req gen.GatherCVEJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	res, err := h.gather.GatherCVE(r.Context(), req.Cve)
+	if err != nil {
+		if errors.Is(err, app.ErrInvalidCVE) {
+			writeProblem(w, http.StatusBadRequest, "invalid cve", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "gather failed", err.Error())
+		return
+	}
+	type sourceOut struct {
+		Source    string `json:"source"`
+		Found     bool   `json:"found"`
+		Recorded  bool   `json:"recorded"`
+		Withdrawn bool   `json:"withdrawn"`
+		Error     string `json:"error,omitempty"`
+	}
+	out := struct {
+		CVE         string      `json:"cve"`
+		FaultlineID string      `json:"faultline_id,omitempty"`
+		Sources     []sourceOut `json:"sources"`
+	}{CVE: res.CVE, FaultlineID: res.FaultlineID, Sources: make([]sourceOut, 0, len(res.Sources))}
+	for _, sg := range res.Sources {
+		out.Sources = append(out.Sources, sourceOut{
+			Source: sg.Source, Found: sg.Found, Recorded: sg.Recorded, Withdrawn: sg.Withdrawn, Error: sg.Err,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 // GetFaultlineById handles GET /faultlines/{id}.
 func (h *Handler) GetFaultlineById(w http.ResponseWriter, r *http.Request, id string) {

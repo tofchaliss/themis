@@ -68,6 +68,66 @@ paths:
                 type: array
                 items:
                   type: string
+  /faultlines/gather:
+    post:
+      operationId: gatherCVE
+      summary: On-demand fetch of ONE CVE's facts through the wired per-CVE sources (G-AI-1).
+      description: >-
+        The explicit, operator-triggered half of "the AI asks, the feeds gather": consults each
+        wired per-CVE source (NVD today) for a CVE the scheduled feeds may not have ingested
+        yet, and folds what they return as ORDINARY source Proposals - same ACLs, same
+        reconciliation precedence, same "Gathering Is Not Knowing" boundary as any feed. Unlike
+        the scheduled sweeps this needs no enable flag: the authenticated POST is the opt-in.
+        A write-scoped key is required (it records Proposals).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cve]
+              properties:
+                cve:
+                  type: string
+                  description: The CVE id to gather (e.g. CVE-2026-12345).
+      responses:
+        '200':
+          description: >-
+            The gather ran; each wired source reports found / recorded / withdrawn / error
+            independently. found=false everywhere is an honest answer (the world has nothing
+            yet), not a failure.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cve, sources]
+                properties:
+                  cve:
+                    type: string
+                  faultline_id:
+                    type: string
+                    description: The card the facts folded into, when one exists after the gather.
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      required: [source]
+                      properties:
+                        source: { type: string }
+                        found: { type: boolean }
+                        recorded: { type: boolean, description: "a NEW Proposal folded; a restatement reads false" }
+                        withdrawn: { type: boolean }
+                        error: { type: string, description: "per-source failure - reported, never fatal to the gather" }
+        '400':
+          $ref: '#/components/responses/Problem'
+        '503':
+          description: No per-CVE source is wired on this node.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /feeds:
     get:
       operationId: getFeedHealth

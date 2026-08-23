@@ -532,3 +532,18 @@ states its cause on `X-Themis-AI-Reason`: `no_grounding` covers Governance's hon
 an evidence-less side (422 upstream) or Evidence unreachable (502 upstream) refuses rather than
 narrating a diff that proves nothing. Both releases empty ⇒ a deterministic
 `rule:empty-comparison` answer, zero tokens. In the GUI: Compare tab → "Ask the advisor".
+
+## On-demand CVE gather (G-AI-1 half a)
+
+When a brand-new CVE has no card yet (`recommend_position` declines with
+`decline_class=thin_grounding` — "no version evidence"), gather its facts explicitly:
+
+```sh
+curl -s -X POST -H "X-API-Key: $KEY" -H "content-type: application/json" \
+  "http://localhost:8085/api/v1/faultlines/gather" -d '{"cve":"CVE-2026-12345"}'
+```
+
+Each wired per-CVE source (NVD today) reports `found` / `recorded` / `withdrawn` / `error`
+independently; everything folds as ordinary source Proposals (same precedence as the scheduled
+sweeps). No enable flag: the authenticated write-scoped POST is the opt-in. Uses
+`THEMIS_NVD_URL` / `THEMIS_NVD_API_KEY` when set, NVD defaults otherwise.

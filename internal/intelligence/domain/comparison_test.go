@@ -87,3 +87,20 @@ func TestCompareReleasesV1_Declaration(t *testing.T) {
 		t.Error("DefaultRegistry must carry compare_releases")
 	}
 }
+
+// The G-AI-5 tripwire: every shipped capability today is local-only, internal-privacy —
+// nothing can reach a cloud provider, which is WHY the full data-classification /
+// provider-clearance machinery (D10/INT-0069) is correctly deferred. The moment a capability
+// declares otherwise, this fails the build and forces the G-AI-5 decision before the route
+// exists — the R4 "guarded deferral" pattern.
+func TestEveryShippedCapabilityIsLocalOnly(t *testing.T) {
+	for _, id := range []string{"recommend_position", "plan_remediation", "explain_vulnerability", "compare_releases"} {
+		c, ok := domain.DefaultRegistry().Lookup(id)
+		if !ok {
+			t.Fatalf("capability %q missing from the registry", id)
+		}
+		if !c.Routing.LocalOnly || c.Routing.Privacy != domain.PrivacyInternal {
+			t.Errorf("%s routing = %+v — a non-local capability requires the G-AI-5 classification/clearance decision FIRST", id, c.Routing)
+		}
+	}
+}

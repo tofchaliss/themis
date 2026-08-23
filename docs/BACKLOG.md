@@ -894,7 +894,16 @@ under the 2026-08-07 re-derivation standard.
   **Priority: MED** (HIGH for static estates; the current VM estate uploads rarely, so it is
   live there).
 
-- [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.** _(Gap surfaced in the
+- [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.**
+  **✅ HALF (a) LANDED 2026-08-23 (T5 chain): the on-demand gather exists.**
+  `POST /faultlines/gather {cve}` on Knowledge consults the wired per-CVE sources (NVD today,
+  via the same `VulnsForCVE` + fold path as the backfill sweep) and folds ordinary source
+  Proposals — same ACL, same precedence, "Gathering Is Not Knowing" intact. Needs no enable
+  flag: the scheduled watch's opt-in guards SILENT outbound calls, and an authenticated
+  write-scoped POST is never silent. Withdrawn CVEs retire the card; found-nothing is an honest
+  200. **Half (b) — the AI automatically emitting "need more data on CVE-X" and pushing here —
+  remains the Δ4-class push seam**; until then the loop is a human/script reading an
+  `insufficient` whose `decline_class=thin_grounding` detail says what is missing, and POSTing. _(Gap surfaced in the
   M4 Δ2 grill, 2026-07-24.)_ When `recommend_position` runs against a CVE our feeds have **not yet ingested**,
   there is no _Information_ to reason over — and without an affected range even the version-range step can't
   run — so the capability returns a safe **"insufficient data — no recommendation"** (the Δ2 decision, Option
@@ -1048,7 +1057,12 @@ under the 2026-08-07 re-derivation standard.
   budget enforcement/policy Δ3+.
 
 - [ ] **G-AI-5 — Data-classification / provider-clearance admission deferred; Δ2 is a minimal local-only
-  gate.** _(Gap surfaced in the M4 Δ2 grill, 2026-07-24.)_ Δ2's pre-invocation gate is deliberately minimal
+  gate.** **RE-EVALUATED 2026-08-23 (T5 chain): the deferral is CONFIRMED CORRECT and now
+  GUARDED.** No non-local provider exists, so classification still has no routing effect —
+  building the machinery now would be dead code misrepresenting a live control. What changed:
+  `TestEveryShippedCapabilityIsLocalOnly` is the R4-style tripwire — the moment any capability
+  declares a non-local/non-internal route, the build fails and forces this decision BEFORE the
+  route exists. This item graduates to real work when a cloud/paid provider is proposed.** _(Gap surfaced in the M4 Δ2 grill, 2026-07-24.)_ Δ2's pre-invocation gate is deliberately minimal
   because the model is **local / on-prem — nothing leaves the building**, so INT-0069's strongest rule ("the
   most sensitive data stays local-only") is satisfied by default. Δ2 does: (1) **authorize** the
   caller/capability request (authn/authz), (2) **scrub secrets / PII** from both the prompt and the telemetry

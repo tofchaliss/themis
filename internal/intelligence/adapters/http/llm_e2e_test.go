@@ -241,3 +241,48 @@ func envOr(k, def string) string {
 	}
 	return def
 }
+
+// TestE2ERealLLM_CompareReleases drives the two-release Information capability
+// (compare_releases@v1, AI-CMP-1) against a real model. Its live risk is citation-shaped like
+// its siblings': the prompt renders three buckets of CVEs with priorities, and a model
+// summarising "what the fix achieved" may cite a rounded number or a CVE from the wrong
+// bucket — only the live pairing of this prompt with the grounding gate exercises that.
+func TestE2ERealLLM_CompareReleases(t *testing.T) {
+	url, model := llmEndpoint(t)
+
+	gov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/compare/") {
+			_, _ = w.Write([]byte(`{
+			  "baseline_release_id":"rel-old","candidate_release_id":"rel-new",
+			  "fixed":[{"finding_id":"f1","cve":"CVE-2026-10","residual_priority":92,"effective_priority":92,
+			            "components":[{"purl":"pkg:rpm/rocky/openssl@1.1.1","name":"openssl","version":"1.1.1","ecosystem":"rpm","source":"openssl"}]}],
+			  "new":[{"finding_id":"f9","cve":"CVE-2026-77","residual_priority":40,"effective_priority":40,
+			          "components":[{"purl":"pkg:rpm/rocky/zlib@1.2.13","name":"zlib","version":"1.2.13","ecosystem":"rpm","source":"zlib"}]}],
+			  "persisting":[{"finding_id":"f3","cve":"CVE-2026-2","stance":"","residual_priority":70,"effective_priority":70,
+			                 "components":[{"purl":"pkg:rpm/rocky/python3-ply@3.9","name":"python3-ply","version":"3.9","ecosystem":"rpm","source":"python-ply"}]}]
+			}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer gov.Close()
+
+	h := NewHandler(realGateway(t, gov.URL, url, model), nil)
+	rr := invoke(t, h, "compare_releases", `{"subject":{"type":"release","ids":["rel-old","rel-new"]}}`)
+	t.Logf("compare_releases on %q @ %s → HTTP %d\n%s", model, url, rr.Code, rr.Body.String())
+
+	switch rr.Code {
+	case http.StatusOK:
+		body := rr.Body.String()
+		if strings.Contains(body, `"recommendation"`) || strings.Contains(body, `"stance"`) {
+			t.Errorf("an Information Response must carry no proposal/stance; body=%s", body)
+		}
+		if !strings.Contains(body, `"information"`) {
+			t.Errorf("a 200 must carry the narration; body=%s", body)
+		}
+	case http.StatusNoContent:
+		assertNotAGroundingDisagreement(t, rr)
+	default:
+		t.Fatalf("unexpected status %d; body=%s", rr.Code, rr.Body.String())
+	}
+}

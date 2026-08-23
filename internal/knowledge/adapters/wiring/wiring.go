@@ -182,8 +182,13 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// this line existed, a scanner-report upload was accepted by Evidence and silently
 	// no-op'd here — the "wiring is no gate" class.
 	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{})
+	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
+	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
+	// never silent. It reuses the same NVD client + fold path as the backfill sweep.
+	gather := app.NewGatherService(fold,
+		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read, health).Router(),
+		Handler:  knhttp.NewHandler(read, health).WithGather(gather).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
