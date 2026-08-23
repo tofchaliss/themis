@@ -69,6 +69,8 @@ type Config struct {
 	TopK       int    // semantic precedents to retrieve (0 → the engine default)
 	// BudgetTokens / BudgetWindow — D4's per-capability spend ceiling; both unset = unlimited.
 	BudgetTokens int
+	// MaxRunTokens — G-AI-4's per-run ceiling; 0 = unlimited.
+	MaxRunTokens int
 	BudgetWindow time.Duration
 }
 
@@ -184,6 +186,7 @@ func Wire(cfg Config) (Intelligence, error) {
 		Engines:               engines,
 		ProviderTimeout:       cfg.ProviderTimeout,
 		BudgetTokens:          cfg.BudgetTokens,
+		MaxRunTokens:          cfg.MaxRunTokens,
 		BudgetWindow:          cfg.BudgetWindow,
 		Router:                rtr,
 		BudgetDegradeFraction: cfg.BudgetDegradeFraction,

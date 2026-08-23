@@ -19,6 +19,10 @@ const (
 	// defaultDegradeFraction is degrade-not-fail's low-water mark (G-AI-4): below this
 	// fraction of the window ceiling, invocations route to the economy tier when one exists.
 	defaultDegradeFraction = 0.20
+
+	// DeclineThinGrounding / DeclineModelUndetermined are the G-AI-2c decline classes.
+	DeclineThinGrounding     = "thin_grounding"
+	DeclineModelUndetermined = "model_undetermined"
 )
 
 // maxAttempts is the schema-validation retry budget (D7): one initial attempt plus one
@@ -79,6 +83,13 @@ type Outcome struct {
 	// recorded as enterprise truth and never reaches Governance — a human reads it and it is
 	// discarded. Empty for a Decision capability.
 	Information string
+	// DeclineClass classifies an honest `insufficient` for the eval loop (G-AI-2c):
+	// `thin_grounding` — the backend knew the grounding could not support a stance before any
+	// model ran (AI-204-2's taxonomy) — versus `model_undetermined` — the grounding was fine
+	// and the model still could not tell. Different problems, different fixes: the first is a
+	// projection/correlation gap, the second a model/prompt question. Empty unless the
+	// terminal reason is insufficient.
+	DeclineClass string
 	// Detail is WHY the outcome ended as it did, in the words of the check that ended it —
 	// telemetry only, never returned to the caller (TRUST-6).
 	//
@@ -123,6 +134,7 @@ type Gateway struct {
 	prompt          PromptRenderer
 	dispatcher      *Dispatcher
 	maxPromptBytes  int
+	maxRunTokens    int // per-run ceiling (G-AI-4): 0 = unlimited
 	providerTimeout time.Duration
 	budget          *Budget // nil or unconfigured = unlimited (the default)
 	// router, when set, enables the tier decisions (phase3-intelligence-router): escalation
@@ -162,9 +174,14 @@ type GatewayConfig struct {
 	BudgetDegradeFraction float64
 	Prompt                PromptRenderer
 	Engines               []Engine
-	MaxPromptBytes        int              // runaway-prompt cap (0 → default); over-cap → insufficient
-	ProviderTimeout       time.Duration    // per-invocation deadline (0 → default)
-	Now                   func() time.Time // defaults to time.Now
+	MaxPromptBytes        int // runaway-prompt cap (0 → default); over-cap → insufficient
+	// MaxRunTokens is G-AI-4's per-run cost ceiling: once ONE invocation's accumulated spend
+	// reaches it, no further attempt (schema retry or escalation) is made — the run ends as
+	// `budget_exhausted` with DecidedBy "guard:run-budget". 0 = unlimited, matching the window
+	// budget's load-bearing default: a ceiling nobody set must never fire.
+	MaxRunTokens    int
+	ProviderTimeout time.Duration    // per-invocation deadline (0 → default)
+	Now             func() time.Time // defaults to time.Now
 }
 
 // NewGateway precompiles a validator per registered capability and indexes the engines
@@ -207,6 +224,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		maxPromptBytes:  maxPrompt,
 		providerTimeout: timeout,
 		budget:          NewBudget(cfg.BudgetTokens, cfg.BudgetWindow),
+		maxRunTokens:    cfg.MaxRunTokens,
 		router:          cfg.Router,
 		degradeFrac:     degrade,
 		now:             now,
@@ -403,6 +421,14 @@ func (g *Gateway) Invoke(
 			// prompt — and both look identical in ReasonSchemaInvalid alone.
 			var lastSchemaErr error
 			for attempt := 0; attempt < maxAttempts; attempt++ {
+				// The per-run ceiling (G-AI-4): a run that has already spent its cap makes no
+				// further call — a schema-thrashing invocation stops mid-run instead of riding
+				// every retry to the window's edge. First attempts always run (spend is 0).
+				if g.maxRunTokens > 0 && oc.TokensUsed >= g.maxRunTokens {
+					oc.Duration = g.now().Sub(start)
+					oc.DecidedBy, oc.Reason = "guard:run-budget", ReasonBudgetExhausted
+					return domain.Proposal{}, oc
+				}
 				res, eerr := eng.Execute(ctx, in)
 				if eerr != nil {
 					oc.Duration = g.now().Sub(start)
@@ -454,7 +480,8 @@ func (g *Gateway) Invoke(
 			// worse). Anything but `insufficient` on the primary ends the loop here.
 			if out.RecommendedStance == string(domain.StanceInsufficient) &&
 				capb.Output == domain.OutputDecision && tiers[ti] == TierPrimary && !degraded &&
-				g.router != nil && g.router.Available(TierEscalation) && g.budget.Allow(g.now()) {
+				g.router != nil && g.router.Available(TierEscalation) && g.budget.Allow(g.now()) &&
+				(g.maxRunTokens == 0 || oc.TokensUsed < g.maxRunTokens) {
 				// The upgrade counterpart of degrade-not-fail (G-AI-2b): the larger model may
 				// extract more from the SAME grounding — the prompt is identical by design, so
 				// a different answer can only come from the model. Skipped while degraded:
@@ -505,6 +532,12 @@ func (g *Gateway) Invoke(
 			oc.Duration = g.now().Sub(start)
 			oc.DecidedBy = "llm:" + string(domain.StanceInsufficient)
 			oc.Reason = ReasonInsufficient
+			// The G-AI-2c classification: was there anything to reason about?
+			if thinGrounding != "" {
+				oc.DeclineClass = DeclineThinGrounding
+			} else {
+				oc.DeclineClass = DeclineModelUndetermined
+			}
 			// AI-204-2: when the grounding was deterministically thin, the journal line says
 			// so beside the decline — no operator re-derives by hand what the backend knew.
 			if oc.Detail == "" && thinGrounding != "" {
@@ -538,6 +571,11 @@ func (g *Gateway) Invoke(
 	oc.Duration = g.now().Sub(start)
 	oc.DecidedBy = "insufficient"
 	oc.Reason = ReasonInsufficient
+	if thinGrounding != "" {
+		oc.DeclineClass = DeclineThinGrounding
+	} else {
+		oc.DeclineClass = DeclineModelUndetermined
+	}
 	if oc.Detail == "" && thinGrounding != "" {
 		oc.Detail = thinGrounding // AI-204-2, same as the model's decline above
 	}

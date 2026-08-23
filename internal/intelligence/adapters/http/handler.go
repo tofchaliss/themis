@@ -229,11 +229,19 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 	if oc.Detail != "" {
 		fields = append(fields, observability.String("detail", oc.Detail))
 	}
+	if oc.DeclineClass != "" {
+		fields = append(fields, observability.String("decline_class", oc.DeclineClass))
+	}
 	h.logger.Info("capability invoked", fields...)
 	// Counted by terminal reason. This is the metric that would have made TRUST-6 a dashboard
 	// question rather than a log investigation: "what fraction of invocations are refused, and
 	// for which reason" is a rate, and rates do not come from log lines.
 	observability.Default().RecordAIInvocation(oc.CapabilityID, oc.Reason, oc.Produced)
+	// The decline-class rate (G-AI-2c): "the model can't tell" and "there was nothing to
+	// tell from" are different problems with different owners, now separable on a dashboard.
+	if oc.DeclineClass != "" {
+		observability.Default().RecordAIDecline(oc.CapabilityID, oc.DeclineClass, oc.Tier)
+	}
 }
 
 // selectionFrom reads the Selection from the request, accepting the deprecated finding_id

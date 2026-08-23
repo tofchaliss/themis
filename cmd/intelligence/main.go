@@ -63,6 +63,7 @@ type config struct {
 	// budget switched on by accident refuses recommendations, and a refusal reads downstream as
 	// the AI being unavailable (D13).
 	budgetTokens int
+	maxRunTokens int // THEMIS_INTELLIGENCE_MAX_RUN_TOKENS — per-run (per-invocation) token ceiling across retries + escalation (G-AI-4); 0/unset = unlimited (the load-bearing default).
 	budgetWindow time.Duration
 	rebuild      bool // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
@@ -91,6 +92,7 @@ func loadConfig() config {
 		embedModel:      envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
 		topK:            envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
 		budgetTokens:    envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
+		maxRunTokens:    envIntDefault("THEMIS_INTELLIGENCE_MAX_RUN_TOKENS", 0),
 		escalationModel: os.Getenv("THEMIS_INTELLIGENCE_MODEL_ESCALATION"),
 		economyModel:    os.Getenv("THEMIS_INTELLIGENCE_MODEL_ECONOMY"),
 		degradePct:      envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
@@ -159,6 +161,7 @@ func main() {
 		EmbedModel:            cfg.embedModel,
 		TopK:                  cfg.topK,
 		BudgetTokens:          cfg.budgetTokens,
+		MaxRunTokens:          cfg.maxRunTokens,
 		BudgetWindow:          cfg.budgetWindow,
 		BudgetDegradeFraction: cfg.degradePct,
 	})

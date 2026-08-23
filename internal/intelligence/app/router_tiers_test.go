@@ -181,3 +181,25 @@ func TestBudgetLimit(t *testing.T) {
 		t.Errorf("nil Limit = %d, want 0", got)
 	}
 }
+
+// G-AI-4: a run at its per-run ceiling does NOT escalate — the upgrade pass is spend, and a
+// capped run has none left. The primary's honest decline stands.
+func TestEscalationRespectsThePerRunCeiling(t *testing.T) {
+	decline := `{"finding_id":"F1","recommended_stance":"insufficient","confidence":0,"evidence":[],"reasoning":"cannot tell"}`
+	eng := &tierEngine{byTier: map[ModelTier]string{TierPrimary: decline, TierEscalation: decline}, tokens: 3000}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines: []Engine{eng}, Router: fakeTierRouter{esc: true},
+		MaxRunTokens: 2500, // the primary's 3000-token decline exhausts the run
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonInsufficient || oc.Tier != string(TierPrimary) {
+		t.Fatalf("outcome = %+v, want the primary's decline to stand un-escalated", oc)
+	}
+	if len(eng.seen) != 1 {
+		t.Errorf("engine calls = %d, want 1 — the escalation pass must not run", len(eng.seen))
+	}
+}

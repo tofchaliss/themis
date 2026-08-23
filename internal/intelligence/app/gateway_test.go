@@ -920,3 +920,97 @@ func TestInvokeInsufficientCarriesThinGroundingDetail(t *testing.T) {
 		t.Errorf("healthy grounding decline detail = %q, want empty", oc2.Detail)
 	}
 }
+
+// G-AI-4 per-run ceiling: once one invocation's accumulated spend reaches the cap, no
+// further attempt is made — the run ends budget_exhausted at guard:run-budget. First
+// attempts always run (a ceiling nobody reached must not fire).
+func TestInvokePerRunCeilingStopsRetries(t *testing.T) {
+	okRaw := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[{"kind":"cve","ref":"CVE-1"}],"reasoning":"grounded"}`
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines:      []Engine{&fakeEngine{replies: []engineReply{{raw: `{not json`, tokens: 3000}, {raw: okRaw, tokens: 100}}}},
+		MaxRunTokens: 2500,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonBudgetExhausted || oc.DecidedBy != "guard:run-budget" {
+		t.Fatalf("outcome = %+v, want budget_exhausted at guard:run-budget", oc)
+	}
+	if oc.TokensUsed != 3000 {
+		t.Errorf("tokens = %d, want only the first attempt's 3000 (the cap stopped the second)", oc.TokensUsed)
+	}
+
+	// Unset (0) = unlimited: the same sequence completes on the retry.
+	g2 := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: `{not json`, tokens: 3000}, {raw: okRaw, tokens: 100}}})
+	if _, oc2 := g2.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr"); oc2.Reason != ReasonOK {
+		t.Errorf("unlimited run = %+v, want OK", oc2)
+	}
+}
+
+// G-AI-2c: every honest insufficient carries its decline class — thin_grounding when the
+// backend knew, model_undetermined when the grounding was fine and the model still couldn't.
+func TestInvokeDeclineClassSeparatesThinFromUndetermined(t *testing.T) {
+	decline := `{"finding_id":"F1","recommended_stance":"insufficient","confidence":0,"evidence":[],"reasoning":"cannot tell"}`
+	healthy := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"carrier"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+	}}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: healthy,
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: decline}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.DeclineClass != DeclineModelUndetermined {
+		t.Errorf("healthy decline class = %q, want model_undetermined", oc.DeclineClass)
+	}
+
+	thin := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"scope"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+	}}
+	g2, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: thin,
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: decline}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc2 := g2.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc2.DeclineClass != DeclineThinGrounding {
+		t.Errorf("thin decline class = %q, want thin_grounding", oc2.DeclineClass)
+	}
+
+	// A produced proposal carries NO decline class.
+	okRaw := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[{"kind":"cve","ref":"CVE-1"}],"reasoning":"grounded"}`
+	g3 := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{{raw: okRaw}}})
+	if _, oc3 := g3.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr"); oc3.DeclineClass != "" {
+		t.Errorf("produced outcome decline class = %q, want empty", oc3.DeclineClass)
+	}
+}
+
+// The plan-exhausted exit classifies too (G-AI-2c): with healthy grounding the class is
+// model_undetermined — nothing structural explained the no-answer.
+func TestInvokePlanExhaustedDeclineClassOnHealthyGrounding(t *testing.T) {
+	reg := domain.NewRegistry(customCap("retrieval_only", domain.ExecutionPlan{{Engine: domain.EngineKnowledge}}))
+	healthy := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"carrier"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+	}}
+	g, err := NewGateway(GatewayConfig{Registry: reg, Projection: healthy, Prompt: fakePrompt{},
+		Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "retrieval_only", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonInsufficient || oc.DeclineClass != DeclineModelUndetermined {
+		t.Errorf("outcome = %q class %q, want insufficient/model_undetermined", oc.Reason, oc.DeclineClass)
+	}
+}

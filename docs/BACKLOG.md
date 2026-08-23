@@ -936,7 +936,13 @@ under the 2026-08-07 re-derivation standard.
   never tried" is now observable. Deliberately narrow: never fires on schema/business failures
   (contract problems — escalating would mask which lever to pull, the distinction this very
   entry's (c) needs), never on timeouts, never while degraded, never for Information
-  capabilities. **(c) the eval loop** remains open and still needs Δ4.
+  capabilities. **✅ (c)'s CLASSIFICATION half LANDED 2026-08-23 (T5 chain):** every honest
+  insufficient now carries a `DeclineClass` — `thin_grounding` (the backend knew: AI-204-2's
+  taxonomy) vs `model_undetermined` (grounding fine, model couldn't) — in the journal
+  (`decline_class`) and as `themis_ai_declines_total{capability,class,tier}`. "The model can't
+  reason" and "there was nothing to reason about" are now separable rates with separate owners.
+  **(c)'s TUNING half** (the loop that acts on those rates — prompt/model versioning) remains
+  open and is Δ4's eval-harness work.
 
 - [x] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
   invocation under-reports its cost in telemetry.** ✅ **CLOSED 2026-08-23 (T4 delivery).**
@@ -1019,8 +1025,14 @@ under the 2026-08-07 re-derivation standard.
   route to the smaller model instead of refusing; full exhaustion still answers
   `budget_exhausted`, because the economy model's tokens are real tokens too. A degraded
   invocation never escalates.
-  **Still open:** the other three scopes (per-run cost ceiling beyond the existing prompt-size
-  guard, the autonomous pool, the global enterprise ceiling).
+  **✅ PER-RUN CEILING LANDED 2026-08-23 (T5 chain):** `THEMIS_INTELLIGENCE_MAX_RUN_TOKENS` —
+  once ONE invocation's accumulated spend (retries + escalation, honest since AI-TEL-1) reaches
+  it, no further attempt runs (`budget_exhausted`, `guard:run-budget`); escalation respects it
+  too. Unset = unlimited, same load-bearing default as the window.
+  **Still open, both blocked on planes that do not exist yet:** the autonomous pool (needs Δ4
+  autonomy — there is nothing to pool for) and the global enterprise ceiling (with ONE
+  Intelligence node the window ceiling IS the global ceiling; the scope becomes real when a
+  second AI node exists).
  _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 builds the **meter** (per-call time / input-size / token count recorded via telemetry) plus
   one **runaway guard** (a per-request timeout + a cap on prompt input size) — nothing more. The actual

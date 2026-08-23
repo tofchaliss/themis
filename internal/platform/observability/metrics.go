@@ -32,6 +32,7 @@ type Metrics struct {
 	feedPolls     *prometheus.CounterVec
 	feedRecords   *prometheus.CounterVec
 	aiInvocations *prometheus.CounterVec
+	aiDeclines    *prometheus.CounterVec
 	httpRequests  *prometheus.CounterVec
 	httpDuration  *prometheus.HistogramVec
 }
@@ -62,6 +63,13 @@ func NewMetrics(service string) *Metrics {
 			Name: "themis_ai_invocations_total",
 			Help: "Intelligence capability invocations by capability, outcome reason, and whether a proposal was produced.",
 		}, []string{"capability", "reason", "produced"}),
+		// The G-AI-2c eval signal: honest declines split by WHAT could not tell — the model
+		// (`model_undetermined`, a model/prompt question) or the grounding
+		// (`thin_grounding`, a projection/correlation gap) — and by the tier that gave up.
+		aiDeclines: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "themis_ai_declines_total",
+			Help: "Honest insufficient outcomes by capability, decline class (thin_grounding | model_undetermined), and model tier.",
+		}, []string{"capability", "class", "tier"}),
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "themis_http_requests_total",
 			Help: "HTTP requests by method, route and status class.",
@@ -72,7 +80,7 @@ func NewMetrics(service string) *Metrics {
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "route"}),
 	}
-	factory.MustRegister(m.feedPolls, m.feedRecords, m.aiInvocations, m.httpRequests, m.httpDuration)
+	factory.MustRegister(m.feedPolls, m.feedRecords, m.aiInvocations, m.aiDeclines, m.httpRequests, m.httpDuration)
 	return m
 }
 
@@ -125,6 +133,18 @@ func (m *Metrics) RecordAIInvocation(capability, reason string, produced bool) {
 		return
 	}
 	m.aiInvocations.WithLabelValues(capability, reason, strconv.FormatBool(produced)).Inc()
+}
+
+// RecordAIDecline counts one honest insufficient by its G-AI-2c class and the tier that gave
+// up — the rate a tuning loop watches per capability/model.
+func (m *Metrics) RecordAIDecline(capability, class, tier string) {
+	if m == nil {
+		return
+	}
+	if tier == "" {
+		tier = "none"
+	}
+	m.aiDeclines.WithLabelValues(capability, class, tier).Inc()
 }
 
 // RecordHTTPRequest counts one request and observes its latency.
