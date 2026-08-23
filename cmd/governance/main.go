@@ -30,6 +30,7 @@ import (
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
+	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -165,6 +166,20 @@ func main() {
 	// platform's own scraper, carries no business content, and gating it would mean handing
 	// scrape credentials to monitoring.
 	router.Handle("/metrics", observability.Default().Handler())
+	// Liveness + readiness, outside /api/v1 like /metrics (R6/F5): /healthz says the process
+	// serves; /readyz says it can actually answer — DB reachable, migrations present, and the
+	// stored credential still valid on a FRESH connection (pooled connections survive a
+	// password rotation, so every node reports healthy until they all fail at the next restart).
+	credWatch := health.NewCredentialWatch(health.PgxDialer(cfg.dsn), 0, func(err error) {
+		logger.Error("db credentials are STALE: fresh connections fail; pooled connections keep serving until the next restart", observability.Err(err))
+	})
+	go credWatch.Run(ctx)
+	router.Get("/healthz", health.Healthz())
+	router.Get("/readyz", health.Readyz(
+		health.PoolCheck("db", pool),
+		health.ExecCheck("migrations", pool, "SELECT version FROM schema_migrations LIMIT 1"),
+		credWatch.Check("db-credentials"),
+	))
 	closeAuth := authedMount(ctx, router, cfg, logger, gov.Handler)
 	defer closeAuth()
 

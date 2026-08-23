@@ -38,7 +38,7 @@ code reading.
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
 | **R7** | ~~The blast multiplier destroys the order it exists to create~~ ✅ **CLOSED 2026-08-23** | ~~P2, measured~~ | Resolved by **EDR-GOVERNANCE-01 D17**: the output clamp is removed — `effective_priority`/`residual_priority` are unclamped ranking numbers (0–200; the bound lives on the multiplier's saturation). A constant multiplier now provably preserves within-release order and amplifies across releases as C2 intended. | GOV-15 ✅ |
-| **R6** | **A node that fails announces nothing** | **P2, measured** | Both halves of one VM incident. A crash-looping node restarted **81 times** unnoticed because nothing surfaces "never became ready"; and a rotated DB password stays invisible because `pgx` keeps serving pre-rotation connections — every node reports healthy until they all fail together at the next restart. | F5 (`/healthz` + `/readyz` + a startup-failure signal) · DB-password rotation reconciliation |
+| **R6** | ~~A node that fails announces nothing~~ ✅ **CLOSED 2026-08-23** (orchestration residual filed LOW-MED) | ~~P2, measured~~ | Resolved by the `internal/platform/health` seam: `/healthz` + `/readyz` on every node (DB ping · migrations probe · fresh-connection credential watch), systemd `StartLimitBurst` turning crash loops into visible failed units, and a vm-verify Readiness section. The rotation *rewrite-the-fleet* verb remains as its own LOW-MED item. | F5 ✅ · rotation detection ✅ · rotation orchestration (open) |
 | **R1** | **AI harness build-out** | **P2** | Roadmap, not defects — the largest remaining body of work and the only cluster that is about capability rather than correctness. Kept separate so it never competes with correctness work. | M4 Δ4 · G-AI-1 · G-AI-2(c) · G-AI-3 · G-AI-4 (remaining scopes) · G-AI-5 · PLAN-5 · Δ3a component-embedding · AI-TEL-1 · AI-204-2 — *(closed 2026-08-13: G-AI-2b escalation, G-AI-4 degrade-not-fail, GUI-1 explain)* |
 | **R2** | **Governance decision depth** | **P2** | The governed road works end to end, but a proposal still records AI confidence as prose in its rationale, so a confidence-threshold policy has nothing to read. | structured AI-proposal fields |
 | **R3** | **Communication has one delivery channel, and it is a log line** | **P2** | The exactly-once / idempotent / outcome-recorded mechanics are done; what is missing is anywhere real to send an artifact. | concrete delivery channels (SMTP / Slack / webhook) |
@@ -2451,7 +2451,18 @@ under the 2026-08-07 re-derivation standard.
   separate claim or one claim seen three times? Until then the numbers are per-step honest and
   the total is not meaningful — which is worth saying in the rendered output.
 
-- [ ] **F5 — a node that cannot start is indistinguishable from a healthy one.** **MED.** Found on the VM
+- [x] **F5 — a node that cannot start is indistinguishable from a healthy one.** ✅ **CLOSED
+  2026-08-23 (EDR-ENHANCE-T2, second T2 delivery — both missing halves).** (a) Every node now
+  serves `/healthz` (liveness) + `/readyz` (readiness: DB ping, migrations-table probe,
+  credential freshness) from the new business-agnostic `internal/platform/health` package
+  (depguard `platform-health-infra-only` + `TestPlatformHealthIsBusinessAgnostic` fence it like
+  eventbus/auth), mounted outside `/api/v1` like `/metrics`; `vm-verify.sh` gained a Readiness
+  section probing all six. (b) The outside-the-node signal: the systemd template now sets
+  `StartLimitIntervalSec=300` + `StartLimitBurst=5`, so a crash loop becomes a **failed unit**
+  visible to `systemctl --failed` and vm-verify's unit-state check instead of 81 silent restarts.
+  Migration failure stays fatal, as required — the failure is now loud, not soft. Filing below
+  kept for the record.
+  **MED.** Found on the VM
   2026-08-08: `themis@governance` had been crash-looping for **81 restarts** — it could not authenticate to
   run its migrations, so it exited, and `Restart=always` restarted it forever. Nothing surfaced that. The
   only reason it was caught is that someone read `schema_migrations.version` by hand and noticed it was 6
@@ -2465,7 +2476,19 @@ under the 2026-08-07 re-derivation standard.
   **Do not fix by making migration failure non-fatal.** Serving on an unverified schema is the worse
   outcome; the fix is making the failure loud, not soft.
 
-- [ ] **Rotating the DB password silently arms a fleet-wide outage.** **MED, operability.** Same VM
+- [x] **Rotating the DB password silently arms a fleet-wide outage — DETECTION half.** ✅ **CLOSED
+  2026-08-23 (EDR-ENHANCE-T2: detection first, orchestration later).** Every DB-owning node now
+  runs a `health.CredentialWatch`: every 60s it opens a **fresh** connection (the only operation
+  that exercises the stored credential — pooled connections survive a rotation) and a failure
+  flips `/readyz` to 503 naming `db-credentials`, plus one ERROR log at the transition. The armed
+  fleet-wide outage is now visible within a minute of rotation instead of at the next restart.
+  **Residual (open below): the orchestration half** — a fleet env-rewrite + restart verb.
+- [ ] **DB-password rotation orchestration — rewrite the fleet's env files as one operation.**
+  **LOW-MED, operability** (was the "still open" tail of the entry above). A `themisctl`-style
+  verb or an `install-systemd.sh` flag that rewrites `/etc/themis/*.env` and restarts the fleet
+  atomically, plus the friendlier startup error ("DSN in /etc/themis/<svc>.env is not accepted by
+  the server"). Original filing kept below for the record.
+  **MED, operability.** Same VM
   incident. `install-systemd.sh` bakes `THEMIS_PGPW` into six `/etc/themis/*.env` files and nothing
   reconciles them afterwards, so the `themis` role's password and the DSNs had drifted apart (the role held
   the literal example password from `INSTALLATION.md`, the env files held a different one).

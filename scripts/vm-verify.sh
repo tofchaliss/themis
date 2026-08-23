@@ -56,6 +56,24 @@ for svc in registry evidence knowledge governance communication intelligence; do
   if [ "$state" = "active" ]; then ok "$svc"; else flag "$svc is $state"; fi
 done
 
+# ── Readiness (R6/F5) ─────────────────────────────────────────────────────────────────────────
+#
+# "active" above only means the PROCESS runs; /readyz is the node saying it can actually serve
+# (DB reachable, migrations present, stored credential still valid on a FRESH connection — the
+# rotation trap where pooled connections keep working until the next restart). Unauthenticated
+# by design, like /metrics. A node without the endpoint is an old binary — reported, not failed.
+hdr "Readiness (/readyz)"
+for pair in "registry:8082" "evidence:8081" "knowledge:8085" "governance:8083" "communication:8084" "intelligence:8086"; do
+  svc="${pair%%:*}"; port="${pair##*:}"
+  body="$(curl -sf --max-time 5 "http://localhost:$port/readyz" 2>/dev/null || true)"
+  case "$body" in
+    *'"ready"'*)    ok "$svc ready" ;;
+    *'"degraded"'*) flag "$svc DEGRADED: $body" ;;
+    "")             flag "$svc: no /readyz (old binary, or node down)" ;;
+    *)              flag "$svc: unexpected readyz answer: $body" ;;
+  esac
+done
+
 # ── Migrations ────────────────────────────────────────────────────────────────────────────────
 #
 # The EXPECTED version is read from the migrations directory rather than hard-coded. A literal

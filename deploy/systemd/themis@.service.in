@@ -5,6 +5,11 @@
 Description=Themis Phase-3 %i service
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
+# R6/F5: a crash-looping service must become a FAILED unit, not an invisible restart loop —
+# 5 failures inside 5 minutes stop the retries and leave the unit in a state
+# `systemctl --failed` and vm-verify.sh actually show. (Measured 2026-08-08: 81 silent restarts.)
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

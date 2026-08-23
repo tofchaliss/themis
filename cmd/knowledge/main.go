@@ -28,6 +28,7 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
+	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -100,14 +101,14 @@ func loadConfig() config {
 		evidenceURL:    envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		osvURL:         envDefault("THEMIS_OSV_URL", "https://api.osv.dev"),
 
-		nvdEnabled:          os.Getenv("THEMIS_NVD_ENABLED") == "1",
-		nvdURL:              os.Getenv("THEMIS_NVD_URL"),
-		nvdAPIKey:           os.Getenv("THEMIS_NVD_API_KEY"),
-		nvdDiscovery:        os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
-		nvdBackfillLimit:    envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
-		nvdStaleAfter:       parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
-		nvdPollInterval:     parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
-		reattributeInterval: parseDurationDefault(os.Getenv("THEMIS_REATTRIBUTE_INTERVAL"), 6*time.Hour),
+		nvdEnabled:            os.Getenv("THEMIS_NVD_ENABLED") == "1",
+		nvdURL:                os.Getenv("THEMIS_NVD_URL"),
+		nvdAPIKey:             os.Getenv("THEMIS_NVD_API_KEY"),
+		nvdDiscovery:          os.Getenv("THEMIS_NVD_DISCOVERY") == "1",
+		nvdBackfillLimit:      envIntDefault("THEMIS_NVD_BACKFILL_LIMIT", app.DefaultBackfillLimit),
+		nvdStaleAfter:         parseDurationDefault(os.Getenv("THEMIS_NVD_STALE_AFTER"), app.DefaultStaleAfter),
+		nvdPollInterval:       parseDurationDefault(os.Getenv("THEMIS_NVD_POLL_INTERVAL"), 6*time.Hour),
+		reattributeInterval:   parseDurationDefault(os.Getenv("THEMIS_REATTRIBUTE_INTERVAL"), 6*time.Hour),
 		rediscoveryEnabled:    os.Getenv("THEMIS_REDISCOVERY_ENABLED") != "0",
 		rediscoveryInterval:   parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_INTERVAL"), time.Hour),
 		rediscoveryStaleAfter: parseDurationDefault(os.Getenv("THEMIS_REDISCOVERY_STALE_AFTER"), app.DefaultRediscoveryStaleAfter),
@@ -292,6 +293,20 @@ func main() {
 	// platform's own scraper, carries no business content, and gating it would mean handing
 	// scrape credentials to monitoring.
 	router.Handle("/metrics", observability.Default().Handler())
+	// Liveness + readiness, outside /api/v1 like /metrics (R6/F5): /healthz says the process
+	// serves; /readyz says it can actually answer — DB reachable, migrations present, and the
+	// stored credential still valid on a FRESH connection (pooled connections survive a
+	// password rotation, so every node reports healthy until they all fail at the next restart).
+	credWatch := health.NewCredentialWatch(health.PgxDialer(cfg.dsn), 0, func(err error) {
+		logger.Error("db credentials are STALE: fresh connections fail; pooled connections keep serving until the next restart", observability.Err(err))
+	})
+	go credWatch.Run(ctx)
+	router.Get("/healthz", health.Healthz())
+	router.Get("/readyz", health.Readyz(
+		health.PoolCheck("db", pool),
+		health.ExecCheck("migrations", pool, "SELECT version FROM schema_migrations LIMIT 1"),
+		credWatch.Check("db-credentials"),
+	))
 	closeAuth := authedMount(ctx, router, cfg, logger, kn.Handler)
 	defer closeAuth()
 	if cfg.devPurge {

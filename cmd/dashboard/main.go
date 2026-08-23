@@ -25,6 +25,7 @@ import (
 	"github.com/themis-project/themis/internal/dashboard/proxy"
 	"github.com/themis-project/themis/internal/dashboard/session"
 	"github.com/themis-project/themis/internal/platform/auth"
+	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -122,6 +123,10 @@ func main() {
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
 	router.Handle("/metrics", observability.Default().Handler())
+	// Liveness + readiness (R6/F5). The dashboard owns no database: /readyz with zero checks
+	// still distinguishes "serving" from "absent", which is the R6 gap for this node.
+	router.Get("/healthz", health.Healthz())
+	router.Get("/readyz", health.Readyz())
 
 	p, err := proxy.New(proxy.Config{
 		Targets: map[string]string{

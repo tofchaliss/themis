@@ -118,6 +118,38 @@ func TestPlatformEventbusIsBusinessAgnostic(t *testing.T) {
 	}
 }
 
+// TestPlatformHealthIsBusinessAgnostic enforces that the platform health package
+// (internal/platform/health) imports no bounded context and not the registry — it is
+// business-agnostic liveness/readiness plumbing that depends only on the standard library
+// and infrastructure drivers (pgx) (EDR-ENHANCE-T2 / R6). Depguard's
+// platform-health-infra-only rule enforces the same at lint time; this is the module-level backstop.
+func TestPlatformHealthIsBusinessAgnostic(t *testing.T) {
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(cfg, module+"/internal/platform/health/...")
+	if err != nil {
+		t.Fatalf("load health packages: %v", err)
+	}
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		t.Fatalf("health packages contained %d load error(s)", n)
+	}
+
+	forbidden := append([]string{"registry"}, boundedContexts...)
+	for _, p := range pkgs {
+		for imp := range p.Imports {
+			if !strings.HasPrefix(imp, module+"/internal/") {
+				continue // stdlib / infrastructure drivers are fine
+			}
+			for _, f := range forbidden {
+				base := module + "/internal/" + f
+				if imp == base || strings.HasPrefix(imp, base+"/") {
+					t.Errorf("health violation: %s imports %s — platform health must depend on no context or the registry, only drivers",
+						p.PkgPath, imp)
+				}
+			}
+		}
+	}
+}
+
 // TestPlatformAuthIsBusinessAgnostic enforces that the platform edge-security package
 // (internal/platform/auth) imports no bounded context and not the registry — it is
 // business-agnostic middleware + identity store that depends only on the standard library

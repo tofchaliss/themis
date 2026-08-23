@@ -245,6 +245,22 @@ linters:
               desc: auth is business-agnostic platform edge-security — it must not import a bounded context (EDR-SECURITY-01 D1)
             - pkg: github.com/themis-project/themis/internal/registry
               desc: auth is platform edge-security beneath the pipeline — it depends only on the kernel + drivers, not the registry context
+        platform-health-infra-only:
+          files:
+            - "internal/platform/health/**"
+          deny:
+            - pkg: github.com/themis-project/themis/internal/evidence
+              desc: health is business-agnostic platform liveness/readiness — it must not import a bounded context (R6/F5)
+            - pkg: github.com/themis-project/themis/internal/knowledge
+              desc: health is business-agnostic platform liveness/readiness — it must not import a bounded context (R6/F5)
+            - pkg: github.com/themis-project/themis/internal/governance
+              desc: health is business-agnostic platform liveness/readiness — it must not import a bounded context (R6/F5)
+            - pkg: github.com/themis-project/themis/internal/communication
+              desc: health is business-agnostic platform liveness/readiness — it must not import a bounded context (R6/F5)
+            - pkg: github.com/themis-project/themis/internal/intelligence
+              desc: health is business-agnostic platform liveness/readiness — it must not import a bounded context (R6/F5)
+            - pkg: github.com/themis-project/themis/internal/registry
+              desc: health is platform liveness/readiness beneath the pipeline — it depends only on drivers, not the registry context
         dashboard-is-a-view:
           files:
             - "internal/dashboard/**"

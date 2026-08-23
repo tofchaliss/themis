@@ -67,6 +67,7 @@ declare -a infra_pkgs=(
 	platform/eventbus
 	platform/observability
 	platform/auth
+	platform/health
 	dashboard/proxy
 	dashboard/session
 	registry/adapters/store

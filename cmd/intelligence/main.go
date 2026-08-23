@@ -32,6 +32,7 @@ import (
 	"github.com/themis-project/themis/internal/intelligence/adapters/wiring"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
+	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
@@ -211,6 +212,21 @@ func main() {
 	// platform's own scraper, carries no business content, and gating it would mean handing
 	// scrape credentials to monitoring.
 	router.Handle("/metrics", observability.Default().Handler())
+	// Liveness + readiness, outside /api/v1 like /metrics (R6/F5). The Intelligence node's
+	// vector store is OPTIONAL (semantic precedent off ⇒ no DSN), so readiness carries DB
+	// checks only when a pool exists — a Gateway with no store is ready by construction.
+	router.Get("/healthz", health.Healthz())
+	var readyChecks []health.Check
+	if pool != nil {
+		credWatch := health.NewCredentialWatch(health.PgxDialer(cfg.dsn), 0, func(err error) {
+			logger.Error("db credentials are STALE: fresh connections fail; pooled connections keep serving until the next restart", observability.Err(err))
+		})
+		go credWatch.Run(ctx)
+		readyChecks = append(readyChecks,
+			health.PoolCheck("db", pool),
+			credWatch.Check("db-credentials"))
+	}
+	router.Get("/readyz", health.Readyz(readyChecks...))
 	closeAuth := authedMount(ctx, router, cfg, logger, intel.Handler)
 	defer closeAuth()
 
