@@ -71,7 +71,7 @@ implementation**:
 | Tier | Theme | Items (existing IDs) | Order rule |
 | --- | --- | --- | --- |
 | **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
-| **T2** | Correctness & robustness | **R7** (GOV-15) · **R6** (F5 + DB-rotation) · GUI-11 · EV-DEDUP-2 (EDR only) · R4/R5 stay guarded/deferred | **first — outranks all capability tiers** |
+| **T2** | Correctness & robustness | ✅ **EXECUTED 2026-08-23**: R7 (GOV-15 ✅ D17) · R6 (F5 ✅ + rotation detection ✅) · EV-DEDUP-2 design ✅ (D10 PROPOSED) · GUI-11 re-scoped design-first (aliases not persisted) · R4/R5 stay guarded/deferred | done first, as required |
 | **T3** | Enterprise & platform | **R2** (structured AI-proposal fields) · **R3** (SMTP/webhook delivery) · F2 · GUI-15 · GUI-3 · GUI-5 · (Kafka swap stays parked) | after T2, R-table order within |
 | **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
 | **T5** | AI capabilities (R1) | AI-CMP-1 · G-AI-3 · G-AI-1 · G-AI-2(c) · G-AI-4 · G-AI-5 · Δ4 (eval harness, then autonomy) | entry via AI-CMP-1 → G-AI-3 |
