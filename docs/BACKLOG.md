@@ -938,8 +938,10 @@ under the 2026-08-07 re-derivation standard.
   entry's (c) needs), never on timeouts, never while degraded, never for Information
   capabilities. **(c) the eval loop** remains open and still needs Δ4.
 
-- [ ] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
-  invocation under-reports its cost in telemetry.** _(Surfaced 2026-08-13 during the router's live
+- [x] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
+  invocation under-reports its cost in telemetry.** ✅ **CLOSED 2026-08-23 (T4 delivery).**
+  Accumulates across attempts AND tiers; the proposal metadata's figure becomes the invocation
+  TOTAL (the honest number for both, as filed). Regression: `TestInvokeTokensAccumulateAcrossAttempts`. _(Surfaced 2026-08-13 during the router's live
   escalation test.)_ The Gateway overwrites `oc.TokensUsed` per attempt, so an invocation with a
   schema retry or an escalation logs only the final call's tokens (measured: an escalated
   invocation whose two calls cost ~1900 + 2116 tokens logged `tokens:2116`). The BUDGET is
@@ -949,8 +951,12 @@ under the 2026-08-07 re-derivation standard.
   "invocation total" — the total is the honest number for both. **Dep:** none. **Scope:** SMALL.
   **Priority: LOW.**
 
-- [ ] **AI-204-2 — an honest decline could state its DETERMINISTIC sub-cause when the backend already
-  knows it.** _(Observed live 2026-08-12 diagnosing CVE-2026-42496; filed 2026-08-13.)_ That decline
+- [x] **AI-204-2 — an honest decline could state its DETERMINISTIC sub-cause when the backend already
+  knows it.** ✅ **CLOSED 2026-08-23 (T4 delivery, exactly the filed shape).**
+  `domain.GroundingThinness` names the deterministic why (all-scope components — zero carriers —
+  or zero version evidence) computed BEFORE the LLM step and stamped into `Outcome.Detail` on the
+  insufficient exits only; the 204 header stays opaque (AI-204-1's invariant). The readapi client
+  now decodes `claim_class` (it was on the wire and dropped). Feeds G-AI-2c's decline taxonomy. _(Observed live 2026-08-12 diagnosing CVE-2026-42496; filed 2026-08-13.)_ That decline
   was fully explainable BEFORE the model ran: all 37 matched components were `claim_class=scope`
   (zero carriers), so the grounding could not support a stance — a fact the deterministic backend
   holds, no model needed. Today the 204's `X-Themis-AI-Reason: insufficient` and the journal's

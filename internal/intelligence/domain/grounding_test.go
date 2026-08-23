@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFaultlineFixAvailable(t *testing.T) {
 	if (FaultlineView{}).FixAvailable() {
@@ -183,5 +186,50 @@ func TestPrecedentDeltaWeightAndRankScore(t *testing.T) {
 	exact := PrecedentPosition{Score: 0, ReleaseOverlap: 0.6, OverlapKnown: true}
 	if exact.RankScore() != 0.8 { // weight alone: 0.5 + 0.5*0.6
 		t.Errorf("exact-CVE rank = %v, want the delta weight", exact.RankScore())
+	}
+}
+
+// AI-204-2: thinness is named only when the backend KNOWS the grounding cannot support a
+// stance — all-scope components, or zero version evidence. Unknown claim classes count as
+// carriers (EDR-CORRELATION-01), so they are never thin.
+func TestGroundingThinness(t *testing.T) {
+	base := func() FindingAssessment {
+		return FindingAssessment{
+			Finding:   FindingView{ID: "F1", Components: []string{"a", "b"}, ClaimClasses: []string{"scope", "scope"}},
+			Knowledge: FaultlineView{AffectedRanges: []string{"<1.2"}},
+		}
+	}
+
+	if got := GroundingThinness(base()); !strings.Contains(got, "all scope-class") || !strings.Contains(got, "2 component(s)") {
+		t.Errorf("all-scope = %q", got)
+	}
+
+	mixed := base()
+	mixed.Finding.ClaimClasses = []string{"scope", "carrier"}
+	if got := GroundingThinness(mixed); got != "" {
+		t.Errorf("a single carrier must not be thin: %q", got)
+	}
+
+	unknown := base()
+	unknown.Finding.ClaimClasses = []string{"scope", ""}
+	if got := GroundingThinness(unknown); got != "" {
+		t.Errorf("unknown counts as carrier, must not be thin: %q", got)
+	}
+
+	misaligned := base()
+	misaligned.Finding.ClaimClasses = []string{"scope"} // an older node sent no classes
+	if got := GroundingThinness(misaligned); got != "" {
+		t.Errorf("misaligned classes must not claim thinness: %q", got)
+	}
+
+	noEvidence := FindingAssessment{Finding: FindingView{ID: "F1", Components: []string{"a"}, ClaimClasses: []string{"carrier"}}}
+	if got := GroundingThinness(noEvidence); !strings.Contains(got, "no affected ranges and no fix versions") {
+		t.Errorf("no version evidence = %q", got)
+	}
+
+	healthy := base()
+	healthy.Finding.ClaimClasses = []string{"carrier", "carrier"}
+	if got := GroundingThinness(healthy); got != "" {
+		t.Errorf("healthy grounding = %q, want empty", got)
 	}
 }

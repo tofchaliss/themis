@@ -44,7 +44,8 @@ type assessmentResponse struct {
 		CVE         string `json:"cve"`
 		Stage       string `json:"stage"`
 		Components  []struct {
-			PURL string `json:"purl"`
+			PURL       string `json:"purl"`
+			ClaimClass string `json:"claim_class"`
 		} `json:"components"`
 	} `json:"finding"`
 	Knowledge struct {
@@ -83,14 +84,16 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 	}
 
 	purls := make([]string, 0, len(body.Finding.Components))
+	claims := make([]string, 0, len(body.Finding.Components))
 	for _, comp := range body.Finding.Components {
 		purls = append(purls, comp.PURL)
+		claims = append(claims, comp.ClaimClass)
 	}
 	return domain.FindingAssessment{
 		Finding: domain.FindingView{
 			ID: body.Finding.ID, ReleaseID: body.Finding.ReleaseID,
 			FaultlineID: body.Finding.FaultlineID, CVE: body.Finding.CVE,
-			Stage: body.Finding.Stage, Components: purls,
+			Stage: body.Finding.Stage, Components: purls, ClaimClasses: claims,
 		},
 		Knowledge: domain.FaultlineView{
 			ID: body.Knowledge.FaultlineID, CVE: body.Knowledge.CVE,

@@ -309,6 +309,10 @@ func (g *Gateway) Invoke(
 		}
 		ac = domain.AssembledContext{Projection: proj}
 	}
+	// AI-204-2: name the deterministic thinness NOW, before any model runs, so a later honest
+	// decline carries its why in telemetry (the 204 header stays opaque per AI-204-1). Computed
+	// once here; applied only on the insufficient exits below — an error's own detail wins.
+	thinGrounding := domain.GroundingThinness(ac.Projection)
 
 	for _, step := range capb.Plan {
 		// Knowledge (retrieval) step (Δ3a): best-effort precedent grounding, delegated whole to
@@ -410,7 +414,14 @@ func (g *Gateway) Invoke(
 					}
 					return domain.Proposal{}, oc
 				}
-				oc.Provider, oc.Model, oc.TokensUsed = res.Provider, res.Model, res.TokensUsed
+				oc.Provider, oc.Model = res.Provider, res.Model
+				// ACCUMULATE across attempts and tiers (AI-TEL-1): a schema retry or an
+				// escalation is real spend, and telemetry that reports only the final call
+				// under-states an invocation's cost (measured: ~1900+2116 logged as 2116).
+				// The budget already debits every attempt; this makes the journal agree.
+				// The proposal metadata inherits the same number — the invocation TOTAL is
+				// the honest figure for both.
+				oc.TokensUsed += res.TokensUsed
 				// Debit what the call ACTUALLY cost, not an estimate. Every attempt debits, including
 				// one whose output fails schema validation — and including an escalation pass: a
 				// retry consumes the model exactly as a successful call does, and a ledger that
@@ -494,6 +505,11 @@ func (g *Gateway) Invoke(
 			oc.Duration = g.now().Sub(start)
 			oc.DecidedBy = "llm:" + string(domain.StanceInsufficient)
 			oc.Reason = ReasonInsufficient
+			// AI-204-2: when the grounding was deterministically thin, the journal line says
+			// so beside the decline — no operator re-derives by hand what the backend knew.
+			if oc.Detail == "" && thinGrounding != "" {
+				oc.Detail = thinGrounding
+			}
 			return domain.Proposal{}, oc
 		}
 		if verr := validator.ValidateBusiness(out, subjectID, ac); verr != nil {
@@ -522,6 +538,9 @@ func (g *Gateway) Invoke(
 	oc.Duration = g.now().Sub(start)
 	oc.DecidedBy = "insufficient"
 	oc.Reason = ReasonInsufficient
+	if oc.Detail == "" && thinGrounding != "" {
+		oc.Detail = thinGrounding // AI-204-2, same as the model's decline above
+	}
 	return domain.Proposal{}, oc
 }
 

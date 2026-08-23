@@ -1013,3 +1013,15 @@ that does not exist yet". It exists now (EDR-GOVERNANCE-01 D16), and the realiza
 - **Degrade contract**: a nil seam, a failed read (including the D16 honesty guard's 422/502),
   or an empty comparison leaves that precedent UNWEIGHTED and unlabeled — an outage must never
   penalize precedent, and 0% must never be claimed when the truth is "could not ask".
+
+## Realization note (2026-08-23): AI-TEL-1 + AI-204-2 (T4 groundwork pair)
+
+- **AI-TEL-1**: `Outcome.TokensUsed` accumulates across attempts and tiers; the proposal
+  metadata inherits the invocation TOTAL. The budget was always right (it debits every
+  attempt); the journal now agrees with it.
+- **AI-204-2**: `domain.GroundingThinness` — all-scope components (zero carriers; unknown
+  counts as carrier per EDR-CORRELATION-01) or zero version evidence — computed before any
+  model call and stamped into `Outcome.Detail` on the insufficient exits. Telemetry-only by
+  decision: the 204 header stays opaque (AI-204-1). This is the decline taxonomy's first
+  entry, which G-AI-2(c)'s eval loop consumes: "model can't reason" vs "grounding had nothing
+  to reason about" are different problems with different fixes.

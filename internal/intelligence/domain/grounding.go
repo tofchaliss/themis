@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // FindingView is Intelligence's read-only view of a Governance Finding (D5) — the
 // grounding subject of a position recommendation. It is a value mirror decoded from
 // Governance's read API (FindingView JSON), never Governance's aggregate
@@ -11,6 +13,39 @@ type FindingView struct {
 	CVE         string
 	Stage       string
 	Components  []string // component purls
+	// ClaimClasses aligns with Components: `carrier`, `scope`, or "" = unknown per component
+	// (EDR-CORRELATION-01 D3). Carried for AI-204-2's thinness diagnosis — unknown is treated
+	// as carrier everywhere, so only an explicit all-`scope` set reads as thin.
+	ClaimClasses []string
+}
+
+// GroundingThinness names the deterministic reason a Decision capability's grounding cannot
+// support a stance, when the backend already knows it BEFORE any model runs (AI-204-2).
+// Returns "" when the grounding is not deterministically thin. Telemetry-only by decision:
+// the 204 header stays opaque (AI-204-1's invariant); this string lands in Outcome.Detail so
+// a decline's journal line carries its why — and so the eval loop (G-AI-2c) can tell "model
+// can't reason" from "grounding had nothing to reason about".
+func GroundingThinness(a FindingAssessment) string {
+	f := a.Finding
+	// All matched components explicitly scope-class ⇒ zero carriers: nothing in the grounding
+	// says any component CARRIES the flaw (the CVE-2026-42496 case — 37 components, all from a
+	// module-stream rebuild set). Unknown ("") counts as carrier, per EDR-CORRELATION-01.
+	if n := len(f.Components); n > 0 && n == len(f.ClaimClasses) {
+		scope := 0
+		for _, c := range f.ClaimClasses {
+			if c == "scope" {
+				scope++
+			}
+		}
+		if scope == n {
+			return fmt.Sprintf("grounding: %d component(s), all scope-class (zero carriers) — no evidence any component carries the flaw", n)
+		}
+	}
+	// No version evidence at all: nothing to run a range verdict on and no fix to reason from.
+	if len(a.Knowledge.AffectedRanges) == 0 && len(a.Knowledge.FixedVersions) == 0 && a.Knowledge.UnattributedFixes == 0 {
+		return "grounding: no affected ranges and no fix versions on record — nothing for a version verdict to stand on"
+	}
+	return ""
 }
 
 // FaultlineView is Intelligence's read-only view of a Knowledge Faultline's

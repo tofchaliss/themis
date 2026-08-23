@@ -859,3 +859,64 @@ func TestInvokeUnbudgetedIsUnlimited(t *testing.T) {
 		}
 	}
 }
+
+// AI-TEL-1: an invocation's token figure is the SUM across attempts — a schema retry's spend
+// is real spend, and the journal must agree with the budget ledger, which already debits both.
+func TestInvokeTokensAccumulateAcrossAttempts(t *testing.T) {
+	okRaw := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[{"kind":"cve","ref":"CVE-1"}],"reasoning":"grounded"}`
+	g := newTestGateway(t, fakePrompt{}, &fakeEngine{replies: []engineReply{
+		{raw: `{not json`, tokens: 1900}, // attempt 1: malformed → retried
+		{raw: okRaw, tokens: 2116},       // attempt 2: accepted
+	}})
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonOK {
+		t.Fatalf("outcome = %+v", oc)
+	}
+	if oc.TokensUsed != 1900+2116 {
+		t.Errorf("tokens = %d, want the invocation total %d (measured live: the last attempt alone was logged)", oc.TokensUsed, 1900+2116)
+	}
+}
+
+// AI-204-2: when the grounding is deterministically thin (all components scope-class), an
+// honest decline's telemetry names the why — the fact the backend knew before the model ran.
+// The header/API behaviour is untouched (AI-204-1): Detail is journal-only.
+func TestInvokeInsufficientCarriesThinGroundingDetail(t *testing.T) {
+	thin := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/a@1", "pkg:rpm/b@1"}, ClaimClasses: []string{"scope", "scope"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+	}}
+	decline := `{"finding_id":"F1","recommended_stance":"insufficient","confidence":0,"evidence":[],"reasoning":"cannot tell"}`
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: thin,
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: decline}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonInsufficient {
+		t.Fatalf("outcome = %+v", oc)
+	}
+	if !strings.Contains(oc.Detail, "all scope-class") {
+		t.Errorf("detail = %q, want the deterministic thinness named", oc.Detail)
+	}
+
+	// A HEALTHY grounding's decline stays unannotated — thinness is a fact, not a filler.
+	healthy := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"carrier"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+	}}
+	g2, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: healthy,
+		Prompt: fakePrompt{}, Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: decline}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc2 := g2.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc2.Detail != "" {
+		t.Errorf("healthy grounding decline detail = %q, want empty", oc2.Detail)
+	}
+}
