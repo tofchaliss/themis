@@ -192,6 +192,12 @@ func toGenPrecedents(in []domain.PrecedentPosition) []gen.PrecedentPosition {
 		}
 		score := p.Score
 		item.Score = &score
+		// Absent (not zero) when the delta could not be computed — 0 would read as "totally
+		// different release" when the truth is "we could not ask" (G-AI-3).
+		if p.OverlapKnown {
+			overlap := p.ReleaseOverlap
+			item.ReleaseOverlap = &overlap
+		}
 		out = append(out, item)
 	}
 	return out

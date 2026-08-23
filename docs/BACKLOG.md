@@ -973,7 +973,13 @@ under the 2026-08-07 re-derivation standard.
   Governance — the worst outcome is a human disagreeing with prose. 204 semantics per
   AI-204-1/AI-204-2. **Dep:** none (D16 shipped in v0.4.2); composes with [[G-AI-3]], which reuses
   the same delta machinery for precedent ranking. **Scope:** MEDIUM.
-- [ ] **G-AI-3 — Rank precedent decisions by release-to-release delta.** _(Gap surfaced in the M4 Δ2 grill,
+- [x] **G-AI-3 — Rank precedent decisions by release-to-release delta.** ✅ **CLOSED 2026-08-23
+  (EDR-INTELLIGENCE-01 realization note; second T5/R1 delivery).** The remainder shipped on the
+  D16 comparison read: posture-overlap delta (`persisting/(fixed+new+persisting)`), weight
+  `0.5+0.5×overlap`, ranked inside the ONE PrecedentService seam (Gateway grounding and
+  `/findings/{id}/similar` re-rank identically), overlap exposed in the prompt and as additive
+  `release_overlap` on the wire; unknown/failed comparisons leave precedent unweighted.
+  Original filing kept below. _(Gap surfaced in the M4 Δ2 grill,
   2026-07-24.)_ Δ2 grounds `recommend_position` with our own past Enterprise Positions on the **same CVE** from
   other releases, handed to the AI **clearly labeled** (which release, component version, decision + rationale)
   so the AI and the human weigh relevance themselves — a cheap on-demand read-API pull, done only when

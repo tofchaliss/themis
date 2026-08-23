@@ -153,7 +153,10 @@ func Wire(cfg Config) (Intelligence, error) {
 	if idx != nil {
 		vidx = idx
 	}
-	precedents := app.NewPrecedentService(emb, vidx, prc, cfg.TopK).WithProjection(proj)
+	// WithComparisons wires the G-AI-3 delta ranking through the same Governance client the
+	// projections come from — a precedent decided on a near-identical release outranks one from
+	// a very different release, for the Gateway's grounding and /similar alike.
+	precedents := app.NewPrecedentService(emb, vidx, prc, cfg.TopK).WithProjection(proj).WithComparisons(proj)
 
 	pr, err := engine.NewPromptRenderer()
 	if err != nil {

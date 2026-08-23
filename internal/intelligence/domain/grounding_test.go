@@ -167,3 +167,21 @@ func TestStreamKeyPrefersTheNamedStream(t *testing.T) {
 		t.Errorf("streamKeyFor(other package's fix) = %q, want empty", got)
 	}
 }
+
+// G-AI-3: the delta weight halves a fully-disjoint release's rank, keeps an identical one
+// whole, and leaves the unknown case unweighted; exact-CVE precedents rank by weight alone.
+func TestPrecedentDeltaWeightAndRankScore(t *testing.T) {
+	full := PrecedentPosition{Score: 0.8, ReleaseOverlap: 1.0, OverlapKnown: true}
+	none := PrecedentPosition{Score: 0.8, ReleaseOverlap: 0.0, OverlapKnown: true}
+	unknown := PrecedentPosition{Score: 0.8}
+	if full.DeltaWeight() != 1.0 || none.DeltaWeight() != 0.5 || unknown.DeltaWeight() != 1.0 {
+		t.Fatalf("weights = %v %v %v", full.DeltaWeight(), none.DeltaWeight(), unknown.DeltaWeight())
+	}
+	if full.RankScore() != 0.8 || none.RankScore() != 0.4 {
+		t.Errorf("semantic ranks = %v %v", full.RankScore(), none.RankScore())
+	}
+	exact := PrecedentPosition{Score: 0, ReleaseOverlap: 0.6, OverlapKnown: true}
+	if exact.RankScore() != 0.8 { // weight alone: 0.5 + 0.5*0.6
+		t.Errorf("exact-CVE rank = %v, want the delta weight", exact.RankScore())
+	}
+}

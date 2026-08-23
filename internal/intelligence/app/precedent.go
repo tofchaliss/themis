@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
 )
@@ -63,7 +64,25 @@ type PrecedentService struct {
 	index      VectorIndex
 	fallback   PrecedentReader
 	projection ProjectionReader
-	topK       int
+	// comparisons enables delta-aware ranking (G-AI-3): each precedent is weighted by how much
+	// its release's posture overlaps the subject's, via the deterministic comparison read
+	// (EDR-GOVERNANCE-01 D16). Optional like every other port: nil ⇒ ranking is pure retrieval
+	// order, and ANY comparison failure leaves that precedent unweighted — a missing delta must
+	// never block retrieval or penalize a precedent.
+	comparisons ComparisonReader
+	topK        int
+}
+
+// ComparisonReader is the slice of the projection reader the delta ranking needs — narrow on
+// purpose, so a test fakes two-release comparisons without faking the whole read surface.
+type ComparisonReader interface {
+	GetReleaseComparison(ctx context.Context, baselineID, candidateID string) (domain.ReleaseComparison, error)
+}
+
+// WithComparisons wires the delta-ranking seam (G-AI-3) and returns the service for chaining.
+func (s *PrecedentService) WithComparisons(r ComparisonReader) *PrecedentService {
+	s.comparisons = r
+	return s
 }
 
 // NewPrecedentService builds the seam. Every dependency is optional and a nil one simply
@@ -140,7 +159,7 @@ func (s *PrecedentService) RetrieveForFinding(ctx context.Context, findingID str
 // precedent". Operators see the difference in telemetry, not in the return value.
 func (s *PrecedentService) Retrieve(ctx context.Context, q PrecedentQuery) []domain.PrecedentPosition {
 	if found := s.semantic(ctx, q); len(found) > 0 {
-		return found
+		return s.deltaRank(ctx, q.ReleaseID, found)
 	}
 	if s.fallback == nil || q.FaultlineID == "" {
 		return nil
@@ -151,6 +170,46 @@ func (s *PrecedentService) Retrieve(ctx context.Context, q PrecedentQuery) []dom
 	if err != nil {
 		return nil
 	}
+	return s.deltaRank(ctx, q.ReleaseID, prec)
+}
+
+// deltaRank is the G-AI-3 remainder: weight each precedent by the release-to-release delta and
+// re-sort. The delta signal is posture overlap from the deterministic comparison read —
+// |persisting| / (|fixed|+|new|+|persisting|), the Jaccard of the two releases' Finding sets.
+// One comparison per DISTINCT precedent release (topK bounds it), cached within the call; the
+// subject's own release (IncludeSameRelease) trivially overlaps 1.0 without a read. Any failed
+// or empty comparison leaves that precedent unweighted (weight 1.0): degrading a rank because a
+// read failed would punish precedent for an outage. The sort is stable, so equal rank scores
+// keep the retriever's order.
+func (s *PrecedentService) deltaRank(ctx context.Context, subjectRelease string, prec []domain.PrecedentPosition) []domain.PrecedentPosition {
+	if s.comparisons == nil || subjectRelease == "" {
+		return prec
+	}
+	type verdict struct {
+		overlap float64
+		known   bool
+	}
+	cache := make(map[string]verdict, len(prec))
+	for i := range prec {
+		rel := prec[i].ReleaseID
+		if rel == "" {
+			continue
+		}
+		v, seen := cache[rel]
+		if !seen {
+			if rel == subjectRelease {
+				v = verdict{overlap: 1.0, known: true}
+			} else {
+				cmp, err := s.comparisons.GetReleaseComparison(ctx, subjectRelease, rel)
+				if total := len(cmp.Fixed) + len(cmp.New) + len(cmp.Persisting); err == nil && total > 0 {
+					v = verdict{overlap: float64(len(cmp.Persisting)) / float64(total), known: true}
+				}
+			}
+			cache[rel] = v
+		}
+		prec[i].ReleaseOverlap, prec[i].OverlapKnown = v.overlap, v.known
+	}
+	sort.SliceStable(prec, func(i, j int) bool { return prec[i].RankScore() > prec[j].RankScore() })
 	return prec
 }
 

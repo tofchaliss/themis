@@ -27,6 +27,8 @@ var compareReleasesTmpl string
 // plan needs lives in ReleasePosture.PlanActions, not in a template function.
 var promptFuncs = template.FuncMap{
 	"add1": func(i int) int { return i + 1 },
+	// mul100 renders a 0..1 ratio as a percentage figure (G-AI-3 release-overlap label).
+	"mul100": func(f float64) float64 { return f * 100 },
 	// first3 caps a long list: a merged module-stream step legitimately covers 33 packages, and
 	// printing all 33 turned one plan step into five wrapped lines of noise (PLAN-1). The COLLAPSE
 	// is right; the rendering was not.

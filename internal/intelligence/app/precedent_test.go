@@ -327,3 +327,127 @@ func TestRedactPrecedentsNilRedactorPassesThrough(t *testing.T) {
 		t.Errorf("empty input returned %+v, want nil", out)
 	}
 }
+
+// --- G-AI-3: delta-aware ranking ------------------------------------------------------
+
+// deltaComparisons fakes the comparison read per precedent release.
+type deltaComparisons struct {
+	byRelease map[string]domain.ReleaseComparison
+	err       error
+	calls     int
+}
+
+func (d *deltaComparisons) GetReleaseComparison(_ context.Context, _, candidate string) (domain.ReleaseComparison, error) {
+	d.calls++
+	if d.err != nil {
+		return domain.ReleaseComparison{}, d.err
+	}
+	return d.byRelease[candidate], d.err
+}
+
+// bucketsOf builds a comparison whose overlap = persisting/(fixed+new+persisting).
+func bucketsOf(fixed, fresh, persisting int) domain.ReleaseComparison {
+	mk := func(n int) []domain.PostureEntry {
+		out := make([]domain.PostureEntry, n)
+		return out
+	}
+	return domain.ReleaseComparison{BaselineID: "R1", CandidateID: "x",
+		Fixed: mk(fixed), New: mk(fresh), Persisting: mk(persisting)}
+}
+
+// A high-cosine precedent from a very DIFFERENT release must fall behind a slightly
+// lower-cosine one from a near-identical release — the whole point of G-AI-3.
+func TestRetrieveDeltaRanksByReleaseOverlap(t *testing.T) {
+	sem := &recordingSemantic{out: []domain.PrecedentPosition{
+		{ReleaseID: "far", Score: 0.90},  // overlap 0 → weight 0.5 → rank 0.45
+		{ReleaseID: "near", Score: 0.80}, // overlap 1 → weight 1.0 → rank 0.80
+	}}
+	cmpr := &deltaComparisons{byRelease: map[string]domain.ReleaseComparison{
+		"far":  bucketsOf(5, 5, 0),
+		"near": bucketsOf(0, 0, 10),
+	}}
+	s := NewPrecedentService(sem, sem, nil, 5).WithComparisons(cmpr)
+	got := s.Retrieve(context.Background(), subjectQuery())
+	if len(got) != 2 || got[0].ReleaseID != "near" || got[1].ReleaseID != "far" {
+		t.Fatalf("order = %+v, want near before far", got)
+	}
+	if !got[0].OverlapKnown || got[0].ReleaseOverlap != 1.0 {
+		t.Errorf("near overlap = %v known=%v", got[0].ReleaseOverlap, got[0].OverlapKnown)
+	}
+	if got[1].Score != 0.90 {
+		t.Error("the stored cosine score must stay the index's, not the weighted rank")
+	}
+}
+
+// The fallback's exact-CVE precedents (Score 0) rank by the delta weight alone.
+func TestRetrieveDeltaRanksTheFallbackToo(t *testing.T) {
+	fb := &recordingFallback{out: []domain.PrecedentPosition{
+		{ReleaseID: "far"}, {ReleaseID: "near"},
+	}}
+	cmpr := &deltaComparisons{byRelease: map[string]domain.ReleaseComparison{
+		"far":  bucketsOf(9, 0, 1),
+		"near": bucketsOf(1, 0, 9),
+	}}
+	s := NewPrecedentService(nil, nil, fb, 5).WithComparisons(cmpr)
+	got := s.Retrieve(context.Background(), subjectQuery())
+	if len(got) != 2 || got[0].ReleaseID != "near" {
+		t.Fatalf("order = %+v, want near first", got)
+	}
+}
+
+// Degradation contract: a failing or empty comparison leaves precedent UNWEIGHTED and in
+// retrieval order — an outage must never penalize precedent or block retrieval.
+func TestRetrieveDeltaDegradesToUnweighted(t *testing.T) {
+	for name, cmpr := range map[string]*deltaComparisons{
+		"read error":       {err: context.DeadlineExceeded},
+		"empty comparison": {byRelease: map[string]domain.ReleaseComparison{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sem := &recordingSemantic{out: []domain.PrecedentPosition{
+				{ReleaseID: "a", Score: 0.9}, {ReleaseID: "b", Score: 0.8},
+			}}
+			s := NewPrecedentService(sem, sem, nil, 5).WithComparisons(cmpr)
+			got := s.Retrieve(context.Background(), subjectQuery())
+			if len(got) != 2 || got[0].ReleaseID != "a" || got[0].OverlapKnown || got[1].OverlapKnown {
+				t.Fatalf("%s: got %+v, want retrieval order, overlap unknown", name, got)
+			}
+		})
+	}
+}
+
+// One comparison per DISTINCT precedent release; the subject's own release overlaps 1.0
+// without a read; a nil seam or empty subject changes nothing.
+func TestRetrieveDeltaCachesAndSkips(t *testing.T) {
+	sem := &recordingSemantic{out: []domain.PrecedentPosition{
+		{ReleaseID: "other", Score: 0.9}, {ReleaseID: "other", Score: 0.7},
+		{ReleaseID: "R1", Score: 0.6}, // same release as the subject (IncludeSameRelease case)
+		{ReleaseID: "", Score: 0.5},   // no release: nothing to compare against
+	}}
+	cmpr := &deltaComparisons{byRelease: map[string]domain.ReleaseComparison{"other": bucketsOf(0, 0, 3)}}
+	s := NewPrecedentService(sem, sem, nil, 5).WithComparisons(cmpr)
+	got := s.Retrieve(context.Background(), subjectQuery())
+	if cmpr.calls != 1 {
+		t.Errorf("comparison calls = %d, want 1 (cached per distinct release)", cmpr.calls)
+	}
+	for _, p := range got {
+		if p.ReleaseID == "R1" && (!p.OverlapKnown || p.ReleaseOverlap != 1.0) {
+			t.Errorf("subject's own release must overlap 1.0 without a read: %+v", p)
+		}
+		if p.ReleaseID == "" && p.OverlapKnown {
+			t.Errorf("a precedent with no release must stay unweighted: %+v", p)
+		}
+	}
+
+	// Nil seam: pure retrieval order, untouched.
+	sem2 := &recordingSemantic{out: []domain.PrecedentPosition{{ReleaseID: "x", Score: 0.9}}}
+	if got := NewPrecedentService(sem2, sem2, nil, 5).Retrieve(context.Background(), subjectQuery()); got[0].OverlapKnown {
+		t.Error("nil comparison seam must not mark overlap")
+	}
+	// Empty subject release: nothing to compare FROM.
+	sem3 := &recordingSemantic{out: []domain.PrecedentPosition{{ReleaseID: "x", Score: 0.9}}}
+	q := subjectQuery()
+	q.ReleaseID = ""
+	if got := NewPrecedentService(sem3, sem3, nil, 5).WithComparisons(cmpr).Retrieve(context.Background(), q); got[0].OverlapKnown {
+		t.Error("no subject release must leave precedent unweighted")
+	}
+}

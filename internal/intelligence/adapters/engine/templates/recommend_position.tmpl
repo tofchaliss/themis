@@ -21,7 +21,7 @@ affected by a specific vulnerability, and explain why.
   {{capList .Faultline.AffectedRanges 12}}
 {{if .Precedents}}
 ## Prior enterprise decisions on this or similar findings (consider for consistency, do not blindly copy — a different CVE may not be comparable)
-{{range .Precedents}}- release {{.ReleaseID}}{{if .SourceCVE}} · cve {{.SourceCVE}}{{end}}{{if .Component}} · {{.Component}}{{end}}{{if gt .Score 0.0}} · similarity {{printf "%.2f" .Score}}{{end}}: {{.Stance}} — {{.Rationale}}
+{{range .Precedents}}- release {{.ReleaseID}}{{if .SourceCVE}} · cve {{.SourceCVE}}{{end}}{{if .Component}} · {{.Component}}{{end}}{{if gt .Score 0.0}} · similarity {{printf "%.2f" .Score}}{{end}}{{if .OverlapKnown}} · release-overlap {{printf "%.0f" (mul100 .ReleaseOverlap)}}% (how much that release's open surface matches this one — weigh low-overlap precedent less){{end}}: {{.Stance}} — {{.Rationale}}
 {{end}}{{end}}
 ## Instructions
 Respond with a single JSON object ONLY (no prose), matching exactly:

@@ -482,3 +482,29 @@ func TestRenderCompareReleases(t *testing.T) {
 		}
 	}
 }
+
+// G-AI-3: a precedent with a known release overlap renders the labeled percentage; one
+// without stays unlabeled rather than claiming 0%.
+func TestRenderRecommendCarriesReleaseOverlap(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac := domain.AssembledContext{
+		Projection: domain.FindingAssessment{Finding: domain.FindingView{ID: "F1", CVE: "CVE-1"}},
+		Precedents: []domain.PrecedentPosition{
+			{ReleaseID: "near", Stance: "not_affected", Score: 0.8, ReleaseOverlap: 0.82, OverlapKnown: true},
+			{ReleaseID: "mystery", Stance: "affected", Score: 0.7},
+		},
+	}
+	out, err := r.Render("recommend_position", ac)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(out, "release-overlap 82%") {
+		t.Errorf("prompt missing the overlap label:\n%s", out)
+	}
+	if strings.Contains(out, "mystery \u00b7 release-overlap") || strings.Contains(out, "release-overlap 0%") {
+		t.Error("an unknown overlap must not render as 0%")
+	}
+}

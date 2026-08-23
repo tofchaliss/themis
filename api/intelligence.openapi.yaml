@@ -170,6 +170,15 @@ components:
             Cosine similarity in [0,1] for a semantically retrieved precedent. 0 marks an
             exact-CVE match, which is found by lookup rather than by similarity and therefore
             has no meaningful score — not "least similar".
+        release_overlap:
+          type: number
+          format: double
+          description: >-
+            G-AI-3 delta signal - posture overlap in [0,1] between the precedent's release and
+            the subject's, from the deterministic comparison read (EDR-GOVERNANCE-01 D16):
+            persisting / (fixed + new + persisting). Absent when the comparison could not be
+            computed - an unknown delta leaves the precedent unweighted, never penalized. The
+            ranking you receive is already weighted by it (down-weight only, never dropped).
     InformationResponse:
       type: object
       description: >-

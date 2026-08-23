@@ -992,3 +992,24 @@ doubles as the fan-out guard, T9). What was decided in realization:
 - Consumers: the GUI's Compare tab ("Ask the advisor", read-scope allowed — the invoke is in
   the dashboard gate's statelessPosts, recording nothing), and any curl. Same read, same
   grounding as the tab renders.
+
+## Realization note (2026-08-23): G-AI-3 — delta-aware precedent ranking (the open remainder, closed)
+
+The Δ3a cosine half shipped 2026-08-04; the remainder waited on "release-comparison machinery
+that does not exist yet". It exists now (EDR-GOVERNANCE-01 D16), and the realization:
+
+- **The delta signal is posture overlap**: `|persisting| / (|fixed|+|new|+|persisting|)` from
+  the deterministic comparison read — the Jaccard of the two releases' open-Finding sets. A
+  near-identical release overlaps ~1.0; a very different one ~0. A component-level diff can
+  refine the signal later without moving the seam.
+- **Down-weight, never drop**: `weight = 0.5 + 0.5×overlap`; ranking key = cosine × weight
+  (semantic) or the weight alone (exact-CVE fallback, whose Score is 0 by construction).
+  Dropping was rejected: the Δ2 stance is "clearly labeled, the model and the human weigh
+  relevance themselves" — so the overlap is EXPOSED (prompt label `release-overlap NN%`,
+  additive `release_overlap` on `/findings/{id}/similar`) rather than silently acted on.
+- **It lives in the PrecedentService** — the one retrieval seam — so the Gateway's grounding
+  and the human endpoint re-rank identically. One comparison read per distinct precedent
+  release (topK-bounded, cached per call; the subject's own release is 1.0 without a read).
+- **Degrade contract**: a nil seam, a failed read (including the D16 honesty guard's 422/502),
+  or an empty comparison leaves that precedent UNWEIGHTED and unlabeled — an outage must never
+  penalize precedent, and 0% must never be claimed when the truth is "could not ask".

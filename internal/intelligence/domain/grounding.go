@@ -48,8 +48,9 @@ func (f FaultlineView) FixAvailable() bool { return len(f.FixedVersions) > 0 }
 // Score 0); Δ3a's Knowledge Engine additionally retrieves SEMANTICALLY similar past decisions
 // — possibly a DIFFERENT CVE on the same component or bug-class — each with a cosine Score in
 // [0,1] (Book IV Ch 8, RC-1). It is context, not instruction: the AI only reads it and the
-// human still decides ("Gathering Is Not Knowing"). Ranking by release-to-release delta stays
-// deferred (G-AI-3).
+// human still decides ("Gathering Is Not Knowing"). Ranking is delta-aware (G-AI-3): the
+// PrecedentService weights each precedent by how much the release it was decided on overlaps
+// the release under judgment, and both consumers see the same weight.
 type PrecedentPosition struct {
 	ReleaseID string
 	Stance    string
@@ -57,6 +58,34 @@ type PrecedentPosition struct {
 	SourceCVE string  // CVE of the precedent decision (may differ from the subject — Δ3a semantic precedent)
 	Component string  // representative component of the precedent decision (label)
 	Score     float64 // cosine similarity in [0,1] for a Δ3a retrieved precedent; 0 for a Δ2 exact-CVE precedent
+	// ReleaseOverlap is the posture overlap between the precedent's release and the subject's
+	// (G-AI-3): |persisting| / (|fixed|+|new|+|persisting|) from the deterministic comparison
+	// read (EDR-GOVERNANCE-01 D16). 1.0 = the releases share their whole open surface; 0 =
+	// nothing in common. Meaningful only when OverlapKnown — an unreadable or empty comparison
+	// leaves the precedent unweighted rather than penalized.
+	ReleaseOverlap float64
+	OverlapKnown   bool
+}
+
+// DeltaWeight is the G-AI-3 down-weight: how much of a precedent's retrieval score survives
+// the release-to-release delta. An identical release keeps everything (1.0); a completely
+// disjoint one keeps half (0.5) — down-weighted, NEVER dropped, because the precedent stays
+// clearly labeled and the model/human weigh it themselves. Unknown overlap weighs 1.0.
+func (p PrecedentPosition) DeltaWeight() float64 {
+	if !p.OverlapKnown {
+		return 1.0
+	}
+	return 0.5 + 0.5*p.ReleaseOverlap
+}
+
+// RankScore is the ordering key the PrecedentService sorts by (G-AI-3): the cosine similarity
+// scaled by the delta weight for a semantic precedent; the delta weight alone for an exact-CVE
+// precedent (whose Score is 0 by construction, not "no similarity").
+func (p PrecedentPosition) RankScore() float64 {
+	if p.Score > 0 {
+		return p.Score * p.DeltaWeight()
+	}
+	return p.DeltaWeight()
 }
 
 // AssembledContext is the **Capability Context** (EDR-TRUST-01 T10): the shape a capability
