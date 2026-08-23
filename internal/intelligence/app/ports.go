@@ -124,6 +124,12 @@ type ProjectionReader interface {
 	// its priority and components. Governance owns it (it owns the Release Selection Type's
 	// security view), and a dashboard and a report read the same thing.
 	GetReleasePosture(ctx context.Context, releaseID string) (domain.ReleasePosture, error)
+	// GetReleaseComparison fetches Governance's cross-release posture diff (EDR-GOVERNANCE-01
+	// D16) for compare_releases@v1 (AI-CMP-1). Governance owns the buckets, their ordering AND
+	// the honesty guard (422 evidence-less / 502 evidence unreachable) — a guard refusal
+	// surfaces here as an error and becomes an honest no-grounding outcome, never a narration
+	// of a diff that proves nothing.
+	GetReleaseComparison(ctx context.Context, baselineID, candidateID string) (domain.ReleaseComparison, error)
 }
 
 // PrecedentReader is a Knowledge Provider (D5, Δ2 C6): reads our own past Enterprise

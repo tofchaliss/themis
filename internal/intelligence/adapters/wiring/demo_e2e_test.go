@@ -50,6 +50,10 @@ func (s stubProjectionReader) GetReleasePosture(context.Context, string) (domain
 	return domain.ReleasePosture{}, nil
 }
 
+func (s stubProjectionReader) GetReleaseComparison(context.Context, string, string) (domain.ReleaseComparison, error) {
+	return domain.ReleaseComparison{}, nil
+}
+
 func demoGateway(t *testing.T, prov app.Provider, idx *index.Memory, emb app.Embedder) *app.Gateway {
 	t.Helper()
 	pr, err := engine.NewPromptRenderer()

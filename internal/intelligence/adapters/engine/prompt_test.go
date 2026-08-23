@@ -452,3 +452,33 @@ func TestRecommendPromptBoundsAffectedRanges(t *testing.T) {
 		}
 	}
 }
+
+// compare_releases renders the comparison buckets with their counts and truncation notes, and
+// carries the JSON contract pinned to the candidate id.
+func TestRenderCompareReleases(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac := domain.AssembledContext{Comparison: domain.ReleaseComparison{
+		BaselineID: "rel-a", CandidateID: "rel-b",
+		Fixed: []domain.PostureEntry{{FindingID: "f1", CVE: "CVE-2024-0001", ResidualPriority: 90, EffectivePriority: 90,
+			Components: []domain.PostureComponent{{Name: "libfoo", Version: "1.0"}}}},
+		Persisting: []domain.PostureEntry{{FindingID: "f3", CVE: "CVE-2023-0003", ResidualPriority: 70, EffectivePriority: 70}},
+	}}
+	out, err := r.Render("compare_releases", ac)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{
+		"rel-a", "rel-b",
+		"CVE-2024-0001", "libfoo 1.0", "residual 90",
+		"CVE-2023-0003", "undecided",
+		"(nothing new)",
+		`"subject_id":"rel-b"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}

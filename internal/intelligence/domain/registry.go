@@ -141,9 +141,44 @@ func ExplainVulnerabilityV1() Capability {
 	}
 }
 
+// CompareReleasesV1 narrates the cross-release posture diff (AI-CMP-1, IDEA-1's consumer 3):
+// given a baseline and a candidate release — the Selection is ORDERED [baseline, candidate] —
+// it says what the fix achieved, what it introduced, what it missed, and what to do next.
+//
+// It is an **Information** capability (T7): a narration proposes no stance, nothing enters
+// Governance, and the worst outcome of a wrong one is a human disagreeing with prose.
+//
+// The DIFF is deliberately not the model's job. The grounding is Governance's deterministic
+// comparison read (EDR-GOVERNANCE-01 D16) handed over VERBATIM — buckets, ordering, honesty
+// guard all decided server-side — so the model narrates a result it can no longer get wrong.
+// The same read serves the GUI's Compare tab: one question, one answer, whoever asks.
+//
+// No Knowledge (precedent) step, for explain_vulnerability's reason: precedent retrieval is
+// scoped to past Positions, and a diff narration is not a position.
+func CompareReleasesV1() Capability {
+	return Capability{
+		ID:      "compare_releases",
+		Version: "v1",
+		// Exactly two Releases, ordered [baseline, candidate]. The bound is the fan-out guard
+		// (T9): comparing N releases pairwise is a different capability, not this one repeated.
+		SelectionType: SelectionRelease,
+		MinSelection:  2,
+		MaxSelection:  2,
+		Output:        OutputInformation,
+		Needs:         []ContextNeed{NeedReleaseComparison},
+		Plan: ExecutionPlan{
+			{Engine: EngineLLM, Prompt: "compare_releases"},
+		},
+		OutputSchema: compareReleasesSchema,
+		// No stances: an Information Response recommends nothing (T7).
+		AllowedStances: nil,
+		Routing:        RoutingRequirements{Privacy: PrivacyInternal, LocalOnly: true},
+	}
+}
+
 // DefaultRegistry is the shipped catalog: recommend_position@v1 (Decision, one Finding),
 // plan_remediation@v1 (Information, one Release), and explain_vulnerability@v1 (Information,
 // one Finding).
 func DefaultRegistry() *Registry {
-	return NewRegistry(RecommendPositionV1(), PlanRemediationV1(), ExplainVulnerabilityV1())
+	return NewRegistry(RecommendPositionV1(), PlanRemediationV1(), ExplainVulnerabilityV1(), CompareReleasesV1())
 }

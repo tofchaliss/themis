@@ -27,6 +27,10 @@ func (p *planProjection) GetReleasePosture(context.Context, string) (domain.Rele
 	return p.posture, nil
 }
 
+func (p *planProjection) GetReleaseComparison(context.Context, string, string) (domain.ReleaseComparison, error) {
+	return domain.ReleaseComparison{}, nil
+}
+
 // echoProvider returns whatever raw JSON it is given, recording the prompt it saw.
 type echoProvider struct {
 	raw    string

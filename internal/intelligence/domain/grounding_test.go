@@ -64,6 +64,23 @@ func TestGroundsAnchorsToTheProjectionNotTheShapedView(t *testing.T) {
 
 // The accessors read straight through to the authoritative projection — a shaped context has
 // no private copy that could drift from what the owning context vouched for.
+// A context carrying a Comparison grounds through IT — the comparison's identifiers, not the
+// (zero-valued) finding projection beside it.
+func TestAssembledContextGroundsThroughComparison(t *testing.T) {
+	ac := AssembledContext{Comparison: ReleaseComparison{
+		BaselineID: "rel-a", CandidateID: "rel-b",
+		Persisting: []PostureEntry{{FindingID: "f3", CVE: "CVE-3"}},
+	}}
+	for _, ref := range []string{"rel-a", "rel-b", "f3", "CVE-3"} {
+		if !ac.Grounds(ref) {
+			t.Errorf("Grounds(%q) = false, want true", ref)
+		}
+	}
+	if ac.Grounds("CVE-404") {
+		t.Error("an identifier in no bucket must not ground")
+	}
+}
+
 func TestAssembledContextAccessorsReadTheProjection(t *testing.T) {
 	ac := AssembledContext{Projection: FindingAssessment{
 		Finding:   FindingView{ID: "F1", ReleaseID: "R1"},

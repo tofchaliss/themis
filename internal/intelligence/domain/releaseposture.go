@@ -440,13 +440,23 @@ func (p ReleasePosture) Grounds(ref string) bool {
 		return true
 	}
 	for _, e := range p.Entries {
-		if ref == e.FindingID || ref == e.CVE {
+		if e.grounds(ref) {
 			return true
 		}
-		for _, c := range e.Components {
-			if ref == c.PURL || (c.Name != "" && ref == c.Name) || (c.Source != "" && ref == c.Source) {
-				return true
-			}
+	}
+	return false
+}
+
+// grounds reports whether ref names this entry or one of its components — shared by the
+// posture's Grounds and the comparison's (comparison.go), so the two can never disagree on
+// what counts as a real identifier.
+func (e PostureEntry) grounds(ref string) bool {
+	if ref == e.FindingID || ref == e.CVE {
+		return true
+	}
+	for _, c := range e.Components {
+		if ref == c.PURL || (c.Name != "" && ref == c.Name) || (c.Source != "" && ref == c.Source) {
+			return true
 		}
 	}
 	return false

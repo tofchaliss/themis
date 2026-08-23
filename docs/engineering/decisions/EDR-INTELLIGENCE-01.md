@@ -963,3 +963,32 @@ OpenSpec change `openspec/changes/phase3-intelligence/` with these as `tasks.md`
   client); the pipeline is correct with AI off; disabled ≡ unavailable (D13).
 - **Harness** — the target Intelligence architecture (`docs/engineering/THEMIS-AI-HARNESS.md`): typed
   multi-engine dispatch + execution harness + LLMOps plane; reached by four additive deltas (Revision 2).
+
+---
+
+## Realization note (2026-08-23): `compare_releases@v1` — the fourth capability (AI-CMP-1, EDR-ENHANCE-T5 entry point)
+
+The first two-subject capability, and deliberately the cheapest possible one: an **Information**
+narration (T7) over Governance's deterministic release-comparison read (EDR-GOVERNANCE-01 D16),
+received VERBATIM as a new `ReleaseComparison` grounding shape (`NeedReleaseComparison`). The
+Selection is **ordered** — `[baseline, candidate]`, exactly two (`Min=Max=2`; the cardinality
+doubles as the fan-out guard, T9). What was decided in realization:
+
+- **The diff is never the model's job.** Buckets, ordering, and the honesty guard are all
+  server-side; the model narrates a query result it cannot get wrong, and the prompt says so.
+  Each bucket is capped at 15 rows worst-first, with the omission COUNTED in the prompt — a
+  silent truncation would let the model claim completeness it was never given.
+- **The guard's refusal is a grounding failure, not material.** Governance's 422 (an
+  evidence-less side) or 502 (Evidence unreachable) surfaces as `no_grounding` — the runtime
+  never narrates around a diff that proves nothing.
+- **Empty buckets answer deterministically** (`rule:empty-comparison`): "no security
+  difference" costs zero tokens.
+- **Grounding Verification is the only gate** on this path (T8), as for its Information
+  siblings: every cited ref must name a release id, finding id, CVE, or component the
+  comparison contained; `AssembledContext.Grounds` anchors to the comparison when present.
+- No Knowledge (precedent) step, for explain_vulnerability's reason: a narration is not a
+  position. G-AI-3 (delta-aware precedent ranking) will reuse the same comparison machinery on
+  the Decision path — that is its own item.
+- Consumers: the GUI's Compare tab ("Ask the advisor", read-scope allowed — the invoke is in
+  the dashboard gate's statelessPosts, recording nothing), and any curl. Same read, same
+  grounding as the tab renders.

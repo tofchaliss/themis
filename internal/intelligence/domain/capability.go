@@ -37,6 +37,10 @@ const (
 	NeedFinding ContextNeed = "finding"
 	// NeedFaultline is the Finding's Faultline enrichment, read from Knowledge's read API.
 	NeedFaultline ContextNeed = "faultline"
+	// NeedReleaseComparison is the cross-release posture diff owned by Governance
+	// (EDR-GOVERNANCE-01 D16): fixed / new / persisting by CVE between a baseline and a
+	// candidate release. Declaring it makes a capability two-release by construction.
+	NeedReleaseComparison ContextNeed = "release_comparison"
 	// NeedReleasePosture is the release-scoped Domain Projection owned by Governance: every
 	// Finding on a Release with its priority and components (T10).
 	NeedReleasePosture ContextNeed = "release_posture"
@@ -106,3 +110,14 @@ type Capability struct {
 // Ref is the "id@version" provenance string carried on every Proposal this
 // capability produces (D2 · INT-0067).
 func (c Capability) Ref() string { return c.ID + "@" + c.Version }
+
+// HasNeed reports whether the capability declared the given grounding input — how the runtime
+// decides WHICH projection to receive without knowing any topology (T10).
+func (c Capability) HasNeed(n ContextNeed) bool {
+	for _, need := range c.Needs {
+		if need == n {
+			return true
+		}
+	}
+	return false
+}

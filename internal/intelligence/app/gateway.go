@@ -264,8 +264,28 @@ func (g *Gateway) Invoke(
 	// asks the reader for the projection of the type it declared and is handed an authoritative
 	// one back.
 	var ac domain.AssembledContext
-	switch capb.SelectionType {
-	case domain.SelectionRelease:
+	switch {
+	case capb.HasNeed(domain.NeedReleaseComparison):
+		// Two ordered releases: [baseline, candidate] (AI-CMP-1). Accepts() already enforced
+		// the cardinality, so the indexes are safe. The read carries Governance's honesty guard
+		// with it — an evidence-less side refuses there, and that refusal is a grounding
+		// failure here, never something to narrate around.
+		cmp, cerr := g.projection.GetReleaseComparison(ctx, sel.IDs[0], sel.IDs[1])
+		if cerr != nil || cmp.CandidateID == "" {
+			oc.Reason = ReasonNoGrounding
+			return domain.Proposal{}, oc
+		}
+		// Nothing in any bucket means both postures are empty — a real answer, given
+		// deterministically rather than spending a model call to say "no difference".
+		if cmp.Empty() {
+			oc.Duration = g.now().Sub(start)
+			oc.Information = "Both releases have empty postures — nothing fixed, nothing new, nothing persisting. There is no security difference to narrate."
+			oc.DecidedBy = "rule:empty-comparison"
+			oc.Reason = ReasonOK
+			return domain.Proposal{}, oc
+		}
+		ac = domain.AssembledContext{Comparison: cmp}
+	case capb.SelectionType == domain.SelectionRelease:
 		posture, perr := g.projection.GetReleasePosture(ctx, subjectID)
 		if perr != nil || posture.ReleaseID == "" {
 			oc.Reason = ReasonNoGrounding

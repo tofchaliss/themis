@@ -86,3 +86,30 @@ const planRemediationSchema = `{
     "reasoning": { "type": "string", "minLength": 1 }
   }
 }`
+
+// compareReleasesSchema is the JSON Schema for compare_releases@v1's raw model output — the
+// same Information shape as its siblings: no stance, no confidence (T7), mandatory `evidence`
+// because Grounding Verification is the only gate on this path (T8). subject_id names the
+// CANDIDATE release — the build being judged.
+const compareReleasesSchema = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject_id", "evidence", "reasoning"],
+  "properties": {
+    "subject_id": { "type": "string", "minLength": 1 },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "ref": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reasoning": { "type": "string", "minLength": 1 }
+  }
+}`

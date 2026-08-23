@@ -19,6 +19,9 @@ var planRemediationTmpl string
 //go:embed templates/explain_vulnerability.tmpl
 var explainVulnerabilityTmpl string
 
+//go:embed templates/compare_releases.tmpl
+var compareReleasesTmpl string
+
 // promptFuncs are the few helpers the templates need. Deliberately tiny: a prompt template is an
 // adapter asset, and logic that grows here is logic that has escaped the domain — the grouping a
 // plan needs lives in ReleasePosture.PlanActions, not in a template function.
@@ -113,6 +116,7 @@ func NewPromptRenderer() (*PromptRenderer, error) {
 		"recommend_position":    recommendPositionTmpl,
 		"plan_remediation":      planRemediationTmpl,
 		"explain_vulnerability": explainVulnerabilityTmpl,
+		"compare_releases":      compareReleasesTmpl,
 	})
 }
 

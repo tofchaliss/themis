@@ -49,6 +49,7 @@ var documentPosts = map[string]bool{
 var statelessPosts = map[string]bool{
 	"/api/intelligence/capabilities/plan_remediation/invoke":      true,
 	"/api/intelligence/capabilities/explain_vulnerability/invoke": true,
+	"/api/intelligence/capabilities/compare_releases/invoke":      true,
 	"/api/communication/previews":                                 true,
 }
 

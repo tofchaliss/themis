@@ -55,7 +55,7 @@ curl -s -X POST localhost:8086/api/v1/capabilities/recommend_position/invoke \
 > ([API.md](API.md)). The **automated** grounding→validation→proposal path is fully proven without any of
 > this — see `go test ./internal/intelligence/...` (`e2e_test.go` drives the whole stack over httptest).
 
-**Automated real-model check.** `make e2e-llm` runs **all three shipped capabilities** —
+**Automated real-model check.** `make e2e-llm` runs the shipped capabilities —
 `recommend_position` (Decision, one Finding), `plan_remediation` (Information, one Release) and
 `explain_vulnerability` (Information, one Finding — GUI-1) — over a **real** OpenAI-compatible server and
 asserts the output passes validation (`200` with an `llm:<stance>` provenance for a Decision, `200`
@@ -513,3 +513,22 @@ Every task group / PR must pass `make check`. Coverage tiers are enforced by `sc
 precedence, the VEX-overlay append-only rule, materialization stance-equality — and print a replay seed on
 failure. Integration tests use the `//go:build integration` tag and real embedded Postgres on distinct
 per-context ports.
+
+## compare_releases@v1 — narrate a fix-verification diff (AI-CMP-1)
+
+The fourth capability: an **Information** narration over Governance's deterministic comparison
+read (EDR-GOVERNANCE-01 D16). The Selection is **ordered** — `[baseline, candidate]`, exactly two
+releases — and the model is handed the `{fixed,new,persisting}` buckets verbatim (capped at 15
+rows per bucket, worst-first, with omissions counted in the prompt).
+
+```sh
+curl -s -X POST -H "X-API-Key: $KEY" -H "content-type: application/json" \
+  "http://localhost:8086/api/v1/capabilities/compare_releases/invoke" \
+  -d '{"subject":{"type":"release","ids":["<BASELINE_ID>","<CANDIDATE_ID>"]}}'
+```
+
+`200` returns an `InformationResponse` (prose + provenance; nothing enters Governance). `204`
+states its cause on `X-Themis-AI-Reason`: `no_grounding` covers Governance's honesty guard too —
+an evidence-less side (422 upstream) or Evidence unreachable (502 upstream) refuses rather than
+narrating a diff that proves nothing. Both releases empty ⇒ a deterministic
+`rule:empty-comparison` answer, zero tokens. In the GUI: Compare tab → "Ask the advisor".

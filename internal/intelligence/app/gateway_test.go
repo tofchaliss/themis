@@ -66,8 +66,10 @@ func (e *fakeEngine) Execute(_ context.Context, in ExecInput) (EngineResult, err
 // fakeProjection stands in for Governance's FindingAssessment Domain Projection. The runtime
 // receives it whole — there is nothing here for the gateway to compose.
 type fakeProjection struct {
-	proj domain.FindingAssessment
-	err  error
+	proj       domain.FindingAssessment
+	err        error
+	comparison domain.ReleaseComparison
+	cmpErr     error
 }
 
 func (f fakeProjection) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
@@ -76,6 +78,10 @@ func (f fakeProjection) GetAssessment(context.Context, string) (domain.FindingAs
 
 func (f fakeProjection) GetReleasePosture(context.Context, string) (domain.ReleasePosture, error) {
 	return domain.ReleasePosture{}, nil
+}
+
+func (f fakeProjection) GetReleaseComparison(context.Context, string, string) (domain.ReleaseComparison, error) {
+	return f.comparison, f.cmpErr
 }
 
 func groundedProjection() fakeProjection {

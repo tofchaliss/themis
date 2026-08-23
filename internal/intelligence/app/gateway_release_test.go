@@ -12,9 +12,11 @@ import (
 // releaseProjection serves the release-scoped Domain Projection and counts Finding reads, so a
 // test can assert the runtime asks for the projection its capability declared and nothing else.
 type releaseProjection struct {
-	posture domain.ReleasePosture
-	err     error
-	assessN int
+	posture    domain.ReleasePosture
+	err        error
+	assessN    int
+	comparison domain.ReleaseComparison
+	cmpErr     error
 }
 
 func (r *releaseProjection) GetAssessment(context.Context, string) (domain.FindingAssessment, error) {
@@ -24,6 +26,10 @@ func (r *releaseProjection) GetAssessment(context.Context, string) (domain.Findi
 
 func (r *releaseProjection) GetReleasePosture(context.Context, string) (domain.ReleasePosture, error) {
 	return r.posture, r.err
+}
+
+func (r *releaseProjection) GetReleaseComparison(context.Context, string, string) (domain.ReleaseComparison, error) {
+	return r.comparison, r.cmpErr
 }
 
 func outstandingPosture() domain.ReleasePosture {

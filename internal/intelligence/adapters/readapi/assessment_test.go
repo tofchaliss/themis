@@ -74,3 +74,52 @@ func TestGetReleasePostureErrors(t *testing.T) {
 		t.Error("an unreachable Governance must error")
 	}
 }
+
+// The comparison read (AI-CMP-1): one call, buckets mapped verbatim; Governance's honesty
+// guard (422/502) and transport failures surface as errors, never as empty diffs.
+func TestGetReleaseComparison(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases/rel-a/compare/rel-b" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"baseline_release_id":"rel-a","candidate_release_id":"rel-b",
+			"fixed":[{"finding_id":"f1","cve":"CVE-1","residual_priority":90,"effective_priority":90,
+				"components":[{"purl":"pkg:rpm/x@1","name":"x","version":"1","source":"src-x"}]}],
+			"new":[],
+			"persisting":[{"finding_id":"f3","cve":"CVE-3","stance":"affected","residual_priority":70,"effective_priority":70}]
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewAssessmentClient(srv.URL, srv.Client())
+	cmp, err := c.GetReleaseComparison(context.Background(), "rel-a", "rel-b")
+	if err != nil {
+		t.Fatalf("GetReleaseComparison: %v", err)
+	}
+	if cmp.BaselineID != "rel-a" || cmp.CandidateID != "rel-b" {
+		t.Errorf("ids = %s/%s", cmp.BaselineID, cmp.CandidateID)
+	}
+	if len(cmp.Fixed) != 1 || cmp.Fixed[0].CVE != "CVE-1" || cmp.Fixed[0].Components[0].Source != "src-x" {
+		t.Errorf("fixed = %+v", cmp.Fixed)
+	}
+	if len(cmp.New) != 0 || len(cmp.Persisting) != 1 || cmp.Persisting[0].Stance != "affected" {
+		t.Errorf("new/persisting = %+v / %+v", cmp.New, cmp.Persisting)
+	}
+
+	// The guard's refusal (or any non-200) is an error the gateway turns into no-grounding.
+	if _, err := c.GetReleaseComparison(context.Background(), "rel-a", "rel-nope"); err == nil {
+		t.Error("non-200 must return an error")
+	}
+}
+
+func TestGetReleaseComparison_MalformedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{not-json`))
+	}))
+	defer srv.Close()
+	if _, err := NewAssessmentClient(srv.URL, nil).GetReleaseComparison(context.Background(), "a", "b"); err == nil {
+		t.Error("malformed JSON must return a decode error")
+	}
+}

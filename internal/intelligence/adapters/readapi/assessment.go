@@ -163,20 +163,71 @@ func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID stri
 
 	out := domain.ReleasePosture{ReleaseID: releaseID, Entries: make([]domain.PostureEntry, 0, len(body))}
 	for _, e := range body {
-		entry := domain.PostureEntry{
-			FindingID: e.FindingID, CVE: e.CVE, Stance: e.Stance,
-			ResidualPriority: e.ResidualPriority, EffectivePriority: e.EffectivePriority,
-		}
-		for _, c := range e.Components {
-			entry.Components = append(entry.Components, domain.PostureComponent{
-				PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
-				ClaimClass: c.ClaimClass,
-			})
-		}
-		for _, f := range e.Fixes {
-			entry.Fixes = append(entry.Fixes, domain.PostureFix{Package: f.Package, Version: f.Version})
-		}
-		out.Entries = append(out.Entries, entry)
+		out.Entries = append(out.Entries, toPostureEntry(e))
+	}
+	return out, nil
+}
+
+// toPostureEntry maps one wire posture row to the domain shape — shared by the posture read
+// and the comparison read, whose buckets are the same rows.
+func toPostureEntry(e posturePayload) domain.PostureEntry {
+	entry := domain.PostureEntry{
+		FindingID: e.FindingID, CVE: e.CVE, Stance: e.Stance,
+		ResidualPriority: e.ResidualPriority, EffectivePriority: e.EffectivePriority,
+	}
+	for _, c := range e.Components {
+		entry.Components = append(entry.Components, domain.PostureComponent{
+			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+			ClaimClass: c.ClaimClass,
+		})
+	}
+	for _, f := range e.Fixes {
+		entry.Fixes = append(entry.Fixes, domain.PostureFix{Package: f.Package, Version: f.Version})
+	}
+	return entry
+}
+
+// comparisonPayload mirrors Governance's ReleaseComparison wire shape (EDR-GOVERNANCE-01 D16).
+type comparisonPayload struct {
+	BaselineReleaseID  string           `json:"baseline_release_id"`
+	CandidateReleaseID string           `json:"candidate_release_id"`
+	Fixed              []posturePayload `json:"fixed"`
+	New                []posturePayload `json:"new"`
+	Persisting         []posturePayload `json:"persisting"`
+}
+
+// GetReleaseComparison fetches the cross-release diff from Governance
+// (GET /api/v1/releases/{baseline}/compare/{candidate}) for compare_releases@v1 (AI-CMP-1).
+// One read, buckets and ordering decided server-side (T10). Governance's honesty guard rides
+// along: a 422 (a side has no evidence) or 502 (Evidence unreachable) surfaces as an error —
+// the gateway turns it into an honest no-grounding outcome rather than narrating around it.
+func (c *AssessmentClient) GetReleaseComparison(ctx context.Context, baselineID, candidateID string) (domain.ReleaseComparison, error) {
+	url := c.baseURL + "/api/v1/releases/" + baselineID + "/compare/" + candidateID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return domain.ReleaseComparison{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return domain.ReleaseComparison{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return domain.ReleaseComparison{}, fmt.Errorf("governance: compare %s vs %s: status %d", baselineID, candidateID, resp.StatusCode)
+	}
+	var body comparisonPayload
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return domain.ReleaseComparison{}, err
+	}
+	out := domain.ReleaseComparison{BaselineID: body.BaselineReleaseID, CandidateID: body.CandidateReleaseID}
+	for _, e := range body.Fixed {
+		out.Fixed = append(out.Fixed, toPostureEntry(e))
+	}
+	for _, e := range body.New {
+		out.New = append(out.New, toPostureEntry(e))
+	}
+	for _, e := range body.Persisting {
+		out.Persisting = append(out.Persisting, toPostureEntry(e))
 	}
 	return out, nil
 }

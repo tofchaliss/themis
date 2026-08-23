@@ -885,7 +885,43 @@ async function viewCompare() {
           <p class="card-sub">Open on both releases, shown with the candidate's state. Positions do not carry
             across releases — a persisting CVE on the candidate is decided there, or it is undecided.</p>
           <div data-cmp="persisting">${bucketTable(persisting, `<b>Nothing persists</b>No CVE is open on both releases.`)}</div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Ask the advisor</h2>
+          <p class="card-sub">A local-model narration of exactly the buckets above (compare_releases, AI-CMP-1) —
+            it cites only what the comparison contains, weighs buckets by residual priority, and decides
+            nothing. Advisory prose; judging a release is a governed step.</p>
+          <button class="btn" id="cmp-ai-btn">Narrate this comparison</button>
+          <div id="cmp-ai-out" style="margin-top:10px"></div>
         </div>`;
+
+      $("#cmp-ai-btn").addEventListener("click", async () => {
+        const btn = $("#cmp-ai-btn"), aiOut = $("#cmp-ai-out");
+        btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Narrating…`;
+        aiOut.innerHTML = `<div class="empty"><b>Asking the local model…</b>May take a minute; the diff above is the deterministic truth either way.</div>`;
+        try {
+          const r = await apiPOST("intelligence", "/capabilities/compare_releases/invoke",
+            { subject: { type: "release", ids: [aId, bId] } });
+          if (r.status === 200) {
+            const j = await r.json();
+            aiOut.innerHTML = `<div class="plan-head">${aiProvenance(j)}</div>
+              <div class="plan-text">${aiProse(j.information || "")}</div>`;
+          } else if (r.status === 204) {
+            const reason = r.headers.get("X-Themis-AI-Reason");
+            aiOut.innerHTML = (reason === "disabled" || reason === "unreachable")
+              ? `<div class="empty"><b>Advisor unavailable</b>The AI plane is ${esc(reason)} — the comparison above stands on its own.</div>`
+              : aiOutcomeHTML(reason);
+          } else if (r.status === 404) {
+            aiOut.innerHTML = `<div class="empty"><b>Not on this node yet</b>The intelligence node predates compare_releases.</div>`;
+          } else {
+            aiOut.innerHTML = `<div class="err">advisor returned ${r.status}: ${esc(await problemDetail(r))}</div>`;
+          }
+        } catch (e) {
+          aiOut.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+        }
+        btn.disabled = false; btn.textContent = "Narrate this comparison";
+      });
 
       const buckets = { fixed, fresh, persisting };
       for (const [key, list] of Object.entries(buckets)) {

@@ -29,6 +29,10 @@ func (s stubProjection) GetReleasePosture(context.Context, string) (domain.Relea
 	return domain.ReleasePosture{}, nil
 }
 
+func (s stubProjection) GetReleaseComparison(context.Context, string, string) (domain.ReleaseComparison, error) {
+	return domain.ReleaseComparison{}, nil
+}
+
 type stubPosition struct {
 	stance, rationale string
 	found             bool

@@ -963,8 +963,8 @@ under the 2026-08-07 re-derivation standard.
   this signal to tell "model can't reason" from "grounding had nothing to reason about".
   **Dep:** none. **Scope:** SMALL-MEDIUM. **Priority: LOW-MED.**
 
-- [ ] **AI-CMP-1 — `compare_releases@v1`: an Information capability narrating the comparison read
-  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T5).** MED as the T5 entry point. IDEA-1's
+- [x] **AI-CMP-1 — `compare_releases@v1`: an Information capability narrating the comparison read
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T5).** MED as the T5 entry point. ✅ **CLOSED 2026-08-23 (first T5/R1 delivery; EDR-INTELLIGENCE-01 realization note).** Shipped exactly as filed: ordered two-release Selection, `NeedReleaseComparison` grounding received verbatim, buckets capped 15/bucket with counted omissions, guard refusals → `no_grounding`, empty diff → `rule:empty-comparison` (zero tokens), Grounding Verification the only gate; GUI "Ask the advisor" on the Compare tab (read-scope, statelessPosts). IDEA-1's
   consumer 3, unblocked by EDR-GOVERNANCE-01 D16: the deterministic
   `GET /releases/{id}/compare/{candidate}` now exists, so the capability is an overlay — the model
   is handed the `{fixed,new,persisting}` buckets verbatim and narrates what the fix achieved,
