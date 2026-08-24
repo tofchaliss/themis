@@ -251,6 +251,16 @@ e2e-pipeline:
 e2e-llm:
 	$(GO) test -tags=llm -count=1 -v -run TestE2ERealLLM ./internal/intelligence/adapters/http/...
 
+# Δ4a LLMOps replay harness (EDR-INTELLIGENCE-01 § Δ4a). Builds the eval command; RUN it by hand
+# against a node's store to replay the curated golden set through the live model and score
+# deterministically (grounded? schema-valid? honest decline?). Live-only, run-it-yourself — no CI
+# net (D-Δ4a-6). Information capabilities score groundedness, NOT answer quality (D-Δ4a-2).
+#   THEMIS_DATABASE_DSN=... THEMIS_LLM_URL=... THEMIS_LLM_MODEL=... ./bin/intelligence-eval run
+#   THEMIS_DATABASE_DSN=... ./bin/intelligence-eval promote <correlation_id> --label "<case>"
+eval-llm:
+	$(GO) build -tags=llm -o bin/intelligence-eval ./cmd/intelligence-eval
+	@echo "built bin/intelligence-eval — run: THEMIS_DATABASE_DSN=... THEMIS_LLM_URL=... ./bin/intelligence-eval run"
+
 # Opt-in embedding-model + what-to-embed evaluation for the Δ3a Knowledge Engine (R5). Embeds a
 # small labeled corpus (findings grouped by shared component) with each candidate model + text
 # composition and reports same-component sibling retrieval (recall@1/@3, MRR) + embed latency —
