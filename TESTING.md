@@ -547,3 +547,30 @@ Each wired per-CVE source (NVD today) reports `found` / `recorded` / `withdrawn`
 independently; everything folds as ordinary source Proposals (same precedence as the scheduled
 sweeps). No enable flag: the authenticated write-scoped POST is the opt-in. Uses
 `THEMIS_NVD_URL` / `THEMIS_NVD_API_KEY` when set, NVD defaults otherwise.
+
+## Δ4a LLMOps eval harness (`make eval-llm`)
+
+The offline, live-model replay harness (EDR-INTELLIGENCE-01 § Δ4a). Build it, then run it by hand
+against a node's store — after a deploy, or before promoting a model.
+
+```sh
+make eval-llm   # builds bin/intelligence-eval
+
+# curate: promote a real logged invocation into the durable golden set (a case worth guarding)
+THEMIS_DATABASE_DSN=<intelligence-dsn> \
+  ./bin/intelligence-eval promote <correlation_id> --label "merged-module-stream plan"
+
+# evaluate: replay the golden set through the live model, score, store + print a report
+THEMIS_DATABASE_DSN=<intelligence-dsn> THEMIS_LLM_URL=http://localhost:11434 \
+  THEMIS_LLM_MODEL=cyberpal20b:latest ./bin/intelligence-eval run
+```
+
+**Three honest limits, by design (D-Δ4a-2/4/6):**
+- **Information capabilities** (`plan_remediation`, `explain_vulnerability`, `compare_releases`)
+  score **groundedness / well-formedness, NOT answer quality** — prose has no single correct
+  answer. "PASS" means it stayed grounded and well-formed, never "it was a good explanation".
+- **Promotion is human-gated.** The report groups pass-rates by `(capability, prompt_version,
+  model)` and ADVISES; nothing but a human reading it blocks deploying a worse-scoring model.
+- **Run-it-yourself, no CI net.** The eval needs a live model and CI has none, so a
+  prompt-contract or gate change that would reject previously-good outputs ships silently unless
+  someone runs this. Make it a release-gate habit.

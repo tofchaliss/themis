@@ -91,7 +91,15 @@ Create the `themis` role and the databases (as the `postgres` superuser): the fo
 (`evidence` — which also co-locates the Registry identity schema — `knowledge`, `governance`,
 `communication`), the shared `bus` event log, `auth` (the API-key store for inbound edge auth, F1), and
 `intelligence` (the Δ3a Operational Semantic Index — harmless to create even if you run the Gateway
-stateless). Set
+stateless).
+
+> **Backup note (Δ4a):** most of the `intelligence` DB is disposable — the vector index rebuilds from
+> Governance's Positions, and the invocation log is age-capped. But the Δ4a **golden set**
+> (`golden_entries`) and **eval reports** (`eval_reports`) are the node's first NON-disposable state:
+> a curated regression suite and its scoring history that a `TRUNCATE` would lose. If you rely on the
+> eval harness, back this database up. Nothing in it is enterprise truth — it is operational state.
+
+Set
 the password **once** in a shell variable and reuse it everywhere — the runbook's DSNs read the same `$PGPW`,
 so there is no second place to keep in sync:
 

@@ -129,12 +129,11 @@ func (g *Gateway) redact(s string) string {
 // context is captured only once grounding was assembled (an early Selection/auth reject has an
 // empty ac, which is fine — those cases are not replay material anyway).
 func (g *Gateway) captureInvocation(ctx context.Context, oc Outcome, ac domain.AssembledContext) {
-	var contextJSON []byte
-	if raw, err := json.Marshal(ac); err == nil {
-		contextJSON = []byte(g.redact(string(raw)))
-	} else {
-		contextJSON = []byte("null")
-	}
+	// AssembledContext is plain data (no channels/funcs), so Marshal cannot fail; a marshal
+	// error would yield "" here, which the redactor passes through — no separate error branch
+	// to leave untested.
+	raw, _ := json.Marshal(ac)
+	contextJSON := []byte(g.redact(string(raw)))
 	g.capturer.Capture(ctx, CapturedInvocation{
 		CorrelationID: oc.CorrelationID,
 		Capability:    oc.CapabilityID,

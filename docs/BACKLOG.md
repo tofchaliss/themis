@@ -968,7 +968,7 @@ under the 2026-08-07 re-derivation standard.
   (`decline_class`) and as `themis_ai_declines_total{capability,class,tier}`. "The model can't
   reason" and "there was nothing to reason about" are now separable rates with separate owners.
   **(c)'s TUNING half** (the loop that acts on those rates — prompt/model versioning) remains
-  open and is Δ4's eval-harness work.
+  open and is Δ4's eval-harness work. **✅ THE HARNESS LANDED 2026-08-24 (Δ4a): `make eval-llm` / `cmd/intelligence-eval` replays a curated golden set and scores by (capability, prompt_version, model). The ACTING half — a loop that auto-tunes — stays deferred (promotion is human-gated by decision, D-Δ4a-4); the harness gives a human the numbers to tune by.**
 
 - [x] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
   invocation under-reports its cost in telemetry.** ✅ **CLOSED 2026-08-23 (T4 delivery).**

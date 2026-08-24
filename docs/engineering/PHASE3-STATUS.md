@@ -32,8 +32,11 @@
 > **`openspec/changes/phase3-intelligence-d4a`** (proposal/design/tasks). Net shape: co-locate an operational
 > store in the existing `intelligence` DB (capped invocation log · durable golden set · eval reports · version
 > stamp) + an offline live-model eval command — NO DB prompt registry, NO model registry, NO automated
-> promotion, NO scheduled loop, NO CI net. **NEXT = either implement Δ4a (`/opsx:apply phase3-intelligence-d4a`)
-> or grill Δ4b (autonomy).** Grill state for both in [`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md).
+> promotion, NO scheduled loop, NO CI net. **Δ4a IMPLEMENTED (2026-08-24, 5 groups, `make check-ci` green): store (migrations 000003:
+> invocation_log · golden_entries · eval_reports · prompt_versions), a content-hash prompt version
+> stamp, redacted best-effort capture + boot version-seed + age retention, and `cmd/intelligence-eval`
+> (`make eval-llm`) — replay the golden set through a live model, score deterministically, promote
+> curated cases. NEXT = grill Δ4b (autonomy).** Grill state for both in [`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md).
 
 **Historical snapshot below (2026-08-06).**
 
