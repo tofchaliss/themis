@@ -508,3 +508,28 @@ func TestRenderRecommendCarriesReleaseOverlap(t *testing.T) {
 		t.Error("an unknown overlap must not render as 0%")
 	}
 }
+
+// Δ4a D-Δ4a-3: the version stamp is a stable content hash per capability, and it CHANGES when
+// the template text changes — that stability is what makes cross-deploy eval comparison valid.
+func TestPromptVersionsAreStableContentHashes(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := r.Versions()
+	for _, cap := range []string{"recommend_position", "plan_remediation", "explain_vulnerability", "compare_releases"} {
+		if v[cap] == "" || r.Version(cap) != v[cap] {
+			t.Errorf("%s: Versions()=%q Version()=%q, want a non-empty match", cap, v[cap], r.Version(cap))
+		}
+	}
+	if r.Version("nope") != "" {
+		t.Error("unknown capability must return empty version")
+	}
+	// Same text → same hash; different text → different hash.
+	a, _ := newRenderer(map[string]string{"x": "hello"})
+	b, _ := newRenderer(map[string]string{"x": "hello"})
+	c, _ := newRenderer(map[string]string{"x": "world"})
+	if a.Version("x") != b.Version("x") || a.Version("x") == c.Version("x") {
+		t.Errorf("hash not content-stable: %q %q %q", a.Version("x"), b.Version("x"), c.Version("x"))
+	}
+}

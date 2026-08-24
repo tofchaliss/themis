@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	_ "embed"
 	"fmt"
 	"strings"
@@ -92,10 +94,29 @@ var promptFuncs = template.FuncMap{
 // or app rings. It implements app.PromptRenderer.
 type PromptRenderer struct {
 	templates map[string]*template.Template
+	// versions is capability id → a short content hash of its template text (Δ4a D-Δ4a-3).
+	// Computed once at construction from the raw `go:embed` text — the prompt is a reviewed,
+	// in-code asset, and this is its ATTRIBUTION fingerprint (stamped on every invocation +
+	// eval row), never a serving key. Prompts are not served from the store.
+	versions map[string]string
 	// logger is optional (nil = silent). It exists so the DETERMINISTIC half of a plan is
 	// observable without a model — see WithLogger.
 	logger *observability.Logger
 }
+
+// Versions returns capability id → template content hash (Δ4a D-Δ4a-3), for the composition
+// root to seed `prompt_versions` at boot.
+func (r *PromptRenderer) Versions() map[string]string {
+	out := make(map[string]string, len(r.versions))
+	for k, v := range r.versions {
+		out[k] = v
+	}
+	return out
+}
+
+// Version returns one capability's template content hash ("" if unknown) — stamped onto the
+// invocation's Outcome so every logged/eval row is attributable to the exact prompt that ran.
+func (r *PromptRenderer) Version(capability string) string { return r.versions[capability] }
 
 // WithLogger makes the computed plan grouping visible, and returns the renderer for chaining.
 //
@@ -126,14 +147,17 @@ func NewPromptRenderer() (*PromptRenderer, error) {
 // tests can inject templates, including malformed ones).
 func newRenderer(src map[string]string) (*PromptRenderer, error) {
 	tmpls := make(map[string]*template.Template, len(src))
+	versions := make(map[string]string, len(src))
 	for id, text := range src {
 		t, err := template.New(id).Funcs(promptFuncs).Parse(text)
 		if err != nil {
 			return nil, fmt.Errorf("parse prompt template %q: %w", id, err)
 		}
 		tmpls[id] = t
+		sum := sha256.Sum256([]byte(text))
+		versions[id] = hex.EncodeToString(sum[:])[:12] // 12 hex chars: ample to distinguish revisions
 	}
-	return &PromptRenderer{templates: tmpls}, nil
+	return &PromptRenderer{templates: tmpls, versions: versions}, nil
 }
 
 // Render renders the capability's prompt from the assembled context.

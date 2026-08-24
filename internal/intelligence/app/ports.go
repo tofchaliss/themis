@@ -102,6 +102,10 @@ type EngineResult struct {
 // the domain or app rings; the template is an adapter-side asset.
 type PromptRenderer interface {
 	Render(capabilityID string, ctx domain.AssembledContext) (string, error)
+	// Version returns the capability's prompt content hash (Δ4a D-Δ4a-3), stamped on the
+	// Outcome so every telemetry / invocation-log / eval row is attributable to the exact
+	// prompt that ran. "" when unknown (e.g. a test renderer that does not track versions).
+	Version(capabilityID string) string
 }
 
 // ProjectionReader fetches the Domain Projection for a Selection (EDR-TRUST-01 T10).

@@ -16,6 +16,7 @@ const okRaw = `{"finding_id":"F1","recommended_stance":"affected","confidence":0
 	`"evidence":[{"kind":"faultline","ref":"FL1"}],"reasoning":"x"}`
 
 func (p fixedPrompt) Render(_ string, _ domain.AssembledContext) (string, error) { return p.s, nil }
+func (p fixedPrompt) Version(_ string) string                                    { return "" }
 
 type fakePrompt struct{ err error }
 
@@ -25,6 +26,7 @@ func (p fakePrompt) Render(_ string, _ domain.AssembledContext) (string, error) 
 	}
 	return "PROMPT", nil
 }
+func (p fakePrompt) Version(capabilityID string) string { return "v-" + capabilityID }
 
 // fakeEngine is a stub LLM engine returning canned raw replies (one per attempt). It
 // records the last prompt + routing it saw so tests can assert redaction + local-only.
@@ -313,6 +315,7 @@ func (p *capturePrompt) Render(_ string, ac domain.AssembledContext) (string, er
 	p.got = ac
 	return "PROMPT", nil
 }
+func (p *capturePrompt) Version(_ string) string { return "" }
 
 type fakePrecedent struct {
 	positions []domain.PrecedentPosition

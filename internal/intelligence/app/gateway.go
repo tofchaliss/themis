@@ -75,7 +75,11 @@ type Outcome struct {
 	// an escalated decline is still `insufficient` — but "the bigger model could not
 	// tell either" versus "we never tried a bigger model" is exactly the distinction
 	// G-AI-2 needs observable.
-	Tier           string
+	Tier string
+	// PromptVersion is the content hash of the capability's prompt template (Δ4a D-Δ4a-3):
+	// attribution, so every telemetry / invocation-log / eval row names the exact prompt that
+	// ran. Empty when no LLM step ran or the renderer tracks no versions.
+	PromptVersion  string
 	Selection      domain.Selection   // what the invocation was about (T9 provenance)
 	OutputClass    domain.OutputClass // which branch ran (T7): information or decision
 	PrecedentsUsed int                // precedents (semantic + exact-CVE) that grounded the LLM step (Δ3a provenance)
@@ -257,6 +261,7 @@ func (g *Gateway) Invoke(
 	// for a release-scoped capability (T9).
 	subjectID := sel.First()
 	oc.OutputClass = capb.Output
+	oc.PromptVersion = g.prompt.Version(capabilityID) // attribution stamp (Δ4a); harmless if no LLM step runs
 	validator := g.validators[capabilityID]
 
 	// Pre-invocation authorization (C7): reject BEFORE any grounding or provider call.

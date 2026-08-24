@@ -223,6 +223,12 @@ func (h *Handler) logTelemetry(oc app.Outcome) {
 	if oc.Tier != "" && oc.Tier != string(app.TierPrimary) {
 		fields = append(fields, observability.String("tier", oc.Tier))
 	}
+	// `prompt_version` attributes the line to the exact prompt template that ran (Δ4a
+	// D-Δ4a-3), so an eval's cross-deploy comparison and a live journal agree on which
+	// version produced a result. Present only when an LLM step ran.
+	if oc.PromptVersion != "" {
+		fields = append(fields, observability.String("prompt_version", oc.PromptVersion))
+	}
 	// `detail` says WHICH check refused the output, and is present only when something did
 	// (TRUST-6). Omitted on a clean run so the common line is unchanged, and never echoed in
 	// the HTTP response — the 204 stays opaque by design.
