@@ -108,6 +108,30 @@ type PromptRenderer interface {
 	Version(capabilityID string) string
 }
 
+// InvocationCapturer records a completed invocation for the Δ4a replay harness (D-Δ4a-5).
+// It is called from the Gateway AFTER redaction, with the frozen assembled context and raw
+// output already scrubbed — so a captured entry can never durably hold an un-redacted secret.
+// Optional and best-effort: a nil capturer disables capture, and a capture error is ignored
+// (a logging/eval concern must never fail an invocation). The Gateway hands JSON bytes, not
+// domain types, so the app ring stays free of any store shape.
+type InvocationCapturer interface {
+	Capture(ctx context.Context, rec CapturedInvocation)
+}
+
+// CapturedInvocation is the redacted, frozen record of one invocation.
+type CapturedInvocation struct {
+	CorrelationID string
+	Capability    string
+	PromptVersion string
+	Model         string
+	Tier          string
+	ContextJSON   []byte // the assembled context, marshaled + redacted
+	OutputJSON    []byte // the raw model output, marshaled + redacted; nil when no LLM step ran
+	Reason        string
+	DeclineClass  string
+	Tokens        int
+}
+
 // ProjectionReader fetches the Domain Projection for a Selection (EDR-TRUST-01 T10).
 //
 // It is the runtime's ONLY business read, and it composes nothing: one business-named

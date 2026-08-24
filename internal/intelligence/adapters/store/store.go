@@ -41,6 +41,11 @@ type Store struct {
 // New builds a Store over the given pool.
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// HasPool reports whether the Store has a live pool. The wiring path constructs a
+// pool-less Store to exercise the stateful branch without a database; the boot-time Δ4a
+// version seed and capturer must skip it rather than dereference a nil pool.
+func (s *Store) HasPool() bool { return s != nil && s.pool != nil }
+
 // Upsert writes (or replaces) the embedding for a Finding's current Enterprise Position,
 // keyed by Finding id — a later PositionRevised re-embeds and overwrites the one row. When
 // the population consumer's inbox transaction rides the context (A4) the write joins it

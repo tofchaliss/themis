@@ -1017,3 +1017,62 @@ func TestInvokePlanExhaustedDeclineClassOnHealthyGrounding(t *testing.T) {
 		t.Errorf("outcome = %q class %q, want insufficient/model_undetermined", oc.Reason, oc.DeclineClass)
 	}
 }
+
+// --- Δ4a capture (D-Δ4a-5) -----------------------------------------------------------
+
+type recordingCapturer struct{ got []CapturedInvocation }
+
+func (c *recordingCapturer) Capture(_ context.Context, rec CapturedInvocation) {
+	c.got = append(c.got, rec)
+}
+
+// Every terminal path captures exactly once, with the prompt version + reason stamped, and
+// the captured context is REDACTED — capture is downstream of the same scrub the prompt gets,
+// so a golden entry can never durably hold an un-redacted secret.
+func TestInvokeCapturesRedactedOnce(t *testing.T) {
+	cap := &recordingCapturer{}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines:  []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}},
+		Redactor: tagRedactor{}, Capturer: cap,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr-cap")
+	if len(cap.got) != 1 {
+		t.Fatalf("captures = %d, want exactly 1", len(cap.got))
+	}
+	c := cap.got[0]
+	if c.CorrelationID != "corr-cap" || c.Capability != "recommend_position" || c.Reason != oc.Reason {
+		t.Errorf("capture metadata = %+v", c)
+	}
+	if c.PromptVersion != "v-recommend_position" {
+		t.Errorf("prompt version not stamped: %q", c.PromptVersion)
+	}
+	if !strings.HasPrefix(string(c.ContextJSON), "REDACTED:") {
+		t.Errorf("captured context must be redacted, got %q", string(c.ContextJSON))
+	}
+}
+
+// A capture failure never affects the invocation, and an early Selection reject still captures
+// (with an empty context) — capture is best-effort and total.
+func TestInvokeCaptureIsBestEffortAndTotal(t *testing.T) {
+	cap := &recordingCapturer{}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}}, Capturer: cap,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wrong cardinality → rejected at the door; still captured.
+	_, oc := g.Invoke(context.Background(), "recommend_position",
+		domain.Selection{Type: domain.SelectionFinding, IDs: []string{"a", "b"}}, "corr-reject")
+	if oc.Reason != ReasonSelectionMismatch {
+		t.Fatalf("reason = %q", oc.Reason)
+	}
+	if len(cap.got) != 1 || cap.got[0].Reason != ReasonSelectionMismatch {
+		t.Errorf("early reject must still capture: %+v", cap.got)
+	}
+}

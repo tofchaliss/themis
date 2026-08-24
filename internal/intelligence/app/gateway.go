@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -121,6 +122,32 @@ func (g *Gateway) redact(s string) string {
 	return g.redactor.Redact(s)
 }
 
+// captureInvocation records the completed invocation for the Δ4a replay harness (D-Δ4a-5). It
+// marshals the assembled context and REDACTS it before it leaves the process — capture is
+// downstream of the same scrub the prompt gets. Best-effort by contract: any marshal or capture
+// failure is swallowed, because a replay-harness concern must never affect an invocation. The
+// context is captured only once grounding was assembled (an early Selection/auth reject has an
+// empty ac, which is fine — those cases are not replay material anyway).
+func (g *Gateway) captureInvocation(ctx context.Context, oc Outcome, ac domain.AssembledContext) {
+	var contextJSON []byte
+	if raw, err := json.Marshal(ac); err == nil {
+		contextJSON = []byte(g.redact(string(raw)))
+	} else {
+		contextJSON = []byte("null")
+	}
+	g.capturer.Capture(ctx, CapturedInvocation{
+		CorrelationID: oc.CorrelationID,
+		Capability:    oc.CapabilityID,
+		PromptVersion: oc.PromptVersion,
+		Model:         oc.Model,
+		Tier:          oc.Tier,
+		ContextJSON:   contextJSON,
+		Reason:        oc.Reason,
+		DeclineClass:  oc.DeclineClass,
+		Tokens:        oc.TokensUsed,
+	})
+}
+
 // Gateway is the reactive Intelligence Gateway pipeline (D5–D8): given a capability id
 // and a subject identifier it assembles grounding, has the Engine Dispatcher walk the
 // capability's execution plan, validates, and returns an advisory Proposal — or a
@@ -133,8 +160,9 @@ type Gateway struct {
 	// same service, so a human and the model see one retrieval result. Optional: nil = no
 	// precedent grounding, which is the supported stateless-Gateway deployment.
 	precedents      *PrecedentService
-	authorizer      Authorizer // optional (nil = allow-all)
-	redactor        Redactor   // optional (nil = no redaction)
+	authorizer      Authorizer         // optional (nil = allow-all)
+	redactor        Redactor           // optional (nil = no redaction)
+	capturer        InvocationCapturer // optional (nil = no Δ4a capture)
 	prompt          PromptRenderer
 	dispatcher      *Dispatcher
 	maxPromptBytes  int
@@ -160,6 +188,7 @@ type GatewayConfig struct {
 	Precedents *PrecedentService
 	Authorizer Authorizer // optional pre-invocation authz (Δ2 C7); nil = allow-all
 	Redactor   Redactor   // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
+	Capturer   InvocationCapturer // optional Δ4a replay-harness capture (D-Δ4a-5); nil = no capture
 	// BudgetTokens / BudgetWindow enforce D4's per-capability spend ceiling. Both must be > 0 to
 	// enforce anything; unset = unlimited, which is today's behaviour and the safe default —
 	// a budget switched on by accident refuses recommendations, and a refusal is indistinguishable
@@ -223,6 +252,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		precedents:      cfg.Precedents,
 		authorizer:      cfg.Authorizer,
 		redactor:        cfg.Redactor,
+		capturer:        cfg.Capturer,
 		prompt:          cfg.Prompt,
 		dispatcher:      NewDispatcher(cfg.Engines...),
 		maxPromptBytes:  maxPrompt,
@@ -246,6 +276,16 @@ func (g *Gateway) Invoke(
 	ctx context.Context, capabilityID string, sel domain.Selection, correlationID string,
 ) (domain.Proposal, Outcome) {
 	oc := Outcome{CapabilityID: capabilityID, CorrelationID: correlationID, Selection: sel}
+
+	// Δ4a capture (D-Δ4a-5): record the invocation for the replay harness, best-effort, at the
+	// single terminal point. ac fills in once grounding is assembled; the closure reads the
+	// final oc + ac by reference so every return path is captured without touching the hot path.
+	// The context is marshaled then REDACTED before it leaves — capture is downstream of the
+	// same scrub the prompt gets, so a golden entry can never durably hold a secret.
+	var ac domain.AssembledContext
+	if g.capturer != nil {
+		defer func() { g.captureInvocation(ctx, oc, ac) }()
+	}
 
 	capb, ok := g.registry.Lookup(capabilityID)
 	if !ok {
@@ -285,8 +325,7 @@ func (g *Gateway) Invoke(
 	// Receive the Domain Projection — one read, no composition (T10). WHICH projection is
 	// decided by the capability's Selection Type, not by the runtime knowing any topology: it
 	// asks the reader for the projection of the type it declared and is handed an authoritative
-	// one back.
-	var ac domain.AssembledContext
+	// one back. (ac is declared at the top of Invoke so the capture defer can read it.)
 	switch {
 	case capb.HasNeed(domain.NeedReleaseComparison):
 		// Two ordered releases: [baseline, candidate] (AI-CMP-1). Accepts() already enforced

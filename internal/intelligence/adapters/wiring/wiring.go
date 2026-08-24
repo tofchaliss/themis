@@ -13,6 +13,7 @@
 package wiring
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -177,11 +178,22 @@ func Wire(cfg Config) (Intelligence, error) {
 	// the HTTP response bound for an engineer. Same discipline, applied twice, because they are
 	// genuinely different exits from the process.
 	redactor := admission.NewBasicRedactor()
+	// Δ4a capture (D-Δ4a-5): only when the node has a Store. A capture rides the same redactor
+	// as the prompt (the Gateway redacts the context before handing it here), and the boot
+	// version-upsert seeds prompt_versions so every stamped row is attributable.
+	var capturer app.InvocationCapturer
+	if cfg.Store != nil && cfg.Store.HasPool() {
+		capturer = store.NewCapturer(cfg.Store)
+		for capID, hash := range pr.Versions() {
+			_ = cfg.Store.UpsertPromptVersion(context.Background(), capID, hash) // best-effort boot seed
+		}
+	}
 	gw, err := app.NewGateway(app.GatewayConfig{
 		Registry:              domain.DefaultRegistry(),
 		Projection:            proj,
 		Precedents:            precedents,
 		Redactor:              redactor, // C7 secret/PII scrub (authorizer = deployment seam)
+		Capturer:              capturer,
 		Prompt:                pr,
 		Engines:               engines,
 		ProviderTimeout:       cfg.ProviderTimeout,

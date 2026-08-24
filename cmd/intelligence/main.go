@@ -65,6 +65,7 @@ type config struct {
 	budgetTokens int
 	maxRunTokens int // THEMIS_INTELLIGENCE_MAX_RUN_TOKENS — per-run (per-invocation) token ceiling across retries + escalation (G-AI-4); 0/unset = unlimited (the load-bearing default).
 	budgetWindow time.Duration
+	logRetention time.Duration // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
 	rebuild      bool // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. Set ⇒ the reader drains Governance Position events to populate the index; empty ⇒ no population (single-context dev).
@@ -97,6 +98,7 @@ func loadConfig() config {
 		economyModel:    os.Getenv("THEMIS_INTELLIGENCE_MODEL_ECONOMY"),
 		degradePct:      envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
 		budgetWindow:    envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
+		logRetention:    envDurationDefault("THEMIS_INTELLIGENCE_LOG_RETENTION", 0),
 		rebuild:         os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
@@ -207,6 +209,30 @@ func main() {
 		logger.Info("knowledge enrichment-stream reader enabled (index freshness)")
 	} else {
 		logger.Info("index population reader disabled (needs THEMIS_BUS_DATABASE_DSN + THEMIS_DATABASE_DSN)")
+	}
+
+	// Δ4a invocation-log retention (D-Δ4a-5): the capture log is disposable, capped by age. The
+	// golden set promoted from it is durable and never pruned here. Only when a store exists.
+	if pool != nil && cfg.logRetention > 0 {
+		st := store.New(pool)
+		go func() {
+			tick := time.NewTicker(6 * time.Hour)
+			defer tick.Stop()
+			for {
+				cutoff := time.Now().Add(-cfg.logRetention)
+				if n, err := st.PruneInvocations(ctx, cutoff); err != nil {
+					logger.Error("invocation-log prune failed", observability.Err(err))
+				} else if n > 0 {
+					logger.Info("pruned invocation log", observability.Int("count", int(n)))
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+		logger.Info("invocation-log retention enabled", observability.String("retention", cfg.logRetention.String()))
 	}
 
 	router := chi.NewRouter()
