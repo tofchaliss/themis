@@ -27,9 +27,13 @@
 >   doesn't validate the model's `subject_id` echo) · **AI-PROSE-1** (narration renders priority numbers as
 >   words — expected; the gate anchors to identifiers, not prose arithmetic).
 >
-> **NEXT = Δ4 (Autonomy + LLMOps)** — the last R1 body of work, **design-first**. Grill prep + the full item
-> tree + the open scope question (one change vs a Δ4a store+LLMOps / Δ4b autonomy split) are captured in
-> **[`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md)**. Resume there.
+> **Δ4a GRILLED + DESIGNED (2026-08-24, no code):** the Δ4 split was accepted (Δ4a store+LLMOps first, Δ4b
+> autonomy next). Δ4a's eight decisions are in **EDR-INTELLIGENCE-01 § Δ4a** (D-Δ4a-1…6) and scaffolded as
+> **`openspec/changes/phase3-intelligence-d4a`** (proposal/design/tasks). Net shape: co-locate an operational
+> store in the existing `intelligence` DB (capped invocation log · durable golden set · eval reports · version
+> stamp) + an offline live-model eval command — NO DB prompt registry, NO model registry, NO automated
+> promotion, NO scheduled loop, NO CI net. **NEXT = either implement Δ4a (`/opsx:apply phase3-intelligence-d4a`)
+> or grill Δ4b (autonomy).** Grill state for both in [`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md).
 
 **Historical snapshot below (2026-08-06).**
 

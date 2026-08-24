@@ -1,6 +1,7 @@
 # Δ4 (Autonomy + LLMOps) — Grilling Prep & Resume Point
 
-**Status: PRE-GRILL. No code. Resume the grilling here next session.**
+**Status: Δ4a GRILLED + DESIGNED (2026-08-24) — `openspec/changes/phase3-intelligence-d4a` + EDR § Δ4a
+(D-Δ4a-1…6). NO code yet. Δ4b (autonomy) is the next grill.**
 Created 2026-08-24 after the AI chain completed through the pre-Δ4 boundary (main `25c5335`)
 and its live VM round passed. Δ4 is the last body of R1 work and is **design-first**: grill →
 EDR realization decisions → OpenSpec change(s) → code, per the phase-3 workflow.
@@ -64,7 +65,8 @@ scoring machinery to MEASURE an analyst before letting one run unattended. (4) E
 ~Δ2-sized (Δ2 was 9 groups) instead of one oversized change. (5) The store is the natural
 Δ4a foundation Δ4b extends.
 
-The grilling has not yet resolved Q1. It stops here.
+**Q1 RESOLVED: SPLIT accepted — Δ4a (store + LLMOps) grilled and designed first; Δ4b (autonomy) next.**
+Δ4a's eight decisions are captured in EDR-INTELLIGENCE-01 § Δ4a. What remains to grill is Δ4b only.
 
 ## Downstream items Δ4 unblocks (tracked in BACKLOG, currently Δ4-gated)
 
@@ -91,3 +93,21 @@ The grilling has not yet resolved Q1. It stops here.
 3. Start at **Q1** (scope: one change vs the Δ4a/Δ4b split) — recommendation above.
 4. Then walk the tree: A1 (store co-location) → B branch → C branch, resolving dependencies
    first, one question at a time.
+
+
+---
+
+## Δ4b (autonomy) — the NEXT grill (not started)
+
+Δ4a is done; Δ4b is the autonomous plane, to grill as its own session. The branches (from the C tree above):
+- **C1** autonomous engine + analysts (cross-cutting scheduled analysis: shared root cause, threat clusters,
+  portfolio narrative).
+- **C2** scheduler + cadence.
+- **C3** the outbound **push seam** into Knowledge/Governance proposal-intake — also unblocks **G-AI-1 half
+  (b)** (AI emits "need more data on CVE-X" → the gather endpoint from half (a)).
+- **C4** autonomous budget pool (D4's separate capped pool + pause-not-fail + the global ceiling).
+
+Δ4b builds on Δ4a's store. Its immovable guardrail is the sharpest in the system: **autonomy of generation
+is allowed; autonomy of authority is never** (D3) — every autonomous output is an advisory Proposal under
+Governance. Resume: re-read EDR § Δ4a (done) + D3/D4, re-invoke grilling, start at C1 (or first: "does Δ4b
+need the eval loop green as a precondition to enabling any analyst?").

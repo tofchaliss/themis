@@ -1032,3 +1032,104 @@ that does not exist yet". It exists now (EDR-GOVERNANCE-01 D16), and the realiza
   decision: the 204 header stays opaque (AI-204-1). This is the decline taxonomy's first
   entry, which G-AI-2(c)'s eval loop consumes: "model can't reason" vs "grounding had nothing
   to reason about" are different problems with different fixes.
+
+---
+
+## Δ4a — Store + LLMOps (grilled 2026-08-24; DESIGN — no code yet)
+
+Δ4 (Autonomy + LLMOps) is the last R1 body of work and is **split** (grill decision): **Δ4a = operational
+store + LLMOps plane**, **Δ4b = autonomous plane** (its own later grill). Δ4a first, because the eval loop
+consumes telemetry that is ALREADY LIVE (`decline_class`, `themis_ai_declines_total`, invocation-total
+tokens) and needs no new generation path — and it gives us the machinery to MEASURE a capability's quality
+before Δ4b ever lets an analyst run unattended. What the grill established, decision by decision:
+
+### D-Δ4a-1 — The operational store CO-LOCATES in the existing `intelligence` database
+
+The Intelligence node already owns a Postgres store (`position_embeddings` KS2 vector index + `processed_events`
+inbox, migrations `000001`/`000002`). Δ4a ADDS migrations (`000003…`) to the same DB and store package — same
+context, same ownership, same pool/DSN/migration harness. Splitting within one context would invent a boundary
+the architecture (database-PER-CONTEXT) does not have.
+
+**Backup note (new obligation):** the vector index is disposable (rebuildable from Governance Positions), and
+the inbox is bookkeeping — but Δ4a's **golden set and eval reports are the node's FIRST non-disposable state**.
+A `TRUNCATE` of the `intelligence` DB would lose a curated regression suite and the history of which version
+scored what. The EDR flags that this DB now needs a backup story; it is no longer "derived and safe to wipe".
+
+### D-Δ4a-2 — Golden dataset = grounding-replay set (+ acceptance-outcome for the Decision capability only)
+
+A golden entry is a FROZEN real invocation (assembled context + the model's output). Scoring is DETERMINISTIC
+against machinery that already exists: did every cited identifier ground (T8)? did the schema validate? was a
+decline honest? No human labels. For `recommend_position` a SECOND signal is layered in — Governance's actual
+accept/reject of the AI's proposal, harvested free from the pipeline (noisy, Decision-only).
+
+- **Human-labeled quality is DEFERRED** — it needs a labeling workflow/UI, a project in itself; do not
+  half-build it.
+- **HONEST LIMIT:** for the Information capabilities (`plan_remediation`, `explain_vulnerability`,
+  `compare_releases`) the loop measures **groundedness / well-formedness, NOT answer quality** — prose has no
+  single correct answer to diff against. "Eval green" for an Information capability means "it stayed grounded
+  and well-formed", never "it was a good explanation". Stated so nobody reads more into the score.
+
+### D-Δ4a-3 — Prompts stay in-code; the registry records a content-hash VERSION (attribution, not serving)
+
+Prompts remain `go:embed` — reviewed, CI-gated, shipped with the binary. The registry stores a content hash +
+version label per capability, STAMPED on every invocation and eval row. A prompt change is a code change (PR,
+review, deploy); the registry's job is attribution and history, not serving.
+
+- Rejected: DB-served prompts (runtime A/B / hot-swap). It opens an un-audited path — an unreviewed prompt is
+  an unreviewed change to what the model is told about security findings, contradicting the advisory-but-audited
+  spirit — and keeps the Gateway hot path unchanged is worth more than split-traffic on a single-team box.
+- **SCOPE-DOWN:** "A/B" here means **sequential cross-deploy comparison** (this deploy's eval run vs the last
+  version's recorded run), NOT live traffic-splitting. The EDR's Δ4 "A/B" line is scoped to that.
+
+### D-Δ4a-4 — No model registry; model identity is config + version-stamp; promotion is HUMAN-gated
+
+Model tiers are already runtime router config (`THEMIS_INTELLIGENCE_MODEL`/`_ESCALATION`/`_ECONOMY`, INT-0062)
+and `model`/`tier` already stamp every row. Δ4a adds no `models` table and no automated promotion gate. The eval
+report groups pass-rates by `(capability, prompt_version, model)`; "capability promotion" is a human reading
+the report and changing config, then redeploying.
+
+- An automated promotion gate would be autonomy of a consequential change ("the system switched the model
+  serving security recommendations") — barred by the immovable guardrail. The report ADVISES; a person decides.
+- **HONEST LIMIT:** nothing but human attention blocks deploying a WORSE-scoring model — the gate is human
+  attention, not code. Stated in the EDR.
+
+### D-Δ4a-5 — Golden capture is HYBRID: capped invocation log → human-promoted durable golden set
+
+Every invocation is captured into a RETENTION-CAPPED log (disposable, like the embeddings); a human PROMOTES
+selected entries into the durable, backed-up golden set. The log is raw material; the golden set is a CURATED
+regression suite — small, each entry a case-class worth not regressing (the PLAN-4 merged-step citation, the
+all-scope decline, the AI-CMP-1b subject_id echo). Curation is what makes it a suite rather than a replay of
+100 near-duplicate contexts.
+
+- **REDACTION ON WRITE:** the capture-to-log path scrubs secrets/PII with the SAME boundary as the prompt. A
+  golden entry is a durable artifact and must never become the place a pasted secret lives forever.
+
+### D-Δ4a-6 — The eval is an OFFLINE, ON-DEMAND, LIVE-MODEL command; run-it-yourself discipline
+
+The eval replays the golden set's frozen INPUTS through the CURRENT prompt/model (real provider calls,
+`e2e-llm`-shaped), scores against the golden expectations, and stores a report. It runs when a human asks —
+post-deploy, pre-promotion — not on a schedule (continuous model spend on a single-VM box serving reactive
+traffic is the wrong trade; the decisions it informs are deploy-time moments).
+
+- **LIVE-ONLY (no static/model-less mode):** considered and REJECTED a second "static" mode (replay frozen
+  OUTPUTS through the current gate/schema, CI-able with no model). One mode, one meaning: the eval is about
+  MODEL BEHAVIOR, and a contract-check must never be mistaken for a quality-check.
+- **HONEST LIMIT (accepted):** because the live eval needs a model and CI has none, **no automatic net guards
+  the AI contract** — a prompt-contract or gate change that would reject previously-good outputs ships silently
+  unless a human runs the eval. The eval story is entirely run-it-yourself discipline (consistent with the
+  human-gated promotion above). Stated plainly so "eval exists" is never read as "regressions are caught".
+
+### Δ4a net shape
+
+Store: new migrations in the existing `intelligence` DB (capped invocation log · durable golden set · eval
+reports · version history; golden set + reports backed up). LLMOps: a content-hash version stamp · a redacted
+capped log with human promotion to a durable golden set · an offline live-model eval command scoring
+deterministically (grounded? schema-valid? honest decline? + Decision-only acceptance-outcome), reporting by
+`(capability, prompt_version, model)` · NO DB prompt registry, NO model registry, NO automated promotion, NO
+scheduled loop, NO CI net. Much smaller than "prompt registry + golden datasets + A/B + model registry +
+capability promotion" reads as — because on a reviewable, single-binary, single-VM platform, most of "LLMOps"
+is **attribution + a replay harness**, not a serving/experimentation platform.
+
+Immovable guardrails carried in: the eval tunes routing/versioning, **never truth** (INT-0065); redaction on
+every write; all Δ4a state is the node's OPERATIONAL state, never enterprise knowledge. Δ4b (autonomy) is a
+separate change and a separate grill; it will build on this store.
