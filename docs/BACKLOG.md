@@ -253,6 +253,23 @@ under the 2026-08-07 re-derivation standard.
   tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
   a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
   engine when a second translator lands. Until then the translator is exercised only live.
+- [ ] **AI-CMP-1b — the Information path never validates `subject_id`; the model can echo the wrong
+  one (filed 2026-08-24, live).** LOW. Live-witnessed twice on `compare_releases`: the prompt tells the
+  model to echo the CANDIDATE release id in `subject_id`, and CyberPal returned the BASELINE id instead
+  (`rel-old` on the e2e fixture; the baseline id on the MRF pair). Harmless today — `subject_id` is
+  response metadata, the prose and cited CVEs were correct — but the Decision path validates its
+  `finding_id` echo and the Information path validates nothing, so a capability cannot rely on the field.
+  **Fix shape:** a cheap subject-echo check on the Information branch (the expected id is known — it is the
+  Selection's subject), warning-not-fatal like the rationale scan (an echo mismatch is a labeling slip,
+  not an ungrounded citation). **Scope:** SMALL.
+- [ ] **AI-PROSE-1 — narration renders priority NUMBERS as severity WORDS / restates aggregates loosely
+  (filed 2026-08-24, live).** LOW, expected-by-design note. `compare_releases` rendered "residual priority
+  of critical" instead of "152", and once mis-restated a bucket count. Grounding Verification anchors to
+  IDENTIFIERS, not to arithmetic in prose (T8), so this is not a gate failure — it is the documented limit
+  of what the gate guarantees. **Not a bug to fix so much as a reading rule to socialize:** trust the named
+  CVEs and the deterministic tiles; treat summary numbers in the prose as prose. Captured so the demo
+  narration's "critical" wording is not mistaken for a defect. Revisit only if a stricter numeric-claim
+  check is ever wanted (it would need the model to cite numbers as structured fields, not free text).
 - [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
   (filed 2026-08-17, live test).** LOW → **re-scoped 2026-08-23 (T2 execution): DESIGN-FIRST,
   blocked on a Knowledge domain decision.** The T2 plan assumed the card's alias set existed to
@@ -956,7 +973,7 @@ under the 2026-08-07 re-derivation standard.
 - [x] **AI-TEL-1 — `Outcome.TokensUsed` reports only the LAST attempt's tokens; a multi-attempt
   invocation under-reports its cost in telemetry.** ✅ **CLOSED 2026-08-23 (T4 delivery).**
   Accumulates across attempts AND tiers; the proposal metadata's figure becomes the invocation
-  TOTAL (the honest number for both, as filed). Regression: `TestInvokeTokensAccumulateAcrossAttempts`. _(Surfaced 2026-08-13 during the router's live
+  TOTAL (the honest number for both, as filed). Regression: `TestInvokeTokensAccumulateAcrossAttempts`. **LIVE-VERIFIED 2026-08-24 (VM):** journal `tokens:3212` = invocation total on a real CyberPal compare. _(Surfaced 2026-08-13 during the router's live
   escalation test.)_ The Gateway overwrites `oc.TokensUsed` per attempt, so an invocation with a
   schema retry or an escalation logs only the final call's tokens (measured: an escalated
   invocation whose two calls cost ~1900 + 2116 tokens logged `tokens:2116`). The BUDGET is
@@ -985,7 +1002,7 @@ under the 2026-08-07 re-derivation standard.
   **Dep:** none. **Scope:** SMALL-MEDIUM. **Priority: LOW-MED.**
 
 - [x] **AI-CMP-1 — `compare_releases@v1`: an Information capability narrating the comparison read
-  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T5).** MED as the T5 entry point. ✅ **CLOSED 2026-08-23 (first T5/R1 delivery; EDR-INTELLIGENCE-01 realization note).** Shipped exactly as filed: ordered two-release Selection, `NeedReleaseComparison` grounding received verbatim, buckets capped 15/bucket with counted omissions, guard refusals → `no_grounding`, empty diff → `rule:empty-comparison` (zero tokens), Grounding Verification the only gate; GUI "Ask the advisor" on the Compare tab (read-scope, statelessPosts). IDEA-1's
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T5).** MED as the T5 entry point. ✅ **CLOSED 2026-08-23 (first T5/R1 delivery; EDR-INTELLIGENCE-01 realization note).** Shipped exactly as filed: ordered two-release Selection, `NeedReleaseComparison` grounding received verbatim, buckets capped 15/bucket with counted omissions, guard refusals → `no_grounding`, empty diff → `rule:empty-comparison` (zero tokens), Grounding Verification the only gate; GUI "Ask the advisor" on the Compare tab (read-scope, statelessPosts). **LIVE-VERIFIED 2026-08-24 (VM):** grounded 200 vs CyberPal via curl + GUI; e2e-llm compare_releases PASS on a real-delta fixture (fixed/new/persisting all read correctly); truncation-honesty disclosed ("worst 15 shown, 95 omitted"). IDEA-1's
   consumer 3, unblocked by EDR-GOVERNANCE-01 D16: the deterministic
   `GET /releases/{id}/compare/{candidate}` now exists, so the capability is an overlay — the model
   is handed the `{fixed,new,persisting}` buckets verbatim and narrates what the fix achieved,
@@ -995,7 +1012,7 @@ under the 2026-08-07 re-derivation standard.
   AI-204-1/AI-204-2. **Dep:** none (D16 shipped in v0.4.2); composes with [[G-AI-3]], which reuses
   the same delta machinery for precedent ranking. **Scope:** MEDIUM.
 - [x] **G-AI-3 — Rank precedent decisions by release-to-release delta.** ✅ **CLOSED 2026-08-23
-  (EDR-INTELLIGENCE-01 realization note; second T5/R1 delivery).** The remainder shipped on the
+  (EDR-INTELLIGENCE-01 realization note; second T5/R1 delivery).** **LIVE-VERIFIED 2026-08-24 (VM):** /similar returned 4 baseline precedents at release_overlap 1.0 — correct, the two releases share 100% of their open surface (0 fixed/0 new/110 persisting). The remainder shipped on the
   D16 comparison read: posture-overlap delta (`persisting/(fixed+new+persisting)`), weight
   `0.5+0.5×overlap`, ranked inside the ONE PrecedentService seam (Gateway grounding and
   `/findings/{id}/similar` re-rank identically), overlap exposed in the prompt and as additive
@@ -2348,7 +2365,7 @@ under the 2026-08-07 re-derivation standard.
   and not the other. Now a real CVE from the Finding, plus an explicit prohibition.
 
 - [x] **GOV-15 — at a large estate the blast multiplier destroys the triage order it exists to
-  improve.** ✅ **CLOSED 2026-08-23 (EDR-GOVERNANCE-01 D17, the first T2 delivery).** The decision
+  improve.** ✅ **CLOSED 2026-08-23 (EDR-GOVERNANCE-01 D17, the first T2 delivery).** **LIVE-VERIFIED 2026-08-24 (VM):** 12-customer estate → mult 2.0×, CVE-2019-10086 at eff 152 leading the queue (the very CVE the clamp dropped from the top three on 2026-08-08); order preserved AND amplified. The decision
   went to option (a)+: **remove the output clamp** — `effective_priority`/`residual_priority` are
   unclamped ranking numbers, range 0–200 (the bound moved to the input: `BlastMultiplier` already
   saturates at 2.0×). Option (c) (blast as secondary key) was REJECTED with reasons in D17: it
@@ -2535,7 +2552,7 @@ under the 2026-08-07 re-derivation standard.
   the total is not meaningful — which is worth saying in the rendered output.
 
 - [x] **F5 — a node that cannot start is indistinguishable from a healthy one.** ✅ **CLOSED
-  2026-08-23 (EDR-ENHANCE-T2, second T2 delivery — both missing halves).** (a) Every node now
+  2026-08-23 (EDR-ENHANCE-T2, second T2 delivery — both missing halves).** **LIVE-VERIFIED 2026-08-24 (VM):** /readyz ready on all six nodes; vm-verify Readiness section green. (a) Every node now
   serves `/healthz` (liveness) + `/readyz` (readiness: DB ping, migrations-table probe,
   credential freshness) from the new business-agnostic `internal/platform/health` package
   (depguard `platform-health-infra-only` + `TestPlatformHealthIsBusinessAgnostic` fence it like
