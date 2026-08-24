@@ -40,6 +40,13 @@ disable-able, D13):
 | **Δ3** | Polyglot + advanced reasoning | **Python LLM engine** (DSPy/LangGraph) behind the engine port · **RAG / Knowledge Engine** (pgvector) | +Python, +pgvector |
 | **Δ4** | Autonomy + LLMOps | **Autonomous engine** + scheduler + push seam · **LLMOps plane** (prompt registry, golden datasets, A/B, model registry, capability promotion) + operational store | separate |
 
+> **Δ4 status (2026-08-24): PRE-GRILL.** Δ1–Δ3a shipped; the whole pre-Δ4 R1 surface shipped + was
+> live-verified this cycle (see `PHASE3-STATUS.md`). Δ4 is the last R1 body of work and is design-first.
+> The decomposed item tree (A operational store · B LLMOps plane · C autonomous plane), the guardrails that
+> do not move, the downstream items Δ4 unblocks (G-AI-1b, G-AI-2c tuning, G-AI-4 pool, G-AI-5), and the open
+> scope question (one change vs a **Δ4a store+LLMOps / Δ4b autonomy** split — recommended split) live in
+> [`../DELTA4-GRILL-PREP.md`](../DELTA4-GRILL-PREP.md). Resume the grill there.
+
 The one rule that keeps every later delta additive (no rewrites): **Δ1 must sit on the harness's real seams,
 even with one thing behind each.** Get the seam shapes right once; fill in behind ports thereafter.
 

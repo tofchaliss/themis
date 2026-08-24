@@ -1,6 +1,37 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-06 · **Read this first when resuming.**
+**Updated:** 2026-08-24 · **Read this first when resuming.**
+
+> ## ⏭ RESUME 2026-08-24 — next up is the **Δ4 grill** (design-first, no code yet)
+>
+> The tiered enhancement roadmap (`EDR-ENHANCE-T1…T5`) drove several arcs to `main` and each was
+> **live-verified on the VM** the same or next day. Current `main` = `25c5335`; `make check-ci` green.
+>
+> **Shipped + live-verified since the 2026-08-19 compare-read release (v0.4.2):**
+> - **T2 correctness:** GOV-15/**D17** — `effective`/`residual` priority UNCLAMPED (0–200 ranking numbers;
+>   the 100-clamp destroyed triage order at a saturated estate). Live: 12-customer estate → 2.0×,
+>   CVE-2019-10086 at eff **152** leading the queue. · **R6/F5** — `internal/platform/health` (4th platform
+>   pkg): `/healthz`+`/readyz` on all nodes + fresh-connection credential watch + systemd `StartLimitBurst`.
+>   Live: readyz green all six. · EV-DEDUP-2 design = **EDR-EVIDENCE-01 D10 (PROPOSED)** filings model.
+>   GUI-11 re-scoped design-first (aliases aren't persisted).
+> - **T5/R1 AI chain — the whole pre-Δ4 surface:** **AI-CMP-1** `compare_releases@v1` (Information; ordered
+>   [baseline,candidate]; grounded verbatim on the D16 read; live 200 vs CyberPal, e2e-llm PASS). ·
+>   **G-AI-3** delta-aware precedent ranking (release-overlap weight in the one PrecedentService seam; live
+>   `release_overlap`). · **AI-TEL-1** invocation-total tokens · **AI-204-2** deterministic decline detail ·
+>   **G-AI-2(c)** classification half (`decline_class` + `themis_ai_declines_total`) · **G-AI-4** per-run
+>   token ceiling · **G-AI-1 half (a)** on-demand `POST /faultlines/gather` (live: fetched a fresh CVE) ·
+>   **G-AI-5** deferral confirmed + guarded by `TestEveryShippedCapabilityIsLocalOnly`.
+> - **e2e-llm** now drives all four capabilities; **4/4 PASS on cyberpal20b** (2026-08-24). The PLAN-4
+>   merged-step citation regression is confirmed dead.
+> - v0.4.2 tagged (2026-08-21). Two LOW gaps filed from the VM round: **AI-CMP-1b** (Information path
+>   doesn't validate the model's `subject_id` echo) · **AI-PROSE-1** (narration renders priority numbers as
+>   words — expected; the gate anchors to identifiers, not prose arithmetic).
+>
+> **NEXT = Δ4 (Autonomy + LLMOps)** — the last R1 body of work, **design-first**. Grill prep + the full item
+> tree + the open scope question (one change vs a Δ4a store+LLMOps / Δ4b autonomy split) are captured in
+> **[`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md)**. Resume there.
+
+**Historical snapshot below (2026-08-06).**
 
 Phase-3 is a **greenfield DDD rebuild** of Themis into four bounded contexts —
 **Evidence → Knowledge → Governance → Communication** — plus an Intelligence Gateway, realized from the
