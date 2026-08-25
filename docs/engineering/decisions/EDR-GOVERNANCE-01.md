@@ -528,6 +528,17 @@ all, since `Inferred` fails the constitutional stage before policy is consulted.
 PoC contrast: the PoC had no notion of a governed auto-accept — suppression was either manual or implicit in
 feed handling, with no recorded authority and no evidence floor.
 
+
+> **Realization note (2026-08-25, Δ4b D-Δ4b-6 — the authority line made un-erodable):** the
+> `ActorSystem` gate in `PolicyRule.Evaluate` ALREADY makes an `ai`-proposer proposal ineligible for
+> auto-accept — an autonomous analyst (Δ4b) raises `proposer_kind: ai`, so its proposals are advisory,
+> never authority (D3). What Δ4b adds is the ENFORCEMENT of that guarantee against future erosion:
+> `TestAIProposalNeverAutoAccepts` drives every shipped auto-accept rule against an ai-proposed proposal
+> across all stances and all trust classes and fails the build if any could accept (the R4 tripwire
+> pattern, like `TestEveryShippedCapabilityIsLocalOnly` for G-AI-5). A new auto-accept rule must be added
+> to `shippedAutoAcceptPolicies()` so the invariant covers it — a forgotten rule is a reviewable omission.
+> This is the single most important line in Δ4b: autonomy of generation is the feature, autonomy of
+> authority is the catastrophe, and the difference is now a build-breaking test, not an implicit gap.
 ### D16 — Release comparison is a Governance read: `GET /releases/{id}/compare/{candidate}`, guarded by evidence presence, fail-closed
 
 Context: IDEA-1 (release-comparison read + fix-verification view, filed 2026-08-14) asked the question "diff
