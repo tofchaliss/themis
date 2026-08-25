@@ -919,7 +919,7 @@ under the 2026-08-07 re-derivation standard.
   flag: the scheduled watch's opt-in guards SILENT outbound calls, and an authenticated
   write-scoped POST is never silent. Withdrawn CVEs retire the card; found-nothing is an honest
   200. **Half (b) — the AI automatically emitting "need more data on CVE-X" and pushing here —
-  remains the Δ4-class push seam**; until then the loop is a human/script reading an
+  remains the Δ4-class push seam** **✅ THE PUSH SEAM NOW EXISTS (Δ4b, 2026-08-25): `readapi.ProposalWriter` raises advisory `ai` proposals to Governance; the AI-emits-need-more-data path can reuse the same outbound-write seam to POST a gather request to Knowledge as a follow-on.**; until then the loop is a human/script reading an
   `insufficient` whose `decline_class=thin_grounding` detail says what is missing, and POSTing. _(Gap surfaced in the
   M4 Δ2 grill, 2026-07-24.)_ When `recommend_position` runs against a CVE our feeds have **not yet ingested**,
   there is no _Information_ to reason over — and without an affected range even the version-range step can't

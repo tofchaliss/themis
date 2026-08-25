@@ -574,3 +574,27 @@ THEMIS_DATABASE_DSN=<intelligence-dsn> THEMIS_LLM_URL=http://localhost:11434 \
 - **Run-it-yourself, no CI net.** The eval needs a live model and CI has none, so a
   prompt-contract or gate change that would reject previously-good outputs ships silently unless
   someone runs this. Make it a release-gate habit.
+
+## Δ4b autonomous plane (default OFF)
+
+The autonomous cross-release-consistency analyst raises advisory proposals no request would ask
+for — when the same CVE was decided on a similar release but is undecided here. Enable it by
+giving the pool a budget (its existence is the switch):
+
+```sh
+# on the intelligence node's env, then restart:
+THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS=500
+THEMIS_INTELLIGENCE_AUTO_CADENCE=5m        # short cadence for a live test
+THEMIS_REGISTRY_URL=http://localhost:8082
+THEMIS_API_KEY=<a write-scoped key>
+```
+
+Within one cadence, advisory `ai` proposals appear on undecided Findings that have a decided
+precedent elsewhere — visible in a release posture / the finding drawer. **Honest properties:**
+- **Quiet by default** — it proposes ONCE per (finding, precedent) and stays silent until the
+  precedent changes (D-Δ4b-5). It will not re-spam a Finding every tick.
+- **Never authority** — an `ai` proposal can NEVER be auto-accepted, regardless of stance/evidence
+  (constitutional, guarded by `TestAIProposalNeverAutoAccepts`). It advises; a human decides.
+- **Bounded** — it spends from a SEPARATE capped pool (a hard isolation wall from reactive), and
+  pauses (drain-then-stop) when the pool is spent, resuming next window. It can never starve
+  reactive triage.

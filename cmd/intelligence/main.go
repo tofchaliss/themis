@@ -65,7 +65,14 @@ type config struct {
 	budgetTokens int
 	maxRunTokens int // THEMIS_INTELLIGENCE_MAX_RUN_TOKENS — per-run (per-invocation) token ceiling across retries + escalation (G-AI-4); 0/unset = unlimited (the load-bearing default).
 	budgetWindow time.Duration
-	logRetention time.Duration // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
+	logRetention time.Duration
+	// Δ4b autonomous plane (D-Δ4b-3/4). The pool's EXISTENCE is the enable switch: unset ⇒ the
+	// autonomous sweep never runs. A hard isolation wall from the reactive budget.
+	autoBudgetTokens int           // THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS — the autonomous pool ceiling per window. Unset/0 = the autonomous sweep is DISABLED (not unlimited: nobody asked, so off).
+	autoBudgetWindow time.Duration // THEMIS_INTELLIGENCE_AUTO_BUDGET_WINDOW — the pool's window.
+	autoCadence      time.Duration // THEMIS_INTELLIGENCE_AUTO_CADENCE — how often the sweep runs (default 12h). Only matters when the pool is configured.
+	registryURL      string        // THEMIS_REGISTRY_URL — Registry read-API base URL, for the autonomous sweep to enumerate releases.
+	apiWriteKey      string        // THEMIS_API_KEY — the node's WRITE-scoped key for the autonomous push (POST /findings/{id}/proposals). Empty in an auth-off dev deployment. // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
 	rebuild      bool // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. Set ⇒ the reader drains Governance Position events to populate the index; empty ⇒ no population (single-context dev).
@@ -99,6 +106,11 @@ func loadConfig() config {
 		degradePct:      envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
 		budgetWindow:    envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
 		logRetention:    envDurationDefault("THEMIS_INTELLIGENCE_LOG_RETENTION", 0),
+		autoBudgetTokens: envIntDefault("THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS", 0),
+		autoBudgetWindow: envDurationDefault("THEMIS_INTELLIGENCE_AUTO_BUDGET_WINDOW", 24*time.Hour),
+		autoCadence:      envDurationDefault("THEMIS_INTELLIGENCE_AUTO_CADENCE", 12*time.Hour),
+		registryURL:      envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
+		apiWriteKey:      os.Getenv("THEMIS_API_KEY"),
 		rebuild:         os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
@@ -166,6 +178,10 @@ func main() {
 		MaxRunTokens:          cfg.maxRunTokens,
 		BudgetWindow:          cfg.budgetWindow,
 		BudgetDegradeFraction: cfg.degradePct,
+		AutoBudgetTokens:      cfg.autoBudgetTokens,
+		AutoBudgetWindow:      cfg.autoBudgetWindow,
+		RegistryURL:           cfg.registryURL,
+		APIWriteKey:           cfg.apiWriteKey,
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))
@@ -233,6 +249,35 @@ func main() {
 			}
 		}()
 		logger.Info("invocation-log retention enabled", observability.String("retention", cfg.logRetention.String()))
+	}
+
+	// Δ4b autonomous plane (D-Δ4b-3): the cross-release-consistency analyst on a cadence, when a
+	// pool is configured (the pool IS the enable switch). Default OFF. It raises advisory `ai`
+	// proposals Governance can never auto-accept (the group-1 tripwire) — autonomy of generation,
+	// never of authority.
+	if intel.Sweep != nil && intel.Sweep.Enabled() {
+		go func() {
+			tick := time.NewTicker(cfg.autoCadence)
+			defer tick.Stop()
+			for {
+				res, err := intel.Sweep.Run(ctx)
+				if err != nil {
+					logger.Error("autonomous sweep failed", observability.Err(err))
+				} else if res.Proposed > 0 || res.Paused {
+					logger.Info("autonomous sweep",
+						observability.Int("proposed", res.Proposed), observability.Int("examined", res.Examined),
+						observability.Int("skipped", res.Skipped), observability.Bool("paused", res.Paused))
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+		logger.Info("autonomous consistency analyst enabled", observability.String("cadence", cfg.autoCadence.String()))
+	} else {
+		logger.Info("autonomous plane disabled (set THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS to enable)")
 	}
 
 	router := chi.NewRouter()

@@ -73,16 +73,24 @@ type Config struct {
 	// MaxRunTokens — G-AI-4's per-run ceiling; 0 = unlimited.
 	MaxRunTokens int
 	BudgetWindow time.Duration
+	// Δ4b autonomous pool + sweep dependencies (D-Δ4b-4). AutoBudgetTokens/Window unset (0) ⇒
+	// the sweep is nil (the pool's existence is the enable switch). A hard isolation wall from
+	// the reactive budget.
+	AutoBudgetTokens int
+	AutoBudgetWindow time.Duration
+	RegistryURL      string // Registry read-API base URL (release enumeration for the sweep)
+	APIWriteKey      string // the node's write-scoped key for the autonomous push
 }
 
 // Intelligence is the wired Gateway surface. Index and Consumer are non-nil only when a Store
 // was configured (the Δ3a retrieval plane) — cmd boot-loads the Index and drives the Consumer
 // off the bus.
 type Intelligence struct {
-	Handler  http.Handler      // the reactive invoke API (mount under /api/v1)
-	Gateway  *app.Gateway      //
-	Index    *index.Memory     // nil when Store is nil — the boot-load target
-	Consumer *inbound.Consumer // nil when Store is nil — the bus population consumer
+	Handler  http.Handler         // the reactive invoke API (mount under /api/v1)
+	Gateway  *app.Gateway         //
+	Index    *index.Memory        // nil when Store is nil — the boot-load target
+	Consumer *inbound.Consumer    // nil when Store is nil — the bus population consumer
+	Sweep    *app.AutonomousSweep // Δ4b: nil unless BOTH a Store and an autonomous pool are configured
 }
 
 // Wire assembles the Gateway. It returns an error only if a capability's output schema fails
@@ -206,10 +214,21 @@ func Wire(cfg Config) (Intelligence, error) {
 	if err != nil {
 		return Intelligence{}, err
 	}
+	// Δ4b autonomous sweep — only when BOTH a store (for the idempotence record) and an
+	// autonomous pool (the enable switch) are configured. The pool is a SEPARATE Budget: a hard
+	// isolation wall from the reactive budget above, so autonomy can never starve reactive triage.
+	var sweep *app.AutonomousSweep
+	if cfg.Store != nil && cfg.Store.HasPool() && cfg.AutoBudgetTokens > 0 {
+		pool := app.NewBudget(cfg.AutoBudgetTokens, cfg.AutoBudgetWindow)
+		registry := readapi.NewRegistryClient(cfg.RegistryURL, cfg.HTTPClient)
+		writer := readapi.NewProposalWriter(cfg.GovernanceURL, cfg.APIWriteKey, cfg.HTTPClient)
+		sweep = app.NewAutonomousSweep(registry, proj, precedents, writer, cfg.Store, pool)
+	}
 	return Intelligence{
 		Handler:  intelhttp.NewHandler(gw, cfg.Logger).WithPrecedents(precedents, redactor).Routes(),
 		Gateway:  gw,
 		Index:    idx,
 		Consumer: consumer,
+		Sweep:    sweep,
 	}, nil
 }
