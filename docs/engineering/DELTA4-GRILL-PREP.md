@@ -97,7 +97,9 @@ scoring machinery to MEASURE an analyst before letting one run unattended. (4) E
 
 ---
 
-## Δ4b (autonomy) — the NEXT grill (not started)
+## Δ4b (autonomy) — GRILLED + DESIGNED 2026-08-25 (walking skeleton)
+
+See EDR-INTELLIGENCE-01 § Δ4b (D-Δ4b-1…6) + openspec/changes/phase3-intelligence-d4b. Original branch notes below.
 
 Δ4a is done; Δ4b is the autonomous plane, to grill as its own session. The branches (from the C tree above):
 - **C1** autonomous engine + analysts (cross-cutting scheduled analysis: shared root cause, threat clusters,

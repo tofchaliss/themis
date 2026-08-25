@@ -1133,3 +1133,104 @@ is **attribution + a replay harness**, not a serving/experimentation platform.
 Immovable guardrails carried in: the eval tunes routing/versioning, **never truth** (INT-0065); redaction on
 every write; all Δ4a state is the node's OPERATIONAL state, never enterprise knowledge. Δ4b (autonomy) is a
 separate change and a separate grill; it will build on this store.
+
+---
+
+## Δ4b — Autonomy, walking skeleton (grilled 2026-08-25; DESIGN — no code yet)
+
+Δ4b is the autonomous plane — generation with no caller (D3). Grilled as a **walking skeleton** (the
+proven Δ1 rhythm): ONE analyst, on a scheduler, spending from a capped pool with pause-not-fail, pushing
+through ONE seam — deferring the analyst portfolio, cloud-tier autonomy, and event-reactive triggering. It
+builds on Δ4a's store. Its immovable guardrail is the sharpest in the system: **autonomy of GENERATION is
+allowed; autonomy of AUTHORITY is never** (D3). What the grill established:
+
+### D-Δ4b-1 — The push seam is the EXISTING Governance `raiseProposal` (proposer_kind: ai); no new intake
+
+The autonomous analyst raises an advisory Governance Proposal on an EXISTING Finding via the seam the
+reactive path already uses (`POST /findings/{id}/proposals`, `proposer_kind: ai`), over Intelligence's
+existing read-API client. The autonomous and reactive proposals therefore arrive INDISTINGUISHABLE through
+the same advisory door — exactly D3's "both modes funnel to one advisory-Proposal exit". Consequence
+(carried into the analyst choice): the skeleton analyst can only target Findings that ALREADY EXIST — it
+cannot invent Findings (those are Governance's, born of real correlation). A portfolio-narrative insight
+with no Finding to attach to needs a different intake and is DEFERRED.
+
+Writing requires a WRITE-scoped key: the node currently only reads cross-context; the autonomous engine
+needs credentials to POST (a deployment/auth point, flagged for the wiring).
+
+### D-Δ4b-2 — The skeleton analyst: cross-release decision-consistency
+
+Self-initiated `recommend_position`-style grounding over UNDECIDED Findings that have a DECIDED precedent
+on a SIMILAR release. It is the autonomous twin of the reactive recommender — same grounding (the
+PrecedentService + compare read from G-AI-3/AI-CMP-1), but self-initiated across the estate: a human
+triaging release B never sees that release A already answered this CVE.
+
+- It COMPOSES existing reads (Registry releases + PrecedentService per undecided Finding) — no new
+  cross-release-by-CVE Governance endpoint (which does not exist; that gap is why the "emerging-threat
+  cluster" analyst was rejected for the skeleton — it would need new read plumbing to even run).
+- It does NOT overlap the disposition-watcher (GOV-14b): that watches SUPPRESSED Findings for signal/time
+  drift; this watches UNDECIDED Findings for precedent. Complementary, not redundant.
+- Rejected for the skeleton: emerging-threat cluster (blocked on a missing read) and portfolio narrative
+  (no Finding to attach to; deferred with the new-intake it would need).
+
+### D-Δ4b-3 — Trigger: a configurable, DEFAULT-OFF time cadence (+ a manual "sweep now")
+
+The analyst runs on a fixed cadence, mirroring the feed sweeps / disposition-watcher / re-discovery sweep —
+the honest realization of D3's "own scheduled analysts", with no caller by design. Default OFF (a silent
+autonomous plane switched on by accident is the surprise the budget-default rule guards against; and see
+D-Δ4b-4, where the pool's existence IS the enable switch). A manual "sweep now" affordance ships for
+testing/ops.
+
+- Rejected for the skeleton: EVENT-reactive triggering (elegant later, but couples the analyst to bus
+  semantics and makes spend hard to bound — a Position burst becomes an analyst burst; deferred). And an
+  operator-triggered-ONLY sweep (safest, but it dodges the very seam — generation with no caller — that
+  Δ4b exists to prove).
+
+### D-Δ4b-4 — A SEPARATE autonomous budget pool; unset = OFF; pause = drain-then-stop; a hard isolation wall
+
+Autonomy spends from its OWN `Budget` instance (own ceiling/window,
+`THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS`/`_WINDOW`), distinct from the reactive per-capability window (D4's
+"separate, capped autonomous-engine pool").
+
+- **Unset = OFF, not unlimited.** This is the sharp divergence from the reactive default: reactive-unset
+  means "no ceiling" because a human asked for each call; autonomous-unset must mean OFF, because nobody
+  asked at all. The pool's EXISTENCE is the enable switch (satisfying D-Δ4b-3's default-OFF in one place).
+- **Pause = drain-then-stop mid-sweep.** Worst-first (existing residual priority — free, no new value
+  model); each proposal debits the pool; when the pool cannot admit the next call the sweep stops there and
+  resumes next window. Never refuses reactive work (separate pool); never overshoots by more than one call
+  (admission on remaining>0, as reactive).
+- **A HARD isolation wall.** Autonomy and reactive never share slack — an idle autonomous pool does not
+  help reactive throughput, and a busy reactive day never starves autonomy or vice versa. Isolation over
+  efficiency, correct for the skeleton; a shared-with-priorities pool is a possible future refinement.
+
+### D-Δ4b-5 — Idempotence: record pushes, skip already-proposed pairs, re-propose only on precedent change
+
+The analyst records each push (in the Δ4a store — a small `autonomous_proposals` record) and skips
+already-proposed (Finding, precedent) pairs on the next tick, RE-proposing only if the precedent that
+grounded it CHANGED. Without this, a cadence re-examines the same undecided Finding every window and
+accumulates identical advisory proposals until someone decides — proposal spam, the behavior that makes
+operators distrust and DISABLE the autonomous plane. Quiet-by-default (one proposal per insight, silent
+until something moves) is the trust property that keeps it enabled.
+
+- This makes the analyst STATEFUL (unlike the reactive path). The record is operational state, not truth:
+  disposable — a wipe risks RE-proposing (annoying), never MIS-proposing (wrong).
+
+### D-Δ4b-6 (IMMOVABLE) — The authority line, made structural: an AI proposal can NEVER auto-accept
+
+D3's guardrail is absolute, so it is ENFORCED, not trusted. Governance's auto-accept path (D15) gains an
+explicit constitutional precondition — **an `ai`-proposer proposal is never eligible for policy
+auto-accept, regardless of stance or evidence** — and an INVARIANT TEST fails the build the moment a policy
+rule could accept an AI proposal (the R4 tripwire pattern, as `TestEveryShippedCapabilityIsLocalOnly` does
+for G-AI-5). This is the single most important line in Δ4b: autonomy of generation is the feature, autonomy
+of authority is the catastrophe, and the difference — "can an AI proposal ever auto-accept" — is now a
+build-breaking tripwire, not an implicit gap. Mandatory in the skeleton, not a follow-on. The reason of
+record lives in Governance, where the bar is enforced.
+
+### Δ4b net shape
+
+A cadence-driven autonomous analyst (cross-release consistency) in the Intelligence node, default-OFF,
+enabled by a separate capped pool; it composes existing reads to find undecided Findings with a decided
+precedent on a similar release, records what it proposed (skip/re-propose on precedent change), and pushes
+an advisory `ai` proposal through the existing Governance seam — where an explicit, test-guarded
+constitutional bar guarantees it can never become authority. Deferred: the analyst portfolio,
+portfolio-narrative + its new intake, event-reactive triggering, cloud-tier autonomy, a
+shared-with-priorities pool. Δ4b builds on Δ4a's store and moves no immovable guardrail.
