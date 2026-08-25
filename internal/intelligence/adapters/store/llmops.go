@@ -133,3 +133,23 @@ func (s *Store) UpsertPromptVersion(ctx context.Context, capability, contentHash
 		VALUES ($1,$2) ON CONFLICT (capability, content_hash) DO NOTHING`, capability, contentHash)
 	return err
 }
+
+// HasProposed reports whether the autonomous analyst already pushed this (finding, precedent)
+// pair (Δ4b D-Δ4b-5) — the idempotence check that keeps the plane quiet-by-default. A
+// precedent_key that encodes the precedent's version means a CHANGED precedent reads false and
+// re-proposes, which is correct, not spam.
+func (s *Store) HasProposed(ctx context.Context, findingID, precedentKey string) (bool, error) {
+	var exists bool
+	err := s.exec(ctx).QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM autonomous_proposals WHERE finding_id = $1 AND precedent_key = $2)`,
+		findingID, precedentKey).Scan(&exists)
+	return exists, err
+}
+
+// RecordProposed records that the analyst pushed this pair. Idempotent on the pair.
+func (s *Store) RecordProposed(ctx context.Context, findingID, precedentKey string) error {
+	_, err := s.exec(ctx).Exec(ctx, `
+		INSERT INTO autonomous_proposals (finding_id, precedent_key)
+		VALUES ($1,$2) ON CONFLICT (finding_id, precedent_key) DO NOTHING`, findingID, precedentKey)
+	return err
+}

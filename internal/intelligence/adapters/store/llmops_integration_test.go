@@ -77,3 +77,29 @@ func TestEvalReportAndPromptVersion(t *testing.T) {
 		t.Fatalf("upsert version again: %v", err)
 	}
 }
+
+// Δ4b D-Δ4b-5: the analyst records pushes and skips already-proposed pairs; a CHANGED precedent
+// key (a new precedent version) re-proposes.
+func TestAutonomousProposalIdempotence(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+
+	if has, err := st.HasProposed(ctx, "f-1", "prec-v1"); err != nil || has {
+		t.Fatalf("fresh pair: has=%v err=%v", has, err)
+	}
+	if err := st.RecordProposed(ctx, "f-1", "prec-v1"); err != nil {
+		t.Fatal(err)
+	}
+	// Same pair → skip.
+	if has, _ := st.HasProposed(ctx, "f-1", "prec-v1"); !has {
+		t.Error("recorded pair must read as already-proposed (skip)")
+	}
+	// Re-record is idempotent (no error, no duplicate).
+	if err := st.RecordProposed(ctx, "f-1", "prec-v1"); err != nil {
+		t.Fatalf("re-record: %v", err)
+	}
+	// A CHANGED precedent (new key) → NOT yet proposed → re-proposes.
+	if has, _ := st.HasProposed(ctx, "f-1", "prec-v2"); has {
+		t.Error("a changed precedent key must read as not-yet-proposed (re-propose)")
+	}
+}

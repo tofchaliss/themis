@@ -182,6 +182,6 @@ func (s *Store) Count(ctx context.Context) (int, error) {
 // Purge removes all Intelligence rows — a full rebuild after a model change, and test
 // cleanup. The index is derived, so a rebuild replays the bus / re-reads the read-APIs (D12).
 func (s *Store) Purge(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE processed_events, position_embeddings, invocation_log, golden_entries, eval_reports, prompt_versions`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE processed_events, position_embeddings, invocation_log, golden_entries, eval_reports, prompt_versions, autonomous_proposals`)
 	return err
 }

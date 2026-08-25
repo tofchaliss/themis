@@ -203,3 +203,12 @@ type Authorizer interface {
 type Redactor interface {
 	Redact(text string) string
 }
+
+// ProposalRaiser pushes an autonomous advisory Proposal to Governance (Δ4b D-Δ4b-1). It is the
+// outbound WRITE seam — the only place Intelligence writes cross-context — and it raises the
+// proposal with proposer_kind: ai, so it arrives through the SAME advisory door the reactive
+// path uses and is indistinguishable downstream. It can never auto-accept (Governance's
+// ActorSystem gate + the D-Δ4b-6 tripwire): autonomy of generation, never of authority.
+type ProposalRaiser interface {
+	RaiseAIProposal(ctx context.Context, findingID, stance, rationale string) error
+}
