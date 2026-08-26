@@ -103,3 +103,24 @@ func TestAutonomousProposalIdempotence(t *testing.T) {
 		t.Error("a changed precedent key must read as not-yet-proposed (re-propose)")
 	}
 }
+
+// Regression (2026-08-26): the captured context is a REDACTED string (purls/secrets rewritten),
+// so it is NOT valid JSON. It must store as TEXT — a JSONB column silently rejected it and
+// capture wrote nothing whenever a real Finding's component purls were present.
+func TestInvocationLogStoresRedactedNonJSONContext(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+	// A redactor turns pkg:golang/x@1 into pkg:[REDACTED] etc., yielding a string like this —
+	// deliberately not valid JSON.
+	redacted := `{finding: F1, component: pkg:[REDACTED], note: password=[REDACTED]}`
+	if err := st.AppendInvocation(ctx, store.LoggedInvocation{
+		CorrelationID: "corr-nonjson", Capability: "recommend_position",
+		ContextJSON: []byte(redacted), Reason: "ok",
+	}); err != nil {
+		t.Fatalf("a redacted non-JSON context must store as TEXT, got: %v", err)
+	}
+	got, ok, err := st.GetInvocation(ctx, "corr-nonjson")
+	if err != nil || !ok || string(got.ContextJSON) != redacted {
+		t.Fatalf("round-trip of redacted context: ok=%v err=%v got=%q", ok, err, string(got.ContextJSON))
+	}
+}

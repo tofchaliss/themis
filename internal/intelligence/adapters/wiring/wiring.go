@@ -191,7 +191,11 @@ func Wire(cfg Config) (Intelligence, error) {
 	// version-upsert seeds prompt_versions so every stamped row is attributable.
 	var capturer app.InvocationCapturer
 	if cfg.Store != nil && cfg.Store.HasPool() {
-		capturer = store.NewCapturer(cfg.Store)
+		cap := store.NewCapturer(cfg.Store)
+		if cfg.Logger != nil {
+			cap = cap.WithLogger(cfg.Logger.Component("capture"))
+		}
+		capturer = cap
 		for capID, hash := range pr.Versions() {
 			_ = cfg.Store.UpsertPromptVersion(context.Background(), capID, hash) // best-effort boot seed
 		}

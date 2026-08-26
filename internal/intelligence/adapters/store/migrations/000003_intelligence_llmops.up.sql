@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS invocation_log (
     prompt_version TEXT NOT NULL DEFAULT '',
     model          TEXT NOT NULL DEFAULT '',
     tier           TEXT NOT NULL DEFAULT '',
-    context_json   JSONB NOT NULL,   -- the assembled context, REDACTED on write
-    output_json    JSONB,            -- the model's raw output (redacted); null on a non-LLM decision
+    context_json   TEXT NOT NULL,    -- the assembled context, REDACTED on write (TEXT: the redactor rewrites substrings, so the stored form is a scrubbed STRING, not queryable JSON — see 000005)
+    output_json    TEXT,             -- the model's raw output (redacted); null on a non-LLM decision
     reason         TEXT NOT NULL DEFAULT '',
     decline_class  TEXT NOT NULL DEFAULT '',
     tokens         INTEGER NOT NULL DEFAULT 0,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS golden_entries (
     label                 TEXT NOT NULL,
     capability            TEXT NOT NULL,
     source_correlation_id TEXT NOT NULL DEFAULT '',
-    context_json          JSONB NOT NULL,   -- frozen assembled context (redacted)
+    context_json          TEXT NOT NULL,    -- frozen assembled context (redacted; TEXT, see 000005)
     expected_json         JSONB NOT NULL,   -- frozen expected outcome
     promoted_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
