@@ -76,6 +76,23 @@ implementation**:
 | **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
 | **T5** | AI capabilities (R1) | AI-CMP-1 · G-AI-3 · G-AI-1 · G-AI-2(c) · G-AI-4 · G-AI-5 · Δ4 (eval harness, then autonomy) | entry via AI-CMP-1 → G-AI-3 |
 
+**GUI/Scanner work order (agreed 2026-08-26) — the next stretch after AUTO-VOL-1.** Four of the open
+GUI items are one coherent piece of work, not four: **GUI-2 · GUI-4 · GUI-3 · GUI-5 all touch
+`internal/knowledge/adapters/feed/` + `app/feed_health.go`, all bounded by the D5 relevance rule
+(enrich carded CVEs, never mirror the feed), and all land under ONE EDR-VEX-01 delta.** Clubbed as the
+**"Distro-feed completeness"** cluster — one grilling, one EDR, one implementation arc. Order within it:
+**(1) GUI-2** (MED-HIGH — the only real DATA gap: Alpine has correlation but no vendor fixed-apk bounds /
+fixed-verdict; `enrich_alpine.go` is already partly scaffolded); **(2) GUI-4** rides with it (the
+visibility half — per-ecosystem feed-health rows so "Alpine flowing" ≠ "Alpine silently absent");
+**(3) GUI-3** (Red Hat `changes.csv` efficiency sweep — but FIRST verify whether `THEMIS_VEXFEED_URLS`
+at Red Hat's per-CVE VEX dir already covers it with zero new code); **(4) GUI-5** (Rocky RXSA errata —
+smallest, most niche, last). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
+the tiers still describe theme, this describes the seam. After the cluster: **GUI-12** (measured MED
+dedup fix, pure code) → **KN-SCAN-3** (ecosystem canon, Go-side) → **GUI-10 → GUI-15** (translator test
+harness, then Grype — build-change, Must-ask). GUI-11 + EV-DEDUP-2 stay design-blocked (own EDR/domain
+decision each). **NEXT SESSION: grill GUI-2 as the EDR-VEX-01 delta**, discovery-prep on the existing
+Alpine path (`alpine_client.go`, `enrich_alpine.go`, EDR-VEX-01 D7) recommended first.
+
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
 R6 (silent failure) — both found by running the system rather than by reading it, which is the argument for
