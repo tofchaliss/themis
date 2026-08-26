@@ -344,6 +344,25 @@ OpenVEX / CSAF out.
   [`docs/engineering/PARITY-GAP.md`](docs/engineering/PARITY-GAP.md); resume any session at
   [`docs/engineering/PHASE3-STATUS.md`](docs/engineering/PHASE3-STATUS.md).
 
+## Shell commands the user pastes (paste-safe, ALWAYS)
+
+The user runs the commands I give **by pasting whole fenced blocks** into a `fish` shell on the VM (and
+sometimes locally). Two rules are mandatory, not stylistic — breaking them makes the paste error out
+mid-run:
+
+- **Every interstitial comment INSIDE a fenced code block MUST begin with `#`.** Any explanatory prose left
+  between commands in a block is executed as a command when pasted and errors (e.g. a line starting with
+  `(` → a fish syntax error; `then re-fire…` → `command not found`). If a step needs prose, put it OUTSIDE
+  the fence, or make it a `# comment` line inside. Never leave a bare sentence inside a ``` block.
+- **`fish` does NOT support the bash `VAR=value command` prefix, and `make` may not inherit exports.** To
+  set env for one command in any shell, use `env VAR=value … command` (e.g.
+  `env THEMIS_LLM_URL=… THEMIS_LLM_MODEL=… go test -tags=llm …`), not `VAR=value make …` (measured
+  2026-08-24: the prefix was silently dropped and the test ran on defaults). Multi-line `set -x VAR value`
+  before the command also works.
+
+Also standing (see the session-specific guidance): the VM `bash`/`fish` may have `noclobber` — overwrite a
+file with `rm -f file` then recreate, not `>|`; keep straight quotes; keep blocks short and bannerless.
+
 ## Permission and related
 
 ### Allowed without asking
