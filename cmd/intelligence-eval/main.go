@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -195,11 +196,22 @@ func selectionFor(capability string, ac domain.AssembledContext) domain.Selectio
 func promote(ctx context.Context, st *store.Store, args []string) error {
 	fs := flag.NewFlagSet("promote", flag.ExitOnError)
 	label := fs.String("label", "", "a human label for the case (required)")
-	_ = fs.Parse(args)
-	if fs.NArg() < 1 || *label == "" {
+	// Go's flag package stops at the first POSITIONAL arg, so `promote <corr> --label X` would
+	// leave --label unparsed. Pull the correlation id (the first non-flag arg) out first, then
+	// parse the rest — so flag order does not matter (measured live 2026-08-26).
+	var corr string
+	var flagArgs []string
+	for _, a := range args {
+		if corr == "" && !strings.HasPrefix(a, "-") {
+			corr = a
+			continue
+		}
+		flagArgs = append(flagArgs, a)
+	}
+	_ = fs.Parse(flagArgs)
+	if corr == "" || *label == "" {
 		return fmt.Errorf("usage: intelligence-eval promote <correlation_id> --label \"<case>\"")
 	}
-	corr := fs.Arg(0)
 	in, ok, err := st.GetInvocation(ctx, corr)
 	if err != nil {
 		return err
