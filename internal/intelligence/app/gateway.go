@@ -283,7 +283,17 @@ func (g *Gateway) Invoke(
 	// same scrub the prompt gets, so a golden entry can never durably hold a secret.
 	var ac domain.AssembledContext
 	if g.capturer != nil {
-		defer func() { g.captureInvocation(ctx, oc, ac) }()
+		// Capture on a DETACHED context, never the invocation's. The provider-timeout wrapper
+		// below reassigns `ctx` and its `defer cancel()` runs BEFORE this defer (LIFO), so
+		// capturing on `ctx` would always run on a cancelled context — the INSERT fails with
+		// "context canceled" and, being best-effort, silently writes nothing (measured live
+		// 2026-08-26: 0 rows after successful invocations). Capture is a fire-and-forget audit
+		// write that must OUTLIVE the request, so it gets its own short deadline.
+		defer func() {
+			cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer ccancel()
+			g.captureInvocation(cctx, oc, ac)
+		}()
 	}
 
 	capb, ok := g.registry.Lookup(capabilityID)

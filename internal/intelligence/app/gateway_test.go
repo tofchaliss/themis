@@ -1020,9 +1020,13 @@ func TestInvokePlanExhaustedDeclineClassOnHealthyGrounding(t *testing.T) {
 
 // --- Δ4a capture (D-Δ4a-5) -----------------------------------------------------------
 
-type recordingCapturer struct{ got []CapturedInvocation }
+type recordingCapturer struct {
+	got     []CapturedInvocation
+	ctxErrs []error // the context error seen at capture time — must be nil (a LIVE context)
+}
 
-func (c *recordingCapturer) Capture(_ context.Context, rec CapturedInvocation) {
+func (c *recordingCapturer) Capture(ctx context.Context, rec CapturedInvocation) {
+	c.ctxErrs = append(c.ctxErrs, ctx.Err())
 	c.got = append(c.got, rec)
 }
 
@@ -1074,5 +1078,32 @@ func TestInvokeCaptureIsBestEffortAndTotal(t *testing.T) {
 	}
 	if len(cap.got) != 1 || cap.got[0].Reason != ReasonSelectionMismatch {
 		t.Errorf("early reject must still capture: %+v", cap.got)
+	}
+}
+
+// Regression (2026-08-26): capture must run on a LIVE context even when the invocation's context
+// was cancelled (a provider timeout, or the request context dying on handler return). Capturing on
+// the invocation's cancelled context made every store INSERT fail with "context canceled",
+// silently — 0 rows after successful invocations on the VM. Detached-context capture fixes it.
+func TestInvokeCaptureRunsOnLiveContextAfterTimeout(t *testing.T) {
+	cap := &recordingCapturer{}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines:         []Engine{&fakeEngine{replies: []engineReply{{err: context.DeadlineExceeded}}}},
+		Capturer:        cap,
+		ProviderTimeout: time.Millisecond, // a real timeout wrapper whose cancel fires before capture
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonInsufficient {
+		t.Fatalf("outcome = %+v", oc)
+	}
+	if len(cap.ctxErrs) != 1 {
+		t.Fatalf("captures = %d, want 1", len(cap.ctxErrs))
+	}
+	if cap.ctxErrs[0] != nil {
+		t.Errorf("capture ran on a CANCELLED context (%v) — the store write would fail silently", cap.ctxErrs[0])
 	}
 }
