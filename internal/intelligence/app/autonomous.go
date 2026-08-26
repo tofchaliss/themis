@@ -39,9 +39,27 @@ type AutonomousSweep struct {
 	recorder  ProposedRecorder
 	pool      *Budget // the SEPARATE autonomous pool; nil/disabled ⇒ the sweep is off
 	now       func() time.Time
+	// AUTO-VOL-1 volume controls (measured live 2026-08-26: one decision cascaded to 110
+	// proposals in a single sweep). The guardrails contain the danger; these contain the noise.
+	minScore   float64 // minimum cosine similarity a precedent must clear to be advised on
+	minOverlap float64 // minimum release-overlap (G-AI-3 delta) a precedent must clear
+	maxPerPass int     // hard cap on proposals pushed in one sweep (0 = uncapped)
 }
 
+// Default volume controls (AUTO-VOL-1). Chosen so a WEAK match (a different CVE that merely
+// shares a component, or a precedent from a barely-overlapping release) no longer triggers an
+// advisory — only a strong, clearly-relevant precedent does. A first-run sweep also caps its
+// output so one enable can never firehose the triage board.
+const (
+	defaultMinPrecedentScore = 0.75 // strong cosine; below this the neighbour is "vaguely similar", not precedent
+	defaultMinReleaseOverlap = 0.5  // the two releases share at least half their open surface
+	// DefaultAutoMaxPerPass is the per-sweep proposal cap the composition root falls back to when
+	// the operator sets other volume knobs but leaves the cap unset (AUTO-VOL-1).
+	DefaultAutoMaxPerPass = 20
+)
+
 // NewAutonomousSweep wires the analyst. A nil or disabled pool disables the sweep entirely.
+// The volume controls default to the constants above; override with WithVolumeControls.
 func NewAutonomousSweep(
 	releases ReleaseLister, posture ProjectionReader, precedent *PrecedentService,
 	raiser ProposalRaiser, recorder ProposedRecorder, pool *Budget,
@@ -49,6 +67,8 @@ func NewAutonomousSweep(
 	return &AutonomousSweep{
 		releases: releases, posture: posture, precedent: precedent,
 		raiser: raiser, recorder: recorder, pool: pool, now: time.Now,
+		minScore: defaultMinPrecedentScore, minOverlap: defaultMinReleaseOverlap,
+		maxPerPass: DefaultAutoMaxPerPass,
 	}
 }
 
@@ -58,16 +78,31 @@ func (s *AutonomousSweep) WithClock(now func() time.Time) *AutonomousSweep {
 	return s
 }
 
+// WithVolumeControls overrides the AUTO-VOL-1 gate + cap (config-driven from the composition
+// root). A non-positive minScore/minOverlap keeps its default; a non-positive maxPerPass means
+// UNCAPPED (an operator who deliberately wants no cap). Returns the sweep for chaining.
+func (s *AutonomousSweep) WithVolumeControls(minScore, minOverlap float64, maxPerPass int) *AutonomousSweep {
+	if minScore > 0 {
+		s.minScore = minScore
+	}
+	if minOverlap > 0 {
+		s.minOverlap = minOverlap
+	}
+	s.maxPerPass = maxPerPass // 0/negative = uncapped, an explicit operator choice
+	return s
+}
+
 // Enabled reports whether the sweep will do anything (the pool is the switch).
 func (s *AutonomousSweep) Enabled() bool { return s.pool != nil && s.pool.Enabled() }
 
 // SweepResult is the outcome of one pass — provenance for the operator/telemetry.
 type SweepResult struct {
-	Proposed  int // advisory proposals pushed this pass
-	Skipped   int // undecided Findings skipped (no precedent, or already proposed)
-	Examined  int // undecided Findings looked at
-	Paused    bool // the pool drained mid-pass (drain-then-stop)
-	PushErrs  int  // per-Finding push failures (non-fatal)
+	Proposed int  // advisory proposals pushed this pass
+	Skipped  int  // undecided Findings skipped (no precedent, or already proposed)
+	Examined int  // undecided Findings looked at
+	Paused   bool // the pool drained mid-pass (drain-then-stop)
+	Capped   bool // the per-pass proposal cap was hit — the rest waits for the next window (AUTO-VOL-1)
+	PushErrs int  // per-Finding push failures (non-fatal)
 }
 
 // candidate is one undecided Finding worth a proposal, with its grounding precedent.
@@ -96,6 +131,14 @@ func (s *AutonomousSweep) Run(ctx context.Context) (SweepResult, error) {
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].priority > cands[j].priority })
 
 	for _, c := range cands {
+		// The per-pass cap (AUTO-VOL-1): even under budget, one sweep never pushes more than
+		// maxPerPass proposals — the remainder waits for the next window, worst-first. Stops one
+		// enable firehosing the triage board (measured: 110 in a single sweep). The
+		// idempotence record keeps a capped candidate available (unproposed) next pass.
+		if s.maxPerPass > 0 && res.Proposed >= s.maxPerPass {
+			res.Capped = true
+			break
+		}
 		// The pool is the wall: when it cannot admit the next push, stop here and resume next
 		// window (drain-then-stop). One proposal ~ one unit; the pool is token-denominated, so a
 		// nominal debit per push keeps the skeleton simple while honoring the envelope.
@@ -147,9 +190,9 @@ func (s *AutonomousSweep) gather(ctx context.Context, res *SweepResult) ([]candi
 				Severity: severityOf(e), Components: componentsOf(e),
 				FaultlineID: "", ReleaseID: relID,
 			})
-			best, ok := firstDecided(precs)
+			best, ok := s.bestQualifyingPrecedent(precs)
 			if !ok {
-				res.Skipped++
+				res.Skipped++ // no precedent, or none STRONG enough to advise on (AUTO-VOL-1)
 				continue
 			}
 			cands = append(cands, candidate{
@@ -164,12 +207,29 @@ func (s *AutonomousSweep) gather(ctx context.Context, res *SweepResult) ([]candi
 	return cands, nil
 }
 
-// firstDecided returns the highest-ranked precedent that carries a decided stance.
-func firstDecided(precs []domain.PrecedentPosition) (domain.PrecedentPosition, bool) {
+// bestQualifyingPrecedent returns the highest-ranked precedent that is DECIDED and STRONG enough
+// to advise on (AUTO-VOL-1): a cosine score at/above minScore, and — when the delta overlap is
+// known — a release overlap at/above minOverlap. Precedents arrive delta-ranked (G-AI-3), so the
+// first qualifier is the best. This is what stops one accepted decision cascading into a proposal
+// on every vaguely-similar undecided Finding across the estate.
+//
+// An exact-CVE fallback precedent has Score 0 by construction (matched by lookup, not similarity)
+// but is by definition the SAME CVE — maximally relevant — so it qualifies on identity, exempt
+// from the score floor. Unknown overlap does not disqualify (an unreadable comparison must not
+// silence a strong same-CVE precedent), but a KNOWN-and-low overlap does.
+func (s *AutonomousSweep) bestQualifyingPrecedent(precs []domain.PrecedentPosition) (domain.PrecedentPosition, bool) {
 	for _, p := range precs {
-		if p.Stance != "" {
-			return p, true
+		if p.Stance == "" {
+			continue // undecided precedent is not precedent
 		}
+		exactCVE := p.Score == 0 // the Δ2 exact-CVE fallback — same CVE, exempt from the cosine floor
+		if !exactCVE && p.Score < s.minScore {
+			continue
+		}
+		if p.OverlapKnown && p.ReleaseOverlap < s.minOverlap {
+			continue
+		}
+		return p, true
 	}
 	return domain.PrecedentPosition{}, false
 }

@@ -71,9 +71,14 @@ type config struct {
 	autoBudgetTokens int           // THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS — the autonomous pool ceiling per window. Unset/0 = the autonomous sweep is DISABLED (not unlimited: nobody asked, so off).
 	autoBudgetWindow time.Duration // THEMIS_INTELLIGENCE_AUTO_BUDGET_WINDOW — the pool's window.
 	autoCadence      time.Duration // THEMIS_INTELLIGENCE_AUTO_CADENCE — how often the sweep runs (default 12h). Only matters when the pool is configured.
-	registryURL      string        // THEMIS_REGISTRY_URL — Registry read-API base URL, for the autonomous sweep to enumerate releases.
-	apiWriteKey      string        // THEMIS_API_KEY — the node's WRITE-scoped key for the autonomous push (POST /findings/{id}/proposals). Empty in an auth-off dev deployment. // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
-	rebuild      bool // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
+	// AUTO-VOL-1 volume controls. Unset (0) ⇒ the code defaults apply (0.75 cosine / 0.5 overlap /
+	// 20 per pass); AUTO_MAX_PER_PASS < 0 ⇒ explicitly uncapped.
+	autoMinScore   float64 // THEMIS_INTELLIGENCE_AUTO_MIN_SCORE — minimum cosine a precedent must clear to be advised on.
+	autoMinOverlap float64 // THEMIS_INTELLIGENCE_AUTO_MIN_OVERLAP — minimum release-overlap a precedent must clear.
+	autoMaxPerPass int     // THEMIS_INTELLIGENCE_AUTO_MAX_PER_PASS — hard cap on proposals per sweep (<0 = uncapped).
+	registryURL    string  // THEMIS_REGISTRY_URL — Registry read-API base URL, for the autonomous sweep to enumerate releases.
+	apiWriteKey    string  // THEMIS_API_KEY — the node's WRITE-scoped key for the autonomous push (POST /findings/{id}/proposals). Empty in an auth-off dev deployment. // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
+	rebuild        bool    // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. Set ⇒ the reader drains Governance Position events to populate the index; empty ⇒ no population (single-context dev).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations on startup (dev convenience).
@@ -94,24 +99,27 @@ func loadConfig() config {
 		respFormat:    os.Getenv("THEMIS_LLM_RESPONSE_FORMAT"),
 		llmTimeout:    envDurationDefault("THEMIS_LLM_TIMEOUT", 60*time.Second),
 
-		dsn:             os.Getenv("THEMIS_DATABASE_DSN"),
-		migrate:         os.Getenv("THEMIS_INTELLIGENCE_MIGRATE") == "1",
-		migrationsPath:  envDefault("THEMIS_INTELLIGENCE_MIGRATIONS", "internal/intelligence/adapters/store/migrations"),
-		embedModel:      envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
-		topK:            envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
-		budgetTokens:    envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
-		maxRunTokens:    envIntDefault("THEMIS_INTELLIGENCE_MAX_RUN_TOKENS", 0),
-		escalationModel: os.Getenv("THEMIS_INTELLIGENCE_MODEL_ESCALATION"),
-		economyModel:    os.Getenv("THEMIS_INTELLIGENCE_MODEL_ECONOMY"),
-		degradePct:      envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
-		budgetWindow:    envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
-		logRetention:    envDurationDefault("THEMIS_INTELLIGENCE_LOG_RETENTION", 0),
+		dsn:              os.Getenv("THEMIS_DATABASE_DSN"),
+		migrate:          os.Getenv("THEMIS_INTELLIGENCE_MIGRATE") == "1",
+		migrationsPath:   envDefault("THEMIS_INTELLIGENCE_MIGRATIONS", "internal/intelligence/adapters/store/migrations"),
+		embedModel:       envDefault("THEMIS_INTELLIGENCE_EMBED_MODEL", "nomic-embed-text"),
+		topK:             envIntDefault("THEMIS_INTELLIGENCE_PRECEDENT_TOPK", 5),
+		budgetTokens:     envIntDefault("THEMIS_INTELLIGENCE_BUDGET_TOKENS", 0),
+		maxRunTokens:     envIntDefault("THEMIS_INTELLIGENCE_MAX_RUN_TOKENS", 0),
+		escalationModel:  os.Getenv("THEMIS_INTELLIGENCE_MODEL_ESCALATION"),
+		economyModel:     os.Getenv("THEMIS_INTELLIGENCE_MODEL_ECONOMY"),
+		degradePct:       envFloatDefault("THEMIS_INTELLIGENCE_BUDGET_DEGRADE_PCT", 0),
+		budgetWindow:     envDurationDefault("THEMIS_INTELLIGENCE_BUDGET_WINDOW", 0),
+		logRetention:     envDurationDefault("THEMIS_INTELLIGENCE_LOG_RETENTION", 0),
 		autoBudgetTokens: envIntDefault("THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS", 0),
 		autoBudgetWindow: envDurationDefault("THEMIS_INTELLIGENCE_AUTO_BUDGET_WINDOW", 24*time.Hour),
 		autoCadence:      envDurationDefault("THEMIS_INTELLIGENCE_AUTO_CADENCE", 12*time.Hour),
+		autoMinScore:     envFloatDefault("THEMIS_INTELLIGENCE_AUTO_MIN_SCORE", 0),
+		autoMinOverlap:   envFloatDefault("THEMIS_INTELLIGENCE_AUTO_MIN_OVERLAP", 0),
+		autoMaxPerPass:   envSignedIntDefault("THEMIS_INTELLIGENCE_AUTO_MAX_PER_PASS", 0),
 		registryURL:      envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		apiWriteKey:      os.Getenv("THEMIS_API_KEY"),
-		rebuild:         os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
+		rebuild:          os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
@@ -180,6 +188,9 @@ func main() {
 		BudgetDegradeFraction: cfg.degradePct,
 		AutoBudgetTokens:      cfg.autoBudgetTokens,
 		AutoBudgetWindow:      cfg.autoBudgetWindow,
+		AutoMinScore:          cfg.autoMinScore,
+		AutoMinOverlap:        cfg.autoMinOverlap,
+		AutoMaxPerPass:        cfg.autoMaxPerPass,
 		RegistryURL:           cfg.registryURL,
 		APIWriteKey:           cfg.apiWriteKey,
 	})
@@ -263,10 +274,11 @@ func main() {
 				res, err := intel.Sweep.Run(ctx)
 				if err != nil {
 					logger.Error("autonomous sweep failed", observability.Err(err))
-				} else if res.Proposed > 0 || res.Paused {
+				} else if res.Proposed > 0 || res.Paused || res.Capped {
 					logger.Info("autonomous sweep",
 						observability.Int("proposed", res.Proposed), observability.Int("examined", res.Examined),
-						observability.Int("skipped", res.Skipped), observability.Bool("paused", res.Paused))
+						observability.Int("skipped", res.Skipped), observability.Bool("paused", res.Paused),
+						observability.Bool("capped", res.Capped))
 				}
 				select {
 				case <-ctx.Done():
@@ -275,7 +287,11 @@ func main() {
 				}
 			}
 		}()
-		logger.Info("autonomous consistency analyst enabled", observability.String("cadence", cfg.autoCadence.String()))
+		logger.Info("autonomous consistency analyst enabled",
+			observability.String("cadence", cfg.autoCadence.String()),
+			observability.String("min_score", strconv.FormatFloat(effectiveAutoFloat(cfg.autoMinScore, 0.75), 'f', 2, 64)),
+			observability.String("min_overlap", strconv.FormatFloat(effectiveAutoFloat(cfg.autoMinOverlap, 0.5), 'f', 2, 64)),
+			observability.Int("max_per_pass", effectiveAutoCap(cfg.autoMaxPerPass)))
 	} else {
 		logger.Info("autonomous plane disabled (set THEMIS_INTELLIGENCE_AUTO_BUDGET_TOKENS to enable)")
 	}
@@ -447,4 +463,35 @@ func envIntDefault(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// envSignedIntDefault accepts negatives (unlike envIntDefault), so a knob whose negative value is
+// meaningful — e.g. AUTO_MAX_PER_PASS < 0 = uncapped (AUTO-VOL-1) — reads correctly.
+func envSignedIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// effectiveAutoFloat / effectiveAutoCap mirror the wiring's AUTO-VOL-1 fallback so the startup log
+// shows the values the sweep will actually use (0 ⇒ code default; a negative cap ⇒ uncapped).
+func effectiveAutoFloat(configured, def float64) float64 {
+	if configured > 0 {
+		return configured
+	}
+	return def
+}
+
+func effectiveAutoCap(configured int) int {
+	switch {
+	case configured < 0:
+		return 0 // uncapped
+	case configured > 0:
+		return configured
+	default:
+		return 20 // app.DefaultAutoMaxPerPass — mirrored here to keep cmd free of an app import for one const
+	}
 }

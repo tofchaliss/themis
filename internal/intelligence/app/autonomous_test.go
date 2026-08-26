@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -230,5 +231,117 @@ func TestSweepReleaseListErrorIsFatal(t *testing.T) {
 		WithClock(func() time.Time { return time.Unix(1_700_000_000, 0) })
 	if _, err := s.Run(context.Background()); err == nil {
 		t.Error("a release-list failure must be fatal — no releases, no work")
+	}
+}
+
+// --- AUTO-VOL-1: volume controls ------------------------------------------------------
+
+// A WEAK-cosine precedent no longer triggers a proposal — it is "vaguely similar", not
+// precedent (the cascade that produced 110 in one sweep, measured live 2026-08-26).
+func TestSweepSkipsWeakScorePrecedent(t *testing.T) {
+	raiser := &recordingRaiser{}
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
+		[]domain.PrecedentPosition{precedent("rel-2", "CVE-1", "not_affected", 0.40)}, // below the 0.75 floor
+		raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	res, _ := s.Run(context.Background())
+	if res.Proposed != 0 || res.Skipped != 1 {
+		t.Errorf("a weak-score precedent must be skipped: %+v", res)
+	}
+}
+
+// A DECIDED precedent from a barely-overlapping release is skipped when overlap is KNOWN and low.
+func TestSweepSkipsLowOverlapPrecedent(t *testing.T) {
+	raiser := &recordingRaiser{}
+	weak := domain.PrecedentPosition{ReleaseID: "rel-2", SourceCVE: "CVE-1", Stance: "not_affected",
+		Score: 0.9, ReleaseOverlap: 0.1, OverlapKnown: true} // strong cosine but disjoint releases
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
+		[]domain.PrecedentPosition{weak}, raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	res, _ := s.Run(context.Background())
+	if res.Proposed != 0 {
+		t.Errorf("a low-overlap precedent must be skipped: %+v", res)
+	}
+
+	// The SAME precedent with a HIGH overlap qualifies.
+	weak.ReleaseOverlap = 0.9
+	s2 := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
+		[]domain.PrecedentPosition{weak}, &recordingRaiser{}, newMemRecorder(), NewBudget(100, time.Hour))
+	if res2, _ := s2.Run(context.Background()); res2.Proposed != 1 {
+		t.Errorf("a high-overlap strong precedent must qualify: %+v", res2)
+	}
+}
+
+// An exact-CVE fallback (Score 0 by construction, SAME CVE) is exempt from the cosine floor —
+// same CVE is maximally relevant, matched by lookup not similarity.
+func TestSweepExactCVEFallbackExemptFromScoreFloor(t *testing.T) {
+	raiser := &recordingRaiser{}
+	exact := domain.PrecedentPosition{ReleaseID: "rel-2", SourceCVE: "CVE-1", Stance: "not_affected", Score: 0}
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
+		[]domain.PrecedentPosition{exact}, raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	if res, _ := s.Run(context.Background()); res.Proposed != 1 {
+		t.Errorf("an exact-CVE precedent (score 0) must qualify: %+v", res)
+	}
+}
+
+// The per-pass cap: even with budget and candidates to spare, one sweep pushes at most
+// maxPerPass, worst-first, and flags Capped. The rest waits (unproposed) for the next window.
+func TestSweepPerPassCap(t *testing.T) {
+	raiser := &recordingRaiser{}
+	entries := []domain.PostureEntry{undecided("f-hi", 95), undecided("f-mid", 80), undecided("f-lo", 40)}
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: entries}},
+		[]domain.PrecedentPosition{precedent("rel-2", "CVE-1", "not_affected", 0.9)},
+		raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	s.WithVolumeControls(0, 0, 2) // cap at 2
+	res, _ := s.Run(context.Background())
+	if res.Proposed != 2 || !res.Capped {
+		t.Fatalf("res=%+v — want exactly 2 proposals then capped", res)
+	}
+	// Worst-first: the two highest-priority Findings got the slots.
+	if len(raiser.calls) != 2 || raiser.calls[0] != "f-hi" || raiser.calls[1] != "f-mid" {
+		t.Errorf("cap must keep the worst-first order: %v", raiser.calls)
+	}
+}
+
+// WithVolumeControls: non-positive score/overlap keep defaults; a non-positive cap = uncapped.
+func TestVolumeControlsDefaultsAndUncapped(t *testing.T) {
+	raiser := &recordingRaiser{}
+	entries := make([]domain.PostureEntry, 30)
+	for i := range entries {
+		entries[i] = undecided(fmt.Sprintf("f%d", i), 50)
+	}
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: entries}},
+		[]domain.PrecedentPosition{precedent("rel-2", "CVE-1", "not_affected", 0.9)},
+		raiser, newMemRecorder(), NewBudget(1000, time.Hour))
+	s.WithVolumeControls(-1, -1, 0) // keep score/overlap defaults, 0 = uncapped
+	res, _ := s.Run(context.Background())
+	if res.Capped || res.Proposed != 30 {
+		t.Errorf("uncapped sweep must propose all 30: %+v", res)
+	}
+
+	// Positive overrides land on the fields (the override branch, not the keep-default branch).
+	s.WithVolumeControls(0.9, 0.8, 5)
+	if s.minScore != 0.9 || s.minOverlap != 0.8 || s.maxPerPass != 5 {
+		t.Errorf("positive overrides must apply: %+v", s)
+	}
+}
+
+// A precedent list whose FIRST entry is undecided (empty stance) is skipped over — the analyst
+// advises on the first DECIDED, qualifying precedent, never an undecided neighbour.
+func TestSweepSkipsUndecidedPrecedentInList(t *testing.T) {
+	raiser := &recordingRaiser{}
+	precs := []domain.PrecedentPosition{
+		{ReleaseID: "rel-2", SourceCVE: "CVE-1", Stance: "", Score: 0.99}, // undecided — skipped
+		precedent("rel-3", "CVE-2", "not_affected", 0.9),                  // the real precedent
+	}
+	s := sweepWith(t,
+		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
+		precs, raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	if res, _ := s.Run(context.Background()); res.Proposed != 1 || raiser.calls[0] != "f1" {
+		t.Errorf("must advise on the first decided precedent, skipping the undecided one: %+v", res)
 	}
 }
