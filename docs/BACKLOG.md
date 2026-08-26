@@ -270,6 +270,22 @@ under the 2026-08-07 re-derivation standard.
   CVEs and the deterministic tiles; treat summary numbers in the prose as prose. Captured so the demo
   narration's "critical" wording is not mistaken for a defect. Revisit only if a stricter numeric-claim
   check is ever wanted (it would need the model to cite numbers as structured fields, not free text).
+- [ ] **AUTO-VOL-1 — the autonomous analyst proposes too much per sweep; one decision cascaded to
+  110 advisory proposals (MEASURED LIVE 2026-08-26).** MED, usability. Δ4b's walking skeleton is
+  SAFE (verified live: `decided_findings=0`, every ai proposal stays `proposed`, never
+  auto-accepted — the constitutional bar held at volume) and IDEMPOTENT (`autonomous_proposals`=110,
+  the second sweep re-proposes ~0). But one seeded `not_affected` cascaded — via semantic
+  similarity — into **110 advisory proposals in a single 2m sweep** (examined 215, proposed 110).
+  That is exactly the "operators distrust and disable the plane" noise D-Δ4b-5 worried about, made
+  concrete: the guardrails contain the DANGER, not the VOLUME. Two levers are too loose:
+  (1) **no per-sweep proposal cap** — the pool (500 tokens × cost 1) admitted all 110 without
+  pausing; a first-run pool should be sized to pause, and/or a hard `max-proposals-per-sweep`;
+  (2) **the precedent-match threshold is too permissive** — the analyst proposes on ANY decided
+  precedent the semantic search returns, however weak; it should require a STRONG match (high cosine
+  AND meaningful release_overlap, both already computed by the G-AI-3 delta ranking) before advising.
+  **Fix shape:** add a min-similarity/overlap gate in `AutonomousSweep.gather` + a per-sweep cap;
+  both are small, additive, and testable. A Δ4b follow-up refinement (the skeleton proved the seam +
+  the guardrails, which was its job); this is the tuning the live run surfaced.
 - [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
   (filed 2026-08-17, live test).** LOW → **re-scoped 2026-08-23 (T2 execution): DESIGN-FIRST,
   blocked on a Knowledge domain decision.** The T2 plan assumed the card's alias set existed to
