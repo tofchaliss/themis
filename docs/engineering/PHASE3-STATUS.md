@@ -36,7 +36,21 @@
 > invocation_log · golden_entries · eval_reports · prompt_versions), a content-hash prompt version
 > stamp, redacted best-effort capture + boot version-seed + age retention, and `cmd/intelligence-eval`
 > (`make eval-llm`) — replay the golden set through a live model, score deterministically, promote
-> curated cases. NEXT = grill Δ4b (autonomy).** Grill state for both in [`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md).
+> curated cases. Grill state in [`DELTA4-GRILL-PREP.md`](DELTA4-GRILL-PREP.md).
+>
+> **Δ4 COMPLETE + VM-VERIFIED (2026-08-26).** Δ4b (autonomy walking skeleton) grilled, implemented,
+> merged: one cross-release consistency analyst, default-OFF cadence, separate capped pool, idempotent
+> pushes, and the immovable authority bar (`TestAIProposalNeverAutoAccepts`). VM round:
+> - **Δ4a** full loop `1/1 passed` — capture→promote→replay→score on a real CyberPal invocation.
+> - **Δ4b SAFE** — `decided_findings=0`, every autonomous `ai` proposal stays `proposed`, the
+>   constitutional bar held at volume; **IDEMPOTENT** — `autonomous_proposals` held at 110 across ~6h
+>   of 2m ticks (dozens of sweeps re-proposed nothing).
+> - Four defects found LIVE, THREE fixed (JSONB-vs-redacted-string capture, cancelled-capture-context,
+>   eval-promote flag-order); one filed: **AUTO-VOL-1** (110 proposals in one sweep — the volume the
+>   design feared; fix = a min-similarity/overlap gate reusing the G-AI-3 delta + a per-sweep cap).
+>
+> **NEXT = implement AUTO-VOL-1**, then the deferred Δ4b refinements (analyst portfolio, event-reactive
+> triggering, cloud tiers) as demand dictates. R1/AI harness is otherwise COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 

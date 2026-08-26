@@ -274,7 +274,7 @@ under the 2026-08-07 re-derivation standard.
   110 advisory proposals (MEASURED LIVE 2026-08-26).** MED, usability. Δ4b's walking skeleton is
   SAFE (verified live: `decided_findings=0`, every ai proposal stays `proposed`, never
   auto-accepted — the constitutional bar held at volume) and IDEMPOTENT (`autonomous_proposals`=110,
-  the second sweep re-proposes ~0). But one seeded `not_affected` cascaded — via semantic
+  the count held at exactly 110 across ~6h of 2-minute ticks — dozens of sweeps re-proposed NOTHING). But one seeded `not_affected` cascaded — via semantic
   similarity — into **110 advisory proposals in a single 2m sweep** (examined 215, proposed 110).
   That is exactly the "operators distrust and disable the plane" noise D-Δ4b-5 worried about, made
   concrete: the guardrails contain the DANGER, not the VOLUME. Two levers are too loose:
