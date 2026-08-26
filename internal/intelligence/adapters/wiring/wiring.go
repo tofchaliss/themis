@@ -80,6 +80,11 @@ type Config struct {
 	AutoBudgetWindow time.Duration
 	RegistryURL      string // Registry read-API base URL (release enumeration for the sweep)
 	APIWriteKey      string // the node's write-scoped key for the autonomous push
+	// AUTO-VOL-1 volume controls for the sweep. Unset (0) ⇒ the code defaults apply
+	// (0.75 cosine / 0.5 overlap / 20 per pass). AutoMaxPerPass < 0 ⇒ explicitly uncapped.
+	AutoMinScore   float64
+	AutoMinOverlap float64
+	AutoMaxPerPass int
 }
 
 // Intelligence is the wired Gateway surface. Index and Consumer are non-nil only when a Store
@@ -227,6 +232,18 @@ func Wire(cfg Config) (Intelligence, error) {
 		registry := readapi.NewRegistryClient(cfg.RegistryURL, cfg.HTTPClient)
 		writer := readapi.NewProposalWriter(cfg.GovernanceURL, cfg.APIWriteKey, cfg.HTTPClient)
 		sweep = app.NewAutonomousSweep(registry, proj, precedents, writer, cfg.Store, pool)
+		// AUTO-VOL-1: apply operator overrides only when at least one knob is set, so an
+		// all-zero Config leaves the code defaults (0.75 / 0.5 / 20) intact. A configured
+		// AutoMaxPerPass < 0 is the explicit "uncapped" request, passed through as 0.
+		if cfg.AutoMinScore > 0 || cfg.AutoMinOverlap > 0 || cfg.AutoMaxPerPass != 0 {
+			maxPass := app.DefaultAutoMaxPerPass // keep the default unless explicitly reconfigured
+			if cfg.AutoMaxPerPass < 0 {
+				maxPass = 0 // uncapped
+			} else if cfg.AutoMaxPerPass > 0 {
+				maxPass = cfg.AutoMaxPerPass
+			}
+			sweep = sweep.WithVolumeControls(cfg.AutoMinScore, cfg.AutoMinOverlap, maxPass)
+		}
 	}
 	return Intelligence{
 		Handler:  intelhttp.NewHandler(gw, cfg.Logger).WithPrecedents(precedents, redactor).Routes(),

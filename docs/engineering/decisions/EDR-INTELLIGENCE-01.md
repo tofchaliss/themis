@@ -1225,6 +1225,40 @@ of authority is the catastrophe, and the difference — "can an AI proposal ever
 build-breaking tripwire, not an implicit gap. Mandatory in the skeleton, not a follow-on. The reason of
 record lives in Governance, where the bar is enforced.
 
+### D-Δ4b-7 (AUTO-VOL-1, added 2026-08-26 from a live measurement) — volume controls: gate what qualifies, cap what one pass pushes
+
+The walking skeleton (D-Δ4b-2…6) proved the seam and the guardrails, and the guardrails held exactly as
+designed: verified live, `decided_findings=0` and every `ai` proposal stayed `proposed` (D-Δ4b-6 unbroken),
+idempotent across ~6h of 2-minute ticks (D-Δ4b-5 held the count flat). But the FIRST sweep, off a single
+seeded `not_affected`, cascaded via semantic similarity into **110 advisory proposals in one 2-minute sweep**
+(examined 215). The guardrails contain the DANGER (authority, budget, spam-over-time); they say nothing about
+the VOLUME of a single well-behaved pass. Two levers were too loose, and both are contained here:
+
+- **A qualification gate on the precedent** (`bestQualifyingPrecedent`): a precedent earns an advisory only
+  when its cosine clears a floor (default **0.75** — below it the neighbour is "vaguely similar", not
+  precedent) AND, when the release-overlap is KNOWN (the G-AI-3 delta), that overlap clears a floor (default
+  **0.5**). The Δ2 **exact-CVE fallback is exempt from the cosine floor** — it is the SAME CVE, matched by
+  lookup not similarity (Score 0 by construction), so it is maximally relevant, not weakly so. Unknown overlap
+  does not disqualify (an unreadable comparison must not silence a strong same-CVE precedent); a known-and-low
+  overlap does.
+- **A per-sweep cap** (`maxPerPass`, default **20**, worst-first via the residual priority already on the
+  posture row): even under budget, one pass pushes at most the cap and flags `SweepResult.Capped`; the
+  remainder waits UNPROPOSED for the next window (the D-Δ4b-5 idempotence record keeps a capped candidate
+  available next pass). This stops a single enable firehosing the triage board while the pool still has room.
+
+All three are operator-tunable from the composition root (`THEMIS_INTELLIGENCE_AUTO_MIN_SCORE` /
+`_AUTO_MIN_OVERLAP` / `_AUTO_MAX_PER_PASS`; the cap `< 0` = an explicit uncap). The design intent is unchanged
+— autonomy of generation, never of authority — this is the noise-tuning the live run demanded, additive to the
+skeleton, no seam moved.
+
+**Live-verified 2026-08-26** on the same 215-Finding estate that produced the 110-proposal cascade. Four
+consecutive 2-minute sweeps each read `proposed=20 examined=215 capped=true`, with `skipped` rising
+107→127→147→167 (+20 per pass — the D-Δ4b-5 idempotence record advancing worst-first, re-proposing nothing).
+The gate skipped the weak precedents; the cap bounded each pass at exactly 20; `paused=false` (the cap bit
+before the budget would have). Both immovable properties held throughout: `ai_accepted=0` (D-Δ4b-6), and the
+decided-Finding count was unmoved by any autonomous activity. 110-in-one-sweep became a controlled
+20-per-window drain.
+
 ### Δ4b net shape
 
 A cadence-driven autonomous analyst (cross-release consistency) in the Intelligence node, default-OFF,

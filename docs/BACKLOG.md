@@ -270,8 +270,8 @@ under the 2026-08-07 re-derivation standard.
   CVEs and the deterministic tiles; treat summary numbers in the prose as prose. Captured so the demo
   narration's "critical" wording is not mistaken for a defect. Revisit only if a stricter numeric-claim
   check is ever wanted (it would need the model to cite numbers as structured fields, not free text).
-- [ ] **AUTO-VOL-1 — the autonomous analyst proposes too much per sweep; one decision cascaded to
-  110 advisory proposals (MEASURED LIVE 2026-08-26).** MED, usability. Δ4b's walking skeleton is
+- [x] **AUTO-VOL-1 — the autonomous analyst proposes too much per sweep; one decision cascaded to
+  110 advisory proposals (MEASURED LIVE 2026-08-26).** FIXED 2026-08-26 (`feat/auto-vol-1`). MED, usability. Δ4b's walking skeleton is
   SAFE (verified live: `decided_findings=0`, every ai proposal stays `proposed`, never
   auto-accepted — the constitutional bar held at volume) and IDEMPOTENT (`autonomous_proposals`=110,
   the count held at exactly 110 across ~6h of 2-minute ticks — dozens of sweeps re-proposed NOTHING). But one seeded `not_affected` cascaded — via semantic
@@ -286,6 +286,20 @@ under the 2026-08-07 re-derivation standard.
   **Fix shape:** add a min-similarity/overlap gate in `AutonomousSweep.gather` + a per-sweep cap;
   both are small, additive, and testable. A Δ4b follow-up refinement (the skeleton proved the seam +
   the guardrails, which was its job); this is the tuning the live run surfaced.
+  **DONE (2026-08-26):** `bestQualifyingPrecedent` now gates on a min cosine (default **0.75**) AND
+  a known min release-overlap (default **0.5**, the G-AI-3 delta) — the exact-CVE fallback (same CVE,
+  Score 0 by lookup) is exempt from the cosine floor; plus a per-sweep `maxPerPass` cap (default
+  **20**, worst-first, `SweepResult.Capped` flagged, the remainder held unproposed for the next
+  window). All three are operator-tunable via `THEMIS_INTELLIGENCE_AUTO_MIN_SCORE` /
+  `_AUTO_MIN_OVERLAP` / `_AUTO_MAX_PER_PASS` (the last `< 0` = explicitly uncapped); startup logs the
+  effective values; the sweep log gains a `capped` field. app-ring coverage 100%.
+  **LIVE-VERIFIED on the VM (2026-08-26):** clean-slate run (117 stale `ai` proposals + idempotence
+  record cleared) against the SAME 215-Finding estate that produced 110 before. Four consecutive 2m
+  sweeps each read `proposed=20 examined=215 capped=true`, with `skipped` climbing 107→127→147→167
+  (+20/pass — the idempotence record advancing worst-first, never re-proposing). The gate rejected
+  the weak precedents (skipped), the cap bounded each pass at exactly 20, `paused=false` (cap bit
+  before budget). Guardrails held throughout: `ai_accepted=0`, `decided_findings=5` unchanged. 110→20.
+  Box returned to default-OFF, test proposals cleared. **CLOSED.**
 - [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
   (filed 2026-08-17, live test).** LOW → **re-scoped 2026-08-23 (T2 execution): DESIGN-FIRST,
   blocked on a Knowledge domain decision.** The T2 plan assumed the card's alias set existed to
