@@ -1251,6 +1251,14 @@ All three are operator-tunable from the composition root (`THEMIS_INTELLIGENCE_A
 — autonomy of generation, never of authority — this is the noise-tuning the live run demanded, additive to the
 skeleton, no seam moved.
 
+**Live-verified 2026-08-26** on the same 215-Finding estate that produced the 110-proposal cascade. Four
+consecutive 2-minute sweeps each read `proposed=20 examined=215 capped=true`, with `skipped` rising
+107→127→147→167 (+20 per pass — the D-Δ4b-5 idempotence record advancing worst-first, re-proposing nothing).
+The gate skipped the weak precedents; the cap bounded each pass at exactly 20; `paused=false` (the cap bit
+before the budget would have). Both immovable properties held throughout: `ai_accepted=0` (D-Δ4b-6), and the
+decided-Finding count was unmoved by any autonomous activity. 110-in-one-sweep became a controlled
+20-per-window drain.
+
 ### Δ4b net shape
 
 A cadence-driven autonomous analyst (cross-release consistency) in the Intelligence node, default-OFF,

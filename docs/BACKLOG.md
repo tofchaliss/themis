@@ -292,9 +292,14 @@ under the 2026-08-07 re-derivation standard.
   **20**, worst-first, `SweepResult.Capped` flagged, the remainder held unproposed for the next
   window). All three are operator-tunable via `THEMIS_INTELLIGENCE_AUTO_MIN_SCORE` /
   `_AUTO_MIN_OVERLAP` / `_AUTO_MAX_PER_PASS` (the last `< 0` = explicitly uncapped); startup logs the
-  effective values; the sweep log gains a `capped` field. app-ring coverage 100%. **Live re-test on
-  the VM still pending** — enable a small pool and confirm one sweep now proposes ≤ 20 strong matches,
-  not 110.
+  effective values; the sweep log gains a `capped` field. app-ring coverage 100%.
+  **LIVE-VERIFIED on the VM (2026-08-26):** clean-slate run (117 stale `ai` proposals + idempotence
+  record cleared) against the SAME 215-Finding estate that produced 110 before. Four consecutive 2m
+  sweeps each read `proposed=20 examined=215 capped=true`, with `skipped` climbing 107→127→147→167
+  (+20/pass — the idempotence record advancing worst-first, never re-proposing). The gate rejected
+  the weak precedents (skipped), the cap bounded each pass at exactly 20, `paused=false` (cap bit
+  before budget). Guardrails held throughout: `ai_accepted=0`, `decided_findings=5` unchanged. 110→20.
+  Box returned to default-OFF, test proposals cleared. **CLOSED.**
 - [ ] **GUI-11 — the per-scan join is blind to aliases: a GHSA-keyed claim can never match
   (filed 2026-08-17, live test).** LOW → **re-scoped 2026-08-23 (T2 execution): DESIGN-FIRST,
   blocked on a Knowledge domain decision.** The T2 plan assumed the card's alias set existed to

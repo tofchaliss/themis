@@ -45,12 +45,19 @@
 > - **Δ4b SAFE** — `decided_findings=0`, every autonomous `ai` proposal stays `proposed`, the
 >   constitutional bar held at volume; **IDEMPOTENT** — `autonomous_proposals` held at 110 across ~6h
 >   of 2m ticks (dozens of sweeps re-proposed nothing).
-> - Four defects found LIVE, THREE fixed (JSONB-vs-redacted-string capture, cancelled-capture-context,
->   eval-promote flag-order); one filed: **AUTO-VOL-1** (110 proposals in one sweep — the volume the
->   design feared; fix = a min-similarity/overlap gate reusing the G-AI-3 delta + a per-sweep cap).
+> - Four defects found LIVE, all FIXED (JSONB-vs-redacted-string capture, cancelled-capture-context,
+>   eval-promote flag-order, and **AUTO-VOL-1** — 110 proposals in one sweep, the volume the design feared).
 >
-> **NEXT = implement AUTO-VOL-1**, then the deferred Δ4b refinements (analyst portfolio, event-reactive
-> triggering, cloud tiers) as demand dictates. R1/AI harness is otherwise COMPLETE.
+> **AUTO-VOL-1 DONE + LIVE-VERIFIED (2026-08-26, `feat/auto-vol-1`).** `bestQualifyingPrecedent` gates on
+> min cosine (0.75) + known min release-overlap (0.5, the G-AI-3 delta; exact-CVE fallback exempt) and a
+> per-sweep `maxPerPass` cap (20, worst-first, `Capped` flagged); operator-tunable via
+> `THEMIS_INTELLIGENCE_AUTO_MIN_SCORE`/`_AUTO_MIN_OVERLAP`/`_AUTO_MAX_PER_PASS`. VM re-test on the same
+> 215-Finding estate: four 2m sweeps each `proposed=20 capped=true`, `skipped` 107→127→147→167 (+20/pass
+> = idempotence), `ai_accepted=0`, decided count unmoved. 110→20. app-ring coverage 100%, `make check-ci`
+> green. EDR D-Δ4b-7 records it.
+>
+> **NEXT = the deferred Δ4b refinements** (analyst portfolio, event-reactive triggering, cloud tiers) as
+> demand dictates. R1/AI harness is otherwise COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 
