@@ -278,6 +278,11 @@ under the 2026-08-07 re-derivation standard.
   fixes from **source** packages only (binary rpms are the rebuild SCOPE per EDR-CORRELATION-01),
   `SeverityUnknown` (never contends for the headline), trust=Observed, tier=2, opt-in
   `THEMIS_ROCKY_ENABLED`/`_URL`/`_POLL_INTERVAL`, health row `rocky`.
+  **VM round 2026-08-27:** the failure path live-verified (sweep error logged, `rocky` row
+  degraded, `consecutive_failures` counting) — but the success path is **blocked by VM egress**:
+  `errata.rockylinux.org` is firewalled (100s probe, no response; timeout raised 30s→120s first,
+  measured-then-fixed, before the probe proved blackhole). Live fold verification waits on an
+  **egress allowlist entry for `errata.rockylinux.org`**; feed off on the VM until then.
   _Original filing:_ LOW-MED — RXSA advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.
 - [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
