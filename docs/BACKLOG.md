@@ -90,18 +90,18 @@ relevance rule, one EDR-VEX-01 delta) but the state was stale on two of the four
 and ALL of GUI-4 had already shipped 2026-08-13 in PR #95** (`b4ed088`: EDR-VEX-01 D7 + the `alpine`
 ACL/client/sweep behind `THEMIS_ALPINE_ENABLED`, and the per-distro `<source>/<distro>` Tier-3 health
 rows in `adapters/feed/health_source.go`; live-verified — 78 bounds folded in 28s, `osv/rocky` row
-observed). The live remainder of the cluster, in order: **(1) GUI-2b ✅ CLOSED 2026-08-27** (the apk
-fixed-VERDICT — grilled as EDR-VEX-01 D9 and shipped on `feat/knowledge-apk-verdict` the same day);
-**(2) GUI-3** (Red Hat `changes.csv` efficiency sweep — but FIRST verify whether `THEMIS_VEXFEED_URLS`
-at Red Hat's per-CVE VEX dir already covers it with zero new code); **(3) GUI-5** (Rocky RXSA errata —
-smallest, most niche, last). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
+observed). **The cluster COMPLETED 2026-08-27** — all three remaining items grilled/designed and
+shipped in one arc on `feat/knowledge-apk-verdict`: **(1) GUI-2b ✅** (apk fixed-verdict, EDR-VEX-01
+D9); **(2) GUI-3 ✅** (VEXFEED-coverage verified NO first, then the D10 per-CVE-VEX changes.csv gate);
+**(3) GUI-5 ✅** (D11 Rocky RXSA feed, 29-advisory universe measured live). One consolidated VM test
+round covers all three (plus live-verifying GUI-2b needs an Alpine SBOM). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
 the tiers still describe theme, this describes the seam. After the cluster: **GUI-12** (measured MED
 dedup fix, pure code) → **KN-SCAN-3** (ecosystem canon, Go-side) → **GUI-10 → GUI-15** (translator test
 harness, then Grype — build-change, Must-ask). GUI-11 + EV-DEDUP-2 stay design-blocked (own EDR/domain
-decision each). ~~NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta~~ — **done 2026-08-27** (grilled
-D9 + shipped same session). **NEXT: GUI-3's step zero** — the zero-code verification of whether
-`THEMIS_VEXFEED_URLS` at Red Hat's per-CVE VEX dir (`…/csaf/v2/vex/`) already covers the need; a VM
-round can also live-verify GUI-2b once an Alpine estate exists.
+decision each). ~~NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta~~ — **the whole cluster is done
+2026-08-27** (D9 + D10 + D11, one branch, `make check` green). **NEXT: the consolidated VM test round**
+(GUI-2b apk verdict with an Alpine SBOM · D10 gate log lines · `rocky` feed + health row), then
+**GUI-12** (measured MED dedup fix, pure code) per the after-cluster order.
 
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
@@ -252,11 +252,16 @@ under the 2026-08-07 re-derivation standard.
   false-"fixed"; max-bound's converse is a needless "affected"). **Revisit only on a measured
   hit in either direction** — read from code, nothing measured. Cluster: Distro-feed
   completeness. **Scope:** MED (domain change — Must-ask, design before code).
-- [ ] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** LOW-MED, efficiency. Today the Red
-  Hat feed re-asks Hydra per carded CVE per interval; `…/csaf/v2/advisories/changes.csv` is a
-  change signal — intersect with carded CVEs, fetch only what moved. Same D5 bound, far fewer
-  requests. Also verify first whether `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir
-  (`…/csaf/v2/vex/`) already covers the need with zero new code.
+- [x] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** ✅ **CLOSED 2026-08-27**
+  (`feat/knowledge-apk-verdict`, EDR-VEX-01 **D10**). Step zero verified first: the VEXFEED path
+  covers only `not_affected` applicability, not severity/fixes — so it complements, never
+  replaces. The gate ships in the Red Hat sweep itself: the **per-CVE VEX** `changes.csv`
+  (verified live — `"<year>/cve-<id>.json"` rows; the advisory-level CSV is NOT per-CVE) feeds an
+  optional `RedHatChangeSignal`; after the first full sweep only changed-or-never-fetched carded
+  CVEs are re-asked. Three fail-open rules (first-sweep-full/restart heals · signal failure →
+  full sweep · fold error doesn't advance the watermark) keep it an efficiency gate, never a
+  correctness gate. `THEMIS_REDHAT_CHANGES_URL` overrides the CSV; no switch of its own.
+  _Original filing:_ LOW-MED, efficiency — the feed re-asked Hydra per carded CVE per interval.
 - [x] **GUI-4 — per-distro feed-health rows.** ✅ **CLOSED 2026-08-13** — shipped in PR #95
   (`b4ed088`): distro component queries record under `<source>/<distro>` (`osv/alpine`,
   `osv/rocky`, …) at the Tier-3 informational tier (`adapters/feed/health_source.go`), so a quiet
@@ -265,10 +270,15 @@ under the 2026-08-07 re-derivation standard.
   late, 2026-08-27.)* _Original filing:_ `GET /feeds` showed one `osv` row, so Alpine data flowing
   and quietly absent looked identical; this was the visibility half of "add feeds for
   rhel/rocky/alpine" — the rhel/rocky DATA already flowed; only Alpine (GUI-2) was a real gap.
-- [ ] **GUI-5 — Rocky errata feed for RXSA-only advisories.** LOW-MED. The Red Hat feed covers
-  Rocky by clone (EDR-VEX-01 decision — correct for rebuilds), but **RXSA** advisories
-  (Rocky-exclusive/SIG packages) exist in no Red Hat data. A Rocky errata (Apollo) feed scoped to
-  that gap; do not duplicate the clone coverage.
+- [x] **GUI-5 — Rocky errata feed for RXSA-only advisories.** ✅ **CLOSED 2026-08-27**
+  (`feat/knowledge-apk-verdict`, EDR-VEX-01 **D11**). Verified live first: the RXSA universe is
+  **29 advisories** with structured `cves[]` + per-product NVRA lists, which settled the shape —
+  a D7-pattern feed (walk the tiny whole set, intersect with carded CVEs in memory), not per-CVE
+  queries. Ships as the `rocky` feed: RXSA-prefix only (RLSA clones stay with the Red Hat feed),
+  fixes from **source** packages only (binary rpms are the rebuild SCOPE per EDR-CORRELATION-01),
+  `SeverityUnknown` (never contends for the headline), trust=Observed, tier=2, opt-in
+  `THEMIS_ROCKY_ENABLED`/`_URL`/`_POLL_INTERVAL`, health row `rocky`.
+  _Original filing:_ LOW-MED — RXSA advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.
 - [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/

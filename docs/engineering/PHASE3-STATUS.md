@@ -65,11 +65,17 @@ and the resume pointer, never item state.
 > reached the range gate) found and fixed; `make check` green, 100% tiers, rapid properties. Live
 > verification waits on an Alpine estate. GUI-2c (precise branch scoping) filed, consciously deferred.
 >
-> **NEXT (per the BACKLOG work order) = the cluster remainder: GUI-3** (step zero is a zero-code
-> verification — does `THEMIS_VEXFEED_URLS` at Red Hat's VEX dir already cover it?) → **GUI-5** (Rocky
-> RXSA). GUI-2's bounds half and GUI-4 shipped 2026-08-13 (PR #95) — the 2026-08-26 order listed them
-> stale. The deferred Δ4b refinements (analyst portfolio, event-reactive triggering, cloud tiers) wait
-> on demand; R1/AI harness is otherwise COMPLETE.
+> **GUI-3 + GUI-5 DONE (2026-08-27, same branch) — the Distro-feed completeness cluster is COMPLETE.**
+> GUI-3: step zero verified NO (VEXFEED covers only `not_affected`), so the **D10** modified-since gate
+> ships in the Red Hat sweep — the per-CVE VEX `changes.csv` (verified live) feeds a fail-open
+> `RedHatChangeSignal`: first sweep full, then changed-or-never-fetched only; signal failure → full
+> sweep; restart heals. GUI-5: **D11** `rocky` feed — RXSA-only (29-advisory universe measured live;
+> RLSA clones stay with the Red Hat feed), source-package rpm fixes, SeverityUnknown, Observed/Tier-2,
+> opt-in `THEMIS_ROCKY_ENABLED`. `make check` green; app 100%, new adapters covered.
+>
+> **NEXT = the consolidated VM test round** (GUI-2b needs an Alpine SBOM · D10 gate log lines · rocky
+> feed + health row), then **GUI-12** per the after-cluster order. GUI-2's bounds half and GUI-4
+> shipped 2026-08-13 (PR #95). The deferred Δ4b refinements wait on demand; R1/AI harness is COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 

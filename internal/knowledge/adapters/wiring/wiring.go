@@ -58,6 +58,7 @@ type Knowledge struct {
 	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
 	Alpine   *app.AlpineEnrichmentService // nil when the Alpine secdb feed is disabled
+	Rocky    *app.RockyEnrichmentService  // nil when the Rocky RXSA errata feed is disabled
 	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
 	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
 	// Reattribute re-asks the discovery feeds about components already in the estate, so cards
@@ -119,7 +120,23 @@ type SignalsConfig struct {
 // needs no key. Covers RHEL and its 1:1 rebuilds (Rocky, Alma).
 type RedHatConfig struct {
 	Enabled bool
-	BaseURL string       // "" → the client default (access.redhat.com Hydra)
+	BaseURL string // "" → the client default (access.redhat.com Hydra)
+	// ChangesURL overrides the per-CVE VEX changes.csv the D10 modified-since gate reads
+	// ("" → Red Hat's public VEX change log). The gate is an efficiency gate riding the same
+	// opt-in: it fails open to a full sweep, so it needs no switch of its own.
+	ChangesURL string
+	HTTP       *http.Client // optional; nil → http.DefaultClient
+}
+
+// RockyConfig configures the optional Rocky RXSA errata feed (GUI-5, EDR-VEX-01 D11). When
+// Enabled, Wire builds the errata (Apollo) client and a RockyEnrichmentService on
+// Knowledge.Rocky (nil when disabled); the composition root schedules its Enrich. The RXSA
+// universe is tiny, so the D5 bound is applied inside the client: the advisory set is walked
+// whole and only records matching carded CVEs are kept. RLSA clones are excluded — their
+// content already arrives via the Red Hat feed.
+type RockyConfig struct {
+	Enabled bool
+	BaseURL string       // "" → the client default (errata.rockylinux.org)
 	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
@@ -150,7 +167,7 @@ type VexfeedConfig struct {
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -209,10 +226,17 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		kn.Signals = app.NewSignalEnrichmentService(src, st, fold, sysClock{})
 	}
 	if redhat.Enabled {
-		kn.RedHat = app.NewRedHatEnrichmentService(feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP), st, fold)
+		kn.RedHat = app.NewRedHatEnrichmentService(feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP), st, fold).
+			// The D10 modified-since gate: after the first full sweep, only carded CVEs the VEX
+			// change log reports modified (or never-fetched ones) are re-asked. Fails open to a
+			// full sweep, so it rides the feed's own opt-in with no switch of its own.
+			WithChangeSignal(feed.NewRedHatChangesClient(redhat.ChangesURL, redhat.HTTP), sysClock{})
 	}
 	if alpine.Enabled {
 		kn.Alpine = app.NewAlpineEnrichmentService(feed.NewAlpineClient(alpine.BaseURL, alpine.Branches, alpine.HTTP), st, fold)
+	}
+	if rocky.Enabled {
+		kn.Rocky = app.NewRockyEnrichmentService(feed.NewRockyClient(rocky.BaseURL, rocky.HTTP), st, fold)
 	}
 	if vexfeed.Enabled {
 		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)

@@ -228,6 +228,52 @@ deliberately switched off 2026-08-12), so the kernel table/property tests and th
 tests carry the verdict; the smoke case when an Alpine estate exists is the two-branch `busybox`
 scenario above.
 
+### D10 — Red Hat sweep gains a modified-since change gate (GUI-3, added 2026-08-27)
+
+GUI-3's step zero — "does `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir already cover
+the need with zero new code?" — was verified 2026-08-27 and the answer is **no**: the CSAF-VEX
+client folds only `not_affected` applicability statements, while the Red Hat feed's job is vendor
+severity + fixed NEVRAs, so the VEX feed complements it and cannot replace it. The efficiency gap
+is real: the sweep re-asks Hydra once per carded CVE per interval, forever, even when nothing
+changed. Verified live the same day: Red Hat's VEX directory publishes a **per-CVE**
+`…/csaf/v2/vex/changes.csv` (`"<year>/cve-<id>.json","RFC3339"` rows, ~3.6 MB) — a change signal
+addressable by exactly the key the sweep iterates.
+
+**The decision:** the Red Hat sweep gains an optional **change gate**, and it is an efficiency
+gate that must never become a correctness gate — every uncertain path falls back to the old full
+sweep. The app service takes a `RedHatChangeSignal` port (the CSV client, adapter-side); a sweep
+fetches per-CVE only what is **changed-since-the-last-completed-sweep or never fetched by this
+process**. Three fail-open rules make it safe: (1) the first sweep of a process is always full
+(restart heals any missed signal — which is also why the watermark is deliberately in-memory, not
+persisted); (2) a signal fetch/parse failure disables the gate for that sweep (full sweep, exactly
+the pre-D10 behavior); (3) a fold error aborts without advancing the watermark, so the next sweep
+re-reads a superset of changes. A card added between sweeps is fetched immediately (it is not in
+the fetched set), and a CVE Red Hat does not track is marked fetched on its stable nil answer — the
+change signal re-triggers it if Red Hat later starts tracking it. *Alternative considered:*
+`…/csaf/v2/advisories/changes.csv` — rejected: its rows are advisory files, not CVEs, so
+intersecting with the carded set would need an advisory→CVE index the feed otherwise never builds.
+
+### D11 — Rocky RXSA errata feed, scoped to the non-clone gap (GUI-5, added 2026-08-27)
+
+The Red Hat feed covers Rocky/Alma **by clone** (D2/Phase 3 — correct for 1:1 rebuilds), but
+**RXSA** advisories (Rocky-exclusive/SIG packages: cloud/SIG kernels and friends) exist in no Red
+Hat data. Verified live 2026-08-27 on `errata.rockylinux.org` (Apollo API v2): RXSA advisories are
+`shortCode: "RX"`, carry structured `cves[]` and per-product `rpms{}` NVRA lists — and the whole
+RXSA universe is **29 advisories**, which settles the fetch shape: this is a D7-pattern feed
+(fetch the small whole set, intersect with carded CVEs in memory, discard the rest), not a per-CVE
+query feed; per-CVE `filters.cve` exists but would cost more requests than the whole set.
+
+**The decision, bounded three ways:** (1) **RXSA only** — advisories whose name carries the
+`RXSA-` prefix; RLSA clones are excluded because their content already arrives via the Red Hat
+feed ("do not duplicate the clone coverage"). (2) **Fixes only, from source packages** — the
+Proposal carries `Fixes` keyed by the **source** package (the `.src.rpm` NVRAs), ecosystem `rpm`,
+`SeverityUnknown` throughout: the binary-rpm list is the rebuild SCOPE (EDR-CORRELATION-01), not N
+fix claims, and severity for these CVEs arrives via NVD/OSV — `rocky` never contends for the
+headline, mirroring D7's posture for `alpine`. (3) **Trust = Observed, tier = Tier-2** — a public
+errata record, reproducible on re-fetch, carrying no judgment statements (no `not_affected`);
+Tier-2 because it is the sole vendor fix source for the SIG-package gap it covers. Opt-in like
+every feed (`THEMIS_ROCKY_ENABLED=1`, `_URL`, `_POLL_INTERVAL`), health row `rocky`.
+
 ## Not in scope (explicit non-goals)
 
 VEX *export* fidelity (a separate serializer concern); cryptographic VEX signature verification (stub in both

@@ -13,7 +13,7 @@ R-table order (R2 → R3) governs.
 | Delivery channels | **R3** | Communication's delivery mechanics (exactly-once, idempotent, outcome-recorded) are done; the only channel is a log line. Add **SMTP** and **webhook** deliverers behind the existing port; Slack/Teams ride the webhook shape |
 | **F2** | parity | The HMAC webhook verifier shipped in `internal/platform/auth` but no route mounts it — mount it on the webhook intake when R3's webhook channel lands (they pair naturally) |
 | **GUI-15** *(new, filed with this roadmap)* | — | Second in-browser scanner translator — **Grype first** (closest shape to Trivy), Xray/Black Duck by demand. Each is a pure function + detector registration per EDR-GUI-01 D16; GUI-10's harness (T1) is the prerequisite quality gate |
-| GUI-3 · GUI-5 | — | Feed depth: Red Hat `changes.csv` modified-since sweep (efficiency); Rocky errata feed for RXSA-only advisories (coverage) |
+| GUI-3 ✅ · GUI-5 ✅ | — | ✅ SHIPPED 2026-08-27 (EDR-VEX-01 D10/D11, with the distro-feed cluster) — Red Hat `changes.csv` modified-since gate; Rocky RXSA errata feed |
 | Kafka transport swap | M5 maturation | A real broker behind the same kernel `Envelope` + ports — the bus database was built as its stand-in. Tracked as a maturation, **not proposed for this pass**: no current scale signal demands it, and doing it without one is résumé-driven engineering |
 
 ## Decisions to confirm before code

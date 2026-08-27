@@ -71,6 +71,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
 
 ### GUI-3 — Red Hat `changes.csv` modified-since sweep
 
+> **Status: ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D10, `feat/knowledge-apk-verdict`; step zero
+> verified NO — the VEX feed complements, never replaces).
+
 - **What it is:** efficiency, not correctness. The Red Hat feed re-asks Hydra per carded CVE per
   interval; `…/csaf/v2/advisories/changes.csv` is a change signal — intersect with carded CVEs,
   fetch only what moved.
@@ -97,6 +100,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
   screen, which is a nice order but not a dependency.
 
 ### GUI-5 — Rocky errata feed for RXSA-only advisories
+
+> **Status: ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D11, `feat/knowledge-apk-verdict`; RXSA universe
+> measured at 29 advisories).
 
 - **What it is:** the Red Hat feed covers Rocky by clone (correct for rebuilds — EDR-VEX-01
   decision), but **RXSA** advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.

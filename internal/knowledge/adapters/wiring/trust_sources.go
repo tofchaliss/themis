@@ -30,6 +30,9 @@ var trustBySource = map[string]value.TrustClass{
 	// reproduces it, and unlike the Red Hat feed it carries no judgment statements (no
 	// not_affected, no severity), only fix bounds. Observed, not Asserted (EDR-VEX-01 D7).
 	"alpine": value.TrustObserved,
+	// Rocky RXSA errata are the same shape for the SIG-package gap: a public record of fixed
+	// rpm NEVRAs, reproducible on re-fetch, no judgment statements folded (EDR-VEX-01 D11).
+	"rocky": value.TrustObserved,
 
 	// Vendor statements about the vendor's own builds. Asserted is **not** a reliability
 	// judgment — Red Hat is entirely trustworthy and is also the sole authority on their
