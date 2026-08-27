@@ -225,7 +225,11 @@ func main() {
 	}, wiring.RockyConfig{
 		Enabled: cfg.rockyEnabled,
 		BaseURL: cfg.rockyURL,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		// 120s, not 30s: the RXSA page is small (335 KB measured 2026-08-27) but the errata
+		// service can be slow to first byte, and the first live sweep hit the 30s ceiling
+		// mid-handshake from a slower egress — the NVD lesson again: server/network time,
+		// not payload size, so the fix is patience, not a smaller page.
+		HTTP: &http.Client{Timeout: 120 * time.Second},
 	}, wiring.VexfeedConfig{
 		Enabled:  cfg.vexfeedEnabled,
 		BaseURLs: cfg.vexfeedURLs,
