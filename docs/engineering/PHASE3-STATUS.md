@@ -1,6 +1,8 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-24 · **Read this first when resuming.**
+**Updated:** 2026-08-27 · **Read this first when resuming.** Open work is tracked ONLY in
+[`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
+and the resume pointer, never item state.
 
 > ## ⏭ RESUME 2026-08-24 — next up is the **Δ4 grill** (design-first, no code yet)
 >
@@ -56,8 +58,12 @@
 > = idempotence), `ai_accepted=0`, decided count unmoved. 110→20. app-ring coverage 100%, `make check-ci`
 > green. EDR D-Δ4b-7 records it.
 >
-> **NEXT = the deferred Δ4b refinements** (analyst portfolio, event-reactive triggering, cloud tiers) as
-> demand dictates. R1/AI harness is otherwise COMPLETE.
+> **NEXT (per the BACKLOG work order, corrected 2026-08-27) = the "Distro-feed completeness" cluster:**
+> **GUI-2b** (apk fixed-verdict — grill as an EDR-VEX-01 delta; discovery-prep done) → **GUI-3**
+> (verify-first: does `THEMIS_VEXFEED_URLS` at Red Hat's VEX dir already cover it?) → **GUI-5** (Rocky
+> RXSA). GUI-2's bounds half and GUI-4 shipped 2026-08-13 (PR #95) — the 2026-08-26 order listed them
+> stale. The deferred Δ4b refinements (analyst portfolio, event-reactive triggering, cloud tiers) wait
+> on demand; R1/AI harness is otherwise COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 

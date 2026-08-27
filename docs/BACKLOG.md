@@ -10,10 +10,17 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
-**Updated:** 2026-07-30 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
+**Updated:** 2026-08-27 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
 Status of what **is** done lives in `PHASE3-STATUS.md`; the monolith→greenfield capability diff lives in
 [`engineering/PARITY-GAP.md`](engineering/PARITY-GAP.md). This file is only the open work. Each item states
 **what**, **why it's open**, **where it plugs in**, and its **dependency**.
+
+**Tracking rule (agreed 2026-08-27):** this file is **the ONE tracking document**. When a feature ships,
+its item here is marked done **in the same change** — and every other doc that lists the item (tier EDRs,
+plan docs, status resume blocks) gets its marker updated then too, until tracking moves to a tool. The
+rule exists because the 2026-08-26 work order below was written against two items (GUI-2 bounds, GUI-4)
+that had shipped two weeks earlier: closure was recorded in `GUI-UPGRADE-PLAN.md` but the checkboxes here
+were never ticked, and the stale text was then trusted.
 
 Snapshot: the four-context pipeline **plus M4 Intelligence Δ1+Δ2 and M5 (event bus) are merged to `main`**,
 and the stack is **deployed end-to-end on a Linux VM under systemd** (2026-07-30). The first monolith→greenfield
@@ -70,28 +77,30 @@ implementation**:
 
 | Tier | Theme | Items (existing IDs) | Order rule |
 | --- | --- | --- | --- |
-| **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
+| **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 ✅ (shipped PR #95, 2026-08-13) · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
 | **T2** | Correctness & robustness | ✅ **EXECUTED 2026-08-23**: R7 (GOV-15 ✅ D17) · R6 (F5 ✅ + rotation detection ✅) · EV-DEDUP-2 design ✅ (D10 PROPOSED) · GUI-11 re-scoped design-first (aliases not persisted) · R4/R5 stay guarded/deferred | done first, as required |
 | **T3** | Enterprise & platform | **R2** (structured AI-proposal fields) · **R3** (SMTP/webhook delivery) · F2 · GUI-15 · GUI-3 · GUI-5 · (Kafka swap stays parked) | after T2, R-table order within |
 | **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
 | **T5** | AI capabilities (R1) | AI-CMP-1 · G-AI-3 · G-AI-1 · G-AI-2(c) · G-AI-4 · G-AI-5 · Δ4 (eval harness, then autonomy) | entry via AI-CMP-1 → G-AI-3 |
 
-**GUI/Scanner work order (agreed 2026-08-26) — the next stretch after AUTO-VOL-1.** Four of the open
-GUI items are one coherent piece of work, not four: **GUI-2 · GUI-4 · GUI-3 · GUI-5 all touch
-`internal/knowledge/adapters/feed/` + `app/feed_health.go`, all bounded by the D5 relevance rule
-(enrich carded CVEs, never mirror the feed), and all land under ONE EDR-VEX-01 delta.** Clubbed as the
-**"Distro-feed completeness"** cluster — one grilling, one EDR, one implementation arc. Order within it:
-**(1) GUI-2** (MED-HIGH — the only real DATA gap: Alpine has correlation but no vendor fixed-apk bounds /
-fixed-verdict; `enrich_alpine.go` is already partly scaffolded); **(2) GUI-4** rides with it (the
-visibility half — per-ecosystem feed-health rows so "Alpine flowing" ≠ "Alpine silently absent");
-**(3) GUI-3** (Red Hat `changes.csv` efficiency sweep — but FIRST verify whether `THEMIS_VEXFEED_URLS`
-at Red Hat's per-CVE VEX dir already covers it with zero new code); **(4) GUI-5** (Rocky RXSA errata —
+**GUI/Scanner work order (agreed 2026-08-26; CORRECTED 2026-08-27 against the code).** The 2026-08-26
+paragraph clubbed GUI-2 · GUI-4 · GUI-3 · GUI-5 as one **"Distro-feed completeness"** cluster — the
+seam was right (all `internal/knowledge/adapters/feed/` + `app/feed_health.go`, all bounded by the D5
+relevance rule, one EDR-VEX-01 delta) but the state was stale on two of the four: **GUI-2's bounds half
+and ALL of GUI-4 had already shipped 2026-08-13 in PR #95** (`b4ed088`: EDR-VEX-01 D7 + the `alpine`
+ACL/client/sweep behind `THEMIS_ALPINE_ENABLED`, and the per-distro `<source>/<distro>` Tier-3 health
+rows in `adapters/feed/health_source.go`; live-verified — 78 bounds folded in 28s, `osv/rocky` row
+observed). The live remainder of the cluster, in order: **(1) GUI-2b** (the apk fixed-VERDICT, split
+from GUI-2 exactly as Red Hat split PR2/PR3, unblocked since KN-FIX-3/D8 — see its entry below);
+**(2) GUI-3** (Red Hat `changes.csv` efficiency sweep — but FIRST verify whether `THEMIS_VEXFEED_URLS`
+at Red Hat's per-CVE VEX dir already covers it with zero new code); **(3) GUI-5** (Rocky RXSA errata —
 smallest, most niche, last). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
 the tiers still describe theme, this describes the seam. After the cluster: **GUI-12** (measured MED
 dedup fix, pure code) → **KN-SCAN-3** (ecosystem canon, Go-side) → **GUI-10 → GUI-15** (translator test
 harness, then Grype — build-change, Must-ask). GUI-11 + EV-DEDUP-2 stay design-blocked (own EDR/domain
-decision each). **NEXT SESSION: grill GUI-2 as the EDR-VEX-01 delta**, discovery-prep on the existing
-Alpine path (`alpine_client.go`, `enrich_alpine.go`, EDR-VEX-01 D7) recommended first.
+decision each). **NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta** — the discovery-prep the original
+order asked for was done 2026-08-27 (verdict seam `app/correlate.go` `RPMFixedByStream` + Governance
+`app/assessment.go` twin; `value.VersionClassAPK` ordering already in the kernel).
 
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
@@ -203,23 +212,41 @@ under the 2026-08-07 re-derivation standard.
   what no feed can — "…and your `python3-libs` sits in billing-api's request path." Ephemeral,
   clearly AI-labeled, never a substitute for the stored summary (that layering was decided
   2026-08-11 when the summary was made evidence; see the `VulnFacts.Summary` doc comment).
-- [ ] **GUI-2 — Alpine secdb enrichment feed.** **MED-HIGH for estates shipping Alpine** — the
-  genuine distro data gap this session found: RHEL/Rocky/Alma get vendor severity, `not_affected`
-  and fixed NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but **Alpine has correlation
-  only** — no vendor fixed-version bounds, no apk fixed-verdict. Source:
-  `security.alpinelinux.org` per-branch secdb. Needs the **D5 reading written first** (the DB is
-  not per-CVE addressable: fetch the small branch DB, fold ONLY records matching carded CVEs,
-  discard the rest — enrichment, not mirroring), as an EDR-VEX-01 delta. Mirrors B3's shape.
+- [x] **GUI-2 — Alpine secdb enrichment feed.** ✅ **CLOSED (bounds half) 2026-08-13** — EDR-VEX-01
+  **D7** written first, then shipped in PR #95 (`feat/knowledge-distro-feeds`, `b4ed088`): the
+  `alpine` feed ACL + branch-DB client + sweep (trust=Observed, tier=2, opt-in
+  `THEMIS_ALPINE_ENABLED`/`_BRANCHES`/`_URL`/`_POLL_INTERVAL`), fetch-the-branch-DB-whole /
+  fold-only-carded per D5. Live-verified 2026-08-12: 5 branches fetched, **78 bounds folded in
+  28s**. The apk fixed-VERDICT half was split out and continues as **GUI-2b** below. *(Checkbox
+  ticked late, 2026-08-27 — the staleness that produced the tracking rule at the top of Part 1.)*
+  _Original filing (2026-08-11):_ RHEL/Rocky/Alma get vendor severity, `not_affected` and fixed
+  NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but Alpine had correlation only. Source:
+  `security.alpinelinux.org` per-branch secdb; not per-CVE addressable. Mirrors B3's shape.
+- [ ] **GUI-2b — apk fixed-verdict (split from GUI-2 on 2026-08-12; unblocked by KN-FIX-3/D8 since
+  2026-08-13).** **MED for estates shipping Alpine.** D7 put fixed-apk BOUNDS on the card, but the
+  correlation verdict is still rpm-only: `internal/knowledge/app/correlate.go` drops a match only
+  via `value.RPMFixedByStream`, so an apk component installed at-or-above its vendor fix keeps its
+  match — and Governance's display twin (`internal/governance/app/assessment.go`) renders no
+  fixed-by-verdict for apk either. The kernel already orders apk versions
+  (`value.VersionClassAPK`, `-rN` build revisions) and D8 gave fixes the `apk` ecosystem
+  qualifier, so what remains is the verdict function plus its one design question: **branch
+  scoping** (is a v3.20 secdb bound valid evidence for a v3.19 component? — the apk analogue of
+  the rpm EL-stream rule). Design-first as an EDR-VEX-01 delta, mirroring the Red Hat PR2
+  (bounds) / PR3 (verdict) split. Cluster: Distro-feed completeness (work order above).
+  **Scope:** SMALL-MED.
 - [ ] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** LOW-MED, efficiency. Today the Red
   Hat feed re-asks Hydra per carded CVE per interval; `…/csaf/v2/advisories/changes.csv` is a
   change signal — intersect with carded CVEs, fetch only what moved. Same D5 bound, far fewer
   requests. Also verify first whether `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir
   (`…/csaf/v2/vex/`) already covers the need with zero new code.
-- [ ] **GUI-4 — per-distro feed-health rows.** LOW-MED, visibility. `GET /feeds` shows one `osv`
-  row, so Alpine data flowing and Alpine data quietly absent look identical; RHEL+Rocky+Alma hide
-  behind one `redhat` row. Record OSV distro queries per ecosystem (`osv/alpine`, `osv/rocky`…).
-  This is the visibility half of what the user reported as "add feeds for rhel/rocky/alpine" —
-  the rhel/rocky DATA already flows; only Alpine (GUI-2) is a real gap.
+- [x] **GUI-4 — per-distro feed-health rows.** ✅ **CLOSED 2026-08-13** — shipped in PR #95
+  (`b4ed088`): distro component queries record under `<source>/<distro>` (`osv/alpine`,
+  `osv/rocky`, …) at the Tier-3 informational tier (`adapters/feed/health_source.go`), so a quiet
+  distro reads as an old timestamp and never as degraded, while the aggregate `osv` row keeps the
+  tier-2 verdict. Live-verified 2026-08-12 (`osv/rocky` row on the dashboard). *(Checkbox ticked
+  late, 2026-08-27.)* _Original filing:_ `GET /feeds` showed one `osv` row, so Alpine data flowing
+  and quietly absent looked identical; this was the visibility half of "add feeds for
+  rhel/rocky/alpine" — the rhel/rocky DATA already flowed; only Alpine (GUI-2) was a real gap.
 - [ ] **GUI-5 — Rocky errata feed for RXSA-only advisories.** LOW-MED. The Red Hat feed covers
   Rocky by clone (EDR-VEX-01 decision — correct for rebuilds), but **RXSA** advisories
   (Rocky-exclusive/SIG packages) exist in no Red Hat data. A Rocky errata (Apollo) feed scoped to

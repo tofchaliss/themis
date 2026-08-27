@@ -51,6 +51,10 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
 
 ### GUI-2 — Alpine secdb enrichment feed
 
+> **Status: bounds half ✅ SHIPPED 2026-08-13** (EDR-VEX-01 D7, PR #95; live-verified — 78 bounds
+> folded). The apk fixed-VERDICT continues as **GUI-2b** — tracked in `docs/BACKLOG.md`, the one
+> tracking document.
+
 - **What it is:** the one genuine distro *data* gap the live days found. RHEL/Rocky/Alma get
   vendor severity + `not_affected` + fixed NEVRAs from the Red Hat feed; Ubuntu/Debian ride
   OSV; **Alpine has correlation only** — no vendor fixed-version bounds, no apk fixed-verdict.
@@ -76,6 +80,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
   item in both families.
 
 ### GUI-4 — per-distro feed-health rows
+
+> **Status: ✅ SHIPPED 2026-08-13** (PR #95, `adapters/feed/health_source.go`; live-verified —
+> `osv/rocky` row).
 
 - **What it is:** visibility. `GET /feeds` shows one `osv` row, so "Alpine data flowing" and
   "Alpine data quietly absent" look identical on the dashboard's feed-health view; RHEL + Rocky
