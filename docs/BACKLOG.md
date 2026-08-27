@@ -233,7 +233,17 @@ under the 2026-08-07 re-derivation standard.
   scoping** (is a v3.20 secdb bound valid evidence for a v3.19 component? — the apk analogue of
   the rpm EL-stream rule). Design-first as an EDR-VEX-01 delta, mirroring the Red Hat PR2
   (bounds) / PR3 (verdict) split. Cluster: Distro-feed completeness (work order above).
-  **Scope:** SMALL-MED.
+  **Scope:** SMALL-MED. **Grilled 2026-08-27 → EDR-VEX-01 D9:** max-bound rule over
+  strictly-`apk`-stamped bounds, match-time only, rpm parity; the precise branch model is GUI-2c.
+- [ ] **GUI-2c — precise apk branch scoping (filed 2026-08-27 with EDR-VEX-01 D9; consciously
+  deferred — R5 posture).** LOW. The exact rpm mirror the D9 verdict declined for now:
+  `FixedVersion` gains a branch/stream field, the D7 Alpine client stops discarding branches, and
+  the verdict scopes the component's PURL `distro=` qualifier to the bound's branch. A
+  domain-model change with D8-class store-codec/decode-healing surface, bought against D9's
+  stated residual (component's branch unswept AND its true bound above every collected one →
+  false-"fixed"; max-bound's converse is a needless "affected"). **Revisit only on a measured
+  hit in either direction** — read from code, nothing measured. Cluster: Distro-feed
+  completeness. **Scope:** MED (domain change — Must-ask, design before code).
 - [ ] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** LOW-MED, efficiency. Today the Red
   Hat feed re-asks Hydra per carded CVE per interval; `…/csaf/v2/advisories/changes.csv` is a
   change signal — intersect with carded CVEs, fetch only what moved. Same D5 bound, far fewer
