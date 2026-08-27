@@ -90,17 +90,18 @@ relevance rule, one EDR-VEX-01 delta) but the state was stale on two of the four
 and ALL of GUI-4 had already shipped 2026-08-13 in PR #95** (`b4ed088`: EDR-VEX-01 D7 + the `alpine`
 ACL/client/sweep behind `THEMIS_ALPINE_ENABLED`, and the per-distro `<source>/<distro>` Tier-3 health
 rows in `adapters/feed/health_source.go`; live-verified — 78 bounds folded in 28s, `osv/rocky` row
-observed). The live remainder of the cluster, in order: **(1) GUI-2b** (the apk fixed-VERDICT, split
-from GUI-2 exactly as Red Hat split PR2/PR3, unblocked since KN-FIX-3/D8 — see its entry below);
+observed). The live remainder of the cluster, in order: **(1) GUI-2b ✅ CLOSED 2026-08-27** (the apk
+fixed-VERDICT — grilled as EDR-VEX-01 D9 and shipped on `feat/knowledge-apk-verdict` the same day);
 **(2) GUI-3** (Red Hat `changes.csv` efficiency sweep — but FIRST verify whether `THEMIS_VEXFEED_URLS`
 at Red Hat's per-CVE VEX dir already covers it with zero new code); **(3) GUI-5** (Rocky RXSA errata —
 smallest, most niche, last). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
 the tiers still describe theme, this describes the seam. After the cluster: **GUI-12** (measured MED
 dedup fix, pure code) → **KN-SCAN-3** (ecosystem canon, Go-side) → **GUI-10 → GUI-15** (translator test
 harness, then Grype — build-change, Must-ask). GUI-11 + EV-DEDUP-2 stay design-blocked (own EDR/domain
-decision each). **NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta** — the discovery-prep the original
-order asked for was done 2026-08-27 (verdict seam `app/correlate.go` `RPMFixedByStream` + Governance
-`app/assessment.go` twin; `value.VersionClassAPK` ordering already in the kernel).
+decision each). ~~NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta~~ — **done 2026-08-27** (grilled
+D9 + shipped same session). **NEXT: GUI-3's step zero** — the zero-code verification of whether
+`THEMIS_VEXFEED_URLS` at Red Hat's per-CVE VEX dir (`…/csaf/v2/vex/`) already covers the need; a VM
+round can also live-verify GUI-2b once an Alpine estate exists.
 
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
@@ -222,8 +223,15 @@ under the 2026-08-07 re-derivation standard.
   _Original filing (2026-08-11):_ RHEL/Rocky/Alma get vendor severity, `not_affected` and fixed
   NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but Alpine had correlation only. Source:
   `security.alpinelinux.org` per-branch secdb; not per-CVE addressable. Mirrors B3's shape.
-- [ ] **GUI-2b — apk fixed-verdict (split from GUI-2 on 2026-08-12; unblocked by KN-FIX-3/D8 since
-  2026-08-13).** **MED for estates shipping Alpine.** D7 put fixed-apk BOUNDS on the card, but the
+- [x] **GUI-2b — apk fixed-verdict (split from GUI-2 on 2026-08-12; unblocked by KN-FIX-3/D8 since
+  2026-08-13).** ✅ **CLOSED 2026-08-27** — grilled and shipped same day (`feat/knowledge-apk-verdict`,
+  EDR-VEX-01 **D9**): `value.APKFixedByBounds` (max-bound rule, rapid property invariants) +
+  `EnterpriseView.StrictFixesFor` (verdict-grade selection — only positively-`apk`-stamped bounds) +
+  the correlation gate beside the rpm verdict; kernel/domain/app at their 100% tiers, `make check`
+  green. Along the way the pre-existing apk COMPARATOR defect was found and fixed (lexicographic
+  fallback ordered `r5` above `r10` and `rc1` above its release — reached the range gate too).
+  Live VM verification deliberately waits on an Alpine estate (none deployed; D9 records the smoke
+  case). _Original filing:_ **MED for estates shipping Alpine.** D7 put fixed-apk BOUNDS on the card, but the
   correlation verdict is still rpm-only: `internal/knowledge/app/correlate.go` drops a match only
   via `value.RPMFixedByStream`, so an apk component installed at-or-above its vendor fix keeps its
   match — and Governance's display twin (`internal/governance/app/assessment.go`) renders no

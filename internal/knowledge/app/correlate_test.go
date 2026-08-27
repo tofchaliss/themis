@@ -165,6 +165,86 @@ func TestCorrelate_SkipsRPMFixedByStream(t *testing.T) {
 	}
 }
 
+// The apk analogue of the stream verdict (EDR-VEX-01 D9): installed at/above EVERY stamped apk
+// bound → the branch's fix is present, no match. The two bounds are two branches' fixes for one
+// CVE — exactly the shape D7's cross-branch dedup produces.
+func TestCorrelate_SkipsAPKFixedByAllBounds(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{
+		PURL: "pkg:apk/alpine/busybox@1.36.1-r0?distro=alpine-3.19", Name: "busybox",
+		Version: "1.36.1-r0", Ecosystem: "apk",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		comp.PURL: {{CVE: cve(t, "CVE-2024-21"), Proposal: vulnFactsFixedApk(t, "alpine", "busybox", "1.35.0-r10", "1.36.1-r0")}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	s := correlation(t, inv, disc, matches, repo)
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 0 || matches.calls != 0 {
+		t.Errorf("a build at/above every apk bound must record no match (n=%d, RecordMatch calls=%d)", n, matches.calls)
+	}
+	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-21"); !found {
+		t.Error("expected the folded faultline to exist even though the component is fixed")
+	}
+}
+
+// The D9 busybox scenario: installed BETWEEN two branches' bounds must stay a match. "≥ any
+// bound" would clear the v3.19 install with the v3.18 bound — the cross-branch false-"fixed"
+// the max-bound rule exists to prevent.
+func TestCorrelate_KeepsAPKBetweenBranchBounds(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{
+		PURL: "pkg:apk/alpine/busybox@1.36.0-r2?distro=alpine-3.19", Name: "busybox",
+		Version: "1.36.0-r2", Ecosystem: "apk",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		comp.PURL: {{CVE: cve(t, "CVE-2024-22"), Proposal: vulnFactsFixedApk(t, "alpine", "busybox", "1.35.0-r10", "1.36.1-r0")}},
+	}}
+	matches := newMatches()
+	s := correlation(t, inv, disc, matches, newRepo())
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("recorded %d matches, want 1 — below one branch's bound means the fix may be missing here", n)
+	}
+}
+
+// Fail-closed for verdicts (D9): a bound with no positive apk stamp — the shared-card shape —
+// neither proves fixed nor blocks; with no stamped apk evidence the occurrence stays a match.
+func TestCorrelate_APKVerdictNeverDecidesOnUnstampedBounds(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{
+		PURL: "pkg:apk/alpine/perl@5.30.3-r0?distro=alpine-3.12", Name: "perl",
+		Version: "5.30.3-r0", Ecosystem: "apk",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		// An UNSTAMPED bound numerically below the install (vulnFactsFixedFor stamps nothing) —
+		// under fail-open reading it would "prove" fixed; the strict selection must ignore it.
+		comp.PURL: {{CVE: cve(t, "CVE-2024-23"), Proposal: vulnFactsFixedFor(t, "osv", "perl", "5.26.3")}},
+	}}
+	matches := newMatches()
+	s := correlation(t, inv, disc, matches, newRepo())
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("recorded %d matches, want 1 — an unstamped bound must never fire the apk verdict", n)
+	}
+}
+
 // KN-FIX-1 regression. The fixed-verdict must use THIS item's own Proposal, never the card's
 // reconciled FixedVersions — which is a union across every package the CVE affects, with no
 // package association.

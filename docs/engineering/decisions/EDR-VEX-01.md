@@ -182,8 +182,13 @@ cross-stream false-"fixed" the rpm guard exists to prevent.
 **The decision, in three parts:**
 
 1. **The max-bound rule.** `fixed` iff the strict apk bound set for the package is non-empty AND the
-   installed version is at/above **every** bound in it (apk segment ordering — the kernel's existing
-   `compareAPKVersion`, dispatched by `CompareVersions`; the comparator D7 anticipated already ships).
+   installed version is at/above **every** bound in it (apk segment ordering via the kernel's
+   `compareAPKVersion`, dispatched by `CompareVersions`). Implementing this completed the comparator
+   work D7 specified: the shipped comparator fell back to LEXICOGRAPHIC compare for non-numeric
+   segments, ordering `r5` above `r10` and `1.2.4_rc1` above `1.2.4` — the false-"fixed" /
+   false-out-of-range direction, and it reached the existing range `Applicability` gate too. Fixed
+   with apk-tools' suffix ranks (`_alpha < _beta < _pre < _rc` below the release; `cvs/svn/git/hg/p`
+   and `-rN` above) and numeric word+number comparison; unknown shapes keep the old fallback.
    If the component's own branch's bound is among the collected set this is provably sound (≥ all ⟹ ≥
    yours); when bounds disagree it errs toward "affected" — the safe direction, costing an operator a
    look, never hiding a live vulnerability. **Residual, stated honestly:** a component whose branch was

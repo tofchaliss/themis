@@ -398,6 +398,33 @@ func (v EnterpriseView) FixesFor(pkg, ecosystem string) []string {
 	return append(direct, module...)
 }
 
+// StrictFixesFor returns only the fixes POSITIVELY attributed to the given canonical
+// ecosystem for the package — the verdict-grade selection (EDR-VEX-01 D9). Where FixesFor
+// is fail-open (an unknown ecosystem still answers everything, so a display never hides a
+// possible fix), a fixed-VERDICT must be fail-closed: it decides only on evidence that
+// affirmatively claims the component's ecosystem, and an unstamped bound neither proves
+// nor blocks. On a shared card an unstamped foreign bound in the fail-open set would never
+// prove anything under the max-bound rule but would silently block the verdict forever —
+// this selection is why the verdict stays useful exactly where estates share CVEs.
+func (v EnterpriseView) StrictFixesFor(pkg, ecosystem string) []string {
+	pkg = strings.TrimSpace(pkg)
+	compEco := value.CanonicalEcosystem(ecosystem)
+	if pkg == "" || compEco == "" {
+		return nil // no positive identity to match against → no verdict-grade evidence
+	}
+	var out []string
+	for _, f := range v.Fixes {
+		if !strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
+			continue
+		}
+		if f.Ecosystem != compEco {
+			continue // unknown ("") included: only a positive stamp qualifies
+		}
+		out = append(out, f.Version)
+	}
+	return out
+}
+
 // fixFold accumulates the reconciled fix set. It is where the D8 single-normalization and the
 // ecosystem merge live, and BOTH must be order-independent (the D2 determinism guarantee):
 //

@@ -221,6 +221,16 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, fixes) {
 			continue
 		}
+		// The apk analogue (EDR-VEX-01 D9): an apk build at/above EVERY strictly-stamped apk
+		// bound for its package carries its branch's fix and is NOT affected. Two deliberate
+		// differences from the rpm line: the bound set is the STRICT selection (an unstamped
+		// foreign bound on a shared card neither proves nor blocks — fail-open is for display,
+		// fail-closed is for verdicts), and soundness comes from the max-bound rule rather than
+		// stream markers, because an apk version names no branch for a compare to scope to.
+		if bounds := f.View().StrictFixesFor(componentPackage(item.Component), item.Component.Ecosystem); len(bounds) > 0 &&
+			value.APKFixedByBounds(item.Component.Ecosystem, item.Component.Version, bounds) {
+			continue
+		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, Score: f.View().Score(),

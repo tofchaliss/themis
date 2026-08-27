@@ -52,8 +52,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
 ### GUI-2 — Alpine secdb enrichment feed
 
 > **Status: bounds half ✅ SHIPPED 2026-08-13** (EDR-VEX-01 D7, PR #95; live-verified — 78 bounds
-> folded). The apk fixed-VERDICT continues as **GUI-2b** — tracked in `docs/BACKLOG.md`, the one
-> tracking document.
+> folded). **GUI-2b (apk fixed-verdict) ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D9,
+> `feat/knowledge-apk-verdict`). Remaining: GUI-2c (precise branch scoping, consciously deferred) —
+> tracked in `docs/BACKLOG.md`, the one tracking document.
 
 - **What it is:** the one genuine distro *data* gap the live days found. RHEL/Rocky/Alma get
   vendor severity + `not_affected` + fixed NEVRAs from the Red Hat feed; Ubuntu/Debian ride
