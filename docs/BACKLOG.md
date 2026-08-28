@@ -355,8 +355,10 @@ under the 2026-08-07 re-derivation standard.
   SMALL-MED (layer 1) + SMALL (layer 2).
 - [ ] **REP-1 — Enterprise reports section (filed 2026-08-28, user ask; the R3 arc grown to its
   real size — grill as ONE design before any code).** MED-HIGH aggregate value; the named report
-  set: PSM · SLA · SVM-status · Fixed-Vulnerability · Fault · CVE-Status · Customer-scan ·
-  Configuration/EOL. **Home is Communication, not the GUI**: each report is a Publication
+  set: PSM · SLA · **SVM-status (SVM = Software Vulnerability Manager, confirmed 2026-08-28 —
+  possibly mirroring an incumbent tool's report; get a SAMPLE of the current report for the
+  grill, reports are contracts with their readers)** · Fixed-Vulnerability · Fault · CVE-Status ·
+  Customer-scan · Configuration/EOL. PSM expansion still unconfirmed. **Home is Communication, not the GUI**: each report is a Publication
   (deterministic materialization, immutable content, supersede-not-edit, human-triggered) with
   its own serializer; the GUI "Reports" section is a thin trigger+list over the existing
   CreatePublication flow. Cost map at filing: **SMALL serializers over existing reads** —
