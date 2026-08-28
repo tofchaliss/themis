@@ -352,7 +352,23 @@ under the 2026-08-07 re-derivation standard.
   "Gathering Is Not Knowing"), each row with a **Gather** button onto the existing
   `POST /faultlines/gather`, so entering the estate stays an explicit operator act. Related:
   [[FEED-CERT-1]] (a CERT-flagged filter would be a natural facet on this page). **Scope:**
-  SMALL-MED (layer 1) + SMALL (layer 2). ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
+  SMALL-MED (layer 1) + SMALL (layer 2).
+- [ ] **REP-1 — Enterprise reports section (filed 2026-08-28, user ask; the R3 arc grown to its
+  real size — grill as ONE design before any code).** MED-HIGH aggregate value; the named report
+  set: PSM · SLA · SVM-status · Fixed-Vulnerability · Fault · CVE-Status · Customer-scan ·
+  Configuration/EOL. **Home is Communication, not the GUI**: each report is a Publication
+  (deterministic materialization, immutable content, supersede-not-edit, human-triggered) with
+  its own serializer; the GUI "Reports" section is a thin trigger+list over the existing
+  CreatePublication flow. Cost map at filing: **SMALL serializers over existing reads** —
+  CVE-Status (posture), Fixed-Vulnerability (the D16 compare's `fixed` bucket — live-proven
+  2026-08-28), Fault (the card), PSM (DASH-1 product rollup); **MED reads to add** — SVM-status
+  (estate-wide aggregates), Customer-scan (C1 estate-graph join); **design-first sub-items** —
+  **REP-1a SLA policy model** (fix-within-N-days per severity: the policy config does not exist;
+  timestamps do) and **REP-1b component EOL data** (Themis holds none; endoflife.date is a clean
+  JSON API and D5 fits — fetch EOL only for products/distros in the estate; feeds the
+  Configuration/EOL report AND could flag EOL components on the posture). Pairs with **R3
+  delivery** (SMTP/webhook) — a report nobody receives is a log line; build as one arc. AI:
+  optional clearly-labeled executive-summary overlay (Information-class), never the figures. ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
