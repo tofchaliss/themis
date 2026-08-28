@@ -292,6 +292,18 @@ under the 2026-08-07 re-derivation standard.
   suppressed). D16 compare: `{fixed:68, new:0, persisting:45}` with the CVE in `fixed` —
   113−45=68 exact. Off-VM OSV predictions (113/45) matched the live counts precisely.
   _Original filing:_ LOW-MED — RXSA advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.
+- [x] **KN-DISTRO-1 — Trivy's bare-version `distro=` qualifier skipped every distro component
+  (measured live 2026-08-28; FIXED same day, `e5bb11b`).** The first real Alpine SBOM ever driven
+  through discovery (Trivy CycloneDX, 62 components) produced a **zero-finding release that read
+  as a clean image**: `osvDistroEcosystem` required `name-version` in the qualifier
+  (`distro=alpine-3.20.2`), but Trivy's apk dialect puts the name in the PURL namespace
+  (`pkg:apk/alpine/…`) and only the bare version in the qualifier (`distro=3.20.2`) — the split
+  found no name, returned "", and every component was silently skipped by the OSV distro query.
+  Worst-direction failure: vulnerable reads as clean, with nothing logged. **Fix:** one shared
+  `distroNameVersion` resolves both dialects (bare numeric qualifier → name from the PURL
+  namespace) and feeds both `osvDistroEcosystem` and `healthDistro`, so the per-distro health
+  rows (GUI-4) heal too. Found by the GUI-2b live round — the "first real SBOM of a kind finds
+  the dialect gap" class, same family as KN-FIX-3.
 - [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
