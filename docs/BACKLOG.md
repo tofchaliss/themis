@@ -374,7 +374,22 @@ under the 2026-08-07 re-derivation standard.
   **configurable mapping** (stance+justification+card-facts → org state names), never a
   replacement state machine — VEX stays clean on the wire while the GUI page and the REP-1
   SLA/SVM reports consume the same bucket rollup. Likely from the incumbent process — a sample
-  of the current metric page/report is grill input, same as REP-1. **Home is Communication, not the GUI**: each report is a Publication
+  of the current metric page/report is grill input, same as REP-1.
+- [ ] **LIC-1 — license visibility → policy flags → escalation manager (filed 2026-08-28, user
+  ask; phased, design-first).** License risk is ADJACENT to security risk — same pipeline shape
+  (evidence → policy → finding → human decision → report), different domain (no CVEs, no OSV,
+  legal authorities, per-product policy matrices) — so full workflow would be a NEW bounded
+  context, not a Knowledge bolt-on. The data already flows: CycloneDX/SPDX declared licenses sit
+  byte-for-byte in every stored SBOM; the inventory parser currently discards them. Phases:
+  **(0) visibility, SMALL-MED** — parse declared licenses into the inventory (additive field;
+  API change, Must-ask) + show on component views; **(1) deterministic policy flags, MED** — a
+  configured allow/deny/review license policy evaluated over the inventory, violations on the
+  posture + a REP-1-family report (this alone answers "which has license issues"); **(2) the
+  escalation manager, LARGE, own EDR** — routed escalations, legal-review positions; THE grill
+  question is Governance-machinery-reuse vs own context. Constitutional line unchanged: a
+  classifier's license verdict is Information — humans/policy decide. AI (optional, later):
+  obligation summarization as a clearly-labeled Information capability. Related: [[REP-1]]
+  (Configuration/EOL is the sibling "component compliance" report). **Home is Communication, not the GUI**: each report is a Publication
   (deterministic materialization, immutable content, supersede-not-edit, human-triggered) with
   its own serializer; the GUI "Reports" section is a thin trigger+list over the existing
   CreatePublication flow. Cost map at filing: **SMALL serializers over existing reads** —
