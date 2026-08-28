@@ -73,9 +73,18 @@ and the resume pointer, never item state.
 > RLSA clones stay with the Red Hat feed), source-package rpm fixes, SeverityUnknown, Observed/Tier-2,
 > opt-in `THEMIS_ROCKY_ENABLED`. `make check` green; app 100%, new adapters covered.
 >
-> **NEXT = the consolidated VM test round** (GUI-2b needs an Alpine SBOM · D10 gate log lines · rocky
-> feed + health row), then **GUI-12** per the after-cluster order. GUI-2's bounds half and GUI-4
-> shipped 2026-08-13 (PR #95). The deferred Δ4b refinements wait on demand; R1/AI harness is COMPLETE.
+> **CONSOLIDATED VM ROUND COMPLETE (2026-08-28) — every cluster item live-verified.** GUI-5: both
+> paths + the end-to-end kernel evidence demo (113→45 findings, CVE in the D16 `fixed` bucket, the
+> rocky-only `.cloud` NEVRA on the card). GUI-2b: A/B musl demo on a real sidecar SBOM (finding at
+> r1 with the secdb bound on the drawer; absent at r2 with a below-fix zlib control; the max-bound
+> verdict's multi-branch abstention observed as designed). GUI-3/D10: ~60 fast-cadence sweeps, zero
+> failures. The round also found + fixed **KN-DISTRO-1** (Trivy's bare `distro=3.20.2` qualifier
+> silently skipped every component — a 62-component image read as CLEAN; 0→28 findings after the
+> namespace-fallback fix) and the rocky 30s→120s timeout (VM egress). Branch
+> `feat/knowledge-apk-verdict` (stacked on `docs/gui-scanner-work-order`), pushed, NO PR.
+>
+> **NEXT = GUI-12** (measured MED dedup fix, pure code) per the after-cluster order, then KN-SCAN-3 →
+> GUI-10 → GUI-15. The deferred Δ4b refinements wait on demand; R1/AI harness is COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 

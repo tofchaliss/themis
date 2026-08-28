@@ -271,6 +271,8 @@ under the 2026-08-07 re-derivation standard.
   CVEs are re-asked. Three fail-open rules (first-sweep-full/restart heals · signal failure →
   full sweep · fold error doesn't advance the watermark) keep it an efficiency gate, never a
   correctness gate. `THEMIS_REDHAT_CHANGES_URL` overrides the CSV; no switch of its own.
+  **LIVE-SOAKED 2026-08-28:** ~60 sweeps at a 3-minute test cadence over 3 hours on the VM —
+  **zero** `red hat enrichment failed` lines; the gate never degraded correctness.
   _Original filing:_ LOW-MED, efficiency — the feed re-asked Hydra per carded CVE per interval.
 - [x] **GUI-4 — per-distro feed-health rows.** ✅ **CLOSED 2026-08-13** — shipped in PR #95
   (`b4ed088`): distro component queries record under `<source>/<distro>` (`osv/alpine`,
