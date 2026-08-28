@@ -358,7 +358,23 @@ under the 2026-08-07 re-derivation standard.
   set: PSM · SLA · **SVM-status (SVM = Software Vulnerability Manager, confirmed 2026-08-28 —
   possibly mirroring an incumbent tool's report; get a SAMPLE of the current report for the
   grill, reports are contracts with their readers)** · Fixed-Vulnerability · Fault · CVE-Status ·
-  Customer-scan · Configuration/EOL. PSM expansion still unconfirmed. **Home is Communication, not the GUI**: each report is a Publication
+  Customer-scan · Configuration/EOL. PSM expansion still unconfirmed.
+- [ ] **REP-2 — assessment-workflow metrics page: the enterprise state vocabulary as a
+  projection (filed 2026-08-28, user ask; design-first, grill WITH R2).** MED. The user's
+  state set: Initial severity · Not Assessed · In Progress · In Analysis · Completely
+  Assessed · Mitigate-with · Waiting-on-solution · No Release / Release / Mitigate-in-Future-
+  Release · Accepted · No Solution · False Positive · Transferred. Mapping at filing: ~8 states
+  are PROJECTIONS over existing data (no-position=Not-Assessed · under_investigation=In-
+  Analysis · has-position=Assessed · accepted_risk=Accepted · not_affected+justification=False-
+  Positive · affected+no-published-fix=Waiting-on-solution, flips automatically when a feed
+  delivers a bound · proposals-trail=initial-vs-current severity). Three are GAPS needing
+  structured Position fields: **mitigation link** (what mitigates), **target release** (fixed-in
+  planning), **transfer/ownership** — the SAME structured-fields surface R2 has been waiting
+  for; grill the two as one design. Architectural line: the enterprise vocabulary is a
+  **configurable mapping** (stance+justification+card-facts → org state names), never a
+  replacement state machine — VEX stays clean on the wire while the GUI page and the REP-1
+  SLA/SVM reports consume the same bucket rollup. Likely from the incumbent process — a sample
+  of the current metric page/report is grill input, same as REP-1. **Home is Communication, not the GUI**: each report is a Publication
   (deterministic materialization, immutable content, supersede-not-edit, human-triggered) with
   its own serializer; the GUI "Reports" section is a thin trigger+list over the existing
   CreatePublication flow. Cost map at filing: **SMALL serializers over existing reads** —
