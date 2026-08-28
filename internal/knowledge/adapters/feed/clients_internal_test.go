@@ -113,6 +113,10 @@ func TestOSVEcosystem(t *testing.T) {
 		{"pkg:rpm/rhel/x@1?distro=rhel-9.2", "", "Red Hat"},
 		{"pkg:deb/debian/x@1?distro=debian-11", "", "Debian:11"},
 		{"pkg:apk/alpine/x@1?distro=alpine-3.18", "", "Alpine:v3.18"},
+		// Trivy's apk dialect (KN-DISTRO-1, measured live 2026-08-28): the distro name lives in
+		// the PURL namespace and the qualifier carries only the bare version.
+		{"pkg:apk/alpine/x@1?distro=3.20.2", "", "Alpine:v3.20"},
+		{"pkg:rpm/rocky/x@1?distro=8.10", "", "Rocky Linux:8"},
 		{"pkg:rpm/x/y@1?distro=exotic-1", "", ""}, // unknown distro → skip
 		{"", "PyPI", "PyPI"},                      // fallback to ecosystem label
 		{"", "golang", "Go"},                      // fallback synonym

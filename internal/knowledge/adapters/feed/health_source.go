@@ -2,9 +2,7 @@ package feed
 
 import (
 	"context"
-	"strings"
 
-	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
 	"github.com/themis-project/themis/internal/knowledge/domain"
 	"github.com/themis-project/themis/internal/platform/observability"
@@ -90,13 +88,11 @@ func healthDistro(purl string) string {
 	default:
 		return ""
 	}
-	distro := strings.ToLower(strings.TrimSpace(value.PURLQualifier(purl, "distro")))
-	if distro == "" {
+	// Both qualifier dialects resolve here (KN-DISTRO-1): "alpine-3.20.2" and Trivy's
+	// bare-version "3.20.2" (name from the PURL namespace) yield the same per-distro row.
+	name, _ := distroNameVersion(purl)
+	if name == "" {
 		return ""
-	}
-	name := distro
-	if i := strings.IndexByte(distro, '-'); i > 0 {
-		name = distro[:i]
 	}
 	switch name {
 	case "rockylinux":

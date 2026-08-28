@@ -193,23 +193,19 @@ func osvPackageName(comp app.InventoryComponent) string {
 // numbered release, so their OSV ecosystem is the bare name and their PURL may carry no version
 // suffix at all.
 func osvDistroEcosystem(purl string) string {
-	distro := strings.ToLower(strings.TrimSpace(value.PURLQualifier(purl, "distro")))
-	// ROLLING distros first, before the version split. Wolfi and Chainguard ship no numbered
-	// release, so their OSV ecosystems carry no version — and their PURLs may omit the "-<date>"
-	// suffix entirely, which the split below would reject as unresolvable. Matching on the
-	// prefix covers both `distro=wolfi` and `distro=wolfi-20230201`.
-	switch {
-	case distro == "wolfi" || strings.HasPrefix(distro, "wolfi-"):
+	name, ver := distroNameVersion(purl)
+	// ROLLING distros first, before the version requirement. Wolfi and Chainguard ship no
+	// numbered release, so their OSV ecosystems carry no version — and their PURLs may omit
+	// the "-<date>" suffix entirely.
+	switch name {
+	case "wolfi":
 		return "Wolfi"
-	case distro == "chainguard" || strings.HasPrefix(distro, "chainguard-"):
+	case "chainguard":
 		return "Chainguard"
 	}
-	i := strings.IndexByte(distro, '-')
-	if i <= 0 || i+1 >= len(distro) {
+	if ver == "" {
 		return ""
 	}
-	name := distro[:i]
-	ver := distro[i+1:]
 	switch name {
 	case "rocky", "rockylinux":
 		return "Rocky Linux:" + distroMajor(ver)
@@ -223,6 +219,29 @@ func osvDistroEcosystem(purl string) string {
 		return "Alpine:v" + distroMajorMinor(ver)
 	}
 	return ""
+}
+
+// distroNameVersion splits a PURL "distro=" qualifier into its distro name and version,
+// handling BOTH dialects in the wild: "alpine-3.20.2" (the name inside the qualifier) and
+// Trivy's apk form "3.20.2" — a bare version, because for apk the distro name already lives
+// in the PURL namespace (pkg:apk/alpine/...). Measured live 2026-08-28 (KN-DISTRO-1): the
+// first real Alpine SBOM (Trivy CycloneDX) carried distro=3.20.2, the name-version split
+// found no name, and every one of its 62 components was silently skipped by the distro
+// query — a zero-finding release that read as a clean image. A bare non-numeric qualifier
+// ("wolfi") is a name with no version.
+func distroNameVersion(purl string) (name, version string) {
+	distro := strings.ToLower(strings.TrimSpace(value.PURLQualifier(purl, "distro")))
+	if distro == "" {
+		return "", ""
+	}
+	if i := strings.IndexByte(distro, '-'); i > 0 && i+1 < len(distro) {
+		return distro[:i], distro[i+1:]
+	}
+	if distro[0] >= '0' && distro[0] <= '9' {
+		ns, _ := purlNamespaceName(purl)
+		return strings.ToLower(strings.TrimSpace(ns)), distro
+	}
+	return distro, ""
 }
 
 // distroMajor returns the leading numeric release ("8.10" -> "8").
