@@ -128,7 +128,14 @@ three angles, and two of them proposed fixes that would not have worked.
   {domain,app,adapters}` + `cmd/intelligence` (stateless) + the Governance caller seam (`adapters/intelligence`
   client + no-op + on-demand `POST /findings/{id}/recommend`). Ollama (OpenAI-compatible) + fake provider;
   3-stage validation; read-API grounding.
-- [ ] **M4 Δ2–Δ4 — Intelligence, the rest of the harness** (`docs/engineering/THEMIS-AI-HARNESS.md`): **Δ2**
+- [x] **M4 Δ2–Δ4 — Intelligence, the rest of the harness** ✅ **PARENT CLOSED 2026-08-28**
+  (checkbox ticked late under the tracking rule — every delta had already shipped: Δ2 2026-07-24,
+  Δ3a 2026-08-04, Δ4a 2026-08-24, Δ4b + AUTO-VOL-1 live-verified 2026-08-26; R1 declared COMPLETE
+  in PHASE3-STATUS). What the umbrella still holds, all demand-gated, tracked in the R-clusters
+  not here: the deferred Δ4b refinements (analyst portfolio · event-reactive triggering · cloud
+  tiers) and the consciously-replaced Δ3 Python/pgvector idea (all-Go won; Δ3a component-embedding
+  design stays R5-deferred). Original plan text below for provenance.
+  (`docs/engineering/THEMIS-AI-HARNESS.md`): **Δ2**
   typed Engine Dispatcher + Rule Engine + budget (4 scopes) + security/privacy admission; **Δ3** Python LLM
   engine (DSPy/LangGraph, a service behind the engine port) + RAG/Knowledge Engine (pgvector); **Δ4**
   autonomous engine + push seam + the LLMOps plane (prompt registry, golden datasets, A/B, model registry,
