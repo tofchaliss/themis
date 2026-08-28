@@ -338,7 +338,21 @@ under the 2026-08-07 re-derivation standard.
   operator-curated list upload (the scanner-report pattern), not a poller. (3) the read half —
   a findings/posture filter ("flagged by cert-in") + later a Communication compliance-report
   serializer, which wants R3's delivery channel anyway. Sequence: after the GUI/scanner track,
-  beside R3. ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
+  beside R3.
+- [ ] **GUI-16 — "What's new" page: newest CVEs and their details (filed 2026-08-28, user ask;
+  design settled at filing, D5-bounded).** LOW-MED, capability. NOT a world-feed mirror — a page
+  listing every CVE published this week would persist uncarded-CVE data, exactly what
+  EDR-KNOWLEDGE-01 D5 forbids, and would be a worse copy of NVD/cve.org. Two doctrine-clean
+  layers instead: **(1) the page** — newest **carded** Faultlines sorted by card-creation time
+  (CVE · stored summary · severity band · exploit signals · published fix · which releases it
+  touches), pure read over persisted estate-relevant data; the staying-current sweep, gather,
+  and the autonomous analyst are what keep it fresh. Needs a small Knowledge read addition
+  (list-faultlines-by-recency) + one GUI view. **(2) optional panel** — an ephemeral
+  latest-published list fetched on view through the proxy (displayed, never persisted —
+  "Gathering Is Not Knowing"), each row with a **Gather** button onto the existing
+  `POST /faultlines/gather`, so entering the estate stays an explicit operator act. Related:
+  [[FEED-CERT-1]] (a CERT-flagged filter would be a natural facet on this page). **Scope:**
+  SMALL-MED (layer 1) + SMALL (layer 2). ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
