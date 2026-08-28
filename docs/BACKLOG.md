@@ -283,6 +283,14 @@ under the 2026-08-07 re-derivation standard.
   the way). 2026-08-28, after the `errata.rockylinux.org` allowlist opened: the success path —
   first sweep `folded=1` (the SIG-Cloud-9 kernel fix `0:5.14.0-687.36.1.el9_8.cloud.1.0` onto
   the gathered CVE-2026-23415 card, 27s after startup), `rocky` row `healthy`/tier-2.
+  **End-to-end evidence demo (2026-08-28, on the VM):** two one-component releases of a
+  SIG-Cloud-9 kernel — `5.14.0-687.15.1.el9_7.cloud.1.0` (old) vs `…687.36.1.el9_8.cloud.1.0`
+  (the RXSA build). Old: **113 findings, CVE-2026-23415 present**; card shows proposal source
+  `rocky` and kernel fixes `[0:…el9_8, 0:…el9_8.cloud.1.0, 0:6.12…el10_2]` — the `.cloud` NEVRA
+  exists in NO Red Hat data, so its presence (and the drawer's published-fix line) is
+  attributable to the rocky feed alone. New: **45 findings, the CVE absent** (false positive
+  suppressed). D16 compare: `{fixed:68, new:0, persisting:45}` with the CVE in `fixed` —
+  113−45=68 exact. Off-VM OSV predictions (113/45) matched the live counts precisely.
   _Original filing:_ LOW-MED — RXSA advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.
 - [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
