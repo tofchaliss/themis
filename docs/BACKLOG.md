@@ -243,6 +243,16 @@ under the 2026-08-07 re-derivation standard.
   (bounds) / PR3 (verdict) split. Cluster: Distro-feed completeness (work order above).
   **Scope:** SMALL-MED. **Grilled 2026-08-27 → EDR-VEX-01 D9:** max-bound rule over
   strictly-`apk`-stamped bounds, match-time only, rpm parity; the precise branch model is GUI-2c.
+  **LIVE-VERIFIED 2026-08-28 (A/B on the VM, real sidecar SBOM):** `musl-utils@1.2.5-r1` →
+  CVE-2026-6042 finding present, card carrying SIX multi-branch apk bounds incl. the v3.20 fix
+  `1.2.5-r2` (`alpine` proposal on the audit trail — the drawer's remediation line);
+  `musl-utils@1.2.5-r2` → the CVE absent, with a below-fix zlib control on the same release
+  proving the absence is meaningful (3 findings, zlib present). Honest attribution: on this
+  multi-branch card the absence is delivered by OSV's branch-aware filter — the max-bound
+  verdict correctly ABSTAINS (newer branches' bounds r10/r22/1.2.6-r1 sit above r2), the exact
+  conservative trade D9 records; the verdict's unique wins (backports OSV admits) are carried by
+  the kernel/domain/app tests, and sharpening the multi-branch case is GUI-2c. The same round
+  also surfaced + fixed KN-DISTRO-1 (below).
 - [ ] **GUI-2c — precise apk branch scoping (filed 2026-08-27 with EDR-VEX-01 D9; consciously
   deferred — R5 posture).** LOW. The exact rpm mirror the D9 verdict declined for now:
   `FixedVersion` gains a branch/stream field, the D7 Alpine client stops discarding branches, and
