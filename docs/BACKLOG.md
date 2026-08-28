@@ -323,7 +323,22 @@ under the 2026-08-07 re-derivation standard.
   namespace) and feeds both `osvDistroEcosystem` and `healthDistro`, so the per-distro health
   rows (GUI-4) heal too. Found by the GUI-2b live round — the "first real SBOM of a kind finds
   the dialect gap" class, same family as KN-FIX-3.
-- [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
+- [ ] **FEED-CERT-1 — CERT advisory-membership signal (CERT-In / CERT/CC) + the filtered list
+  (filed 2026-08-28, user ask; design-first).** LOW-MED — MED **if** the driver is CERT-In
+  compliance (Indian-regulated estates track CIVN/CIAD advisories under the 2022 CERT-In
+  directions). NOT a new vulnerability list: a CERT note is an authority flagging an existing
+  CVE — the KEV shape — so the design is an **advisory-membership signal on carded CVEs**
+  (D5-bounded, never a mirror), generic once for any national CERT. Three parts: (1) domain —
+  `ExploitSignal` (or sibling) gains additive advisory memberships `(source → advisory id)`;
+  a domain change, Must-ask, EDR-KNOWLEDGE-01 delta; memberships join KEV/EPSS as
+  disposition-watcher premise drift and as deterministic AI-grounding facts. (2) sources —
+  CERT/CC is per-CVE JSON (`kb.cert.org/vuls/api/`, perfect D5 fit, cheap, LOW value);
+  CERT-In has NO structured feed (HTML/PDF, maybe RSS) — **step zero is a verification probe**
+  of what is machine-readable; if scraping is the only path, the honest scope may be an
+  operator-curated list upload (the scanner-report pattern), not a poller. (3) the read half —
+  a findings/posture filter ("flagged by cert-in") + later a Communication compliance-report
+  serializer, which wants R3's delivery channel anyway. Sequence: after the GUI/scanner track,
+  beside R3. ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
