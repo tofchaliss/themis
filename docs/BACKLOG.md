@@ -77,7 +77,7 @@ implementation**:
 
 | Tier | Theme | Items (existing IDs) | Order rule |
 | --- | --- | --- | --- |
-| **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 ✅ (shipped PR #95, 2026-08-13) · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
+| **T1** | Basic polish | GUI-12 ✅ (2026-08-28) · GUI-10 · GUI-4 ✅ (shipped PR #95, 2026-08-13) · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
 | **T2** | Correctness & robustness | ✅ **EXECUTED 2026-08-23**: R7 (GOV-15 ✅ D17) · R6 (F5 ✅ + rotation detection ✅) · EV-DEDUP-2 design ✅ (D10 PROPOSED) · GUI-11 re-scoped design-first (aliases not persisted) · R4/R5 stay guarded/deferred | done first, as required |
 | **T3** | Enterprise & platform | **R2** (structured AI-proposal fields) · **R3** (SMTP/webhook delivery) · F2 · GUI-15 · GUI-3 · GUI-5 · (Kafka swap stays parked) | after T2, R-table order within |
 | **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
@@ -426,17 +426,23 @@ under the 2026-08-07 re-derivation standard.
   never sees them. Honest today (the chip's wording covers it), silently pessimistic tomorrow:
   any tool that emits GHSA/DSA/RHSA ids inflates the "No Finding" tile. Fix shape: expose the
   card's alias set on the posture row (or a Knowledge alias-resolve read) and join through it.
-- [ ] **GUI-12 — raw-scanner re-upload dedup is defeated by the translation timestamp
-  (filed 2026-08-17 from code, MEASURED live the same day).** LOW→MED: no longer speculative.
-  Evidence's byte-identical dedup was verified live against a curated re-upload — but
-  `translateTrivy` stamps every finding's `observed_at` at translation time, so the SAME raw
-  Trivy file uploaded twice yields two different curated documents and two scan rows.
-  **Reproduced in the Round-2 live test 2026-08-17:** an already-uploaded report re-uploaded
-  as raw JSON was accepted again and added a second row to the Scans list. Arguably two
-  observations at two times; practically a double-click (or a re-run CI job) files duplicate
-  scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
-  derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
-  or omit it client-side and let the server stamp ingestion time.
+- [x] **GUI-12 — raw-scanner re-upload dedup is defeated by the translation timestamp
+  (filed 2026-08-17 from code, MEASURED live the same day).** ✅ **CLOSED 2026-08-28**
+  (`fix/gui12-rescan-dedup`, per EDR-ENHANCE-T1 decision 1): `translateTrivy` now derives
+  `observed_at` from the raw report's own `CreatedAt` (the time the tool actually observed;
+  Trivy's 7-digit fractional seconds trimmed to milliseconds for `Date.parse`, offsets
+  normalized to UTC, node-verified deterministic) — byte-identical raw re-uploads translate to
+  byte-identical curated documents and Evidence's content addressing dedups them. The EDR's
+  "omit and let the server stamp" fallback was verified NOT to exist on the wire (the scanner
+  ACL's `parseObserved` rejects a blank `observed_at` — omitting would silently void every
+  finding), so a report with no usable `CreatedAt` keeps the fresh stamp AND the file note says
+  "stamped fresh, so a re-upload will NOT dedup" — silently losing dedup and visibly losing it
+  must not look alike. Browser-side only; born untested by design — GUI-10's harness covers it
+  when it lands. Live verification: re-upload the same raw Trivy file twice → one scan row +
+  the 409/dedup toast.
+  _Original filing:_ the SAME raw Trivy file uploaded twice yielded two curated documents and
+  two scan rows (Round-2 live test 2026-08-17) — a double-click or re-run CI job inflated the
+  Scans card and doubled every claim in the per-scan join.
 - [x] **EV-DEDUP-1 — the same bytes filed against a DIFFERENT release were silently swallowed:
   `created=false` read as success while the new release received no evidence.** ✅ **CLOSED
   2026-08-19 (measured live: a fix-verification candidate stayed empty and only the compare's

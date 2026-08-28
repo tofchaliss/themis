@@ -21,6 +21,9 @@ domain model.
 1. **GUI-12 timestamp source**: report `CreatedAt` (deterministic bytes; dedup works; honest
    observation time) vs omit client-side and let Evidence stamp ingestion. Recommended:
    **report `CreatedAt` with server-stamp fallback** — it is the time the tool actually observed.
+   *(✅ SHIPPED 2026-08-28 — with one correction found at implementation: the server-stamp
+   fallback does not exist on the wire (the scanner ACL rejects a blank `observed_at`), so the
+   no-CreatedAt fallback keeps the fresh stamp and SAYS SO in the file note instead.)*
 2. **GUI-10 harness shape**: a node-based dev-dependency test runner is a build change ("Must ask",
    already flagged in the backlog) vs porting translator tests to Go via a JS engine. Recommended:
    **defer the toolchain; run translator functions under `node --test` invoked from a Makefile
