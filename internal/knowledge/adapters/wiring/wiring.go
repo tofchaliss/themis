@@ -70,6 +70,11 @@ type Knowledge struct {
 	// inventory. Always set — like Reattribute, it rides the always-on discovery source; the
 	// composition root decides whether to run its loop.
 	Rediscovery *app.RediscoveryService
+	// Reverdict re-judges match rows whose verdict stamp lags their card (EDR-VERDICT-01 D6):
+	// the catch-up sweep over history plus the Nudge()-driven immediate path the fix-folding
+	// feed loops kick. Always set — it rides only Knowledge's own store and the Evidence read
+	// seam; the composition root runs its loop.
+	Reverdict *app.ReverdictService
 }
 
 // RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
@@ -169,6 +174,8 @@ type VerdictConfig struct {
 	// THEMIS_VERDICT_INFERRED_BRIDGE=0). Stated as the negation so the zero value keeps the
 	// documented default: the Inferred grade is ON.
 	DisableInferredBridge bool
+	// ReverdictBatch bounds one re-verdict sweep (THEMIS_REVERDICT_BATCH; <=0 → default 200).
+	ReverdictBatch int
 }
 
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
@@ -223,6 +230,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
 		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit),
+		// The re-verdict (EDR-VERDICT-01 D6): store supplies the stale rows, the ledger and the
+		// Evidence client rebuild each release's bridge context, and RecordMatch is the same
+		// seam intake judged through — one judge, every door, every moment.
+		Reverdict: app.NewReverdictService(st, st, st, evClient, st, st, sysClock{}, verdict.ReverdictBatch).
+			WithInferredBridge(!verdict.DisableInferredBridge),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

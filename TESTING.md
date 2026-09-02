@@ -324,6 +324,14 @@ effective/residual read 0); one live carrier keeps full urgency. To verify: chec
 entry for a CVE whose distro copy is patched — the shadow row reads cleared-with-reason while
 a pip-installed copy below the upstream fix stays open, and the finding stays queued.
 
+**Watch the re-verdict sweep** (D6, always on): `journalctl -u themis@knowledge | grep re-verdict`
+— every sweep logs `rejudged` and `changed`, including zeros. A non-zero `changed` is the
+headline: an EXISTING occurrence's verdict flipped (a vendor fix landing on history — the
+KN-VERDICT-1 healing event). The sweep runs on `THEMIS_REVERDICT_INTERVAL` (default 12h) AND
+immediately after any feed sweep that folded something, so fresh bounds reach existing rows in
+seconds; `scripts/vm-verify.sh` reports `verdicts: cleared/inferred/stale` — `stale` is the
+sweep's remaining queue and should trend to 0.
+
 **Watch a re-discovery sweep** (default ON): `journalctl -u themis@knowledge | grep re-discovery`
 — every sweep logs `releases` and `new_matches`, including zeros ("nothing was stale" and "the
 sweep stopped working" must not look alike). A non-zero `new_matches` is the headline event: a

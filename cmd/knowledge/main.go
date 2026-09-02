@@ -67,6 +67,8 @@ type config struct {
 	// (EDR-VERDICT-01 D4 strict mode: only explicit SBOM ownership evidence may clear a
 	// language-package occurrence). Default on.
 	verdictInferredBridgeOff bool
+	reverdictInterval        time.Duration // THEMIS_REVERDICT_INTERVAL — catch-up sweep cadence (default 12h; the nudge path is the real latency).
+	reverdictBatch           int           // THEMIS_REVERDICT_BATCH — stale rows re-judged per sweep (default 200); a large estate drains across nudges/ticks.
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -128,6 +130,8 @@ func loadConfig() config {
 		rediscoveryLimit: envIntDefault("THEMIS_REDISCOVERY_LIMIT", app.DefaultRediscoveryLimit),
 
 		verdictInferredBridgeOff: os.Getenv("THEMIS_VERDICT_INFERRED_BRIDGE") == "0",
+		reverdictInterval:        parseDurationDefault(os.Getenv("THEMIS_REVERDICT_INTERVAL"), app.DefaultReverdictInterval),
+		reverdictBatch:           envIntDefault("THEMIS_REVERDICT_BATCH", app.DefaultReverdictBatch),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -245,13 +249,22 @@ func main() {
 		Limit:      cfg.rediscoveryLimit,
 	}, wiring.VerdictConfig{
 		DisableInferredBridge: cfg.verdictInferredBridgeOff,
+		ReverdictBatch:        cfg.reverdictBatch,
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
 
+	// The re-verdict loop (EDR-VERDICT-01 D6): the interval is the catch-up backstop; the
+	// fix-folding feed loops below Nudge() it the moment a tick folds something, so real card
+	// news reaches existing match rows in seconds, not half a day.
+	go reverdictLoop(kn.Reverdict, cfg.reverdictInterval, logger.Component("reverdict"))
+	logger.Info("re-verdict sweep enabled (EDR-VERDICT-01 D6)",
+		observability.String("interval", cfg.reverdictInterval.String()),
+		observability.Int("rows_per_sweep", cfg.reverdictBatch))
+
 	// Re-attribution (KN-FIX-2). Always on: it needs no feed the node is not already using.
 	if kn.Reattribute != nil {
-		go reattributeLoop(kn.Reattribute, cfg.reattributeInterval, logger.Component("reattribute"))
+		go reattributeLoop(kn.Reattribute, cfg.reattributeInterval, logger.Component("reattribute"), kn.Reverdict.Nudge)
 	}
 
 	if cfg.rediscoveryEnabled {
@@ -267,7 +280,7 @@ func main() {
 	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
 	// CVSS/severity onto its card. Off unless THEMIS_NVD_ENABLED=1.
 	if kn.Backfill != nil {
-		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"))
+		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"), kn.Reverdict.Nudge)
 		logger.Info("nvd per-CVE enrichment enabled",
 			observability.String("interval", cfg.nvdPollInterval.String()),
 			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit),
@@ -284,7 +297,7 @@ func main() {
 	// Scheduled Red Hat vendor feed (D5, parity B3): folds vendor severity + not_affected
 	// applicability onto already-carded CVEs (covers RHEL/Rocky/Alma). Off unless THEMIS_REDHAT_ENABLED=1.
 	if kn.RedHat != nil {
-		go redhatLoop(kn.RedHat, kn.Health, cfg.redhatPollInterval, logger.Component("redhat"))
+		go redhatLoop(kn.RedHat, kn.Health, cfg.redhatPollInterval, logger.Component("redhat"), kn.Reverdict.Nudge)
 		logger.Info("red hat vendor feed enabled", observability.String("interval", cfg.redhatPollInterval.String()))
 	}
 
@@ -292,7 +305,7 @@ func main() {
 	// already-carded CVEs — the one distro that had correlation but no vendor fix data (GUI-2).
 	// Off unless THEMIS_ALPINE_ENABLED=1.
 	if kn.Alpine != nil {
-		go alpineLoop(kn.Alpine, kn.Health, cfg.alpinePollInterval, logger.Component("alpine"))
+		go alpineLoop(kn.Alpine, kn.Health, cfg.alpinePollInterval, logger.Component("alpine"), kn.Reverdict.Nudge)
 		logger.Info("alpine secdb feed enabled",
 			observability.Int("branches", len(cfg.alpineBranches)), observability.String("interval", cfg.alpinePollInterval.String()))
 	}
@@ -301,7 +314,7 @@ func main() {
 	// NEVRAs onto already-carded CVEs — the one Rocky gap the clone-covering Red Hat feed cannot
 	// reach (GUI-5). Off unless THEMIS_ROCKY_ENABLED=1.
 	if kn.Rocky != nil {
-		go rockyLoop(kn.Rocky, kn.Health, cfg.rockyPollInterval, logger.Component("rocky"))
+		go rockyLoop(kn.Rocky, kn.Health, cfg.rockyPollInterval, logger.Component("rocky"), kn.Reverdict.Nudge)
 		logger.Info("rocky rxsa errata feed enabled", observability.String("interval", cfg.rockyPollInterval.String()))
 	}
 
@@ -419,6 +432,39 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 	}
 }
 
+// reverdictLoop re-judges match rows whose verdict stamp lags their card (EDR-VERDICT-01 D6):
+// on the interval (the catch-up backstop that drains history — every pre-feature row starts at
+// stamp 0), and immediately when a fix-folding feed loop nudges it after a tick that folded
+// something. The sweep is self-targeting via the stamps and idempotent, so an extra wake-up is
+// one cheap query; the vexfeed and signal loops do not nudge because they never fold fixes.
+func reverdictLoop(rs *app.ReverdictService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		rejudged, changed, err := rs.Sweep(context.Background())
+		if err != nil {
+			logger.Error("re-verdict sweep failed", observability.Err(err))
+			return
+		}
+		// Logged on every sweep including zero: "everything is current" and "the sweep stopped
+		// working" must not look alike (NVD-WATCH-1). A non-zero `changed` is the headline —
+		// an existing occurrence's verdict actually flipped (a clearance landing on history is
+		// exactly the KN-VERDICT-1 event this loop exists for).
+		logger.Info("re-verdict sweep complete",
+			observability.Int("rejudged", rejudged), observability.Int("changed", changed))
+	}
+	time.Sleep(20 * time.Second) // let the service settle before draining history
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sweep()
+		case <-rs.NudgeC():
+			sweep()
+		}
+	}
+}
+
 // reattributeLoop re-asks the discovery feeds about components already in the estate, so cards
 // folded before fix-attribution existed gain it without waiting for a new SBOM (KN-FIX-2).
 //
@@ -426,7 +472,7 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 // idempotent (the aggregate drops verbatim restatements), and self-terminating — once every card
 // is attributed the query returns nothing and the sweep writes nothing. It is not gated behind a
 // feature flag because it rides the always-on OSV discovery source, not an opt-in feed.
-func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger *observability.Logger) {
+func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := rs.Sweep(context.Background())
 		if err != nil {
@@ -436,6 +482,12 @@ func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger 
 		// Logged on every sweep including zero: "everything is attributed" and "the sweep stopped
 		// working" must not look alike (the same reasoning as NVD-WATCH-1).
 		logger.Info("re-attribution sweep complete", observability.Int("folded", n))
+		if n > 0 {
+			// The immediate re-verdict path (EDR-VERDICT-01 D6): a fold that changed a card
+			// made that card's match rows stale, and the nudged sweep finds exactly those
+			// rows via their stamps. Coalescing and non-blocking.
+			nudge()
+		}
 	}
 	sweep()
 	ticker := time.NewTicker(interval)
@@ -451,7 +503,7 @@ func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger 
 // which carded CVEs still lack an NVD Proposal, fetches those by id, and stops at the cap. There
 // is no watermark to advance and therefore no way to skip — the queue IS the state, and a CVE
 // stays on it until it is enriched.
-func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := bf.Enrich(context.Background())
 		if err != nil {
@@ -464,6 +516,9 @@ func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interv
 		// Logged on EVERY sweep including a zero fold: an estate with nothing left to enrich and
 		// a feed that has stopped working must not look alike (NVD-WATCH-1).
 		logger.Info("nvd enrichment sweep complete", observability.Int("folded", n))
+		if n > 0 {
+			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
+		}
 		observability.Default().RecordFeedPoll("nvd", observability.FeedPollComplete)
 		observability.Default().RecordFeedRecords("nvd", observability.FeedRecordsFolded, n)
 	}
@@ -505,7 +560,7 @@ func signalLoop(sig *app.SignalEnrichmentService, health *app.FeedHealthService,
 // interval. It folds vendor severity + not_affected applicability onto already-carded CVEs
 // (relevance-bounded, per-CVE Hydra fetch); a failure is logged and retried next tick (the sweep
 // is idempotent). A CVE Red Hat does not track is skipped inside the sweep, not an error.
-func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := rh.Enrich(context.Background())
 		if err != nil {
@@ -516,6 +571,7 @@ func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, 
 		recordFeed(health, "redhat", nil, logger)
 		if n > 0 {
 			logger.Info("red hat enrichment folded", observability.Int("folded", n))
+			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
 		}
 	}
 	time.Sleep(25 * time.Second) // let the service settle; per-CVE fetches scale with the card set
@@ -531,7 +587,7 @@ func redhatLoop(rh *app.RedHatEnrichmentService, health *app.FeedHealthService, 
 // interval. It fetches the configured branch DBs and folds fixed apk version bounds onto
 // already-carded CVEs (the D5 filter is inside the client — uncarded records are discarded in
 // memory); a failure is logged and retried next tick (the sweep is idempotent).
-func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := al.Enrich(context.Background())
 		if err != nil {
@@ -542,6 +598,7 @@ func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, 
 		recordFeed(health, "alpine", nil, logger)
 		if n > 0 {
 			logger.Info("alpine enrichment folded", observability.Int("folded", n))
+			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
 		}
 	}
 	time.Sleep(25 * time.Second) // let the service settle; branch DBs are fetched whole
@@ -557,7 +614,7 @@ func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, 
 // every interval. It walks the (tiny) RXSA advisory set and folds source-package fixed NEVRAs
 // onto already-carded CVEs (the D5 filter is inside the client — uncarded records are discarded
 // in memory); a failure is logged and retried next tick (the sweep is idempotent).
-func rockyLoop(rk *app.RockyEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+func rockyLoop(rk *app.RockyEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := rk.Enrich(context.Background())
 		if err != nil {
@@ -568,6 +625,7 @@ func rockyLoop(rk *app.RockyEnrichmentService, health *app.FeedHealthService, in
 		recordFeed(health, "rocky", nil, logger)
 		if n > 0 {
 			logger.Info("rocky enrichment folded", observability.Int("folded", n))
+			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
 		}
 	}
 	time.Sleep(25 * time.Second) // let the service settle; the advisory set is walked whole

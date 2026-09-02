@@ -62,18 +62,31 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
       how-to. (INSTALLATION defers to the env template, per R2.)
 - [x] 2.6 `make vet-tags` + `make check` green (knowledge app back at 100% incl. bridge branches).
 
-## Group 3 — Phase 3: re-verdict (D6)
+## Group 3 — Phase 3: re-verdict (D6) — ✅ implemented 2026-09-02
 
-- [ ] 3.1 Fold-change trigger: on a fix-set-changing fold, `ReverdictForFaultline` re-judges that
-      card's matches, stamps `verdict_card_version`, emits change events (no network in the write tx —
-      D7 read/write split).
-- [ ] 3.2 Catch-up sweep: bounded batch over `verdict_card_version < card version` (incl. `0`
-      pre-feature rows); `THEMIS_REVERDICT_INTERVAL` / `THEMIS_REVERDICT_BATCH`; idempotent (completed
-      sweep writes nothing); wiring in `cmd/knowledge`.
-- [ ] 3.3 Integration test: matches recorded BEFORE bounds fold get cleared by the sweep; stamps
-      advance; re-run writes nothing.
-- [ ] 3.4 `scripts/vm-verify.sh`: verdict-state counts + sweep lag in the read-only report.
-- [ ] 3.5 `make vet-tags` + `make check` green.
+- [x] 3.1 Fold-change trigger — REFINED from the scaffold shape, same semantics: instead of a
+      per-fold `ReverdictForFaultline` call threaded through six enrichment services, the
+      fix-folding feed loops (redhat · alpine · rocky · nvd backfill · reattribute) call
+      `Reverdict.Nudge()` after any tick that folded — the nudged sweep finds EXACTLY the rows
+      those folds made stale via the stamps, so "immediate on real card news" holds (seconds,
+      not the interval) with no per-CVE bookkeeping and no network anywhere near a fold's
+      transaction. vexfeed/signals don't nudge (they never fold fixes); correlation-time folds
+      judge inline already. Coalescing, non-blocking.
+- [x] 3.2 Catch-up sweep: `ReverdictService.Sweep` over `verdict_card_version < card version`
+      (covers pre-feature stamp-0 rows); bridge context rebuilt PER RELEASE — the correlated
+      inventory via the KN-RECOR-1 ledger + Evidence read seam, or the release's own recorded
+      occurrences for a scanner-only release; an unreadable context SKIPS the whole release
+      (stamping a judgement made on poorer context than the evidence offers would silently
+      downgrade the verdict). Re-judging goes through the same `RecordMatch` seam (change →
+      update + `ComponentVerdictChanged`; confirmation → silent stamp).
+      `THEMIS_REVERDICT_INTERVAL` (12h backstop) / `THEMIS_REVERDICT_BATCH` (200); loop in
+      `cmd/knowledge` selects ticker + nudge.
+- [x] 3.3 Integration test `TestReverdictSweep_FullLoop`: the measured MRF shape on a real
+      store — row recorded pre-bounds, redhat fold bumps the card, sweep clears it (inferred,
+      reason, stamp current, ONE change event), second sweep reads and writes nothing.
+- [x] 3.4 `scripts/vm-verify.sh`: `verdicts: cleared/inferred/stale` line (stale = the sweep's
+      remaining queue, should trend to 0); TESTING.md re-verdict watch note; env template.
+- [x] 3.5 `make vet-tags` + `make check` green (knowledge app 100% incl. the sweep).
 
 ## Group 4 — Phase 4: the face (D8-plan, D9)
 

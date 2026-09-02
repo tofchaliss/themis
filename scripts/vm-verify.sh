@@ -116,6 +116,16 @@ printf '    evidence=%s  faultlines=%s  matches=%s  findings=%s  positions=%s  p
   "${EV:-?}" "${FL:-?}" "${MA:-?}" "${FN:-?}" "${PO:-?}" "${PU:-?}"
 printf '    bus events=%s\n' "${BUS:-?}"
 
+# Occurrence verdicts (EDR-VERDICT-01): how many matches are recorded cleared (and at which
+# evidence grade), and how many are STALE — stamp behind their card, i.e. the re-verdict
+# sweep's remaining queue. A persistently large stale count with feeds folding is the shape of
+# the sweep not running (or its Evidence reads failing); zero cleared on a Red Hat estate with
+# the bridge on is the shape of KN-VERDICT-1 still biting.
+VC="$(q knowledge "select count(*) from faultline_matches where verdict_state='cleared_vendor_fix'")"
+VI="$(q knowledge "select count(*) from faultline_matches where verdict_grade='inferred'")"
+VS="$(q knowledge 'select count(*) from faultline_matches m join faultlines f on f.id=m.faultline_id where m.verdict_card_version < f.version')"
+printf '    verdicts: cleared=%s (inferred=%s)  stale=%s\n' "${VC:-?}" "${VI:-?}" "${VS:-?}"
+
 # A consumer with UNDELIVERED events of its own source context is the shape of a stalled reader —
 # worth surfacing because the stall is silent: the gap-free watermark simply stops admitting rows
 # and nothing errors. Measured false positive fixed 2026-08-13: the old metric compared the cursor
