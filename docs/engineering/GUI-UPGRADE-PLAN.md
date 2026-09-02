@@ -51,6 +51,11 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
 
 ### GUI-2 — Alpine secdb enrichment feed
 
+> **Status: bounds half ✅ SHIPPED 2026-08-13** (EDR-VEX-01 D7, PR #95; live-verified — 78 bounds
+> folded). **GUI-2b (apk fixed-verdict) ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D9,
+> `feat/knowledge-apk-verdict`). Remaining: GUI-2c (precise branch scoping, consciously deferred) —
+> tracked in `docs/BACKLOG.md`, the one tracking document.
+
 - **What it is:** the one genuine distro *data* gap the live days found. RHEL/Rocky/Alma get
   vendor severity + `not_affected` + fixed NEVRAs from the Red Hat feed; Ubuntu/Debian ride
   OSV; **Alpine has correlation only** — no vendor fixed-version bounds, no apk fixed-verdict.
@@ -66,6 +71,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
 
 ### GUI-3 — Red Hat `changes.csv` modified-since sweep
 
+> **Status: ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D10, `feat/knowledge-apk-verdict`; step zero
+> verified NO — the VEX feed complements, never replaces).
+
 - **What it is:** efficiency, not correctness. The Red Hat feed re-asks Hydra per carded CVE per
   interval; `…/csaf/v2/advisories/changes.csv` is a change signal — intersect with carded CVEs,
   fetch only what moved.
@@ -76,6 +84,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
   item in both families.
 
 ### GUI-4 — per-distro feed-health rows
+
+> **Status: ✅ SHIPPED 2026-08-13** (PR #95, `adapters/feed/health_source.go`; live-verified —
+> `osv/rocky` row).
 
 - **What it is:** visibility. `GET /feeds` shows one `osv` row, so "Alpine data flowing" and
   "Alpine data quietly absent" look identical on the dashboard's feed-health view; RHEL + Rocky
@@ -89,6 +100,9 @@ Effort scale: **S** = a focused session · **M** = a few sessions, one EDR delta
   screen, which is a nice order but not a dependency.
 
 ### GUI-5 — Rocky errata feed for RXSA-only advisories
+
+> **Status: ✅ SHIPPED 2026-08-27** (EDR-VEX-01 D11, `feat/knowledge-apk-verdict`; RXSA universe
+> measured at 29 advisories).
 
 - **What it is:** the Red Hat feed covers Rocky by clone (correct for rebuilds — EDR-VEX-01
   decision), but **RXSA** advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.

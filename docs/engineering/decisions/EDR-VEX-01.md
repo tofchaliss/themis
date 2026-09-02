@@ -1,5 +1,7 @@
 # EDR-VEX-01 — Vendor VEX applicability: ingest, carry, and govern suppression (parity B3/B4 + VEX-ingest)
 
+> **Extended by [EDR-VERDICT-01](EDR-VERDICT-01.md) (2026-09-02):** the Phase-3 rpm fixed-verdict now lands on OCCURRENCE state (recorded, re-verdictable, bridged to language-package components) instead of silently dropping a match at correlation time. The comparator and stream scoping here are unchanged.
+
 Status: **Accepted — design confirmed 2026-07-31** (grounded against the existing EDRs, which decide most of it)
 Date: 2026-07-31
 Author: parity-closure session (vendor-VEX cluster)
@@ -121,8 +123,8 @@ machine-readable branch index exists; a configured branch the server lacks is a 
 **Split out, exactly as Red Hat split PR2/PR3:** the **apk fixed-verdict** (a matched apk at/above its
 branch fix opens no Finding — correlation's gate, the analogue of `value.RPMFixedByStream`) needs an apk
 version comparator (`-r` revisions, `_alpha/_beta/_pre/_rc/_p` suffixes) with property tests, and ships
-separately. Bounds-first already puts the published fix version on the posture, which is most of GUI-2's
-measured value.
+separately (decided in D9). Bounds-first already puts the published fix version on the posture, which is
+most of GUI-2's measured value.
 
 ### D8 — Fix attribution is ecosystem-scoped, and NEVRA versions normalize once (KN-FIX-3, added 2026-08-13)
 
@@ -166,6 +168,113 @@ reusing `value.RPMReleaseMajor`, fail-open when either side lacks a marker. The 
 this is honesty of display and grounding, not a correctness gate. Excluded fixes join the
 `UnattributedFixes` count rather than vanishing: "held but not attributable to yours" stays a
 different statement from "no fix published".
+
+### D9 — apk fixed-verdict: max-bound over strictly-stamped apk bounds (GUI-2b, added 2026-08-27)
+
+The verdict half D7 split out. An apk component installed at/above its vendor fix must open no Finding —
+the analogue of `value.RPMFixedByStream` — but the rpm verdict's soundness guard does not carry over:
+rpm scopes the compare to the same EL stream **read out of the version string itself** (`.el8`), while an
+apk version (`1.36.0-r2`) names no branch, and the D7 client deliberately discards the branch when
+folding (bounds dedup across branches by `CVE|package|version`; `FixedVersion` carries no branch field).
+A card can therefore legitimately hold two bounds for one package — v3.18's `1.35.0-r10` and v3.19's
+`1.36.1-r0` — with nothing saying which is whose, and "installed ≥ *any* bound" would declare a v3.19
+`busybox@1.36.0-r2` fixed by the v3.18 bound while it is live-vulnerable on its own branch: exactly the
+cross-stream false-"fixed" the rpm guard exists to prevent.
+
+**The decision, in three parts:**
+
+1. **The max-bound rule.** `fixed` iff the strict apk bound set for the package is non-empty AND the
+   installed version is at/above **every** bound in it (apk segment ordering via the kernel's
+   `compareAPKVersion`, dispatched by `CompareVersions`). Implementing this completed the comparator
+   work D7 specified: the shipped comparator fell back to LEXICOGRAPHIC compare for non-numeric
+   segments, ordering `r5` above `r10` and `1.2.4_rc1` above `1.2.4` — the false-"fixed" /
+   false-out-of-range direction, and it reached the existing range `Applicability` gate too. Fixed
+   with apk-tools' suffix ranks (`_alpha < _beta < _pre < _rc` below the release; `cvs/svn/git/hg/p`
+   and `-rN` above) and numeric word+number comparison; unknown shapes keep the old fallback.
+   If the component's own branch's bound is among the collected set this is provably sound (≥ all ⟹ ≥
+   yours); when bounds disagree it errs toward "affected" — the safe direction, costing an operator a
+   look, never hiding a live vulnerability. **Residual, stated honestly:** a component whose branch was
+   not swept/published AND whose true bound exceeds every collected one can still read false-"fixed";
+   Alpine bounds are near-monotone across branches, so the case is rare — and it is the trigger for the
+   deferred precise model. *Alternative considered:* `FixedVersion` gains a branch/stream field, the D7
+   client stops discarding branches, and the verdict scopes the component's PURL `distro=` qualifier
+   (already extractable — the OSV client resolves it today) to the bound's branch — the true rpm mirror.
+   Rejected **for now**: a domain-model change with store-codec/decode-healing surface (the D8 class of
+   work) bought against a residual nobody has measured. Filed as **GUI-2c**, consciously deferred;
+   revisit on a measured hit in either direction.
+2. **Strictly-stamped bounds only — fail-open is for display, fail-closed is for verdicts.** The
+   verdict's bound set is fixes positively stamped `Ecosystem == "apk"` (a strict domain accessor
+   beside `FixesFor`), NOT the D8 fail-open set, which by design includes unknown-ecosystem fixes. On a
+   shared card (the measured KN-FIX-3 `perl` estate) the fail-open set can contain an unstamped rpm
+   NEVRA; under max-bound it would never prove anything but would silently block the verdict forever.
+   The stamps are reliable exactly where it matters: the D7 feed stamps `apk` at the source, D8's
+   decode-time healing stamps the persisted alpine history, OSV stamps per affected-entry. This is not
+   a contradiction of D8 — it makes the standing asymmetry quotable: **D8's fail-open serves "never
+   hide a possible fix" (display/attribution); the verdict's direction is "never decide on weak
+   evidence" (fail-closed)** — the rpm verdict already lives by it, silently skipping every bound
+   without a resolvable `.elN` marker.
+3. **Match-time only, strict rpm parity — no retroactive healing.** The verdict lives in Knowledge's
+   correlation (beside the rpm call), applies at upload and at each KN-RECOR-1 re-discovery pass, and
+   never retracts an already-recorded match: a bound arriving *after* the match landed shows on the
+   card, the drawer and the posture, and a human closes the Finding on that evidence — the governed
+   path. Silent retraction would be delete-shaped machinery in an append-only system. Governance and
+   Intelligence are untouched: the display twin's stream-scoping is rpm-only and **fail-open**, so apk
+   bounds already pass through attribution unfiltered, and the Rule Engine decides off reconciled
+   *ranges*, not fix bounds.
+
+**Verified grounding (2026-08-27, read from code):** the package-name seam the verdict inherits already
+works for apk — `componentPackage` prefers the component's `Source`, which Evidence's parsers fill from
+the SPDX `upstream=` PURL qualifier / CycloneDX source properties, matching the secdb's origin-package
+keying. **Live verification waits on an Alpine estate:** the VM estate ships none (the D7 feed was
+deliberately switched off 2026-08-12), so the kernel table/property tests and the shared-card domain
+tests carry the verdict; the smoke case when an Alpine estate exists is the two-branch `busybox`
+scenario above.
+
+### D10 — Red Hat sweep gains a modified-since change gate (GUI-3, added 2026-08-27)
+
+GUI-3's step zero — "does `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir already cover
+the need with zero new code?" — was verified 2026-08-27 and the answer is **no**: the CSAF-VEX
+client folds only `not_affected` applicability statements, while the Red Hat feed's job is vendor
+severity + fixed NEVRAs, so the VEX feed complements it and cannot replace it. The efficiency gap
+is real: the sweep re-asks Hydra once per carded CVE per interval, forever, even when nothing
+changed. Verified live the same day: Red Hat's VEX directory publishes a **per-CVE**
+`…/csaf/v2/vex/changes.csv` (`"<year>/cve-<id>.json","RFC3339"` rows, ~3.6 MB) — a change signal
+addressable by exactly the key the sweep iterates.
+
+**The decision:** the Red Hat sweep gains an optional **change gate**, and it is an efficiency
+gate that must never become a correctness gate — every uncertain path falls back to the old full
+sweep. The app service takes a `RedHatChangeSignal` port (the CSV client, adapter-side); a sweep
+fetches per-CVE only what is **changed-since-the-last-completed-sweep or never fetched by this
+process**. Three fail-open rules make it safe: (1) the first sweep of a process is always full
+(restart heals any missed signal — which is also why the watermark is deliberately in-memory, not
+persisted); (2) a signal fetch/parse failure disables the gate for that sweep (full sweep, exactly
+the pre-D10 behavior); (3) a fold error aborts without advancing the watermark, so the next sweep
+re-reads a superset of changes. A card added between sweeps is fetched immediately (it is not in
+the fetched set), and a CVE Red Hat does not track is marked fetched on its stable nil answer — the
+change signal re-triggers it if Red Hat later starts tracking it. *Alternative considered:*
+`…/csaf/v2/advisories/changes.csv` — rejected: its rows are advisory files, not CVEs, so
+intersecting with the carded set would need an advisory→CVE index the feed otherwise never builds.
+
+### D11 — Rocky RXSA errata feed, scoped to the non-clone gap (GUI-5, added 2026-08-27)
+
+The Red Hat feed covers Rocky/Alma **by clone** (D2/Phase 3 — correct for 1:1 rebuilds), but
+**RXSA** advisories (Rocky-exclusive/SIG packages: cloud/SIG kernels and friends) exist in no Red
+Hat data. Verified live 2026-08-27 on `errata.rockylinux.org` (Apollo API v2): RXSA advisories are
+`shortCode: "RX"`, carry structured `cves[]` and per-product `rpms{}` NVRA lists — and the whole
+RXSA universe is **29 advisories**, which settles the fetch shape: this is a D7-pattern feed
+(fetch the small whole set, intersect with carded CVEs in memory, discard the rest), not a per-CVE
+query feed; per-CVE `filters.cve` exists but would cost more requests than the whole set.
+
+**The decision, bounded three ways:** (1) **RXSA only** — advisories whose name carries the
+`RXSA-` prefix; RLSA clones are excluded because their content already arrives via the Red Hat
+feed ("do not duplicate the clone coverage"). (2) **Fixes only, from source packages** — the
+Proposal carries `Fixes` keyed by the **source** package (the `.src.rpm` NVRAs), ecosystem `rpm`,
+`SeverityUnknown` throughout: the binary-rpm list is the rebuild SCOPE (EDR-CORRELATION-01), not N
+fix claims, and severity for these CVEs arrives via NVD/OSV — `rocky` never contends for the
+headline, mirroring D7's posture for `alpine`. (3) **Trust = Observed, tier = Tier-2** — a public
+errata record, reproducible on re-fetch, carrying no judgment statements (no `not_affected`);
+Tier-2 because it is the sole vendor fix source for the SIG-package gap it covers. Opt-in like
+every feed (`THEMIS_ROCKY_ENABLED=1`, `_URL`, `_POLL_INTERVAL`), health row `rocky`.
 
 ## Not in scope (explicit non-goals)
 

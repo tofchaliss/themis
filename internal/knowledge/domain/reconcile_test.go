@@ -333,6 +333,46 @@ func TestFixesFor_PrefersADirectFixOverAModuleStreamRebuild(t *testing.T) {
 	}
 }
 
+// StrictFixesFor is the verdict-grade selection (EDR-VEX-01 D9): only positively-stamped
+// bounds qualify. The fixture is the measured KN-FIX-3 shared card — an apk bound, an
+// UNSTAMPED rpm NEVRA, and a foreign-stamped fix on one CVE. Fail-open FixesFor returns
+// the unstamped one too (display must never hide a fix); the strict selection must not,
+// or the max-bound verdict would be silently blocked forever on every shared card.
+func TestStrictFixesFor_OnlyPositivelyStampedBoundsQualify(t *testing.T) {
+	v := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "perl", Version: "5.30.3-r0", Ecosystem: "apk"},
+		{Package: "perl", Version: "perl-4:5.26.3-419.el8"}, // unstamped: neither proves nor blocks
+		{Package: "perl", Version: "4:5.16.3-299.el7_9", Ecosystem: "rpm"},
+		{Package: "openssl", Version: "3.1.4-r5", Ecosystem: "apk"}, // other package never answers
+	}}
+	got := v.StrictFixesFor("perl", "apk")
+	if len(got) != 1 || got[0] != "5.30.3-r0" {
+		t.Fatalf("StrictFixesFor(perl, apk) = %v, want exactly the stamped apk bound", got)
+	}
+	if got := v.StrictFixesFor("perl", "alpine"); len(got) != 1 {
+		t.Fatalf("feed ecosystem name must canonicalize (alpine→apk), got %v", got)
+	}
+	if got := v.StrictFixesFor("perl", "rpm"); len(got) != 1 || got[0] != "4:5.16.3-299.el7_9" {
+		t.Fatalf("StrictFixesFor(perl, rpm) = %v, want exactly the stamped rpm fix", got)
+	}
+}
+
+// No positive identity on either side → no verdict-grade evidence at all.
+func TestStrictFixesFor_UnknownEcosystemOrBlankPackageAnswersNothing(t *testing.T) {
+	v := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "perl", Version: "5.30.3-r0", Ecosystem: "apk"},
+	}}
+	if got := v.StrictFixesFor("perl", ""); got != nil {
+		t.Fatalf("unknown component ecosystem must select nothing, got %v", got)
+	}
+	if got := v.StrictFixesFor("  ", "apk"); got != nil {
+		t.Fatalf("blank package must select nothing, got %v", got)
+	}
+	if got := v.StrictFixesFor("PERL", "apk"); len(got) != 1 {
+		t.Fatalf("package match stays case-insensitive like FixesFor, got %v", got)
+	}
+}
+
 // Carrier products are a UNION across flaw-describing sources, and blanks are dropped.
 //
 // Union is the fail-safe direction: a carrier named by ANY source keeps its components classified

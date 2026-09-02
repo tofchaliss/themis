@@ -986,7 +986,18 @@ const TRIVY_ECOSYSTEMS = {
 function translateTrivy(j) {
   const findings = [];
   let skipped = 0;
-  const observed = new Date().toISOString();
+  // GUI-12: observed_at derives from the report's own CreatedAt — the time the tool
+  // actually observed — so byte-identical raw re-uploads translate to byte-identical
+  // curated documents and Evidence's content addressing dedups them. A fresh timestamp
+  // here defeated that (measured live 2026-08-17: the same Trivy file re-uploaded
+  // produced a second scan row). Trivy stamps 7-digit fractional seconds; trim to
+  // milliseconds for Date.parse. Only a report with no usable CreatedAt falls back to
+  // "now" — and the file note says so, because silently losing dedup and visibly
+  // losing it must not look alike.
+  const created = typeof j.CreatedAt === "string"
+    ? Date.parse(j.CreatedAt.replace(/\.(\d{3})\d+(?=Z|[+-])/, ".$1")) : NaN;
+  const stamped = !Number.isNaN(created);
+  const observed = stamped ? new Date(created).toISOString() : new Date().toISOString();
   for (const r of j.Results || []) {
     for (const v of (r && r.Vulnerabilities) || []) {
       if (!v || !v.VulnerabilityID || !v.PkgName) { skipped++; continue; }
@@ -1009,7 +1020,7 @@ function translateTrivy(j) {
       });
     }
   }
-  return { findings, skipped };
+  return { findings, skipped, stamped };
 }
 
 /* Further tools (Grype/Xray/Black Duck/Cortex) register here by demand (D16). */
@@ -1151,7 +1162,7 @@ async function viewSBOM() {
           fileText = JSON.stringify({ findings: out.findings });
           fileScanner = tr.tool;
           findings = out.findings.length;
-          translated = { tool: tr.tool, skipped: out.skipped };
+          translated = { tool: tr.tool, skipped: out.skipped, stamped: out.stamped };
           $("#sb-kind").value = "scanner-report";
         }
       }
@@ -1159,7 +1170,7 @@ async function viewSBOM() {
     detect.textContent = fileFormat
       ? `Detected ${fileFormat === "cyclonedx" ? "CycloneDX" : "SPDX"} · ${(f.size / 1024).toFixed(0)} KB`
       : (translated
-        ? `Raw ${translated.tool} JSON — translated in-browser · ${findings} findings${translated.skipped ? ` (${translated.skipped} skipped: no CVE id or package name)` : ""} · Kind set to “Scanner report”.`
+        ? `Raw ${translated.tool} JSON — translated in-browser · ${findings} findings${translated.skipped ? ` (${translated.skipped} skipped: no CVE id or package name)` : ""}${translated.stamped === false ? " · report carries no CreatedAt — stamped fresh, so a re-upload will NOT dedup" : ""} · Kind set to “Scanner report”.`
         : (findings !== null
           ? `Detected scanner report${fileScanner ? ` (${fileScanner})` : ""} · ${findings} findings — set Kind to “Scanner report”.`
           : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`));

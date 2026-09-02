@@ -1,6 +1,8 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-24 · **Read this first when resuming.**
+**Updated:** 2026-08-27 · **Read this first when resuming.** Open work is tracked ONLY in
+[`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
+and the resume pointer, never item state.
 
 > ## ⏭ RESUME 2026-08-24 — next up is the **Δ4 grill** (design-first, no code yet)
 >
@@ -56,8 +58,33 @@
 > = idempotence), `ai_accepted=0`, decided count unmoved. 110→20. app-ring coverage 100%, `make check-ci`
 > green. EDR D-Δ4b-7 records it.
 >
-> **NEXT = the deferred Δ4b refinements** (analyst portfolio, event-reactive triggering, cloud tiers) as
-> demand dictates. R1/AI harness is otherwise COMPLETE.
+> **GUI-2b DONE (2026-08-27, `feat/knowledge-apk-verdict`, unmerged).** Grilled → **EDR-VEX-01 D9**
+> and shipped the same session: `value.APKFixedByBounds` (max-bound over strictly-`apk`-stamped
+> bounds, fail-closed) + `EnterpriseView.StrictFixesFor` + the correlation gate beside the rpm
+> verdict; the pre-existing apk comparator defect (lexicographic `r5` > `r10`, `rc1` above release —
+> reached the range gate) found and fixed; `make check` green, 100% tiers, rapid properties. Live
+> verification waits on an Alpine estate. GUI-2c (precise branch scoping) filed, consciously deferred.
+>
+> **GUI-3 + GUI-5 DONE (2026-08-27, same branch) — the Distro-feed completeness cluster is COMPLETE.**
+> GUI-3: step zero verified NO (VEXFEED covers only `not_affected`), so the **D10** modified-since gate
+> ships in the Red Hat sweep — the per-CVE VEX `changes.csv` (verified live) feeds a fail-open
+> `RedHatChangeSignal`: first sweep full, then changed-or-never-fetched only; signal failure → full
+> sweep; restart heals. GUI-5: **D11** `rocky` feed — RXSA-only (29-advisory universe measured live;
+> RLSA clones stay with the Red Hat feed), source-package rpm fixes, SeverityUnknown, Observed/Tier-2,
+> opt-in `THEMIS_ROCKY_ENABLED`. `make check` green; app 100%, new adapters covered.
+>
+> **CONSOLIDATED VM ROUND COMPLETE (2026-08-28) — every cluster item live-verified.** GUI-5: both
+> paths + the end-to-end kernel evidence demo (113→45 findings, CVE in the D16 `fixed` bucket, the
+> rocky-only `.cloud` NEVRA on the card). GUI-2b: A/B musl demo on a real sidecar SBOM (finding at
+> r1 with the secdb bound on the drawer; absent at r2 with a below-fix zlib control; the max-bound
+> verdict's multi-branch abstention observed as designed). GUI-3/D10: ~60 fast-cadence sweeps, zero
+> failures. The round also found + fixed **KN-DISTRO-1** (Trivy's bare `distro=3.20.2` qualifier
+> silently skipped every component — a 62-component image read as CLEAN; 0→28 findings after the
+> namespace-fallback fix) and the rocky 30s→120s timeout (VM egress). Branch
+> `feat/knowledge-apk-verdict` (stacked on `docs/gui-scanner-work-order`), pushed, NO PR.
+>
+> **NEXT = GUI-12** (measured MED dedup fix, pure code) per the after-cluster order, then KN-SCAN-3 →
+> GUI-10 → GUI-15. The deferred Δ4b refinements wait on demand; R1/AI harness is COMPLETE.
 
 **Historical snapshot below (2026-08-06).**
 

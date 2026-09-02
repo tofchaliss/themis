@@ -83,6 +83,18 @@ func TestCompareVersionsAPK(t *testing.T) {
 		{"1.36.1-r0", "1.36.1-r0", 0},
 		{"1.36.1-r0", "1.36.1-r1", -1}, // revision suffix orders
 		{"1.36.1-r0", "1.36.1", 1},     // extra revision segment is newer
+		{"1.0-r5", "1.0-r10", -1},      // revisions compare numerically, not lexically (D9)
+		{"1.2.4_rc1", "1.2.4", -1},     // pre-release suffix orders below the release (D9)
+		{"1.2.4_alpha1", "1.2.4_beta1", -1},
+		{"1.2.4_pre2", "1.2.4_rc1", -1},
+		{"1.2.4_p1", "1.2.4", 1}, // patch suffix orders above the release
+		{"1.2.4_rc2", "1.2.4_rc10", -1},
+		{"1.2.4_rc10", "1.2.4_rc2", 1},   // and the symmetric direction
+		{"1.0-r01", "1.0-r1", 0},         // leading-zero revision compares numerically equal
+		{"1.2.4", "1.2.4_rc1", 1},        // release above its own rc, both directions
+		{"1.2.foo", "1.2.bar", 1},        // unknown words keep the lexicographic fallback
+		{"1.2.4_rc1", "1.2.4_zeta1", -1}, // known-vs-unknown word: lexicographic fallback
+		{"1.2a", "1.2b", -1},             // digit-letter segments keep the generic fallback
 		{"1.2", "1.10", -1},            // numeric segments compare numerically
 		{"1.10", "1.2", 1},             // mirror
 		{"1.2.3", "1.2.3", 0},

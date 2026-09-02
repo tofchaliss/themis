@@ -412,6 +412,17 @@ func splitAPKParts(version string) []string {
 	return parts
 }
 
+// apkSuffixRank orders the known apk suffix words around a plain release segment:
+// pre-release suffixes (_alpha < _beta < _pre < _rc) sort BELOW the suffix-less release
+// (rank 0, the empty word), post-release words (cvs/svn/git/hg/p) and the -rN revision
+// ABOVE it — apk-tools' own ordering. Words absent here keep the generic fallback, so
+// only affirmatively-known suffixes reorder anything.
+var apkSuffixRank = map[string]int{
+	"alpha": -4, "beta": -3, "pre": -2, "rc": -1,
+	"": 0,
+	"cvs": 1, "svn": 2, "git": 3, "hg": 4, "p": 5, "r": 6,
+}
+
 func compareAPKSegment(a, b string) int {
 	if a == b {
 		return 0
@@ -428,7 +439,55 @@ func compareAPKSegment(a, b string) int {
 			return 0
 		}
 	}
+	// word+number segments ("rc1", "r10", "p5", bare words, or the empty pad for a missing
+	// segment): the word compares by apk suffix rank, then the number numerically. The
+	// plain lexicographic fallback ordered r5 above r10 and rc1 above its release — the
+	// false-"fixed"/false-out-of-range direction (EDR-VEX-01 D9).
+	aw, an, aok := splitAPKWordNum(a)
+	bw, bn, bok := splitAPKWordNum(b)
+	if aok && bok {
+		if aw != bw {
+			ar, arKnown := apkSuffixRank[aw]
+			br, brKnown := apkSuffixRank[bw]
+			if arKnown && brKnown {
+				if ar < br {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a, b)
+		}
+		switch {
+		case an < bn:
+			return -1
+		case an > bn:
+			return 1
+		default:
+			return 0
+		}
+	}
 	return strings.Compare(a, b)
+}
+
+// splitAPKWordNum splits a segment into a leading letter run and a trailing number
+// ("rc1" → "rc",1 · "r10" → "r",10 · "7" → "",7 · "" → "",0). ok=false when the segment
+// is not letters-then-digits (e.g. "2a"), which keeps the generic fallback for shapes
+// this ordering does not understand.
+func splitAPKWordNum(s string) (word string, num int, ok bool) {
+	i := 0
+	for i < len(s) && isVersionLetter(s[i]) {
+		i++
+	}
+	word = s[:i]
+	rest := s[i:]
+	if rest == "" {
+		return word, 0, true
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return "", 0, false
+	}
+	return word, n, true
 }
 
 // --- rpm (epoch:version-release) ordering ------------------------------------

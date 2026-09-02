@@ -117,6 +117,22 @@ func vulnFactsRanged(t *testing.T, source string, ranges ...string) domain.Propo
 	return p
 }
 
+// vulnFactsFixedApk mirrors the Alpine ACL (EDR-VEX-01 D7): a secdb fix bound arrives
+// positively stamped `apk`, which is what qualifies it for the strict verdict selection (D9).
+func vulnFactsFixedApk(t *testing.T, source, pkg string, fixed ...string) domain.Proposal {
+	t.Helper()
+	fixes := make([]domain.FixedVersion, 0, len(fixed))
+	for _, f := range fixed {
+		fixes = append(fixes, domain.FixedVersion{Package: pkg, Version: f, Ecosystem: "apk"})
+	}
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityUnknown, Fixes: fixes})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 // vulnFactsFixed builds a vuln-facts Proposal carrying fixed versions (e.g. Red Hat main-stream
 // fix NEVRAs), so a reconciled view exposes them to correlation's stream-scoped fixed gate.
 // vulnFactsFixed mirrors the Red Hat ACL: a vendor fix is stated as a NEVRA, so its package is

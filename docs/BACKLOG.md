@@ -10,10 +10,17 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
-**Updated:** 2026-07-30 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
+**Updated:** 2026-08-27 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
 Status of what **is** done lives in `PHASE3-STATUS.md`; the monolith→greenfield capability diff lives in
 [`engineering/PARITY-GAP.md`](engineering/PARITY-GAP.md). This file is only the open work. Each item states
 **what**, **why it's open**, **where it plugs in**, and its **dependency**.
+
+**Tracking rule (agreed 2026-08-27):** this file is **the ONE tracking document**. When a feature ships,
+its item here is marked done **in the same change** — and every other doc that lists the item (tier EDRs,
+plan docs, status resume blocks) gets its marker updated then too, until tracking moves to a tool. The
+rule exists because the 2026-08-26 work order below was written against two items (GUI-2 bounds, GUI-4)
+that had shipped two weeks earlier: closure was recorded in `GUI-UPGRADE-PLAN.md` but the checkboxes here
+were never ticked, and the stale text was then trusted.
 
 Snapshot: the four-context pipeline **plus M4 Intelligence Δ1+Δ2 and M5 (event bus) are merged to `main`**,
 and the stack is **deployed end-to-end on a Linux VM under systemd** (2026-07-30). The first monolith→greenfield
@@ -70,11 +77,31 @@ implementation**:
 
 | Tier | Theme | Items (existing IDs) | Order rule |
 | --- | --- | --- | --- |
-| **T1** | Basic polish | GUI-12 · GUI-10 · GUI-4 · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
+| **T1** | Basic polish | GUI-12 ✅ (2026-08-28) · GUI-10 · GUI-4 ✅ (shipped PR #95, 2026-08-13) · KN-SCAN-3 · vanilla-JS decision note | opportunistic, each self-contained |
 | **T2** | Correctness & robustness | ✅ **EXECUTED 2026-08-23**: R7 (GOV-15 ✅ D17) · R6 (F5 ✅ + rotation detection ✅) · EV-DEDUP-2 design ✅ (D10 PROPOSED) · GUI-11 re-scoped design-first (aliases not persisted) · R4/R5 stay guarded/deferred | done first, as required |
 | **T3** | Enterprise & platform | **R2** (structured AI-proposal fields) · **R3** (SMTP/webhook delivery) · F2 · GUI-15 · GUI-3 · GUI-5 · (Kafka swap stays parked) | after T2, R-table order within |
 | **T4** | AI groundwork (deterministic) | AI-204-2 · AI-TEL-1 · PLAN-5 · Δ3a per-CVE embedding | before/interleaved with T5 as prerequisites |
 | **T5** | AI capabilities (R1) | AI-CMP-1 · G-AI-3 · G-AI-1 · G-AI-2(c) · G-AI-4 · G-AI-5 · Δ4 (eval harness, then autonomy) | entry via AI-CMP-1 → G-AI-3 |
+
+**GUI/Scanner work order (agreed 2026-08-26; CORRECTED 2026-08-27 against the code).** The 2026-08-26
+paragraph clubbed GUI-2 · GUI-4 · GUI-3 · GUI-5 as one **"Distro-feed completeness"** cluster — the
+seam was right (all `internal/knowledge/adapters/feed/` + `app/feed_health.go`, all bounded by the D5
+relevance rule, one EDR-VEX-01 delta) but the state was stale on two of the four: **GUI-2's bounds half
+and ALL of GUI-4 had already shipped 2026-08-13 in PR #95** (`b4ed088`: EDR-VEX-01 D7 + the `alpine`
+ACL/client/sweep behind `THEMIS_ALPINE_ENABLED`, and the per-distro `<source>/<distro>` Tier-3 health
+rows in `adapters/feed/health_source.go`; live-verified — 78 bounds folded in 28s, `osv/rocky` row
+observed). **The cluster COMPLETED 2026-08-27** — all three remaining items grilled/designed and
+shipped in one arc on `feat/knowledge-apk-verdict`: **(1) GUI-2b ✅** (apk fixed-verdict, EDR-VEX-01
+D9); **(2) GUI-3 ✅** (VEXFEED-coverage verified NO first, then the D10 per-CVE-VEX changes.csv gate);
+**(3) GUI-5 ✅** (D11 Rocky RXSA feed, 29-advisory universe measured live). One consolidated VM test
+round covers all three (plus live-verifying GUI-2b needs an Alpine SBOM). This SUPERSEDES the T1/T3 scattering of these IDs for scheduling purposes —
+the tiers still describe theme, this describes the seam. After the cluster: **GUI-12** (measured MED
+dedup fix, pure code) → **KN-SCAN-3** (ecosystem canon, Go-side) → **GUI-10 → GUI-15** (translator test
+harness, then Grype — build-change, Must-ask). GUI-11 + EV-DEDUP-2 stay design-blocked (own EDR/domain
+decision each). ~~NEXT SESSION: grill GUI-2b as the EDR-VEX-01 delta~~ — **the whole cluster is done
+2026-08-27** (D9 + D10 + D11, one branch, `make check` green). **NEXT: the consolidated VM test round**
+(GUI-2b apk verdict with an Alpine SBOM · D10 gate log lines · `rocky` feed + health row), then
+**GUI-12** (measured MED dedup fix, pure code) per the after-cluster order.
 
 **The shape of the list changed again, and not in the good direction.** On 2026-08-07 it was dominated by
 "we have decided not to build this yet". Two clusters now hold **measured defects** — R7 (triage order) and
@@ -101,7 +128,14 @@ three angles, and two of them proposed fixes that would not have worked.
   {domain,app,adapters}` + `cmd/intelligence` (stateless) + the Governance caller seam (`adapters/intelligence`
   client + no-op + on-demand `POST /findings/{id}/recommend`). Ollama (OpenAI-compatible) + fake provider;
   3-stage validation; read-API grounding.
-- [ ] **M4 Δ2–Δ4 — Intelligence, the rest of the harness** (`docs/engineering/THEMIS-AI-HARNESS.md`): **Δ2**
+- [x] **M4 Δ2–Δ4 — Intelligence, the rest of the harness** ✅ **PARENT CLOSED 2026-08-28**
+  (checkbox ticked late under the tracking rule — every delta had already shipped: Δ2 2026-07-24,
+  Δ3a 2026-08-04, Δ4a 2026-08-24, Δ4b + AUTO-VOL-1 live-verified 2026-08-26; R1 declared COMPLETE
+  in PHASE3-STATUS). What the umbrella still holds, all demand-gated, tracked in the R-clusters
+  not here: the deferred Δ4b refinements (analyst portfolio · event-reactive triggering · cloud
+  tiers) and the consciously-replaced Δ3 Python/pgvector idea (all-Go won; Δ3a component-embedding
+  design stays R5-deferred). Original plan text below for provenance.
+  (`docs/engineering/THEMIS-AI-HARNESS.md`): **Δ2**
   typed Engine Dispatcher + Rule Engine + budget (4 scopes) + security/privacy admission; **Δ3** Python LLM
   engine (DSPy/LangGraph, a service behind the engine port) + RAG/Knowledge Engine (pgvector); **Δ4**
   autonomous engine + push seam + the LLMOps plane (prompt registry, golden datasets, A/B, model registry,
@@ -186,28 +220,188 @@ under the 2026-08-07 re-derivation standard.
   what no feed can — "…and your `python3-libs` sits in billing-api's request path." Ephemeral,
   clearly AI-labeled, never a substitute for the stored summary (that layering was decided
   2026-08-11 when the summary was made evidence; see the `VulnFacts.Summary` doc comment).
-- [ ] **GUI-2 — Alpine secdb enrichment feed.** **MED-HIGH for estates shipping Alpine** — the
-  genuine distro data gap this session found: RHEL/Rocky/Alma get vendor severity, `not_affected`
-  and fixed NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but **Alpine has correlation
-  only** — no vendor fixed-version bounds, no apk fixed-verdict. Source:
-  `security.alpinelinux.org` per-branch secdb. Needs the **D5 reading written first** (the DB is
-  not per-CVE addressable: fetch the small branch DB, fold ONLY records matching carded CVEs,
-  discard the rest — enrichment, not mirroring), as an EDR-VEX-01 delta. Mirrors B3's shape.
-- [ ] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** LOW-MED, efficiency. Today the Red
-  Hat feed re-asks Hydra per carded CVE per interval; `…/csaf/v2/advisories/changes.csv` is a
-  change signal — intersect with carded CVEs, fetch only what moved. Same D5 bound, far fewer
-  requests. Also verify first whether `THEMIS_VEXFEED_URLS` pointed at Red Hat's per-CVE VEX dir
-  (`…/csaf/v2/vex/`) already covers the need with zero new code.
-- [ ] **GUI-4 — per-distro feed-health rows.** LOW-MED, visibility. `GET /feeds` shows one `osv`
-  row, so Alpine data flowing and Alpine data quietly absent look identical; RHEL+Rocky+Alma hide
-  behind one `redhat` row. Record OSV distro queries per ecosystem (`osv/alpine`, `osv/rocky`…).
-  This is the visibility half of what the user reported as "add feeds for rhel/rocky/alpine" —
-  the rhel/rocky DATA already flows; only Alpine (GUI-2) is a real gap.
-- [ ] **GUI-5 — Rocky errata feed for RXSA-only advisories.** LOW-MED. The Red Hat feed covers
-  Rocky by clone (EDR-VEX-01 decision — correct for rebuilds), but **RXSA** advisories
-  (Rocky-exclusive/SIG packages) exist in no Red Hat data. A Rocky errata (Apollo) feed scoped to
-  that gap; do not duplicate the clone coverage.
-- [x] **GUI-6 — productize the dashboard.** ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
+- [x] **GUI-2 — Alpine secdb enrichment feed.** ✅ **CLOSED (bounds half) 2026-08-13** — EDR-VEX-01
+  **D7** written first, then shipped in PR #95 (`feat/knowledge-distro-feeds`, `b4ed088`): the
+  `alpine` feed ACL + branch-DB client + sweep (trust=Observed, tier=2, opt-in
+  `THEMIS_ALPINE_ENABLED`/`_BRANCHES`/`_URL`/`_POLL_INTERVAL`), fetch-the-branch-DB-whole /
+  fold-only-carded per D5. Live-verified 2026-08-12: 5 branches fetched, **78 bounds folded in
+  28s**. The apk fixed-VERDICT half was split out and continues as **GUI-2b** below. *(Checkbox
+  ticked late, 2026-08-27 — the staleness that produced the tracking rule at the top of Part 1.)*
+  _Original filing (2026-08-11):_ RHEL/Rocky/Alma get vendor severity, `not_affected` and fixed
+  NEVRAs from the Red Hat feed, Ubuntu/Debian ride OSV, but Alpine had correlation only. Source:
+  `security.alpinelinux.org` per-branch secdb; not per-CVE addressable. Mirrors B3's shape.
+- [x] **GUI-2b — apk fixed-verdict (split from GUI-2 on 2026-08-12; unblocked by KN-FIX-3/D8 since
+  2026-08-13).** ✅ **CLOSED 2026-08-27** — grilled and shipped same day (`feat/knowledge-apk-verdict`,
+  EDR-VEX-01 **D9**): `value.APKFixedByBounds` (max-bound rule, rapid property invariants) +
+  `EnterpriseView.StrictFixesFor` (verdict-grade selection — only positively-`apk`-stamped bounds) +
+  the correlation gate beside the rpm verdict; kernel/domain/app at their 100% tiers, `make check`
+  green. Along the way the pre-existing apk COMPARATOR defect was found and fixed (lexicographic
+  fallback ordered `r5` above `r10` and `rc1` above its release — reached the range gate too).
+  Live VM verification deliberately waits on an Alpine estate (none deployed; D9 records the smoke
+  case). _Original filing:_ **MED for estates shipping Alpine.** D7 put fixed-apk BOUNDS on the card, but the
+  correlation verdict is still rpm-only: `internal/knowledge/app/correlate.go` drops a match only
+  via `value.RPMFixedByStream`, so an apk component installed at-or-above its vendor fix keeps its
+  match — and Governance's display twin (`internal/governance/app/assessment.go`) renders no
+  fixed-by-verdict for apk either. The kernel already orders apk versions
+  (`value.VersionClassAPK`, `-rN` build revisions) and D8 gave fixes the `apk` ecosystem
+  qualifier, so what remains is the verdict function plus its one design question: **branch
+  scoping** (is a v3.20 secdb bound valid evidence for a v3.19 component? — the apk analogue of
+  the rpm EL-stream rule). Design-first as an EDR-VEX-01 delta, mirroring the Red Hat PR2
+  (bounds) / PR3 (verdict) split. Cluster: Distro-feed completeness (work order above).
+  **Scope:** SMALL-MED. **Grilled 2026-08-27 → EDR-VEX-01 D9:** max-bound rule over
+  strictly-`apk`-stamped bounds, match-time only, rpm parity; the precise branch model is GUI-2c.
+  **LIVE-VERIFIED 2026-08-28 (A/B on the VM, real sidecar SBOM):** `musl-utils@1.2.5-r1` →
+  CVE-2026-6042 finding present, card carrying SIX multi-branch apk bounds incl. the v3.20 fix
+  `1.2.5-r2` (`alpine` proposal on the audit trail — the drawer's remediation line);
+  `musl-utils@1.2.5-r2` → the CVE absent, with a below-fix zlib control on the same release
+  proving the absence is meaningful (3 findings, zlib present). Honest attribution: on this
+  multi-branch card the absence is delivered by OSV's branch-aware filter — the max-bound
+  verdict correctly ABSTAINS (newer branches' bounds r10/r22/1.2.6-r1 sit above r2), the exact
+  conservative trade D9 records; the verdict's unique wins (backports OSV admits) are carried by
+  the kernel/domain/app tests, and sharpening the multi-branch case is GUI-2c. The same round
+  also surfaced + fixed KN-DISTRO-1 (below).
+- [ ] **GUI-2c — precise apk branch scoping (filed 2026-08-27 with EDR-VEX-01 D9; consciously
+  deferred — R5 posture).** LOW. The exact rpm mirror the D9 verdict declined for now:
+  `FixedVersion` gains a branch/stream field, the D7 Alpine client stops discarding branches, and
+  the verdict scopes the component's PURL `distro=` qualifier to the bound's branch. A
+  domain-model change with D8-class store-codec/decode-healing surface, bought against D9's
+  stated residual (component's branch unswept AND its true bound above every collected one →
+  false-"fixed"; max-bound's converse is a needless "affected"). **Revisit only on a measured
+  hit in either direction** — read from code, nothing measured. Cluster: Distro-feed
+  completeness. **Scope:** MED (domain change — Must-ask, design before code).
+- [x] **GUI-3 — Red Hat `changes.csv` modified-since sweep.** ✅ **CLOSED 2026-08-27**
+  (`feat/knowledge-apk-verdict`, EDR-VEX-01 **D10**). Step zero verified first: the VEXFEED path
+  covers only `not_affected` applicability, not severity/fixes — so it complements, never
+  replaces. The gate ships in the Red Hat sweep itself: the **per-CVE VEX** `changes.csv`
+  (verified live — `"<year>/cve-<id>.json"` rows; the advisory-level CSV is NOT per-CVE) feeds an
+  optional `RedHatChangeSignal`; after the first full sweep only changed-or-never-fetched carded
+  CVEs are re-asked. Three fail-open rules (first-sweep-full/restart heals · signal failure →
+  full sweep · fold error doesn't advance the watermark) keep it an efficiency gate, never a
+  correctness gate. `THEMIS_REDHAT_CHANGES_URL` overrides the CSV; no switch of its own.
+  **LIVE-SOAKED 2026-08-28:** ~60 sweeps at a 3-minute test cadence over 3 hours on the VM —
+  **zero** `red hat enrichment failed` lines; the gate never degraded correctness.
+  _Original filing:_ LOW-MED, efficiency — the feed re-asked Hydra per carded CVE per interval.
+- [x] **GUI-4 — per-distro feed-health rows.** ✅ **CLOSED 2026-08-13** — shipped in PR #95
+  (`b4ed088`): distro component queries record under `<source>/<distro>` (`osv/alpine`,
+  `osv/rocky`, …) at the Tier-3 informational tier (`adapters/feed/health_source.go`), so a quiet
+  distro reads as an old timestamp and never as degraded, while the aggregate `osv` row keeps the
+  tier-2 verdict. Live-verified 2026-08-12 (`osv/rocky` row on the dashboard). *(Checkbox ticked
+  late, 2026-08-27.)* _Original filing:_ `GET /feeds` showed one `osv` row, so Alpine data flowing
+  and quietly absent looked identical; this was the visibility half of "add feeds for
+  rhel/rocky/alpine" — the rhel/rocky DATA already flowed; only Alpine (GUI-2) was a real gap.
+- [x] **GUI-5 — Rocky errata feed for RXSA-only advisories.** ✅ **CLOSED 2026-08-27**
+  (`feat/knowledge-apk-verdict`, EDR-VEX-01 **D11**). Verified live first: the RXSA universe is
+  **29 advisories** with structured `cves[]` + per-product NVRA lists, which settled the shape —
+  a D7-pattern feed (walk the tiny whole set, intersect with carded CVEs in memory), not per-CVE
+  queries. Ships as the `rocky` feed: RXSA-prefix only (RLSA clones stay with the Red Hat feed),
+  fixes from **source** packages only (binary rpms are the rebuild SCOPE per EDR-CORRELATION-01),
+  `SeverityUnknown` (never contends for the headline), trust=Observed, tier=2, opt-in
+  `THEMIS_ROCKY_ENABLED`/`_URL`/`_POLL_INTERVAL`, health row `rocky`.
+  **LIVE-VERIFIED both ways.** 2026-08-27: the failure path (VM egress firewalled → sweep error
+  logged, `rocky` row degraded, `consecutive_failures` counting; timeout raised 30s→120s along
+  the way). 2026-08-28, after the `errata.rockylinux.org` allowlist opened: the success path —
+  first sweep `folded=1` (the SIG-Cloud-9 kernel fix `0:5.14.0-687.36.1.el9_8.cloud.1.0` onto
+  the gathered CVE-2026-23415 card, 27s after startup), `rocky` row `healthy`/tier-2.
+  **End-to-end evidence demo (2026-08-28, on the VM):** two one-component releases of a
+  SIG-Cloud-9 kernel — `5.14.0-687.15.1.el9_7.cloud.1.0` (old) vs `…687.36.1.el9_8.cloud.1.0`
+  (the RXSA build). Old: **113 findings, CVE-2026-23415 present**; card shows proposal source
+  `rocky` and kernel fixes `[0:…el9_8, 0:…el9_8.cloud.1.0, 0:6.12…el10_2]` — the `.cloud` NEVRA
+  exists in NO Red Hat data, so its presence (and the drawer's published-fix line) is
+  attributable to the rocky feed alone. New: **45 findings, the CVE absent** (false positive
+  suppressed). D16 compare: `{fixed:68, new:0, persisting:45}` with the CVE in `fixed` —
+  113−45=68 exact. Off-VM OSV predictions (113/45) matched the live counts precisely.
+  _Original filing:_ LOW-MED — RXSA advisories (Rocky-exclusive/SIG packages) exist in no Red Hat data.
+- [x] **KN-DISTRO-1 — Trivy's bare-version `distro=` qualifier skipped every distro component
+  (measured live 2026-08-28; FIXED same day, `e5bb11b`).** The first real Alpine SBOM ever driven
+  through discovery (Trivy CycloneDX, 62 components) produced a **zero-finding release that read
+  as a clean image**: `osvDistroEcosystem` required `name-version` in the qualifier
+  (`distro=alpine-3.20.2`), but Trivy's apk dialect puts the name in the PURL namespace
+  (`pkg:apk/alpine/…`) and only the bare version in the qualifier (`distro=3.20.2`) — the split
+  found no name, returned "", and every component was silently skipped by the OSV distro query.
+  Worst-direction failure: vulnerable reads as clean, with nothing logged. **Fix:** one shared
+  `distroNameVersion` resolves both dialects (bare numeric qualifier → name from the PURL
+  namespace) and feeds both `osvDistroEcosystem` and `healthDistro`, so the per-distro health
+  rows (GUI-4) heal too. Found by the GUI-2b live round — the "first real SBOM of a kind finds
+  the dialect gap" class, same family as KN-FIX-3.
+- [ ] **FEED-CERT-1 — CERT advisory-membership signal (CERT-In / CERT/CC) + the filtered list
+  (filed 2026-08-28, user ask; design-first).** LOW-MED — MED **if** the driver is CERT-In
+  compliance (Indian-regulated estates track CIVN/CIAD advisories under the 2022 CERT-In
+  directions). NOT a new vulnerability list: a CERT note is an authority flagging an existing
+  CVE — the KEV shape — so the design is an **advisory-membership signal on carded CVEs**
+  (D5-bounded, never a mirror), generic once for any national CERT. Three parts: (1) domain —
+  `ExploitSignal` (or sibling) gains additive advisory memberships `(source → advisory id)`;
+  a domain change, Must-ask, EDR-KNOWLEDGE-01 delta; memberships join KEV/EPSS as
+  disposition-watcher premise drift and as deterministic AI-grounding facts. (2) sources —
+  CERT/CC is per-CVE JSON (`kb.cert.org/vuls/api/`, perfect D5 fit, cheap, LOW value);
+  CERT-In has NO structured feed (HTML/PDF, maybe RSS) — **step zero is a verification probe**
+  of what is machine-readable; if scraping is the only path, the honest scope may be an
+  operator-curated list upload (the scanner-report pattern), not a poller. (3) the read half —
+  a findings/posture filter ("flagged by cert-in") + later a Communication compliance-report
+  serializer, which wants R3's delivery channel anyway. Sequence: after the GUI/scanner track,
+  beside R3.
+- [ ] **GUI-16 — "What's new" page: newest CVEs and their details (filed 2026-08-28, user ask;
+  design settled at filing, D5-bounded).** LOW-MED, capability. NOT a world-feed mirror — a page
+  listing every CVE published this week would persist uncarded-CVE data, exactly what
+  EDR-KNOWLEDGE-01 D5 forbids, and would be a worse copy of NVD/cve.org. Two doctrine-clean
+  layers instead: **(1) the page** — newest **carded** Faultlines sorted by card-creation time
+  (CVE · stored summary · severity band · exploit signals · published fix · which releases it
+  touches), pure read over persisted estate-relevant data; the staying-current sweep, gather,
+  and the autonomous analyst are what keep it fresh. Needs a small Knowledge read addition
+  (list-faultlines-by-recency) + one GUI view. **(2) optional panel** — an ephemeral
+  latest-published list fetched on view through the proxy (displayed, never persisted —
+  "Gathering Is Not Knowing"), each row with a **Gather** button onto the existing
+  `POST /faultlines/gather`, so entering the estate stays an explicit operator act. Related:
+  [[FEED-CERT-1]] (a CERT-flagged filter would be a natural facet on this page). **Scope:**
+  SMALL-MED (layer 1) + SMALL (layer 2).
+- [ ] **REP-1 — Enterprise reports section (filed 2026-08-28, user ask; the R3 arc grown to its
+  real size — grill as ONE design before any code).** MED-HIGH aggregate value; the named report
+  set: PSM · SLA · **SVM-status (SVM = Software Vulnerability Manager, confirmed 2026-08-28 —
+  possibly mirroring an incumbent tool's report; get a SAMPLE of the current report for the
+  grill, reports are contracts with their readers)** · Fixed-Vulnerability · Fault · CVE-Status ·
+  Customer-scan · Configuration/EOL. PSM expansion still unconfirmed.
+- [ ] **REP-2 — assessment-workflow metrics page: the enterprise state vocabulary as a
+  projection (filed 2026-08-28, user ask; design-first, grill WITH R2).** MED. The user's
+  state set: Initial severity · Not Assessed · In Progress · In Analysis · Completely
+  Assessed · Mitigate-with · Waiting-on-solution · No Release / Release / Mitigate-in-Future-
+  Release · Accepted · No Solution · False Positive · Transferred. Mapping at filing: ~8 states
+  are PROJECTIONS over existing data (no-position=Not-Assessed · under_investigation=In-
+  Analysis · has-position=Assessed · accepted_risk=Accepted · not_affected+justification=False-
+  Positive · affected+no-published-fix=Waiting-on-solution, flips automatically when a feed
+  delivers a bound · proposals-trail=initial-vs-current severity). Three are GAPS needing
+  structured Position fields: **mitigation link** (what mitigates), **target release** (fixed-in
+  planning), **transfer/ownership** — the SAME structured-fields surface R2 has been waiting
+  for; grill the two as one design. Architectural line: the enterprise vocabulary is a
+  **configurable mapping** (stance+justification+card-facts → org state names), never a
+  replacement state machine — VEX stays clean on the wire while the GUI page and the REP-1
+  SLA/SVM reports consume the same bucket rollup. Likely from the incumbent process — a sample
+  of the current metric page/report is grill input, same as REP-1.
+- [ ] **LIC-1 — license visibility → policy flags → escalation manager (filed 2026-08-28, user
+  ask; phased, design-first).** License risk is ADJACENT to security risk — same pipeline shape
+  (evidence → policy → finding → human decision → report), different domain (no CVEs, no OSV,
+  legal authorities, per-product policy matrices) — so full workflow would be a NEW bounded
+  context, not a Knowledge bolt-on. The data already flows: CycloneDX/SPDX declared licenses sit
+  byte-for-byte in every stored SBOM; the inventory parser currently discards them. Phases:
+  **(0) visibility, SMALL-MED** — parse declared licenses into the inventory (additive field;
+  API change, Must-ask) + show on component views; **(1) deterministic policy flags, MED** — a
+  configured allow/deny/review license policy evaluated over the inventory, violations on the
+  posture + a REP-1-family report (this alone answers "which has license issues"); **(2) the
+  escalation manager, LARGE, own EDR** — routed escalations, legal-review positions; THE grill
+  question is Governance-machinery-reuse vs own context. Constitutional line unchanged: a
+  classifier's license verdict is Information — humans/policy decide. AI (optional, later):
+  obligation summarization as a clearly-labeled Information capability. Related: [[REP-1]]
+  (Configuration/EOL is the sibling "component compliance" report). **Home is Communication, not the GUI**: each report is a Publication
+  (deterministic materialization, immutable content, supersede-not-edit, human-triggered) with
+  its own serializer; the GUI "Reports" section is a thin trigger+list over the existing
+  CreatePublication flow. Cost map at filing: **SMALL serializers over existing reads** —
+  CVE-Status (posture), Fixed-Vulnerability (the D16 compare's `fixed` bucket — live-proven
+  2026-08-28), Fault (the card), PSM (DASH-1 product rollup); **MED reads to add** — SVM-status
+  (estate-wide aggregates), Customer-scan (C1 estate-graph join); **design-first sub-items** —
+  **REP-1a SLA policy model** (fix-within-N-days per severity: the policy config does not exist;
+  timestamps do) and **REP-1b component EOL data** (Themis holds none; endoflife.date is a clean
+  JSON API and D5 fits — fetch EOL only for products/distros in the estate; feeds the
+  Configuration/EOL report AND could flag EOL components on the posture). Pairs with **R3
+  delivery** (SMTP/webhook) — a report nobody receives is a log line; build as one arc. AI:
+  optional clearly-labeled executive-summary overlay (Information-class), never the figures. ✅ **CLOSED 2026-08-13** (EDR-GUI-01 grilled D1–D13; all four phases shipped + live-verified in PR #96; spike branch deleted; OpenSpec `phase3-gui-dashboard` archived). **P2 — roadmap.** The spike branch never merges; when
   the VM evaluation settles the style and feature set, the keeper is rebuilt properly (EDR +
   OpenSpec change): auth on its own inbound edge, the authority-line buttons (accept/reject/
   publish) designed rather than spiked, tests, coverage registration. Until then the spike doc is
@@ -317,17 +511,23 @@ under the 2026-08-07 re-derivation standard.
   never sees them. Honest today (the chip's wording covers it), silently pessimistic tomorrow:
   any tool that emits GHSA/DSA/RHSA ids inflates the "No Finding" tile. Fix shape: expose the
   card's alias set on the posture row (or a Knowledge alias-resolve read) and join through it.
-- [ ] **GUI-12 — raw-scanner re-upload dedup is defeated by the translation timestamp
-  (filed 2026-08-17 from code, MEASURED live the same day).** LOW→MED: no longer speculative.
-  Evidence's byte-identical dedup was verified live against a curated re-upload — but
-  `translateTrivy` stamps every finding's `observed_at` at translation time, so the SAME raw
-  Trivy file uploaded twice yields two different curated documents and two scan rows.
-  **Reproduced in the Round-2 live test 2026-08-17:** an already-uploaded report re-uploaded
-  as raw JSON was accepted again and added a second row to the Scans list. Arguably two
-  observations at two times; practically a double-click (or a re-run CI job) files duplicate
-  scans that inflate the Scans card and double every claim in the per-scan join. Fix options:
-  derive `observed_at` from the report's own `CreatedAt` (deterministic bytes → dedup works),
-  or omit it client-side and let the server stamp ingestion time.
+- [x] **GUI-12 — raw-scanner re-upload dedup is defeated by the translation timestamp
+  (filed 2026-08-17 from code, MEASURED live the same day).** ✅ **CLOSED 2026-08-28**
+  (`fix/gui12-rescan-dedup`, per EDR-ENHANCE-T1 decision 1): `translateTrivy` now derives
+  `observed_at` from the raw report's own `CreatedAt` (the time the tool actually observed;
+  Trivy's 7-digit fractional seconds trimmed to milliseconds for `Date.parse`, offsets
+  normalized to UTC, node-verified deterministic) — byte-identical raw re-uploads translate to
+  byte-identical curated documents and Evidence's content addressing dedups them. The EDR's
+  "omit and let the server stamp" fallback was verified NOT to exist on the wire (the scanner
+  ACL's `parseObserved` rejects a blank `observed_at` — omitting would silently void every
+  finding), so a report with no usable `CreatedAt` keeps the fresh stamp AND the file note says
+  "stamped fresh, so a re-upload will NOT dedup" — silently losing dedup and visibly losing it
+  must not look alike. Browser-side only; born untested by design — GUI-10's harness covers it
+  when it lands. Live verification: re-upload the same raw Trivy file twice → one scan row +
+  the 409/dedup toast.
+  _Original filing:_ the SAME raw Trivy file uploaded twice yielded two curated documents and
+  two scan rows (Round-2 live test 2026-08-17) — a double-click or re-run CI job inflated the
+  Scans card and doubled every claim in the per-scan join.
 - [x] **EV-DEDUP-1 — the same bytes filed against a DIFFERENT release were silently swallowed:
   `created=false` read as success while the new release received no evidence.** ✅ **CLOSED
   2026-08-19 (measured live: a fix-verification candidate stayed empty and only the compare's
@@ -401,6 +601,77 @@ under the 2026-08-07 re-derivation standard.
   is the durable half: canonicalize at the seam where the component is parsed
   (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
   future recipe/client to remember.
+- [ ] **KN-VERDICT-1 — a vendor-backported fix cannot clear a live finding: the rpm fixed-verdict
+  never reaches it across any of its three links (filed 2026-09-02, MEASURED live on
+  MRF/cdmrf-oamp/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
+  cluster EDR-VEX-01 / EDR-CORRELATION-01; link (a) is design-first. The estate flags setuptools
+  vulnerable while Red Hat backported the fix into RHEL 8.10 (RHSA-2025:11044,
+  `python-setuptools-0:39.2.0-9.el8_10`; Rocky's RLSA-2025:11044 is the 1:1 clone the `rocky`
+  feed rightly skips — those bounds arrive via `redhat`). Every feed reads healthy because every
+  feed IS healthy: the Hydra doc lists RHEL 8 as Affected-with-errata, NOT `not affected`, so the
+  Phase-2 suppression overlay correctly never fires — the ONLY path that can clear this finding
+  is the Phase-3 rpm fixed-verdict (`app/correlate.go` + `value.RPMFixedByStream`). Three links,
+  each verified in code, keep that verdict away from it:
+  **(a) No cross-ecosystem bridge — the big one, design-first.** The estate carries setuptools as
+  a PYTHON package (`setuptools@39.2.0`, pypi/python-pkg — the very component KN-SCAN-2's
+  2026-08-14 live verification recorded on this same CVE), while the vendor fix folds as Package
+  `python-setuptools`, Ecosystem `rpm`. `FixesFor("setuptools", "pypi")` matches nothing and
+  `RPMFixedByStream` refuses non-rpm ecosystems by construction — each fail-safe correct alone,
+  jointly a PERMANENT false positive for every distro-owned site-packages component, patched or
+  not. The relationship "this RPM provides that language package" does not exist in the model;
+  bridging it (SBOM provenance/ownership relationship vs. a curated rpm↔upstream name map) is an
+  EDR decision before code.
+  **(b) Scanner-path matches take NO verdict at all.** `ScannerReportService.ApplyIngest` records
+  as-is on the premise "the scanner already version-matched" — exactly false for backports, which
+  scanners cannot see. The discovery-path gates (reconciled range + rpm/apk fixed-verdicts)
+  should also run on scanner matches whose component is verdict-capable.
+  **(c) Matches are append-only and the verdict fires only at correlation-apply time.** Vendor
+  bounds fold on a later 12h sweep; nothing revisits an existing match when new bounds prove it
+  fixed (the re-discovery sweep re-runs the gate, but `RecordMatch`'s dedup keeps the old row —
+  the `continue` only avoids re-adding). Fix shape per "overlays, never deletes": folding new fix
+  bounds re-evaluates existing matches and rides the system-proposal channel like the
+  not_affected overlay — never a silent match delete.
+  Recorded honestly: if the deployed image's RPM is OLDER than `-9.el8_10` the finding is REAL
+  and Themis is right — the VM check (match row's component shape + installed NEVRA) decides
+  which link is live for MRF; (b) and (c) are code facts either way.
+  **VM-VERIFIED 2026-09-02 — the feed side is FULLY working; link (a) is the live defect.** The
+  card holds the exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)` (plus el9/el10 and the
+  python39-module rebuild set); the `redhat` vuln-facts proposal folded; feed health green,
+  0 consecutive failures. The open matches are `setuptools@39.2.0 (pypi, source empty)` on both
+  releases plus scanner `setuptools@70.3.0` (once `python-pkg`, once `pypi` — KN-SCAN-3 again)
+  and module-scope `python3-ply`/`python3-pyyaml`. Notably there is NO rpm-shaped setuptools
+  match — either the SBOM never carried the RPM, or the rpm road worked and was verdict-cleared
+  at correlation, leaving only the pypi shadow of the same installed files flagged (`rpm -q
+  python3-setuptools` on the image discriminates). Design consequence, measured not assumed: a
+  name map (`setuptools`↔`python-setuptools`) alone CANNOT fix (a) — the pypi component's
+  version is bare `39.2.0`, no release segment, so an rpm compare against `0:39.2.0-9.el8_10`
+  is undecidable-at-best from that row; the verdict must find the OWNING RPM component (full
+  EVR) in the same inventory, i.e. the bridge is a provenance relationship, not vocabulary.
+  **FALSE POSITIVE CONFIRMED on the image (2026-09-02):** `rpm -q` shows
+  `platform-python-setuptools-39.2.0-9.el8_10.noarch` installed and its changelog names the
+  CVE-2025-47273 fix — the flagged `setuptools@39.2.0 (pypi)` rows are the .egg-info shadow of
+  a PATCHED rpm. Two further measured details for the grill: (1) the owning BINARY rpm is
+  `platform-python-setuptools` (not `python3-setuptools`) while the card's bound is attributed
+  to the SOURCE package `python-setuptools` — the bridge therefore needs file→binary-rpm→srpm,
+  two hops, exactly what `componentPackage`'s source-wins rule already does for rpm-shaped
+  components; (2) the scanner's separate `setuptools@70.3.0` (carrier, scanner/trivy) is a
+  pip-installed copy BELOW the 78.1.1 upstream fix that no distro backport covers — it likely
+  stays open legitimately after the bridge lands, so fixing (a) must not be validated against
+  "the whole Finding disappears".
+  **GRILLED + DESIGNED 2026-09-02 (same session, eight decisions, no code yet):**
+  **`docs/engineering/decisions/EDR-VERDICT-01.md`** (D1–D9) is the decision record;
+  **`openspec/changes/phase3-occurrence-verdicts`** (proposal/design/tasks) is the change. Net shape:
+  Finding stays one-per-(release,CVE), verdict state moves to the OCCURRENCE (component row) —
+  every examined occurrence is RECORDED with a state ("checked and fine" becomes visible; the
+  scanner-path gap closes by unifying intake, not by a parallel gate); the ownership bridge runs at
+  two labeled evidence grades (Observed = SBOM ownership edge · Inferred = same-inventory
+  source-pkg + exact-version match, switchable off); an Inferred clearance leaves the queue by
+  default, clearly labeled; Knowledge computes/stores, Governance mirrors; re-verdict = immediate
+  on real card news + a stamped catch-up sweep (the phase that heals THIS finding); priority =
+  full urgency from open carriers only; remediation + plan grouping per (package, world); drawer
+  shows per-occurrence state/grade/reason. Four phases in tasks.md; binding validation criterion:
+  39.2.0 cleared-with-reason, 70.3.0 still open, Finding still queued. Case-file report:
+  artifact b57b9622-c500-4a8e-9e10-6503bdb91210. Implementation NOT started.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

@@ -72,12 +72,17 @@ type config struct {
 
 	redhatEnabled      bool          // THEMIS_REDHAT_ENABLED=1 — enable the scheduled Red Hat vendor feed (per-CVE vendor severity + not_affected applicability on already-carded CVEs; covers RHEL/Rocky/Alma; default off).
 	redhatURL          string        // THEMIS_REDHAT_URL — Red Hat Security Data API base URL (empty → the public Hydra default; no API key needed).
+	redhatChangesURL   string        // THEMIS_REDHAT_CHANGES_URL — per-CVE VEX changes.csv the D10 modified-since gate reads (empty → Red Hat's public VEX change log). The gate fails open to a full sweep, so it has no enable switch of its own.
 	redhatPollInterval time.Duration // THEMIS_REDHAT_POLL_INTERVAL — Go duration between Red Hat sweeps (default 12h; falls back to 12h if unparseable).
 
 	alpineEnabled      bool          // THEMIS_ALPINE_ENABLED=1 — enable the scheduled Alpine secdb feed (branch-DB fetch, fixed apk version bounds folded onto already-carded CVEs; EDR-VEX-01 D7; default off).
 	alpineURL          string        // THEMIS_ALPINE_URL — Alpine secdb base URL (empty → the public secdb.alpinelinux.org default).
 	alpineBranches     []string      // THEMIS_ALPINE_BRANCHES — comma-separated secdb branches to sweep (e.g. v3.20,v3.21). A branch absent upstream 404s harmlessly, so the default over-covers; set it to the branches your estate actually ships.
 	alpinePollInterval time.Duration // THEMIS_ALPINE_POLL_INTERVAL — Go duration between Alpine sweeps (default 12h; falls back to 12h if unparseable).
+
+	rockyEnabled      bool          // THEMIS_ROCKY_ENABLED=1 — enable the scheduled Rocky RXSA errata feed (SIG/Rocky-exclusive fixed NEVRAs folded onto already-carded CVEs; EDR-VEX-01 D11; the RLSA clone coverage stays with the Red Hat feed; default off).
+	rockyURL          string        // THEMIS_ROCKY_URL — Rocky errata (Apollo) base URL (empty → the public errata.rockylinux.org default; no API key needed).
+	rockyPollInterval time.Duration // THEMIS_ROCKY_POLL_INTERVAL — Go duration between RXSA sweeps (default 12h; falls back to 12h if unparseable).
 
 	vexfeedEnabled      bool          // THEMIS_VEXFEED_ENABLED=1 — enable the generic CSAF-VEX vendor feed (per-CVE not_affected applicability on already-carded CVEs; default off).
 	vexfeedURLs         []string      // THEMIS_VEXFEED_URLS — comma-separated CSAF-VEX directory base URLs (per-CVE files at /<year>/cve-<id>.json).
@@ -126,12 +131,17 @@ func loadConfig() config {
 
 		redhatEnabled:      os.Getenv("THEMIS_REDHAT_ENABLED") == "1",
 		redhatURL:          os.Getenv("THEMIS_REDHAT_URL"),
+		redhatChangesURL:   os.Getenv("THEMIS_REDHAT_CHANGES_URL"),
 		redhatPollInterval: parseDurationDefault(os.Getenv("THEMIS_REDHAT_POLL_INTERVAL"), 12*time.Hour),
 
 		alpineEnabled:      os.Getenv("THEMIS_ALPINE_ENABLED") == "1",
 		alpineURL:          os.Getenv("THEMIS_ALPINE_URL"),
 		alpineBranches:     splitCSV(envDefault("THEMIS_ALPINE_BRANCHES", "v3.18,v3.19,v3.20,v3.21,v3.22")),
 		alpinePollInterval: parseDurationDefault(os.Getenv("THEMIS_ALPINE_POLL_INTERVAL"), 12*time.Hour),
+
+		rockyEnabled:      os.Getenv("THEMIS_ROCKY_ENABLED") == "1",
+		rockyURL:          os.Getenv("THEMIS_ROCKY_URL"),
+		rockyPollInterval: parseDurationDefault(os.Getenv("THEMIS_ROCKY_POLL_INTERVAL"), 12*time.Hour),
 
 		vexfeedEnabled:      os.Getenv("THEMIS_VEXFEED_ENABLED") == "1",
 		vexfeedURLs:         splitCSV(os.Getenv("THEMIS_VEXFEED_URLS")),
@@ -200,15 +210,26 @@ func main() {
 		ExploitDBURL: cfg.exploitDBURL,
 		HTTP:         &http.Client{Timeout: 120 * time.Second},
 	}, wiring.RedHatConfig{
-		Enabled: cfg.redhatEnabled,
-		BaseURL: cfg.redhatURL,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		Enabled:    cfg.redhatEnabled,
+		BaseURL:    cfg.redhatURL,
+		ChangesURL: cfg.redhatChangesURL,
+		// 60s, not 30s: beside the small per-CVE docs, the D10 gate fetches the whole VEX
+		// changes.csv (~3.6 MB measured 2026-08-27) once per sweep.
+		HTTP: &http.Client{Timeout: 60 * time.Second},
 	}, wiring.AlpineConfig{
 		Enabled:  cfg.alpineEnabled,
 		BaseURL:  cfg.alpineURL,
 		Branches: cfg.alpineBranches,
 		// 60s, not 30s: a sweep fetches whole branch DBs (a few MB each), not one small per-CVE doc.
 		HTTP: &http.Client{Timeout: 60 * time.Second},
+	}, wiring.RockyConfig{
+		Enabled: cfg.rockyEnabled,
+		BaseURL: cfg.rockyURL,
+		// 120s, not 30s: the RXSA page is small (335 KB measured 2026-08-27) but the errata
+		// service can be slow to first byte, and the first live sweep hit the 30s ceiling
+		// mid-handshake from a slower egress — the NVD lesson again: server/network time,
+		// not payload size, so the fix is patience, not a smaller page.
+		HTTP: &http.Client{Timeout: 120 * time.Second},
 	}, wiring.VexfeedConfig{
 		Enabled:  cfg.vexfeedEnabled,
 		BaseURLs: cfg.vexfeedURLs,
@@ -266,6 +287,14 @@ func main() {
 		go alpineLoop(kn.Alpine, kn.Health, cfg.alpinePollInterval, logger.Component("alpine"))
 		logger.Info("alpine secdb feed enabled",
 			observability.Int("branches", len(cfg.alpineBranches)), observability.String("interval", cfg.alpinePollInterval.String()))
+	}
+
+	// Scheduled Rocky RXSA errata feed (D5, EDR-VEX-01 D11): folds SIG/Rocky-exclusive fixed
+	// NEVRAs onto already-carded CVEs — the one Rocky gap the clone-covering Red Hat feed cannot
+	// reach (GUI-5). Off unless THEMIS_ROCKY_ENABLED=1.
+	if kn.Rocky != nil {
+		go rockyLoop(kn.Rocky, kn.Health, cfg.rockyPollInterval, logger.Component("rocky"))
+		logger.Info("rocky rxsa errata feed enabled", observability.String("interval", cfg.rockyPollInterval.String()))
 	}
 
 	// Scheduled generic CSAF-VEX vendor feed (D5, parity B4): folds not_affected applicability from
@@ -508,6 +537,32 @@ func alpineLoop(al *app.AlpineEnrichmentService, health *app.FeedHealthService, 
 		}
 	}
 	time.Sleep(25 * time.Second) // let the service settle; branch DBs are fetched whole
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
+// rockyLoop runs the scheduled Rocky RXSA errata feed: one sweep shortly after startup, then
+// every interval. It walks the (tiny) RXSA advisory set and folds source-package fixed NEVRAs
+// onto already-carded CVEs (the D5 filter is inside the client — uncarded records are discarded
+// in memory); a failure is logged and retried next tick (the sweep is idempotent).
+func rockyLoop(rk *app.RockyEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := rk.Enrich(context.Background())
+		if err != nil {
+			logger.Error("rocky enrichment failed", observability.Err(err))
+			recordFeed(health, "rocky", err, logger)
+			return
+		}
+		recordFeed(health, "rocky", nil, logger)
+		if n > 0 {
+			logger.Info("rocky enrichment folded", observability.Int("folded", n))
+		}
+	}
+	time.Sleep(25 * time.Second) // let the service settle; the advisory set is walked whole
 	sweep()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
