@@ -601,6 +601,77 @@ under the 2026-08-07 re-derivation standard.
   is the durable half: canonicalize at the seam where the component is parsed
   (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
   future recipe/client to remember.
+- [ ] **KN-VERDICT-1 — a vendor-backported fix cannot clear a live finding: the rpm fixed-verdict
+  never reaches it across any of its three links (filed 2026-09-02, MEASURED live on
+  MRF/cdmrf-oamp/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
+  cluster EDR-VEX-01 / EDR-CORRELATION-01; link (a) is design-first. The estate flags setuptools
+  vulnerable while Red Hat backported the fix into RHEL 8.10 (RHSA-2025:11044,
+  `python-setuptools-0:39.2.0-9.el8_10`; Rocky's RLSA-2025:11044 is the 1:1 clone the `rocky`
+  feed rightly skips — those bounds arrive via `redhat`). Every feed reads healthy because every
+  feed IS healthy: the Hydra doc lists RHEL 8 as Affected-with-errata, NOT `not affected`, so the
+  Phase-2 suppression overlay correctly never fires — the ONLY path that can clear this finding
+  is the Phase-3 rpm fixed-verdict (`app/correlate.go` + `value.RPMFixedByStream`). Three links,
+  each verified in code, keep that verdict away from it:
+  **(a) No cross-ecosystem bridge — the big one, design-first.** The estate carries setuptools as
+  a PYTHON package (`setuptools@39.2.0`, pypi/python-pkg — the very component KN-SCAN-2's
+  2026-08-14 live verification recorded on this same CVE), while the vendor fix folds as Package
+  `python-setuptools`, Ecosystem `rpm`. `FixesFor("setuptools", "pypi")` matches nothing and
+  `RPMFixedByStream` refuses non-rpm ecosystems by construction — each fail-safe correct alone,
+  jointly a PERMANENT false positive for every distro-owned site-packages component, patched or
+  not. The relationship "this RPM provides that language package" does not exist in the model;
+  bridging it (SBOM provenance/ownership relationship vs. a curated rpm↔upstream name map) is an
+  EDR decision before code.
+  **(b) Scanner-path matches take NO verdict at all.** `ScannerReportService.ApplyIngest` records
+  as-is on the premise "the scanner already version-matched" — exactly false for backports, which
+  scanners cannot see. The discovery-path gates (reconciled range + rpm/apk fixed-verdicts)
+  should also run on scanner matches whose component is verdict-capable.
+  **(c) Matches are append-only and the verdict fires only at correlation-apply time.** Vendor
+  bounds fold on a later 12h sweep; nothing revisits an existing match when new bounds prove it
+  fixed (the re-discovery sweep re-runs the gate, but `RecordMatch`'s dedup keeps the old row —
+  the `continue` only avoids re-adding). Fix shape per "overlays, never deletes": folding new fix
+  bounds re-evaluates existing matches and rides the system-proposal channel like the
+  not_affected overlay — never a silent match delete.
+  Recorded honestly: if the deployed image's RPM is OLDER than `-9.el8_10` the finding is REAL
+  and Themis is right — the VM check (match row's component shape + installed NEVRA) decides
+  which link is live for MRF; (b) and (c) are code facts either way.
+  **VM-VERIFIED 2026-09-02 — the feed side is FULLY working; link (a) is the live defect.** The
+  card holds the exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)` (plus el9/el10 and the
+  python39-module rebuild set); the `redhat` vuln-facts proposal folded; feed health green,
+  0 consecutive failures. The open matches are `setuptools@39.2.0 (pypi, source empty)` on both
+  releases plus scanner `setuptools@70.3.0` (once `python-pkg`, once `pypi` — KN-SCAN-3 again)
+  and module-scope `python3-ply`/`python3-pyyaml`. Notably there is NO rpm-shaped setuptools
+  match — either the SBOM never carried the RPM, or the rpm road worked and was verdict-cleared
+  at correlation, leaving only the pypi shadow of the same installed files flagged (`rpm -q
+  python3-setuptools` on the image discriminates). Design consequence, measured not assumed: a
+  name map (`setuptools`↔`python-setuptools`) alone CANNOT fix (a) — the pypi component's
+  version is bare `39.2.0`, no release segment, so an rpm compare against `0:39.2.0-9.el8_10`
+  is undecidable-at-best from that row; the verdict must find the OWNING RPM component (full
+  EVR) in the same inventory, i.e. the bridge is a provenance relationship, not vocabulary.
+  **FALSE POSITIVE CONFIRMED on the image (2026-09-02):** `rpm -q` shows
+  `platform-python-setuptools-39.2.0-9.el8_10.noarch` installed and its changelog names the
+  CVE-2025-47273 fix — the flagged `setuptools@39.2.0 (pypi)` rows are the .egg-info shadow of
+  a PATCHED rpm. Two further measured details for the grill: (1) the owning BINARY rpm is
+  `platform-python-setuptools` (not `python3-setuptools`) while the card's bound is attributed
+  to the SOURCE package `python-setuptools` — the bridge therefore needs file→binary-rpm→srpm,
+  two hops, exactly what `componentPackage`'s source-wins rule already does for rpm-shaped
+  components; (2) the scanner's separate `setuptools@70.3.0` (carrier, scanner/trivy) is a
+  pip-installed copy BELOW the 78.1.1 upstream fix that no distro backport covers — it likely
+  stays open legitimately after the bridge lands, so fixing (a) must not be validated against
+  "the whole Finding disappears".
+  **GRILLED + DESIGNED 2026-09-02 (same session, eight decisions, no code yet):**
+  **`docs/engineering/decisions/EDR-VERDICT-01.md`** (D1–D9) is the decision record;
+  **`openspec/changes/phase3-occurrence-verdicts`** (proposal/design/tasks) is the change. Net shape:
+  Finding stays one-per-(release,CVE), verdict state moves to the OCCURRENCE (component row) —
+  every examined occurrence is RECORDED with a state ("checked and fine" becomes visible; the
+  scanner-path gap closes by unifying intake, not by a parallel gate); the ownership bridge runs at
+  two labeled evidence grades (Observed = SBOM ownership edge · Inferred = same-inventory
+  source-pkg + exact-version match, switchable off); an Inferred clearance leaves the queue by
+  default, clearly labeled; Knowledge computes/stores, Governance mirrors; re-verdict = immediate
+  on real card news + a stamped catch-up sweep (the phase that heals THIS finding); priority =
+  full urgency from open carriers only; remediation + plan grouping per (package, world); drawer
+  shows per-occurrence state/grade/reason. Four phases in tasks.md; binding validation criterion:
+  39.2.0 cleared-with-reason, 70.3.0 still open, Finding still queued. Case-file report:
+  artifact b57b9622-c500-4a8e-9e10-6503bdb91210. Implementation NOT started.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

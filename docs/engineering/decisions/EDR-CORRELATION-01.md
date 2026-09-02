@@ -1,5 +1,7 @@
 # EDR-CORRELATION-01 — Advisory scope is not a vulnerability claim (CORR-1)
 
+> **Extended by [EDR-VERDICT-01](EDR-VERDICT-01.md) (2026-09-02):** claim classes are unchanged; queue state now derives from CARRIER occurrences' verdict state (per-occurrence, recorded for every examined component).
+
 Status: **Accepted — design decided 2026-08-08** (grounded on measured VM data, not intuition)
 Date: 2026-08-08
 Author: clean-slate VM verification session (CORR-1 cluster)

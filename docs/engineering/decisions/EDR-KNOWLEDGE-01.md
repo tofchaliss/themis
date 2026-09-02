@@ -1,5 +1,7 @@
 # EDR-KNOWLEDGE-01 — Knowledge / Faultline Bounded Context
 
+> **Extended by [EDR-VERDICT-01](EDR-VERDICT-01.md) (2026-09-02):** match records become stateful occurrences (verdict state + evidence grade + re-verdict stamp); Knowledge owns the occurrence verdict and the RPM->language-package ownership bridge.
+
 Status: **Grilled — ready for issue breakdown** (12 decisions locked, 2026-07-14). Ground rule: ADR
 wins; the `internal/` PoC is reference only.
 

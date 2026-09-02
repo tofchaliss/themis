@@ -1,5 +1,7 @@
 # EDR-VEX-01 — Vendor VEX applicability: ingest, carry, and govern suppression (parity B3/B4 + VEX-ingest)
 
+> **Extended by [EDR-VERDICT-01](EDR-VERDICT-01.md) (2026-09-02):** the Phase-3 rpm fixed-verdict now lands on OCCURRENCE state (recorded, re-verdictable, bridged to language-package components) instead of silently dropping a match at correlation time. The comparator and stream scoping here are unchanged.
+
 Status: **Accepted — design confirmed 2026-07-31** (grounded against the existing EDRs, which decide most of it)
 Date: 2026-07-31
 Author: parity-closure session (vendor-VEX cluster)

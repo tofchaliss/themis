@@ -1,5 +1,7 @@
 # EDR-GOVERNANCE-01 — Governance / Findings & Enterprise Position Bounded Context
 
+> **Extended by [EDR-VERDICT-01](EDR-VERDICT-01.md) (2026-09-02):** the (Release, Faultline) Finding key (D1) is UPHELD; finding_components gain mirrored per-occurrence verdict state, and queue membership/priority derive from open carrier occurrences only.
+
 Status: **Grilled — ready for issue breakdown** (13 decisions locked, 2026-07-15). Ground rule: ADR wins;
 the `internal/` PoC is reference only.
 
