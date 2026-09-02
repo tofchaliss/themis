@@ -17,7 +17,10 @@ func TestAssessmentClientHappy(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{
 			"finding":{"id":"F1","release_id":"R1","faultline_id":"FL1","cve":"CVE-2024-0001","stage":"identified",
-			           "components":[{"purl":"pkg:golang/x@1.0.0"},{"purl":"pkg:npm/y@2.0.0"}]},
+			           "components":[{"purl":"pkg:golang/x@1.0.0","claim_class":"carrier",
+			                          "verdict_state":"cleared_vendor_fix","verdict_grade":"inferred",
+			                          "verdict_reason":"matched to the patched rpm"},
+			                         {"purl":"pkg:npm/y@2.0.0"}]},
 			"knowledge":{"faultline_id":"FL1","cve":"CVE-2024-0001","severity":"high","cvss_score":7.5,
 			             "epss":0.42,"kev":true,"exploit_public":true,
 			             "affected_ranges":["< 2.0"],"fixed_versions":["2.0"]}
@@ -31,6 +34,16 @@ func TestAssessmentClientHappy(t *testing.T) {
 	}
 	if got.Finding.ID != "F1" || got.Finding.FaultlineID != "FL1" || len(got.Finding.Components) != 2 {
 		t.Errorf("finding half = %+v", got.Finding)
+	}
+	// The occurrence verdict rides through (AI-REC-1): decoding purl+claim_class only was the
+	// defect that grounded a recommendation on a copy the estate had already cleared.
+	if got.Finding.VerdictStates[0] != "cleared_vendor_fix" || got.Finding.VerdictGrades[0] != "inferred" ||
+		got.Finding.VerdictReasons[0] != "matched to the patched rpm" {
+		t.Errorf("verdict fields = %v/%v/%v, want the clearance carried through",
+			got.Finding.VerdictStates, got.Finding.VerdictGrades, got.Finding.VerdictReasons)
+	}
+	if got.Finding.VerdictStates[1] != "" {
+		t.Errorf("absent verdict must decode to \"\" (open), got %q", got.Finding.VerdictStates[1])
 	}
 	if got.Knowledge.Severity != "high" || !got.Knowledge.KEV || len(got.Knowledge.AffectedRanges) != 1 {
 		t.Errorf("knowledge half = %+v", got.Knowledge)

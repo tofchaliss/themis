@@ -17,6 +17,79 @@ type FindingView struct {
 	// (EDR-CORRELATION-01 D3). Carried for AI-204-2's thinness diagnosis — unknown is treated
 	// as carrier everywhere, so only an explicit all-`scope` set reads as thin.
 	ClaimClasses []string
+	// The occurrence verdicts, aligned with Components (EDR-VERDICT-01 D5, AI-REC-1):
+	// `cleared_vendor_fix` means those files provably carry the vendor's fix already; anything
+	// else — including "" from an older projection — reads as open. Measured 2026-09-02: a
+	// recommendation grounded 'affected' at 0.90 on a CLEARED copy because these fields were
+	// decoded and discarded — the model was faithful to grounding the estate had outgrown.
+	VerdictStates  []string
+	VerdictGrades  []string
+	VerdictReasons []string
+}
+
+// verdictAt reads the verdict for component i, tolerating an older projection whose arrays
+// are absent or short — missing reads as open, the fail-safe direction.
+func (f FindingView) verdictAt(i int) (state, grade, reason string) {
+	if i < len(f.VerdictStates) {
+		state = f.VerdictStates[i]
+	}
+	if i < len(f.VerdictGrades) {
+		grade = f.VerdictGrades[i]
+	}
+	if i < len(f.VerdictReasons) {
+		reason = f.VerdictReasons[i]
+	}
+	return state, grade, reason
+}
+
+// OpenCarrierCount reports how many occurrences are LIVE evidence: carrier-or-unknown class
+// (EDR-CORRELATION-01) and not cleared by a vendor-fix verdict (EDR-VERDICT-01 D7).
+func (f FindingView) OpenCarrierCount() int {
+	n := 0
+	for i := range f.Components {
+		class := ""
+		if i < len(f.ClaimClasses) {
+			class = f.ClaimClasses[i]
+		}
+		state, _, _ := f.verdictAt(i)
+		if class != "scope" && state != "cleared_vendor_fix" {
+			n++
+		}
+	}
+	return n
+}
+
+// ComponentLines renders each occurrence for a prompt, stating what the estate knows about it
+// so the model can cite the verdict instead of tripping over it (AI-REC-1): a CLEARED copy is
+// labeled with its grade and premise and is explicitly not live evidence; a scope-class row is
+// labeled as a rebuild obligation, not a vulnerability claim; everything else is OPEN.
+func (f FindingView) ComponentLines() []string {
+	out := make([]string, 0, len(f.Components))
+	for i, purl := range f.Components {
+		class := ""
+		if i < len(f.ClaimClasses) {
+			class = f.ClaimClasses[i]
+		}
+		state, grade, reason := f.verdictAt(i)
+		line := purl
+		switch {
+		case state == "cleared_vendor_fix":
+			label := "CLEARED by vendor fix"
+			if grade != "" {
+				label += " (" + grade + ")"
+			}
+			if reason != "" {
+				label += ": " + reason
+			}
+			line += " — " + label + " — NOT live evidence; this copy needs no action"
+		case class == "scope":
+			line += " — scope-class: in the advisory's rebuild set, no evidence it carries the flaw"
+		default:
+			line += " — OPEN"
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // GroundingThinness names the deterministic reason a Decision capability's grounding cannot
@@ -40,6 +113,13 @@ func GroundingThinness(a FindingAssessment) string {
 		if scope == n {
 			return fmt.Sprintf("grounding: %d component(s), all scope-class (zero carriers) — no evidence any component carries the flaw", n)
 		}
+	}
+	// Every carrier occurrence cleared by a vendor-fix verdict (EDR-VERDICT-01 D7): the
+	// grounding holds nothing LIVE to take a stance on — the queue would read this Finding at
+	// residual 0, and a Decision asked anyway should be diagnosable as thin, not as a model
+	// failure (AI-REC-1).
+	if len(f.Components) > 0 && f.OpenCarrierCount() == 0 {
+		return fmt.Sprintf("grounding: %d component(s), every carrier cleared by a vendor-fix verdict — nothing live to decide about", len(f.Components))
 	}
 	// No version evidence at all: nothing to run a range verdict on and no fix to reason from.
 	if len(a.Knowledge.AffectedRanges) == 0 && len(a.Knowledge.FixedVersions) == 0 && a.Knowledge.UnattributedFixes == 0 {

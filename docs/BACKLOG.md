@@ -687,16 +687,30 @@ under the 2026-08-07 re-derivation standard.
   "finding disappeared" scare was release-posture.sh 401'ing silently without a key — fixed
   same session (shares the cached admin key, names the trap). The measured false positive this
   item was filed on is healed in production.
-- [ ] **AI-REC-1 — COMEBACK MARKER: "the AI recommendation is wrong" (user, 2026-09-02, during
-  the KN-VERDICT-1 V.1 validation).** UNTRIAGED — parked deliberately mid-validation; no
-  measurement captured yet beyond the user's statement. When picked up, first pin WHICH
-  capability (recommend_position on a Finding of this estate is the likely subject) and WHAT
-  was wrong (stance? grounding? the new cleared-occurrence data confusing the prompt?), then
-  triage against the AI-CMP-1b / AI-PROSE-1 known-limit filings before treating it as new.
-  Plausible arc-interaction to check FIRST: the Gateway's grounding/selection now sees
-  occurrence verdicts and per-world fixes — a recommendation that reasoned over a CLEARED
-  copy's fix, or over the cleared copy at all, would be a KN-VERDICT-1 integration gap, not a
-  model fault.
+- [x] **AI-REC-1 — the AI recommendation grounded `affected` on a CLEARED copy (user-reported
+  2026-09-02 during V.1; MEASURED same day from the invocation log + the raised proposal).**
+  ✅ **FIXED 2026-09-02 (code; live re-check pending).** The suspected arc-interaction was
+  exactly it: the invocation `0a1d2544` context showed components as bare purls+claim classes —
+  Governance sends full components WITH verdicts since KN-VERDICT-1 G1, but the Intelligence
+  readapi client decoded only `{purl, claim_class}` and DISCARDED them — and the model
+  faithfully recommended "affected (0.90): includes BOTH setuptools@39.2.0 and 70.3.0, below
+  78.1.1", citing the cleared copy as live evidence. Not a model fault: grounding the estate
+  had outgrown. Fix, one seam end-to-end: readapi decodes verdict state/grade/reason →
+  `FindingView` carries them (parallel arrays, short/absent = open fail-safe) →
+  `ComponentLines()` renders each occurrence labeled (CLEARED-with-grade-and-premise / OPEN /
+  scope-class) in BOTH Finding prompts + an explicit reading rule ("a backport keeps the old
+  version number; ground `affected` on OPEN components only") → `GroundingThinness` gains the
+  all-carriers-cleared class so a Decision on a fully-cleared Finding is diagnosably thin.
+  Prompt hashes change (prompt_versions is designed for it). Verify live: re-run recommend on
+  the MRF finding — the rationale must ground on 70.3.0 alone and may cite the 39.2.0
+  clearance as settled.
+- [ ] **AI-CAP-2 — invocation_log.output_json is EMPTY on reason=ok LLM rows (measured
+  2026-09-02: `0a1d2544` recommend_position, model set, rationale delivered, output NULL/'').**
+  LOW, capture-path defect (Δ4a): the schema allows null "on a non-LLM decision" but this WAS
+  an LLM decision — check whether the 2026-08-31 rows share it (pre-dates today's deploy →
+  pre-existing) and where the Decision path's capture diverges from the Information path's.
+  The eval/golden loop promotes from this column, so an empty output is a case that can never
+  become golden.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
