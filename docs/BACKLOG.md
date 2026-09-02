@@ -681,7 +681,20 @@ under the 2026-08-07 re-derivation standard.
   contributing nothing; `FixedVersion.ecosystem` on the wire; closed KN-SCAN-3 as a dependency).
   **REMAINS: tasks.md V.1 — the live VM validation** (deploy → let the Red Hat sweep nudge the
   re-verdict → 39.2.0 cleared-with-reason · 70.3.0 open with upstream advice · Finding queued
-  at full urgency). NOT live-verified until that runs.
+  at full urgency). NOT live-verified until that runs. V.1 partial state 2026-09-02: DB legs
+  PASSED live (39.2.0 cleared inferred-with-reason on both releases · 70.3.0 open · stale
+  drained 1080 rows to 0 · 17 clearances estate-wide, 11 observed-grade); the queued-at-full-
+  urgency leg was BLOCKED mid-check (release-posture.sh printed nothing — under debug).
+- [ ] **AI-REC-1 — COMEBACK MARKER: "the AI recommendation is wrong" (user, 2026-09-02, during
+  the KN-VERDICT-1 V.1 validation).** UNTRIAGED — parked deliberately mid-validation; no
+  measurement captured yet beyond the user's statement. When picked up, first pin WHICH
+  capability (recommend_position on a Finding of this estate is the likely subject) and WHAT
+  was wrong (stance? grounding? the new cleared-occurrence data confusing the prompt?), then
+  triage against the AI-CMP-1b / AI-PROSE-1 known-limit filings before treating it as new.
+  Plausible arc-interaction to check FIRST: the Gateway's grounding/selection now sees
+  occurrence verdicts and per-world fixes — a recommendation that reasoned over a CLEARED
+  copy's fix, or over the cleared copy at all, would be a KN-VERDICT-1 integration gap, not a
+  model fault.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
