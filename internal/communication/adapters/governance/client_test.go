@@ -126,3 +126,58 @@ func TestGetPosition_NoComponentsYieldsNil(t *testing.T) {
 		t.Errorf("components = %v, want nil", snap.Lineage.Components)
 	}
 }
+
+// The rollup's first read (D13.5): the posture rows decode with the decided half (stance,
+// position version, rationale) and the per-component verdict fields the annotations are
+// built from — and absent additive fields read as their zero values.
+func TestReleasePosture(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases/rel-1/posture" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[
+		  {"finding_id":"f1","faultline_id":"fl1","cve":"CVE-2020-1747","stance":"not_affected",
+		   "has_position":true,"position_version":2,"position_rationale":"not reachable",
+		   "components":[{"purl":"pkg:rpm/x@1","claim_class":"carrier"}]},
+		  {"finding_id":"f2","faultline_id":"fl2","cve":"CVE-2025-47273",
+		   "components":[{"purl":"pkg:pypi/setuptools@39.2.0","claim_class":"carrier",
+		     "verdict_state":"cleared_vendor_fix","verdict_grade":"inferred","verdict_reason":"matched"}]}
+		]`))
+	}))
+	defer srv.Close()
+
+	rows, err := governance.NewClient(srv.URL, srv.Client()).ReleasePosture(context.Background(), "rel-1")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	if !rows[0].HasPosition || rows[0].PositionVersion != 2 || rows[0].PositionRationale != "not reachable" {
+		t.Errorf("decided row = %+v", rows[0])
+	}
+	c := rows[1].Components[0]
+	if c.VerdictState != "cleared_vendor_fix" || c.VerdictGrade != "inferred" || c.VerdictReason != "matched" {
+		t.Errorf("verdict fields = %+v", c)
+	}
+	if rows[1].HasPosition || rows[1].PositionVersion != 0 {
+		t.Errorf("undecided row = %+v", rows[1])
+	}
+}
+
+func TestReleasePosture_Errors(t *testing.T) {
+	notOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer notOK.Close()
+	if _, err := governance.NewClient(notOK.URL, notOK.Client()).ReleasePosture(context.Background(), "rel-1"); err == nil {
+		t.Error("non-200 must error")
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{`))
+	}))
+	defer bad.Close()
+	if _, err := governance.NewClient(bad.URL, bad.Client()).ReleasePosture(context.Background(), "rel-1"); err == nil {
+		t.Error("malformed JSON must error")
+	}
+	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleasePosture(context.Background(), "rel-1"); err == nil {
+		t.Error("transport failure must error")
+	}
+}

@@ -341,7 +341,7 @@ func newPipeline(t *testing.T) *pipeline {
 	// back from Governance over its read API).
 	commPool := mustPool(t, dsnFor("communication"))
 	t.Cleanup(commPool.Close)
-	comm := commwiring.Wire(commPool, governanceSrv.URL,
+	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL,
 		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool))
 	communicationSrv := httptest.NewServer(mount(comm.Handler))
 	t.Cleanup(communicationSrv.Close)

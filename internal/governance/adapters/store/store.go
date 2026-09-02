@@ -405,7 +405,8 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
-		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes
+		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes,
+		       COALESCE(po.rationale, '')
 		FROM findings f
 		-- The reservation (EDR-TRUST-01 T12) is DERIVED, never stored: join the current
 		-- Position to the proposal it accepted and read that proposal's evidence class. A
@@ -429,9 +430,10 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			baseScore                   int
 			evidenceTrust, band         string
 			fixesRaw                    []byte
+			positionRationale           string
 		)
 		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore,
-			&evidenceTrust, &band, &fixesRaw); err != nil {
+			&evidenceTrust, &band, &fixesRaw, &positionRationale); err != nil {
 			return nil, err
 		}
 		var fixes []app.FixedVersion
@@ -452,6 +454,12 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		if curStance != nil {
 			e.Stance = domain.Stance(*curStance)
 			e.HasPosition = true
+			// The decided-input handle a release-scoped consumer records to make its snapshot's
+			// staleness computable (EDR-COMMUNICATION-01 D13.2). Was scanned and dropped here.
+			if curVersion != nil {
+				e.PositionVersion = *curVersion
+			}
+			e.PositionRationale = positionRationale
 			// Derived must not mean invisible (T12): a Position resting on anything weaker
 			// than Observed carries its class here, beside stance and priority.
 			if c := value.MaxTrust(value.TrustClass(evidenceTrust)); c != value.TrustObserved {

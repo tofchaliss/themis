@@ -578,6 +578,17 @@ components:
           type: string
         has_position:
           type: boolean
+        position_version:
+          type: integer
+          description: >-
+            The current Position's version when has_position (absent/0 otherwise) - the handle a
+            release-scoped snapshot records so its staleness is exactly computable
+            (EDR-COMMUNICATION-01 D13.2).
+        position_rationale:
+          type: string
+          description: >-
+            The current Position's own rationale (absent when none) - carried onto a release
+            rollup's statements as status notes (EDR-COMMUNICATION-01 D13).
         components:
           type: array
           description: >-

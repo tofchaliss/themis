@@ -59,7 +59,7 @@ func TestInboxRejectsStaleRedelivery(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()
 
-	comm := wiring.Wire(pool, "http://unused", nil, nil, noopPublisher{})
+	comm := wiring.Wire(pool, "http://unused", "http://unused", nil, nil, noopPublisher{})
 	inbox := store.NewInboxConsumer(pool, comm.Consumer)
 
 	established := positionEnv(t, "evt-v1", "governance.position_established", 1, "affected")

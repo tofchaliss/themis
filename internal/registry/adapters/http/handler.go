@@ -140,6 +140,34 @@ func (h *Handler) GetRelease(w http.ResponseWriter, r *http.Request, id string) 
 	writeJSON(w, http.StatusOK, toRelease(rel))
 }
 
+// GetProject handles GET /projects/{id} — the upward hop of the name chain (D13.4).
+func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request, id string) {
+	p, err := h.svc.GetProject(r.Context(), domain.ProjectID(id))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeProblem(w, http.StatusNotFound, "project not found", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot read project", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toProject(p))
+}
+
+// GetProduct handles GET /products/{id} — the top of the name chain (D13.4).
+func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request, id string) {
+	p, err := h.svc.GetProduct(r.Context(), domain.ProductID(id))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeProblem(w, http.StatusNotFound, "product not found", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot read product", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toProduct(p))
+}
+
 // ListReleases handles GET /releases?project=.
 func (h *Handler) ListReleases(w http.ResponseWriter, r *http.Request, params gen.ListReleasesParams) {
 	rels, err := h.svc.ListReleases(r.Context(), domain.ProjectID(params.Project))
@@ -253,6 +281,16 @@ func writeRegisterError(w http.ResponseWriter, err error) {
 func toRelease(r domain.Release) gen.Release {
 	id, project, version := string(r.ID()), string(r.ProjectID()), r.Version()
 	return gen.Release{Id: &id, ProjectId: &project, Version: &version}
+}
+
+func toProject(p domain.Project) gen.ProjectView {
+	id, prod, name := string(p.ID()), string(p.ProductID()), p.Name()
+	return gen.ProjectView{Id: &id, ProductId: &prod, Name: &name}
+}
+
+func toProduct(p domain.Product) gen.ProductView {
+	id, name := string(p.ID()), p.Name()
+	return gen.ProductView{Id: &id, Name: &name}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

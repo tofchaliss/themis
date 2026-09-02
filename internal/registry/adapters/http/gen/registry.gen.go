@@ -151,6 +151,9 @@ type ServerInterface interface {
 	// Register a product; returns a stable Product ID.
 	// (POST /products)
 	RegisterProduct(w http.ResponseWriter, r *http.Request)
+	// Get a product by ID (the top of the name chain).
+	// (GET /products/{id})
+	GetProduct(w http.ResponseWriter, r *http.Request, id string)
 	// Register a microservice under a product; returns a stable Microservice ID.
 	// (POST /products/{id}/microservices)
 	RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string)
@@ -160,6 +163,9 @@ type ServerInterface interface {
 	// Register a project under a product; returns a stable Project ID.
 	// (POST /projects)
 	RegisterProject(w http.ResponseWriter, r *http.Request)
+	// Get a project by ID (the upward hop of the name chain — release -> project -> product).
+	// (GET /projects/{id})
+	GetProject(w http.ResponseWriter, r *http.Request, id string)
 	// List the releases under a project.
 	// (GET /projects/{id}/releases)
 	ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams)
@@ -205,6 +211,12 @@ func (_ Unimplemented) RegisterProduct(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get a product by ID (the top of the name chain).
+// (GET /products/{id})
+func (_ Unimplemented) GetProduct(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Register a microservice under a product; returns a stable Microservice ID.
 // (POST /products/{id}/microservices)
 func (_ Unimplemented) RegisterMicroservice(w http.ResponseWriter, r *http.Request, id string) {
@@ -220,6 +232,12 @@ func (_ Unimplemented) ListProjectsOfProduct(w http.ResponseWriter, r *http.Requ
 // Register a project under a product; returns a stable Project ID.
 // (POST /projects)
 func (_ Unimplemented) RegisterProject(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a project by ID (the upward hop of the name chain — release -> project -> product).
+// (GET /projects/{id})
+func (_ Unimplemented) GetProject(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -349,6 +367,32 @@ func (siw *ServerInterfaceWrapper) RegisterProduct(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetProduct operation middleware
+func (siw *ServerInterfaceWrapper) GetProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProduct(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RegisterMicroservice operation middleware
 func (siw *ServerInterfaceWrapper) RegisterMicroservice(w http.ResponseWriter, r *http.Request) {
 
@@ -422,6 +466,32 @@ func (siw *ServerInterfaceWrapper) RegisterProject(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProject operation middleware
+func (siw *ServerInterfaceWrapper) GetProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProject(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -698,6 +768,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/products", wrapper.RegisterProduct)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/products/{id}", wrapper.GetProduct)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/products/{id}/microservices", wrapper.RegisterMicroservice)
 	})
 	r.Group(func(r chi.Router) {
@@ -705,6 +778,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/projects", wrapper.RegisterProject)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/projects/{id}", wrapper.GetProject)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/projects/{id}/releases", wrapper.ListReleasesOfProject)
@@ -730,30 +806,31 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7Flfb9s2EP8qB27AWsy1nLZPLvbQNkMWbEODtN0euqClpbPFjiIV/kkrBAb2tA8w7BP2kwykRIl2pDhe",
-	"7Wzd+mRaIo/Hu9/97o66JKksSilQGE2ml0ShLqXQ6P+cKDnjWLhhKoVBYdyQliVnKTVMiuStlsI902mO",
-	"BXWjLxXOyZR8kXRyk/qtToK85XI5IhnqVLHSiSFT8q1SUo2Je9HMdsKecKrNKc2Y9X9LJUtUhmGjKkeq",
-	"8TXL3D9TlUimRBvFxIIsR8QKdm7xdWq1kQUqHU1iwuACld9N4bllCjMyfRVL7Fl/Ngrr5ewtpsZtEllo",
-	"VbkMDWW8VzHDDMeeN8t++ZlNzU8M313dY+DgghZbiHfDXYgfudVO135/9O1+igumDaqnjYlP8dyiNlc1",
-	"GT5R7D0/6+yafQ6x5LIqUJjBnYK3h0CF4oIpKYomFK5XKBa2uvQ6LX9kqZIa1QVLcd8WaeB1C9u4R9tu",
-	"sxlSsRbR3NFmlU7rUB9UqaxVHsLBBSrNaurbqFWQ0626XrGagG8Yj2vbsWxAuD/tjWP8Y04/tPlWJLND",
-	"BdwjJuayZuU459QmVxVoW5ZSGSYW4PPcewN3TnKq8d4DWChEMWfIs7vw4bc/QTV+ApMjNPEDH37/AxqQ",
-	"+3FzZNBG2dRYRTmwDIVhpoKcoaIqzSugIgMu5a9gy7BCj+E4TPy6XY4gBa8egZCgMbXKvdWGGoQ7R/IC",
-	"laAiRZDvhAaTU3N3/IsgbZ4hL3IsmIb2tI9PjiMsTsnBeDKeOKvKEgUtGZmSB+PJ+AEZkZKa3LspWUmj",
-	"paxDxjnS1wHHWWvOjs5JDU3U5onMqp0VEUNZY7kaC0ZZ9A+ieub+5GDnarTx2lPUhDmYjZ19H04mQ1Jb",
-	"NaMaaUS0LQqqqkgSUAieeAQKjVVCA3VgmHGEYBI4PqxLqaSIkolOLlm2TLI2C97Al13K9GhQtEDjQfDq",
-	"kjB3RIeQwLdT4llu1QejyJ7rsXq2X4Rczff/NYyMyMP793eAqQ4TIOdAIYYNzOUG2HV27oDXZGNv0gWa",
-	"q+T7IkdA4fiolEyYZpfcFlSAHx69PIY7h4+ff3fv4O4YfmYml9aAyZkeAYWmVP9KgwOwo0imwQqFNM29",
-	"UlZw1NqzdEo5d8fkCmlWQS55Vr94+fL40DMmvDl59vwFJI1U/QZK5ZqEzFP+u5yluZOP72lqeFULlbbk",
-	"LmM4XWjmWBXwPdNGg5GgsJAXOCajtbj6gWlzEkxzJaLWWiK3GzSGBBdhY3g8087M3wDlPLzSbhsfjOcW",
-	"VdVFo//ZGH8r2J9shX1msNA3aPraFqbLzlQpWvXFw7Pvx2s4dTZrzzoC6WdSziuYM+4jB2ZV7ZvaSr6A",
-	"uJbWGp32nKHWquv/S4JqXNVDFKFcusISdWZaSVabc1PcKH2C2amvz/ucn/ohtZKPrMg24Cw27RDYmg4j",
-	"TlC9VO0nPZt3jLFznI0Gid/3EzWl/csZvr1FuinDOyQ9/LvI8BnBJeHgxHVMdB5vfbwxIfhuce8JIb4H",
-	"+RztgwnEI39zoIeeO45x7/E6xkM5d22Mh87bx3gDgtuK8UZBaJpxX206m3E0qAPC3dnDwZIw0yjqhpS3",
-	"RTNNjfVVUU4HK8LQ9P/jlBHfCd0uZQRMxOhylm0AtBVkBpCyZvRyhVu2qD1uyQlbOWCyOwf4TrOz/qaa",
-	"PWi7X4peuxf+TNH9FB2Iay2Ieig6XIW2FB387yl6MMyO0HQO309p/xHhdaOo2geNHaGJrD+rBsyazDjV",
-	"5p5qv5wO2Tj+wPqJ2TlWfS+M9VRaUVNW/Sm4vQLTkQv8hZPP1UraRe6nY303v1C0zMe1bq4ZCWa1ipMp",
-	"SWjJkosDsjxb/hUAAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

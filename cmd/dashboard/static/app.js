@@ -425,6 +425,18 @@ async function loadReleases(projectId, projectName) {
 
 /* --- Release posture --- */
 
+/* The rollup's worklist row (D13.2): staleness is COMPUTED from the recorded input set, so
+   the chip states fact — "current" means a republish would change nothing. */
+function rollupStatusLine(rollup) {
+  if (!rollup) return `<span class="chip chip-info" title="the communication node did not answer the rollup-status read">status unavailable</span>`;
+  if (!rollup.found) return `<span class="chip chip-info">none published yet</span>`;
+  const meta = ` <span class="mono" style="font-size:.85em">${esc(rollup.statements)} statements · as of ${esc(rollup.as_of || "")}</span>`;
+  if (rollup.stale) {
+    return `<span class="chip chip-warn" title="the live posture differs from what the published document was built from — republish when ready; nothing happens automatically">${esc(rollup.summary || "STALE")}</span>${meta}`;
+  }
+  return `<span class="chip chip-accent" title="the live posture matches the published document's recorded inputs exactly">✓ current</span>${meta}`;
+}
+
 async function viewRelease(releaseId, version) {
   setRail("estate");
   crumbs([{ label: "Overview", href: "#/" }, { label: "Estate", href: "#/estate" },
@@ -440,6 +452,8 @@ async function viewRelease(releaseId, version) {
   }
   try { blast = await apiGET("registry", `/releases/${encodeURIComponent(releaseId)}/blast-radius`); } catch { /* estate optional */ }
   try { pubs = asArray(await apiGET("communication", `/publications?release=${encodeURIComponent(releaseId)}`)); } catch { /* optional */ }
+  let rollup = null;
+  try { rollup = await apiGET("communication", `/releases/${encodeURIComponent(releaseId)}/rollup-status?audience=customer`); } catch { /* optional — older comm node */ }
   try { queue = asArray(await apiGET("communication", "/publishable-positions")).filter((q) => q.release_id === releaseId); } catch { /* optional */ }
   let scans = [];
   try { scans = asArray(await apiGET("evidence", `/evidence?release=${encodeURIComponent(releaseId)}`)).filter((e) => e.kind === "scanner-report"); } catch { /* optional */ }
@@ -492,6 +506,18 @@ async function viewRelease(releaseId, version) {
     </div>
 
     <div class="card">
+      <h2 class="card-title">Customer VEX document</h2>
+      <p class="card-sub">One multi-statement OpenVEX file for this whole release (EDR-COMMUNICATION-01 D13):
+        decided findings speak their Position; everything else is <span class="mono">under_investigation</span>;
+        machine clearances annotate, never assert. Publishing is always a human act.</p>
+      <div style="margin:6px 0">${rollupStatusLine(rollup)}</div>
+      <button class="btn" id="btn-vex-preview">Preview</button>
+      ${rollup && rollup.found ? `<button class="btn" id="btn-vex-view">View published</button>` : ""}
+      <button class="btn btn-primary" id="btn-vex-publish">${rollup && rollup.found ? "Republish (supersedes the current one)" : "Publish"}</button>
+      <div id="vex-out" hidden style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
       <h2 class="card-title">Publications</h2>
       ${pubs.length ? pubTable(pubs) : `<div class="empty"><b>Nothing published for this release</b>Decide a Position, then POST /publications — publication is always human-triggered.</div>`}
       ${queue.length ? `<h2 class="card-title" style="margin-top:16px">Publishable queue</h2>${queueTable(queue)}` : ""}
@@ -511,6 +537,50 @@ async function viewRelease(releaseId, version) {
     location.hash = `#/scan/${tr.dataset.id}?rel=${encodeURIComponent(releaseId)}&v=${encodeURIComponent(version || "")}`;
   }));
   fillScanCounts(scans);
+
+  // The customer VEX card (D13): preview renders without recording (a stateless POST the
+  // read scope may use); publish/republish is a write; the document is shown verbatim.
+  const vexOut = $("#vex-out");
+  const showVexDoc = (payload, note) => {
+    vexOut.hidden = false;
+    vexOut.innerHTML = `${note ? `<div class="card-sub">${note}</div>` : ""}
+      <pre class="mono" style="max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:10px;font-size:12px">${esc(payload)}</pre>`;
+  };
+  const vexErr = (msg) => { vexOut.hidden = false; vexOut.innerHTML = `<div class="err">${esc(msg)}</div>`; };
+  $("#btn-vex-preview").addEventListener("click", async () => {
+    vexOut.hidden = false;
+    vexOut.innerHTML = `<div class="empty"><b>Rendering…</b>Two reads (posture + Registry names), one deterministic transform.</div>`;
+    try {
+      const r = await apiPOST("communication", "/previews",
+        { release_id: releaseId, artifact_type: "vex", format: "openvex" });
+      if (r.status !== 200) { vexErr(`preview refused (${r.status}): ${await problemDetail(r)}`); return; }
+      const j = await r.json();
+      showVexDoc(j.payload || "", "Preview — rendered now, recorded nowhere.");
+    } catch (e) { vexErr(e instanceof NodeDown ? "Communication node unreachable." : e.message); }
+  });
+  const vexViewBtn = $("#btn-vex-view");
+  if (vexViewBtn && rollup && rollup.found) {
+    vexViewBtn.addEventListener("click", async () => {
+      try {
+        const doc = await apiGET("communication", `/rollups/${encodeURIComponent(rollup.publication_id)}`);
+        showVexDoc(doc.payload || "", `Published document ${esc(rollup.publication_id)} — as of ${esc(doc.as_of || "")}.`);
+      } catch (e) { vexErr(e instanceof NodeDown ? "Communication node unreachable." : e.message); }
+    });
+  }
+  $("#btn-vex-publish").addEventListener("click", async () => {
+    const btn = $("#btn-vex-publish");
+    btn.disabled = true;
+    try {
+      const r = await apiPOST("communication", "/publications",
+        { release_id: releaseId, artifact_type: "vex", format: "openvex", audience: "customer" });
+      if (r.status !== 201) { vexErr(`publish refused (${r.status}): ${await problemDetail(r)}`); btn.disabled = false; return; }
+      toast("Published — the previous document, if any, is superseded (both kept).");
+      viewRelease(releaseId, version); // re-render: the status chip reads the new record
+    } catch (e) {
+      vexErr(e instanceof NodeDown ? "Communication node unreachable." : e.message);
+      btn.disabled = false;
+    }
+  });
 
   const planBtn = $("#btn-plan");
   planBtn.addEventListener("click", async () => {

@@ -181,6 +181,44 @@ paths:
                 $ref: '#/components/schemas/Release'
         '404':
           $ref: '#/components/responses/Problem'
+  /projects/{id}:
+    get:
+      operationId: getProject
+      summary: Get a project by ID (the upward hop of the name chain — release -> project -> product).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectView'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /products/{id}:
+    get:
+      operationId: getProduct
+      summary: Get a product by ID (the top of the name chain).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '404':
+          $ref: '#/components/responses/Problem'
   /customers:
     post:
       operationId: registerCustomer

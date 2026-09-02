@@ -59,6 +59,33 @@ func (s *Store) GetRelease(ctx context.Context, id domain.ReleaseID) (domain.Rel
 	return domain.NewRelease(id, domain.ProjectID(projectID), version)
 }
 
+// GetProject loads a Project by id; a missing row yields ErrNotFound.
+func (s *Store) GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error) {
+	var productID, name string
+	err := s.pool.QueryRow(ctx, `SELECT product_id, name FROM projects WHERE id = $1`, string(id)).
+		Scan(&productID, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Project{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Project{}, err
+	}
+	return domain.NewProject(id, domain.ProductID(productID), name)
+}
+
+// GetProduct loads a Product by id; a missing row yields ErrNotFound.
+func (s *Store) GetProduct(ctx context.Context, id domain.ProductID) (domain.Product, error) {
+	var name string
+	err := s.pool.QueryRow(ctx, `SELECT name FROM products WHERE id = $1`, string(id)).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Product{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Product{}, err
+	}
+	return domain.NewProduct(id, name)
+}
+
 // ListReleases returns the Releases belonging to a Project, ordered by id.
 func (s *Store) ListReleases(ctx context.Context, project domain.ProjectID) ([]domain.Release, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, version FROM releases WHERE project_id = $1 ORDER BY id`, string(project))

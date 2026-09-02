@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
 )
 
@@ -107,4 +108,62 @@ func purls(cs []componentRef) []string {
 		return nil
 	}
 	return out
+}
+
+// postureRow mirrors the fields of Governance's release-posture JSON the rollup consumes
+// (EDR-COMMUNICATION-01 D13.5): the decided half (stance, position version + rationale) and
+// the components with their occurrence-verdict fields.
+type postureRow struct {
+	FindingID         string `json:"finding_id"`
+	FaultlineID       string `json:"faultline_id"`
+	CVE               string `json:"cve"`
+	Stance            string `json:"stance"`
+	HasPosition       bool   `json:"has_position"`
+	PositionVersion   int    `json:"position_version"`
+	PositionRationale string `json:"position_rationale"`
+	Components        []struct {
+		PURL          string `json:"purl"`
+		ClaimClass    string `json:"claim_class"`
+		VerdictState  string `json:"verdict_state"`
+		VerdictGrade  string `json:"verdict_grade"`
+		VerdictReason string `json:"verdict_reason"`
+	} `json:"components"`
+}
+
+// ReleasePosture fetches the release-scoped Domain Projection — the rollup's first read
+// (D13.5). Implements app.ReleasePostureReader.
+func (c *Client) ReleasePosture(ctx context.Context, releaseID string) ([]app.RollupPostureRow, error) {
+	url := fmt.Sprintf("%s/api/v1/releases/%s/posture", c.baseURL, releaseID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("governance: release posture %s: status %d", releaseID, resp.StatusCode)
+	}
+	var rows []postureRow
+	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+		return nil, err
+	}
+	out := make([]app.RollupPostureRow, 0, len(rows))
+	for _, r := range rows {
+		row := app.RollupPostureRow{
+			FindingID: r.FindingID, FaultlineID: r.FaultlineID, CVE: r.CVE,
+			HasPosition: r.HasPosition, Stance: r.Stance,
+			PositionVersion: r.PositionVersion, PositionRationale: r.PositionRationale,
+		}
+		for _, comp := range r.Components {
+			row.Components = append(row.Components, app.RollupComponentRow{
+				PURL: comp.PURL, ClaimClass: comp.ClaimClass,
+				VerdictState: comp.VerdictState, VerdictGrade: comp.VerdictGrade, VerdictReason: comp.VerdictReason,
+			})
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }

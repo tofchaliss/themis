@@ -19,28 +19,33 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// CreatePublicationRequest defines model for CreatePublicationRequest.
+// CreatePublicationRequest The subject is a UNION (EDR-COMMUNICATION-01 D13.5): exactly one of finding_id (a per-Position artifact, D3) or release_id (the release-scoped VEX rollup, D13 - only artifact_type `vex` is valid there). Supplying both or neither is a 400.
 type CreatePublicationRequest struct {
 	// ArtifactType vex | advisory | notification | audit_report
 	ArtifactType string  `json:"artifact_type"`
 	Audience     *string `json:"audience,omitempty"`
 	Channel      *string `json:"channel,omitempty"`
-	FindingId    string  `json:"finding_id"`
+	FindingId    *string `json:"finding_id,omitempty"`
 
 	// Format openvex | cyclonedx-vex | csaf | markdown | json-report | text
 	Format string `json:"format"`
+
+	// ReleaseId The release whose rollup to materialize (D13): one multi-statement document over the whole posture - statements from Positions only, machine clearances as annotations, full coverage, recorded input set. Refused (422) when the Registry name chain cannot identify the product (fail-closed, D13.4).
+	ReleaseId *string `json:"release_id,omitempty"`
 }
 
 // CreatePublicationResponse defines model for CreatePublicationResponse.
 type CreatePublicationResponse struct {
+	// PublicationId The new record's id - a per-Finding Publication for a finding_id subject, a release rollup for a release_id subject (fetch the latter via GET /rollups/{id}).
 	PublicationId *string `json:"publication_id,omitempty"`
 }
 
-// PreviewRequest defines model for PreviewRequest.
+// PreviewRequest Same subject union as CreatePublicationRequest - exactly one of finding_id / release_id.
 type PreviewRequest struct {
-	ArtifactType string `json:"artifact_type"`
-	FindingId    string `json:"finding_id"`
-	Format       string `json:"format"`
+	ArtifactType string  `json:"artifact_type"`
+	FindingId    *string `json:"finding_id,omitempty"`
+	Format       string  `json:"format"`
+	ReleaseId    *string `json:"release_id,omitempty"`
 }
 
 // PreviewResponse defines model for PreviewResponse.
@@ -83,8 +88,63 @@ type QueueEntryView struct {
 	Version     *int    `json:"version,omitempty"`
 }
 
+// RollupStatus defines model for RollupStatus.
+type RollupStatus struct {
+	AsOf  *string `json:"as_of,omitempty"`
+	Drift *struct {
+		// AnnotationOnly Same decision, different annotation fingerprint - minor drift (D13.2).
+		AnnotationOnly   *int `json:"annotation_only,omitempty"`
+		ChangedDecisions *int `json:"changed_decisions,omitempty"`
+		NewFindings      *int `json:"new_findings,omitempty"`
+		RemovedFindings  *int `json:"removed_findings,omitempty"`
+	} `json:"drift,omitempty"`
+
+	// Found false when no rollup was ever published for this (release, format, audience).
+	Found         *bool   `json:"found,omitempty"`
+	PublicationId *string `json:"publication_id,omitempty"`
+
+	// Stale true when the live posture differs from the rollup's recorded input set - any new or removed finding, changed decision, or annotation-only change.
+	Stale      *bool `json:"stale,omitempty"`
+	Statements *int  `json:"statements,omitempty"`
+
+	// Summary Plain-language drift summary ("current", or "STALE - 1 changed decision(s), ...").
+	Summary *string `json:"summary,omitempty"`
+}
+
+// RollupView defines model for RollupView.
+type RollupView struct {
+	// AsOf The snapshot's vintage (RFC3339) - also stated inside the document itself.
+	AsOf      *string `json:"as_of,omitempty"`
+	Audience  *string `json:"audience,omitempty"`
+	CreatedAt *string `json:"created_at,omitempty"`
+	Format    *string `json:"format,omitempty"`
+	Id        *string `json:"id,omitempty"`
+
+	// Payload The rendered document (e.g. the OpenVEX JSON), verbatim.
+	Payload *string `json:"payload,omitempty"`
+
+	// ProductPurl The Registry-derived customer-facing product identity (D13.4).
+	ProductPurl       *string `json:"product_purl,omitempty"`
+	ReleaseId         *string `json:"release_id,omitempty"`
+	Statements        *int    `json:"statements,omitempty"`
+	SupersededBy      *string `json:"superseded_by,omitempty"`
+	SupersedesId      *string `json:"supersedes_id,omitempty"`
+	WithdrawnExcluded *int    `json:"withdrawn_excluded,omitempty"`
+}
+
 // ListPublicationsParams defines parameters for ListPublications.
 type ListPublicationsParams struct {
+	Release string `form:"release" json:"release"`
+}
+
+// GetRollupStatusParams defines parameters for GetRollupStatus.
+type GetRollupStatusParams struct {
+	Format   *string `form:"format,omitempty" json:"format,omitempty"`
+	Audience *string `form:"audience,omitempty" json:"audience,omitempty"`
+}
+
+// ListRollupsParams defines parameters for ListRollups.
+type ListRollupsParams struct {
 	Release string `form:"release" json:"release"`
 }
 
@@ -111,6 +171,15 @@ type ServerInterface interface {
 	// The analyst worklist — Positions ready to publish or gone stale.
 	// (GET /publishable-positions)
 	GetPublishableQueue(w http.ResponseWriter, r *http.Request)
+	// The worklist staleness row (D13.2): the current rollup for (release, format, audience) and its computed drift against the live posture - exact, not approximated, thanks to the recorded input set. Republishing stays a human act.
+	// (GET /releases/{id}/rollup-status)
+	GetRollupStatus(w http.ResponseWriter, r *http.Request, id string, params GetRollupStatusParams)
+	// List a release's VEX rollups, newest first (the full supersession history - D5 keeps both).
+	// (GET /rollups)
+	ListRollups(w http.ResponseWriter, r *http.Request, params ListRollupsParams)
+	// Get one recorded rollup (metadata + the rendered document).
+	// (GET /rollups/{id})
+	GetRollup(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -144,6 +213,24 @@ func (_ Unimplemented) GetPublication(w http.ResponseWriter, r *http.Request, id
 // The analyst worklist — Positions ready to publish or gone stale.
 // (GET /publishable-positions)
 func (_ Unimplemented) GetPublishableQueue(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// The worklist staleness row (D13.2): the current rollup for (release, format, audience) and its computed drift against the live posture - exact, not approximated, thanks to the recorded input set. Republishing stays a human act.
+// (GET /releases/{id}/rollup-status)
+func (_ Unimplemented) GetRollupStatus(w http.ResponseWriter, r *http.Request, id string, params GetRollupStatusParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a release's VEX rollups, newest first (the full supersession history - D5 keeps both).
+// (GET /rollups)
+func (_ Unimplemented) ListRollups(w http.ResponseWriter, r *http.Request, params ListRollupsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get one recorded rollup (metadata + the rendered document).
+// (GET /rollups/{id})
+func (_ Unimplemented) GetRollup(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -248,6 +335,120 @@ func (siw *ServerInterfaceWrapper) GetPublishableQueue(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPublishableQueue(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRollupStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetRollupStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRollupStatusParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "audience" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "audience", r.URL.Query(), &params.Audience, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "audience"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "audience", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRollupStatus(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRollups operation middleware
+func (siw *ServerInterfaceWrapper) ListRollups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRollupsParams
+
+	// ------------- Required query parameter "release" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "release", r.URL.Query(), &params.Release, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "release"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "release", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRollups(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRollup operation middleware
+func (siw *ServerInterfaceWrapper) GetRollup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRollup(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -385,6 +586,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/publishable-positions", wrapper.GetPublishableQueue)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/rollup-status", wrapper.GetRollupStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/rollups", wrapper.ListRollups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/rollups/{id}", wrapper.GetRollup)
+	})
 
 	return r
 }
@@ -394,25 +604,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"zFfbbuNGDP0VYlqgCaDYSbN98Vu7CBaLFqgbBH3ZBsFYQ9nclWYUDmVHTQz0I/qF/ZJidPFVynUT7Jus",
-	"oTgkzzkkfatil+XOohWvRreK0efOeqx+jNlNUszCY+ysoJXwqPM8pVgLOTv87J0N73w8w0yHp+8ZEzVS",
-	"3w3Xfof1qR+2/pbLZaQM+pgpD27USJ0xOx6ocNBYB2fvGbXguJi0F57jdYG+CiNnlyML1aFqFkp0LFdS",
-	"5hhebLuf4w3cgTZz8o5LuAPrhJLGaTgpDMkVY+5YVKRqJ8oLk52qZaTCOdq48rx3GM+0tZh2niVkDdnp",
-	"FZnuY8eZlv14XY62jjku49RZNDdHzW+vE7iDTPMX4xYh9oDBUR063IHgTUcGy0gxXhfEaNTo02ZU0U7p",
-	"VjFdrpy4yWeMJYTbgUdNl31A8rVRd/LLDv9jxjnh4vEoP7/er1OgVQK9ZdFl6vTj67ES4LYbg6Kpm3FC",
-	"kuJj/a9B+pNw8ZyCP1sZ8bz7G4MpzZHLKy9aCt8Noy5SScliL87PpEGker7oxy1SufNU8XyO7KluiI0R",
-	"WcEpsqrolaL2vRF70X1V9EWO7NHg5pcT51LUthvXPwos8MwKl92w9tX+pXV9OMctaq5yuDf9e6q6n3t4",
-	"RTZx+y31vcuywrYtv5pnNwIH45n2eHQKU0a0CWFqDuG/f/4FmSFs9DDwBSc6xgFcME2nyJVBpgWZdEp/",
-	"10YuAW3hzApyzuQRxg01gKy4cNbKBVplwcGsyLQ9ktotmup260AX4rLK7WEEjNoAY+zYoIEN2XrQ1oRY",
-	"iOGAcYoWWU9SPISGsT6ClLys8/GzcH7UktbDwvGXYBJVrvK6g4Fex85oDTIsSGaukCYMstMBXMzWifzg",
-	"oQYRyINOF7r0kNANGpiU1e0rfwcW58jASHWhUNAcDv6yatW81MUMM/KwjdnP449qgw7qZHA8OA4MCdNS",
-	"56RG6nRwPDhVQa4yq5g+bPKpm6+rh0qQQuXyo1GjtmdvFFXVwwC9/OJM+RXXn63pttweOsIFVi82FrAf",
-	"j4+//u3NaOpYwn7/dRDK+a6+tcvZKrr1Lhfs3z3J/qcn+a8aYJZpLtVInddU1B3CavW0R9Ngvca23jGH",
-	"G9KuKj3FDmb8Rl42tVYRi3WGguzV6NOtolC26wK5VJGyOgvcbZqg2gU32gBqdzZfvhB4Esz8gwzYmfbr",
-	"7qmZdXkPI16AWKhhT+dKXEDyvC7XoJmkHTDsbZ2vpM/efxuPUurJa8bRr9na2Hzrwm2nZtfE3BVzJ132",
-	"5uRhh5KHt2SWvXL+gLJNoi4xh8mx1nK1/7+djJ+k3nv695vB+gGlF69mAYF2KxE0QAnkXNgd9HZXkgcR",
-	"rD+otlz1Fp1zZ59+k8ZZ7VZWp6WX1YpW7Ybj1eYWtsISxLWLHTiGqbMI1aI9qOPyyPOW4QWnaqSGOqfh",
-	"/EQtL5f/BwAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
