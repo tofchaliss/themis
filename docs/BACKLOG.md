@@ -720,7 +720,9 @@ under the 2026-08-07 re-derivation standard.
   retry loop's Detail cannot carry whole), redacted at the capture boundary; nil (never "")
   when no LLM ran, so NULL keeps meaning "the model said nothing". Asserted by test now on
   ok, non-LLM, and schema-invalid paths, so it cannot rot unnoticed again. Historical rows
-  stay empty (nothing to backfill from — the outputs were never recorded).
+  stay empty (nothing to backfill from — the outputs were never recorded). **LIVE-VERIFIED
+  2026-09-02:** first post-restart invocation captured its full output JSON, sitting directly
+  above a pre-fix `<NULL>` row in the same query — the before and after in two lines.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
