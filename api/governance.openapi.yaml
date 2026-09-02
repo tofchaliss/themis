@@ -416,6 +416,13 @@ components:
           description: The package the fix is published for — the SOURCE package for distro components.
         version:
           type: string
+        ecosystem:
+          type: string
+          description: >-
+            The world the fix is published in (rpm | apk | pypi | ...), as the feed stated it;
+            empty when the source did not say. Carried so a consumer can pair each fix with the
+            occurrence it actually applies to (EDR-VERDICT-01 D8 - "update the RPM" and
+            "upgrade the pip install" are different work) without guessing from version shape.
     Component:
       type: object
       properties:

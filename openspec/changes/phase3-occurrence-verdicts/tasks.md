@@ -88,15 +88,26 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
       remaining queue, should trend to 0); TESTING.md re-verdict watch note; env template.
 - [x] 3.5 `make vet-tags` + `make check` green (knowledge app 100% incl. the sweep).
 
-## Group 4 — Phase 4: the face (D8-plan, D9)
+## Group 4 — Phase 4: the face (D8-plan, D9) — ✅ implemented 2026-09-02
 
-- [ ] 4.1 Drawer: per-occurrence rows (state pill, grade label, reason, per-occurrence fix); cleared
-      rows in a quiet section below open ones.
-- [ ] 4.2 `plan_remediation` pre-prompt grouping → (package, canonical world); e2e-llm fixture keeps a
-      mixed-world release.
-- [ ] 4.3 Docs sweep in the same change: BACKLOG (KN-VERDICT-1 phase ticks), PARITY-GAP if touched,
-      TESTING.md drawer/verdict how-to.
-- [ ] 4.4 `make vet-tags` + `make check` green.
+- [x] 4.1 Drawer: per-occurrence rows — verdict chip (distinct observed vs inferred wording),
+      the clearance's reason verbatim, per-occurrence fix advice matched by canonical world
+      (unknown world → advice + explicit "confirm install method" caveat, never a guess);
+      cleared rows in a quiet "Cleared — no action needed" section below open ones; the posture
+      table's component cell leads with the copy that still matters and shows "✓ all cleared"
+      when nothing real is open. `FixedVersion.ecosystem` added to the wire (additive) so the
+      client pairs fixes to worlds from server-stated data, not version-shape guessing.
+- [x] 4.2 Plan grouping by (package, CANONICAL world) with cleared occurrences contributing
+      nothing (`PlanActions` filters `VerdictIsOpen`; readapi decodes `verdict_state`); the
+      e2e-llm fixture gains the measured mixed-world finding (cleared distro shadow + open
+      python-pkg pip copy → one pypi action, nothing for the shadow).
+      **DEPENDENCY CLOSED: KN-SCAN-3** — canonical-world grouping was hollow while
+      `CanonicalEcosystem("python-pkg")` passed it verbatim; the kernel alias table gains the
+      Trivy analyzer vocabulary and `scanner_source.go` canonicalizes at the parse seam, as
+      the backlog item specified.
+- [x] 4.3 Docs sweep: BACKLOG (KN-VERDICT-1 implementation note + KN-SCAN-3 ✅), TESTING.md
+      verdict how-to (landed in G2/G3); PARITY-GAP untouched (no parity item in this arc).
+- [x] 4.4 `make vet-tags` + `make check` green.
 
 ## Live validation (binding, EDR "Validation criterion")
 

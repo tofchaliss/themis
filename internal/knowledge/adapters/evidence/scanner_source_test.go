@@ -62,6 +62,31 @@ func TestScannerSource_TranslatesFindingsAndSkipsBadOnes(t *testing.T) {
 	}
 }
 
+// KN-SCAN-3, the durable half: the scanner's analyzer vocabulary is canonicalized AT THE PARSE
+// SEAM, so `python-pkg` lands as `pypi` in every downstream consumer (verdicts, fix selection,
+// plan grouping) — and an unknown spelling passes through untouched, the KN-FIX-3 fail-safe.
+func TestScannerSource_CanonicalizesAnalyzerEcosystems(t *testing.T) {
+	report := `{"findings":[` +
+		`{"cve":"CVE-2025-47273","observed_at":"2026-08-13T00:00:00Z","severity":"HIGH","cvss_score":7.1,"cvss_vector":"",` +
+		`"component":{"purl":"pkg:pypi/setuptools@70.3.0","name":"setuptools","version":"70.3.0","ecosystem":"python-pkg","source":""}},` +
+		`{"cve":"CVE-2024-4444","observed_at":"2026-08-13T00:00:00Z","severity":"LOW","cvss_score":3.1,"cvss_vector":"",` +
+		`"component":{"purl":"pkg:generic/x@1","name":"x","version":"1","ecosystem":"rust-lib","source":""}}` +
+		`]}`
+	srv := docServer(t, "scanner-report", report)
+	defer srv.Close()
+
+	props, _, err := NewScannerSource(NewClient(srv.URL, nil), feed.NewRegistry()).ScannerProposals(context.Background(), "ev-1")
+	if err != nil || len(props) != 2 {
+		t.Fatalf("props=%d err=%v, want 2", len(props), err)
+	}
+	if props[0].Component.Ecosystem != "pypi" {
+		t.Errorf("ecosystem = %q, want the canonical pypi for the analyzer name python-pkg", props[0].Component.Ecosystem)
+	}
+	if props[1].Component.Ecosystem != "rust-lib" {
+		t.Errorf("ecosystem = %q, want an unknown analyzer name passed through untouched", props[1].Component.Ecosystem)
+	}
+}
+
 // A mis-routed evidence id — the document exists but is another kind — must be an error, not
 // an empty success: silently ingesting zero findings from an SBOM would be the same class of
 // quiet no-op this seam exists to kill.

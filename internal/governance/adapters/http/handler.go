@@ -389,12 +389,19 @@ func toComponents(in []domain.MatchedComponent) []gen.Component {
 	return out
 }
 
-// toFixedVersions maps the selected fixes to the wire shape.
+// toFixedVersions maps the selected fixes to the wire shape, carrying the fix's WORLD so a
+// consumer can pair each fix with the occurrence it applies to (EDR-VERDICT-01 D8) instead of
+// guessing from version shape.
 func toFixedVersions(in []app.FixedVersion) []gen.FixedVersion {
 	out := make([]gen.FixedVersion, 0, len(in))
 	for _, f := range in {
 		pkg, ver := f.Package, f.Version
-		out = append(out, gen.FixedVersion{Package: &pkg, Version: &ver})
+		fv := gen.FixedVersion{Package: &pkg, Version: &ver}
+		if f.Ecosystem != "" {
+			eco := f.Ecosystem
+			fv.Ecosystem = &eco
+		}
+		out = append(out, fv)
 	}
 	return out
 }

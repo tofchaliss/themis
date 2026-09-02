@@ -591,16 +591,18 @@ under the 2026-08-07 re-derivation standard.
   the new GUI selector produced two `scanner/trivy` components (setuptools@70.3.0 on
   CVE-2026-59890 + CVE-2025-47273) sitting beside discovery's setuptools@39.2.0 on the SAME
   Findings — the two-engines-one-decision shape, with provenance distinguishing the rows.
-- [ ] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).** LOW,
-  measured live the same day: Trivy names ecosystems in its own vocabulary (`python-pkg`,
-  `node-pkg`, `gobinary`, …) and the curated recipe used to pass it verbatim, so a scanner row
-  read ecosystem `python-pkg` beside discovery's `pypi` for the same package. Harmless by
-  construction — `value.CanonicalEcosystem` doesn't know these names, and an unknown ecosystem
-  never filters a fix nor hides anything (KN-FIX-3 fail-safe) — but the two roads should read as
-  one vocabulary. The TESTING.md jq recipe now maps the common types (same-day fix); this item
-  is the durable half: canonicalize at the seam where the component is parsed
-  (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
-  future recipe/client to remember.
+- [x] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).**
+  ✅ **CLOSED 2026-09-02** (KN-VERDICT-1 Group 4 — the canonical-world plan grouping NEEDED it:
+  `CanonicalEcosystem("python-pkg")` returned it verbatim, so the measured mixed-world case
+  split one pypi job into two actions, which is how the gap stopped being cosmetic). Fix as
+  filed: `value.NormalizeEcosystem` gains the Trivy analyzer aliases (`python-pkg`→pypi,
+  `node-pkg`→npm, `gobinary`/`gomod`→go, `jar`/`pom`→maven, `gemspec`→gem — mirroring the
+  dashboard's `TRIVY_ECOSYSTEMS` map), and `adapters/evidence/scanner_source.go` canonicalizes
+  at the parse seam, so every downstream consumer (verdicts, fix selection, plan grouping)
+  reads one vocabulary; unknown analyzer names still pass through untouched (KN-FIX-3
+  fail-safe). _Original filing:_ Trivy names ecosystems in its own vocabulary and the curated
+  recipe used to pass it verbatim, so a scanner row read `python-pkg` beside discovery's
+  `pypi` for the same package.
 - [ ] **KN-VERDICT-1 — a vendor-backported fix cannot clear a live finding: the rpm fixed-verdict
   never reaches it across any of its three links (filed 2026-09-02, MEASURED live on
   MRF/cdmrf-oamp/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
@@ -671,7 +673,15 @@ under the 2026-08-07 re-derivation standard.
   full urgency from open carriers only; remediation + plan grouping per (package, world); drawer
   shows per-occurrence state/grade/reason. Four phases in tasks.md; binding validation criterion:
   39.2.0 cleared-with-reason, 70.3.0 still open, Finding still queued. Case-file report:
-  artifact b57b9622-c500-4a8e-9e10-6503bdb91210. Implementation NOT started.
+  artifact b57b9622-c500-4a8e-9e10-6503bdb91210.
+  **ALL FOUR PHASES IMPLEMENTED 2026-09-02 (branch `feat/occurrence-verdicts`, each `make check`
+  green + committed): G1 record book · G2 ownership bridge · G3 re-verdict · G4 the face**
+  (drawer per-occurrence view with state pills/grade labels/reasons/per-world fix advice +
+  quiet cleared section; plan grouping by (package, canonical world) with cleared occurrences
+  contributing nothing; `FixedVersion.ecosystem` on the wire; closed KN-SCAN-3 as a dependency).
+  **REMAINS: tasks.md V.1 — the live VM validation** (deploy → let the Red Hat sweep nudge the
+  re-verdict → 39.2.0 cleared-with-reason · 70.3.0 open with upstream advice · Finding queued
+  at full urgency). NOT live-verified until that runs.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

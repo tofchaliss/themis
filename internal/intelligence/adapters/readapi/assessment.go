@@ -122,6 +122,9 @@ type posturePayload struct {
 		Ecosystem  string `json:"ecosystem"`
 		Source     string `json:"source"`
 		ClaimClass string `json:"claim_class"`
+		// VerdictState — `cleared_vendor_fix` means these files already carry the vendor's fix
+		// (EDR-VERDICT-01 D8); absent on rows predating the field, which reads as open.
+		VerdictState string `json:"verdict_state"`
 	} `json:"components"`
 	// Fixes are the versions published for THIS Finding's own components (PLAN-3). The runtime
 	// decodes them for ONE reason (EDR-CORRELATION-01 D8 step 1): a distro module-stream fix
@@ -181,7 +184,7 @@ func toPostureEntry(e posturePayload) domain.PostureEntry {
 	for _, c := range e.Components {
 		entry.Components = append(entry.Components, domain.PostureComponent{
 			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
-			ClaimClass: c.ClaimClass,
+			ClaimClass: c.ClaimClass, VerdictState: c.VerdictState,
 		})
 	}
 	for _, f := range e.Fixes {

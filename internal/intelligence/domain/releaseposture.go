@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // ReleasePosture is Intelligence's read-only view of Governance's release-scoped Domain
@@ -52,11 +54,20 @@ type PostureComponent struct {
 	// (EDR-CORRELATION-01 D3). Decided by Knowledge; the runtime consumes it and never
 	// re-derives it (T10).
 	ClaimClass string
+	// VerdictState is the occurrence verdict, mirrored from the projection (EDR-VERDICT-01
+	// D2/D8): `cleared_vendor_fix` means these files provably carry the vendor's fix already.
+	// Anything else — including "" from a row predating the field — reads as open. Like
+	// ClaimClass, it is Knowledge's conclusion; the runtime consumes it and never re-derives it.
+	VerdictState string
 }
 
 // ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown
 // counts — absence of attribution evidence must never hide a live vulnerability.
 func (c PostureComponent) ActsAsCarrier() bool { return c.ClaimClass != "scope" }
+
+// VerdictIsOpen reports whether this occurrence must be treated as live. Only the affirmative
+// clearance closes it (EDR-VERDICT-01 D2 — the fail-safe direction).
+func (c PostureComponent) VerdictIsOpen() bool { return c.VerdictState != "cleared_vendor_fix" }
 
 // UpgradeAction is one unit of remediation work: upgrade this package, and these Findings close.
 //
@@ -192,6 +203,13 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 			if !c.ActsAsCarrier() {
 				continue
 			}
+			// EDR-VERDICT-01 D8: a CLEARED occurrence is not work. Its files already carry the
+			// vendor's fix, so an action derived from it would send an operator to upgrade
+			// something that is done — measured shape: the patched rpm's .egg-info shadow must
+			// not add an action while the pip-installed copy beside it still does.
+			if !c.VerdictIsOpen() {
+				continue
+			}
 			pkg := c.Source
 			if pkg == "" {
 				pkg = c.Name
@@ -199,17 +217,22 @@ func (p ReleasePosture) PlanActions() []UpgradeAction {
 			if pkg == "" {
 				continue // nothing actionable to name
 			}
+			// The grouping world is the CANONICAL ecosystem (EDR-VERDICT-01 D8): scanners and
+			// feeds spell one world many ways (`rhel`/`rpm`, `pypi`/`python-pkg`), and keying on
+			// the raw spelling split one job into two while "update the RPM" and "upgrade the
+			// pip install" — genuinely different work — must stay two.
+			world := value.CanonicalEcosystem(c.Ecosystem)
 			// A module-stream rebuild is ONE action covering every package it rebuilt
 			// (EDR-CORRELATION-01 D8 step 1); anything else is keyed by its own package.
-			key := c.Ecosystem + "\x00" + pkg
+			key := world + "\x00" + pkg
 			stream := streamKeyFor(e.Fixes, pkg)
 			if stream != "" {
-				key = c.Ecosystem + "\x00stream\x00" + stream
+				key = world + "\x00stream\x00" + stream
 			}
 			a, ok := byKey[key]
 			if !ok {
 				a = &acc{
-					action:    UpgradeAction{Package: pkg, Ecosystem: c.Ecosystem, Stream: stream},
+					action:    UpgradeAction{Package: pkg, Ecosystem: world, Stream: stream},
 					cveSeen:   map[string]bool{},
 					verSeen:   map[string]bool{},
 					findSeen:  map[string]bool{},

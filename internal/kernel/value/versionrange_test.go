@@ -11,6 +11,16 @@ func TestNormalizeEcosystem(t *testing.T) {
 		"npm":      "npm",
 		" NPM ":    "npm",
 		"":         "",
+		// Scanner analyzer vocabulary (KN-SCAN-3): Trivy's spellings alias to the package
+		// world, so a scanner row and discovery's row for one package meet everywhere.
+		"python-pkg": "pypi",
+		"node-pkg":   "npm",
+		"gobinary":   "go",
+		"gomod":      "go",
+		"jar":        "maven",
+		"pom":        "maven",
+		"gemspec":    "gem",
+		"rust-lib":   "rust-lib", // unknown analyzer names pass through untouched (fail-safe)
 	}
 	for in, want := range cases {
 		if got := NormalizeEcosystem(in); got != want {
