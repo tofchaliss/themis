@@ -21,6 +21,10 @@ type fakeRepo struct {
 	products      map[string]bool
 	projects      map[string]bool
 	releases      map[string]domain.Release
+	projectObjs   map[string]domain.Project
+	productObjs   map[string]domain.Product
+	projErr       error
+	prodErr       error
 	microservices map[string]bool
 	customers     map[string]bool
 	blast         int
@@ -72,6 +76,26 @@ func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Re
 		return domain.Release{}, store.ErrNotFound
 	}
 	return rel, nil
+}
+func (r *fakeRepo) GetProject(_ context.Context, id domain.ProjectID) (domain.Project, error) {
+	if r.projErr != nil {
+		return domain.Project{}, r.projErr
+	}
+	p, ok := r.projectObjs[string(id)]
+	if !ok {
+		return domain.Project{}, store.ErrNotFound
+	}
+	return p, nil
+}
+func (r *fakeRepo) GetProduct(_ context.Context, id domain.ProductID) (domain.Product, error) {
+	if r.prodErr != nil {
+		return domain.Product{}, r.prodErr
+	}
+	p, ok := r.productObjs[string(id)]
+	if !ok {
+		return domain.Product{}, store.ErrNotFound
+	}
+	return p, nil
 }
 func (r *fakeRepo) ListProducts(_ context.Context, name string) ([]domain.Product, error) {
 	if r.listErr != nil {
@@ -416,5 +440,78 @@ func TestTraversalEndpoints_StoreFailure(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// The upward name-chain hops (EDR-COMMUNICATION-01 D13.4): a release rollup resolves
+// release -> project -> product by name, so both single-item GETs must serve, 404 cleanly,
+// and surface store faults as 500s.
+func TestGetProjectAndProduct(t *testing.T) {
+	repo := newFakeRepo()
+	proj, err := domain.NewProject("proj-1", "prod-1", "cdmrf-oamp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prod, err := domain.NewProduct("prod-1", "MRF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.projectObjs = map[string]domain.Project{"proj-1": proj}
+	repo.productObjs = map[string]domain.Product{"prod-1": prod}
+	srv := newServer(t, repo)
+
+	resp, err := http.Get(srv.URL + "/projects/proj-1")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get project: %v %d", err, resp.StatusCode)
+	}
+	var pv struct {
+		ID        string `json:"id"`
+		ProductID string `json:"product_id"`
+		Name      string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pv); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if pv.ID != "proj-1" || pv.ProductID != "prod-1" || pv.Name != "cdmrf-oamp" {
+		t.Errorf("project view = %+v", pv)
+	}
+
+	resp, err = http.Get(srv.URL + "/products/prod-1")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get product: %v %d", err, resp.StatusCode)
+	}
+	var prv struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&prv); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if prv.Name != "MRF" {
+		t.Errorf("product view = %+v", prv)
+	}
+
+	// Unknowns 404.
+	for _, path := range []string{"/projects/ghost", "/products/ghost"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil || resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: %v %d, want 404", path, err, resp.StatusCode)
+		}
+		_ = resp.Body.Close()
+	}
+}
+
+func TestGetProjectAndProduct_StoreFaults(t *testing.T) {
+	repo := newFakeRepo()
+	repo.projErr = errors.New("db down")
+	repo.prodErr = errors.New("db down")
+	srv := newServer(t, repo)
+	for _, path := range []string{"/projects/x", "/products/x"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil || resp.StatusCode != http.StatusInternalServerError {
+			t.Errorf("%s: %v %d, want 500", path, err, resp.StatusCode)
+		}
+		_ = resp.Body.Close()
 	}
 }

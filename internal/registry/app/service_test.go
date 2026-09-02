@@ -14,6 +14,8 @@ type fakeRepo struct {
 	products      map[string]bool
 	projects      map[string]bool
 	releases      map[string]domain.Release
+	projectObjs   map[string]domain.Project
+	productObjs   map[string]domain.Product
 	microservices map[string]bool
 	customers     map[string]bool
 
@@ -102,6 +104,22 @@ func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Re
 		return domain.Release{}, r.errGetRelease
 	}
 	return r.releases[string(id)], nil
+}
+
+func (r *fakeRepo) GetProject(_ context.Context, id domain.ProjectID) (domain.Project, error) {
+	p, ok := r.projectObjs[string(id)]
+	if !ok {
+		return domain.Project{}, errors.New("not found")
+	}
+	return p, nil
+}
+
+func (r *fakeRepo) GetProduct(_ context.Context, id domain.ProductID) (domain.Product, error) {
+	p, ok := r.productObjs[string(id)]
+	if !ok {
+		return domain.Product{}, errors.New("not found")
+	}
+	return p, nil
 }
 
 func (r *fakeRepo) ListProducts(_ context.Context, name string) ([]domain.Product, error) {
@@ -444,5 +462,27 @@ func TestListProductsAndProjects(t *testing.T) {
 	}
 	if _, err := newService(failing).ListProjects(ctx, "prod-1", ""); err == nil {
 		t.Error("a store failure must surface from ListProjects")
+	}
+}
+
+// The upward name-chain passthroughs (D13.4).
+func TestGetProjectAndProductPassthrough(t *testing.T) {
+	repo := newFakeRepo()
+	proj, _ := domain.NewProject("proj-1", "prod-1", "cdmrf-oamp")
+	prod, _ := domain.NewProduct("prod-1", "MRF")
+	repo.projectObjs = map[string]domain.Project{"proj-1": proj}
+	repo.productObjs = map[string]domain.Product{"prod-1": prod}
+	svc := newService(repo)
+	if got, err := svc.GetProject(context.Background(), "proj-1"); err != nil || got.Name() != "cdmrf-oamp" {
+		t.Errorf("GetProject = %v %v", got, err)
+	}
+	if got, err := svc.GetProduct(context.Background(), "prod-1"); err != nil || got.Name() != "MRF" {
+		t.Errorf("GetProduct = %v %v", got, err)
+	}
+	if _, err := svc.GetProject(context.Background(), "ghost"); err == nil {
+		t.Error("unknown project must error")
+	}
+	if _, err := svc.GetProduct(context.Background(), "ghost"); err == nil {
+		t.Error("unknown product must error")
 	}
 }

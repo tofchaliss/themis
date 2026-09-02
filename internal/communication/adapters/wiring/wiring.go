@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	govclient "github.com/themis-project/themis/internal/communication/adapters/governance"
+	regclient "github.com/themis-project/themis/internal/communication/adapters/registry"
 	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
@@ -46,7 +47,7 @@ type Communication struct {
 
 // Wire builds the Communication components over the given pool, Governance read-API base
 // URL, delivery channel, redactor, and outbox publisher.
-func Wire(pool *pgxpool.Pool, governanceBaseURL string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
+func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
 	st := store.New(pool)
 	positions := govclient.NewClient(governanceBaseURL, nil)
 	serializers := serializer.Default()
@@ -54,10 +55,13 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL string, deliverer app.Deliverer,
 
 	write := app.NewPublicationService(st, positions, serializers, idGen{}, clock)
 	read := app.NewReadService(st, positions, serializers)
+	// The release-scoped VEX rollup (EDR-COMMUNICATION-01 D13): the same Governance client
+	// supplies the posture read, the Registry client the fail-closed name chain (D13.4).
+	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil), st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
 	return Communication{
-		Handler:   commhttp.NewHandler(write, read).Router(),
+		Handler:   commhttp.NewHandler(write, read).WithRollups(rollups).Router(),
 		Store:     st,
 		Consumer:  inbound.NewConsumer(write),
 		Delivery:  app.NewDeliveryService(st, deliverer, redactor, clock),

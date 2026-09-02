@@ -98,6 +98,81 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /rollups:
+    get:
+      operationId: listRollups
+      summary: List a release's VEX rollups, newest first (the full supersession history - D5 keeps both).
+      parameters:
+        - name: release
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RollupView'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /rollups/{id}:
+    get:
+      operationId: getRollup
+      summary: Get one recorded rollup (metadata + the rendered document).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollupView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/rollup-status:
+    get:
+      operationId: getRollupStatus
+      summary: >-
+        The worklist staleness row (D13.2): the current rollup for (release, format, audience)
+        and its computed drift against the live posture - exact, not approximated, thanks to the
+        recorded input set. Republishing stays a human act.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            default: openvex
+        - name: audience
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollupStatus'
+        '500':
+          $ref: '#/components/responses/Problem'
   /publishable-positions:
     get:
       operationId: getPublishableQueue
@@ -124,10 +199,21 @@ components:
   schemas:
     CreatePublicationRequest:
       type: object
-      required: [finding_id, artifact_type, format]
+      required: [artifact_type, format]
+      description: >-
+        The subject is a UNION (EDR-COMMUNICATION-01 D13.5): exactly one of finding_id (a
+        per-Position artifact, D3) or release_id (the release-scoped VEX rollup, D13 - only
+        artifact_type `vex` is valid there). Supplying both or neither is a 400.
       properties:
         finding_id:
           type: string
+        release_id:
+          type: string
+          description: >-
+            The release whose rollup to materialize (D13): one multi-statement document over
+            the whole posture - statements from Positions only, machine clearances as
+            annotations, full coverage, recorded input set. Refused (422) when the Registry
+            name chain cannot identify the product (fail-closed, D13.4).
         artifact_type:
           type: string
           description: vex | advisory | notification | audit_report
@@ -143,11 +229,64 @@ components:
       properties:
         publication_id:
           type: string
+          description: >-
+            The new record's id - a per-Finding Publication for a finding_id subject, a release
+            rollup for a release_id subject (fetch the latter via GET /rollups/{id}).
+    RollupView:
+      type: object
+      properties:
+        id: { type: string }
+        release_id: { type: string }
+        product_purl:
+          type: string
+          description: The Registry-derived customer-facing product identity (D13.4).
+        format: { type: string }
+        audience: { type: string }
+        as_of:
+          type: string
+          description: The snapshot's vintage (RFC3339) - also stated inside the document itself.
+        statements: { type: integer }
+        withdrawn_excluded: { type: integer }
+        supersedes_id: { type: string }
+        superseded_by: { type: string }
+        created_at: { type: string }
+        payload:
+          type: string
+          description: The rendered document (e.g. the OpenVEX JSON), verbatim.
+    RollupStatus:
+      type: object
+      properties:
+        found:
+          type: boolean
+          description: false when no rollup was ever published for this (release, format, audience).
+        publication_id: { type: string }
+        as_of: { type: string }
+        statements: { type: integer }
+        stale:
+          type: boolean
+          description: >-
+            true when the live posture differs from the rollup's recorded input set - any new
+            or removed finding, changed decision, or annotation-only change.
+        summary:
+          type: string
+          description: Plain-language drift summary ("current", or "STALE - 1 changed decision(s), ...").
+        drift:
+          type: object
+          properties:
+            changed_decisions: { type: integer }
+            new_findings: { type: integer }
+            removed_findings: { type: integer }
+            annotation_only:
+              type: integer
+              description: Same decision, different annotation fingerprint - minor drift (D13.2).
     PreviewRequest:
       type: object
-      required: [finding_id, artifact_type, format]
+      required: [artifact_type, format]
+      description: Same subject union as CreatePublicationRequest - exactly one of finding_id / release_id.
       properties:
         finding_id:
+          type: string
+        release_id:
           type: string
         artifact_type:
           type: string

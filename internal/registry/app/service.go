@@ -155,6 +155,16 @@ func (s *RegistryService) GetRelease(ctx context.Context, id domain.ReleaseID) (
 	return s.repo.GetRelease(ctx, id)
 }
 
+// GetProject loads a Project by id — the upward name-chain hop (D13.4).
+func (s *RegistryService) GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error) {
+	return s.repo.GetProject(ctx, id)
+}
+
+// GetProduct loads a Product by id — the top of the name chain (D13.4).
+func (s *RegistryService) GetProduct(ctx context.Context, id domain.ProductID) (domain.Product, error) {
+	return s.repo.GetProduct(ctx, id)
+}
+
 // ListProducts returns products, optionally filtered by exact name (DASH-1).
 func (s *RegistryService) ListProducts(ctx context.Context, name string) ([]domain.Product, error) {
 	return s.repo.ListProducts(ctx, name)

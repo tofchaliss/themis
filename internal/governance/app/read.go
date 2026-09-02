@@ -35,6 +35,14 @@ type PostureEntry struct {
 	Stage       domain.Stage
 	Stance      domain.Stance
 	HasPosition bool
+	// PositionVersion is the current Position's version when HasPosition (0 otherwise) — the
+	// handle a release-scoped snapshot records so its staleness is exactly computable
+	// (EDR-COMMUNICATION-01 D13.2).
+	PositionVersion int
+	// PositionRationale is the current Position's own words ("" when none) — carried on the
+	// rollup's statements as status notes (D13), read from the join this projection already
+	// pays for.
+	PositionRationale string
 	// BaseScore is Knowledge's CVE-intrinsic priority (0–100), materialized from the
 	// FaultlineEnriched event (C6). Governance scales it by the blast multiplier (C2).
 	BaseScore int

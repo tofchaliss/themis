@@ -536,20 +536,27 @@ under the 2026-08-07 re-derivation standard.
   same bytes + different release ⇒ **409** naming the release + evidence id the content already
   resolves to (`ContentFiledElsewhereError`, spec'd on POST /evidence, rendered verbatim by the
   GUI toast). Integration-tested (`TestSave_Idempotent` cross-release arm).
-- [ ] **COMM-VEX-1 — no RELEASE-scoped VEX document: publications materialize one Finding's
-  Position each (filed 2026-09-02; GRILLED + DESIGNED same day → EDR-COMMUNICATION-01 D13,
-  five sub-decisions D13.1–D13.5).** MED, cluster Communication/R3, **ready to implement on
-  explicit go — after the current branch stack merges.** Net shape: statements from Positions
-  ONLY, machine clearances as annotations (the governed door for a clearance to speak is
-  GOV-VERDICT-1's policy path); snapshot with a recorded input set, staleness computed and
-  surfaced on the D10 worklist, republish human (D4); full coverage — one statement per
-  finding, `under_investigation` for everything undecided with annotations sizing the nuance,
-  withdrawn CVEs preamble-only; product identity from the Registry name chain
-  (`pkg:generic/<product>/<project>@<version>`, UUID as reference), fail-CLOSED; input = two
-  reads (the Governance posture — which EDR-VERDICT-01 G1 already equipped with everything
-  needed — plus the Registry names); request = `release_id` subject union on the existing
-  publish/preview endpoints; OpenVEX first. Groups: ① domain materializer + OpenVEX
-  serializer ② app/API + Registry client ③ worklist staleness row.
+- [x] **COMM-VEX-1 — no RELEASE-scoped VEX document (filed + grilled 2026-09-02 →
+  EDR-COMMUNICATION-01 D13).** ✅ **IMPLEMENTED 2026-09-02 (`feat/comm-vex-rollup`; live
+  validation on the VM pending).** All three groups: ① `domain/rollup.go` (pure
+  MaterializeRollup + recorded input set + ComputeRollupDrift) + the OpenVEX rollup
+  serializer (multi-statement, `x_themis` vintage block, clearances as bracketed notes) +
+  `RollupPublication` as its OWN record — the Publication aggregate is Position-anchored
+  (single stance, hard-validated) and a rollup is a materialized POSTURE, so it gets its own
+  table (`release_rollups`, migration comm 000005) rather than a weakened invariant;
+  ② `app/RollupService` (create/preview/status/get/list, D5 supersede chain per
+  (release, format, audience)), `release_id` subject union on POST /publications +
+  /previews, the fail-closed Registry name-chain client (422 when unresolvable), and the
+  upstream enablers the detail-check demanded: Governance posture gains `position_version` +
+  `position_rationale` (both were designed-for but not on the wire) and Registry gains
+  GET /projects/{id} + /products/{id} (the upward hops the DASH-1 traversal cannot answer);
+  ③ GET /releases/{id}/rollup-status — exact drift from the recorded input set (changed
+  decisions / new・removed findings / annotation-only). Deviations recorded honestly:
+  **withdrawn-CVE exclusion (D13.3) deferred** — the posture carries no withdrawal signal,
+  the field/preamble slot are plumbed, always 0 until Governance exposes it; **rollup
+  delivery-channel integration + outbox events deferred** (the delivery worker keys on
+  per-Finding publications; follow-up when a channel needs rollups). Verify live: preview →
+  publish → status current → decide one finding → status STALE naming the drift → republish.
 - [ ] **COMM-VEX-1b — CSAF rollup serializer (filed 2026-09-02 from the D13.5 format order).**
   LOW until a consumer asks (REP-1's incumbent world suggests one will). The CSAF product-tree
   work deserves its own focus; the OpenVEX rollup already answers the customer question. Same

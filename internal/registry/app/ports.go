@@ -13,6 +13,12 @@ type Repository interface {
 	SaveRelease(ctx context.Context, r domain.Release) error
 
 	GetRelease(ctx context.Context, id domain.ReleaseID) (domain.Release, error)
+	// GetProject / GetProduct are the UPWARD hops of the name chain (release → project →
+	// product) a release-scoped customer document needs to name its product by something a
+	// consumer can match (EDR-COMMUNICATION-01 D13.4); the downward traversal (DASH-1) cannot
+	// answer "whose release is this?" without walking every product.
+	GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
+	GetProduct(ctx context.Context, id domain.ProductID) (domain.Product, error)
 	ListReleases(ctx context.Context, project domain.ProjectID) ([]domain.Release, error)
 	// ListProducts / ListProjects complete the product→project→release traversal a human has
 	// (DASH-1). Without them a posture is reachable only by a caller that already holds the UUID

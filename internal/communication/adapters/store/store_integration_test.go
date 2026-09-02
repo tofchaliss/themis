@@ -426,3 +426,76 @@ func TestMigrationDownUp(t *testing.T) {
 		t.Fatalf("up: %v", err)
 	}
 }
+
+// The rollup store round-trip (D13/D5): save → current → supersede-on-republish → history
+// keeps both → optimistic concurrency refuses a stale prior → unknown id is its own error.
+func TestRollupStoreRoundTrip(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	product := domain.RollupProductRef{Product: "MRF", Project: "cdmrf-oamp", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
+	asOf := time.Date(2026, 9, 2, 17, 0, 0, 0, time.UTC)
+	art, err := domain.MaterializeRollup(product, asOf, []domain.RollupEntry{
+		{FindingID: "f1", CVE: "CVE-2025-47273", OpenComponents: []string{"pkg:pypi/setuptools@70.3.0"},
+			Annotations: []string{"39.2.0 cleared"}},
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := domain.NewRollupPublication("rp-1", art, "openvex", "customer", []byte(`{"v":1}`), "", asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveRollup(ctx, first, nil, 0); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	cur, found, err := st.CurrentRollup(ctx, "rel-1", "openvex", "customer")
+	if err != nil || !found || cur.ID() != "rp-1" || cur.Statements() != 1 || cur.WithdrawnExcluded() != 2 ||
+		len(cur.InputSet()) != 1 || cur.InputSet()[0].FindingID != "f1" || !cur.AsOf().Equal(asOf) ||
+		cur.ProductPURL() != product.PURL() || string(cur.Payload()) != `{"v":1}` {
+		t.Fatalf("current = %+v found=%v err=%v", cur, found, err)
+	}
+	// A different audience is a different chain.
+	if _, found, _ := st.CurrentRollup(ctx, "rel-1", "openvex", ""); found {
+		t.Error("audience must scope the chain")
+	}
+
+	// Republish supersedes.
+	second, err := domain.NewRollupPublication("rp-2", art, "openvex", "customer", []byte(`{"v":2}`), "rp-1", asOf.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := cur
+	prevVersion := prior.Version()
+	if err := prior.Supersede("rp-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveRollup(ctx, second, &prior, prevVersion); err != nil {
+		t.Fatalf("supersede save: %v", err)
+	}
+	cur, found, err = st.CurrentRollup(ctx, "rel-1", "openvex", "customer")
+	if err != nil || !found || cur.ID() != "rp-2" {
+		t.Fatalf("current after republish = %v", cur.ID())
+	}
+	old, err := st.GetRollup(ctx, "rp-1")
+	if err != nil || old.SupersededBy() != "rp-2" || old.Version() != 2 {
+		t.Fatalf("superseded old = %+v err=%v", old, err)
+	}
+	if hist, err := st.ListRollups(ctx, "rel-1"); err != nil || len(hist) != 2 {
+		t.Fatalf("history = %d err=%v — D5 keeps both", len(hist), err)
+	}
+
+	// A STALE prior (wrong version) loses the race explicitly.
+	third, _ := domain.NewRollupPublication("rp-3", art, "openvex", "customer", []byte(`{"v":3}`), "rp-2", asOf.Add(2*time.Minute))
+	staleP := cur
+	_ = staleP.Supersede("rp-3")
+	if err := st.SaveRollup(ctx, third, &staleP, 99); !errors.Is(err, app.ErrConcurrent) {
+		t.Fatalf("stale prior err = %v, want ErrConcurrent", err)
+	}
+
+	if _, err := st.GetRollup(ctx, "ghost"); !errors.Is(err, domain.ErrRollupNotFound) {
+		t.Errorf("unknown rollup err = %v", err)
+	}
+}

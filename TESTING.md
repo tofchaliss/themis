@@ -324,6 +324,20 @@ effective/residual read 0); one live carrier keeps full urgency. To verify: chec
 entry for a CVE whose distro copy is patched — the shadow row reads cleared-with-reason while
 a pip-installed copy below the upstream fix stays open, and the finding stays queued.
 
+**The release-scoped VEX rollup (EDR-COMMUNICATION-01 D13, COMM-VEX-1).** One multi-statement
+OpenVEX document for a whole release — statements from POSITIONS only (decided findings speak
+their stance; everything else is `under_investigation`), machine clearances and scope-only
+membership as bracketed `status_notes` annotations, the product named by the Registry chain
+(`pkg:generic/<product>/<project>@<version>`; publishing REFUSES with 422 if the chain cannot
+answer). Same doors as per-finding publications, with `release_id` instead of `finding_id`
+(exactly one; `artifact_type` must be `vex`; OpenVEX only for now — CSAF is COMM-VEX-1b):
+`POST :8084/api/v1/previews` renders without recording; `POST /publications` records (D5
+append-and-supersede per (release, format, audience)); `GET /rollups?release=<id>` lists the
+history; `GET /rollups/{id}` returns metadata + the document; `GET
+/releases/{id}/rollup-status` is the worklist staleness row — exact drift (changed decisions /
+new・removed findings / annotation-only) computed from the rollup's recorded input set against
+the live posture. Republishing stays a human act.
+
 **Watch the re-verdict sweep** (D6, always on): `journalctl -u themis@knowledge | grep re-verdict`
 — every sweep logs `rejudged` and `changed`, including zeros. A non-zero `changed` is the
 headline: an EXISTING occurrence's verdict flipped (a vendor fix landing on history — the

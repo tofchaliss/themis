@@ -426,6 +426,14 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		ResidualPriority:  &res,
 		OpenCarriers:      &open,
 	}
+	if e.PositionVersion > 0 {
+		pv := e.PositionVersion
+		out.PositionVersion = &pv
+	}
+	if e.PositionRationale != "" {
+		pr := e.PositionRationale
+		out.PositionRationale = &pr
+	}
 	if len(e.Components) > 0 {
 		comps := toComponents(e.Components)
 		out.Components = &comps
