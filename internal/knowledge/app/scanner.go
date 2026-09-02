@@ -43,11 +43,20 @@ type ScannerReportService struct {
 	fold    *FaultlineService
 	matches MatchRecorder
 	clock   Clock
+	// inferredBridge arms the D4 guess grade of the ownership bridge (default ON), exactly as
+	// on CorrelationService — one switch, one meaning, both doors.
+	inferredBridge bool
 }
 
 // NewScannerReportService wires the scanner-report ingestion ports.
 func NewScannerReportService(src ScannerReportSource, fold *FaultlineService, matches MatchRecorder, clock Clock) *ScannerReportService {
-	return &ScannerReportService{source: src, fold: fold, matches: matches, clock: clock}
+	return &ScannerReportService{source: src, fold: fold, matches: matches, clock: clock, inferredBridge: true}
+}
+
+// WithInferredBridge sets the D4 switch (EDR-VERDICT-01) and returns the service for chaining.
+func (s *ScannerReportService) WithInferredBridge(enabled bool) *ScannerReportService {
+	s.inferredBridge = enabled
+	return s
 }
 
 // ScannerPlan is the read phase's output: every usable finding of one report, ready to fold
@@ -56,6 +65,11 @@ type ScannerPlan struct {
 	ReleaseID string
 	Items     []ScannerProposal
 	Skipped   int
+	// Bridge is the ownership-bridge context (EDR-VERDICT-01 D3) built from the report's OWN
+	// component set: a scanner that catalogued the image's rpm database and its site-packages
+	// put both in one report, so the report itself is the same-inventory candidate set. Scanner
+	// reports carry no explicit ownership edges — only the Inferred hop can bridge here.
+	Bridge BridgeContext
 }
 
 // PlanIngest runs the READ phase with no transaction: fetch the report document from
@@ -67,7 +81,20 @@ func (s *ScannerReportService) PlanIngest(ctx context.Context, releaseID, eviden
 	if err != nil {
 		return ScannerPlan{}, err
 	}
-	return ScannerPlan{ReleaseID: releaseID, Items: props, Skipped: skipped}, nil
+	siblings := make([]InventoryComponent, 0, len(props))
+	seen := map[string]struct{}{}
+	for _, p := range props {
+		key := p.Component.PURL + "|" + p.Component.Name + "@" + p.Component.Version
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		siblings = append(siblings, p.Component)
+	}
+	return ScannerPlan{
+		ReleaseID: releaseID, Items: props, Skipped: skipped,
+		Bridge: BridgeContext{Siblings: siblings, InferredBridge: s.inferredBridge},
+	}, nil
 }
 
 // ApplyIngest runs the WRITE phase inside the caller's transaction: fold every finding and
@@ -97,7 +124,7 @@ func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan
 			// see; the KN-VERDICT-1 link-(b) defect was this path recording unjudged rows. The
 			// reconciled-range gate stays correlation-only (a range-rejected candidate was never
 			// a match; a scanner's version-matched finding is).
-			Verdict:     judgeOccurrence(f.View(), p.Component),
+			Verdict:     judgeOccurrence(f.View(), p.Component, plan.Bridge),
 			CardVersion: f.Version(),
 			// Why this component matched, decided against the reconciled card exactly as the
 			// discovery path decides it (EDR-CORRELATION-01 D3): a scanner names the component

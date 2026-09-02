@@ -24,6 +24,11 @@ type InventoryComponent struct {
 // Inventory is the subset of Evidence's canonical inventory correlation needs.
 type Inventory struct {
 	Components []InventoryComponent
+	// Owners maps an owned component's PURL to its owning component's PURL, from the SBOM's
+	// explicit ownership relationships (Syft's ownership-by-file-overlap — the rpm whose file
+	// list proves it installed the language package). Observed-grade bridge evidence
+	// (EDR-VERDICT-01 D3); empty when the document carries no such edges — never inferred here.
+	Owners map[string]string
 }
 
 // InventoryReader reads a release's inventory from Evidence's read API (D4). Knowledge
@@ -108,11 +113,21 @@ type CorrelationService struct {
 	matches   MatchRecorder
 	ledger    ReleaseLedger // optional: nil = no re-discovery ledger (KN-RECOR-1)
 	clock     Clock
+	// inferredBridge arms the D4 guess grade of the ownership bridge (default ON; the strict
+	// estate disables it via THEMIS_VERDICT_INFERRED_BRIDGE=0 in the composition root).
+	inferredBridge bool
 }
 
 // NewCorrelationService wires the correlation ports.
 func NewCorrelationService(inv InventoryReader, disc PackageVulnSource, fold *FaultlineService, matches MatchRecorder, clock Clock) *CorrelationService {
-	return &CorrelationService{inventory: inv, discover: disc, fold: fold, matches: matches, clock: clock}
+	return &CorrelationService{inventory: inv, discover: disc, fold: fold, matches: matches, clock: clock, inferredBridge: true}
+}
+
+// WithInferredBridge sets the D4 switch (EDR-VERDICT-01) and returns the service for
+// chaining. Kept out of the constructor so every existing call site is unaffected.
+func (s *CorrelationService) WithInferredBridge(enabled bool) *CorrelationService {
+	s.inferredBridge = enabled
+	return s
 }
 
 // WithLedger adds the re-discovery ledger (KN-RECOR-1): every ApplyCorrelation then records
@@ -157,6 +172,10 @@ type CorrelationPlan struct {
 	// ledger (KN-RECOR-1) so a later sweep re-reads the same (or a newer) inventory.
 	EvidenceID string
 	Items      []PlannedMatch
+	// Bridge is the ownership-bridge context judgeOccurrence needs at APPLY time
+	// (EDR-VERDICT-01 D3): the sibling components of the same inventory plus its explicit
+	// ownership edges. Captured in the read phase because the write phase does no I/O (D7).
+	Bridge BridgeContext
 }
 
 // PlanCorrelation runs correlation's READ phase with NO transaction: it reads the release's
@@ -168,7 +187,10 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 	if err != nil {
 		return CorrelationPlan{}, err
 	}
-	plan := CorrelationPlan{ReleaseID: releaseID, EvidenceID: evidenceID}
+	plan := CorrelationPlan{
+		ReleaseID: releaseID, EvidenceID: evidenceID,
+		Bridge: BridgeContext{Siblings: inv.Components, Owners: inv.Owners, InferredBridge: s.inferredBridge},
+	}
 	for _, comp := range inv.Components {
 		discovered, err := s.discover.VulnsForPackage(ctx, comp)
 		if err != nil {
@@ -222,7 +244,7 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, Score: f.View().Score(),
 			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
-			Verdict:     judgeOccurrence(f.View(), item.Component),
+			Verdict:     judgeOccurrence(f.View(), item.Component, plan.Bridge),
 			CardVersion: f.Version(),
 			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
 			// recorded either way — D2 keeps everything, because an old build inside a superseded

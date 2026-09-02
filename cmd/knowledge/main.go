@@ -63,6 +63,10 @@ type config struct {
 	rediscoveryInterval   time.Duration // THEMIS_REDISCOVERY_INTERVAL — loop tick (default 1h).
 	rediscoveryStaleAfter time.Duration // THEMIS_REDISCOVERY_STALE_AFTER — how old a release's last discovery may grow (default 24h).
 	rediscoveryLimit      int           // THEMIS_REDISCOVERY_LIMIT — releases per sweep (default 3); a large estate drains across ticks.
+	// THEMIS_VERDICT_INFERRED_BRIDGE — "0" switches OFF the ownership bridge's guess grade
+	// (EDR-VERDICT-01 D4 strict mode: only explicit SBOM ownership evidence may clear a
+	// language-package occurrence). Default on.
+	verdictInferredBridgeOff bool
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -122,6 +126,8 @@ func loadConfig() config {
 		// misleading-telemetry class NVD-WATCH-1 exists to prevent (measured live 2026-08-13:
 		// the first deployed startup line printed releases_per_sweep=0).
 		rediscoveryLimit: envIntDefault("THEMIS_REDISCOVERY_LIMIT", app.DefaultRediscoveryLimit),
+
+		verdictInferredBridgeOff: os.Getenv("THEMIS_VERDICT_INFERRED_BRIDGE") == "0",
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -237,6 +243,8 @@ func main() {
 	}, wiring.RediscoveryConfig{
 		StaleAfter: cfg.rediscoveryStaleAfter,
 		Limit:      cfg.rediscoveryLimit,
+	}, wiring.VerdictConfig{
+		DisableInferredBridge: cfg.verdictInferredBridgeOff,
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))

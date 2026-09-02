@@ -120,6 +120,44 @@ func TestParse_SPDX_Golden(t *testing.T) {
 	}
 }
 
+// Syft's ownership-by-file-overlap arrives as SPDX OTHER + a comment marker; it becomes a
+// first-class edge with its direction preserved (owner -> owned), because it is the
+// Observed-grade evidence the ownership bridge runs on (EDR-VERDICT-01 D3). A bare OTHER
+// without the marker proves nothing and drops.
+func TestParse_SPDX_OwnershipRelationship(t *testing.T) {
+	doc := []byte(`{
+	  "spdxVersion": "SPDX-2.3",
+	  "packages": [
+	    {"SPDXID": "SPDXRef-rpm", "name": "platform-python-setuptools", "versionInfo": "39.2.0-9.el8_10",
+	     "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+	       "referenceLocator": "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10"}]},
+	    {"SPDXID": "SPDXRef-py", "name": "setuptools", "versionInfo": "39.2.0",
+	     "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+	       "referenceLocator": "pkg:pypi/setuptools@39.2.0"}]}
+	  ],
+	  "relationships": [
+	    {"spdxElementId": "SPDXRef-rpm", "relatedSpdxElement": "SPDXRef-py",
+	     "relationshipType": "OTHER", "comment": "evident-by: ownership-by-file-overlap"},
+	    {"spdxElementId": "SPDXRef-py", "relatedSpdxElement": "SPDXRef-rpm",
+	     "relationshipType": "OTHER", "comment": "unrelated note"}
+	  ]
+	}`)
+	res, err := parser.NewRegistry().Parse(context.Background(), "spdx", "", doc)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	edges := res.Inventory.Dependencies()
+	if len(edges) != 1 {
+		t.Fatalf("edges = %d, want 1 (the unmarked OTHER must drop): %+v", len(edges), edges)
+	}
+	e := edges[0]
+	if e.Relationship != "ownership-by-file-overlap" ||
+		e.From.String() != "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10" ||
+		e.To.String() != "pkg:pypi/setuptools@39.2.0" {
+		t.Errorf("edge = %+v, want owner->owned with the ownership relationship", e)
+	}
+}
+
 func TestParse_UnsupportedFormat(t *testing.T) {
 	_, err := parser.NewRegistry().Parse(context.Background(), "trivy", "", []byte(`{}`))
 	var ufe *parser.UnsupportedFormatError

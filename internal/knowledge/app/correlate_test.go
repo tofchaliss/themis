@@ -214,6 +214,43 @@ func TestCorrelate_RecordsAPKFixedAsCleared(t *testing.T) {
 	}
 }
 
+// The ownership bridge through the correlation door (EDR-VERDICT-01 D3/D4): the measured MRF
+// shape — a pypi setuptools shadow beside its patched rpm on one inventory — clears at the
+// INFERRED grade by default, and stays open when the operator arms strict mode. This is the
+// service-level proof that the D4 switch actually reaches the judge.
+func TestCorrelate_OwnershipBridgeAndStrictMode(t *testing.T) {
+	ctx := context.Background()
+	shadow := app.InventoryComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi",
+	}
+	rpm := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10", Name: "platform-python-setuptools",
+		Version: "39.2.0-9.el8_10", Ecosystem: "rpm", Source: "python-setuptools",
+	}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{shadow, rpm}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		shadow.PURL: {{CVE: cve(t, "CVE-2025-47273"), Proposal: vulnFactsFixedFor(t, "redhat", "python-setuptools", "0:39.2.0-9.el8_10")}},
+	}}
+
+	matches := newMatches()
+	if _, err := correlation(t, inv, disc, matches, newRepo()).Correlate(ctx, "rel-1", "ev-1"); err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	m := matches.byPURL[shadow.PURL]
+	if m.Verdict.State != domain.VerdictClearedVendorFix || m.Verdict.Grade != domain.VerdictGradeInferred {
+		t.Errorf("default bridge: verdict = %+v, want an inferred clearance", m.Verdict)
+	}
+
+	strict := newMatches()
+	if _, err := correlation(t, inv, disc, strict, newRepo()).WithInferredBridge(false).
+		Correlate(ctx, "rel-1", "ev-1"); err != nil {
+		t.Fatalf("strict correlate: %v", err)
+	}
+	if m := strict.byPURL[shadow.PURL]; !m.Verdict.State.IsOpen() {
+		t.Errorf("strict mode: verdict = %+v, must stay open without explicit ownership evidence", m.Verdict)
+	}
+}
+
 // The D9 busybox scenario: installed BETWEEN two branches' bounds must stay a match. "≥ any
 // bound" would clear the v3.19 install with the v3.18 bound — the cross-branch false-"fixed"
 // the max-bound rule exists to prevent.

@@ -309,6 +309,21 @@ The `ecosystem` mapping exists because Trivy speaks its own vocabulary (`python-
 the KN-FIX-3 fail-safe), but mapped here so the two roads read as one ecosystem; the durable
 in-code canonicalization is KN-SCAN-3.
 
+**Occurrence verdicts + the ownership bridge (EDR-VERDICT-01, KN-VERDICT-1).** Every examined
+component is now recorded WITH a verdict — `open` or `cleared_vendor_fix` — instead of a fixed
+occurrence being silently dropped (discovery) or recorded unjudged (scanner). A clearance
+carries an evidence grade and a plain-language reason on the Governance posture
+(`verdict_state` / `verdict_grade` / `verdict_reason` per component, `open_carriers` per
+entry): `observed` = direct evidence (the component's own build vs the vendor bound, or an
+explicit SBOM ownership edge — Syft SPDX `ownership-by-file-overlap`), `inferred` = a labeled
+same-inventory match (the rpm whose fix-attribution key and exact upstream version match the
+language row — the CVE-2025-47273 `setuptools@39.2.0`-shadow-of-a-patched-rpm shape).
+`THEMIS_VERDICT_INFERRED_BRIDGE=0` is strict mode (guess grade off). A finding leaves the
+ranked queue only when EVERY carrier occurrence is cleared (`open_carriers=0` ⇒
+effective/residual read 0); one live carrier keeps full urgency. To verify: check the posture
+entry for a CVE whose distro copy is patched — the shadow row reads cleared-with-reason while
+a pip-installed copy below the upstream fix stays open, and the finding stays queued.
+
 **Watch a re-discovery sweep** (default ON): `journalctl -u themis@knowledge | grep re-discovery`
 — every sweep logs `releases` and `new_matches`, including zeros ("nothing was stale" and "the
 sweep stopped working" must not look alike). A non-zero `new_matches` is the headline event: a

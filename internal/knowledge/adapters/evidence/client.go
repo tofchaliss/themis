@@ -36,6 +36,15 @@ type inventoryResponse struct {
 		Ecosystem string `json:"ecosystem"`
 		Source    string `json:"source"`
 	} `json:"components"`
+	// Dependencies carries Evidence's normalized relationship edges. Knowledge consumes ONLY
+	// the ownership edges (`ownership-by-file-overlap` — Syft's file-overlap proof that one
+	// package installed another's files): they are the Observed-grade evidence of the
+	// EDR-VERDICT-01 D3 bridge. A depends_on edge is not ownership and is ignored here.
+	Dependencies []struct {
+		From         string `json:"from"`
+		To           string `json:"to"`
+		Relationship string `json:"relationship"`
+	} `json:"dependencies"`
 }
 
 // GetInventory fetches the canonical inventory for an Evidence id via Evidence's read
@@ -64,6 +73,15 @@ func (c *Client) GetInventory(ctx context.Context, evidenceID string) (app.Inven
 		inv.Components = append(inv.Components, app.InventoryComponent{
 			PURL: comp.Purl, Name: comp.Name, Version: comp.Version, Ecosystem: comp.Ecosystem, Source: comp.Source,
 		})
+	}
+	for _, dep := range body.Dependencies {
+		if dep.Relationship != "ownership-by-file-overlap" || dep.From == "" || dep.To == "" {
+			continue
+		}
+		if inv.Owners == nil {
+			inv.Owners = map[string]string{}
+		}
+		inv.Owners[dep.To] = dep.From // owned PURL -> owning PURL (the rpm)
 	}
 	return inv, nil
 }

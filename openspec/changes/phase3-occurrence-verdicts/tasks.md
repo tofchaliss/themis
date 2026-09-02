@@ -33,20 +33,34 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
       there — the occurrence surface is Governance's, where the components already live.
 - [x] 1.9 `make vet-tags` + `make check` green (domain/app rings at 100% both contexts).
 
-## Group 2 — Phase 2: the ownership bridge (D3, D4, D8-read)
+## Group 2 — Phase 2: the ownership bridge (D3, D4, D8-read) — ✅ implemented 2026-09-02
 
-- [ ] 2.1 Evidence read model: surface SBOM ownership relationships in the inventory DTO where the
-      document carries them (Syft CycloneDX/SPDX edges); absent → empty, never inferred here.
-- [ ] 2.2 Bridge resolver in `judgeOccurrence`: Observed hop (edge → owning rpm → source pkg →
-      `RPMFixedByStream` on full EVR) then Inferred hop (same-inventory source-pkg + exact upstream
-      version), gated by `THEMIS_VERDICT_INFERRED_BRIDGE` (default on); every missing precondition →
-      `open`. Table-driven tests incl. the measured case and the pip-copy-at-distro-version wrong-clear
-      bound.
-- [ ] 2.3 Reason strings: distinct Observed vs Inferred wording (drawer renders verbatim).
-- [ ] 2.4 Per-occurrence fix selection on the read path (ecosystem-matched; unknown → upstream +
-      caveat; cleared → none).
-- [ ] 2.5 `deploy/node.env.example` + INSTALLATION/TESTING notes for the switch (R2 self-documenting).
-- [ ] 2.6 `make vet-tags` + `make check` green.
+- [x] 2.1 Evidence: SPDX parser recognizes Syft's `OTHER` + `ownership-by-file-overlap` comment as
+      a first-class edge (direction owner→owned preserved); already flows through the existing
+      `dependencies` read-API field, no spec change. Knowledge's client maps ONLY ownership edges
+      into `Inventory.Owners` (owned→owner); depends_on is not ownership. CORRECTION to the
+      scaffold: CycloneDX carries no ownership representation — SPDX-only, matching the EDR's
+      honest limit (Trivy-only estates run on the Inferred grade).
+- [x] 2.2 Bridge in `judgeOccurrence` via `BridgeContext` (siblings + owners + switch), carried on
+      both plans (correlation: the release inventory; scanner: the report's own component set —
+      Trivy catalogues the rpm DB beside site-packages, so the report IS a same-inventory set).
+      Observed hop: edge → rpm-class owner in the sibling set → owner's own stream verdict.
+      Inferred hop: rpm sibling whose fix-attribution key normalizes to the language row's name
+      (equality, one distro-wrapper strip — the guard that keeps version equality from clearing
+      strangers) + exact upstream-version match + sibling at/above the bound. Gated by
+      `THEMIS_VERDICT_INFERRED_BRIDGE` (default on; wiring `VerdictConfig.DisableInferredBridge`
+      so the zero value keeps the default). Tests: the measured MRF case, the pip-copy-below-fix
+      bound (must stay open), the pinned exact-distro-version wrong-clear limit, name-affinity
+      guard, strict mode at service level through both doors.
+- [x] 2.3 Reason strings distinct per grade ("owned by X (SBOM ownership): …" vs "matched to X at
+      the distro version (inferred, no ownership edge): …"), each naming the bound.
+- [x] 2.4 Fix selection: `selectFixesFor` skips CLEARED occurrences — a cleared row pulls no fix
+      into the Finding's list; all-cleared ⇒ empty list + unattributed count. (Ecosystem-matched
+      selection already existed via KN-FIX-3 `fixAppliesTo`; the unknown-world caveat string is
+      drawer presentation → Group 4.)
+- [x] 2.5 `deploy/node.env.example` documents the switch + grades; TESTING.md gains the verdict
+      how-to. (INSTALLATION defers to the env template, per R2.)
+- [x] 2.6 `make vet-tags` + `make check` green (knowledge app back at 100% incl. bridge branches).
 
 ## Group 3 — Phase 3: re-verdict (D6)
 

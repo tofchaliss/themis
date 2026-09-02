@@ -18,6 +18,9 @@ func fakeEvidence(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"components":[
 				{"purl":"pkg:deb/debian/openssl@3.0.11","name":"openssl","version":"3.0.11","ecosystem":"deb"},
 				{"purl":"pkg:deb/debian/zlib@1.3","name":"zlib","version":"1.3","ecosystem":"deb"}
+			],"dependencies":[
+				{"from":"pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10","to":"pkg:pypi/setuptools@39.2.0","relationship":"ownership-by-file-overlap"},
+				{"from":"pkg:deb/debian/openssl@3.0.11","to":"pkg:deb/debian/zlib@1.3","relationship":"depends_on"}
 			]}`))
 		case "/api/v1/evidence/malformed/inventory":
 			_, _ = w.Write([]byte(`{not json`))
@@ -68,6 +71,10 @@ func TestClient_GetInventory(t *testing.T) {
 	}
 	if inv.Components[0].PURL != "pkg:deb/debian/openssl@3.0.11" || inv.Components[0].Ecosystem != "deb" {
 		t.Errorf("component[0] = %+v", inv.Components[0])
+	}
+	// Only ownership edges populate Owners (EDR-VERDICT-01 D3) — depends_on is not ownership.
+	if len(inv.Owners) != 1 || inv.Owners["pkg:pypi/setuptools@39.2.0"] != "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10" {
+		t.Errorf("owners = %+v, want the one ownership edge, owned->owner", inv.Owners)
 	}
 }
 

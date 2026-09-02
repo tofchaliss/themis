@@ -163,11 +163,19 @@ type VexfeedConfig struct {
 	HTTP     *http.Client // optional; nil → http.DefaultClient
 }
 
+// VerdictConfig carries the occurrence-verdict switches (EDR-VERDICT-01).
+type VerdictConfig struct {
+	// DisableInferredBridge switches OFF the ownership bridge's guess grade (D4 strict mode;
+	// THEMIS_VERDICT_INFERRED_BRIDGE=0). Stated as the negation so the zero value keeps the
+	// documented default: the Inferred grade is ON.
+	DisableInferredBridge bool
+}
+
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -190,7 +198,8 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
 		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
 	}
-	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st)
+	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st).
+		WithInferredBridge(!verdict.DisableInferredBridge)
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
@@ -198,7 +207,8 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// ACL translates each finding, and matches record so Governance opens Findings. Before
 	// this line existed, a scanner-report upload was accepted by Evidence and silently
 	// no-op'd here — the "wiring is no gate" class.
-	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{})
+	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{}).
+		WithInferredBridge(!verdict.DisableInferredBridge)
 	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
 	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
 	// never silent. It reuses the same NVD client + fold path as the backfill sweep.
