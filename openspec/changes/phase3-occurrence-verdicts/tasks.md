@@ -114,3 +114,30 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
 - [ ] V.1 On the estate: CVE-2025-47273 → `setuptools@39.2.0` occurrences cleared (grade `inferred`,
       reason naming `platform-python-setuptools-39.2.0-9.el8_10`), `setuptools@70.3.0` still open with
       upstream advice, Finding still queued at full urgency. The finding must NOT disappear.
+
+### V.1 VM procedure (read-only except the deploy itself; VM repo at /opt/themis/src/themis)
+
+1. **Deploy the branch and rebuild.** `git fetch && git checkout feat/occurrence-verdicts &&
+   git pull --ff-only`, then `go build -o bin/ ./cmd/...`. Migrations self-apply on restart
+   (knowledge `000007`, governance `000012`) via the existing `THEMIS_*_MIGRATE=1` flags in
+   `/etc/themis/*.env`.
+2. **Speed the history drain for the validation window.** The catch-up sweep is bounded
+   (`THEMIS_REVERDICT_BATCH`, default 200/sweep) and its interval defaults to 12h — an estate of
+   a few hundred pre-feature rows would take days at defaults. Set
+   `THEMIS_REVERDICT_INTERVAL=2m` in the knowledge env for the validation, remove after. NOTE:
+   a restarted Red Hat sweep folds ~nothing new (verbatim restatements are dropped —
+   KN-PROPOSAL-BLOAT-1), so the NUDGE path will not fire for history; the interval sweep is the
+   history healer, by design.
+3. **Restart all nodes** (`sudo systemctl restart 'themis@*'`) and watch
+   `journalctl -u themis@knowledge -f | grep re-verdict` — expect `rejudged=N changed=M` lines;
+   `changed > 0` is the healing event; a persistent `re-verdict sweep failed` means the
+   Evidence read is down (rows stay stale, by design).
+4. **Verify the binding criterion** (queries in TESTING.md / the chat procedure):
+   knowledge `faultline_matches` for CVE-2025-47273 → 39.2.0 rows `cleared_vendor_fix/inferred`
+   with reason naming platform-python-setuptools, 70.3.0 rows `open`; governance mirror
+   matches; `GET /releases/{id}/posture` → the finding present, `open_carriers=1`,
+   effective/residual at FULL value; drawer shows the quiet cleared section with reasons; the
+   plan's pypi action names 70.3.0 only. `scripts/vm-verify.sh` → `verdicts:` line with
+   `stale` trending to 0.
+5. **Tick this box only when all three hold**: cleared-with-reason · still-open pip copy ·
+   finding still queued. The finding disappearing entirely FAILS the validation.
