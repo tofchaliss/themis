@@ -111,9 +111,16 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
 
 ## Live validation (binding, EDR "Validation criterion")
 
-- [ ] V.1 On the estate: CVE-2025-47273 → `setuptools@39.2.0` occurrences cleared (grade `inferred`,
-      reason naming `platform-python-setuptools-39.2.0-9.el8_10`), `setuptools@70.3.0` still open with
-      upstream advice, Finding still queued at full urgency. The finding must NOT disappear.
+- [x] V.1 ✅ **PASSED LIVE 2026-09-02 (~15:55 IST, MRF estate).** All three legs measured:
+      (1) `setuptools@39.2.0` cleared on BOTH releases — `cleared_vendor_fix`/`inferred`, reason
+      "matched to platform-python-setuptools 39.2.0-9.el8_10 at the distro ve…", Governance
+      mirror agreeing; (2) `setuptools@70.3.0` still open (both spellings); (3) the Finding
+      still queued at FULL urgency — posture read: `effective_priority: 80, residual_priority:
+      80, open_carriers: 1`. Drain: 1080 re-judgements across five 2m sweeps to `stale=0`;
+      estate-wide `cleared=17 (inferred=6)` — 11 observed-grade clearances surfaced on rpm
+      components whose "checked and fine" was never recorded before. One tooling defect found
+      and fixed during the run (release-posture.sh 401'd silently without a key — now shares
+      the cached admin key and names the trap).
 
 ### V.1 VM procedure (read-only except the deploy itself; VM repo at /opt/themis/src/themis)
 

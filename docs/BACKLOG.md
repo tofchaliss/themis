@@ -679,12 +679,14 @@ under the 2026-08-07 re-derivation standard.
   (drawer per-occurrence view with state pills/grade labels/reasons/per-world fix advice +
   quiet cleared section; plan grouping by (package, canonical world) with cleared occurrences
   contributing nothing; `FixedVersion.ecosystem` on the wire; closed KN-SCAN-3 as a dependency).
-  **REMAINS: tasks.md V.1 — the live VM validation** (deploy → let the Red Hat sweep nudge the
-  re-verdict → 39.2.0 cleared-with-reason · 70.3.0 open with upstream advice · Finding queued
-  at full urgency). NOT live-verified until that runs. V.1 partial state 2026-09-02: DB legs
-  PASSED live (39.2.0 cleared inferred-with-reason on both releases · 70.3.0 open · stale
-  drained 1080 rows to 0 · 17 clearances estate-wide, 11 observed-grade); the queued-at-full-
-  urgency leg was BLOCKED mid-check (release-posture.sh printed nothing — under debug).
+  **✅ V.1 LIVE-VALIDATED 2026-09-02 — the arc is DONE end-to-end on the MRF estate.** All
+  three binding legs measured: 39.2.0 cleared inferred-with-reason on both releases · 70.3.0
+  still open · Finding queued at FULL urgency (posture: effective 80 / residual 80 /
+  open_carriers 1). Drain: 1080 re-judgements to stale=0; estate-wide cleared=17 (6 inferred +
+  11 observed-grade rpm clearances that were previously silent drops). The mid-validation
+  "finding disappeared" scare was release-posture.sh 401'ing silently without a key — fixed
+  same session (shares the cached admin key, names the trap). The measured false positive this
+  item was filed on is healed in production.
 - [ ] **AI-REC-1 — COMEBACK MARKER: "the AI recommendation is wrong" (user, 2026-09-02, during
   the KN-VERDICT-1 V.1 validation).** UNTRIAGED — parked deliberately mid-validation; no
   measurement captured yet beyond the user's statement. When picked up, first pin WHICH
