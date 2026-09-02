@@ -701,9 +701,12 @@ under the 2026-08-07 re-derivation standard.
   scope-class) in BOTH Finding prompts + an explicit reading rule ("a backport keeps the old
   version number; ground `affected` on OPEN components only") → `GroundingThinness` gains the
   all-carriers-cleared class so a Decision on a fully-cleared Finding is diagnosably thin.
-  Prompt hashes change (prompt_versions is designed for it). Verify live: re-run recommend on
-  the MRF finding — the rationale must ground on 70.3.0 alone and may cite the 39.2.0
-  clearance as settled.
+  Prompt hashes change (prompt_versions is designed for it). **LIVE-VERIFIED 2026-09-02
+  (same day, MRF finding re-asked):** "affected (0.90): The release includes setuptools
+  version 70.3.0, which is an open component and falls within the affected range … does not
+  include the fix introduced in version 78.1.1" — grounded on the open copy alone, the model
+  even adopting the OPEN label vocabulary; the cleared 39.2.0 no longer appears as evidence.
+  Same stance, honest grounds.
 - [ ] **AI-CAP-2 — invocation_log.output_json is EMPTY on reason=ok LLM rows (measured
   2026-09-02: `0a1d2544` recommend_position, model set, rationale delivered, output NULL/'').**
   LOW, capture-path defect (Δ4a): the schema allows null "on a non-LLM decision" but this WAS
