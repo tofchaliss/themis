@@ -537,18 +537,35 @@ under the 2026-08-07 re-derivation standard.
   resolves to (`ContentFiledElsewhereError`, spec'd on POST /evidence, rendered verbatim by the
   GUI toast). Integration-tested (`TestSave_Idempotent` cross-release arm).
 - [ ] **COMM-VEX-1 — no RELEASE-scoped VEX document: publications materialize one Finding's
-  Position each (filed 2026-09-02, read from the API while answering "how do we give the VEX
-  for a release").** MED, design-first, cluster Communication/R3. `POST /publications` and
-  `/previews` take a `finding_id` — so "the VEX for release X" is today N separate OpenVEX/
-  CSAF artifacts, one per decided Finding, which is not the document a customer asks for (one
-  file, all statements for the release — the shape every vendor VEX feed we CONSUME has).
-  Fix shape to grill: a release-scoped materialization (`release_id` + format) that folds
-  every current Position on the release into ONE multi-statement document — including, now
-  that KN-VERDICT-1 exists, whether machine-cleared occurrences may appear as `not_affected`
-  statements WITH their stated mechanism or whether only human/policy Positions may speak
-  (Domain Invariant 3 suggests the latter, with clearances as annotations at most). Needs an
-  EDR-COMMUNICATION-01 delta; touches the stance-equality invariant and supersede semantics
-  (a new Position on ANY finding of the release stales the rollup).
+  Position each (filed 2026-09-02; GRILLED + DESIGNED same day → EDR-COMMUNICATION-01 D13,
+  five sub-decisions D13.1–D13.5).** MED, cluster Communication/R3, **ready to implement on
+  explicit go — after the current branch stack merges.** Net shape: statements from Positions
+  ONLY, machine clearances as annotations (the governed door for a clearance to speak is
+  GOV-VERDICT-1's policy path); snapshot with a recorded input set, staleness computed and
+  surfaced on the D10 worklist, republish human (D4); full coverage — one statement per
+  finding, `under_investigation` for everything undecided with annotations sizing the nuance,
+  withdrawn CVEs preamble-only; product identity from the Registry name chain
+  (`pkg:generic/<product>/<project>@<version>`, UUID as reference), fail-CLOSED; input = two
+  reads (the Governance posture — which EDR-VERDICT-01 G1 already equipped with everything
+  needed — plus the Registry names); request = `release_id` subject union on the existing
+  publish/preview endpoints; OpenVEX first. Groups: ① domain materializer + OpenVEX
+  serializer ② app/API + Registry client ③ worklist staleness row.
+- [ ] **COMM-VEX-1b — CSAF rollup serializer (filed 2026-09-02 from the D13.5 format order).**
+  LOW until a consumer asks (REP-1's incumbent world suggests one will). The CSAF product-tree
+  work deserves its own focus; the OpenVEX rollup already answers the customer question. Same
+  materializer, new registry entry; unsupported rollup format 400s until it lands.
+- [ ] **GOV-VERDICT-1 — opt-in policy path: an all-cleared finding raises a system
+  `not_affected` proposal (filed 2026-09-02 from the D13.1 grill).** LOW, design-first,
+  Governance. Today a vendor-fix clearance updates occurrence rows and queue state but raises
+  NO proposal — so there is nothing for a policy to accept, and a fully-cleared finding can
+  never lawfully speak `not_affected` in a customer document (D13.1 keeps it
+  `under_investigation` + annotation). The hook: when a finding's last open carrier clears,
+  raise a system proposal citing the clearance premises; the EXISTING policy auto-accept and
+  constitutional bar (never for AI proposals; system proposals per current rules) decide.
+  Premise drift is already guarded — a re-opened verdict is exactly the disposition-watcher
+  shape. Grill before code: proposal wording, whether Inferred-grade clearances qualify or
+  Observed-only, and interaction with residual-priority (the finding is already off the
+  queue when this fires).
 - [ ] **EV-DEDUP-2 — should one observation be attachable to MANY releases?** LOW, design-first.
   **Design DELIVERED 2026-08-23 (T2's last item): EDR-EVIDENCE-01 D10 (PROPOSED)** — observation
   stays one record (D3 upheld); a new `evidence_filings` association table carries

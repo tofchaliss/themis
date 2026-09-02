@@ -333,6 +333,70 @@ template as Evidence D9 / Knowledge D12 / Governance D13.
 PoC contrast: the PoC is technical-layer-first (`domain` / `usecase` / `adapter` shared across everything);
 the greenfield is context-first with Communication isolated behind events + read APIs.
 
+### D13 — Release-scoped VEX rollup: one multi-statement document per release (COMM-VEX-1; grilled 2026-09-02)
+
+Context: D1–D5 materialize ONE Position into one artifact, so "the VEX for release X" was N per-Finding
+files — not the single multi-statement document a customer asks for (the shape of every vendor VEX feed
+Themis CONSUMES). Filed as COMM-VEX-1 while answering that exact operator question; grilled the same day.
+Cross-references EDR-VERDICT-01 (occurrence verdicts are the annotation source).
+
+Decision (five sub-decisions, each with its rejected alternative):
+
+- **D13.1 — Statements come from Positions ONLY; machine clearances annotate, never assert.** A finding
+  with a Position speaks its stance through the existing D3 mapping; every other finding — including one
+  whose every occurrence a vendor-fix verdict cleared — appears as `under_investigation`, with the
+  clearance attached as an annotation quoting the verdict's stated premise. The governed door for a
+  clearance to SPEAK is the existing policy machinery: an opt-in policy auto-accepts a system
+  `not_affected` proposal raised from an all-cleared finding (GOV-VERDICT-1, a Governance item — today a
+  clearance raises no proposal), and only the resulting Position speaks. REJECTED: printing `not_affected`
+  from a verdict directly (even labeled) — it would make Communication the first place a machine
+  conclusion becomes an enterprise assertion to an outside party, against Domain Invariant 3 and D3's
+  stance-equality invariant (there is no Position for the artifact's stance to equal), and the documented
+  Inferred-grade wrong-clear limit would eventually reach a customer as "not affected".
+- **D13.2 — Snapshot with a RECORDED INPUT SET; staleness computed; republish stays human (D4).** The
+  rollup records what it was built from: the finding list with each Position version and, for annotated
+  findings, the verdict state printed. Determinism (D3) carries over — same input set, same bytes — and
+  staleness becomes exact: stale ⇔ current input set ≠ recorded. The D10 worklist gains a rollup row
+  naming the drift (new decisions / finding-set change / annotation-only change, the last ranked minor);
+  a human republishes; D5 append-and-supersede chains the revisions. The document states its vintage
+  inline (as-of timestamp + statement count). REJECTED: auto-republish (violates D4 and would spam
+  supersessions on every feed sweep); timestamp-approximated staleness (cannot tell a reversed decision
+  from a footnote).
+- **D13.3 — Full coverage: one statement per finding, zero omissions.** Omission is a claim (a vanished
+  statement reads as "resolved" to a customer diffing rollups). Decided findings speak; undecided ones —
+  live, all-cleared, and scope-only alike — are `under_investigation`, with annotations sizing the
+  nuance (all-cleared: the clearance premise; scope-only: "listed via a module-stream rebuild set, no
+  evidence this component carries the flaw"). The ONE exclusion: findings on withdrawn/superseded CVEs
+  get no statement (asserting about a retired CVE confuses tooling) and are counted in the preamble.
+  REJECTED: decided-only rollups — a tidy document that fails the question "what is your posture".
+- **D13.4 — Product identity from Registry names, fail-CLOSED; open components as subcomponents.** The
+  statement product identifier is built from the Registry name chain
+  (`pkg:generic/<product>/<project>@<release-version>`), with the internal release UUID as an additional
+  reference. Communication gains a small Registry read client (the established cross-context read
+  pattern) that fails CLOSED for this artifact: no name chain → refuse to publish (a customer document
+  whose product line is a UUID is not degraded, it is useless — the opposite trade from blast-radius's
+  fail-open, deliberately). Each statement carries the finding's OPEN component purls as subcomponents;
+  cleared copies stay in the annotation (D13.1), so subcomponents and assertion always agree. DEFERRED,
+  recorded: per-product operator override of the identifier convention. REJECTED: caller-supplied
+  identity (every caller re-derives; two rollups can name one release two ways).
+- **D13.5 — Input is TWO reads; request is a subject union on the existing endpoints; OpenVEX first.**
+  The whole document is a pure function over (a) Governance's release-posture read — which since
+  EDR-VERDICT-01 G1 already carries stance, position version, per-component verdicts, and open_carriers,
+  so NOTHING is added to Governance — and (b) the Registry name read. `POST /publications` and
+  `/previews` accept `release_id` as the alternative to `finding_id` (exactly one; `artifact_type: vex`
+  unchanged); staleness checking is the same posture read diffed against the recorded input set. Format
+  order: OpenVEX (natively multi-statement) → CSAF (COMM-VEX-1b — the product-tree work enterprise
+  consumers ask for) → CycloneDX-VEX; an unsupported rollup format is a clear 400, never a
+  half-document. REJECTED: per-finding fetch (the N+1 release-posture.sh exists to warn against);
+  Communication keeping its own release view via more events (D2 chose read-API-over-replication for
+  exactly this).
+
+Implementation (design-first; code waits for an explicit go, after the current branch stack merges):
+① domain rollup materializer + OpenVEX serializer (pure; reuses the D3 stance mapping; records the
+input set) → ② app/API (subject union, Registry client, fail-closed identity) → ③ worklist staleness
+row. CSAF = COMM-VEX-1b; the Governance hook = GOV-VERDICT-1 (separate item, separate context — the
+rollup works fully without it).
+
 ## Traceability → issues
 
 One issue per implementable decision; each cross-references its decision + ADR. Suggested delivery: an
