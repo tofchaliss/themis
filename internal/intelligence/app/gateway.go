@@ -95,6 +95,17 @@ type Outcome struct {
 	// projection/correlation gap, the second a model/prompt question. Empty unless the
 	// terminal reason is insufficient.
 	DeclineClass string
+	// Output is the model's TERMINAL raw response text — the last provider reply of the
+	// invocation, whatever became of it (accepted, schema-rejected on the final attempt,
+	// grounding-refused). Empty when no LLM step produced text. Telemetry/capture only, never
+	// returned to the caller; redacted at the capture boundary like Detail.
+	//
+	// AI-CAP-2 (measured 2026-09-02): the invocation_log's output_json column, its capture
+	// port field, and its doc comment all existed — and NOTHING ever populated them, on any
+	// path, since Δ4a shipped. Nobody noticed because the eval loop replays from context_json;
+	// the output column was audit data no gate read. This field is the missing wire, and its
+	// capture is asserted by test now, so it cannot silently rot again.
+	Output string
 	// Detail is WHY the outcome ended as it did, in the words of the check that ended it —
 	// telemetry only, never returned to the caller (TRUST-6).
 	//
@@ -134,6 +145,12 @@ func (g *Gateway) captureInvocation(ctx context.Context, oc Outcome, ac domain.A
 	// to leave untested.
 	raw, _ := json.Marshal(ac)
 	contextJSON := []byte(g.redact(string(raw)))
+	// The model's terminal output, redacted like everything that leaves the process; nil (not
+	// "") when no LLM step produced text, so the store keeps the column NULL for non-LLM rows.
+	var outputJSON []byte
+	if oc.Output != "" {
+		outputJSON = []byte(g.redact(oc.Output))
+	}
 	g.capturer.Capture(ctx, CapturedInvocation{
 		CorrelationID: oc.CorrelationID,
 		Capability:    oc.CapabilityID,
@@ -141,6 +158,7 @@ func (g *Gateway) captureInvocation(ctx context.Context, oc Outcome, ac domain.A
 		Model:         oc.Model,
 		Tier:          oc.Tier,
 		ContextJSON:   contextJSON,
+		OutputJSON:    outputJSON,
 		Reason:        oc.Reason,
 		DeclineClass:  oc.DeclineClass,
 		Tokens:        oc.TokensUsed,
@@ -494,6 +512,11 @@ func (g *Gateway) Invoke(
 					return domain.Proposal{}, oc
 				}
 				oc.Provider, oc.Model = res.Provider, res.Model
+				// The terminal raw output for capture (AI-CAP-2): every reply overwrites, so
+				// the LAST one wins — the accepted output on a success, and on a schema-invalid
+				// exit the very reply that failed, which is the diagnostic the retry loop's
+				// Detail cannot carry whole.
+				oc.Output = res.Raw
 				// ACCUMULATE across attempts and tiers (AI-TEL-1): a schema retry or an
 				// escalation is real spend, and telemetry that reports only the final call
 				// under-states an invocation's cost (measured: ~1900+2116 logged as 2116).

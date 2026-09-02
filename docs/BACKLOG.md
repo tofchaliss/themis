@@ -707,13 +707,20 @@ under the 2026-08-07 re-derivation standard.
   include the fix introduced in version 78.1.1" — grounded on the open copy alone, the model
   even adopting the OPEN label vocabulary; the cleared 39.2.0 no longer appears as evidence.
   Same stance, honest grounds.
-- [ ] **AI-CAP-2 — invocation_log.output_json is EMPTY on reason=ok LLM rows (measured
+- [x] **AI-CAP-2 — invocation_log.output_json is EMPTY on reason=ok LLM rows (measured
   2026-09-02: `0a1d2544` recommend_position, model set, rationale delivered, output NULL/'').**
-  LOW, capture-path defect (Δ4a): the schema allows null "on a non-LLM decision" but this WAS
-  an LLM decision — check whether the 2026-08-31 rows share it (pre-dates today's deploy →
-  pre-existing) and where the Decision path's capture diverges from the Information path's.
-  The eval/golden loop promotes from this column, so an empty output is a case that can never
-  become golden.
+  ✅ **FIXED 2026-09-02.** Root cause simpler and older than suspected: NOT a path divergence —
+  the column, the capture port's `OutputJSON` field, and its doc comment all existed since Δ4a
+  shipped, and NOTHING ever populated the field, on ANY path, for ANY capability. Every row
+  ever captured has an empty output. Invisible because the eval loop replays from
+  `context_json` and scores deterministically — the output column was audit data no gate read
+  (the vet-tags lesson in a new costume: what nothing exercises, rots silently). Fix:
+  `Outcome.Output` carries the model's TERMINAL raw reply (last provider response — the
+  accepted output on success, the failing reply on a schema-invalid exit, diagnostic gold the
+  retry loop's Detail cannot carry whole), redacted at the capture boundary; nil (never "")
+  when no LLM ran, so NULL keeps meaning "the model said nothing". Asserted by test now on
+  ok, non-LLM, and schema-invalid paths, so it cannot rot unnoticed again. Historical rows
+  stay empty (nothing to backfill from — the outputs were never recorded).
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**
