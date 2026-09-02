@@ -33,7 +33,20 @@ type MatchedComponent struct {
 	// (a payload predating the field). Knowledge records matches first-wins, so the value is
 	// whoever found the occurrence first.
 	DetectionOrigin string
+	// The occurrence verdict, MIRRORED from Knowledge (EDR-VERDICT-01 D5) — Governance never
+	// re-derives it. `cleared_vendor_fix` says the installed build provably carries the vendor's
+	// fix; anything else — including "" from a row predating the field — reads as open, the
+	// fail-safe direction. Grade (`observed` | `inferred`) is the evidence strength behind a
+	// clearance and Reason its plain-language premise, rendered verbatim by the drawer. This is
+	// the machine's "handled"; a human's "handled" is the Position, and the two never mix.
+	VerdictState  string
+	VerdictGrade  string
+	VerdictReason string
 }
+
+// VerdictIsOpen reports whether this occurrence must be treated as live. Only the affirmative
+// clearance closes it; unknown/missing states are open (EDR-VERDICT-01 D2).
+func (c MatchedComponent) VerdictIsOpen() bool { return c.VerdictState != "cleared_vendor_fix" }
 
 // ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown
 // counts: absence of attribution evidence must never hide a live vulnerability, the same

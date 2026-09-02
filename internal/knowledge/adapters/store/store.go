@@ -35,11 +35,12 @@ const sourceContext = "knowledge"
 // the contract test guard the wire shape so a domain refactor fails the build rather than
 // silently breaking a consumer.
 var schemaRefByEventType = map[string]string{
-	app.EventFaultlineCreated:    "knowledge.faultline_created.v1",
-	app.EventFaultlineEnriched:   "knowledge.faultline_enriched.v1",
-	app.EventFaultlineMatured:    "knowledge.faultline_matured.v1",
-	app.EventFaultlineSuperseded: "knowledge.faultline_superseded.v1",
-	app.EventComponentMatched:    "knowledge.component_matched.v1",
+	app.EventFaultlineCreated:        "knowledge.faultline_created.v1",
+	app.EventFaultlineEnriched:       "knowledge.faultline_enriched.v1",
+	app.EventFaultlineMatured:        "knowledge.faultline_matured.v1",
+	app.EventFaultlineSuperseded:     "knowledge.faultline_superseded.v1",
+	app.EventComponentMatched:        "knowledge.component_matched.v1",
+	app.EventComponentVerdictChanged: "knowledge.component_verdict_changed.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -238,10 +239,26 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 	return nil // the inbox unit of work owns the commit
 }
 
-// RecordMatch records a release-component match idempotently (D3). On a new match it
-// advances the card to Correlated (monotonic — never regressing a mature/superseded
-// card) and queues a ComponentMatched event, all in one transaction. A re-scan of the
-// same occurrence records nothing and emits no duplicate.
+// matchedComponentOf renders one Match as its wire component, verdict included
+// (EDR-VERDICT-01 D5).
+func matchedComponentOf(m app.Match) domain.MatchedComponent {
+	return domain.MatchedComponent{
+		PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version,
+		Ecosystem: m.Component.Ecosystem, Source: m.Component.Source,
+		ClaimClass: m.ClaimClass, DetectionOrigin: m.DetectionOrigin,
+		VerdictState: m.Verdict.State, VerdictGrade: m.Verdict.Grade, VerdictReason: m.Verdict.Reason,
+	}
+}
+
+// RecordMatch records a release-component match idempotently (D3). On a new match it stores
+// the occurrence WITH its verdict (EDR-VERDICT-01 D2), advances the card to Correlated
+// (monotonic — never regressing a mature/superseded card) and queues a ComponentMatched
+// event, all in one transaction.
+//
+// A re-judgement of an EXISTING occurrence never duplicates it: when the verdict state
+// actually changed, the row is updated and a ComponentVerdictChanged event is queued (D6);
+// when only the judged-against card version advanced, the stamp alone is refreshed silently.
+// Rows are never deleted — a clearance is recorded state, not a removal.
 func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 	// Join the inbox unit of work when one rides the context (EB-06); correlation fans out
 	// over an SBOM's components, so every match for one EvidenceRegistered shares one tx.
@@ -253,21 +270,67 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		defer func() { _ = tx.Rollback(ctx) }()
 	}
 
-	ct, err := tx.Exec(ctx, `
-		INSERT INTO faultline_matches
-			(release_id, faultline_id, component_purl, matched_at,
-			 component_name, component_version, component_ecosystem, component_source)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
-		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt,
-		m.Component.Name, m.Component.Version, m.Component.Ecosystem, m.Component.Source)
-	if err != nil {
-		return false, err
+	newState := m.Verdict.State
+	if newState == "" {
+		newState = domain.VerdictOpen // an unjudged caller records a live match, exactly as before
 	}
-	if ct.RowsAffected() == 0 {
+
+	var oldState string
+	var oldStamp int64
+	err = tx.QueryRow(ctx, `
+		SELECT verdict_state, verdict_card_version FROM faultline_matches
+		WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3 FOR UPDATE`,
+		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).Scan(&oldState, &oldStamp)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// New occurrence: insert with its verdict and stamp, advance the card, emit the event.
+	case err != nil:
+		return false, err
+	default:
+		// Existing occurrence. A CHANGE is a semantic one — open became cleared or cleared
+		// re-opened; the empty string a pre-feature row may hold reads as open (D2).
+		if domain.VerdictState(oldState).IsOpen() != newState.IsOpen() {
+			if _, uerr := tx.Exec(ctx, `
+				UPDATE faultline_matches
+				SET verdict_state=$4, verdict_grade=$5, verdict_reason=$6, verdict_card_version=$7
+				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
+				m.ReleaseID, string(m.FaultlineID), m.Component.PURL,
+				string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion); uerr != nil {
+				return false, uerr
+			}
+			changed := domain.ComponentVerdictChanged{
+				FaultlineID: m.FaultlineID, CVE: m.CVE, ReleaseID: m.ReleaseID,
+				Component: matchedComponentOf(m), OccurredAt: m.OccurredAt.UTC(),
+			}
+			if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
+				return false, qerr
+			}
+		} else if int64(m.CardVersion) > oldStamp {
+			// Same conclusion against a newer card: refresh the stamp so the catch-up sweep
+			// does not re-judge a row that is already current. No event — nothing changed.
+			if _, uerr := tx.Exec(ctx, `
+				UPDATE faultline_matches SET verdict_card_version=$4
+				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
+				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.CardVersion); uerr != nil {
+				return false, uerr
+			}
+		}
 		if own {
 			return false, tx.Commit(ctx) // already matched — idempotent
 		}
 		return false, nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO faultline_matches
+			(release_id, faultline_id, component_purl, matched_at,
+			 component_name, component_version, component_ecosystem, component_source,
+			 verdict_state, verdict_grade, verdict_reason, verdict_card_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt,
+		m.Component.Name, m.Component.Version, m.Component.Ecosystem, m.Component.Source,
+		string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion); err != nil {
+		return false, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -281,24 +344,13 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		// Source rides along (AI-GROUND-1): it is already on the inventory component and was
 		// being dropped here, which left every downstream consumer unable to tell which of a
 		// card's fix versions belongs to this component.
-		Components: []domain.MatchedComponent{{
-			PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version,
-			Ecosystem: m.Component.Ecosystem, Source: m.Component.Source,
-			ClaimClass: m.ClaimClass, DetectionOrigin: m.DetectionOrigin,
-		}},
+		Components: []domain.MatchedComponent{matchedComponentOf(m)},
 		Score:      m.Score,
 		Priority:   m.Priority,
 		Fixes:      append([]domain.FixedVersion(nil), m.Fixes...),
 		OccurredAt: m.OccurredAt.UTC(),
 	}
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		uuid.NewString(), sourceContext, string(m.FaultlineID), app.EventComponentMatched, schemaRefFor(app.EventComponentMatched), string(m.FaultlineID), string(payload), m.OccurredAt); err != nil {
+	if err := s.queueOutbox(ctx, tx, app.EventComponentMatched, string(m.FaultlineID), event, m.OccurredAt); err != nil {
 		return false, err
 	}
 
@@ -306,6 +358,20 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		return true, tx.Commit(ctx)
 	}
 	return true, nil // the inbox unit of work owns the commit
+}
+
+// queueOutbox marshals one integration event into the knowledge outbox inside the caller's
+// transaction.
+func (s *Store) queueOutbox(ctx context.Context, tx pgx.Tx, eventType, subject string, event any, at time.Time) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO knowledge_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		uuid.NewString(), sourceContext, subject, eventType, schemaRefFor(eventType), subject, string(payload), at)
+	return err
 }
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint violation

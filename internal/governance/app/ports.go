@@ -67,6 +67,11 @@ type Repository interface {
 	// SetSignals materializes the current exploitability picture onto the Faultline's Findings, so
 	// a decision taken later records the premise it rested on (GOV-14b).
 	SetSignals(ctx context.Context, faultlineID string, sig domain.ExploitSignals) error
+	// SetComponentVerdict mirrors a re-judged occurrence verdict onto the matching component
+	// row of the (Release, Faultline) Finding (EDR-VERDICT-01 D5) — denormalized read-data
+	// Knowledge owns, like SetBaseScore. A missing Finding or component row is a no-op: the
+	// ComponentMatched that creates the row carries the same verdict.
+	SetComponentVerdict(ctx context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error
 	// SetBandAndFixes materializes the exploitability band and the SELECTED fix versions onto one
 	// Finding, so a release rollup carries both without a read per row (DASH-2 / PLAN-3).
 	SetBandAndFixes(ctx context.Context, findingID, band string, fixes []FixedVersion) error

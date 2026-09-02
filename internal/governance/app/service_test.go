@@ -19,6 +19,7 @@ type fakeRepo struct {
 	setBandErr     error
 	lastFixes      []app.FixedVersion
 	lastSignals    domain.ExploitSignals
+	lastVerdict    domain.MatchedComponent
 	byID           map[domain.FindingID]domain.Finding
 	order          []domain.FindingID
 	saveCalls      int
@@ -52,6 +53,28 @@ func (r *fakeRepo) SetBaseScore(_ context.Context, fl string, score int) error {
 		r.baseScores = map[string]int{}
 	}
 	r.baseScores[fl] = score
+	return nil
+}
+
+// SetComponentVerdict mirrors the real store: it applies the verdict to the matching
+// component row of the (Release, Faultline) Finding; a missing Finding or row is a no-op
+// (EDR-VERDICT-01 D5).
+func (r *fakeRepo) SetComponentVerdict(_ context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error {
+	r.lastVerdict = comp
+	for id, f := range r.byID {
+		if f.ReleaseID() != releaseID || f.FaultlineID() != faultlineID {
+			continue
+		}
+		comps := f.Components()
+		for i := range comps {
+			if comps[i].PURL == comp.PURL {
+				comps[i].VerdictState, comps[i].VerdictGrade, comps[i].VerdictReason =
+					comp.VerdictState, comp.VerdictGrade, comp.VerdictReason
+			}
+		}
+		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+			comps, f.Stage(), f.Proposals(), f.Positions(), f.Version(), f.Signals())
+	}
 	return nil
 }
 

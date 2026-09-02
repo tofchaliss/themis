@@ -3,27 +3,35 @@
 Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group ends with
 `make vet-tags` green (tagged files rot silently otherwise) and phase completion gates on `make check`.
 
-## Group 1 — Phase 1: the record book (D1, D2, D5, D7)
+## Group 1 — Phase 1: the record book (D1, D2, D5, D7) — ✅ implemented 2026-09-02
 
-- [ ] 1.1 Knowledge domain: occurrence verdict value object (`open` / `cleared_vendor_fix` + grade
+- [x] 1.1 Knowledge domain: occurrence verdict value object (`open` / `cleared_vendor_fix` + grade
       `observed`/`inferred` + reason); missing/unknown reads as `open` everywhere.
-- [ ] 1.2 Knowledge migration: `verdict_state` / `verdict_grade` / `verdict_reason` /
-      `verdict_card_version` on `faultline_matches` (+ down migration; reversibility gate).
-- [ ] 1.3 Unify intake: `judgeOccurrence` seam in the app ring; `ApplyCorrelation` records
-      fixed-verdict outcomes as cleared rows instead of `continue`; `ApplyIngest` judges scanner
-      occurrences through the same seam (range-rejected candidates still never record).
-- [ ] 1.4 `RecordMatch` upsert: state fields update on conflict; rows never deleted; store tests incl.
-      pre-feature default rows reading as `open`.
-- [ ] 1.5 Events: additive state/grade/reason on `ComponentMatched` (schema declared);
-      `knowledge.component_verdict_changed.v1` envelope + schema.
-- [ ] 1.6 Governance migration: mirror columns on `finding_components` (+ down); consumer upserts both
-      events; unknown state → `open`.
-- [ ] 1.7 Governance queue derivation: open-carrier set drives priority (full value, cleared contribute
-      zero) and queue membership; projection tests for the measured shape (1 cleared + 1 open carrier →
-      queued at full urgency; all-cleared → off queue).
-- [ ] 1.8 Read APIs (knowledge + governance): expose state/grade/reason per component (spec-first;
-      regenerate).
-- [ ] 1.9 `make vet-tags` + `make check` green.
+      (`internal/knowledge/domain/verdict.go`)
+- [x] 1.2 Knowledge migration `000007_match_verdict`: `verdict_state` / `verdict_grade` /
+      `verdict_reason` / `verdict_card_version` on `faultline_matches` (+ down). Pre-feature rows
+      default `'open'`@stamp 0 — the catch-up sweep's target.
+- [x] 1.3 Unify intake: `judgeOccurrence` seam (`app/verdict.go`) shared by `ApplyCorrelation`
+      and `ApplyIngest`; fixed-verdict outcomes recorded as cleared rows instead of `continue`;
+      range-rejected candidates still never record (they were never matches).
+- [x] 1.4 `RecordMatch`: select-then-record; a semantic state CHANGE updates the row + emits
+      `ComponentVerdictChanged`; a confirming re-judgement refreshes the stamp silently; rows
+      never deleted. Integration test `TestRecordMatch_VerdictLifecycle`.
+- [x] 1.5 Events: additive VerdictState/Grade/Reason on `ComponentMatched` (schema updated);
+      `knowledge.component_verdict_changed.v1` event + schema + contract-test cases.
+- [x] 1.6 Governance migration `000012_component_verdict`: mirror columns on `finding_components`
+      (+ down); consumer dispatches both events; empty replayed state never blanks a recorded one
+      (upsert CASE guard); unknown state reads `open`. `Store.SetComponentVerdict` mirrors
+      re-judgements in place (miss = no-op). Integration test `TestComponentVerdictMirror`.
+- [x] 1.7 Governance queue derivation (D7): `OpenCarriers` per posture entry; one live carrier →
+      FULL priority; components present + zero open carriers → effective/residual 0 (off the
+      ranked queue); no component rows → untouched (missing evidence never clears).
+      `TestReleasePosture_QueueDerivesFromOpenCarriers` encodes the measured MRF shape.
+- [x] 1.8 Read API: governance Component gains `verdict_state`/`verdict_grade`/`verdict_reason`,
+      PostureEntry gains `open_carriers` (spec-first, regenerated). CORRECTION to the scaffold:
+      Knowledge's read API exposes no matches/components surface, so there is nothing to extend
+      there — the occurrence surface is Governance's, where the components already live.
+- [x] 1.9 `make vet-tags` + `make check` green (domain/app rings at 100% both contexts).
 
 ## Group 2 — Phase 2: the ownership bridge (D3, D4, D8-read)
 

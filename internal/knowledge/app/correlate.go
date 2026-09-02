@@ -62,7 +62,14 @@ type Match struct {
 	// DetectionOrigin is which engine produced this match — `discovery` or `scanner/<name>`
 	// (KN-SCAN-2). Provenance for display, never authority; see domain.MatchedComponent.
 	DetectionOrigin string
-	OccurredAt      time.Time
+	// Verdict is what judgeOccurrence concluded about this occurrence (EDR-VERDICT-01 D2):
+	// recorded alongside the match, never a reason to drop it. A cleared occurrence is a
+	// visible "checked and fine" row.
+	Verdict domain.OccurrenceVerdict
+	// CardVersion is the card version this occurrence was judged against (the D6 re-verdict
+	// stamp); the catch-up sweep re-judges rows whose stamp is behind their card.
+	CardVersion int
+	OccurredAt  time.Time
 }
 
 // OriginDiscovery is the DetectionOrigin of every feed-correlation match, including the
@@ -205,36 +212,18 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
 			continue
 		}
-		// Vendor fixed-verdict (EDR-VEX-01 Phase 3): for an rpm component, if the installed build
-		// is at or above a same-EL-stream vendor fix (Red Hat/Rocky/Alma), the backported fix is
-		// present and this occurrence is NOT affected — drop the match.
-		//
-		// The fixes are looked up BY PACKAGE (KN-FIX-1). The view's flat FixedVersions is a union
-		// across every package the CVE affects, so comparing an installed build against it could
-		// satisfy the verdict using a DIFFERENT package's fix and silently drop a live
-		// vulnerability. Measured on a live release: 31 real occurrences disappeared that way,
-		// mostly python3-ply@3.9 and python3-pyyaml@3.12 clearing CPython's 3.6.8 fixes.
-		//
-		// FixesFor aggregates every source's fix for THIS package and excludes unattributed ones,
-		// so the verdict rests on evidence about this component and nothing else.
-		if fixes := f.View().FixesFor(componentPackage(item.Component), item.Component.Ecosystem); len(fixes) > 0 &&
-			value.RPMFixedByStream(item.Component.Ecosystem, item.Component.Version, fixes) {
-			continue
-		}
-		// The apk analogue (EDR-VEX-01 D9): an apk build at/above EVERY strictly-stamped apk
-		// bound for its package carries its branch's fix and is NOT affected. Two deliberate
-		// differences from the rpm line: the bound set is the STRICT selection (an unstamped
-		// foreign bound on a shared card neither proves nor blocks — fail-open is for display,
-		// fail-closed is for verdicts), and soundness comes from the max-bound rule rather than
-		// stream markers, because an apk version names no branch for a compare to scope to.
-		if bounds := f.View().StrictFixesFor(componentPackage(item.Component), item.Component.Ecosystem); len(bounds) > 0 &&
-			value.APKFixedByBounds(item.Component.Ecosystem, item.Component.Version, bounds) {
-			continue
-		}
+		// The occurrence verdict (EDR-VERDICT-01 D2): the vendor fixed-verdicts — the rpm
+		// same-EL-stream rule (EDR-VEX-01 Phase 3) and the apk strict-bounds rule (D9) — run in
+		// judgeOccurrence, shared with the scanner path. A cleared occurrence is RECORDED as
+		// cleared, not dropped: "checked and fine" must be distinguishable from "never looked"
+		// (the two were indistinguishable in the live KN-VERDICT-1 investigation), and a
+		// recorded row is what a later re-judgement can revisit.
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, Score: f.View().Score(),
 			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			Verdict:     judgeOccurrence(f.View(), item.Component),
+			CardVersion: f.Version(),
 			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
 			// recorded either way — D2 keeps everything, because an old build inside a superseded
 			// stream genuinely does need replacing. What changes is what a consumer may SAY about

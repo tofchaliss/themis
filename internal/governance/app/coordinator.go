@@ -100,6 +100,24 @@ func (c *Coordinator) OnComponentMatched(ctx context.Context, m InboundComponent
 	return err
 }
 
+// InboundComponentVerdictChanged is one existing occurrence whose verdict state changed on a
+// Knowledge re-judgement (EDR-VERDICT-01 D5/D6). The component carries the NEW state.
+type InboundComponentVerdictChanged struct {
+	FaultlineID string
+	ReleaseID   string
+	Component   domain.MatchedComponent
+}
+
+// OnComponentVerdictChanged mirrors a re-judged occurrence verdict onto the Finding's
+// component row (D5). Governance never re-derives the verdict and never decides anything
+// here — queue membership and priority re-derive from the mirrored state at read time (D7),
+// and human decisions stay Positions. A change for a Finding that does not exist (the match
+// predates Governance, or arrived out of order) is a no-op, not an error: the ComponentMatched
+// that creates it carries the same verdict.
+func (c *Coordinator) OnComponentVerdictChanged(ctx context.Context, m InboundComponentVerdictChanged) error {
+	return c.svc.MirrorComponentVerdict(ctx, m.ReleaseID, m.FaultlineID, m.Component)
+}
+
 // OnFaultlineEnriched re-evaluates the affected Findings — raising a system proposal +
 // flagging for review, never auto-deciding (D6).
 func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlineEnriched) error {

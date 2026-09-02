@@ -27,6 +27,10 @@ type memRepo struct {
 	byID        map[domain.FindingID]domain.Finding
 	order       []domain.FindingID
 	baseScores  map[string]int
+
+	lastVerdictRelease   string
+	lastVerdictFaultline string
+	lastVerdict          domain.MatchedComponent
 }
 
 func (r *memRepo) SetBaseScore(_ context.Context, fl string, score int) error {
@@ -39,6 +43,11 @@ func (r *memRepo) SetBaseScore(_ context.Context, fl string, score int) error {
 
 func (r *memRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
 	r.lastSignals = sig
+	return nil
+}
+
+func (r *memRepo) SetComponentVerdict(_ context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error {
+	r.lastVerdictRelease, r.lastVerdictFaultline, r.lastVerdict = releaseID, faultlineID, comp
 	return nil
 }
 
@@ -137,6 +146,39 @@ func TestConsumer_ComponentMatched(t *testing.T) {
 	}
 }
 
+// The verdict rides ComponentMatched additively and the change event dispatches to the
+// mirror (EDR-VERDICT-01 D5): Governance stores what Knowledge concluded, verbatim, and
+// re-derives nothing.
+func TestConsumer_ComponentMatchedCarriesVerdict(t *testing.T) {
+	repo := newMemRepo()
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2025-47273","ReleaseID":"rel-1",
+		"Components":[{"PURL":"pkg:pypi/setuptools@39.2.0","Name":"setuptools","Version":"39.2.0","Ecosystem":"pypi",
+		"VerdictState":"cleared_vendor_fix","VerdictGrade":"observed","VerdictReason":"vendor fix present"}]}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.component_matched", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	c := repo.byID[repo.order[0]].Components()[0]
+	if c.VerdictState != "cleared_vendor_fix" || c.VerdictGrade != "observed" || c.VerdictReason != "vendor fix present" {
+		t.Errorf("component verdict = %q/%q/%q, want the mirrored clearance", c.VerdictState, c.VerdictGrade, c.VerdictReason)
+	}
+}
+
+func TestConsumer_ComponentVerdictChanged(t *testing.T) {
+	repo := newMemRepo()
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2025-47273","ReleaseID":"rel-1",
+		"Component":{"PURL":"pkg:pypi/setuptools@39.2.0","Name":"setuptools","Version":"39.2.0","Ecosystem":"pypi",
+		"VerdictState":"cleared_vendor_fix","VerdictGrade":"inferred","VerdictReason":"matched to python-setuptools at the distro version"}}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.component_verdict_changed", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if repo.lastVerdictRelease != "rel-1" || repo.lastVerdictFaultline != "fl-1" {
+		t.Errorf("mirror keyed to %s/%s, want rel-1/fl-1", repo.lastVerdictRelease, repo.lastVerdictFaultline)
+	}
+	if repo.lastVerdict.VerdictState != "cleared_vendor_fix" || repo.lastVerdict.VerdictGrade != "inferred" {
+		t.Errorf("mirrored verdict = %+v, want the inferred clearance", repo.lastVerdict)
+	}
+}
+
 func TestConsumer_FaultlineEnriched(t *testing.T) {
 	repo := newMemRepo()
 	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
@@ -231,7 +273,7 @@ func TestConsumer_UnknownTypeIgnored(t *testing.T) {
 func TestConsumer_MalformedPayloads(t *testing.T) {
 	repo := newMemRepo()
 	c := consumer(repo)
-	for _, evt := range []string{"knowledge.component_matched", "knowledge.faultline_enriched", "knowledge.faultline_superseded"} {
+	for _, evt := range []string{"knowledge.component_matched", "knowledge.component_verdict_changed", "knowledge.faultline_enriched", "knowledge.faultline_superseded"} {
 		if err := c.Handle(context.Background(), mkEnv(evt, []byte("{not json"))); err == nil {
 			t.Errorf("%s: malformed payload should error", evt)
 		}

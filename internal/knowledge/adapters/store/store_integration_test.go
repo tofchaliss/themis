@@ -543,6 +543,74 @@ func TestRecordMatch(t *testing.T) {
 	}
 }
 
+// The occurrence-verdict lifecycle on one match row (EDR-VERDICT-01 D2/D6): recorded with its
+// verdict and stamp; a re-judgement that CHANGES the state updates the row and emits
+// ComponentVerdictChanged; one that confirms it advances the stamp silently; the row is never
+// duplicated and never deleted.
+func TestRecordMatch_VerdictLifecycle(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-47"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2024-47",
+		Component:  app.InventoryComponent{PURL: "pkg:rpm/rhel/openssl@1.0.2k-10.el8", Version: "1.0.2k-10.el8", Ecosystem: "rpm"},
+		Verdict:    domain.OpenVerdict(),
+		CardVersion: 1, OccurredAt: time.Now().UTC(),
+	}
+	if created, err := st.RecordMatch(ctx, m); err != nil || !created {
+		t.Fatalf("first match: created=%v err=%v", created, err)
+	}
+	var state string
+	var stamp int64
+	row := func() {
+		t.Helper()
+		if err := pool.QueryRow(ctx,
+			"SELECT verdict_state, verdict_card_version FROM faultline_matches WHERE component_purl=$1",
+			m.Component.PURL).Scan(&state, &stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row()
+	if state != "open" || stamp != 1 {
+		t.Fatalf("recorded verdict = %s@%d, want open@1", state, stamp)
+	}
+
+	// Re-judged against a newer card with the SAME conclusion: stamp advances, no event.
+	m.CardVersion = 3
+	if created, err := st.RecordMatch(ctx, m); err != nil || created {
+		t.Fatalf("stamp refresh: created=%v err=%v, want false/nil", created, err)
+	}
+	row()
+	if state != "open" || stamp != 3 {
+		t.Errorf("after confirm = %s@%d, want open@3", state, stamp)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 0 {
+		t.Errorf("verdict events after a confirming re-judgement = %d, want 0", n)
+	}
+
+	// A re-judgement that CHANGES the state: row updated in place, ONE change event queued.
+	m.CardVersion = 4
+	m.Verdict = domain.ClearedVendorFix(domain.VerdictGradeObserved, "vendor fix 1.0.2k-16.el8 present")
+	if created, err := st.RecordMatch(ctx, m); err != nil || created {
+		t.Fatalf("re-judgement: created=%v err=%v, want false/nil (no new row)", created, err)
+	}
+	row()
+	if state != "cleared_vendor_fix" || stamp != 4 {
+		t.Errorf("after clearance = %s@%d, want cleared_vendor_fix@4", state, stamp)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM faultline_matches"); n != 1 {
+		t.Errorf("match rows = %d, want 1 — a re-judgement must never duplicate the occurrence", n)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 1 {
+		t.Errorf("ComponentVerdictChanged events = %d, want exactly 1", n)
+	}
+}
+
 func TestCVEsNeedingRefresh(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()

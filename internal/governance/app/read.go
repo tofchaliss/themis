@@ -76,6 +76,13 @@ type PostureEntry struct {
 	// card's cross-package union (AI-GROUND-1). Carried so a release-scoped plan can say what to
 	// upgrade TO without a per-Finding read (PLAN-3).
 	Fixes []FixedVersion
+	// OpenCarriers counts the carrier occurrences whose verdict is still open (EDR-VERDICT-01
+	// D7) — the number that decides whether this Finding is still in the queue. Scope-class
+	// rows never count (they are rebuild obligations, not vulnerability claims), and a missing
+	// verdict counts as open (fail-safe). When every carrier occurrence is cleared, the
+	// priorities below read 0 and the Finding leaves the ranked queue — that is where the
+	// noise reduction comes from, never from discounting live occurrences.
+	OpenCarriers int
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads
@@ -184,8 +191,33 @@ func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]P
 		// diverge once a governed decision exists to divide them.
 		entries[i].ResidualPriority = domain.ResidualPriority(
 			entries[i].EffectivePriority, domain.StanceWeight(entries[i].Stance, s.mitigatedWeight))
+		// Queue derivation from the occurrence verdicts (EDR-VERDICT-01 D7): priority comes
+		// from the OPEN carrier occurrences only, at full value — one live occurrence keeps
+		// the Finding at full urgency however many cleared rows sit beside it, and only a
+		// Finding with components on record and NONE of them open reads 0 and leaves the
+		// ranked queue. A Finding with no component rows at all (older data) keeps its
+		// priority untouched: missing evidence must never clear anything.
+		entries[i].OpenCarriers = openCarriers(entries[i].Components)
+		if len(entries[i].Components) > 0 && entries[i].OpenCarriers == 0 {
+			entries[i].EffectivePriority = 0
+			entries[i].ResidualPriority = 0
+		}
 	}
 	return entries, nil
+}
+
+// openCarriers counts the carrier occurrences still open (EDR-VERDICT-01 D7). Scope-class
+// rows are rebuild obligations, not vulnerability claims, so they neither hold a Finding in
+// the queue nor release it; unknown claim classes act as carrier and unknown verdicts as
+// open — both fail-safe directions this codebase already committed to.
+func openCarriers(comps []domain.MatchedComponent) int {
+	n := 0
+	for _, c := range comps {
+		if c.ActsAsCarrier() && c.VerdictIsOpen() {
+			n++
+		}
+	}
+	return n
 }
 
 // FaultlineBlastRadius returns the Releases affected by a Faultline (D10).

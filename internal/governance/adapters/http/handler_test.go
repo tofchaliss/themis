@@ -69,6 +69,10 @@ func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Findi
 
 func (r *fakeRepo) SetBaseScore(context.Context, string, int) error { return nil }
 
+func (r *fakeRepo) SetComponentVerdict(context.Context, string, string, domain.MatchedComponent) error {
+	return nil
+}
+
 func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
 	r.lastSignals = sig
 	return nil

@@ -80,9 +80,22 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 			Components: []domain.MatchedComponent{{
 				PURL: "pkg:deb/debian/openssl@3.0.11", Name: "openssl", Version: "3.0.11", Ecosystem: "deb",
 				Source: "openssl", ClaimClass: domain.ClaimCarrier, DetectionOrigin: "scanner/trivy",
+				VerdictState: domain.VerdictClearedVendorFix, VerdictGrade: domain.VerdictGradeObserved,
+				VerdictReason: "vendor fix 3.0.12 present",
 			}},
 			Score: 72, Priority: "high",
 			Fixes:      []domain.FixedVersion{{Package: "openssl", Version: "3.0.12", Ecosystem: "deb"}},
+			OccurredAt: now,
+		}},
+		{app.EventComponentVerdictChanged, domain.ComponentVerdictChanged{
+			FaultlineID: "fl-1", CVE: "CVE-2024-1", ReleaseID: "rel-1",
+			Component: domain.MatchedComponent{
+				PURL: "pkg:rpm/rocky/python3-setuptools@39.2.0-9.el8_10", Name: "python3-setuptools",
+				Version: "39.2.0-9.el8_10", Ecosystem: "rpm", Source: "python-setuptools",
+				ClaimClass: domain.ClaimCarrier, DetectionOrigin: "discovery",
+				VerdictState: domain.VerdictClearedVendorFix, VerdictGrade: domain.VerdictGradeObserved,
+				VerdictReason: "vendor fix 0:39.2.0-9.el8_10 present: installed 39.2.0-9.el8_10 is at/above the same-stream bound for python-setuptools",
+			},
 			OccurredAt: now,
 		}},
 	}

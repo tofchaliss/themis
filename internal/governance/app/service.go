@@ -161,6 +161,15 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 // path for a Finding; a new Finding starts Identified with no Position, emitting
 // FindingOpened. Re-delivery is idempotent: an existing Finding absorbs only new components
 // and, if nothing changed, performs no write. Retries on optimistic-concurrency conflicts.
+// MirrorComponentVerdict writes a re-judged occurrence verdict onto the Finding's component
+// row (EDR-VERDICT-01 D5). Pure mirroring: Knowledge computed the verdict where the card's
+// fixes and comparators live; Governance stores the copy its queue derivation reads (D7).
+// It never touches the Position — the machine's "the fix is installed" and a human's "we
+// accept this" are different books, kept apart.
+func (s *FindingService) MirrorComponentVerdict(ctx context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error {
+	return s.repo.SetComponentVerdict(ctx, releaseID, faultlineID, comp)
+}
+
 func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, in OpenFindingInput) (domain.FindingID, error) {
 	releaseID, faultlineID, cve, comps := in.ReleaseID, in.FaultlineID, in.CVE, in.Components
 	baseScore := in.BaseScore

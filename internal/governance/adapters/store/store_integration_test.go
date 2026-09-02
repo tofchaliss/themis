@@ -171,6 +171,63 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// The verdict mirror columns (EDR-VERDICT-01 D5): the verdict rides the component upsert,
+// survives the round-trip, an EMPTY replayed state never blanks a recorded one, and
+// SetComponentVerdict re-points the row in place — including a clearance flipping back to
+// open — while a miss (unknown key or purl) is a silent no-op.
+func TestComponentVerdictMirror(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	f := newFinding(t, "fnd-1", "rel-1", "fl-1", "CVE-2025-47273")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi",
+		VerdictState: "cleared_vendor_fix", VerdictGrade: "inferred", VerdictReason: "matched to python-setuptools"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := st.GetByID(ctx, "fnd-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if c := got.Components()[0]; c.VerdictState != "cleared_vendor_fix" || c.VerdictGrade != "inferred" || c.VerdictReason != "matched to python-setuptools" {
+		t.Errorf("round-trip verdict = %+v", c)
+	}
+
+	// A replayed older payload (empty verdict) must not blank the recorded clearance.
+	f2, _, _ := load(t, st, "fnd-1")
+	if _, err := f2.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi"}); err == nil {
+		_ = st.Save(ctx, f2, false, f2.Version(), nil)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT verdict_state FROM finding_components WHERE purl=$1", "pkg:pypi/setuptools@39.2.0").Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "cleared_vendor_fix" {
+		t.Errorf("after empty replay = %q, want the recorded clearance kept", state)
+	}
+
+	// The mirror write: a re-judgement flips the clearance back to open, in place.
+	if err := st.SetComponentVerdict(ctx, "rel-1", "fl-1", domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", VerdictState: "open", VerdictReason: "bounds withdrawn"}); err != nil {
+		t.Fatalf("set verdict: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT verdict_state FROM finding_components WHERE purl=$1", "pkg:pypi/setuptools@39.2.0").Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "open" {
+		t.Errorf("after mirror = %q, want open", state)
+	}
+	// A miss is a no-op, never an error (the creating ComponentMatched carries the verdict).
+	if err := st.SetComponentVerdict(ctx, "rel-ghost", "fl-ghost", domain.MatchedComponent{PURL: "pkg:none"}); err != nil {
+		t.Errorf("miss must be a no-op, got %v", err)
+	}
+}
+
 func TestDecisionRoundTrip(t *testing.T) {
 	pool := newPool(t)
 	st := store.New(pool)

@@ -141,6 +141,13 @@ type MatchedComponent struct {
 	//
 	// Additive/omitempty: an older payload decodes to "", which a consumer shows as unknown.
 	DetectionOrigin string `json:"DetectionOrigin,omitempty"`
+	// The occurrence verdict (EDR-VERDICT-01 D2/D5): what the fixed-verdict machinery concluded
+	// about THIS occurrence, with the evidence grade and plain-language premise. Additive /
+	// omitempty: an older payload decodes to "", which every consumer reads as open — the
+	// fail-safe direction.
+	VerdictState  VerdictState  `json:"VerdictState,omitempty"`
+	VerdictGrade  VerdictGrade  `json:"VerdictGrade,omitempty"`
+	VerdictReason string        `json:"VerdictReason,omitempty"`
 }
 
 // ComponentMatched is the correlation output (D3/D8): a release's component matches a
@@ -171,6 +178,20 @@ type ComponentMatched struct {
 	Priority   string         `json:"Priority,omitempty"`
 	Fixes      []FixedVersion `json:"Fixes,omitempty"`
 	OccurredAt time.Time
+}
+
+// ComponentVerdictChanged records that an EXISTING occurrence's verdict state changed — a
+// later re-judgement (new fix bounds folding onto the card, the catch-up sweep) reached a
+// different conclusion than the one on record (EDR-VERDICT-01 D5/D6). It is emitted only on a
+// real state change, never on a re-judgement that confirms what is already recorded, and it
+// never deletes anything: Governance mirrors the new state onto its component row and
+// re-derives queue membership.
+type ComponentVerdictChanged struct {
+	FaultlineID FaultlineID
+	CVE         string
+	ReleaseID   string
+	Component   MatchedComponent
+	OccurredAt  time.Time
 }
 
 // NewFaultlineCreated builds the event for a newly created card.

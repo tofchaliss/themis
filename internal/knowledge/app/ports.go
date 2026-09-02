@@ -20,6 +20,9 @@ const (
 	EventFaultlineMatured    = "knowledge.faultline_matured"
 	EventFaultlineSuperseded = "knowledge.faultline_superseded"
 	EventComponentMatched    = "knowledge.component_matched"
+	// EventComponentVerdictChanged — an EXISTING occurrence's verdict state changed on a
+	// re-judgement (EDR-VERDICT-01 D5/D6). Emitted only on a real state change.
+	EventComponentVerdictChanged = "knowledge.component_verdict_changed"
 )
 
 // OutboxNote is one integration event queued for delivery in the aggregate's own

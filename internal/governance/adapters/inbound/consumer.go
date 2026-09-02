@@ -20,9 +20,10 @@ import (
 // Knowledge integration-event type identifiers Governance consumes (mirrors
 // EDR-KNOWLEDGE-01 D8). These are the wire contract, not a shared package.
 const (
-	eventComponentMatched    = "knowledge.component_matched"
-	eventFaultlineEnriched   = "knowledge.faultline_enriched"
-	eventFaultlineSuperseded = "knowledge.faultline_superseded"
+	eventComponentMatched        = "knowledge.component_matched"
+	eventComponentVerdictChanged = "knowledge.component_verdict_changed"
+	eventFaultlineEnriched       = "knowledge.faultline_enriched"
+	eventFaultlineSuperseded     = "knowledge.faultline_superseded"
 )
 
 // Subscription declares Governance's bus binding (EB-07 / D7): it consumes the Knowledge
@@ -32,7 +33,7 @@ const (
 var Subscription = eventbus.Subscription{
 	Consumer: "governance",
 	Stream:   "knowledge",
-	Interest: []string{eventComponentMatched, eventFaultlineEnriched, eventFaultlineSuperseded},
+	Interest: []string{eventComponentMatched, eventComponentVerdictChanged, eventFaultlineEnriched, eventFaultlineSuperseded},
 }
 
 // Consumer translates raw Knowledge events into coordinator calls.
@@ -56,6 +57,14 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 			return err
 		}
 		return c.coord.OnComponentMatched(ctx, dto.toInbound())
+	case eventComponentVerdictChanged:
+		var dto componentVerdictChangedDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return err
+		}
+		return c.coord.OnComponentVerdictChanged(ctx, app.InboundComponentVerdictChanged{
+			FaultlineID: dto.FaultlineID, ReleaseID: dto.ReleaseID, Component: dto.Component.toDomain(),
+		})
 	case eventFaultlineEnriched:
 		var dto faultlineEnrichedDTO
 		if err := json.Unmarshal(env.Payload, &dto); err != nil {
@@ -119,20 +128,39 @@ type componentDTO struct {
 	// DetectionOrigin — `discovery` | `scanner/<name>` | "" (unknown, on payloads predating
 	// KN-SCAN-2). Display provenance only; carried, never acted on.
 	DetectionOrigin string `json:"DetectionOrigin"`
+	// The occurrence verdict, mirrored as-is (EDR-VERDICT-01 D5). Absent on payloads predating
+	// the field, which decodes to "" and reads as open — the fail-safe direction.
+	VerdictState  string `json:"VerdictState"`
+	VerdictGrade  string `json:"VerdictGrade"`
+	VerdictReason string `json:"VerdictReason"`
+}
+
+func (c componentDTO) toDomain() domain.MatchedComponent {
+	return domain.MatchedComponent{
+		PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
+		ClaimClass: c.ClaimClass, DetectionOrigin: c.DetectionOrigin,
+		VerdictState: c.VerdictState, VerdictGrade: c.VerdictGrade, VerdictReason: c.VerdictReason,
+	}
 }
 
 func (d componentMatchedDTO) toInbound() app.InboundComponentMatched {
 	comps := make([]domain.MatchedComponent, 0, len(d.Components))
 	for _, c := range d.Components {
-		comps = append(comps, domain.MatchedComponent{
-			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
-			ClaimClass: c.ClaimClass, DetectionOrigin: c.DetectionOrigin,
-		})
+		comps = append(comps, c.toDomain())
 	}
 	return app.InboundComponentMatched{
 		FaultlineID: d.FaultlineID, CVE: d.CVE, ReleaseID: d.ReleaseID, Score: d.Score,
 		Band: d.Priority, Fixes: toAppFixes(d.Fixes), Components: comps,
 	}
+}
+
+// componentVerdictChangedDTO mirrors Knowledge's ComponentVerdictChanged wire JSON
+// (EDR-VERDICT-01 D5/D6): one existing occurrence whose verdict state changed.
+type componentVerdictChangedDTO struct {
+	FaultlineID string       `json:"FaultlineID"`
+	CVE         string       `json:"CVE"`
+	ReleaseID   string       `json:"ReleaseID"`
+	Component   componentDTO `json:"Component"`
 }
 
 type faultlineEnrichedDTO struct {

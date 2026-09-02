@@ -117,7 +117,9 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
 	rows, err := s.querier(ctx).Query(ctx,
-		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
+		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin,
+		        verdict_state, verdict_grade, verdict_reason
+		 FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +128,8 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	var out []domain.MatchedComponent
 	for rows.Next() {
 		var c domain.MatchedComponent
-		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin); err != nil {
+		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin,
+			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -280,8 +283,9 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding) error {
 	for _, c := range f.Components() {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem, source, claim_class, detection_origin)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			INSERT INTO finding_components (finding_id, purl, name, version, ecosystem, source, claim_class, detection_origin,
+			                                verdict_state, verdict_grade, verdict_reason)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 			ON CONFLICT (finding_id, purl) DO UPDATE SET
 				source = CASE WHEN finding_components.source = '' THEN EXCLUDED.source ELSE finding_components.source END,
 				-- A later, better-attributed classification may arrive once NVD has enriched the
@@ -290,8 +294,16 @@ func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding)
 				-- First-wins, like source: Knowledge records one match per occurrence, so a
 				-- non-empty origin only ever arrives once — but an empty one (an older payload
 				-- replayed) must never blank a recorded origin.
-				detection_origin = CASE WHEN finding_components.detection_origin = '' THEN EXCLUDED.detection_origin ELSE finding_components.detection_origin END`,
-			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem, c.Source, c.ClaimClass, c.DetectionOrigin); err != nil {
+				detection_origin = CASE WHEN finding_components.detection_origin = '' THEN EXCLUDED.detection_origin ELSE finding_components.detection_origin END,
+				-- The verdict mirror (EDR-VERDICT-01 D5): Knowledge is authoritative, so a
+				-- NON-EMPTY incoming state overwrites — a re-judgement may legitimately flip a
+				-- clearance back to open. An empty one (an older payload replayed) must never
+				-- blank a recorded verdict.
+				verdict_state = CASE WHEN EXCLUDED.verdict_state <> '' THEN EXCLUDED.verdict_state ELSE finding_components.verdict_state END,
+				verdict_grade = CASE WHEN EXCLUDED.verdict_state <> '' THEN EXCLUDED.verdict_grade ELSE finding_components.verdict_grade END,
+				verdict_reason = CASE WHEN EXCLUDED.verdict_state <> '' THEN EXCLUDED.verdict_reason ELSE finding_components.verdict_reason END`,
+			string(f.ID()), c.PURL, c.Name, c.Version, c.Ecosystem, c.Source, c.ClaimClass, c.DetectionOrigin,
+			c.VerdictState, c.VerdictGrade, c.VerdictReason); err != nil {
 			return err
 		}
 	}
@@ -465,7 +477,8 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 		return entries, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.finding_id, c.purl, c.name, c.version, c.ecosystem, c.source, c.claim_class, c.detection_origin
+		SELECT c.finding_id, c.purl, c.name, c.version, c.ecosystem, c.source, c.claim_class, c.detection_origin,
+		       c.verdict_state, c.verdict_grade, c.verdict_reason
 		FROM finding_components c
 		JOIN findings f ON f.id = c.finding_id
 		WHERE f.release_id = $1
@@ -479,7 +492,8 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 	for rows.Next() {
 		var fid string
 		var c domain.MatchedComponent
-		if err := rows.Scan(&fid, &c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin); err != nil {
+		if err := rows.Scan(&fid, &c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin,
+			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason); err != nil {
 			return nil, err
 		}
 		byFinding[fid] = append(byFinding[fid], c)
@@ -498,6 +512,20 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
 	_, err := s.exec(ctx).Exec(ctx,
 		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
+	return err
+}
+
+// SetComponentVerdict mirrors a re-judged occurrence verdict onto the matching component row
+// (EDR-VERDICT-01 D5). Like SetBaseScore it is denormalized read-data Knowledge owns —
+// independent of aggregate version, and a zero-row update (the Finding or the row does not
+// exist yet) is a no-op: the ComponentMatched that creates the row carries the same verdict.
+func (s *Store) SetComponentVerdict(ctx context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error {
+	_, err := s.exec(ctx).Exec(ctx, `
+		UPDATE finding_components c
+		SET verdict_state = $4, verdict_grade = $5, verdict_reason = $6
+		FROM findings f
+		WHERE c.finding_id = f.id AND f.release_id = $1 AND f.faultline_id = $2 AND c.purl = $3`,
+		releaseID, faultlineID, comp.PURL, comp.VerdictState, comp.VerdictGrade, comp.VerdictReason)
 	return err
 }
 

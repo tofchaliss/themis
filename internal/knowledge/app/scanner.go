@@ -75,9 +75,11 @@ func (s *ScannerReportService) PlanIngest(ctx context.Context, releaseID, eviden
 // deterministically; verbatim restatements are dropped) and records no duplicate match.
 // Returns the number of new matches.
 //
-// A scanner report is already a version-matched finding (the scanner did the matching), so
-// it is recorded as-is — the reconciled-range gate applies only to the OSV/NVD discovery
-// path in CorrelationService, not to scanner evidence about the concrete image.
+// Every occurrence is judged through the same seam correlation uses before it is recorded
+// (EDR-VERDICT-01 D2) — a scanner is version-matched against the FILES, but backports live in
+// the build release a scanner cannot see, so "the scanner already matched it" was never a
+// reason to skip the vendor fixed-verdict. Only the reconciled-range gate stays
+// correlation-only: a range-rejected candidate was never a match, while a scanner's finding is.
 func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan) (int, error) {
 	newMatches := 0
 	for _, p := range plan.Items {
@@ -89,6 +91,14 @@ func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan
 			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: p.CVE.String(),
 			Component: p.Component, Score: f.View().Score(), Priority: f.View().Priority(),
 			Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			// The occurrence verdict (EDR-VERDICT-01 D2), through the SAME seam correlation
+			// uses. The old premise — "a scanner report is already version-matched, so record
+			// as-is" — is exactly false for backports, which a scanner reading .egg-info cannot
+			// see; the KN-VERDICT-1 link-(b) defect was this path recording unjudged rows. The
+			// reconciled-range gate stays correlation-only (a range-rejected candidate was never
+			// a match; a scanner's version-matched finding is).
+			Verdict:     judgeOccurrence(f.View(), p.Component),
+			CardVersion: f.Version(),
 			// Why this component matched, decided against the reconciled card exactly as the
 			// discovery path decides it (EDR-CORRELATION-01 D3): a scanner names the component
 			// it scanned, but whether that component CARRIES the flaw is the card's knowledge,

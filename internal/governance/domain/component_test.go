@@ -72,6 +72,24 @@ func TestMatchedComponentFixKeys(t *testing.T) {
 // Unknown must act as a carrier. A gap in attribution evidence cannot be allowed to hide a live
 // vulnerability — the same fail-safe direction as the range gate's undecidable verdict
 // (EDR-CORRELATION-01 D3).
+// Only the affirmative clearance closes an occurrence; unknown, missing, and future states
+// all read as open — the fail-safe direction (EDR-VERDICT-01 D2).
+func TestMatchedComponentVerdictIsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		open  bool
+	}{
+		{"", true},     // pre-feature row / absent field
+		{"open", true},
+		{"something-new", true},
+		{"cleared_vendor_fix", false},
+	} {
+		if got := (domain.MatchedComponent{VerdictState: tc.state}).VerdictIsOpen(); got != tc.open {
+			t.Errorf("VerdictState %q VerdictIsOpen = %v, want %v", tc.state, got, tc.open)
+		}
+	}
+}
+
 func TestMatchedComponentActsAsCarrier(t *testing.T) {
 	for _, tc := range []struct {
 		class string

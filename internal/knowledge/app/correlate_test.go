@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -135,11 +136,12 @@ func TestCorrelate_SkipsOutOfRange(t *testing.T) {
 	}
 }
 
-func TestCorrelate_SkipsRPMFixedByStream(t *testing.T) {
+func TestCorrelate_RecordsRPMFixedAsCleared(t *testing.T) {
 	ctx := context.Background()
 	// The installed RHEL-8 build (release 17) is at/above the Red Hat RHEL-8 fix (release 16), so
-	// it carries the backported fix — correlation records NO match for this occurrence (fixed, not
-	// affected), even though the CVE is real (EDR-VEX-01 Phase 3, stream-scoped fixed verdict).
+	// it carries the backported fix. The occurrence IS recorded — "checked and fine" must be a
+	// visible row, not silence (EDR-VERDICT-01 D2) — with an observed-grade clearance stating
+	// its premise, and stamped with the card version it was judged against.
 	comp := app.InventoryComponent{
 		PURL: "pkg:rpm/rhel/openssl@1.0.2k-17.el8_10", Name: "openssl",
 		Version: "1.0.2k-17.el8_10", Ecosystem: "rhel",
@@ -156,19 +158,33 @@ func TestCorrelate_SkipsRPMFixedByStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("correlate: %v", err)
 	}
-	if n != 0 || matches.calls != 0 {
-		t.Errorf("a build at/above its same-stream vendor fix must record no match (n=%d, RecordMatch calls=%d)", n, matches.calls)
+	if n != 1 || matches.calls != 1 {
+		t.Fatalf("a fixed occurrence must be RECORDED as cleared (n=%d, RecordMatch calls=%d)", n, matches.calls)
 	}
-	// The card is still folded — the CVE is real intelligence; only THIS release's occurrence is fixed.
+	m := matches.byPURL[comp.PURL]
+	if m.Verdict.State != domain.VerdictClearedVendorFix {
+		t.Errorf("verdict state = %q, want cleared_vendor_fix", m.Verdict.State)
+	}
+	if m.Verdict.Grade != domain.VerdictGradeObserved {
+		t.Errorf("verdict grade = %q, want observed — a direct version compare is direct evidence", m.Verdict.Grade)
+	}
+	if !strings.Contains(m.Verdict.Reason, "1.0.2k-16.el8_10") {
+		t.Errorf("the clearance must name the bound it rests on, got %q", m.Verdict.Reason)
+	}
+	if m.CardVersion <= 0 {
+		t.Errorf("CardVersion = %d, want the judged-against card version (> 0) for the re-verdict stamp", m.CardVersion)
+	}
+	// The card is still folded — the CVE is real intelligence; only THIS occurrence is fixed.
 	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-11"); !found {
 		t.Error("expected the folded faultline to exist even though the component is fixed")
 	}
 }
 
 // The apk analogue of the stream verdict (EDR-VEX-01 D9): installed at/above EVERY stamped apk
-// bound → the branch's fix is present, no match. The two bounds are two branches' fixes for one
-// CVE — exactly the shape D7's cross-branch dedup produces.
-func TestCorrelate_SkipsAPKFixedByAllBounds(t *testing.T) {
+// bound → the branch's fix is present — recorded as a cleared occurrence (EDR-VERDICT-01 D2).
+// The two bounds are two branches' fixes for one CVE — exactly the shape D7's cross-branch
+// dedup produces.
+func TestCorrelate_RecordsAPKFixedAsCleared(t *testing.T) {
 	ctx := context.Background()
 	comp := app.InventoryComponent{
 		PURL: "pkg:apk/alpine/busybox@1.36.1-r0?distro=alpine-3.19", Name: "busybox",
@@ -186,8 +202,12 @@ func TestCorrelate_SkipsAPKFixedByAllBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("correlate: %v", err)
 	}
-	if n != 0 || matches.calls != 0 {
-		t.Errorf("a build at/above every apk bound must record no match (n=%d, RecordMatch calls=%d)", n, matches.calls)
+	if n != 1 || matches.calls != 1 {
+		t.Fatalf("a fixed apk occurrence must be RECORDED as cleared (n=%d, RecordMatch calls=%d)", n, matches.calls)
+	}
+	m := matches.byPURL[comp.PURL]
+	if m.Verdict.State != domain.VerdictClearedVendorFix || m.Verdict.Grade != domain.VerdictGradeObserved {
+		t.Errorf("verdict = %+v, want an observed-grade clearance", m.Verdict)
 	}
 	if _, found, _ := repo.GetByCVE(ctx, "CVE-2024-21"); !found {
 		t.Error("expected the folded faultline to exist even though the component is fixed")
@@ -368,7 +388,10 @@ func TestCorrelate_FixedVerdictUsesTheSourcePackage(t *testing.T) {
 		comp.PURL: {{CVE: cve(t, "CVE-2024-12"), Proposal: vulnFactsFixedFor(t, "redhat", "openssl", "1.0.2k-16.el8_10")}},
 	}}
 	matches := newMatches()
-	if n, err := correlation(t, inv, disc, matches, newRepo()).Correlate(ctx, "rel-1", "ev-1"); err != nil || n != 0 {
-		t.Fatalf("n=%d err=%v, want 0 — the installed build carries the source package's fix", n, err)
+	if n, err := correlation(t, inv, disc, matches, newRepo()).Correlate(ctx, "rel-1", "ev-1"); err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v, want 1 recorded occurrence", n, err)
+	}
+	if m := matches.byPURL[comp.PURL]; m.Verdict.State != domain.VerdictClearedVendorFix {
+		t.Errorf("verdict = %+v — the installed build carries the SOURCE package's fix and must be cleared", m.Verdict)
 	}
 }
