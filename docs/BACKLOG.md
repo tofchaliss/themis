@@ -555,8 +555,17 @@ under the 2026-08-07 re-derivation standard.
   **withdrawn-CVE exclusion (D13.3) deferred** — the posture carries no withdrawal signal,
   the field/preamble slot are plumbed, always 0 until Governance exposes it; **rollup
   delivery-channel integration + outbox events deferred** (the delivery worker keys on
-  per-Finding publications; follow-up when a channel needs rollups). Verify live: preview →
-  publish → status current → decide one finding → status STALE naming the drift → republish.
+  per-Finding publications; follow-up when a channel needs rollups). **LIVE-VALIDATED
+  2026-09-02 (~17:57 IST, MRF estate):** preview rendered 120 statements with the product
+  purl `pkg:generic/MRF/cdmrf-oamp@20.1.0.0-118` on each; a decided finding SPOKE
+  (CVE-2017-18342 `fixed`, subcomponent pyyaml@3.12) beside honest `under_investigation`
+  rows with scope-sized annotations; publish 201 → status `found:true stale:false
+  statements:120 "current"`. BONUS validation en route: the first attempt hit the D13.4
+  fail-closed path for real (stale Registry binary → hop 404 → clear 422 naming the hop, no
+  UUID-labeled document shipped) — the exact failure mode the grill most wanted never to
+  ship, witnessed refusing correctly. Remaining optional demo: decide a finding → status
+  flips to `STALE: 1 changed decision(s)` → republish supersedes (drift machinery unit- and
+  HTTP-tested; the live flip just hasn't been photographed).
 - [ ] **COMM-VEX-1b — CSAF rollup serializer (filed 2026-09-02 from the D13.5 format order).**
   LOW until a consumer asks (REP-1's incumbent world suggests one will). The CSAF product-tree
   work deserves its own focus; the OpenVEX rollup already answers the customer question. Same
