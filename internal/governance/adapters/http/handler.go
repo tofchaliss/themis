@@ -382,17 +382,26 @@ func toComponents(in []domain.MatchedComponent) []gen.Component {
 			Purl: strptr(c.PURL), Name: strptr(c.Name), Version: strptr(c.Version),
 			Ecosystem: strptr(c.Ecosystem), Source: strptr(c.Source),
 			ClaimClass: strptr(c.ClaimClass), DetectionOrigin: strptr(c.DetectionOrigin),
+			VerdictState: verdictStatePtr(c.VerdictState), VerdictGrade: verdictGradePtr(c.VerdictGrade),
+			VerdictReason: strptr(c.VerdictReason),
 		})
 	}
 	return out
 }
 
-// toFixedVersions maps the selected fixes to the wire shape.
+// toFixedVersions maps the selected fixes to the wire shape, carrying the fix's WORLD so a
+// consumer can pair each fix with the occurrence it applies to (EDR-VERDICT-01 D8) instead of
+// guessing from version shape.
 func toFixedVersions(in []app.FixedVersion) []gen.FixedVersion {
 	out := make([]gen.FixedVersion, 0, len(in))
 	for _, f := range in {
 		pkg, ver := f.Package, f.Version
-		out = append(out, gen.FixedVersion{Package: &pkg, Version: &ver})
+		fv := gen.FixedVersion{Package: &pkg, Version: &ver}
+		if f.Ecosystem != "" {
+			eco := f.Ecosystem
+			fv.Ecosystem = &eco
+		}
+		out = append(out, fv)
 	}
 	return out
 }
@@ -403,6 +412,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	mult := float32(e.Multiplier)
 	eff := e.EffectivePriority
 	res := e.ResidualPriority
+	open := e.OpenCarriers
 	out := gen.PostureEntry{
 		FindingId:         strptr(string(e.FindingID)),
 		FaultlineId:       strptr(e.FaultlineID),
@@ -414,6 +424,7 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 		BlastMultiplier:   &mult,
 		EffectivePriority: &eff,
 		ResidualPriority:  &res,
+		OpenCarriers:      &open,
 	}
 	if len(e.Components) > 0 {
 		comps := toComponents(e.Components)
@@ -540,3 +551,21 @@ func writeProblem(w http.ResponseWriter, status int, title, detail string) {
 }
 
 func strptr(s string) *string { return &s }
+
+// verdictStatePtr / verdictGradePtr map the mirrored verdict onto the wire enums, omitting
+// empty values so a pre-feature row serializes exactly as before (absent = open, fail-safe).
+func verdictStatePtr(s string) *gen.ComponentVerdictState {
+	if s == "" {
+		return nil
+	}
+	v := gen.ComponentVerdictState(s)
+	return &v
+}
+
+func verdictGradePtr(s string) *gen.ComponentVerdictGrade {
+	if s == "" {
+		return nil
+	}
+	v := gen.ComponentVerdictGrade(s)
+	return &v
+}

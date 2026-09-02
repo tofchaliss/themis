@@ -5,8 +5,8 @@ affected by a specific vulnerability, and explain why.
 - finding_id: {{.Finding.ID}}
 - release: {{.Finding.ReleaseID}}
 - cve: {{.Finding.CVE}}
-- components:
-{{range .Finding.Components}}  - {{.}}
+- components (each labeled with what the estate has already established about THAT copy):
+{{range .Finding.ComponentLines}}  - {{.}}
 {{end}}
 ## Vulnerability enrichment (faultline {{.Faultline.ID}})
 {{if .Faultline.Summary}}- what_it_is: {{.Faultline.Summary}}
@@ -33,6 +33,7 @@ unrecognised ref discards the whole recommendation.
 
 Rules:
 - recommended_stance must be one of: affected, not_affected, mitigated, or insufficient (use insufficient when the evidence is not enough to determine — an honest "no recommendation").
+- A component marked "CLEARED by vendor fix" provably ALREADY CARRIES its fix (a distro backport keeps the old version number, so its version comparing below an upstream fix is expected and means nothing). It is NOT evidence the release is affected and must not appear in your reasoning as if it were live. Ground an `affected` stance on OPEN components only; if no component is OPEN, the honest answer is not_affected or insufficient.
 - confidence is a number between 0 and 1.
 - Cite evidence only using identifiers shown above: the finding_id, the faultline id {{.Faultline.ID}}, the cve {{.Faultline.CVE}}, or a component purl. Do not invent identifiers.
 - finding_id must equal {{.Finding.ID}}.

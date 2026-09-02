@@ -70,6 +70,11 @@ type Knowledge struct {
 	// inventory. Always set — like Reattribute, it rides the always-on discovery source; the
 	// composition root decides whether to run its loop.
 	Rediscovery *app.RediscoveryService
+	// Reverdict re-judges match rows whose verdict stamp lags their card (EDR-VERDICT-01 D6):
+	// the catch-up sweep over history plus the Nudge()-driven immediate path the fix-folding
+	// feed loops kick. Always set — it rides only Knowledge's own store and the Evidence read
+	// seam; the composition root runs its loop.
+	Reverdict *app.ReverdictService
 }
 
 // RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
@@ -163,11 +168,21 @@ type VexfeedConfig struct {
 	HTTP     *http.Client // optional; nil → http.DefaultClient
 }
 
+// VerdictConfig carries the occurrence-verdict switches (EDR-VERDICT-01).
+type VerdictConfig struct {
+	// DisableInferredBridge switches OFF the ownership bridge's guess grade (D4 strict mode;
+	// THEMIS_VERDICT_INFERRED_BRIDGE=0). Stated as the negation so the zero value keeps the
+	// documented default: the Inferred grade is ON.
+	DisableInferredBridge bool
+	// ReverdictBatch bounds one re-verdict sweep (THEMIS_REVERDICT_BATCH; <=0 → default 200).
+	ReverdictBatch int
+}
+
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
 // discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
 // NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
 // Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -190,7 +205,8 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// correlation (A1) + the client's CPE-product gate keep the fuzzy keyword source precise.
 		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
 	}
-	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st)
+	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st).
+		WithInferredBridge(!verdict.DisableInferredBridge)
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
@@ -198,7 +214,8 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// ACL translates each finding, and matches record so Governance opens Findings. Before
 	// this line existed, a scanner-report upload was accepted by Evidence and silently
 	// no-op'd here — the "wiring is no gate" class.
-	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{})
+	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{}).
+		WithInferredBridge(!verdict.DisableInferredBridge)
 	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
 	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
 	// never silent. It reuses the same NVD client + fold path as the backfill sweep.
@@ -213,6 +230,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
 		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit),
+		// The re-verdict (EDR-VERDICT-01 D6): store supplies the stale rows, the ledger and the
+		// Evidence client rebuild each release's bridge context, and RecordMatch is the same
+		// seam intake judged through — one judge, every door, every moment.
+		Reverdict: app.NewReverdictService(st, st, st, evClient, st, st, sysClock{}, verdict.ReverdictBatch).
+			WithInferredBridge(!verdict.DisableInferredBridge),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

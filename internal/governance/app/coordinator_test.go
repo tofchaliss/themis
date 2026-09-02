@@ -36,6 +36,24 @@ func TestCoordinator_OnComponentMatched(t *testing.T) {
 	}
 }
 
+// OnComponentVerdictChanged is pure mirroring (EDR-VERDICT-01 D5): the re-judged verdict
+// reaches the repo keyed by the (Release, Faultline) business key, and nothing is decided.
+func TestCoordinator_OnComponentVerdictChanged(t *testing.T) {
+	repo := newRepo()
+	coord := app.NewCoordinator(writeSvc(repo))
+	err := coord.OnComponentVerdictChanged(context.Background(), app.InboundComponentVerdictChanged{
+		FaultlineID: "fl-1", ReleaseID: "rel-1",
+		Component: domain.MatchedComponent{PURL: "pkg:pypi/setuptools@39.2.0",
+			VerdictState: "cleared_vendor_fix", VerdictGrade: "observed", VerdictReason: "vendor fix present"},
+	})
+	if err != nil {
+		t.Fatalf("on verdict changed: %v", err)
+	}
+	if repo.lastVerdict.PURL != "pkg:pypi/setuptools@39.2.0" || repo.lastVerdict.VerdictState != "cleared_vendor_fix" {
+		t.Errorf("mirrored verdict = %+v", repo.lastVerdict)
+	}
+}
+
 func TestCoordinator_OnFaultlineEnriched(t *testing.T) {
 	repo := newRepo()
 	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))

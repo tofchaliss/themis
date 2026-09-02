@@ -232,4 +232,67 @@ func TestGroundingThinness(t *testing.T) {
 	if got := GroundingThinness(healthy); got != "" {
 		t.Errorf("healthy grounding = %q, want empty", got)
 	}
+
+	// EDR-VERDICT-01 D7 / AI-REC-1: every carrier cleared by a vendor-fix verdict ⇒ nothing
+	// live to decide about — diagnosably thin, not a model failure.
+	allCleared := base()
+	allCleared.Finding.ClaimClasses = []string{"carrier", "scope"}
+	allCleared.Finding.VerdictStates = []string{"cleared_vendor_fix", ""}
+	if got := GroundingThinness(allCleared); !strings.Contains(got, "every carrier cleared") {
+		t.Errorf("all-carriers-cleared = %q, want the cleared-thinness class", got)
+	}
+	// One OPEN carrier beside a cleared one is a live grounding — never thin.
+	oneLive := base()
+	oneLive.Finding.ClaimClasses = []string{"carrier", "carrier"}
+	oneLive.Finding.VerdictStates = []string{"cleared_vendor_fix", ""}
+	if got := GroundingThinness(oneLive); got != "" {
+		t.Errorf("one live carrier must not be thin: %q", got)
+	}
+}
+
+// AI-REC-1, measured 2026-09-02: a recommendation grounded `affected` at 0.90 on a CLEARED
+// copy, because the prompt showed bare purls. ComponentLines states each occurrence's verdict
+// so the model can cite the clearance instead of tripping over it; missing/short verdict
+// arrays (an older projection) read as open — the fail-safe direction.
+func TestFindingViewComponentLines(t *testing.T) {
+	f := FindingView{
+		Components:     []string{"pkg:pypi/setuptools@39.2.0", "pkg:pypi/setuptools@70.3.0", "pkg:rpm/rocky/python3-ply@3.9-9.el8"},
+		ClaimClasses:   []string{"carrier", "carrier", "scope"},
+		VerdictStates:  []string{"cleared_vendor_fix", "", ""},
+		VerdictGrades:  []string{"inferred", "", ""},
+		VerdictReasons: []string{"matched to platform-python-setuptools 39.2.0-9.el8_10 at the distro version", "", ""},
+	}
+	lines := f.ComponentLines()
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	if !strings.Contains(lines[0], "CLEARED by vendor fix (inferred)") ||
+		!strings.Contains(lines[0], "platform-python-setuptools") ||
+		!strings.Contains(lines[0], "NOT live evidence") {
+		t.Errorf("cleared line = %q, want the labeled clearance with grade and premise", lines[0])
+	}
+	if !strings.Contains(lines[1], "OPEN") || strings.Contains(lines[1], "CLEARED") {
+		t.Errorf("open line = %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "scope-class") {
+		t.Errorf("scope line = %q", lines[2])
+	}
+
+	// An older projection with no verdict arrays: every non-scope row reads OPEN.
+	old := FindingView{Components: []string{"a", "b"}, ClaimClasses: []string{"carrier", "scope"}}
+	oldLines := old.ComponentLines()
+	if !strings.Contains(oldLines[0], "OPEN") || !strings.Contains(oldLines[1], "scope-class") {
+		t.Errorf("older projection lines = %v", oldLines)
+	}
+	if old.OpenCarrierCount() != 1 {
+		t.Errorf("OpenCarrierCount (older projection) = %d, want 1", old.OpenCarrierCount())
+	}
+	if f.OpenCarrierCount() != 1 {
+		t.Errorf("OpenCarrierCount = %d, want 1 — cleared and scope rows are not live", f.OpenCarrierCount())
+	}
+	// A clearance without grade/reason still labels itself.
+	bare := FindingView{Components: []string{"x"}, ClaimClasses: []string{"carrier"}, VerdictStates: []string{"cleared_vendor_fix"}}
+	if l := bare.ComponentLines()[0]; !strings.Contains(l, "CLEARED by vendor fix —") && !strings.Contains(l, "CLEARED by vendor fix — NOT") {
+		t.Errorf("bare clearance line = %q", l)
+	}
 }

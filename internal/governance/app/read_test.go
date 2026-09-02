@@ -93,6 +93,64 @@ func TestReadService_GetPosition(t *testing.T) {
 	}
 }
 
+// TestReleasePosture_QueueDerivesFromOpenCarriers is the EDR-VERDICT-01 D7 rule on the shape
+// the arc was measured on (CVE-2025-47273 / MRF): one cleared carrier beside one open carrier
+// keeps FULL urgency — a live occurrence is never discounted by its cleared neighbours — and
+// only a Finding whose every carrier is cleared reads 0 and leaves the ranked queue. The
+// binding validation criterion is "the finding must NOT disappear", and this test is its
+// unit-level half.
+func TestReleasePosture_QueueDerivesFromOpenCarriers(t *testing.T) {
+	ctx := context.Background()
+	cleared := domain.MatchedComponent{PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools",
+		ClaimClass: "carrier", VerdictState: "cleared_vendor_fix", VerdictGrade: "observed"}
+	open := domain.MatchedComponent{PURL: "pkg:pypi/setuptools@70.3.0", Name: "setuptools",
+		ClaimClass: "carrier"} // no verdict recorded → open, the fail-safe direction
+	scope := domain.MatchedComponent{PURL: "pkg:rpm/rhel/python3-ply@3.9-9.el8", Name: "python3-ply",
+		ClaimClass: "scope"}
+
+	proj := fakeProjection{posture: []app.PostureEntry{
+		{FindingID: "fnd-mixed", BaseScore: 71, Components: []domain.MatchedComponent{cleared, open, scope}},
+		{FindingID: "fnd-all-cleared", BaseScore: 71, Components: []domain.MatchedComponent{cleared, scope}},
+		{FindingID: "fnd-no-components", BaseScore: 71},
+	}}
+	got, err := app.NewReadService(newRepo(), proj, nil, 0).ReleasePosture(ctx, "rel-1")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("posture = %+v err=%v", got, err)
+	}
+
+	// One live carrier among cleared neighbours → FULL urgency, no proportional discount.
+	if got[0].OpenCarriers != 1 || got[0].EffectivePriority != 71 || got[0].ResidualPriority != 71 {
+		t.Errorf("mixed: open=%d eff=%d res=%d, want 1 / 71 / 71 — a live occurrence is never diluted",
+			got[0].OpenCarriers, got[0].EffectivePriority, got[0].ResidualPriority)
+	}
+	// Every carrier cleared (the scope row neither holds nor releases) → 0, off the ranked queue.
+	if got[1].OpenCarriers != 0 || got[1].EffectivePriority != 0 || got[1].ResidualPriority != 0 {
+		t.Errorf("all-cleared: open=%d eff=%d res=%d, want 0 / 0 / 0 — nothing real remains open",
+			got[1].OpenCarriers, got[1].EffectivePriority, got[1].ResidualPriority)
+	}
+	// No component rows on record (older data) → priorities untouched: missing evidence never clears.
+	if got[2].OpenCarriers != 0 || got[2].EffectivePriority != 71 {
+		t.Errorf("no-components: open=%d eff=%d, want 0 / 71 — absence of rows must not read as cleared",
+			got[2].OpenCarriers, got[2].EffectivePriority)
+	}
+}
+
+// MirrorComponentVerdict is pure mirroring (EDR-VERDICT-01 D5): the repo write happens, the
+// Position is never touched.
+func TestMirrorComponentVerdict(t *testing.T) {
+	repo := newRepo()
+	svc := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+	comp := domain.MatchedComponent{PURL: "pkg:pypi/setuptools@39.2.0",
+		VerdictState: "cleared_vendor_fix", VerdictGrade: "inferred",
+		VerdictReason: "matched to vendor package python-setuptools at the distro version"}
+	if err := svc.MirrorComponentVerdict(context.Background(), "rel-1", "fl-1", comp); err != nil {
+		t.Fatalf("mirror: %v", err)
+	}
+	if repo.lastVerdict.PURL != comp.PURL || repo.lastVerdict.VerdictState != "cleared_vendor_fix" {
+		t.Errorf("repo received %+v, want the mirrored verdict", repo.lastVerdict)
+	}
+}
+
 type fakeBlast struct {
 	customers int
 	err       error

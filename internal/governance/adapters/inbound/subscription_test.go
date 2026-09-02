@@ -14,14 +14,15 @@ func TestSubscription(t *testing.T) {
 	// The interest set is exactly the Faultline facts the Consumer dispatches on (the
 	// per-type dispatch + UnknownTypeIgnored tests prove Handle matches this set).
 	for _, want := range []string{
-		"knowledge.component_matched", "knowledge.faultline_enriched", "knowledge.faultline_superseded",
+		"knowledge.component_matched", "knowledge.component_verdict_changed",
+		"knowledge.faultline_enriched", "knowledge.faultline_superseded",
 	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)
 		}
 	}
-	if len(s.Interest) != 3 {
-		t.Errorf("interest set = %v, want 3 types", s.Interest)
+	if len(s.Interest) != 4 {
+		t.Errorf("interest set = %v, want 4 types", s.Interest)
 	}
 	// A Knowledge event Governance does not consume is out of interest.
 	if s.InInterest("knowledge.faultline_created") {

@@ -137,6 +137,45 @@ const claimNote = (c) => c === "scope"
   ? ` <span class="chip chip-info" title="in the advisory's rebuild set; no evidence it carries the flaw">scope</span>`
   : (c === "carrier" ? ` <span class="chip" title="evidence says this package carries the flaw">carrier</span>` : "");
 
+/* Occurrence verdicts (EDR-VERDICT-01 D9). A cleared row is the MACHINE's "handled" — the
+   installed files provably carry the vendor's fix — distinct from a human decision, and its
+   evidence grade is always shown: `observed` = direct evidence (own build vs the bound, or an
+   SBOM ownership edge); `inferred` = a same-inventory match Themis worked out itself. */
+const verdictCleared = (c) => c.verdict_state === "cleared_vendor_fix";
+const verdictChip = (c) => !verdictCleared(c) ? ""
+  : (c.verdict_grade === "inferred"
+    ? ` <span class="chip chip-accent" title="cleared by Themis's own match (no ownership proof in the SBOM) — see the stated reason; THEMIS_VERDICT_INFERRED_BRIDGE=0 disables this grade">✓ cleared — inferred</span>`
+    : ` <span class="chip chip-accent" title="cleared on direct evidence — see the stated reason">✓ cleared — vendor fix</span>`);
+
+/* The canonical package world, mirroring kernel value.CanonicalEcosystem + the KN-SCAN-3
+   aliases — used ONLY to pair a fix with the occurrence it applies to; verdicts stay
+   server-side. */
+function worldOf(eco) {
+  const e = (eco || "").toLowerCase().trim();
+  const alias = { "python-pkg": "pypi", "python": "pypi", "node-pkg": "npm", "gobinary": "go",
+    "gomod": "go", "golang": "go", "jar": "maven", "pom": "maven", "gemspec": "gem" };
+  const w = alias[e] || e;
+  if (["rpm", "redhat", "rhel", "rocky", "rocky linux", "almalinux", "alma", "centos", "fedora"].includes(w)
+    || w.includes("rocky") || w.includes("rhel") || w.includes("centos")) return "rpm";
+  if (["apk", "alpine", "wolfi", "chainguard"].includes(w) || w.includes("alpine")) return "apk";
+  if (w === "deb" || w.includes("debian") || w.includes("ubuntu")) return "deb";
+  return w;
+}
+
+/* Per-occurrence fix advice (D8): each OPEN copy gets the fix from its OWN world — "update the
+   RPM" and "upgrade the pip install" are different work. A fix that states no world matches any
+   (the source did not say — fail-open, display only); a component with no stated world gets the
+   advice with an explicit confirm-first caveat rather than a guess. */
+function occurrenceFixAdvice(c, fixes) {
+  if (verdictCleared(c) || !(fixes || []).length) return "";
+  const cw = worldOf(c.ecosystem);
+  const mine = fixes.filter((f) => !f.ecosystem || !cw || worldOf(f.ecosystem) === cw);
+  if (!mine.length) return "";
+  const vs = mine.map((f) => `<span class="mono">${esc(f.version)}</span>`).join(" ");
+  const caveat = !cw ? ` <span class="chip chip-warn" title="this copy states no ecosystem — confirm how it was installed before applying the fix">confirm install method</span>` : "";
+  return ` <span class="chip chip-info" title="fix published for this copy's world">fix: </span>${vs}${caveat}`;
+}
+
 /* The X-Themis-AI-Reason taxonomy (AI-204-1), rendered instead of a vanishing
    toast: each no-answer states what KIND of no-answer it was. */
 const AI_REASONS = {
@@ -532,11 +571,17 @@ function segBarWireTips() {
 function componentCell(components) {
   const cs = components || [];
   if (!cs.length) return `<span class="chip chip-info">none recorded</span>`;
+  // The head is the copy that still MATTERS: an open carrier beats a cleared one — the
+  // measured case is a cleared distro shadow beside a live pip copy, and leading with the
+  // cleared row would read as "nothing to do here" (EDR-VERDICT-01 D9).
   const carriers = cs.filter((c) => c.claim_class !== "scope");
-  const head = carriers.length ? carriers[0] : cs[0];
+  const openCarriers = carriers.filter((c) => !verdictCleared(c));
+  const head = openCarriers[0] || carriers[0] || cs[0];
   const more = cs.length - 1;
   return `<span class="mono">${esc(head.name)}${head.version ? "@" + esc(head.version) : ""}</span>`
     + claimNote(head.claim_class)
+    + (carriers.length > 0 && openCarriers.length === 0
+      ? ` <span class="chip chip-accent" title="every carrier copy provably carries its vendor fix — the finding has left the ranked queue without any row being deleted; open the drawer for each copy's stated reason">✓ all cleared</span>` : "")
     + (more > 0 ? ` <span class="chip chip-info">+${more} more</span>` : "");
 }
 
@@ -1383,9 +1428,23 @@ async function openDrawer(entry) {
 
     <section>
       <h3 class="section-h">Matched components</h3>
-      ${(f.components || entry.components || []).map((c) =>
-        `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}${c.detection_origin && c.detection_origin !== "discovery" ? ` <span class="chip chip-accent" title="which engine produced this match (KN-SCAN-2) — provenance only, never authority; unmarked components came from feed discovery">found by ${esc(c.detection_origin)}</span>` : ""}</div>`
-      ).join("") || `<div class="empty">none recorded</div>`}
+      ${(() => {
+        /* Per-occurrence verdicts (EDR-VERDICT-01 D9): open copies first, each with the fix
+           for its OWN world; cleared copies below in a quiet section with their stated reason —
+           "checked and fine" is a visible row, never silence. One finding can honestly hold
+           both: the measured case is a patched rpm's .egg-info shadow (cleared) beside a
+           pip-installed copy below the upstream fix (open). */
+        const comps = f.components || entry.components || [];
+        if (!comps.length) return `<div class="empty">none recorded</div>`;
+        const fixes = entry.fixes || (k && k.fixes) || [];
+        const row = (c) =>
+          `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${verdictChip(c)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}${c.detection_origin && c.detection_origin !== "discovery" ? ` <span class="chip chip-accent" title="which engine produced this match (KN-SCAN-2) — provenance only, never authority; unmarked components came from feed discovery">found by ${esc(c.detection_origin)}</span>` : ""}${occurrenceFixAdvice(c, fixes)}${verdictCleared(c) && c.verdict_reason ? `<div class="muted" style="margin:1px 0 0 12px;font-size:.85em" title="the clearance's stated premise, verbatim from Knowledge">${esc(c.verdict_reason)}</div>` : ""}</div>`;
+        const open = comps.filter((c) => !verdictCleared(c));
+        const cleared = comps.filter(verdictCleared);
+        return open.map(row).join("")
+          + (open.length === 0 ? `<div class="empty"><b>Every copy is cleared</b>Nothing on this finding is live — the rows below say why each copy needs no action.</div>` : "")
+          + (cleared.length ? `<div class="muted" style="margin:8px 0 2px;font-size:.8em;letter-spacing:.04em;text-transform:uppercase" title="the machine's 'handled' — the installed files provably carry the vendor's fix; a human decision is a Position, shown above, and the two never mix">Cleared — no action needed</div>` + cleared.map(row).join("") : "");
+      })()}
     </section>
 
     <section>

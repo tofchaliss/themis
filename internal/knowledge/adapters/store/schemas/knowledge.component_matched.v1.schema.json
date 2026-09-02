@@ -23,7 +23,10 @@
           "Ecosystem": { "type": "string" },
           "Source": { "type": "string", "description": "Upstream SOURCE-package name for distro components; additive/omitempty (AI-GROUND-1)." },
           "ClaimClass": { "type": "string", "enum": ["carrier", "scope"], "description": "Why this component matched; absent = unknown, treated as carrier (EDR-CORRELATION-01 D3). Additive/omitempty." },
-          "DetectionOrigin": { "type": "string", "description": "Which engine produced the match: `discovery` or `scanner/<name>` (bare `scanner` when the report names no engine). Display provenance, never authority; absent on older payloads (KN-SCAN-2). Additive/omitempty." }
+          "DetectionOrigin": { "type": "string", "description": "Which engine produced the match: `discovery` or `scanner/<name>` (bare `scanner` when the report names no engine). Display provenance, never authority; absent on older payloads (KN-SCAN-2). Additive/omitempty." },
+          "VerdictState": { "type": "string", "enum": ["open", "cleared_vendor_fix"], "description": "The occurrence verdict (EDR-VERDICT-01 D2): what the fixed-verdict machinery concluded about THIS occurrence. Absent = open, the fail-safe direction. Additive/omitempty." },
+          "VerdictGrade": { "type": "string", "enum": ["observed", "inferred"], "description": "Evidence strength behind a clearance (EDR-VERDICT-01 D3, EDR-TRUST-01 vocabulary): `observed` = direct evidence, `inferred` = a labeled same-inventory match. Set only when cleared. Additive/omitempty." },
+          "VerdictReason": { "type": "string", "description": "Plain-language premise of the verdict, rendered verbatim by a drawer. Additive/omitempty." }
         }
       }
     },

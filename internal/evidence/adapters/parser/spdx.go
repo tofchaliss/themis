@@ -34,7 +34,16 @@ type spdxRelation struct {
 	SPDXElementID      string `json:"spdxElementId"`
 	RelatedSPDXElement string `json:"relatedSpdxElement"`
 	RelationshipType   string `json:"relationshipType"`
+	Comment            string `json:"comment"`
 }
+
+// ownershipMarker is Syft's ownership-by-file-overlap evidence in SPDX form: the cataloger
+// proved (by file overlap with the rpm database) that one package's files were installed BY
+// another — e.g. site-packages/setuptools is owned by the rpm platform-python-setuptools.
+// SPDX has no first-class type for it, so Syft emits relationshipType OTHER with this marker
+// in the comment. It is exactly the affirmative Observed-grade evidence the ownership bridge
+// requires (EDR-VERDICT-01 D3) — a DEPENDS_ON edge is NOT ownership and never qualifies.
+const ownershipMarker = "ownership-by-file-overlap"
 
 func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []domain.DependencyEdge, []string, error) {
 	var doc spdxDocument
@@ -77,7 +86,15 @@ func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []d
 
 	var edges []domain.DependencyEdge
 	for _, rel := range doc.Relationships {
-		if !strings.EqualFold(rel.RelationshipType, "DEPENDS_ON") {
+		relationship := ""
+		switch {
+		case strings.EqualFold(rel.RelationshipType, "DEPENDS_ON"):
+			relationship = "depends_on"
+		case strings.EqualFold(rel.RelationshipType, "OTHER") && strings.Contains(strings.ToLower(rel.Comment), ownershipMarker):
+			// Direction follows Syft's artifact relationship: spdxElementId is the OWNING
+			// package (the rpm), relatedSpdxElement the owned one (the language package).
+			relationship = ownershipMarker
+		default:
 			continue
 		}
 		from, okFrom := idToPURL[rel.SPDXElementID]
@@ -85,7 +102,7 @@ func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []d
 		if !okFrom || !okTo {
 			continue
 		}
-		edges = append(edges, domain.DependencyEdge{From: from, To: to, Relationship: "depends_on"})
+		edges = append(edges, domain.DependencyEdge{From: from, To: to, Relationship: relationship})
 	}
 
 	return components, edges, warnings, nil

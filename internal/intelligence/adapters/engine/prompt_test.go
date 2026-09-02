@@ -27,6 +27,47 @@ func TestPromptRendererHappy(t *testing.T) {
 	}
 }
 
+// AI-REC-1, measured 2026-09-02: the prompt showed bare purls, so a recommendation grounded
+// `affected` at 0.90 on a copy the estate had already cleared. Both Finding-scoped prompts now
+// state each occurrence's verdict and carry the reading rule for a clearance.
+func TestPromptRendererStatesOccurrenceVerdicts(t *testing.T) {
+	r, err := NewPromptRenderer()
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ac := domain.AssembledContext{Projection: domain.FindingAssessment{
+		Finding: domain.FindingView{
+			ID: "F1", CVE: "CVE-2025-47273",
+			Components:     []string{"pkg:pypi/setuptools@39.2.0", "pkg:pypi/setuptools@70.3.0"},
+			ClaimClasses:   []string{"carrier", "carrier"},
+			VerdictStates:  []string{"cleared_vendor_fix", ""},
+			VerdictGrades:  []string{"inferred", ""},
+			VerdictReasons: []string{"matched to platform-python-setuptools 39.2.0-9.el8_10 at the distro version", ""},
+		},
+		Knowledge: domain.FaultlineView{ID: "FL1", Severity: "medium"},
+	}}
+	for _, capability := range []string{"recommend_position", "explain_vulnerability"} {
+		out, err := r.Render(capability, ac)
+		if err != nil {
+			t.Fatalf("Render(%s): %v", capability, err)
+		}
+		for _, want := range []string{
+			"CLEARED by vendor fix (inferred)",
+			"platform-python-setuptools 39.2.0-9.el8_10",
+			"pkg:pypi/setuptools@70.3.0 — OPEN",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s prompt missing %q\n%s", capability, want, out)
+			}
+		}
+	}
+	// The Decision prompt also carries the reading rule: ground `affected` on OPEN copies only.
+	out, _ := r.Render("recommend_position", ac)
+	if !strings.Contains(out, "Ground an `affected` stance on OPEN components only") {
+		t.Errorf("recommend_position prompt missing the cleared-copy rule\n%s", out)
+	}
+}
+
 func TestPromptRendererSemanticPrecedents(t *testing.T) {
 	r, err := NewPromptRenderer()
 	if err != nil {

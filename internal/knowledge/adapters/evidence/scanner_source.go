@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
@@ -93,7 +94,11 @@ func (s *ScannerSource) ScannerProposals(ctx context.Context, evidenceID string)
 			Proposal: translated[0].Proposal,
 			Component: app.InventoryComponent{
 				PURL: fc.Component.PURL, Name: fc.Component.Name, Version: fc.Component.Version,
-				Ecosystem: fc.Component.Ecosystem, Source: fc.Component.Source,
+				// Canonicalized AT THE PARSE SEAM (KN-SCAN-3): a scanner's analyzer vocabulary
+				// (`python-pkg`, `gobinary`) becomes the pipeline's package world here, once,
+				// instead of every recipe/client remembering the mapping. An unknown name passes
+				// through unchanged — the KN-FIX-3 fail-safe: it filters nothing, hides nothing.
+				Ecosystem: value.NormalizeEcosystem(fc.Component.Ecosystem), Source: fc.Component.Source,
 			},
 			Origin: origin,
 		})

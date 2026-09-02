@@ -33,6 +33,22 @@ func NormalizeEcosystem(ecosystem string) string {
 		return "go"
 	case "python":
 		return "pypi"
+	// Scanner vocabulary (KN-SCAN-3): Trivy names ecosystems by its ANALYZER, not the package
+	// world — `python-pkg` for site-packages, `gobinary` for a compiled module, `jar`/`pom` for
+	// the same Maven artifact seen two ways. Aliased here, at the one shared table, so a
+	// scanner row and discovery's row for the same package read as one world everywhere
+	// (verdicts, fix selection, plan grouping) instead of trusting every client and recipe to
+	// remember the mapping. Mirrors the dashboard translator's TRIVY_ECOSYSTEMS map.
+	case "python-pkg":
+		return "pypi"
+	case "node-pkg":
+		return "npm"
+	case "gobinary", "gomod":
+		return "go"
+	case "jar", "pom":
+		return "maven"
+	case "gemspec":
+		return "gem"
 	default:
 		return strings.ToLower(strings.TrimSpace(ecosystem))
 	}

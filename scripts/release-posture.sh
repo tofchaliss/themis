@@ -53,6 +53,14 @@ REGISTRY="${THEMIS_REGISTRY_URL:-http://localhost:8082}"
 GOVERNANCE="${THEMIS_GOVERNANCE_URL:-http://localhost:8083}"
 KNOWLEDGE="${THEMIS_KNOWLEDGE_URL:-http://localhost:8085}"
 
+# Share list-open-vulns.sh's cached admin key when the caller set none. Without this, an
+# auth-enabled estate made every call 401 and `curl -sf` swallowed it — the script printed
+# NOTHING, which read as "the finding disappeared" during a live validation (2026-09-02).
+KEY_FILE="${THEMIS_API_KEY_FILE:-$HOME/.themis_admin_api_key}"
+if [ -z "${THEMIS_API_KEY:-}" ] && [ -r "$KEY_FILE" ]; then
+  THEMIS_API_KEY="$(cat "$KEY_FILE")"
+fi
+
 # Inbound-edge auth is optional (EDR-SECURITY-01): send the key only when one is configured.
 get() {
   if [ -n "${THEMIS_API_KEY:-}" ]; then curl -sf -H "X-API-Key: $THEMIS_API_KEY" "$@"; else curl -sf "$@"; fi
@@ -82,7 +90,12 @@ trap 'rm -f "$hdrfile"' EXIT
 # (with its SOURCE package) and the per-component fix selection, so the join that every client had
 # to re-implement is done once, by the context that owns it.
 
-posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || { echo "cannot read posture for $REL" >&2; exit 1; }
+posture=$(get "$GOVERNANCE/api/v1/releases/$REL/posture") || {
+  echo "cannot read posture for $REL from $GOVERNANCE" >&2
+  echo "  (on an auth-enabled node a missing/invalid key 401s silently — set THEMIS_API_KEY," >&2
+  echo "   or run scripts/list-open-vulns.sh once so its cached key at $KEY_FILE exists)" >&2
+  exit 1
+}
 total=$(echo "$posture" | jq 'length')
 [ "$total" != "0" ] || { echo "no Findings for release $REL"; exit 0; }
 

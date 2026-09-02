@@ -60,6 +60,81 @@ func TestScannerReport_IngestAndIdempotent(t *testing.T) {
 	}
 }
 
+// The KN-VERDICT-1 link-(b) regression: a scanner-reported occurrence runs through the SAME
+// verdict seam as discovery (EDR-VERDICT-01 D2). Before this, the scanner path recorded
+// unjudged rows on the premise "the scanner already version-matched" — which is exactly false
+// for backports, which live in the build release a scanner reading .egg-info cannot see.
+func TestScannerReport_JudgesOccurrencesThroughTheSharedSeam(t *testing.T) {
+	fixed := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/openssl@1.0.2k-17.el8_10", Name: "openssl",
+		Version: "1.0.2k-17.el8_10", Ecosystem: "rpm",
+	}
+	live := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/openssl@1.0.2k-10.el8", Name: "openssl",
+		Version: "1.0.2k-10.el8", Ecosystem: "rpm",
+	}
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2024-31"), Proposal: vulnFactsFixed(t, "scanner", "openssl-1.0.2k-16.el8_10"),
+			Component: fixed, Origin: "scanner/trivy"},
+		{CVE: cve(t, "CVE-2024-31"), Proposal: vulnFactsFixed(t, "scanner", "openssl-1.0.2k-16.el8_10"),
+			Component: live, Origin: "scanner/trivy"},
+	}}
+	matches := newMatches()
+	svc := scannerService(t, src, matches, newRepo())
+
+	if n, err := svc.Ingest(context.Background(), "rel-1", "ev-1"); err != nil || n != 2 {
+		t.Fatalf("Ingest = %d, %v; want both occurrences recorded", n, err)
+	}
+	if m := matches.byPURL[fixed.PURL]; m.Verdict.State != domain.VerdictClearedVendorFix {
+		t.Errorf("at/above the same-stream bound: verdict = %+v, want cleared_vendor_fix", m.Verdict)
+	}
+	if m := matches.byPURL[live.PURL]; m.Verdict.State.IsOpen() != true {
+		t.Errorf("below the bound: verdict = %+v, must stay open", m.Verdict)
+	}
+	if m := matches.byPURL[fixed.PURL]; m.CardVersion <= 0 {
+		t.Errorf("CardVersion = %d, want the judged-against card version for the re-verdict stamp", m.CardVersion)
+	}
+}
+
+// The bridge through the scanner door: a Trivy-style report that catalogued BOTH the rpm
+// database and site-packages is its own same-inventory candidate set, so the shadow clears
+// (inferred) beside its patched rpm — and strict mode holds it open. The duplicate row also
+// exercises the plan's sibling dedup.
+func TestScannerReport_OwnershipBridgeAndStrictMode(t *testing.T) {
+	shadow := app.InventoryComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi",
+	}
+	rpm := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10", Name: "platform-python-setuptools",
+		Version: "39.2.0-9.el8_10", Ecosystem: "rpm", Source: "python-setuptools",
+	}
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2025-47273"), Proposal: vulnFactsFixedFor(t, "scanner", "python-setuptools", "0:39.2.0-9.el8_10"),
+			Component: shadow, Origin: "scanner/trivy"},
+		{CVE: cve(t, "CVE-2025-47273"), Proposal: vulnFactsFixedFor(t, "scanner", "python-setuptools", "0:39.2.0-9.el8_10"),
+			Component: rpm, Origin: "scanner/trivy"},
+		// The same rpm reported twice (two findings can name one component) — dedups in the plan.
+		{CVE: cve(t, "CVE-2025-47273"), Proposal: vulnFactsFixedFor(t, "scanner", "python-setuptools", "0:39.2.0-9.el8_10"),
+			Component: rpm, Origin: "scanner/trivy"},
+	}}
+	matches := newMatches()
+	if _, err := scannerService(t, src, matches, newRepo()).Ingest(context.Background(), "rel-1", "ev-1"); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if m := matches.byPURL[shadow.PURL]; m.Verdict.State != domain.VerdictClearedVendorFix || m.Verdict.Grade != domain.VerdictGradeInferred {
+		t.Errorf("default bridge: verdict = %+v, want an inferred clearance", m.Verdict)
+	}
+
+	strictMatches := newMatches()
+	svc := scannerService(t, src, strictMatches, newRepo()).WithInferredBridge(false)
+	if _, err := svc.Ingest(context.Background(), "rel-1", "ev-1"); err != nil {
+		t.Fatalf("strict ingest: %v", err)
+	}
+	if m := strictMatches.byPURL[shadow.PURL]; !m.Verdict.State.IsOpen() {
+		t.Errorf("strict mode: verdict = %+v, must stay open", m.Verdict)
+	}
+}
+
 func TestScannerReport_Errors(t *testing.T) {
 	prop := app.ScannerProposal{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
 		Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}}

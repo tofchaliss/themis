@@ -416,6 +416,13 @@ components:
           description: The package the fix is published for — the SOURCE package for distro components.
         version:
           type: string
+        ecosystem:
+          type: string
+          description: >-
+            The world the fix is published in (rpm | apk | pypi | ...), as the feed stated it;
+            empty when the source did not say. Carried so a consumer can pair each fix with the
+            occurrence it actually applies to (EDR-VERDICT-01 D8 - "update the RPM" and
+            "upgrade the pip install" are different work) without guessing from version shape.
     Component:
       type: object
       properties:
@@ -454,6 +461,29 @@ components:
             unknown (the match predates the field). Display provenance ONLY - it never enters a
             decision, a policy, or the AI's grounding; authority stays with the trust class and
             the source tier.
+        verdict_state:
+          type: string
+          enum: [open, cleared_vendor_fix]
+          description: >-
+            The occurrence verdict, mirrored from Knowledge (EDR-VERDICT-01 D2/D5):
+            `cleared_vendor_fix` - the installed build provably carries the vendor's fix;
+            `open` or absent - a live occurrence (absent = the row predates the field, which
+            reads as open - the fail-safe direction). This is the MACHINE's "handled"; a
+            human's "handled" is the Position, and the two never mix.
+        verdict_grade:
+          type: string
+          enum: [observed, inferred]
+          description: >-
+            Evidence strength behind a clearance (EDR-VERDICT-01 D3, EDR-TRUST-01 vocabulary):
+            `observed` - direct evidence (the component's own version against the vendor bound,
+            or an explicit SBOM ownership relationship); `inferred` - a same-inventory match
+            Themis worked out itself, always labeled as such. Present only when cleared.
+        verdict_reason:
+          type: string
+          description: >-
+            Plain-language premise of the verdict (e.g. "vendor fix 0:39.2.0-9.el8_10 present"),
+            stated by Knowledge and rendered verbatim - a clearance nobody can read the reason
+            for is one nobody can audit.
     FindingAssessment:
       type: object
       properties:
@@ -602,6 +632,15 @@ components:
             'observed' (EDR-TRUST-01 T12) - e.g. an acceptance leaning on a vendor's Asserted
             not_affected. Absent means no Position, or one resting on observed evidence.
             Derived from the accepted proposal, never stored as state.
+        open_carriers:
+          type: integer
+          description: >
+            How many CARRIER occurrences are still open (EDR-VERDICT-01 D7) - the number that
+            decides queue membership. Scope-class rows never count. When components exist and
+            this reads 0, every carrier is cleared by a vendor fix and effective_priority /
+            residual_priority read 0 - the Finding has left the ranked queue without any row
+            being deleted. One live carrier keeps FULL urgency however many cleared rows sit
+            beside it: priorities are never discounted proportionally.
     RaiseProposalRequest:
       type: object
       required: [stance]

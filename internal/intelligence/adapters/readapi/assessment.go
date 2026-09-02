@@ -46,6 +46,12 @@ type assessmentResponse struct {
 		Components  []struct {
 			PURL       string `json:"purl"`
 			ClaimClass string `json:"claim_class"`
+			// The occurrence verdict (EDR-VERDICT-01 D5). Governance always sent the full
+			// component; decoding ONLY purl+claim_class here was the AI-REC-1 defect — the
+			// Gateway grounded a recommendation on a copy the estate had already cleared.
+			VerdictState  string `json:"verdict_state"`
+			VerdictGrade  string `json:"verdict_grade"`
+			VerdictReason string `json:"verdict_reason"`
 		} `json:"components"`
 	} `json:"finding"`
 	Knowledge struct {
@@ -85,15 +91,22 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 
 	purls := make([]string, 0, len(body.Finding.Components))
 	claims := make([]string, 0, len(body.Finding.Components))
+	vstates := make([]string, 0, len(body.Finding.Components))
+	vgrades := make([]string, 0, len(body.Finding.Components))
+	vreasons := make([]string, 0, len(body.Finding.Components))
 	for _, comp := range body.Finding.Components {
 		purls = append(purls, comp.PURL)
 		claims = append(claims, comp.ClaimClass)
+		vstates = append(vstates, comp.VerdictState)
+		vgrades = append(vgrades, comp.VerdictGrade)
+		vreasons = append(vreasons, comp.VerdictReason)
 	}
 	return domain.FindingAssessment{
 		Finding: domain.FindingView{
 			ID: body.Finding.ID, ReleaseID: body.Finding.ReleaseID,
 			FaultlineID: body.Finding.FaultlineID, CVE: body.Finding.CVE,
 			Stage: body.Finding.Stage, Components: purls, ClaimClasses: claims,
+			VerdictStates: vstates, VerdictGrades: vgrades, VerdictReasons: vreasons,
 		},
 		Knowledge: domain.FaultlineView{
 			ID: body.Knowledge.FaultlineID, CVE: body.Knowledge.CVE,
@@ -122,6 +135,9 @@ type posturePayload struct {
 		Ecosystem  string `json:"ecosystem"`
 		Source     string `json:"source"`
 		ClaimClass string `json:"claim_class"`
+		// VerdictState — `cleared_vendor_fix` means these files already carry the vendor's fix
+		// (EDR-VERDICT-01 D8); absent on rows predating the field, which reads as open.
+		VerdictState string `json:"verdict_state"`
 	} `json:"components"`
 	// Fixes are the versions published for THIS Finding's own components (PLAN-3). The runtime
 	// decodes them for ONE reason (EDR-CORRELATION-01 D8 step 1): a distro module-stream fix
@@ -181,7 +197,7 @@ func toPostureEntry(e posturePayload) domain.PostureEntry {
 	for _, c := range e.Components {
 		entry.Components = append(entry.Components, domain.PostureComponent{
 			PURL: c.PURL, Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, Source: c.Source,
-			ClaimClass: c.ClaimClass,
+			ClaimClass: c.ClaimClass, VerdictState: c.VerdictState,
 		})
 	}
 	for _, f := range e.Fixes {

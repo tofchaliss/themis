@@ -1057,6 +1057,53 @@ func TestInvokeCapturesRedactedOnce(t *testing.T) {
 	if !strings.HasPrefix(string(c.ContextJSON), "REDACTED:") {
 		t.Errorf("captured context must be redacted, got %q", string(c.ContextJSON))
 	}
+	// AI-CAP-2 (measured 2026-09-02): the column, the port field, and its doc comment all
+	// existed while NOTHING populated them — every ok row shipped with an empty output, and
+	// the eval loop could never promote what was not captured. The model's terminal output
+	// must be captured, redacted like the context.
+	if !strings.HasPrefix(string(c.OutputJSON), "REDACTED:") || !strings.Contains(string(c.OutputJSON), "affected") {
+		t.Errorf("captured output must be the redacted model reply, got %q", string(c.OutputJSON))
+	}
+}
+
+// The other half of AI-CAP-2's contract: a row with no LLM reply keeps output_json NULL (nil,
+// not ""), so "the model said nothing" and "the model said the empty string" cannot blur — and
+// a schema-invalid exit captures the very reply that failed, the diagnostic Detail cannot
+// carry whole.
+func TestInvokeCaptureOutput_NonLLMAndSchemaInvalid(t *testing.T) {
+	// Early reject: no LLM ran → OutputJSON nil.
+	cap := &recordingCapturer{}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines: []Engine{&fakeEngine{replies: []engineReply{{raw: okRaw}}}}, Capturer: cap,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = g.Invoke(context.Background(), "recommend_position",
+		domain.Selection{Type: domain.SelectionFinding, IDs: []string{"a", "b"}}, "corr-nollm")
+	if got := cap.got[0].OutputJSON; got != nil {
+		t.Errorf("no LLM ran: OutputJSON = %q, want nil", got)
+	}
+
+	// Schema-invalid exit: the failing reply is captured.
+	cap2 := &recordingCapturer{}
+	bad := `{"finding_id":"F1","not":"the schema"}`
+	g2, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: groundedProjection(), Prompt: fakePrompt{},
+		Engines:  []Engine{&fakeEngine{replies: []engineReply{{raw: bad}, {raw: bad}, {raw: bad}}}},
+		Capturer: cap2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oc := g2.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr-bad")
+	if oc.Reason != ReasonSchemaInvalid {
+		t.Fatalf("reason = %q, want schema_invalid", oc.Reason)
+	}
+	if got := string(cap2.got[0].OutputJSON); !strings.Contains(got, "not") {
+		t.Errorf("schema-invalid exit must capture the failing reply, got %q", got)
+	}
 }
 
 // A capture failure never affects the invocation, and an early Selection reject still captures

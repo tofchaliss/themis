@@ -543,6 +543,165 @@ func TestRecordMatch(t *testing.T) {
 	}
 }
 
+// The occurrence-verdict lifecycle on one match row (EDR-VERDICT-01 D2/D6): recorded with its
+// verdict and stamp; a re-judgement that CHANGES the state updates the row and emits
+// ComponentVerdictChanged; one that confirms it advances the stamp silently; the row is never
+// duplicated and never deleted.
+func TestRecordMatch_VerdictLifecycle(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-47"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2024-47",
+		Component:  app.InventoryComponent{PURL: "pkg:rpm/rhel/openssl@1.0.2k-10.el8", Version: "1.0.2k-10.el8", Ecosystem: "rpm"},
+		Verdict:    domain.OpenVerdict(),
+		CardVersion: 1, OccurredAt: time.Now().UTC(),
+	}
+	if created, err := st.RecordMatch(ctx, m); err != nil || !created {
+		t.Fatalf("first match: created=%v err=%v", created, err)
+	}
+	var state string
+	var stamp int64
+	row := func() {
+		t.Helper()
+		if err := pool.QueryRow(ctx,
+			"SELECT verdict_state, verdict_card_version FROM faultline_matches WHERE component_purl=$1",
+			m.Component.PURL).Scan(&state, &stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row()
+	if state != "open" || stamp != 1 {
+		t.Fatalf("recorded verdict = %s@%d, want open@1", state, stamp)
+	}
+
+	// Re-judged against a newer card with the SAME conclusion: stamp advances, no event.
+	m.CardVersion = 3
+	if created, err := st.RecordMatch(ctx, m); err != nil || created {
+		t.Fatalf("stamp refresh: created=%v err=%v, want false/nil", created, err)
+	}
+	row()
+	if state != "open" || stamp != 3 {
+		t.Errorf("after confirm = %s@%d, want open@3", state, stamp)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 0 {
+		t.Errorf("verdict events after a confirming re-judgement = %d, want 0", n)
+	}
+
+	// A re-judgement that CHANGES the state: row updated in place, ONE change event queued.
+	m.CardVersion = 4
+	m.Verdict = domain.ClearedVendorFix(domain.VerdictGradeObserved, "vendor fix 1.0.2k-16.el8 present")
+	if created, err := st.RecordMatch(ctx, m); err != nil || created {
+		t.Fatalf("re-judgement: created=%v err=%v, want false/nil (no new row)", created, err)
+	}
+	row()
+	if state != "cleared_vendor_fix" || stamp != 4 {
+		t.Errorf("after clearance = %s@%d, want cleared_vendor_fix@4", state, stamp)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM faultline_matches"); n != 1 {
+		t.Errorf("match rows = %d, want 1 — a re-judgement must never duplicate the occurrence", n)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 1 {
+		t.Errorf("ComponentVerdictChanged events = %d, want exactly 1", n)
+	}
+}
+
+type stubInventory struct{ inv app.Inventory }
+
+func (s stubInventory) GetInventory(context.Context, string) (app.Inventory, error) {
+	return s.inv, nil
+}
+
+// The KN-VERDICT-1 healing loop end-to-end on a real store (EDR-VERDICT-01 D6): a match
+// recorded BEFORE its card had any fix bounds — the measured MRF shape — is found by the
+// stale query after the bounds fold, re-judged through the bridge, cleared in place with the
+// change event queued, and the second sweep finds nothing. This is the integration-level half
+// of the binding validation criterion.
+func TestReverdictSweep_FullLoop(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	// A discovery-era card: severity known, NO fixes yet.
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2025-47273"), vulnFacts(t, "osv", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shadow := app.InventoryComponent{PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi"}
+	rpm := app.InventoryComponent{
+		PURL: "pkg:rpm/rhel/platform-python-setuptools@39.2.0-9.el8_10", Name: "platform-python-setuptools",
+		Version: "39.2.0-9.el8_10", Ecosystem: "rpm", Source: "python-setuptools",
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2025-47273",
+		Component: shadow, Verdict: domain.OpenVerdict(), CardVersion: f.Version(),
+		OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertCorrelatedRelease(ctx, "rel-1", "ev-1", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Months later, the vendor bounds arrive (the Red Hat sweep folds them) — the card's
+	// version moves past the row's stamp, which is all the queue there is.
+	if _, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2025-47273"),
+		vulnFactsFixedFor(t, "redhat", "python-setuptools", "0:39.2.0-9.el8_10")); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := st.StaleVerdictOccurrences(ctx, 10)
+	if err != nil || len(stale) != 1 || stale[0].Component.PURL != shadow.PURL || !stale[0].Current.IsOpen() {
+		t.Fatalf("stale = %+v err=%v, want the one open pre-bounds row", stale, err)
+	}
+	// The ledger + fallback readers answer from the same store.
+	if ev, found, err := st.EvidenceForRelease(ctx, "rel-1"); err != nil || !found || ev != "ev-1" {
+		t.Fatalf("ledger = %q/%v/%v, want ev-1", ev, found, err)
+	}
+	if _, found, err := st.EvidenceForRelease(ctx, "rel-ghost"); err != nil || found {
+		t.Fatalf("unknown release must be found=false, got %v/%v", found, err)
+	}
+	if comps, err := st.MatchComponentsForRelease(ctx, "rel-1"); err != nil || len(comps) != 1 {
+		t.Fatalf("release components = %+v err=%v, want the one recorded occurrence", comps, err)
+	}
+
+	rs := app.NewReverdictService(st, st, st,
+		stubInventory{inv: app.Inventory{Components: []app.InventoryComponent{shadow, rpm}}},
+		st, st, realClock{}, 0)
+	rejudged, changed, err := rs.Sweep(ctx)
+	if err != nil || rejudged != 1 || changed != 1 {
+		t.Fatalf("sweep = %d/%d/%v, want 1 re-judged, 1 changed", rejudged, changed, err)
+	}
+	var state, grade, reason string
+	var stamp int64
+	if err := pool.QueryRow(ctx,
+		"SELECT verdict_state, verdict_grade, verdict_reason, verdict_card_version FROM faultline_matches WHERE component_purl=$1",
+		shadow.PURL).Scan(&state, &grade, &reason, &stamp); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := st.GetByID(ctx, f.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "cleared_vendor_fix" || grade != "inferred" || reason == "" || stamp != int64(cur.Version()) {
+		t.Errorf("row after sweep = %s/%s/%q@%d (card v%d), want an inferred clearance stamped current", state, grade, reason, stamp, cur.Version())
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 1 {
+		t.Errorf("ComponentVerdictChanged events = %d, want 1", n)
+	}
+
+	// Idempotent: everything is stamped current, so the next sweep reads nothing and writes nothing.
+	rejudged, changed, err = rs.Sweep(ctx)
+	if err != nil || rejudged != 0 || changed != 0 {
+		t.Errorf("second sweep = %d/%d/%v, want 0/0/nil", rejudged, changed, err)
+	}
+}
+
 func TestCVEsNeedingRefresh(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()

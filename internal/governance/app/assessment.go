@@ -131,6 +131,13 @@ func selectFixesFor(fixes []FixedVersion, comps []domain.MatchedComponent) []Fix
 	out := make([]FixedVersion, 0, len(fixes))
 	for _, f := range fixes {
 		for _, c := range comps {
+			// A CLEARED occurrence needs nothing (EDR-VERDICT-01 D8): its files already carry
+			// the fix, so letting it pull "its" fix into the Finding's list would tell an
+			// operator to upgrade something that is done — and once every carrier is cleared,
+			// an empty list is the honest answer. Open occurrences select exactly as before.
+			if !c.VerdictIsOpen() {
+				continue
+			}
 			if fixAppliesTo(f, c) {
 				out = append(out, f)
 				break

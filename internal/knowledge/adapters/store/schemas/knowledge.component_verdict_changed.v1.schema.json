@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.component_verdict_changed.v1.schema.json",
+  "title": "knowledge.component_verdict_changed.v1",
+  "description": "Integration-contract v1 for the ComponentVerdictChanged event payload (EDR-VERDICT-01 D5/D6): an EXISTING occurrence's verdict state changed on a re-judgement. Emitted only on a real state change; Governance mirrors the new state and re-derives queue membership. It never deletes anything.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "ReleaseID", "Component", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["PURL", "Name", "Version", "Ecosystem"],
+      "properties": {
+        "PURL": { "type": "string" },
+        "Name": { "type": "string" },
+        "Version": { "type": "string" },
+        "Ecosystem": { "type": "string" },
+        "Source": { "type": "string" },
+        "ClaimClass": { "type": "string", "enum": ["carrier", "scope"] },
+        "DetectionOrigin": { "type": "string" },
+        "VerdictState": { "type": "string", "enum": ["open", "cleared_vendor_fix"], "description": "The NEW state. Absent = open (fail-safe)." },
+        "VerdictGrade": { "type": "string", "enum": ["observed", "inferred"] },
+        "VerdictReason": { "type": "string" }
+      }
+    },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -536,6 +536,36 @@ under the 2026-08-07 re-derivation standard.
   same bytes + different release ⇒ **409** naming the release + evidence id the content already
   resolves to (`ContentFiledElsewhereError`, spec'd on POST /evidence, rendered verbatim by the
   GUI toast). Integration-tested (`TestSave_Idempotent` cross-release arm).
+- [ ] **COMM-VEX-1 — no RELEASE-scoped VEX document: publications materialize one Finding's
+  Position each (filed 2026-09-02; GRILLED + DESIGNED same day → EDR-COMMUNICATION-01 D13,
+  five sub-decisions D13.1–D13.5).** MED, cluster Communication/R3, **ready to implement on
+  explicit go — after the current branch stack merges.** Net shape: statements from Positions
+  ONLY, machine clearances as annotations (the governed door for a clearance to speak is
+  GOV-VERDICT-1's policy path); snapshot with a recorded input set, staleness computed and
+  surfaced on the D10 worklist, republish human (D4); full coverage — one statement per
+  finding, `under_investigation` for everything undecided with annotations sizing the nuance,
+  withdrawn CVEs preamble-only; product identity from the Registry name chain
+  (`pkg:generic/<product>/<project>@<version>`, UUID as reference), fail-CLOSED; input = two
+  reads (the Governance posture — which EDR-VERDICT-01 G1 already equipped with everything
+  needed — plus the Registry names); request = `release_id` subject union on the existing
+  publish/preview endpoints; OpenVEX first. Groups: ① domain materializer + OpenVEX
+  serializer ② app/API + Registry client ③ worklist staleness row.
+- [ ] **COMM-VEX-1b — CSAF rollup serializer (filed 2026-09-02 from the D13.5 format order).**
+  LOW until a consumer asks (REP-1's incumbent world suggests one will). The CSAF product-tree
+  work deserves its own focus; the OpenVEX rollup already answers the customer question. Same
+  materializer, new registry entry; unsupported rollup format 400s until it lands.
+- [ ] **GOV-VERDICT-1 — opt-in policy path: an all-cleared finding raises a system
+  `not_affected` proposal (filed 2026-09-02 from the D13.1 grill).** LOW, design-first,
+  Governance. Today a vendor-fix clearance updates occurrence rows and queue state but raises
+  NO proposal — so there is nothing for a policy to accept, and a fully-cleared finding can
+  never lawfully speak `not_affected` in a customer document (D13.1 keeps it
+  `under_investigation` + annotation). The hook: when a finding's last open carrier clears,
+  raise a system proposal citing the clearance premises; the EXISTING policy auto-accept and
+  constitutional bar (never for AI proposals; system proposals per current rules) decide.
+  Premise drift is already guarded — a re-opened verdict is exactly the disposition-watcher
+  shape. Grill before code: proposal wording, whether Inferred-grade clearances qualify or
+  Observed-only, and interaction with residual-priority (the finding is already off the
+  queue when this fires).
 - [ ] **EV-DEDUP-2 — should one observation be attachable to MANY releases?** LOW, design-first.
   **Design DELIVERED 2026-08-23 (T2's last item): EDR-EVIDENCE-01 D10 (PROPOSED)** — observation
   stays one record (D3 upheld); a new `evidence_filings` association table carries
@@ -591,16 +621,18 @@ under the 2026-08-07 re-derivation standard.
   the new GUI selector produced two `scanner/trivy` components (setuptools@70.3.0 on
   CVE-2026-59890 + CVE-2025-47273) sitting beside discovery's setuptools@39.2.0 on the SAME
   Findings — the two-engines-one-decision shape, with provenance distinguishing the rows.
-- [ ] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).** LOW,
-  measured live the same day: Trivy names ecosystems in its own vocabulary (`python-pkg`,
-  `node-pkg`, `gobinary`, …) and the curated recipe used to pass it verbatim, so a scanner row
-  read ecosystem `python-pkg` beside discovery's `pypi` for the same package. Harmless by
-  construction — `value.CanonicalEcosystem` doesn't know these names, and an unknown ecosystem
-  never filters a fix nor hides anything (KN-FIX-3 fail-safe) — but the two roads should read as
-  one vocabulary. The TESTING.md jq recipe now maps the common types (same-day fix); this item
-  is the durable half: canonicalize at the seam where the component is parsed
-  (`adapters/evidence/scanner_source.go`), extending the alias table rather than trusting every
-  future recipe/client to remember.
+- [x] **KN-SCAN-3 — canonicalize scanner-report component ecosystems (filed 2026-08-14).**
+  ✅ **CLOSED 2026-09-02** (KN-VERDICT-1 Group 4 — the canonical-world plan grouping NEEDED it:
+  `CanonicalEcosystem("python-pkg")` returned it verbatim, so the measured mixed-world case
+  split one pypi job into two actions, which is how the gap stopped being cosmetic). Fix as
+  filed: `value.NormalizeEcosystem` gains the Trivy analyzer aliases (`python-pkg`→pypi,
+  `node-pkg`→npm, `gobinary`/`gomod`→go, `jar`/`pom`→maven, `gemspec`→gem — mirroring the
+  dashboard's `TRIVY_ECOSYSTEMS` map), and `adapters/evidence/scanner_source.go` canonicalizes
+  at the parse seam, so every downstream consumer (verdicts, fix selection, plan grouping)
+  reads one vocabulary; unknown analyzer names still pass through untouched (KN-FIX-3
+  fail-safe). _Original filing:_ Trivy names ecosystems in its own vocabulary and the curated
+  recipe used to pass it verbatim, so a scanner row read `python-pkg` beside discovery's
+  `pypi` for the same package.
 - [ ] **KN-VERDICT-1 — a vendor-backported fix cannot clear a live finding: the rpm fixed-verdict
   never reaches it across any of its three links (filed 2026-09-02, MEASURED live on
   MRF/cdmrf-oamp/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
@@ -671,7 +703,56 @@ under the 2026-08-07 re-derivation standard.
   full urgency from open carriers only; remediation + plan grouping per (package, world); drawer
   shows per-occurrence state/grade/reason. Four phases in tasks.md; binding validation criterion:
   39.2.0 cleared-with-reason, 70.3.0 still open, Finding still queued. Case-file report:
-  artifact b57b9622-c500-4a8e-9e10-6503bdb91210. Implementation NOT started.
+  artifact b57b9622-c500-4a8e-9e10-6503bdb91210.
+  **ALL FOUR PHASES IMPLEMENTED 2026-09-02 (branch `feat/occurrence-verdicts`, each `make check`
+  green + committed): G1 record book · G2 ownership bridge · G3 re-verdict · G4 the face**
+  (drawer per-occurrence view with state pills/grade labels/reasons/per-world fix advice +
+  quiet cleared section; plan grouping by (package, canonical world) with cleared occurrences
+  contributing nothing; `FixedVersion.ecosystem` on the wire; closed KN-SCAN-3 as a dependency).
+  **✅ V.1 LIVE-VALIDATED 2026-09-02 — the arc is DONE end-to-end on the MRF estate.** All
+  three binding legs measured: 39.2.0 cleared inferred-with-reason on both releases · 70.3.0
+  still open · Finding queued at FULL urgency (posture: effective 80 / residual 80 /
+  open_carriers 1). Drain: 1080 re-judgements to stale=0; estate-wide cleared=17 (6 inferred +
+  11 observed-grade rpm clearances that were previously silent drops). The mid-validation
+  "finding disappeared" scare was release-posture.sh 401'ing silently without a key — fixed
+  same session (shares the cached admin key, names the trap). The measured false positive this
+  item was filed on is healed in production.
+- [x] **AI-REC-1 — the AI recommendation grounded `affected` on a CLEARED copy (user-reported
+  2026-09-02 during V.1; MEASURED same day from the invocation log + the raised proposal).**
+  ✅ **FIXED 2026-09-02 (code; live re-check pending).** The suspected arc-interaction was
+  exactly it: the invocation `0a1d2544` context showed components as bare purls+claim classes —
+  Governance sends full components WITH verdicts since KN-VERDICT-1 G1, but the Intelligence
+  readapi client decoded only `{purl, claim_class}` and DISCARDED them — and the model
+  faithfully recommended "affected (0.90): includes BOTH setuptools@39.2.0 and 70.3.0, below
+  78.1.1", citing the cleared copy as live evidence. Not a model fault: grounding the estate
+  had outgrown. Fix, one seam end-to-end: readapi decodes verdict state/grade/reason →
+  `FindingView` carries them (parallel arrays, short/absent = open fail-safe) →
+  `ComponentLines()` renders each occurrence labeled (CLEARED-with-grade-and-premise / OPEN /
+  scope-class) in BOTH Finding prompts + an explicit reading rule ("a backport keeps the old
+  version number; ground `affected` on OPEN components only") → `GroundingThinness` gains the
+  all-carriers-cleared class so a Decision on a fully-cleared Finding is diagnosably thin.
+  Prompt hashes change (prompt_versions is designed for it). **LIVE-VERIFIED 2026-09-02
+  (same day, MRF finding re-asked):** "affected (0.90): The release includes setuptools
+  version 70.3.0, which is an open component and falls within the affected range … does not
+  include the fix introduced in version 78.1.1" — grounded on the open copy alone, the model
+  even adopting the OPEN label vocabulary; the cleared 39.2.0 no longer appears as evidence.
+  Same stance, honest grounds.
+- [x] **AI-CAP-2 — invocation_log.output_json is EMPTY on reason=ok LLM rows (measured
+  2026-09-02: `0a1d2544` recommend_position, model set, rationale delivered, output NULL/'').**
+  ✅ **FIXED 2026-09-02.** Root cause simpler and older than suspected: NOT a path divergence —
+  the column, the capture port's `OutputJSON` field, and its doc comment all existed since Δ4a
+  shipped, and NOTHING ever populated the field, on ANY path, for ANY capability. Every row
+  ever captured has an empty output. Invisible because the eval loop replays from
+  `context_json` and scores deterministically — the output column was audit data no gate read
+  (the vet-tags lesson in a new costume: what nothing exercises, rots silently). Fix:
+  `Outcome.Output` carries the model's TERMINAL raw reply (last provider response — the
+  accepted output on success, the failing reply on a schema-invalid exit, diagnostic gold the
+  retry loop's Detail cannot carry whole), redacted at the capture boundary; nil (never "")
+  when no LLM ran, so NULL keeps meaning "the model said nothing". Asserted by test now on
+  ok, non-LLM, and schema-invalid paths, so it cannot rot unnoticed again. Historical rows
+  stay empty (nothing to backfill from — the outputs were never recorded). **LIVE-VERIFIED
+  2026-09-02:** first post-restart invocation captured its full output JSON, sitting directly
+  above a pre-fix `<NULL>` row in the same query — the before and after in two lines.
 
 > **✅ The Knowledge feed items below are IMPLEMENTED under `openspec/changes/phase3-knowledge-feeds`**
 > (19/19 tasks, gated, 2026-07-23): real OSV query-by-package + NVD modified-since fetch clients, **CVSS 4.0**

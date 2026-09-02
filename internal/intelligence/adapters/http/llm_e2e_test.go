@@ -132,9 +132,11 @@ func TestE2ERealLLM_RecommendPosition(t *testing.T) {
 func TestE2ERealLLM_PlanRemediation(t *testing.T) {
 	url, model := llmEndpoint(t)
 
-	// A release posture with a MERGED step (two packages, identical CVE set) and a single-package
-	// step. The merged one is deliberate: its heading renders as a package LIST, which is the exact
-	// citation form that was refused live.
+	// A release posture with a MERGED step (two packages, identical CVE set), a single-package
+	// step, and a MIXED-WORLD finding (EDR-VERDICT-01 D8): a cleared distro shadow beside an
+	// open pip copy of the same package, so the plan must contain a pypi action for the open
+	// copy and nothing for the cleared one. The merged step is deliberate: its heading renders
+	// as a package LIST, which is the exact citation form that was refused live.
 	gov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[
 		  {"finding_id":"f1","cve":"CVE-2026-1","residual_priority":90,"effective_priority":90,
@@ -145,7 +147,14 @@ func TestE2ERealLLM_PlanRemediation(t *testing.T) {
 		                  "ecosystem":"rpm","source":"mod_http2"}]},
 		  {"finding_id":"f3","cve":"CVE-2026-2","residual_priority":70,"effective_priority":70,
 		   "components":[{"purl":"pkg:rpm/rocky/python3-ply@3.9","name":"python3-ply","version":"3.9",
-		                  "ecosystem":"rpm","source":"python-ply"}]}
+		                  "ecosystem":"rpm","source":"python-ply"}]},
+		  {"finding_id":"f4","cve":"CVE-2025-47273","residual_priority":71,"effective_priority":71,
+		   "components":[
+		     {"purl":"pkg:pypi/setuptools@39.2.0","name":"setuptools","version":"39.2.0",
+		      "ecosystem":"pypi","claim_class":"carrier","verdict_state":"cleared_vendor_fix",
+		      "verdict_grade":"inferred","verdict_reason":"matched to platform-python-setuptools at the distro version"},
+		     {"purl":"pkg:pypi/setuptools@70.3.0","name":"setuptools","version":"70.3.0",
+		      "ecosystem":"python-pkg","claim_class":"carrier"}]}
 		]`))
 	}))
 	defer gov.Close()

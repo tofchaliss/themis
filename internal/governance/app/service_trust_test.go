@@ -620,6 +620,56 @@ func TestGetFindingAssessment_ExcludesWrongEcosystemAndWrongStreamFixes(t *testi
 	}
 }
 
+// A CLEARED occurrence needs nothing (EDR-VERDICT-01 D8): its files already carry the fix, so
+// it must not pull "its" fix into the Finding's list — and once every occurrence is cleared,
+// the honest fix list is empty (with the count reported, not silently dropped). Open
+// occurrences keep selecting exactly as before.
+func TestGetFindingAssessment_ClearedOccurrencesSelectNoFixes(t *testing.T) {
+	repo := newRepo()
+	f := findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools",
+		Version: "39.2.0", Ecosystem: "pypi",
+		VerdictState: "cleared_vendor_fix", VerdictGrade: "inferred",
+	})
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@70.3.0", Name: "setuptools",
+		Version: "70.3.0", Ecosystem: "pypi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo.seed(f)
+	known := app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2025-47273",
+		Fixes: []app.FixedVersion{{Package: "setuptools", Version: "78.1.1", Ecosystem: "pypi"}},
+	}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	// The OPEN 70.3.0 copy still selects the upstream fix — clearing its neighbour changed nothing for it.
+	if len(got.Knowledge.FixedVersions) != 1 || got.Knowledge.FixedVersions[0] != "78.1.1" {
+		t.Fatalf("fixed_versions = %v, want the open copy's upstream fix", got.Knowledge.FixedVersions)
+	}
+
+	// Now the same Finding with ONLY the cleared occurrence: the fix list must be empty.
+	repo2 := newRepo()
+	repo2.seed(findingWithComponent(t, domain.MatchedComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools",
+		Version: "39.2.0", Ecosystem: "pypi",
+		VerdictState: "cleared_vendor_fix", VerdictGrade: "inferred",
+	}))
+	read2 := app.NewReadService(repo2, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})
+	got2, err := read2.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(got2.Knowledge.FixedVersions) != 0 || got2.Knowledge.UnattributedFixes != 1 {
+		t.Errorf("all-cleared: fixed_versions=%v unattributed=%d, want none selected / 1 counted",
+			got2.Knowledge.FixedVersions, got2.Knowledge.UnattributedFixes)
+	}
+}
+
 // Absence of evidence never excludes (D8 fail-open): a fix with no stated ecosystem, or a
 // component/fix without a resolvable EL marker, keeps matching by name.
 func TestGetFindingAssessment_UnknownEcosystemOrStreamFailsOpen(t *testing.T) {

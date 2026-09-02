@@ -48,6 +48,47 @@ func TestPlanActions_CollapsesFindingsIntoUpgrades(t *testing.T) {
 	}
 }
 
+// The EDR-VERDICT-01 D8 rules on the measured MRF shape: a CLEARED occurrence adds no action
+// (its files already carry the fix), the open pip copy beside it still does, and the two
+// worlds group canonically — `python-pkg` and `pypi` are one job while rpm work stays its own.
+func TestPlanActions_ClearedOccurrencesAndCanonicalWorlds(t *testing.T) {
+	cleared := domain.PostureComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0",
+		Ecosystem: "pypi", ClaimClass: "carrier", VerdictState: "cleared_vendor_fix",
+	}
+	pipCopy := domain.PostureComponent{
+		PURL: "pkg:pypi/setuptools@70.3.0", Name: "setuptools", Version: "70.3.0",
+		Ecosystem: "python-pkg", ClaimClass: "carrier", // a scanner's spelling of the same world
+	}
+	p := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f1", "CVE-2025-47273", 71, cleared, pipCopy),
+		// A second CVE naming the pip copy under the OTHER spelling — one world, one action key.
+		entry("f2", "CVE-2026-59890", 40, domain.PostureComponent{
+			PURL: "pkg:pypi/setuptools@70.3.0", Name: "setuptools", Version: "70.3.0",
+			Ecosystem: "pypi", ClaimClass: "carrier",
+		}),
+	}}
+	got := p.PlanActions()
+	if len(got) != 1 {
+		t.Fatalf("actions = %+v, want ONE pypi upgrade — the cleared shadow adds nothing and the two spellings are one world", got)
+	}
+	if got[0].Package != "setuptools" || got[0].Ecosystem != "pypi" {
+		t.Errorf("action = %+v, want setuptools in the canonical pypi world", got[0])
+	}
+	if len(got[0].CVEs) != 2 || len(got[0].InstalledVersions) != 1 || got[0].InstalledVersions[0] != "70.3.0" {
+		t.Errorf("action = %+v, want both CVEs on the one open install (70.3.0 only — 39.2.0 is cleared)", got[0])
+	}
+
+	// All carriers cleared but the Finding still open at entry level (e.g. an undecided scope
+	// obligation): no action emerges — there is nothing left to DO for it.
+	allCleared := domain.ReleasePosture{ReleaseID: "rel-1", Entries: []domain.PostureEntry{
+		entry("f3", "CVE-2025-47273", 71, cleared),
+	}}
+	if got := allCleared.PlanActions(); len(got) != 0 {
+		t.Errorf("actions = %+v, want none — every occurrence is cleared", got)
+	}
+}
+
 // A decided Finding is not work. Including it would pad the plan with actions nobody needs to
 // take — and a plan whose items are already done is a plan people stop reading.
 func TestPlanActions_ExcludesDecidedFindings(t *testing.T) {
