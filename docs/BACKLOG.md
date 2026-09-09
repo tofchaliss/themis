@@ -3072,6 +3072,42 @@ under the 2026-08-07 re-derivation standard.
   against an el8 install — the misleading half. Deferred deliberately; needs a rule for
   stream-less versions and must not regress non-distro ecosystems.
 
+- [x] **KN-MODULE-3 — a modular build could never be cleared: its EL marker is `+elN`, not `.elN`
+  (filed 2026-09-09).** ✅ **FIXED 2026-09-09.** **HIGH, correctness.** `RPMReleaseMajor` matched
+  only `.el`, so an installed modular build (`2.4.37-65.module+el8.10.0+40257+286895ef.9`) placed
+  as EL major `""` — and `RPMFixedByStream` returns false at its `instMajor == ""` guard *before
+  considering any fix*. **No modular RHEL/Rocky package could EVER be cleared by the vendor-fix
+  verdict** — httpd, python38, nodejs, postgresql alike — however good its evidence.
+  Found only after KN-MODULE-2 and KN-SCAN-3b were both resolved and CVE-2021-40438 *still* read
+  `open` with a correct purl, a correct `rpm` ecosystem, and Red Hat data folded: three defects
+  stacked on one row, each hiding the next.
+  Fixed by also accepting `+el`. Safety is tested explicitly, because a false "fixed" hides a live
+  vulnerability and is the only unsafe direction: el7 never clears el8, el9 never clears el8, a
+  build below the fix stays affected, and a module NEVRA never decides. **Mutation-verified.**
+  **Honest residual — NOT fixed, deliberately:** Red Hat's `affected_release` for RHEL 8 often
+  states only a MODULE NEVRA (`httpd:2.4-8040020211008164252.522a0ee4`), whose version field is
+  the stream name `2.4` — not a build. There is no sound comparison between `2.4` and an installed
+  `2.4.37-65`, so such a fix still cannot clear, and forcing one would fabricate the conclusion
+  the design forbids. A card whose el8 entry is a real modular NEVRA
+  (`httpd-0:2.4.37-43.module+el8.4.0+571+fd70afb1`) clears correctly today. Closing the rest likely
+  needs the Red Hat **errata/RHSA** stream rather than the CVE record — filed as the follow-up
+  below. Until then the designed path for "the vendor data cannot prove it but we verified the
+  backport" is a **VEX `not_affected` or a Governance decision**, which is also what preserves the
+  audit trail.
+
+- [ ] **KN-MODULE-4 — module-NEVRA vendor fixes carry no comparable version (filed 2026-09-09).**
+  MED, correctness. Follow-up to KN-MODULE-3. Red Hat's CVE record states an el8 modular fix as
+  `name:stream-context`; the stream (`2.4`) is not a build, so the stream-scoped compare cannot
+  use it and the occurrence stays `open` even when the installed build demonstrably carries the
+  fix (CVE-2021-40438 on a patched el8.10 httpd is the live case — a KEV CVE ranking top of estate
+  while not applicable). **Options:** (a) read the module CONTEXT (`8040020211008164252` decomposes
+  to major 8, minor 4, build timestamp) and compare stream-context ordering — needs care, the
+  context orders builds of a stream, not package versions; (b) resolve the fix through the Red Hat
+  **errata/RHSA** data, which states real NEVRAs per module stream; (c) treat a same-stream module
+  fix as clearing only when the installed module context is at/above the fix's — narrower than (a)
+  and defensible. Prefer (b): it uses the vendor's own package-level statement instead of deriving
+  one. **Dep:** none. **Scope:** MED.
+
 - [ ] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
   ecosystem, silently closing its verdict path (filed 2026-09-09).** MED, correctness-of-signal.
   Scanners identify binaries they fingerprint on disk with application-scoped identifiers
