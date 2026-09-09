@@ -59,8 +59,12 @@ type Knowledge struct {
 	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
 	Alpine   *app.AlpineEnrichmentService // nil when the Alpine secdb feed is disabled
 	Rocky    *app.RockyEnrichmentService  // nil when the Rocky RXSA errata feed is disabled
-	Vexfeed  *app.VexEnrichmentService    // nil when the generic CSAF-VEX feed is disabled
-	Health   *app.FeedHealthService       // always set; the schedulers record into it (B1)
+	// RockyErrata is the per-CVE RLSA fix-bound sweep (KN-MODULE-4); nil when Rocky is disabled.
+	// It rides the same enable flag as Rocky — one Rocky source, two shapes: RXSA whole-universe
+	// (tiny, Rocky-exclusive packages) and RLSA per-CVE (large, the modular fix bounds).
+	RockyErrata *app.BackfillService
+	Vexfeed     *app.VexEnrichmentService // nil when the generic CSAF-VEX feed is disabled
+	Health      *app.FeedHealthService    // always set; the schedulers record into it (B1)
 	// Reattribute re-asks the discovery feeds about components already in the estate, so cards
 	// folded before fix-attribution existed gain it without a new SBOM (KN-FIX-2). Always set —
 	// it rides the always-on OSV discovery source, not an opt-in feed.
@@ -133,16 +137,29 @@ type RedHatConfig struct {
 	HTTP       *http.Client // optional; nil → http.DefaultClient
 }
 
-// RockyConfig configures the optional Rocky RXSA errata feed (GUI-5, EDR-VEX-01 D11). When
-// Enabled, Wire builds the errata (Apollo) client and a RockyEnrichmentService on
-// Knowledge.Rocky (nil when disabled); the composition root schedules its Enrich. The RXSA
-// universe is tiny, so the D5 bound is applied inside the client: the advisory set is walked
-// whole and only records matching carded CVEs are kept. RLSA clones are excluded — their
-// content already arrives via the Red Hat feed.
+// RockyConfig configures the optional Rocky errata feeds (GUI-5, EDR-VEX-01 D11; KN-MODULE-4).
+// One flag arms two sweeps over the same Apollo client, because they are one Rocky knowledge
+// source in two shapes:
+//
+//   - RXSA, whole-universe (Knowledge.Rocky): Rocky-exclusive/SIG packages that exist in no Red
+//     Hat data. The set is tiny (29 advisories, 2026-08-27), so the D5 bound lives in the client
+//     — the advisory list is walked whole and uncarded records are discarded in memory.
+//   - RLSA, per-CVE (Knowledge.RockyErrata): the fix BOUNDS for modular packages. Red Hat's CVE
+//     record states an el8 modular fix as a module NEVRA whose version is the stream NAME, which
+//     bounds nothing, so RLSA is the only place the real build appears. The RLSA universe is 4103
+//     advisories against 3 for one CVE (measured 2026-09-09), so this one is per-CVE and
+//     staleness-bounded through BackfillService rather than a walk.
+//
+// RLSA is an additional evidence source for fix bounds, never a second authority: its Proposals
+// carry SeverityUnknown and create no applicability path of their own.
 type RockyConfig struct {
 	Enabled bool
 	BaseURL string       // "" → the client default (errata.rockylinux.org)
 	HTTP    *http.Client // optional; nil → http.DefaultClient
+	// BackfillLimit and StaleAfter bound the per-CVE RLSA sweep (KN-MODULE-4); 0 → the
+	// BackfillService defaults (200 CVEs per sweep, 7-day staleness).
+	BackfillLimit int
+	StaleAfter    time.Duration
 }
 
 // AlpineConfig configures the optional Alpine secdb feed (GUI-2, EDR-VEX-01 D7). When Enabled,
@@ -258,7 +275,17 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		kn.Alpine = app.NewAlpineEnrichmentService(feed.NewAlpineClient(alpine.BaseURL, alpine.Branches, alpine.HTTP), st, fold)
 	}
 	if rocky.Enabled {
-		kn.Rocky = app.NewRockyEnrichmentService(feed.NewRockyClient(rocky.BaseURL, rocky.HTTP), st, fold)
+		rockyClient := feed.NewRockyClient(rocky.BaseURL, rocky.HTTP)
+		kn.Rocky = app.NewRockyEnrichmentService(rockyClient, st, fold)
+		// The per-CVE RLSA sweep (KN-MODULE-4), riding the same enable flag: one Rocky knowledge
+		// source, not two configuration surfaces. It is the ONLY place a modular package's fix is
+		// stated as a real build — Red Hat's CVE record gives the module stream name, which bounds
+		// nothing, so without this a PATCHED modular build can never clear. Per-CVE and
+		// staleness-bounded through the same BackfillService NVD uses, because the RLSA universe
+		// is 4103 advisories (measured 2026-09-09) against 3 for one CVE: the D5 relevance bound
+		// made structural, not a second global feed.
+		kn.RockyErrata = app.NewBackfillService("rocky-errata", rockyClient, st, fold,
+			rocky.BackfillLimit, rocky.StaleAfter)
 	}
 	if vexfeed.Enabled {
 		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)

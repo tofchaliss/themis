@@ -254,3 +254,50 @@ func TestRPMFixedByStreamModularSafety(t *testing.T) {
 		t.Error("a module NEVRA names a stream, not a version — it must never clear a build")
 	}
 }
+
+// KN-MODULE-4 safety: admitting RLSA as a fix-bound source must NOT let a bound that names no
+// build become a clearance. The invariant is
+//
+//	concrete NEVRA + compatible EL major + RPMFixedByStream → clear
+//
+// never "any advisory mentioning the package → clear". This is the exact failure mode
+// KN-MODULE-3 was about, restated as a guard so the new evidence path cannot weaken it.
+func TestMalformedBoundNeverClears(t *testing.T) {
+	const installed = "2.4.37-65.module+el8.10.0+40257+286895ef.9"
+	for _, bound := range []string{
+		"httpd:2.4",                              // a module STREAM NAME, bounds nothing
+		"httpd:2.4-8040020211008164252.522a0ee4", // Red Hat's module NEVRA — a stream, not a build
+		"2.4",                                    // a bare upstream version
+		"2.4.47",                                 // upstream Apache, as a scanner reports it
+		"httpd",                                  // a name alone
+		"",
+	} {
+		t.Run(bound, func(t *testing.T) {
+			if value.RPMFixedByStream("rpm", installed, []string{bound}) {
+				t.Errorf("bound %q cleared a build it cannot bound — a false 'fixed' hides a live vulnerability", bound)
+			}
+		})
+	}
+}
+
+// The live regression, end to end over the real strings: the RLSA bound clears the patched build,
+// and every unsafe direction stays closed. CVE-2021-40438 on release 7bc21a1b, 2026-09-09.
+func TestRLSABoundClearsThePatchedModularBuild(t *testing.T) {
+	const (
+		installed = "2.4.37-65.module+el8.10.0+40257+286895ef.9"
+		older     = "2.4.37-30.module+el8.3.0+100+abcd1234"
+		rlsaFix   = "httpd-0:2.4.37-39.module+el8.4.0+571+fd70afb1"
+	)
+	if !value.RPMFixedByStream("rpm", installed, []string{rlsaFix}) {
+		t.Error("65 >= 39 in the same el8 modular family: the patched build must clear")
+	}
+	if value.RPMFixedByStream("rpm", older, []string{rlsaFix}) {
+		t.Error("30 < 39: a build below the vendor fix must stay affected")
+	}
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.6-97.el7_9.1"}) {
+		t.Error("an el7 bound must never clear an el8 install")
+	}
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.37-99.module+el9.0.0+1+aaaa"}) {
+		t.Error("an el9 bound must never clear an el8 install")
+	}
+}

@@ -280,7 +280,7 @@ func main() {
 	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
 	// CVSS/severity onto its card. Off unless THEMIS_NVD_ENABLED=1.
 	if kn.Backfill != nil {
-		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"), kn.Reverdict.Nudge)
+		go backfillLoop("nvd", kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"), kn.Reverdict.Nudge)
 		logger.Info("nvd per-CVE enrichment enabled",
 			observability.String("interval", cfg.nvdPollInterval.String()),
 			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit),
@@ -316,6 +316,15 @@ func main() {
 	if kn.Rocky != nil {
 		go rockyLoop(kn.Rocky, kn.Health, cfg.rockyPollInterval, logger.Component("rocky"), kn.Reverdict.Nudge)
 		logger.Info("rocky rxsa errata feed enabled", observability.String("interval", cfg.rockyPollInterval.String()))
+	}
+	// The per-CVE RLSA fix-bound sweep (KN-MODULE-4), on the same flag and cadence as the RXSA
+	// walk above. RLSA is the only source stating a MODULAR package's fix as a real build — Red
+	// Hat's CVE record gives the module stream name, which bounds nothing — so without this a
+	// PATCHED modular build can never clear the vendor-fix verdict.
+	if kn.RockyErrata != nil {
+		go backfillLoop("rocky-errata", kn.RockyErrata, kn.Health, cfg.rockyPollInterval,
+			logger.Component("rocky-errata"), kn.Reverdict.Nudge)
+		logger.Info("rocky rlsa fix-bound sweep enabled", observability.String("interval", cfg.rockyPollInterval.String()))
 	}
 
 	// Scheduled generic CSAF-VEX vendor feed (D5, parity B4): folds not_affected applicability from
@@ -497,30 +506,32 @@ func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger 
 	}
 }
 
-// backfillLoop runs the per-CVE NVD enrichment sweep on a fixed cadence (D5a).
+// backfillLoop runs a per-CVE enrichment sweep on a fixed cadence (D5a). `source` names the
+// feed in logs, health and metrics — NVD and the Rocky RLSA fix-bound sweep (KN-MODULE-4) share
+// this loop because they share the shape: per-CVE, staleness-bounded, capped per sweep.
 //
 // Simpler than the window walk it replaces, because there is no window: each run asks the store
 // which carded CVEs still lack an NVD Proposal, fetches those by id, and stops at the cap. There
 // is no watermark to advance and therefore no way to skip — the queue IS the state, and a CVE
 // stays on it until it is enriched.
-func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
+func backfillLoop(source string, bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := bf.Enrich(context.Background())
 		if err != nil {
-			logger.Error("nvd enrichment sweep failed", observability.Err(err))
-			recordFeed(health, "nvd", err, logger)
-			observability.Default().RecordFeedPoll("nvd", observability.FeedPollFailed)
+			logger.Error(source+" enrichment sweep failed", observability.Err(err))
+			recordFeed(health, source, err, logger)
+			observability.Default().RecordFeedPoll(source, observability.FeedPollFailed)
 			return
 		}
-		recordFeed(health, "nvd", nil, logger)
+		recordFeed(health, source, nil, logger)
 		// Logged on EVERY sweep including a zero fold: an estate with nothing left to enrich and
 		// a feed that has stopped working must not look alike (NVD-WATCH-1).
-		logger.Info("nvd enrichment sweep complete", observability.Int("folded", n))
+		logger.Info(source+" enrichment sweep complete", observability.Int("folded", n))
 		if n > 0 {
 			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
 		}
-		observability.Default().RecordFeedPoll("nvd", observability.FeedPollComplete)
-		observability.Default().RecordFeedRecords("nvd", observability.FeedRecordsFolded, n)
+		observability.Default().RecordFeedPoll(source, observability.FeedPollComplete)
+		observability.Default().RecordFeedRecords(source, observability.FeedRecordsFolded, n)
 	}
 	time.Sleep(15 * time.Second) // let the service settle before the first sweep
 	sweep()
