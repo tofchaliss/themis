@@ -136,3 +136,62 @@ func TestIsRPMModuleStream(t *testing.T) {
 		})
 	}
 }
+
+// KN-MODULE-2: Red Hat states modular fixes as a MODULE NEVRA ("name:stream-context"), which the
+// plain-NEVRA rule reads as fewer than three hyphen segments and therefore attributes to NOTHING.
+// The consequence measured live 2026-09-09: the el8 module fix for CVE-2021-40438 was stored
+// unattributed, an unattributed fix may never satisfy a per-component verdict (KN-FIX-1), and a
+// PATCHED httpd 2.4.37-65.module+el8.10.0 sat `open` on a KEV CVE while the posture offered an
+// el7 build (0:2.4.6-97.el7_9.1) as its fix.
+func TestRPMPackageNameReadsModuleNEVRA(t *testing.T) {
+	for _, tc := range []struct {
+		nevra string
+		want  string
+	}{
+		// The live fixtures, verbatim from Red Hat's CVE-2021-40438 record.
+		{"httpd:2.4-8040020211008164252.522a0ee4", "httpd"},
+		{"httpd:2.4-8010020211008125020.c27ad7f8", "httpd"},
+		{"httpd:2.4-8020020211008164029.4cda2c84", "httpd"},
+		// Other modular streams on the same estate.
+		{"python38:3.8-8040020210427111907.522a0ee4", "python38"},
+		{"nodejs:14-8040020210817145317.522a0ee4", "nodejs"},
+		// Regression — the plain NEVRA forms must be unchanged. The epoch colon here falls
+		// AFTER a hyphen, which is what keeps it out of the module path.
+		{"httpd-0:2.4.6-97.el7_9.1", "httpd"},
+		{"httpd24-httpd-0:2.4.34-22.el7.1", "httpd24-httpd"},
+		{"openssl-1:1.0.2k-16.el8", "openssl"},
+		// Regression — a bare EVR still names no package.
+		{"1.0.2k-16.el8", ""},
+		{"2.4.49", ""},
+		{"", ""},
+	} {
+		t.Run(tc.nevra, func(t *testing.T) {
+			if got := value.RPMPackageName(tc.nevra); got != tc.want {
+				t.Errorf("RPMPackageName(%q) = %q, want %q", tc.nevra, got, tc.want)
+			}
+		})
+	}
+}
+
+// A module NEVRA carries no `.module+el` marker — that marker is on the INSTALLED build, not on
+// the advisory's identifier — so the classifier must recognize the form itself. Without this, a
+// module fix sorts as a DIRECT fix and the KN-MODULE-1 ordering silently inverts.
+func TestIsRPMModuleStreamRecognizesModuleNEVRA(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"httpd:2.4-8040020211008164252.522a0ee4", true},
+		{"nodejs:14-8040020210817145317.522a0ee4", true},
+		// Not module streams: a plain NEVRA with an epoch colon, and a bare EVR.
+		{"httpd-0:2.4.6-97.el7_9.1", false},
+		{"openssl-1:1.0.2k-16.el8", false},
+		{"0:2.28-251.el8_10.38", false},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := value.IsRPMModuleStream(tc.version); got != tc.want {
+				t.Errorf("IsRPMModuleStream(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}

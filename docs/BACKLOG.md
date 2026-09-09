@@ -3002,6 +3002,115 @@ under the 2026-08-07 re-derivation standard.
   and restarts the fleet as one operation — plus a startup-time credential check that fails with
   "DSN in /etc/themis/<svc>.env is not accepted by the server" rather than a bare driver error.
 
+- [ ] **KN-SCAN-OBS-1 — the scanner-report `skipped` counter is computed and never logged
+  (filed 2026-09-09).** MED, observability. `ScannerSource.ScannerProposals`
+  (`internal/knowledge/adapters/evidence/scanner_source.go`) counts every finding the translation
+  could not use and threads it through `ScannerPlan.Skipped` (`internal/knowledge/app/scanner.go`).
+  Its own comment says the count "keeps the gap visible in the caller's log line" — **but no caller
+  logs it.** `Coordinator.PrepareEvidenceRegistered` discards it, and `ApplyIngest`'s match count is
+  never logged either, so a scanner upload produces **no log line at all** on the success path.
+  **Measured live 2026-09-09:** a 554-finding Cortex report ingested as 542 new proposals. Twelve
+  findings were dropped and nothing in the system said so or named them — identifying them required
+  re-reading the uploaded document offline. An under-reported scan reads as a cleaner image than it is.
+  **Where it plugs in:** one structured log at the ingest seam — evidence id, release, findings seen,
+  proposals folded, matches recorded, skipped — plus a `themis_scanner_findings_total{outcome}` counter
+  in the section-D metric family, so "how many findings did we drop this month" is a dashboard question
+  rather than an archaeology exercise. **Dep:** none. **Scope:** SMALL.
+
+- [ ] **KN-SCAN-OBS-2 — a zero-finding scanner report is indistinguishable from a successful one
+  (filed 2026-09-09).** MED, correctness-of-signal. A `scanner-report` whose document does not carry the
+  curated `{"findings":[…]}` envelope unmarshals into `scannerReportDoc{Findings: nil}`: the loop body
+  never runs, `ApplyIngest` returns `(0, nil)`, the inbox marks the event applied, and Evidence has
+  already returned **201**. Operator-visible result: a successful upload that changes nothing, with no
+  error anywhere. This is the same class `internal/knowledge/adapters/wiring/wiring.go` records as
+  previously fixed ("accepted by Evidence and silently no-op'd here — the 'wiring is no gate' class");
+  the **envelope-mismatch variant is still open**. Note the trust gate cannot catch it: it validates
+  well-formed JSON, not shape, and by design does not know the scanner-report envelope (D2 leaves
+  per-format structure to the consumer).
+  **Options, not yet decided:** (a) log+count a zero-finding ingest as a distinct outcome — cheapest,
+  closes with KN-SCAN-OBS-1; (b) surface a per-scan "0 findings ingested" badge on the release posture's
+  Scans card (D15), where an operator would actually look; (c) reject a scanner-report whose envelope
+  carries no `findings` key at the Evidence border — **rejected for now**: it would put shape knowledge
+  in a context that deliberately has none. Prefer (a)+(b). **Dep:** KN-SCAN-OBS-1. **Scope:** SMALL.
+
+- [x] **KN-MODULE-2 — Red Hat module-stream fixes lose their package attribution, so a patched
+  modular build can never clear (filed 2026-09-09).** ✅ **FIXED 2026-09-09** — `RPMPackageName`
+  and `IsRPMModuleStream` now read the `name:stream-context` module NEVRA
+  (`internal/kernel/value/rpmstream.go`, via `moduleNEVRAName`). Two forms must not be mistaken
+  for it, and the EXISTING tests caught both on the first attempt: a plain NEVRA whose epoch colon
+  follows a hyphen (`openssl-1:1.0.2k-16.el8`), and — the one a position rule alone misses — a
+  BARE EVR whose epoch colon LEADS (`1:1.0.2k-16.el8`). The discriminator is that an rpm epoch is
+  an integer while a module name is a name, so an all-digit prefix is an epoch and never a module.
+  Tests: live fixtures from Red Hat's CVE-2021-40438 record (httpd/python38/nodejs module NEVRAs)
+  plus el7/SCL/bare-EVR regressions, and a domain test proving `StrictFixesFor` — the fail-closed
+  verdict path — now sees the el8 module fix while KN-MODULE-1 ordering still puts the direct fix
+  first. **Mutation-verified:** reverting the recognition makes the new tests fail.
+  **Still required to clear the live estate:** a Knowledge restart, so the full Red Hat sweep
+  re-attributes cards already folded (stored proposals are not re-parsed in place). Original
+  filing follows.
+  **HIGH, correctness.** Red Hat states el8
+  modular fixes in module-NEVRA form (`httpd:2.4-8040020211008164252.522a0ee4`).
+  `value.RPMPackageName` splits on `-` and needs ≥3 parts, so that form yields **`""`** — the fix
+  is stored **unattributed**, and by the KN-FIX-1 rule an unattributed fix can never satisfy a
+  per-component verdict. `value.IsRPMModuleStream` also misses it (it keys on `.module+el`, which
+  marks the *installed build*, not Red Hat's module NEVRA).
+  **Measured live 2026-09-09**, release `7bc21a1b`: `CVE-2021-40438` (critical, **KEV**, EPSS
+  0.99999) sits `open` against `httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9` while the
+  posture offers `0:2.4.6-97.el7_9.1` — a **RHEL 7** build against a **RHEL 8** install. The
+  el8 fix IS on the card, just unreadable. The build is patched: **a false positive, ranked top
+  of estate.** Sixteen further httpd CVEs on that release show the same shape — one defect, 17
+  rows. Same family as KN-FIX-1's "upgrade python3-ply 3.9 to 0.1.7".
+  **Excluded as causes** (checked): stale feed (the Red Hat proposal is present, observed
+  2021-09-16, and re-folding is idempotent — a sweep changes nothing); `redhatIsMainStream`
+  over-filtering (it admits `cpe:/a:redhat:enterprise_linux:8`, confirmed against the vendor API).
+  **Where it plugs in:** `value.RPMPackageName` + `value.IsRPMModuleStream` learn the
+  `name:stream-context` form — the one shared vocabulary, so every modular package (python38,
+  nodejs, postgresql, …) is fixed at once. No migration, no API change; a Knowledge restart
+  forces the full Red Hat sweep that re-attributes existing cards. `redhat_client.go:138` already
+  records this as deferred **PR3**. **Dep:** none. **Scope:** SMALL.
+  **Follow-up (separate, larger):** per-EL-stream fix scoping so an el7 fix is never *displayed*
+  against an el8 install — the misleading half. Deferred deliberately; needs a rule for
+  stream-less versions and must not regress non-distro ecosystems.
+
+- [ ] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
+  ecosystem, silently closing its verdict path (filed 2026-09-09).** MED, correctness-of-signal.
+  Scanners identify binaries they fingerprint on disk with application-scoped identifiers
+  (Cortex: `app:httpd@2.4.37-65.module+el8.10.0…`, `component_source: /usr/sbin/httpd`).
+  `ecosystemFromPURL` requires a `pkg:` prefix, so the component lands with
+  `component_ecosystem = ''` — and `StrictFixesFor` returns `nil` on an empty ecosystem, so **no
+  vendor-fix verdict can ever fire** for it. **Measured live 2026-09-09:** 87 of 1633 matches
+  (all one component, httpd) in exactly this state.
+  Note the asymmetry worth deciding on: the **SPDX parser skips** a package whose purl type is
+  unreadable (`spdx.go:78`), while the scanner path **admits** it. Two doors, two rules, and the
+  permissive one produces occurrences that look ordinary but are structurally undecidable.
+  **Options:** (a) mark such occurrences and surface the count — cheapest, composes with
+  KN-SCAN-OBS-1; (b) canonicalize recognizable non-purl identifiers at the scanner ACL seam
+  (an rpm-shaped version implies an rpm component); (c) skip them as SPDX does — **rejected**:
+  it would hide real findings, and fail-open is the right direction here.
+  Prefer (a), consider (b). **Dep:** composes with KN-SCAN-OBS-1. **Scope:** SMALL.
+  **Note:** in the observed case the producer was an external CSV→JSON converter that passed
+  `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
+  The Themis-side asymmetry above is filed on its own merits, independent of that.
+
+- [ ] **GUI-16 — non-JSON scanner exports have no documented road (filed 2026-09-09).** LOW-MED,
+  operability/docs. **Context:** a user uploaded a Cortex export pair — the SBOM as SPDX JSON (accepted)
+  and the scan results as **CSV** (refused in-browser by `JSON.parse`, so no request ever reached
+  Evidence). The refusal was correct at every layer: Themis is JSON-only by contract — Evidence's
+  `document` is a JSON string, the trust gate runs `json.Valid`, and Knowledge reads a curated envelope.
+  **Not a defect**; the gap is that nothing tells an operator what to do next. The file note says the file
+  is not valid JSON but not that a conversion road exists, and `TESTING.md`'s jq recipe covers only
+  JSON-in/JSON-out (Trivy).
+  **Verified live 2026-09-09:** a 556-row Cortex CSV converted offline to the curated envelope ingested
+  cleanly through the unmodified pipeline — 554 findings, 542 proposals, 556 matches on the target release.
+  So the pipeline needs nothing; only the road needs writing down.
+  **Options:** (a) document the CSV→curated-envelope conversion in `TESTING.md` beside the jq recipe, and
+  ship the converter under `scripts/` — smallest, keeps the JSON-only contract intact; (b) extend the
+  in-browser D16 translator registry — **does not apply**: a translator runs on already-parsed JSON, so it
+  is never reached for a CSV; (c) admit non-JSON at the Evidence border — **stop-and-ask**, this changes
+  the evidence contract and the domain model, and should not be done to serve one vendor's export format.
+  Prefer (a). **Dep:** none. **Scope:** SMALL. **Open question for the filer:** whether Cortex can export
+  scan results as JSON at all — if it can, (a) is a stopgap and this closes as docs-only.
+
 ---
 
 ### E. Process / optional refinements
