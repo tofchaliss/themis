@@ -261,3 +261,44 @@ func TestBackfill_SupersedeStoreFailureStopsTheSweep(t *testing.T) {
 		t.Errorf("asked about %d CVEs, want the sweep to stop after the failure", len(src.asked))
 	}
 }
+
+// The queue key and the Proposal source are the SAME name, and a sweep that folds Proposals
+// under a different source than it queues on can never advance: CVEsNeedingRefresh asks "which
+// cards have no Proposal from source X", so if nothing is ever written as X, the same
+// front-of-queue CVEs are returned forever and cards further back are never reached.
+//
+// Measured live 2026-09-09 (KN-MODULE-4): the RLSA sweep was queued on "rocky-errata" while its
+// Proposals carried "rocky". Every unit test passed, the sweep logged healthy folds — 187, then
+// 18 — and the CVE the feature was built for was never visited. A silent non-advancing queue
+// looks exactly like a drained one.
+func TestBackfill_QueueKeyMatchesTheFoldedProposalSource(t *testing.T) {
+	repo := newRepo()
+	q := &fakeQueue{cves: []string{"CVE-2021-40438"}}
+	// The source stamps its Proposals "rocky"; the sweep must therefore queue on "rocky".
+	src := &fakeCVESource{facts: map[string]app.CVEFacts{
+		"CVE-2021-40438": {Proposal: proposalFor(t, "CVE-2021-40438", "rocky"), Found: true},
+	}}
+	svc := app.NewBackfillService("rocky", src, q, foldSvc(repo), 10, time.Hour)
+
+	if _, err := svc.Enrich(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if q.gotSource != "rocky" {
+		t.Fatalf("queued on %q; the Proposals are folded as \"rocky\", so the queue can never record a visit", q.gotSource)
+	}
+	// The card must now carry a rocky Proposal — which is what takes it OUT of the queue next
+	// sweep and lets the sweep advance to the rest of the estate.
+	card, ok := repo.cards["CVE-2021-40438"]
+	if !ok {
+		t.Fatal("no card folded")
+	}
+	found := false
+	for _, p := range card.Proposals() {
+		if p.Source() == q.gotSource {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no Proposal recorded under the queue key %q — the sweep would re-ask about this CVE forever", q.gotSource)
+	}
+}

@@ -284,7 +284,14 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// staleness-bounded through the same BackfillService NVD uses, because the RLSA universe
 		// is 4103 advisories (measured 2026-09-09) against 3 for one CVE: the D5 relevance bound
 		// made structural, not a second global feed.
-		kn.RockyErrata = app.NewBackfillService("rocky-errata", rockyClient, st, fold,
+		// The queue key MUST equal the source the Proposals carry. CVEsNeedingRefresh asks
+		// "which cards have no Proposal from source X, or a stale one"; the Proposals folded
+		// here are stamped `rocky` (the precedence identity, D11), so keying the queue on
+		// anything else means no card is ever recorded as visited. Measured live 2026-09-09
+		// with the key "rocky-errata": the first sweep folded 187, the second folded 18, and
+		// the queue kept returning the same front-of-list CVEs forever — cards further back,
+		// including the one this feature was built for, were never reached.
+		kn.RockyErrata = app.NewBackfillService("rocky", rockyClient, st, fold,
 			rocky.BackfillLimit, rocky.StaleAfter)
 	}
 	if vexfeed.Enabled {

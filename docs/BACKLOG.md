@@ -3120,6 +3120,14 @@ under the 2026-08-07 re-derivation standard.
   `""`) can ever clear. Fuzzy keyword hits are excluded twice — advisory class (RLBA bugfix
   rebuilds the same packages without a security fix) and whether the advisory names the CVE at
   all. **Both filters mutation-verified.**
+  **Live defect found and fixed after first deploy (2026-09-09):** the sweep was queued on
+  `"rocky-errata"` while its Proposals carry `"rocky"`. `CVEsNeedingRefresh` asks which cards lack
+  a Proposal from source X, so keying the queue on a name nothing writes means no card is ever
+  recorded as visited: the same front-of-queue CVEs return forever and the rest of the estate is
+  never reached. It looked healthy — folds of 187 then 18, every unit test green — while the CVE
+  the feature was built for was never fetched. A silent non-advancing queue is indistinguishable
+  from a drained one. Fixed by keying the queue on `rocky`; guarded by a regression test
+  asserting the queue key equals the folded Proposal source, mutation-verified.
   **Follow-up:** the same gap exists for RHEL-proper estates, which have no RLSA — Red Hat's own
   errata/RHSA endpoint states real NEVRAs per module stream. Same shape, different base URL;
   filed below, deliberately not built. Original filing follows.
