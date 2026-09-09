@@ -469,3 +469,30 @@ func TestReconcile_FixEcosystemMergeIsOrderIndependent(t *testing.T) {
 		}
 	}
 }
+
+// KN-MODULE-2 at the domain seam: Red Hat's CVE-2021-40438 record, as the ACL attributes it once
+// RPMPackageName reads the module NEVRA form. Before that fix the el8 module fix was stored
+// UNATTRIBUTED, so StrictFixesFor returned nothing and the vendor-fix verdict could never fire —
+// a patched httpd 2.4.37-65.module+el8.10.0 sat `open` on a KEV CVE while the posture offered the
+// el7 build as its fix (measured live 2026-09-09).
+func TestFixesForSeesTheEl8ModuleFix(t *testing.T) {
+	v := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "httpd", Version: "httpd-0:2.4.6-97.el7_9.1", Ecosystem: "rpm"},
+		{Package: "httpd", Version: "httpd:2.4-8040020211008164252.522a0ee4", Ecosystem: "rpm"},
+	}}
+
+	// The verdict path is fail-closed: it decides only on positively attributed fixes. Both must
+	// reach it, or a modular estate can never be cleared.
+	if strict := v.StrictFixesFor("httpd", "rpm"); len(strict) != 2 {
+		t.Fatalf("StrictFixesFor = %v, want both fixes including the el8 module rebuild", strict)
+	}
+
+	all := v.FixesFor("httpd", "rpm")
+	if len(all) != 2 {
+		t.Fatalf("FixesFor = %v, want both", all)
+	}
+	// KN-MODULE-1 ordering still holds: the direct fix leads, the module rebuild follows.
+	if all[0] != "httpd-0:2.4.6-97.el7_9.1" || all[1] != "httpd:2.4-8040020211008164252.522a0ee4" {
+		t.Errorf("FixesFor order = %v; want the direct fix first, the module rebuild after", all)
+	}
+}
