@@ -14,16 +14,26 @@ import "strings"
 // rpmArchSuffixes are the trailing .arch tokens stripped from an RPM NEVRA before comparison.
 var rpmArchSuffixes = []string{"x86_64", "noarch", "aarch64", "s390x", "ppc64le", "i686", "src"}
 
-// RPMReleaseMajor extracts the RHEL major from an RPM version or NEVRA's `.elN` release marker
+// RPMReleaseMajor extracts the RHEL major from an RPM version or NEVRA's EL release marker
 // (e.g. "1.0.2k-16.el8_10" or "openssl-1:1.0.2k-16.el8_10.x86_64" → "8"). Returns "" when there
-// is no `.elN` marker, so a non-EL rpm never decides a stream-scoped verdict.
+// is no EL marker, so a non-EL rpm never decides a stream-scoped verdict.
+//
+// A MODULAR build spells the marker "+elN", not ".elN" — RHEL 8 ships httpd as
+// "2.4.37-65.module+el8.10.0+40257+286895ef.9". Matching only ".el" left every modular build
+// unplaceable, and RPMFixedByStream's `instMajor == ""` guard then returned false before any fix
+// was considered: NO modular RHEL/Rocky package could be cleared by the vendor-fix verdict,
+// however good its evidence (measured live 2026-09-09 on a patched el8.10 httpd carrying a KEV
+// CVE — KN-MODULE-3).
 func RPMReleaseMajor(version string) string {
 	v := StripVersionQualifiers(strings.TrimSpace(version))
 	idx := strings.LastIndex(v, ".el")
+	if i := strings.LastIndex(v, "+el"); i > idx {
+		idx = i
+	}
 	if idx < 0 {
 		return ""
 	}
-	rest := v[idx+len(".el"):]
+	rest := v[idx+len(".el"):] // ".el" and "+el" are the same length
 	i := 0
 	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
 		i++

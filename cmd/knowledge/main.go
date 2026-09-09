@@ -86,9 +86,9 @@ type config struct {
 	alpineBranches     []string      // THEMIS_ALPINE_BRANCHES — comma-separated secdb branches to sweep (e.g. v3.20,v3.21). A branch absent upstream 404s harmlessly, so the default over-covers; set it to the branches your estate actually ships.
 	alpinePollInterval time.Duration // THEMIS_ALPINE_POLL_INTERVAL — Go duration between Alpine sweeps (default 12h; falls back to 12h if unparseable).
 
-	rockyEnabled      bool          // THEMIS_ROCKY_ENABLED=1 — enable the scheduled Rocky RXSA errata feed (SIG/Rocky-exclusive fixed NEVRAs folded onto already-carded CVEs; EDR-VEX-01 D11; the RLSA clone coverage stays with the Red Hat feed; default off).
+	rockyEnabled      bool          // THEMIS_ROCKY_ENABLED=1 — enable BOTH Rocky errata sweeps: the RXSA walk (SIG/Rocky-exclusive fixed NEVRAs; EDR-VEX-01 D11) and the per-CVE RLSA fix-bound sweep (KN-MODULE-4 — the only source stating a MODULAR package's fix as a real build). Default off.
 	rockyURL          string        // THEMIS_ROCKY_URL — Rocky errata (Apollo) base URL (empty → the public errata.rockylinux.org default; no API key needed).
-	rockyPollInterval time.Duration // THEMIS_ROCKY_POLL_INTERVAL — Go duration between RXSA sweeps (default 12h; falls back to 12h if unparseable).
+	rockyPollInterval time.Duration // THEMIS_ROCKY_POLL_INTERVAL — Go duration between Rocky sweeps, both RXSA and RLSA (default 12h; falls back to 12h if unparseable).
 
 	vexfeedEnabled      bool          // THEMIS_VEXFEED_ENABLED=1 — enable the generic CSAF-VEX vendor feed (per-CVE not_affected applicability on already-carded CVEs; default off).
 	vexfeedURLs         []string      // THEMIS_VEXFEED_URLS — comma-separated CSAF-VEX directory base URLs (per-CVE files at /<year>/cve-<id>.json).
@@ -280,7 +280,7 @@ func main() {
 	// Scheduled NVD enrichment (D5/D5a): fetches each carded CVE by id and folds authoritative
 	// CVSS/severity onto its card. Off unless THEMIS_NVD_ENABLED=1.
 	if kn.Backfill != nil {
-		go backfillLoop(kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"), kn.Reverdict.Nudge)
+		go backfillLoop("nvd", kn.Backfill, kn.Health, cfg.nvdPollInterval, logger.Component("nvd"), kn.Reverdict.Nudge)
 		logger.Info("nvd per-CVE enrichment enabled",
 			observability.String("interval", cfg.nvdPollInterval.String()),
 			observability.Int("cves_per_sweep", cfg.nvdBackfillLimit),
@@ -316,6 +316,15 @@ func main() {
 	if kn.Rocky != nil {
 		go rockyLoop(kn.Rocky, kn.Health, cfg.rockyPollInterval, logger.Component("rocky"), kn.Reverdict.Nudge)
 		logger.Info("rocky rxsa errata feed enabled", observability.String("interval", cfg.rockyPollInterval.String()))
+	}
+	// The per-CVE RLSA fix-bound sweep (KN-MODULE-4), on the same flag and cadence as the RXSA
+	// walk above. RLSA is the only source stating a MODULAR package's fix as a real build — Red
+	// Hat's CVE record gives the module stream name, which bounds nothing — so without this a
+	// PATCHED modular build can never clear the vendor-fix verdict.
+	if kn.RockyErrata != nil {
+		go backfillLoop("rocky-errata", kn.RockyErrata, kn.Health, cfg.rockyPollInterval,
+			logger.Component("rocky-errata"), kn.Reverdict.Nudge)
+		logger.Info("rocky rlsa fix-bound sweep enabled", observability.String("interval", cfg.rockyPollInterval.String()))
 	}
 
 	// Scheduled generic CSAF-VEX vendor feed (D5, parity B4): folds not_affected applicability from
@@ -497,30 +506,32 @@ func reattributeLoop(rs *app.ReattributeService, interval time.Duration, logger 
 	}
 }
 
-// backfillLoop runs the per-CVE NVD enrichment sweep on a fixed cadence (D5a).
+// backfillLoop runs a per-CVE enrichment sweep on a fixed cadence (D5a). `source` names the
+// feed in logs, health and metrics — NVD and the Rocky RLSA fix-bound sweep (KN-MODULE-4) share
+// this loop because they share the shape: per-CVE, staleness-bounded, capped per sweep.
 //
 // Simpler than the window walk it replaces, because there is no window: each run asks the store
 // which carded CVEs still lack an NVD Proposal, fetches those by id, and stops at the cap. There
 // is no watermark to advance and therefore no way to skip — the queue IS the state, and a CVE
 // stays on it until it is enriched.
-func backfillLoop(bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
+func backfillLoop(source string, bf *app.BackfillService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger, nudge func()) {
 	sweep := func() {
 		n, err := bf.Enrich(context.Background())
 		if err != nil {
-			logger.Error("nvd enrichment sweep failed", observability.Err(err))
-			recordFeed(health, "nvd", err, logger)
-			observability.Default().RecordFeedPoll("nvd", observability.FeedPollFailed)
+			logger.Error(source+" enrichment sweep failed", observability.Err(err))
+			recordFeed(health, source, err, logger)
+			observability.Default().RecordFeedPoll(source, observability.FeedPollFailed)
 			return
 		}
-		recordFeed(health, "nvd", nil, logger)
+		recordFeed(health, source, nil, logger)
 		// Logged on EVERY sweep including a zero fold: an estate with nothing left to enrich and
 		// a feed that has stopped working must not look alike (NVD-WATCH-1).
-		logger.Info("nvd enrichment sweep complete", observability.Int("folded", n))
+		logger.Info(source+" enrichment sweep complete", observability.Int("folded", n))
 		if n > 0 {
 			nudge() // immediate re-verdict on real card news (EDR-VERDICT-01 D6)
 		}
-		observability.Default().RecordFeedPoll("nvd", observability.FeedPollComplete)
-		observability.Default().RecordFeedRecords("nvd", observability.FeedRecordsFolded, n)
+		observability.Default().RecordFeedPoll(source, observability.FeedPollComplete)
+		observability.Default().RecordFeedRecords(source, observability.FeedRecordsFolded, n)
 	}
 	time.Sleep(15 * time.Second) // let the service settle before the first sweep
 	sweep()

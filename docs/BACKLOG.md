@@ -3072,6 +3072,79 @@ under the 2026-08-07 re-derivation standard.
   against an el8 install — the misleading half. Deferred deliberately; needs a rule for
   stream-less versions and must not regress non-distro ecosystems.
 
+- [x] **KN-MODULE-3 — a modular build could never be cleared: its EL marker is `+elN`, not `.elN`
+  (filed 2026-09-09).** ✅ **FIXED 2026-09-09.** **HIGH, correctness.** `RPMReleaseMajor` matched
+  only `.el`, so an installed modular build (`2.4.37-65.module+el8.10.0+40257+286895ef.9`) placed
+  as EL major `""` — and `RPMFixedByStream` returns false at its `instMajor == ""` guard *before
+  considering any fix*. **No modular RHEL/Rocky package could EVER be cleared by the vendor-fix
+  verdict** — httpd, python38, nodejs, postgresql alike — however good its evidence.
+  Found only after KN-MODULE-2 and KN-SCAN-3b were both resolved and CVE-2021-40438 *still* read
+  `open` with a correct purl, a correct `rpm` ecosystem, and Red Hat data folded: three defects
+  stacked on one row, each hiding the next.
+  Fixed by also accepting `+el`. Safety is tested explicitly, because a false "fixed" hides a live
+  vulnerability and is the only unsafe direction: el7 never clears el8, el9 never clears el8, a
+  build below the fix stays affected, and a module NEVRA never decides. **Mutation-verified.**
+  **Honest residual — NOT fixed, deliberately:** Red Hat's `affected_release` for RHEL 8 often
+  states only a MODULE NEVRA (`httpd:2.4-8040020211008164252.522a0ee4`), whose version field is
+  the stream name `2.4` — not a build. There is no sound comparison between `2.4` and an installed
+  `2.4.37-65`, so such a fix still cannot clear, and forcing one would fabricate the conclusion
+  the design forbids. A card whose el8 entry is a real modular NEVRA
+  (`httpd-0:2.4.37-43.module+el8.4.0+571+fd70afb1`) clears correctly today. Closing the rest likely
+  needs the Red Hat **errata/RHSA** stream rather than the CVE record — filed as the follow-up
+  below. Until then the designed path for "the vendor data cannot prove it but we verified the
+  backport" is a **VEX `not_affected` or a Governance decision**, which is also what preserves the
+  audit trail.
+
+- [x] **KN-MODULE-4 — module-NEVRA vendor fixes carry no comparable version (filed 2026-09-09).**
+  ✅ **FIXED 2026-09-09** — option (b), the vendor's own package-level statement. `RockyClient`
+  gains `VulnsForCVE` (implements `app.CVEVulnSource`), driven by the EXISTING `BackfillService`:
+  per-CVE, staleness-bounded, capped per sweep — the same D5a shape NVD uses. Wired on the
+  existing `THEMIS_ROCKY_ENABLED` flag and `rockyPollInterval`, so this is one Rocky knowledge
+  source in two shapes, not a second configuration surface.
+  **Why per-CVE and not a wider sweep:** RXSA is 29 advisories, RLSA is **4103** (measured
+  2026-09-09) — a whole-universe walk would be 42 pages per sweep, growing, and would breach the
+  existing 50-page cap within a year. One CVE returns **3**. Recording the dead end too: merely
+  flipping the `RXSA-` prefix check does nothing, because `fetchPage` asks the server for
+  `filters.keyword=RXSA` and RLSA never arrives.
+  **Architectural boundary (owner review):** RLSA is an additional evidence source for fix
+  BOUNDS, never a second authority. Proposals carry `SeverityUnknown` so `rocky` cannot take the
+  headline (D11), and no second applicability path is created — fold, precedence and
+  `RPMFixedByStream` are the existing machinery untouched. `VulnsForCVE` is deliberately thin
+  (query → select advisory class → extract `.src.rpm` NVRAs → `FixedVersion`); it holds no
+  version comparison, stream reasoning, applicability, severity or dedup policy, so it stays an
+  adapter rather than a second verdict engine.
+  **Safety, tested explicitly** — a false "fixed" hides a live vulnerability and is the only
+  unsafe direction: the live regression proves `2.4.37-65 + RLSA -39 → CLEAR`,
+  `2.4.37-30 + RLSA -39 → NOT CLEAR`, el7↛el8 and el9↛el8; and a malformed-bound guard proves
+  no bound that names no build (`httpd:2.4`, the module NEVRA, bare `2.4`, `2.4.47`, `httpd`,
+  `""`) can ever clear. Fuzzy keyword hits are excluded twice — advisory class (RLBA bugfix
+  rebuilds the same packages without a security fix) and whether the advisory names the CVE at
+  all. **Both filters mutation-verified.**
+  **Follow-up:** the same gap exists for RHEL-proper estates, which have no RLSA — Red Hat's own
+  errata/RHSA endpoint states real NEVRAs per module stream. Same shape, different base URL;
+  filed below, deliberately not built. Original filing follows.
+  MED, correctness. Follow-up to KN-MODULE-3. Red Hat's CVE record states an el8 modular fix as
+  `name:stream-context`; the stream (`2.4`) is not a build, so the stream-scoped compare cannot
+  use it and the occurrence stays `open` even when the installed build demonstrably carries the
+  fix (CVE-2021-40438 on a patched el8.10 httpd is the live case — a KEV CVE ranking top of estate
+  while not applicable). **Options:** (a) read the module CONTEXT (`8040020211008164252` decomposes
+  to major 8, minor 4, build timestamp) and compare stream-context ordering — needs care, the
+  context orders builds of a stream, not package versions; (b) resolve the fix through the Red Hat
+  **errata/RHSA** data, which states real NEVRAs per module stream; (c) treat a same-stream module
+  fix as clearing only when the installed module context is at/above the fix's — narrower than (a)
+  and defensible. Prefer (b): it uses the vendor's own package-level statement instead of deriving
+  one. **Dep:** none. **Scope:** MED.
+
+- [ ] **KN-MODULE-5 — RHEL-proper estates have no RLSA, so modular fixes stay unbounded there
+  (filed 2026-09-09).** MED, correctness. KN-MODULE-4 closed the modular fix-bound gap for Rocky
+  by reading RLSA. A true Red Hat subscriber has no RLSA: their equivalent is Red Hat's own
+  **errata/RHSA** data, which states real NEVRAs per module stream where the CVE record states
+  only the stream name. Same defect, same shape of fix — a per-CVE `CVEVulnSource` over the
+  errata endpoint, driven by the same `BackfillService`, riding `THEMIS_REDHAT_ENABLED`.
+  Deliberately not built with KN-MODULE-4: no RHEL-proper estate is in play yet, and building a
+  second vendor path speculatively would be scope creep. Same for AlmaLinux (ALSA) and Oracle
+  (ELSA) if those estates appear. **Dep:** none. **Scope:** MED (the pattern is now proven).
+
 - [ ] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
   ecosystem, silently closing its verdict path (filed 2026-09-09).** MED, correctness-of-signal.
   Scanners identify binaries they fingerprint on disk with application-scoped identifiers

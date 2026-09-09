@@ -195,3 +195,109 @@ func TestIsRPMModuleStreamRecognizesModuleNEVRA(t *testing.T) {
 		})
 	}
 }
+
+// KN-MODULE-3: a MODULAR build spells its EL marker "+elN", not ".elN". Matching only ".el" left
+// every modular build unplaceable, so RPMFixedByStream's instMajor=="" guard refused before any
+// fix was considered — no modular RHEL/Rocky package could EVER be cleared by the vendor-fix
+// verdict. Measured live 2026-09-09: a patched httpd 2.4.37-65.module+el8.10.0 sat `open` on a
+// KEV CVE with correct purl, ecosystem and vendor data all present.
+func TestRPMReleaseMajorReadsModularMarker(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		want    string
+	}{
+		{"2.4.37-65.module+el8.10.0+40257+286895ef.9", "8"},    // the live fixture
+		{"httpd-0:2.4.37-43.module+el8.4.0+571+fd70afb1", "8"}, // modular fix NEVRA
+		{"0:3.11-10.module+el8.10.0+1582+bc278001", "8"},
+		{"nodejs-1:14.21.3-2.module+el9.2.0+18279+d5b3d2f9", "9"},
+		// Regression: the plain ".elN" forms are unchanged.
+		{"1.0.2k-16.el8_10", "8"},
+		{"openssl-1:1.0.2k-16.el8_10.x86_64", "8"},
+		{"httpd-0:2.4.6-97.el7_9.1", "7"},
+		// A module NEVRA names a STREAM, not a build: it carries no EL marker and must stay
+		// unplaceable, so no compare is attempted against it.
+		{"httpd:2.4-8040020211008164252.522a0ee4", ""},
+		{"2.4.49", ""},
+		{"", ""},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := value.RPMReleaseMajor(tc.version); got != tc.want {
+				t.Errorf("RPMReleaseMajor(%q) = %q, want %q", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+// The safety properties the modular marker must not weaken. A false "fixed" hides a live
+// vulnerability and is the only unsafe direction, so each case below is a guard, not a nicety.
+func TestRPMFixedByStreamModularSafety(t *testing.T) {
+	const installed = "2.4.37-65.module+el8.10.0+40257+286895ef.9"
+
+	// A same-stream modular fix the install is at/above: cleared.
+	if !value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.37-43.module+el8.4.0+571+fd70afb1"}) {
+		t.Error("a patched modular build must be cleared by its same-stream vendor fix")
+	}
+	// A DIFFERENT EL major must never clear, however the versions compare.
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.6-97.el7_9.1"}) {
+		t.Error("an el7 fix must never clear an el8 install")
+	}
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.37-99.module+el9.0.0+1+aaaa"}) {
+		t.Error("an el9 fix must never clear an el8 install")
+	}
+	// An install BELOW the same-stream fix stays affected.
+	if value.RPMFixedByStream("rpm", "2.4.37-30.module+el8.3.0+100+abcd1234",
+		[]string{"httpd-0:2.4.37-43.module+el8.4.0+571+fd70afb1"}) {
+		t.Error("a build below the vendor fix must stay affected")
+	}
+	// A module NEVRA states a stream name ("2.4"), not a build, so it can never decide.
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd:2.4-8040020211008164252.522a0ee4"}) {
+		t.Error("a module NEVRA names a stream, not a version — it must never clear a build")
+	}
+}
+
+// KN-MODULE-4 safety: admitting RLSA as a fix-bound source must NOT let a bound that names no
+// build become a clearance. The invariant is
+//
+//	concrete NEVRA + compatible EL major + RPMFixedByStream → clear
+//
+// never "any advisory mentioning the package → clear". This is the exact failure mode
+// KN-MODULE-3 was about, restated as a guard so the new evidence path cannot weaken it.
+func TestMalformedBoundNeverClears(t *testing.T) {
+	const installed = "2.4.37-65.module+el8.10.0+40257+286895ef.9"
+	for _, bound := range []string{
+		"httpd:2.4",                              // a module STREAM NAME, bounds nothing
+		"httpd:2.4-8040020211008164252.522a0ee4", // Red Hat's module NEVRA — a stream, not a build
+		"2.4",                                    // a bare upstream version
+		"2.4.47",                                 // upstream Apache, as a scanner reports it
+		"httpd",                                  // a name alone
+		"",
+	} {
+		t.Run(bound, func(t *testing.T) {
+			if value.RPMFixedByStream("rpm", installed, []string{bound}) {
+				t.Errorf("bound %q cleared a build it cannot bound — a false 'fixed' hides a live vulnerability", bound)
+			}
+		})
+	}
+}
+
+// The live regression, end to end over the real strings: the RLSA bound clears the patched build,
+// and every unsafe direction stays closed. CVE-2021-40438 on release 7bc21a1b, 2026-09-09.
+func TestRLSABoundClearsThePatchedModularBuild(t *testing.T) {
+	const (
+		installed = "2.4.37-65.module+el8.10.0+40257+286895ef.9"
+		older     = "2.4.37-30.module+el8.3.0+100+abcd1234"
+		rlsaFix   = "httpd-0:2.4.37-39.module+el8.4.0+571+fd70afb1"
+	)
+	if !value.RPMFixedByStream("rpm", installed, []string{rlsaFix}) {
+		t.Error("65 >= 39 in the same el8 modular family: the patched build must clear")
+	}
+	if value.RPMFixedByStream("rpm", older, []string{rlsaFix}) {
+		t.Error("30 < 39: a build below the vendor fix must stay affected")
+	}
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.6-97.el7_9.1"}) {
+		t.Error("an el7 bound must never clear an el8 install")
+	}
+	if value.RPMFixedByStream("rpm", installed, []string{"httpd-0:2.4.37-99.module+el9.0.0+1+aaaa"}) {
+		t.Error("an el9 bound must never clear an el8 install")
+	}
+}
