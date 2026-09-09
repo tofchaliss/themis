@@ -86,9 +86,10 @@ type config struct {
 	alpineBranches     []string      // THEMIS_ALPINE_BRANCHES — comma-separated secdb branches to sweep (e.g. v3.20,v3.21). A branch absent upstream 404s harmlessly, so the default over-covers; set it to the branches your estate actually ships.
 	alpinePollInterval time.Duration // THEMIS_ALPINE_POLL_INTERVAL — Go duration between Alpine sweeps (default 12h; falls back to 12h if unparseable).
 
-	rockyEnabled      bool          // THEMIS_ROCKY_ENABLED=1 — enable BOTH Rocky errata sweeps: the RXSA walk (SIG/Rocky-exclusive fixed NEVRAs; EDR-VEX-01 D11) and the per-CVE RLSA fix-bound sweep (KN-MODULE-4 — the only source stating a MODULAR package's fix as a real build). Default off.
-	rockyURL          string        // THEMIS_ROCKY_URL — Rocky errata (Apollo) base URL (empty → the public errata.rockylinux.org default; no API key needed).
-	rockyPollInterval time.Duration // THEMIS_ROCKY_POLL_INTERVAL — Go duration between Rocky sweeps, both RXSA and RLSA (default 12h; falls back to 12h if unparseable).
+	rockyEnabled       bool          // THEMIS_ROCKY_ENABLED=1 — enable BOTH Rocky errata sweeps: the RXSA walk (SIG/Rocky-exclusive fixed NEVRAs; EDR-VEX-01 D11) and the per-CVE RLSA fix-bound sweep (KN-MODULE-4 — the only source stating a MODULAR package's fix as a real build). Default off.
+	rockyURL           string        // THEMIS_ROCKY_URL — Rocky errata (Apollo) base URL (empty → the public errata.rockylinux.org default; no API key needed).
+	rockyPollInterval  time.Duration // THEMIS_ROCKY_POLL_INTERVAL — Go duration between Rocky sweeps, both RXSA and RLSA (default 12h; falls back to 12h if unparseable).
+	rockyBackfillLimit int           // THEMIS_ROCKY_BACKFILL_LIMIT — carded CVEs the RLSA fix-bound sweep visits per run (default 200). One small request per CVE, so this bounds a sweep to a predictable duration; a large estate drains over successive sweeps. Raise it to drain a backlog in one pass.
 
 	vexfeedEnabled      bool          // THEMIS_VEXFEED_ENABLED=1 — enable the generic CSAF-VEX vendor feed (per-CVE not_affected applicability on already-carded CVEs; default off).
 	vexfeedURLs         []string      // THEMIS_VEXFEED_URLS — comma-separated CSAF-VEX directory base URLs (per-CVE files at /<year>/cve-<id>.json).
@@ -149,9 +150,10 @@ func loadConfig() config {
 		alpineBranches:     splitCSV(envDefault("THEMIS_ALPINE_BRANCHES", "v3.18,v3.19,v3.20,v3.21,v3.22")),
 		alpinePollInterval: parseDurationDefault(os.Getenv("THEMIS_ALPINE_POLL_INTERVAL"), 12*time.Hour),
 
-		rockyEnabled:      os.Getenv("THEMIS_ROCKY_ENABLED") == "1",
-		rockyURL:          os.Getenv("THEMIS_ROCKY_URL"),
-		rockyPollInterval: parseDurationDefault(os.Getenv("THEMIS_ROCKY_POLL_INTERVAL"), 12*time.Hour),
+		rockyEnabled:       os.Getenv("THEMIS_ROCKY_ENABLED") == "1",
+		rockyURL:           os.Getenv("THEMIS_ROCKY_URL"),
+		rockyPollInterval:  parseDurationDefault(os.Getenv("THEMIS_ROCKY_POLL_INTERVAL"), 12*time.Hour),
+		rockyBackfillLimit: envIntDefault("THEMIS_ROCKY_BACKFILL_LIMIT", app.DefaultBackfillLimit),
 
 		vexfeedEnabled:      os.Getenv("THEMIS_VEXFEED_ENABLED") == "1",
 		vexfeedURLs:         splitCSV(os.Getenv("THEMIS_VEXFEED_URLS")),
@@ -233,8 +235,9 @@ func main() {
 		// 60s, not 30s: a sweep fetches whole branch DBs (a few MB each), not one small per-CVE doc.
 		HTTP: &http.Client{Timeout: 60 * time.Second},
 	}, wiring.RockyConfig{
-		Enabled: cfg.rockyEnabled,
-		BaseURL: cfg.rockyURL,
+		Enabled:       cfg.rockyEnabled,
+		BaseURL:       cfg.rockyURL,
+		BackfillLimit: cfg.rockyBackfillLimit,
 		// 120s, not 30s: the RXSA page is small (335 KB measured 2026-08-27) but the errata
 		// service can be slow to first byte, and the first live sweep hit the 30s ceiling
 		// mid-handshake from a slower egress — the NVD lesson again: server/network time,
@@ -324,7 +327,9 @@ func main() {
 	if kn.RockyErrata != nil {
 		go backfillLoop("rocky-errata", kn.RockyErrata, kn.Health, cfg.rockyPollInterval,
 			logger.Component("rocky-errata"), kn.Reverdict.Nudge)
-		logger.Info("rocky rlsa fix-bound sweep enabled", observability.String("interval", cfg.rockyPollInterval.String()))
+		logger.Info("rocky rlsa fix-bound sweep enabled",
+			observability.String("interval", cfg.rockyPollInterval.String()),
+			observability.Int("cves_per_sweep", cfg.rockyBackfillLimit))
 	}
 
 	// Scheduled generic CSAF-VEX vendor feed (D5, parity B4): folds not_affected applicability from
