@@ -3201,6 +3201,30 @@ under the 2026-08-07 re-derivation standard.
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
 
+- [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
+  (filed 2026-09-10).** MED-HIGH for queue truth, **design-first** (touches "overlays, never
+  deletes" and the RecordMatch dedup). **Measured live on MRF/cdmrf-oamp/20.1.0.0-125, minutes
+  after KN-MODULE-5 cleared 96 occurrences:** the earlier converter defect had recorded scanner
+  occurrences with a poisoned `component_source` (the CSV's file_path — the literal "Managed by
+  the Package Manager" on 492 rpm rows, `/usr/sbin/httpd` on 87). `componentPackage()` prefers
+  source, the recorded identity is immutable on the row, so every re-judgement asks
+  `FixesFor("Managed by the Package Manager")` forever — those rows are PERMANENTLY unclearable,
+  whatever bounds arrive. Re-uploading the corrected report healed nothing structurally: rows
+  whose purl changed (httpd, `app:` → same `app:` but distinct from the old row) were filed as
+  NEW occurrences — so each httpd CVE now carries a cleared row AND a stale-open sibling, and a
+  Finding leaves triage only when EVERY carrier occurrence clears, so the 87 stale siblings hold
+  every cleared httpd Finding in the queue — while rows whose purl matched were deduped and KEPT
+  their poisoned source. Net: 579 rpm occurrences on one release that no feed, sweep, or
+  re-upload can ever fix. (The 20 `/opt/...jar` maven sources are the same field usage but no
+  maven verdict machinery exists to block — noted, not counted.)
+  **Shape of the fix (to grill, not decided):** on a dedup hit, RecordMatch should OVERLAY the
+  recorded component detail when the incoming observation differs (better attribution is a new
+  observation of the SAME occurrence — an update honors append-only spirit via the verdict
+  restamp, not a delete); and the (release, faultline) sibling pair whose purls differ but whose
+  (name, version, ecosystem) coincide needs a dedup/supersede rule so a re-scan cannot mint
+  eternal stale twins (GUI-12's rescan-dedup solved the evidence layer; this is the match layer).
+  **Dep:** none. **Scope:** MED.
+
 - [ ] **DEV-COV-1 — whole-repo `make check` coverage is red on a clean `main` locally (filed
   2026-09-10).** LOW-MED, process. Measured on macOS, deterministic across runs, identical on a
   clean-`main` worktree — so NOT introduced by any current branch: `governance/adapters/http`

@@ -1,6 +1,7 @@
 # Case file — why MRF/cdmrf-oamp/20.1.0.0-125 shows 634 open findings and zero clearances
 
-**Status:** FIX BUILT 2026-09-10 (`fix/kn-module-5-redhat-errata-bounds`) — **live verification pending**
+**Status:** FIX LIVE-VERIFIED 2026-09-10 (main `daec9a1`) — 96 cleared incl. both proven CVEs;
+queue impact blocked by the stale mis-attributed siblings (**KN-SCAN-4**, §8b)
 **Date:** 2026-09-10 · **Release under investigation:** `7bc21a1b-e898-47e4-b784-f2242fa983a4`
 (MRF → cdmrf-oamp → 20.1.0.0-125) · **Estate:** Rocky 8 container image, Cortex + SPDX evidence
 **Related:** KN-VERDICT-1 · KN-MODULE-4 (fixed) · **KN-MODULE-5 (open — the blocker)** · KN-SCAN-3b
@@ -219,6 +220,38 @@ normalize (one prefix stripped, and the name begins `platform-`), which is a sec
    own EDR delta and careful tests.
 4. **Re-measure before doing more.** After 1–3, re-run the §6 query. Several entries there may
    resolve for free, and the remainder will be a different, smaller list.
+
+## 8b. LIVE VERIFICATION — 2026-09-10 evening (same day)
+
+Deployed to the VM (main `daec9a1`), knowledge node restarted; the restart's full Red Hat sweep
+folded **1592** proposals with the second hop live.
+
+**Result: 96 occurrences `cleared_vendor_fix` (was 0 throughout this case):**
+
+| Component | Cleared | Note |
+| --- | --- | --- |
+| httpd | 74 | the KN-MODULE-5 mechanism, end to end |
+| libxml2 | 14 | bonus — fresh direct bounds from the full sweep |
+| libssh | 7 | same |
+| curl | 1 | same |
+
+CVE-2019-0211's cleared row reads, verbatim: *"vendor fix
+0:2.4.37-11.module+el8.0.0+2969+90015743 present: installed
+2.4.37-65.module+el8.10.0+40257+286895ef.9 is at/above the same-stream bound for httpd"* — the
+resolved RHSA-2019:0980 bound, the exact chain §5 designed. CVE-2019-0220 likewise (`-16`,
+RHSA-2019:3436).
+
+**Honest residue — 13 httpd CVEs stay open on the corrected row** (2019-17567, 2024-24795/38472/
+43204/43394, 2025-59775, and seven 2026-*): each is either fixed in a build newer than `-65`
+(a REAL finding) or carries no main-stream RHSA bound. This is the queue working, not failing.
+
+**New blocker found by the verification itself: the stale poisoned siblings — filed as
+KN-SCAN-4.** Every cleared httpd row has an open twin recorded with `source=/usr/sbin/httpd`
+(the pre-fix converter output), and 492 more rpm rows estate-wide carry `source="Managed by the
+Package Manager"`. Recorded identity is immutable, so they can never clear, and re-uploading the
+corrected report minted the cleared rows as NEW occurrences instead of healing the old ones —
+so the stale twins still hold every cleared httpd Finding in the triage queue. The queue-count
+payoff of this whole case now waits on KN-SCAN-4, not on any feed.
 
 ## 9. Reproduction queries
 
