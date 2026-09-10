@@ -3242,6 +3242,17 @@ under the 2026-08-07 re-derivation standard.
   the sub-package split `kernel-core`→`kernel`, `openssl-libs`→`openssl` — that is data, not
   vocabulary.
 
+- [ ] **KN-VERDICT-2 — a verdict-logic change ships invisible: stamps claim currency the new
+  code never produced (filed 2026-09-10).** LOW-MED, operability. The D6 stamp records "judged
+  against card version N" — but not against WHICH judgement logic. Deploying a binary that
+  changes `judgeOccurrence`/`FixesFor` (KN-FIX-4 was the live case) re-judges NOTHING: every row
+  is stamp-current, the sweep honestly reports `rejudged:0`, and the new rule's effect waits on
+  unrelated feed drift. The operator workaround is a manual stamp reset (`verdict_card_version=0`
+  for open rows), used twice on 2026-09-10. Fix shape to decide: fold a verdict-logic version
+  (e.g. a build-stamped constant) into the staleness predicate, so a logic change IS staleness —
+  the same "the query is the state" move `CVEsNeedingRefresh` made. **Dep:** none.
+  **Scope:** SMALL.
+
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
   RecordMatch's dedup hit now treats the incoming observation as a NEW observation of the same
