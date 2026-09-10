@@ -496,3 +496,32 @@ func TestFixesForSeesTheEl8ModuleFix(t *testing.T) {
 		t.Errorf("FixesFor order = %v; want the direct fix first, the module rebuild after", all)
 	}
 }
+
+// D12 end-to-end at the lookup: the measured MRF card shape — the fix filed under the source
+// name answers the binary-name query, in both the fail-open and the fail-closed (verdict-grade)
+// selection, and the collision guard holds inside a real Fixes set.
+func TestFixesFor_NormalizedNameEquality(t *testing.T) {
+	view := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "python-setuptools", Version: "0:39.2.0-9.el8_10", Ecosystem: "rpm"},
+		{Package: "PyYAML", Version: "0:5.4.1-1.el8", Ecosystem: "rpm"},
+		{Package: "ruby-json", Version: "0:2.7.1-2.el8", Ecosystem: "rpm"},
+		{Package: "python3-pip-wheel", Version: "0:23.2.1-4.el8", Ecosystem: "rpm"},
+	}}
+	if got := view.FixesFor("python3-setuptools", "rpm"); len(got) != 1 || got[0] != "0:39.2.0-9.el8_10" {
+		t.Errorf("FixesFor(python3-setuptools) = %v, want the python-setuptools bound (the measured miss)", got)
+	}
+	if got := view.StrictFixesFor("python3-setuptools", "rpm"); len(got) != 1 {
+		t.Errorf("StrictFixesFor(python3-setuptools) = %v, want the same bound (verdict-grade)", got)
+	}
+	if got := view.FixesFor("python3-pyyaml", "rpm"); len(got) != 1 || got[0] != "0:5.4.1-1.el8" {
+		t.Errorf("FixesFor(python3-pyyaml) = %v, want the PyYAML bound (bare-vs-wrapped)", got)
+	}
+	// The collision guard inside a live set: python3-json must NOT be answered by ruby-json.
+	if got := view.FixesFor("python3-json", "rpm"); len(got) != 0 {
+		t.Errorf("FixesFor(python3-json) = %v, want none — a ruby bound must never answer a python query", got)
+	}
+	// Containment stays forbidden: pip finds nothing in a set holding only pip-wheel.
+	if got := view.FixesFor("python3-pip", "rpm"); len(got) != 0 {
+		t.Errorf("FixesFor(python3-pip) = %v, want none — a -wheel bound must not clear pip", got)
+	}
+}

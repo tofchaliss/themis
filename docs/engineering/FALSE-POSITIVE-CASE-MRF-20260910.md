@@ -269,8 +269,8 @@ have kept orphaned occurrences open forever) plus KN-SCAN-4a deployed:
 - Sweeps drained to `rejudged:0 changed:0` — steady state, nothing pending.
 
 **Remaining, in recommended order** (all tracked in BACKLOG, none blocking):
-1. §6 normalized-equality in `FixesFor`/`StrictFixesFor` — the pypi shadows + python3-* family
-   (own EDR delta first; fail-safe-sensitive).
+1. ~~§6 normalized-equality in `FixesFor`/`StrictFixesFor`~~ ✅ **BUILT 2026-09-10 evening**
+   (EDR-VEX-01 D12, KN-FIX-4) — live verification pending on the next re-verdict pass.
 2. Regenerate SBOMs with source metadata — `kernel-core`'s 136 et al. (operator-side).
 3. The 13 honest httpd residues — real upgrade work, correctly flagged.
 4. KN-SCAN-4b (purl-twin supersede, cosmetic now) · EV-TOOL-1 (fingerprint the producing tool).
