@@ -3143,8 +3143,36 @@ under the 2026-08-07 re-derivation standard.
   and defensible. Prefer (b): it uses the vendor's own package-level statement instead of deriving
   one. **Dep:** none. **Scope:** MED.
 
-- [ ] **KN-MODULE-5 — RHEL-proper estates have no RLSA, so modular fixes stay unbounded there
-  (filed 2026-09-09).** MED, correctness. KN-MODULE-4 closed the modular fix-bound gap for Rocky
+- [x] **KN-MODULE-5 — RHEL-proper estates have no RLSA, so modular fixes stay unbounded there
+  (filed 2026-09-09).** ✅ **FIXED 2026-09-10** (`fix/kn-module-5-redhat-errata-bounds`) — the
+  two-hop CSAF resolution, INSIDE the existing `redhat` per-CVE path (`RedHatClient.FetchCVE`):
+  when an `affected_release` fix is a module identifier, the advisory it names is fetched at
+  `/csaf/<RHSA>.json` (same public Hydra host — the existing base URL covers it) and its
+  `.src` product-version NEVRAs fold beside the module entry. Same source, same queue, same
+  Proposal — deliberately NOT a second BackfillService, which would re-create the KN-MODULE-4
+  queue-keying defect (a sweep keyed on a name nothing folds never advances). Hop two fires
+  only on module-shaped fixes (plain NEVRAs cost no extra request), RHSA-only, source packages
+  only (the binary list is rebuild SCOPE — EDR-CORRELATION-01), every failure falls open to
+  hop one's entry so a resolution problem never costs the severity facts on the same Proposal.
+  Safety tests mirror KN-MODULE-4: the live pair (installed `-65` clears against resolved
+  `-11`; pre-fix `-9` does not; the bare module identifier clears NOTHING), fail-open on
+  csaf 500/invalid-json, no fetch for RHBA, one fetch per advisory. CSAF document types reused
+  from the csaf.go ACL. **Live verification pending on the MRF estate (87 httpd CVEs).**
+  Original re-scope note follows.
+  ~~RE-SCOPED + PROMOTED 2026-09-10~~ — see the case file
+  [`engineering/FALSE-POSITIVE-CASE-MRF-20260910.md`](engineering/FALSE-POSITIVE-CASE-MRF-20260910.md).**
+  MED→**HIGH** (87 live false positives on MRF/cdmrf-oamp/20.1.0.0-125, incl. a KEV CVE topping the
+  queue). **The "same shape, different base URL" assumption below is WRONG, measured 2026-09-10:**
+  Red Hat's Hydra CVE endpoint restates the SAME module stream
+  (`httpd:2.4-8000020190405071959.55190bc5`), so swapping the base URL buys nothing. The real NEVRA
+  lives **one hop further**, in the CSAF document of the advisory the CVE record already names
+  (`RHSA-2019:0980` → `httpd-0:2.4.37-11.module+el8.0.0+2969+90015743`). Both endpoints verified
+  **public, no subscription**. Also measured: the trigger is NOT "a RHEL-proper estate" as assumed —
+  this is a **Rocky** estate whose pre-2021 modular fixes only exist in Red Hat's errata, because
+  Rocky 8 did not exist when they shipped (Rocky's RLSA API returns nothing for CVE-2019-0211).
+  Existing comparator needs NO change: installed `-65` vs bound `-11` on the same el8 stream clears
+  immediately. Original filing follows.
+  MED, correctness. KN-MODULE-4 closed the modular fix-bound gap for Rocky
   by reading RLSA. A true Red Hat subscriber has no RLSA: their equivalent is Red Hat's own
   **errata/RHSA** data, which states real NEVRAs per module stream where the CVE record states
   only the stream name. Same defect, same shape of fix — a per-CVE `CVEVulnSource` over the
@@ -3172,6 +3200,18 @@ under the 2026-08-07 re-derivation standard.
   **Note:** in the observed case the producer was an external CSV→JSON converter that passed
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
+
+- [ ] **DEV-COV-1 — whole-repo `make check` coverage is red on a clean `main` locally (filed
+  2026-09-10).** LOW-MED, process. Measured on macOS, deterministic across runs, identical on a
+  clean-`main` worktree — so NOT introduced by any current branch: `governance/adapters/http`
+  87.4% (threshold 90%) and `registry/adapters/store` 73.5% (threshold 80%); the frozen legacy
+  `adapter/notify` intermittently reports 99.7% (threshold 100%) on some runs only, confirming
+  profile nondeterminism from the integration-test contribution. CI (`make check-ci`,
+  coverage-greenfield) stays green, so this is a local-profile divergence (macOS vs Linux branch
+  coverage in the merged integration profile), but it makes the documented pre-commit gate
+  unreliable as a signal: a contributor cannot tell their regression from this floor. Decide:
+  re-derive the two thresholds from a Linux profile, or make check-coverage.sh print a
+  known-divergence note. **Dep:** none. **Scope:** SMALL.
 
 - [ ] **GUI-16 — non-JSON scanner exports have no documented road (filed 2026-09-09).** LOW-MED,
   operability/docs. **Context:** a user uploaded a Cortex export pair — the SBOM as SPDX JSON (accepted)
