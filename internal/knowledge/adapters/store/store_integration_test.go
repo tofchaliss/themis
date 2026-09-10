@@ -953,3 +953,87 @@ func TestMatchesForFaultline(t *testing.T) {
 		t.Errorf("unmatched card: occ=%v err=%v, want empty/nil", empty, err)
 	}
 }
+
+// A dedup hit is a new observation of the same occurrence: corrected component detail overlays
+// the recorded row (KN-SCAN-4a) and resets the verdict stamp to 0 so the catch-up sweep
+// re-judges it with the corrected identity. An empty incoming field never blanks a recorded
+// one, and unchanged detail keeps the fast stamp-refresh path event-free. Measured motivation:
+// 492 occurrences recorded with source "Managed by the Package Manager" that a corrected
+// re-upload deduped against and could never heal.
+func TestRecordMatch_OverlaysCorrectedDetail(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-48"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2024-48",
+		Component: app.InventoryComponent{
+			PURL: "pkg:rpm/rocky/binutils@2.30-128.el8_10", Name: "binutils",
+			Version: "2.30-128.el8_10", Ecosystem: "rpm",
+			Source: "Managed by the Package Manager", // the poisoned recording
+		},
+		Verdict:     domain.OpenVerdict(),
+		CardVersion: 1, OccurredAt: time.Now().UTC(),
+	}
+	if created, err := st.RecordMatch(ctx, m); err != nil || !created {
+		t.Fatalf("first match: created=%v err=%v", created, err)
+	}
+
+	var src, eco string
+	var stamp int64
+	row := func() {
+		t.Helper()
+		if err := pool.QueryRow(ctx,
+			"SELECT component_source, component_ecosystem, verdict_card_version FROM faultline_matches WHERE component_purl=$1",
+			m.Component.PURL).Scan(&src, &eco, &stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The corrected re-scan: same purl, corrected source. The row is healed in place — no new
+	// row — and its stamp resets to 0 so the sweep re-judges under the corrected identity.
+	corrected := m
+	corrected.Component.Source = "binutils"
+	corrected.CardVersion = 2
+	if created, err := st.RecordMatch(ctx, corrected); err != nil || created {
+		t.Fatalf("corrected re-scan: created=%v err=%v, want false/nil (overlay, not a twin)", created, err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM faultline_matches"); n != 1 {
+		t.Fatalf("match rows = %d, want 1 — corrected detail must overlay, never duplicate", n)
+	}
+	row()
+	if src != "binutils" {
+		t.Errorf("source after overlay = %q, want binutils", src)
+	}
+	if stamp != 0 {
+		t.Errorf("stamp after detail correction = %d, want 0 (invite the re-verdict sweep)", stamp)
+	}
+
+	// A later, poorer observation with an EMPTY source must not blank the healed attribution;
+	// unchanged detail rides the ordinary stamp-refresh path.
+	poorer := corrected
+	poorer.Component.Source = ""
+	poorer.CardVersion = 5
+	if _, err := st.RecordMatch(ctx, poorer); err != nil {
+		t.Fatal(err)
+	}
+	row()
+	if src != "binutils" {
+		t.Errorf("source after empty observation = %q, want binutils (never blank a recorded field)", src)
+	}
+	if stamp != 5 {
+		t.Errorf("stamp after unchanged-detail confirm = %d, want 5", stamp)
+	}
+	if eco != "rpm" {
+		t.Errorf("ecosystem = %q, want rpm untouched throughout", eco)
+	}
+
+	// No verdict-change events rode any of this: detail correction is not a verdict change.
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 0 {
+		t.Errorf("ComponentVerdictChanged events = %d, want 0", n)
+	}
+}
