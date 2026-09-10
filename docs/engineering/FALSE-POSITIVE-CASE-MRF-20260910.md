@@ -1,7 +1,9 @@
 # Case file — why MRF/cdmrf-oamp/20.1.0.0-125 shows 634 open findings and zero clearances
 
-**Status:** FIX LIVE-VERIFIED 2026-09-10 (main `daec9a1`) — 96 cleared incl. both proven CVEs;
-queue impact blocked by the stale mis-attributed siblings (**KN-SCAN-4**, §8b)
+**Status:** **RESOLVED 2026-09-10** (main `c14b721`) — 189 occurrences cleared; the stale
+siblings healed (one-time repair + KN-SCAN-4a); **CVE-2019-0211/0220 at `residual_priority: 0`
+on the posture** — the KEV CVE is out of the triage queue on vendor-grade evidence. Residual
+work: §8c.
 **Date:** 2026-09-10 · **Release under investigation:** `7bc21a1b-e898-47e4-b784-f2242fa983a4`
 (MRF → cdmrf-oamp → 20.1.0.0-125) · **Estate:** Rocky 8 container image, Cortex + SPDX evidence
 **Related:** KN-VERDICT-1 · KN-MODULE-4 (fixed) · **KN-MODULE-5 (open — the blocker)** · KN-SCAN-3b
@@ -252,6 +254,26 @@ Package Manager"`. Recorded identity is immutable, so they can never clear, and 
 corrected report minted the cleared rows as NEW occurrences instead of healing the old ones —
 so the stale twins still hold every cleared httpd Finding in the triage queue. The queue-count
 payoff of this whole case now waits on KN-SCAN-4, not on any feed.
+
+## 8c. FINAL STATE — 2026-09-10 17:21 (case resolved)
+
+The one-time repair (`UPDATE … SET component_source = component_name, verdict_card_version = 0`
+over the 579 poisoned rpm rows — chosen over DELETE because Governance's event-fed mirror would
+have kept orphaned occurrences open forever) plus KN-SCAN-4a deployed:
+
+- **Cleared: 96 → 189.** httpd **148** (74 corrected rows + 74 healed twins; the 13 CVEs open
+  on both rows are exactly the 13 honest residues), libxml2 26, libssh 7, libsolv 6,
+  python3.12 1, curl 1. Open matches 634 (morning) → 532.
+- **Queue confirmed moving:** posture 517 Findings / 341 outstanding;
+  `CVE-2019-0211` and `CVE-2019-0220` both `residual_priority: 0, effective_priority: 0`.
+- Sweeps drained to `rejudged:0 changed:0` — steady state, nothing pending.
+
+**Remaining, in recommended order** (all tracked in BACKLOG, none blocking):
+1. §6 normalized-equality in `FixesFor`/`StrictFixesFor` — the pypi shadows + python3-* family
+   (own EDR delta first; fail-safe-sensitive).
+2. Regenerate SBOMs with source metadata — `kernel-core`'s 136 et al. (operator-side).
+3. The 13 honest httpd residues — real upgrade work, correctly flagged.
+4. KN-SCAN-4b (purl-twin supersede, cosmetic now) · EV-TOOL-1 (fingerprint the producing tool).
 
 ## 9. Reproduction queries
 
