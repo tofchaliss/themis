@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -64,8 +65,9 @@ type redhatCVEDocument struct {
 		PackageName string `json:"package_name"`
 	} `json:"package_state"`
 	AffectedRelease []struct {
-		Package string `json:"package"` // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
-		CPE     string `json:"cpe"`     // the advisory product CPE — carries the EL stream
+		Package  string `json:"package"`  // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
+		CPE      string `json:"cpe"`      // the advisory product CPE — carries the EL stream
+		Advisory string `json:"advisory"` // the RHSA that shipped the fix — the KN-MODULE-5 second hop
 	} `json:"affected_release"`
 }
 
@@ -112,13 +114,23 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 	// only MAIN-stream advisories (excluding EUS/AUS/E4S/TUS via the CPE) so correlation's
 	// stream-scoped fixed verdict never compares a rolling install against a minor-locked backport.
 	var fixes []string
+	moduleAdvisories := map[string]struct{}{}
 	for _, ar := range doc.AffectedRelease {
 		pkg := strings.TrimSpace(ar.Package)
 		if pkg == "" || !redhatIsMainStream(ar.CPE) {
 			continue
 		}
 		fixes = append(fixes, pkg)
+		// A MODULE-stream "fix" (`httpd:2.4-8000020190405071959.55190bc5`) names no build, so
+		// the stream-scoped verdict can never compare against it — the occurrence stays open
+		// even when the installed build provably carries the backport (KN-MODULE-5; measured
+		// live 2026-09-10, 87 httpd CVEs on one Rocky release). The REAL per-package NEVRAs
+		// exist one hop away, in the CSAF document of the very advisory this row names.
+		if value.IsRPMModuleStream(pkg) && strings.HasPrefix(strings.TrimSpace(ar.Advisory), "RHSA-") {
+			moduleAdvisories[strings.TrimSpace(ar.Advisory)] = struct{}{}
+		}
 	}
+	fixes = append(fixes, c.resolveModuleAdvisories(ctx, moduleAdvisories, fixes)...)
 
 	// Vendor-severity vuln-facts (only when a CVSS is present — mirror the NVD ACL's drop-no-CVSS
 	// so a Red Hat CVE without CVSS3 never pollutes the reconciled headline with a zero score). The
@@ -254,4 +266,106 @@ func redhatIsPackageLevel(pkg string) bool {
 		return false
 	}
 	return !strings.HasSuffix(pkg, "-container")
+}
+
+// resolveModuleAdvisories is the KN-MODULE-5 second hop. The CVE record states a modular fix as
+// `name:stream-context` — a module identifier, not a build — so hop one leaves nothing the
+// stream-scoped verdict can compare. This fetches each named advisory's CSAF document (same
+// public Hydra host, /csaf/<RHSA>.json) and extracts the real source-package NEVRAs.
+//
+// It fires ONLY when hop one yielded a module-stream fix: plain NEVRAs already work, so a
+// non-modular CVE costs no extra request. Deliberately THIN, like the KN-MODULE-4 Rocky
+// resolver it mirrors: fetch → walk → extract → NEVRA strings. No version comparison, no
+// stream reasoning, no severity — RPMFixedByStream stays the one verdict authority, and its
+// EL-stream scoping is what keeps an el7 NEVRA from ever clearing an el8 install.
+//
+// SOURCE packages only (the `.src` product versions): a modular advisory's binary-rpm list is
+// the rebuild SCOPE, not N vulnerability claims (EDR-CORRELATION-01) — and the source list is
+// exactly how rockyFixFromNVRA reads RLSA. Every failure falls open to hop one's behavior (the
+// module entry alone, today's state): a resolution problem must never cost the severity facts
+// riding the same Proposal.
+func (c *RedHatClient) resolveModuleAdvisories(ctx context.Context, advisories map[string]struct{}, have []string) []string {
+	if len(advisories) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, f := range have {
+		seen[f] = struct{}{}
+	}
+	// Sorted iteration: the Proposal payload must be deterministic (D2 order-independence),
+	// and a map walk would reorder fixes between two identical sweeps.
+	ids := make([]string, 0, len(advisories))
+	for id := range advisories {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var out []string
+	for _, id := range ids {
+		nevras, err := c.fetchAdvisorySourceNEVRAs(ctx, id)
+		if err != nil {
+			continue // fail open: the module entry from hop one still folds
+		}
+		for _, n := range nevras {
+			if _, dup := seen[n]; dup {
+				continue
+			}
+			seen[n] = struct{}{}
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// fetchAdvisorySourceNEVRAs fetches one advisory's CSAF document and returns its source-package
+// NEVRAs (the `.src` product versions), module suffix stripped. A 404 (no CSAF published) is a
+// normal gap, not an error worth distinguishing — the caller fails open either way.
+func (c *RedHatClient) fetchAdvisorySourceNEVRAs(ctx context.Context, advisory string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/csaf/"+advisory+".json", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("redhat: GET csaf/%s: status %d", advisory, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	// The CSAF-VEX ACL's document types (csaf.go) are reused: this advisory document is the
+	// same CSAF 2.0 shape, and only the product tree's product_version branches are read here.
+	var doc csafDocument
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, fmt.Errorf("redhat: invalid csaf json for %s: %w", advisory, err)
+	}
+	var out []string
+	collectSourceNEVRAs(doc.ProductTree.Branches, &out)
+	return out, nil
+}
+
+// collectSourceNEVRAs walks the CSAF product tree collecting source-package NEVRAs. Only the
+// tree's own product_version entries are read — the composite `<Product>:<NEVRA>` relationship
+// ids never appear in branches, so no prefix-stripping heuristics are needed. A modular product
+// id carries a `::<module>:<stream>` suffix ("httpd-0:2.4.37-11.module+….src::httpd:2.4"); the
+// suffix is dropped and the NEVRA kept. A candidate that names no package (a malformed or bare
+// id, the guard KN-MODULE-4 mutation-verified on the Rocky side) is discarded — a bound that
+// names nothing must never reach FixesFor, where it could match everything or nothing.
+func collectSourceNEVRAs(branches []csafBranch, out *[]string) {
+	for _, b := range branches {
+		if b.Product != nil {
+			id := strings.TrimSpace(b.Product.ProductID)
+			if i := strings.Index(id, "::"); i >= 0 {
+				id = id[:i]
+			}
+			if strings.HasSuffix(id, ".src") && value.RPMPackageName(id) != "" {
+				*out = append(*out, id)
+			}
+		}
+		collectSourceNEVRAs(b.Branches, out)
+	}
 }
