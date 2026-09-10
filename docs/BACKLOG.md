@@ -3201,6 +3201,30 @@ under the 2026-08-07 re-derivation standard.
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
 
+- [ ] **EV-TOOL-1 — detect the producing tool from the document and route normalization by it;
+  never ask the user first (filed 2026-09-10).** MED, ingestion quality; extends GUI-15's
+  translator-harness seam; sibling of KN-SCAN-4 (both born from the 2026-09-10 case). Three
+  parts, one seam:
+  **(a) Fingerprint → per-tool normalization registry.** SPDX `creationInfo.creators`,
+  CycloneDX `metadata.tools`, Trivy/Grype JSON structure, a Cortex CSV's 21-column header — the
+  documents self-identify. Detect and route to the tool's translator (the in-browser Trivy
+  translator and `cortex-csv-to-scan-report.sh` become two entries of one registry); ask the
+  operator ONLY as the fallback when detection fails. Rationale measured 2026-09-10: the 579
+  permanently-unclearable occurrences came from an ad-hoc converter variant — fingerprint
+  routing removes the ad-hoc road entirely.
+  **(b) Populate `Provenance.Source` from the document, not the uploader.** The field exists on
+  every Evidence record ("producing tool, e.g. trivy") but is caller-supplied hearsay; the
+  parsers never read the generator metadata sitting in the file. Observed beats Asserted here
+  exactly as everywhere else (EDR-TRUST-01 vocabulary).
+  **(c) Door-side attribution lint (informational, never a rejection).** The `-125` SBOM
+  carried 489 rpm components with ZERO source-package attributions — every distro fix lookup
+  for sub-packages (kernel-core→kernel, perl-Errno→perl) was doomed at upload time, and nothing
+  said so. An upload-time note ("N rpm components, 0 source attributions — vendor fix bounds
+  will not attribute; regenerate with source metadata") turns a multi-day investigation into a
+  visible warning. Fail-open: the upload always proceeds.
+  **Dep:** GUI-15 (harness) for (a); none for (b)/(c). **Scope:** MED ((b) and (c) are SMALL
+  each and can land first).
+
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** MED-HIGH for queue truth, **design-first** (touches "overlays, never
   deletes" and the RecordMatch dedup). **Measured live on MRF/cdmrf-oamp/20.1.0.0-125, minutes
