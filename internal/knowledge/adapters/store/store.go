@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"strings"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -241,6 +243,15 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 
 // matchedComponentOf renders one Match as its wire component, verdict included
 // (EDR-VERDICT-01 D5).
+// overlayField is the KN-SCAN-4a per-field overlay rule: a non-empty incoming observation that
+// differs replaces the recorded value; an empty incoming one never blanks what is recorded.
+func overlayField(recorded, incoming string) string {
+	if v := strings.TrimSpace(incoming); v != "" {
+		return v
+	}
+	return recorded
+}
+
 func matchedComponentOf(m app.Match) domain.MatchedComponent {
 	return domain.MatchedComponent{
 		PURL: m.Component.PURL, Name: m.Component.Name, Version: m.Component.Version,
@@ -277,25 +288,48 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 
 	var oldState string
 	var oldStamp int64
+	var oldName, oldVersion, oldEco, oldSource string
 	err = tx.QueryRow(ctx, `
-		SELECT verdict_state, verdict_card_version FROM faultline_matches
+		SELECT verdict_state, verdict_card_version,
+		       component_name, component_version, component_ecosystem, component_source
+		FROM faultline_matches
 		WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3 FOR UPDATE`,
-		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).Scan(&oldState, &oldStamp)
+		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).
+		Scan(&oldState, &oldStamp, &oldName, &oldVersion, &oldEco, &oldSource)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// New occurrence: insert with its verdict and stamp, advance the card, emit the event.
 	case err != nil:
 		return false, err
 	default:
-		// Existing occurrence. A CHANGE is a semantic one — open became cleared or cleared
-		// re-opened; the empty string a pre-feature row may hold reads as open (D2).
+		// Existing occurrence — and a dedup hit is a NEW OBSERVATION of the same occurrence,
+		// not merely a duplicate to swallow (KN-SCAN-4a). The recorded component detail is
+		// overlaid with the incoming observation where it differs: last observation wins,
+		// except that a non-empty recorded field is never blanked by an empty incoming one
+		// (a poorer observation must not erase attribution a better one supplied).
+		//
+		// Why this exists, measured 2026-09-10: a broken converter recorded 492 occurrences
+		// with component_source = "Managed by the Package Manager" (the CSV's file_path).
+		// componentPackage() prefers source, the recorded identity was immutable, so every
+		// re-judgement asked the feeds about a package of that literal name — permanently
+		// unclearable — and re-uploading the CORRECTED report deduped here and healed nothing.
+		name := overlayField(oldName, m.Component.Name)
+		version := overlayField(oldVersion, m.Component.Version)
+		eco := overlayField(oldEco, m.Component.Ecosystem)
+		source := overlayField(oldSource, m.Component.Source)
+		detailChanged := name != oldName || version != oldVersion || eco != oldEco || source != oldSource
+
+		// A CHANGE is a semantic one — open became cleared or cleared re-opened; the empty
+		// string a pre-feature row may hold reads as open (D2).
 		if domain.VerdictState(oldState).IsOpen() != newState.IsOpen() {
 			if _, uerr := tx.Exec(ctx, `
 				UPDATE faultline_matches
-				SET verdict_state=$4, verdict_grade=$5, verdict_reason=$6, verdict_card_version=$7
+				SET verdict_state=$4, verdict_grade=$5, verdict_reason=$6, verdict_card_version=$7,
+				    component_name=$8, component_version=$9, component_ecosystem=$10, component_source=$11
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
 				m.ReleaseID, string(m.FaultlineID), m.Component.PURL,
-				string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion); uerr != nil {
+				string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion,
+				name, version, eco, source); uerr != nil {
 				return false, uerr
 			}
 			changed := domain.ComponentVerdictChanged{
@@ -305,13 +339,23 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
 				return false, qerr
 			}
-		} else if int64(m.CardVersion) > oldStamp {
-			// Same conclusion against a newer card: refresh the stamp so the catch-up sweep
-			// does not re-judge a row that is already current. No event — nothing changed.
+		} else if int64(m.CardVersion) > oldStamp || detailChanged {
+			// Same conclusion: refresh the stamp so the catch-up sweep does not re-judge a
+			// current row, and persist any corrected detail. A detail-only correction resets
+			// the stamp to 0 instead — the corrected identity may judge differently against
+			// knowledge the card already holds, and the stale stamp is precisely what invites
+			// the sweep to find out. No event — the verdict has not changed yet.
+			stamp := m.CardVersion
+			if detailChanged {
+				stamp = 0
+			}
 			if _, uerr := tx.Exec(ctx, `
-				UPDATE faultline_matches SET verdict_card_version=$4
+				UPDATE faultline_matches
+				SET verdict_card_version=$4,
+				    component_name=$5, component_version=$6, component_ecosystem=$7, component_source=$8
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
-				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.CardVersion); uerr != nil {
+				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, stamp,
+				name, version, eco, source); uerr != nil {
 				return false, uerr
 			}
 		}

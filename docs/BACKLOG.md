@@ -3226,7 +3226,20 @@ under the 2026-08-07 re-derivation standard.
   each and can land first).
 
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
-  (filed 2026-09-10).** MED-HIGH for queue truth, **design-first** (touches "overlays, never
+  (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
+  RecordMatch's dedup hit now treats the incoming observation as a NEW observation of the same
+  occurrence — component detail is overlaid where it differs (last observation wins; a non-empty
+  recorded field is never blanked by an empty incoming one), and a detail-only correction resets
+  the verdict stamp to 0 so the catch-up sweep re-judges under the corrected identity. Guarded by
+  `TestRecordMatch_OverlaysCorrectedDetail`. The 579 already-poisoned rows predate the fix and
+  were healed by a one-time operator UPDATE (source := component_name, stamp := 0) — DELETE was
+  rejected because Governance's event-fed mirror would have kept the orphaned occurrences open
+  forever, which is "overlays, never deletes" earning its keep. **Part (b) remains open,
+  design-first:** the purl-changed twin pair (same release+faultline+name+version, different
+  purl — the 87 httpd `app:` vs old rows) needs a dedup/supersede rule so a converter identity
+  drift cannot mint eternal duplicates; cosmetic after (a) + the repair, so LOW-MED now.
+  Original filing follows.
+  MED-HIGH for queue truth, **design-first** (touches "overlays, never
   deletes" and the RecordMatch dedup). **Measured live on MRF/cdmrf-oamp/20.1.0.0-125, minutes
   after KN-MODULE-5 cleared 96 occurrences:** the earlier converter defect had recorded scanner
   occurrences with a poisoned `component_source` (the CSV's file_path — the literal "Managed by
