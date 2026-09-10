@@ -462,6 +462,13 @@ async function viewRelease(releaseId, version) {
 
   const undecided = posture.filter((p) => !p.has_position).length;
   const suppressed = posture.filter((p) => p.has_position && ["not_affected", "accepted_risk"].includes(p.stance)).length;
+  // The machine's "handled": findings whose every CARRIER copy provably carries its vendor fix
+  // (the identified-false-positive class — EDR-VERDICT-01). Scope-only findings don't count:
+  // no carrier means there was nothing to clear, and counting them would inflate the number.
+  const clearedAll = posture.filter((p) => {
+    const carriers = (p.components || []).filter((c) => c.claim_class !== "scope");
+    return carriers.length > 0 && carriers.every(verdictCleared);
+  }).length;
   const mult = posture.length ? Math.max(...posture.map((p) => p.blast_multiplier || 1)) : 1;
   const bandCounts = BANDS.map(([b]) => [b, posture.filter((p) => p.band === b).length]);
   const unbanded = posture.length - bandCounts.reduce((s, [, n]) => s + n, 0);
@@ -474,6 +481,8 @@ async function viewRelease(releaseId, version) {
         <div class="tile-note">awaiting a Position</div></div>
       <div class="tile tile-c"><div class="tile-value">${suppressed}</div><div class="tile-label">Suppressed</div>
         <div class="tile-note">not_affected / accepted_risk — kept, not deleted</div></div>
+      <div class="tile tile-c"><div class="tile-value">${clearedAll}</div><div class="tile-label">Cleared — no action</div>
+        <div class="tile-note">vendor fix proven on every copy (identified false positives)</div></div>
       <div class="tile tile-a"><div class="tile-value">${blast ? blast.unique_customers : "—"}<span style="font-size:14px;color:var(--ink2)"> · ×${mult.toFixed(1)}</span></div>
         <div class="tile-label">Blast radius</div><div class="tile-note">unique customers · priority multiplier</div></div>
     </div>
