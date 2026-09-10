@@ -3225,6 +3225,23 @@ under the 2026-08-07 re-derivation standard.
   **Dep:** GUI-15 (harness) for (a); none for (b)/(c). **Scope:** MED ((b) and (c) are SMALL
   each and can land first).
 
+- [x] **KN-FIX-4 — fix lookup missed the vendor's name for the installed package: exact-equality
+  only (filed + FIXED 2026-09-10, `feat/kn-fix-4-normalized-fix-lookup`).** ✅ **EDR-VEX-01
+  D12**: `FixesFor`/`StrictFixesFor` now match by exact equality first, then
+  `NormalizeProduct`-EQUALITY under a wrapper-family guard — never `relatedProduct` containment
+  (a `-wheel` bound must not clear pip; wrong clearance = false negative). Measured driver
+  (MRF case §6–§7): the card held `python-setuptools 0:39.2.0-9.el8_10` while the SBOM says
+  `python3-setuptools` — `FixesFor` returned empty beside the exact bound, blocking both the
+  direct verdict and the D3 ownership bridge for every pypi shadow (~100 occurrences), plus the
+  `libcurl`→`curl`/`libnghttp2`/`libattr` class (3 CVEs, all correctly below-bound). The
+  collision guard (`python3-json` vs `ruby-json`, both → `json`) is what makes normalization
+  safe on shared cards: same bare root + cross-language wrappers never match; bare-vs-wrapped
+  (`PyYAML`, `curl`) is the measured true-positive shape and does. `MatchesFixPackage` +
+  table test; domain 100.0%. **Live verification pending** (expect pypi shadows to clear via
+  the bridge on the next re-verdict pass). NOT covered (unchanged, needs source attribution):
+  the sub-package split `kernel-core`→`kernel`, `openssl-libs`→`openssl` — that is data, not
+  vocabulary.
+
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
   RecordMatch's dedup hit now treats the incoming observation as a NEW observation of the same

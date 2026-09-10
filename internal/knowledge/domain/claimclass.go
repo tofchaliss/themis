@@ -53,6 +53,62 @@ func NormalizeProduct(s string) string {
 	return n
 }
 
+// wrapperFamily groups the distro wrapper prefixes whose members name the SAME upstream
+// project when their bare roots agree: every python-era wrapper is one family, each other
+// wrapper its own. It exists for MatchesFixPackage's guard (D12): `python3-json` and
+// `ruby-json` both normalize to `json`, and without the family check a ruby bound could
+// answer a python query on a shared rpm card — a version compare over two unrelated version
+// lines, which is how a false "fixed" would be minted.
+func wrapperFamily(prefix string) string {
+	switch prefix {
+	case "python-", "python2-", "python3-", "python3x-":
+		return "python"
+	default:
+		return prefix // each remaining wrapper (perl-, ruby-, lib, …) is its own family
+	}
+}
+
+// strippedWrapper reports which distro wrapper NormalizeProduct would strip from the
+// (already lowercased, underscore-folded) name — "" when none applies.
+func strippedWrapper(n string) string {
+	for _, pre := range distroPrefixes {
+		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
+			return pre
+		}
+	}
+	return ""
+}
+
+// MatchesFixPackage reports whether a card's fix-attribution package name answers a query for
+// the given component package (EDR-VEX-01 D12, KN-FIX-4). Exact case-insensitive equality
+// first — the rule that always held; then normalized-name EQUALITY (never containment: a
+// `python3-pip-wheel` bound must not clear `python3-pip`, and a wrong clearance is a false
+// negative) guarded by wrapper-family compatibility: the bare roots must agree AND the
+// stripped wrappers must be the same family or one side bare. The bare-vs-wrapped direction
+// is the measured true-positive shape — the vendor files under its project name (`PyYAML`,
+// `curl`) or its source name (`python-setuptools`) while the SBOM carries the binary name
+// (`python3-pyyaml`, `libcurl`, `python3-setuptools`); reproduced live 2026-09-10, where the
+// exact-only rule left `FixesFor("python3-setuptools")` empty beside the exact bound the
+// card held under `python-setuptools`.
+func MatchesFixPackage(fixPkg, queryPkg string) bool {
+	f := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(fixPkg)), "_", "-")
+	q := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(queryPkg)), "_", "-")
+	if f == "" || q == "" {
+		return false
+	}
+	if f == q {
+		return true
+	}
+	fw, qw := strippedWrapper(f), strippedWrapper(q)
+	if strings.TrimPrefix(f, fw) != strings.TrimPrefix(q, qw) {
+		return false // different bare roots — different projects
+	}
+	if fw == "" || qw == "" {
+		return true // bare project/source name vs the distro's wrapped binary name
+	}
+	return wrapperFamily(fw) == wrapperFamily(qw)
+}
+
 // minProductOverlap is the shortest normalized name allowed to match by containment. Below it a
 // substring match is coincidence rather than evidence.
 const minProductOverlap = 3

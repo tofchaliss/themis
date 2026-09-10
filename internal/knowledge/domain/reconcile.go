@@ -383,7 +383,10 @@ func (v EnterpriseView) FixesFor(pkg, ecosystem string) []string {
 	// Only the ORDER changes, which is what a consumer showing the first N reads.
 	var direct, module []string
 	for _, f := range v.Fixes {
-		if !strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
+		// D12 (KN-FIX-4): exact-equality first inside MatchesFixPackage, then normalized-name
+		// equality — the vendor files a fix under its source/project name while the component
+		// carries the binary name, and the exact-only rule left them permanently unmatched.
+		if !MatchesFixPackage(f.Package, pkg) {
 			continue
 		}
 		if f.Ecosystem != "" && compEco != "" && f.Ecosystem != compEco {
@@ -414,7 +417,7 @@ func (v EnterpriseView) StrictFixesFor(pkg, ecosystem string) []string {
 	}
 	var out []string
 	for _, f := range v.Fixes {
-		if !strings.EqualFold(strings.TrimSpace(f.Package), pkg) {
+		if !MatchesFixPackage(f.Package, pkg) { // D12: same name rule as FixesFor
 			continue
 		}
 		if f.Ecosystem != compEco {

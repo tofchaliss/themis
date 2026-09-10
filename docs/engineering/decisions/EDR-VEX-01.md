@@ -276,6 +276,51 @@ errata record, reproducible on re-fetch, carrying no judgment statements (no `no
 Tier-2 because it is the sole vendor fix source for the SIG-package gap it covers. Opt-in like
 every feed (`THEMIS_ROCKY_ENABLED=1`, `_URL`, `_POLL_INTERVAL`), health row `rocky`.
 
+### D12 — Fix lookup matches the package by normalized-name equality, never containment (KN-FIX-4, added 2026-09-10)
+
+**Decision.** `FixesFor` / `StrictFixesFor` match `Fix.Package` against the queried package by
+**exact case-insensitive equality first**, then — only when exact matching found nothing for
+that entry — by **`NormalizeProduct` equality guarded by wrapper-family compatibility**. Never
+by `relatedProduct` containment.
+
+**Measured evidence (2026-09-10, MRF case file §6–§7).** The card for CVE-2025-47273 held the
+exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)` while the SBOM's installed rpm is
+`python3-setuptools` — `FixesFor("python3-setuptools","rpm")` returned nothing (reproduced by
+executing the real function), so neither the direct verdict nor the D3 ownership bridge could
+ever fire, even though `NormalizeProduct` maps BOTH names to `setuptools` in the same package.
+Estate-wide the same one-character gap (`python3-` vs `python-`, `lib` vs bare) blocked the
+`python3-pyyaml`/`python3-ply` family and the `libcurl`→`curl` / `libnghttp2`→`nghttp2` /
+`libattr`→`attr` pairs. Blast radius measured before building: 3 direct rpm CVEs newly
+comparable (all three correctly STAY open — installed below bound), plus the ~100 pypi-shadow
+occurrences unblocked through the bridge.
+
+**The wrapper-family guard — why bare normalization is not enough.** `NormalizeProduct` strips
+one distro wrapper, so `python3-json` and `ruby-json` BOTH normalize to `json`; on a shared rpm
+card, plain normalized equality would let a ruby-json bound answer a python3-json query, and
+`RPMFixedByStream`'s version compare over two unrelated version lines could then produce a
+false "fixed" — the one forbidden direction. The guard: after stripping, the bare roots must be
+equal AND the stripped wrappers must be **compatible** — same family (`python-`/`python2-`/
+`python3-`/`python3x-` are one family), or one side bare (the vendor's project name `PyYAML`
+against the distro's `python3-pyyaml`; `curl` against `libcurl`). Cross-family
+(`ruby-` vs `python3-`) never matches.
+
+**Rejected.**
+- **`relatedProduct` containment** — deliberately fail-open toward carrier for claim
+  classification, which is exactly wrong here: containment would let a `python3-pip-wheel`
+  bound clear `python3-pip`, and a wrong clearance is a false negative.
+- **A curated alias map** — `NormalizeProduct` already exists, is tested, and covers the whole
+  measured population; a second vocabulary would drift.
+- **Normalizing at fold time** — the card must keep each vendor's own package name verbatim
+  (audit; the drawer renders the source's statement); the flexibility belongs at the LOOKUP,
+  where both names are in hand.
+
+**Fail-safe accounting.** Under-matching keeps a row open (safe, unchanged). The only new
+over-match risk is the wrapper-family residual (a bare-named bound meeting a wrapped component
+of a different language, e.g. a hypothetical bare `json` rpm) — bounded beneath by the existing
+ecosystem stamp (D9), the EL-stream scoping and the version compare, and accepted with the
+guard in place because the bare-vs-wrapped direction IS the measured true-positive shape
+(`PyYAML`, `curl`). `StrictFixesFor` keeps its fail-closed ecosystem selection unchanged.
+
 ## Not in scope (explicit non-goals)
 
 VEX *export* fidelity (a separate serializer concern); cryptographic VEX signature verification (stub in both
