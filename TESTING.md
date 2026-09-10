@@ -288,6 +288,41 @@ jq '{findings:[.Results[] as $r | $r.Vulnerabilities[]? | {cve:.VulnerabilityID,
 Findings the translation cannot use are skipped and counted, never fatal — one malformed
 finding must not void a 400-finding report.
 
+**Cortex CSV exports (GUI-16 — the non-JSON road).** Cortex exports scan results as CSV, which
+the in-browser upload rightly refuses (Themis is JSON-only by contract). The maintained
+conversion is `scripts/cortex-csv-to-scan-report.sh` — use it and nothing else; the 2026-09-10
+false-positive case (docs/engineering/FALSE-POSITIVE-CASE-MRF-20260910.md) traced 579
+permanently-unclearable occurrences to an ad-hoc converter variant, so a second converter is a
+defect, not a convenience:
+
+```sh
+scripts/cortex-csv-to-scan-report.sh cortex-export.csv > scan-report.json
+jq '.findings|length' scan-report.json   # sanity: should match the CSV's data-row count
+# then POST like an SBOM but kind=scanner-report, or use the dashboard form
+```
+
+The standard per-scan procedure, in order:
+
+1. **SBOM first, report second.** Upload the release's SBOM (SPDX/CycloneDX) before the scanner
+   report so correlation has an inventory to record occurrences against (and the ownership
+   bridge has siblings/edges to reach through).
+2. **Convert with the committed script only.** It parses RFC 4180 properly (Cortex descriptions
+   contain newlines — 1264 physical lines can be 557 rows), maps `origin_package_name` into
+   `component.source` (never `file_path`), and labels rpm-shaped `APP` binaries with the `rpm`
+   ecosystem so the vendor-fix verdict can reach them.
+3. **Do not pass a timestamp unless you must.** `observed_at` defaults to the CSV's mtime, so
+   re-converting the same export is byte-identical and Evidence's content addressing dedups it
+   instead of filing a duplicate scan. Passing `now` breaks that.
+4. **Upload to the SAME release** for a re-scan of the same image; a new image version is a new
+   Release (register it first — `scripts/gf-upload-sbom.sh` does Product→Project→Release).
+5. **Verify:** `scripts/vm-verify.sh` for the estate; per release, the posture Scans card, and
+   `re-verdict sweep complete … changed:N` in the knowledge journal after the feeds fold.
+
+Until KN-SCAN-4 lands, know its shape: an occurrence recorded with wrong attribution is not
+healed by re-uploading corrected data — the corrected rows land beside the old ones. With the
+committed converter the identities are stable, so routine re-scans dedup cleanly; the hazard is
+only ever a DIFFERENT converter emitting different identities.
+
 **Or skip the jq entirely:** the dashboard's SBOM-manager form accepts **raw Trivy JSON**
 directly — the same translation runs in the browser (EDR-GUI-01 D16; the server only ever
 sees the curated document), the Kind selector flips to "Scanner report" automatically, and

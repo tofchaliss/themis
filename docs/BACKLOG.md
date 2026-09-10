@@ -3237,7 +3237,7 @@ under the 2026-08-07 re-derivation standard.
   re-derive the two thresholds from a Linux profile, or make check-coverage.sh print a
   known-divergence note. **Dep:** none. **Scope:** SMALL.
 
-- [ ] **GUI-16 — non-JSON scanner exports have no documented road (filed 2026-09-09).** LOW-MED,
+- [x] **GUI-16 — non-JSON scanner exports have no documented road (filed 2026-09-09).** ✅ **CLOSED 2026-09-10** — the Cortex CSV road is documented in TESTING.md (§ scanner reports): the committed `scripts/cortex-csv-to-scan-report.sh` (single sanctioned converter after the 2026-09-10 false-positive case), the SBOM-first upload order, the deterministic `observed_at`, and the KN-SCAN-4 caveat. Original filing follows. LOW-MED,
   operability/docs. **Context:** a user uploaded a Cortex export pair — the SBOM as SPDX JSON (accepted)
   and the scan results as **CSV** (refused in-browser by `JSON.parse`, so no request ever reached
   Evidence). The refusal was correct at every layer: Themis is JSON-only by contract — Evidence's
