@@ -269,8 +269,13 @@ have kept orphaned occurrences open forever) plus KN-SCAN-4a deployed:
 - Sweeps drained to `rejudged:0 changed:0` — steady state, nothing pending.
 
 **Remaining, in recommended order** (all tracked in BACKLOG, none blocking):
-1. ~~§6 normalized-equality in `FixesFor`/`StrictFixesFor`~~ ✅ **BUILT 2026-09-10 evening**
-   (EDR-VEX-01 D12, KN-FIX-4) — live verification pending on the next re-verdict pass.
+1. ~~§6 normalized-equality in `FixesFor`/`StrictFixesFor`~~ ✅ **LIVE-VERIFIED 2026-09-10
+   18:31** (EDR-VEX-01 D12, KN-FIX-4): the ORIGINAL KN-VERDICT-1 row — CVE-2025-47273's
+   `setuptools@39.2.0 (pypi)` — cleared through the D3 bridge at Inferred grade, premise
+   verbatim: "matched to python3-setuptools 39.2.0-9.el8_10 at the distro version (inferred,
+   no ownership edge): vendor fix 0:39.2.0-9.el8_10 present". +3 clearances this pass; the
+   pip@23.2.1 shadows stay blocked on the versioned-wrapper gap (KN-FIX-5, filed with the
+   measurement).
 2. Regenerate SBOMs with source metadata — `kernel-core`'s 136 et al. (operator-side).
 3. The 13 honest httpd residues — real upgrade work, correctly flagged.
 4. KN-SCAN-4b (purl-twin supersede, cosmetic now) · EV-TOOL-1 (fingerprint the producing tool).

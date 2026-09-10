@@ -3242,6 +3242,20 @@ under the 2026-08-07 re-derivation standard.
   the sub-package split `kernel-core`→`kernel`, `openssl-libs`→`openssl` — that is data, not
   vocabulary.
 
+- [ ] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
+  shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification).**
+  LOW-MED, correctness; EDR-VEX-01 D12 follow-up. `distroPrefixes` holds the literal `python3-`
+  and `python3x-` but NOT the versioned form: `python3.12-pip` fails `HasPrefix("python3-")`
+  (dot vs hyphen at position 7), so `NormalizeProduct` returns it unstripped, the D3 bridge's
+  name affinity fails, and `MatchesFixPackage("pip","python3.12-pip")` compares bare roots
+  `pip` vs `python3.12-pip` → false. Measured: on the MRF release the KN-FIX-4 pass cleared
+  the `setuptools@39.2.0` shadow (sibling `python3-setuptools`) but left every
+  `pip@23.2.1` shadow open beside its at-version sibling `python3.12-pip@23.2.1-4.el8`.
+  Fix shape to decide: a PATTERN rule for `pythonN.M-` in the wrapper strip (one dynamic rule,
+  same python family in `wrapperFamily`) rather than enumerating literals that grow with every
+  interpreter release. Touches claim classification too (`NormalizeProduct` is shared) — check
+  the carrier/scope property tests before assuming it is free. **Dep:** none. **Scope:** SMALL.
+
 - [ ] **KN-VERDICT-2 — a verdict-logic change ships invisible: stamps claim currency the new
   code never produced (filed 2026-09-10).** LOW-MED, operability. The D6 stamp records "judged
   against card version N" — but not against WHICH judgement logic. Deploying a binary that
