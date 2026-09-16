@@ -3457,6 +3457,34 @@ under the 2026-08-07 re-derivation standard.
   That is the argument for EDR-3's UNKNOWN rule being the ANSWER for distro-packaged software
   rather than a fallback.
 
+  **CLASS BOUNDARY MEASURED 2026-09-16 — it is NOT distro-vs-ecosystem.** Four carrier
+  defects, separable, only ONE structural:
+
+  | component | carriers on the card | why it fails | fixable today? |
+  | --- | --- | --- | --- |
+  | `httpd` | `http_server` + 26–37 bundler products | vocabulary gap + pollution | no — structural |
+  | `spring-core` | `spring_framework` (CLEAN, single, no pollution) | vocabulary gap ONLY | no — structural |
+  | `perl-interpreter` / `perl-libs` | **`perl`** — correct, present, sometimes the ONLY entry | **Themis's own wrapper strip** turns `perl-interpreter` into `interpreter`, then compares it to `perl` | **YES — self-inflicted** |
+  | 2 perl cards | `["\\"]` — a lone backslash | `cpeProduct` naive `:` split vs CPE 2.3 escaping | yes — parser fix |
+
+  **Spring is the load-bearing row.** It is maven, i.e. ecosystem-packaged, and its carrier set
+  is exactly what the D4 design wants: one entry, the real project, zero bundlers. It STILL
+  fails, because `spring_framework` and `spring-core` share no substring. So the vocabulary gap
+  is NOT a distro problem — ecosystem packaging buys a clean carrier set, not a matching one,
+  and EDR-3's UNKNOWN rule is the answer for BOTH halves.
+  **Perl is the highest-value fix in this cluster** and needs no new evidence: the carrier is
+  correct and available, and the normalization intended to help destroys it (variant B, now
+  confirmed on real card data, not a synthetic case).
+  **Garbage tokens are SMALL but the mechanism is not.** Measured estate-wide, only **2** cards
+  carry `["\\"]`. The risk is not the count: we noticed those because the artifact was
+  VISIBLY broken. A mis-split landing on a plausible fragment yields a wrong-but-normal-looking
+  carrier that nothing would surface. Fix `cpeProduct` to respect CPE 2.3 escaping rather than
+  splitting naively on `:`.
+  **Side effect of `minProductOverlap = 3`, measured:** legitimately short project names exist
+  (`jq` 16 cards, `xz` 1). They still match by EQUALITY (checked before the length guard), but
+  can never match by containment — so `jq` classifies a component `jq` as carrier and `jq-libs`
+  as scope. Minor, but it belongs to whatever rule replaces `relatedProduct`.
+
   **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
   (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)
   and shipped on the match event; Knowledge stores no `claim_class` column at all and
