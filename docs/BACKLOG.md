@@ -3340,7 +3340,7 @@ under the 2026-08-07 re-derivation standard.
 - [ ] **GOV-MIRROR-1 — Governance's occurrence-verdict mirror has no reconciliation, and no
   path at all for corrected component identity (filed 2026-09-16, MEASURED live on
   MRF/cdmrf-oamp/20.1.0.0-125; found by opening ONE drawer and asking why a badge was
-  missing).** **HIGH, silent divergence**; EDR-VERDICT-01 D5/D6. Two parts, one seam.
+  missing).** **MED-HIGH, silent divergence**; EDR-VERDICT-01 D5/D6. Two parts, one seam.
 
   **(a) Nothing ever checks that the mirror agrees with its source.** Governance holds a
   verdict it never re-derives (D5, correctly), fed by `knowledge.component_verdict_changed`.
@@ -3363,6 +3363,20 @@ under the 2026-08-07 re-derivation standard.
   **Repair executed live (proves the convergence path is sound):** 74 httpd `app:` rows
   reopened (`verdict_state='open'`, stamp 0) → sweep `rejudged:97 changed:74` → 74 events →
   both sides **192/721**. Repair, not fix.
+  **Negative control — the mechanism is NOT broken (measured same day, both directions, on the
+  two releases no repair ever touched):** `20.1.0.0-109` and `20.1.0.0-118` each returned
+  **K-cleared/G-open = 0 AND G-cleared/K-open = 0**. Two consequences. (i) Governance holds no
+  independent verdict state — it is a PURE lagging projection, so a reconciler is a ONE-WAY
+  repair that may safely overwrite. (ii) The drift is not spontaneous; the trigger is a write
+  that bypasses the aggregate. **This project does that deliberately** — the 2026-09-10 repair
+  of 579 rows is recorded under KN-SCAN-4 — and any relabelling pass writing into Knowledge
+  would reproduce it at scale. So the severity is about **detection, not frequency**: rare
+  trigger, permanent and invisible consequence.
+  **Implementation constraint for the replay design:** the consumer inbox is keyed on the
+  kernel `envelope_id` and a duplicate short-circuits to a no-op
+  (`governance/.../migrations/000003`, `InboxConsumer.Handle`). A reconciler therefore cannot
+  republish a stored envelope verbatim — it must mint a FRESH envelope id carrying the same
+  payload, or it will appear to run and change nothing.
   **Fix shape to decide:** a periodic reconciler comparing Knowledge's occurrence verdicts to
   Governance's mirror and re-emitting on disagreement. It cannot be a SQL join (separate
   databases — the isolation is structural and worth keeping), so it goes over the read API or
