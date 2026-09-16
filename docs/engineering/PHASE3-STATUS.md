@@ -4,6 +4,36 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
+> ## ⏭ RESUME 2026-09-16 — the httpd trace: five defects, one repaired live, EDR-2 investigated
+>
+> A single question — "why is this httpd finding not marked vendor-fixed?" — opened five
+> independent defects. All filed in [`../BACKLOG.md`](../BACKLOG.md) with measured evidence;
+> **no code written, nothing merged.** Branch `docs/registry-duplicate-hierarchy` (docs only).
+>
+> - **GOV-MIRROR-1 (MED-HIGH)** — Governance's verdict mirror has no reconciliation. Measured
+>   **60 diverged rows** on one release, undetected six days, invisible to every probe. Cause:
+>   an out-of-band repair wrote around the aggregate, and a cleared row cannot self-heal
+>   (re-judging yields no transition, so no event). **Repaired live** by forcing 74 rows back
+>   to `open` → sweep `rejudged:97 changed:74` → both sides converged at 192/721. A negative
+>   control on the two untouched releases (zero drift, BOTH directions) proved the event path
+>   sound and Governance a pure lagging projection.
+> - **KN-CLAIM-1 (HIGH)** — the carrier comparison writes off real carriers as `scope`, which
+>   drops a Finding from the queue, from plans and from AI grounding. **238 scope-only
+>   Findings, 158 never cleared.** Four separable carrier defects measured; only the
+>   vocabulary gap is structural, and it spans BOTH packaging worlds (spring, maven, has a
+>   perfectly clean carrier set and still fails).
+> - **KN-SCAN-3b** — root cause found: `app:` was never an ecosystem, it is SPDX
+>   `primaryPackagePurpose` collapsed into a purl scheme. The scanner's own SBOM carries the
+>   good twin one entry away. **EDR-1 spec agreed** (7 rules, commit `7cca64c`). Also found a
+>   latent **empty-purl poison-halt** on the same line of code.
+> - **REG-DUP-1** — three Products named `MRF`; registry has no uniqueness at any level and
+>   name-grouped reads collapse duplicates invisibly.
+>
+> **NEXT:** trace `relatedProduct` → its current contract → minimal replacement tested against
+> perl / jq+xz / httpd / spring-core → THEN the EDR-3 boundary. Agenda is written into
+> KN-CLAIM-1; do not re-derive it. Order after that: EDR-1 → KN-SCAN-4(b) → EDR-4 → relabel.
+> F7 (consumer poison-message resilience) stays an independent track.
+
 > ## ⏭ RESUME 2026-08-24 — next up is the **Δ4 grill** (design-first, no code yet)
 >
 > The tiered enhancement roadmap (`EDR-ENHANCE-T1…T5`) drove several arcs to `main` and each was

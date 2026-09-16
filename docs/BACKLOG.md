@@ -3485,6 +3485,31 @@ under the 2026-08-07 re-derivation standard.
   can never match by containment — so `jq` classifies a component `jq` as carrier and `jq-libs`
   as scope. Minor, but it belongs to whatever rule replaces `relatedProduct`.
 
+  **EDR-2 STOPPING POINT (2026-09-16) — INVESTIGATED, deliberately NOT designed.** Three of
+  the four defects are deterministic fixes with the evidence already in hand (perl wrapper,
+  CPE parse, bundler pollution). The fourth is a structural limitation and **must not be turned
+  into another mapping system** — that is the alias table both reviewers rejected, arriving by
+  a different door.
+  **Consequence, and the most durable conclusion of the session:** EDR-3's UNKNOWN rule is no
+  longer the fallback for distro packages. **It is the safety boundary for EVERY
+  carrier/component vocabulary mismatch Themis cannot deterministically bridge** — `http_server`
+  ↔ `httpd` and `spring_framework` ↔ `spring-core` alike, despite completely different feed
+  provenance.
+  **Invariant for whatever replaces `relatedProduct`:** *it may establish a DETERMINISTIC name
+  correspondence; it must not manufacture one where the available evidence says only that two
+  names are different.*
+  **NEXT SESSION AGENDA (do not re-derive this):**
+  1. Establish `relatedProduct`'s CURRENT contract from the code + its tests — what does `true`
+     actually mean today? Same project · probable name correspondence · evidence sufficient to
+     classify `scope` · or merely a candidate-generation predicate? EDR-3 may own the final
+     uncertainty decision, and which one it is decides where the boundary sits.
+  2. Trace the three cases separately, since only the first two belong INSIDE the predicate:
+     wrapped name (`perl-interpreter` ↔ `perl`, should correlate) · short project (`jq` ↔ `jq`,
+     equality should correlate) · different vocabulary (`http_server` ↔ `httpd`,
+     `spring_framework` ↔ `spring-core` — must NOT be forced).
+  3. Define the minimal replacement and test it against all four measured cases — perl, jq/xz,
+     httpd, spring-core — BEFORE writing the EDR-3 boundary.
+
   **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
   (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)
   and shipped on the match event; Knowledge stores no `claim_class` column at all and
