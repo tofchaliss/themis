@@ -360,3 +360,73 @@ func TestListProductsAndProjects(t *testing.T) {
 		t.Errorf("projects leaked across products: %+v, %v", leaked, err)
 	}
 }
+
+// GetProduct and GetProject are the two reads the DASH-1 name traversal rests on
+// (GET /products → /products/{id}/projects → /projects/{id}/releases). Both were entirely
+// uncovered, which is part of why this package sat under its threshold (DEV-COV-1).
+func TestGetProductAndProject(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	prodID, projID, _ := seed(t, s)
+
+	prod, err := s.GetProduct(ctx, prodID)
+	if err != nil {
+		t.Fatalf("get product: %v", err)
+	}
+	if prod.ID() != prodID || prod.Name() != "Themis" {
+		t.Errorf("product = %+v, want id=%s name=Themis", prod, prodID)
+	}
+
+	proj, err := s.GetProject(ctx, projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if proj.ID() != projID || proj.ProductID() != prodID || proj.Name() != "api" {
+		t.Errorf("project = %+v, want id=%s product=%s name=api", proj, projID, prodID)
+	}
+
+	// A missing row must be ErrNotFound, never a zero value: the traversal has to tell
+	// "no such product" from "a product whose name is empty", and a caller that cannot
+	// distinguish them renders a blank page instead of a 404.
+	if _, err := s.GetProduct(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetProduct(missing) = %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetProject(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetProject(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+// The estate-graph existence checks (C1). RegisterDeployment validates its microservice and
+// customer through these before inserting, so a false negative here turns a valid deployment
+// into a rejected one and a false positive defers the failure to the foreign key.
+func TestEstateExists(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	seed(t, s) // prod-1, which the microservice FK requires
+
+	ms, _ := domain.NewMicroservice("ms-1", "prod-1", "payments")
+	must(t, s.SaveMicroservice(ctx, ms))
+	cust, _ := domain.NewCustomer("cust-1", "Acme")
+	must(t, s.SaveCustomer(ctx, cust))
+
+	for _, tc := range []struct {
+		name  string
+		check func() (bool, error)
+		want  bool
+	}{
+		{"microservice yes", func() (bool, error) { return s.MicroserviceExists(ctx, "ms-1") }, true},
+		{"microservice no", func() (bool, error) { return s.MicroserviceExists(ctx, "nope") }, false},
+		{"customer yes", func() (bool, error) { return s.CustomerExists(ctx, "cust-1") }, true},
+		{"customer no", func() (bool, error) { return s.CustomerExists(ctx, "nope") }, false},
+	} {
+		got, err := tc.check()
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
