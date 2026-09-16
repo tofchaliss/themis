@@ -3242,6 +3242,35 @@ under the 2026-08-07 re-derivation standard.
   the sub-package split `kernel-core`→`kernel`, `openssl-libs`→`openssl` — that is data, not
   vocabulary.
 
+- [ ] **REG-DUP-1 — nothing stops a duplicate Product/Project/Release hierarchy, and every
+  read collapses it by NAME so the duplicates are invisible (filed 2026-09-16, measured live
+  during a test-data cleanup).** MED, data integrity + operability; Registry context.
+  `registry/adapters/store/migrations/000001_registry.up.sql` declares `products(id PK, name)`,
+  `projects(id PK, product_id FK, name)` and `releases(id PK, project_id FK, version)` with **no
+  uniqueness constraint** beyond the surrogate id — not on `products.name`, not on
+  `(product_id, projects.name)`, not on `(project_id, releases.version)`. `RegisterProduct` /
+  `RegisterProject` / `RegisterRelease` are unconditional inserts (no find-or-create), so
+  `scripts/gf-upload-sbom.sh` mints a fresh hierarchy on every run that does not pass `-r`.
+  **Measured:** one estate carried **three** Products named `MRF` — one real (`cdmrf-oamp`,
+  3 releases, 1 microservice), one holding an empty duplicate `cdmrf-sidecar` project, one
+  holding nothing at all — plus **two** Projects named `cdmrf-sidecar` under different parents,
+  each with its own release (`20.0` and `20.0-refix`). Nothing in the GUI or the read APIs
+  distinguished them.
+  **Why it bites twice.** (1) The DASH-1 name traversal (`GET /products` →
+  `/products/{id}/projects` → `/projects/{id}/releases`) is ambiguous by construction: two
+  Products share a name and only an id tells them apart, so "the posture for MRF" has no single
+  answer. (2) Diagnostic reads that `GROUP BY name` — the obvious shape, and the one used during
+  this cleanup — **sum across duplicates and report them as one row**, which is how the duplicate
+  hierarchy stayed hidden through several passes. A delete scoped `WHERE name = …` would then hit
+  every namesake, including the real one.
+  **Fix shape to decide (design-first, Must-ask — domain model + migration).** Either (a) a
+  uniqueness constraint per level plus find-or-create registration, which makes a name an
+  identity and needs a decision about whether two teams may ever ship a Product of the same name;
+  or (b) keep names non-unique but make every read surface the id and add a
+  `GET /products?name=` that returns ALL matches rather than one. (a) is the smaller API change
+  and the bigger domain claim. Either way the migration has to cope with duplicates that already
+  exist. **Dep:** none. **Scope:** SMALL (b) / MEDIUM (a).
+
 - [ ] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
   shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification).**
   LOW-MED, correctness; EDR-VEX-01 D12 follow-up. `distroPrefixes` holds the literal `python3-`
