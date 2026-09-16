@@ -3222,8 +3222,38 @@ under the 2026-08-07 re-derivation standard.
   nothing — unlike (c), which is only safe when a twin exists. (d) is the concrete first step
   of the component-identity seam; see KN-CLAIM-1 and GOV-MIRROR-1(b) for the ownership
   question it belongs to.
+  **SHARP EDGE on the same line — an EMPTY purl can HALT the stream (found 2026-09-16 while
+  speccing (d); not yet fired on any estate).** `scanner_source.go` skips a finding only when
+  **both** purl and name are empty (`PURL == "" && Name == ""`), so a component with a NAME and
+  NO purl is accepted, recorded with `component_purl = ''` — and since the purl is in the
+  PRIMARY KEY, every purl-less component on one (release, card) **collapses onto a single row,
+  merged by the ABSENCE of identity rather than a shared one**. Downstream is worse:
+  `governance/domain/component.go:101` rejects an empty PURL, `AbsorbComponent` returns
+  `errEmptyComponentURL`, and `governance/app/service.go:207` returns it OUT of the
+  ComponentMatched handler — the inbox transaction rolls back and the D8 poison-halt stops the
+  **whole** Knowledge→Governance stream (no dead-letter, no per-subject isolation; PARITY-GAP
+  F7). Cortex supplies a non-empty-but-unusable string so this has not fired here; a scanner
+  that simply OMITS the purl would stop the pipeline. **This makes (d) an availability fix as
+  well as a correctness one.**
+  **Implementation constraints for (d), established 2026-09-16 before any code:**
+  (i) **Abstain on ambiguity** — resolve only when EXACTLY ONE candidate twin matches by
+  name+version on that release; more than one stays unresolved (same shape as the D9 apk
+  multi-bound abstention).
+  (ii) **Dedup is structural, not new machinery** — resolved observations land on the twin's
+  purl and collapse under the existing PK; the KN-SCAN-4a overlay already treats a repeat as a
+  new observation of the same occurrence.
+  (iii) **Immutable evidence is untouched** — (d) is a Knowledge-side ingest decision; the
+  report's bytes stay in `evidence.raw_document` (scanner reports retain bytes even though they
+  produce no inventory), so the raw identifier is ALWAYS recoverable. But `faultline_matches`
+  has **no column for an observed identifier** — the purl column IS the identity — so rewriting
+  it drops the raw string from the row. Either add a column (schema change, Must-ask) or read
+  it back from Evidence on demand; the latter preserves the ownership boundary.
+  (iv) **(d) fixes only NEW observations.** Converging the EXISTING `app:` rows means changing
+  a value that is part of the primary key — that is exactly **KN-SCAN-4(b)**. The two are one
+  piece of work from opposite ends; shipping (d) alone leaves current rows as they are.
   Prefer (d) with (a) as the interim marker. **Dep:** composes with KN-SCAN-OBS-1; (d) wants
-  the identity-ownership decision. **Scope:** SMALL (a) / MEDIUM (d).
+  the identity-ownership decision, and pairs with KN-SCAN-4(b) for existing rows.
+  **Scope:** SMALL (a) / MEDIUM (d).
   **Note:** in the observed case the producer was an external CSV→JSON converter that passed
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
