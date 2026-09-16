@@ -3271,6 +3271,122 @@ under the 2026-08-07 re-derivation standard.
   and the bigger domain claim. Either way the migration has to cope with duplicates that already
   exist. **Dep:** none. **Scope:** SMALL (b) / MEDIUM (a).
 
+- [ ] **KN-CLAIM-1 — an upstream project name that is not a substring of the distro package
+  name classifies the REAL carrier as `scope`, and a scope-only Finding silently leaves the
+  triage queue (filed 2026-09-16, MEASURED live on MRF/cdmrf-oamp/20.1.0.0-125).** **HIGH,
+  false-negative generator**; EDR-CORRELATION-01 D3/D4. `relatedProduct` accepts equality OR
+  substring containment, which cannot bridge NVD's registered PROJECT name and the distro's
+  BINARY package name when neither contains the other.
+  **Reproduced in the domain package, not inferred:** card `CVE-2023-31122` carries
+  `carrier_products = ["debian_linux","fedora","http_server"]`; `NormalizeProduct("http_server")`
+  = `http-server`; `relatedProduct("http-server","httpd")` = **false** (the chars after `http`
+  are `-server`, so `httpd` is not contained). `ClassifyClaim` therefore returns **`scope`** for
+  `httpd`, `mod_http2` and `mod_md` — every one of which genuinely carries this Apache
+  mod_macro flaw. This is exactly the direction `claimclass.go` says must never happen
+  ("under-matching would mark a genuinely vulnerable package as `scope`, and a consumer acting
+  on that could drop it from a plan").
+  **Why it is not merely a wrong label — three consumers all exclude it:**
+  (1) **The queue drops it.** `openCarriers` counts `ActsAsCarrier() && VerdictIsOpen()`, and
+  scope rows act as neither; `ReleasePosture` then forces `effective_priority` and
+  `residual_priority` to **0** for any Finding with components and no open carrier. A
+  scope-only Finding leaves the ranked queue whether or not anything verified a fix.
+  (2) **Remediation plans and the AI's grounding use carriers only** (by design) — the flaw is
+  invisible to both.
+  (3) **It can never read "cleared".** The GUI's cleared tile and the `✓ all cleared` chip both
+  require `carriers.length > 0`, so a scope-only Finding is excluded from the
+  identified-false-positive count no matter how many copies clear.
+  **THREE variants, all reproduced in-package (2026-09-16). Only the first is correct:**
+
+  | carrier (NVD) | component | normalized | class | verdict |
+  | --- | --- | --- | --- | --- |
+  | `python` | `python3-pyyaml` | `pyyaml` | scope | ✅ correct — a genuine module-stream bystander |
+  | `python` | `python3` | `python3` | carrier | ✅ correct |
+  | `http_server` | `httpd` | `httpd` | scope | ❌ **A — project name vs binary name** |
+  | `spring_framework` | `spring-core` | `spring-core` | scope | ❌ **A** |
+  | `perl` | `perl-interpreter` | `interpreter` | scope | ❌ **B — the strip removes the token that would have matched** |
+  | `perl` | `perl-libs` | `libs` | scope | ❌ **B** (same shape as the `openssl-libs`→`openssl` note under KN-FIX-4) |
+
+  **Variant B is the subtle one, and it forbids the obvious fix.** Comparing the UNSTRIPPED names
+  would repair `perl`↔`perl-interpreter` — and would simultaneously make `python`↔`python3-pyyaml`
+  a CARRIER, re-creating precisely the defect EDR-CORRELATION-01 exists to prevent. The strip is
+  load-bearing; it just also destroys the project identity when the wrapped package IS the project.
+  **Measured blast radius (3 releases, 797 Findings):** **238 scope-only Findings, 158 of them
+  with NO occurrence ever cleared** — priority 0, absent from plans and from grounding, nothing
+  having verified them as fixed. Per-component counts OVERLAP (one Finding carries several
+  components, so they do not sum): `python3-pyyaml` 116 · `python3-ply` 66 · `httpd` 13 ·
+  `spring-core` 10 · `spring-web` 10 · a ~7-each `perl-*` cluster. The python cluster is the
+  feature WORKING; `httpd`/`spring-*` are confirmed variant A; the `perl-*` cluster is a mix of
+  genuine bystanders and variant B. Exact attribution needs a per-card carrier-vs-component
+  comparison (they live in different databases, so it is two reads, not a join).
+  **Fix shape to decide (design-first, Must-ask — domain model).** (a) A curated project→package
+  alias table beside `distroPrefixes`: precise, but grows forever and covers only what someone
+  remembered. (b) **Preferred — change the failure direction at CARD level:** if carriers are
+  known but not one of them `relatedProduct`s ANY component on the card, return `ClaimUnknown`
+  rather than `ClaimScope`. Unknown already acts as carrier everywhere, so it fails safe.
+  **Validated against all four cards above:** the python card keeps `pyyaml` as scope, because
+  `python3` on that same card DOES match — so it is not a whole-card miss; the httpd, spring and
+  perl cards have no matching carrier at all and flip wholesale. The cost is losing scope
+  precision on the perl card (`perl-Encode` becomes a carrier), which is the trade this codebase
+  has already committed to in writing: absence of evidence must never hide a live vulnerability. Needs the carrier/scope
+  property tests re-run — `NormalizeProduct` is shared with KN-FIX-5.
+  **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
+  (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)
+  and shipped on the match event; Knowledge stores no `claim_class` column at all and
+  Governance never re-derives it. So unlike a VERDICT — re-judged whenever the card version
+  moves — a class computed against an older carrier set is frozen forever. Any fix to the rule
+  above therefore needs a re-classification path, or it ships invisible exactly as KN-VERDICT-2
+  describes. **Dep:** none. **Scope:** MEDIUM (rule) + SMALL (re-classification sweep).
+
+- [ ] **GOV-MIRROR-1 — Governance's occurrence-verdict mirror has no reconciliation, and no
+  path at all for corrected component identity (filed 2026-09-16, MEASURED live on
+  MRF/cdmrf-oamp/20.1.0.0-125; found by opening ONE drawer and asking why a badge was
+  missing).** **HIGH, silent divergence**; EDR-VERDICT-01 D5/D6. Two parts, one seam.
+
+  **(a) Nothing ever checks that the mirror agrees with its source.** Governance holds a
+  verdict it never re-derives (D5, correctly), fed by `knowledge.component_verdict_changed`.
+  The invariant "a verdict transition emits an event" **already holds in code**: the only
+  `UPDATE` of `verdict_state` in Knowledge (`adapters/store/store.go:327`) sits inside the
+  branch that queues the event, in the same transaction, and the insert path emits
+  `component_matched` carrying the verdict. So no change to the EMISSION fixes this — the gap
+  is that a write which bypasses the aggregate (the 2026-09-10 operator repair, a dropped
+  event, a future bug) diverges the mirror **permanently and invisibly**, and nothing compares
+  the two sides.
+  **Measured 2026-09-16 on one release:** Knowledge **192** occurrences cleared, Governance
+  **132** — **60 diverged**, undetected for **six days**. Invisible to `/healthz`, `/readyz`,
+  feed health, the relay (194 queued / 194 sent / 0 unsent) and every reader cursor (all at
+  head). The only way the number was obtained was dumping both databases and diffing by hand;
+  no join is possible, they are different databases by design.
+  **It cannot self-heal, and the reason is counter-intuitive.** The sweep re-judges only rows
+  whose stamp is behind the card version. Resetting the stamp re-judges the row, arrives at
+  cleared, compares cleared against cleared, finds **no transition** and emits nothing. Only
+  forcing the row back to `open` produces the open→cleared transition that re-emits.
+  **Repair executed live (proves the convergence path is sound):** 74 httpd `app:` rows
+  reopened (`verdict_state='open'`, stamp 0) → sweep `rejudged:97 changed:74` → 74 events →
+  both sides **192/721**. Repair, not fix.
+  **Fix shape to decide:** a periodic reconciler comparing Knowledge's occurrence verdicts to
+  Governance's mirror and re-emitting on disagreement. It cannot be a SQL join (separate
+  databases — the isolation is structural and worth keeping), so it goes over the read API or
+  by bounded event replay. Cheapest honest version: a counter per release on both sides, so a
+  disagreement is at least VISIBLE even before it is healed.
+
+  **(b) Corrected component identity has no path to Governance at all.**
+  `Store.SetComponentVerdict` (`governance/adapters/store/store.go`) updates exactly three
+  columns — `verdict_state`, `verdict_grade`, `verdict_reason`. Ecosystem and source are never
+  refreshed, and only a fresh `component_matched` carries detail. **Measured, still true after
+  (a) converged:** Governance renders `source = /usr/sbin/httpd` and an EMPTY ecosystem beside
+  a clearance reason that names `httpd` — the drawer's provenance contradicts the evidence the
+  verdict rested on, permanently.
+  **Do NOT reflexively add ecosystem/source to the verdict event — settle ownership first.**
+  Knowledge does not own component identity: migration `000005_match_component_detail` says in
+  its own comment that those columns exist so a row can "ASK A FEED ABOUT IT AGAIN", i.e. a
+  re-query working set, not an identity of record. Evidence owns identity for SBOM components
+  (validated `value.NewPURL` at the parser). **For scanner-report components NO context owns
+  it** — they never pass through Evidence's parser, so three contexts hold three copies and
+  none is authoritative. That is the strongest argument for siting the component-identity seam
+  at INTAKE in Evidence rather than in Knowledge; see KN-CLAIM-1 and KN-SCAN-4(b).
+  **Dep:** (b) blocks on the identity-ownership decision; (a) does not. **Scope:** MEDIUM (a) /
+  design-first (b).
+
 - [ ] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
   shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification).**
   LOW-MED, correctness; EDR-VEX-01 D12 follow-up. `distroPrefixes` holds the literal `python3-`
