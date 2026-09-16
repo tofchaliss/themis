@@ -3677,9 +3677,25 @@ under the 2026-08-07 re-derivation standard.
   eternal stale twins (GUI-12's rescan-dedup solved the evidence layer; this is the match layer).
   **Dep:** none. **Scope:** MED.
 
-- [ ] **DEV-COV-1 — the merge gate is DEAD: `main` CI has failed every run for 14 days (filed
-  2026-09-10 as a local-only issue; **PREMISE CORRECTED + SEVERITY RAISED 2026-09-16**).**
-  **MED-HIGH, process.**
+- [x] **DEV-COV-1 — the merge gate is DEAD: `main` CI has failed every run for 14 days (filed
+  2026-09-10 as a local-only issue; **PREMISE CORRECTED + SEVERITY RAISED 2026-09-16**;
+  **FIXED 2026-09-16**).** **MED-HIGH, process.**
+  **FIXED by raising the two packages rather than lowering the thresholds** — the shortfall was
+  real on both platforms, so re-deriving the numbers would have hidden it. Both gaps were
+  genuinely untested behaviour, not accounting:
+  - `registry/adapters/store` **73.5% → 87.8%.** Four functions sat at ZERO: `GetProduct` and
+    `GetProject` (the two reads the DASH-1 name traversal rests on, including their ErrNotFound
+    branches — a caller that cannot tell "no such product" from "a product with an empty name"
+    renders a blank page instead of a 404), plus `MicroserviceExists` and `CustomerExists` (the
+    C1 estate checks `RegisterDeployment` validates against before inserting).
+  - `governance/adapters/http` **87.4% → 97.6%.** Every posture row in the tests was the minimal
+    one, so the serializer's optional branches were unreachable: position version and rationale,
+    components with their mirrored verdicts, the band, the per-occurrence fix selection and the
+    evidence reservation — i.e. most of what DASH-2 / PLAN-3 / EDR-VERDICT-01 D8 exist to put on
+    the wire. The new test also pins that an UNSTAMPED fix serializes with no ecosystem rather
+    than a guessed one.
+  `make check-ci` now passes locally with zero threshold failures. Narrative below kept for
+  provenance — the 14-day blind window is the part worth remembering, not the two numbers.
   **The original filing said "CI (`make check-ci`, coverage-greenfield) stays green, so this is
   a local-profile divergence (macOS vs Linux)". That is FALSE, and it was the load-bearing
   claim.** Measured 2026-09-16 against the GitHub Actions history: Linux CI fails on the SAME

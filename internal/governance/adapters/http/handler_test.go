@@ -557,3 +557,81 @@ func TestGetFindingExposesProposalEvidenceTrust(t *testing.T) {
 		t.Errorf("AI proposal evidence_trust = %v, want inferred", got["recommend_position@v1"])
 	}
 }
+
+// A posture row carrying everything the dashboard reads in one call (DASH-2 / PLAN-3 /
+// EDR-VERDICT-01 D8). The minimal row above leaves every optional field absent, so the
+// serializer's branches — position version and rationale, components with their mirrored
+// verdicts, the band, the per-occurrence fix selection and the evidence reservation — were
+// unreachable from the tests. That is most of the gap this package sat in (DEV-COV-1).
+func TestPostureEntrySerializesEveryOptionalField(t *testing.T) {
+	proj := fakeProjection{posture: []app.PostureEntry{{
+		FindingID:         "fnd-1",
+		FaultlineID:       "fl-1",
+		CVE:               "CVE-2023-31122",
+		Stage:             domain.StagePositionEstablished,
+		Stance:            domain.StanceNotAffected,
+		HasPosition:       true,
+		PositionVersion:   3,
+		PositionRationale: "vendor states not affected",
+		BaseScore:         75,
+		Multiplier:        1.5,
+		EffectivePriority: 112,
+		ResidualPriority:  0,
+		OpenCarriers:      0,
+		Band:              "high",
+		Reservation:       value.TrustInferred,
+		Components: []domain.MatchedComponent{{
+			PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", Version: "2.4.37",
+			Ecosystem: "rpm", Source: "httpd", ClaimClass: "carrier",
+			DetectionOrigin: "scanner/cortex",
+			VerdictState:    "cleared_vendor_fix", VerdictGrade: "observed",
+			VerdictReason: "vendor fix present",
+		}},
+		Fixes: []app.FixedVersion{
+			{Package: "httpd", Version: "0:2.4.37-64.el8", Ecosystem: "rpm"},
+			{Package: "httpd", Version: "2.4.58"}, // unstamped: ecosystem omitted, not invented
+		},
+	}}}
+	srv := server(t, newRepo(), proj)
+
+	status, body := do(t, http.MethodGet, srv.URL+"/releases/rel-1/posture", nil)
+	if status != http.StatusOK {
+		t.Fatalf("posture status = %d", status)
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal(body, &entries); err != nil || len(entries) != 1 {
+		t.Fatalf("posture = %v err=%v", entries, err)
+	}
+	e := entries[0]
+
+	for _, k := range []string{"position_version", "position_rationale", "band", "fixes",
+		"components", "reservation"} {
+		if _, ok := e[k]; !ok {
+			t.Errorf("%q absent from a fully-populated posture row: %v", k, e)
+		}
+	}
+
+	// The fix pairing is what lets a consumer say what to upgrade TO without a second read,
+	// and an unstamped bound must NOT acquire an ecosystem it was never given.
+	fixes, ok := e["fixes"].([]any)
+	if !ok || len(fixes) != 2 {
+		t.Fatalf("fixes = %v, want 2", e["fixes"])
+	}
+	if eco := fixes[0].(map[string]any)["ecosystem"]; eco != "rpm" {
+		t.Errorf("stamped fix ecosystem = %v, want rpm", eco)
+	}
+	if _, present := fixes[1].(map[string]any)["ecosystem"]; present {
+		t.Error("an unstamped fix must serialize with no ecosystem, never a guessed one")
+	}
+
+	// The mirrored verdict reaches the wire; absent would read as open, the fail-safe default.
+	comps, ok := e["components"].([]any)
+	if !ok || len(comps) != 1 {
+		t.Fatalf("components = %v, want 1", e["components"])
+	}
+	c := comps[0].(map[string]any)
+	if c["verdict_state"] != "cleared_vendor_fix" || c["verdict_grade"] != "observed" {
+		t.Errorf("component verdict = %v/%v, want cleared_vendor_fix/observed",
+			c["verdict_state"], c["verdict_grade"])
+	}
+}
