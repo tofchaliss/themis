@@ -3251,9 +3251,49 @@ under the 2026-08-07 re-derivation standard.
   (iv) **(d) fixes only NEW observations.** Converging the EXISTING `app:` rows means changing
   a value that is part of the primary key — that is exactly **KN-SCAN-4(b)**. The two are one
   piece of work from opposite ends; shipping (d) alone leaves current rows as they are.
-  Prefer (d) with (a) as the interim marker. **Dep:** composes with KN-SCAN-OBS-1; (d) wants
-  the identity-ownership decision, and pairs with KN-SCAN-4(b) for existing rows.
-  **Scope:** SMALL (a) / MEDIUM (d).
+  ---
+  **SPEC AGREED 2026-09-16 — this is the EDR-1 boundary; implement to it, do not re-derive it.**
+
+  **Design principle (the one sentence the rest follows from):** *an unknown ECOSYSTEM is a
+  valid state of incomplete knowledge; an empty PURL is not an identity. Manufacture neither.*
+  The two are routinely conflated and they are not the same defect: `FixesFor` already models
+  the first correctly (an unknown ecosystem filters nothing, so the drawer shows every fix with
+  the confirm-install-method caveat, while `StrictFixesFor` stays fail-CLOSED so no verdict
+  fires). Only the empty purl is broken.
+
+  **Normative rules:**
+  1. **Exactly one valid twin** (same release, same name+version) → resolve the observation to
+     that component's canonical PURL and proceed normally.
+  2. **More than one candidate** → ABSTAIN. Retain and surface as unresolved.
+  3. **Zero candidates** → ABSTAIN. Retain and surface as unresolved.
+  4. **Never synthesize a PURL** merely to satisfy the identity invariant.
+  5. **Never discard the underlying scanner evidence.**
+  6. Historical identity repair is **KN-SCAN-4(b)**, not this item.
+  7. Consumer poison-message resilience is **PARITY-GAP F7**, not this item.
+
+  **An unresolved observation SHALL remain discoverable and countable as unresolved; it SHALL
+  NOT be silently discarded nor treated as a bystander.** Surfacing is part of THIS change, not
+  a follow-up (KN-SCAN-OBS-1 / OBS-2) — the lesson of the 2026-09-16 session is that a correct
+  answer nobody can see is indistinguishable from a wrong one.
+
+  **Why rule 4 — `pkg:generic/<name>@<version>` was considered and REJECTED on measured
+  evidence.** It is a structurally valid purl (`NewPURL` accepts it; `CanonicalEcosystem`
+  yields `generic`), but a purl TYPE *is* an ecosystem claim. `FixesFor` skips a fix whose
+  ecosystem is known and different from the component's, so a `generic` component would filter
+  out every rpm-stamped fix — stripping the operator of the fix advice an EMPTY ecosystem
+  currently shows them. Synthesizing turns "we do not know the world" into "the world is
+  generic", which is strictly worse than the blank.
+
+  **Accepted cost, stated so nobody re-litigates it:** on a scanner-ONLY release (no SBOM,
+  therefore never a twin) an unresolved observation does **not** reach the Governance posture.
+  That is materially different from losing it — the evidence is immutable in Evidence and the
+  unresolved population is exposed by count — but it IS a gap, and it is the price of not
+  making an ecosystem claim Themis cannot substantiate. The alternative (let Governance accept
+  a marked unresolved identity) preserves visibility but weakens the canonical-component
+  invariant, which is a larger domain change than this item should carry.
+
+  **Dep:** surfacing (KN-SCAN-OBS-1/OBS-2) ships WITH this; pairs with KN-SCAN-4(b) for
+  existing rows. **Scope:** MEDIUM.
   **Note:** in the observed case the producer was an external CSV→JSON converter that passed
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
