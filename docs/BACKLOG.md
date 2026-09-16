@@ -3192,11 +3192,108 @@ under the 2026-08-07 re-derivation standard.
   Note the asymmetry worth deciding on: the **SPDX parser skips** a package whose purl type is
   unreadable (`spdx.go:78`), while the scanner path **admits** it. Two doors, two rules, and the
   permissive one produces occurrences that look ordinary but are structurally undecidable.
+  **ROOT CAUSE FOUND 2026-09-16 (read from the stored SBOM itself, release
+  `20.1.0.0-125`).** `app:` was never an ecosystem: it is SPDX **`primaryPackagePurpose`**,
+  a PURPOSE dimension, collapsed into the identity dimension by the CSV converter making it a
+  purl scheme. The producing scanner (PANW) emits httpd **TWICE in one document** — once
+  `primaryPackagePurpose: LIBRARY`, `supplier: Organization: infrastructure@rockylinux.org`,
+  with a proper `pkg:rpm/rocky/httpd@…` external ref; and once `primaryPackagePurpose:
+  APPLICATION`, `supplier: NOASSERTION`, **no `externalRefs` at all**. Same name, same
+  `versionInfo`. The duplicate originates UPSTREAM; Themis did not invent it.
+  **The two doors, measured on that one document:** the SPDX parser dropped the purl-less twin
+  (`canonical_inventory` = 489 components, **exactly 1** httpd); the scanner path admitted its
+  analogue, which then became a security subject on 60+ cards. Same input, one door rejecting
+  and one admitting.
+  **Also measured: the document carries NO CPE** — no `SECURITY`/`cpe23Type` external ref on
+  either twin — so a CPE-based identity bridge is unavailable on this estate (bears on
+  KN-CLAIM-1's fix options). Two identity signals ARE present and discarded by the parser:
+  `primaryPackagePurpose` and `supplier`.
+  **These are the same rows as GOV-MIRROR-1's 60**: the `app:` occurrences an out-of-band
+  repair healed in Knowledge without emitting.
   **Options:** (a) mark such occurrences and surface the count — cheapest, composes with
   KN-SCAN-OBS-1; (b) canonicalize recognizable non-purl identifiers at the scanner ACL seam
   (an rpm-shaped version implies an rpm component); (c) skip them as SPDX does — **rejected**:
-  it would hide real findings, and fail-open is the right direction here.
-  Prefer (a), consider (b). **Dep:** composes with KN-SCAN-OBS-1. **Scope:** SMALL.
+  it would hide real findings on a scanner-ONLY release, and fail-open is the right direction
+  there. **(d) NEW, and the evidence now favours it — converge onto the usable twin.** When a
+  purl-less observation matches a component already on the same release by name+version, it is
+  a second representation of that component, not a new subject: record the observation against
+  the usable identity and keep the raw string as provenance. On the measured case that is
+  exact (same name, same version, the good twin one entry away in the same file), and it loses
+  nothing — unlike (c), which is only safe when a twin exists. (d) is the concrete first step
+  of the component-identity seam; see KN-CLAIM-1 and GOV-MIRROR-1(b) for the ownership
+  question it belongs to.
+  **SHARP EDGE on the same line — an EMPTY purl can HALT the stream (found 2026-09-16 while
+  speccing (d); not yet fired on any estate).** `scanner_source.go` skips a finding only when
+  **both** purl and name are empty (`PURL == "" && Name == ""`), so a component with a NAME and
+  NO purl is accepted, recorded with `component_purl = ''` — and since the purl is in the
+  PRIMARY KEY, every purl-less component on one (release, card) **collapses onto a single row,
+  merged by the ABSENCE of identity rather than a shared one**. Downstream is worse:
+  `governance/domain/component.go:101` rejects an empty PURL, `AbsorbComponent` returns
+  `errEmptyComponentURL`, and `governance/app/service.go:207` returns it OUT of the
+  ComponentMatched handler — the inbox transaction rolls back and the D8 poison-halt stops the
+  **whole** Knowledge→Governance stream (no dead-letter, no per-subject isolation; PARITY-GAP
+  F7). Cortex supplies a non-empty-but-unusable string so this has not fired here; a scanner
+  that simply OMITS the purl would stop the pipeline. **This makes (d) an availability fix as
+  well as a correctness one.**
+  **Implementation constraints for (d), established 2026-09-16 before any code:**
+  (i) **Abstain on ambiguity** — resolve only when EXACTLY ONE candidate twin matches by
+  name+version on that release; more than one stays unresolved (same shape as the D9 apk
+  multi-bound abstention).
+  (ii) **Dedup is structural, not new machinery** — resolved observations land on the twin's
+  purl and collapse under the existing PK; the KN-SCAN-4a overlay already treats a repeat as a
+  new observation of the same occurrence.
+  (iii) **Immutable evidence is untouched** — (d) is a Knowledge-side ingest decision; the
+  report's bytes stay in `evidence.raw_document` (scanner reports retain bytes even though they
+  produce no inventory), so the raw identifier is ALWAYS recoverable. But `faultline_matches`
+  has **no column for an observed identifier** — the purl column IS the identity — so rewriting
+  it drops the raw string from the row. Either add a column (schema change, Must-ask) or read
+  it back from Evidence on demand; the latter preserves the ownership boundary.
+  (iv) **(d) fixes only NEW observations.** Converging the EXISTING `app:` rows means changing
+  a value that is part of the primary key — that is exactly **KN-SCAN-4(b)**. The two are one
+  piece of work from opposite ends; shipping (d) alone leaves current rows as they are.
+  ---
+  **SPEC AGREED 2026-09-16 — this is the EDR-1 boundary; implement to it, do not re-derive it.**
+
+  **Design principle (the one sentence the rest follows from):** *an unknown ECOSYSTEM is a
+  valid state of incomplete knowledge; an empty PURL is not an identity. Manufacture neither.*
+  The two are routinely conflated and they are not the same defect: `FixesFor` already models
+  the first correctly (an unknown ecosystem filters nothing, so the drawer shows every fix with
+  the confirm-install-method caveat, while `StrictFixesFor` stays fail-CLOSED so no verdict
+  fires). Only the empty purl is broken.
+
+  **Normative rules:**
+  1. **Exactly one valid twin** (same release, same name+version) → resolve the observation to
+     that component's canonical PURL and proceed normally.
+  2. **More than one candidate** → ABSTAIN. Retain and surface as unresolved.
+  3. **Zero candidates** → ABSTAIN. Retain and surface as unresolved.
+  4. **Never synthesize a PURL** merely to satisfy the identity invariant.
+  5. **Never discard the underlying scanner evidence.**
+  6. Historical identity repair is **KN-SCAN-4(b)**, not this item.
+  7. Consumer poison-message resilience is **PARITY-GAP F7**, not this item.
+
+  **An unresolved observation SHALL remain discoverable and countable as unresolved; it SHALL
+  NOT be silently discarded nor treated as a bystander.** Surfacing is part of THIS change, not
+  a follow-up (KN-SCAN-OBS-1 / OBS-2) — the lesson of the 2026-09-16 session is that a correct
+  answer nobody can see is indistinguishable from a wrong one.
+
+  **Why rule 4 — `pkg:generic/<name>@<version>` was considered and REJECTED on measured
+  evidence.** It is a structurally valid purl (`NewPURL` accepts it; `CanonicalEcosystem`
+  yields `generic`), but a purl TYPE *is* an ecosystem claim. `FixesFor` skips a fix whose
+  ecosystem is known and different from the component's, so a `generic` component would filter
+  out every rpm-stamped fix — stripping the operator of the fix advice an EMPTY ecosystem
+  currently shows them. Synthesizing turns "we do not know the world" into "the world is
+  generic", which is strictly worse than the blank.
+
+  **Accepted cost, stated so nobody re-litigates it:** on a scanner-ONLY release (no SBOM,
+  therefore never a twin) an unresolved observation does **not** reach the Governance posture.
+  That is materially different from losing it — the evidence is immutable in Evidence and the
+  unresolved population is exposed by count — but it IS a gap, and it is the price of not
+  making an ecosystem claim Themis cannot substantiate. The alternative (let Governance accept
+  a marked unresolved identity) preserves visibility but weakens the canonical-component
+  invariant, which is a larger domain change than this item should carry.
+
+  **Dep:** surfacing (KN-SCAN-OBS-1/OBS-2) ships WITH this; pairs with KN-SCAN-4(b) for
+  existing rows. **Scope:** MEDIUM.
   **Note:** in the observed case the producer was an external CSV→JSON converter that passed
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
@@ -3241,6 +3338,249 @@ under the 2026-08-07 re-derivation standard.
   the bridge on the next re-verdict pass). NOT covered (unchanged, needs source attribution):
   the sub-package split `kernel-core`→`kernel`, `openssl-libs`→`openssl` — that is data, not
   vocabulary.
+
+- [ ] **REG-DUP-1 — nothing stops a duplicate Product/Project/Release hierarchy, and every
+  read collapses it by NAME so the duplicates are invisible (filed 2026-09-16, measured live
+  during a test-data cleanup).** MED, data integrity + operability; Registry context.
+  `registry/adapters/store/migrations/000001_registry.up.sql` declares `products(id PK, name)`,
+  `projects(id PK, product_id FK, name)` and `releases(id PK, project_id FK, version)` with **no
+  uniqueness constraint** beyond the surrogate id — not on `products.name`, not on
+  `(product_id, projects.name)`, not on `(project_id, releases.version)`. `RegisterProduct` /
+  `RegisterProject` / `RegisterRelease` are unconditional inserts (no find-or-create), so
+  `scripts/gf-upload-sbom.sh` mints a fresh hierarchy on every run that does not pass `-r`.
+  **Measured:** one estate carried **three** Products named `MRF` — one real (`cdmrf-oamp`,
+  3 releases, 1 microservice), one holding an empty duplicate `cdmrf-sidecar` project, one
+  holding nothing at all — plus **two** Projects named `cdmrf-sidecar` under different parents,
+  each with its own release (`20.0` and `20.0-refix`). Nothing in the GUI or the read APIs
+  distinguished them.
+  **Why it bites twice.** (1) The DASH-1 name traversal (`GET /products` →
+  `/products/{id}/projects` → `/projects/{id}/releases`) is ambiguous by construction: two
+  Products share a name and only an id tells them apart, so "the posture for MRF" has no single
+  answer. (2) Diagnostic reads that `GROUP BY name` — the obvious shape, and the one used during
+  this cleanup — **sum across duplicates and report them as one row**, which is how the duplicate
+  hierarchy stayed hidden through several passes. A delete scoped `WHERE name = …` would then hit
+  every namesake, including the real one.
+  **Fix shape to decide (design-first, Must-ask — domain model + migration).** Either (a) a
+  uniqueness constraint per level plus find-or-create registration, which makes a name an
+  identity and needs a decision about whether two teams may ever ship a Product of the same name;
+  or (b) keep names non-unique but make every read surface the id and add a
+  `GET /products?name=` that returns ALL matches rather than one. (a) is the smaller API change
+  and the bigger domain claim. Either way the migration has to cope with duplicates that already
+  exist. **Dep:** none. **Scope:** SMALL (b) / MEDIUM (a).
+
+- [ ] **KN-CLAIM-1 — an upstream project name that is not a substring of the distro package
+  name classifies the REAL carrier as `scope`, and a scope-only Finding silently leaves the
+  triage queue (filed 2026-09-16, MEASURED live on MRF/cdmrf-oamp/20.1.0.0-125).** **HIGH,
+  false-negative generator**; EDR-CORRELATION-01 D3/D4. `relatedProduct` accepts equality OR
+  substring containment, which cannot bridge NVD's registered PROJECT name and the distro's
+  BINARY package name when neither contains the other.
+  **Reproduced in the domain package, not inferred:** card `CVE-2023-31122` carries
+  `carrier_products = ["debian_linux","fedora","http_server"]`; `NormalizeProduct("http_server")`
+  = `http-server`; `relatedProduct("http-server","httpd")` = **false** (the chars after `http`
+  are `-server`, so `httpd` is not contained). `ClassifyClaim` therefore returns **`scope`** for
+  `httpd`, `mod_http2` and `mod_md` — every one of which genuinely carries this Apache
+  mod_macro flaw. This is exactly the direction `claimclass.go` says must never happen
+  ("under-matching would mark a genuinely vulnerable package as `scope`, and a consumer acting
+  on that could drop it from a plan").
+  **Why it is not merely a wrong label — three consumers all exclude it:**
+  (1) **The queue drops it.** `openCarriers` counts `ActsAsCarrier() && VerdictIsOpen()`, and
+  scope rows act as neither; `ReleasePosture` then forces `effective_priority` and
+  `residual_priority` to **0** for any Finding with components and no open carrier. A
+  scope-only Finding leaves the ranked queue whether or not anything verified a fix.
+  (2) **Remediation plans and the AI's grounding use carriers only** (by design) — the flaw is
+  invisible to both.
+  (3) **It can never read "cleared".** The GUI's cleared tile and the `✓ all cleared` chip both
+  require `carriers.length > 0`, so a scope-only Finding is excluded from the
+  identified-false-positive count no matter how many copies clear.
+  **THREE variants, all reproduced in-package (2026-09-16). Only the first is correct:**
+
+  | carrier (NVD) | component | normalized | class | verdict |
+  | --- | --- | --- | --- | --- |
+  | `python` | `python3-pyyaml` | `pyyaml` | scope | ✅ correct — a genuine module-stream bystander |
+  | `python` | `python3` | `python3` | carrier | ✅ correct |
+  | `http_server` | `httpd` | `httpd` | scope | ❌ **A — project name vs binary name** |
+  | `spring_framework` | `spring-core` | `spring-core` | scope | ❌ **A** |
+  | `perl` | `perl-interpreter` | `interpreter` | scope | ❌ **B — the strip removes the token that would have matched** |
+  | `perl` | `perl-libs` | `libs` | scope | ❌ **B** (same shape as the `openssl-libs`→`openssl` note under KN-FIX-4) |
+
+  **Variant B is the subtle one, and it forbids the obvious fix.** Comparing the UNSTRIPPED names
+  would repair `perl`↔`perl-interpreter` — and would simultaneously make `python`↔`python3-pyyaml`
+  a CARRIER, re-creating precisely the defect EDR-CORRELATION-01 exists to prevent. The strip is
+  load-bearing; it just also destroys the project identity when the wrapped package IS the project.
+  **Measured blast radius (3 releases, 797 Findings):** **238 scope-only Findings, 158 of them
+  with NO occurrence ever cleared** — priority 0, absent from plans and from grounding, nothing
+  having verified them as fixed. Per-component counts OVERLAP (one Finding carries several
+  components, so they do not sum): `python3-pyyaml` 116 · `python3-ply` 66 · `httpd` 13 ·
+  `spring-core` 10 · `spring-web` 10 · a ~7-each `perl-*` cluster. The python cluster is the
+  feature WORKING; `httpd`/`spring-*` are confirmed variant A; the `perl-*` cluster is a mix of
+  genuine bystanders and variant B. Exact attribution needs a per-card carrier-vs-component
+  comparison (they live in different databases, so it is two reads, not a join).
+  **Fix shape to decide (design-first, Must-ask — domain model).** (a) A curated project→package
+  alias table beside `distroPrefixes`: precise, but grows forever and covers only what someone
+  remembered. (b) **Preferred — change the failure direction at CARD level:** if carriers are
+  known but not one of them `relatedProduct`s ANY component on the card, return `ClaimUnknown`
+  rather than `ClaimScope`. Unknown already acts as carrier everywhere, so it fails safe.
+  **Validated against all four cards above:** the python card keeps `pyyaml` as scope, because
+  `python3` on that same card DOES match — so it is not a whole-card miss; the httpd, spring and
+  perl cards have no matching carrier at all and flip wholesale. The cost is losing scope
+  precision on the perl card (`perl-Encode` becomes a carrier), which is the trade this codebase
+  has already committed to in writing: absence of evidence must never hide a live vulnerability. Needs the carrier/scope
+  property tests re-run — `NormalizeProduct` is shared with KN-FIX-5.
+  **SECOND, INDEPENDENT CARRIER DEFECT — the carrier set is not carriers (measured
+  2026-09-16, estate-wide).** `nvdVulnerableProducts` harvests the product token of EVERY
+  vulnerable CPE match node, so `CarrierProducts` is "every product NVD marked vulnerable",
+  not "which product carries the flaw" (the D4 intent). Measured on the httpd cards, carrier
+  lists routinely contain `debian_linux` · `ubuntu_linux` · `fedora` · `leap` ·
+  `enterprise_linux` · `macos` · `rocky_linux` · `zfs_storage_appliance_kit` ·
+  `clustered_data_ontap` · `tenable.sc` · `peoplesoft_enterprise_peopletools` — **downstream
+  products that BUNDLE httpd, none of which carries an httpd flaw.** CVE-2019-0211 lists 27
+  such products; CVE-2021-40438 lists 37.
+  **This is the SAME class of error the claim-class mechanism exists to prevent, in the other
+  vocabulary.** A module advisory read as N vulnerability claims and a CPE configuration read
+  as N carrier claims are one mistake in two dialects. EDR-CORRELATION-01 caught it on the
+  distro side and made it an invariant; nobody applied the same reading to NVD.
+  **The correction is in data already fetched and discarded.** A criteria string is
+  `cpe:2.3:<part>:<vendor>:<product>:…` and `cpeProduct` splits on `:` and takes index **4**.
+  Index **2** is the PART (`a` = application, `o` = operating system, `h` = hardware) and index
+  **3** is the VENDOR — both stepped over. Filtering to part `a` drops the OS/appliance noise
+  outright; keeping the vendor yields `apache:http_server` instead of a bare token.
+  **It does NOT close the vocabulary gap** (`http_server` still never becomes `httpd`) — it
+  cleans the set. Both halves are needed and they are separable: the pollution fix is SMALL and
+  mechanical, the vocabulary gap is the design question above.
+  **Estate-wide carrier sourcing, measured the same day — only `nvd` and `osv` EVER supply a
+  carrier** (`nvd` 718/855 proposals, `osv` 3208/16253; `redhat` 0/17110, `rocky` 0/615,
+  `alpine` 0/294, `scanner` 0/811 — all zero BY DESIGN, since a distro record cannot attribute
+  a carrier). OSV contributes only from NON-distro entries. **Consequence:** for
+  distro-packaged native software with no language-ecosystem presence (httpd, openssl, curl,
+  glibc, the perl interpreter — the whole base OS) NVD's CPE product is the ONLY possible
+  carrier source, so the vocabulary gap is STRUCTURAL for that entire class, not an edge case.
+  That is the argument for EDR-3's UNKNOWN rule being the ANSWER for distro-packaged software
+  rather than a fallback.
+
+  **CLASS BOUNDARY MEASURED 2026-09-16 — it is NOT distro-vs-ecosystem.** Four carrier
+  defects, separable, only ONE structural:
+
+  | component | carriers on the card | why it fails | fixable today? |
+  | --- | --- | --- | --- |
+  | `httpd` | `http_server` + 26–37 bundler products | vocabulary gap + pollution | no — structural |
+  | `spring-core` | `spring_framework` (CLEAN, single, no pollution) | vocabulary gap ONLY | no — structural |
+  | `perl-interpreter` / `perl-libs` | **`perl`** — correct, present, sometimes the ONLY entry | **Themis's own wrapper strip** turns `perl-interpreter` into `interpreter`, then compares it to `perl` | **YES — self-inflicted** |
+  | 2 perl cards | `["\\"]` — a lone backslash | `cpeProduct` naive `:` split vs CPE 2.3 escaping | yes — parser fix |
+
+  **Spring is the load-bearing row.** It is maven, i.e. ecosystem-packaged, and its carrier set
+  is exactly what the D4 design wants: one entry, the real project, zero bundlers. It STILL
+  fails, because `spring_framework` and `spring-core` share no substring. So the vocabulary gap
+  is NOT a distro problem — ecosystem packaging buys a clean carrier set, not a matching one,
+  and EDR-3's UNKNOWN rule is the answer for BOTH halves.
+  **Perl is the highest-value fix in this cluster** and needs no new evidence: the carrier is
+  correct and available, and the normalization intended to help destroys it (variant B, now
+  confirmed on real card data, not a synthetic case).
+  **Garbage tokens are SMALL but the mechanism is not.** Measured estate-wide, only **2** cards
+  carry `["\\"]`. The risk is not the count: we noticed those because the artifact was
+  VISIBLY broken. A mis-split landing on a plausible fragment yields a wrong-but-normal-looking
+  carrier that nothing would surface. Fix `cpeProduct` to respect CPE 2.3 escaping rather than
+  splitting naively on `:`.
+  **Side effect of `minProductOverlap = 3`, measured:** legitimately short project names exist
+  (`jq` 16 cards, `xz` 1). They still match by EQUALITY (checked before the length guard), but
+  can never match by containment — so `jq` classifies a component `jq` as carrier and `jq-libs`
+  as scope. Minor, but it belongs to whatever rule replaces `relatedProduct`.
+
+  **EDR-2 STOPPING POINT (2026-09-16) — INVESTIGATED, deliberately NOT designed.** Three of
+  the four defects are deterministic fixes with the evidence already in hand (perl wrapper,
+  CPE parse, bundler pollution). The fourth is a structural limitation and **must not be turned
+  into another mapping system** — that is the alias table both reviewers rejected, arriving by
+  a different door.
+  **Consequence, and the most durable conclusion of the session:** EDR-3's UNKNOWN rule is no
+  longer the fallback for distro packages. **It is the safety boundary for EVERY
+  carrier/component vocabulary mismatch Themis cannot deterministically bridge** — `http_server`
+  ↔ `httpd` and `spring_framework` ↔ `spring-core` alike, despite completely different feed
+  provenance.
+  **Invariant for whatever replaces `relatedProduct`:** *it may establish a DETERMINISTIC name
+  correspondence; it must not manufacture one where the available evidence says only that two
+  names are different.*
+  **NEXT SESSION AGENDA (do not re-derive this):**
+  1. Establish `relatedProduct`'s CURRENT contract from the code + its tests — what does `true`
+     actually mean today? Same project · probable name correspondence · evidence sufficient to
+     classify `scope` · or merely a candidate-generation predicate? EDR-3 may own the final
+     uncertainty decision, and which one it is decides where the boundary sits.
+  2. Trace the three cases separately, since only the first two belong INSIDE the predicate:
+     wrapped name (`perl-interpreter` ↔ `perl`, should correlate) · short project (`jq` ↔ `jq`,
+     equality should correlate) · different vocabulary (`http_server` ↔ `httpd`,
+     `spring_framework` ↔ `spring-core` — must NOT be forced).
+  3. Define the minimal replacement and test it against all four measured cases — perl, jq/xz,
+     httpd, spring-core — BEFORE writing the EDR-3 boundary.
+
+  **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
+  (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)
+  and shipped on the match event; Knowledge stores no `claim_class` column at all and
+  Governance never re-derives it. So unlike a VERDICT — re-judged whenever the card version
+  moves — a class computed against an older carrier set is frozen forever. Any fix to the rule
+  above therefore needs a re-classification path, or it ships invisible exactly as KN-VERDICT-2
+  describes. **Dep:** none. **Scope:** MEDIUM (rule) + SMALL (re-classification sweep).
+
+- [ ] **GOV-MIRROR-1 — Governance's occurrence-verdict mirror has no reconciliation, and no
+  path at all for corrected component identity (filed 2026-09-16, MEASURED live on
+  MRF/cdmrf-oamp/20.1.0.0-125; found by opening ONE drawer and asking why a badge was
+  missing).** **MED-HIGH, silent divergence**; EDR-VERDICT-01 D5/D6. Two parts, one seam.
+
+  **(a) Nothing ever checks that the mirror agrees with its source.** Governance holds a
+  verdict it never re-derives (D5, correctly), fed by `knowledge.component_verdict_changed`.
+  The invariant "a verdict transition emits an event" **already holds in code**: the only
+  `UPDATE` of `verdict_state` in Knowledge (`adapters/store/store.go:327`) sits inside the
+  branch that queues the event, in the same transaction, and the insert path emits
+  `component_matched` carrying the verdict. So no change to the EMISSION fixes this — the gap
+  is that a write which bypasses the aggregate (the 2026-09-10 operator repair, a dropped
+  event, a future bug) diverges the mirror **permanently and invisibly**, and nothing compares
+  the two sides.
+  **Measured 2026-09-16 on one release:** Knowledge **192** occurrences cleared, Governance
+  **132** — **60 diverged**, undetected for **six days**. Invisible to `/healthz`, `/readyz`,
+  feed health, the relay (194 queued / 194 sent / 0 unsent) and every reader cursor (all at
+  head). The only way the number was obtained was dumping both databases and diffing by hand;
+  no join is possible, they are different databases by design.
+  **It cannot self-heal, and the reason is counter-intuitive.** The sweep re-judges only rows
+  whose stamp is behind the card version. Resetting the stamp re-judges the row, arrives at
+  cleared, compares cleared against cleared, finds **no transition** and emits nothing. Only
+  forcing the row back to `open` produces the open→cleared transition that re-emits.
+  **Repair executed live (proves the convergence path is sound):** 74 httpd `app:` rows
+  reopened (`verdict_state='open'`, stamp 0) → sweep `rejudged:97 changed:74` → 74 events →
+  both sides **192/721**. Repair, not fix.
+  **Negative control — the mechanism is NOT broken (measured same day, both directions, on the
+  two releases no repair ever touched):** `20.1.0.0-109` and `20.1.0.0-118` each returned
+  **K-cleared/G-open = 0 AND G-cleared/K-open = 0**. Two consequences. (i) Governance holds no
+  independent verdict state — it is a PURE lagging projection, so a reconciler is a ONE-WAY
+  repair that may safely overwrite. (ii) The drift is not spontaneous; the trigger is a write
+  that bypasses the aggregate. **This project does that deliberately** — the 2026-09-10 repair
+  of 579 rows is recorded under KN-SCAN-4 — and any relabelling pass writing into Knowledge
+  would reproduce it at scale. So the severity is about **detection, not frequency**: rare
+  trigger, permanent and invisible consequence.
+  **Implementation constraint for the replay design:** the consumer inbox is keyed on the
+  kernel `envelope_id` and a duplicate short-circuits to a no-op
+  (`governance/.../migrations/000003`, `InboxConsumer.Handle`). A reconciler therefore cannot
+  republish a stored envelope verbatim — it must mint a FRESH envelope id carrying the same
+  payload, or it will appear to run and change nothing.
+  **Fix shape to decide:** a periodic reconciler comparing Knowledge's occurrence verdicts to
+  Governance's mirror and re-emitting on disagreement. It cannot be a SQL join (separate
+  databases — the isolation is structural and worth keeping), so it goes over the read API or
+  by bounded event replay. Cheapest honest version: a counter per release on both sides, so a
+  disagreement is at least VISIBLE even before it is healed.
+
+  **(b) Corrected component identity has no path to Governance at all.**
+  `Store.SetComponentVerdict` (`governance/adapters/store/store.go`) updates exactly three
+  columns — `verdict_state`, `verdict_grade`, `verdict_reason`. Ecosystem and source are never
+  refreshed, and only a fresh `component_matched` carries detail. **Measured, still true after
+  (a) converged:** Governance renders `source = /usr/sbin/httpd` and an EMPTY ecosystem beside
+  a clearance reason that names `httpd` — the drawer's provenance contradicts the evidence the
+  verdict rested on, permanently.
+  **Do NOT reflexively add ecosystem/source to the verdict event — settle ownership first.**
+  Knowledge does not own component identity: migration `000005_match_component_detail` says in
+  its own comment that those columns exist so a row can "ASK A FEED ABOUT IT AGAIN", i.e. a
+  re-query working set, not an identity of record. Evidence owns identity for SBOM components
+  (validated `value.NewPURL` at the parser). **For scanner-report components NO context owns
+  it** — they never pass through Evidence's parser, so three contexts hold three copies and
+  none is authoritative. That is the strongest argument for siting the component-identity seam
+  at INTAKE in Evidence rather than in Knowledge; see KN-CLAIM-1 and KN-SCAN-4(b).
+  **Dep:** (b) blocks on the identity-ownership decision; (a) does not. **Scope:** MEDIUM (a) /
+  design-first (b).
 
 - [ ] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
   shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification).**
