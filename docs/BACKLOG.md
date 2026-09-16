@@ -3192,11 +3192,38 @@ under the 2026-08-07 re-derivation standard.
   Note the asymmetry worth deciding on: the **SPDX parser skips** a package whose purl type is
   unreadable (`spdx.go:78`), while the scanner path **admits** it. Two doors, two rules, and the
   permissive one produces occurrences that look ordinary but are structurally undecidable.
+  **ROOT CAUSE FOUND 2026-09-16 (read from the stored SBOM itself, release
+  `20.1.0.0-125`).** `app:` was never an ecosystem: it is SPDX **`primaryPackagePurpose`**,
+  a PURPOSE dimension, collapsed into the identity dimension by the CSV converter making it a
+  purl scheme. The producing scanner (PANW) emits httpd **TWICE in one document** — once
+  `primaryPackagePurpose: LIBRARY`, `supplier: Organization: infrastructure@rockylinux.org`,
+  with a proper `pkg:rpm/rocky/httpd@…` external ref; and once `primaryPackagePurpose:
+  APPLICATION`, `supplier: NOASSERTION`, **no `externalRefs` at all**. Same name, same
+  `versionInfo`. The duplicate originates UPSTREAM; Themis did not invent it.
+  **The two doors, measured on that one document:** the SPDX parser dropped the purl-less twin
+  (`canonical_inventory` = 489 components, **exactly 1** httpd); the scanner path admitted its
+  analogue, which then became a security subject on 60+ cards. Same input, one door rejecting
+  and one admitting.
+  **Also measured: the document carries NO CPE** — no `SECURITY`/`cpe23Type` external ref on
+  either twin — so a CPE-based identity bridge is unavailable on this estate (bears on
+  KN-CLAIM-1's fix options). Two identity signals ARE present and discarded by the parser:
+  `primaryPackagePurpose` and `supplier`.
+  **These are the same rows as GOV-MIRROR-1's 60**: the `app:` occurrences an out-of-band
+  repair healed in Knowledge without emitting.
   **Options:** (a) mark such occurrences and surface the count — cheapest, composes with
   KN-SCAN-OBS-1; (b) canonicalize recognizable non-purl identifiers at the scanner ACL seam
   (an rpm-shaped version implies an rpm component); (c) skip them as SPDX does — **rejected**:
-  it would hide real findings, and fail-open is the right direction here.
-  Prefer (a), consider (b). **Dep:** composes with KN-SCAN-OBS-1. **Scope:** SMALL.
+  it would hide real findings on a scanner-ONLY release, and fail-open is the right direction
+  there. **(d) NEW, and the evidence now favours it — converge onto the usable twin.** When a
+  purl-less observation matches a component already on the same release by name+version, it is
+  a second representation of that component, not a new subject: record the observation against
+  the usable identity and keep the raw string as provenance. On the measured case that is
+  exact (same name, same version, the good twin one entry away in the same file), and it loses
+  nothing — unlike (c), which is only safe when a twin exists. (d) is the concrete first step
+  of the component-identity seam; see KN-CLAIM-1 and GOV-MIRROR-1(b) for the ownership
+  question it belongs to.
+  Prefer (d) with (a) as the interim marker. **Dep:** composes with KN-SCAN-OBS-1; (d) wants
+  the identity-ownership decision. **Scope:** SMALL (a) / MEDIUM (d).
   **Note:** in the observed case the producer was an external CSV→JSON converter that passed
   `app:` through unchanged; that converter now rewrites rpm-shaped rows and reports the rest.
   The Themis-side asymmetry above is filed on its own merits, independent of that.
