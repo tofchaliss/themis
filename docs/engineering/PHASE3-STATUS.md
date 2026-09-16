@@ -29,6 +29,20 @@ and the resume pointer, never item state.
 > - **REG-DUP-1** — three Products named `MRF`; registry has no uniqueness at any level and
 >   name-grouped reads collapse duplicates invisibly.
 >
+> **⚠ OPERATIONAL — carry this forward; it is NOT architecture and must not get lost among the
+> docs commits.** A PostgreSQL password was exposed on 2026-09-16 in terminal scrollback and in
+> the shell history file: a `set -x VAR value` written in fish syntax instead enabled **bash
+> xtrace**, which then echoed every command including the `$PGBASE` connection string.
+> **Action: rotate the credential**, rewrite the DSN in each `/etc/themis/<svc>.env`, and
+> restart all six nodes plus the dashboard. Rewriting the fleet is still a hand operation — see
+> the open *DB-password rotation orchestration* item in the backlog. (The fresh-connection
+> credential watch on `/readyz` will surface any node left on the old secret.)
+>
+> **Read the filed entries as the MEASURED state.** Every surviving claim rests on a measurement
+> or a code read. Three confident hypotheses died on contact with the data during this session
+> (that the verdict event had never been published, that the `app:` row could never be judged,
+> and that the divergence was systemic) and are deliberately NOT preserved. Do not reopen them.
+>
 > **NEXT:** trace `relatedProduct` → its current contract → minimal replacement tested against
 > perl / jq+xz / httpd / spring-core → THEN the EDR-3 boundary. Agenda is written into
 > KN-CLAIM-1; do not re-derive it. Order after that: EDR-1 → KN-SCAN-4(b) → EDR-4 → relabel.
