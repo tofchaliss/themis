@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -235,5 +236,70 @@ func TestCPEProductGateEdges(t *testing.T) {
 	}
 	if nvdConfigsMatchProduct(nil, "") {
 		t.Error("empty name must not match any config")
+	}
+}
+
+// A CPE field may contain a literal colon written `\:` — Perl module products do it constantly,
+// since `SSH::Parallel` encodes as `ssh\:\:parallel`. Splitting naively lands mid-escape.
+// Measured 2026-09-16: two perl cards carried a lone `\` as their only carrier product, which
+// matches nothing and made every component on them scope.
+func TestSplitCPEHonoursEscaping(t *testing.T) {
+	for _, c := range []struct{ criteria, wantProduct, wantPart, why string }{
+		{"cpe:2.3:a:vendor:openssl:3.0", "openssl", "a", "the ordinary case is unchanged"},
+		{"cpe:2.3:a:perl:ssh\\:\\:parallel:1.0", "ssh::parallel", "a",
+			"an escaped Perl module name yields the real product, not a fragment"},
+		{"cpe:2.3:o:redhat:enterprise_linux:8.0", "enterprise_linux", "o",
+			"an operating-system part is readable and distinguishable"},
+		{"cpe:2.3:h:vendor:appliance:1", "appliance", "h", "hardware too"},
+		{"too:short", "", "", "malformed yields nothing rather than a panic"},
+		{"", "", "", "empty yields nothing"},
+	} {
+		if got := cpeProduct(c.criteria); got != c.wantProduct {
+			t.Errorf("cpeProduct(%q) = %q, want %q — %s", c.criteria, got, c.wantProduct, c.why)
+		}
+		if got := cpePart(c.criteria); got != c.wantPart {
+			t.Errorf("cpePart(%q) = %q, want %q — %s", c.criteria, got, c.wantPart, c.why)
+		}
+	}
+}
+
+// KN-CLAIM-1: an NVD configuration lists every AFFECTED product, which is a different question
+// from which product CARRIES the flaw. The bundlers are operating systems and appliances, and
+// the `part` field is what separates them. Decoded from JSON rather than built as a literal, so
+// the test exercises the same parse path the client does.
+func TestNVDVulnerableProductsKeepsApplicationsOnly(t *testing.T) {
+	decode := func(t *testing.T, raw string) []nvdConfig {
+		t.Helper()
+		var configs []nvdConfig
+		if err := json.Unmarshal([]byte(raw), &configs); err != nil {
+			t.Fatalf("decode configs: %v", err)
+		}
+		return configs
+	}
+
+	got := nvdVulnerableProducts(decode(t, `[{"nodes":[{"cpeMatch":[
+		{"vulnerable":true,"criteria":"cpe:2.3:a:apache:http_server:2.4.57"},
+		{"vulnerable":true,"criteria":"cpe:2.3:o:debian:debian_linux:11.0"},
+		{"vulnerable":true,"criteria":"cpe:2.3:o:fedoraproject:fedora:37"},
+		{"vulnerable":true,"criteria":"cpe:2.3:h:netapp:clustered_data_ontap:-"},
+		{"vulnerable":false,"criteria":"cpe:2.3:a:apache:not_vulnerable:1.0"},
+		{"vulnerable":true,"criteria":"cpe:2.3:a:apache:http_server:2.4.58"},
+		{"vulnerable":true,"criteria":"cpe:2.3:a:apache:*:*"},
+		{"vulnerable":true,"criteria":"cpe:2.3:a:apache:-:*"}
+	]}]}]`))
+	// The second http_server entry is a duplicate version row, and `*`/`-` are CPE wildcards,
+	// not product names — all three must be dropped without disturbing the real carrier.
+	if len(got) != 1 || got[0] != "http_server" {
+		t.Errorf("nvdVulnerableProducts = %v, want [http_server] — the OS and appliance entries "+
+			"bundle the flaw, they do not carry it", got)
+	}
+
+	// Filtering can only SHRINK the set, and an empty set means ClaimUnknown, which acts as
+	// carrier. The fail-safe direction survives by construction.
+	none := nvdVulnerableProducts(decode(t, `[{"nodes":[{"cpeMatch":[
+		{"vulnerable":true,"criteria":"cpe:2.3:o:debian:debian_linux:11.0"}
+	]}]}]`))
+	if len(none) != 0 {
+		t.Errorf("an OS-only configuration must yield no carriers, got %v", none)
 	}
 }

@@ -36,8 +36,30 @@ func (c ClaimClass) ActsAsCarrier() bool { return c != ClaimScope }
 // covers the overwhelming majority and anything it misses lands in ClaimUnknown, which is safe.
 var distroPrefixes = []string{"python3-", "python3x-", "python-", "python2-", "perl-", "ruby-", "golang-", "rust-", "php-", "nodejs-", "lib"}
 
+// roleSuffixes are packaging ROLE words rather than project names. A distro splits one upstream
+// project into sub-packages BY ROLE — `perl-interpreter`, `perl-libs`, `python3-devel` — and the
+// tail names the role, not a different project. Stripping the wrapper from those destroys the
+// only token that identifies the project at all.
+//
+// Measured 2026-09-16 (KN-CLAIM-1 variant B): the card for a perl CVE carried the carrier `perl`,
+// correct and sometimes the ONLY entry, while `perl-interpreter` normalized to `interpreter` and
+// matched nothing. The evidence was right and the normalization threw it away.
+//
+// This is VOCABULARY, not data. Packaging roles are a small closed set; project names are not.
+// That is the line an alias table (`http_server` → `httpd`) crosses and this does not.
+//
+// Keeping the name whole is the FAIL-SAFE direction in every consumer: classification errs
+// toward carrier (the safe way), while MatchesFixPackage and the inferred bridge both demand
+// EQUALITY, so a longer name under-matches rather than over-matches.
+var roleSuffixes = map[string]struct{}{
+	"interpreter": {}, "libs": {}, "devel": {}, "common": {}, "core": {},
+	"doc": {}, "docs": {}, "tools": {}, "utils": {}, "bin": {},
+	"static": {}, "headers": {}, "lang": {}, "macros": {},
+}
+
 // NormalizeProduct reduces a package or CPE product name to a comparable form: lowercase, `_`
-// folded to `-`, and one distro wrapper prefix removed.
+// folded to `-`, and one distro wrapper prefix removed — UNLESS what the strip would leave is a
+// packaging role rather than a project (see roleSuffixes), in which case the name is kept whole.
 //
 // It is deliberately conservative — it never strips more than one prefix and never guesses a
 // suffix — because the cost of a WRONG equality here is classifying a carrier as scope, which is
@@ -47,7 +69,14 @@ func NormalizeProduct(s string) string {
 	n := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
 	for _, pre := range distroPrefixes {
 		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
-			return strings.TrimPrefix(n, pre)
+			root := strings.TrimPrefix(n, pre)
+			if _, isRole := roleSuffixes[root]; isRole {
+				// `perl-interpreter` IS perl; `python3-pyyaml` is not python. The difference is
+				// whether the tail names a role or a project, and only the first may keep the
+				// wrapper — which is precisely what lets `python3-pyyaml` stay scope.
+				return n
+			}
+			return root
 		}
 	}
 	return n
@@ -69,10 +98,15 @@ func wrapperFamily(prefix string) string {
 }
 
 // strippedWrapper reports which distro wrapper NormalizeProduct would strip from the
-// (already lowercased, underscore-folded) name — "" when none applies.
+// (already lowercased, underscore-folded) name — "" when none applies. It must agree with
+// NormalizeProduct exactly, role suffixes included, or MatchesFixPackage compares a stripped
+// root against an unstripped one.
 func strippedWrapper(n string) string {
 	for _, pre := range distroPrefixes {
 		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
+			if _, isRole := roleSuffixes[strings.TrimPrefix(n, pre)]; isRole {
+				return "" // kept whole by NormalizeProduct, so no wrapper was stripped
+			}
 			return pre
 		}
 	}

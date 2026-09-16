@@ -3400,8 +3400,8 @@ under the 2026-08-07 re-derivation standard.
   | `python` | `python3` | `python3` | carrier | ✅ correct |
   | `http_server` | `httpd` | `httpd` | scope | ❌ **A — project name vs binary name** |
   | `spring_framework` | `spring-core` | `spring-core` | scope | ❌ **A** |
-  | `perl` | `perl-interpreter` | `interpreter` | scope | ❌ **B — the strip removes the token that would have matched** |
-  | `perl` | `perl-libs` | `libs` | scope | ❌ **B** (same shape as the `openssl-libs`→`openssl` note under KN-FIX-4) |
+  | `perl` | `perl-interpreter` | `perl-interpreter` | **carrier** | ✅ **FIXED 2026-09-16** (was ❌ B — the strip removed the token that would have matched) |
+  | `perl` | `perl-libs` | `perl-libs` | **carrier** | ✅ **FIXED 2026-09-16** (same shape as the `openssl-libs`→`openssl` note under KN-FIX-4) |
 
   **Variant B is the subtle one, and it forbids the obvious fix.** Comparing the UNSTRIPPED names
   would repair `perl`↔`perl-interpreter` — and would simultaneously make `python`↔`python3-pyyaml`
@@ -3485,6 +3485,39 @@ under the 2026-08-07 re-derivation standard.
   can never match by containment — so `jq` classifies a component `jq` as carrier and `jq-libs`
   as scope. Minor, but it belongs to whatever rule replaces `relatedProduct`.
 
+  ---
+  **THREE OF THE FOUR SHIPPED 2026-09-16** (`fix/carrier-correlation-defects`). The deterministic
+  half is done; only the vocabulary gap remains, and it is EDR-3's, not EDR-2's.
+
+  - ✅ **Variant B — the wrapper strip (the highest-value fix).** `NormalizeProduct` now keeps a
+    name WHOLE when the strip would leave a packaging ROLE word rather than a project:
+    `perl-interpreter` and `perl-libs` stay intact and match the carrier `perl`, while
+    `python3-pyyaml` still strips to `pyyaml` and stays scope. `strippedWrapper` follows the same
+    rule so `MatchesFixPackage` never compares a stripped root against an unstripped one.
+    **`roleSuffixes` is VOCABULARY, not data** — packaging roles are a small closed set, which is
+    the line an alias table crosses and this does not. Keeping a name whole is the FAIL-SAFE
+    direction in all three consumers: classification errs toward carrier, while fix lookup and
+    the inferred bridge demand equality and therefore under-match. domain 100%.
+  - ✅ **Garbage tokens.** `splitCPE` honours CPE 2.3 backslash escaping, so a Perl module product
+    (`SSH::Parallel` encodes as `ssh\:\:parallel`) yields the real name instead of a lone `\`.
+    That escaping is almost certainly why both garbage cards were perl CVEs.
+  - ✅ **Bundler pollution.** `nvdVulnerableProducts` keeps CPE part `a` only, via the new
+    `cpePart`. The OS and appliance entries that BUNDLE a flaw are no longer read as carriers of
+    it. Filtering can only SHRINK the set and an empty set is `ClaimUnknown`, which acts as
+    carrier — so the fail-safe direction survives by construction. **Deliberately NOT applied to
+    `nvdConfigsMatchProduct`**: that gate decides DISCOVERY, where narrowing risks a false
+    negative, and it was not the measured defect. feed 92.1%.
+  - ⬜ **Vocabulary gap** — unchanged and structural. `http_server` ↔ `httpd` and
+    `spring_framework` ↔ `spring-core` still do not resolve, by design, until EDR-3 decides what
+    an unbridgeable mismatch should mean.
+
+  **NOT yet live-verified.** Claim class is computed once at match time and never re-derived, so
+  these fixes change nothing for existing rows until something re-matches them — the same trap
+  KN-VERDICT-2 describes. A re-classification path is still required (see the sibling defect
+  below), and GOV-MIRROR-1 means a Knowledge-side re-classification would not reach Governance
+  on its own either.
+
+  ---
   **EDR-2 STOPPING POINT (2026-09-16) — INVESTIGATED, deliberately NOT designed.** Three of
   the four defects are deterministic fixes with the evidence already in hand (perl wrapper,
   CPE parse, bundler pollution). The fourth is a structural limitation and **must not be turned
