@@ -36,6 +36,24 @@ func TestClassifyClaim(t *testing.T) {
 			[]string{"commons-beanutils"}, "openssh", "openssh-server", domain.ClaimScope},
 		{"one carrier among several",
 			[]string{"urllib3", "pyyaml"}, "PyYAML", "python3-pyyaml", domain.ClaimCarrier},
+		// KN-CLAIM-1 variant B, measured 2026-09-16: the carrier `perl` was present and correct
+		// on the card — sometimes the ONLY entry — and the wrapper strip turned the component
+		// into `interpreter`, which matches nothing. The role suffix keeps the project token.
+		{"role sub-package IS the project: perl-interpreter carries a perl flaw",
+			[]string{"perl"}, "perl-interpreter", "perl-interpreter", domain.ClaimCarrier},
+		{"role sub-package, libs: perl-libs carries a perl flaw",
+			[]string{"perl"}, "perl-libs", "perl-libs", domain.ClaimCarrier},
+		{"the same card's real bystander stays scope — Encode is a project, not a role",
+			[]string{"perl"}, "perl-Encode", "perl-Encode", domain.ClaimScope},
+		{"the polluted carrier list still resolves: perl among NVD's OS products",
+			[]string{"enterprise_linux", "fedora", "perl"}, "perl-libs", "perl-libs", domain.ClaimCarrier},
+		// The guard the role rule must NOT break: a python module-stream rebuild lists pyyaml,
+		// which is a PROJECT and therefore still strips. Comparing the unstripped form here
+		// would make every bystander a carrier — the defect EDR-CORRELATION-01 exists to stop.
+		{"role rule must not leak: python3-pyyaml against carrier python is still scope",
+			[]string{"python"}, "python3-pyyaml", "python3-pyyaml", domain.ClaimScope},
+		{"and python3-devel against carrier python IS the project",
+			[]string{"python"}, "python3-devel", "python3-devel", domain.ClaimCarrier},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := domain.ClassifyClaim(tc.carriers, tc.pkg, tc.compName); got != tc.want {
@@ -74,6 +92,27 @@ func TestNormalizeProductStripsOneWrapperOnly(t *testing.T) {
 	}
 }
 
+// A distro splits one project into sub-packages BY ROLE. Stripping the wrapper from those
+// leaves a role word that identifies nothing, which is how a correct carrier was thrown away
+// (KN-CLAIM-1 variant B, measured 2026-09-16).
+func TestNormalizeProductKeepsRoleSuffixesWhole(t *testing.T) {
+	for _, c := range []struct{ in, want, why string }{
+		{"perl-interpreter", "perl-interpreter", "the measured case: `interpreter` names a role"},
+		{"perl-libs", "perl-libs", "so does `libs`"},
+		{"python3-devel", "python3-devel", "and `devel`"},
+		{"PYTHON3-DOC", "python3-doc", "case folding still applies to a kept name"},
+		{"python3_common", "python3-common", "underscore folding too"},
+		{"python3-pyyaml", "pyyaml", "a PROJECT tail still strips — this is the guard"},
+		{"python3-libxml2", "libxml2", "and so does this one"},
+		{"libssl", "ssl", "`ssl` is a project, not a role"},
+		{"libs", "s", "a bare role word is not itself wrapper-protected"},
+	} {
+		if got := domain.NormalizeProduct(c.in); got != c.want {
+			t.Errorf("NormalizeProduct(%q) = %q, want %q — %s", c.in, got, c.want, c.why)
+		}
+	}
+}
+
 // D12 (KN-FIX-4): the fix-lookup name rule — exact first, then normalized EQUALITY under the
 // wrapper-family guard, never containment. Every pair below is either measured from the
 // 2026-09-10 MRF case or the collision that guard exists to forbid.
@@ -98,6 +137,11 @@ func TestMatchesFixPackage(t *testing.T) {
 		{"", "httpd", false, "empty never matches"},
 		{"httpd", "", false, "empty never matches"},
 		{"lib", "lib", true, "a name equal to a bare prefix matches only itself (len guard in strippedWrapper)"},
+		// strippedWrapper must agree with NormalizeProduct about role suffixes, or a stripped
+		// root gets compared against an unstripped one.
+		{"libs", "perl-libs", false, "a fix for a package literally named `libs` must not answer perl-libs"},
+		{"perl", "perl-libs", false, "and a bare `perl` bound is not a fix for the libs sub-package"},
+		{"perl-libs", "perl-libs", true, "the role-suffixed name still matches itself exactly"},
 	}
 	for _, c := range cases {
 		if got := domain.MatchesFixPackage(c.fix, c.query); got != c.want {

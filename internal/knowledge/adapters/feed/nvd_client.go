@@ -350,21 +350,83 @@ func (c *NVDClient) VulnsForPackage(ctx context.Context, comp app.InventoryCompo
 	return out, nil
 }
 
+// splitCPE splits a CPE 2.3 formatted string into its fields, honouring the specification's
+// backslash escaping. A field value may contain a literal colon written `\:` — Perl module
+// products do it constantly, since `SSH::Parallel` is encoded `ssh\:\:parallel` — and a naive
+// strings.Split lands mid-escape and returns fragments.
+//
+// Measured 2026-09-16: two perl cards carried a single carrier product of `\`, a lone escape
+// character, which matches nothing and therefore classified every component on those cards as
+// scope. The count was small; the mechanism is not, because a split landing on a plausible
+// fragment yields a wrong carrier that looks entirely ordinary.
+//
+// The escape character is consumed, so `ssh\:\:parallel` yields `ssh::parallel` — the real
+// product name rather than a fragment of one.
+func splitCPE(criteria string) []string {
+	var (
+		parts []string
+		cur   strings.Builder
+		esc   bool
+	)
+	for _, r := range criteria {
+		switch {
+		case esc:
+			cur.WriteRune(r)
+			esc = false
+		case r == '\\':
+			esc = true
+		case r == ':':
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	return append(parts, cur.String())
+}
+
 // cpeProduct extracts the product from a CPE 2.3 URI
 // (cpe:2.3:<part>:<vendor>:<product>:<version>:…) — field index 4, or "" if malformed.
 func cpeProduct(criteria string) string {
-	parts := strings.Split(criteria, ":")
+	parts := splitCPE(criteria)
 	if len(parts) < 5 {
 		return ""
 	}
 	return parts[4]
 }
 
-// nvdVulnerableProducts lists the distinct products NVD marks vulnerable for a CVE.
+// cpePart extracts the CPE part — `a` application, `o` operating system, `h` hardware — from
+// field index 2, or "" if malformed.
+func cpePart(criteria string) string {
+	parts := splitCPE(criteria)
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[2]
+}
+
+// nvdVulnerableProducts lists the distinct APPLICATION products NVD marks vulnerable for a CVE
+// — the answer to "which product carries this flaw" (EDR-CORRELATION-01 D4).
 //
 // This is the same walk nvdConfigsMatchProduct does, kept instead of collapsed to a boolean. The
 // data was always here — it was extracted to gate A2 discovery and then dropped, which is why
 // "which package carries this flaw" had no answer anywhere in the system.
+//
+// APPLICATION parts only (KN-CLAIM-1, measured 2026-09-16). An NVD configuration lists every
+// AFFECTED product, which is not the same question: an httpd flaw's list carried `debian_linux`,
+// `ubuntu_linux`, `fedora`, `macos`, `rocky_linux`, `zfs_storage_appliance_kit` and
+// `clustered_data_ontap` — 27 entries on CVE-2019-0211, 37 on CVE-2021-40438 — all products that
+// BUNDLE httpd and none of which carries the flaw. Reading that list as N carrier claims is the
+// same error, in the CPE dialect, that this file's distro sibling exists to prevent: an advisory
+// package list read as N vulnerability claims. The `part` field separates them, and it was being
+// stepped over on the way to the product.
+//
+// Filtering can only SHRINK the set, and an empty set classifies every component as
+// ClaimUnknown — which acts as carrier. So the fail-safe direction is preserved by construction.
+//
+// Deliberately NOT applied to nvdConfigsMatchProduct: that gate decides DISCOVERY, where
+// narrowing risks a false negative, and it was not the measured defect. Precision of discovery
+// and semantics of carriers are different questions.
 func nvdVulnerableProducts(configs []nvdConfig) []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -373,6 +435,9 @@ func nvdVulnerableProducts(configs []nvdConfig) []string {
 			for _, m := range node.CPEMatch {
 				if !m.Vulnerable {
 					continue
+				}
+				if cpePart(m.Criteria) != "a" {
+					continue // an OS or appliance that bundles the flaw is not its carrier
 				}
 				p := cpeProduct(m.Criteria)
 				if p == "" || p == "*" || p == "-" {
