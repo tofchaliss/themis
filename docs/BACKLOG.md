@@ -3677,8 +3677,30 @@ under the 2026-08-07 re-derivation standard.
   eternal stale twins (GUI-12's rescan-dedup solved the evidence layer; this is the match layer).
   **Dep:** none. **Scope:** MED.
 
-- [ ] **DEV-COV-1 — whole-repo `make check` coverage is red on a clean `main` locally (filed
-  2026-09-10).** LOW-MED, process. Measured on macOS, deterministic across runs, identical on a
+- [ ] **DEV-COV-1 — the merge gate is DEAD: `main` CI has failed every run for 14 days (filed
+  2026-09-10 as a local-only issue; **PREMISE CORRECTED + SEVERITY RAISED 2026-09-16**).**
+  **MED-HIGH, process.**
+  **The original filing said "CI (`make check-ci`, coverage-greenfield) stays green, so this is
+  a local-profile divergence (macOS vs Linux)". That is FALSE, and it was the load-bearing
+  claim.** Measured 2026-09-16 against the GitHub Actions history: Linux CI fails on the SAME
+  two packages at the IDENTICAL percentages as macOS — `governance/adapters/http` 87.4%
+  (threshold 90%) and `registry/adapters/store` 73.5% (threshold 80%). Not a platform
+  divergence. A real shortfall on both.
+  **First red: 2026-09-02**, run on `Merge feat/occurrence-verdicts: the KN-VERDICT-1 arc`.
+  **Last green: 2026-08-26.** EVERY `main.yml` run since has failed — including docs-only
+  commits, which is how it stayed invisible — and roughly a dozen merges have landed through a
+  gate that could not have stopped any of them.
+  **That is the real cost, and it is not "a contributor cannot tell their regression from this
+  floor".** It is that `main` has had NO merge signal for two weeks. Every defect filed on
+  2026-09-16 (KN-CLAIM-1, GOV-MIRROR-1, KN-SCAN-3b, REG-DUP-1) entered a repository whose gate
+  was already failing, and a genuine coverage regression landing today would be
+  indistinguishable from the standing red.
+  **Fix: make `main` green before anything else is judged by it** — either raise the two
+  packages' coverage or re-derive the thresholds with the reason recorded. Bisect start is the
+  2026-09-02 merge. Then keep it green, since a permanently-red gate is worth less than no gate:
+  it trains everyone to ignore the one signal that would have caught this.
+  Original filing text follows for provenance. Measured on macOS, deterministic across runs,
+  identical on a
   clean-`main` worktree — so NOT introduced by any current branch: `governance/adapters/http`
   87.4% (threshold 90%) and `registry/adapters/store` 73.5% (threshold 80%); the frozen legacy
   `adapter/notify` intermittently reports 99.7% (threshold 100%) on some runs only, confirming
