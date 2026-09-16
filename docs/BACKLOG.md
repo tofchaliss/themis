@@ -3426,6 +3426,37 @@ under the 2026-08-07 re-derivation standard.
   precision on the perl card (`perl-Encode` becomes a carrier), which is the trade this codebase
   has already committed to in writing: absence of evidence must never hide a live vulnerability. Needs the carrier/scope
   property tests re-run — `NormalizeProduct` is shared with KN-FIX-5.
+  **SECOND, INDEPENDENT CARRIER DEFECT — the carrier set is not carriers (measured
+  2026-09-16, estate-wide).** `nvdVulnerableProducts` harvests the product token of EVERY
+  vulnerable CPE match node, so `CarrierProducts` is "every product NVD marked vulnerable",
+  not "which product carries the flaw" (the D4 intent). Measured on the httpd cards, carrier
+  lists routinely contain `debian_linux` · `ubuntu_linux` · `fedora` · `leap` ·
+  `enterprise_linux` · `macos` · `rocky_linux` · `zfs_storage_appliance_kit` ·
+  `clustered_data_ontap` · `tenable.sc` · `peoplesoft_enterprise_peopletools` — **downstream
+  products that BUNDLE httpd, none of which carries an httpd flaw.** CVE-2019-0211 lists 27
+  such products; CVE-2021-40438 lists 37.
+  **This is the SAME class of error the claim-class mechanism exists to prevent, in the other
+  vocabulary.** A module advisory read as N vulnerability claims and a CPE configuration read
+  as N carrier claims are one mistake in two dialects. EDR-CORRELATION-01 caught it on the
+  distro side and made it an invariant; nobody applied the same reading to NVD.
+  **The correction is in data already fetched and discarded.** A criteria string is
+  `cpe:2.3:<part>:<vendor>:<product>:…` and `cpeProduct` splits on `:` and takes index **4**.
+  Index **2** is the PART (`a` = application, `o` = operating system, `h` = hardware) and index
+  **3** is the VENDOR — both stepped over. Filtering to part `a` drops the OS/appliance noise
+  outright; keeping the vendor yields `apache:http_server` instead of a bare token.
+  **It does NOT close the vocabulary gap** (`http_server` still never becomes `httpd`) — it
+  cleans the set. Both halves are needed and they are separable: the pollution fix is SMALL and
+  mechanical, the vocabulary gap is the design question above.
+  **Estate-wide carrier sourcing, measured the same day — only `nvd` and `osv` EVER supply a
+  carrier** (`nvd` 718/855 proposals, `osv` 3208/16253; `redhat` 0/17110, `rocky` 0/615,
+  `alpine` 0/294, `scanner` 0/811 — all zero BY DESIGN, since a distro record cannot attribute
+  a carrier). OSV contributes only from NON-distro entries. **Consequence:** for
+  distro-packaged native software with no language-ecosystem presence (httpd, openssl, curl,
+  glibc, the perl interpreter — the whole base OS) NVD's CPE product is the ONLY possible
+  carrier source, so the vocabulary gap is STRUCTURAL for that entire class, not an edge case.
+  That is the argument for EDR-3's UNKNOWN rule being the ANSWER for distro-packaged software
+  rather than a fallback.
+
   **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
   (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)
   and shipped on the match event; Knowledge stores no `claim_class` column at all and
