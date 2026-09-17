@@ -149,3 +149,68 @@ func TestMatchesFixPackage(t *testing.T) {
 		}
 	}
 }
+
+// KN-CLAIM-1 variant C, measured 2026-09-17. Containment can only relate two names when one is
+// a substring of the other, which is false for SIBLING packages of one upstream project. Both
+// shapes below were measured against the live estate; the guards are the over-matching this rule
+// would otherwise introduce.
+func TestClassifyClaimSharedTokenRelatesSiblingPackages(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		carriers      []string
+		pkg, compName string
+		want          domain.ClaimClass
+	}{
+		// Shape 1: a shared stem with divergent tails. Not a distro problem — these components
+		// are maven, with one clean carrier, and containment called them scope on 20 findings.
+		{"spring-core is the spring framework",
+			[]string{"spring_framework"}, "spring-core", "spring-core", domain.ClaimCarrier},
+		{"and so is spring-web",
+			[]string{"spring_framework"}, "spring-web", "spring-web", domain.ClaimCarrier},
+		// Shape 2: a project name below the containment floor. `xz` is two characters, so it
+		// could previously match ONLY the literal name `xz` — every sub-package was scope.
+		{"xz-libs carries an xz flaw despite the two-character project name",
+			[]string{"xz"}, "xz-libs", "xz-libs", domain.ClaimCarrier},
+		{"an accepted over-match: xz-java shares the token and stays carrier (errs safe)",
+			[]string{"xz"}, "xz-java", "xz-java", domain.ClaimCarrier},
+		{"but an unrelated two-character project is still scope",
+			[]string{"jq"}, "jansson", "jansson", domain.ClaimScope},
+
+		// The guards. A shared token is evidence only when the token distinguishes something;
+		// without the generic filter every `-core`/`-server` package would carry every other
+		// one's flaws, and claim_class would stop discriminating at all.
+		{"a shared packaging ROLE is not evidence: spring-framework vs openssl-core",
+			[]string{"spring-framework"}, "openssl-core", "openssl-core", domain.ClaimScope},
+		{"nor is a shared structure word: http-server vs nginx-server",
+			[]string{"http-server"}, "nginx-server", "nginx-server", domain.ClaimScope},
+		{"a carrier made only of packaging vocabulary claims nothing",
+			[]string{"core"}, "server", "server", domain.ClaimScope},
+		{"single-character CPE debris stays inert — a literal backslash was measured on 2 cards",
+			[]string{"\\"}, "httpd", "httpd", domain.ClaimScope},
+
+		// The guard that must survive every change to this file: a module-stream rebuild lists
+		// pyyaml, which is a PROJECT, so it still strips and still fails to relate to `python`.
+		{"role rule + token rule must not leak: python3-pyyaml against python is still scope",
+			[]string{"python"}, "python3-pyyaml", "python3-pyyaml", domain.ClaimScope},
+
+		// The containment path is RETAINED, so everything that matched before still matches.
+		{"containment still relates a role sub-package to its bare project",
+			[]string{"perl"}, "perl-libs", "perl-libs", domain.ClaimCarrier},
+		{"and still relates a stem sub-package",
+			[]string{"vim"}, "", "vim-minimal", domain.ClaimCarrier},
+
+		// The EDR-1 BOUNDARY, asserted on purpose. `http_server` and `httpd` share no token and
+		// no substring: this is a SYNONYM, which no string comparison can bridge. It belongs to
+		// the intake identity model. If a future change makes this pass HERE, it has grown an
+		// alias table inside the correlation vocabulary — read EDR-1 before deleting this case.
+		{"httpd stays scope: a synonym is an identity problem, not a string problem",
+			[]string{"debian_linux", "fedora", "http_server"}, "httpd", "httpd", domain.ClaimScope},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := domain.ClassifyClaim(tc.carriers, tc.pkg, tc.compName); got != tc.want {
+				t.Errorf("ClassifyClaim(%v, %q, %q) = %q, want %q",
+					tc.carriers, tc.pkg, tc.compName, got, tc.want)
+			}
+		})
+	}
+}
