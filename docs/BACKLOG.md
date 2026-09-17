@@ -3683,9 +3683,17 @@ under the 2026-08-07 re-derivation standard.
      moved, and expect the httpd share (174 component rows) to dominate what is left, because it
      is the synonym class and nothing shipped here touches it.
   2. **[`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md) — WRITTEN 2026-09-17**, D1–D9,
-     recording the agreed spec and drawing the EDR-3 boundary (D9). Implementation not started;
-     Phase 1 is twin resolution at the scanner ACL seam, and D6 requires the unresolved count to
-     ship WITH it rather than after.
+     recording the agreed spec and drawing the EDR-3 boundary (D9). OpenSpec change
+     **`phase3-component-identity`** scaffolded the same day (proposal/design/tasks, 21 tasks, no
+     `specs/` deltas as `phase3-*` requires). Implementation NOT started.
+     **Two constraints found while reading the seam, both recorded in design.md:** (i) the candidate
+     twins are NOT in the scanner report — `PlanIngest` builds its sibling set from the report's own
+     components, while the measured good twin lives in the SBOM's canonical inventory, so resolution
+     needs the release→evidence→inventory read (the same two ports `ReverdictService.bridgeFor`
+     already uses); (ii) **Knowledge does not validate purls at all today** — `value.NewPURL` is
+     Evidence-only — so it cannot currently tell `pkg:rpm/rocky/httpd@2.4.57` from `app:httpd`, which
+     is precisely the distinction D1 demands. Groups 1+2 ship together per D6, and Group 2 closes
+     KN-SCAN-OBS-1 in the same change.
   3. **Relabel the 238/158** once 1 lands, and re-measure per-component counts — the python
      cluster should be unchanged (it is the feature working), spring should go to zero.
 
