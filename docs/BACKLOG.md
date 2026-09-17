@@ -3191,6 +3191,44 @@ under the 2026-08-07 re-derivation standard.
   second vendor path speculatively would be scope creep. Same for AlmaLinux (ALSA) and Oracle
   (ELSA) if those estates appear. **Dep:** none. **Scope:** MED (the pattern is now proven).
 
+- [ ] **ATTR-GAP-1 — surface the carrier attribution gap (filed 2026-09-17, specified in
+  [`EDR-ATTRIBUTION-01`](engineering/decisions/EDR-ATTRIBUTION-01.md) D1/D3/D6).** MED,
+  correctness-of-presentation. `carrier attribution gap = carriers exist + zero deterministic
+  component matches`. It states only that *Themis has insufficient identity evidence to attribute
+  this carrier to an installed component* — **it is not a verdict** and says nothing about whether
+  anything is affected, which the CVE-2023-32681 case proves is the only honest reading.
+  **DERIVED, not stored (D3).** `ClassifyClaim` returns `scope` only when carriers are non-empty
+  and the component matched none, so *every active component is `scope`* ⟺ *carriers exist + zero
+  matches*. **No column, no event, no migration** — a read-model derivation over data both
+  contexts already hold. Its one precondition is classification currency, which the
+  re-classification sweep now provides.
+  **Measured cost it recovers:** of the 87 `httpd` components, **74 are `cleared_vendor_fix`** and
+  invisible to the GUI's cleared tile, which requires `carriers.length > 0`. Surfacing lets the
+  tile show them WITHOUT asserting any component carries the flaw.
+  **MUST NOT be expressed as `unknown`** (D2): that value already means "affected, attribution
+  missing, acts as carrier". Two statements, two places.
+  **Population:** 227 all-scope findings measured post-retirement.
+  **Dep:** none. **Scope:** SMALL-MEDIUM (a derived field + the tile + a count).
+
+- [ ] **ATTR-CPE-1 — the CPE acquisition experiment (filed 2026-09-17,
+  [`EDR-ATTRIBUTION-01`](engineering/decisions/EDR-ATTRIBUTION-01.md) D7/D8).** MED, evidence
+  acquisition — **an experiment, not a fix.** The estate's SBOM carries no `cpe23Type` external
+  ref, but that is a property of how the artifact was GENERATED, not proof CPE cannot exist. Syft
+  can emit them. If it does, `cpe:2.3:a:apache:http_server` beside `pkg:rpm/rocky/httpd` makes the
+  `http_server`↔`httpd` synonym **deterministic**, with no Themis-maintained synonym dictionary —
+  the line every reviewer of this arc has refused to cross.
+  **Phase B is read-only:** regenerate ONE SBOM with CPE refs and measure whether httpd carries
+  its Apache CPE. Changes nothing.
+  **Six preconditions must ALL hold before CPE becomes an identity mechanism** (D7): (1) Syft
+  emits the expected CPE for httpd · (2) it survives the SBOM parser · (3) Themis retains it
+  through the identity path · (4) NVD's CPE representation normalizes to the same identity ·
+  (5) it holds for more than httpd · (6) a missing or wrong CPE fails SAFE rather than creating a
+  false match.
+  **Do NOT declare `PURL → CPE → metadata → name` a normative hierarchy before then** (D8) —
+  that would repeat the mistake EDR-ATTRIBUTION-01 exists to correct.
+  **Dep:** ATTR-GAP-1 is independent of this and should not wait on it. **Scope:** SMALL (phase B)
+  / unknown beyond it, deliberately.
+
 - [ ] **KN-IDENT-1 — two ENCODINGS of one purl are two identities, so identity comparison is
   string equality over a non-canonical form (filed 2026-09-17, measured on MRF).** LOW,
   precision; EDR-IDENTITY-01 follow-up. The same rpm is present in the estate under two

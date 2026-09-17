@@ -89,6 +89,34 @@ and the resume pointer, never item state.
 > supersede lifecycle, and a rename in place (the purl is a PK column and Postgres will UPDATE
 > it; dead at 87/87 collisions). Measuring the basis first is the cheapest step in this arc.
 >
+> ### EDR-3 SPECIFIED — and its agreed design was killed by measurement first
+> [`EDR-ATTRIBUTION-01`](decisions/EDR-ATTRIBUTION-01.md) (D1–D8). The governing sentence:
+> **zero match is an OBSERVATION, not an identity conclusion.**
+> **What the measurement killed.** The agreed rule — carriers known, nothing matched ⇒ classify
+> `unknown` — rested on a recorded claim that the python module-stream cluster was protected
+> because `python3` would match on those cards. **That claim is false.** The decisive case is
+> CVE-2023-32681, the `requests` proxy-authorization leak: its only components are `python3-ply`
+> and `python3-pyyaml`, and there is no `python3-requests` on the release. The estate has the
+> rebuilt stream members and not the package that carries the flaw, so every component on that
+> card is a legitimate bystander and `scope` is CORRECT.
+> **Two situations, one observable condition, opposite correct outcomes** — `http_server`/`httpd`
+> (carrier installed under another name) and `requests`/`pyyaml` (carrier genuinely absent). The
+> rule cannot tell them apart, because telling them apart IS the synonym question. It would have
+> broken **182 correct suppressions to fix 87 wrong ones.** Rejected on evidence.
+> **What replaces it:** an explicit **Attribution Gap** — `carriers exist + zero deterministic
+> matches` — which states only that Themis lacks the identity evidence to attribute the carrier,
+> and is **NOT a verdict** and **NOT `unknown`** (that value already means "affected, attribution
+> missing, acts as carrier"; two statements, two places). It is **derived, not stored**: `scope`
+> is returned only when carriers are non-empty and nothing matched, so *all components `scope`* ⟺
+> *gap*, needing no column, event or migration — with classification currency, which the
+> re-classification sweep now provides, as its one precondition.
+> **The 87 httpd cases stay unchanged** until identity evidence exists; surfacing recovers the
+> measured cost (74 verified clearances the cleared tile hides) without asserting anything.
+> **CPE is an evidence-ACQUISITION experiment, not the answer** (D7): six preconditions must all
+> hold first, and `PURL → CPE → metadata → name` is deliberately NOT declared a hierarchy yet
+> (D8) — that would repeat the mistake this EDR exists to correct.
+> Filed: **ATTR-GAP-1** (surface it) and **ATTR-CPE-1** (the read-only experiment).
+>
 > ### ⚠ OPERATIONAL — still outstanding
 > - **Rotate the exposed PostgreSQL credential** (leaked to scrollback + bash history on
 >   2026-09-16 via a fish-syntax `set -x` on a bash shell). Independent of all Themis work and not
