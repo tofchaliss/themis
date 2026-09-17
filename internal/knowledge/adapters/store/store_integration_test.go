@@ -1202,3 +1202,78 @@ func TestStaleVerdictOccurrences_LogicGenerationCountsAsStaleness(t *testing.T) 
 		t.Errorf("stale after a generation bump = %+v, want the one row back", next)
 	}
 }
+
+// The re-verdict sweep must CONVERGE, not merely re-judge correctly (measured live 2026-09-17,
+// the first VM run of KN-VERDICT-2).
+//
+// A row that is version-current but generation-stale satisfied neither `CardVersion > oldStamp`
+// nor `detailChanged`, so RecordMatch ran no UPDATE at all and verdict_generation stayed behind.
+// Observed on the VM: `rejudged:200 changed:0` every two minutes while stale sat at 1558 of
+// 1569 — every verdict correct, zero progress, and no path to convergence.
+//
+// The assertion that matters is therefore the SECOND query: a confirming re-judgement under new
+// logic must leave the row current, because "the conclusion did not change" is itself the fact
+// worth recording.
+func TestRecordMatch_ConfirmingRejudgementAdvancesTheLogicGeneration(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2025-47273"), vulnFacts(t, "osv", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := app.InventoryComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi",
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2025-47273",
+		Component: comp, Verdict: domain.OpenVerdict(), OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the measured shape: the row is fully current on the card version, and behind
+	// only on the logic generation — which is what every row looks like the moment a changed
+	// verdict rule is deployed.
+	var cardVersion int
+	if err := pool.QueryRow(ctx, "SELECT version FROM faultlines WHERE id=$1", string(f.ID())).Scan(&cardVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE faultline_matches SET verdict_card_version=$1, verdict_generation=0
+		WHERE faultline_id=$2`, cardVersion, string(f.ID())); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, 10)
+	if err != nil || len(stale) != 1 {
+		t.Fatalf("stale = %+v err=%v, want the one generation-stale row", stale, err)
+	}
+
+	// Re-judge it to the SAME conclusion, exactly as the sweep does.
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2025-47273",
+		Component: comp, Verdict: domain.OpenVerdict(), CardVersion: cardVersion,
+		OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var gotGeneration int
+	if err := pool.QueryRow(ctx,
+		"SELECT verdict_generation FROM faultline_matches WHERE faultline_id=$1", string(f.ID())).Scan(&gotGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if gotGeneration != domain.VerdictGeneration {
+		t.Errorf("verdict_generation = %d, want %d — a confirming re-judgement must advance the stamp",
+			gotGeneration, domain.VerdictGeneration)
+	}
+	// The sweep must now find nothing. Without this the loop spins on the same rows forever.
+	after, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 0 {
+		t.Errorf("stale after a confirming re-judgement = %+v, want empty — the sweep must CONVERGE", after)
+	}
+}

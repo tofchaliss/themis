@@ -3771,6 +3771,21 @@ under the 2026-08-07 re-derivation standard.
   idea — a code change advances no data version, so only a constant the query compares against
   can make new logic count as staleness. This entry is the second instance; treat a third as a
   signal to generalize rather than to copy.
+  **DEFECT IN THE FIRST CUT, caught on the first VM run (2026-09-17) — the sweep re-judged
+  correctly and never CONVERGED.** `RecordMatch`'s stamp-refresh branch was gated on
+  `CardVersion > oldStamp || detailChanged`. A row that is version-current and generation-stale
+  — which is what EVERY row looks like the moment a changed verdict rule is deployed — satisfied
+  neither, so no UPDATE ran and `verdict_generation` stayed behind. Measured live:
+  `rejudged:200 changed:0` every two minutes while `stale` sat at **1558 of 1569**. Every verdict
+  was correct; progress was zero and there was no path to convergence.
+  Fixed by adding the generation term to the gate. **The test that now guards it asserts
+  CONVERGENCE, not correctness** — re-judge to the same conclusion, then require the stale query
+  to come back empty. The original integration test checked that a generation bump makes a row
+  stale, which was true and insufficient: nothing asked whether the row could ever become
+  current again. Verified by reverting the gate and watching the new test fail on both
+  assertions.
+  **Lesson worth keeping:** for any self-targeting sweep, "does it find the work?" and "does the
+  work stop being found?" are two different tests, and only the second one catches a spin.
 
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):

@@ -295,14 +295,15 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 
 	var oldState string
 	var oldStamp int64
+	var oldGeneration int
 	var oldName, oldVersion, oldEco, oldSource string
 	err = tx.QueryRow(ctx, `
-		SELECT verdict_state, verdict_card_version,
+		SELECT verdict_state, verdict_card_version, verdict_generation,
 		       component_name, component_version, component_ecosystem, component_source
 		FROM faultline_matches
 		WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3 FOR UPDATE`,
 		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).
-		Scan(&oldState, &oldStamp, &oldName, &oldVersion, &oldEco, &oldSource)
+		Scan(&oldState, &oldStamp, &oldGeneration, &oldName, &oldVersion, &oldEco, &oldSource)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// New occurrence: insert with its verdict and stamp, advance the card, emit the event.
@@ -348,12 +349,24 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
 				return false, qerr
 			}
-		} else if int64(m.CardVersion) > oldStamp || detailChanged {
-			// Same conclusion: refresh the stamp so the catch-up sweep does not re-judge a
+		} else if int64(m.CardVersion) > oldStamp || oldGeneration < domain.VerdictGeneration || detailChanged {
+			// Same conclusion: refresh the stamps so the catch-up sweep does not re-judge a
 			// current row, and persist any corrected detail. A detail-only correction resets
-			// the stamp to 0 instead — the corrected identity may judge differently against
-			// knowledge the card already holds, and the stale stamp is precisely what invites
+			// them to 0 instead — the corrected identity may judge differently against
+			// knowledge the card already holds, and a stale stamp is precisely what invites
 			// the sweep to find out. No event — the verdict has not changed yet.
+			//
+			// The GENERATION term is load-bearing, and its absence was measured live
+			// (2026-09-17, first VM run of KN-VERDICT-2): a row that is version-current but
+			// generation-stale satisfies neither of the other two conditions, so no UPDATE ran,
+			// verdict_generation stayed behind, and the row stayed stale. The sweep re-judged
+			// the same 200 rows every 2 minutes forever — `rejudged:200 changed:0` on every
+			// sweep while `stale` sat at 1558 of 1569. Correct verdicts, zero progress, and it
+			// would never have converged.
+			//
+			// A confirming re-judgement under NEW logic is exactly the case this branch exists
+			// for: the conclusion did not change, and that fact is itself the thing worth
+			// recording.
 			stamp := m.CardVersion
 			generation := domain.VerdictGeneration
 			if detailChanged {
