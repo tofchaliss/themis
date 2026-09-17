@@ -83,6 +83,10 @@ type Knowledge struct {
 	// version or the current rule generation (EDR-CORRELATION-01 D3/D4, KN-CLAIM-1). Always
 	// set — it rides only Knowledge's own store; the composition root runs its loop.
 	Reclassify *app.ReclassifyService
+	// Scanner is the scanner-report ingestion service. Exposed so the composition root can
+	// attach the D6 ingest reporter (the app ring never logs — CONVENTIONS R1). It is already
+	// wired into Consumer; this is the same instance, not a second one.
+	Scanner *app.ScannerReportService
 }
 
 // RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
@@ -239,6 +243,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	// this line existed, a scanner-report upload was accepted by Evidence and silently
 	// no-op'd here — the "wiring is no gate" class.
 	scanSvc := app.NewScannerReportService(evidence.NewScannerSource(evClient, feed.NewRegistry()), fold, st, sysClock{}).
+		// Identity candidates (EDR-IDENTITY-01 D2): the store resolves a release to its
+		// correlated evidence id and the Evidence client reads that document's canonical
+		// inventory — the same two ports the D6 re-verdict bridge uses. Without them the
+		// candidate set is the report alone, which ABSTAINS rather than guessing.
+		WithIdentityCandidates(st, evClient).
 		WithInferredBridge(!verdict.DisableInferredBridge)
 	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
 	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
@@ -264,6 +273,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// inline carrier-change trigger uses — one definition of a re-announcement, two
 		// moments it can fire.
 		Reclassify: app.NewReclassifyService(st, st, st, st, sysClock{}, verdict.ReclassifyBatch),
+		Scanner:    scanSvc,
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

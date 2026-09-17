@@ -265,6 +265,9 @@ func main() {
 	// The re-verdict loop (EDR-VERDICT-01 D6): the interval is the catch-up backstop; the
 	// fix-folding feed loops below Nudge() it the moment a tick folds something, so real card
 	// news reaches existing match rows in seconds, not half a day.
+	// The D6 ingest reporter (EDR-IDENTITY-01): the app ring never logs, so the per-ingest
+	// outcome counts leave through a port and land here, where the logger lives.
+	kn.Scanner.WithIngestReporter(ingestLogger{logger.Component("scanner-ingest")})
 	go reverdictLoop(kn.Reverdict, cfg.reverdictInterval, logger.Component("reverdict"))
 	go reclassifyLoop(kn.Reclassify, cfg.reclassifyInterval, logger.Component("reclassify"))
 	logger.Info("re-verdict sweep enabled (EDR-VERDICT-01 D6)",
@@ -450,6 +453,25 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 	for range ticker.C {
 		sweep()
 	}
+}
+
+// ingestLogger surfaces the outcome of one scanner-report ingest (EDR-IDENTITY-01 D6).
+//
+// Every count on one line, on every ingest including a clean one. Two of these were invisible
+// before: `unresolved` did not exist, and `skipped` was computed and never logged at all
+// (KN-SCAN-OBS-1) — so a report that half-translated looked exactly like one that fully
+// ingested. A non-zero `unresolved` is the headline: those observations named a component whose
+// identity could not be established, they are NOT bystanders, and they do not reach the posture.
+type ingestLogger struct{ log *observability.Logger }
+
+func (l ingestLogger) ScannerIngest(releaseID, evidenceID string, recorded, items, skipped, unresolved int) {
+	l.log.Info("scanner report ingested",
+		observability.String("release_id", releaseID),
+		observability.String("evidence_id", evidenceID),
+		observability.Int("recorded", recorded),
+		observability.Int("items", items),
+		observability.Int("skipped", skipped),
+		observability.Int("unresolved", unresolved))
 }
 
 // reverdictLoop re-judges match rows whose verdict stamps lag — their card's version (new data)

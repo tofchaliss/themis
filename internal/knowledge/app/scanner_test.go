@@ -189,3 +189,172 @@ func TestCoordinator_ScannerReadErrorPropagates(t *testing.T) {
 		t.Fatal("a scanner read-phase error must propagate")
 	}
 }
+
+// identityLedger/identityInventory supply the release's canonical inventory — the authoritative
+// candidate set for identity resolution (EDR-IDENTITY-01 D2).
+type identityLedger struct {
+	ev    string
+	found bool
+	err   error
+}
+
+func (l identityLedger) EvidenceForRelease(context.Context, string) (string, bool, error) {
+	return l.ev, l.found, l.err
+}
+
+type identityInventory struct {
+	comps []app.InventoryComponent
+	err   error
+}
+
+func (i identityInventory) GetInventory(context.Context, string) (app.Inventory, error) {
+	return app.Inventory{Components: i.comps}, i.err
+}
+
+type capturedIngest struct {
+	calls                                int
+	recorded, items, skipped, unresolved int
+}
+
+func (c *capturedIngest) ScannerIngest(_, _ string, recorded, items, skipped, unresolved int) {
+	c.calls++
+	c.recorded, c.items, c.skipped, c.unresolved = recorded, items, skipped, unresolved
+}
+
+// The measured case, end to end (EDR-IDENTITY-01 D2): a scanner observation carrying `app:httpd`
+// resolves onto the release's own `pkg:rpm/rocky/httpd@2.4.57` — ONE component, not two security
+// subjects. Before this, the observation was recorded with that raw string as its identity and
+// became a subject on 60+ cards.
+func TestScannerReport_ResolvesPurllessObservationOntoItsTwin(t *testing.T) {
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+			Origin:    "scanner/cortex"},
+	}}
+	matches := newMatches()
+	report := &capturedIngest{}
+	svc := scannerService(t, src, matches, newRepo()).
+		WithIdentityCandidates(identityLedger{ev: "ev-sbom", found: true},
+			identityInventory{comps: []app.InventoryComponent{
+				{PURL: "pkg:rpm/rocky/httpd@2.4.57", Name: "httpd", Version: "2.4.57", Ecosystem: "rpm"},
+			}}).
+		WithIngestReporter(report)
+
+	if n, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil || n != 1 {
+		t.Fatalf("Ingest = %d, %v; want 1, nil", n, err)
+	}
+	if _, ok := matches.byPURL["pkg:rpm/rocky/httpd@2.4.57"]; !ok {
+		t.Errorf("the observation did not land on the twin's purl; recorded %v", matches.byPURL)
+	}
+	if _, ok := matches.byPURL["app:httpd"]; ok {
+		t.Error("the raw identifier was recorded as an identity — exactly the defect D1 forbids")
+	}
+	// D6: the counts reach an operator, on every ingest.
+	if report.calls != 1 || report.recorded != 1 || report.items != 1 || report.unresolved != 0 {
+		t.Errorf("report = %+v, want one call with 1 recorded / 1 item / 0 unresolved", report)
+	}
+}
+
+// D2/D6: with no twin the observation ABSTAINS — retained and counted as unresolved, never
+// guessed at, never recorded with an unusable identity, and never treated as a bystander.
+func TestScannerReport_UnresolvedObservationIsCountedNotRecorded(t *testing.T) {
+	src := fakeScannerSource{skipped: 2, props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+			Origin:    "scanner/cortex"},
+		{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}, Origin: "scanner"},
+	}}
+	matches := newMatches()
+	report := &capturedIngest{}
+	// A scanner-ONLY release: the ledger has no correlated evidence, so there is never a twin.
+	svc := scannerService(t, src, matches, newRepo()).
+		WithIdentityCandidates(identityLedger{}, identityInventory{}).
+		WithIngestReporter(report)
+
+	n, err := svc.Ingest(context.Background(), "rel-1", "ev-report")
+	if err != nil {
+		t.Fatalf("an unresolvable observation must not fail the ingest: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("recorded %d matches, want 1 — only the identifiable component", n)
+	}
+	if _, ok := matches.byPURL["app:httpd"]; ok {
+		t.Error("an unresolved observation was recorded; no row may carry a non-identity")
+	}
+	if _, ok := matches.byPURL[""]; ok {
+		t.Error("a row with an EMPTY purl was written — the primary-key collapse and the stream halt")
+	}
+	// The whole point of D6: it is visible. `skipped` was computed and never surfaced before
+	// (KN-SCAN-OBS-1), so a half-translated report looked exactly like a clean one.
+	if report.calls != 1 || report.unresolved != 1 || report.skipped != 2 || report.recorded != 1 {
+		t.Errorf("report = %+v, want 1 unresolved / 2 skipped / 1 recorded", report)
+	}
+}
+
+// Ambiguity abstains (D2). Two distinct purls for one name+version is exactly the case where a
+// guess would be wrong, so no tie-break is invented — and an unreadable inventory degrades the
+// same way, because a poorer context must never be stamped as an answer.
+func TestScannerReport_AmbiguityAndDegradationBothAbstain(t *testing.T) {
+	obs := app.ScannerProposal{
+		CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+		Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+		Origin:    "scanner/cortex",
+	}
+	twins := []app.InventoryComponent{
+		{PURL: "pkg:rpm/rocky/httpd@2.4.57", Name: "httpd", Version: "2.4.57", Ecosystem: "rpm"},
+		{PURL: "pkg:rpm/rhel/httpd@2.4.57", Name: "httpd", Version: "2.4.57", Ecosystem: "rpm"},
+	}
+	for _, tc := range []struct {
+		name      string
+		ledger    identityLedger
+		inventory identityInventory
+	}{
+		{"two candidates", identityLedger{ev: "ev-sbom", found: true}, identityInventory{comps: twins}},
+		{"inventory read fails", identityLedger{ev: "ev-sbom", found: true}, identityInventory{err: errors.New("evidence down")}},
+		{"ledger read fails", identityLedger{err: errors.New("db down")}, identityInventory{comps: twins[:1]}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			matches := newMatches()
+			report := &capturedIngest{}
+			svc := scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs}}, matches, newRepo()).
+				WithIdentityCandidates(tc.ledger, tc.inventory).
+				WithIngestReporter(report)
+			if _, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil {
+				t.Fatalf("degradation must not fail the ingest: %v", err)
+			}
+			if len(matches.byPURL) != 0 {
+				t.Errorf("recorded %v, want nothing — abstention writes no row", matches.byPURL)
+			}
+			if report.unresolved != 1 {
+				t.Errorf("unresolved = %d, want 1 — abstention must still be visible", report.unresolved)
+			}
+		})
+	}
+}
+
+// The candidate set includes the report's OWN usable components, because twins can travel
+// together in one document — the measured SPDX file carried both. With no inventory wired at all
+// (single-context dev), that is the only source, and it must still work.
+func TestScannerReport_ReportsOwnComponentsAreCandidates(t *testing.T) {
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+			Origin:    "scanner/cortex"},
+		{CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+			Component: app.InventoryComponent{
+				PURL: "pkg:rpm/rocky/httpd@2.4.57", Name: "httpd", Version: "2.4.57", Ecosystem: "rpm"},
+			Origin: "scanner/cortex"},
+	}}
+	matches := newMatches()
+	svc := scannerService(t, src, matches, newRepo()) // no identity ports wired at all
+	if _, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if _, ok := matches.byPURL["pkg:rpm/rocky/httpd@2.4.57"]; !ok {
+		t.Errorf("the twin in the same report was not used as a candidate; recorded %v", matches.byPURL)
+	}
+	if _, ok := matches.byPURL["app:httpd"]; ok {
+		t.Error("the raw identifier was recorded as an identity")
+	}
+}
