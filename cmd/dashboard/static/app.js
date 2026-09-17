@@ -137,6 +137,27 @@ const claimNote = (c) => c === "scope"
   ? ` <span class="chip chip-info" title="in the advisory's rebuild set; no evidence it carries the flaw">scope</span>`
   : (c === "carrier" ? ` <span class="chip" title="evidence says this package carries the flaw">carrier</span>` : "");
 
+/* The carrier ATTRIBUTION GAP (EDR-ATTRIBUTION-01 D1/D3/D6).
+
+   gap = the card names carrier products AND none of them matched any component here.
+
+   It says exactly one thing: Themis has insufficient identity evidence to attribute this carrier
+   to an installed component. It says NOTHING about whether anything is affected — the measured
+   proof is CVE-2023-32681, a `requests` flaw whose only components are python3-ply and
+   python3-pyyaml with no python3-requests installed: carriers known, zero matches, and every
+   component a legitimate bystander. So a gap is an OBSERVATION, never a verdict, and it is
+   deliberately NOT the `unknown` claim class, which means something different (affected,
+   attribution missing, acts as carrier).
+
+   DERIVED here, not served and not stored (D3): ClassifyClaim returns `scope` only when carriers
+   are non-empty and the component matched none of them, so "every component is scope" is exactly
+   equivalent to the gap. The data is already in this response; an API field would duplicate a
+   derivation, and a column would turn an observability question into another domain object. */
+const isAttributionGap = (components) => {
+  const cs = components || [];
+  return cs.length > 0 && cs.every((c) => c.claim_class === "scope");
+};
+
 /* Occurrence verdicts (EDR-VERDICT-01 D9). A cleared row is the MACHINE's "handled" — the
    installed files provably carry the vendor's fix — distinct from a human decision, and its
    evidence grade is always shown: `observed` = direct evidence (own build vs the bound, or an
@@ -469,6 +490,12 @@ async function viewRelease(releaseId, version) {
     const carriers = (p.components || []).filter((c) => c.claim_class !== "scope");
     return carriers.length > 0 && carriers.every(verdictCleared);
   }).length;
+  // Attribution gaps, counted SEPARATELY from `clearedAll` on purpose (EDR-ATTRIBUTION-01 D6).
+  // Folding them into the cleared tile would assert that their components are carriers, which is
+  // the one thing the gap explicitly does not claim. The operator should read "verified
+  // clearances on cards whose carrier we could not attribute", never "carriers".
+  const gaps = posture.filter((p) => isAttributionGap(p.components));
+  const gapCleared = gaps.filter((p) => (p.components || []).every(verdictCleared)).length;
   const mult = posture.length ? Math.max(...posture.map((p) => p.blast_multiplier || 1)) : 1;
   const bandCounts = BANDS.map(([b]) => [b, posture.filter((p) => p.band === b).length]);
   const unbanded = posture.length - bandCounts.reduce((s, [, n]) => s + n, 0);
@@ -483,6 +510,9 @@ async function viewRelease(releaseId, version) {
         <div class="tile-note">not_affected / accepted_risk — kept, not deleted</div></div>
       <div class="tile tile-c"><div class="tile-value">${clearedAll}</div><div class="tile-label">Cleared — no action</div>
         <div class="tile-note">vendor fix proven on every copy (identified false positives)</div></div>
+      <div class="tile tile-d"><div class="tile-value">${gaps.length}<span style="font-size:14px;color:var(--ink2)"> · ${gapCleared} cleared</span></div>
+        <div class="tile-label">Attribution gap</div>
+        <div class="tile-note" title="the card names carrier products and none matched a component here, so Themis cannot attribute the carrier to anything installed. An OBSERVATION, not a verdict: it says nothing about whether these components are affected. The cleared half is verified vendor fixes that the Cleared tile cannot count, because counting them there would assert these components are carriers.">carrier named, none matched — not a verdict</div></div>
       <div class="tile tile-a"><div class="tile-value">${blast ? blast.unique_customers : "—"}<span style="font-size:14px;color:var(--ink2)"> · ×${mult.toFixed(1)}</span></div>
         <div class="tile-label">Blast radius</div><div class="tile-note">unique customers · priority multiplier</div></div>
     </div>
@@ -657,10 +687,17 @@ function componentCell(components) {
   const openCarriers = carriers.filter((c) => !verdictCleared(c));
   const head = openCarriers[0] || carriers[0] || cs[0];
   const more = cs.length - 1;
+  // A gap finding has no carrier copy, so the `all cleared` chip above can never fire for it and
+  // its verified clearances were invisible in this column (EDR-ATTRIBUTION-01 D6 — the measured
+  // cost). It gets its OWN chip, worded so it asserts nothing about carrier status.
+  const gap = isAttributionGap(cs);
+  const gapAllCleared = gap && cs.every(verdictCleared);
   return `<span class="mono">${esc(head.name)}${head.version ? "@" + esc(head.version) : ""}</span>`
     + claimNote(head.claim_class)
     + (carriers.length > 0 && openCarriers.length === 0
       ? ` <span class="chip chip-accent" title="every carrier copy provably carries its vendor fix — the finding has left the ranked queue without any row being deleted; open the drawer for each copy's stated reason">✓ all cleared</span>` : "")
+    + (gap ? ` <span class="chip chip-warn" title="the card names carrier products and none matched a component here — Themis cannot attribute the carrier to anything installed. This says NOTHING about whether these components are affected; it is an attribution observation, not a verdict.">attribution gap</span>` : "")
+    + (gapAllCleared ? ` <span class="chip chip-info" title="every recorded copy provably carries its vendor fix, but the carrier itself could not be attributed — so this is NOT counted as an identified false positive">✓ cleared · unattributed</span>` : "")
     + (more > 0 ? ` <span class="chip chip-info">+${more} more</span>` : "");
 }
 

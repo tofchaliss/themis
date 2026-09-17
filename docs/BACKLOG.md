@@ -3195,7 +3195,7 @@ under the 2026-08-07 re-derivation standard.
   second vendor path speculatively would be scope creep. Same for AlmaLinux (ALSA) and Oracle
   (ELSA) if those estates appear. **Dep:** none. **Scope:** MED (the pattern is now proven).
 
-- [ ] **ATTR-GAP-1 — surface the carrier attribution gap (filed 2026-09-17, specified in
+- [x] **ATTR-GAP-1 — surface the carrier attribution gap (filed + SHIPPED 2026-09-17, specified in
   [`EDR-ATTRIBUTION-01`](engineering/decisions/EDR-ATTRIBUTION-01.md) D1/D3/D6).** MED,
   correctness-of-presentation. `carrier attribution gap = carriers exist + zero deterministic
   component matches`. It states only that *Themis has insufficient identity evidence to attribute
@@ -3219,7 +3219,32 @@ under the 2026-08-07 re-derivation standard.
   "how do we resolve the identity"; it is purely how to make an absence visible and countable
   while it stays an absence. D3's equivalence is what makes the second constraint satisfiable:
   the gap is derivable from classification state that already exists.
-  **Dep:** none. **Scope:** SMALL-MEDIUM (a derived field + the tile + a count).
+  ---
+  **SHIPPED 2026-09-17, and it needed NO API change, NO migration and NO event.** Both constraints
+  held: the gap turns into no verdict and no new persistence model.
+  **Why it came out that cheap:** both carrier gates in the GUI were already client-side, computed
+  from `p.components`, which the posture response already serves. So the gap is derived AT THE
+  CONSUMER — `isAttributionGap(cs)` = *components exist and every one is `scope`*. An API field
+  would have duplicated a derivation; a column would have turned an observability question into
+  another domain object, which is exactly what D3 exists to avoid.
+  **Counted SEPARATELY from the Cleared tile, deliberately.** Folding gap findings into
+  `clearedAll` would assert their components are carriers — the one thing the gap explicitly does
+  not claim. The new tile reads `<gaps> · <n> cleared` with the label "carrier named, none
+  matched — not a verdict", so an operator sees *verified clearances on cards whose carrier we
+  could not attribute*, never *carriers*.
+  **Two chips in the component column**, because a gap finding has no carrier copy and therefore
+  could never fire the existing `✓ all cleared` chip — which is precisely how its verified
+  clearances were invisible: `attribution gap` (worded to assert nothing about affectedness) and
+  `✓ cleared · unattributed` (stated as NOT an identified false positive).
+  **`scripts/vm-verify.sh` reports it too**, so the count is operator-visible without the GUI,
+  using the same SQL derivation plus a line stating that a gap is not a verdict.
+  **Found while implementing:** a backtick inside a template literal in `app.js` broke the parse —
+  caught by `make js-check`, which is the third time in one session that a backtick in a quoted
+  context bit (SQL string, `git merge -m`, now JS).
+  **NOT live-verified.** Expected on the VM: the tile reads **227** gaps with the cleared half
+  non-zero, `python3-pyyaml`/`python3-ply` still `scope` with no class changed anywhere, and no
+  component anywhere classified `unknown` by a gap.
+  **Dep:** none. **Scope:** was SMALL-MEDIUM; came in smaller — GUI + one script, no Go change.
 
 - [x] **ATTR-CPE-1 — the CPE acquisition experiment: RUN 2026-09-17, NEGATIVE RESULT (filed and
   closed the same day,

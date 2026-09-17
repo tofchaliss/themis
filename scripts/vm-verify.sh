@@ -179,6 +179,31 @@ q knowledge "select source||' consecutive_failures='||consecutive_failures from 
 hdr "Carrier attribution (EDR-CORRELATION-01)"
 CARR="$(q knowledge "select count(*) from faultlines where (view->'carrier_products') is not null and jsonb_array_length(view->'carrier_products') > 0")"
 info "cards with carrier products: ${CARR:-0} of ${FL:-0}"
+# The carrier ATTRIBUTION GAP (EDR-ATTRIBUTION-01 D1/D3/D6): the card names carrier products and
+# none matched a component here, so Themis cannot attribute the carrier to anything installed.
+#
+# An OBSERVATION, not a verdict -- it says nothing about whether these components are affected.
+# The measured proof is CVE-2023-32681, a `requests` flaw whose only components are python3-ply
+# and python3-pyyaml with no python3-requests installed: carriers known, zero matches, every
+# component a legitimate bystander.
+#
+# DERIVED, never stored (D3): ClassifyClaim returns `scope` only when carriers are non-empty and
+# the component matched none, so "every active component is scope" IS the gap. The `cleared` half
+# is verified vendor fixes the cleared tile cannot count, because counting them there would
+# assert these components are carriers.
+GAPS="$(q governance "select count(*) from (
+          select f.id from findings f join finding_components c on c.finding_id=f.id
+          where c.retired_at is null
+          group by f.id having bool_and(c.claim_class='scope')) x")"
+GAPC="$(q governance "select count(*) from (
+          select f.id from findings f join finding_components c on c.finding_id=f.id
+          where c.retired_at is null
+          group by f.id having bool_and(c.claim_class='scope')
+             and bool_and(c.verdict_state='cleared_vendor_fix')) x")"
+printf '    attribution gaps: %s findings (%s fully cleared) — carrier named, none matched\n' \
+  "${GAPS:-?}" "${GAPC:-?}"
+info "an attribution gap is NOT a verdict — it states only that identity evidence is insufficient"
+
 q governance "select coalesce(nullif(claim_class,''),'(unknown)')||' '||count(*) from finding_components group by 1 order by 2 desc" \
   | while read -r line; do info "$line components"; done
 info "unknown behaves as carrier — coverage grows as NVD refreshes; it is not a fault"
