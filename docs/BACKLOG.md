@@ -3398,8 +3398,8 @@ under the 2026-08-07 re-derivation standard.
   | --- | --- | --- | --- | --- |
   | `python` | `python3-pyyaml` | `pyyaml` | scope | ✅ correct — a genuine module-stream bystander |
   | `python` | `python3` | `python3` | carrier | ✅ correct |
-  | `http_server` | `httpd` | `httpd` | scope | ❌ **A — project name vs binary name** |
-  | `spring_framework` | `spring-core` | `spring-core` | scope | ❌ **A** |
+  | `http_server` | `httpd` | `httpd` | scope | ❌ **A — SYNONYM; the only one left, now EDR-1's** |
+  | `spring_framework` | `spring-core` | `spring-core` | **carrier** | ✅ **FIXED 2026-09-17** (was ❌ A — shared stem, divergent tails) |
   | `perl` | `perl-interpreter` | `perl-interpreter` | **carrier** | ✅ **FIXED 2026-09-16** (was ❌ B — the strip removed the token that would have matched) |
   | `perl` | `perl-libs` | `perl-libs` | **carrier** | ✅ **FIXED 2026-09-16** (same shape as the `openssl-libs`→`openssl` note under KN-FIX-4) |
 
@@ -3480,10 +3480,12 @@ under the 2026-08-07 re-derivation standard.
   VISIBLY broken. A mis-split landing on a plausible fragment yields a wrong-but-normal-looking
   carrier that nothing would surface. Fix `cpeProduct` to respect CPE 2.3 escaping rather than
   splitting naively on `:`.
-  **Side effect of `minProductOverlap = 3`, measured:** legitimately short project names exist
-  (`jq` 16 cards, `xz` 1). They still match by EQUALITY (checked before the length guard), but
-  can never match by containment — so `jq` classifies a component `jq` as carrier and `jq-libs`
-  as scope. Minor, but it belongs to whatever rule replaces `relatedProduct`.
+  **Side effect of `minProductOverlap = 3`, measured — ✅ FIXED 2026-09-17.** Legitimately short
+  project names exist (`jq` 16 cards, `xz` 1). They matched by EQUALITY (checked before the
+  length guard) but could never match by containment, so `jq` classified a component `jq` as
+  carrier and `jq-libs` as scope. The floor still guards containment (`jq` inside `jquery` is the
+  shape it forbids) and no longer gates token overlap, where a whole token standing alone is
+  evidence a bare substring is not.
 
   ---
   **THREE OF THE FOUR SHIPPED 2026-09-16** (`fix/carrier-correlation-defects`). The deterministic
@@ -3507,15 +3509,51 @@ under the 2026-08-07 re-derivation standard.
     carrier — so the fail-safe direction survives by construction. **Deliberately NOT applied to
     `nvdConfigsMatchProduct`**: that gate decides DISCOVERY, where narrowing risks a false
     negative, and it was not the measured defect. feed 92.1%.
-  - ⬜ **Vocabulary gap** — unchanged and structural. `http_server` ↔ `httpd` and
-    `spring_framework` ↔ `spring-core` still do not resolve, by design, until EDR-3 decides what
-    an unbridgeable mismatch should mean.
+  - ✅ **Variant A, the SIBLING half — shipped 2026-09-17** (`fix/kn-claim-token-overlap`).
+    `relatedProduct` now also relates two names that share a DISTINGUISHING token, which closes
+    the two shapes containment structurally cannot reach: a shared stem with divergent tails
+    (`spring_framework` ↔ `spring-core`/`spring-web`, 20 findings) and a project name below the
+    containment floor (`xz` ↔ `xz-libs`). The rule is purely ADDITIVE — equality and containment
+    are retained — so it can only move `scope`→`carrier`, never the reverse, and every
+    previously-correct carrier verdict survives by construction.
+    **The generic-token filter is what keeps it from over-matching into uselessness.** A shared
+    token is evidence only when the token distinguishes something: `spring-core`/`openssl-core`
+    share `core` and `http-server`/`nginx-server` share `server`, and without the filter every
+    `-core`/`-server`/`-libs` package would carry every other one's flaws — `claim_class` would
+    stop discriminating at all, which is the one way this predicate can fail broadly AND
+    silently. `roleSuffixes` is generic by construction; `extraGenericTokens` adds the structure
+    words that are not wrapper-strip candidates. **Language names are deliberately absent** — a
+    language token survives normalization only in the role-protected case (`perl-libs`,
+    `python3-devel`), which is exactly a true positive.
+    `minTokenLen = 2` admits the real two-character projects while still rejecting the
+    single-character CPE debris. Both bystander guards re-measured and holding:
+    `python`↔`python3-pyyaml` and `commons-beanutils`↔`javapackages-filesystem` stay `scope`.
+    domain 100%.
+  - ⬜ **Vocabulary gap — now SYNONYMS ONLY, and it belongs to EDR-1.** `http_server` ↔ `httpd`
+    shares no token and no substring, because it is a SYNONYM rather than a name variation. No
+    string comparison can bridge it, and forcing it would be the alias table both reviewers
+    rejected, arriving by a different door. **Decided 2026-09-17: it stays with the intake
+    identity model (EDR-1), not with the correlation predicate.** The boundary is asserted as a
+    TEST in `claimclass_test.go` — if that case ever starts passing there, an alias table has
+    grown inside the correlation vocabulary.
 
-  **NOT yet live-verified.** Claim class is computed once at match time and never re-derived, so
-  these fixes change nothing for existing rows until something re-matches them — the same trap
-  KN-VERDICT-2 describes. A re-classification path is still required (see the sibling defect
-  below), and GOV-MIRROR-1 means a Knowledge-side re-classification would not reach Governance
-  on its own either.
+  **NOT yet live-verified — and the MECHANISM is narrower than first recorded (corrected
+  2026-09-17).** The earlier note said claim class "is computed once at match time and never
+  re-derived". The conclusion holds, the reason does not: a re-derivation path already exists.
+  `FaultlineService.FoldProposal` (`service.go:163`) calls `reannounceMatches`, which recomputes
+  `ClassifyClaim` from the CURRENT card and replays every recorded occurrence — so the new rules
+  WOULD be applied by it.
+  It is scoped to the **empty→non-empty carrier transition**, deliberately, so it fires exactly
+  ONCE per card. Every card behind the measured 158 findings already has carriers, so that
+  trigger is **already spent and can never fire again**.
+  **Why this matters: going live is now cheap.** The propagation machinery exists and is already
+  idempotent downstream — `finding_components.claim_class` accepts any non-empty incoming value
+  (`store.go:293`), so a re-announce carries a re-classification through to Governance without
+  the GOV-MIRROR-1 gap applying. The only open question is what RE-ARMS the trigger: a card-level
+  re-classification sweep, modelled on `reverdict.go`'s `Sweep`, is the obvious shape.
+  **One risk to design for:** because any non-empty class wins, a re-announce propagates
+  `carrier`→`scope` as readily as the reverse. A sweep must therefore be run against the
+  carrier/scope property tests, not just spot-checked.
 
   ---
   **EDR-2 STOPPING POINT (2026-09-16) — INVESTIGATED, deliberately NOT designed.** Three of
@@ -3531,17 +3569,23 @@ under the 2026-08-07 re-derivation standard.
   **Invariant for whatever replaces `relatedProduct`:** *it may establish a DETERMINISTIC name
   correspondence; it must not manufacture one where the available evidence says only that two
   names are different.*
-  **NEXT SESSION AGENDA (do not re-derive this):**
-  1. Establish `relatedProduct`'s CURRENT contract from the code + its tests — what does `true`
-     actually mean today? Same project · probable name correspondence · evidence sufficient to
-     classify `scope` · or merely a candidate-generation predicate? EDR-3 may own the final
-     uncertainty decision, and which one it is decides where the boundary sits.
-  2. Trace the three cases separately, since only the first two belong INSIDE the predicate:
-     wrapped name (`perl-interpreter` ↔ `perl`, should correlate) · short project (`jq` ↔ `jq`,
-     equality should correlate) · different vocabulary (`http_server` ↔ `httpd`,
-     `spring_framework` ↔ `spring-core` — must NOT be forced).
-  3. Define the minimal replacement and test it against all four measured cases — perl, jq/xz,
-     httpd, spring-core — BEFORE writing the EDR-3 boundary.
+  **AGENDA ITEMS 1–3 COMPLETED 2026-09-17.** The contract was established from the code and
+  its tests (one caller, `ClassifyClaim`; the operator was equality OR bidirectional full-string
+  containment gated at ≥3 chars on the shorter side, both sides pre-normalized), all four cases
+  were measured in-package BEFORE and AFTER, and the minimal replacement shipped.
+  **What `true` MEANS, now decided:** `relatedProduct` is a *deterministic name-correspondence*
+  predicate. It answers "do these two names demonstrably denote one project?" — it is NOT a
+  same-project oracle, and it never asserts difference. That is why `false` yields `scope` only
+  when SOME carrier on the card matched something, and why the unbridgeable case must land in
+  identity, not here.
+  **WHAT REMAINS (do not re-derive the above):**
+  1. **Re-classification sweep** — re-arm the one-shot re-announce so the shipped rules reach the
+     existing estate. Reuse `reannounceMatches`; model the sweep on `reverdict.go`. This is the
+     only thing standing between four shipped fixes and a measurable change on the VM.
+  2. **EDR-1 (intake identity)** now owns the synonym class. The spec is already agreed; the
+     httpd row is its first measured test case.
+  3. **Relabel the 238/158** once 1 lands, and re-measure per-component counts — the python
+     cluster should be unchanged (it is the feature working), spring should go to zero.
 
   **Sibling defect, same root, file together:** the claim class is computed ONCE at match time
   (`app/{correlate,scanner,service}.go` all call `ClassifyClaim(f.View().CarrierProducts, …)`)

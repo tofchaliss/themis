@@ -143,22 +143,113 @@ func MatchesFixPackage(fixPkg, queryPkg string) bool {
 	return wrapperFamily(fw) == wrapperFamily(qw)
 }
 
-// minProductOverlap is the shortest normalized name allowed to match by containment. Below it a
-// substring match is coincidence rather than evidence.
+// minProductOverlap is the shortest normalized name allowed to match by CONTAINMENT. Below it a
+// substring match is coincidence rather than evidence — `jq` inside `jquery` is the shape it
+// forbids. It deliberately does NOT gate token overlap, where a whole token standing alone is
+// evidence in a way a bare substring never is.
 const minProductOverlap = 3
+
+// minTokenLen is the shortest token allowed to stand as evidence by itself. It admits the real
+// two-character projects (`jq`, `xz`) that the containment floor locks out, while still rejecting
+// the single-character debris that reaches carrier lists from malformed CPE records — a literal
+// `\` was measured on two cards, 2026-09-16.
+const minTokenLen = 2
+
+// extraGenericTokens are packaging-structure words that appear inside many unrelated project
+// names. A shared token is evidence of a shared project only when the token DISTINGUISHES
+// something: `spring-framework` and `spring-core` share `spring`, which is a project name, while
+// `spring-core` and `openssl-core` share `core`, which is a packaging role and says nothing.
+// Without this filter, token overlap would make every `-server`, `-core` and `-libs` package a
+// carrier of every other one's flaws — over-matching so broad that `claim_class` would stop
+// discriminating at all, which is the one way this function can fail usefully AND silently.
+//
+// Every roleSuffixes word is generic by construction — they ARE packaging roles — so this set
+// only adds the structure words that are not wrapper-strip candidates.
+//
+// Language names are deliberately ABSENT. A language token survives normalization only in the
+// role-protected case (`perl-libs`, `python3-devel`), and that case is exactly a true positive;
+// marking `perl` generic would throw away the evidence the role rule was added to keep.
+var extraGenericTokens = map[string]struct{}{
+	"server": {}, "client": {}, "daemon": {}, "agent": {}, "service": {}, "runtime": {},
+	"framework": {}, "engine": {}, "library": {}, "libraries": {}, "module": {}, "modules": {},
+	"plugin": {}, "plugins": {}, "driver": {}, "drivers": {}, "api": {}, "sdk": {}, "cli": {},
+	"gui": {}, "web": {}, "app": {}, "apps": {}, "base": {}, "main": {}, "minimal": {},
+	"full": {}, "extras": {}, "compat": {}, "legacy": {}, "data": {}, "config": {}, "conf": {},
+	"source": {}, "src": {}, "dev": {}, "test": {}, "tests": {}, "examples": {}, "samples": {},
+	"man": {}, "locale": {}, "debug": {}, "debuginfo": {}, "debugsource": {}, "selinux": {},
+	"systemd": {}, "init": {}, "scripts": {}, "bindings": {}, "filesystem": {}, "all": {},
+	"util": {}, "tool": {},
+}
+
+// isGenericToken reports whether a token is packaging vocabulary rather than a project name.
+func isGenericToken(t string) bool {
+	if _, isRole := roleSuffixes[t]; isRole {
+		return true
+	}
+	_, isGeneric := extraGenericTokens[t]
+	return isGeneric
+}
+
+// distinguishingTokens splits a normalized name on `-` and keeps only the tokens that could
+// identify a project at all.
+func distinguishingTokens(n string) []string {
+	var out []string
+	for _, t := range strings.Split(n, "-") {
+		if len(t) < minTokenLen || isGenericToken(t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// sharesDistinguishingToken reports whether two normalized names have a project-identifying
+// token in common. Names carry one to four tokens, so the nested scan is cheaper than building
+// a set.
+func sharesDistinguishingToken(a, b string) bool {
+	at := distinguishingTokens(a)
+	if len(at) == 0 {
+		return false // nothing but packaging vocabulary — no claim either way
+	}
+	bt := distinguishingTokens(b)
+	for _, x := range at {
+		for _, y := range bt {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // relatedProduct reports whether two normalized names describe the same project.
 //
-// It is deliberately ASYMMETRIC IN RISK: equality OR containment counts, so it errs toward
-// CARRIER. A distro splits an upstream project across packages that keep its name as a stem —
-// `vim` → `vim-minimal`, `openssl` → `openssl-libs` — and NVD names the project while a vendor
-// prefixes it (`commons-beanutils` vs `apache-commons-beanutils`). Demanding exact equality
-// classified `apache-commons-beanutils` as SCOPE for its own CVE.
+// It is deliberately ASYMMETRIC IN RISK: equality, containment OR a shared distinguishing token
+// counts, so it errs toward CARRIER. A distro splits an upstream project across packages that
+// keep its name as a stem — `vim` -> `vim-minimal`, `openssl` -> `openssl-libs` — and NVD names
+// the project while a vendor prefixes it (`commons-beanutils` vs `apache-commons-beanutils`).
+// Demanding exact equality classified `apache-commons-beanutils` as SCOPE for its own CVE.
 //
 // Over-matching costs precision: a bystander stays a carrier and nothing improves for it.
 // Under-matching would mark a genuinely vulnerable package as `scope`, and a consumer acting on
 // that could drop it from a plan. Only one of those hides a vulnerability, so the comparison
 // leans the other way.
+//
+// The token rule (KN-CLAIM-1 variant C, measured 2026-09-17) closes two shapes containment
+// cannot reach, both of them SIBLING packages of one upstream project:
+//
+//   - a shared stem with divergent tails — `spring_framework` (NVD) vs `spring-core` /
+//     `spring-web` (the SBOM). Neither string contains the other, so containment called the
+//     framework's own CVEs `scope` on 20 findings. This is not a distro problem: the components
+//     are maven, with a single clean carrier.
+//   - a project name below the containment floor — `xz` vs `xz-libs`. Two-character projects
+//     (`jq`, `xz`, `mc`, `bc`) could previously match ONLY their own exact name, so every
+//     sub-package of one was silently scope.
+//
+// What it deliberately does NOT do is bridge a SYNONYM: `http_server` (NVD's CPE product) and
+// `httpd` (the package) share no token, and no amount of string comparison can relate them.
+// That is a vocabulary/identity problem and it belongs to the intake identity model (EDR-1),
+// not here — the same line the roleSuffixes comment draws around an alias table.
 func relatedProduct(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -170,7 +261,10 @@ func relatedProduct(a, b string) bool {
 	if len(short) > len(long) {
 		short, long = long, short
 	}
-	return len(short) >= minProductOverlap && strings.Contains(long, short)
+	if len(short) >= minProductOverlap && strings.Contains(long, short) {
+		return true
+	}
+	return sharesDistinguishingToken(a, b)
 }
 
 // ClassifyClaim decides what a component's match MEANS, given the products a flaw-describing
