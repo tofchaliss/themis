@@ -135,3 +135,55 @@ func TestVulnFacts_FixVersionsAndUnattributedFixes(t *testing.T) {
 		t.Fatalf("FixVersions = %v, want [2.28 3.0] — attribution dropped, versions kept", got)
 	}
 }
+
+// KN-CLAIM-1, 2026-09-17: a source that re-reports the same CVE with a DIFFERENT carrier set is
+// making a new observation, not restating itself. Leaving CarrierProducts out of the dedup made
+// a corrected carrier list unobservable — severity, CVSS, ranges and fixes are all unchanged on
+// an NVD re-poll — which silently defeated the inline re-classification trigger that watches for
+// exactly this change, and the CPE-escaping repair whose whole effect is a different name.
+func TestCarrierProductsChangeIsNotARestatement(t *testing.T) {
+	at := time.Now().UTC()
+	mk := func(carriers ...string) domain.Proposal {
+		p, err := domain.NewVulnFactsProposal("nvd", at, domain.VulnFacts{
+			Severity: value.SeverityHigh, CarrierProducts: carriers,
+			AffectedRanges: []string{"<2.4.57"},
+		})
+		if err != nil {
+			t.Fatalf("proposal: %v", err)
+		}
+		return p
+	}
+	f, err := domain.NewFaultline("fl-carriers", mustCVE(t, "CVE-2023-31122"))
+	if err != nil {
+		t.Fatalf("faultline: %v", err)
+	}
+	prec, trust := domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil)
+
+	if res := f.FoldProposal(mk("http_server"), prec, trust); !res.Recorded {
+		t.Fatal("the first statement must be recorded")
+	}
+	// The case that matters: a later poll names an ADDITIONAL carrier. This is the shape the
+	// CPE 2.3 escaping repair produces — a product that used to parse as a lone backslash now
+	// yields its real name — and before this fix it was dropped as a verbatim restatement.
+	if res := f.FoldProposal(mk("http_server", "apache_http_server"), prec, trust); !res.Recorded {
+		t.Error("an ADDED carrier is a new observation, not a restatement")
+	}
+	if got := f.View().CarrierProducts; len(got) != 2 {
+		t.Errorf("carriers = %v, want both — an added carrier must reach the view", got)
+	}
+	// A SMALLER set is recorded too, but the VIEW is a union across every proposal ever
+	// appended, so a carrier can be added and never removed. That is deliberate and fail-safe
+	// (a carrier named by any source keeps its components classified as carriers), and it is
+	// why the shipped CPE application-part filter can only clean cards enriched AFTER it —
+	// re-polling an existing card cannot shrink what the union already holds.
+	if res := f.FoldProposal(mk("http_server"), prec, trust); !res.Recorded {
+		t.Error("a smaller carrier set is still a new observation and must be recorded")
+	}
+	if got := f.View().CarrierProducts; len(got) != 2 {
+		t.Errorf("carriers = %v, want both retained — the view unions, it never removes", got)
+	}
+	// And a restatement identical to the most recent one is still dropped.
+	if res := f.FoldProposal(mk("http_server"), prec, trust); res.Recorded {
+		t.Error("an identical carrier set is a restatement")
+	}
+}

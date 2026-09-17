@@ -129,6 +129,18 @@ func vulnFacts(t *testing.T, source string, sev value.Severity, ranges ...string
 	return p
 }
 
+// vulnFactsCarriers builds facts naming which products CARRY the flaw (EDR-CORRELATION-01 D4).
+func vulnFactsCarriers(t *testing.T, source string, carriers ...string) domain.Proposal {
+	t.Helper()
+	c, _ := value.NewCVSS(7.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
+	p, err := domain.NewVulnFactsProposal(source, time.Unix(1_700_000_000, 0),
+		domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c, CarrierProducts: carriers})
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	return p
+}
+
 // vulnFactsFixed builds facts whose fix version carries NO package — the pre-attribution shape a
 // CPE-keyed source (NVD) still legitimately produces.
 func vulnFactsFixed(t *testing.T, source string, fixed ...string) domain.Proposal {
@@ -558,8 +570,8 @@ func TestRecordMatch_VerdictLifecycle(t *testing.T) {
 	}
 	m := app.Match{
 		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2024-47",
-		Component:  app.InventoryComponent{PURL: "pkg:rpm/rhel/openssl@1.0.2k-10.el8", Version: "1.0.2k-10.el8", Ecosystem: "rpm"},
-		Verdict:    domain.OpenVerdict(),
+		Component:   app.InventoryComponent{PURL: "pkg:rpm/rhel/openssl@1.0.2k-10.el8", Version: "1.0.2k-10.el8", Ecosystem: "rpm"},
+		Verdict:     domain.OpenVerdict(),
 		CardVersion: 1, OccurredAt: time.Now().UTC(),
 	}
 	if created, err := st.RecordMatch(ctx, m); err != nil || !created {
@@ -1035,5 +1047,101 @@ func TestRecordMatch_OverlaysCorrectedDetail(t *testing.T) {
 	// No verdict-change events rode any of this: detail correction is not a verdict change.
 	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentVerdictChanged); n != 0 {
 		t.Errorf("ComponentVerdictChanged events = %d, want 0", n)
+	}
+}
+
+// The re-classification sweep end-to-end on a real store (EDR-CORRELATION-01 D3/D4,
+// KN-CLAIM-1): a card whose stamps lag is found, its recorded occurrences are re-announced with
+// classes computed by the CURRENT rules, the stamps advance inside the same transaction, and
+// the next sweep finds nothing.
+//
+// The measured shape it reproduces: spring-core matched a spring_framework CVE and was
+// classified `scope` by the old containment rule, so the Finding left the triage queue. Nothing
+// re-correlates a stable estate, and a rules fix advances no card version — so without this
+// sweep the correction would apply only to matches that do not exist yet.
+func TestReclassifySweep_FullLoop(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2023-31122"),
+		vulnFactsCarriers(t, "nvd", "spring_framework"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier := app.InventoryComponent{
+		PURL: "pkg:maven/org.springframework/spring-core@5.3.0", Name: "spring-core",
+		Version: "5.3.0", Ecosystem: "maven",
+	}
+	bystander := app.InventoryComponent{
+		PURL: "pkg:maven/com.other/unrelated@1.0", Name: "unrelated", Version: "1.0", Ecosystem: "maven",
+	}
+	for _, c := range []app.InventoryComponent{carrier, bystander} {
+		if _, err := st.RecordMatch(ctx, app.Match{
+			ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2023-31122",
+			Component: c, Verdict: domain.OpenVerdict(), CardVersion: f.Version(),
+			OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Every card starts unstamped, so the first sweep sees it. A card with no matches must NOT
+	// be listed — it would spend the batch on a no-op.
+	if _, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2019-10086"),
+		vulnFactsCarriers(t, "nvd", "commons-beanutils")); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := st.StaleClassificationCards(ctx, domain.ClassifierGeneration, 10)
+	if err != nil {
+		t.Fatalf("stale cards: %v", err)
+	}
+	if len(stale) != 1 || stale[0].ID != f.ID() {
+		t.Fatalf("stale = %+v, want only the card that HAS matches", stale)
+	}
+
+	// Recording the first match promoted the card to `correlated` and bumped its version, so
+	// the live version is NOT the one the fold returned. The sweep re-reads the card for
+	// exactly this reason and stamps what it actually classified; a test that stamped the stale
+	// value would leave the card permanently stale and hide the convergence bug.
+	liveVersion := stale[0].Version
+
+	before := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentMatched)
+	notes := []app.OutboxNote{{
+		EventType:  app.EventComponentMatched,
+		Event:      domain.NewComponentMatched(f, "rel-1", nil, time.Now().UTC()),
+		OccurredAt: time.Now().UTC(),
+	}}
+	if err := st.StampReclassified(ctx, f.ID(), liveVersion, domain.ClassifierGeneration, notes); err != nil {
+		t.Fatalf("stamp: %v", err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentMatched); got != before+1 {
+		t.Errorf("ComponentMatched events = %d, want %d — the note must be queued with the stamp", got, before+1)
+	}
+	// The stamp must not disturb the aggregate: bumping version here would make every sweep
+	// look like a card change to the re-verdict sweep and to this sweep's own selector.
+	var version, reVersion, reGeneration int
+	if err := pool.QueryRow(ctx,
+		`SELECT version, reclassified_version, reclassified_generation FROM faultlines WHERE id=$1`,
+		string(f.ID())).Scan(&version, &reVersion, &reGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if version != liveVersion {
+		t.Errorf("card version = %d, want %d unchanged — the stamp must not touch the aggregate", version, liveVersion)
+	}
+	if reVersion != liveVersion || reGeneration != domain.ClassifierGeneration {
+		t.Errorf("stamps = %d/%d, want %d/%d", reVersion, reGeneration, liveVersion, domain.ClassifierGeneration)
+	}
+
+	// Stamped current: the sweep converges.
+	if again, aerr := st.StaleClassificationCards(ctx, domain.ClassifierGeneration, 10); aerr != nil || len(again) != 0 {
+		t.Fatalf("second pass = %+v err=%v, want empty — the sweep must converge", again, aerr)
+	}
+	// A RULES change advances no card version, and the generation stamp is the only thing that
+	// can see it. This is the mechanism that made both 2026-09 carrier fixes ship invisible.
+	next, err := st.StaleClassificationCards(ctx, domain.ClassifierGeneration+1, 10)
+	if err != nil || len(next) != 1 {
+		t.Fatalf("after a generation bump = %+v err=%v, want the card back", next, err)
 	}
 }

@@ -418,12 +418,36 @@ func TestAbsorbComponent_RedeliveryFillsInNewInformation(t *testing.T) {
 		t.Errorf("component = %+v, want source and class filled in", got)
 	}
 
-	// An EMPTY incoming value must never erase what is already known: an unattributed
+	// An empty incoming SOURCE must never erase what is already known: an unattributed
 	// re-delivery cannot undo attribution already established.
-	if changed, err := f.AbsorbComponent(base); err != nil || changed {
-		t.Errorf("unattributed re-delivery: changed=%v, want false — it must not erase", changed)
+	//
+	// claim_class is the deliberate exception (KN-CLAIM-1 Q1, 2026-09-17). Empty there means
+	// UNKNOWN, unknown ACTS AS CARRIER, so empty is the SAFE value rather than the poorer one:
+	// a card that legitimately ends up naming no carriers must be able to lift a stale `scope`,
+	// or the component stays excluded from the queue, from plans and from grounding on evidence
+	// that no longer supports the exclusion.
+	if changed, err := f.AbsorbComponent(base); err != nil || !changed {
+		t.Errorf("unattributed re-delivery: changed=%v err=%v, want true — unknown lifts scope", changed, err)
 	}
-	if got := f.Components()[0]; got.Source != "javapackages-tools" || got.ClaimClass != "scope" {
-		t.Errorf("attribution was erased by an empty re-delivery: %+v", got)
+	got = f.Components()[0]
+	if got.Source != "javapackages-tools" {
+		t.Errorf("source was erased by an empty re-delivery: %+v", got)
+	}
+	if got.ClaimClass != "" {
+		t.Errorf("claim class = %q, want cleared to unknown — unknown acts as carrier", got.ClaimClass)
+	}
+
+	// But a recorded CARRIER is never disturbed by unknown: both act as carrier, and keeping
+	// the more specific value loses nothing.
+	carrier := base
+	carrier.ClaimClass = "carrier"
+	if changed, err := f.AbsorbComponent(carrier); err != nil || !changed {
+		t.Fatalf("carrier re-delivery: changed=%v err=%v, want true/nil", changed, err)
+	}
+	if changed, err := f.AbsorbComponent(base); err != nil || changed {
+		t.Errorf("unknown over carrier: changed=%v err=%v, want false — carrier stands", changed, err)
+	}
+	if got := f.Components()[0].ClaimClass; got != "carrier" {
+		t.Errorf("claim class = %q, want carrier kept", got)
 	}
 }

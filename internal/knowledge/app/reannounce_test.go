@@ -90,13 +90,26 @@ func TestFoldProposal_ReannouncesMatchesWhenCarriersFirstArrive(t *testing.T) {
 			ev.Components[0].ClaimClass)
 	}
 
-	// A LATER enrichment must not re-announce again: the trigger is the empty→non-empty
-	// transition, once per card, not every enrichment.
+	// A later enrichment that leaves the carrier SET unchanged must not re-announce. The
+	// trigger is a change to the carriers, not every enrichment — a third source restating
+	// the same carrier is not news about classification.
 	if _, _, err := svc.FoldProposal(ctx, cve, mk("redhat", "commons-beanutils")); err != nil {
 		t.Fatalf("fold again: %v", err)
 	}
 	if got := countNotes(repo.lastNotes, app.EventComponentMatched); got != 0 {
-		t.Errorf("re-announced again (%d), want 0 — the trigger is the transition", got)
+		t.Errorf("re-announced again (%d), want 0 — the carrier set did not change", got)
+	}
+
+	// But a fold that ADDS a carrier does re-announce (widened 2026-09-17, KN-CLAIM-1). The
+	// old empty→non-empty trigger fired once per card, which populated a class but could never
+	// CORRECT one: a carrier arriving later, or the bundler-pollution filter removing products
+	// that never carried the flaw, left every recorded occurrence holding a class derived from
+	// carriers the card no longer has.
+	if _, _, err := svc.FoldProposal(ctx, cve, mk("osv", "commons-beanutils", "beanutils")); err != nil {
+		t.Fatalf("fold with an added carrier: %v", err)
+	}
+	if got := countNotes(repo.lastNotes, app.EventComponentMatched); got != 1 {
+		t.Errorf("re-announced %d matches after the carrier set changed, want 1", got)
 	}
 }
 

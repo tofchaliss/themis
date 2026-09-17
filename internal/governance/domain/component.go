@@ -48,10 +48,15 @@ type MatchedComponent struct {
 // clearance closes it; unknown/missing states are open (EDR-VERDICT-01 D2).
 func (c MatchedComponent) VerdictIsOpen() bool { return c.VerdictState != "cleared_vendor_fix" }
 
+// ClaimScope is the one class that EXCLUDES a component from carrier treatment — the
+// component was in an advisory's rebuild set with no evidence it carries the flaw
+// (EDR-CORRELATION-01 D3). Named because two rules turn on it and a literal in both drifts.
+const ClaimScope = "scope"
+
 // ActsAsCarrier reports whether this component must be treated as carrying the flaw. Unknown
 // counts: absence of attribution evidence must never hide a live vulnerability, the same
 // fail-safe direction as the range gate's undecidable verdict.
-func (c MatchedComponent) ActsAsCarrier() bool { return c.ClaimClass != "scope" }
+func (c MatchedComponent) ActsAsCarrier() bool { return c.ClaimClass != ClaimScope }
 
 // FixKey returns the names this component may be published under, most specific first: the
 // source package, then `namespace:name` (Maven's groupId:artifactId), then the bare name.

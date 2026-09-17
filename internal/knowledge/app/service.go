@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -110,10 +111,19 @@ func (s *FaultlineService) SupersedeFaultline(ctx context.Context, cve value.CVE
 // reannounceMatches builds a ComponentMatched note per recorded occurrence of a card, carrying the
 // freshly-computed claim class. No-op when no match reader is wired (single-context dev).
 func (s *FaultlineService) reannounceMatches(ctx context.Context, f domain.Faultline, now time.Time) ([]OutboxNote, error) {
-	if s.matches == nil {
+	return reannounceNotes(ctx, s.matches, f, now)
+}
+
+// reannounceNotes recomputes the claim class of every recorded occurrence of a card and returns
+// one ComponentMatched note each. Shared by the inline path (a fold changed the carriers) and
+// the re-classification sweep (history, and a rule-generation change) so there is ONE definition
+// of what a re-announcement contains — the two paths differ in WHEN they fire, never in what
+// they say. No-op when no match reader is wired (single-context dev).
+func reannounceNotes(ctx context.Context, matches MatchReader, f domain.Faultline, now time.Time) ([]OutboxNote, error) {
+	if matches == nil {
 		return nil, nil
 	}
-	occ, err := s.matches.MatchesForFaultline(ctx, string(f.ID()))
+	occ, err := matches.MatchesForFaultline(ctx, string(f.ID()))
 	if err != nil {
 		return nil, err
 	}
@@ -160,24 +170,31 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 			notes = append(notes, OutboxNote{EventType: EventFaultlineCreated, Event: domain.NewFaultlineCreated(f, now), OccurredAt: now})
 		}
 
-		hadCarriers := len(f.View().CarrierProducts) > 0
+		carriersBefore := append([]string(nil), f.View().CarrierProducts...)
 		res := f.FoldProposal(p, s.prec, s.trust)
 		if res.ViewChanged {
 			notes = append(notes, OutboxNote{EventType: EventFaultlineEnriched, Event: domain.NewFaultlineEnriched(f, now), OccurredAt: now})
 		}
-		// Carrier attribution arriving for the first time RE-ANNOUNCES this card's existing
-		// matches (EDR-CORRELATION-01 D3/D4).
+		// A CHANGE to the carrier set RE-ANNOUNCES this card's existing matches
+		// (EDR-CORRELATION-01 D3/D4).
 		//
 		// Classification happens at correlation, but the evidence for it — NVD's CPE products —
 		// arrives on NVD's own cadence, which is usually LATER. Without this the class stamped at
 		// match time is the one that lasts: on a stable estate no new correlation ever runs, so
-		// every component would stay `unknown` forever and step 2 would be inert. Measured on the
-		// VM: 370 components, all unknown, while the cards were being enriched around them.
+		// every component would stay `unknown` forever. Measured on the VM: 370 components, all
+		// unknown, while the cards were being enriched around them.
 		//
-		// Scoped to the empty→non-empty transition so it fires ONCE per card rather than on every
-		// enrichment, and it is idempotent downstream: Governance's upsert only overwrites a class
-		// with a non-empty one, and re-delivering a match adds no component.
-		if !hadCarriers && len(f.View().CarrierProducts) > 0 {
+		// WIDENED 2026-09-17 from the empty→non-empty transition to any change. The narrow form
+		// fired exactly once per card, which was enough to populate a class but not to CORRECT
+		// one: a later fold that adds a carrier, or the bundler-pollution filter removing the
+		// products that never carried the flaw, both leave every recorded occurrence holding a
+		// class derived from carriers the card no longer has. Both slices come from sortedKeys,
+		// so the order is canonical and a positional compare is exact.
+		//
+		// Bounded by how often folds actually change carriers, and idempotent downstream:
+		// re-delivering a match adds no component, and Governance's upsert converges.
+		// Cards that receive NO further folds are the sweep's job, not this path's.
+		if !slices.Equal(carriersBefore, f.View().CarrierProducts) {
 			more, rerr := s.reannounceMatches(ctx, f, now)
 			if rerr != nil {
 				return domain.Faultline{}, false, rerr
