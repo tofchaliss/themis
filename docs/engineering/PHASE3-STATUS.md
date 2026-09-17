@@ -16,9 +16,17 @@ and the resume pointer, never item state.
 > `http_server` because it IS `httpd`, re-encoded. Any CPE that could bridge needs an
 > authoritative source (NVD's dictionary, a vendor-authored SBOM), which is the alias table with
 > extra steps — rejected three times in this arc.
-> **So the Attribution Gap is the PRINCIPLED terminal state, not just the current one**, and
-> `ATTR-GAP-1` is now the only live track: make the uncertainty visible. Everything on the
-> DO-NOT-YET list below stays not-yet, permanently for the CPE items.
+> **So the Attribution Gap is a TERMINAL state, not a provisional one** (EDR-ATTRIBUTION-01 **D9**),
+> and `ATTR-GAP-1` is the only live technical track: make the uncertainty visible. D9 names the
+> five prohibited "improvements" — a synonym table, name-similarity guessing, treating a
+> name-derived CPE as independent evidence, promoting NVD's CPE products into package identities,
+> and converting zero correlation into `unknown`. Reopening needs an authoritative identity source
+> Themis consumes rather than maintains; absent that, surfacing is the whole of the work.
+> **The methodology gained a second half: CONVENTIONS R4b — presence of a data field is not
+> presence of useful evidence.** Ask not only whether the evidence exists but whether it carries
+> what the decision predicate needs, and where its value came from: 6384 CPE refs existed and
+> carried zero independent identity information, because they were derived from the very name the
+> decision was already using.
 > **This also corrected EDR-IDENTITY-01**, which had widened "no CPE on either httpd twin" into
 > "no CPE on this estate". Same error class as the 174-vs-87 count — see CONVENTIONS R4.
 >

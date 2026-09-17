@@ -167,6 +167,36 @@ name cannot, which is a property of the derivation and not of this estate.
 hypothesis until D7's six preconditions are measured. Declaring it now would repeat the mistake
 this EDR exists to correct: encoding an invariant ahead of its evidence.
 
+### D9 — The Attribution Gap is a TERMINAL state, not a provisional one
+
+Settled after ATTR-CPE-1 (D7a). The gap is **not** an implementation placeholder waiting for a smarter
+matcher. It is the **correct terminal state** when the available evidence cannot establish identity:
+
+    Carrier
+      ├── deterministic identity evidence exists  → correlate
+      └── no deterministic identity evidence      → Attribution Gap
+
+**Therefore the following are prohibited as "improvements" to it.** Each has been proposed and rejected
+during this arc, some more than once, and each would convert an honest observation into a manufactured
+conclusion:
+
+1. **A synonym or alias table.** Rejected three times on the same grounds: it grows forever and covers
+   only what someone remembered. `roleSuffixes` is a small closed packaging vocabulary; `http_server →
+   httpd` is unbounded data.
+2. **Guessing from name similarity.** Fuzzy matching over identity widens rather than narrows, and the one
+   error identity comparison must never make is merging two different builds.
+3. **Treating a CPE generated from the same name as independent evidence.** Measured false (D7a): a
+   derived value carries no information about the thing it was derived from.
+4. **Promoting NVD's CPE product names into package identities.** That is (1) entered through a feed
+   instead of a table.
+5. **Converting zero correlation into `unknown`.** The rejected rule. It breaks 182 correct suppressions
+   to fix 87 wrong ones, because zero correlation collapses "installed under another name" and "not
+   installed at all" (D1, and the CVE-2023-32681 case).
+
+**What WOULD reopen this:** an authoritative identity source not derived from the package name — a
+vendor-authored SBOM carrying real CPEs, or an upstream mapping Themis consumes rather than maintains.
+Absent that, the gap stands, and surfacing it (D6) is the whole of the work.
+
 ## Validation criterion
 
 1. The gap is countable and visible, and equals the all-scope Finding population (227 measured).

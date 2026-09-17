@@ -127,6 +127,33 @@ a recorded claim about a specific cluster (*"`python3` matches on those cards"*)
 deterministic discriminator exists, surface the ambiguity as a first-class, countable state rather than
 resolving it by policy. EDR-ATTRIBUTION-01's Attribution Gap is the worked example.
 
+### R4b — Presence of a data field is not presence of useful evidence
+
+The rule has two parts, and the second is the one that gets skipped:
+
+1. Does the evidence **exist**?
+2. Does it **contain the information the decision predicate needs**?
+
+**The measured case (2026-09-17, ATTR-CPE-1).** An EDR recorded "the document carries no CPE", generalized
+from an observation about two specific packages. The estate turned out to hold **6384 `cpe23Type`
+references**. But the finding that mattered was not the correction — it was that those CPEs are generated
+heuristically **from the package name**, so `httpd` yields `cpe:2.3:a:httpd:httpd:…`, never
+`apache:http_server`. The field was abundantly present and carried **zero independent identity
+information**:
+
+    package name → Syft heuristic → CPE → the same vocabulary
+
+rather than the chain the design needed:
+
+    package identity → authoritative CPE → NVD CPE → deterministic bridge
+
+So the experiment answered its question by failing, and it failed for a better reason than absence would
+have given: a derived value cannot be independent evidence about the thing it was derived from.
+
+**How to apply.** When a design turns on some field being available, do not stop at "the field is
+populated". Ask where its value CAME FROM. If it was derived from the same input the decision is already
+using, it adds nothing no matter how many rows carry it.
+
 ## How these apply per node
 
 Both rules are **shared infrastructure**, not re-implemented per context: one observability bootstrap
