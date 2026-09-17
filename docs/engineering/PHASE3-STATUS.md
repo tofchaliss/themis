@@ -28,6 +28,28 @@ and the resume pointer, never item state.
 > code work before precondition 4 can be tested. The backlog entry carries the full table.
 > **A failure is a valid result:** CPE insufficient ⇒ no deterministic attribution ⇒ the
 > Attribution Gap stands, and prompts no invented synonym mechanism.
+> **ATTR-CPE-1 is an EVIDENCE EXPERIMENT, not a partially designed implementation.** The gate is
+> B, and nothing downstream of B is today's target:
+>
+> ```
+> B: does Syft actually emit the required CPE?
+>        ├── NO  → stop; the Attribution Gap remains the honest terminal state
+>        └── YES → enable parser path → retain CPE in the model
+>                  → preserve vendor on the NVD side → test real CPE ↔ CPE identity
+> ```
+>
+> **DO NOT YET — an explicit negative scope, because every item here is a change somebody could
+> reasonably start and none of them is supported by evidence yet:**
+> - change the SBOM parser
+> - add CPE to the component DTO
+> - change the NVD identity representation
+> - declare `PURL → CPE → …` a hierarchy
+> - reclassify the 87 httpd cases
+> - reclassify the 182 legitimate bystanders
+>
+> There is no reason to touch the parser or the DTO before proving the source artifact contains
+> the evidence at all. If B succeeds, design the SMALLEST possible change for 2 → 3 → 4 and
+> measure each, rather than assuming the whole CPE pipeline works.
 > **Do not reopen** the 182 `scope` bystanders or the 87 httpd cases until the evidence path
 > changes (EDR-ATTRIBUTION-01 D4/D5).
 > **Standing discipline from this arc — CONVENTIONS R4:** before encoding a rule, measure the
