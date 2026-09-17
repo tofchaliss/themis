@@ -3246,6 +3246,58 @@ under the 2026-08-07 re-derivation standard.
   component anywhere classified `unknown` by a gap.
   **Dep:** none. **Scope:** was SMALL-MEDIUM; came in smaller — GUI + one script, no Go change.
 
+- [ ] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
+  surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
+  user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.
+  **The symptom:** the drawer on a **Rocky 8.10** estate shows the vendor proposal
+  *"not_affected for httpd (Red Hat: not affected in Red Hat Enterprise Linux 7)"*. RHEL 7 is not
+  what this estate runs.
+  **The mechanism, read from the code.** `domain.Applicability` is `{Package, Status,
+  Justification}` — **there is no product or stream field.** Red Hat's Hydra document lists
+  `PackageState` PER PRODUCT (RHEL 5/6/7/8/9/10, plus Hardened Images, Software Collections,
+  JBoss, Ansible, OpenShift, Satellite, RHV, OpenJDK…), and `redhat_client.go` dedups them with
+  `seen := map[string]struct{}{}` keyed on **the package name alone**. So exactly one product's
+  statement survives per (CVE, package) and **which one is decided by array order in someone
+  else's JSON**. The product name is preserved only as display prose, via
+  `productSuffix` → `" in Red Hat Enterprise Linux 7"`.
+  The code documents the gap itself: *"The per-EL-stream verdict precision (rhel-8 vs rhel-9) is
+  PR3; here the statement keys on the package name"*. Dedup-by-package makes it worse than
+  imprecise — it makes it **arbitrary**, and it discards every other product silently.
+  **Measured distribution of surviving statements (≈907 total):**
+
+  | product | statements | relevant to a Rocky 8.10 estate |
+  | --- | --- | --- |
+  | RHEL 6 | **207** | no — EOL |
+  | RHEL 7 | **193** | no — EOL |
+  | RHEL 10 | 130 | no |
+  | **RHEL 8** | **90** | **yes** |
+  | RHEL 9 | 87 | no |
+  | Hardened Images · Software Collections · JBoss · Ansible · OpenShift · Satellite · RHV · OpenJDK | ~170 | no |
+  | RHEL 5 | 30 | no — EOL |
+
+  **So ~90% of the surviving statements are scoped to products this estate does not run**, and
+  because RHEL 6 wins 207 times against RHEL 8's 90, Hydra evidently lists oldest-first — meaning
+  **the most common outcome is the LEAST relevant statement surviving.**
+  **Why it is a false-negative path and not cosmetic:** a reconciled `not_affected` raises a
+  system suppression Proposal on the Findings whose component it covers (EDR-VEX-01 — "gathered,
+  not obeyed"). It never auto-suppresses by itself, but a policy MAY auto-accept it, and the match
+  is on package name only — so an EOL-major statement can retire a live el8 finding.
+  **Impact NOT yet measured** (R4 discipline — the mechanism is confirmed, the firing is not):
+  count `finding_proposals` by `stance='not_affected'` × `status`, and how many accepted ones
+  carry an EOL product in `rationale`. If accepted+EOL is non-zero this is HIGH and has already
+  suppressed real findings; if everything is `raised`, the mechanism is armed but has not fired.
+  **Fix shape to decide (design-first — a domain model change):** give `Applicability` a product/
+  stream scope and keep one statement PER (package, product) instead of collapsing to one per
+  package; then match a statement to a Finding only when its scope matches the release's own
+  distro major. The scope is already in the source document — `ps.ProductName` is read and then
+  thrown into prose. **Do NOT fix it by parsing the justification string**; that is the same
+  mistake as deriving identity from a name.
+  **Related but distinct:** this is about the vendor statement's SCOPE, whereas EDR-VEX-01
+  Phase 3's same-EL-stream rule already scopes the *fixed-version verdict* correctly (measured
+  working today on the pip cards: el9/el10 bounds correctly declined against an el8 install). The
+  fix bounds carry their stream in the NEVRA; the applicability statement does not carry its
+  product at all. **Dep:** none. **Scope:** MEDIUM (domain + ACL + matching).
+
 - [x] **ATTR-CPE-1 — the CPE acquisition experiment: RUN 2026-09-17, NEGATIVE RESULT (filed and
   closed the same day,
   [`EDR-ATTRIBUTION-01`](engineering/decisions/EDR-ATTRIBUTION-01.md) D7/D8).** MED, evidence
