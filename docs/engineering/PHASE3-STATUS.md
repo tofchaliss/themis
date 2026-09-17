@@ -4,6 +4,39 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
+> ## ⏭ RESUME POINT — `ATTR-CPE-1`
+>
+> **`main` = `be181e4`, CI green.** Two parallel tracks, neither blocking the other:
+>
+> | | | |
+> | --- | --- | --- |
+> | **EDR-IDENTITY-01** | specified, implemented, merged | intake identity |
+> | **EDR-2 (the carrier investigation)** | investigated, closed | shipped 4 deterministic fixes |
+> | **EDR-ATTRIBUTION-01** | specified | the attribution gap |
+> | **ATTR-GAP-1** | **can proceed NOW — independent** | make uncertainty visible |
+> | **ATTR-CPE-1** | **next technical investigation** | determine whether CPE closes it |
+>
+> **Start here: ATTR-CPE-1**, answering one question and nothing more — *when CPE is actually
+> present in the SBOM, does it provide sufficient deterministic identity evidence to bridge the
+> carrier and the installed component?* Smallest controlled case: one SBOM where `httpd` carries
+> both `pkg:rpm/rocky/httpd@…` and `cpe:2.3:a:apache:http_server:…`. Trace that exact CPE through
+> SBOM → parser → stored identity → Knowledge → carrier → correlation → verdict. **Do not infer
+> success from Syft emitting it**; demonstrate all six preconditions end to end.
+> **Two of the six already fail by construction (pre-assessed from code, no VM needed):** the SPDX
+> parser reads only `PACKAGE-MANAGER` external refs, so a `cpe23Type` ref is never read; and no
+> component DTO in Evidence or Knowledge has a CPE field. A success at phase B therefore implies
+> code work before precondition 4 can be tested. The backlog entry carries the full table.
+> **A failure is a valid result:** CPE insufficient ⇒ no deterministic attribution ⇒ the
+> Attribution Gap stands, and prompts no invented synonym mechanism.
+> **Do not reopen** the 182 `scope` bystanders or the 87 httpd cases until the evidence path
+> changes (EDR-ATTRIBUTION-01 D4/D5).
+> **Standing discipline from this arc — CONVENTIONS R4:** before encoding a rule, measure the
+> rule's TRIGGERING PREDICATE against the estate. **Agreement is not evidence** — the rejected
+> rule was internally coherent, had been agreed by two people, and was empirically wrong.
+> **Operator action, outside this work:** [`docs/OPERATIONAL-ACTIONS.md`](../OPERATIONAL-ACTIONS.md)
+> — rotate the exposed credential. Its own completion criterion (the `pgx` pool restart), so it
+> does not compete with the next identity investigation.
+>
 > ## ⏭ CHECKPOINT 2026-09-17 — the carrier arc closed and LIVE-VERIFIED on the VM
 >
 > **`main` = `d3833c6`, CI GREEN.** Everything is merged; no branch holds work. The 2026-09-16

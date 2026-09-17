@@ -3230,8 +3230,33 @@ under the 2026-08-07 re-derivation standard.
   false match.
   **Do NOT declare `PURL → CPE → metadata → name` a normative hierarchy before then** (D8) —
   that would repeat the mistake EDR-ATTRIBUTION-01 exists to correct.
-  **Dep:** ATTR-GAP-1 is independent of this and should not wait on it. **Scope:** SMALL (phase B)
-  / unknown beyond it, deliberately.
+  **The single question phase B answers, and nothing more:** *when CPE is actually present in the
+  SBOM, does it provide sufficient deterministic identity evidence to bridge the carrier and the
+  installed component?* Smallest useful controlled case — one SBOM, one component:
+  `httpd` carrying BOTH `pkg:rpm/rocky/httpd@…` and `cpe:2.3:a:apache:http_server:…`.
+  **Do NOT infer success from Syft emitting the CPE.** The trace must run end to end —
+  SBOM → parser → stored component identity → Knowledge → carrier → correlation → verdict — and
+  each of the six preconditions demonstrated, not assumed.
+
+  **PRE-ASSESSED FROM THE CODE 2026-09-17 (no VM needed), and two preconditions already FAIL:**
+
+  | # | precondition | status today |
+  | --- | --- | --- |
+  | 1 | Syft emits the expected CPE for httpd | **unknown** — this is what phase B measures |
+  | 2 | the CPE survives the SBOM parser | **NO.** `purlFromExternalRefs` (`spdx.go`) filters to `referenceCategory: PACKAGE-MANAGER`; a `SECURITY`/`cpe23Type` ref is never read at all |
+  | 3 | Themis retains it through the identity path | **NO.** `componentJSON` (evidence store) and `app.InventoryComponent` (Knowledge) carry purl/name/version/ecosystem/source — there is no CPE field anywhere in either |
+  | 4 | NVD's CPE normalizes to the same identity | **partly available.** `splitCPE` already parses the criteria string and `cpePart`/`cpeProduct` read indices 2 and 4 — but index **3, the VENDOR, is discarded**, and `apache:http_server` is what makes a CPE↔CPE comparison meaningful rather than a bare-token one |
+  | 5 | holds for more than httpd | unknown |
+  | 6 | a missing or wrong CPE fails SAFE | unknown — and the one to design for, not discover |
+
+  **What that means for sequencing:** phase B is still the right first step because it is cheap,
+  read-only, and gates everything — but a SUCCESS at B implies code work on 2 and 3 before 4 can
+  even be tested. Nobody should read "Syft emits it" as "Themis can use it".
+  **If any precondition fails, that is a VALID result**, not a setback: CPE insufficient ⇒ no
+  deterministic attribution ⇒ the Attribution Gap remains the honest terminal state, and it must
+  not prompt another invented synonym mechanism.
+  **Dep:** ATTR-GAP-1 is independent of this and must NOT be blocked behind it. **Scope:** SMALL
+  (phase B) / unknown beyond it, deliberately.
 
 - [ ] **KN-IDENT-1 — two ENCODINGS of one purl are two identities, so identity comparison is
   string equality over a non-canonical form (filed 2026-09-17, measured on MRF).** LOW,
