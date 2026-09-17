@@ -23,6 +23,12 @@ const (
 	// EventComponentVerdictChanged — an EXISTING occurrence's verdict state changed on a
 	// re-judgement (EDR-VERDICT-01 D5/D6). Emitted only on a real state change.
 	EventComponentVerdictChanged = "knowledge.component_verdict_changed"
+	// EventComponentRetired announces that a recorded occurrence does not denote an additional
+	// component and leaves the active projection (KN-SCAN-4(b)). Follows the existing
+	// `knowledge.component_*` vocabulary rather than inventing a lifecycle taxonomy; `retired`
+	// is the word this codebase already uses in prose for a terminal, relationship-free exit
+	// (see Finding.Archive), as distinct from `superseded`, which names a replacement.
+	EventComponentRetired = "knowledge.component_retired"
 )
 
 // OutboxNote is one integration event queued for delivery in the aggregate's own

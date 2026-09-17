@@ -170,6 +170,13 @@ func (s *FindingService) MirrorComponentVerdict(ctx context.Context, releaseID, 
 	return s.repo.SetComponentVerdict(ctx, releaseID, faultlineID, comp)
 }
 
+// RetireComponent withdraws a mirrored component from the active projection (KN-SCAN-4(b)).
+// Denormalized read-data Knowledge owns, exactly like MirrorComponentVerdict — no aggregate
+// load, no Finding mutation, no Position touched.
+func (s *FindingService) RetireComponent(ctx context.Context, releaseID, faultlineID, purl, reason string) error {
+	return s.repo.RetireComponent(ctx, releaseID, faultlineID, purl, reason, s.clock.Now())
+}
+
 func (s *FindingService) OpenOrUpdateFinding(ctx context.Context, in OpenFindingInput) (domain.FindingID, error) {
 	releaseID, faultlineID, cve, comps := in.ReleaseID, in.FaultlineID, in.CVE, in.Components
 	baseScore := in.BaseScore

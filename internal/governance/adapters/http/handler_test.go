@@ -73,6 +73,10 @@ func (r *fakeRepo) SetComponentVerdict(context.Context, string, string, domain.M
 	return nil
 }
 
+func (r *fakeRepo) RetireComponent(context.Context, string, string, string, string, time.Time) error {
+	return nil
+}
+
 func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.ExploitSignals) error {
 	r.lastSignals = sig
 	return nil

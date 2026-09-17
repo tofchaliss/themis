@@ -1,0 +1,21 @@
+-- Component retirement, mirrored (KN-SCAN-4(b)).
+--
+-- Governance's component rows are Knowledge-owned mirror data (EDR-VERDICT-01 D5), and they are
+-- append-only content: AbsorbComponent is the only mutation and it is additive and
+-- fill-in-only, with no remove. So a duplicate identity recorded under a raw scanner string had
+-- NO path out, and the drawer showed one real component twice -- measured 2026-09-17: 87 raw
+-- rows beside 87 canonical ones, verdict-identical (74 cleared / 13 open each).
+--
+-- Retired rows are MARKED, never deleted, and leave only the ACTIVE projection. The historical
+-- existence of the observation is preserved, which is what makes this different from the
+-- operator SQL that produced GOV-MIRROR-1's undetected divergence: the mutation stays in-band,
+-- carried by knowledge.component_retired.v1.
+--
+-- Findings and Positions are untouched. A Position belongs to a Finding, not to a component, so
+-- retiring a duplicate retracts no security decision -- and queue state re-derives from the
+-- remaining components, which makes the counts MORE correct, since httpd is currently counted
+-- twice per Finding.
+--
+-- NULL means active, which is every existing row.
+ALTER TABLE finding_components ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+ALTER TABLE finding_components ADD COLUMN IF NOT EXISTS retired_reason TEXT NOT NULL DEFAULT '';

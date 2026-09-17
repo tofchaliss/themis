@@ -145,9 +145,9 @@ type MatchedComponent struct {
 	// about THIS occurrence, with the evidence grade and plain-language premise. Additive /
 	// omitempty: an older payload decodes to "", which every consumer reads as open — the
 	// fail-safe direction.
-	VerdictState  VerdictState  `json:"VerdictState,omitempty"`
-	VerdictGrade  VerdictGrade  `json:"VerdictGrade,omitempty"`
-	VerdictReason string        `json:"VerdictReason,omitempty"`
+	VerdictState  VerdictState `json:"VerdictState,omitempty"`
+	VerdictGrade  VerdictGrade `json:"VerdictGrade,omitempty"`
+	VerdictReason string       `json:"VerdictReason,omitempty"`
 }
 
 // ComponentMatched is the correlation output (D3/D8): a release's component matches a
@@ -193,6 +193,44 @@ type ComponentVerdictChanged struct {
 	Component   MatchedComponent
 	OccurredAt  time.Time
 }
+
+// ComponentRetired announces that a recorded occurrence does NOT denote an additional component
+// and has been withdrawn from the active projection (KN-SCAN-4(b)).
+//
+// The measured fact it carries is narrow and worth stating exactly: *this identity does not
+// represent an additional component on this release*. It deliberately does NOT name what the
+// component duplicates. Encoding `superseded_by` would assert a lifecycle relationship the
+// evidence does not need — the canonical row already exists independently, recorded by its own
+// path, and it needs no pointer back to a row that never denoted a distinct thing.
+//
+// Retirement is a PROJECTION change, not an erasure: the row stays stored, so the audit trail
+// keeps every occurrence Themis ever recorded, and "we retired this" stays distinguishable from
+// "this never happened". Consumers exclude retired components from active queries.
+//
+// Idempotent by construction: it asserts a state, not a transition, so re-delivery re-asserts
+// the same state and changes nothing.
+type ComponentRetired struct {
+	FaultlineID FaultlineID
+	CVE         string
+	ReleaseID   string
+	// PURL identifies the exact row being retired — the one thing a consumer needs.
+	PURL string
+	// Reason is operator-facing audit text, never a decision input; nothing branches on it.
+	Reason     string
+	OccurredAt time.Time
+}
+
+// NewComponentRetired builds the retirement event for one recorded occurrence.
+func NewComponentRetired(f Faultline, releaseID, purl, reason string, at time.Time) ComponentRetired {
+	return ComponentRetired{
+		FaultlineID: f.ID(), CVE: f.CVE().String(), ReleaseID: releaseID,
+		PURL: purl, Reason: reason, OccurredAt: at.UTC(),
+	}
+}
+
+// RetiredDuplicateIdentity is the only reason KN-SCAN-4(b) emits: the row's identity is a raw
+// scanner string whose canonical twin is already recorded on the same release and card.
+const RetiredDuplicateIdentity = "duplicate_identity"
 
 // NewFaultlineCreated builds the event for a newly created card.
 func NewFaultlineCreated(f Faultline, at time.Time) FaultlineCreated {

@@ -87,6 +87,10 @@ type Knowledge struct {
 	// attach the D6 ingest reporter (the app ring never logs — CONVENTIONS R1). It is already
 	// wired into Consumer; this is the same instance, not a second one.
 	Scanner *app.ScannerReportService
+	// Retire runs the duplicate-identity repair (KN-SCAN-4(b)): a raw scanner identity whose
+	// canonical twin is already recorded leaves the active projection. Always set — it rides
+	// only Knowledge's own store; the composition root runs it.
+	Retire *app.RetireService
 }
 
 // RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
@@ -277,6 +281,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// moments it can fire.
 		Reclassify: app.NewReclassifyService(st, st, st, st, sysClock{}, verdict.ReclassifyBatch),
 		Scanner:    scanSvc,
+		Retire:     app.NewRetireService(st, st, st, sysClock{}, 0),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

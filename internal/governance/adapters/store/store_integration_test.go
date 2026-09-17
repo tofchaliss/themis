@@ -632,3 +632,80 @@ func TestClaimClassUnknownClearsScopeButNeverCarrier(t *testing.T) {
 		t.Errorf("after a decided class = %q, want carrier", got)
 	}
 }
+
+// KN-SCAN-4(b) on the Governance side: a retired component leaves the ACTIVE projection and
+// stays in the aggregate. The measured defect it closes — one real httpd component rendered
+// twice per Finding, 87 raw rows beside 87 canonical ones, verdict-identical.
+func TestRetireComponent_LeavesTheProjectionAndStaysStored(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	const raw = "app:httpd@2.4.37"
+	const good = "pkg:rpm/rocky/httpd@2.4.37"
+
+	f := newFinding(t, "fnd-r", "rel-r", "fl-r", "CVE-2023-31122")
+	for _, c := range []domain.MatchedComponent{
+		{PURL: good, Name: "httpd", Version: "2.4.37", Ecosystem: "rpm", ClaimClass: "carrier"},
+		{PURL: raw, Name: "httpd", Version: "2.4.37", ClaimClass: "carrier"},
+	} {
+		if _, err := f.AbsorbComponent(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	if err := st.RetireComponent(ctx, "rel-r", "fl-r", raw, "duplicate_identity", time.Now().UTC()); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+
+	// STORED: the row is still there, so the audit trail keeps the observation.
+	var retiredReason string
+	if err := pool.QueryRow(ctx,
+		"SELECT retired_reason FROM finding_components WHERE purl=$1", raw).Scan(&retiredReason); err != nil {
+		t.Fatalf("the retired row must still exist — retirement is not an erasure: %v", err)
+	}
+	if retiredReason != "duplicate_identity" {
+		t.Errorf("retired_reason = %q, want duplicate_identity", retiredReason)
+	}
+
+	// AGGREGATE keeps it, which is what makes a re-delivered ComponentMatched a no-op instead
+	// of resurrecting the duplicate.
+	got, err := st.GetByID(ctx, "fnd-r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Components()) != 2 {
+		t.Errorf("aggregate components = %d, want 2 — the write model keeps the row", len(got.Components()))
+	}
+
+	// ACTIVE PROJECTION drops it: the posture is what openCarriers and the cleared tile read.
+	entries, err := st.ReleasePosture(ctx, "rel-r")
+	if err != nil {
+		t.Fatalf("posture: %v", err)
+	}
+	var seen int
+	for _, e := range entries {
+		for _, c := range e.Components {
+			if c.PURL == raw {
+				t.Error("a retired component must not appear in the active posture")
+			}
+			if c.PURL == good {
+				seen++
+			}
+		}
+	}
+	if seen != 1 {
+		t.Errorf("canonical component appeared %d times in the posture, want exactly 1", seen)
+	}
+
+	// Idempotent, and a miss is a no-op rather than an error (events can arrive out of order).
+	if err := st.RetireComponent(ctx, "rel-r", "fl-r", raw, "duplicate_identity", time.Now().UTC()); err != nil {
+		t.Errorf("a second retirement must be a no-op: %v", err)
+	}
+	if err := st.RetireComponent(ctx, "rel-ghost", "fl-ghost", "pkg:none", "x", time.Now().UTC()); err != nil {
+		t.Errorf("a miss must be a no-op: %v", err)
+	}
+}

@@ -31,7 +31,8 @@ func (s *Store) StaleVerdictOccurrences(ctx context.Context, generation, limit i
 		       m.verdict_state
 		FROM faultline_matches m
 		JOIN faultlines f ON f.id = m.faultline_id
-		WHERE m.verdict_card_version < f.version OR m.verdict_generation < $1
+		WHERE m.retired_at IS NULL
+		  AND (m.verdict_card_version < f.version OR m.verdict_generation < $1)
 		ORDER BY m.release_id, m.faultline_id, m.component_purl
 		LIMIT $2`, generation, limit)
 	if err != nil {
@@ -78,7 +79,7 @@ func (s *Store) EvidenceForRelease(ctx context.Context, releaseID string) (strin
 func (s *Store) MatchComponentsForRelease(ctx context.Context, releaseID string) ([]app.InventoryComponent, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT component_purl, component_name, component_version, component_ecosystem, component_source
-		FROM faultline_matches WHERE release_id = $1`, releaseID)
+		FROM faultline_matches WHERE release_id = $1 AND retired_at IS NULL`, releaseID)
 	if err != nil {
 		return nil, err
 	}

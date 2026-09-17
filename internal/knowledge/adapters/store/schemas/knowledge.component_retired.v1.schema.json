@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.component_retired.v1.schema.json",
+  "title": "knowledge.component_retired.v1",
+  "description": "Integration-contract v1 for the ComponentRetired event payload (KN-SCAN-4(b)): a recorded occurrence does NOT denote an additional component on this release and leaves the ACTIVE projection. The row stays stored on both sides — retirement is a projection change, never an erasure, so the audit trail keeps every occurrence Themis recorded and 'we retired this' stays distinguishable from 'this never happened'. It deliberately carries NO superseded-by pointer: the canonical row already exists independently and needs no relationship to a row that never denoted a distinct thing. The event asserts a STATE rather than a transition, so re-delivery re-asserts the same state and changes nothing. It never touches a Finding or a Position.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "ReleaseID", "PURL", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "PURL": { "type": "string", "description": "The exact row being retired — the one thing a consumer needs." },
+    "Reason": { "type": "string", "description": "Operator-facing audit text, never a decision input; nothing branches on it. KN-SCAN-4(b) emits only `duplicate_identity`." },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

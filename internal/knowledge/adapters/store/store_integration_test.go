@@ -1277,3 +1277,93 @@ func TestRecordMatch_ConfirmingRejudgementAdvancesTheLogicGeneration(t *testing.
 		t.Errorf("stale after a confirming re-judgement = %+v, want empty — the sweep must CONVERGE", after)
 	}
 }
+
+// KN-SCAN-4(b) on a real store: the duplicate-identity repair, reproducing the measured MRF
+// shape — a scanner report recorded httpd under `app:httpd@<version>` while the SBOM path had
+// already recorded the same component under its canonical rpm purl on the same (release, card).
+// Measured 2026-09-17: 87 such rows, and in 87 of 87 cases the canonical row already existed.
+func TestRetireDuplicateIdentity_FullLoop(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2023-31122"),
+		vulnFactsCarriers(t, "nvd", "http_server"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rawPURL = "app:httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9"
+	const goodPURL = "pkg:rpm/rocky/httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9"
+	canonical := app.InventoryComponent{
+		PURL: goodPURL, Name: "httpd", Version: "2.4.37-65.module+el8.10.0+40257+286895ef.9", Ecosystem: "rpm",
+	}
+	raw := app.InventoryComponent{
+		PURL: rawPURL, Name: "httpd", Version: "2.4.37-65.module+el8.10.0+40257+286895ef.9",
+	}
+	// An UNRELATED raw row with no canonical twin — it must NOT be listed, because it may be the
+	// only record of something real and retiring it would delete evidence, not a duplicate.
+	lonely := app.InventoryComponent{PURL: "app:inhouse-agent@3.1.0", Name: "inhouse-agent", Version: "3.1.0"}
+	for _, c := range []app.InventoryComponent{canonical, raw, lonely} {
+		if _, err := st.RecordMatch(ctx, app.Match{
+			ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2023-31122",
+			Component: c, Verdict: domain.OpenVerdict(), OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dups, err := st.DuplicateIdentityRows(ctx, 10)
+	if err != nil {
+		t.Fatalf("list duplicates: %v", err)
+	}
+	if len(dups) != 1 || dups[0].PURL != rawPURL {
+		t.Fatalf("duplicates = %+v, want only the raw httpd row (the twinless one must not be listed)", dups)
+	}
+
+	before := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentRetired)
+	ev := domain.NewComponentRetired(f, "rel-1", rawPURL, domain.RetiredDuplicateIdentity, time.Now().UTC())
+	done, err := st.RetireMatch(ctx, dups[0], time.Now().UTC(), ev)
+	if err != nil || !done {
+		t.Fatalf("retire = %v/%v, want true/nil", done, err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentRetired); got != before+1 {
+		t.Errorf("retirement events = %d, want %d — the event must be queued with the mark", got, before+1)
+	}
+	// MARKED, never deleted: the row stays, so the audit trail keeps every occurrence recorded.
+	if n := count(t, pool, "SELECT count(*) FROM faultline_matches WHERE component_purl=$1", rawPURL); n != 1 {
+		t.Errorf("rows for the retired purl = %d, want 1 — retirement is a projection change, not an erasure", n)
+	}
+
+	// Idempotent: a second retirement touches nothing and queues no second event.
+	again, err := st.RetireMatch(ctx, dups[0], time.Now().UTC(), ev)
+	if err != nil || again {
+		t.Errorf("second retire = %v/%v, want false/nil — already retired is a no-op", again, err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventComponentRetired); got != before+1 {
+		t.Errorf("retirement events = %d after a re-run, want %d — no second assertion", got, before+1)
+	}
+	// Converged: the listing excludes retired rows, so the sweep finds nothing on a re-run.
+	if left, lerr := st.DuplicateIdentityRows(ctx, 10); lerr != nil || len(left) != 0 {
+		t.Errorf("second listing = %+v err=%v, want empty — the repair must converge", left, lerr)
+	}
+	// And the retired row leaves every ACTIVE projection: no re-judgement, no re-announcement.
+	stale, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration+1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range stale {
+		if row.Component.PURL == rawPURL {
+			t.Error("a retired occurrence must never be re-judged")
+		}
+	}
+	occ, err := st.MatchesForFaultline(ctx, string(f.ID()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range occ {
+		if o.Component.PURL == rawPURL {
+			t.Error("a retired occurrence must never be re-announced")
+		}
+	}
+}

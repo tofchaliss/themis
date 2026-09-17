@@ -116,6 +116,11 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 }
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
+	// Retired rows are loaded ON PURPOSE (KN-SCAN-4(b)). This is the AGGREGATE, not a query:
+	// retirement removes a component from the ACTIVE PROJECTION (entriesForRelease, which is
+	// what openCarriers and the cleared tile read), never from the write model. Keeping the row
+	// here is what makes a re-delivered ComponentMatched a no-op instead of resurrecting the
+	// duplicate — AbsorbComponent sees the purl it already holds and reports no change.
 	rows, err := s.querier(ctx).Query(ctx,
 		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin,
 		        verdict_state, verdict_grade, verdict_reason
@@ -516,7 +521,7 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 		       c.verdict_state, c.verdict_grade, c.verdict_reason
 		FROM finding_components c
 		JOIN findings f ON f.id = c.finding_id
-		WHERE f.release_id = $1
+		WHERE f.release_id = $1 AND c.retired_at IS NULL
 		ORDER BY c.finding_id, c.purl`, releaseID)
 	if err != nil {
 		return nil, err

@@ -43,3 +43,30 @@ func TestKnowledgeEvents(t *testing.T) {
 		t.Error("NewComponentMatched did not defensively copy components")
 	}
 }
+
+// KN-SCAN-4(b): the retirement event carries the card's identity, the exact row, and a reason —
+// and deliberately no superseded-by pointer, because the canonical row exists independently and
+// needs no relationship to one that never denoted a distinct component.
+func TestNewComponentRetired(t *testing.T) {
+	f, err := domain.NewFaultline("fl-r", mustCVE(t, "CVE-2023-31122"))
+	if err != nil {
+		t.Fatalf("faultline: %v", err)
+	}
+	at := time.Date(2026, 9, 17, 12, 0, 0, 0, time.FixedZone("IST", 5*3600+1800))
+	ev := domain.NewComponentRetired(f, "rel-1", "app:httpd@2.4.37", domain.RetiredDuplicateIdentity, at)
+
+	if ev.FaultlineID != f.ID() || ev.CVE != "CVE-2023-31122" || ev.ReleaseID != "rel-1" {
+		t.Errorf("event = %+v, want the card's identity and the release", ev)
+	}
+	if ev.PURL != "app:httpd@2.4.37" {
+		t.Errorf("PURL = %q, want the exact row being retired", ev.PURL)
+	}
+	if ev.Reason != "duplicate_identity" {
+		t.Errorf("reason = %q, want duplicate_identity", ev.Reason)
+	}
+	// UTC on the wire, like every other event here — a local zone would make two identical
+	// facts compare unequal downstream.
+	if ev.OccurredAt.Location() != time.UTC || !ev.OccurredAt.Equal(at) {
+		t.Errorf("OccurredAt = %v, want the same instant in UTC", ev.OccurredAt)
+	}
+}
