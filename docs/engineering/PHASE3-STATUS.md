@@ -1,52 +1,71 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-08-27 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-09-16 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME 2026-09-16 — the httpd trace: five defects, one repaired live, EDR-2 investigated
+> ## ⏭ CHECKPOINT 2026-09-16 — the httpd trace: 5 defects filed, 3 shipped, the merge gate revived
 >
-> A single question — "why is this httpd finding not marked vendor-fixed?" — opened five
-> independent defects. All filed in [`../BACKLOG.md`](../BACKLOG.md) with measured evidence;
-> **no code written, nothing merged.** Branch `docs/registry-duplicate-hierarchy` (docs only).
+> **`main` = `c48a5ec`, CI GREEN — the first green run since 2026-08-26.** Everything below is
+> merged; no branch is left holding work. One question — "why does this httpd finding show no
+> vendor-fixed badge?" — opened five independent defects across three contexts.
 >
-> - **GOV-MIRROR-1 (MED-HIGH)** — Governance's verdict mirror has no reconciliation. Measured
->   **60 diverged rows** on one release, undetected six days, invisible to every probe. Cause:
->   an out-of-band repair wrote around the aggregate, and a cleared row cannot self-heal
->   (re-judging yields no transition, so no event). **Repaired live** by forcing 74 rows back
->   to `open` → sweep `rejudged:97 changed:74` → both sides converged at 192/721. A negative
->   control on the two untouched releases (zero drift, BOTH directions) proved the event path
->   sound and Governance a pure lagging projection.
-> - **KN-CLAIM-1 (HIGH)** — the carrier comparison writes off real carriers as `scope`, which
->   drops a Finding from the queue, from plans and from AI grounding. **238 scope-only
->   Findings, 158 never cleared.** Four separable carrier defects measured; only the
->   vocabulary gap is structural, and it spans BOTH packaging worlds (spring, maven, has a
->   perfectly clean carrier set and still fails).
-> - **KN-SCAN-3b** — root cause found: `app:` was never an ecosystem, it is SPDX
->   `primaryPackagePurpose` collapsed into a purl scheme. The scanner's own SBOM carries the
->   good twin one entry away. **EDR-1 spec agreed** (7 rules, commit `7cca64c`). Also found a
->   latent **empty-purl poison-halt** on the same line of code.
-> - **REG-DUP-1** — three Products named `MRF`; registry has no uniqueness at any level and
->   name-grouped reads collapse duplicates invisibly.
+> ### Shipped and merged
+> - **KN-CLAIM-1, three of four carrier defects** (`fix/carrier-correlation-defects`).
+>   (1) **Variant B, the wrapper strip** — `NormalizeProduct` now keeps a name WHOLE when the
+>   strip would leave a packaging ROLE (`perl-interpreter`, `perl-libs`) rather than a project,
+>   so they match the carrier `perl`; `python3-pyyaml` still strips and stays scope, guarded by
+>   an explicit test. `roleSuffixes` is **vocabulary, not data** — that is the line an alias
+>   table crosses and this does not. (2) **`splitCPE`** honours CPE 2.3 backslash escaping, so
+>   an escaped Perl module product yields its real name instead of a lone `\`. (3)
+>   **`nvdVulnerableProducts` keeps CPE part `a` only** — the OS/appliance entries that BUNDLE a
+>   flaw are no longer read as carrying it. NOT applied to the discovery gate, where narrowing
+>   risks a false negative.
+> - **DEV-COV-1** (`fix/dev-cov-1-coverage-floor`) — the merge gate had failed **every** `main`
+>   run since 2026-09-02, docs-only commits included, so a dozen merges landed through a gate
+>   that could not stop them. Its original premise ("CI stays green, macOS-only divergence") was
+>   **false**: Linux failed identically. Fixed by RAISING the two packages, not lowering the
+>   thresholds — `registry/adapters/store` 73.5→87.8% (four functions at ZERO, incl. the DASH-1
+>   traversal reads) and `governance/adapters/http` 87.4→97.6% (every posture row in the suite
+>   was the minimal one, so the serializer's optional branches were unreachable).
+> - **GOV-MIRROR-1 repaired live** — 60 diverged verdict rows on `20.1.0.0-125`, undetected six
+>   days, invisible to every probe. Forced 74 rows back to `open` → sweep `rejudged:97
+>   changed:74` → both sides converged at **192/721**. The DEFECT (no reconciliation) is still
+>   open; only this instance is repaired.
+> - **Estate cleanup** — 5 test releases, 3 projects, 2 products removed (459 occurrences, 405
+>   findings). Estate is now one product, MRF, with `cdmrf-oamp` holding three real builds.
 >
-> **⚠ OPERATIONAL — carry this forward; it is NOT architecture and must not get lost among the
-> docs commits.** A PostgreSQL password was exposed on 2026-09-16 in terminal scrollback and in
-> the shell history file: a `set -x VAR value` written in fish syntax instead enabled **bash
-> xtrace**, which then echoed every command including the `$PGBASE` connection string.
-> **Action: rotate the credential**, rewrite the DSN in each `/etc/themis/<svc>.env`, and
-> restart all six nodes plus the dashboard. Rewriting the fleet is still a hand operation — see
-> the open *DB-password rotation orchestration* item in the backlog. (The fresh-connection
-> credential watch on `/readyz` will surface any node left on the old secret.)
+> ### Filed, not started
+> **KN-CLAIM-1** (vocabulary gap — the one structural defect; spans BOTH packaging worlds, since
+> spring/maven has a perfectly clean carrier set and fails anyway) · **GOV-MIRROR-1** (a+b) ·
+> **KN-SCAN-3b** (EDR-1 spec agreed, 7 rules) · **KN-SCAN-4(b)** · **REG-DUP-1**.
+>
+> ### ⚠ OPERATIONAL — carry this; it is not architecture
+> A **PostgreSQL password was exposed** 2026-09-16 in terminal scrollback and the shell history
+> file: a `set -x VAR value` written in fish syntax instead enabled **bash xtrace**, which
+> echoed every `$PGBASE` DSN. **Rotate it**, rewrite the DSN in each `/etc/themis/<svc>.env`,
+> restart all six nodes + the dashboard. Fleet rewrite is still a hand operation (see the open
+> *DB-password rotation orchestration* item); `/readyz`'s fresh-connection credential watch will
+> surface any node left on the old secret.
+>
+> ### NEXT — one thing, and the agenda is already written
+> **Trace `relatedProduct`: establish its CURRENT contract from the code + tests (does `true`
+> mean "same project", or is it a candidate-generation predicate? that decides whether EDR-3 or
+> the matcher carries the weight) → define the minimal replacement → test against all four
+> measured cases (perl · jq/xz · httpd · spring-core) → THEN write the EDR-3 boundary.** The
+> full agenda is inside **KN-CLAIM-1 in `BACKLOG.md`** — do not re-derive it.
+> Order after that: **EDR-1 → KN-SCAN-4(b) → EDR-4 → relabel.** F7 (consumer poison-message
+> resilience) is an independent track. **KN-MODULE-4 is correct — leave it alone.**
+>
+> **The three shipped fixes are NOT live-verified**, and cannot be by waiting: claim class is
+> computed once at match time and never re-derived, so existing rows keep their old answer until
+> something re-matches them (the KN-VERDICT-2 shape). A re-classification path is required, and
+> GOV-MIRROR-1 means a Knowledge-side re-classification would not reach Governance on its own.
 >
 > **Read the filed entries as the MEASURED state.** Every surviving claim rests on a measurement
-> or a code read. Three confident hypotheses died on contact with the data during this session
+> or a code read. Three confident hypotheses died on contact with the data during the session
 > (that the verdict event had never been published, that the `app:` row could never be judged,
 > and that the divergence was systemic) and are deliberately NOT preserved. Do not reopen them.
->
-> **NEXT:** trace `relatedProduct` → its current contract → minimal replacement tested against
-> perl / jq+xz / httpd / spring-core → THEN the EDR-3 boundary. Agenda is written into
-> KN-CLAIM-1; do not re-derive it. Order after that: EDR-1 → KN-SCAN-4(b) → EDR-4 → relabel.
-> F7 (consumer poison-message resilience) stays an independent track.
 
 > ## ⏭ RESUME 2026-08-24 — next up is the **Δ4 grill** (design-first, no code yet)
 >
