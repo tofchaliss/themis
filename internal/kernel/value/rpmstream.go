@@ -47,6 +47,47 @@ func RPMReleaseMajor(version string) string {
 // stream, an install/fix without a resolvable `.elN`, or a non-rpm ecosystem never decides
 // "fixed" here (all fail safe toward "affected"). fixedVersions are the reconciled vendor fixes
 // (the feed has already excluded EUS/AUS/E4S/TUS backport lines).
+//
+// # Semantic contract: ANY-match, not HIGHEST-match
+//
+// The question answered is *"does there exist a same-major fixed bound this install satisfies?"* —
+// NOT *"is the install at least the highest published bound?"* It returns true on the FIRST
+// qualifying bound.
+//
+// That distinction is not cosmetic, and reading version strings instead of running the comparator
+// gets it wrong. Measured 2026-09-17 on CVE-2026-29167: the card carries 13 el8 bounds; the
+// install `2.4.37-65.module+el8.10.0+40257+286895ef.9` sits ABOVE the base build
+// `…+1830+22f0c9e0` and BELOW `…+40312+2c72bb9b.10`. It is correctly CLEARED, at `observed`
+// grade, because the fix shipped in the base build and every later rebuild carries it. An
+// eyeball comparison against the highest bound concluded "one build behind" and was wrong.
+//
+// # "Highest-match" is NOT the safer rule — do not "harden" this loop into it
+//
+// A property asserting `any-match == highest-match` under monotonic same-major bounds was
+// proposed as regression protection and DISPROVED by rapid immediately:
+//
+//	installed  2.4.37-1.module+el8.0.0+9999+def
+//	bounds     2.4.37-1.module+el8.0.0+1000+abc0   (satisfied)
+//	           2.4.37-80.module+el8.0.0+1100+abc1  (not satisfied)
+//
+// The install carries the fix that shipped in `2.4.37-1…+1000`; a later `2.4.37-80` bound also
+// carrying that fix does not make the install vulnerable. **Highest-match would UNDER-clear**,
+// refusing to clear installs that demonstrably hold the fix. The equivalence is false, and
+// any-match is the correct question. `TestRPMFixedByStreamHighestMatchWouldUnderClear` pins it.
+//
+// # The honest residual limit
+//
+// Any-match over-clears in exactly one shape: two same-major bounds representing PARALLEL module
+// contexts, where the estate sits on a branch that never received the lower-numbered fix. That
+// risk is real in principle and **cannot be detected by comparing against the highest bound** —
+// it needs module-CONTEXT awareness, which `RPMReleaseMajor` deliberately discards (it resolves
+// only the EL major).
+//
+// No such case could be constructed from the 2026-09-17 estate: every multi-bound card inspected
+// was a progression, including CVE-2021-44790's el8.2/el8.4/el8.5 spread, where release numbers
+// are monotonic across minor streams (`2.4.37-21.module+el8.2.0` < `2.4.37-65.module+el8.10.0`).
+// **If a parallel-context counterexample ever appears, this comparator's design must be
+// revisited — with module context, not with a highest-bound rule.**
 func RPMFixedByStream(ecosystem, installed string, fixedVersions []string) bool {
 	if ClassifyEcosystem(ecosystem) != VersionClassRPM {
 		return false
