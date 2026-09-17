@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/evidence/adapters/parser"
@@ -277,4 +278,127 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// The measured SPDX shape (2026-09-16): the same httpd package twice — once LIBRARY with a
+// proper rpm purl, once APPLICATION with `supplier: NOASSERTION` and NO externalRefs — plus an
+// ownership relationship pointing at the unidentified twin.
+//
+// Before EDR-IDENTITY-01 the unidentified entry was dropped with a warning, and because its
+// SPDXID never entered the id→purl map, **the relationship went with it.** That edge carries
+// Observed-grade bridge evidence (EDR-VERDICT-01 D3), so the document's strongest clearance
+// signal was being discarded as a side effect of a naming defect.
+func TestSPDX_PurllessTwinResolvesAndKeepsItsEdge(t *testing.T) {
+	doc := []byte(`{
+      "spdxVersion": "SPDX-2.3",
+      "packages": [
+        {"SPDXID": "SPDXRef-lib-httpd", "name": "httpd", "versionInfo": "2.4.57",
+         "primaryPackagePurpose": "LIBRARY",
+         "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+                           "referenceLocator": "pkg:rpm/rocky/httpd@2.4.57"}]},
+        {"SPDXID": "SPDXRef-app-httpd", "name": "httpd", "versionInfo": "2.4.57",
+         "primaryPackagePurpose": "APPLICATION", "supplier": "NOASSERTION"},
+        {"SPDXID": "SPDXRef-mod", "name": "mod_ssl", "versionInfo": "2.4.57",
+         "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+                           "referenceLocator": "pkg:rpm/rocky/mod_ssl@2.4.57"}]}
+      ],
+      "relationships": [
+        {"spdxElementId": "SPDXRef-app-httpd", "relatedSpdxElement": "SPDXRef-mod",
+         "relationshipType": "OTHER", "comment": "ownership-by-file-overlap"}
+      ]
+    }`)
+	res, err := parser.NewRegistry().Parse(context.Background(), string(parser.FormatSPDX), "2.3", doc)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	comps := res.Inventory.Components()
+	if len(comps) != 2 {
+		t.Fatalf("components = %d, want 2 — the duplicate must NOT become a second subject", len(comps))
+	}
+	// The ownership edge survived by resolving onto the identified twin. This is the functional
+	// gain: previously it vanished with the dropped entry.
+	edges := res.Inventory.Dependencies()
+	if len(edges) != 1 {
+		t.Fatalf("edges = %d, want 1 — the edge must survive onto the resolved twin", len(edges))
+	}
+	if got := edges[0].From.String(); got != "pkg:rpm/rocky/httpd@2.4.57" {
+		t.Errorf("edge from = %q, want the identified twin's purl", got)
+	}
+	// An exact duplicate is resolved, not unresolved, so it raises no warning.
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "unresolved component identity") {
+			t.Errorf("an exactly-resolvable twin must not warn: %q", w)
+		}
+	}
+}
+
+// A named entry with NO identified twin is retained as a WARNING rather than dropped in silence.
+// It still does not enter the inventory — synthesizing an identity is forbidden (D3) — but the
+// fact that the document named a component Themis cannot correlate is now visible (D6).
+func TestSPDX_UnidentifiableComponentIsSurfacedNotSilent(t *testing.T) {
+	doc := []byte(`{
+      "spdxVersion": "SPDX-2.3",
+      "packages": [
+        {"SPDXID": "SPDXRef-mystery", "name": "inhouse-agent", "versionInfo": "3.1.0"}
+      ]
+    }`)
+	res, err := parser.NewRegistry().Parse(context.Background(), string(parser.FormatSPDX), "2.3", doc)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if n := len(res.Inventory.Components()); n != 0 {
+		t.Errorf("components = %d, want 0 — no identity means no inventory entry, and none is invented", n)
+	}
+	var found bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "unresolved component identity") && strings.Contains(w, "inhouse-agent") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want an unresolved-identity warning naming the component; got %v", res.Warnings)
+	}
+}
+
+// The CycloneDX door takes the SAME rule (EDR-IDENTITY-01 D4 — one rule, three doors). Its
+// identifier is a bom-ref rather than an SPDXID, and an entry may carry neither a usable purl
+// NOR a bom-ref, in which case the raw purl string stands in as the local id: it is only ever
+// used to re-key a dependency edge, so a non-identity is harmless there and losing the edge is not.
+func TestCycloneDX_PurllessTwinResolvesAndKeepsItsEdge(t *testing.T) {
+	doc := []byte(`{
+      "bomFormat": "CycloneDX", "specVersion": "1.5",
+      "components": [
+        {"bom-ref": "ref-good", "name": "httpd", "version": "2.4.57", "purl": "pkg:rpm/rocky/httpd@2.4.57"},
+        {"bom-ref": "ref-app", "name": "httpd", "version": "2.4.57", "purl": "app:httpd"},
+        {"name": "httpd", "version": "2.4.57", "purl": "app:httpd-no-ref"},
+        {"bom-ref": "ref-mystery", "name": "inhouse-agent", "version": "3.1.0", "purl": "app:inhouse"}
+      ],
+      "dependencies": [
+        {"ref": "ref-app", "dependsOn": ["ref-good"]}
+      ]
+    }`)
+	res, err := parser.NewRegistry().Parse(context.Background(), string(parser.FormatCycloneDX), "1.5", doc)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if n := len(res.Inventory.Components()); n != 1 {
+		t.Fatalf("components = %d, want 1 — three entries name one identified component", n)
+	}
+	// The dependency edge survived by resolving its bom-ref onto the identified twin.
+	if n := len(res.Inventory.Dependencies()); n != 1 {
+		t.Errorf("dependencies = %d, want 1 — the edge must survive onto the resolved twin", n)
+	}
+	// Only the genuinely unidentifiable entry is unresolved; the twins are resolved silently.
+	var unresolved int
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "unresolved component identity") {
+			unresolved++
+			if !strings.Contains(w, "inhouse-agent") {
+				t.Errorf("unexpected unresolved entry: %q", w)
+			}
+		}
+	}
+	if unresolved != 1 {
+		t.Errorf("unresolved warnings = %d, want 1 (inhouse-agent only); got %v", unresolved, res.Warnings)
+	}
 }

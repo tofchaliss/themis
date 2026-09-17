@@ -20,14 +20,15 @@ type fakeTrust struct {
 func (f fakeTrust) Admit(app.TrustInput) (app.TrustOutcome, error) { return f.out, f.err }
 
 type fakeParser struct {
-	inv    domain.Inventory
-	err    error
-	called bool
+	inv      domain.Inventory
+	warnings []string
+	err      error
+	called   bool
 }
 
 func (f *fakeParser) Parse(context.Context, string, string, []byte) (domain.Inventory, []string, error) {
 	f.called = true
-	return f.inv, nil, f.err
+	return f.inv, f.warnings, f.err
 }
 
 type fakeSubject struct {
@@ -230,5 +231,63 @@ func TestContentFiledElsewhereError_NamesBothSides(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "rel-old") || !strings.Contains(msg, "ev-9") {
 		t.Errorf("message must name the release and the evidence id: %q", msg)
+	}
+}
+
+// capturedParse records what the parse reporter was told (EDR-IDENTITY-01 D6).
+type capturedParse struct {
+	calls      int
+	format     string
+	components int
+	warnings   []string
+}
+
+func (c *capturedParse) Parsed(format string, components int, warnings []string) {
+	c.calls++
+	c.format, c.components, c.warnings = format, components, warnings
+}
+
+// The parser's warnings were DISCARDED at this call site (`parsed, _, perr := ...`), which is
+// what made a dropped component silent: the parser was honest, the caller was not. A component
+// that never reaches the inventory can never be correlated, so the silence turned a naming
+// defect into a false negative nobody could see (EDR-IDENTITY-01 D6).
+func TestRegister_ReportsParseOutcome(t *testing.T) {
+	parser := &fakeParser{
+		inv:      inventory(t),
+		warnings: []string{"unresolved component identity: name=inhouse-agent version=3.1.0"},
+	}
+	report := &capturedParse{}
+	svc := newService(fakeTrust{out: acceptedTrust()}, parser, fakeSubject{ok: true},
+		&fakeRepo{saveID: "ev-1", saveCreated: true}).WithParseReporter(report)
+
+	if _, err := svc.Register(context.Background(), app.RegisterCommand{
+		Raw: []byte("raw"), Kind: domain.KindSBOM, Format: "cyclonedx", SubjectReleaseID: "rel-1",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if report.calls != 1 {
+		t.Fatalf("reporter called %d times, want 1 — on EVERY parse, so silence is never ambiguous", report.calls)
+	}
+	if len(report.warnings) != 1 {
+		t.Errorf("warnings = %v, want the parser's one warning carried through, not discarded", report.warnings)
+	}
+	if report.components != len(inventory(t).Components()) {
+		t.Errorf("components = %d, want the inventory's count", report.components)
+	}
+}
+
+// A non-SBOM carries no inventory, so there is no parse and nothing to report. Reporting here
+// would invent a parse that never happened.
+func TestRegister_NonSBOM_ReportsNothing(t *testing.T) {
+	report := &capturedParse{}
+	svc := newService(fakeTrust{out: acceptedTrust()}, &fakeParser{}, fakeSubject{ok: true},
+		&fakeRepo{saveID: "ev-1", saveCreated: true}).WithParseReporter(report)
+	if _, err := svc.Register(context.Background(), app.RegisterCommand{
+		Raw: []byte("raw"), Kind: domain.KindVEX, SubjectReleaseID: "rel-1",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if report.calls != 0 {
+		t.Errorf("reporter called %d times for a non-SBOM, want 0", report.calls)
 	}
 }

@@ -6,8 +6,21 @@ callers on 2026-09-17), and phase completion gates on `make check-ci`.
 
 Groups 1 and 2 ship TOGETHER (D6). Group 3 is independent.
 
-**STATUS 2026-09-17: Groups 1 and 2 IMPLEMENTED** (`make check-ci` green, knowledge/app 100%),
-except 2.3 which is deferred with its reason recorded in place. Group 3 not started.
+**STATUS 2026-09-17: Groups 1, 2 and 3 IMPLEMENTED** (`make check-ci` green; knowledge/app,
+evidence/app and evidence/adapters/parser all 100%). Only 2.3 remains, deferred with its reason
+recorded in place — it needs a persisted row (which D5 avoids) or an API change (must-ask).
+
+**Group 3 turned out to be broader and deeper than written:**
+- **Broader** — the CycloneDX door has the identical shape, so the rule went to BOTH document
+  doors. "One rule, three doors" (scanner, SPDX, CycloneDX) rather than the two the task named.
+- **Deeper** — the parser was never the silent part. It already emitted a warning per dropped
+  entry; `register.go` discarded them with `_`. The parser was honest and the CALLER was not,
+  which is the same shape as KN-SCAN-OBS-1 one ring further out.
+- **A functional gain nobody had asked for:** an unidentified entry's document id never entered
+  the id→purl map, so every relationship edge touching it was dropped too — **including the
+  ownership edges that carry Observed-grade bridge evidence** (EDR-VERDICT-01 D3). Resolving the
+  twin keeps those edges. The document's strongest clearance signal was being discarded as a
+  side effect of a naming defect.
 
 ## Group 1 — Phase 1: the rule (D1, D2, D3, D4)
 
@@ -64,12 +77,12 @@ except 2.3 which is deferred with its reason recorded in place. Group 3 not star
 
 ## Group 3 — Phase 2: the SPDX door (D4)
 
-- [ ] 3.1 Bring the SPDX parser's purl-less handling under the same rule, so the asymmetry closes from
+- [x] 3.1 Bring the SPDX parser's purl-less handling under the same rule, so the asymmetry closes from
       both sides rather than one door adopting the other's behaviour. The parser has TWO identity signals
       it discards today — `primaryPackagePurpose` and `supplier` — and the measured document carries **no
       CPE**, so any design resting on CPE is unverifiable on this estate and must not be taken.
-- [ ] 3.2 Evidence tier coverage held (parser is 100% today).
-- [ ] 3.3 `make vet-tags` green; `make check-ci` green.
+- [x] 3.2 Evidence tier coverage held (parser is 100% today).
+- [x] 3.3 `make vet-tags` green; `make check-ci` green.
 
 ## Validation criterion (binding — from EDR-IDENTITY-01)
 
@@ -80,7 +93,7 @@ On the measured MRF document, after Groups 1+2:
 - [x] V2 No component is recorded with `component_purl = ''` on any path.
 - [x] V3 An ambiguous or twin-less purl-less observation is retained, counted as unresolved, and visible.
 - [x] V4 `pkg:generic/` appears nowhere.
-- [ ] V5 After Group 3, the SPDX and scanner doors agree on the same input.
+- [x] V5 After Group 3, the SPDX and scanner doors agree on the same input.
 
 ## Out of scope (stated so it is not re-litigated)
 

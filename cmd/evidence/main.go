@@ -97,10 +97,10 @@ func main() {
 	var apiHandler http.Handler
 	var st *store.Store
 	if len(cfg.knownReleases) > 0 {
-		apiHandler, st = wiring.EvidenceAPI(pool, subjectref.NewStub(cfg.knownReleases...))
+		apiHandler, st = wiring.EvidenceAPI(pool, subjectref.NewStub(cfg.knownReleases...), parseLogger{logger.Component("parser")})
 		logger.Info("SubjectRef = dev stub", observability.Int("known_releases", len(cfg.knownReleases)))
 	} else {
-		apiHandler, st = wiring.EvidenceAPI(pool, registrySubjectRef{store: registrystore.New(pool)})
+		apiHandler, st = wiring.EvidenceAPI(pool, registrySubjectRef{store: registrystore.New(pool)}, parseLogger{logger.Component("parser")})
 		logger.Info("SubjectRef = registry-backed (registry.ReleaseExists)")
 	}
 
@@ -261,4 +261,24 @@ func (p logPublisher) Publish(_ context.Context, env event.Envelope) error {
 		observability.String("id", env.ID), observability.String("type", env.Type),
 		observability.String("subject", env.Subject))
 	return nil
+}
+
+// parseLogger surfaces one SBOM parse's outcome (EDR-IDENTITY-01 D6). The app ring never logs
+// (CONVENTIONS R1), so the counts and warnings leave through a port and land here.
+//
+// Logged on EVERY parse, including one with nothing to report: "no unresolved components" and
+// "the parser stopped checking" must not look alike. A non-zero `warnings` is the headline —
+// chiefly entries the document NAMED but did not IDENTIFY, which never reach the inventory and
+// therefore can never be correlated. Those warnings were discarded at the call site until
+// 2026-09-17, so a document that lost a component said nothing at all.
+type parseLogger struct{ log *observability.Logger }
+
+func (l parseLogger) Parsed(format string, components int, warnings []string) {
+	l.log.Info("sbom parsed",
+		observability.String("format", format),
+		observability.Int("components", components),
+		observability.Int("warnings", len(warnings)))
+	for _, w := range warnings {
+		l.log.Warn("sbom parse warning", observability.String("detail", w))
+	}
 }
