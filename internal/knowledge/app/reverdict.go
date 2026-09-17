@@ -119,7 +119,14 @@ func (s *ReverdictService) NudgeC() <-chan struct{} { return s.nudge }
 func (s *ReverdictService) Generation() int { return domain.VerdictGeneration }
 
 // Sweep re-judges one bounded batch of stale occurrences. Returns how many rows were
-// re-judged (stamped current) and how many actually changed state.
+// re-judged (stamped current), how many actually changed state, and whether the batch FILLED —
+// meaning more stale rows remain and the caller should sweep again rather than wait out the
+// interval (KN-REVERDICT-1).
+//
+// `full` alone is NOT a safe signal to loop on, and the reason is the fail-safety below: rows
+// whose release is skipped stay stale AND unstamped, so a release that sorts early and has a
+// batch's worth of rows would refill the same batch forever. The caller must also require
+// PROGRESS (`rejudged > 0`) — see reverdictLoop.
 //
 // Per-release fail-safety: the bridge context is rebuilt per release — the correlated
 // inventory where the ledger has one, the release's own recorded occurrences where it does not
@@ -127,10 +134,10 @@ func (s *ReverdictService) Generation() int { return domain.VerdictGeneration }
 // its rows stay stale for the next sweep: judging with a poorer context than the evidence
 // actually offers, then stamping the result current, would silently downgrade the verdict —
 // the one direction this arc exists to close.
-func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, err error) {
+func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, full bool, err error) {
 	rows, err := s.stale.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, s.batch)
 	if err != nil || len(rows) == 0 {
-		return 0, 0, err
+		return 0, 0, false, err
 	}
 
 	// One bridge context and one card read per distinct release/card in the batch, not per row.
@@ -151,7 +158,7 @@ func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, er
 		if !ok {
 			card, err = s.repo.GetByID(ctx, row.FaultlineID)
 			if err != nil {
-				return rejudged, changed, err // a store fault, not a feed gap — surface it
+				return rejudged, changed, false, err // a store fault, not a feed gap — surface it
 			}
 			cards[row.FaultlineID] = card
 		}
@@ -173,14 +180,14 @@ func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, er
 				card.View().CarrierProducts, componentPackage(row.Component), row.Component.Name),
 			OccurredAt: now,
 		}); err != nil {
-			return rejudged, changed, err
+			return rejudged, changed, false, err
 		}
 		rejudged++
 		if verdict.State.IsOpen() != row.Current.IsOpen() {
 			changed++
 		}
 	}
-	return rejudged, changed, nil
+	return rejudged, changed, len(rows) == s.batch, nil
 }
 
 // bridgeFor rebuilds the bridge context for one release, or nil when the evidence it needs is

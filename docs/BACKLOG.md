@@ -3829,9 +3829,9 @@ under the 2026-08-07 re-derivation standard.
   is correctly declined by the same-EL-stream rule. A confirming re-judgement now advances the
   stamp, which is the whole point.
 
-- [ ] **KN-REVERDICT-1 — the re-verdict loop has no drain-while-full, so a logic-generation
+- [x] **KN-REVERDICT-1 — the re-verdict loop has no drain-while-full, so a logic-generation
   bump takes DAYS on the shipped default (filed 2026-09-17, measured on the VM run of
-  KN-VERDICT-2).** LOW-MED, operability. The generation stamp exists so a shipped verdict-rule
+  KN-VERDICT-2; SHIPPED 2026-09-17).** LOW-MED, operability. The generation stamp exists so a shipped verdict-rule
   change re-judges promptly. But `reverdictLoop` sweeps only on its ticker or a feed nudge, 200
   rows at a time, and the shipped default is `THEMIS_REVERDICT_INTERVAL=12h` — so a generation
   bump drains 400 rows a day. The 1569-row MRF estate would take **~4 days**; a real estate far
@@ -3843,6 +3843,18 @@ under the 2026-08-07 re-derivation standard.
   four seconds instead of six hourly ticks). `ReverdictService.Sweep` would need to report
   whether the batch filled, exactly as `ReclassifyService.Sweep` does. Terminates for the same
   reason: each batch stamps the rows it read, so the stale set strictly shrinks.
+  **SHIPPED 2026-09-17.** `ReverdictService.Sweep` now reports whether the batch filled and
+  `reverdictLoop` drains on one wake-up, so a generation bump lands in minutes rather than days.
+  **The loop condition is NOT the one the re-classification loop uses, and copying it would have
+  been a bug.** Reverdict SKIPS a release whose Evidence inventory is unreadable (correctly — D6
+  fail-safety: judging with a poorer context than the evidence offers, then stamping the result
+  current, would silently downgrade the verdict), and those rows stay stale AND unstamped. So a
+  release that sorts early with a batch's worth of rows would refill the same batch forever: a
+  hot spin during an Evidence outage, precisely when not to hammer it. The loop therefore
+  requires PROGRESS — `full && rejudged > 0` — which guarantees the stale set strictly shrinks.
+  Reclassify needs no such guard because it stamps every card it reads.
+  Guarded by two tests: one pinning the full/partial signal, one pinning the
+  full-batch-no-progress combination the guard exists for. app 100%.
   **Dep:** none. **Scope:** SMALL.
 
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
