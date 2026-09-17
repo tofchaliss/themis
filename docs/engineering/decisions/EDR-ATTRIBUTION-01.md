@@ -134,6 +134,33 @@ identity mechanism in Themis:
 5. The relationship holds for more than httpd.
 6. A missing or wrong CPE fails SAFE rather than creating a false match.
 
+### D7a — ATTR-CPE-1 RESULT (measured 2026-09-17): CPE is present, and insufficient
+
+Phase B ran **without regenerating anything** — the evidence was already in the database.
+
+| precondition | result |
+| --- | --- |
+| 1 · Syft emits the expected CPE for httpd | **NO.** It emits CPEs (6384 `cpe23Type` refs vs 548 purls, Syft 1.42.1), but httpd gets `cpe:2.3:a:httpd:httpd:…` and `cpe:2.3:a:rocky:httpd:…` — **never `apache:http_server`** |
+| 4 · NVD's CPE normalizes to the same identity | **NO.** NVD's carrier is `apache:http_server`; the SBOM's are product `httpd`, vendors `httpd` and `rocky`. Comparing them needs precisely the `httpd` ↔ `http_server` mapping CPE was supposed to supply |
+| 2, 3, 5, 6 | not reached — 1 and 4 settle it |
+
+**Why, and this is the durable part: a GENERATED CPE carries no more identity information than the name
+it was generated from.** Syft derives these heuristically from the package name, so they sit on the SAME
+side of the vocabulary gap as the name. `httpd:httpd` cannot bridge `httpd` → `http_server` because it
+*is* `httpd`, re-encoded. CPE here **moves** the synonym problem rather than solving it.
+
+**And the generalization matters more than the measurement.** Any CPE that *could* bridge would have to
+come from an authoritative source not derived from the package name — NVD's CPE dictionary, or a
+vendor-authored SBOM. That is the alias table with extra steps, which this arc has rejected three times on
+the same grounds each time.
+
+**Conclusion: the Attribution Gap is not merely the current terminal state — it is the PRINCIPLED one**,
+absent an upstream authoritative identity source. It stands, and it prompts no invented synonym mechanism.
+
+**Scope of this finding, stated so it is not over-read:** it tests *Syft-generated* CPEs, which is what
+this estate has. It does not prove no CPE could ever bridge — only that a CPE derived from the package
+name cannot, which is a property of the derivation and not of this estate.
+
 ### D8 — Do not declare an identity hierarchy yet
 
 `PURL → CPE → metadata → name` is **not** written as a normative hierarchy by this EDR. It is a
@@ -150,10 +177,11 @@ this EDR exists to correct: encoding an invariant ahead of its evidence.
 ## Phases
 
 - **A — specify the Attribution Gap** (this document).
-- **B — the CPE experiment:** regenerate ONE SBOM with CPE external refs and measure whether httpd
-  carries its Apache CPE. Read-only; changes nothing.
-- **C — trace CPE end to end** if B succeeds, against D7's six preconditions.
-- **D — only then** decide whether CPE belongs in the canonical identity model.
+- **B — the CPE experiment: DONE 2026-09-17, negative.** No regeneration was needed; the evidence was
+  already stored. See D7a.
+- **C — trace CPE end to end** — **not reached.** B failed at preconditions 1 and 4.
+- **D — decide whether CPE belongs in the canonical identity model** — **decided: NO**, for
+  name-derived CPE. Reopening requires an authoritative identity source, not a re-run.
 
 ## Methodology, recorded as a standing rule
 

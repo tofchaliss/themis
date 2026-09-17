@@ -3214,7 +3214,8 @@ under the 2026-08-07 re-derivation standard.
   **Population:** 227 all-scope findings measured post-retirement.
   **Dep:** none. **Scope:** SMALL-MEDIUM (a derived field + the tile + a count).
 
-- [ ] **ATTR-CPE-1 — the CPE acquisition experiment (filed 2026-09-17,
+- [x] **ATTR-CPE-1 — the CPE acquisition experiment: RUN 2026-09-17, NEGATIVE RESULT (filed and
+  closed the same day,
   [`EDR-ATTRIBUTION-01`](engineering/decisions/EDR-ATTRIBUTION-01.md) D7/D8).** MED, evidence
   acquisition — **an experiment, not a fix.** The estate's SBOM carries no `cpe23Type` external
   ref, but that is a property of how the artifact was GENERATED, not proof CPE cannot exist. Syft
@@ -3255,8 +3256,32 @@ under the 2026-08-07 re-derivation standard.
   **If any precondition fails, that is a VALID result**, not a setback: CPE insufficient ⇒ no
   deterministic attribution ⇒ the Attribution Gap remains the honest terminal state, and it must
   not prompt another invented synonym mechanism.
-  **Dep:** ATTR-GAP-1 is independent of this and must NOT be blocked behind it. **Scope:** SMALL
-  (phase B) / unknown beyond it, deliberately.
+  ---
+  **RESULT 2026-09-17 — CPE is PRESENT and INSUFFICIENT. Phase B needed no regeneration: the
+  evidence was already in the database.**
+
+  | precondition | result |
+  | --- | --- |
+  | 1 · Syft emits the expected CPE for httpd | **NO.** 6384 `cpe23Type` refs vs 548 purls (Syft 1.42.1) — but httpd gets `cpe:2.3:a:httpd:httpd:…` and `cpe:2.3:a:rocky:httpd:…`, **never `apache:http_server`** |
+  | 4 · NVD's CPE normalizes to the same identity | **NO.** NVD's carrier is `apache:http_server`; the SBOM's are product `httpd`, vendors `httpd`/`rocky` |
+  | 2, 3, 5, 6 | not reached — 1 and 4 settle it |
+
+  **A GENERATED CPE carries no more identity information than the name it was generated from.**
+  Syft derives these heuristically from the package name, so they sit on the SAME side of the
+  vocabulary gap as the name: `httpd:httpd` cannot bridge `httpd` → `http_server` because it IS
+  `httpd`, re-encoded. CPE moves the synonym problem rather than solving it.
+  **Any CPE that could bridge would need an authoritative source not derived from the package
+  name** — NVD's CPE dictionary, or a vendor-authored SBOM. That is the alias table with extra
+  steps, rejected three times in this arc on the same grounds. **So the Attribution Gap is the
+  PRINCIPLED terminal state, not merely the current one.**
+  **Scope of the finding, so it is not over-read:** it tests *Syft-generated* CPEs, which is what
+  this estate has. It does not prove no CPE could ever bridge — only that one derived from the
+  package name cannot, which is a property of the derivation, not of this estate.
+  **It also corrected EDR-IDENTITY-01**, which had generalized "no CPE on either httpd twin" into
+  "no CPE on this estate / a CPE bridge is unavailable". 6384 refs say otherwise. Same error class
+  as the 174-vs-87 count: a narrow observation widened into a structural claim.
+  **Dep:** ATTR-GAP-1 was independent of this and is now the only live track. **Scope:** was SMALL
+  (phase B); closed.
 
 - [ ] **KN-IDENT-1 — two ENCODINGS of one purl are two identities, so identity comparison is
   string equality over a non-canonical form (filed 2026-09-17, measured on MRF).** LOW,

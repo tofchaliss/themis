@@ -4,7 +4,25 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — `ATTR-CPE-1`
+> ## ⏭ RESUME POINT — `ATTR-GAP-1` (ATTR-CPE-1 is CLOSED, negative)
+>
+> **`main` = see below. ATTR-CPE-1 ran 2026-09-17 and failed at preconditions 1 and 4.** No
+> regeneration was needed — the evidence was already stored. The SBOM carries **6384 `cpe23Type`
+> refs** (Syft 1.42.1), but httpd's are `cpe:2.3:a:httpd:httpd:…` and `cpe:2.3:a:rocky:httpd:…`,
+> never `apache:http_server`, which is NVD's carrier.
+> **The durable finding: a GENERATED CPE carries no more identity information than the name it
+> was generated from.** Syft derives them heuristically from the package name, so they sit on the
+> same side of the vocabulary gap as the name — `httpd:httpd` cannot bridge `httpd` →
+> `http_server` because it IS `httpd`, re-encoded. Any CPE that could bridge needs an
+> authoritative source (NVD's dictionary, a vendor-authored SBOM), which is the alias table with
+> extra steps — rejected three times in this arc.
+> **So the Attribution Gap is the PRINCIPLED terminal state, not just the current one**, and
+> `ATTR-GAP-1` is now the only live track: make the uncertainty visible. Everything on the
+> DO-NOT-YET list below stays not-yet, permanently for the CPE items.
+> **This also corrected EDR-IDENTITY-01**, which had widened "no CPE on either httpd twin" into
+> "no CPE on this estate". Same error class as the 174-vs-87 count — see CONVENTIONS R4.
+>
+> ## ⏭ SUPERSEDED RESUME POINT — `ATTR-CPE-1`
 >
 > **`main` = `be181e4`, CI green.** Two parallel tracks, neither blocking the other:
 >

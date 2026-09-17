@@ -32,9 +32,14 @@ parsers, consumed in Knowledge's correlation, and enforced as an invariant in Go
 - **Two doors, one input, opposite answers:** the SPDX parser dropped the purl-less twin
   (`canonical_inventory` = 489 components, **exactly 1** httpd); the scanner path admitted its analogue,
   which then became a security subject on **60+ cards**.
-- **The document carries NO CPE** — no `SECURITY`/`cpe23Type` ref on either twin — so a CPE-based identity
-  bridge is **unavailable on this estate**. Two identity signals *are* present and discarded by the
-  parser: `primaryPackagePurpose` and `supplier`.
+- **CORRECTED 2026-09-17 (ATTR-CPE-1):** this EDR originally said "the document carries NO CPE … so a
+  CPE-based identity bridge is unavailable on this estate". **That was a narrow observation widened into a
+  structural claim, and it is false.** The document carries **6384 `cpe23Type` refs** against 548 purls —
+  Syft 1.42.1 emits them. What is true is narrower and more useful: the CPEs Syft emits are **name-derived
+  heuristics** (httpd gets `cpe:2.3:a:httpd:httpd:…` and `cpe:2.3:a:rocky:httpd:…`, never
+  `apache:http_server`), so they land on the SAME side of the vocabulary gap as the package name and
+  cannot bridge it. See EDR-ATTRIBUTION-01's ATTR-CPE-1 result.
+- Two identity signals *are* present and discarded by the parser: `primaryPackagePurpose` and `supplier`.
 - Those 60 rows are the same ones GOV-MIRROR-1 found diverged: the `app:` occurrences an out-of-band
   repair healed in Knowledge without emitting.
 
@@ -197,8 +202,10 @@ On the measured MRF document, after this EDR ships:
 - **Existing rows are NOT repaired by this.** Converging the current `app:` rows means changing a value
   that is part of the primary key — that is **KN-SCAN-4(b)**. The two are one piece of work from opposite
   ends; shipping this alone leaves current rows as they are.
-- **No CPE on the measured estate**, so the identity hierarchy's strongest deterministic signal below
-  PURL is untestable here. Any decision resting on CPE would be unverifiable and is therefore not taken.
+- **CPE is present but cannot bridge** (measured 2026-09-17, correcting an earlier claim here that no CPE
+  existed at all). Syft's CPEs are generated from the package name, so a CPE-based bridge would still need
+  an authoritative name mapping — which is the alias table this arc has refused three times. No decision
+  rests on CPE.
 - **No `CanonicalComponent` entity is created.** It was explicitly deferred: the measured problems are
   resolvable at the intake seam, and a new database entity is a larger commitment than the evidence
   currently justifies.
