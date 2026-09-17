@@ -20,6 +20,9 @@ type Handler struct {
 	read   *app.ReadService
 	health *app.FeedHealthService
 	gather *app.GatherService // nil / sourceless ⇒ POST /faultlines/gather refuses honestly
+	// scanner serves the on-demand unresolved-components query (EDR-IDENTITY-01 D6). nil ⇒ the
+	// endpoint refuses honestly rather than answering "none", which would read as "all clear".
+	scanner *app.ScannerReportService
 }
 
 // NewHandler builds a Handler.
@@ -30,6 +33,13 @@ func NewHandler(read *app.ReadService, health *app.FeedHealthService) *Handler {
 // WithGather wires the on-demand per-CVE gather (G-AI-1) and returns the handler for chaining.
 func (h *Handler) WithGather(g *app.GatherService) *Handler {
 	h.gather = g
+	return h
+}
+
+// WithScanner wires the scanner-report service for the unresolved-components query (D6) and
+// returns the handler for chaining.
+func (h *Handler) WithScanner(s *app.ScannerReportService) *Handler {
+	h.scanner = s
 	return h
 }
 
@@ -226,4 +236,60 @@ func fixesOut(fixes []domain.FixedVersion) *[]gen.FixedVersion {
 		out = append(out, fv)
 	}
 	return &out
+}
+
+// GetUnresolvedComponents answers "which components did this scanner report NAME but not
+// IDENTIFY?" (EDR-IDENTITY-01 D6).
+//
+// Recomputed on demand from immutable evidence rather than read from a stored count, so the
+// answer cannot drift from the behaviour it describes — see app.UnresolvedComponents. The
+// endpoint exists because a correct answer nobody can see is indistinguishable from a wrong one,
+// and these observations are neither findings nor bystanders: they are evidence Themis holds and
+// cannot yet identify.
+func (h *Handler) GetUnresolvedComponents(w http.ResponseWriter, r *http.Request, evidenceId string) {
+	if h.scanner == nil {
+		writeProblem(w, http.StatusInternalServerError, "scanner ingestion not wired",
+			"this node cannot resolve component identity")
+		return
+	}
+	rep, err := h.scanner.UnresolvedComponents(r.Context(), evidenceId)
+	switch {
+	case errors.Is(err, app.ErrNoSuchEvidence):
+		writeProblem(w, http.StatusNotFound, "no such evidence", evidenceId)
+		return
+	case errors.Is(err, app.ErrNotScannerReport):
+		writeProblem(w, http.StatusConflict, "not a scanner report",
+			"only a scanner report carries observations to resolve")
+		return
+	case err != nil:
+		writeProblem(w, http.StatusInternalServerError, "cannot compute unresolved components", err.Error())
+		return
+	}
+	comps := make([]gen.UnresolvedComponent, 0, len(rep.Unresolved))
+	for _, u := range rep.Unresolved {
+		c := gen.UnresolvedComponent{
+			Name:    u.Name,
+			Version: u.Version,
+			Reason:  gen.UnresolvedComponentReason(u.Reason),
+		}
+		if u.Ecosystem != "" {
+			c.Ecosystem = strptr(u.Ecosystem)
+		}
+		if u.Origin != "" {
+			c.Origin = strptr(u.Origin)
+		}
+		// Verbatim and unmodified — never synthesized (D3). Empty when the report offered none,
+		// which is a different observation from offering something unusable.
+		if u.RawPURL != "" {
+			c.ObservedPurl = strptr(u.RawPURL)
+		}
+		comps = append(comps, c)
+	}
+	writeJSON(w, http.StatusOK, gen.UnresolvedComponentsReport{
+		EvidenceId: rep.EvidenceID,
+		ReleaseId:  rep.ReleaseID,
+		Resolved:   rep.Resolved,
+		Unresolved: len(rep.Unresolved),
+		Components: comps,
+	})
 }

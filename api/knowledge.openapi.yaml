@@ -139,6 +139,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeedHealthReport'
+  /scanner-reports/{evidenceId}/unresolved:
+    get:
+      operationId: getUnresolvedComponents
+      summary: Components a scanner report NAMED but whose identity could not be established.
+      description: >-
+        EDR-IDENTITY-01 D6. An observation whose purl is absent or unusable is resolved onto the
+        release's own component when exactly one matches by name+version; anything else abstains
+        and is reported here. These observations do NOT reach the Governance posture, so they are
+        neither findings nor bystanders — they are evidence Themis holds and cannot yet identify.
+
+
+        Recomputed on demand from immutable evidence rather than stored: D5 deliberately keeps the
+        observed identifier out of Knowledge's rows, so this reads the report and the release
+        inventory back through the SAME code path the ingest uses. The answer therefore cannot
+        drift from the behaviour it describes.
+      parameters:
+        - name: evidenceId
+          in: path
+          required: true
+          description: The scanner-report evidence id returned by the upload.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnresolvedComponentsReport'
+        '404':
+          description: No such evidence document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: The document is not a scanner report, so it has no observations to resolve.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -301,3 +344,48 @@ components:
           type: string
         detail:
           type: string
+    UnresolvedComponentsReport:
+      type: object
+      required: [evidence_id, release_id, resolved, unresolved, components]
+      properties:
+        evidence_id:
+          type: string
+        release_id:
+          type: string
+        resolved:
+          type: integer
+          description: Observations that reached an identity — either their own or an unambiguous twin's.
+        unresolved:
+          type: integer
+          description: Observations retained and counted, with no identity established.
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnresolvedComponent'
+    UnresolvedComponent:
+      type: object
+      required: [name, version, reason]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        ecosystem:
+          type: string
+        origin:
+          type: string
+          description: Which scanner engine observed it (`scanner/<name>`).
+        observed_purl:
+          type: string
+          description: >-
+            The identifier the report offered, verbatim and unmodified — empty when it offered
+            none. Never synthesized: EDR-IDENTITY-01 D3 forbids manufacturing a purl, because a
+            purl TYPE is an ecosystem claim.
+        reason:
+          type: string
+          enum: [no_candidate, ambiguous]
+          description: >-
+            `no_candidate` — nothing on the release matches this name+version (the common case is
+            a scanner-only release, which has no SBOM and therefore never a twin).
+            `ambiguous` — several distinct identities match, which is exactly where a guess would
+            be wrong, so no tie-break is invented.

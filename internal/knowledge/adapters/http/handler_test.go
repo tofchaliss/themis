@@ -281,3 +281,112 @@ func TestGetFaultlineById_OmitsFixesWhenThereAreNone(t *testing.T) {
 		t.Errorf("empty fixes must be omitted, got: %s", body)
 	}
 }
+
+// --- the unresolved-components endpoint (EDR-IDENTITY-01 D6) -------------------------------
+
+type idFacts struct {
+	kind, release string
+	found         bool
+}
+
+func (f idFacts) EvidenceFacts(context.Context, string) (string, string, bool, error) {
+	return f.kind, f.release, f.found, nil
+}
+
+type idSource struct{ props []app.ScannerProposal }
+
+func (s idSource) ScannerProposals(context.Context, string) ([]app.ScannerProposal, int, error) {
+	return s.props, 0, nil
+}
+
+func identityServer(t *testing.T, facts app.EvidenceFactsSource, src app.ScannerReportSource) *httptest.Server {
+	t.Helper()
+	fold := app.NewFaultlineService(fakeRepo{}, idGenStub{}, feedClock{},
+		domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	scan := app.NewScannerReportService(src, fold, noopMatches{}, feedClock{}).WithEvidenceFacts(facts)
+	health := app.NewFeedHealthService(fakeFeedStore{}, feedClock{})
+	srv := httptest.NewServer(
+		knhttp.NewHandler(app.NewReadService(fakeRepo{}, fakeProjection{}), health).WithScanner(scan).Router())
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+type idGenStub struct{}
+
+func (idGenStub) NewID() string { return "fl-1" }
+
+type noopMatches struct{}
+
+func (noopMatches) RecordMatch(context.Context, app.Match) (bool, error) { return false, nil }
+
+func TestGetUnresolvedComponents(t *testing.T) {
+	cveID, err := value.NewCVEID("CVE-2023-31122")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prop, err := domain.NewVulnFactsProposal("scanner", feedClock{}.Now(),
+		domain.VulnFacts{Severity: value.SeverityHigh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := idSource{props: []app.ScannerProposal{{
+		CVE: cveID, Proposal: prop, Origin: "scanner/cortex",
+		Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+	}}}
+
+	t.Run("200 with the verbatim observed identifier", func(t *testing.T) {
+		srv := identityServer(t, idFacts{kind: "scanner-report", release: "rel-1", found: true}, src)
+		status, body := get(t, srv.URL+"/scanner-reports/ev-1/unresolved")
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", status, body)
+		}
+		var rep struct {
+			ReleaseID  string `json:"release_id"`
+			Resolved   int    `json:"resolved"`
+			Unresolved int    `json:"unresolved"`
+			Components []struct {
+				Name         string `json:"name"`
+				ObservedPurl string `json:"observed_purl"`
+				Reason       string `json:"reason"`
+				Origin       string `json:"origin"`
+			} `json:"components"`
+		}
+		if jerr := json.Unmarshal([]byte(body), &rep); jerr != nil {
+			t.Fatalf("decode: %v; body=%s", jerr, body)
+		}
+		if rep.ReleaseID != "rel-1" || rep.Unresolved != 1 || len(rep.Components) != 1 {
+			t.Fatalf("report = %+v", rep)
+		}
+		c := rep.Components[0]
+		if c.Name != "httpd" || c.ObservedPurl != "app:httpd" || c.Reason != "no_candidate" {
+			t.Errorf("component = %+v, want the observed string carried verbatim", c)
+		}
+		if c.Origin != "scanner/cortex" {
+			t.Errorf("origin = %q, want the observing engine", c.Origin)
+		}
+	})
+
+	t.Run("404 for an unknown id — never an empty 200", func(t *testing.T) {
+		srv := identityServer(t, idFacts{}, src)
+		if status, body := get(t, srv.URL+"/scanner-reports/ev-ghost/unresolved"); status != http.StatusNotFound {
+			t.Errorf("status = %d, want 404; body=%s", status, body)
+		}
+	})
+
+	t.Run("409 for a document that carries no observations", func(t *testing.T) {
+		srv := identityServer(t, idFacts{kind: "sbom", release: "rel-1", found: true}, src)
+		if status, body := get(t, srv.URL+"/scanner-reports/ev-sbom/unresolved"); status != http.StatusConflict {
+			t.Errorf("status = %d, want 409; body=%s", status, body)
+		}
+	})
+
+	t.Run("500 when the query is unwired — refusing beats reporting zero", func(t *testing.T) {
+		health := app.NewFeedHealthService(fakeFeedStore{}, feedClock{})
+		srv := httptest.NewServer(
+			knhttp.NewHandler(app.NewReadService(fakeRepo{}, fakeProjection{}), health).Router())
+		t.Cleanup(srv.Close)
+		if status, _ := get(t, srv.URL+"/scanner-reports/ev-1/unresolved"); status != http.StatusInternalServerError {
+			t.Errorf("status = %d, want 500 — 'not wired' must not read as 'all clear'", status)
+		}
+	})
+}

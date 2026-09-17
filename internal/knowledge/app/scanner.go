@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/domain"
@@ -52,9 +53,18 @@ type ScannerReportService struct {
 	// therefore ABSTAINS — it never synthesizes an identity.
 	ledger    ReleaseEvidenceSource
 	inventory InventoryReader
+	// facts resolves an evidence id to its release, for the on-demand unresolved query.
+	facts EvidenceFactsSource
 	// report receives the per-ingest outcome counts. The app ring never logs (CONVENTIONS R1),
 	// so the counts leave through a port an adapter owns. Optional; nil = no reporting.
 	report IngestReporter
+}
+
+// EvidenceFactsSource resolves an evidence id to its kind and subject release
+// (EDR-IDENTITY-01 D6). Optional; without it the unresolved query cannot run, which it reports
+// honestly rather than answering "none".
+type EvidenceFactsSource interface {
+	EvidenceFacts(ctx context.Context, evidenceID string) (kind, releaseID string, found bool, err error)
 }
 
 // IngestReporter receives the outcome of one scanner-report ingest (EDR-IDENTITY-01 D6).
@@ -87,6 +97,63 @@ func (s *ScannerReportService) WithIdentityCandidates(ledger ReleaseEvidenceSour
 func (s *ScannerReportService) WithIngestReporter(r IngestReporter) *ScannerReportService {
 	s.report = r
 	return s
+}
+
+// WithEvidenceFacts wires the evidence-facts read used by the unresolved-components query (D6).
+func (s *ScannerReportService) WithEvidenceFacts(f EvidenceFactsSource) *ScannerReportService {
+	s.facts = f
+	return s
+}
+
+// ErrNotScannerReport is returned when the queried document is not a scanner report, so it
+// carries no observations to resolve.
+var ErrNotScannerReport = errors.New("knowledge: evidence is not a scanner report")
+
+// ErrNoSuchEvidence is returned for an unknown evidence id.
+var ErrNoSuchEvidence = errors.New("knowledge: no such evidence")
+
+// UnresolvedReport is the on-demand answer to "which components did this report NAME but not
+// IDENTIFY?" (EDR-IDENTITY-01 D6).
+type UnresolvedReport struct {
+	EvidenceID string
+	ReleaseID  string
+	Resolved   int
+	Unresolved []UnresolvedObservation
+}
+
+// UnresolvedComponents recomputes the unresolved population for one scanner report.
+//
+// RECOMPUTED, not stored, and that is a design decision rather than a shortcut (D5): the
+// observed identifier deliberately never enters a Knowledge row, because the report's bytes are
+// immutable in Evidence and duplicating them would have Knowledge owning a copy of evidence it
+// does not own. So this reads the document and the release inventory back through
+// PlanIngest — the SAME code path the ingest uses — which means the answer cannot drift from
+// the behaviour it describes. A stored count could; that is exactly how the GOV-MIRROR-1
+// divergence happened.
+//
+// Writes nothing. PlanIngest is the read phase; the write phase is not called.
+func (s *ScannerReportService) UnresolvedComponents(ctx context.Context, evidenceID string) (UnresolvedReport, error) {
+	if s.facts == nil {
+		return UnresolvedReport{}, errors.New("knowledge: evidence facts source not wired")
+	}
+	kind, releaseID, found, err := s.facts.EvidenceFacts(ctx, evidenceID)
+	if err != nil {
+		return UnresolvedReport{}, err
+	}
+	if !found {
+		return UnresolvedReport{}, ErrNoSuchEvidence
+	}
+	if kind != "scanner-report" {
+		return UnresolvedReport{}, ErrNotScannerReport
+	}
+	plan, err := s.PlanIngest(ctx, releaseID, evidenceID)
+	if err != nil {
+		return UnresolvedReport{}, err
+	}
+	return UnresolvedReport{
+		EvidenceID: evidenceID, ReleaseID: releaseID,
+		Resolved: len(plan.Items), Unresolved: plan.Unresolved,
+	}, nil
 }
 
 // WithInferredBridge sets the D4 switch (EDR-VERDICT-01) and returns the service for chaining.

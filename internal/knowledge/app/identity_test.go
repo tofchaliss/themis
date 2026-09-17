@@ -1,7 +1,11 @@
 package app_test
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	"github.com/themis-project/themis/internal/kernel/value"
 
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
@@ -108,6 +112,108 @@ func TestResolveIdentity(t *testing.T) {
 		purl, _ := app.ResolveIdentity(obs, nil)
 		if purl != "" {
 			t.Errorf("abstention returned %q — a synthesized identity is the one thing D3 forbids", purl)
+		}
+	})
+}
+
+// factsStub resolves an evidence id to its kind and release.
+type factsStub struct {
+	kind, release string
+	found         bool
+	err           error
+}
+
+func (f factsStub) EvidenceFacts(context.Context, string) (string, string, bool, error) {
+	return f.kind, f.release, f.found, f.err
+}
+
+// EDR-IDENTITY-01 D6: the unresolved population is answerable on demand, RECOMPUTED from
+// immutable evidence rather than read from a stored count. That is the point — it runs through
+// PlanIngest, the same code path the ingest uses, so the answer cannot drift from the behaviour
+// it describes. A stored count could, and that is precisely how GOV-MIRROR-1's divergence
+// happened.
+func TestUnresolvedComponents(t *testing.T) {
+	obs := app.ScannerProposal{
+		CVE: cve(t, "CVE-2023-31122"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+		Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd", Version: "2.4.57"},
+		Origin:    "scanner/cortex",
+	}
+	identified := app.ScannerProposal{
+		CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+		Component: app.InventoryComponent{PURL: "pkg:pypi/foo@1"}, Origin: "scanner",
+	}
+
+	t.Run("reports the unresolved observation with its verbatim identifier", func(t *testing.T) {
+		svc := scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs, identified}},
+			newMatches(), newRepo()).
+			WithEvidenceFacts(factsStub{kind: "scanner-report", release: "rel-1", found: true})
+
+		rep, err := svc.UnresolvedComponents(context.Background(), "ev-report")
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if rep.ReleaseID != "rel-1" || rep.EvidenceID != "ev-report" {
+			t.Errorf("report = %+v, want the release resolved from evidence facts", rep)
+		}
+		if rep.Resolved != 1 || len(rep.Unresolved) != 1 {
+			t.Fatalf("resolved=%d unresolved=%d, want 1/1", rep.Resolved, len(rep.Unresolved))
+		}
+		u := rep.Unresolved[0]
+		if u.RawPURL != "app:httpd" {
+			t.Errorf("observed purl = %q, want the report's own string verbatim", u.RawPURL)
+		}
+		if u.Reason != app.ReasonNoCandidate {
+			t.Errorf("reason = %q, want no_candidate", u.Reason)
+		}
+	})
+
+	t.Run("the query writes nothing", func(t *testing.T) {
+		matches := newMatches()
+		svc := scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs, identified}}, matches, newRepo()).
+			WithEvidenceFacts(factsStub{kind: "scanner-report", release: "rel-1", found: true})
+		if _, err := svc.UnresolvedComponents(context.Background(), "ev-report"); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if len(matches.byPURL) != 0 {
+			t.Errorf("the query recorded %v — it must read only", matches.byPURL)
+		}
+	})
+
+	t.Run("a non-scanner document has no observations to resolve", func(t *testing.T) {
+		svc := scannerService(t, fakeScannerSource{}, newMatches(), newRepo()).
+			WithEvidenceFacts(factsStub{kind: "sbom", release: "rel-1", found: true})
+		if _, err := svc.UnresolvedComponents(context.Background(), "ev-sbom"); !errors.Is(err, app.ErrNotScannerReport) {
+			t.Errorf("err = %v, want ErrNotScannerReport", err)
+		}
+	})
+
+	t.Run("an unknown id is distinguishable from an empty answer", func(t *testing.T) {
+		svc := scannerService(t, fakeScannerSource{}, newMatches(), newRepo()).
+			WithEvidenceFacts(factsStub{})
+		if _, err := svc.UnresolvedComponents(context.Background(), "ev-ghost"); !errors.Is(err, app.ErrNoSuchEvidence) {
+			t.Errorf("err = %v, want ErrNoSuchEvidence — 'not found' must not read as 'all clear'", err)
+		}
+	})
+
+	t.Run("errors propagate rather than reading as all-clear", func(t *testing.T) {
+		boom := errors.New("evidence down")
+		svc := scannerService(t, fakeScannerSource{}, newMatches(), newRepo()).
+			WithEvidenceFacts(factsStub{err: boom})
+		if _, err := svc.UnresolvedComponents(context.Background(), "ev-1"); err == nil {
+			t.Error("a facts-read failure must surface")
+		}
+		src := fakeScannerSource{err: boom}
+		svc2 := scannerService(t, src, newMatches(), newRepo()).
+			WithEvidenceFacts(factsStub{kind: "scanner-report", release: "rel-1", found: true})
+		if _, err := svc2.UnresolvedComponents(context.Background(), "ev-1"); err == nil {
+			t.Error("a report-read failure must surface")
+		}
+	})
+
+	t.Run("unwired facts refuse honestly instead of answering none", func(t *testing.T) {
+		svc := scannerService(t, fakeScannerSource{}, newMatches(), newRepo())
+		if _, err := svc.UnresolvedComponents(context.Background(), "ev-1"); err == nil {
+			t.Error("an unwired query must refuse, not report zero unresolved")
 		}
 	})
 }

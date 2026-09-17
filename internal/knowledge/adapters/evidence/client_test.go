@@ -29,6 +29,13 @@ func fakeEvidence(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"kind":"vex","document":"{\"statements\":[]}"}`))
 		case "/api/v1/evidence/malformed/document":
 			_, _ = w.Write([]byte(`{not json`))
+		case "/api/v1/evidence/ev-1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"kind":"scanner-report","subject_release_id":"rel-1"}`))
+		case "/api/v1/evidence/malformed":
+			_, _ = w.Write([]byte(`{not json`))
+		case "/api/v1/evidence/broken":
+			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -93,5 +100,33 @@ func TestClient_Errors(t *testing.T) {
 	// Transport error (unreachable) — nil client falls back to the default client.
 	if _, err := evidence.NewClient("http://127.0.0.1:1", nil).GetInventory(context.Background(), "ev-1"); err == nil {
 		t.Error("unreachable evidence: expected error")
+	}
+}
+
+// EvidenceFacts resolves an evidence id to its kind and subject release (EDR-IDENTITY-01 D6),
+// so the unresolved-components query needs only the id the upload already returned.
+func TestClient_EvidenceFacts(t *testing.T) {
+	srv := fakeEvidence(t)
+	defer srv.Close()
+	c := evidence.NewClient(srv.URL, srv.Client())
+
+	kind, release, found, err := c.EvidenceFacts(context.Background(), "ev-1")
+	if err != nil || !found {
+		t.Fatalf("facts = %v/%v, want found", found, err)
+	}
+	if kind != "scanner-report" || release != "rel-1" {
+		t.Errorf("kind=%q release=%q, want scanner-report/rel-1", kind, release)
+	}
+	// An unknown id is NOT an error: the caller must distinguish "no such document" from "the
+	// document has nothing unresolved", and a 404 answered as an error would collapse the two.
+	if _, _, found, err := c.EvidenceFacts(context.Background(), "nope"); err != nil || found {
+		t.Errorf("unknown id = %v/%v, want found=false with no error", found, err)
+	}
+	// Any other non-200 IS an error — a broken Evidence must never read as "all clear".
+	if _, _, _, err := c.EvidenceFacts(context.Background(), "broken"); err == nil {
+		t.Error("a 500 from Evidence must surface as an error")
+	}
+	if _, _, _, err := c.EvidenceFacts(context.Background(), "malformed"); err == nil {
+		t.Error("a malformed body must surface as an error")
 	}
 }
