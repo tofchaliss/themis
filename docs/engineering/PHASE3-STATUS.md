@@ -1,8 +1,96 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-09-16 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-09-17 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
+
+> ## ⏭ CHECKPOINT 2026-09-17 — the carrier arc closed and LIVE-VERIFIED on the VM
+>
+> **`main` = `d3833c6`, CI GREEN.** Everything is merged; no branch holds work. The 2026-09-16
+> checkpoint below opened the arc; this one closes it, and the numbers are measured on the MRF
+> estate (859 cards · 1569 matches · 797 findings), not inferred.
+>
+> ### Shipped, merged, and verified live
+> - **KN-CLAIM-1 variant A, the sibling half** — `relatedProduct` also relates names sharing a
+>   DISTINGUISHING token, closing the two shapes containment structurally cannot reach: a shared
+>   stem with divergent tails (`spring_framework` ↔ `spring-core`/`spring-web`) and a project
+>   below the containment floor (`xz` ↔ `xz-libs`). Purely ADDITIVE, so it can only move
+>   `scope`→`carrier`. The generic-token filter is what keeps it from over-matching into
+>   uselessness.
+> - **The re-classification sweep** (migration 000008) — card-level stamps plus
+>   `domain.ClassifierGeneration`, so a RULES change counts as staleness. Q1 folded in: unknown
+>   LIFTS a stale `scope` and never disturbs a recorded `carrier`, because for `claim_class`
+>   empty means unknown, and unknown ACTS AS CARRIER — the one field where empty is the SAFE
+>   value, not the poorer one.
+> - **KN-FIX-5** — `versionedInterpreterPrefix` strips `pythonN.M-` wrappers; `NormalizeProduct`
+>   and `strippedWrapper` now share ONE `wrapperPrefixOf`, removing the divergence hazard
+>   `strippedWrapper`'s own comment warned about.
+> - **KN-VERDICT-2** (migration 000009) — `domain.VerdictGeneration` folded into the D6 staleness
+>   predicate, so a shipped verdict-logic change re-judges instead of waiting on feed drift.
+>
+> ### The live numbers (2026-09-17, MRF/cdmrf-oamp)
+>
+> | | before | after |
+> | --- | --- | --- |
+> | claim classes | scope **728** · carrier **534** · unknown **307** | scope **705** · carrier **557** · unknown **307** |
+> | spring-core / spring-web | scope 10 / scope 10 | **carrier 10 / carrier 10** |
+> | perl-interpreter / libs / macros | carrier 4 each | **carrier 5 each** |
+> | verdict staleness | 0 (single-stamp predicate) | 1558 → 780 → **0** |
+>
+> **−23 scope / +23 carrier reconciles exactly**: 20 spring + 3 perl. The re-classification sweep
+> drained 626 cards / 1571 occurrences in 7 batches and converged; no errors.
+>
+> **All four guards held, zero movement:** `python3-pyyaml` 122 scope · `python3-ply` 74 scope ·
+> `perl-Encode` 11 scope · `httpd` 174 scope. The pyyaml one is the load-bearing guard — it is
+> EDR-CORRELATION-01's module-stream bystander rule surviving a change to the same predicate.
+> `httpd` staying scope is the EDR-1 boundary holding ON PURPOSE.
+>
+> ### One defect only a live run could find
+> The re-verdict sweep re-judged correctly and **never converged**: `rejudged:200 changed:0` every
+> two minutes while `stale` sat at **1558 of 1569**. `RecordMatch`'s stamp-refresh branch was
+> gated on `CardVersion > oldStamp || detailChanged`, and a row that is version-current but
+> generation-stale — what EVERY row looks like the moment a rule ships — satisfies neither, so no
+> UPDATE ran and the stamp never advanced. Fixed in `d3833c6`; `stale` then drained to 0 and
+> stayed there.
+> **The lesson is the durable part:** for a self-targeting sweep, *"does it find the work?"* and
+> *"does the work stop being found?"* are DIFFERENT tests, and only the second catches a spin. The
+> original test asserted the first and passed.
+>
+> ### A prediction retired, not achieved
+> I expected the `pip@23.2.1` shadows to clear via KN-FIX-5 and they did not. **That was an
+> unsound prediction, not a defect.** Six of seven pip cards hold only pypi bounds at 23.3+, so
+> nothing could clear them; the seventh (CVE-2026-8643) holds rpm bounds for `python3.14-pip` at
+> `0:25.2-3.el10_2.5` / `0:25.2-3.el9_8.5` — el9/el10 streams against an **el8** estate, which the
+> same-EL-stream rule correctly declines. `open` is the right answer on all seven.
+> What the round DID establish is more useful than a clearance: the name bridge now reaches the
+> vendor bound (verified against the real string — `MatchesFixPackage("python3.14-pip","pip")` is
+> true) and the stream guard then declines. Before KN-FIX-5 the lookup never found the bound at
+> all, so the same `open` came out **for the wrong reason** — right answer, wrong reason, which
+> hides until the data changes.
+>
+> ### ⚠ OPERATIONAL — still outstanding
+> - **Rotate the exposed PostgreSQL credential** (leaked to scrollback + bash history on
+>   2026-09-16 via a fish-syntax `set -x` on a bash shell). Independent of all Themis work and not
+>   done. See DB-password rotation orchestration in the backlog.
+> - **Go caches moved off the NFS home** (2026-09-17): the build died on `disk quota exceeded`
+>   at `~/.cache/go-build`. `GOCACHE`/`GOMODCACHE` now point at `/opt/themis/{gocache,gomodcache}`,
+>   persisted in `~/.bashrc`, and the 1.1G module cache was MOVED rather than re-downloaded
+>   (this box is firewalled). Affects the build environment only; systemd units are unaffected.
+>
+> ### NEXT
+> **EDR-1 (intake identity) now owns the only remaining carrier gap** — the synonym class, of
+> which `httpd` ↔ `http_server` is the measured case and 174 rows the measured cost. Those rows
+> are `cleared_vendor_fix` AND `scope`, so 148 verified clearances are invisible to the GUI's
+> cleared tile (it requires `carriers.length > 0`). That is where the remaining value sits.
+> Secondary, filed: the re-verdict loop has no drain-while-full, so on the shipped 12h default a
+> generation bump would drain 200 rows twice a day (~4 days for this estate). The reclassify loop
+> already has the pattern.
+>
+> ### Read this as MEASURED state
+> The claim-class and verdict-generation behaviour above is live-verified with before/after
+> numbers. Three hypotheses died during the 2026-09-16 arc and must not be revived from history:
+> the `pkg:generic/` purl proposal, the "event type never published" reading, and the "systemic
+> mirror divergence" severity. See the 2026-09-16 checkpoint for what replaced them.
 
 > ## ⏭ CHECKPOINT 2026-09-16 — the httpd trace: 5 defects filed, 3 shipped, the merge gate revived
 >

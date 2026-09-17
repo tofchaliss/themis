@@ -3637,14 +3637,36 @@ under the 2026-08-07 re-derivation standard.
   re-polling an existing card cannot shrink what the union already holds. Cleaning historical
   bundler pollution would need a card-level rebuild, which is a separate decision from this one.
 
-  **STILL NOT LIVE-VERIFIED.** Everything above is gated and green locally; nothing has run on
-  the VM. The sweep's own first drain is the verification, and it is observable: the loop logs
-  `cards` / `occurrences` / `generation` on every sweep including zero.
+  **LIVE-VERIFIED 2026-09-17** on MRF/cdmrf-oamp (859 cards · 1569 matches · 797 findings).
+  The re-classification sweep drained **626 cards / 1571 occurrences in 7 batches** (6×100 + 26)
+  and converged, no errors, in about four seconds — the `full`-batch re-sweep doing exactly what
+  it was added for, instead of waiting out six hourly ticks.
+
+  | | before | after |
+  | --- | --- | --- |
+  | claim classes | scope 728 · carrier 534 · unknown 307 | **scope 705 · carrier 557 · unknown 307** |
+  | spring-core | scope 10 | **carrier 10** |
+  | spring-web | scope 10 | **carrier 10** |
+  | perl-interpreter / perl-libs / perl-macros | carrier 4 each | **carrier 5 each** |
+
+  **−23 scope / +23 carrier reconciles exactly** — 20 spring + 3 perl, and nothing else moved.
+  **All four guards held with ZERO movement:** `python3-pyyaml` 122 scope · `python3-ply` 74
+  scope · `perl-Encode` 11 scope · `httpd` 174 scope. The pyyaml guard is the load-bearing one:
+  it is EDR-CORRELATION-01's module-stream bystander rule surviving a change to the very
+  predicate it depends on. `httpd` staying scope is the EDR-1 boundary holding on purpose.
+  **Why only 3 of ~19 stale perl rows moved:** the rest sit on cards whose carrier set never
+  names `perl` at all (NVD listed only OS products), so there is nothing to relate them to.
+  Correct, and it is the synonym/vocabulary gap again rather than a normalization miss.
+  **`classification: stale cards` does NOT settle at 0 on an active estate** (observed 37, then
+  97, after a clean drain): feed loops restart with the node and fold proposals, which bumps card
+  versions after those cards were stamped. The metric means "cards whose version moved since last
+  classification", so small-and-draining is the healthy shape, not zero. The earlier note implying
+  convergence-to-zero was wrong about this line.
 
   **WHAT REMAINS (do not re-derive the above):**
-  1. **Run it on the VM.** Migration 000008 applies, then the first drain re-classifies the
-     estate at generation 3. Expect the 20 spring findings to leave `scope`; expect the python
-     cluster NOT to move (it is the feature working); expect httpd to stay scope (EDR-1).
+  1. **The 238/158 relabel** — re-measure `scope_only_findings` / `never_cleared` now that 23 rows
+     moved, and expect the httpd share (174 component rows) to dominate what is left, because it
+     is the synonym class and nothing shipped here touches it.
   2. **EDR-1 (intake identity)** now owns the synonym class. The spec is already agreed; the
      httpd row is its first measured test case.
   3. **Relabel the 238/158** once 1 lands, and re-measure per-component counts — the python
@@ -3747,6 +3769,20 @@ under the 2026-08-07 re-derivation standard.
   `scope` — and `python3.12-devel` is still the interpreter via the role rule.
   `ClassifierGeneration` → 4 and `VerdictGeneration` → 2, so the re-classification and
   re-verdict sweeps both drain the estate for it. domain 100%.
+  **LIVE 2026-09-17 — the name bridge works; the clearance is correctly DECLINED downstream.**
+  The predicted outcome (the `pip@23.2.1` shadows clear) did not happen, and that prediction was
+  **unsound rather than unlucky**: six of the seven pip cards hold only pypi bounds at 23.3+, so
+  nothing could ever clear them, and the seventh (CVE-2026-8643) holds rpm bounds for
+  `python3.14-pip` at `0:25.2-3.el10_2.5` / `0:25.2-3.el9_8.5` — el9/el10 streams against an
+  **el8** estate. The same-EL-stream rule (EDR-VEX-01 Phase 3) declines that, correctly: a fix in
+  a different major stream says nothing about whether this build carries the patch.
+  **What the round did establish is worth more than a clearance.** The lookup now REACHES the
+  vendor bound — verified against the real string, `MatchesFixPackage("python3.14-pip","pip")` is
+  true, note `python3.14-` and not the `python3.12-` the original entry described. Before this
+  fix the lookup never found the bound at all, so the same `open` came out **for the wrong
+  reason**. Right answer, wrong reason is the failure mode that hides until the data changes.
+  **Not a Themis defect, recorded for completeness:** Red Hat publishes no el8 bound for these
+  pip CVEs. That is feed/vendor coverage, not logic.
 
 - [x] **KN-VERDICT-2 — a verdict-logic change ships invisible: stamps claim currency the new
   code never produced (filed 2026-09-10; SHIPPED 2026-09-17).** LOW-MED, operability. The D6 stamp records "judged
@@ -3786,6 +3822,28 @@ under the 2026-08-07 re-derivation standard.
   assertions.
   **Lesson worth keeping:** for any self-targeting sweep, "does it find the work?" and "does the
   work stop being found?" are two different tests, and only the second one catches a spin.
+  **CONVERGENCE CONFIRMED LIVE 2026-09-17** after the fix: `stale` 1558 → 780 → **0**, then
+  `rejudged:0` steady on every subsequent sweep (batches of 200×5 then 51, at this node's 2m
+  interval). `changed:0` across the entire drain, which is the correct result on this estate —
+  every re-judgement confirmed its existing conclusion, and the only candidate for a flip (pip)
+  is correctly declined by the same-EL-stream rule. A confirming re-judgement now advances the
+  stamp, which is the whole point.
+
+- [ ] **KN-REVERDICT-1 — the re-verdict loop has no drain-while-full, so a logic-generation
+  bump takes DAYS on the shipped default (filed 2026-09-17, measured on the VM run of
+  KN-VERDICT-2).** LOW-MED, operability. The generation stamp exists so a shipped verdict-rule
+  change re-judges promptly. But `reverdictLoop` sweeps only on its ticker or a feed nudge, 200
+  rows at a time, and the shipped default is `THEMIS_REVERDICT_INTERVAL=12h` — so a generation
+  bump drains 400 rows a day. The 1569-row MRF estate would take **~4 days**; a real estate far
+  longer, and the whole point of the stamp is lost in the interval.
+  **Measured 2026-09-17:** the VM runs a 2m interval, which masked it entirely — the full drain
+  took ~14 minutes there. On the default it would not have been visibly draining at all.
+  **Fix shape, already written once:** the same `full`-batch re-sweep the re-classification loop
+  uses (`reclassifyLoop` drains while a batch comes back full, which is why 626 cards finished in
+  four seconds instead of six hourly ticks). `ReverdictService.Sweep` would need to report
+  whether the batch filled, exactly as `ReclassifyService.Sweep` does. Terminates for the same
+  reason: each batch stamps the rows it read, so the stale set strictly shrinks.
+  **Dep:** none. **Scope:** SMALL.
 
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
