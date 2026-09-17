@@ -78,10 +78,16 @@ and the resume pointer, never item state.
 >   (this box is firewalled). Affects the build environment only; systemd units are unaffected.
 >
 > ### NEXT
-> **EDR-1 (intake identity) now owns the only remaining carrier gap** — the synonym class, of
-> which `httpd` ↔ `http_server` is the measured case and 174 rows the measured cost. Those rows
-> are `cleared_vendor_fix` AND `scope`, so 148 verified clearances are invisible to the GUI's
-> cleared tile (it requires `carriers.length > 0`). That is where the remaining value sits.
+> **[`EDR-IDENTITY-01`](decisions/EDR-IDENTITY-01.md) is WRITTEN** (2026-09-17, D1–D9) — the
+> backlog's "EDR-1". It records the spec agreed 2026-09-16 for component identity at intake
+> (twin resolution, abstain on ambiguity, never synthesize a purl, never discard the evidence,
+> surface the unresolved count WITH the change) and resolves an ownership ambiguity the backlog
+> carried in two directions: **EDR-IDENTITY-01 owns whether identity can be ESTABLISHED; EDR-3
+> owns what a failure to establish it MEANS** (the UNKNOWN rule). An alias table belongs to
+> neither. Implementation NOT started — Phase 1 is twin resolution at the scanner ACL seam.
+> **The remaining carrier gap is the synonym class and it is EDR-3's**, priced at 174 `httpd`
+> component rows classified `scope`, **148 of them also `cleared_vendor_fix`** — verified
+> clearances invisible to the GUI's cleared tile, which requires `carriers.length > 0`.
 > Secondary, filed: the re-verdict loop has no drain-while-full, so on the shipped 12h default a
 > generation bump would drain 200 rows twice a day (~4 days for this estate). The reclassify loop
 > already has the pattern.

@@ -3252,7 +3252,10 @@ under the 2026-08-07 re-derivation standard.
   a value that is part of the primary key — that is exactly **KN-SCAN-4(b)**. The two are one
   piece of work from opposite ends; shipping (d) alone leaves current rows as they are.
   ---
-  **SPEC AGREED 2026-09-16 — this is the EDR-1 boundary; implement to it, do not re-derive it.**
+  **SPEC AGREED 2026-09-16 — recorded as
+  [`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md) on 2026-09-17 (D1–D9). That EDR is
+  now the reason of record; implement to it and do not re-derive it.** The rules below are kept
+  here because the measured evidence they rest on lives in this entry.
 
   **Design principle (the one sentence the rest follows from):** *an unknown ECOSYSTEM is a
   valid state of incomplete knowledge; an empty PURL is not an identity. Manufacture neither.*
@@ -3529,13 +3532,25 @@ under the 2026-08-07 re-derivation standard.
     single-character CPE debris. Both bystander guards re-measured and holding:
     `python`↔`python3-pyyaml` and `commons-beanutils`↔`javapackages-filesystem` stay `scope`.
     domain 100%.
-  - ⬜ **Vocabulary gap — now SYNONYMS ONLY, and it belongs to EDR-1.** `http_server` ↔ `httpd`
-    shares no token and no substring, because it is a SYNONYM rather than a name variation. No
-    string comparison can bridge it, and forcing it would be the alias table both reviewers
-    rejected, arriving by a different door. **Decided 2026-09-17: it stays with the intake
-    identity model (EDR-1), not with the correlation predicate.** The boundary is asserted as a
+  - ⬜ **Vocabulary gap — SYNONYMS ONLY, and the ownership is now settled explicitly.**
+    `http_server` ↔ `httpd` shares no token and no substring, because it is a SYNONYM rather
+    than a name variation. No string comparison can bridge it, and forcing it would be the alias
+    table both reviewers rejected, arriving by a different door. The boundary is asserted as a
     TEST in `claimclass_test.go` — if that case ever starts passing there, an alias table has
     grown inside the correlation vocabulary.
+    **CORRECTION 2026-09-17.** This entry carried TWO readings of who owns it — an older one
+    assigning the unbridgeable mismatch to "EDR-3's UNKNOWN rule", and a note I added the same
+    day assigning the synonym class to "the intake identity model (EDR-1)". Both are in the text
+    and they are not the same claim. Resolved in
+    [`EDR-IDENTITY-01` D9](engineering/decisions/EDR-IDENTITY-01.md):
+    **EDR-IDENTITY-01 owns whether an identity can be ESTABLISHED** (for this class it
+    establishes nothing — the measured SBOM carries no CPE, the one signal that could relate the
+    two vocabularies deterministically), and **EDR-3 owns what a failure to establish it MEANS**
+    — the UNKNOWN rule. An alias table belongs to neither.
+    **Measured cost of leaving it to EDR-3** (2026-09-17, post-sweep): **174 `httpd` component
+    rows are `scope`, 148 of them ALSO `cleared_vendor_fix`** — so 148 verified clearances are
+    invisible to the GUI's cleared tile, which requires `carriers.length > 0`. That is the price,
+    and it is EDR-3's to remove.
 
   **NOT yet live-verified — and the MECHANISM is narrower than first recorded (corrected
   2026-09-17).** The earlier note said claim class "is computed once at match time and never
@@ -3667,8 +3682,10 @@ under the 2026-08-07 re-derivation standard.
   1. **The 238/158 relabel** — re-measure `scope_only_findings` / `never_cleared` now that 23 rows
      moved, and expect the httpd share (174 component rows) to dominate what is left, because it
      is the synonym class and nothing shipped here touches it.
-  2. **EDR-1 (intake identity)** now owns the synonym class. The spec is already agreed; the
-     httpd row is its first measured test case.
+  2. **[`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md) — WRITTEN 2026-09-17**, D1–D9,
+     recording the agreed spec and drawing the EDR-3 boundary (D9). Implementation not started;
+     Phase 1 is twin resolution at the scanner ACL seam, and D6 requires the unresolved count to
+     ship WITH it rather than after.
   3. **Relabel the 238/158** once 1 lands, and re-measure per-component counts — the python
      cluster should be unchanged (it is the feature working), spring should go to zero.
 
