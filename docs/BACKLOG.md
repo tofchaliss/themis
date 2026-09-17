@@ -3246,6 +3246,32 @@ under the 2026-08-07 re-derivation standard.
   component anywhere classified `unknown` by a gap.
   **Dep:** none. **Scope:** was SMALL-MEDIUM; came in smaller — GUI + one script, no Go change.
 
+- [x] **DEV-PROP-1 — `make test-property` has been BROKEN since 2026-08-07, so the deep
+  1000-check runs never ran (found + fixed 2026-09-17).** MED, gate integrity. The `property-run`
+  target selected packages by `grep -rlE 'pgregory\.net/rapid' --include='*_test.go'`. That also
+  matches files which merely MENTION the string — and one does:
+  `tests/architecture/property_naming_test.go` greps source for it to enforce the `Property`
+  suffix. So `./tests/architecture` entered the package list, its test binary rejected
+  `-rapid.checks` as an unknown flag, and the whole target died with a usage dump.
+  **The architecture test that enforces property naming had broken the target it exists to
+  protect** — added in the same commit, `4faa9be` (2026-08-07).
+  **Invisible for six weeks because `check` and `check-ci` do not run `test-property`.** Every
+  rapid property in the repo has been running at rapid's default 100 examples via `make test`,
+  never the 1000 the deep target exists for. Confirmed by bisect: green at `4faa9be~1`, red at
+  `4faa9be`, red on main until today.
+  **Fixed** by selecting packages whose tests ACTUALLY IMPORT rapid, via
+  `go list -f '{{.ImportPath}} {{join .TestImports}} {{join .XTestImports}}'` — a fact about
+  imports rather than a string match over source. 15 packages now selected, `tests/architecture`
+  correctly excluded, exit 0.
+  **Found by accident**, which is the uncomfortable part: it surfaced only because a new property
+  was added and `make test-property` was run to check it. A gate nothing runs cannot report its
+  own absence — the same shape as KN-SCAN-OBS-1 (a counter computed and never logged) and the
+  `vet-tags` rationale (a tagged file invisible to every gate that does not set its tag).
+  **Follow-up worth considering:** `check-ci` does not run `test-property`, by design (the deep
+  run is slow). That is defensible, but it means this target's health is nobody's gate. A cheap
+  smoke — assert the selected package list is non-empty and contains the known property packages —
+  would have caught this on the day.
+
 - [ ] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
   surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
   user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.

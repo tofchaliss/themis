@@ -103,8 +103,19 @@ test-property-greenfield:
 # property-run is the shared body: find the packages under ROOTS that import rapid and run only
 # their property tests. Exits cleanly when a root has none, so a newly scaffolded context
 # without property tests does not fail the build.
+# Selects packages whose TESTS ACTUALLY IMPORT rapid, via `go list` — not by grepping source.
+#
+# A grep for the literal `pgregory.net/rapid` also matches files that merely MENTION it, and one
+# does: tests/architecture/property_naming_test.go greps source for that string to enforce the
+# `Property` suffix. That pulled ./tests/architecture into the list, where `-rapid.checks` is an
+# unknown flag, so the whole target died with a usage dump. Broken from 2026-08-07 (4faa9be) to
+# 2026-09-17 and INVISIBLE, because `check`/`check-ci` do not run this target — so the deep
+# 1000-check runs silently did not happen for six weeks.
+#
+# The architecture test that enforces property naming had broken the target it exists to protect.
 property-run:
-	@pkgs=$$(grep -rlE 'pgregory\.net/rapid' --include='*_test.go' $(ROOTS) | sed -e 's#/[^/]*$$##' -e 's#^#./#' | sort -u); \
+	@pkgs=$$($(GO) list -f '{{.ImportPath}} {{join .TestImports " "}} {{join .XTestImports " "}}' $(addsuffix /...,$(addprefix ./,$(ROOTS))) 2>/dev/null \
+		| grep 'pgregory\.net/rapid' | cut -d' ' -f1 | sed -e 's#^github.com/themis-project/themis#.#' | sort -u); \
 	if [ -z "$$pkgs" ]; then echo "property packages: none under $(ROOTS)"; exit 0; fi; \
 	echo "property packages:" $$pkgs; \
 	$(GO) test $(GO_TEST_FLAGS) $$pkgs -run 'Property|Prop_' -rapid.checks=$${RAPID_CHECKS:-1000}
