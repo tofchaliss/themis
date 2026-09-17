@@ -108,6 +108,14 @@ type InboundComponentVerdictChanged struct {
 	Component   domain.MatchedComponent
 }
 
+// InboundComponentRetired carries a component withdrawal (KN-SCAN-4(b)).
+type InboundComponentRetired struct {
+	FaultlineID string
+	ReleaseID   string
+	PURL        string
+	Reason      string
+}
+
 // OnComponentVerdictChanged mirrors a re-judged occurrence verdict onto the Finding's
 // component row (D5). Governance never re-derives the verdict and never decides anything
 // here — queue membership and priority re-derive from the mirrored state at read time (D7),
@@ -116,6 +124,20 @@ type InboundComponentVerdictChanged struct {
 // that creates it carries the same verdict.
 func (c *Coordinator) OnComponentVerdictChanged(ctx context.Context, m InboundComponentVerdictChanged) error {
 	return c.svc.MirrorComponentVerdict(ctx, m.ReleaseID, m.FaultlineID, m.Component)
+}
+
+// OnComponentRetired withdraws a mirrored component from the ACTIVE projection (KN-SCAN-4(b)):
+// the occurrence does not denote an additional component on this release.
+//
+// It decides nothing and touches neither the Finding nor its Positions — a Position belongs to a
+// Finding, not to a component, so retiring a duplicate retracts no security decision. Queue
+// membership and priority re-derive from the components that remain (D7), which makes them MORE
+// correct: the component was being counted twice per Finding.
+//
+// Idempotent, and a miss is a no-op rather than an error: the row may not exist yet (events can
+// arrive out of order) or may already be retired.
+func (c *Coordinator) OnComponentRetired(ctx context.Context, m InboundComponentRetired) error {
+	return c.svc.RetireComponent(ctx, m.ReleaseID, m.FaultlineID, m.PURL, m.Reason)
 }
 
 // OnFaultlineEnriched re-evaluates the affected Findings — raising a system proposal +

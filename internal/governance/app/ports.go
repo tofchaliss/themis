@@ -72,6 +72,10 @@ type Repository interface {
 	// Knowledge owns, like SetBaseScore. A missing Finding or component row is a no-op: the
 	// ComponentMatched that creates the row carries the same verdict.
 	SetComponentVerdict(ctx context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error
+	// RetireComponent withdraws a mirrored component from the ACTIVE projection (KN-SCAN-4(b)):
+	// the occurrence does not denote an additional component. Marked, never deleted -- the row
+	// stays for the audit trail. Idempotent; a miss is a no-op, not an error.
+	RetireComponent(ctx context.Context, releaseID, faultlineID, purl, reason string, at time.Time) error
 	// SetBandAndFixes materializes the exploitability band and the SELECTED fix versions onto one
 	// Finding, so a release rollup carries both without a read per row (DASH-2 / PLAN-3).
 	SetBandAndFixes(ctx context.Context, findingID, band string, fixes []FixedVersion) error

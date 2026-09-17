@@ -270,6 +270,7 @@ func main() {
 	kn.Scanner.WithIngestReporter(ingestLogger{logger.Component("scanner-ingest")})
 	go reverdictLoop(kn.Reverdict, cfg.reverdictInterval, logger.Component("reverdict"))
 	go reclassifyLoop(kn.Reclassify, cfg.reclassifyInterval, logger.Component("reclassify"))
+	go retireLoop(kn.Retire, logger.Component("retire"))
 	logger.Info("re-verdict sweep enabled (EDR-VERDICT-01 D6)",
 		observability.String("interval", cfg.reverdictInterval.String()),
 		observability.Int("rows_per_sweep", cfg.reverdictBatch))
@@ -472,6 +473,32 @@ func (l ingestLogger) ScannerIngest(releaseID, evidenceID string, recorded, item
 		observability.Int("items", items),
 		observability.Int("skipped", skipped),
 		observability.Int("unresolved", unresolved))
+}
+
+// retireLoop runs the duplicate-identity repair once at startup and then leaves it alone
+// (KN-SCAN-4(b)).
+//
+// Deliberately NOT on a ticker. This is a REPAIR of a bounded, measured population — 87 rows of
+// one component, every one with its canonical twin already recorded — not a standing
+// reconciliation. The forward fix (EDR-IDENTITY-01) means no new duplicates of this shape are
+// created, so a recurring sweep would query for work that cannot appear. It drains while batches
+// come back full, then stops; the listing excludes retired rows, so a restart re-runs it for
+// free and finds nothing.
+func retireLoop(rs *app.RetireService, logger *observability.Logger) {
+	time.Sleep(40 * time.Second) // after the other two sweeps' settle windows
+	for {
+		retired, full, err := rs.Sweep(context.Background())
+		if err != nil {
+			logger.Error("duplicate-identity repair failed", observability.Err(err))
+			return
+		}
+		// Logged including zero: on a healthy estate this says "nothing to repair", which is
+		// the answer an operator wants after deploying a repair.
+		logger.Info("duplicate-identity repair complete", observability.Int("retired", retired))
+		if !full || retired == 0 {
+			return
+		}
+	}
 }
 
 // reverdictLoop re-judges match rows whose verdict stamps lag — their card's version (new data)

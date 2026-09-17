@@ -106,3 +106,24 @@ func TestCoordinator_OnFaultlineSuperseded(t *testing.T) {
 		t.Errorf("proposals = %+v", f.Proposals())
 	}
 }
+
+// KN-SCAN-4(b): retirement reaches the repository keyed on (release, faultline, purl), and
+// NOTHING else happens — no Finding loaded, no Position touched. A Position belongs to a
+// Finding, not to a component, so retiring a duplicate retracts no security decision.
+func TestOnComponentRetired(t *testing.T) {
+	repo := newRepo()
+	coord := app.NewCoordinator(writeSvc(repo))
+	err := coord.OnComponentRetired(context.Background(), app.InboundComponentRetired{
+		FaultlineID: "fl-1", ReleaseID: "rel-1",
+		PURL: "app:httpd@2.4.37", Reason: "duplicate_identity",
+	})
+	if err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if got := repo.retired["rel-1|fl-1|app:httpd@2.4.37"]; got != "duplicate_identity" {
+		t.Errorf("retired = %q, want duplicate_identity; map=%v", got, repo.retired)
+	}
+	if repo.saveCalls != 0 {
+		t.Errorf("saveCalls = %d, want 0 — retirement must not touch the aggregate", repo.saveCalls)
+	}
+}

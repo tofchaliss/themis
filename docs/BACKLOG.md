@@ -3857,10 +3857,40 @@ under the 2026-08-07 re-derivation standard.
   for six days). Positions are per-Finding, not per-component, so retiring a duplicate component
   destroys no decision, and queue state re-derives from the remaining components — which makes
   the counts MORE correct, since httpd is currently counted twice per Finding.
-  **Still to decide before code (Must-ask: a delete on an append-only content model):** whether
-  Governance retires the row outright or marks it, and what the event is called. The semantics
-  are at least crisp now — *this row duplicates another under a different identity* — which is a
-  narrower claim than any lifecycle change.
+  **DECIDED + SHIPPED 2026-09-17 — MARKED retirement, in-band, idempotent.** The architectural
+  decision of record: *KN-SCAN-4(b) retires duplicate scanner-derived component rows in-band
+  rather than renaming or physically deleting them. Retirement preserves historical evidence and
+  component identity while removing the duplicate from the active Governance projection. The
+  retirement event must be idempotent and must not mutate Findings or Positions.*
+  **Naming came from the EXISTING vocabulary, not a new taxonomy.** `knowledge.component_retired`
+  sits beside `component_matched` and `component_verdict_changed`; `retired` is the word this
+  codebase already uses in prose for a terminal, relationship-free exit (see `Finding.Archive`),
+  as distinct from `superseded`, which names a replacement. **No `superseded_by` field** — that
+  would assert a relationship the evidence does not need, since the canonical row already exists
+  independently.
+  **Stored vs active, the distinction that makes it safe:** Knowledge marks
+  `faultline_matches.retired_at`, Governance marks `finding_components.retired_at` +
+  `retired_reason`. Retired rows leave every ACTIVE projection — the reverdict queue, the
+  re-announce set, the bridge sibling set, and Governance's `ReleasePosture` (which is what
+  `openCarriers` and the cleared tile read). They deliberately REMAIN in Governance's aggregate:
+  that is what makes a re-delivered `ComponentMatched` a no-op instead of resurrecting the
+  duplicate.
+  **Idempotent at every layer**, as the contract requires: both UPDATEs are guarded on
+  `retired_at IS NULL`, the listing excludes retired rows so the sweep converges, a miss is a
+  no-op rather than an error (events can arrive out of order), and the event asserts a STATE
+  rather than a transition.
+  **`RetireComponent` needed no domain change** — it is denormalized read-data Knowledge owns,
+  exactly like `SetComponentVerdict`: no aggregate load, no Finding mutation, no Position touched.
+  **The twinless row is NOT retired.** `DuplicateIdentityRows` lists a raw row only when the same
+  name+version demonstrably already has an identified row beside it. A raw row with no twin may
+  be the only record of something real, and retiring it would delete evidence rather than a
+  duplicate — guarded by an integration-test case.
+  **The repair loop runs ONCE at startup, not on a ticker**: this is a bounded measured
+  population, and the forward fix (EDR-IDENTITY-01) means no new duplicates of this shape are
+  created, so a recurring sweep would query for work that cannot appear.
+  **NOT live-verified.** Expected on the VM after deploy: 87 retired, active httpd components
+  87 (not 174), cleared 74 / open 13 on the canonical rows, Findings no longer double-counted,
+  Positions unchanged, both sides converged.
   **Dep:** (a) unaffected. **(b)** should land BEFORE EDR-3: it removes half the httpd rows, so
   EDR-3 inherits a smaller, better-understood problem. **Scope:** SMALL-MEDIUM (b), now that the
   measurement has removed the general cases. See also KN-IDENT-1 for purl canonicalization, which

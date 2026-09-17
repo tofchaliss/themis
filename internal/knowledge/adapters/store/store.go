@@ -43,6 +43,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventFaultlineSuperseded:     "knowledge.faultline_superseded.v1",
 	app.EventComponentMatched:        "knowledge.component_matched.v1",
 	app.EventComponentVerdictChanged: "knowledge.component_verdict_changed.v1",
+	app.EventComponentRetired:        "knowledge.component_retired.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -617,7 +618,7 @@ func (s *Store) MatchesForFaultline(ctx context.Context, faultlineID string) ([]
 		SELECT release_id, component_purl, component_name, component_version,
 		       component_ecosystem, component_source
 		  FROM faultline_matches
-		 WHERE faultline_id = $1
+		 WHERE faultline_id = $1 AND retired_at IS NULL
 		 ORDER BY release_id, component_purl`, faultlineID)
 	if err != nil {
 		return nil, err

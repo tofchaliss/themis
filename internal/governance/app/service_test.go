@@ -20,6 +20,7 @@ type fakeRepo struct {
 	lastFixes      []app.FixedVersion
 	lastSignals    domain.ExploitSignals
 	lastVerdict    domain.MatchedComponent
+	retired        map[string]string
 	byID           map[domain.FindingID]domain.Finding
 	order          []domain.FindingID
 	saveCalls      int
@@ -75,6 +76,15 @@ func (r *fakeRepo) SetComponentVerdict(_ context.Context, releaseID, faultlineID
 		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 			comps, f.Stage(), f.Proposals(), f.Positions(), f.Version(), f.Signals())
 	}
+	return nil
+}
+
+// retired records the components withdrawn from the active projection (KN-SCAN-4(b)).
+func (r *fakeRepo) RetireComponent(_ context.Context, releaseID, faultlineID, purl, reason string, _ time.Time) error {
+	if r.retired == nil {
+		r.retired = map[string]string{}
+	}
+	r.retired[releaseID+"|"+faultlineID+"|"+purl] = reason
 	return nil
 }
 

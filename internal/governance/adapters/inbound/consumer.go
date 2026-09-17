@@ -22,6 +22,7 @@ import (
 const (
 	eventComponentMatched        = "knowledge.component_matched"
 	eventComponentVerdictChanged = "knowledge.component_verdict_changed"
+	eventComponentRetired        = "knowledge.component_retired"
 	eventFaultlineEnriched       = "knowledge.faultline_enriched"
 	eventFaultlineSuperseded     = "knowledge.faultline_superseded"
 )
@@ -33,7 +34,8 @@ const (
 var Subscription = eventbus.Subscription{
 	Consumer: "governance",
 	Stream:   "knowledge",
-	Interest: []string{eventComponentMatched, eventComponentVerdictChanged, eventFaultlineEnriched, eventFaultlineSuperseded},
+	Interest: []string{eventComponentMatched, eventComponentVerdictChanged, eventComponentRetired,
+		eventFaultlineEnriched, eventFaultlineSuperseded},
 }
 
 // Consumer translates raw Knowledge events into coordinator calls.
@@ -64,6 +66,15 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		}
 		return c.coord.OnComponentVerdictChanged(ctx, app.InboundComponentVerdictChanged{
 			FaultlineID: dto.FaultlineID, ReleaseID: dto.ReleaseID, Component: dto.Component.toDomain(),
+		})
+	case eventComponentRetired:
+		var dto componentRetiredDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return err
+		}
+		return c.coord.OnComponentRetired(ctx, app.InboundComponentRetired{
+			FaultlineID: dto.FaultlineID, ReleaseID: dto.ReleaseID,
+			PURL: dto.PURL, Reason: dto.Reason,
 		})
 	case eventFaultlineEnriched:
 		var dto faultlineEnrichedDTO
@@ -161,6 +172,18 @@ type componentVerdictChangedDTO struct {
 	CVE         string       `json:"CVE"`
 	ReleaseID   string       `json:"ReleaseID"`
 	Component   componentDTO `json:"Component"`
+}
+
+// componentRetiredDTO decodes knowledge.component_retired.v1 (KN-SCAN-4(b)). Narrow on purpose:
+// the PURL identifies the exact row, and there is no superseded-by pointer because the canonical
+// row already exists independently and needs no relationship to a row that never denoted a
+// distinct component.
+type componentRetiredDTO struct {
+	FaultlineID string `json:"FaultlineID"`
+	CVE         string `json:"CVE"`
+	ReleaseID   string `json:"ReleaseID"`
+	PURL        string `json:"PURL"`
+	Reason      string `json:"Reason"`
 }
 
 type faultlineEnrichedDTO struct {

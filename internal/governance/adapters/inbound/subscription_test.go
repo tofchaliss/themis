@@ -15,14 +15,17 @@ func TestSubscription(t *testing.T) {
 	// per-type dispatch + UnknownTypeIgnored tests prove Handle matches this set).
 	for _, want := range []string{
 		"knowledge.component_matched", "knowledge.component_verdict_changed",
+		"knowledge.component_retired", // KN-SCAN-4(b)
 		"knowledge.faultline_enriched", "knowledge.faultline_superseded",
 	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)
 		}
 	}
-	if len(s.Interest) != 4 {
-		t.Errorf("interest set = %v, want 4 types", s.Interest)
+	// The COUNT is asserted deliberately: adding a type to Handle without adding it here means
+	// the stream reader filters the event out and the dispatch is dead code, which is silent.
+	if len(s.Interest) != 5 {
+		t.Errorf("interest set = %v, want 5 types", s.Interest)
 	}
 	// A Knowledge event Governance does not consume is out of interest.
 	if s.InInterest("knowledge.faultline_created") {

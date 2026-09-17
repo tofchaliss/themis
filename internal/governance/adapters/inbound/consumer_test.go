@@ -28,6 +28,7 @@ type memRepo struct {
 	order       []domain.FindingID
 	baseScores  map[string]int
 
+	retired              map[string]string
 	lastVerdictRelease   string
 	lastVerdictFaultline string
 	lastVerdict          domain.MatchedComponent
@@ -48,6 +49,15 @@ func (r *memRepo) SetSignals(_ context.Context, faultlineID string, sig domain.E
 
 func (r *memRepo) SetComponentVerdict(_ context.Context, releaseID, faultlineID string, comp domain.MatchedComponent) error {
 	r.lastVerdictRelease, r.lastVerdictFaultline, r.lastVerdict = releaseID, faultlineID, comp
+	return nil
+}
+
+// retired records withdrawals so a test can assert the consumer dispatched one (KN-SCAN-4(b)).
+func (r *memRepo) RetireComponent(_ context.Context, releaseID, faultlineID, purl, reason string, _ time.Time) error {
+	if r.retired == nil {
+		r.retired = map[string]string{}
+	}
+	r.retired[releaseID+"|"+faultlineID+"|"+purl] = reason
 	return nil
 }
 
@@ -277,5 +287,19 @@ func TestConsumer_MalformedPayloads(t *testing.T) {
 		if err := c.Handle(context.Background(), mkEnv(evt, []byte("{not json"))); err == nil {
 			t.Errorf("%s: malformed payload should error", evt)
 		}
+	}
+}
+
+// KN-SCAN-4(b): the retirement event reaches the repository through the coordinator, and
+// nothing else happens — no Finding loaded, no Position touched.
+func TestConsumer_ComponentRetired(t *testing.T) {
+	repo := newMemRepo()
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2023-31122","ReleaseID":"rel-1",
+		"PURL":"app:httpd@2.4.37","Reason":"duplicate_identity"}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.component_retired", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if got := repo.retired["rel-1|fl-1|app:httpd@2.4.37"]; got != "duplicate_identity" {
+		t.Errorf("retired = %q, want duplicate_identity; map=%v", got, repo.retired)
 	}
 }

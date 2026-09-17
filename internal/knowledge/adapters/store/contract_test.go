@@ -98,6 +98,16 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 			},
 			OccurredAt: now,
 		}},
+		// KN-SCAN-4(b). Narrow on purpose: the PURL identifies the exact row, and there is NO
+		// superseded-by field — the canonical row exists independently and needs no relationship
+		// to one that never denoted a distinct component. The schema forbids additional
+		// properties, so adding one later fails here rather than surprising a consumer.
+		{app.EventComponentRetired, domain.ComponentRetired{
+			FaultlineID: "fl-1", CVE: "CVE-2023-31122", ReleaseID: "rel-1",
+			PURL:       "app:httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9",
+			Reason:     domain.RetiredDuplicateIdentity,
+			OccurredAt: now,
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {
