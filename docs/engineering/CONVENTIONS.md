@@ -94,6 +94,39 @@ Governance enrichment halt (BUG-1). Treat "handler reads on the pool" as a defec
 **Guard:** each context's store owns a regression test that mutates one aggregate twice within a single
 inbox envelope and asserts convergence (e.g. Governance's `TestInboxTwoMutationsOnOneFindingConverge`).
 
+## R4 — Measure a rule's TRIGGERING PREDICATE against the estate before encoding it
+
+A design can be logically sound, feel conservative, and still be wrong — because its trigger collapses
+distinct real-world cases that require opposite outcomes. Reason about the rule all you like; the thing to
+go and measure is **what fires it**.
+
+**The measured case (2026-09-17, EDR-ATTRIBUTION-01).** The proposed rule was "carriers known, nothing
+matched ⇒ classify `unknown`", which fails toward treating a component as affected and therefore *reads*
+as the safe direction. Its trigger — a whole-card match miss — turned out to cover two situations that are
+indistinguishable in the data and opposite in truth:
+
+| observable | reality | correct outcome |
+| --- | --- | --- |
+| carriers known, zero matches | `http_server` IS `httpd` under another name | treat as carrier |
+| carriers known, zero matches | `requests` genuinely not installed; `pyyaml`/`ply` are bystanders | keep `scope` |
+
+It would have broken **182 correct suppressions to fix 87 wrong ones**. One query against the estate found
+it, before any code existed. The rule had already been agreed in principle by two people, and it rested on
+a recorded claim about a specific cluster (*"`python3` matches on those cards"*) that was simply false.
+
+**How to apply.** Before implementing a rule that classifies, suppresses, or re-opens anything:
+
+1. Write down the predicate that fires it, on its own.
+2. Query the estate for the population that predicate selects — not the population you have in mind.
+3. Inspect a concrete member of that population end to end, including the ones you expect to be excluded.
+4. If the predicate selects cases requiring opposite outcomes, the rule is **unsound, not mis-scoped** —
+   do not rescope it, and do not add conservatism on top. Find a different discriminator, or record an
+   honest observation instead of a conclusion.
+
+**Corollary, and the sentence worth keeping:** *an observation is not a conclusion.* Where no
+deterministic discriminator exists, surface the ambiguity as a first-class, countable state rather than
+resolving it by policy. EDR-ATTRIBUTION-01's Attribution Gap is the worked example.
+
 ## How these apply per node
 
 Both rules are **shared infrastructure**, not re-implemented per context: one observability bootstrap

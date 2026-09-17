@@ -115,12 +115,28 @@ and the resume pointer, never item state.
 > **CPE is an evidence-ACQUISITION experiment, not the answer** (D7): six preconditions must all
 > hold first, and `PURL → CPE → metadata → name` is deliberately NOT declared a hierarchy yet
 > (D8) — that would repeat the mistake this EDR exists to correct.
+> **Three concepts the arc had been conflating, now separate:** a zero carrier match yields an
+> **Attribution Gap**, which is *not* `unknown`, *not* `scope`-as-a-security-conclusion, and *not*
+> affected. D3's discovery keeps it cheap — no new persistence model, so an observability problem
+> does not become another domain object.
+> **Sequencing (ATTR-GAP-1 does NOT wait on CPE):**
+> `ATTR-GAP-1` → surface measurable gaps — independent.
+> `ATTR-CPE-1` → read-only evidence experiment → succeeds: evaluate CPE's identity role ·
+> fails: the Attribution Gap stands as the honest terminal state, and prompts no invented
+> synonym mechanism.
+> Then, and only then, historical/reclassification work on measured evidence. **Do not reopen the
+> 182 `scope` bystanders or the 87 httpd cases merely because the gap is now visible** — D4/D5
+> preserve both until stronger identity evidence exists.
+> **The methodology is now a standing rule, not a story:** CONVENTIONS **R4** — measure a rule's
+> TRIGGERING PREDICATE against the estate before encoding it. A design can be logically sound,
+> feel conservative, and still be wrong when its trigger collapses distinct real-world cases.
 > Filed: **ATTR-GAP-1** (surface it) and **ATTR-CPE-1** (the read-only experiment).
 >
-> ### ⚠ OPERATIONAL — still outstanding
-> - **Rotate the exposed PostgreSQL credential** (leaked to scrollback + bash history on
->   2026-09-16 via a fish-syntax `set -x` on a bash shell). Independent of all Themis work and not
->   done. See DB-password rotation orchestration in the backlog.
+> ### ⚠ OPERATIONAL — tracked OUTSIDE the architecture backlog
+> - **Rotate the exposed PostgreSQL credential** — now [`docs/OPERATIONAL-ACTIONS.md`](../OPERATIONAL-ACTIONS.md),
+>   moved there 2026-09-17 after three sessions in the backlog. An operator action buried among
+>   architecture entries reads as "someday"; it is owed by whoever holds the credentials, not by
+>   the codebase. The tooling half (atomic fleet env rewrite) stays in the backlog, correctly.
 > - **Go caches moved off the NFS home** (2026-09-17): the build died on `disk quota exceeded`
 >   at `~/.cache/go-build`. `GOCACHE`/`GOMODCACHE` now point at `/opt/themis/{gocache,gomodcache}`,
 >   persisted in `~/.bashrc`, and the 1.1G module cache was MOVED rather than re-downloaded

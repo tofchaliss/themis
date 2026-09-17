@@ -2982,7 +2982,11 @@ under the 2026-08-07 re-derivation standard.
   fleet-wide outage is now visible within a minute of rotation instead of at the next restart.
   **Residual (open below): the orchestration half** — a fleet env-rewrite + restart verb.
 - [ ] **DB-password rotation orchestration — rewrite the fleet's env files as one operation.**
-  **LOW-MED, operability** (was the "still open" tail of the entry above). A `themisctl`-style
+  **LOW-MED, operability** (was the "still open" tail of the entry above).
+  **Not to be confused with the live operator action:** rotating the CURRENTLY exposed credential is
+  tracked in [`docs/OPERATIONAL-ACTIONS.md`](OPERATIONAL-ACTIONS.md), deliberately outside this file —
+  an operational action buried among architecture entries reads as "someday". This entry is the
+  ENGINEERING half (make step 2 atomic); that file is the action. A `themisctl`-style
   verb or an `install-systemd.sh` flag that rewrites `/etc/themis/*.env` and restarts the fleet
   atomically, plus the friendlier startup error ("DSN in /etc/themis/<svc>.env is not accepted by
   the server"). Original filing kept below for the record.

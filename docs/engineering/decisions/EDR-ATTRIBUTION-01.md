@@ -155,6 +155,16 @@ this EDR exists to correct: encoding an invariant ahead of its evidence.
 - **C — trace CPE end to end** if B succeeds, against D7's six preconditions.
 - **D — only then** decide whether CPE belongs in the canonical identity model.
 
+## Methodology, recorded as a standing rule
+
+The lesson generalizes beyond this EDR and is therefore **CONVENTIONS R4**, not a story told here: *a
+design can be logically sound, feel conservative, and still be wrong when its TRIGGERING PREDICATE
+collapses distinct real-world cases that require opposite outcomes.* Measure what fires a rule against the
+estate before encoding it — including the population you expect it to exclude.
+
+The `scope` ⟺ whole-card-miss equivalence is what exposed it here: the same predicate that makes the gap
+cheap to derive (D3) is the predicate that made the rejected rule unsound.
+
 ## Honest limits
 
 - **The 87 httpd cases remain misclassified** for as long as this EDR stands alone. That is a stated cost,
