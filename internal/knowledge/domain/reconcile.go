@@ -389,6 +389,23 @@ func (v EnterpriseView) FixesFor(pkg, ecosystem string) []string {
 		if !MatchesFixPackage(f.Package, pkg) {
 			continue
 		}
+		// A fix whose ecosystem is KNOWN and different is not this component's fix. Guarded on
+		// both being non-empty, deliberately: an unknown ecosystem is a valid state of
+		// incomplete knowledge and must filter nothing (EDR-IDENTITY-01 D1), which is why the
+		// drawer still shows every candidate bound with a confirm-install-method caveat.
+		//
+		// FIX BOUNDS STAY ECOSYSTEM-SCOPED. Do NOT normalize two packaging identities into one
+		// merely because they carry the same upstream software: Alpine ships Apache httpd as
+		// `apache2` and Red Hat/Rocky as `httpd` (measured 2026-09-17 — apk bounds
+		// `apache2 2.4.68-r0` beside rpm bounds `httpd 0:2.4.37-65.module+el8.10.0+…`). They are
+		// the same PROJECT and different PACKAGES, on different version lines.
+		//
+		// Two independent guards stop an apk bound clearing an rpm component: the name rule above
+		// (`apache2` and `httpd` share no root) and this ecosystem check. Normalizing the names
+		// would remove the first — and because THIS one abstains when either side's ecosystem is
+		// unknown, a component with an empty ecosystem would then be clearable by an Alpine
+		// bound. That is the concrete chain, and it is why the naming difference is load-bearing
+		// rather than cosmetic.
 		if f.Ecosystem != "" && compEco != "" && f.Ecosystem != compEco {
 			continue
 		}

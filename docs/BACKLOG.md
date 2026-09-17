@@ -3401,6 +3401,17 @@ under the 2026-08-07 re-derivation standard.
   distinct rows are correct). And the failure direction is ABSTENTION — no wrong resolution,
   just no resolution, surfaced as unresolved — so this is a precision limitation, not a
   correctness defect.
+  **HARD CONSTRAINT on any normalization work here, recorded 2026-09-17:** **fix bounds stay
+  ECOSYSTEM-SCOPED.** Do not normalize two packaging identities into one merely because they carry
+  the same upstream software — Alpine ships Apache httpd as `apache2`, Red Hat/Rocky as `httpd`
+  (measured: apk bounds `apache2 2.4.68-r0` beside rpm bounds
+  `httpd 0:2.4.37-65.module+el8.10.0+…`). Same PROJECT, different PACKAGES, different version
+  lines. **The concrete danger chain:** two independent guards currently stop an apk bound from
+  clearing an rpm component — the name rule (`apache2` and `httpd` share no root) and `FixesFor`'s
+  ecosystem check. Normalizing names removes the first, and the second abstains when EITHER side's
+  ecosystem is unknown, so a component with an empty ecosystem would become clearable by an Alpine
+  bound. This estate had exactly such components (the `app:httpd` rows carried an empty ecosystem).
+  Documented at the guard in `reconcile.go`.
   **Fix shape to decide:** canonicalize at the seam that already validates (`value.NewPURL`),
   so there is one spelling of an identity everywhere — percent-encoding normalized, qualifier
   order canonical. **Do not "fix" it by comparing loosely**: dropping qualifiers to make two
