@@ -3191,6 +3191,34 @@ under the 2026-08-07 re-derivation standard.
   second vendor path speculatively would be scope creep. Same for AlmaLinux (ALSA) and Oracle
   (ELSA) if those estates appear. **Dep:** none. **Scope:** MED (the pattern is now proven).
 
+- [ ] **KN-IDENT-1 — two ENCODINGS of one purl are two identities, so identity comparison is
+  string equality over a non-canonical form (filed 2026-09-17, measured on MRF).** LOW,
+  precision; EDR-IDENTITY-01 follow-up. The same rpm is present in the estate under two
+  spellings: `pkg:rpm/rocky/httpd@2.4.37-65.module%2Bel8.10.0%2B40257%2B286895ef.9?arch=x86_64&distro=rocky-8.10&upstream=…`
+  (percent-encoded `+`, with qualifiers) and
+  `pkg:rpm/rocky/httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9` (literal `+`, no qualifiers).
+  Per the purl spec the first is canonical. `value.NewPURL` validates the SCHEME; it does not
+  canonicalize, and every identity comparison downstream is string equality — including
+  `component_purl`, which is **in the primary key** of `faultline_matches` and of
+  `finding_components`.
+  **Consequences, in the order they matter:** (1) `ResolveIdentity` collects DISTINCT purl
+  strings and abstains above one, so two encodings of one component inside ONE release read as
+  ambiguity and the observation stays unresolved; (2) within one release the same component
+  could occupy two rows under two spellings.
+  **Measured severity: does NOT fire on this estate.** Each of the three releases holding httpd
+  carries exactly ONE distinct purl for it (the spellings are in different releases, where
+  distinct rows are correct). And the failure direction is ABSTENTION — no wrong resolution,
+  just no resolution, surfaced as unresolved — so this is a precision limitation, not a
+  correctness defect.
+  **Fix shape to decide:** canonicalize at the seam that already validates (`value.NewPURL`),
+  so there is one spelling of an identity everywhere — percent-encoding normalized, qualifier
+  order canonical. **Do not "fix" it by comparing loosely**: dropping qualifiers to make two
+  strings match would merge genuinely different builds (`arch`, `distro`), which is the one
+  error identity comparison must never make. A canonical form narrows; a loose comparison
+  widens. **Dep:** none, but it touches the kernel value object every context shares.
+  **Scope:** SMALL (canonicalize) + a data question for existing rows, which is KN-SCAN-4(b)'s
+  problem shape again.
+
 - [x] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
   ecosystem, silently closing its verdict path (filed 2026-09-09).** MED, correctness-of-signal.
   Scanners identify binaries they fingerprint on disk with application-scoped identifiers
@@ -3572,10 +3600,15 @@ under the 2026-08-07 re-derivation standard.
     establishes nothing — the measured SBOM carries no CPE, the one signal that could relate the
     two vocabularies deterministically), and **EDR-3 owns what a failure to establish it MEANS**
     — the UNKNOWN rule. An alias table belongs to neither.
-    **Measured cost of leaving it to EDR-3** (2026-09-17, post-sweep): **174 `httpd` component
-    rows are `scope`, 148 of them ALSO `cleared_vendor_fix`** — so 148 verified clearances are
-    invisible to the GUI's cleared tile, which requires `carriers.length > 0`. That is the price,
-    and it is EDR-3's to remove.
+    **Measured cost of leaving it to EDR-3 — CORRECTED 2026-09-17:** **87 distinct `httpd`
+    components** are `scope`, **74 of them ALSO `cleared_vendor_fix`**, so 74 verified clearances
+    are invisible to the GUI's cleared tile (it requires `carriers.length > 0`).
+    The first figure recorded here (174 rows / 148 cleared) counted ROWS. Every affected Finding
+    carries httpd **twice** — once under `pkg:rpm/rocky/httpd@…`, once under the raw
+    `app:httpd@…` — and the halves are verdict-identical (74 cleared / 13 open each). **Half of
+    what was attributed to the synonym class is really the identity defect**, KN-SCAN-4(b), whose
+    dedup shrinks this before EDR-3 starts. A row count is not a component count when identity is
+    the question.
 
   **NOT yet live-verified — and the MECHANISM is narrower than first recorded (corrected
   2026-09-17).** The earlier note said claim class "is computed once at match time and never
@@ -3791,8 +3824,47 @@ under the 2026-08-07 re-derivation standard.
   it** — they never pass through Evidence's parser, so three contexts hold three copies and
   none is authoritative. That is the strongest argument for siting the component-identity seam
   at INTAKE in Evidence rather than in Knowledge; see KN-CLAIM-1 and KN-SCAN-4(b).
-  **Dep:** (b) blocks on the identity-ownership decision; (a) does not. **Scope:** MEDIUM (a) /
-  design-first (b).
+  **(b) DESIGN SETTLED BY MEASUREMENT 2026-09-17 — and it is a DEDUPLICATION, not an identity
+  repair.** The ownership blocker this entry named is lifted:
+  [`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md) sites identity with Evidence
+  (validated at its parser), has Knowledge resolve onto it, and D5 forbids Knowledge duplicating
+  evidence it does not own. What replaced it is a harder constraint the entry did not name, plus
+  a measurement that dissolves most of the difficulty.
+
+  **Measured on MRF, 2026-09-17:**
+
+  | | |
+  | --- | --- |
+  | match rows with an unusable purl | **87** of 1569 (5.5%), all ONE component |
+  | the raw identifier | `app:httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9` |
+  | rows with an EMPTY purl | **0** — the stream-halt hazard was never live here |
+  | affected pairs that ALREADY hold the good purl | **87 of 87 — every one** |
+  | Governance rows for httpd | **87 raw + 87 usable**, verdict-identical (74 cleared / 13 open each) |
+
+  **So there is nothing to rename onto.** Every `(release, faultline)` already carries the
+  correct `pkg:rpm/rocky/httpd@…` row, recorded independently by the SBOM correlation path. The
+  87 raw rows are **pure duplicate subjects** — same component, same CVE, same release, counted
+  twice on both sides. The repair is dedup: retire 87 redundant rows, keep the ones that exist.
+  **Two earlier designs, both discarded on this evidence, recorded so they are not re-proposed:**
+  (i) a *supersede* lifecycle in Governance — far too much machinery for retiring duplicates, and
+  it would encode "this truth was retracted" when the fact is "this row never denoted a distinct
+  thing"; (ii) a *rename in place* (the purl is a PK column, but Postgres will UPDATE it, which
+  would have preserved verdict and stamps) — elegant, and **dead on arrival at 87/87 collisions**.
+  **The remaining hard constraint:** Governance's components are append-only content —
+  `AbsorbComponent` is the only mutation and it is additive and fill-in-only, with no remove, no
+  replace, no retire. So an in-band event is required; an operator SQL pass on both databases is
+  precedent-rejected (it is exactly what produced GOV-MIRROR-1's 60-row divergence, undetected
+  for six days). Positions are per-Finding, not per-component, so retiring a duplicate component
+  destroys no decision, and queue state re-derives from the remaining components — which makes
+  the counts MORE correct, since httpd is currently counted twice per Finding.
+  **Still to decide before code (Must-ask: a delete on an append-only content model):** whether
+  Governance retires the row outright or marks it, and what the event is called. The semantics
+  are at least crisp now — *this row duplicates another under a different identity* — which is a
+  narrower claim than any lifecycle change.
+  **Dep:** (a) unaffected. **(b)** should land BEFORE EDR-3: it removes half the httpd rows, so
+  EDR-3 inherits a smaller, better-understood problem. **Scope:** SMALL-MEDIUM (b), now that the
+  measurement has removed the general cases. See also KN-IDENT-1 for purl canonicalization, which
+  is the same problem shape one level down.
 
 - [x] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
   shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification;

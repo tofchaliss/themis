@@ -159,10 +159,19 @@ readings of who owns it; this decision resolves them:
   roles; `http_server → httpd` is data that grows forever and covers only what someone remembered. That
   is the line both reviewers rejected, and it must not be re-entered through an identity door.
 
-**Measured cost of leaving it to EDR-3** (2026-09-17, after the claim-class sweep): **174 `httpd`
-component rows are `scope`, of which 148 are ALSO `cleared_vendor_fix`.** So 148 verified clearances are
-invisible to the GUI's cleared tile, which requires `carriers.length > 0`. That is the price, and it is
-EDR-3's to remove.
+**Measured cost of leaving it to EDR-3** — **CORRECTED 2026-09-17 after measuring the basis.** The
+first figure written here was "174 `httpd` component rows, 148 cleared", taken from a row count. It is
+**87 distinct httpd components, 74 of them `cleared_vendor_fix`** — so 74 verified clearances are
+invisible to the GUI's cleared tile, which requires `carriers.length > 0`.
+
+The doubling was not noise: every affected Finding carries httpd **twice**, once under
+`pkg:rpm/rocky/httpd@…` and once under the raw scanner identifier `app:httpd@…`, and the two halves are
+verdict-identical (74 cleared / 13 open on each side). **So half of what was attributed to the synonym
+class is really the identity defect** — KN-SCAN-4(b), not EDR-3. Deduplicating those rows shrinks this
+problem before EDR-3 touches it, which is why (b) comes first.
+
+The lesson is about method rather than arithmetic: a row count is not a component count when identity is
+the very thing in question, and this EDR is *about* identity. Count the subjects, not the rows.
 
 ## Validation criterion (binding on every phase)
 

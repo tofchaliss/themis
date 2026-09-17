@@ -41,7 +41,8 @@ and the resume pointer, never item state.
 > drained 626 cards / 1571 occurrences in 7 batches and converged; no errors.
 >
 > **All four guards held, zero movement:** `python3-pyyaml` 122 scope · `python3-ply` 74 scope ·
-> `perl-Encode` 11 scope · `httpd` 174 scope. The pyyaml one is the load-bearing guard — it is
+> `perl-Encode` 11 scope · `httpd` 174 scope (= 87 components × 2 identities; see NEXT). The
+> pyyaml one is the load-bearing guard — it is
 > EDR-CORRELATION-01's module-stream bystander rule surviving a change to the same predicate.
 > `httpd` staying scope is the EDR-1 boundary holding ON PURPOSE.
 >
@@ -85,9 +86,15 @@ and the resume pointer, never item state.
 > carried in two directions: **EDR-IDENTITY-01 owns whether identity can be ESTABLISHED; EDR-3
 > owns what a failure to establish it MEANS** (the UNKNOWN rule). An alias table belongs to
 > neither. Implementation NOT started — Phase 1 is twin resolution at the scanner ACL seam.
-> **The remaining carrier gap is the synonym class and it is EDR-3's**, priced at 174 `httpd`
-> component rows classified `scope`, **148 of them also `cleared_vendor_fix`** — verified
-> clearances invisible to the GUI's cleared tile, which requires `carriers.length > 0`.
+> **The remaining carrier gap is the synonym class and it is EDR-3's** — priced, after correcting
+> the basis on 2026-09-17, at **87 distinct `httpd` components** classified `scope`, **74 of them
+> also `cleared_vendor_fix`**: verified clearances invisible to the GUI's cleared tile, which
+> requires `carriers.length > 0`.
+> **The earlier figure (174 rows / 148 cleared) counted ROWS, and every affected Finding carries
+> httpd twice** — once under `pkg:rpm/rocky/httpd@…` and once under the raw `app:httpd@…`, the two
+> halves verdict-identical. So half of what was attributed to the synonym class is really the
+> identity defect (**KN-SCAN-4(b)**), and deduplicating shrinks EDR-3's problem before it starts.
+> A row count is not a component count when identity is the question.
 > Secondary, filed: the re-verdict loop has no drain-while-full, so on the shipped 12h default a
 > generation bump would drain 200 rows twice a day (~4 days for this estate). The reclassify loop
 > already has the pattern.
