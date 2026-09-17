@@ -12,9 +12,9 @@ import (
 type spdxParser struct{}
 
 type spdxDocument struct {
-	SPDXVersion   string           `json:"spdxVersion"`
-	Packages      []spdxPackage    `json:"packages"`
-	Relationships []spdxRelation   `json:"relationships"`
+	SPDXVersion   string         `json:"spdxVersion"`
+	Packages      []spdxPackage  `json:"packages"`
+	Relationships []spdxRelation `json:"relationships"`
 }
 
 type spdxPackage struct {
@@ -64,24 +64,47 @@ func (spdxParser) parse(raw []byte, specVersion string) ([]domain.Component, []d
 	)
 	idToPURL := map[string]value.PURL{}
 
+	// Entries the document named but did not IDENTIFY. Deferred rather than dropped, so they
+	// can be resolved against what the document did identify (EDR-IDENTITY-01 D2) — a document
+	// can carry the same package twice and identify it only once.
+	var pending []pendingPackage
+
 	for _, pkg := range doc.Packages {
 		locator, ok := purlFromExternalRefs(pkg.ExternalRefs)
 		if !ok {
-			warnings = append(warnings, fmt.Sprintf("skipped package without package-manager purl: name=%s version=%s", pkg.Name, pkg.VersionInfo))
+			pending = append(pending, pendingPackage{ID: pkg.SPDXID, Name: pkg.Name, Version: pkg.VersionInfo})
 			continue
 		}
 		purl, err := value.NewPURL(locator)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("skipped package with invalid purl: name=%s purl=%s", pkg.Name, locator))
+			// An unparseable locator and an absent one are the SAME outcome (D1): neither is
+			// an identity, and `app:httpd` is the measured example of the second kind.
+			pending = append(pending, pendingPackage{
+				ID: pkg.SPDXID, Name: pkg.Name, Version: pkg.VersionInfo, RawPURL: locator})
 			continue
 		}
 		ecosystem, ok := ecosystemFromPURL(purl.String())
 		if !ok {
+			// Deliberately NOT twin-resolved: this purl IS an identity, it is the ECOSYSTEM
+			// that is unknown — "a valid state of incomplete knowledge" per D1, a different
+			// case from having no identity at all. Existing behaviour is left alone; changing
+			// it is not this EDR's decision.
 			warnings = append(warnings, fmt.Sprintf("skipped package with unreadable purl type: purl=%s", purl.String()))
 			continue
 		}
 		idToPURL[pkg.SPDXID] = purl
 		components = append(components, domain.Component{PURL: purl, Name: pkg.Name, Version: pkg.VersionInfo, Ecosystem: ecosystem, Source: srcNameFromPURL(purl.String())})
+	}
+
+	// Resolve the deferred entries onto their identified twin. A resolved id joins idToPURL, so
+	// the relationship pass below still finds its edges — previously those edges vanished with
+	// the entry, ownership edges included.
+	resolvedTwins, unresolved := resolveTwins(components, pending)
+	for id, purl := range resolvedTwins {
+		idToPURL[id] = purl
+	}
+	for _, u := range unresolved {
+		warnings = append(warnings, unresolvedWarning(u))
 	}
 
 	var edges []domain.DependencyEdge

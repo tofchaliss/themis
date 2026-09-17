@@ -25,7 +25,10 @@ import (
 // by the composition root: a registry-backed adapter in production (the kernel's
 // registry.ReleaseExists) or the allow-set stub in dev/tests. Wiring depends only on
 // the app SubjectRefValidator port, so the choice never leaks in here.
-func EvidenceAPI(pool *pgxpool.Pool, subject app.SubjectRefValidator) (http.Handler, *store.Store) {
+//
+// report is the optional parse-outcome reporter (EDR-IDENTITY-01 D6) — variadic so every
+// existing caller and test is unaffected; nil or omitted means no reporting.
+func EvidenceAPI(pool *pgxpool.Pool, subject app.SubjectRefValidator, report ...app.ParseReporter) (http.Handler, *store.Store) {
 	st := store.New(pool)
 	svc := app.NewEvidenceService(
 		trustGate{},
@@ -35,6 +38,9 @@ func EvidenceAPI(pool *pgxpool.Pool, subject app.SubjectRefValidator) (http.Hand
 		idGen{},
 		sysClock{},
 	)
+	if len(report) > 0 && report[0] != nil {
+		svc = svc.WithParseReporter(report[0])
+	}
 	return evhttp.NewHandler(svc).Router(), st
 }
 

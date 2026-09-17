@@ -60,10 +60,21 @@ func (cycloneDXParser) parse(raw []byte, specVersion string) ([]domain.Component
 	// purl) to the component's purl, keeping the dependency graph keyed on purl.
 	refToPURL := map[string]value.PURL{}
 
+	// Entries the document named but did not IDENTIFY — deferred, not dropped, so they can be
+	// resolved against what the document did identify (EDR-IDENTITY-01 D2). Same rule as the
+	// SPDX door and the scanner door: one rule, three doors.
+	var pending []pendingPackage
+
 	for _, c := range doc.Components {
 		purl, err := value.NewPURL(c.PURL)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("skipped component without valid purl: name=%s version=%s purl=%s", c.Name, c.Version, c.PURL))
+			// An absent purl and an unparseable one are the same outcome (D1): neither is an
+			// identity. The bom-ref is carried so a resolved entry keeps its dependency edges.
+			ref := c.BOMRef
+			if ref == "" {
+				ref = c.PURL
+			}
+			pending = append(pending, pendingPackage{ID: ref, Name: c.Name, Version: c.Version, RawPURL: c.PURL})
 			continue
 		}
 		ecosystem, ok := ecosystemFromPURL(purl.String())
@@ -86,6 +97,18 @@ func (cycloneDXParser) parse(raw []byte, specVersion string) ([]domain.Component
 		}
 		refToPURL[purl.String()] = purl
 		components = append(components, domain.Component{PURL: purl, Name: name, Version: ver, Ecosystem: ecosystem, Source: srcNameFromProperties(c.Properties)})
+	}
+
+	// A resolved entry's bom-ref joins refToPURL, so its dependency edges survive instead of
+	// vanishing with the entry.
+	resolvedTwins, unresolved := resolveTwins(components, pending)
+	for ref, purl := range resolvedTwins {
+		if ref != "" {
+			refToPURL[ref] = purl
+		}
+	}
+	for _, u := range unresolved {
+		warnings = append(warnings, unresolvedWarning(u))
 	}
 
 	resolve := func(ref string) (value.PURL, bool) {
