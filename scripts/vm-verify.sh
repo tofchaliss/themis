@@ -121,10 +121,30 @@ printf '    bus events=%s\n' "${BUS:-?}"
 # sweep's remaining queue. A persistently large stale count with feeds folding is the shape of
 # the sweep not running (or its Evidence reads failing); zero cleared on a Red Hat estate with
 # the bridge on is the shape of KN-VERDICT-1 still biting.
+#
+# Staleness is TWO stamps, not one (KN-VERDICT-2): the card version catches new DATA and the
+# generation catches new CODE. Reading only the version would report "stale=0" for an estate
+# the sweep is about to re-judge in full, which is the opposite of what this report is for.
+#
+# Both generations are read FROM THE SOURCE rather than hard-coded, for the same reason the
+# expected migration version is: a literal here would be right the day it was written and
+# silently wrong after the next rule change.
+VGEN="$(sed -n 's/^const VerdictGeneration = \([0-9]*\).*/\1/p' "$REPO_ROOT/internal/knowledge/domain/verdict.go" | head -1)"
+CGEN="$(sed -n 's/^const ClassifierGeneration = \([0-9]*\).*/\1/p' "$REPO_ROOT/internal/knowledge/domain/claimclass.go" | head -1)"
 VC="$(q knowledge "select count(*) from faultline_matches where verdict_state='cleared_vendor_fix'")"
 VI="$(q knowledge "select count(*) from faultline_matches where verdict_grade='inferred'")"
-VS="$(q knowledge 'select count(*) from faultline_matches m join faultlines f on f.id=m.faultline_id where m.verdict_card_version < f.version')"
-printf '    verdicts: cleared=%s (inferred=%s)  stale=%s\n' "${VC:-?}" "${VI:-?}" "${VS:-?}"
+VS="$(q knowledge "select count(*) from faultline_matches m join faultlines f on f.id=m.faultline_id
+                   where m.verdict_card_version < f.version or m.verdict_generation < ${VGEN:-0}")"
+printf '    verdicts: cleared=%s (inferred=%s)  stale=%s (logic generation %s)\n' \
+  "${VC:-?}" "${VI:-?}" "${VS:-?}" "${VGEN:-?}"
+
+# The re-classification queue (KN-CLAIM-1): cards whose claim-class stamps lag their version or
+# the current rule generation. Counted in CARDS because the stamps live on the card -- Knowledge
+# persists no claim class, so what goes stale is the card's carrier set.
+RS="$(q knowledge "select count(*) from faultlines f
+                   where (f.reclassified_generation < ${CGEN:-0} or f.reclassified_version < f.version)
+                     and exists (select 1 from faultline_matches m where m.faultline_id = f.id)")"
+printf '    classification: stale cards=%s (rule generation %s)\n' "${RS:-?}" "${CGEN:-?}"
 
 # A consumer with UNDELIVERED events of its own source context is the shape of a stalled reader —
 # worth surfacing because the stall is silent: the gap-free watermark simply stops admitting rows
