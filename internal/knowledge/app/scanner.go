@@ -46,11 +46,47 @@ type ScannerReportService struct {
 	// inferredBridge arms the D4 guess grade of the ownership bridge (default ON), exactly as
 	// on CorrelationService — one switch, one meaning, both doors.
 	inferredBridge bool
+	// ledger + inventory supply the identity candidate set (EDR-IDENTITY-01 D2). Both optional
+	// (nil = the report is the only candidate source), because a single-context dev node has no
+	// Evidence to read and must still ingest. Missing evidence narrows the candidates and
+	// therefore ABSTAINS — it never synthesizes an identity.
+	ledger    ReleaseEvidenceSource
+	inventory InventoryReader
+	// report receives the per-ingest outcome counts. The app ring never logs (CONVENTIONS R1),
+	// so the counts leave through a port an adapter owns. Optional; nil = no reporting.
+	report IngestReporter
+}
+
+// IngestReporter receives the outcome of one scanner-report ingest (EDR-IDENTITY-01 D6).
+//
+// It exists because the app ring never logs and the unresolved population must still reach an
+// operator: a correct answer nobody can see is indistinguishable from a wrong one, which is the
+// lesson the 2026-09-16 session paid for. `skipped` was ALREADY computed and never surfaced
+// anywhere (KN-SCAN-OBS-1) — this is where that closes too.
+type IngestReporter interface {
+	ScannerIngest(releaseID, evidenceID string, recorded, items, skipped, unresolved int)
 }
 
 // NewScannerReportService wires the scanner-report ingestion ports.
 func NewScannerReportService(src ScannerReportSource, fold *FaultlineService, matches MatchRecorder, clock Clock) *ScannerReportService {
 	return &ScannerReportService{source: src, fold: fold, matches: matches, clock: clock, inferredBridge: true}
+}
+
+// WithIdentityCandidates wires the release-inventory read used to resolve a purl-less
+// observation onto its twin (EDR-IDENTITY-01 D2). These are the SAME two ports
+// ReverdictService.bridgeFor uses — a read, not a new seam.
+//
+// Kept off the constructor so every existing caller is unaffected: without it the candidate set
+// is the report alone, which is the correct degradation rather than a missing feature.
+func (s *ScannerReportService) WithIdentityCandidates(ledger ReleaseEvidenceSource, inv InventoryReader) *ScannerReportService {
+	s.ledger, s.inventory = ledger, inv
+	return s
+}
+
+// WithIngestReporter wires the per-ingest outcome reporter (D6).
+func (s *ScannerReportService) WithIngestReporter(r IngestReporter) *ScannerReportService {
+	s.report = r
+	return s
 }
 
 // WithInferredBridge sets the D4 switch (EDR-VERDICT-01) and returns the service for chaining.
@@ -70,6 +106,13 @@ type ScannerPlan struct {
 	// put both in one report, so the report itself is the same-inventory candidate set. Scanner
 	// reports carry no explicit ownership edges — only the Inferred hop can bridge here.
 	Bridge BridgeContext
+	// Unresolved are observations that named a component whose identity could not be
+	// established (EDR-IDENTITY-01 D2/D6). A SEPARATE POPULATION, not a filtered-out one —
+	// that distinction is what makes them countable at all. No match row is written for them,
+	// which is also why no `component_purl = ''` row can exist any more.
+	Unresolved []UnresolvedObservation
+	// EvidenceID rides along so the ingest report can name the document it read.
+	EvidenceID string
 }
 
 // PlanIngest runs the READ phase with no transaction: fetch the report document from
@@ -91,10 +134,64 @@ func (s *ScannerReportService) PlanIngest(ctx context.Context, releaseID, eviden
 		seen[key] = struct{}{}
 		siblings = append(siblings, p.Component)
 	}
+
+	// Identity resolution (EDR-IDENTITY-01 D2). The candidate set is the release's canonical
+	// inventory PLUS the report's own usable components: the inventory is the authority on what
+	// the release contains and is where the measured twin lives, while the report's own entries
+	// are observations of the same release and the measured document shows twins can travel
+	// together. Disagreement between the two is AMBIGUITY, which abstains — no tie-break is
+	// invented, because that is exactly the case where a guess would be wrong.
+	candidates := append(s.releaseCandidates(ctx, releaseID), siblings...)
+	items := make([]ScannerProposal, 0, len(props))
+	var unresolved []UnresolvedObservation
+	for _, p := range props {
+		if UsablePURL(p.Component.PURL) {
+			items = append(items, p)
+			continue
+		}
+		purl, reason := ResolveIdentity(p.Component, candidates)
+		if reason != "" {
+			unresolved = append(unresolved, UnresolvedObservation{
+				RawPURL: p.Component.PURL, Name: p.Component.Name, Version: p.Component.Version,
+				Ecosystem: p.Component.Ecosystem, Origin: p.Origin, Reason: reason,
+			})
+			continue
+		}
+		// A second representation of a component already on the release, not a new subject.
+		// It lands on the twin's purl and collapses under the existing primary key; the
+		// KN-SCAN-4a overlay already treats a repeat as a new observation of one occurrence.
+		p.Component.PURL = purl
+		items = append(items, p)
+	}
+
 	return ScannerPlan{
-		ReleaseID: releaseID, Items: props, Skipped: skipped,
-		Bridge: BridgeContext{Siblings: siblings, InferredBridge: s.inferredBridge},
+		ReleaseID: releaseID, EvidenceID: evidenceID, Items: items, Skipped: skipped,
+		Unresolved: unresolved,
+		Bridge:     BridgeContext{Siblings: siblings, InferredBridge: s.inferredBridge},
 	}, nil
+}
+
+// releaseCandidates reads the release's canonical inventory — the authoritative candidate set
+// for identity resolution. Returns nil when the ports are unwired (single-context dev), when
+// the release never went through correlation (a scanner-ONLY release, which has no SBOM and
+// therefore never a twin), or when the inventory read fails.
+//
+// Every one of those narrows the candidates and so tends toward ABSTENTION, never toward a
+// synthesized identity. It is the same rule the D6 re-verdict sweep applies per release: a
+// poorer context must never be stamped as an answer.
+func (s *ScannerReportService) releaseCandidates(ctx context.Context, releaseID string) []InventoryComponent {
+	if s.ledger == nil || s.inventory == nil {
+		return nil
+	}
+	evidenceID, found, err := s.ledger.EvidenceForRelease(ctx, releaseID)
+	if err != nil || !found {
+		return nil
+	}
+	inv, err := s.inventory.GetInventory(ctx, evidenceID)
+	if err != nil {
+		return nil
+	}
+	return inv.Components
 }
 
 // ApplyIngest runs the WRITE phase inside the caller's transaction: fold every finding and
@@ -141,6 +238,17 @@ func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan
 		if created {
 			newMatches++
 		}
+	}
+	// One report per ingest, on EVERY ingest including a fully-resolved one with nothing
+	// skipped (EDR-IDENTITY-01 D6). "Nothing unresolved" and "the resolver stopped running"
+	// must not look alike — the same rule the feed watches and both sweeps follow.
+	//
+	// Reported from the WRITE phase, not the read phase: the counts describe an ingest that
+	// actually happened. A plan built and never applied has ingested nothing, and saying
+	// otherwise is the kind of log line that makes a stalled pipeline look healthy.
+	if s.report != nil {
+		s.report.ScannerIngest(plan.ReleaseID, plan.EvidenceID,
+			newMatches, len(plan.Items), plan.Skipped, len(plan.Unresolved))
 	}
 	return newMatches, nil
 }

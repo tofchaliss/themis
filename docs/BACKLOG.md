@@ -3002,7 +3002,7 @@ under the 2026-08-07 re-derivation standard.
   and restarts the fleet as one operation — plus a startup-time credential check that fails with
   "DSN in /etc/themis/<svc>.env is not accepted by the server" rather than a bare driver error.
 
-- [ ] **KN-SCAN-OBS-1 — the scanner-report `skipped` counter is computed and never logged
+- [x] **KN-SCAN-OBS-1 — the scanner-report `skipped` counter is computed and never logged
   (filed 2026-09-09).** MED, observability. `ScannerSource.ScannerProposals`
   (`internal/knowledge/adapters/evidence/scanner_source.go`) counts every finding the translation
   could not use and threads it through `ScannerPlan.Skipped` (`internal/knowledge/app/scanner.go`).
@@ -3016,6 +3016,16 @@ under the 2026-08-07 re-derivation standard.
   proposals folded, matches recorded, skipped — plus a `themis_scanner_findings_total{outcome}` counter
   in the section-D metric family, so "how many findings did we drop this month" is a dashboard question
   rather than an archaeology exercise. **Dep:** none. **Scope:** SMALL.
+
+  **CLOSED 2026-09-17** with `phase3-component-identity` Groups 1+2 (EDR-IDENTITY-01 D6). The app
+  ring never logs (CONVENTIONS R1), so the counts leave through a new `app.IngestReporter` port
+  and land in the composition root's `ingestLogger`: one line per ingest carrying `release_id` /
+  `evidence_id` / `recorded` / `items` / `skipped` / `unresolved`, emitted on EVERY ingest
+  including a clean one — "nothing skipped" and "the ingest stopped running" must not look alike.
+  Reported from the WRITE phase, not the read phase, so the counts describe an ingest that
+  actually happened rather than one that was merely planned.
+  **The metric counter is NOT included** — it was part of this entry's proposed shape and wants
+  the section-D metric family, which is a separate surface; the log line is what D6 required.
 
 - [ ] **KN-SCAN-OBS-2 — a zero-finding scanner report is indistinguishable from a successful one
   (filed 2026-09-09).** MED, correctness-of-signal. A `scanner-report` whose document does not carry the
