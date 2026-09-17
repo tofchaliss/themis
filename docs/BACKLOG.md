@@ -3191,7 +3191,7 @@ under the 2026-08-07 re-derivation standard.
   second vendor path speculatively would be scope creep. Same for AlmaLinux (ALSA) and Oracle
   (ELSA) if those estates appear. **Dep:** none. **Scope:** MED (the pattern is now proven).
 
-- [ ] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
+- [x] **KN-SCAN-3b — a component with an unusable purl is matched and persisted with a blank
   ecosystem, silently closing its verdict path (filed 2026-09-09).** MED, correctness-of-signal.
   Scanners identify binaries they fingerprint on disk with application-scoped identifiers
   (Cortex: `app:httpd@2.4.37-65.module+el8.10.0…`, `component_source: /usr/sbin/httpd`).
@@ -3262,6 +3262,21 @@ under the 2026-08-07 re-derivation standard.
   a value that is part of the primary key — that is exactly **KN-SCAN-4(b)**. The two are one
   piece of work from opposite ends; shipping (d) alone leaves current rows as they are.
   ---
+  **CLOSED 2026-09-17** by `phase3-component-identity` (21/21 tasks, all three groups), against
+  [`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md). One rule, **three doors** —
+  scanner intake, SPDX and CycloneDX — resolving a purl-less observation onto an unambiguous twin
+  and abstaining otherwise. No row is written for an unresolved observation, so no
+  `component_purl = ''` row can exist: the primary-key collapse AND the Knowledge→Governance
+  stream halt both close as consequences of the correctness fix (consumer resilience stays F7).
+  The unresolved population is counted on every ingest and queryable at
+  `GET /api/v1/scanner-reports/{evidenceId}/unresolved`, recomputed from immutable evidence
+  through the same `PlanIngest` path the ingest uses so the answer cannot drift.
+  **Two things the work found that no document predicted:** the parser was never the silent part
+  (it warned; `register.go` discarded the warnings with `_`), and an unidentified entry took its
+  whole relationship graph with it — **including the ownership edges carrying Observed-grade
+  bridge evidence**, the strongest clearance signal a document holds. Existing rows are still
+  untouched: that is KN-SCAN-4(b).
+
   **SPEC AGREED 2026-09-16 — recorded as
   [`EDR-IDENTITY-01`](engineering/decisions/EDR-IDENTITY-01.md) on 2026-09-17 (D1–D9). That EDR is
   now the reason of record; implement to it and do not re-derive it.** The rules below are kept

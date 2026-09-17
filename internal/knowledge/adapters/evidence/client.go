@@ -113,3 +113,39 @@ func (c *Client) GetDocument(ctx context.Context, evidenceID string) ([]byte, st
 	}
 	return []byte(body.Document), body.Kind, nil
 }
+
+type factsResponse struct {
+	Kind             string `json:"kind"`
+	SubjectReleaseID string `json:"subject_release_id"`
+}
+
+// EvidenceFacts fetches a document's kind and subject release via Evidence's read API
+// (EDR-IDENTITY-01 D6). found=false for an unknown id.
+//
+// It exists so the unresolved-components query needs only the evidence id an operator already
+// holds — the upload returns it. The release id is required to resolve identity (the candidate
+// twins are the RELEASE's components), and Evidence already knows it, so asking the caller to
+// supply it would be asking for something the system can look up.
+func (c *Client) EvidenceFacts(ctx context.Context, evidenceID string) (kind, releaseID string, found bool, err error) {
+	url := c.baseURL + "/api/v1/evidence/" + evidenceID
+	req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if rerr != nil {
+		return "", "", false, rerr
+	}
+	resp, derr := c.http.Do(req)
+	if derr != nil {
+		return "", "", false, derr
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", "", false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", "", false, fmt.Errorf("evidence: facts %s: status %d", evidenceID, resp.StatusCode)
+	}
+	var body factsResponse
+	if jerr := json.NewDecoder(resp.Body).Decode(&body); jerr != nil {
+		return "", "", false, jerr
+	}
+	return body.Kind, body.SubjectReleaseID, true, nil
+}

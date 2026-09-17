@@ -6,7 +6,7 @@ callers on 2026-09-17), and phase completion gates on `make check-ci`.
 
 Groups 1 and 2 ship TOGETHER (D6). Group 3 is independent.
 
-**STATUS 2026-09-17: Groups 1, 2 and 3 IMPLEMENTED** (`make check-ci` green; knowledge/app,
+**STATUS 2026-09-17: COMPLETE — all 21 tasks.** Groups 1, 2 and 3 implemented (`make check-ci` green; knowledge/app,
 evidence/app and evidence/adapters/parser all 100%). Only 2.3 remains, deferred with its reason
 recorded in place — it needs a persisted row (which D5 avoids) or an API change (must-ask).
 
@@ -58,18 +58,25 @@ recorded in place — it needs a persisted row (which D5 avoids) or an API chang
       (the NVD-WATCH-1 rule, applied to a third sweep).
 - [x] 2.2 Closes **KN-SCAN-OBS-1** in the same change: the existing `Skipped` counter is computed and
       never logged, so both populations are invisible today. Mark it done in BACKLOG.md when this lands.
-- [ ] 2.3 **DEFERRED 2026-09-17, with the reason stated rather than silently dropped.** The count
-      reaching an operator *without reading logs* needs either a persisted row or a read-API
-      endpoint, and **neither is available without crossing a line this change decided not to
-      cross**: D5 keeps the raw identifier out of `faultline_matches` (read it back from Evidence
-      instead of duplicating what Knowledge does not own), so there is no row to count; and a read
-      API addition is an OpenAPI change, which is on CLAUDE.md's **must-ask** list.
-      The honest shape is an **on-demand** endpoint that recomputes the unresolved population from
-      immutable evidence (report + inventory are both still there), which is consistent with D5 and
-      needs no migration — but it is an API change and wants explicit approval first.
-      **D6 is satisfied without it:** the population is counted and visible on every ingest via 2.1,
-      which is what "discoverable and countable" required. This task is the nicer surface, not the
-      obligation.
+- [x] 2.3 **SHIPPED 2026-09-17 as an API change**, approved explicitly.
+      `GET /api/v1/scanner-reports/{evidenceId}/unresolved` on Knowledge — spec-first, handler
+      generated. **RECOMPUTED on demand, never stored**, and that is the design rather than a
+      shortcut: D5 keeps the observed identifier out of Knowledge's rows, so the query reads the
+      report and the release inventory back through **`PlanIngest` — the same code path the
+      ingest uses**. The answer therefore cannot drift from the behaviour it describes, which a
+      stored count could; that drift is exactly how GOV-MIRROR-1 happened.
+      **Needed no Evidence API change:** `GET /evidence/{id}` already returns
+      `subject_release_id`, so a new client method (`EvidenceFacts`) was enough and the operator
+      supplies only the id the upload returned.
+      **Every "cannot answer" state is distinguishable from "nothing unresolved"** — 404 unknown
+      id, 409 not a scanner report, 500 unwired — because an empty 200 would read as all-clear,
+      which is the failure this whole task exists to prevent.
+      **NOT added to `scripts/vm-verify.sh`:** that script takes an optional release id and has
+      no evidence id to query with, and Knowledge cannot enumerate a release's scanner reports
+      (`UpsertCorrelatedRelease` is called only on the SBOM path). Making it enumerable is a
+      bigger change than this task, and pretending otherwise would have meant a half-working
+      report line.
+
 - [x] 2.4 An unresolved observation is **countable and discoverable, and is NOT a bystander.** Assert it
       explicitly: conflating unresolved with `scope` would make this change cause the exact defect
       EDR-CORRELATION-01 exists to prevent.

@@ -248,6 +248,9 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// inventory — the same two ports the D6 re-verdict bridge uses. Without them the
 		// candidate set is the report alone, which ABSTAINS rather than guessing.
 		WithIdentityCandidates(st, evClient).
+		// The on-demand unresolved query (D6) resolves an evidence id to its release through
+		// Evidence's own facts endpoint, so an operator needs only the id the upload returned.
+		WithEvidenceFacts(evClient).
 		WithInferredBridge(!verdict.DisableInferredBridge)
 	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
 	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
@@ -255,7 +258,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 	gather := app.NewGatherService(fold,
 		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read, health).WithGather(gather).Router(),
+		Handler:  knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),
