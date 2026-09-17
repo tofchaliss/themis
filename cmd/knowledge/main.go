@@ -452,7 +452,8 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 	}
 }
 
-// reverdictLoop re-judges match rows whose verdict stamp lags their card (EDR-VERDICT-01 D6):
+// reverdictLoop re-judges match rows whose verdict stamps lag — their card's version (new data)
+// or the judgement-logic generation (new code, KN-VERDICT-2) — (EDR-VERDICT-01 D6):
 // on the interval (the catch-up backstop that drains history — every pre-feature row starts at
 // stamp 0), and immediately when a fix-folding feed loop nudges it after a tick that folded
 // something. The sweep is self-targeting via the stamps and idempotent, so an extra wake-up is
@@ -469,7 +470,8 @@ func reverdictLoop(rs *app.ReverdictService, interval time.Duration, logger *obs
 		// an existing occurrence's verdict actually flipped (a clearance landing on history is
 		// exactly the KN-VERDICT-1 event this loop exists for).
 		logger.Info("re-verdict sweep complete",
-			observability.Int("rejudged", rejudged), observability.Int("changed", changed))
+			observability.Int("rejudged", rejudged), observability.Int("changed", changed),
+			observability.Int("generation", rs.Generation()))
 	}
 	time.Sleep(20 * time.Second) // let the service settle before draining history
 	sweep()

@@ -214,3 +214,77 @@ func TestClassifyClaimSharedTokenRelatesSiblingPackages(t *testing.T) {
 		})
 	}
 }
+
+// KN-FIX-5, measured 2026-09-10 on the KN-FIX-4 live verification: `distroPrefixes` holds the
+// literals `python3-` and `python3x-`, and `python3.12-pip` fails HasPrefix on both — a dot
+// where the hyphen belongs. The name went through unstripped, so the bridge's name affinity
+// failed and the fix lookup compared the bare root `pip` against the whole `python3.12-pip`.
+// The KN-FIX-4 pass cleared the setuptools shadow through its sibling and left every
+// `pip@23.2.1` shadow open beside `python3.12-pip@23.2.1-4.el8`.
+//
+// One dynamic rule, deliberately narrow — every "must be left alone" case below is a branch of
+// it, and each one falls back to the literal list or to no rule at all.
+func TestNormalizeProductStripsVersionedInterpreterWrappers(t *testing.T) {
+	for _, c := range []struct{ in, want, why string }{
+		{"python3.12-pip", "pip", "the measured case"},
+		{"python3.12-pyyaml", "pyyaml", "and it still strips a project tail, so the guard holds"},
+		{"python3.9-setuptools", "setuptools", "any interpreter version, not an enumerated list"},
+		{"python3.9-devel", "python3.9-devel", "a ROLE tail keeps the whole name, as with python3-devel"},
+		{"python3.12-", "python3.12-", "a wrapper with no payload must not strip to nothing"},
+		{"python3", "python3", "no hyphen at all is not a wrapper"},
+		{"pythonista-foo", "pythonista-foo", "the version segment must be digits and dots only"},
+		{"python3-pip", "pip", "the literal list still applies where it always did"},
+		{"libssl", "ssl", "an unrelated wrapper is untouched"},
+	} {
+		if got := domain.NormalizeProduct(c.in); got != c.want {
+			t.Errorf("NormalizeProduct(%q) = %q, want %q — %s", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+// The fix lookup is what the defect actually broke, and the family guard must survive the
+// dynamic rule: matching by STEM rather than by literal is what keeps `python3.12-` in the
+// python family instead of becoming a family of its own.
+func TestMatchesFixPackageVersionedInterpreterWrappers(t *testing.T) {
+	for _, c := range []struct {
+		fix, query string
+		want       bool
+		why        string
+	}{
+		{"pip", "python3.12-pip", true, "the measured pair: vendor project name vs versioned binary"},
+		{"python3-pip", "python3.12-pip", true, "same python family, different wrapper generation"},
+		{"python3.12-pip", "python3.9-pip", true, "two interpreter versions of one project"},
+		{"ruby-json", "python3.12-json", false, "COLLISION GUARD: the stem match must not merge families"},
+		{"pip", "python3.12-pip-wheel", false, "containment is still never equality"},
+		{"pip", "python3.12-", false, "a payload-less wrapper matches nothing"},
+	} {
+		if got := domain.MatchesFixPackage(c.fix, c.query); got != c.want {
+			t.Errorf("MatchesFixPackage(%q,%q) = %v, want %v — %s", c.fix, c.query, got, c.want, c.why)
+		}
+	}
+}
+
+// The classification consequence, since NormalizeProduct is shared (the entry warned not to
+// assume this was free). The bystander guard must survive the versioned wrapper exactly as it
+// survives the plain one.
+func TestClassifyClaimVersionedInterpreterWrappers(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		carriers  []string
+		pkg, comp string
+		want      domain.ClaimClass
+	}{
+		{"a versioned module-stream bystander is still scope",
+			[]string{"python"}, "python3.12-pyyaml", "python3.12-pyyaml", domain.ClaimScope},
+		{"a versioned ROLE package is still the interpreter",
+			[]string{"python"}, "python3.12-devel", "python3.12-devel", domain.ClaimCarrier},
+		{"and the real carrier resolves through the versioned wrapper",
+			[]string{"pip"}, "python3.12-pip", "python3.12-pip", domain.ClaimCarrier},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := domain.ClassifyClaim(c.carriers, c.pkg, c.comp); got != c.want {
+				t.Errorf("ClassifyClaim = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

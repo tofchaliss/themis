@@ -15,20 +15,25 @@ import (
 // pre-feature row (stamp 0) and every row whose card learned something since. There is no
 // separate list to maintain, so there is nothing that can go stale beside the stamps
 // themselves.
+//
+// TWO stamps since KN-VERDICT-2: the card version catches new DATA, the generation catches new
+// LOGIC. A code change advances no card version, so without the second one a shipped rule
+// change re-judged nothing and the sweep honestly reported `rejudged:0`.
 
-// StaleVerdictOccurrences returns up to limit match rows needing re-judgement, ordered by
+// StaleVerdictOccurrences returns up to limit match rows needing re-judgement — those judged
+// against an older card version OR by an older generation of the judgement logic — ordered by
 // release so one sweep batch clusters its bridge-context reads. Implements
 // app.StaleOccurrenceSource.
-func (s *Store) StaleVerdictOccurrences(ctx context.Context, limit int) ([]app.StaleOccurrence, error) {
+func (s *Store) StaleVerdictOccurrences(ctx context.Context, generation, limit int) ([]app.StaleOccurrence, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.release_id, m.faultline_id, f.cve, m.component_purl,
 		       m.component_name, m.component_version, m.component_ecosystem, m.component_source,
 		       m.verdict_state
 		FROM faultline_matches m
 		JOIN faultlines f ON f.id = m.faultline_id
-		WHERE m.verdict_card_version < f.version
+		WHERE m.verdict_card_version < f.version OR m.verdict_generation < $1
 		ORDER BY m.release_id, m.faultline_id, m.component_purl
-		LIMIT $1`, limit)
+		LIMIT $2`, generation, limit)
 	if err != nil {
 		return nil, err
 	}

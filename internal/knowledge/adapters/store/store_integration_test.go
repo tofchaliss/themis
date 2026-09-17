@@ -667,7 +667,7 @@ func TestReverdictSweep_FullLoop(t *testing.T) {
 		vulnFactsFixedFor(t, "redhat", "python-setuptools", "0:39.2.0-9.el8_10")); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := st.StaleVerdictOccurrences(ctx, 10)
+	stale, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, 10)
 	if err != nil || len(stale) != 1 || stale[0].Component.PURL != shadow.PURL || !stale[0].Current.IsOpen() {
 		t.Fatalf("stale = %+v err=%v, want the one open pre-bounds row", stale, err)
 	}
@@ -1143,5 +1143,62 @@ func TestReclassifySweep_FullLoop(t *testing.T) {
 	next, err := st.StaleClassificationCards(ctx, domain.ClassifierGeneration+1, 10)
 	if err != nil || len(next) != 1 {
 		t.Fatalf("after a generation bump = %+v err=%v, want the card back", next, err)
+	}
+}
+
+// KN-VERDICT-2 on a real store: a row judged against the CURRENT card version but by an OLDER
+// generation of the judgement logic must read as stale.
+//
+// This is the defect the stamp closes. Deploying a binary that changes judgeOccurrence or
+// FixesFor re-judged NOTHING — every row was version-current, the sweep honestly reported
+// `rejudged:0`, and the new rule's effect waited on unrelated feed drift. Measured on KN-FIX-4
+// (2026-09-10), where the operator reset stamps by hand twice.
+func TestStaleVerdictOccurrences_LogicGenerationCountsAsStaleness(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2025-47273"), vulnFacts(t, "osv", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := app.InventoryComponent{
+		PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi",
+	}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2025-47273",
+		Component: comp, Verdict: domain.OpenVerdict(),
+		OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Bring the row's card-version stamp fully current, so the ONLY thing that can make it
+	// stale below is the generation.
+	var cardVersion int
+	if err := pool.QueryRow(ctx, "SELECT version FROM faultlines WHERE id=$1", string(f.ID())).Scan(&cardVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		"UPDATE faultline_matches SET verdict_card_version=$1 WHERE faultline_id=$2", cardVersion, string(f.ID())); err != nil {
+		t.Fatal(err)
+	}
+
+	// RecordMatch stamped the current generation, so at that generation the row is current.
+	current, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, 10)
+	if err != nil {
+		t.Fatalf("stale at current generation: %v", err)
+	}
+	if len(current) != 0 {
+		t.Fatalf("stale = %+v, want empty — the row is version- and generation-current", current)
+	}
+
+	// A shipped logic change bumps the constant, and THAT is what makes the row stale again.
+	next, err := st.StaleVerdictOccurrences(ctx, domain.VerdictGeneration+1, 10)
+	if err != nil {
+		t.Fatalf("stale after a generation bump: %v", err)
+	}
+	if len(next) != 1 || next[0].Component.PURL != comp.PURL {
+		t.Errorf("stale after a generation bump = %+v, want the one row back", next)
 	}
 }

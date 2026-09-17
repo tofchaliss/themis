@@ -44,9 +44,10 @@ type StaleOccurrence struct {
 	Current     domain.VerdictState
 }
 
-// StaleOccurrenceSource lists match rows needing re-judgement, oldest release first, bounded.
+// StaleOccurrenceSource lists match rows needing re-judgement — behind their card's version OR
+// behind the given judgement-logic generation — oldest release first, bounded.
 type StaleOccurrenceSource interface {
-	StaleVerdictOccurrences(ctx context.Context, limit int) ([]StaleOccurrence, error)
+	StaleVerdictOccurrences(ctx context.Context, generation, limit int) ([]StaleOccurrence, error)
 }
 
 // ReleaseEvidenceSource resolves a release to its latest correlated evidence id (the
@@ -112,6 +113,11 @@ func (s *ReverdictService) Nudge() {
 // NudgeC is the wake-up channel the composition root's loop selects on beside its ticker.
 func (s *ReverdictService) NudgeC() <-chan struct{} { return s.nudge }
 
+// Generation reports the judgement-logic generation this service applies — the value a
+// re-judged row is stamped with. Exposed so the composition root can log it without importing
+// the domain ring, which it otherwise never does.
+func (s *ReverdictService) Generation() int { return domain.VerdictGeneration }
+
 // Sweep re-judges one bounded batch of stale occurrences. Returns how many rows were
 // re-judged (stamped current) and how many actually changed state.
 //
@@ -122,7 +128,7 @@ func (s *ReverdictService) NudgeC() <-chan struct{} { return s.nudge }
 // actually offers, then stamping the result current, would silently downgrade the verdict —
 // the one direction this arc exists to close.
 func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, err error) {
-	rows, err := s.stale.StaleVerdictOccurrences(ctx, s.batch)
+	rows, err := s.stale.StaleVerdictOccurrences(ctx, domain.VerdictGeneration, s.batch)
 	if err != nil || len(rows) == 0 {
 		return 0, 0, err
 	}

@@ -1,5 +1,21 @@
 package domain
 
+// VerdictGeneration versions the OCCURRENCE-JUDGEMENT LOGIC — judgeOccurrence, the vendor
+// fixed-verdict rules, FixesFor/StrictFixesFor and the name rules they lean on. Bump it in the
+// SAME change as any edit to those, and the D6 catch-up sweep re-judges the estate once.
+//
+// It exists because a code change advances no card version, so the "judged against card version
+// N" stamp cannot see one. Measured on KN-FIX-4 (2026-09-10): the normalized fix-lookup rule
+// shipped, every row was stamp-current, the sweep honestly reported `rejudged:0`, and the new
+// rule's effect waited on unrelated feed drift. The operator reset stamps by hand, twice.
+//
+// Same mechanism as domain.ClassifierGeneration, deliberately: two stamps, one idea — a rule
+// change IS staleness, and the query is the only place that can know it.
+//
+// Generations: 1 = the pre-stamp baseline (everything through 2026-09-16) ·
+// 2 = versioned interpreter wrappers reach the fix lookup and the bridge (2026-09-17, KN-FIX-5).
+const VerdictGeneration = 2
+
 // Occurrence verdict state (EDR-VERDICT-01 D2). An occurrence is one component row matched to a
 // card on one release. Its verdict records what the vendor-fix machinery concluded about THIS
 // occurrence — recorded state, never a deletion: "checked and fine" and "never looked" must not

@@ -41,8 +41,9 @@ func (c ClaimClass) ActsAsCarrier() bool { return c != ClaimScope }
 // KN-VERDICT-2's failure shape, and a constant the sweep can compare against is what closes it.
 //
 // Generations: 1 = the pre-stamp baseline · 2 = role suffixes kept whole, CPE 2.3 escaping,
-// CPE part `a` filter (2026-09-16) · 3 = shared distinguishing token (2026-09-17).
-const ClassifierGeneration = 3
+// CPE part `a` filter (2026-09-16) · 3 = shared distinguishing token (2026-09-17) ·
+// 4 = versioned interpreter wrappers, `python3.12-` (2026-09-17, KN-FIX-5).
+const ClassifierGeneration = 4
 
 // distroPrefixes are packaging wrappers a distro puts around an upstream project. They are
 // stripped before comparison because NVD names the PROJECT (`pyyaml`) while a component names the
@@ -81,19 +82,18 @@ var roleSuffixes = map[string]struct{}{
 // which every consumer treats as carrier.
 func NormalizeProduct(s string) string {
 	n := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
-	for _, pre := range distroPrefixes {
-		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
-			root := strings.TrimPrefix(n, pre)
-			if _, isRole := roleSuffixes[root]; isRole {
-				// `perl-interpreter` IS perl; `python3-pyyaml` is not python. The difference is
-				// whether the tail names a role or a project, and only the first may keep the
-				// wrapper — which is precisely what lets `python3-pyyaml` stay scope.
-				return n
-			}
-			return root
-		}
+	pre := wrapperPrefixOf(n)
+	if pre == "" {
+		return n
 	}
-	return n
+	root := strings.TrimPrefix(n, pre)
+	if _, isRole := roleSuffixes[root]; isRole {
+		// `perl-interpreter` IS perl; `python3-pyyaml` is not python. The difference is whether
+		// the tail names a role or a project, and only the first may keep the wrapper — which
+		// is precisely what lets `python3-pyyaml` stay scope.
+		return n
+	}
+	return root
 }
 
 // wrapperFamily groups the distro wrapper prefixes whose members name the SAME upstream
@@ -102,13 +102,82 @@ func NormalizeProduct(s string) string {
 // `ruby-json` both normalize to `json`, and without the family check a ruby bound could
 // answer a python query on a shared rpm card — a version compare over two unrelated version
 // lines, which is how a false "fixed" would be minted.
+//
+// Matched by STEM rather than by literal, so every versioned interpreter wrapper
+// (`python3.12-`, `python3.9-`) joins the family it belongs to without being enumerated.
 func wrapperFamily(prefix string) string {
-	switch prefix {
-	case "python-", "python2-", "python3-", "python3x-":
+	if strings.HasPrefix(prefix, "python") {
 		return "python"
-	default:
-		return prefix // each remaining wrapper (perl-, ruby-, lib, …) is its own family
 	}
+	return prefix // each remaining wrapper (perl-, ruby-, lib, …) is its own family
+}
+
+// versionedInterpreterPrefix matches a wrapper whose interpreter version is IN the prefix —
+// `python3.12-pip`, `python3.9-devel` — and returns that prefix, or "" when the name is not of
+// that shape (KN-FIX-5, measured 2026-09-10 on the KN-FIX-4 live verification).
+//
+// A literal list cannot express this. `distroPrefixes` holds `python3-` and `python3x-`, and
+// `python3.12-pip` fails HasPrefix on both (a dot where the hyphen belongs), so the name went
+// through unstripped: the D3 bridge's name affinity failed and
+// MatchesFixPackage("pip", "python3.12-pip") compared the bare root `pip` against the whole
+// `python3.12-pip`. Measured consequence: the KN-FIX-4 pass cleared the setuptools shadow via
+// its sibling `python3-setuptools` and left every `pip@23.2.1` shadow open beside its
+// at-version sibling `python3.12-pip@23.2.1-4.el8`.
+//
+// One dynamic rule instead of literals that grow with every interpreter release. It is
+// deliberately narrow: the stem must be a known interpreter, the version may only be digits
+// and dots, and a trailing hyphen with something after it is required — so `python3` alone,
+// `pythonista-foo` and `python-3-foo` are all left to the literal list or to no rule at all.
+func versionedInterpreterPrefix(n string) string {
+	for _, stem := range versionedInterpreterStems {
+		if !strings.HasPrefix(n, stem) {
+			continue
+		}
+		rest := n[len(stem):]
+		digits := 0
+		for i, r := range rest {
+			switch {
+			case r >= '0' && r <= '9':
+				digits++
+			case r == '.':
+			case r == '-':
+				// A wrapper needs a version and a payload: `python3.12-` alone strips to
+				// nothing, and stripping to the empty string loses the name entirely.
+				if digits > 0 && i+1 < len(rest) {
+					return n[:len(stem)+i+1]
+				}
+				return ""
+			default:
+				return "" // not a pure version segment — not this rule's shape
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// versionedInterpreterStems are the interpreters whose distro packages carry the version in
+// the wrapper. Only python is measured; the list exists so adding one is a one-line change
+// rather than another parser.
+var versionedInterpreterStems = []string{"python"}
+
+// wrapperPrefixOf returns the distro wrapper that applies to an already-lowercased,
+// underscore-folded name, or "" when none does.
+//
+// ONE definition, shared by NormalizeProduct and strippedWrapper. They previously each carried
+// the rule, and the comment on strippedWrapper warned that a divergence between them would
+// compare a stripped root against an unstripped one — a hazard that disappears when there is
+// only one place to change.
+func wrapperPrefixOf(n string) string {
+	if pre := versionedInterpreterPrefix(n); pre != "" {
+		return pre
+	}
+	for _, pre := range distroPrefixes {
+		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
+			return pre
+		}
+	}
+	return ""
 }
 
 // strippedWrapper reports which distro wrapper NormalizeProduct would strip from the
@@ -116,15 +185,14 @@ func wrapperFamily(prefix string) string {
 // NormalizeProduct exactly, role suffixes included, or MatchesFixPackage compares a stripped
 // root against an unstripped one.
 func strippedWrapper(n string) string {
-	for _, pre := range distroPrefixes {
-		if len(n) > len(pre) && strings.HasPrefix(n, pre) {
-			if _, isRole := roleSuffixes[strings.TrimPrefix(n, pre)]; isRole {
-				return "" // kept whole by NormalizeProduct, so no wrapper was stripped
-			}
-			return pre
-		}
+	pre := wrapperPrefixOf(n)
+	if pre == "" {
+		return ""
 	}
-	return ""
+	if _, isRole := roleSuffixes[strings.TrimPrefix(n, pre)]; isRole {
+		return "" // kept whole by NormalizeProduct, so no wrapper was stripped
+	}
+	return pre
 }
 
 // MatchesFixPackage reports whether a card's fix-attribution package name answers a query for
