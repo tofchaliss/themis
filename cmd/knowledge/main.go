@@ -69,6 +69,8 @@ type config struct {
 	verdictInferredBridgeOff bool
 	reverdictInterval        time.Duration // THEMIS_REVERDICT_INTERVAL — catch-up sweep cadence (default 12h; the nudge path is the real latency).
 	reverdictBatch           int           // THEMIS_REVERDICT_BATCH — stale rows re-judged per sweep (default 200); a large estate drains across nudges/ticks.
+	reclassifyInterval       time.Duration // THEMIS_RECLASSIFY_INTERVAL — claim-class catch-up cadence (default 6h); the inline carrier-change trigger carries new evidence, so this drains history and rule changes.
+	reclassifyBatch          int           // THEMIS_RECLASSIFY_BATCH — stale CARDS re-announced per sweep (default 100); the loop keeps sweeping while a batch comes back full.
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -133,6 +135,8 @@ func loadConfig() config {
 		verdictInferredBridgeOff: os.Getenv("THEMIS_VERDICT_INFERRED_BRIDGE") == "0",
 		reverdictInterval:        parseDurationDefault(os.Getenv("THEMIS_REVERDICT_INTERVAL"), app.DefaultReverdictInterval),
 		reverdictBatch:           envIntDefault("THEMIS_REVERDICT_BATCH", app.DefaultReverdictBatch),
+		reclassifyInterval:       parseDurationDefault(os.Getenv("THEMIS_RECLASSIFY_INTERVAL"), app.DefaultReclassifyInterval),
+		reclassifyBatch:          envIntDefault("THEMIS_RECLASSIFY_BATCH", app.DefaultReclassifyBatch),
 
 		sigEnabled:      os.Getenv("THEMIS_EPSSKEV_ENABLED") == "1",
 		epssURL:         envDefault("THEMIS_EPSS_URL", "https://epss.cyentia.com/epss_scores-current.csv.gz"),
@@ -253,6 +257,7 @@ func main() {
 	}, wiring.VerdictConfig{
 		DisableInferredBridge: cfg.verdictInferredBridgeOff,
 		ReverdictBatch:        cfg.reverdictBatch,
+		ReclassifyBatch:       cfg.reclassifyBatch,
 	})
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
@@ -261,6 +266,7 @@ func main() {
 	// fix-folding feed loops below Nudge() it the moment a tick folds something, so real card
 	// news reaches existing match rows in seconds, not half a day.
 	go reverdictLoop(kn.Reverdict, cfg.reverdictInterval, logger.Component("reverdict"))
+	go reclassifyLoop(kn.Reclassify, cfg.reclassifyInterval, logger.Component("reclassify"))
 	logger.Info("re-verdict sweep enabled (EDR-VERDICT-01 D6)",
 		observability.String("interval", cfg.reverdictInterval.String()),
 		observability.Int("rows_per_sweep", cfg.reverdictBatch))
@@ -476,6 +482,43 @@ func reverdictLoop(rs *app.ReverdictService, interval time.Duration, logger *obs
 		case <-rs.NudgeC():
 			sweep()
 		}
+	}
+}
+
+// reclassifyLoop re-announces the recorded matches of cards whose claim-class stamps lag
+// (EDR-CORRELATION-01 D3/D4, KN-CLAIM-1). There is no nudge path: new carrier evidence is
+// emitted INLINE by the fold that brought it, so this loop exists for the two things no fold
+// signals — history (every pre-stamp card starts at generation 0) and a change to the
+// classification rules themselves, which advances no card version and folds nothing.
+//
+// While a sweep comes back FULL there is more to drain, so it sweeps again immediately instead
+// of waiting out the interval. That terminates because each batch stamps the cards it read, so
+// the stale set strictly shrinks; a rule-generation bump therefore drains in consecutive
+// sweeps rather than over days of interval ticks.
+func reclassifyLoop(rs *app.ReclassifyService, interval time.Duration, logger *observability.Logger) {
+	drain := func() {
+		for {
+			cards, occurrences, full, err := rs.Sweep(context.Background())
+			if err != nil {
+				logger.Error("re-classification sweep failed", observability.Err(err))
+				return
+			}
+			// Logged on every sweep including zero: "everything is current" and "the sweep
+			// stopped working" must not look alike (NVD-WATCH-1).
+			logger.Info("re-classification sweep complete",
+				observability.Int("cards", cards), observability.Int("occurrences", occurrences),
+				observability.Int("generation", rs.Generation()))
+			if !full {
+				return
+			}
+		}
+	}
+	time.Sleep(30 * time.Second) // after the re-verdict sweep's own settle window
+	drain()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		drain()
 	}
 }
 

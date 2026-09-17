@@ -147,11 +147,21 @@ type Proposal struct {
 // sameAs reports whether two VulnFacts carry identical content (KN-PROPOSAL-BLOAT-1). Slices
 // compare element-wise and in order: sources emit them in a stable order, so a reordering is
 // itself a change worth recording rather than one worth suppressing.
+//
+// CarrierProducts is part of the comparison, added 2026-09-17 (KN-CLAIM-1). Leaving it out made
+// a corrected carrier set INVISIBLE: severity, CVSS, ranges and fixes are unchanged when NVD
+// re-reports the same CVE, so a re-poll carrying a different product list was dropped as a
+// verbatim restatement and the carriers on the card never moved. That silently defeated both
+// the shipped CPE application-part filter (whose whole effect is a SMALLER product list) and
+// the inline re-classification trigger, which fires on a carrier-set change it would never
+// have seen. A source changing its mind about which product carries a flaw is a new
+// observation by any reading.
 func (f VulnFacts) sameAs(other VulnFacts) bool {
 	return f.Severity == other.Severity &&
 		f.CVSS == other.CVSS &&
 		f.Summary == other.Summary &&
 		slices.Equal(f.AffectedRanges, other.AffectedRanges) &&
+		slices.Equal(f.CarrierProducts, other.CarrierProducts) &&
 		slices.Equal(f.Fixes, other.Fixes)
 }
 

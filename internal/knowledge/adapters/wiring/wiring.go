@@ -79,6 +79,10 @@ type Knowledge struct {
 	// feed loops kick. Always set — it rides only Knowledge's own store and the Evidence read
 	// seam; the composition root runs its loop.
 	Reverdict *app.ReverdictService
+	// Reclassify re-announces the recorded matches of cards whose claim-class stamps lag their
+	// version or the current rule generation (EDR-CORRELATION-01 D3/D4, KN-CLAIM-1). Always
+	// set — it rides only Knowledge's own store; the composition root runs its loop.
+	Reclassify *app.ReclassifyService
 }
 
 // RediscoveryConfig tunes the KN-RECOR-1 sweep. Zero values select the app defaults
@@ -193,6 +197,9 @@ type VerdictConfig struct {
 	DisableInferredBridge bool
 	// ReverdictBatch bounds one re-verdict sweep (THEMIS_REVERDICT_BATCH; <=0 → default 200).
 	ReverdictBatch int
+	// ReclassifyBatch bounds one re-classification sweep (THEMIS_RECLASSIFY_BATCH; <=0 →
+	// default 100). Counted in CARDS, not rows — the stamps live on the card.
+	ReclassifyBatch int
 }
 
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
@@ -252,6 +259,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// seam intake judged through — one judge, every door, every moment.
 		Reverdict: app.NewReverdictService(st, st, st, evClient, st, st, sysClock{}, verdict.ReverdictBatch).
 			WithInferredBridge(!verdict.DisableInferredBridge),
+		// Re-classification (KN-CLAIM-1): the store supplies the stale cards and stamps them
+		// atomically with the notes, and the notes are built by the SAME reannounce path the
+		// inline carrier-change trigger uses — one definition of a re-announcement, two
+		// moments it can fire.
+		Reclassify: app.NewReclassifyService(st, st, st, st, sysClock{}, verdict.ReclassifyBatch),
 	}
 	if nvd.Enabled {
 		// Per-CVE over the carded set (D5a), not a modified-since window walk. The relevance

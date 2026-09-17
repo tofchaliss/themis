@@ -553,3 +553,82 @@ func TestSetBandAndFixes_RidesThePostureRollup(t *testing.T) {
 		}
 	}
 }
+
+// KN-CLAIM-1 Q1, 2026-09-17: the empty-value rule INVERTS for claim_class.
+//
+// Everywhere else an empty incoming field means "a poorer observation" and must never blank a
+// recorded value. For claim_class, empty means UNKNOWN — and unknown ACTS AS CARRIER — so empty
+// is the safe value, not the poorer one. A card can legitimately hold no carriers (every CPE
+// product it named was a bundler, or its only sources are distro records, which cannot attribute
+// a carrier at all), and a row that once recorded `scope` would otherwise keep it: out of the
+// triage queue, out of remediation plans and out of the AI's grounding, on evidence that no
+// longer supports the exclusion.
+//
+// So unknown CLEARS a recorded `scope` and never disturbs a recorded `carrier`. Monotone toward
+// safety in both directions.
+func TestClaimClassUnknownClearsScopeButNeverCarrier(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	const scoped = "pkg:rpm/rocky/javapackages-filesystem@5.3.0"
+	const carried = "pkg:rpm/rocky/httpd@2.4.57"
+
+	f := newFinding(t, "fnd-cc", "rel-cc", "fl-cc", "CVE-2019-10086")
+	for _, c := range []domain.MatchedComponent{
+		{PURL: scoped, Name: "javapackages-filesystem", Version: "5.3.0", Ecosystem: "rpm", ClaimClass: "scope"},
+		{PURL: carried, Name: "httpd", Version: "2.4.57", Ecosystem: "rpm", ClaimClass: "carrier"},
+	} {
+		if _, err := f.AbsorbComponent(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	classOf := func(purl string) string {
+		t.Helper()
+		var got string
+		if err := pool.QueryRow(ctx,
+			"SELECT claim_class FROM finding_components WHERE purl=$1", purl).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if classOf(scoped) != "scope" || classOf(carried) != "carrier" {
+		t.Fatalf("setup = %q/%q, want scope/carrier", classOf(scoped), classOf(carried))
+	}
+
+	// A re-announcement whose card now attributes nothing: both arrive as unknown. The version
+	// is captured BEFORE absorbing, because absorbing a change bumps the aggregate.
+	f2, _, _ := load(t, st, "fnd-cc")
+	prev := f2.Version()
+	for _, c := range []domain.MatchedComponent{
+		{PURL: scoped, Name: "javapackages-filesystem", Version: "5.3.0", Ecosystem: "rpm"},
+		{PURL: carried, Name: "httpd", Version: "2.4.57", Ecosystem: "rpm"},
+	} {
+		_, _ = f2.AbsorbComponent(c)
+	}
+	if err := st.Save(ctx, f2, false, prev, nil); err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if got := classOf(scoped); got != "" {
+		t.Errorf("scope under unknown = %q, want cleared to unknown — unknown acts as carrier, the fail-safe direction", got)
+	}
+	if got := classOf(carried); got != "carrier" {
+		t.Errorf("carrier under unknown = %q, want carrier kept — the more specific value loses nothing", got)
+	}
+
+	// And a non-empty class still wins outright, in either direction.
+	f3, _, _ := load(t, st, "fnd-cc")
+	prev3 := f3.Version()
+	_, _ = f3.AbsorbComponent(domain.MatchedComponent{
+		PURL: scoped, Name: "javapackages-filesystem", Version: "5.3.0", Ecosystem: "rpm", ClaimClass: "carrier"})
+	if err := st.Save(ctx, f3, false, prev3, nil); err != nil {
+		t.Fatalf("re-save 2: %v", err)
+	}
+	if got := classOf(scoped); got != "carrier" {
+		t.Errorf("after a decided class = %q, want carrier", got)
+	}
+}

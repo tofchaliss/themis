@@ -110,15 +110,34 @@ func (f *Finding) AbsorbComponent(c MatchedComponent) (bool, error) {
 		// `WHERE finding_components.source = ''` backfill clause that could never run, because
 		// nothing saved on a re-delivery.
 		//
-		// Only ever fills IN — an empty incoming value never erases a known one, so an
-		// unattributed re-delivery cannot undo attribution that has already been established.
+		// `source` only ever fills IN — an empty incoming value never erases a known one, so an
+		// unattributed re-delivery cannot undo attribution already established.
 		changed := false
 		if existing.Source == "" && c.Source != "" {
 			f.components[i].Source = c.Source
 			changed = true
 		}
-		if c.ClaimClass != "" && c.ClaimClass != existing.ClaimClass {
+		// claim_class does NOT follow that rule, and the difference is deliberate (KN-CLAIM-1
+		// Q1, 2026-09-17). For every other field an empty incoming value means "a poorer
+		// observation". For claim_class empty means UNKNOWN — and unknown ACTS AS CARRIER — so
+		// empty is the SAFE value here, not the poorer one.
+		//
+		// A card can legitimately hold no carriers at all: every CPE product it named was a
+		// downstream bundler, or its only sources are distro records, which cannot attribute a
+		// carrier. Re-classification then yields unknown, and under a fills-in-only rule a
+		// component that once recorded `scope` would keep it — excluded from the triage queue,
+		// from remediation plans and from the AI's grounding, on evidence that no longer
+		// supports the exclusion. Silently, and with no path back.
+		//
+		// So unknown CLEARS a recorded `scope` and never disturbs a recorded `carrier` (that
+		// already acts as carrier; keeping the more specific value loses nothing). Monotone
+		// toward safety in both directions.
+		switch {
+		case c.ClaimClass != "" && c.ClaimClass != existing.ClaimClass:
 			f.components[i].ClaimClass = c.ClaimClass
+			changed = true
+		case c.ClaimClass == "" && existing.ClaimClass == ClaimScope:
+			f.components[i].ClaimClass = ""
 			changed = true
 		}
 		if changed {

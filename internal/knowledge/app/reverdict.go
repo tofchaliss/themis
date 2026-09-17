@@ -153,6 +153,18 @@ func (s *ReverdictService) Sweep(ctx context.Context) (rejudged, changed int, er
 		if _, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: row.ReleaseID, FaultlineID: row.FaultlineID, CVE: row.CVE,
 			Component: row.Component, Verdict: verdict, CardVersion: card.Version(),
+			// The class is computed here too, from the card already in hand (KN-CLAIM-1,
+			// 2026-09-17). Classification is not this sweep's subject, but the emitted payload
+			// was ASSERTING something false: every ComponentVerdictChanged carried
+			// claim_class="" — i.e. "unknown" — for components whose card names carriers.
+			//
+			// Nothing was corrupted by that, because Governance mirrors a verdict through
+			// SetComponentVerdict, which writes the three verdict columns and never
+			// claim_class. So this is a truthfulness fix, not a bug fix: it establishes the
+			// invariant that every recorded match carries a COMPUTED class, so a future reader
+			// of this event cannot be misled, and empty means unknown everywhere.
+			ClaimClass: domain.ClassifyClaim(
+				card.View().CarrierProducts, componentPackage(row.Component), row.Component.Name),
 			OccurredAt: now,
 		}); err != nil {
 			return rejudged, changed, err

@@ -289,8 +289,35 @@ func (s *Store) saveComponents(ctx context.Context, tx pgx.Tx, f domain.Finding)
 			ON CONFLICT (finding_id, purl) DO UPDATE SET
 				source = CASE WHEN finding_components.source = '' THEN EXCLUDED.source ELSE finding_components.source END,
 				-- A later, better-attributed classification may arrive once NVD has enriched the
-				-- card; an EMPTY (unknown) one must never overwrite a decided class.
-				claim_class = CASE WHEN EXCLUDED.claim_class <> '' THEN EXCLUDED.claim_class ELSE finding_components.claim_class END,
+				-- card, so a non-empty incoming class wins.
+				--
+				-- An EMPTY incoming class is the interesting case, and the rule INVERTS here
+				-- relative to every other column (KN-CLAIM-1 Q1, 2026-09-17). Elsewhere empty
+				-- means "a poorer observation" and must never blank a recorded value. For
+				-- claim_class, empty means UNKNOWN -- and unknown ACTS AS CARRIER, so empty is
+				-- the SAFE value here, not the poorer one.
+				--
+				-- The hazard: a card can legitimately hold NO carriers (every CPE product it
+				-- named was a bundler, or its only sources are distro records, which cannot
+				-- attribute a carrier at all). Classification then yields unknown, and under a
+				-- plain never-blank rule a row that once recorded scope would keep it -- staying
+				-- out of the triage queue, out of remediation plans and out of the AI grounding,
+				-- on evidence that no longer supports the exclusion.
+				--
+				-- This is safe to act on ONLY because every Knowledge path that records a match
+				-- now computes a class (the D6 verdict sweep included, fixed 2026-09-17). Before
+				-- that, an empty class also meant "this event had no opinion", and clearing on it
+				-- would have wiped every scope classification on the next verdict sweep.
+				--
+				-- So unknown CLEARS a recorded scope (toward carrier, the fail-safe direction)
+				-- and never disturbs a recorded carrier (that already acts as carrier, and
+				-- keeping the more specific value loses nothing). Monotone toward safety both
+				-- ways.
+				claim_class = CASE
+					WHEN EXCLUDED.claim_class <> '' THEN EXCLUDED.claim_class
+					WHEN finding_components.claim_class = 'scope' THEN ''
+					ELSE finding_components.claim_class
+				END,
 				-- First-wins, like source: Knowledge records one match per occurrence, so a
 				-- non-empty origin only ever arrives once — but an empty one (an older payload
 				-- replayed) must never blank a recorded origin.

@@ -30,6 +30,20 @@ const (
 // counts, deliberately: absence of evidence is not evidence of absence.
 func (c ClaimClass) ActsAsCarrier() bool { return c != ClaimScope }
 
+// ClassifierGeneration versions the CLASSIFICATION RULES in this file: NormalizeProduct,
+// roleSuffixes, relatedProduct, the generic-token sets and ClassifyClaim. Bump it in the SAME
+// change as any edit to those, and the re-classification sweep drains the estate exactly once.
+//
+// It exists because a rules change advances no card version, so a version-only stamp cannot see
+// one. Both carrier fixes in this file shipped invisible for that reason — the role-suffix rule
+// (2026-09-16) and the shared-token rule (2026-09-17) each corrected classification for every
+// future match while every existing occurrence kept the class the old rules gave it. That is
+// KN-VERDICT-2's failure shape, and a constant the sweep can compare against is what closes it.
+//
+// Generations: 1 = the pre-stamp baseline · 2 = role suffixes kept whole, CPE 2.3 escaping,
+// CPE part `a` filter (2026-09-16) · 3 = shared distinguishing token (2026-09-17).
+const ClassifierGeneration = 3
+
 // distroPrefixes are packaging wrappers a distro puts around an upstream project. They are
 // stripped before comparison because NVD names the PROJECT (`pyyaml`) while a component names the
 // distro package (`python3-pyyaml`) — neither is derivable from the other in general, but this

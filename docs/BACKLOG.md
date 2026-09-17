@@ -3578,10 +3578,73 @@ under the 2026-08-07 re-derivation standard.
   same-project oracle, and it never asserts difference. That is why `false` yields `scope` only
   when SOME carrier on the card matched something, and why the unbridgeable case must land in
   identity, not here.
+  ---
+  **RE-CLASSIFICATION SWEEP — SHIPPED 2026-09-17** (`fix/kn-claim-reclassify-sweep`), Option 1+3
+  as scoped, with Q1 folded in. Five parts, and three of them were defects found while building
+  it that would each have made the sweep inert.
+
+  - ✅ **Card-level stamps** (migration 000008): `faultlines.reclassified_version` and
+    `reclassified_generation`, both defaulting to 0 so every existing card reads as stale and
+    the first sweeps drain history. Stamps live on the CARD because Knowledge persists no claim
+    class at all — `faultline_matches` has no `claim_class` column, the class is computed when
+    an event is built, and only Governance stores it — so the input that goes stale is the
+    card's carrier set, not anything about the occurrence.
+  - ✅ **`domain.ClassifierGeneration`** — the half that matters. A rules change advances no card
+    version, so a version-only stamp cannot see one, which is exactly why BOTH 2026-09 carrier
+    fixes shipped invisible. Bump the constant in the same change as any rule edit and the
+    estate re-classifies once. This is the prototype for closing KN-VERDICT-2 the same way.
+  - ✅ **`ReclassifyService.Sweep`** + `StampReclassified`: notes and stamps commit in ONE
+    transaction (a card stamped current with nothing emitted would be skipped forever — the
+    safety net becoming a false negative), the stamp records the version actually CLASSIFIED
+    rather than the one the listing reported, and a card with no occurrences is still stamped so
+    the sweep converges. `full` drives an immediate re-sweep, so a generation bump drains in
+    consecutive sweeps rather than over days of interval ticks. app 100%.
+  - ✅ **Option 3 — the inline trigger widened** from the empty→non-empty carrier transition to
+    ANY carrier-set change. The narrow form fired once per card, enough to populate a class but
+    never to correct one.
+  - ✅ **Q1 — unknown now lifts a stale `scope`** and never disturbs a recorded `carrier`. The
+    empty-value rule INVERTS for `claim_class`: everywhere else empty means "a poorer
+    observation" and must not blank a recorded value, but here empty means UNKNOWN, unknown ACTS
+    AS CARRIER, so empty is the SAFE value. A card can legitimately name no carriers (all
+    bundlers filtered, or distro-only sources, which cannot attribute), and a row that once
+    recorded `scope` would otherwise keep it — out of the queue, out of plans, out of grounding,
+    on evidence that no longer supports the exclusion.
+
+  **THREE DEFECTS FOUND WHILE BUILDING IT, each of which alone would have made the sweep inert:**
+
+  1. **`VulnFacts.sameAs` ignored `CarrierProducts`** — so a source re-reporting a CVE with a
+     CORRECTED carrier set was dropped as a verbatim restatement (severity, CVSS, ranges and
+     fixes are all unchanged on an NVD re-poll). The inline trigger watches for a carrier change
+     it could never have seen, and the shipped CPE-escaping repair — whose whole effect is a
+     product parsing to its real name instead of `\` — was silently discarded. Fixed; carriers
+     are now part of the comparison.
+  2. **`AbsorbComponent` filtered an empty class at the DOMAIN level**, before any SQL. Q1 in the
+     store alone was unreachable: the domain returned `changed=false` and the caller skipped the
+     save entirely. This is the same trap the D5a comment in that function already documents for
+     `source` — fixed once, in the same place, for a second field.
+  3. **`ComponentVerdictChanged` asserted `claim_class=""`** on every re-judgement, for
+     components whose card names carriers, because the D6 sweep was the only `RecordMatch` caller
+     not computing a class. Nothing was corrupted (Governance mirrors a verdict through
+     `SetComponentVerdict`, which writes three verdict columns and never `claim_class`), so this
+     is a truthfulness fix, not a bug fix — but it establishes the invariant that every recorded
+     match carries a COMPUTED class, which is what makes "empty means unknown" safe to act on
+     anywhere.
+
+  **MEASURED LIMITATION, recorded not fixed:** `view.CarrierProducts` is a UNION across every
+  proposal ever appended, so a carrier can be added and never REMOVED. That is deliberate and
+  fail-safe (a carrier named by any source keeps its components classified as carriers), and it
+  means the shipped CPE application-part filter can only clean cards enriched AFTER it —
+  re-polling an existing card cannot shrink what the union already holds. Cleaning historical
+  bundler pollution would need a card-level rebuild, which is a separate decision from this one.
+
+  **STILL NOT LIVE-VERIFIED.** Everything above is gated and green locally; nothing has run on
+  the VM. The sweep's own first drain is the verification, and it is observable: the loop logs
+  `cards` / `occurrences` / `generation` on every sweep including zero.
+
   **WHAT REMAINS (do not re-derive the above):**
-  1. **Re-classification sweep** — re-arm the one-shot re-announce so the shipped rules reach the
-     existing estate. Reuse `reannounceMatches`; model the sweep on `reverdict.go`. This is the
-     only thing standing between four shipped fixes and a measurable change on the VM.
+  1. **Run it on the VM.** Migration 000008 applies, then the first drain re-classifies the
+     estate at generation 3. Expect the 20 spring findings to leave `scope`; expect the python
+     cluster NOT to move (it is the feature working); expect httpd to stay scope (EDR-1).
   2. **EDR-1 (intake identity)** now owns the synonym class. The spec is already agreed; the
      httpd row is its first measured test case.
   3. **Relabel the 238/158** once 1 lands, and re-measure per-component counts — the python
