@@ -3888,9 +3888,30 @@ under the 2026-08-07 re-derivation standard.
   **The repair loop runs ONCE at startup, not on a ticker**: this is a bounded measured
   population, and the forward fix (EDR-IDENTITY-01) means no new duplicates of this shape are
   created, so a recurring sweep would query for work that cannot appear.
-  **NOT live-verified.** Expected on the VM after deploy: 87 retired, active httpd components
-  87 (not 174), cleared 74 / open 13 on the canonical rows, Findings no longer double-counted,
-  Positions unchanged, both sides converged.
+  **LIVE-VERIFIED 2026-09-17 on MRF — every predicted number, first run, no repair needed.**
+
+  | check | result |
+  | --- | --- |
+  | migrations | knowledge **10**, governance **13**, neither dirty |
+  | repair log | `duplicate-identity repair complete retired=87`, ONE pass, loop stopped |
+  | Knowledge rows | **87 retired / 0 still raw** — every one had its twin; the guard never abstained |
+  | Governance httpd | **raw retired 87 · usable active 87** (was 87 + 87 both active) |
+  | Positions | **29 → 29**, untouched |
+  | `matches` total | **1569 → 1569** — marked, not deleted |
+  | vm-verify | `✓ no issues found`, all readers at head, 0 pending |
+
+  **`matches` staying at 1569 is the load-bearing number**, not a cosmetic one: had it fallen to
+  1482 the change would have been an erasure rather than a retirement, and the audit trail would
+  have lost 87 occurrences Themis really did record.
+  **Honest scope of the win on THIS estate:** both halves of every duplicate were `scope`, so
+  neither counted as an open carrier and **no queue state or priority changed**. The gain here is
+  representational — httpd is counted once per Finding instead of twice, and the 2× inflation is
+  out of every figure derived from these rows. The queue benefit would appear on a
+  carrier-classified duplicate, which this estate happens not to have.
+  **Unrelated churn seen in the same run, recorded so it is not misread as fallout:**
+  `verdicts stale=56` and `classification stale cards=24` are feed activity across the restart
+  (`redhat` 17125→19454 proposals, `nvd` 855→997), which bumps card versions and re-stales rows
+  by design. Both sweeps drain them on their intervals.
   **Dep:** (a) unaffected. **(b)** should land BEFORE EDR-3: it removes half the httpd rows, so
   EDR-3 inherits a smaller, better-understood problem. **Scope:** SMALL-MEDIUM (b), now that the
   measurement has removed the general cases. See also KN-IDENT-1 for purl canonicalization, which
@@ -4009,8 +4030,8 @@ under the 2026-08-07 re-derivation standard.
   full-batch-no-progress combination the guard exists for. app 100%.
   **Dep:** none. **Scope:** SMALL.
 
-- [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
-  (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
+- [x] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
+  (filed 2026-09-10; (a) SHIPPED 2026-09-10, (b) SHIPPED + LIVE-VERIFIED 2026-09-17).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):
   RecordMatch's dedup hit now treats the incoming observation as a NEW observation of the same
   occurrence — component detail is overlaid where it differs (last observation wins; a non-empty
   recorded field is never blanked by an empty incoming one), and a detail-only correction resets

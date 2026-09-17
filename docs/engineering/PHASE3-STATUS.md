@@ -69,6 +69,26 @@ and the resume pointer, never item state.
 > all, so the same `open` came out **for the wrong reason** — right answer, wrong reason, which
 > hides until the data changes.
 >
+> ### KN-SCAN-4(b) — duplicate-identity retirement, LIVE-VERIFIED the same day
+> The 87 `app:httpd@…` rows were **duplicate subjects, not misidentifications**: every one of the
+> 87 already had its canonical `pkg:rpm/rocky/httpd@…` row on the same (release, card), recorded
+> independently by the SBOM path. So Governance was rendering one real component **twice per
+> Finding** — which is also where the 2× counting error above came from.
+> Retirement is **marked, never deleted**, carried in-band by `knowledge.component_retired.v1`,
+> idempotent, and it touches neither Findings nor Positions. Retired rows leave every ACTIVE
+> projection but stay in Governance's aggregate — that is what makes a re-delivered
+> `ComponentMatched` a no-op instead of resurrecting the duplicate.
+> **Verified first run, every predicted number:** migrations 10/13 clean · `retired=87` in one
+> pass, loop stopped · Knowledge **87 retired / 0 still raw** · Governance **raw retired 87,
+> usable active 87** · Positions **29 → 29** · `matches` **1569 → 1569** (the load-bearing one:
+> marked, not erased) · `✓ no issues found`.
+> **Honest scope:** both halves were `scope`, so no queue state or priority changed on this
+> estate. The gain is representational — and it takes the 2× inflation out of every figure
+> derived from those rows.
+> **Three designs died to cheap queries before any code existed** — a `pkg:generic/` purl, a
+> supersede lifecycle, and a rename in place (the purl is a PK column and Postgres will UPDATE
+> it; dead at 87/87 collisions). Measuring the basis first is the cheapest step in this arc.
+>
 > ### ⚠ OPERATIONAL — still outstanding
 > - **Rotate the exposed PostgreSQL credential** (leaked to scrollback + bash history on
 >   2026-09-16 via a fish-syntax `set -x` on a bash shell). Independent of all Themis work and not
