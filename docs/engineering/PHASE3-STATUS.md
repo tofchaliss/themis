@@ -6,6 +6,12 @@ and the resume pointer, never item state.
 
 > ## ⏭ RESUME POINT — `ATTR-GAP-1` (ATTR-CPE-1 is CLOSED, negative)
 >
+> **The question to open with, stated as a constraint:** *how do we expose the absence of
+> sufficient attribution evidence **without** turning it into a verdict, and **without**
+> introducing another persistence model?* The identity boundary is settled (D9, terminal) — this
+> is not "how do we resolve the identity" any more. D3's equivalence is what makes the
+> no-new-persistence constraint satisfiable.
+>
 > **`main` = see below. ATTR-CPE-1 ran 2026-09-17 and failed at preconditions 1 and 4.** No
 > regeneration was needed — the evidence was already stored. The SBOM carries **6384 `cpe23Type`
 > refs** (Syft 1.42.1), but httpd's are `cpe:2.3:a:httpd:httpd:…` and `cpe:2.3:a:rocky:httpd:…`,

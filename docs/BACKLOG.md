@@ -3212,6 +3212,13 @@ under the 2026-08-07 re-derivation standard.
   **MUST NOT be expressed as `unknown`** (D2): that value already means "affected, attribution
   missing, acts as carrier". Two statements, two places.
   **Population:** 227 all-scope findings measured post-retirement.
+  **THE QUESTION THIS ITEM ANSWERS**, stated as a constraint so it is not started as "add a
+  column": *how do we expose the absence of sufficient attribution evidence **without** turning it
+  into a verdict, and **without** introducing another persistence model?*
+  The identity boundary is already settled (EDR-ATTRIBUTION-01 D9 — terminal). This is no longer
+  "how do we resolve the identity"; it is purely how to make an absence visible and countable
+  while it stays an absence. D3's equivalence is what makes the second constraint satisfiable:
+  the gap is derivable from classification state that already exists.
   **Dep:** none. **Scope:** SMALL-MEDIUM (a derived field + the tile + a count).
 
 - [x] **ATTR-CPE-1 — the CPE acquisition experiment: RUN 2026-09-17, NEGATIVE RESULT (filed and
