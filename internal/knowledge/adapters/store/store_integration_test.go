@@ -685,7 +685,7 @@ func TestReverdictSweep_FullLoop(t *testing.T) {
 	rs := app.NewReverdictService(st, st, st,
 		stubInventory{inv: app.Inventory{Components: []app.InventoryComponent{shadow, rpm}}},
 		st, st, realClock{}, 0)
-	rejudged, changed, err := rs.Sweep(ctx)
+	rejudged, changed, _, err := rs.Sweep(ctx)
 	if err != nil || rejudged != 1 || changed != 1 {
 		t.Fatalf("sweep = %d/%d/%v, want 1 re-judged, 1 changed", rejudged, changed, err)
 	}
@@ -708,7 +708,7 @@ func TestReverdictSweep_FullLoop(t *testing.T) {
 	}
 
 	// Idempotent: everything is stamped current, so the next sweep reads nothing and writes nothing.
-	rejudged, changed, err = rs.Sweep(ctx)
+	rejudged, changed, _, err = rs.Sweep(ctx)
 	if err != nil || rejudged != 0 || changed != 0 {
 		t.Errorf("second sweep = %d/%d/%v, want 0/0/nil", rejudged, changed, err)
 	}

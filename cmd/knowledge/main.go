@@ -459,19 +459,35 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 // something. The sweep is self-targeting via the stamps and idempotent, so an extra wake-up is
 // one cheap query; the vexfeed and signal loops do not nudge because they never fold fixes.
 func reverdictLoop(rs *app.ReverdictService, interval time.Duration, logger *observability.Logger) {
+	// One wake-up DRAINS rather than taking a single batch (KN-REVERDICT-1, measured
+	// 2026-09-17). The generation stamp exists so a shipped verdict-rule change re-judges
+	// promptly, and a single batch per tick defeats that: on the 12h default, 200 rows twice a
+	// day is ~4 days for a 1569-row estate and far longer for a real one. The VM's 2m interval
+	// masked it completely.
+	//
+	// The loop requires PROGRESS, not merely a full batch. Rows whose release is skipped (its
+	// Evidence inventory unreadable) stay stale and UNSTAMPED, so a release that sorts early
+	// with a batch's worth of rows would otherwise refill the same batch forever — a hot spin
+	// during an Evidence outage, which is exactly when not to be hammering it. `rejudged > 0`
+	// guarantees the stale set strictly shrinks, so the drain terminates.
 	sweep := func() {
-		rejudged, changed, err := rs.Sweep(context.Background())
-		if err != nil {
-			logger.Error("re-verdict sweep failed", observability.Err(err))
-			return
+		for {
+			rejudged, changed, full, err := rs.Sweep(context.Background())
+			if err != nil {
+				logger.Error("re-verdict sweep failed", observability.Err(err))
+				return
+			}
+			// Logged on every sweep including zero: "everything is current" and "the sweep
+			// stopped working" must not look alike (NVD-WATCH-1). A non-zero `changed` is the
+			// headline — an existing occurrence's verdict actually flipped (a clearance landing
+			// on history is exactly the KN-VERDICT-1 event this loop exists for).
+			logger.Info("re-verdict sweep complete",
+				observability.Int("rejudged", rejudged), observability.Int("changed", changed),
+				observability.Int("generation", rs.Generation()))
+			if !full || rejudged == 0 {
+				return
+			}
 		}
-		// Logged on every sweep including zero: "everything is current" and "the sweep stopped
-		// working" must not look alike (NVD-WATCH-1). A non-zero `changed` is the headline —
-		// an existing occurrence's verdict actually flipped (a clearance landing on history is
-		// exactly the KN-VERDICT-1 event this loop exists for).
-		logger.Info("re-verdict sweep complete",
-			observability.Int("rejudged", rejudged), observability.Int("changed", changed),
-			observability.Int("generation", rs.Generation()))
 	}
 	time.Sleep(20 * time.Second) // let the service settle before draining history
 	sweep()

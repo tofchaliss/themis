@@ -87,7 +87,7 @@ func TestReverdictSweep_ClearsStaleHistory(t *testing.T) {
 	matches := newMatches()
 
 	svc := app.NewReverdictService(stale, ledger, fakeRelComps{}, inv, repo, matches, fixedClock{}, 0)
-	rejudged, changed, err := svc.Sweep(context.Background())
+	rejudged, changed, _, err := svc.Sweep(context.Background())
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestReverdictSweep_ScannerOnlyReleaseUsesItsOwnRows(t *testing.T) {
 	matches := newMatches()
 
 	svc := app.NewReverdictService(stale, &fakeEvidenceLedger{}, relComps, &countingInventory{}, repo, matches, fixedClock{}, 0)
-	rejudged, changed, err := svc.Sweep(context.Background())
+	rejudged, changed, _, err := svc.Sweep(context.Background())
 	if err != nil || rejudged != 1 || changed != 1 {
 		t.Fatalf("rejudged=%d changed=%d err=%v, want 1/1/nil", rejudged, changed, err)
 	}
@@ -152,7 +152,7 @@ func TestReverdictSweep_SkipsReleaseWhenContextUnavailable(t *testing.T) {
 		"fallback rows fail": app.NewReverdictService(stale, &fakeEvidenceLedger{},
 			fakeRelComps{err: errors.New("db hiccup")}, &countingInventory{}, repo, newMatches(), fixedClock{}, 0),
 	} {
-		rejudged, changed, err := svc.Sweep(context.Background())
+		rejudged, changed, _, err := svc.Sweep(context.Background())
 		if err != nil || rejudged != 0 || changed != 0 {
 			t.Errorf("%s: rejudged=%d changed=%d err=%v, want the release skipped silently", name, rejudged, changed, err)
 		}
@@ -169,22 +169,22 @@ func TestReverdictSweep_Errors(t *testing.T) {
 	ledger := func() *fakeEvidenceLedger { return &fakeEvidenceLedger{ev: map[string]string{"rel-1": "ev-1"}} }
 	inv := func() *countingInventory { return &countingInventory{} }
 
-	if _, _, err := app.NewReverdictService(fakeStale{err: errors.New("query failed")}, ledger(), fakeRelComps{},
+	if _, _, _, err := app.NewReverdictService(fakeStale{err: errors.New("query failed")}, ledger(), fakeRelComps{},
 		inv(), repo, newMatches(), fixedClock{}, 0).Sweep(context.Background()); err == nil {
 		t.Error("stale-query error must surface")
 	}
-	if _, _, err := app.NewReverdictService(fakeStale{rows: []app.StaleOccurrence{{ReleaseID: "rel-1", FaultlineID: "ghost", CVE: "CVE-2025-47273"}}},
+	if _, _, _, err := app.NewReverdictService(fakeStale{rows: []app.StaleOccurrence{{ReleaseID: "rel-1", FaultlineID: "ghost", CVE: "CVE-2025-47273"}}},
 		ledger(), fakeRelComps{}, inv(), repo, newMatches(), fixedClock{}, 0).Sweep(context.Background()); err == nil {
 		t.Error("card-read error must surface")
 	}
 	bad := newMatches()
 	bad.err = errors.New("write failed")
-	if _, _, err := app.NewReverdictService(fakeStale{rows: []app.StaleOccurrence{row}}, ledger(), fakeRelComps{},
+	if _, _, _, err := app.NewReverdictService(fakeStale{rows: []app.StaleOccurrence{row}}, ledger(), fakeRelComps{},
 		inv(), repo, bad, fixedClock{}, 0).Sweep(context.Background()); err == nil {
 		t.Error("record error must surface")
 	}
 	// Empty queue: nothing to do, no reads made.
-	if rejudged, changed, err := app.NewReverdictService(fakeStale{}, ledger(), fakeRelComps{},
+	if rejudged, changed, _, err := app.NewReverdictService(fakeStale{}, ledger(), fakeRelComps{},
 		inv(), repo, newMatches(), fixedClock{}, 0).Sweep(context.Background()); err != nil || rejudged != 0 || changed != 0 {
 		t.Errorf("empty sweep = %d/%d/%v, want 0/0/nil", rejudged, changed, err)
 	}
@@ -205,7 +205,7 @@ func TestReverdictSweep_StrictMode(t *testing.T) {
 		&fakeEvidenceLedger{ev: map[string]string{"rel-1": "ev-1"}}, fakeRelComps{},
 		&countingInventory{inv: app.Inventory{Components: []app.InventoryComponent{shadow, rpm}}},
 		repo, matches, fixedClock{}, 0).WithInferredBridge(false)
-	if _, changed, err := svc.Sweep(context.Background()); err != nil || changed != 0 {
+	if _, changed, _, err := svc.Sweep(context.Background()); err != nil || changed != 0 {
 		t.Errorf("strict sweep changed=%d err=%v, want no clearance without explicit ownership", changed, err)
 	}
 	if m := matches.byPURL[shadow.PURL]; !m.Verdict.State.IsOpen() {
@@ -249,7 +249,7 @@ func TestReverdictSweepAsksForTheCurrentLogicGeneration(t *testing.T) {
 	stale := &genStale{}
 	svc := app.NewReverdictService(stale, &fakeEvidenceLedger{}, fakeRelComps{},
 		&countingInventory{}, newRepo(), newMatches(), fixedClock{}, 10)
-	if _, _, err := svc.Sweep(context.Background()); err != nil {
+	if _, _, _, err := svc.Sweep(context.Background()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if stale.got != domain.VerdictGeneration {
@@ -258,4 +258,69 @@ func TestReverdictSweepAsksForTheCurrentLogicGeneration(t *testing.T) {
 	if svc.Generation() != domain.VerdictGeneration {
 		t.Errorf("Generation() = %d, want %d", svc.Generation(), domain.VerdictGeneration)
 	}
+}
+
+// KN-REVERDICT-1: Sweep reports whether the batch FILLED, so one wake-up can drain instead of
+// taking a single batch per tick. On the shipped 12h default a single batch per tick meant 400
+// rows a day — ~4 days for the measured 1569-row estate, which defeats the generation stamp's
+// whole purpose. The VM's 2m interval masked it entirely.
+func TestReverdictSweepReportsAFullBatch(t *testing.T) {
+	repo := newRepo()
+	card := seedCard(t, repo, "CVE-2025-47273", "python-setuptools", "0:39.2.0-9.el8_10")
+	comp := app.InventoryComponent{PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi"}
+	rows := []app.StaleOccurrence{
+		{ReleaseID: "rel-1", FaultlineID: card.ID(), CVE: "CVE-2025-47273", Component: comp, Current: domain.VerdictOpen},
+		{ReleaseID: "rel-1", FaultlineID: card.ID(), CVE: "CVE-2025-47273", Component: comp, Current: domain.VerdictOpen},
+	}
+	ledger := &fakeEvidenceLedger{ev: map[string]string{"rel-1": "ev-1"}}
+	inv := &countingInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+
+	// batch 2, two rows back — the batch filled, so more may remain.
+	full := app.NewReverdictService(fakeStale{rows: rows}, ledger, fakeRelComps{}, inv, repo, newMatches(), fixedClock{}, 2)
+	if _, _, isFull, err := full.Sweep(context.Background()); err != nil || !isFull {
+		t.Errorf("full batch: full=%v err=%v, want true/nil", isFull, err)
+	}
+	// batch 5, two rows back — there is nothing more to take.
+	partial := app.NewReverdictService(fakeStale{rows: rows}, ledger, fakeRelComps{}, inv, repo, newMatches(), fixedClock{}, 5)
+	if _, _, isFull, err := partial.Sweep(context.Background()); err != nil || isFull {
+		t.Errorf("partial batch: full=%v err=%v, want false/nil", isFull, err)
+	}
+}
+
+// The hazard that makes `full` unsafe to loop on BY ITSELF, and why the caller also requires
+// progress: a release whose Evidence inventory is unreadable has its rows SKIPPED, and they stay
+// stale AND unstamped. So the batch comes back full with rejudged == 0, forever — a hot spin
+// during an Evidence outage, which is precisely when not to hammer it.
+//
+// This is the difference from the re-classification sweep, which stamps every card it reads and
+// therefore always makes progress. Copying that loop condition here would have been a bug.
+func TestReverdictSweepFullBatchWithNoProgressIsTheSpinHazard(t *testing.T) {
+	repo := newRepo()
+	card := seedCard(t, repo, "CVE-2025-47273", "python-setuptools", "0:39.2.0-9.el8_10")
+	comp := app.InventoryComponent{PURL: "pkg:pypi/setuptools@39.2.0", Name: "setuptools", Version: "39.2.0", Ecosystem: "pypi"}
+	rows := []app.StaleOccurrence{
+		{ReleaseID: "rel-1", FaultlineID: card.ID(), CVE: "CVE-2025-47273", Component: comp, Current: domain.VerdictOpen},
+		{ReleaseID: "rel-1", FaultlineID: card.ID(), CVE: "CVE-2025-47273", Component: comp, Current: domain.VerdictOpen},
+	}
+	// The ledger resolves, but the inventory read fails — the release is skipped wholesale.
+	svc := app.NewReverdictService(fakeStale{rows: rows},
+		&fakeEvidenceLedger{ev: map[string]string{"rel-1": "ev-1"}}, fakeRelComps{},
+		&countingInventory{err: errors.New("evidence down")}, repo, newMatches(), fixedClock{}, 2)
+
+	rejudged, _, isFull, err := svc.Sweep(context.Background())
+	if err != nil {
+		t.Fatalf("an inventory outage must not surface as a sweep error: %v", err)
+	}
+	if rejudged != 0 {
+		t.Errorf("rejudged = %d, want 0 — a skipped release stamps nothing", rejudged)
+	}
+	if !isFull {
+		t.Fatal("the batch DID fill; `full` must say so")
+	}
+	// full && rejudged == 0 is the caller's stop condition. Asserting it here pins the contract
+	// the loop depends on: without it the drain would re-read these same rows forever.
+	if isFull && rejudged == 0 {
+		return
+	}
+	t.Error("expected the full-batch-no-progress combination the loop guard exists for")
 }
