@@ -3282,10 +3282,25 @@ under the 2026-08-07 re-derivation standard.
   system suppression Proposal on the Findings whose component it covers (EDR-VEX-01 — "gathered,
   not obeyed"). It never auto-suppresses by itself, but a policy MAY auto-accept it, and the match
   is on package name only — so an EOL-major statement can retire a live el8 finding.
-  **Impact NOT yet measured** (R4 discipline — the mechanism is confirmed, the firing is not):
-  count `finding_proposals` by `stance='not_affected'` × `status`, and how many accepted ones
-  carry an EOL product in `rationale`. If accepted+EOL is non-zero this is HIGH and has already
-  suppressed real findings; if everything is `raised`, the mechanism is armed but has not fired.
+  **IMPACT MEASURED 2026-09-17 — ARMED, NOT FIRED. Severity confirmed MED-HIGH, not HIGH.**
+
+  | | |
+  | --- | --- |
+  | accepted `not_affected` | **26** — of which EOL-scoped: **0** |
+  | proposed `not_affected` | 171 — of which EOL-scoped: **60** |
+  | `system` `not_affected` accepted | **24** |
+
+  **No finding has been wrongly suppressed.** But that is not the same as safe, and the reason it
+  has not fired is UNKNOWN, which is the part that matters: **24 `system` `not_affected` proposals
+  WERE auto-accepted**, so the auto-accept path demonstrably works on this estate. Why it accepted
+  those 24 and none of the 60 EOL-scoped ones is undetermined — candidate explanations include an
+  additional policy condition, a trust-class bar (EDR-TRUST-01 T4), or simple arrival timing.
+  **Until that is established, "it has not fired" is not evidence that it will not.** 60 live
+  suppression proposals scoped to RHEL 5/6/7 are sitting in the queue against an el8 estate, and
+  each is one policy change or one human click away from retiring a real finding.
+  **Determine before relaxing:** which condition distinguished the 24 accepted from the 60
+  pending. That answer decides whether the current state is a guard doing its job (in which case
+  name it and test it) or luck (in which case this is closer to HIGH).
   **Fix shape to decide (design-first — a domain model change):** give `Applicability` a product/
   stream scope and keep one statement PER (package, product) instead of collapsing to one per
   package; then match a statement to a Finding only when its scope matches the release's own
