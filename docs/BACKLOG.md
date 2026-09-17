@@ -3722,8 +3722,9 @@ under the 2026-08-07 re-derivation standard.
   **Dep:** (b) blocks on the identity-ownership decision; (a) does not. **Scope:** MEDIUM (a) /
   design-first (b).
 
-- [ ] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
-  shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification).**
+- [x] **KN-FIX-5 — versioned interpreter wrappers (`python3.12-`) never normalize, so the pip
+  shadows stay unbridgeable (filed 2026-09-10, measured on the KN-FIX-4 live verification;
+  SHIPPED 2026-09-17).**
   LOW-MED, correctness; EDR-VEX-01 D12 follow-up. `distroPrefixes` holds the literal `python3-`
   and `python3x-` but NOT the versioned form: `python3.12-pip` fails `HasPrefix("python3-")`
   (dot vs hyphen at position 7), so `NormalizeProduct` returns it unstripped, the D3 bridge's
@@ -3731,21 +3732,45 @@ under the 2026-08-07 re-derivation standard.
   `pip` vs `python3.12-pip` → false. Measured: on the MRF release the KN-FIX-4 pass cleared
   the `setuptools@39.2.0` shadow (sibling `python3-setuptools`) but left every
   `pip@23.2.1` shadow open beside its at-version sibling `python3.12-pip@23.2.1-4.el8`.
-  Fix shape to decide: a PATTERN rule for `pythonN.M-` in the wrapper strip (one dynamic rule,
-  same python family in `wrapperFamily`) rather than enumerating literals that grow with every
-  interpreter release. Touches claim classification too (`NormalizeProduct` is shared) — check
-  the carrier/scope property tests before assuming it is free. **Dep:** none. **Scope:** SMALL.
+  **SHIPPED 2026-09-17** as the pattern rule the entry recommended. `versionedInterpreterPrefix`
+  matches a known interpreter stem followed by a digits-and-dots version and a hyphen with a
+  payload after it — so `python3.12-pip` strips to `pip` while `python3` (no hyphen),
+  `python3.12-` (no payload) and `pythonista-foo` (not a version segment) are all left alone.
+  `wrapperFamily` now matches by STEM, so every versioned wrapper joins the python family
+  instead of becoming its own; the `ruby-json` / `python3.12-json` collision guard still holds.
+  **The refactor that came with it is the durable part:** `NormalizeProduct` and
+  `strippedWrapper` each carried the wrapper rule, and `strippedWrapper`'s own comment warned
+  that a divergence would compare a stripped root against an unstripped one. Both now delegate
+  to one `wrapperPrefixOf`, so that hazard cannot recur.
+  Classification was re-measured rather than assumed free (the entry's warning): the
+  module-stream bystander guard holds — `python3.12-pyyaml` against carrier `python` is still
+  `scope` — and `python3.12-devel` is still the interpreter via the role rule.
+  `ClassifierGeneration` → 4 and `VerdictGeneration` → 2, so the re-classification and
+  re-verdict sweeps both drain the estate for it. domain 100%.
 
-- [ ] **KN-VERDICT-2 — a verdict-logic change ships invisible: stamps claim currency the new
-  code never produced (filed 2026-09-10).** LOW-MED, operability. The D6 stamp records "judged
+- [x] **KN-VERDICT-2 — a verdict-logic change ships invisible: stamps claim currency the new
+  code never produced (filed 2026-09-10; SHIPPED 2026-09-17).** LOW-MED, operability. The D6 stamp records "judged
   against card version N" — but not against WHICH judgement logic. Deploying a binary that
   changes `judgeOccurrence`/`FixesFor` (KN-FIX-4 was the live case) re-judges NOTHING: every row
   is stamp-current, the sweep honestly reports `rejudged:0`, and the new rule's effect waits on
   unrelated feed drift. The operator workaround is a manual stamp reset (`verdict_card_version=0`
-  for open rows), used twice on 2026-09-10. Fix shape to decide: fold a verdict-logic version
-  (e.g. a build-stamped constant) into the staleness predicate, so a logic change IS staleness —
-  the same "the query is the state" move `CVEsNeedingRefresh` made. **Dep:** none.
-  **Scope:** SMALL.
+  for open rows), used twice on 2026-09-10.
+  **SHIPPED 2026-09-17** as the entry recommended — `domain.VerdictGeneration` folded into the
+  staleness predicate, so a logic change IS staleness. Migration 000009 adds
+  `faultline_matches.verdict_generation` (default 0, so every existing row drains once);
+  `StaleVerdictOccurrences` selects `verdict_card_version < f.version OR verdict_generation < $1`;
+  `RecordMatch` stamps it on all three write paths and RESETS it with the card version on a
+  detail correction, because a current generation stamp keeps the sweep away just as effectively.
+  **The stamp is written by the adapter, not carried on `app.Match`**, deliberately: one
+  `judgeOccurrence` produces every verdict in a running binary, so the constant is always the
+  truth about what judged the row, while a field on Match would make three callers repeat the
+  same value and let one forgotten assignment mark a fresh row permanently stale.
+  The sweep now logs `generation` beside `rejudged`/`changed`, so "the rule shipped and drained"
+  is visible rather than inferred.
+  **Same mechanism as `ClassifierGeneration` (000008), and that is the point:** two stamps, one
+  idea — a code change advances no data version, so only a constant the query compares against
+  can make new logic count as staleness. This entry is the second instance; treat a third as a
+  signal to generalize rather than to copy.
 
 - [ ] **KN-SCAN-4 — a re-scan with corrected attribution cannot heal a mis-recorded occurrence
   (filed 2026-09-10).** **Part (a) SHIPPED 2026-09-10** (`fix/kn-scan-4-overlay-on-dedup`):

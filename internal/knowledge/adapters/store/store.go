@@ -261,6 +261,13 @@ func matchedComponentOf(m app.Match) domain.MatchedComponent {
 	}
 }
 
+// The verdict-logic generation is stamped HERE rather than carried on app.Match, deliberately
+// (KN-VERDICT-2). Every judgement in a running binary comes from one judgeOccurrence, so the
+// constant is always the truth about what produced this verdict; putting it on Match would make
+// three callers repeat the same value and let a forgotten field mark a fresh row permanently
+// stale. The stamp is written on every path that writes verdict_card_version, and resets with
+// it — the two stamps answer the same question about different inputs.
+
 // RecordMatch records a release-component match idempotently (D3). On a new match it stores
 // the occurrence WITH its verdict (EDR-VERDICT-01 D2), advances the card to Correlated
 // (monotonic — never regressing a mature/superseded card) and queues a ComponentMatched
@@ -325,10 +332,12 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			if _, uerr := tx.Exec(ctx, `
 				UPDATE faultline_matches
 				SET verdict_state=$4, verdict_grade=$5, verdict_reason=$6, verdict_card_version=$7,
-				    component_name=$8, component_version=$9, component_ecosystem=$10, component_source=$11
+				    verdict_generation=$8,
+				    component_name=$9, component_version=$10, component_ecosystem=$11, component_source=$12
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
 				m.ReleaseID, string(m.FaultlineID), m.Component.PURL,
 				string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion,
+				domain.VerdictGeneration,
 				name, version, eco, source); uerr != nil {
 				return false, uerr
 			}
@@ -346,15 +355,19 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			// knowledge the card already holds, and the stale stamp is precisely what invites
 			// the sweep to find out. No event — the verdict has not changed yet.
 			stamp := m.CardVersion
+			generation := domain.VerdictGeneration
 			if detailChanged {
-				stamp = 0
+				// Both stamps reset together: the corrected identity may judge differently
+				// against knowledge the card already holds, and a current GENERATION stamp
+				// would keep the sweep away just as effectively as a current version stamp.
+				stamp, generation = 0, 0
 			}
 			if _, uerr := tx.Exec(ctx, `
 				UPDATE faultline_matches
-				SET verdict_card_version=$4,
-				    component_name=$5, component_version=$6, component_ecosystem=$7, component_source=$8
+				SET verdict_card_version=$4, verdict_generation=$5,
+				    component_name=$6, component_version=$7, component_ecosystem=$8, component_source=$9
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
-				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, stamp,
+				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, stamp, generation,
 				name, version, eco, source); uerr != nil {
 				return false, uerr
 			}
@@ -369,11 +382,12 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		INSERT INTO faultline_matches
 			(release_id, faultline_id, component_purl, matched_at,
 			 component_name, component_version, component_ecosystem, component_source,
-			 verdict_state, verdict_grade, verdict_reason, verdict_card_version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			 verdict_state, verdict_grade, verdict_reason, verdict_card_version, verdict_generation)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt,
 		m.Component.Name, m.Component.Version, m.Component.Ecosystem, m.Component.Source,
-		string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion); err != nil {
+		string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion,
+		domain.VerdictGeneration); err != nil {
 		return false, err
 	}
 

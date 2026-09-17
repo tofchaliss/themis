@@ -14,7 +14,7 @@ type fakeStale struct {
 	err  error
 }
 
-func (f fakeStale) StaleVerdictOccurrences(context.Context, int) ([]app.StaleOccurrence, error) {
+func (f fakeStale) StaleVerdictOccurrences(context.Context, int, int) ([]app.StaleOccurrence, error) {
 	return f.rows, f.err
 }
 
@@ -227,5 +227,35 @@ func TestReverdictNudge(t *testing.T) {
 	case <-svc.NudgeC():
 		t.Fatal("burst must coalesce to one pending wake-up")
 	default:
+	}
+}
+
+// genStale records the generation the sweep asked for.
+type genStale struct {
+	rows []app.StaleOccurrence
+	got  int
+}
+
+func (g *genStale) StaleVerdictOccurrences(_ context.Context, generation, _ int) ([]app.StaleOccurrence, error) {
+	g.got = generation
+	return g.rows, nil
+}
+
+// KN-VERDICT-2: the sweep must ask for the CURRENT judgement-logic generation, or a shipped
+// rule change re-judges nothing — every row stamp-current, the sweep honestly reporting
+// `rejudged:0`, and the new rule waiting on unrelated feed drift. Measured on KN-FIX-4, where
+// the operator reset stamps by hand twice.
+func TestReverdictSweepAsksForTheCurrentLogicGeneration(t *testing.T) {
+	stale := &genStale{}
+	svc := app.NewReverdictService(stale, &fakeEvidenceLedger{}, fakeRelComps{},
+		&countingInventory{}, newRepo(), newMatches(), fixedClock{}, 10)
+	if _, _, err := svc.Sweep(context.Background()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if stale.got != domain.VerdictGeneration {
+		t.Errorf("sweep asked for generation %d, want %d", stale.got, domain.VerdictGeneration)
+	}
+	if svc.Generation() != domain.VerdictGeneration {
+		t.Errorf("Generation() = %d, want %d", svc.Generation(), domain.VerdictGeneration)
 	}
 }
