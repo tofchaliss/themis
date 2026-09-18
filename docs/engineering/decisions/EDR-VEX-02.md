@@ -163,6 +163,61 @@ to borrow wholesale.** The applicability decision is its own domain operation; t
 different question (is this advisory a main-stream fix line?) and must not be repurposed to answer this
 one.
 
+### D9 — NON-GOAL: this EDR does not change the auto-accept trust policy
+
+It determines whether a vendor statement **applies to the release**. It does **not** elevate the vendor
+assertion from `Asserted` to `Observed`, and it does not alter any policy rule.
+
+Stated as a decision because the two are easy to conflate, and conflating them would undo the guard this
+investigation confirmed twice:
+
+    not_applicable
+        └── visible vendor evidence, cannot clear the Finding
+
+    applicable + not_affected
+        └── enters the EXISTING governance path
+              └── still subject to the TrustObserved floor → still waits for a human
+
+So `applicable` means *"this statement is about your release"*, never *"this statement may be acted on
+automatically"*. Two independent barriers remain, and D2's block is aimed at the human path while the
+trust floor is aimed at the automated one.
+
+## Implementation sequence
+
+Ordered so that each step is verifiable before the next depends on it:
+
+1. **Extend the `PackageState` DTO with the CPE** — one field; the data is already on the wire.
+2. **Preserve the vendor assertion unchanged** — `Status` and `Justification` stay exactly as received
+   (D1, D8).
+3. **Build the structured product scope** — classify the CPE's product identity FIRST (D5).
+4. **Resolve applicability** → `applicable` / `not_applicable` / `unknown` (D3, D4, D6).
+5. **Prevent an inapplicable statement from clearing a Finding** (D2).
+6. **Keep the statement visible and auditable** — including when inapplicable (D2, D8).
+
+## Validation order — and where to STOP
+
+**Check the `unknown` population FIRST, before looking at whether the 60 pending proposals changed.**
+
+> **If `unknown` is unexpectedly large, stop there.** That means the structured-scope resolver is not
+> doing what D3/D4 intend. It is **not** permission to loosen the definition of `unknown` — which is
+> precisely the temptation, because a looser `unknown` would make the numbers look reasonable while
+> hiding a broken resolver.
+
+Then the concrete matrix, on a Rocky 8.10 release:
+
+| vendor scope | relation | expected |
+| --- | --- | --- |
+| `Red Hat Enterprise Linux 8` | same family + major | **`applicable`** |
+| `Red Hat Enterprise Linux 7` | different major | **`not_applicable`** |
+| `OpenShift Pipelines` | different product | **`not_applicable`** |
+| missing / malformed CPE | insufficient evidence | **`unknown`** |
+
+Then the governance consequence, which is what the whole change is for:
+
+- `not_applicable` → the statement is visible and **cannot clear the Finding**.
+- `applicable` + `not_affected` → enters the existing path and is **still held by the TrustObserved
+  floor** (D9).
+
 ## Validation criteria
 
 On the measured estate, after this ships:

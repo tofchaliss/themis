@@ -4,7 +4,32 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — `ATTR-GAP-1` (ATTR-CPE-1 is CLOSED, negative)
+> ## ⏭ RESUME POINT — `VEX-SCOPE-1` implementation, spec'd and ready
+>
+> **Domain-design checkpoint: [`EDR-VEX-02`](decisions/EDR-VEX-02.md) at `6ded066`** (D1–D9).
+> Decisions are settled and are NOT to be reopened. No code written.
+> **Found by a reviewer reading one drawer line:** a Rocky 8.10 estate showed *"not_affected for
+> httpd (Red Hat: not affected in Red Hat Enterprise Linux 7)"*. `Applicability` carried no
+> product scope at all; dedup by package name meant array position picked the survivor. ~90 of
+> ~907 statements are scoped to the major this estate runs.
+> **Severity is human-deception, not automation** — measured: 26 accepted `not_affected`, zero
+> EOL-scoped, and the accepted rationales are 23 version-range + 1 supersede + 2 test. The
+> `TrustObserved` floor already keeps vendor VEX from auto-accepting, confirmed in code AND data.
+> 60 EOL-scoped proposals sit pending, one policy change away.
+> **The structured scope exists and is unread:** `package_state` carries a `cpe` the DTO drops, so
+> no prose parsing is needed. Third instance this session of present-but-unread evidence.
+> **Two limits deliberately preserved:** `unknown` means epistemic uncertainty (malformed, absent,
+> unclassifiable), never "a product we don't run" — a known-different product is
+> `not_applicable`; and **non-Red Hat VEX (generic CSAF, uploaded) is an UNVERIFIED boundary**,
+> inheriting `unknown` until its scope is measured rather than assumed equivalent.
+> **Implementation order** (EDR-VEX-02): DTO field → preserve assertion → structured scope →
+> resolve applicability → block inapplicable from clearing → keep visible.
+> **VALIDATE `unknown` FIRST. If it is unexpectedly large, STOP** — that means the resolver is
+> broken, and it is not permission to loosen `unknown`.
+> **D9 non-goal:** this changes applicability only. It does NOT elevate `Asserted` to `Observed`
+> and does not touch any policy rule.
+>
+> ## ⏭ PREVIOUS RESUME POINT — `ATTR-GAP-1` (ATTR-CPE-1 is CLOSED, negative)
 >
 > **The question to open with, stated as a constraint:** *how do we expose the absence of
 > sufficient attribution evidence **without** turning it into a verdict, and **without**
