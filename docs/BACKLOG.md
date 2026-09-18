@@ -3246,6 +3246,44 @@ under the 2026-08-07 re-derivation standard.
   component anywhere classified `unknown` by a gap.
   **Dep:** none. **Scope:** was SMALL-MEDIUM; came in smaller — GUI + one script, no Go change.
 
+- [ ] **KN-STREAM-1 — OPEN QUESTION: can Themis establish that same-major rpm fix bounds are a
+  PROGRESSION and not parallel module contexts? (filed 2026-09-17)** LOW-MED, correctness of a
+  clearance path; EDR-VEX-01 Phase 3. **Not a defect** — a question whose answer decides whether
+  one is present.
+  **The contract.** `RPMFixedByStream` answers *"did a published same-major fix ship at or below
+  this install?"* — ANY-match, returning true on the first qualifying bound. Measured on
+  CVE-2026-29167: the card holds 13 el8 bounds and the install
+  `2.4.37-65.module+el8.10.0+40257+286895ef.9` sits ABOVE the base `+1830+22f0c9e0` and BELOW
+  `+40312+2c72bb9b.10`. It clears, at `observed` grade.
+  **"Highest-match" is NOT the safer alternative — DISPROVED, do not propose it again.** A
+  property asserting `any-match == highest-match` over monotonic bounds was proposed as the fix
+  and rapid produced a counterexample in under a second: install
+  `2.4.37-1.module+el8.0.0+9999+def` against bounds `2.4.37-1…+1000` (satisfied) and
+  `2.4.37-80…+1100` (not). The install carries the fix that shipped in `2.4.37-1…+1000`; a later
+  release also carrying it does not make the install vulnerable. Highest-match would UNDER-clear.
+  Pinned by `TestRPMFixedByStreamHighestMatchWouldUnderClear`.
+  **The actual open question.** Any-match over-clears in exactly one shape: two same-major bounds
+  representing PARALLEL module contexts, where the estate sits on a branch that never received the
+  lower-numbered fix. That cannot be detected by comparing bounds to each other — it needs module
+  CONTEXT, which `RPMReleaseMajor` deliberately discards (it resolves only the EL major).
+  **Evidence so far: no counterexample exists on this estate.** Every multi-bound card inspected
+  2026-09-17 was a progression, including CVE-2021-44790's el8.2/el8.4/el8.5 spread, where release
+  numbers are monotonic across minor streams (`2.4.37-21.module+el8.2.0` <
+  `2.4.37-65.module+el8.10.0`). So the invariant HOLDS here; what is unknown is whether Red Hat
+  GUARANTEES it.
+  **Guarded by `TestRPMFixedByStreamClearsOnAnySameMajorBoundProperty`** — a CHARACTERIZATION
+  property, not a correctness one. Its generator deliberately does NOT impose monotonicity, so
+  parallel-context shapes appear; it asserts the current answer (clears on the lower bound) so
+  that a change to the selection rule fails deliberately instead of silently altering which
+  findings clear. **If module-context awareness is added, that expectation must be revisited, not
+  patched** — which is the signal it exists to send.
+  **To resolve:** determine from Red Hat's own documentation or data whether two `+NNNNN+hash`
+  module builds of the same NEVRA release can be parallel contexts rather than successive
+  rebuilds. If they can, the comparator needs context awareness and this becomes a real defect on
+  a clearance path. If they cannot, the invariant is guaranteed and the contract is provably
+  correct rather than merely working.
+  **Dep:** none. **Scope:** investigation first; SMALL-MEDIUM if context awareness is needed.
+
 - [x] **DEV-PROP-1 — `make test-property` has been BROKEN since 2026-08-07, so the deep
   1000-check runs never ran (found + fixed 2026-09-17).** MED, gate integrity. The `property-run`
   target selected packages by `grep -rlE 'pgregory\.net/rapid' --include='*_test.go'`. That also

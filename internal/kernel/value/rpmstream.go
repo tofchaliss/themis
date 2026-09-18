@@ -86,6 +86,9 @@ func RPMReleaseMajor(version string) string {
 // No such case could be constructed from the 2026-09-17 estate: every multi-bound card inspected
 // was a progression, including CVE-2021-44790's el8.2/el8.4/el8.5 spread, where release numbers
 // are monotonic across minor streams (`2.4.37-21.module+el8.2.0` < `2.4.37-65.module+el8.10.0`).
+// Tracked as the open question **KN-STREAM-1**, with
+// TestRPMFixedByStreamClearsOnAnySameMajorBoundProperty characterizing the current answer.
+//
 // **If a parallel-context counterexample ever appears, this comparator's design must be
 // revisited — with module context, not with a highest-bound rule.**
 func RPMFixedByStream(ecosystem, installed string, fixedVersions []string) bool {

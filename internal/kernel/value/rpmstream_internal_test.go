@@ -99,3 +99,55 @@ func TestRPMFixedByStreamFailsSafeProperty(t *testing.T) {
 		}
 	})
 }
+
+// CHARACTERIZATION of the any-match contract, and the witness for the open question KN-STREAM-1.
+//
+// This asserts what the comparator DOES, not that it is right: it clears iff SOME same-major
+// bound is satisfied. Written as a property so a change to the selection rule fails here
+// deliberately rather than silently altering which findings clear.
+//
+// The bound sets are NOT forced monotonic, which is the point — the generator includes the shape
+// the open question is about: a bound above the install beside one below it. The comparator
+// clears on the lower bound, and whether that is correct depends on an input-domain invariant
+// Themis cannot currently establish (see KN-STREAM-1 and RPMFixedByStream's doc comment):
+//
+//   - if the bounds are a PROGRESSION (the fix shipped low and every later build carries it),
+//     clearing is correct;
+//   - if they are PARALLEL module CONTEXTS and the estate never received the lower-numbered
+//     build, clearing is an over-clear.
+//
+// Nothing in the data distinguishes those, so this test deliberately encodes the current answer.
+// **If module-context awareness is ever added, this expectation must be revisited, not patched** —
+// that is the signal it exists to send.
+func TestRPMFixedByStreamClearsOnAnySameMajorBoundProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		major := rapid.IntRange(8, 10).Draw(t, "major")
+		// Release/build pairs drawn freely: no monotonicity imposed, so parallel-context shapes
+		// (same release, differing build ids) appear alongside progressions.
+		n := rapid.IntRange(1, 5).Draw(t, "boundCount")
+		bounds := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			rel := rapid.IntRange(1, 90).Draw(t, fmt.Sprintf("release%d", i))
+			build := rapid.IntRange(1, 50000).Draw(t, fmt.Sprintf("build%d", i))
+			bounds = append(bounds,
+				fmt.Sprintf("0:2.4.37-%d.module+el%d.10.0+%d+abc", rel, major, build))
+		}
+		instRel := rapid.IntRange(1, 90).Draw(t, "installedRelease")
+		instBuild := rapid.IntRange(1, 50000).Draw(t, "installedBuild")
+		installed := fmt.Sprintf("2.4.37-%d.module+el%d.10.0+%d+def", instRel, major, instBuild)
+
+		// The contract, stated independently of the implementation's loop order.
+		wantAny := false
+		for _, b := range bounds {
+			if RPMReleaseMajor(b) == RPMReleaseMajor(installed) &&
+				compareRPMVersion(RPMEVR(installed), RPMEVR(b)) >= 0 {
+				wantAny = true
+				break
+			}
+		}
+		if got := RPMFixedByStream("rpm", installed, bounds); got != wantAny {
+			t.Fatalf("RPMFixedByStream=%v, want %v (any same-major bound satisfied) for %q over %v",
+				got, wantAny, installed, bounds)
+		}
+	})
+}
