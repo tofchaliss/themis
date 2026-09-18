@@ -129,15 +129,23 @@ func TestReactToEnrichment_WithdrawalFromAnObservedSourceIsAutoAccepted(t *testi
 func TestReactToApplicability_AssertedVendorStatementRemainsPolicyEligible(t *testing.T) {
 	repo := newRepo()
 	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
-	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl"}); err != nil {
+	// The el8 version and the matching statement scope are PRECONDITIONS, not the subject: this
+	// test is about trust, and a statement whose scope does not cover the release is blocked
+	// before trust is ever consulted (EDR-VEX-02 D2).
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl", Version: "1.0.2k-16.el8_10",
+	}); err != nil {
 		t.Fatalf("absorb: %v", err)
 	}
 	repo.seed(f)
 	s := writeSvc(repo, domain.NewPolicyRule("auto-not-affected", domain.StanceNotAffected))
 
 	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
-		FaultlineID:     "fl-1",
-		Applicabilities: []app.Applicability{{Package: "openssl", Status: "not_affected", Justification: "vulnerable_code_not_present"}},
+		FaultlineID: "fl-1",
+		Applicabilities: []app.Applicability{{
+			Package: "openssl", Status: "not_affected", Justification: "vulnerable_code_not_present",
+			Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"},
+		}},
 	}); err != nil {
 		t.Fatalf("react: %v", err)
 	}
@@ -682,7 +690,7 @@ func TestGetFindingAssessment_UnknownEcosystemOrStreamFailsOpen(t *testing.T) {
 		FaultlineID: "fl-1", CVE: "CVE-2020-10543",
 		Fixes: []app.FixedVersion{
 			{Package: "perl", Version: "4:5.26.3-419.el8", Ecosystem: "rpm"}, // fix has a stream, install doesn't → keep
-			{Package: "perl", Version: "5.32.0"},                            // source did not say → keep
+			{Package: "perl", Version: "5.32.0"},                             // source did not say → keep
 		},
 	}
 	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledge{k: known})

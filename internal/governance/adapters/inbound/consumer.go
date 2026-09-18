@@ -83,7 +83,13 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		}
 		apps := make([]app.Applicability, 0, len(dto.Applicabilities))
 		for _, a := range dto.Applicabilities {
-			apps = append(apps, app.Applicability{Package: a.Package, Status: a.Status, Justification: a.Justification})
+			apps = append(apps, app.Applicability{
+				Package: a.Package, Status: a.Status, Justification: a.Justification,
+				// The vendor-stated scope (EDR-VEX-02 D5). Absent on an older payload, which
+				// decodes to a zero scope and therefore reads as applicability `unknown` —
+				// the fail-safe direction, since an unplaceable statement cannot suppress.
+				Scope: value.ProductScope{Family: a.Scope.Family, Major: a.Scope.Major},
+			})
 		}
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
@@ -219,6 +225,13 @@ type applicabilityDTO struct {
 	Package       string `json:"Package"`
 	Status        string `json:"Status"`
 	Justification string `json:"Justification"`
+	// Scope is the product the VENDOR stated this covers (EDR-VEX-02 D5). Absent on a payload
+	// from before that change, decoding to a zero scope — which reads as applicability
+	// `unknown`, the fail-safe direction, since an unplaceable statement cannot suppress.
+	Scope struct {
+		Family string `json:"Family"`
+		Major  string `json:"Major"`
+	} `json:"Scope"`
 }
 
 type faultlineSupersededDTO struct {

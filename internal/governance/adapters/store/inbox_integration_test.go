@@ -134,7 +134,7 @@ func TestInboxTwoMutationsOnOneFindingConverge(t *testing.T) {
 		Components  []struct{ PURL, Name, Version, Ecosystem string }
 	}{
 		FaultlineID: "fl-1", CVE: "CVE-2024-1", ReleaseID: "rel-1",
-		Components: []struct{ PURL, Name, Version, Ecosystem string }{{"pkg:deb/debian/openssl@3", "openssl", "3", "deb"}},
+		Components: []struct{ PURL, Name, Version, Ecosystem string }{{"pkg:rpm/rocky/openssl@1.0.2k-16.el8_10", "openssl", "1.0.2k-16.el8_10", "rpm"}},
 	})
 	if err := inbox.Handle(ctx, match); err != nil {
 		t.Fatalf("apply match: %v", err)
@@ -149,11 +149,21 @@ func TestInboxTwoMutationsOnOneFindingConverge(t *testing.T) {
 		CVE             string
 		Severity        string
 		Score           int
-		Applicabilities []struct{ Package, Status, Justification string }
+		Applicabilities []struct {
+			Package, Status, Justification string
+			Scope                          struct{ Family, Major string }
+		}
 	}{
 		FaultlineID: "fl-1", CVE: "CVE-2024-1", Severity: "high", Score: 70,
-		Applicabilities: []struct{ Package, Status, Justification string }{
-			{"pkg:deb/debian/openssl", "not_affected", "vulnerable_code_not_present"},
+		// The Scope must cover the release or the suppression proposal is blocked before this
+		// test's subject — BUG-1's two-mutate-paths convergence — is exercised at all
+		// (EDR-VEX-02 D2). The component below carries an `elN` build for the same reason.
+		Applicabilities: []struct {
+			Package, Status, Justification string
+			Scope                          struct{ Family, Major string }
+		}{
+			{"pkg:rpm/rocky/openssl", "not_affected", "vulnerable_code_not_present",
+				struct{ Family, Major string }{"enterprise-linux", "8"}},
 		},
 	})
 	// The regression: before the fix this returned ErrConcurrent (D8 poison-halt); now it converges.

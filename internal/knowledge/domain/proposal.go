@@ -127,8 +127,16 @@ type ExploitSignal struct {
 // Whether to honor it for a given release is Governance's decision, not Knowledge's.
 type Applicability struct {
 	Package       string
-	Status        string // e.g. "affected" / "not_affected"
+	Status        string // e.g. "affected" / "not_affected" — THE VENDOR'S ASSERTION
 	Justification string
+	// Scope is the product the VENDOR said this statement covers, classified from the source
+	// document's structured CPE (EDR-VEX-02 D5). It is part of the statement, not a conclusion
+	// about it: whether the scope covers a given release is Themis's separate determination and
+	// never overwrites Status or Justification (D1/D8).
+	//
+	// A zero Scope means the vendor supplied no readable scope, which downstream reads as
+	// applicability `unknown` — epistemic uncertainty, never a product mismatch (D4).
+	Scope value.ProductScope
 }
 
 // Proposal is one source's non-authoritative input about a CVE (CON-0002): tagged with

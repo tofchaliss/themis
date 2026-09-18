@@ -206,13 +206,19 @@ func TestConsumer_FaultlineEnriched(t *testing.T) {
 func TestConsumer_FaultlineEnriched_Applicability(t *testing.T) {
 	repo := newMemRepo()
 	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
-	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl"}); err != nil {
+	// The el8 version places the release, so the statement's scope below can cover it
+	// (EDR-VEX-02 D6).
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl", Version: "1.0.2k-16.el8_10",
+	}); err != nil {
 		t.Fatalf("absorb: %v", err)
 	}
 	repo.seed(f)
 	// A vendor not_affected statement on the wire (EDR-VEX-01 D5) is decoded and drives a system
 	// not_affected Proposal on the covered Finding (D4). Severity is low, so this is the only one.
-	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"low","Applicabilities":[{"Package":"openssl","Status":"not_affected","Justification":"vulnerable_code_not_present"}]}`)
+	// The `Scope` field rides the same payload (EDR-VEX-02 D5) and must survive decoding, or the
+	// statement would read as unplaceable and be blocked.
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"low","Applicabilities":[{"Package":"openssl","Status":"not_affected","Justification":"vulnerable_code_not_present","Scope":{"Family":"enterprise-linux","Major":"8"}}]}`)
 	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -301,5 +307,40 @@ func TestConsumer_ComponentRetired(t *testing.T) {
 	}
 	if got := repo.retired["rel-1|fl-1|app:httpd@2.4.37"]; got != "duplicate_identity" {
 		t.Errorf("retired = %q, want duplicate_identity; map=%v", got, repo.retired)
+	}
+}
+
+// EDR-VEX-02 D2: a statement whose scope does NOT cover the release raises no Proposal, so it
+// cannot clear the Finding — the block is structural, since a Proposal is the only thing that
+// can. The measured case: a Rocky 8.10 estate shown "not affected in Red Hat Enterprise Linux 7".
+func TestConsumer_FaultlineEnriched_ApplicabilityScopeMismatchRaisesNothing(t *testing.T) {
+	repo := newMemRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:rpm/openssl@1.0.2", Name: "openssl", Version: "1.0.2k-16.el8_10",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	for _, tc := range []struct {
+		name, scope string
+	}{
+		{"different major — the measured RHEL 7 case", `{"Family":"enterprise-linux","Major":"7"}`},
+		{"different product — OpenShift Pipelines", `{"Family":"openshift_pipelines","Major":"1"}`},
+		{"unreadable scope — epistemic uncertainty, also blocked", `{"Family":"","Major":""}`},
+		{"scope absent entirely — an older payload", `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo.byID["fnd-1"] = f // reset
+			payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"low","Applicabilities":[{"Package":"openssl","Status":"not_affected","Justification":"vulnerable_code_not_present","Scope":` + tc.scope + `}]}`)
+			if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			for _, p := range repo.byID["fnd-1"].Proposals() {
+				if p.Stance() == domain.StanceNotAffected {
+					t.Errorf("a scope-mismatched statement raised %+v — it must not be usable for disposition", p)
+				}
+			}
+		})
 	}
 }

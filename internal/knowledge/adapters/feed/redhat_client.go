@@ -63,6 +63,11 @@ type redhatCVEDocument struct {
 		ProductName string `json:"product_name"`
 		FixState    string `json:"fix_state"`
 		PackageName string `json:"package_name"`
+		// CPE is the STRUCTURED product scope of this not_affected statement — the field that
+		// makes EDR-VEX-02 possible without parsing prose. Measured present 2026-09-18
+		// (`cpe:/a:redhat:openshift_pipelines:1`) and simply unread until then, which is why
+		// a statement about RHEL 7 could be shown against a Rocky 8.10 release.
+		CPE string `json:"cpe"`
 	} `json:"package_state"`
 	AffectedRelease []struct {
 		Package  string `json:"package"`  // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
@@ -146,9 +151,14 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 		}
 	}
 
-	// not_affected applicability, one per distinct package Red Hat marks "Not affected". The
-	// per-EL-stream verdict precision (rhel-8 vs rhel-9) is PR3; here the statement keys on the
-	// package name, which Governance matches to a Finding's component (Phase-2 overlay).
+	// not_affected applicability, one per distinct (package, PRODUCT) Red Hat marks "Not
+	// affected" — EDR-VEX-02 D7.
+	//
+	// Keyed on the package name ALONE until 2026-09-18, which meant exactly one product's
+	// statement survived per (CVE, package) and WHICH ONE was decided by its position in Red
+	// Hat's array. Measured consequence: a Rocky 8.10 estate shown "not affected in Red Hat
+	// Enterprise Linux 7", and ~90% of surviving statements scoped to products it does not run.
+	// Nothing is dropped now; Governance decides applicability per statement.
 	seen := map[string]struct{}{}
 	for _, ps := range doc.PackageState {
 		if !strings.EqualFold(strings.TrimSpace(ps.FixState), redhatFixStateNotAffected) {
@@ -158,14 +168,23 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 		if pkg == "" || !redhatIsPackageLevel(pkg) {
 			continue
 		}
-		if _, dup := seen[pkg]; dup {
+		key := pkg + "\x00" + strings.ToLower(strings.TrimSpace(ps.CPE))
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		seen[pkg] = struct{}{}
+		seen[key] = struct{}{}
 		app0 := domain.Applicability{
-			Package:       pkg,
+			Package: pkg,
+			// The vendor's assertion, VERBATIM and untouched (EDR-VEX-02 D1/D8). Themis's own
+			// determination about whether it applies here lives elsewhere and never overwrites
+			// these two fields.
 			Status:        "not_affected",
 			Justification: "Red Hat: not affected" + productSuffix(ps.ProductName),
+			// The scope the VENDOR stated, classified from the structured CPE (D5) — product
+			// identity first, so a non-OS product's version is never read as an OS major. An
+			// absent or unreadable CPE yields a zero scope, which downstream reads as `unknown`
+			// rather than as a mismatch (D4).
+			Scope: value.ScopeFromCPE(ps.CPE),
 		}
 		if p, perr := domain.NewApplicabilityProposal("redhat", observedAt, app0); perr == nil {
 			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})
