@@ -3398,6 +3398,47 @@ under the 2026-08-07 re-derivation standard.
   is not a field. Extracting it from the justification string is explicitly forbidden (it would be
   deriving scope from a display string, the same error class as deriving identity from a name).
   **So the domain change IS the fix**, and it stays design-first / Must-ask.
+
+  ---
+  **SPECIFICATION CONSTRAINT (agreed 2026-09-18) — THREE CONCEPTS, KEPT SEPARATE.** Whatever is
+  decided about the two open choices below, the shape must preserve:
+
+      Statement
+         ├── what the vendor ASSERTED      (evidence — immutable, theirs)
+         ├── product SCOPE                 (what the vendor said it covers)
+         └── APPLICABILITY to this release (Themis's determination)
+                   ├── applicable
+                   ├── not applicable
+                   └── unknown
+
+  **Applicability SHALL NOT be encoded by modifying or interpreting the vendor's original
+  statement.** That keeps two different sentences distinguishable forever:
+
+  - *"Red Hat said httpd is not affected in Red Hat Enterprise Linux 7."*
+  - *"Themis determined that statement does not apply to this Rocky 8.10 release."*
+
+  **What this forbids concretely**, because each is a tempting shortcut: rewriting the
+  justification text to append "(does not apply here)"; dropping the statement so only Themis's
+  conclusion survives; reusing the vendor's `Status` field to carry Themis's determination; or
+  inferring the scope by parsing the justification prose (already forbidden above — it is
+  deriving scope from a display string).
+  **The third applicability value is load-bearing.** `unknown` must exist alongside applicable /
+  not-applicable, for the same reason the Attribution Gap is not a verdict
+  (EDR-ATTRIBUTION-01 D1/D2): a product string Themis cannot place — "Red Hat Software
+  Collections", "JBoss Core Services" — yields *no determination*, which is a different statement
+  from "does not apply" and must not be collapsed into it.
+  **It is the same invariant the codebase already holds, one level down:** Domain Invariant 3
+  ("Gathering Is Not Knowing") keeps gathered Information from becoming Knowledge by arrival;
+  EDR-VEX-01 keeps vendor VEX *gathered, not obeyed*. This extends both to the statement's SCOPE:
+  external evidence stays evidence, and Themis determines its applicability rather than rewriting
+  it.
+
+  **NO CODE CHANGE YET.** Two decisions gate the domain shape:
+  1. **Mismatch** — hide, or show-and-block?
+  2. **RHEL/Rocky** — exact product identity, or established major-level equivalence?
+
+  The measured facts above (the Observed floor holding in code and data; 23 of 26 accepted
+  proposals coming from the version-range path) are settled and are not to be re-derived.
   **Fix shape to decide (design-first — a domain model change):** give `Applicability` a product/
   stream scope and keep one statement PER (package, product) instead of collapsing to one per
   package; then match a statement to a Finding only when its scope matches the release's own
