@@ -3438,6 +3438,12 @@ under the 2026-08-07 re-derivation standard.
   it.
 
   ---
+  **SPECIFIED 2026-09-18 as [`EDR-VEX-02`](engineering/decisions/EDR-VEX-02.md) (D1–D8) — that
+  document is now the reason of record; the evidence below is what it rests on.**
+  Refinement settled the same day: with the CPE available, a positively-read different product
+  (`cpe:/a:redhat:openshift_pipelines:1`) is **`not_applicable`**, not `unknown`. `unknown` means
+  epistemic uncertainty — malformed, absent or unclassifiable scope — never product mismatch.
+
   **BOTH DECISIONS SETTLED 2026-09-18. This entry moves from decision stage to specification.**
 
   | question | decision |
