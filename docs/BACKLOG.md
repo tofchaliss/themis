@@ -3433,9 +3433,61 @@ under the 2026-08-07 re-derivation standard.
   external evidence stays evidence, and Themis determines its applicability rather than rewriting
   it.
 
-  **NO CODE CHANGE YET.** Two decisions gate the domain shape:
-  1. **Mismatch** — hide, or show-and-block?
-  2. **RHEL/Rocky** — exact product identity, or established major-level equivalence?
+  ---
+  **BOTH DECISIONS SETTLED 2026-09-18. This entry moves from decision stage to specification.**
+
+  | question | decision |
+  | --- | --- |
+  | Mismatched vendor VEX | **Show it, mark `not_applicable`, BLOCK its use for Finding disposition** |
+  | RHEL 8 → Rocky 8.10 | **Applicable**, through established RHEL-family major-version equivalence |
+  | Unknown product scope | **`unknown`** — never silently converted to `not_applicable` |
+  | Vendor `Status` | Immutable vendor assertion; **never** reused to carry Themis's applicability |
+  | Justification | **Never** mutated to encode Themis's conclusion |
+  | Original statement | **Never** discarded merely because its scope does not apply |
+  | Scope recovery | **Structured data only; never parse prose** |
+
+  **D1 — show and block.** A vendor statement stays part of the evidence record even when its
+  product scope does not apply. The reviewer sees three separable facts:
+
+      Vendor said:        not_affected on Red Hat Enterprise Linux 7
+      Themis determined:  that statement does not apply to this release (Rocky Linux 8.10)
+      Finding:            unaffected status NOT established
+
+  and cannot use it to clear the Finding. **"Show and block" must not render like an active,
+  applicable statement** — the applicability state is visually AND semantically explicit. The
+  mismatched statement is **not "ignored"**: it is *a valid vendor assertion with
+  `not_applicable` scope*, which keeps "no vendor statement exists" distinguishable from "a
+  statement exists and Themis determined its scope does not apply".
+
+  **D2 — major-level equivalence within the RHEL-compatible family, NOT string matching.**
+  Explicitly not `contains("RHEL") && contains("8")`. Applicability is evaluated on a structured
+  scope — conceptually a distribution FAMILY plus a MAJOR version — so `Red Hat Enterprise
+  Linux 8` and `Rocky 8.10` both reduce to *(enterprise-linux family, 8)* and match, while RHEL 7
+  and RHEL 9 do not. Exact domain names are an implementation choice; the semantic rule is that
+  applicability is evaluated at family + major-release level, never by product-string equality.
+  This is the equivalence Themis already relies on twice: the rocky feed skipping RLSA as a 1:1
+  RHSA clone (EDR-VEX-01 D11), and `RPMReleaseMajor` reducing `el8.10.0` to major `8`.
+  **Consequence for unplaceable products** — `Red Hat Software Collections`, `JBoss Core
+  Services`, `Hardened Images` carry no major version Themis can establish from structured scope,
+  so they are `unknown`, and `unknown` is **not** `not_applicable`.
+
+  **THE ONE OPEN IMPLEMENTATION INPUT — is a structured scope even available?** D2 requires
+  structured data, and the current DTO does not read any: `PackageState` is
+  `{product_name, fix_state, package_name}`. The CPE **is** read on `AffectedRelease`
+  (`redhatIsMainStream` already parses it for EUS/AUS/E4S/TUS), but not on the `not_affected`
+  entries. So before writing the domain change, establish whether Hydra's `package_state` entries
+  carry a `cpe` (e.g. `cpe:/o:redhat:enterprise_linux:8`):
+
+      curl -s https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2023-31122.json \
+        | jq '.package_state[0]'
+
+  If a CPE is present, the major is extractable from structured data and D2 is directly
+  implementable. **If it is absent, D2 collides with "never parse prose"** and the choice becomes
+  explicit rather than accidental: accept a narrow, documented product-name → (family, major)
+  mapping for the RHEL family only, or leave every statement `unknown` and rely on D1's block.
+  **This is the THIRD instance today of structured evidence being present-but-unread** — after
+  `ps.ProductName` (read then thrown into prose) and the SBOM's 6384 CPE refs (filtered out by the
+  parser's PACKAGE-MANAGER-only rule). Worth checking before assuming absence.
 
   The measured facts above (the Observed floor holding in code and data; 23 of 26 accepted
   proposals coming from the version-range path) are settled and are not to be re-derived.
