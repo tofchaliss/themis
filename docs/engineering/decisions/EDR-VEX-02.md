@@ -55,7 +55,7 @@ reviewer trusts — or one policy change admitting Asserted evidence and suppres
 
 ## Decisions
 
-### D1 — Three concepts,永 kept separate
+### D1 — Three concepts, kept separate
 
     Statement
        ├── what the vendor ASSERTED       (evidence — immutable, theirs)
