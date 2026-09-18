@@ -3339,9 +3339,13 @@ under the 2026-08-07 re-derivation standard.
   | Hardened Images · Software Collections · JBoss · Ansible · OpenShift · Satellite · RHV · OpenJDK | ~170 | no |
   | RHEL 5 | 30 | no — EOL |
 
-  **So ~90% of the surviving statements are scoped to products this estate does not run**, and
-  because RHEL 6 wins 207 times against RHEL 8's 90, Hydra evidently lists oldest-first — meaning
-  **the most common outcome is the LEAST relevant statement surviving.**
+  **So ~90% of the surviving statements are scoped to products this estate does not run.**
+  **CORRECTED 2026-09-18:** an earlier note here inferred that "Hydra evidently lists
+  oldest-first" to explain RHEL 6 winning 207 times against RHEL 8's 90. **That inference is
+  wrong** — a sampled document's first `package_state` entry is `OpenShift Pipelines`, not an old
+  RHEL. The array order is arbitrary product order. The defect is unchanged (dedup by package name
+  keeps one entry and which one is decided by array position), but the distribution above is a
+  measurement while the explanation for it was speculation.
   **Why it is a false-negative path and not cosmetic:** a reconciled `not_affected` raises a
   system suppression Proposal on the Findings whose component it covers (EDR-VEX-01 — "gathered,
   not obeyed"). It never auto-suppresses by itself, but a policy MAY auto-accept it, and the match
@@ -3481,13 +3485,22 @@ under the 2026-08-07 re-derivation standard.
       curl -s https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2023-31122.json \
         | jq '.package_state[0]'
 
-  If a CPE is present, the major is extractable from structured data and D2 is directly
-  implementable. **If it is absent, D2 collides with "never parse prose"** and the choice becomes
-  explicit rather than accidental: accept a narrow, documented product-name → (family, major)
-  mapping for the RHEL family only, or leave every statement `unknown` and rely on D1's block.
-  **This is the THIRD instance today of structured evidence being present-but-unread** — after
-  `ps.ProductName` (read then thrown into prose) and the SBOM's 6384 CPE refs (filtered out by the
-  parser's PACKAGE-MANAGER-only rule). Worth checking before assuming absence.
+  **ANSWERED 2026-09-18 — the CPE IS present and simply unread.** A sampled entry:
+
+      {"product_name": "OpenShift Pipelines", "fix_state": "Affected",
+       "package_name": "httpd", "cpe": "cpe:/a:redhat:openshift_pipelines:1"}
+
+  So **D2 is directly implementable from structured data — no prose parsing is needed**, and the
+  DTO gains one field. The CPE is the 2.2 URI form (`cpe:/<part>:<vendor>:<product>:<version>`),
+  and Themis already parses this exact shape: `redhatIsMainStream` reads the `AffectedRelease`
+  CPE to exclude EUS/AUS/E4S/TUS.
+  Extraction is then structural: product `enterprise_linux` identifies the RHEL family, and the
+  version field carries the major (`cpe:/o:redhat:enterprise_linux:8` → family enterprise-linux,
+  major 8), which reduces to the same pair as the release's own `el8` from `RPMReleaseMajor`.
+  **This was the THIRD instance in one session of structured evidence being present-but-unread**
+  — after `ps.ProductName` (read, then flattened into prose) and the SBOM's 6384 `cpe23Type`
+  refs (dropped by the parser's PACKAGE-MANAGER-only filter). The pattern is consistent enough
+  that "the field is not there" should be treated as a claim needing evidence.
 
   The measured facts above (the Observed floor holding in code and data; 23 of 26 accepted
   proposals coming from the version-range path) are settled and are not to be re-derived.
