@@ -3371,9 +3371,19 @@ under the 2026-08-07 re-derivation standard.
   floor is **not met** and the proposal is never auto-accepted. The composition root announces it
   at startup: *"auto-accept policy enabled: system-raised not_affected on observed evidence only
   (vendor VEX is Asserted and still waits for a human)"*.
-  **So the 24 accepted are almost certainly the VERSION-RANGE path** (`reactToVersionRange`,
-  EDR-TRUST-01 T5), which rests on Observed evidence — worth confirming from the accepted
-  rationales rather than assumed.
+  **CONFIRMED from the accepted rationales 2026-09-17 — not one accepted proposal came from the
+  vendor VEX path:**
+
+  | rationale | count | path |
+  | --- | --- | --- |
+  | "every matched component version is outside the reconciled affected range" | **23** | version-range (Observed) — `reactToVersionRange`, EDR-TRUST-01 T5 |
+  | "CVE withdrawn or rejected upstream (Faultline superseded)" | 1 | supersede |
+  | "seed precedent for autonomy test" | 1 | test seed |
+  | "Test: Not reached in our build" | 1 | human / test |
+
+  So the guard holds in code AND in data: the Observed floor has never admitted an Asserted
+  vendor statement on this estate. The code reading and the measurement agree, which is the
+  standard this entry should be held to before anyone changes the policy.
 
   **THE DEFECT IS THEREFORE A HUMAN-DECEPTION RISK, NOT AN AUTOMATION ONE — severity stays
   MED-HIGH but the mechanism is different from what was first filed.** Nothing auto-suppresses
