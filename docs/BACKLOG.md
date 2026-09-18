@@ -3362,9 +3362,32 @@ under the 2026-08-07 re-derivation standard.
   **Until that is established, "it has not fired" is not evidence that it will not.** 60 live
   suppression proposals scoped to RHEL 5/6/7 are sitting in the queue against an el8 estate, and
   each is one policy change or one human click away from retiring a real finding.
-  **Determine before relaxing:** which condition distinguished the 24 accepted from the 60
-  pending. That answer decides whether the current state is a guard doing its job (in which case
-  name it and test it) or luck (in which case this is closer to HIGH).
+  **SUB-QUESTION RESOLVED 2026-09-17 from the code — it is a GUARD, not luck, and it is named.**
+  The wired policy is `AutoAcceptObservedNotAffectedPolicy`, which `RequiringEvidence(TrustObserved)`.
+  A vendor VEX applicability proposal is hard-coded `value.TrustAsserted` (*"not reproducible: a
+  declaration or judgment Themis cannot re-derive"*), and `evidenceMeetsFloor` tests
+  `MaxTrust(actual, required) == required` where `MaxTrust` returns the WORST class
+  (Observed < Asserted < Inferred). `MaxTrust(Asserted, Observed) = Asserted ≠ Observed`, so the
+  floor is **not met** and the proposal is never auto-accepted. The composition root announces it
+  at startup: *"auto-accept policy enabled: system-raised not_affected on observed evidence only
+  (vendor VEX is Asserted and still waits for a human)"*.
+  **So the 24 accepted are almost certainly the VERSION-RANGE path** (`reactToVersionRange`,
+  EDR-TRUST-01 T5), which rests on Observed evidence — worth confirming from the accepted
+  rationales rather than assumed.
+
+  **THE DEFECT IS THEREFORE A HUMAN-DECEPTION RISK, NOT AN AUTOMATION ONE — severity stays
+  MED-HIGH but the mechanism is different from what was first filed.** Nothing auto-suppresses
+  on these. The exposure is:
+  (1) **a human reads *"Red Hat: not affected in Red Hat Enterprise Linux 7"* on an el8 estate and
+  accepts it** — and vendor statements are exactly the kind of evidence a reviewer trusts; and
+  (2) **one policy change** (`THEMIS_GOVERNANCE_AUTOACCEPT` lowered to accept Asserted, or a new
+  rule without an Observed floor) would suppress all 60 at once.
+  **There is no cheap display-only win.** The product IS already rendered — that is how the defect
+  was spotted — so the gap is not visibility but the absence of a *comparison*: nothing checks the
+  statement's product against the release's own distro major, and nothing can, because the product
+  is not a field. Extracting it from the justification string is explicitly forbidden (it would be
+  deriving scope from a display string, the same error class as deriving identity from a name).
+  **So the domain change IS the fix**, and it stays design-first / Must-ask.
   **Fix shape to decide (design-first — a domain model change):** give `Applicability` a product/
   stream scope and keep one statement PER (package, product) instead of collapsing to one per
   package; then match a statement to a Finding only when its scope matches the release's own
