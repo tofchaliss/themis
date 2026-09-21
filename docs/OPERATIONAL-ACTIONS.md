@@ -9,9 +9,37 @@ not become less urgent by being written down.
 
 ---
 
+## ✎ RECORDED — 138 vendor-VEX rejections carry a placeholder decider (2026-09-21)
+
+**Not an action — a provenance note, kept here because the audit trail itself cannot be corrected.**
+
+On 2026-09-21 the 138 standing vendor-VEX `not_affected` proposals that rested on statements scoped to
+products this estate does not run were rejected via `scripts/vex-reject-inapplicable.sh --apply`. The
+command was pasted with its example actor intact, so all 138 are recorded with
+`decided_id = your.name@example.com`.
+
+**What is sound:** the decisions. Each rejection is reproducible from the Governance assessment
+projection plus the script's rule (reject only when no statement covering the package is `applicable`),
+and the dry run was read before applying. No Finding was suppressed, no Position was established, and
+all 138 Findings remain open and in the queue.
+
+**What is wrong:** the decider field only. Proposals are append-only, so there is no edit path, and a
+rejected proposal cannot be re-raised under the same `(finding, package)` id — there is no clean redo.
+
+**Why it is written down rather than fixed:** correcting `decided_id` means an `UPDATE` against an
+append-only audit record, bypassing the event stream this architecture treats as the authoritative
+mutation path. That trade is the owner's to make, not a cleanup to perform quietly. This note is the
+truthful external reference in the meantime.
+
+**The underlying gap is filed as `DEF_GOV_DECIDER_UNVERIFIED`** in [`BACKLOG.md`](BACKLOG.md): the
+recorded decider is free text with no relation to the authenticated caller, even though
+`internal/platform/auth` already carries a principal its own comment calls "the auditable principal id".
+
+---
+
 ## ⚠ OPEN — Rotate the exposed PostgreSQL credential
 
-**Raised 2026-09-16. Open across three sessions (2026-09-16, 2026-09-17). Blocks nothing; fixes itself
+**Raised 2026-09-16. Open across FOUR sessions (2026-09-16, 2026-09-17, 2026-09-18, 2026-09-21). Blocks nothing; fixes itself
 never.**
 
 **What happened.** A command written in `fish` syntax was pasted into a `bash` shell:

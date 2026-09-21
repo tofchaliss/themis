@@ -82,3 +82,72 @@ func TestProposalCodec_StampsEcosystemFromSingleEcosystemSources(t *testing.T) {
 		t.Errorf("stated fix = %v, want the recorded ecosystem kept", f.Fixes)
 	}
 }
+
+// The vendor-stated product scope must survive BOTH persistence round trips (EDR-VEX-02 D5).
+//
+// This is the regression for the defect observed live: `Scope` was absent from both DTOs, so
+// every statement reloaded scope-less. Two consequences, and the second is the worse one — the
+// reconciled view compares equal-or-not on every fold, so a dropped field means the fold always
+// sees a change and re-announces FaultlineEnriched forever. The measured symptom was 1844 stored
+// statements of which every single one reported an empty scope.
+func TestCodec_RoundTripsApplicabilityScope(t *testing.T) {
+	scope := value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}
+	app0 := domain.Applicability{
+		Package: "httpd", Status: "not_affected", Justification: "vulnerable_code_not_present",
+		Scope: scope,
+	}
+
+	// 1. The Proposal payload — the append-only record the view is recomputed FROM.
+	in, err := domain.NewApplicabilityProposal("redhat", time.Unix(1_700_000_000, 0), app0)
+	if err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	raw, err := marshalProposalPayload(in)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	out, err := unmarshalProposal("redhat", in.ObservedAt(), string(in.Kind()), raw)
+	if err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	got, ok := out.Applicability()
+	if !ok {
+		t.Fatal("decoded proposal carries no applicability")
+	}
+	if got != app0 {
+		t.Errorf("proposal round trip = %+v, want %+v", got, app0)
+	}
+
+	// 2. The materialized view — reloaded before every fold, so the decoded statement must be
+	// IDENTICAL or the aggregate reports a view change that did not happen.
+	view := domain.EnterpriseView{Severity: value.SeverityHigh, Applicabilities: []domain.Applicability{app0}}
+	vraw, err := marshalView(view)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	decoded, err := unmarshalView(vraw)
+	if err != nil {
+		t.Fatalf("unmarshal view: %v", err)
+	}
+	if len(decoded.Applicabilities) != 1 || decoded.Applicabilities[0] != app0 {
+		t.Errorf("view round trip = %+v, want [%+v]", decoded.Applicabilities, app0)
+	}
+}
+
+// A statement stored before the scope field decodes with an EMPTY scope rather than failing —
+// and an empty scope reads downstream as applicability `unknown`, which cannot suppress. The
+// fail-safe direction: an unplaceable statement blocks nothing and hides nothing.
+func TestCodec_ApplicabilityWithoutScopeDecodesUnknown(t *testing.T) {
+	legacy := []byte(`{"package":"httpd","status":"not_affected","justification":"vulnerable_code_not_present"}`)
+	p, err := unmarshalProposal("redhat", time.Unix(1_700_000_000, 0), string(domain.KindApplicability), legacy)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	a, _ := p.Applicability()
+	if a.Scope.Known() {
+		t.Errorf("legacy scope = %+v, want an unestablished scope", a.Scope)
+	}
+	if a.Package != "httpd" || a.Status != "not_affected" {
+		t.Errorf("legacy statement = %+v, want the vendor's words intact", a)
+	}
+}

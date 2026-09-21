@@ -53,6 +53,17 @@ type applicabilityDTO struct {
 	Package       string `json:"package"`
 	Status        string `json:"status"`
 	Justification string `json:"justification"`
+	// The vendor-stated product scope (EDR-VEX-02 D5). Stored as two FLAT fields rather than a
+	// nested object for the same reason the read API emits them flat: a half-populated object
+	// must not read as an established scope. Both empty = the vendor supplied no readable scope,
+	// which downstream reads as applicability `unknown`.
+	//
+	// These are part of the round-trip contract named above: dropping them made every reloaded
+	// statement scope-less, so the fold recomputed the scope and reported a view change on every
+	// single fold — the exact defect the comment on the trust fields warns about, observed live
+	// as 1844 statements all with an empty scope.
+	ScopeFamily string `json:"scope_family,omitempty"`
+	ScopeMajor  string `json:"scope_major,omitempty"`
 }
 
 func marshalView(v domain.EnterpriseView) ([]byte, error) {
@@ -66,7 +77,10 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 		HeadlineTrust: string(v.HeadlineTrust), RangeTrust: string(v.RangeTrust), SignalTrust: string(v.SignalTrust),
 	}
 	for _, a := range v.Applicabilities {
-		dto.Applicabilities = append(dto.Applicabilities, applicabilityDTO{a.Package, a.Status, a.Justification})
+		dto.Applicabilities = append(dto.Applicabilities, applicabilityDTO{
+			Package: a.Package, Status: a.Status, Justification: a.Justification,
+			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
+		})
 	}
 	return json.Marshal(dto)
 }
@@ -94,7 +108,10 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 		SignalTrust:   value.TrustClass(dto.SignalTrust),
 	}
 	for _, a := range dto.Applicabilities {
-		v.Applicabilities = append(v.Applicabilities, domain.Applicability{Package: a.Package, Status: a.Status, Justification: a.Justification})
+		v.Applicabilities = append(v.Applicabilities, domain.Applicability{
+			Package: a.Package, Status: a.Status, Justification: a.Justification,
+			Scope: value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+		})
 	}
 	return v, nil
 }
@@ -118,6 +135,13 @@ type proposalPayloadDTO struct {
 	Package       string   `json:"package,omitempty"`
 	Status        string   `json:"status,omitempty"`
 	Justification string   `json:"justification,omitempty"`
+	// The vendor-stated product scope (EDR-VEX-02 D5), flat for the same reason as the view DTO.
+	// A Proposal is immutable, so one stored before this field decodes with an empty scope and
+	// stays that way — correctly, since the scope was never captured for it. New Proposals from
+	// the same feed carry it, and the reconciled view takes the union, so a card heals as soon
+	// as the feed re-observes it.
+	ScopeFamily string `json:"scope_family,omitempty"`
+	ScopeMajor  string `json:"scope_major,omitempty"`
 }
 
 func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
@@ -142,6 +166,8 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 		dto.Package = a.Package
 		dto.Status = a.Status
 		dto.Justification = a.Justification
+		dto.ScopeFamily = a.Scope.Family
+		dto.ScopeMajor = a.Scope.Major
 	}
 	return json.Marshal(dto)
 }
@@ -170,7 +196,10 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 	case domain.KindExploitSignal:
 		return domain.NewExploitSignalProposal(source, observedAt, domain.ExploitSignal{EPSS: dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic})
 	case domain.KindApplicability:
-		return domain.NewApplicabilityProposal(source, observedAt, domain.Applicability{Package: dto.Package, Status: dto.Status, Justification: dto.Justification})
+		return domain.NewApplicabilityProposal(source, observedAt, domain.Applicability{
+			Package: dto.Package, Status: dto.Status, Justification: dto.Justification,
+			Scope: value.ProductScope{Family: dto.ScopeFamily, Major: dto.ScopeMajor},
+		})
 	default:
 		return domain.Proposal{}, fmt.Errorf("knowledge: unknown proposal kind %q", kind)
 	}

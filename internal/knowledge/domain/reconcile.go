@@ -189,6 +189,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	view.CarrierProducts = sortedKeys(carrierSet)
 	view.Fixes = fixSet.sorted()
 	view.FixedVersions = flatVersions(view.Fixes)
+	dropSupersededScopeless(appSet)
 	view.Applicabilities = sortedApplicabilities(appSet)
 	return view
 }
@@ -310,6 +311,50 @@ func sortedKeys(set map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// dropSupersededScopeless removes a statement carrying NO scope when an otherwise identical
+// statement WITH a scope is present (DEF_VEX_SCOPE_STALE_TWIN, EDR-VEX-02 D8/D10).
+//
+// The view is the union of every applicability Proposal ever appended, and a Proposal is
+// immutable — so a statement observed before Themis could read the vendor's CPE stays in the
+// union forever, sitting beside the same assertion re-observed with its scope. Measured on the
+// deployment: 1594 of ~3100 statements had no scope, and each was the historical twin of a
+// scoped one. Two harms, and the first is the one this is for:
+//
+//  1. A scope-less row renders as applicability `unknown`, which per D4 means "Themis cannot
+//     determine whether this applies". That is FALSE here — Themis can determine it, from the
+//     twin. The row states uncertainty that no longer exists.
+//  2. It made the operator's own validation query unreadable: the `(none)` bucket is the metric
+//     EDR-VEX-02 says to stop on, and history was masquerading as a broken resolver.
+//
+// This discards no RECORD — D8 is about the append-only Proposal, which is untouched. It is a
+// rule about the derived VIEW, which is where reconciliation already decides what evidence
+// wins, and it is the same shape as the legacy fixed-version fallback: strictly-less-informative
+// legacy data degrades rather than competing.
+//
+// Narrow on purpose: the scope must be EXACTLY empty, and the package, status and justification
+// must match to the character. A statement Red Hat genuinely publishes with no readable CPE has
+// no scoped twin, so it survives and still reads as `unknown` — which is correct, and is the
+// distinction D4 exists to protect.
+func dropSupersededScopeless(set map[Applicability]struct{}) {
+	var zero value.ProductScope
+	scoped := map[Applicability]struct{}{}
+	for a := range set {
+		if a.Scope.Known() {
+			bare := a
+			bare.Scope = zero
+			scoped[bare] = struct{}{}
+		}
+	}
+	for a := range set {
+		if a.Scope != zero {
+			continue
+		}
+		if _, superseded := scoped[a]; superseded {
+			delete(set, a)
+		}
+	}
 }
 
 func sortedApplicabilities(set map[Applicability]struct{}) []Applicability {

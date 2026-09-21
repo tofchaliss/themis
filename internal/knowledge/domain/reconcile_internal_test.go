@@ -160,3 +160,61 @@ func TestSortedApplicabilitiesIsTotalOverScope(t *testing.T) {
 		}
 	}
 }
+
+// DEF_VEX_SCOPE_STALE_TWIN: a statement observed before Themis could read the vendor's CPE is
+// still in the append-only history forever, so the view's union carries it beside the same
+// assertion re-observed WITH its scope. The scope-less row renders as applicability `unknown` —
+// "Themis cannot determine whether this applies" — which is false when the twin right next to it
+// determines exactly that.
+//
+// Measured on the deployment: 1594 of ~3100 statements had no scope, all of them historical
+// twins, and they made the `(none)` bucket look like a broken resolver.
+func TestDropSupersededScopeless(t *testing.T) {
+	scoped := Applicability{Package: "httpd", Status: "not_affected",
+		Justification: "Red Hat: not affected in Red Hat Enterprise Linux 8",
+		Scope:         value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}}
+	twin := scoped
+	twin.Scope = value.ProductScope{} // the same assertion, observed before the scope was read
+
+	// An unplaceable statement Red Hat really published with no readable CPE: its justification
+	// names a product nothing else mentions, so it has no scoped twin and MUST survive.
+	genuine := Applicability{Package: "zlib", Status: "not_affected",
+		Justification: "Red Hat: not affected"}
+
+	set := map[Applicability]struct{}{scoped: {}, twin: {}, genuine: {}}
+	dropSupersededScopeless(set)
+
+	if _, still := set[twin]; still {
+		t.Error("the scope-less twin survived — it states an uncertainty its scoped twin resolves")
+	}
+	if _, ok := set[scoped]; !ok {
+		t.Error("the scoped statement was dropped")
+	}
+	if _, ok := set[genuine]; !ok {
+		t.Error("a genuinely unplaceable statement was dropped — D4's `unknown` must stay reachable")
+	}
+	if len(set) != 2 {
+		t.Errorf("set size = %d, want 2", len(set))
+	}
+}
+
+// The rule is keyed on the WHOLE assertion, not the package: a scope-less statement whose status
+// or justification differs from every scoped one is a different assertion and is never dropped.
+// Narrowness is the point — this discards a duplicate, never evidence.
+func TestDropSupersededScopelessIsExact(t *testing.T) {
+	scoped := Applicability{Package: "httpd", Status: "not_affected", Justification: "in RHEL 8",
+		Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}}
+	otherJustification := Applicability{Package: "httpd", Status: "not_affected", Justification: "in RHEL 9"}
+	otherStatus := Applicability{Package: "httpd", Status: "affected", Justification: "in RHEL 8"}
+	halfScope := Applicability{Package: "httpd", Status: "not_affected", Justification: "in RHEL 8",
+		Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux}} // family only — not `Known`
+
+	set := map[Applicability]struct{}{
+		scoped: {}, otherJustification: {}, otherStatus: {}, halfScope: {},
+	}
+	dropSupersededScopeless(set)
+
+	if len(set) != 4 {
+		t.Errorf("set size = %d, want 4 — only an EXACT scope-less duplicate may be dropped: %+v", len(set), set)
+	}
+}

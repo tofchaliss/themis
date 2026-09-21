@@ -3310,6 +3310,172 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
+- [ ] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" is free text, unrelated to the
+  authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
+  literal placeholder).** **MED-HIGH for audit integrity, LOW for behaviour**; EDR-SECURITY-01 +
+  EDR-GOVERNANCE-01 D11. **NOT FIXED — this is a security-model change and needs an explicit
+  decision.**
+  **How it surfaced.** A cleanup command was pasted with its placeholder intact
+  (`THEMIS_ACTOR_ID=your.name@example.com`), and 138 proposal rejections were written with that
+  string as `decided_id`. The decisions themselves are correct and reproducible; the *decider* is
+  fiction. Proposals are append-only, so there is no edit path and no clean redo — a rejected
+  proposal cannot be re-raised under the same `(finding, package)` id.
+  **The mechanism.** `DecisionRequest.actor_id` is a required free-text string, and
+  `deciderActorFrom` takes it verbatim. The API key authenticates the CALLER; the recorded decider
+  is self-declared; **nothing ties the two together.** So any string at all lands in the audit
+  trail as the person who authorized a governed change.
+  **The uncomfortable part: the identity is already there and is already called auditable.**
+  `internal/platform/auth` carries a `Principal`, and its own comment names `ColID` as *"opaque
+  key id (also the auditable principal id)"*, reachable from the request via
+  `auth.PrincipalFrom(ctx)`. The governance HTTP layer does not reference `auth` at all. The
+  auditable identity was built, documented as auditable, and then not used by the one surface that
+  needed it.
+  **Why it is not merely cosmetic.** This codebase's whole stance is *AI proposes, humans decide*,
+  enforced by refusing a system or AI decider at the edge — and that enforcement rests entirely on
+  a claim the caller makes about itself. An unverified decider makes "a human decided this" a
+  statement the system cannot support, which is exactly the property a security platform's audit
+  trail exists to provide.
+  **Shape of a fix, if taken:** bind the recorded decider to the authenticated principal — either
+  derive it (ignore `actor_id` when auth is on) or cross-check it and refuse a mismatch. Both
+  interact with auth being OPTIONAL (`THEMIS_AUTH_DATABASE_DSN` unset = disabled for dev), so the
+  rule has to say what happens with no principal: almost certainly keep `actor_id` in dev and
+  require agreement in production, which is the same shape as `THEMIS_AUTH_REQUIRED=1`.
+  **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
+  all 138 Findings stayed open. The damage is confined to the provenance of a decision.
+
+- [ ] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returns `unknown` when EITHER
+  side is unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
+  reach a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run).**
+  **MED, decision-surface precision**; EDR-VEX-02 D3/D4. **NOT FIXED — this changes what
+  `ScopeMatch` returns, which is a decision, not a cleanup.**
+  **The measured case.** Three of 138 rejections came back `unknown` rather than
+  `not_applicable`, and one of them is:
+
+      spring-web → "Red Hat build of Apache Camel 4 for Quarkus 3"  [unknown × 6]
+
+  Red Hat's side of that comparison is **perfectly clear** — an unambiguous, readable product. It
+  is *Themis's* side that could not be placed: a Maven `spring-web` carries no `.elN` build, so
+  nothing on the Finding says which distro major the release is. The same `unknown` is returned
+  when the vendor supplies no CPE at all, which is a feed gap and permits no conclusion whatever.
+  **Why that matters, in the EDR's own terms.** D4 exists because *"I know this does not apply"*
+  and *"I cannot determine whether this applies"* are different statements and collapsing them
+  hides a broken resolver behind reasonable-looking numbers. This is the identical mistake one
+  level down: `unknown` now carries two states a reviewer would act on differently.
+
+      vendor scope readable, release unplaceable
+          └── "Red Hat spoke about a Quarkus builder image; our component is a Java library"
+                → a human rejects this instantly; it is INFORMATION, not uncertainty
+
+      vendor scope unreadable
+          └── "Red Hat named no product"
+                → nothing can be concluded; this is the real epistemic gap
+
+  **Shape of a fix, if taken:** `ScopeMatch` gains a state distinguishing which SIDE failed (the
+  release side, the vendor side, or both) — or `MatchScope` returns the failing side alongside the
+  verdict. Both are API changes to a kernel value object, and the enum is already load-bearing in
+  the read API, the dashboard chip and the reject script, so the naming deserves the same care D3
+  got. **Do not "fix" this by loosening `unknown`** — that is the temptation D4 already warned
+  about.
+  **Scope note:** this is a precision gap in a decision surface, not a false negative. Nothing is
+  suppressed wrongly: every non-`applicable` verdict blocks a raise, and a blocked raise keeps the
+  Finding open. The cost is a reviewer unable to tell an obviously-irrelevant vendor statement
+  from an unreadable one.
+  **Related:** the underlying inability to place a non-rpm release against a vendor product scope
+  at all — a pypi/npm/maven component has no distro major — is the larger gap this sits on, and it
+  is not addressed anywhere yet.
+
+- [x] **DEF_VEX_SCOPE_STALE_TWIN — a statement observed before the scope existed stays in the
+  view forever beside its scoped re-observation, and renders as `unknown` (found 2026-09-21 in the
+  VM output for the two defects above, FIXED same day).** **MED, MISLEADING-DISPLAY + it hid the
+  validation metric**; EDR-VEX-02 D4/D8/D10.
+  **The symptom.** After deploying the codec fix and letting the Red Hat sweep heal every card,
+  the scope distribution was a real spread (enterprise-linux 5–10, plus ~30 non-OS Red Hat
+  products) — **but `(none)` was still the largest bucket at 1594 of ~3100 statements.** That is
+  precisely the number EDR-VEX-02's validation order says to STOP on, because a large `unknown`
+  population is supposed to mean the resolver is not placing scopes.
+  **It was not the resolver.** The reconciled view is the UNION of every applicability Proposal
+  ever appended (`appSet[*p.applicability]`), and a Proposal is immutable. So every statement
+  observed before the scope was readable stays in the union permanently, sitting beside the same
+  assertion re-observed with its scope. The estate's history holds three generations — the
+  original one-per-package statements, the multi-product statements from the sweep that ran while
+  the codec was still dropping the field, and the scoped ones — and the first two collapse into
+  each other but never into the third.
+  **Why it is a defect and not just noise.** A scope-less row reads as applicability `unknown`,
+  which per D4 means *"Themis cannot determine whether this applies."* That is false when the
+  twin beside it determines exactly that. The row asserts an uncertainty that no longer exists —
+  and it made the operator's own validation query unreadable, history masquerading as a broken
+  resolver.
+  **Fixed** as a reconciliation rule on the derived view: a statement with an EXACTLY empty scope
+  is dropped when an otherwise identical statement (same package, status, justification, to the
+  character) carries a known scope. **No record is discarded** — D8 governs the append-only
+  Proposal, which is untouched; this is the view deciding which evidence wins, which is what
+  reconciliation is for, and it is the same shape as the legacy fixed-version fallback:
+  strictly-less-informative legacy data degrades rather than competing. A statement Red Hat
+  genuinely publishes with no readable CPE has no scoped twin, survives, and still reads
+  `unknown` — the distinction D4 exists to protect, asserted by its own test.
+  **Open, and deliberately NOT folded in:** how many of the **146** standing vendor proposals rest
+  on a statement that is `not_applicable` to this estate. They were raised before EDR-VEX-02 with
+  no scope check at all, and this change blocks new ones without withdrawing old ones. Retiring
+  them is KN-SCAN-4(b)'s problem shape and needs a decision, not a guess.
+
+- [x] **DEF_VEX_COVERING_FIRST_MATCH — an inapplicable vendor statement blocks an APPLICABLE one
+  for the same package, because selection is still by array position (found 2026-09-21 while
+  verifying EDR-VEX-02 D7, FIXED same day).** **HIGH, FALSE-NEGATIVE path** — this one suppresses
+  a legitimate vendor clearance, where DEF_VEX_SCOPE_CODEC_DROP only lost information.
+  **The case.** Red Hat states `httpd` `not_affected` for **RHEL 7** and for **RHEL 8**. Before D7
+  the dedup key was the package name alone, so exactly one survived; now both are kept — and the
+  reconciled view sorts by package → status → justification → scope, so **major 7 comes first**.
+  `coveringStatement` returned the first statement whose package the Finding covered,
+  `applicabilityOf` correctly found it `not_applicable` for a Rocky **8.10** release, and the
+  raise was blocked — **discarding the RHEL 8 statement directly behind it, which applies
+  exactly.** No proposal at all: measured as 0 raised where 1 was owed.
+  **This is two correct halves composing into a defect.** Keeping every product (D7) is right.
+  Blocking what does not apply (D2) is right. First-match selection was harmless only while
+  exactly one statement per package existed — the very property D7 removed. D7's own text names
+  the requirement (*"`coveringStatement` must then select among the statements covering a
+  Finding's package by APPLICABILITY, not by array position"*) and the first half shipped without
+  the second.
+  **Fixed** by selecting the first covering statement whose scope is `applicable`, falling back to
+  the first covering statement only so the block is reported against a statement really present
+  (D2's visible half stays truthful). Guarded both directions: an applicable statement behind an
+  inapplicable one now raises, and a package with three inapplicable statements still raises
+  nothing. Verified by stashing the fix — the test reports 0 proposals.
+  **Worth noting about the detection:** no test failed. The existing suite covered "one applicable
+  statement raises" and "one inapplicable statement blocks", and both stayed green — the defect
+  lives only in the interaction of two statements for one package, which is a case that could not
+  exist before D7. A change that alters CARDINALITY needs its tests re-derived, not just re-run.
+
+- [x] **DEF_VEX_SCOPE_CODEC_DROP — the store codec dropped `Applicability.Scope`, so every vendor
+  statement reloaded scope-less (found live 2026-09-21 on the VM, FIXED same day).** **HIGH,
+  self-inflicted regression in VEX-SCOPE-1**; EDR-VEX-02 D5.
+  **The symptom, measured on the VM after deploying `0fb8784`:** the scope-distribution query
+  returned one row — `(none)||1844` — i.e. the statement count had nearly doubled from 947
+  (correct, see below) while **every single statement still reported an empty scope**. Every
+  other half of the chain was present and correct: the feed ACL parsed the CPE, the domain
+  carried the field, the read API emitted `scope_family`/`scope_major`, the event payload carried
+  it, and Governance decoded it. Only persistence dropped it.
+  **The mechanism.** `internal/knowledge/adapters/store/codec.go` has TWO applicability DTOs —
+  the materialized `viewDTO` and the append-only `proposalPayloadDTO` — and neither gained a
+  scope field. So the scope was computed on every fold and discarded on every save.
+  **Why it is worse than a missing display field.** The comment immediately above `viewDTO`'s
+  trust fields states the rule this violated: *"These MUST round-trip: the view is reloaded
+  before every fold, so a dropped field decodes as empty, gets recomputed, and the aggregate
+  reports a spurious view change on every single fold — firing a duplicate FaultlineEnriched each
+  time."* The warning was written for the trust fields and applies verbatim to any view field;
+  writing a new one without reading it is the actual lesson.
+  **Fixed** by adding flat `scope_family`/`scope_major` to both DTOs (flat, not nested, for the
+  reason the read API is flat: a half-populated object must not read as an established scope).
+  Guarded by three tests, and the integration one asserts **convergence**, not presence:
+  re-folding an identical statement three times must produce NO new `FaultlineEnriched`, which is
+  the property that was actually broken. Verified by reverting the encode line — the test fails.
+  A statement stored before the field decodes with an empty scope, which reads downstream as
+  applicability `unknown` and therefore cannot suppress: the fail-safe direction.
+  **On the 947 → 1844 doubling: that is EXPECTED and is EDR-VEX-02 D7 working.** The old dedup
+  key was the package name alone, so exactly one product's statement survived per (CVE, package)
+  and which one was decided by array order in Red Hat's JSON — the arbitrariness VEX-SCOPE-1 was
+  filed for. The key is now `(package, CPE)`, so a CVE where Red Hat states `httpd` for RHEL 7, 8
+  and 9 keeps all three. Roughly two products per package across the estate is the doubling.
+
 - [x] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
   surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
   user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.
