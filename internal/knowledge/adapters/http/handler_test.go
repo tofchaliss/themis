@@ -390,3 +390,64 @@ func TestGetUnresolvedComponents(t *testing.T) {
 		}
 	})
 }
+
+// EDR-VEX-02 D5: the vendor-stated product scope rides the card's read API, so Governance can
+// determine applicability and SHOW it beside the vendor's words. Emitted as two flat fields, and
+// omitted entirely when the vendor supplied no readable scope — a consumer must read that absence
+// as `unknown` (uncertainty), never as a product mismatch (D4).
+func TestGetFaultline_CarriesVendorScope(t *testing.T) {
+	cve, _ := value.NewCVEID("CVE-2023-31122")
+	f, _ := domain.NewFaultline("fl-scope", cve)
+	scoped, err := domain.NewApplicabilityProposal("redhat", feedClock{}.Now(), domain.Applicability{
+		Package: "httpd", Status: "not_affected",
+		Justification: "Red Hat: not affected in Red Hat Enterprise Linux 7",
+		Scope:         value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FoldProposal(scoped, domain.NewPrecedence("redhat"), domain.NewTrustPolicy(nil))
+	bare, err := domain.NewApplicabilityProposal("vexfeed", feedClock{}.Now(), domain.Applicability{
+		Package: "httpd", Status: "not_affected", Justification: "no scope stated",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FoldProposal(bare, domain.NewPrecedence("redhat", "vexfeed"), domain.NewTrustPolicy(nil))
+
+	srv := server(t, fakeRepo{card: f, found: true}, fakeProjection{})
+	status, body := get(t, srv.URL+"/faultlines/fl-scope")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", status, body)
+	}
+	var out struct {
+		View struct {
+			Applicabilities []struct {
+				Package     string `json:"package"`
+				ScopeFamily string `json:"scope_family"`
+				ScopeMajor  string `json:"scope_major"`
+			} `json:"applicabilities"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, body)
+	}
+	if len(out.View.Applicabilities) != 2 {
+		t.Fatalf("applicabilities = %d, want 2 — a scoped and an unscoped statement", len(out.View.Applicabilities))
+	}
+	var sawScoped, sawBare bool
+	for _, a := range out.View.Applicabilities {
+		switch {
+		case a.ScopeFamily == value.FamilyEnterpriseLinux && a.ScopeMajor == "7":
+			sawScoped = true
+		case a.ScopeFamily == "" && a.ScopeMajor == "":
+			sawBare = true
+		}
+	}
+	if !sawScoped {
+		t.Error("the vendor's stated scope (enterprise-linux 7) did not reach the wire")
+	}
+	if !sawBare {
+		t.Error("an unscoped statement must still be carried, with an empty scope meaning unknown")
+	}
+}

@@ -128,3 +128,35 @@ func TestEnterpriseView_equal(t *testing.T) {
 		t.Error("differing ranges should be unequal")
 	}
 }
+
+// EDR-VEX-02 D7: two statements for ONE package now differ only by the product they cover, so
+// the sort must be total over the scope as well. Without the scope tiebreak the order would
+// depend on map iteration — and the view is compared for equality, so a nondeterministic order
+// would report ViewChanged on every fold and re-announce work that never happened.
+func TestSortedApplicabilitiesIsTotalOverScope(t *testing.T) {
+	rhel7 := Applicability{Package: "httpd", Status: "not_affected", Justification: "same",
+		Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "7"}}
+	rhel8 := Applicability{Package: "httpd", Status: "not_affected", Justification: "same",
+		Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}}
+	pipelines := Applicability{Package: "httpd", Status: "not_affected", Justification: "same",
+		Scope: value.ProductScope{Family: "openshift_pipelines", Major: "1"}}
+
+	set := map[Applicability]struct{}{rhel8: {}, pipelines: {}, rhel7: {}}
+	first := sortedApplicabilities(set)
+	if len(first) != 3 {
+		t.Fatalf("got %d statements, want 3 — differing scopes must not collapse", len(first))
+	}
+	// Family orders before major, and both are compared: enterprise-linux/7 < 8 < openshift…
+	if first[0].Scope.Major != "7" || first[1].Scope.Major != "8" || first[2].Scope.Family != "openshift_pipelines" {
+		t.Errorf("order = %+v, want enterprise-linux/7, enterprise-linux/8, openshift_pipelines/1", first)
+	}
+	// Repeated over a freshly-built map: a stable order cannot depend on iteration order.
+	for i := 0; i < 20; i++ {
+		again := sortedApplicabilities(map[Applicability]struct{}{pipelines: {}, rhel7: {}, rhel8: {}})
+		for j := range again {
+			if again[j] != first[j] {
+				t.Fatalf("run %d position %d = %+v, want %+v — the sort is not total", i, j, again[j], first[j])
+			}
+		}
+	}
+}

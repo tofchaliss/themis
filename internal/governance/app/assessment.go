@@ -23,6 +23,10 @@ type FaultlineKnowledge struct {
 	KEV            bool
 	ExploitPublic  bool
 	AffectedRanges []string
+	// Applicabilities are the vendor VEX statements the card holds, with the scope the VENDOR
+	// stated. Themis's determination about whether each covers this release is computed per
+	// Finding (see VendorStatement) and never written back onto these (EDR-VEX-02 D1).
+	Applicabilities []Applicability
 	// FixedVersions holds the fixes that apply to THIS Finding's components — selected, not
 	// the card's flat union. See selectFixes.
 	FixedVersions []string
@@ -71,6 +75,11 @@ type FaultlineKnowledgeReader interface {
 type FindingAssessment struct {
 	Finding   domain.Finding
 	Knowledge FaultlineKnowledge
+	// VendorStatements are the card's vendor VEX statements with Themis's per-release
+	// applicability determination beside each (EDR-VEX-02 D2). Present so a statement that was
+	// BLOCKED still reaches the reviewer: a non-applicable statement raises no Proposal, and
+	// without this it would disappear from the drawer instead of being visibly inapplicable.
+	VendorStatements []VendorStatement
 }
 
 // GetFindingAssessment builds the projection for one Finding.
@@ -91,8 +100,47 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 	}
 	if k, kerr := s.knowledge.GetFaultline(ctx, f.FaultlineID()); kerr == nil {
 		out.Knowledge = selectFixes(k, f.Components())
+		out.VendorStatements = vendorStatements(&f, k.Applicabilities)
 	}
 	return out, nil
+}
+
+// VendorStatement is one vendor VEX statement as EVIDENCE, beside Themis's separate
+// determination about whether it covers this release (EDR-VEX-02 D1/D2).
+//
+// The three concepts stay in three fields and never collapse: `Status` and `Justification` are
+// the vendor's, verbatim; `ScopeFamily`/`ScopeMajor` are the scope the VENDOR stated; and
+// `Applicability` is Themis's conclusion. Nothing here rewrites the vendor's words.
+type VendorStatement struct {
+	Package       string
+	Status        string
+	Justification string
+	ScopeFamily   string
+	ScopeMajor    string
+	// Applicability is `applicable` / `not_applicable` / `unknown` (D3). Only `applicable` can
+	// have become a Proposal; the other two are shown so a reviewer can see that Red Hat DID
+	// speak about this package and why it did not clear the Finding — the audit trail this whole
+	// arc exists for. `unknown` is epistemic uncertainty, never product mismatch (D4).
+	Applicability string
+}
+
+// vendorStatements pairs each statement the card holds with Themis's determination for THIS
+// Finding. It exists so a blocked statement stays visible: a statement whose scope does not cover
+// the release raises no Proposal, so without this it would vanish from the drawer entirely —
+// which would recreate the invisibility D2 forbids.
+func vendorStatements(f *domain.Finding, apps []Applicability) []VendorStatement {
+	if len(apps) == 0 {
+		return nil
+	}
+	out := make([]VendorStatement, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, VendorStatement{
+			Package: a.Package, Status: a.Status, Justification: a.Justification,
+			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
+			Applicability: string(applicabilityOf(f, a)),
+		})
+	}
+	return out
 }
 
 // selectFixes narrows a card's fix versions to the ones published for THIS Finding's components

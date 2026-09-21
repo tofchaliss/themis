@@ -296,6 +296,20 @@ components:
           description: e.g. affected | not_affected | fixed | under_investigation.
         justification:
           type: string
+        scope_family:
+          type: string
+          description: >-
+            The product FAMILY the vendor said this statement covers, classified from the source
+            document's structured CPE (EDR-VEX-02 D5) — e.g. `enterprise-linux` for Red Hat
+            Enterprise Linux and its 1:1 rebuilds. Part of the vendor's statement, NOT a
+            conclusion about it. Empty means the vendor supplied no readable scope, which a
+            consumer MUST read as applicability `unknown` (epistemic uncertainty), never as a
+            product mismatch.
+        scope_major:
+          type: string
+          description: >-
+            The major version of that family, e.g. `8`. Empty carries the same meaning as an
+            empty `scope_family`.
     ProposalProvenance:
       type: object
       properties:

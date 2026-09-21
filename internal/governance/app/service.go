@@ -297,6 +297,28 @@ type Applicability struct {
 	Package       string
 	Status        string
 	Justification string
+	// Scope is the product the VENDOR said this statement covers (EDR-VEX-02 D5), carried from
+	// Knowledge. Governance compares it against the release's own scope to determine
+	// APPLICABILITY — its own conclusion, which never overwrites Status or Justification (D1).
+	Scope value.ProductScope
+}
+
+// applicabilityOf determines whether a vendor statement covers this Finding's release
+// (EDR-VEX-02 D3/D4/D6).
+//
+// The release's scope comes from its own components' rpm builds: an `elN` marker IS the
+// family+major statement, which is what lets a `Red Hat Enterprise Linux 8` statement cover a
+// `Rocky Linux 8.10` release with no product-string comparison. The FIRST component that places
+// the release decides; components of one release do not straddle EL majors.
+//
+// Returns `unknown` when either side cannot be placed — epistemic uncertainty, never a mismatch.
+func applicabilityOf(f *domain.Finding, a Applicability) value.ScopeMatch {
+	for _, c := range f.Components() {
+		if release := value.ScopeFromRPMRelease(c.Version); release.Known() {
+			return value.MatchScope(a.Scope, release)
+		}
+	}
+	return value.ScopeUnknown // nothing on this Finding places the release
 }
 
 // proposalFor maps an enrichment signal to the Governance Proposal it should raise (D6). It
@@ -483,6 +505,22 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 			covered, ok := coveringStatement(f, notAffected)
 			if !ok {
 				return nil, errNoop // no vendor statement covers this Finding's components
+			}
+			// EDR-VEX-02 D2/D9 — BLOCK a statement whose scope does not cover this release, and
+			// block one whose scope cannot be established.
+			//
+			// The block is STRUCTURAL rather than a flag: a Proposal is the only thing that can
+			// clear a Finding, so declining to raise one means the statement cannot be used for
+			// disposition, by a policy or by a human. The statement itself is untouched and
+			// remains on the card as vendor evidence (D8) — it is not "ignored", it is a valid
+			// vendor assertion whose scope does not apply here.
+			//
+			// Measured reason: a Rocky 8.10 estate was shown "not affected in Red Hat Enterprise
+			// Linux 7", and ~90% of surviving statements were scoped to products it does not run.
+			// `unknown` is blocked for the same fail-safe reason an unknown claim class acts as
+			// carrier: absent evidence must never suppress.
+			if applicabilityOf(f, covered) != value.ScopeApplicable {
+				return nil, errNoop
 			}
 			pid := domain.ProposalID("vex:" + string(id) + ":" + packageKey(covered.Package))
 			// A vendor VEX statement is Asserted: the vendor is the sole authority on their own

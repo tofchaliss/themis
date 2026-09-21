@@ -64,6 +64,21 @@ func (h *Handler) GetFindingAssessment(w http.ResponseWriter, r *http.Request, i
 func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 	view := toFindingView(a.Finding)
 	out := gen.FindingAssessment{Finding: &view}
+	// The vendor statements ride REGARDLESS of whether the knowledge half resolved, and before
+	// the early return below: a blocked statement's whole purpose is to stay visible
+	// (EDR-VEX-02 D2), so it must not be lost to an unrelated absence.
+	if len(a.VendorStatements) > 0 {
+		vs := make([]gen.VendorStatement, 0, len(a.VendorStatements))
+		for _, v := range a.VendorStatements {
+			vs = append(vs, gen.VendorStatement{
+				Package: strptr(v.Package), Status: strptr(v.Status),
+				Justification: strptr(v.Justification),
+				ScopeFamily:   strptr(v.ScopeFamily), ScopeMajor: strptr(v.ScopeMajor),
+				Applicability: (*gen.VendorStatementApplicability)(strptr(v.Applicability)),
+			})
+		}
+		out.VendorStatements = &vs
+	}
 	k := a.Knowledge
 	if k.FaultlineID == "" {
 		return out

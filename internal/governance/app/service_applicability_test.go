@@ -7,6 +7,7 @@ import (
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // --- EDR-VEX-01 D4: vendor VEX suppression overlay -----------------------------------
@@ -16,14 +17,28 @@ import (
 func withComponent(t *testing.T, id, rel, fl, cve, purl, name string) domain.Finding {
 	t.Helper()
 	f := identified(t, id, rel, fl, cve)
-	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: purl, Name: name}); err != nil {
+	// The version carries an `elN` marker so the release is PLACEABLE (EDR-VEX-02 D6): without
+	// one, nothing on the Finding says which distro major it is, applicability is `unknown`, and
+	// a vendor statement is correctly blocked. Every raise-path test below therefore needs it.
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: purl, Name: name, Version: "1.0.2k-16.el8_10",
+	}); err != nil {
 		t.Fatalf("absorb: %v", err)
 	}
 	return f
 }
 
+// notAffected builds a statement scoped to the release the helpers above create (el8), so a test
+// written about the RAISE path still exercises it. Use notAffectedScoped for the blocked paths.
 func notAffected(pkg, justification string) app.Applicability {
-	return app.Applicability{Package: pkg, Status: "not_affected", Justification: justification}
+	return notAffectedScoped(pkg, justification, value.FamilyEnterpriseLinux, "8")
+}
+
+func notAffectedScoped(pkg, justification, family, major string) app.Applicability {
+	return app.Applicability{
+		Package: pkg, Status: "not_affected", Justification: justification,
+		Scope: value.ProductScope{Family: family, Major: major},
+	}
 }
 
 // A vendor not_affected statement covering a Finding's component raises a SYSTEM not_affected
@@ -153,5 +168,149 @@ func TestReactToEnrichment_ApplicabilityProposalBuildErrorPropagates(t *testing.
 	sig := app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{notAffected("openssl", "")}}
 	if err := badClock.ReactToEnrichment(context.Background(), sig); err == nil {
 		t.Error("zero-clock proposal build in the applicability path must error")
+	}
+}
+
+// THE DECIDED MATRIX (EDR-VEX-02 validation order), at the Governance seam where it decides
+// whether a Finding can be cleared. The release is placeable at el8 in every case; only the
+// vendor's stated scope varies.
+func TestReactToEnrichment_ApplicabilityMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		family     string
+		major      string
+		wantRaised bool
+		why        string
+	}{
+		{"RHEL 8 — same family and major", value.FamilyEnterpriseLinux, "8", true,
+			"the ~90 statements that genuinely apply to a Rocky 8.10 estate"},
+		{"RHEL 7 — different major", value.FamilyEnterpriseLinux, "7", false,
+			"THE measured defect: visible on the card, but cannot clear the Finding"},
+		{"OpenShift Pipelines — different product", "openshift_pipelines", "1", false,
+			"a KNOWN different product; note the major of 1 is never compared as an OS major"},
+		{"unreadable scope — epistemic uncertainty", "", "", false,
+			"blocked for the same fail-safe reason an unknown claim class acts as carrier"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepo()
+			repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1", "pkg:rpm/openssl@1.0.2", "openssl"))
+			s := writeSvc(repo)
+
+			err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+				FaultlineID: "fl-1",
+				Applicabilities: []app.Applicability{
+					notAffectedScoped("openssl", "vulnerable_code_not_present", tc.family, tc.major),
+				},
+			})
+			if err != nil {
+				t.Fatalf("react: %v", err)
+			}
+			var raised bool
+			for _, p := range repo.byID["fnd-1"].Proposals() {
+				if p.Stance() == domain.StanceNotAffected {
+					raised = true
+				}
+			}
+			if raised != tc.wantRaised {
+				t.Errorf("not_affected proposal raised = %v, want %v — %s", raised, tc.wantRaised, tc.why)
+			}
+		})
+	}
+}
+
+// D1/D8: a blocked statement is not mutated and not discarded. The vendor's own words survive
+// exactly as received — Themis records its determination elsewhere, never by editing the evidence.
+func TestReactToEnrichment_BlockedStatementIsNeitherMutatedNorDiscarded(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1", "pkg:rpm/httpd@2.4", "httpd"))
+	stmt := notAffectedScoped("httpd", "Red Hat: not affected in Red Hat Enterprise Linux 7",
+		value.FamilyEnterpriseLinux, "7")
+	before := stmt
+
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", Applicabilities: []app.Applicability{stmt},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	if stmt != before {
+		t.Errorf("the vendor statement was mutated: %+v, was %+v", stmt, before)
+	}
+	if stmt.Status != "not_affected" {
+		t.Errorf("Status = %q — the vendor's assertion must never carry Themis's determination", stmt.Status)
+	}
+}
+
+// A release nothing can place (no `elN` marker anywhere on the Finding) yields `unknown`, so even
+// a statement that would otherwise match is blocked. Fail-safe: an unplaceable release must not
+// be suppressed by a statement Themis cannot confirm applies to it.
+func TestReactToEnrichment_UnplaceableReleaseBlocks(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:pypi/requests@2.31.0", Name: "requests", Version: "2.31.0", // no EL marker
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID:     "fl-1",
+		Applicabilities: []app.Applicability{notAffected("requests", "vulnerable_code_not_present")},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		if p.Stance() == domain.StanceNotAffected {
+			t.Error("an unplaceable release must not be suppressed by a vendor statement")
+		}
+	}
+}
+
+// EDR-VEX-02 D2, the VISIBLE half: a blocked statement must still reach the reviewer. It raises
+// no Proposal — the block is structural — so without the assessment carrying it, "Red Hat said
+// nothing" and "Red Hat spoke about another product" would look identical.
+//
+// The three facts stay in three fields: the vendor's words, the scope the VENDOR stated, and
+// Themis's determination. None overwrites another.
+func TestGetFindingAssessment_VendorStatementsCarryThemisDetermination(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2023-31122", "pkg:rpm/rocky/httpd@2.4", "httpd"))
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2023-31122",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("httpd", "Red Hat: not affected in Red Hat Enterprise Linux 7",
+				value.FamilyEnterpriseLinux, "7"),
+			notAffectedScoped("httpd", "Red Hat: not affected in Red Hat Enterprise Linux 8",
+				value.FamilyEnterpriseLinux, "8"),
+			notAffectedScoped("httpd", "Red Hat: not affected in OpenShift Pipelines",
+				"openshift_pipelines", "1"),
+			{Package: "httpd", Status: "not_affected", Justification: "no scope stated"},
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(a.VendorStatements) != 4 {
+		t.Fatalf("vendor statements = %d, want all 4 carried — none is discarded for being inapplicable",
+			len(a.VendorStatements))
+	}
+	want := []string{"not_applicable", "applicable", "not_applicable", "unknown"}
+	for i, w := range want {
+		if got := a.VendorStatements[i].Applicability; got != w {
+			t.Errorf("statement %d (%q) applicability = %q, want %q",
+				i, a.VendorStatements[i].Justification, got, w)
+		}
+	}
+	// The vendor's own words survive verbatim beside Themis's conclusion (D1/D8).
+	for _, v := range a.VendorStatements {
+		if v.Status != "not_affected" {
+			t.Errorf("status = %q — the vendor's assertion must never carry Themis's determination", v.Status)
+		}
+	}
+	// And the scope shown is the VENDOR's, not a rewritten one.
+	if a.VendorStatements[0].ScopeMajor != "7" || a.VendorStatements[1].ScopeMajor != "8" {
+		t.Errorf("scopes = %q/%q, want the vendor's 7 and 8",
+			a.VendorStatements[0].ScopeMajor, a.VendorStatements[1].ScopeMajor)
 	}
 }

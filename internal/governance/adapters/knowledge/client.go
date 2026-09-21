@@ -56,6 +56,17 @@ type faultlineResponse struct {
 			Ecosystem string `json:"ecosystem"` // absent = source did not say → filters nothing
 		} `json:"fixes"`
 		RangeTrust string `json:"range_trust"`
+		// Applicabilities are the vendor VEX statements the card holds, WITH the product scope
+		// the vendor stated (EDR-VEX-02 D5). Carried so Governance can determine whether each
+		// one covers this release and SHOW that determination beside the vendor's own words —
+		// without which a blocked statement would be invisible (D2).
+		Applicabilities []struct {
+			Package       string `json:"package"`
+			Status        string `json:"status"`
+			Justification string `json:"justification"`
+			ScopeFamily   string `json:"scope_family"`
+			ScopeMajor    string `json:"scope_major"`
+		} `json:"applicabilities"`
 	} `json:"view"`
 }
 
@@ -82,18 +93,26 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	for _, f := range body.View.Fixes {
 		fixes = append(fixes, app.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
 	}
+	apps := make([]app.Applicability, 0, len(body.View.Applicabilities))
+	for _, a := range body.View.Applicabilities {
+		apps = append(apps, app.Applicability{
+			Package: a.Package, Status: a.Status, Justification: a.Justification,
+			Scope: value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+		})
+	}
 	return app.FaultlineKnowledge{
-		FaultlineID:    body.ID,
-		CVE:            body.CVE,
-		Summary:        body.View.Summary,
-		Severity:       body.View.Severity,
-		CVSSScore:      body.View.CVSSScore,
-		EPSS:           body.View.EPSS,
-		KEV:            body.View.KEV,
-		ExploitPublic:  body.View.ExploitPublic,
-		AffectedRanges: body.View.AffectedRanges,
-		FixedVersions:  body.View.FixedVersions,
-		Fixes:          fixes,
-		RangeTrust:     value.TrustClass(body.View.RangeTrust),
+		FaultlineID:     body.ID,
+		CVE:             body.CVE,
+		Summary:         body.View.Summary,
+		Severity:        body.View.Severity,
+		CVSSScore:       body.View.CVSSScore,
+		EPSS:            body.View.EPSS,
+		KEV:             body.View.KEV,
+		ExploitPublic:   body.View.ExploitPublic,
+		AffectedRanges:  body.View.AffectedRanges,
+		FixedVersions:   body.View.FixedVersions,
+		Fixes:           fixes,
+		RangeTrust:      value.TrustClass(body.View.RangeTrust),
+		Applicabilities: apps,
 	}, nil
 }

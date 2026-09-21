@@ -188,7 +188,18 @@ func toView(f domain.Faultline) gen.FaultlineView {
 	}
 	apps := make([]gen.Applicability, 0, len(v.Applicabilities))
 	for _, a := range v.Applicabilities {
-		apps = append(apps, gen.Applicability{Package: strptr(a.Package), Status: strptr(a.Status), Justification: strptr(a.Justification)})
+		a := a
+		app0 := gen.Applicability{Package: strptr(a.Package), Status: strptr(a.Status), Justification: strptr(a.Justification)}
+		// The vendor-stated scope (EDR-VEX-02 D5). Emitted as two flat fields so a consumer
+		// cannot mistake a partially-populated object for an established scope: both empty means
+		// the vendor supplied no readable scope, which reads as applicability `unknown`.
+		if a.Scope.Family != "" {
+			app0.ScopeFamily = strptr(a.Scope.Family)
+		}
+		if a.Scope.Major != "" {
+			app0.ScopeMajor = strptr(a.Scope.Major)
+		}
+		apps = append(apps, app0)
 	}
 	ev.Applicabilities = &apps
 	props := make([]gen.ProposalProvenance, 0, len(f.Proposals()))

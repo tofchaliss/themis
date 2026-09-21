@@ -327,7 +327,17 @@ func sortedApplicabilities(set map[Applicability]struct{}) []Applicability {
 		if out[i].Status != out[j].Status {
 			return out[i].Status < out[j].Status
 		}
-		return out[i].Justification < out[j].Justification
+		if out[i].Justification != out[j].Justification {
+			return out[i].Justification < out[j].Justification
+		}
+		// Scope joins the tiebreak because two statements for one package can now differ ONLY
+		// by scope (EDR-VEX-02 D7). Without it the order would depend on map iteration, and the
+		// view is compared for equality — a nondeterministic order would report ViewChanged on
+		// every fold and re-announce work that did not happen.
+		if out[i].Scope.Family != out[j].Scope.Family {
+			return out[i].Scope.Family < out[j].Scope.Family
+		}
+		return out[i].Scope.Major < out[j].Scope.Major
 	})
 	return out
 }
