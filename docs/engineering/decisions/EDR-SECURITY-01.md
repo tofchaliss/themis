@@ -146,6 +146,67 @@ store in the aggregate-store tier (**80%**). The `auth` DB owns an up/down-rever
 and (webhook) good/bad/missing signature. New package + new DB + new depguard rule + API change are all
 "Must ask" items — **this EDR is that ask**, and its sign-off authorizes them.
 
+### D10 — The authenticated principal IS the audit actor (added 2026-09-21)
+
+Decided by the user after `DEF_GOV_DECIDER_UNVERIFIED`: *"Governance decisions are audit records. A
+free-text `decided_by` that has no relationship to the authenticated principal is not sufficient
+provenance."*
+
+**The invariant.** Every Governance decision carries an explicit, machine-identifiable actor
+provenance, and **a decision cannot claim an authenticated actor when authentication was not
+performed.**
+
+**What was wrong.** `DecisionRequest.actor_id` was free text taken verbatim. The API key
+authenticated the CALLER and the audit trail recorded a self-declaration, with nothing relating the
+two. Measured consequence: 138 proposal rejections recorded as decided by
+`your.name@example.com`, a placeholder pasted out of a command.
+
+And it was worse than unverified — it was **forgeable**. A caller sending
+`actor_id: "key:whatever"` was recorded as exactly that, so once any prefix convention existed a
+request could impersonate a principal. Proven by the guard test against the pre-fix code.
+
+The identity was already present and already named for this purpose: `auth.Principal.KeyID` is
+documented as *"the auditable actor id (CON-0016 traceability)"*. The gap was that the Governance
+HTTP adapter never read it — the package doc even claimed *"a real deployment derives it from auth
+middleware"*, describing an intention nothing implemented.
+
+**The resolution.**
+
+    principal present  →  key:<KeyID>      server-derived; actor_id IGNORED
+    principal absent   →  dev:<actor_id>   caller-declared, explicitly MARKED
+    neither            →  400
+
+`key:` is unforgeable because the `dev:` marker is applied to **whatever** the caller sends: a body
+claiming `key:key-7` becomes `dev:key:key-7`. The prefix is a server-side fact, not a claimable
+string.
+
+**Why the unauthenticated path is supported rather than refused.** Auth is optional by design (D8 —
+`THEMIS_AUTH_DATABASE_DSN` unset = disabled for single-context dev), so refusing would break
+development. Per the user: *"I would not silently invent a production-looking identity when auth is
+disabled."* Hence marked, never dressed up. Had this existed, the 138 would read
+`dev:your.name@example.com` — still a placeholder, but visibly unverified.
+
+**Production needs no new switch.** `THEMIS_AUTH_REQUIRED=1` already hard-fails startup when the
+auth DSN is empty, so a production node cannot boot without auth; every request therefore carries a
+principal, and every decision is authenticated. The existing guard delivers the invariant's second
+half with no new configuration.
+
+**Scope: the PROPOSER path is bound too.** A raised proposal is an audit record as well, and
+`proposerFrom` was worse — it defaulted the id to the literal `"api"`, fabricating provenance from
+no input at all. Fixing only the decider would have left the identical defect in the adjacent
+function, which is the mistake `DEF_VEX_COVERING_FIRST_MATCH` was made of. The proposer path still
+accepts a missing id (raising has always worked without one) and records `dev:api`.
+
+**`actor_id` stays REQUIRED in the spec**, deliberately, even though it is ignored when
+authenticated. Making it optional turns it into a pointer in the generated server and ripples
+through every caller and test for no gain in the invariant. Its description states that it is the
+development identity and is ignored under authentication.
+
+**Historical records are NOT rewritten.** The 138 keep their placeholder attribution, recorded in
+`docs/OPERATIONAL-ACTIONS.md`. Per the user: correcting them *"would make the database look cleaner
+while making the audit trail less honest"*, and would risk implying the corrected identity was
+present at decision time. This decision prevents recurrence; it does not edit history.
+
 ## Realization notes (2026-07-31 — discovered during implementation)
 
 A codegen constraint changed *how* D4/D7 are enforced (the contract — the scope vocabulary and the

@@ -3310,11 +3310,33 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
-- [ ] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" is free text, unrelated to the
-  authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
-  literal placeholder).** **MED-HIGH for audit integrity, LOW for behaviour**; EDR-SECURITY-01 +
-  EDR-GOVERNANCE-01 D11. **NOT FIXED — this is a security-model change and needs an explicit
-  decision.**
+- [x] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" was free text, unrelated to
+  the authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
+  literal placeholder; FIXED same day, decided by the user).** **MED-HIGH for audit integrity**;
+  now **EDR-SECURITY-01 D10**.
+  **Worse than filed, and the guard test proved it.** Against the pre-fix code a caller sending
+  `actor_id: "key:key-7"` was recorded as exactly `key:key-7` — so the provenance was not merely
+  unverified, it was **forgeable to look verified** the moment any prefix convention existed.
+  **Fixed** by binding the recorded actor to the authenticated principal:
+  `key:<KeyID>` when a principal is present (and `actor_id` is then ignored — a value the server
+  cannot verify must not overwrite one it can), `dev:<actor_id>` when auth is disabled, 400 when
+  neither identifies anyone. The `dev:` marker is applied to WHATEVER arrives, so `key:…` becomes
+  `dev:key:…` and the authenticated prefix is not claimable.
+  **Production needs no new switch:** `THEMIS_AUTH_REQUIRED=1` already hard-fails startup on an
+  empty auth DSN, so a production node cannot boot open and every decision is authenticated.
+  **The proposer path was bound too, and was worse** — it defaulted the id to the literal `"api"`,
+  fabricating provenance from no input at all. Fixing only the decider would have left the
+  identical defect in the adjacent function, which is what DEF_VEX_COVERING_FIRST_MATCH was made
+  of.
+  **Nothing asserted provenance before**, which is why the defect could exist: every decision test
+  checked only the HTTP status. Five guards added, all five verified to fail against the pre-fix
+  code.
+  **The cleanup script now refuses a placeholder actor id** (`example.com`, `your.name`,
+  `changeme`, `api`, angle brackets…) with the reason stated, because the failure mode is a value
+  the shell accepts happily.
+  **History is NOT rewritten** — the 138 keep their attribution, recorded in
+  `docs/OPERATIONAL-ACTIONS.md`. Per the user: an UPDATE *"would make the database look cleaner
+  while making the audit trail less honest"*.
   **How it surfaced.** A cleanup command was pasted with its placeholder intact
   (`THEMIS_ACTOR_ID=your.name@example.com`), and 138 proposal rejections were written with that
   string as `decided_id`. The decisions themselves are correct and reproducible; the *decider* is
@@ -3343,11 +3365,89 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
-- [ ] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returns `unknown` when EITHER
-  side is unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
-  reach a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run).**
-  **MED, decision-surface precision**; EDR-VEX-02 D3/D4. **NOT FIXED — this changes what
-  `ScopeMatch` returns, which is a decision, not a cleanup.**
+- [ ] **DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE — a vendor proposal id is `(finding, package)`, which
+  cannot represent N product-scoped statements for one package (filed 2026-09-21 by user decision;
+  blocks the 8 miscited proposals).** **MED, and it is the SAME CARDINALITY SHAPE as
+  DEF_VEX_COVERING_FIRST_MATCH** (see CONVENTIONS **R5**); EDR-VEX-02 D7 + EDR-GOVERNANCE-01.
+  **The blocked case, measured.** Eight standing proposals have the right conclusion and cite the
+  wrong statement: Red Hat said `compat-libtiff3` is not affected in RHEL 7 **and** in RHEL 8, the
+  old first-match code cited RHEL 7, and the proposal's words still say so even though the EL 8
+  statement is what covers the `3.9.4-16.el8_10` build. The fixed selection cannot repair them —
+  the id is already taken, so a re-raise is `ErrDuplicateProposal` and a no-op.
+  **The design question, and it is not "how do we reword eight rows".** Per the user: *is the
+  proposal an assertion about a package, or about a package + vendor statement + applicability
+  scope?* Given everything EDR-VEX-02 established, it should be the latter **if** vendor VEX is
+  allowed to produce separate scope-aware proposals. That is the decision to take first.
+  **Consequences either way, so the choice is real:**
+
+      id = (finding, package)                     ← today
+          └── one vendor proposal per package, whichever statement won
+                └── cannot reword; cannot represent two scopes; dedup is accidental
+
+      id = (finding, package, scope)
+          └── one proposal per product-scoped statement
+                └── rewordable; N proposals where N products speak
+                      └── but: does a reviewer want 6 rows for one package?
+
+  The second shape is more truthful and noisier, and the noise is the thing to measure before
+  committing — the estate has packages with statements for RHEL 5/6/7/8/9/10 at once.
+  **Explicitly NOT to be worked around:** do not mutate the eight proposals in place to make the
+  UI text correct. The user's instruction is to settle proposal identity first, then reject and
+  recreate the affected eight **through the proper event path**. Rewriting them would be a second
+  un-audited history, the same objection that kept the 138 attributions untouched.
+  **Mitigated meanwhile:** the drawer shows every vendor statement with its own scope and Themis's
+  determination (D2), so a reviewer opening one of the eight sees the applicable EL 8 statement
+  marked `applies here` beside the proposal's stale wording. Misleading, not dangerous.
+
+- [ ] **DEF_VEX_NONRPM_RELEASE_UNPLACEABLE — a non-rpm release cannot be placed against a vendor
+  product scope AT ALL, so every vendor statement about a PyPI/npm/Maven component resolves
+  `not_comparable` however clear the vendor was (filed 2026-09-21 by user decision; kept SEPARATE
+  from DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES).** **MED, product-scope model gap**;
+  EDR-VEX-02 D11 makes it legible, and deliberately does not close it.
+  **Why it is its own problem.** D11 fixed the *semantic conflation* — `unknown` no longer means
+  two things. It did nothing about the underlying inability:
+
+      unknown  ≠  not_comparable              ← D11 fixed this
+      PyPI component  ↕  Red Hat product scope ← this is untouched
+
+  **The measured population** is small today and structurally permanent: 3 of 138 rejections, being
+  `spring-web` (Maven, against "Red Hat build of Apache Camel 4 for Quarkus 3"), `setuptools`
+  (PyPI, against "Red Hat build of Quarkus Native builder") and one `python3.12`. The release side
+  places from an rpm `elN` build (`ScopeFromRPMRelease`), and a Maven artifact has no such thing —
+  so no amount of vendor clarity helps.
+  **The real question** is what a release's product scope even IS when its components are not
+  distribution packages. A release is not one product: a Rocky 8.10 host running a Python app has
+  an OS scope AND a language-ecosystem context, and Red Hat's statements about Quarkus or Camel
+  images are about a third thing again. Modelling that is a scope-model design question, not a
+  resolver fix, and **R4 applies**: measure the population before designing the rule.
+  **Do not close this by loosening `not_comparable`** into a mismatch. A component Themis cannot
+  place is not a component the vendor spoke about — asserting otherwise would be the same class of
+  error D4 exists to prevent.
+
+- [x] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returned `unknown` when EITHER
+  side was unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
+  reached a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run;
+  FIXED same day, decided by the user: fix it, and do NOT loosen `unknown`).**
+  **MED, decision-surface precision**; now **EDR-VEX-02 D11**.
+  **Fixed** with a fourth state, `not_comparable`: the vendor side is tested FIRST, so `unknown`
+  always means "the statement could not be placed" and `not_comparable` always means "the
+  statement was placed, the release was not". Both-unplaceable resolves to `unknown` — unreadable
+  evidence is the deeper gap. `applicabilityOf` now delegates the whole determination to
+  `MatchScope` (passing a zero release scope) instead of short-circuiting to `unknown` itself,
+  which is what had erased the distinction on the governance side.
+  **Four surfaces updated, and the dashboard one was a trap:** `applicabilityChip` falls through
+  to "scope unknown" for any unrecognised value, so a new state without its own branch would have
+  rendered as the very word the fix exists to stop using. Also the API enum (spec-first,
+  regenerated), and the reject script's summary, which now reports three groups instead of two.
+  **Non-clearing by construction:** every governance check compares against `ScopeApplicable`, so
+  a fourth state cannot become a suppression — asserted directly rather than left as a reading of
+  the code. A new word is not a new escape hatch.
+  **Name chosen after inspecting all usages, as the user required.** `not_comparable` describes the
+  RELATION, keeping Governance's word for an operand ("release") out of a kernel value object, and
+  it survives if the comparison ever becomes genuinely two-sided. The human-facing text carries the
+  cause instead: the chip reads "release not placeable".
+  **Still open, deliberately separate (the user's instruction):** Themis cannot place a non-rpm
+  release against a vendor product scope AT ALL. This makes that gap legible; it does not close it.
   **The measured case.** Three of 138 rejections came back `unknown` rather than
   `not_applicable`, and one of them is:
 

@@ -21,7 +21,7 @@
 # covering its package is `applicable`. A card whose assessment cannot be read is skipped rather
 # than guessed at.
 #
-# `unknown` counts toward rejection, and the report keeps it SEPARATE from `not_applicable`,
+# `unknown` and `not_comparable` both count toward rejection, and the report keeps all three apart,
 # because D4 insists the two are different statements: "this does not apply" versus "I cannot
 # determine whether this applies". Both reach the same action here, for one reason — the FIXED
 # raise path blocks on anything that is not `applicable`, so a proposal resting on an all-`unknown`
@@ -39,6 +39,18 @@
 # script does not work around it: --apply requires THEMIS_ACTOR_ID, and every rejection is
 # recorded against that person. The script decides WHICH proposals to put forward; a human signs
 # them.
+#
+# WHAT ACTUALLY GETS RECORDED (EDR-SECURITY-01 D10). If THEMIS_API_KEY is set the node derives the
+# actor from the authenticated principal and records `key:<key-id>`; THEMIS_ACTOR_ID is then
+# ignored by the server, and it is still sent only because the field is required by the API
+# contract. With auth disabled the declared id is recorded as `dev:<THEMIS_ACTOR_ID>` — marked,
+# so a development decision can never be read as an authenticated one.
+#
+# AND IT REFUSES A PLACEHOLDER. This exists because of a measured mistake: this script's own
+# example invocation was pasted with `your.name@example.com` intact, and 138 rejections were
+# written against it. Proposals are append-only, so there was no edit path and no clean redo. A
+# value that a shell accepts happily is the dangerous kind of placeholder, so the obvious ones are
+# rejected here rather than discovered later in an audit trail.
 #
 # Usage:
 #   PGBASE="postgres://themis:PASSWORD@localhost:5432" ./scripts/vex-reject-inapplicable.sh
@@ -64,6 +76,13 @@ if [ "$APPLY" = "1" ] && [ -z "$ACTOR" ]; then
   echo "vex-reject: --apply needs THEMIS_ACTOR_ID — a rejection is recorded against a person" >&2
   exit 2
 fi
+case "$(printf '%s' "${ACTOR:-}" | tr '[:upper:]' '[:lower:]')" in
+  *example.com*|*your.name*|*changeme*|*placeholder*|*'<'*|*'>'*|"api"|"admin"|"test"|"user")
+    echo "vex-reject: THEMIS_ACTOR_ID=\"$ACTOR\" looks like a placeholder, not a person." >&2
+    echo "  138 rejections were once recorded against your.name@example.com this exact way, and" >&2
+    echo "  proposals are append-only — the attribution could not be corrected afterwards." >&2
+    exit 2 ;;
+esac
 
 # Inbound-edge auth is optional (EDR-SECURITY-01): send the key only when one is configured.
 api() {
@@ -72,7 +91,11 @@ api() {
 
 printf '\n\033[1mTHEMIS — vendor-VEX proposal review\033[0m  %s\n' "$(date '+%Y-%m-%d %H:%M')"
 if [ "$APPLY" = "1" ]; then
-  printf '  mode: \033[31mAPPLY\033[0m — rejections will be written, recorded against %s\n\n' "$ACTOR"
+  if [ -n "${THEMIS_API_KEY:-}" ]; then
+    printf '  mode: \033[31mAPPLY\033[0m — authenticated; recorded against the API key principal (key:…)\n\n'
+  else
+    printf '  mode: \033[31mAPPLY\033[0m — auth disabled; recorded as dev:%s\n\n' "$ACTOR"
+  fi
 else
   printf '  mode: dry run — nothing is written (pass --apply to act)\n\n'
 fi
@@ -94,7 +117,7 @@ if [ -z "$CANDIDATES" ]; then
   exit 0
 fi
 
-TOTAL=0; REJECT=0; KEEP=0; SKIP=0; FAIL=0; MISMATCH=0; UNPLACEABLE=0
+TOTAL=0; REJECT=0; KEEP=0; SKIP=0; FAIL=0; MISMATCH=0; UNPLACEABLE=0; NOTCOMPARABLE=0
 
 while IFS='|' read -r finding proposal pkg product; do
   [ -n "$finding" ] || continue
@@ -128,8 +151,12 @@ while IFS='|' read -r finding proposal pkg product; do
 
   printf '  \033[31m-\033[0m %-28s reject — vendor scoped it to %s [%s]\n' "$pkg" "$product" "$VERDICTS"
   REJECT=$((REJECT + 1))
+  # Ordered most-informative first: a known mismatch outranks the two unplaceable states, and a
+  # placed-vendor/unplaceable-release verdict (D11) outranks an unreadable statement. A statement
+  # group carrying several verdicts is classified by the best evidence in it.
   case ",$VERDICTS," in
     *,not_applicable,*) MISMATCH=$((MISMATCH + 1)) ;;
+    *,not_comparable,*) NOTCOMPARABLE=$((NOTCOMPARABLE + 1)) ;;
     *)                  UNPLACEABLE=$((UNPLACEABLE + 1)) ;;
   esac
   [ "$APPLY" = "1" ] || continue
@@ -145,11 +172,16 @@ while IFS='|' read -r finding proposal pkg product; do
 done <<< "$CANDIDATES"
 
 printf '\n  reviewed %d · reject %d · kept %d · skipped %d\n' "$TOTAL" "$REJECT" "$KEEP" "$SKIP"
-printf '  of the rejections: %d a KNOWN product mismatch, %d a scope Themis could not place\n' \
-  "$MISMATCH" "$UNPLACEABLE"
+printf '  of the rejections: %d a KNOWN product mismatch, %d an unplaceable RELEASE, %d an unreadable STATEMENT\n' \
+  "$MISMATCH" "$NOTCOMPARABLE" "$UNPLACEABLE"
+if [ "$NOTCOMPARABLE" -gt 0 ]; then
+  printf '  the RELEASE group (not_comparable, D11): the vendor stated a readable product scope and\n'
+  printf '  this release could not be placed — typically a maven/npm/pypi component with no distro\n'
+  printf '  build. Not a mismatch, and not a missing vendor statement.\n'
+fi
 if [ "$UNPLACEABLE" -gt 0 ]; then
-  printf '  the second group is not a mismatch (D4) — read it on its own; a large count usually\n'
-  printf '  means those Findings carry no rpm build that places the release.\n'
+  printf '  the STATEMENT group (unknown, D4): the vendor supplied no readable CPE, so nothing at\n'
+  printf '  all follows from it. This is a feed-quality count, not an estate finding.\n'
 fi
 if [ "$APPLY" = "1" ]; then
   printf '  written: %d rejected, %d failed\n' "$((REJECT - FAIL))" "$FAIL"

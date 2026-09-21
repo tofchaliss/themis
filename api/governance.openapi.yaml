@@ -523,12 +523,23 @@ components:
           description: Major version of that family, e.g. `8`. Empty = no readable scope.
         applicability:
           type: string
-          enum: [applicable, not_applicable, unknown]
+          enum: [applicable, not_applicable, unknown, not_comparable]
           description: >-
             THEMIS'S determination for this release. Only `applicable` can have become a
-            Proposal. `not_applicable` means the scope was positively established and does not
-            cover this release. `unknown` is epistemic uncertainty — a scope Themis could not
-            establish — and is never a product mismatch.
+            Proposal; every other value is non-clearing.
+            `not_applicable` — the vendor's scope was positively established and does not cover
+            this release. A product mismatch, never uncertainty.
+            `unknown` — the VENDOR'S STATEMENT could not be placed: no CPE, or one that cannot be
+            classified. A feed-quality gap from which nothing follows.
+            `not_comparable` — the vendor's scope WAS placed, but this RELEASE could not be, so
+            no comparison is possible. The measured case is a Maven or PyPI component, which
+            carries no distribution build, against a perfectly clear Red Hat product scope.
+            The last two were one value until 2026-09-21, and separating them is the point: a
+            reviewer dismisses "the vendor spoke about a builder image and this is a Java
+            library" instantly, while an unreadable CPE permits no conclusion at all. Because
+            `not_comparable` describes the release rather than the statement, it appears
+            identically on EVERY statement of an affected Finding — that repetition is the
+            signal.
     FaultlineKnowledge:
       type: object
       description: >
@@ -714,6 +725,13 @@ components:
       properties:
         actor_id:
           type: string
+          description: >-
+            The DEVELOPMENT decider identity, used only when inbound auth is disabled, where it is
+            recorded with a `dev:` prefix marking it unverified. When the request is
+            authenticated it is IGNORED and the recorded actor is derived from the API key's
+            principal as `key:<key-id>` — a value the server cannot verify must never overwrite
+            one it can (EDR-SECURITY-01 D10). The `dev:` marker is applied to whatever arrives, so
+            sending `key:…` yields `dev:key:…` and cannot forge authenticated provenance.
         actor_kind:
           type: string
           description: human (default). Only a human decider is accepted via the API.

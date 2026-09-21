@@ -115,18 +115,53 @@ func TestMatchScope_NonOSVersionIsNeverAnOSMajor(t *testing.T) {
 	}
 }
 
-// An unestablished scope on EITHER side is unknown: Themis cannot place the statement, or cannot
-// place the release. Never not_applicable, which would assert a comparison it did not make.
-func TestMatchScope_UnknownOnEitherSide(t *testing.T) {
+// The two unplaceable sides are DIFFERENT answers (D11), and neither is ever not_applicable,
+// which would assert a comparison that was not made.
+//
+// This test asserted one word for both until 2026-09-21, and that was the defect
+// (DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES): `unknown` carried "the vendor said nothing
+// readable" and "the vendor was perfectly clear but we cannot place our own release", which a
+// reviewer reacts to completely differently.
+func TestMatchScope_SeparatesTheTwoUnplaceableSides(t *testing.T) {
 	rhel8 := value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}
+	quarkus := value.ScopeFromCPE("cpe:/a:redhat:quarkus:3")
+	if !quarkus.Known() {
+		t.Fatalf("test premise: %q must place, or this proves nothing", quarkus)
+	}
+
+	// The vendor's statement cannot be placed — a feed gap, and nothing whatever follows from it.
 	if got := value.MatchScope(value.ProductScope{}, rhel8); got != value.ScopeUnknown {
-		t.Errorf("unknown vendor scope = %q, want unknown", got)
+		t.Errorf("unplaceable vendor scope = %q, want unknown", got)
 	}
-	if got := value.MatchScope(rhel8, value.ProductScope{}); got != value.ScopeUnknown {
-		t.Errorf("unknown release scope = %q, want unknown", got)
-	}
+	// Half a scope is not a scope: a family with no major places nothing.
 	if got := value.MatchScope(value.ProductScope{Family: "x"}, rhel8); got != value.ScopeUnknown {
 		t.Errorf("family without major = %q, want unknown — half an answer is not an answer", got)
+	}
+
+	// The vendor was CLEAR; the release is what could not be placed. The measured case: Red Hat
+	// names a Quarkus product and the Finding carries a Maven artifact with no `elN` build.
+	if got := value.MatchScope(quarkus, value.ProductScope{}); got != value.ScopeNotComparable {
+		t.Errorf("placed vendor scope vs unplaceable release = %q, want not_comparable", got)
+	}
+
+	// Both unplaceable: `unknown` wins, so that word always means exactly "the statement could
+	// not be placed" and never leaks the release-side case.
+	if got := value.MatchScope(value.ProductScope{}, value.ProductScope{}); got != value.ScopeUnknown {
+		t.Errorf("both unplaceable = %q, want unknown — the unreadable statement is the deeper gap", got)
+	}
+}
+
+// not_comparable is NON-CLEARING, like every state but applicable. Asserted as its own property
+// because the whole safety argument for adding a state rests on it: the governance checks compare
+// against ScopeApplicable, so a new word can never accidentally become a suppression.
+func TestScopeNotComparableIsNotApplicable(t *testing.T) {
+	if value.ScopeNotComparable == value.ScopeApplicable {
+		t.Fatal("not_comparable must never equal applicable")
+	}
+	for _, s := range []value.ScopeMatch{value.ScopeUnknown, value.ScopeNotApplicable, value.ScopeNotComparable} {
+		if s == value.ScopeApplicable {
+			t.Errorf("%q equals applicable — absent evidence must never suppress", s)
+		}
 	}
 }
 

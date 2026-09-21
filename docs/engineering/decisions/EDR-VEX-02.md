@@ -182,6 +182,58 @@ So `applicable` means *"this statement is about your release"*, never *"this sta
 automatically"*. Two independent barriers remain, and D2's block is aimed at the human path while the
 trust floor is aimed at the automated one.
 
+### D11 — Four states, because `unknown` was carrying two facts of different value
+
+Decided 2026-09-21 after measuring the first cleanup run (`DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES`).
+D3's three states were insufficient, and the insufficiency is **D4's own mistake one level down**.
+
+The measured case — three of 138 rejections, and one of them is decisive:
+
+    spring-web → "Red Hat build of Apache Camel 4 for Quarkus 3"   [unknown × 6]
+
+Red Hat's side of that comparison is **perfectly clear**. It is Themis's side that could not be
+placed: a Maven artifact carries no `elN` build, and nothing else on the Finding says which
+distribution major the release is. That returned the same word as *"Red Hat named no product at
+all"*, which is a feed-quality gap from which nothing follows.
+
+    unknown  (before)
+      ├── the vendor's statement could not be placed   → nothing follows; a feed gap
+      └── the statement WAS placed, the release was not → a reviewer dismisses it instantly
+
+So the state set becomes:
+
+    ScopeMatch
+      ├── applicable
+      ├── not_applicable    — both placed, and they differ
+      ├── unknown           — the VENDOR'S STATEMENT could not be placed
+      └── not_comparable    — the statement was placed; the RELEASE was not
+
+**The vendor side is tested first, so each word means exactly one thing.** When both sides fail,
+`unknown` wins: evidence that cannot be read is the more fundamental gap, and that keeps `unknown`
+from ever leaking the release-side case.
+
+**`not_comparable` is ONE-SIDED, and therefore uniform.** Vendor-known plus release-known always
+resolves through family/major, so the only route into it is a release that cannot be placed — a
+fact about the Finding, not about any statement. Every statement on such a Finding reports it, and
+that repetition is the signal rather than noise. It is also why the name describes the relation
+instead of naming a role: a kernel value object should not carry Governance's word for one of its
+operands.
+
+**Safety, and why adding a state changed no behaviour.** Every governance check compares against
+`ScopeApplicable`, so a fourth state is non-clearing by construction — asserted directly by
+`TestScopeNotComparableIsNotApplicable` rather than left as a reading of the code. A new word is
+not a new escape hatch.
+
+**The rejected alternative, named because it is the tempting one:** widening `unknown` to cover the
+release case, or reporting it as `not_applicable`. The first is what D4 already forbids; the
+second would assert a comparison Themis did not make.
+
+**Explicitly NOT solved here.** Themis still cannot place a non-rpm release against a vendor
+product scope at all — a PyPI, npm or Maven component has no distribution major, so every Red Hat
+statement about it resolves `not_comparable` however clear the vendor was. This decision makes that
+gap **legible**; it does not close it. Closing it is a separate product-scope model question and is
+tracked on its own.
+
 ### D10 — The scope is part of the STATEMENT, so it must round-trip through persistence
 
 Recorded because it was violated within hours of the implementation landing, and the violation was
