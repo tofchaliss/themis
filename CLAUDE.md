@@ -333,6 +333,16 @@ OpenVEX / CSAF out.
   would be right the day it was written and silently wrong after (the defect that left the systemd
   installer loading only the first registry migration). Strictly read-only: mutations stay in a
   human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
+- `scripts/vex-reject-inapplicable.sh` — the **one mutation** in this family, and it is opt-in. It
+  reviews the standing vendor-VEX `not_affected` proposals and rejects those resting on a statement
+  Themis determined does not cover the release (the pre-EDR-VEX-02 raises, made with no scope check
+  at all — measured 132 of 140 on the estate). The judgement is **not** in the script: it reads
+  `vendor_statements[].applicability` from the Governance assessment projection, so the domain
+  decides and the script only acts. Discovery is read-only SQL; every write goes through the API so
+  the event stream stays the authoritative mutation path. **Dry-run by default**, and `--apply`
+  requires `THEMIS_ACTOR_ID` because the API accepts only a human decider — a rejection is recorded
+  against a person. Rejecting a `not_affected` proposal establishes no Position and suppresses
+  nothing: the Finding stays open, so the failure mode is extra review, never hidden risk.
 - `scripts/release-smoke-test.sh` — one-command release test (build → fresh DB → migrate → run → register →
   upload the SBOM under `scripts/` → verify components + enrichment). Wrapped by the `/themis-release-test`
   skill.
