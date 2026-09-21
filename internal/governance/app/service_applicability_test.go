@@ -387,6 +387,148 @@ func TestGetFindingAssessment_UnplaceableReleaseIsNotComparable(t *testing.T) {
 	}
 }
 
+// DEF_GOV_RELEASE_SCOPE_FROM_FINDING (EDR-VEX-02 D12): when a Finding's OWN components cannot
+// place the release, the release's own scope is used — so a statement about a DIFFERENT major
+// reads `not_applicable` rather than `not_comparable`.
+//
+// The measured case: release 7bc21a1b carries 688 of 721 components at `el8`, and a Java Finding
+// on it reported `not_comparable` against Red Hat's `enterprise-linux 9` statements. The truth
+// available to Themis was `not_applicable` — 9 is not 8 — and a reviewer can act on that.
+func TestGetFindingAssessment_FallsBackToTheReleaseScope(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:maven/org.apache.xbean/xbean@4.5", Name: "xbean", Version: "4.5", // no elN
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	// The WIDE evidence: the release itself is enterprise-linux 8.
+	repo.releaseScope = value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}
+
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("xbean", "Red Hat: not affected in Red Hat Enterprise Linux 9",
+				value.FamilyEnterpriseLinux, "9"),
+			notAffectedScoped("xbean", "Red Hat: not affected in Red Hat Enterprise Linux 8",
+				value.FamilyEnterpriseLinux, "8"),
+			notAffectedScoped("xbean", "Red Hat: not affected in Camel for Quarkus", "camel_quarkus", "3"),
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	// A KNOWN mismatch, the applicable one, and a genuinely other product — three answers where
+	// before there was one word for all of them.
+	want := []string{"not_applicable", "applicable", "not_applicable"}
+	for i, w := range want {
+		if got := a.VendorStatements[i].Applicability; got != w {
+			t.Errorf("statement %d (%q) = %q, want %q", i, a.VendorStatements[i].Justification, got, w)
+		}
+	}
+	if repo.releaseScopeFor != "rel-1" {
+		t.Errorf("asked about release %q, want rel-1 — the scope must come from THIS Finding's release",
+			repo.releaseScopeFor)
+	}
+}
+
+// The narrow evidence WINS, and the repository is never asked. This is what makes the change
+// additive: a Finding that already placed its release keeps exactly the scope it had, so no
+// existing `applicable` or `not_applicable` verdict can move.
+func TestReleaseScopeFallbackIsOnlyUsedWhenTheFindingCannotPlace(t *testing.T) {
+	repo := newRepo()
+	// An el8 component places the release from the Finding itself.
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1", "pkg:rpm/rocky/httpd@2.4", "httpd"))
+	// A CONTRADICTORY wide answer, which must never be consulted.
+	repo.releaseScope = value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "9"}
+
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("httpd", "in RHEL 8", value.FamilyEnterpriseLinux, "8"),
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if got := a.VendorStatements[0].Applicability; got != "applicable" {
+		t.Errorf("applicability = %q, want applicable — the Finding's own el8 component decides", got)
+	}
+	if repo.releaseScopeFor != "" {
+		t.Errorf("the repository was consulted (%q) although the Finding placed its own release",
+			repo.releaseScopeFor)
+	}
+}
+
+// A repository error degrades to today's behaviour rather than failing the read. An applicability
+// determination is not worth failing an assessment over, and the fail-safe direction is unchanged:
+// an unplaced release yields `not_comparable`, which cannot clear anything.
+func TestReleaseScopeErrorDegradesToNotComparable(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:maven/x/xbean@4.5", Name: "xbean", Version: "4.5",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	repo.releaseScopeErr = errors.New("pool exhausted")
+
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("xbean", "in RHEL 9", value.FamilyEnterpriseLinux, "9"),
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment must not fail on a scope-lookup error: %v", err)
+	}
+	if got := a.VendorStatements[0].Applicability; got != "not_comparable" {
+		t.Errorf("applicability = %q, want not_comparable on a lookup failure", got)
+	}
+}
+
+// The RAISE path uses the same resolution, so the drawer and the decision cannot disagree about
+// one statement. With the release resolved from the wide evidence, an applicable statement on a
+// Finding that places nothing itself now raises — where before it was blocked as uncomparable.
+func TestReactToEnrichment_ReleaseScopeFallbackUnblocksTheRaise(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:maven/x/xbean@4.5", Name: "xbean", Version: "4.5", // places nothing
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	repo.releaseScope = value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}
+
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("xbean", "in RHEL 9", value.FamilyEnterpriseLinux, "9"),
+			notAffectedScoped("xbean", "in RHEL 8", value.FamilyEnterpriseLinux, "8"),
+		},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	var raised []string
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		if p.Stance() == domain.StanceNotAffected {
+			raised = append(raised, p.Rationale())
+		}
+	}
+	if len(raised) != 1 || !strings.Contains(raised[0], "RHEL 8") {
+		t.Errorf("raised %v, want exactly the RHEL 8 statement — the release resolves to 8", raised)
+	}
+}
+
 // EDR-VEX-02 D2, the VISIBLE half: a blocked statement must still reach the reviewer. It raises
 // no Proposal — the block is structural — so without the assessment carrying it, "Red Hat said
 // nothing" and "Red Hat spoke about another product" would look identical.

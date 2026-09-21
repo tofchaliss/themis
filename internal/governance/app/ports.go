@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/kernel/value"
 )
 
 // ErrConcurrent is returned when an optimistic-concurrency save loses the race; the
@@ -79,6 +80,20 @@ type Repository interface {
 	// SetBandAndFixes materializes the exploitability band and the SELECTED fix versions onto one
 	// Finding, so a release rollup carries both without a read per row (DASH-2 / PLAN-3).
 	SetBandAndFixes(ctx context.Context, findingID, band string, fixes []FixedVersion) error
+	// ReleaseScope resolves the PRODUCT SCOPE of a release from its components across every
+	// Finding on it (EDR-VEX-02 D12, DEF_GOV_RELEASE_SCOPE_FROM_FINDING).
+	//
+	// It exists because the release's OS identity is a property of the RELEASE, and deriving it
+	// from one Finding's matched components reports a placeable release as unplaceable whenever
+	// that Finding happens to carry only Maven/PyPI/npm packages. Measured 2026-09-21: a release
+	// with 688 of 721 components carrying `el8` reported `not_comparable` against Red Hat's
+	// `enterprise-linux 9` statements, where the truth available to Themis was `not_applicable`.
+	//
+	// Returns the ZERO scope when the release resolves to anything other than exactly one
+	// distribution major — none, or several. "Several" is not a tie to break: a release built
+	// from one base with packages from another genuinely has no single major, and asserting one
+	// would be a guess dressed as a fact. The caller then keeps today's behaviour.
+	ReleaseScope(ctx context.Context, releaseID string) (value.ProductScope, error)
 	// Save persists the aggregate + outbox notes atomically. created=true inserts a new
 	// Finding; otherwise it updates guarded by prevVersion and returns ErrConcurrent on a
 	// version mismatch. Appended proposals/positions are persisted idempotently by key.

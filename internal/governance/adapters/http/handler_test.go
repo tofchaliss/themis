@@ -29,6 +29,9 @@ type fakeRepo struct {
 	byID        map[domain.FindingID]domain.Finding
 	order       []domain.FindingID
 	err         error
+	// releaseScope is the WIDE release evidence (EDR-VEX-02 D12); zero = does not resolve,
+	// which is the pre-D12 behaviour.
+	releaseScope value.ProductScope
 }
 
 func newRepo() *fakeRepo { return &fakeRepo{byID: map[domain.FindingID]domain.Finding{}} }
@@ -776,4 +779,8 @@ func TestProposerActorIsBoundToAuthenticatedPrincipal(t *testing.T) {
 	if got := p2[len(p2)-1].Proposer().ID; got != "dev:api" {
 		t.Errorf("proposer = %q, want dev:api — an undeclared proposer must not read as a real one", got)
 	}
+}
+
+func (r *fakeRepo) ReleaseScope(_ context.Context, _ string) (value.ProductScope, error) {
+	return r.releaseScope, nil
 }

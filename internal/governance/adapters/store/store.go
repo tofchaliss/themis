@@ -432,6 +432,58 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 	return out, rows.Err()
 }
 
+// ReleaseScope resolves a release's product scope from the components of every Finding on it
+// (EDR-VEX-02 D12, DEF_GOV_RELEASE_SCOPE_FROM_FINDING).
+//
+// The scope is derived in Go, from the version strings, by the SAME kernel function the narrow
+// path uses (`value.ScopeFromRPMRelease`) — deliberately NOT by an SQL regex. A second
+// implementation of "what major is this build" in another language is a second thing to keep
+// correct, and `RPMReleaseMajor` already handles the forms that matter (`.el8`, `+el8`,
+// `el8_10`). The query's job is to fetch distinct versions; the judgement stays in one place.
+//
+// Returns the ZERO scope unless the release resolves to EXACTLY ONE major. Several majors is not
+// a tie to break: a release built from one base with packages from another genuinely has no
+// single product scope, and picking the most common one would assert a fact nobody established.
+// Measured 2026-09-21 — the estate's release resolves cleanly (688 components at `el8`, 33 with
+// no marker at all, zero conflicts), so the multi-major branch is a guard rather than a workaround.
+//
+// It reads through `querier` so it joins an ambient inbox transaction when one is open
+// (CONVENTIONS R3) — the same requirement that BUG-1 established for aggregate reads inside an
+// event handler.
+func (s *Store) ReleaseScope(ctx context.Context, releaseID string) (value.ProductScope, error) {
+	rows, err := s.querier(ctx).Query(ctx, `
+		SELECT DISTINCT c.version
+		  FROM finding_components c
+		  JOIN findings f ON f.id = c.finding_id
+		 WHERE f.release_id = $1 AND c.version <> ''`, releaseID)
+	if err != nil {
+		return value.ProductScope{}, err
+	}
+	defer rows.Close()
+
+	var resolved value.ProductScope
+	for rows.Next() {
+		var version string
+		if err := rows.Scan(&version); err != nil {
+			return value.ProductScope{}, err
+		}
+		scope := value.ScopeFromRPMRelease(version)
+		if !scope.Known() {
+			continue // not a distribution build — says nothing about the release's major
+		}
+		if resolved.Known() && resolved != scope {
+			// Two majors on one release: no single scope exists. Bail immediately rather than
+			// counting, because there is no count at which a conflict becomes an answer.
+			return value.ProductScope{}, nil
+		}
+		resolved = scope
+	}
+	if err := rows.Err(); err != nil {
+		return value.ProductScope{}, err
+	}
+	return resolved, nil
+}
+
 // ReleasePosture returns the Release security-posture rollup — every Finding + its current
 // stance for a Release (D10), served from the materialized current-position columns.
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {

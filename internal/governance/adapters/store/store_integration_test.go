@@ -709,3 +709,69 @@ func TestRetireComponent_LeavesTheProjectionAndStaysStored(t *testing.T) {
 		t.Errorf("a miss must be a no-op: %v", err)
 	}
 }
+
+// TestReleaseScope resolves a release's product scope from EVERY Finding on it (EDR-VEX-02 D12,
+// DEF_GOV_RELEASE_SCOPE_FROM_FINDING).
+//
+// The defect this guards: the scope used to be read from one Finding's own matched components, so
+// a Finding carrying only Maven/PyPI packages reported its release unplaceable — and then a
+// vendor statement that genuinely APPLIED could not raise a proposal. Measured on the deployment:
+// a release with 688 of 721 components at `el8`, and a Java Finding on it that could place
+// nothing at all.
+func TestReleaseScope(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	save := func(id, rel, fl string, comps ...domain.MatchedComponent) {
+		t.Helper()
+		f := newFinding(t, id, rel, fl, "CVE-2024-1")
+		for _, c := range comps {
+			if _, err := f.AbsorbComponent(c); err != nil {
+				t.Fatalf("absorb %s: %v", id, err)
+			}
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+	}
+
+	// rel-el8: one rpm Finding places it; a second Finding carries only Maven, exactly the shape
+	// that used to report the whole release unplaceable.
+	save("fnd-rpm", "rel-el8", "fl-1", domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/httpd@2.4.37-65.el8", Name: "httpd", Version: "2.4.37-65.el8"})
+	save("fnd-java", "rel-el8", "fl-2", domain.MatchedComponent{
+		PURL: "pkg:maven/org.apache.xbean/xbean@4.5", Name: "xbean", Version: "4.5"})
+
+	scope, err := st.ReleaseScope(ctx, "rel-el8")
+	if err != nil {
+		t.Fatalf("ReleaseScope: %v", err)
+	}
+	if scope.Family != value.FamilyEnterpriseLinux || scope.Major != "8" {
+		t.Errorf("scope = %+v, want enterprise-linux/8 — the rpm Finding places the release", scope)
+	}
+
+	// A release with nothing that places it stays unresolved. This is the honest answer, and it
+	// keeps DEF_VEX_NONRPM_RELEASE_UNPLACEABLE a real and separate gap rather than a fixed one.
+	save("fnd-pypi", "rel-none", "fl-3", domain.MatchedComponent{
+		PURL: "pkg:pypi/requests@2.31.0", Name: "requests", Version: "2.31.0"})
+	if scope, err := st.ReleaseScope(ctx, "rel-none"); err != nil || scope.Known() {
+		t.Errorf("scope = %+v err=%v, want an unresolved scope", scope, err)
+	}
+
+	// A release STRADDLING two majors resolves to nothing — there is no count at which a conflict
+	// becomes an answer. A container built FROM one base with packages from another is the real
+	// case, and asserting a single major for it would be a guess dressed as a fact.
+	save("fnd-a", "rel-mixed", "fl-4", domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/httpd@2.4.37-65.el8", Name: "httpd", Version: "2.4.37-65.el8"})
+	save("fnd-b", "rel-mixed", "fl-5", domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/curl@7.76.1-31.el9", Name: "curl", Version: "7.76.1-31.el9"})
+	if scope, err := st.ReleaseScope(ctx, "rel-mixed"); err != nil || scope.Known() {
+		t.Errorf("straddling release scope = %+v err=%v, want unresolved", scope, err)
+	}
+
+	// An unknown release is not an error — it simply resolves to nothing.
+	if scope, err := st.ReleaseScope(ctx, "rel-ghost"); err != nil || scope.Known() {
+		t.Errorf("unknown release = %+v err=%v, want unresolved and no error", scope, err)
+	}
+}

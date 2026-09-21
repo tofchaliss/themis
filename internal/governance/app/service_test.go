@@ -15,19 +15,25 @@ import (
 // --- fakes ---------------------------------------------------------------------------
 
 type fakeRepo struct {
-	lastBand       string
-	setBandErr     error
-	lastFixes      []app.FixedVersion
-	lastSignals    domain.ExploitSignals
-	lastVerdict    domain.MatchedComponent
-	retired        map[string]string
-	byID           map[domain.FindingID]domain.Finding
-	order          []domain.FindingID
-	saveCalls      int
-	conflictFor    int // return ErrConcurrent while saveCalls <= conflictFor
-	getByIDErr     error
-	getByKeyErr    error
-	byFaultlineErr error
+	lastBand    string
+	setBandErr  error
+	lastFixes   []app.FixedVersion
+	lastSignals domain.ExploitSignals
+	lastVerdict domain.MatchedComponent
+	retired     map[string]string
+	byID        map[domain.FindingID]domain.Finding
+	order       []domain.FindingID
+	saveCalls   int
+	conflictFor int // return ErrConcurrent while saveCalls <= conflictFor
+	getByIDErr  error
+	getByKeyErr error
+	// releaseScope is what ReleaseScope returns — the WIDE evidence a Finding's own components
+	// could not supply (EDR-VEX-02 D12). Zero value means the release does not resolve, which is
+	// the pre-D12 behaviour, so every existing test is unaffected by the new port method.
+	releaseScope    value.ProductScope
+	releaseScopeErr error
+	releaseScopeFor string // records the release id asked about, to assert it is not guessed
+	byFaultlineErr  error
 	// byFaultlineCalls + byFaultlineErrOnCall fail a SPECIFIC call. ReactToEnrichment now walks
 	// the Faultline's Findings up to four times (disposition watch, re-prioritize, applicability,
 	// version-range), and a blanket error only ever exercises the first — the later three became
@@ -786,4 +792,15 @@ func TestLifecycleOps_RepoErrors(t *testing.T) {
 	if err := writeSvc(se).ResolveFinding(context.Background(), "fnd-1"); err == nil {
 		t.Error("save error: expected error")
 	}
+}
+
+// ReleaseScope is the WIDE release evidence (EDR-VEX-02 D12). It records which release it was
+// asked about, so a test can assert the resolution is driven by the Finding's own release id
+// rather than by anything inferred.
+func (r *fakeRepo) ReleaseScope(_ context.Context, releaseID string) (value.ProductScope, error) {
+	r.releaseScopeFor = releaseID
+	if r.releaseScopeErr != nil {
+		return value.ProductScope{}, r.releaseScopeErr
+	}
+	return r.releaseScope, nil
 }
