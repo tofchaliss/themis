@@ -3343,11 +3343,30 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
-- [ ] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returns `unknown` when EITHER
-  side is unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
-  reach a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run).**
-  **MED, decision-surface precision**; EDR-VEX-02 D3/D4. **NOT FIXED — this changes what
-  `ScopeMatch` returns, which is a decision, not a cleanup.**
+- [x] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returned `unknown` when EITHER
+  side was unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
+  reached a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run;
+  FIXED same day, decided by the user: fix it, and do NOT loosen `unknown`).**
+  **MED, decision-surface precision**; now **EDR-VEX-02 D11**.
+  **Fixed** with a fourth state, `not_comparable`: the vendor side is tested FIRST, so `unknown`
+  always means "the statement could not be placed" and `not_comparable` always means "the
+  statement was placed, the release was not". Both-unplaceable resolves to `unknown` — unreadable
+  evidence is the deeper gap. `applicabilityOf` now delegates the whole determination to
+  `MatchScope` (passing a zero release scope) instead of short-circuiting to `unknown` itself,
+  which is what had erased the distinction on the governance side.
+  **Four surfaces updated, and the dashboard one was a trap:** `applicabilityChip` falls through
+  to "scope unknown" for any unrecognised value, so a new state without its own branch would have
+  rendered as the very word the fix exists to stop using. Also the API enum (spec-first,
+  regenerated), and the reject script's summary, which now reports three groups instead of two.
+  **Non-clearing by construction:** every governance check compares against `ScopeApplicable`, so
+  a fourth state cannot become a suppression — asserted directly rather than left as a reading of
+  the code. A new word is not a new escape hatch.
+  **Name chosen after inspecting all usages, as the user required.** `not_comparable` describes the
+  RELATION, keeping Governance's word for an operand ("release") out of a kernel value object, and
+  it survives if the comparison ever becomes genuinely two-sided. The human-facing text carries the
+  cause instead: the chip reads "release not placeable".
+  **Still open, deliberately separate (the user's instruction):** Themis cannot place a non-rpm
+  release against a vendor product scope AT ALL. This makes that gap legible; it does not close it.
   **The measured case.** Three of 138 rejections came back `unknown` rather than
   `not_applicable`, and one of them is:
 

@@ -304,21 +304,26 @@ type Applicability struct {
 }
 
 // applicabilityOf determines whether a vendor statement covers this Finding's release
-// (EDR-VEX-02 D3/D4/D6).
+// (EDR-VEX-02 D3/D4/D6/D11).
 //
 // The release's scope comes from its own components' rpm builds: an `elN` marker IS the
 // family+major statement, which is what lets a `Red Hat Enterprise Linux 8` statement cover a
 // `Rocky Linux 8.10` release with no product-string comparison. The FIRST component that places
 // the release decides; components of one release do not straddle EL majors.
 //
-// Returns `unknown` when either side cannot be placed — epistemic uncertainty, never a mismatch.
+// The whole determination is delegated to MatchScope, including the case where NOTHING places the
+// release — a zero scope, passed through deliberately rather than short-circuited here. That is
+// what keeps the two unplaceable states apart (D11): this function used to return `unknown`
+// itself, which reported an unreadable vendor CPE and an unplaceable release as the same word.
 func applicabilityOf(f *domain.Finding, a Applicability) value.ScopeMatch {
+	var release value.ProductScope // zero = nothing on this Finding places the release
 	for _, c := range f.Components() {
-		if release := value.ScopeFromRPMRelease(c.Version); release.Known() {
-			return value.MatchScope(a.Scope, release)
+		if s := value.ScopeFromRPMRelease(c.Version); s.Known() {
+			release = s
+			break
 		}
 	}
-	return value.ScopeUnknown // nothing on this Finding places the release
+	return value.MatchScope(a.Scope, release)
 }
 
 // proposalFor maps an enrichment signal to the Governance Proposal it should raise (D6). It

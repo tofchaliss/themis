@@ -33,12 +33,35 @@ const (
 	ScopeApplicable ScopeMatch = "applicable"
 	// ScopeNotApplicable — the scope is positively KNOWN and does not match.
 	ScopeNotApplicable ScopeMatch = "not_applicable"
-	// ScopeUnknown — the scope could not be reliably determined.
+	// ScopeUnknown — the VENDOR'S STATEMENT could not be placed: no CPE, or one Themis cannot
+	// classify.
 	//
 	// EPISTEMIC UNCERTAINTY, never product mismatch (D4). "I know this does not apply" and "I
 	// cannot determine whether this applies" are different statements, and collapsing the second
 	// into the first would hide a broken resolver behind reasonable-looking numbers.
 	ScopeUnknown ScopeMatch = "unknown"
+	// ScopeNotComparable — the vendor's scope WAS placed; the RELEASE was not, so the two cannot
+	// be compared at all (D11).
+	//
+	// This is the fourth state because `unknown` was carrying two facts with different
+	// information value, which is D4's own mistake one level down. Measured 2026-09-21: a Maven
+	// `spring-web` Finding reported six identical `unknown`s against Red Hat statements naming
+	// "Red Hat build of Apache Camel 4 for Quarkus 3" — an unambiguous product. Red Hat had been
+	// perfectly clear; Themis could not place its own release, because a Maven artifact carries
+	// no `elN` build and nothing else says which distribution major it is.
+	//
+	// Those two need different reactions. A reviewer dismisses "the vendor spoke about a builder
+	// image and this is a Java library" instantly; an unreadable CPE is a feed-quality gap that
+	// permits no conclusion. Reported as one word, neither is actionable.
+	//
+	// It is ONE-SIDED and therefore UNIFORM: vendor-known + release-known always resolves through
+	// family/major, so the only route here is a release that cannot be placed — which is a fact
+	// about the Finding, not about any statement. Every statement on such a Finding reports it,
+	// and that repetition is the signal, not noise.
+	//
+	// Like every non-applicable state it CANNOT clear a Finding: the governance checks compare
+	// against ScopeApplicable, so absent evidence never suppresses.
+	ScopeNotComparable ScopeMatch = "not_comparable"
 )
 
 // MatchScope determines whether a vendor product scope covers a release's own scope (D3/D6).
@@ -47,9 +70,17 @@ const (
 // be classified before any version it carries is interpreted. `cpe:/a:redhat:openshift_pipelines:1`
 // has a perfectly valid version of `1` that has nothing to do with an OS major, so comparing
 // majors first would read it as "major 1" and decide against an operating-system release.
+// The two unplaceable cases are kept APART (D11), and the vendor side is tested first so each
+// word means exactly one thing: `unknown` is always "the vendor's statement could not be placed",
+// and `not_comparable` is always "the statement was placed, our release was not". When BOTH fail,
+// `unknown` wins — an unreadable statement is a fact about the evidence, and evidence that cannot
+// be read is the more fundamental gap.
 func MatchScope(vendor, release ProductScope) ScopeMatch {
-	if !vendor.Known() || !release.Known() {
-		return ScopeUnknown
+	if !vendor.Known() {
+		return ScopeUnknown // the statement itself cannot be placed — say nothing more
+	}
+	if !release.Known() {
+		return ScopeNotComparable // the statement is placed; there is nothing here to place it against
 	}
 	if vendor.Family != release.Family {
 		return ScopeNotApplicable // a different product — established, not uncertain

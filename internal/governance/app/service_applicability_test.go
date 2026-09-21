@@ -331,6 +331,62 @@ func TestReactToEnrichment_NoApplicableStatementRaisesNothing(t *testing.T) {
 	}
 }
 
+// DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES (EDR-VEX-02 D11): an unplaceable RELEASE reports
+// `not_comparable`, not `unknown`, so a reviewer can tell "Red Hat said nothing readable" from
+// "Red Hat was perfectly clear and we cannot place our own release".
+//
+// The measured case, reproduced exactly: a Finding carrying a Maven artifact — no `elN` build
+// anywhere — against Red Hat statements naming a Quarkus product. Before the fix all of them
+// reported `unknown`, which is why six identical rows appeared with nothing distinguishing a
+// clear vendor statement from a missing one.
+//
+// Both properties are asserted together on purpose: the WORD must change AND the behaviour must
+// not. not_comparable is non-clearing exactly like unknown, so nothing becomes suppressible.
+func TestGetFindingAssessment_UnplaceableReleaseIsNotComparable(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:maven/org.springframework/spring-web@5.3.39", Name: "spring-web", Version: "5.3.39",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2024-1",
+		Applicabilities: []app.Applicability{
+			// The vendor was CLEAR — a readable product scope.
+			notAffectedScoped("spring-web", "Red Hat: not affected in Red Hat build of Apache Camel 4 for Quarkus 3",
+				"quarkus", "3"),
+			// The vendor said nothing placeable — a genuinely different situation.
+			{Package: "spring-web", Status: "not_affected", Justification: "Red Hat: not affected"},
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	want := []string{"not_comparable", "unknown"}
+	for i, w := range want {
+		if got := a.VendorStatements[i].Applicability; got != w {
+			t.Errorf("statement %d (%q) = %q, want %q", i, a.VendorStatements[i].Justification, got, w)
+		}
+	}
+
+	// The behaviour half: neither may suppress.
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1", Applicabilities: kn.k.Applicabilities,
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		if p.Stance() == domain.StanceNotAffected {
+			t.Error("a not_comparable statement must not suppress — a new state is not a new escape hatch")
+		}
+	}
+}
+
 // EDR-VEX-02 D2, the VISIBLE half: a blocked statement must still reach the reviewer. It raises
 // no Proposal — the block is structural — so without the assessment carrying it, "Red Hat said
 // nothing" and "Red Hat spoke about another product" would look identical.

@@ -700,6 +700,13 @@ const applicabilityChip = (a) => {
   if (a === "not_applicable") {
     return `<span class="chip chip-warn" title="Themis established the vendor's product scope and it does NOT cover this release, so the statement cannot clear this finding. The statement is kept as evidence — it is not ignored.">does not apply here</span>`;
   }
+  // not_comparable needs its OWN branch, not the fallthrough: the whole point of adding the
+  // state (EDR-VEX-02 D11) is that it stops reading as "scope unknown". The vendor was clear
+  // here — it is this release that could not be placed, which is why it shows on every statement
+  // of the finding at once.
+  if (a === "not_comparable") {
+    return `<span class="chip chip-warn" title="The vendor DID state a readable product scope — it is THIS RELEASE that Themis could not place, so the two cannot be compared. Typical cause: a Maven, npm or PyPI component, which carries no distribution build. This is not a product mismatch and not a missing vendor statement; it appears on every statement of this finding because it describes the release, not the statement.">release not placeable</span>`;
+  }
   return `<span class="chip" title="Themis could not establish the statement's product scope — the CPE was absent, malformed or unclassifiable. That is uncertainty, NOT a product mismatch, and an unplaceable statement cannot clear a finding.">scope unknown</span>`;
 };
 

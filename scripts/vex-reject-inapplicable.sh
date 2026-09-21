@@ -21,7 +21,7 @@
 # covering its package is `applicable`. A card whose assessment cannot be read is skipped rather
 # than guessed at.
 #
-# `unknown` counts toward rejection, and the report keeps it SEPARATE from `not_applicable`,
+# `unknown` and `not_comparable` both count toward rejection, and the report keeps all three apart,
 # because D4 insists the two are different statements: "this does not apply" versus "I cannot
 # determine whether this applies". Both reach the same action here, for one reason — the FIXED
 # raise path blocks on anything that is not `applicable`, so a proposal resting on an all-`unknown`
@@ -94,7 +94,7 @@ if [ -z "$CANDIDATES" ]; then
   exit 0
 fi
 
-TOTAL=0; REJECT=0; KEEP=0; SKIP=0; FAIL=0; MISMATCH=0; UNPLACEABLE=0
+TOTAL=0; REJECT=0; KEEP=0; SKIP=0; FAIL=0; MISMATCH=0; UNPLACEABLE=0; NOTCOMPARABLE=0
 
 while IFS='|' read -r finding proposal pkg product; do
   [ -n "$finding" ] || continue
@@ -128,8 +128,12 @@ while IFS='|' read -r finding proposal pkg product; do
 
   printf '  \033[31m-\033[0m %-28s reject — vendor scoped it to %s [%s]\n' "$pkg" "$product" "$VERDICTS"
   REJECT=$((REJECT + 1))
+  # Ordered most-informative first: a known mismatch outranks the two unplaceable states, and a
+  # placed-vendor/unplaceable-release verdict (D11) outranks an unreadable statement. A statement
+  # group carrying several verdicts is classified by the best evidence in it.
   case ",$VERDICTS," in
     *,not_applicable,*) MISMATCH=$((MISMATCH + 1)) ;;
+    *,not_comparable,*) NOTCOMPARABLE=$((NOTCOMPARABLE + 1)) ;;
     *)                  UNPLACEABLE=$((UNPLACEABLE + 1)) ;;
   esac
   [ "$APPLY" = "1" ] || continue
@@ -145,11 +149,16 @@ while IFS='|' read -r finding proposal pkg product; do
 done <<< "$CANDIDATES"
 
 printf '\n  reviewed %d · reject %d · kept %d · skipped %d\n' "$TOTAL" "$REJECT" "$KEEP" "$SKIP"
-printf '  of the rejections: %d a KNOWN product mismatch, %d a scope Themis could not place\n' \
-  "$MISMATCH" "$UNPLACEABLE"
+printf '  of the rejections: %d a KNOWN product mismatch, %d an unplaceable RELEASE, %d an unreadable STATEMENT\n' \
+  "$MISMATCH" "$NOTCOMPARABLE" "$UNPLACEABLE"
+if [ "$NOTCOMPARABLE" -gt 0 ]; then
+  printf '  the RELEASE group (not_comparable, D11): the vendor stated a readable product scope and\n'
+  printf '  this release could not be placed — typically a maven/npm/pypi component with no distro\n'
+  printf '  build. Not a mismatch, and not a missing vendor statement.\n'
+fi
 if [ "$UNPLACEABLE" -gt 0 ]; then
-  printf '  the second group is not a mismatch (D4) — read it on its own; a large count usually\n'
-  printf '  means those Findings carry no rpm build that places the release.\n'
+  printf '  the STATEMENT group (unknown, D4): the vendor supplied no readable CPE, so nothing at\n'
+  printf '  all follows from it. This is a feed-quality count, not an estate finding.\n'
 fi
 if [ "$APPLY" = "1" ]; then
   printf '  written: %d rejected, %d failed\n' "$((REJECT - FAIL))" "$FAIL"
