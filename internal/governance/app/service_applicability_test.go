@@ -264,3 +264,53 @@ func TestReactToEnrichment_UnplaceableReleaseBlocks(t *testing.T) {
 		}
 	}
 }
+
+// EDR-VEX-02 D2, the VISIBLE half: a blocked statement must still reach the reviewer. It raises
+// no Proposal — the block is structural — so without the assessment carrying it, "Red Hat said
+// nothing" and "Red Hat spoke about another product" would look identical.
+//
+// The three facts stay in three fields: the vendor's words, the scope the VENDOR stated, and
+// Themis's determination. None overwrites another.
+func TestGetFindingAssessment_VendorStatementsCarryThemisDetermination(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2023-31122", "pkg:rpm/rocky/httpd@2.4", "httpd"))
+	kn := stubKnowledge{k: app.FaultlineKnowledge{
+		FaultlineID: "fl-1", CVE: "CVE-2023-31122",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("httpd", "Red Hat: not affected in Red Hat Enterprise Linux 7",
+				value.FamilyEnterpriseLinux, "7"),
+			notAffectedScoped("httpd", "Red Hat: not affected in Red Hat Enterprise Linux 8",
+				value.FamilyEnterpriseLinux, "8"),
+			notAffectedScoped("httpd", "Red Hat: not affected in OpenShift Pipelines",
+				"openshift_pipelines", "1"),
+			{Package: "httpd", Status: "not_affected", Justification: "no scope stated"},
+		},
+	}}
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn)
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(a.VendorStatements) != 4 {
+		t.Fatalf("vendor statements = %d, want all 4 carried — none is discarded for being inapplicable",
+			len(a.VendorStatements))
+	}
+	want := []string{"not_applicable", "applicable", "not_applicable", "unknown"}
+	for i, w := range want {
+		if got := a.VendorStatements[i].Applicability; got != w {
+			t.Errorf("statement %d (%q) applicability = %q, want %q",
+				i, a.VendorStatements[i].Justification, got, w)
+		}
+	}
+	// The vendor's own words survive verbatim beside Themis's conclusion (D1/D8).
+	for _, v := range a.VendorStatements {
+		if v.Status != "not_affected" {
+			t.Errorf("status = %q — the vendor's assertion must never carry Themis's determination", v.Status)
+		}
+	}
+	// And the scope shown is the VENDOR's, not a rewritten one.
+	if a.VendorStatements[0].ScopeMajor != "7" || a.VendorStatements[1].ScopeMajor != "8" {
+		t.Errorf("scopes = %q/%q, want the vendor's 7 and 8",
+			a.VendorStatements[0].ScopeMajor, a.VendorStatements[1].ScopeMajor)
+	}
+}

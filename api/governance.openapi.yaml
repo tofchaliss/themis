@@ -491,6 +491,44 @@ components:
           $ref: '#/components/schemas/FindingView'
         knowledge:
           $ref: '#/components/schemas/FaultlineKnowledge'
+        vendor_statements:
+          type: array
+          description: >-
+            The card's vendor VEX statements, each beside Themis's own determination of whether
+            it covers THIS release (EDR-VEX-02 D2). Present so a BLOCKED statement still reaches
+            the reviewer: a statement whose scope does not cover the release raises no Proposal,
+            and without this it would vanish from the view rather than being visibly inapplicable.
+          items:
+            $ref: '#/components/schemas/VendorStatement'
+    VendorStatement:
+      type: object
+      description: >-
+        One vendor statement as EVIDENCE, beside Themis's separate conclusion. The three concepts
+        never collapse into one field: `status`/`justification` are the vendor's own words,
+        verbatim; `scope_family`/`scope_major` are the product the VENDOR said it covers; and
+        `applicability` is Themis's determination. Nothing here rewrites the vendor's statement.
+      properties:
+        package: { type: string }
+        status:
+          type: string
+          description: The VENDOR'S assertion, e.g. `not_affected`. Never carries Themis's conclusion.
+        justification:
+          type: string
+          description: The vendor's stated reason, verbatim.
+        scope_family:
+          type: string
+          description: Product family the vendor scoped it to, e.g. `enterprise-linux`. Empty = no readable scope.
+        scope_major:
+          type: string
+          description: Major version of that family, e.g. `8`. Empty = no readable scope.
+        applicability:
+          type: string
+          enum: [applicable, not_applicable, unknown]
+          description: >-
+            THEMIS'S determination for this release. Only `applicable` can have become a
+            Proposal. `not_applicable` means the scope was positively established and does not
+            cover this release. `unknown` is epistemic uncertainty — a scope Themis could not
+            establish — and is never a product mismatch.
     FaultlineKnowledge:
       type: object
       description: >

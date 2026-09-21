@@ -677,6 +677,52 @@ function segBarWireTips() {
   });
 }
 
+/* Vendor VEX statements, with Themis's applicability determination beside each
+   (EDR-VEX-02 D2).
+
+   This section exists because of a measured defect: a Rocky 8.10 release was shown
+   "not_affected for httpd (Red Hat: not affected in Red Hat Enterprise Linux 7)" as an
+   acceptable proposal, with nothing saying RHEL 7 is not what the release runs. ~90% of the
+   vendor statements on that estate were scoped to products it does not run.
+
+   A statement whose scope does not cover the release now raises no proposal at all — the block
+   is structural, since a proposal is the only thing that can clear a finding. So without this
+   section the statement would DISAPPEAR, and "Red Hat said nothing" would look identical to
+   "Red Hat spoke about another product". It is not ignored: it is a valid vendor assertion whose
+   scope does not apply here, and that distinction is the whole audit trail.
+
+   Three facts, three columns, never merged: the vendor's words, the scope the VENDOR stated, and
+   Themis's determination. */
+const applicabilityChip = (a) => {
+  if (a === "applicable") {
+    return `<span class="chip chip-good" title="the vendor's product scope covers this release, so this statement is usable — it still needs a decision, and policy cannot auto-accept vendor VEX because it is Asserted evidence">applies here</span>`;
+  }
+  if (a === "not_applicable") {
+    return `<span class="chip chip-warn" title="Themis established the vendor's product scope and it does NOT cover this release, so the statement cannot clear this finding. The statement is kept as evidence — it is not ignored.">does not apply here</span>`;
+  }
+  return `<span class="chip" title="Themis could not establish the statement's product scope — the CPE was absent, malformed or unclassifiable. That is uncertainty, NOT a product mismatch, and an unplaceable statement cannot clear a finding.">scope unknown</span>`;
+};
+
+function vendorStatementsSection(assessment) {
+  const vs = (assessment && assessment.vendor_statements) || [];
+  if (!vs.length) return "";
+  const blocked = vs.filter((v) => v.applicability !== "applicable").length;
+  return `
+    <section>
+      <h3 class="section-h">Vendor statements${blocked ? ` <span class="chip chip-warn">${blocked} not usable here</span>` : ""}</h3>
+      <p class="card-sub" style="margin:0 0 6px">What the vendor asserted, and whether Themis determined it covers <em>this</em> release. A statement is only usable when its product scope matches — one that does not is kept as evidence, never deleted.</p>
+      ${vs.map((v) => `<div class="prec">
+        <div class="prec-top">
+          <span class="chip ${v.status === "not_affected" ? "chip-good" : ""}">${esc(v.status || "—")}</span>
+          <span class="mono">${esc(v.package || "—")}</span>
+          ${v.scope_family ? `<span class="chip chip-info" title="the product the VENDOR scoped this statement to">${esc(v.scope_family)} ${esc(v.scope_major || "")}</span>` : `<span class="chip chip-info" title="the vendor supplied no readable product scope">no stated scope</span>`}
+          ${applicabilityChip(v.applicability)}
+        </div>
+        ${v.justification ? `<div class="prec-rationale">${esc(v.justification)}</div>` : ""}
+      </div>`).join("")}
+    </section>`;
+}
+
 function componentCell(components) {
   const cs = components || [];
   if (!cs.length) return `<span class="chip chip-info">none recorded</span>`;
@@ -1621,6 +1667,8 @@ async function openDrawer(entry) {
           </div>` : ""}
         </div>`).join("") : `<div class="empty">No proposals yet — raise one above, or ask the AI below.</div>`}
     </section>
+
+    ${vendorStatementsSection(assessment)}
 
     ${entry.has_position ? `<section>
       <h3 class="section-h">Publish</h3>

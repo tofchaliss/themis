@@ -3310,7 +3310,7 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
-- [ ] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
+- [x] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
   surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
   user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.
   **The symptom:** the drawer on a **Rocky 8.10** estate shows the vendor proposal
@@ -3510,6 +3510,34 @@ under the 2026-08-07 re-derivation standard.
 
   The measured facts above (the Observed floor holding in code and data; 23 of 26 accepted
   proposals coming from the version-range path) are settled and are not to be re-derived.
+
+  ---
+  **IMPLEMENTED 2026-09-21 — all six steps, in the decided order.**
+  1. `PackageState` reads the `cpe` (present all along, simply unread).
+  2. The vendor's `Status`/`Justification` are untouched; a test asserts a blocked statement is
+     neither mutated nor discarded.
+  3/4. `value.ProductScope` + `ScopeFromCPE` + `ScopeFromRPMRelease` + `MatchScope` — product
+     classified BEFORE any version is interpreted (D5), with `openshift_pipelines:1` as an
+     explicit test that a non-OS version is never read as an OS major.
+  5. Governance blocks a non-applicable statement **structurally**: a Proposal is the only thing
+     that can clear a Finding, so declining to raise one makes the statement unusable by policy
+     AND by a human, with no new "blocked" state to get wrong. `unknown` is blocked too.
+  6. The drawer gains a **Vendor statements** section showing the vendor's words, the scope the
+     VENDOR stated, and Themis's determination in three separate columns — reached through the
+     existing assessment endpoint, which composes Finding + card. Without it a blocked statement
+     would have DISAPPEARED (it raises no proposal), making "Red Hat said nothing" and "Red Hat
+     spoke about another product" look identical.
+
+  Also landed: D7's dedup key gains the product, so array position no longer picks the survivor;
+  the reconciled view's sort gains a scope tiebreak with a determinism test (two statements for
+  one package can now differ only by scope, and the view is compared for equality).
+  **Four existing tests needed their PRECONDITIONS fixed, not their expectations** — they used
+  components with no `elN` marker and statements with no scope, so the release was unplaceable and
+  the new rule correctly blocked them. The BUG-1 convergence test and the Asserted-trust test are
+  about other things entirely; each now carries a placeable release with a comment saying so.
+  **NOT live-verified.** Validate in the order EDR-VEX-02 sets: the `unknown` population FIRST,
+  and if it is unexpectedly large, STOP — that means the resolver is broken, not that `unknown`
+  should be loosened.
   **Fix shape to decide (design-first — a domain model change):** give `Applicability` a product/
   stream scope and keep one statement PER (package, product) instead of collapsing to one per
   package; then match a statement to a Finding only when its scope matches the release's own
