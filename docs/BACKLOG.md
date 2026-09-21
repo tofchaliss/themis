@@ -3383,6 +3383,50 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
+- [ ] **DEF_AI_EMPTY_INFORMATION_REPORTED_OK — a BLANK Information answer is recorded as
+  `reason=ok`, so a decline is counted as a success and rendered as "the Gateway stated no reason"
+  (found 2026-09-21 from a user question about CVE-2026-33006).** **MED**; EDR-INTELLIGENCE-01
+  T7/T8 + AI-204-1. **NOT FIXED.**
+  **The chain, read from the code.** For an Information capability the SUCCESS path is
+  `produced=false` + `reason=ok` — deliberate, and the code says so: *"produced stays FALSE: there
+  is no proposal to record."* The HTTP layer returns the prose only when there IS prose
+  (`oc.Information != ""`), so **`204` + `reason=ok` means the explanation came back EMPTY**, and
+  the Gateway calls that success.
+  **Nothing catches it, and that is the interesting part.** A blank answer passes both gates on
+  this path: the JSON schema accepts an empty string, and Grounding Verification — the ONLY gate
+  on the Information path (T8) — cannot fault an answer that names no identifiers. **R4b for the
+  third time:** presence of a schema-valid field is not presence of useful content (prior
+  instances: the Syft-derived CPEs in ATTR-CPE-1, and the `cpe` the Red Hat DTO dropped).
+  **Why it matters past the label.** `insufficient` exists for exactly this — the honest decline,
+  already rendered as "declined honestly". Routing an empty answer into `ok` means
+  `themis_ai_invocations_total{reason="ok"}` OVERCOUNTS working explanations (14 invocations on
+  the deployment are `produced=false, reason=ok`, an unknown number of them blanks), and an
+  evaluation loop reading those counters would score empties as successes.
+  **Shape of a fix:** treat empty/whitespace-only `Information` as `ReasonInsufficient` where it
+  is set, beside the existing `UngroundedMentions` scan. That makes the existing 204 correct and
+  needs no UI change — the dashboard already renders `insufficient` properly.
+  **Likely trigger for the observed CVE:** thin grounding, typically a card with no stored
+  summary, so the model had nothing to write. Unconfirmed — the `summary_len` check is the test.
+
+- [ ] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
+  reasons, so the other six render as "the Gateway stated no reason" (found 2026-09-21, same
+  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **NOT FIXED — one-file change.**
+  Mapped: `insufficient` · `disabled` · `unreachable` · `provider_error` · `budget_exhausted` ·
+  `business_invalid`. **Missing:** `ok` · `no_grounding` · `prompt_error` · `schema_invalid` ·
+  `unauthorized` · `selection_mismatch` · `unknown_capability`.
+  **The message does not merely fail to help — it ASSERTS** that the Gateway stated no reason,
+  when in every one of those cases it stated a precise one. And they are operationally unlike
+  each other: `unauthorized` and `selection_mismatch` are caller bugs, `prompt_error` and
+  `schema_invalid` are contract problems, `no_grounding` is a data gap, `ok` is success.
+  **This is the exact condition AI-204-1 was created to remove** — *"Before that, all of them read
+  as 'the AI declined'."* The server implements AI-204-1 correctly; the dashboard's list was never
+  extended to match, so the ambiguity returned on the other side of the wire. A gate nobody
+  re-derived after the vocabulary grew — **R5's shape applied to an enum rather than to
+  cardinality**.
+  **Fix:** add the seven, and make the fallback honest — name the unrecognised reason rather than
+  denying one exists, so the NEXT server-side reason degrades to something actionable. Keep the
+  deliberate `disabled`/`unreachable` special-case in `explainRequest` (enabled-only rendering).
+
 - [ ] **DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE — a vendor proposal id is `(finding, package)`, which
   cannot represent N product-scoped statements for one package (filed 2026-09-21 by user decision;
   blocks the 8 miscited proposals).** **MED, and it is the SAME CARDINALITY SHAPE as
