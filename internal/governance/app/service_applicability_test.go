@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/governance/app"
@@ -261,6 +262,71 @@ func TestReactToEnrichment_UnplaceableReleaseBlocks(t *testing.T) {
 	for _, p := range repo.byID["fnd-1"].Proposals() {
 		if p.Stance() == domain.StanceNotAffected {
 			t.Error("an unplaceable release must not be suppressed by a vendor statement")
+		}
+	}
+}
+
+// DEF_VEX_COVERING_FIRST_MATCH — the regression for D7's second half: selection among the
+// statements covering one package must be by APPLICABILITY, not by array position.
+//
+// The concrete case, and it is the common one on this estate. Red Hat states httpd not_affected
+// for RHEL 7 AND for RHEL 8. Before D7 the dedup key was the package name alone, so only one of
+// them survived; now both are kept — and they sort by scope, so major 7 comes FIRST. A first-match
+// reader on a Rocky 8.10 release therefore picks the RHEL 7 statement, determines `not_applicable`,
+// and blocks — discarding the RHEL 8 statement sitting directly behind it, which applies exactly.
+//
+// Two correct halves (keep every product · block what does not apply) composing into a false
+// negative. The order is deliberately 7-then-8 here because that is the order the view produces.
+func TestReactToEnrichment_PicksApplicableStatementNotTheFirstOne(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1", "pkg:rpm/httpd@2.4", "httpd"))
+	s := writeSvc(repo) // no policies → raise only, never auto-accept
+
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("httpd", "not affected in Red Hat Enterprise Linux 7", value.FamilyEnterpriseLinux, "7"),
+			notAffectedScoped("httpd", "not affected in Red Hat Enterprise Linux 8", value.FamilyEnterpriseLinux, "8"),
+		},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+
+	props := repo.byID["fnd-1"].Proposals()
+	var raised []string
+	for _, p := range props {
+		if p.Stance() == domain.StanceNotAffected {
+			raised = append(raised, p.Rationale())
+		}
+	}
+	if len(raised) != 1 {
+		t.Fatalf("not_affected proposals = %d (%v), want 1 raised from the APPLICABLE statement", len(raised), raised)
+	}
+	// The rationale carries the vendor justification, so it identifies WHICH statement was used.
+	if !strings.Contains(raised[0], "Enterprise Linux 8") {
+		t.Errorf("rationale = %q, want the RHEL 8 statement — the RHEL 7 one does not apply to this release", raised[0])
+	}
+}
+
+// The mirror: when NO covering statement is applicable, nothing is raised. The fallback exists so
+// the block is made against a statement that was really seen, not so it can be acted on.
+func TestReactToEnrichment_NoApplicableStatementRaisesNothing(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1", "pkg:rpm/httpd@2.4", "httpd"))
+
+	if err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{
+		FaultlineID: "fl-1",
+		Applicabilities: []app.Applicability{
+			notAffectedScoped("httpd", "RHEL 7", value.FamilyEnterpriseLinux, "7"),
+			notAffectedScoped("httpd", "RHEL 9", value.FamilyEnterpriseLinux, "9"),
+			notAffectedScoped("httpd", "OpenShift Pipelines", "redhat/openshift_pipelines", "1"),
+		},
+	}); err != nil {
+		t.Fatalf("react: %v", err)
+	}
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		if p.Stance() == domain.StanceNotAffected {
+			t.Errorf("raised %q — no statement applies to this release", p.Rationale())
 		}
 	}
 }

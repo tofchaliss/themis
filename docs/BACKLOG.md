@@ -3310,6 +3310,64 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
+- [x] **DEF_VEX_COVERING_FIRST_MATCH — an inapplicable vendor statement blocks an APPLICABLE one
+  for the same package, because selection is still by array position (found 2026-09-21 while
+  verifying EDR-VEX-02 D7, FIXED same day).** **HIGH, FALSE-NEGATIVE path** — this one suppresses
+  a legitimate vendor clearance, where DEF_VEX_SCOPE_CODEC_DROP only lost information.
+  **The case.** Red Hat states `httpd` `not_affected` for **RHEL 7** and for **RHEL 8**. Before D7
+  the dedup key was the package name alone, so exactly one survived; now both are kept — and the
+  reconciled view sorts by package → status → justification → scope, so **major 7 comes first**.
+  `coveringStatement` returned the first statement whose package the Finding covered,
+  `applicabilityOf` correctly found it `not_applicable` for a Rocky **8.10** release, and the
+  raise was blocked — **discarding the RHEL 8 statement directly behind it, which applies
+  exactly.** No proposal at all: measured as 0 raised where 1 was owed.
+  **This is two correct halves composing into a defect.** Keeping every product (D7) is right.
+  Blocking what does not apply (D2) is right. First-match selection was harmless only while
+  exactly one statement per package existed — the very property D7 removed. D7's own text names
+  the requirement (*"`coveringStatement` must then select among the statements covering a
+  Finding's package by APPLICABILITY, not by array position"*) and the first half shipped without
+  the second.
+  **Fixed** by selecting the first covering statement whose scope is `applicable`, falling back to
+  the first covering statement only so the block is reported against a statement really present
+  (D2's visible half stays truthful). Guarded both directions: an applicable statement behind an
+  inapplicable one now raises, and a package with three inapplicable statements still raises
+  nothing. Verified by stashing the fix — the test reports 0 proposals.
+  **Worth noting about the detection:** no test failed. The existing suite covered "one applicable
+  statement raises" and "one inapplicable statement blocks", and both stayed green — the defect
+  lives only in the interaction of two statements for one package, which is a case that could not
+  exist before D7. A change that alters CARDINALITY needs its tests re-derived, not just re-run.
+
+- [x] **DEF_VEX_SCOPE_CODEC_DROP — the store codec dropped `Applicability.Scope`, so every vendor
+  statement reloaded scope-less (found live 2026-09-21 on the VM, FIXED same day).** **HIGH,
+  self-inflicted regression in VEX-SCOPE-1**; EDR-VEX-02 D5.
+  **The symptom, measured on the VM after deploying `0fb8784`:** the scope-distribution query
+  returned one row — `(none)||1844` — i.e. the statement count had nearly doubled from 947
+  (correct, see below) while **every single statement still reported an empty scope**. Every
+  other half of the chain was present and correct: the feed ACL parsed the CPE, the domain
+  carried the field, the read API emitted `scope_family`/`scope_major`, the event payload carried
+  it, and Governance decoded it. Only persistence dropped it.
+  **The mechanism.** `internal/knowledge/adapters/store/codec.go` has TWO applicability DTOs —
+  the materialized `viewDTO` and the append-only `proposalPayloadDTO` — and neither gained a
+  scope field. So the scope was computed on every fold and discarded on every save.
+  **Why it is worse than a missing display field.** The comment immediately above `viewDTO`'s
+  trust fields states the rule this violated: *"These MUST round-trip: the view is reloaded
+  before every fold, so a dropped field decodes as empty, gets recomputed, and the aggregate
+  reports a spurious view change on every single fold — firing a duplicate FaultlineEnriched each
+  time."* The warning was written for the trust fields and applies verbatim to any view field;
+  writing a new one without reading it is the actual lesson.
+  **Fixed** by adding flat `scope_family`/`scope_major` to both DTOs (flat, not nested, for the
+  reason the read API is flat: a half-populated object must not read as an established scope).
+  Guarded by three tests, and the integration one asserts **convergence**, not presence:
+  re-folding an identical statement three times must produce NO new `FaultlineEnriched`, which is
+  the property that was actually broken. Verified by reverting the encode line — the test fails.
+  A statement stored before the field decodes with an empty scope, which reads downstream as
+  applicability `unknown` and therefore cannot suppress: the fail-safe direction.
+  **On the 947 → 1844 doubling: that is EXPECTED and is EDR-VEX-02 D7 working.** The old dedup
+  key was the package name alone, so exactly one product's statement survived per (CVE, package)
+  and which one was decided by array order in Red Hat's JSON — the arbitrariness VEX-SCOPE-1 was
+  filed for. The key is now `(package, CPE)`, so a CVE where Red Hat states `httpd` for RHEL 7, 8
+  and 9 keeps all three. Roughly two products per package across the estate is the doubling.
+
 - [x] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
   surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
   user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.

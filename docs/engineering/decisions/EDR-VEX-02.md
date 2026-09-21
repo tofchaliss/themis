@@ -182,6 +182,32 @@ So `applicable` means *"this statement is about your release"*, never *"this sta
 automatically"*. Two independent barriers remain, and D2's block is aimed at the human path while the
 trust floor is aimed at the automated one.
 
+### D10 — The scope is part of the STATEMENT, so it must round-trip through persistence
+
+Recorded because it was violated within hours of the implementation landing, and the violation was
+invisible in every test: the scope reached the read API, the event payload and the dashboard, but the
+store codec's two applicability DTOs had no scope field, so it was recomputed on every fold and thrown
+away on every save. Measured on the deployment: 1844 stored statements, every one reporting no scope
+(`DEF_VEX_SCOPE_CODEC_DROP`).
+
+Two consequences, and the second is the one that makes this a decision rather than a bug note:
+
+1. Applicability degrades to `unknown` everywhere — the fail-safe direction, so nothing was wrongly
+   suppressed, but D2/D3 stop being able to say anything at all.
+2. **The reconciled view is compared for equality before every fold.** A field that is computed but not
+   stored makes the view differ from itself on every reload, so the aggregate reports a view change that
+   did not happen and re-announces `FaultlineEnriched` forever.
+
+So the rule, and it generalises past this EDR: **any field added to the reconciled view or to a Proposal
+payload must be added to the store codec in the same change, and guarded by a test that asserts a
+repeated identical fold produces NO new event** — not merely that the field survives a round trip. The
+presence test passes while the system loops; only the convergence test fails.
+
+Stored as two flat fields (`scope_family`, `scope_major`), not a nested object, for the same reason the
+read API emits them flat: a half-populated object must not be readable as an established scope. A record
+written before the field decodes with an empty scope and therefore reads as `unknown` — which per D4
+cannot suppress anything.
+
 ## Implementation sequence
 
 Ordered so that each step is verifiable before the next depends on it:

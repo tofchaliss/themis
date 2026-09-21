@@ -1367,3 +1367,67 @@ func TestRetireDuplicateIdentity_FullLoop(t *testing.T) {
 		}
 	}
 }
+
+func applicabilityProp(t *testing.T, source, pkg, family, major string) domain.Proposal {
+	t.Helper()
+	p, err := domain.NewApplicabilityProposal(source, time.Unix(1_700_000_000, 0), domain.Applicability{
+		Package: pkg, Status: "not_affected", Justification: "vulnerable_code_not_present",
+		Scope: value.ProductScope{Family: family, Major: major},
+	})
+	if err != nil {
+		t.Fatalf("applicability proposal: %v", err)
+	}
+	return p
+}
+
+// TestApplicabilityScopeSurvivesReload is the CONVERGENCE assertion for the scope round trip
+// (EDR-VEX-02 D5). Asserting only that the scope comes back would have passed even while the
+// system re-announced the same enrichment on every fold, so this asserts the thing that actually
+// broke: after the scope is stored, re-folding the identical statement produces NO new event, and
+// the reloaded card still carries the scope the vendor stated.
+//
+// Measured before the fix: 1844 stored statements, every one with an empty scope, because the
+// store codec dropped the field and the fold recomputed it as changed each time.
+func TestApplicabilityScopeSurvivesReload(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := service(pool)
+	c := cveID(t, "CVE-2024-77")
+
+	if _, _, err := s.FoldProposal(ctx, c, applicabilityProp(t, "redhat", "httpd", value.FamilyEnterpriseLinux, "8")); err != nil {
+		t.Fatalf("first fold: %v", err)
+	}
+	after := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventFaultlineEnriched)
+
+	// The scope is on the stored view, not recomputed from nothing on the next load.
+	if n := count(t, pool,
+		`SELECT count(*) FROM faultlines
+		  WHERE jsonb_typeof(view -> 'applicabilities') = 'array'
+		    AND EXISTS (
+		      SELECT 1 FROM jsonb_array_elements(view -> 'applicabilities') a
+		       WHERE a ->> 'scope_family' = $1 AND a ->> 'scope_major' = '8')`,
+		value.FamilyEnterpriseLinux); n != 1 {
+		t.Fatalf("cards with a persisted scope = %d, want 1 (the codec dropped Scope)", n)
+	}
+
+	// Re-folding the identical statement must be a no-op. Before the fix the reloaded view had an
+	// empty scope, the fold recomputed it, and the aggregate fired FaultlineEnriched again — every
+	// single time, forever.
+	for i := 0; i < 3; i++ {
+		if _, _, err := s.FoldProposal(ctx, c, applicabilityProp(t, "redhat", "httpd", value.FamilyEnterpriseLinux, "8")); err != nil {
+			t.Fatalf("refold %d: %v", i, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventFaultlineEnriched); n != after {
+		t.Errorf("enriched events = %d after 3 identical refolds, want %d — a dropped field reports a view change that did not happen", n, after)
+	}
+
+	// A DIFFERENT scope for the same package is a distinct statement and DOES change the view
+	// (D7): a vendor saying "not affected in 8" and "not affected in 9" made two assertions.
+	if _, _, err := s.FoldProposal(ctx, c, applicabilityProp(t, "redhat", "httpd", value.FamilyEnterpriseLinux, "9")); err != nil {
+		t.Fatalf("second scope fold: %v", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventFaultlineEnriched); n != after+1 {
+		t.Errorf("enriched events = %d after a new scope, want %d — a second scope is a second statement", n, after+1)
+	}
+}

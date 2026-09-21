@@ -585,15 +585,33 @@ func (s *FindingService) reactToVersionRange(ctx context.Context, sig Enrichment
 	return nil
 }
 
-// coveringStatement returns the first not_affected statement covering one of the Finding's
-// matched components (EDR-VEX-01 D4).
+// coveringStatement returns the not_affected statement Governance should act on for this Finding:
+// the first one covering a matched component whose scope is APPLICABLE to this release, and — when
+// none is applicable — the first covering statement, so the caller blocks against the statement it
+// actually saw and the reason it reports is the truth (EDR-VEX-01 D4, EDR-VEX-02 D7).
+//
+// Selecting by APPLICABILITY rather than by array position is D7's second half, and it became
+// load-bearing the moment D7's first half landed. Before the dedup key gained the product, exactly
+// one statement survived per (CVE, package); now a CVE where Red Hat states httpd not_affected for
+// RHEL 7 AND RHEL 8 keeps both. Statements sort by package, then status, then justification, then
+// scope — so for one package the LOWER major sorts first, and a first-match reader on a Rocky 8.10
+// estate would pick the RHEL 7 statement, find it `not_applicable`, and block the applicable RHEL 8
+// statement sitting right behind it. That is a false negative built out of two correct halves.
 func coveringStatement(f *domain.Finding, apps []Applicability) (Applicability, bool) {
+	var fallback Applicability
+	found := false
 	for _, a := range apps {
-		if f.CoversPackage(a.Package) {
+		if !f.CoversPackage(a.Package) {
+			continue
+		}
+		if applicabilityOf(f, a) == value.ScopeApplicable {
 			return a, true
 		}
+		if !found {
+			fallback, found = a, true
+		}
 	}
-	return Applicability{}, false
+	return fallback, found
 }
 
 // vexRationale renders the rationale for a vendor not_affected suppression, carrying the vendor
