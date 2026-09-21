@@ -3365,6 +3365,65 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
+- [ ] **DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE — a vendor proposal id is `(finding, package)`, which
+  cannot represent N product-scoped statements for one package (filed 2026-09-21 by user decision;
+  blocks the 8 miscited proposals).** **MED, and it is the SAME CARDINALITY SHAPE as
+  DEF_VEX_COVERING_FIRST_MATCH** (see CONVENTIONS **R5**); EDR-VEX-02 D7 + EDR-GOVERNANCE-01.
+  **The blocked case, measured.** Eight standing proposals have the right conclusion and cite the
+  wrong statement: Red Hat said `compat-libtiff3` is not affected in RHEL 7 **and** in RHEL 8, the
+  old first-match code cited RHEL 7, and the proposal's words still say so even though the EL 8
+  statement is what covers the `3.9.4-16.el8_10` build. The fixed selection cannot repair them —
+  the id is already taken, so a re-raise is `ErrDuplicateProposal` and a no-op.
+  **The design question, and it is not "how do we reword eight rows".** Per the user: *is the
+  proposal an assertion about a package, or about a package + vendor statement + applicability
+  scope?* Given everything EDR-VEX-02 established, it should be the latter **if** vendor VEX is
+  allowed to produce separate scope-aware proposals. That is the decision to take first.
+  **Consequences either way, so the choice is real:**
+
+      id = (finding, package)                     ← today
+          └── one vendor proposal per package, whichever statement won
+                └── cannot reword; cannot represent two scopes; dedup is accidental
+
+      id = (finding, package, scope)
+          └── one proposal per product-scoped statement
+                └── rewordable; N proposals where N products speak
+                      └── but: does a reviewer want 6 rows for one package?
+
+  The second shape is more truthful and noisier, and the noise is the thing to measure before
+  committing — the estate has packages with statements for RHEL 5/6/7/8/9/10 at once.
+  **Explicitly NOT to be worked around:** do not mutate the eight proposals in place to make the
+  UI text correct. The user's instruction is to settle proposal identity first, then reject and
+  recreate the affected eight **through the proper event path**. Rewriting them would be a second
+  un-audited history, the same objection that kept the 138 attributions untouched.
+  **Mitigated meanwhile:** the drawer shows every vendor statement with its own scope and Themis's
+  determination (D2), so a reviewer opening one of the eight sees the applicable EL 8 statement
+  marked `applies here` beside the proposal's stale wording. Misleading, not dangerous.
+
+- [ ] **DEF_VEX_NONRPM_RELEASE_UNPLACEABLE — a non-rpm release cannot be placed against a vendor
+  product scope AT ALL, so every vendor statement about a PyPI/npm/Maven component resolves
+  `not_comparable` however clear the vendor was (filed 2026-09-21 by user decision; kept SEPARATE
+  from DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES).** **MED, product-scope model gap**;
+  EDR-VEX-02 D11 makes it legible, and deliberately does not close it.
+  **Why it is its own problem.** D11 fixed the *semantic conflation* — `unknown` no longer means
+  two things. It did nothing about the underlying inability:
+
+      unknown  ≠  not_comparable              ← D11 fixed this
+      PyPI component  ↕  Red Hat product scope ← this is untouched
+
+  **The measured population** is small today and structurally permanent: 3 of 138 rejections, being
+  `spring-web` (Maven, against "Red Hat build of Apache Camel 4 for Quarkus 3"), `setuptools`
+  (PyPI, against "Red Hat build of Quarkus Native builder") and one `python3.12`. The release side
+  places from an rpm `elN` build (`ScopeFromRPMRelease`), and a Maven artifact has no such thing —
+  so no amount of vendor clarity helps.
+  **The real question** is what a release's product scope even IS when its components are not
+  distribution packages. A release is not one product: a Rocky 8.10 host running a Python app has
+  an OS scope AND a language-ecosystem context, and Red Hat's statements about Quarkus or Camel
+  images are about a third thing again. Modelling that is a scope-model design question, not a
+  resolver fix, and **R4 applies**: measure the population before designing the rule.
+  **Do not close this by loosening `not_comparable`** into a mismatch. A component Themis cannot
+  place is not a component the vendor spoke about — asserting otherwise would be the same class of
+  error D4 exists to prevent.
+
 - [x] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returned `unknown` when EITHER
   side was unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
   reached a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run;

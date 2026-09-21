@@ -154,6 +154,60 @@ have given: a derived value cannot be independent evidence about the thing it wa
 populated". Ask where its value CAME FROM. If it was derived from the same input the decision is already
 using, it adds nothing no matter how many rows carry it.
 
+## R5 — A change that alters CARDINALITY must have its invariants and tests re-derived
+
+Elevated to a convention 2026-09-21 by the user, after two defects in one day that a green test
+suite could not see: *"Whenever a change alters cardinality, re-derive the cardinality invariants
+and tests. Do not merely rerun the existing test suite."*
+
+**Why re-running is not enough.** The existing tests were written against the OLD cardinality, so
+they cannot contain the case the change just created. They pass, and their passing means nothing
+about the new shape.
+
+**The measured case (2026-09-21, `DEF_VEX_COVERING_FIRST_MATCH`).** A dedup key gained a field, so
+one package went from carrying **exactly one** vendor statement to carrying **N**. Downstream,
+selection was "take the first match" — correct and harmless while N was always 1. With N > 1 the
+statements sorted by scope, the lower major came first, and a Rocky 8.10 release lost the RHEL 8
+statement that applied to it because the RHEL 7 statement in front of it was correctly judged
+inapplicable.
+
+Two individually correct transformations composing into a false negative:
+
+    keep every product       (correct)
+          +
+    block what cannot apply  (correct)
+          +
+    first-match selection    (correct only at N = 1)
+          =
+    0 proposals raised where 1 was owed
+
+**No test failed.** The suite covered one applicable statement and one inapplicable statement. The
+defect lives only in the interaction of two statements for one package — a case that **could not
+exist** before the change that created it. It was found by reading D7's own text, which had already
+named the requirement, and noticing only its first half had shipped.
+
+**The review questions.** For any change that alters how many of something can exist:
+
+1. What cardinality did the surrounding code **assume**?
+2. What cardinality can the new code now **produce**?
+3. What happens at **0, 1, and more-than-1** — for every consumer, not just the one being changed?
+
+Question 3 is the one that catches this class, because the dangerous case is almost always the jump
+from 1 to many, and the code that breaks is usually code the change did not touch.
+
+**This is a design-review obligation, not a testing technique.** It belongs in the discussion
+before implementation, because the tests that would catch it are precisely the tests nobody has
+written yet.
+
+**The pattern already has a history in this repository**, which is why it is a rule rather than a
+note. Every one of these was a cardinality change that outran its invariants: scanner observations
+with no purl, VEX statement deduplication, carrier extraction, `relatedProduct`, and proposal
+identity — the last of which is **still open**, because a proposal id keyed on `(finding, package)`
+cannot represent N product-scoped statements for one package.
+
+**Related:** R4 measures a rule's trigger; this measures a change's *shape*. A rule can have a
+perfectly sound trigger and still break because the data around it changed multiplicity.
+
 ## How these apply per node
 
 Both rules are **shared infrastructure**, not re-implemented per context: one observability bootstrap
