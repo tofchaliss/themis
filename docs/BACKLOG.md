@@ -3310,6 +3310,47 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
+- [ ] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returns `unknown` when EITHER
+  side is unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
+  reach a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run).**
+  **MED, decision-surface precision**; EDR-VEX-02 D3/D4. **NOT FIXED — this changes what
+  `ScopeMatch` returns, which is a decision, not a cleanup.**
+  **The measured case.** Three of 138 rejections came back `unknown` rather than
+  `not_applicable`, and one of them is:
+
+      spring-web → "Red Hat build of Apache Camel 4 for Quarkus 3"  [unknown × 6]
+
+  Red Hat's side of that comparison is **perfectly clear** — an unambiguous, readable product. It
+  is *Themis's* side that could not be placed: a Maven `spring-web` carries no `.elN` build, so
+  nothing on the Finding says which distro major the release is. The same `unknown` is returned
+  when the vendor supplies no CPE at all, which is a feed gap and permits no conclusion whatever.
+  **Why that matters, in the EDR's own terms.** D4 exists because *"I know this does not apply"*
+  and *"I cannot determine whether this applies"* are different statements and collapsing them
+  hides a broken resolver behind reasonable-looking numbers. This is the identical mistake one
+  level down: `unknown` now carries two states a reviewer would act on differently.
+
+      vendor scope readable, release unplaceable
+          └── "Red Hat spoke about a Quarkus builder image; our component is a Java library"
+                → a human rejects this instantly; it is INFORMATION, not uncertainty
+
+      vendor scope unreadable
+          └── "Red Hat named no product"
+                → nothing can be concluded; this is the real epistemic gap
+
+  **Shape of a fix, if taken:** `ScopeMatch` gains a state distinguishing which SIDE failed (the
+  release side, the vendor side, or both) — or `MatchScope` returns the failing side alongside the
+  verdict. Both are API changes to a kernel value object, and the enum is already load-bearing in
+  the read API, the dashboard chip and the reject script, so the naming deserves the same care D3
+  got. **Do not "fix" this by loosening `unknown`** — that is the temptation D4 already warned
+  about.
+  **Scope note:** this is a precision gap in a decision surface, not a false negative. Nothing is
+  suppressed wrongly: every non-`applicable` verdict blocks a raise, and a blocked raise keeps the
+  Finding open. The cost is a reviewer unable to tell an obviously-irrelevant vendor statement
+  from an unreadable one.
+  **Related:** the underlying inability to place a non-rpm release against a vendor product scope
+  at all — a pypi/npm/maven component has no distro major — is the larger gap this sits on, and it
+  is not addressed anywhere yet.
+
 - [x] **DEF_VEX_SCOPE_STALE_TWIN — a statement observed before the scope existed stays in the
   view forever beside its scoped re-observation, and renders as `unknown` (found 2026-09-21 in the
   VM output for the two defects above, FIXED same day).** **MED, MISLEADING-DISPLAY + it hid the
