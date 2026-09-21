@@ -59,6 +59,14 @@ to the terminal.
 1. Rotate the `themis` role's password on the PostgreSQL server.
 2. Rewrite the DSN in each of the six `/etc/themis/<svc>.env` files (registry, evidence, knowledge,
    governance, communication, intelligence) plus the dashboard's.
+   **Use explicit paths, not a glob.** `/etc/themis` is not listable by an unprivileged user, so a
+   shell glob like `/etc/themis/*.env` is **not expanded** and is passed to the command literally,
+   which then reports `No such file or directory` — for files that exist and are loaded. Verified
+   2026-09-21: `systemctl show themis@governance -p EnvironmentFiles` reports
+   `/etc/themis/governance.env (ignore_errors=no)` on a node that is active, so the file must
+   exist. Confirm the real path per service with
+   `systemctl cat themis@<svc> | grep EnvironmentFile` before editing anything, and never read a
+   missing-file error from a glob as evidence that the runbook is wrong.
 3. Restart all six nodes and the dashboard.
 4. Purge the password from shell history (`history -c` plus the on-disk history file) and clear
    scrollback.

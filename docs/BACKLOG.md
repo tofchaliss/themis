@@ -3399,6 +3399,61 @@ under the 2026-08-07 re-derivation standard.
   determination (D2), so a reviewer opening one of the eight sees the applicable EL 8 statement
   marked `applies here` beside the proposal's stale wording. Misleading, not dangerous.
 
+- [ ] **DEF_GOV_RELEASE_SCOPE_FROM_FINDING — the release's product scope is derived from ONE
+  FINDING'S components instead of from the release, so a placeable release reports as unplaceable
+  (found + MEASURED 2026-09-21 on the deployment, immediately after D11 shipped).** **MED, and it
+  is a LOST DISTINCTION, not a false negative**; EDR-VEX-02 D3/D6/D11. **NOT FIXED — it changes
+  where Governance reads release identity from, which is a port/data-source decision.**
+  **Measured, not inferred.** On release `7bc21a1b`, **688 of 721** components carry an `elN`
+  marker — the release is unambiguously `enterprise-linux 8`. A Java Finding on that same release
+  reports:
+
+      xbean     | enterprise-linux | 9 | not_comparable   ← should be not_applicable (9 != 8)
+      resteasy  | enterprise-linux | 9 | not_comparable   ← should be not_applicable
+      jenkins   | (none stated)    |   | unknown          ← correct
+      spring-web| camel_quarkus    | 3 | not_comparable   ← correct, a genuinely other product
+
+  **Estate-wide population: 49 Findings** are unplaceable from their own components while their
+  release IS placeable (one query, both numbers below).
+  **The mechanism.** `applicabilityOf` iterates `f.Components()` — **the Finding's** matched
+  components — and calls `ScopeFromRPMRelease` on the first one. A Finding whose matched components
+  are all Maven/PyPI/npm therefore places nothing, even when the release around it is 95% rpm. The
+  release's OS identity is a property of the RELEASE, Themis already holds it, and this lookup
+  never sees it.
+  **Why it is not DEF_VEX_NONRPM_RELEASE_UNPLACEABLE.** That one is a real gap: a release with no
+  distribution packages at all genuinely cannot be placed. This is the opposite — the information
+  EXISTS and is not being asked for. Fixing this does not need a scope model for language
+  ecosystems; it needs the right query.
+  **Not a false negative, which is why it is MED and not HIGH.** Both verdicts are non-clearing, so
+  nothing is wrongly suppressed and no proposal changes. What is lost is exactly the distinction
+  D11 was created to make: a reviewer sees "cannot compare" where the truth is "Red Hat spoke about
+  RHEL 9 and you run RHEL 8" — a statement they could act on. D11 separated two meanings of
+  `unknown` and this quietly pushes a third case into the wrong one of them.
+  **The design question (do not skip to the fix).** Where should the release scope come from?
+
+      (a) an in-context query across the release's OTHER Findings
+            └── no cross-context call; Governance already owns every Finding
+                  └── but: makes a pure function I/O-dependent, and it is a
+                      majority vote over a sample, not an authoritative fact
+
+      (b) the release's inventory, over Evidence's or Registry's read API
+            └── authoritative
+                  └── but: a cross-context read on a hot path, and it must
+                      fail-safe to today's behaviour when unreachable
+
+      (c) stamp the release scope onto the Finding when it is opened
+            └── cheap at read time
+                  └── but: a Finding is opened before the release is fully
+                      correlated, so the stamp can be wrong and go stale —
+                      the exact shape of the generation-stamp problems already
+                      fixed twice this month
+
+  **Measure before choosing (R4):** a release can legitimately straddle majors (a container image
+  built FROM one base with packages from another), so "the release's major" may not be a single
+  value. Option (a)'s majority vote would hide that; option (b) would expose it. The 688/721 split
+  on this very release is 33 components that are NOT el-marked, and what those are should be looked
+  at before any of this is encoded.
+
 - [ ] **DEF_VEX_NONRPM_RELEASE_UNPLACEABLE — a non-rpm release cannot be placed against a vendor
   product scope AT ALL, so every vendor statement about a PyPI/npm/Maven component resolves
   `not_comparable` however clear the vendor was (filed 2026-09-21 by user decision; kept SEPARATE
