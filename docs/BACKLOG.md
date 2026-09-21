@@ -3310,6 +3310,39 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
+- [ ] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" is free text, unrelated to the
+  authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
+  literal placeholder).** **MED-HIGH for audit integrity, LOW for behaviour**; EDR-SECURITY-01 +
+  EDR-GOVERNANCE-01 D11. **NOT FIXED — this is a security-model change and needs an explicit
+  decision.**
+  **How it surfaced.** A cleanup command was pasted with its placeholder intact
+  (`THEMIS_ACTOR_ID=your.name@example.com`), and 138 proposal rejections were written with that
+  string as `decided_id`. The decisions themselves are correct and reproducible; the *decider* is
+  fiction. Proposals are append-only, so there is no edit path and no clean redo — a rejected
+  proposal cannot be re-raised under the same `(finding, package)` id.
+  **The mechanism.** `DecisionRequest.actor_id` is a required free-text string, and
+  `deciderActorFrom` takes it verbatim. The API key authenticates the CALLER; the recorded decider
+  is self-declared; **nothing ties the two together.** So any string at all lands in the audit
+  trail as the person who authorized a governed change.
+  **The uncomfortable part: the identity is already there and is already called auditable.**
+  `internal/platform/auth` carries a `Principal`, and its own comment names `ColID` as *"opaque
+  key id (also the auditable principal id)"*, reachable from the request via
+  `auth.PrincipalFrom(ctx)`. The governance HTTP layer does not reference `auth` at all. The
+  auditable identity was built, documented as auditable, and then not used by the one surface that
+  needed it.
+  **Why it is not merely cosmetic.** This codebase's whole stance is *AI proposes, humans decide*,
+  enforced by refusing a system or AI decider at the edge — and that enforcement rests entirely on
+  a claim the caller makes about itself. An unverified decider makes "a human decided this" a
+  statement the system cannot support, which is exactly the property a security platform's audit
+  trail exists to provide.
+  **Shape of a fix, if taken:** bind the recorded decider to the authenticated principal — either
+  derive it (ignore `actor_id` when auth is on) or cross-check it and refuse a mismatch. Both
+  interact with auth being OPTIONAL (`THEMIS_AUTH_DATABASE_DSN` unset = disabled for dev), so the
+  rule has to say what happens with no principal: almost certainly keep `actor_id` in dev and
+  require agreement in production, which is the same shape as `THEMIS_AUTH_REQUIRED=1`.
+  **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
+  all 138 Findings stayed open. The damage is confined to the provenance of a decision.
+
 - [ ] **DEF_VEX_UNKNOWN_CONFLATES_TWO_UNCERTAINTIES — `MatchScope` returns `unknown` when EITHER
   side is unplaceable, so "the vendor named no product" and "our release carries no rpm marker"
   reach a reviewer looking identical (found 2026-09-21 in the `vex-reject-inapplicable` dry run).**
