@@ -725,6 +725,13 @@ components:
       properties:
         actor_id:
           type: string
+          description: >-
+            The DEVELOPMENT decider identity, used only when inbound auth is disabled, where it is
+            recorded with a `dev:` prefix marking it unverified. When the request is
+            authenticated it is IGNORED and the recorded actor is derived from the API key's
+            principal as `key:<key-id>` — a value the server cannot verify must never overwrite
+            one it can (EDR-SECURITY-01 D10). The `dev:` marker is applied to whatever arrives, so
+            sending `key:…` yields `dev:key:…` and cannot forge authenticated provenance.
         actor_kind:
           type: string
           description: human (default). Only a human decider is accepted via the API.

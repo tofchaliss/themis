@@ -40,6 +40,18 @@
 # recorded against that person. The script decides WHICH proposals to put forward; a human signs
 # them.
 #
+# WHAT ACTUALLY GETS RECORDED (EDR-SECURITY-01 D10). If THEMIS_API_KEY is set the node derives the
+# actor from the authenticated principal and records `key:<key-id>`; THEMIS_ACTOR_ID is then
+# ignored by the server, and it is still sent only because the field is required by the API
+# contract. With auth disabled the declared id is recorded as `dev:<THEMIS_ACTOR_ID>` — marked,
+# so a development decision can never be read as an authenticated one.
+#
+# AND IT REFUSES A PLACEHOLDER. This exists because of a measured mistake: this script's own
+# example invocation was pasted with `your.name@example.com` intact, and 138 rejections were
+# written against it. Proposals are append-only, so there was no edit path and no clean redo. A
+# value that a shell accepts happily is the dangerous kind of placeholder, so the obvious ones are
+# rejected here rather than discovered later in an audit trail.
+#
 # Usage:
 #   PGBASE="postgres://themis:PASSWORD@localhost:5432" ./scripts/vex-reject-inapplicable.sh
 #   PGBASE=... THEMIS_ACTOR_ID=you@example.com ./scripts/vex-reject-inapplicable.sh --apply
@@ -64,6 +76,13 @@ if [ "$APPLY" = "1" ] && [ -z "$ACTOR" ]; then
   echo "vex-reject: --apply needs THEMIS_ACTOR_ID — a rejection is recorded against a person" >&2
   exit 2
 fi
+case "$(printf '%s' "${ACTOR:-}" | tr '[:upper:]' '[:lower:]')" in
+  *example.com*|*your.name*|*changeme*|*placeholder*|*'<'*|*'>'*|"api"|"admin"|"test"|"user")
+    echo "vex-reject: THEMIS_ACTOR_ID=\"$ACTOR\" looks like a placeholder, not a person." >&2
+    echo "  138 rejections were once recorded against your.name@example.com this exact way, and" >&2
+    echo "  proposals are append-only — the attribution could not be corrected afterwards." >&2
+    exit 2 ;;
+esac
 
 # Inbound-edge auth is optional (EDR-SECURITY-01): send the key only when one is configured.
 api() {
@@ -72,7 +91,11 @@ api() {
 
 printf '\n\033[1mTHEMIS — vendor-VEX proposal review\033[0m  %s\n' "$(date '+%Y-%m-%d %H:%M')"
 if [ "$APPLY" = "1" ]; then
-  printf '  mode: \033[31mAPPLY\033[0m — rejections will be written, recorded against %s\n\n' "$ACTOR"
+  if [ -n "${THEMIS_API_KEY:-}" ]; then
+    printf '  mode: \033[31mAPPLY\033[0m — authenticated; recorded against the API key principal (key:…)\n\n'
+  else
+    printf '  mode: \033[31mAPPLY\033[0m — auth disabled; recorded as dev:%s\n\n' "$ACTOR"
+  fi
 else
   printf '  mode: dry run — nothing is written (pass --apply to act)\n\n'
 fi

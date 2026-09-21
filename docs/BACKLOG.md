@@ -3310,11 +3310,33 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
-- [ ] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" is free text, unrelated to the
-  authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
-  literal placeholder).** **MED-HIGH for audit integrity, LOW for behaviour**; EDR-SECURITY-01 +
-  EDR-GOVERNANCE-01 D11. **NOT FIXED — this is a security-model change and needs an explicit
-  decision.**
+- [x] **DEF_GOV_DECIDER_UNVERIFIED — the audit trail's "who decided" was free text, unrelated to
+  the authenticated caller (found 2026-09-21, the hard way: 138 rejections landed attributed to a
+  literal placeholder; FIXED same day, decided by the user).** **MED-HIGH for audit integrity**;
+  now **EDR-SECURITY-01 D10**.
+  **Worse than filed, and the guard test proved it.** Against the pre-fix code a caller sending
+  `actor_id: "key:key-7"` was recorded as exactly `key:key-7` — so the provenance was not merely
+  unverified, it was **forgeable to look verified** the moment any prefix convention existed.
+  **Fixed** by binding the recorded actor to the authenticated principal:
+  `key:<KeyID>` when a principal is present (and `actor_id` is then ignored — a value the server
+  cannot verify must not overwrite one it can), `dev:<actor_id>` when auth is disabled, 400 when
+  neither identifies anyone. The `dev:` marker is applied to WHATEVER arrives, so `key:…` becomes
+  `dev:key:…` and the authenticated prefix is not claimable.
+  **Production needs no new switch:** `THEMIS_AUTH_REQUIRED=1` already hard-fails startup on an
+  empty auth DSN, so a production node cannot boot open and every decision is authenticated.
+  **The proposer path was bound too, and was worse** — it defaulted the id to the literal `"api"`,
+  fabricating provenance from no input at all. Fixing only the decider would have left the
+  identical defect in the adjacent function, which is what DEF_VEX_COVERING_FIRST_MATCH was made
+  of.
+  **Nothing asserted provenance before**, which is why the defect could exist: every decision test
+  checked only the HTTP status. Five guards added, all five verified to fail against the pre-fix
+  code.
+  **The cleanup script now refuses a placeholder actor id** (`example.com`, `your.name`,
+  `changeme`, `api`, angle brackets…) with the reason stated, because the failure mode is a value
+  the shell accepts happily.
+  **History is NOT rewritten** — the 138 keep their attribution, recorded in
+  `docs/OPERATIONAL-ACTIONS.md`. Per the user: an UPDATE *"would make the database look cleaner
+  while making the audit trail less honest"*.
   **How it surfaced.** A cleanup command was pasted with its placeholder intact
   (`THEMIS_ACTOR_ID=your.name@example.com`), and 138 proposal rejections were written with that
   string as `decided_id`. The decisions themselves are correct and reproducible; the *decider* is

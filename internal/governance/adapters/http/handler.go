@@ -2,15 +2,22 @@
 // the oapi-codegen server interface (package gen) over the app services. Writes drive the
 // governed decision workflow (raise / accept / reject a proposal, lifecycle transitions);
 // reads serve Findings, Positions, and the release-posture / blast-radius rollups. Renders
-// a Problem error envelope. The deciding actor arrives via the request (the authorization
-// hook seam) — a real deployment derives it from auth middleware; the ADR-fixed rule
-// (only a human or a Governance-owned policy may decide) is enforced in the app (D11).
+// a Problem error envelope. The ADR-fixed rule (only a human or a Governance-owned policy may
+// decide) is enforced in the app (D11).
+//
+// The deciding actor is DERIVED FROM THE AUTHENTICATED PRINCIPAL, not from the request body —
+// see actorProvenance. This doc comment used to say "a real deployment derives it from auth
+// middleware", describing an intention nothing implemented: the recorded decider was whatever
+// string the caller sent, and 138 rejections were eventually recorded against a pasted
+// placeholder before anyone noticed (DEF_GOV_DECIDER_UNVERIFIED).
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/adapters/http/gen"
@@ -18,6 +25,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/platform/auth"
 )
 
 // Handler implements gen.ServerInterface over the Governance write + read services.
@@ -225,7 +233,7 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 		writeProblem(w, http.StatusBadRequest, "invalid stance", "unknown stance "+body.Stance)
 		return
 	}
-	proposer, err := proposerFrom(body)
+	proposer, err := proposerFrom(r.Context(), body)
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid proposer", err.Error())
 		return
@@ -472,9 +480,60 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	return out
 }
 
+// Actor-id provenance prefixes (EDR-SECURITY-01 D10, DEF_GOV_DECIDER_UNVERIFIED). Every actor id
+// Governance records through the API carries one, so the recorded provenance is machine-readable
+// and a decision can never be mistaken for authenticated when authentication did not happen.
+const (
+	// authenticatedActorPrefix marks an id derived from the AUTHENTICATED principal. Only the
+	// server can produce it — no request body reaches this form.
+	authenticatedActorPrefix = "key:"
+	// unauthenticatedActorPrefix marks a caller-declared id accepted because auth is disabled
+	// (single-context dev). It is deliberately ugly: an unverified identity must not be able to
+	// look like a verified one, and the prefix is applied whatever the caller sends, so a body
+	// claiming "key:…" becomes "dev:key:…" rather than forging provenance.
+	unauthenticatedActorPrefix = "dev:"
+)
+
+// actorProvenance resolves the identity a Governance record is attributed to, binding it to the
+// authenticated principal wherever one exists.
+//
+// WHY THIS EXISTS. Until 2026-09-21 the recorded actor was whatever string the caller sent. The
+// API key authenticated the CALLER and the audit trail recorded a self-declaration, with nothing
+// relating the two — so any string at all landed as the person who authorized a governed change.
+// It was found the way these things are found: a cleanup command was pasted with its example
+// value intact and 138 rejections were recorded as decided by `your.name@example.com`.
+//
+// The identity was already there and already named for this: `auth.Principal.KeyID` is documented
+// as "the auditable actor id (CON-0016 traceability)". The gap was that this package never read it.
+//
+// The invariant: every recorded actor id is explicit, machine-identifiable, and states whether
+// authentication actually happened. Auth is optional by design (`THEMIS_AUTH_DATABASE_DSN` unset
+// = disabled for single-context dev), so the unauthenticated path is supported rather than
+// refused — but it is MARKED, never silently dressed up as a production identity. `ok` is false
+// only when nothing at all identifies the actor.
+func actorProvenance(ctx context.Context, declared string) (string, bool) {
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.KeyID != "" {
+		// The principal wins outright and the declared value is ignored: a value the server
+		// cannot verify must not be able to overwrite one it can.
+		return authenticatedActorPrefix + p.KeyID, true
+	}
+	declared = strings.TrimSpace(declared)
+	if declared == "" {
+		return "", false
+	}
+	return unauthenticatedActorPrefix + declared, true
+}
+
 // proposerFrom builds the proposer actor from the request (human by default; ai allowed).
 // system/policy are internal-only proposers and are refused at the API boundary.
-func proposerFrom(body gen.RaiseProposalRequest) (domain.Actor, error) {
+//
+// The proposer is bound to the authenticated principal for the same reason the decider is: a
+// raised proposal is an audit record too, and this function used to DEFAULT the id to the literal
+// "api" — provenance fabricated from no input whatever. Unlike the decider path it still accepts
+// a missing id, because proposal-raising has always worked without one and breaking that is not
+// this change's business; what it records instead is `dev:api`, which is honest about being an
+// unauthenticated caller that declared nothing.
+func proposerFrom(ctx context.Context, body gen.RaiseProposalRequest) (domain.Actor, error) {
 	kind := domain.ActorHuman
 	if body.ProposerKind != nil && *body.ProposerKind != "" {
 		switch domain.ActorKind(*body.ProposerKind) {
@@ -486,9 +545,13 @@ func proposerFrom(body gen.RaiseProposalRequest) (domain.Actor, error) {
 			return domain.Actor{}, errors.New("proposer must be human or ai")
 		}
 	}
-	id := "api"
+	declared := "api"
 	if body.ProposerId != nil && *body.ProposerId != "" {
-		id = *body.ProposerId
+		declared = *body.ProposerId
+	}
+	id, ok := actorProvenance(ctx, declared)
+	if !ok {
+		return domain.Actor{}, errors.New("proposer identity could not be established")
 	}
 	return domain.Actor{Kind: kind, ID: id}, nil
 }
@@ -512,13 +575,18 @@ func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, []time.
 	if body.ReviewBy != nil && !body.ReviewBy.IsZero() {
 		reviewBy = append(reviewBy, body.ReviewBy.UTC())
 	}
-	actor, ok := deciderActorFrom(w, &body)
+	actor, ok := deciderActorFrom(w, r, &body)
 	return actor, reviewBy, ok
 }
 
-func deciderActorFrom(w http.ResponseWriter, body *gen.DecisionRequest) (domain.Actor, bool) {
-	if body.ActorId == "" {
-		writeProblem(w, http.StatusBadRequest, "invalid decider", "actor_id is required")
+func deciderActorFrom(w http.ResponseWriter, r *http.Request, body *gen.DecisionRequest) (domain.Actor, bool) {
+	// Bound to the authenticated principal when there is one; `actor_id` is then ignored, because
+	// the server must not record an identity it cannot verify over one it can. With auth disabled
+	// the declared id is accepted and marked `dev:`.
+	id, ok := actorProvenance(r.Context(), body.ActorId)
+	if !ok {
+		writeProblem(w, http.StatusBadRequest, "invalid decider",
+			"actor_id is required when authentication is disabled")
 		return domain.Actor{}, false
 	}
 	// The API accepts only human or ai deciders; policy/system are internal-only. The
@@ -536,7 +604,7 @@ func deciderActorFrom(w http.ResponseWriter, body *gen.DecisionRequest) (domain.
 			return domain.Actor{}, false
 		}
 	}
-	return domain.Actor{Kind: kind, ID: body.ActorId}, true
+	return domain.Actor{Kind: kind, ID: id}, true
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

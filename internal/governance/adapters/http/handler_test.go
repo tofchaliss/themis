@@ -17,6 +17,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"github.com/themis-project/themis/internal/platform/auth"
 )
 
 // --- fakes -----------------------------------------------------------------------------
@@ -637,5 +638,142 @@ func TestPostureEntrySerializesEveryOptionalField(t *testing.T) {
 	if c["verdict_state"] != "cleared_vendor_fix" || c["verdict_grade"] != "observed" {
 		t.Errorf("component verdict = %v/%v, want cleared_vendor_fix/observed",
 			c["verdict_state"], c["verdict_grade"])
+	}
+}
+
+// authedServer wraps the Governance router in middleware that attaches an authenticated
+// principal, standing in for auth.RequireAPIKey without needing a key store.
+func authedServer(t *testing.T, repo *fakeRepo, keyID string) *httptest.Server {
+	t.Helper()
+	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
+	router := govhttp.NewHandler(write, read).Router()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := auth.WithPrincipal(r.Context(), auth.Principal{KeyID: keyID, Name: "ci", Scopes: []string{auth.ScopeAdmin}})
+		router.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func decidedIDOf(t *testing.T, repo *fakeRepo, finding, proposal string) string {
+	t.Helper()
+	for _, p := range repo.byID[domain.FindingID(finding)].Proposals() {
+		if string(p.ID()) == proposal {
+			return p.DecidedBy().ID
+		}
+	}
+	t.Fatalf("proposal %q not found on %q", proposal, finding)
+	return ""
+}
+
+// DEF_GOV_DECIDER_UNVERIFIED: the recorded decider must come from the AUTHENTICATED principal,
+// and a body value must not be able to overwrite one the server can verify.
+//
+// Nothing asserted this before — every decision test checked only the HTTP status, which is
+// exactly why the defect could exist. The recorded identity was whatever string the caller sent,
+// and 138 rejections were eventually written against a pasted placeholder.
+func TestDecisionActorIsBoundToAuthenticatedPrincipal(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	repo.seed(f)
+	srv := authedServer(t, repo, "key-7")
+
+	// The body claims to be someone else entirely. The principal wins.
+	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals/p1/accept",
+		map[string]any{"actor_id": "somebody.else@example.com"}); status != http.StatusNoContent {
+		t.Fatalf("accept status = %d, want 204", status)
+	}
+	if got := decidedIDOf(t, repo, "fnd-1", "p1"); got != "key:key-7" {
+		t.Errorf("decided_by = %q, want key:key-7 — a claimed identity must never beat a verified one", got)
+	}
+}
+
+// With auth DISABLED (single-context dev) the declared id is accepted, because that path is
+// supported by design — but it is MARKED, so a dev decision can never be read as authenticated.
+// This is the half that matters for the 138: had it existed, they would have been recorded as
+// `dev:your.name@example.com`, still a placeholder but visibly unverified.
+func TestDecisionActorIsMarkedWhenUnauthenticated(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	repo.seed(f)
+	srv := server(t, repo, fakeProjection{})
+
+	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals/p1/accept",
+		map[string]any{"actor_id": "alice"}); status != http.StatusNoContent {
+		t.Fatalf("accept status = %d, want 204", status)
+	}
+	if got := decidedIDOf(t, repo, "fnd-1", "p1"); got != "dev:alice" {
+		t.Errorf("decided_by = %q, want dev:alice — an unverified identity must be marked as one", got)
+	}
+}
+
+// A caller cannot FORGE authenticated provenance by sending the prefix itself: the dev marker is
+// applied to whatever arrives, so "key:key-7" becomes "dev:key:key-7" rather than impersonating
+// a principal. The prefix is a server-side fact, not a claimable string.
+func TestDecisionActorCannotForgeAuthenticatedPrefix(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	repo.seed(f)
+	srv := server(t, repo, fakeProjection{})
+
+	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals/p1/accept",
+		map[string]any{"actor_id": "key:key-7"}); status != http.StatusNoContent {
+		t.Fatalf("accept status = %d, want 204", status)
+	}
+	if got := decidedIDOf(t, repo, "fnd-1", "p1"); got != "dev:key:key-7" {
+		t.Errorf("decided_by = %q, want dev:key:key-7 — the authenticated prefix must not be claimable", got)
+	}
+}
+
+// A whitespace-only actor_id is no identity at all, and with auth disabled there is nothing to
+// fall back to. 400, rather than recording a blank or a `dev:` with nothing after it.
+func TestDecisionActorRejectsBlankIdentity(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	repo.seed(f)
+	srv := server(t, repo, fakeProjection{})
+
+	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals/p1/accept",
+		map[string]any{"actor_id": "   "}); status != http.StatusBadRequest {
+		t.Error("a whitespace-only actor_id must be refused, not recorded")
+	}
+}
+
+// The PROPOSER path carries the same binding. It used to default the id to the literal "api" —
+// provenance fabricated from no input at all — so with auth on it now records the principal, and
+// with auth off an undeclared proposer is honestly `dev:api`.
+func TestProposerActorIsBoundToAuthenticatedPrincipal(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
+	srv := authedServer(t, repo, "key-9")
+
+	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals",
+		map[string]any{"stance": "affected", "proposer_id": "pretend"}); status != http.StatusCreated {
+		t.Fatalf("raise status = %d, want 201", status)
+	}
+	props := repo.byID["fnd-1"].Proposals()
+	if got := props[len(props)-1].Proposer().ID; got != "key:key-9" {
+		t.Errorf("proposer = %q, want key:key-9", got)
+	}
+
+	repo2 := newRepo()
+	repo2.seed(identified(t, "fnd-2", "rel-1", "fl-1", "CVE-1"))
+	open := server(t, repo2, fakeProjection{})
+	if status, _ := do(t, http.MethodPost, open.URL+"/findings/fnd-2/proposals",
+		map[string]any{"stance": "affected"}); status != http.StatusCreated {
+		t.Fatalf("raise status = %d, want 201", status)
+	}
+	p2 := repo2.byID["fnd-2"].Proposals()
+	if got := p2[len(p2)-1].Proposer().ID; got != "dev:api" {
+		t.Errorf("proposer = %q, want dev:api — an undeclared proposer must not read as a real one", got)
 	}
 }
