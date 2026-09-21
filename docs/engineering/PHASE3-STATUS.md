@@ -1,10 +1,101 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-09-17 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-09-21 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — `VEX-SCOPE-1` implementation, spec'd and ready
+> ## ⏭ RESUME POINT — 2026-09-21 · the VEX-scope arc is CLOSED; six defects fixed and live-verified
+>
+> **`main` = `0f7701d`. Both CI workflows green. Deployed and verified on the VM.**
+> Domain-design checkpoint: [`EDR-VEX-02`](decisions/EDR-VEX-02.md) **D1–D12** and
+> [`EDR-SECURITY-01`](decisions/EDR-SECURITY-01.md) **D10**. Decisions settled; do not reopen.
+>
+> **What shipped** (all `DEF_*`, all live-verified, GitHub #107–#111 + #114):
+>
+> | | what it was | how it was found |
+> | --- | --- | --- |
+> | #107 | the store codec dropped `Applicability.Scope`, so every statement reloaded scope-less | the VM returned one row: `(none)||1844` |
+> | #108 | an inapplicable statement blocked an APPLICABLE one — would have blocked all 278 EL8 statements | reading D7's own text and noticing only half had shipped |
+> | #109 | a pre-scope statement stayed in the view forever and rendered as `unknown` | the `(none)` bucket stayed largest after #107 |
+> | #110 | `unknown` conflated "vendor said nothing" with "we can't place our release" → 4th state `not_comparable` | the cleanup dry-run |
+> | #111 | the audit decider was free text, unrelated to the authenticated principal — and FORGEABLE | 138 rejections landed on a pasted placeholder |
+> | #114 | the release's scope was read from ONE Finding's components, hiding `applicable` verdicts | the output taken to verify #110 |
+>
+> **Live state:** scope distribution 1 row → 66; vendor scope resolution ~98% (30 statements
+> genuinely CPE-less); 138 inapplicable vendor proposals rejected (0 failed, 0 Positions, every
+> Finding still open); 8 proposals remain, correct-conclusion/wrong-citation.
+>
+> **The pattern across all six, and the thing to carry forward:** every one was invisible to a
+> green test suite and visible in one query against the running system. **Four were found by
+> measuring AFTER the previous fix shipped.** Two were introduced by the previous day's change.
+>
+> **Three conventions came out of it** — [`CONVENTIONS.md`](CONVENTIONS.md) **R4c** (a measured
+> population may be the output of a DEFECT, not the domain) and **R5** (a change that alters
+> CARDINALITY needs its invariants and tests RE-DERIVED, not re-run). R5 is a design-review
+> obligation, not a testing technique.
+>
+> ### 🔢 PRIORITIZED — start here tomorrow
+>
+> **P0 · Rotate the exposed PostgreSQL credential** — [`OPERATIONAL-ACTIONS.md`](../OPERATIONAL-ACTIONS.md).
+> *Human action, not architecture. Five sessions old and RE-EXPOSED on 2026-09-21.* The only live
+> exposure on the list; everything else is correctness or design. Two traps recorded there: `pgx`
+> pools keep serving on connections opened before a password change, so **every node reports
+> healthy on a dead credential** and they all fail together at the next restart; and
+> `/etc/themis` is not listable unprivileged, so a shell glob is NOT expanded and reports
+> `No such file or directory` for files that exist — confirm each path with
+> `systemctl cat themis@<svc> | grep EnvironmentFile` first. **Must precede P3.**
+>
+> **P1 · Verify #114's payoff** — restart Knowledge to drive a full Red Hat sweep, then check
+> whether `proposed` rises above 8 for `proposer_id = 'vex-applicability'`. Cheap, needs no
+> decision, and it is the one open question whose answer could expose a SEVENTH defect: the 49
+> Findings that could not place their release should now be able to raise real vendor clearances.
+> If nothing moves, either there are genuinely no applicable EL8 statements on them, or something
+> else blocks the raise path. **The raise path is event-driven** — restarting Governance replays
+> nothing, so only a Knowledge sweep re-evaluates. The same restart also drives the #109
+> convergence floor to its expected `unscoped_now` ≈ 30 (`residual_floor` = 30, measured).
+>
+> **P2 · Decide [#112] proposal identity, then repair the 8** —
+> `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`. The last outstanding user-visible wrongness: 8 proposals
+> with the right conclusion citing the wrong vendor statement. They cannot be repaired in place —
+> the id is `(finding, package)`, so a re-raise is `ErrDuplicateProposal`. **The question is not
+> "how do we reword 8 rows"** but *is a proposal an assertion about a package, or about a package
+> + vendor statement + applicability scope?* **One measurement first** (the noise cost of the
+> truthful shape — how many EL8 statements exist per (card, package); if almost all are 1, the
+> "noisier" id is not noisy at all). Then reject and recreate the 8 **through the event path** —
+> the user's standing instruction is not to mutate them, because that would be a second
+> un-audited history, the same objection that kept the 138 attributions untouched.
+> **This is the fifth instance of R5's cardinality pattern.**
+>
+> **P3 · Enable inbound auth (optional, deliberate, its own round)** — the node logs
+> `AUTH DISABLED`, so #111's `key:` provenance never engages and every decision records `dev:`.
+> Honest, and exactly the marker that was asked for, but D10's production half is **inert** until
+> auth is on — easy to mistake for "done". `THEMIS_AUTH_REQUIRED=1` then delivers the invariant's
+> second half with no new configuration. **After P0**, because rotating after an auth cutover
+> makes it harder to reason about which credential broke what.
+>
+> **P4 · [#113] non-rpm release placement — DO NOT DESIGN AGAINST IT YET.**
+> `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE`, **measured population ZERO.** The census returned 3
+> releases, all resolving to a single major, 0 with no distribution packages, 0 straddling. The
+> 3 rows originally filed as its evidence were #114's defect — the same rows justified two issues
+> and only one was real (**R4c**). Revisit trigger: **the first release uploaded whose SBOM
+> contains no distribution packages at all** (a pure-Java or pure-Python image).
+>
+> **P5 · Unchanged deferrals, reasons on record** — the CSAF/non-Red-Hat scope path (measure
+> first), `KN-IDENT-1` (forward canonicalization would recreate the twin problem KN-SCAN-4(b) just
+> solved), `KN-STREAM-1` (needs Red Hat build-convention documentation that does not exist).
+>
+> ### ⚠ Two corrections carried forward, so they are not rediscovered as facts
+>
+> 1. **`not_comparable` (D11) has ZERO reachable instances on this estate**, and its measured
+>    justification was #114's defect. The state stands on **semantic** grounds — `unknown` and
+>    `not_comparable` genuinely say different things and it is the honest answer for an unplaceable
+>    release — but do not cite the original 3 rows as evidence for it.
+> 2. **The 138 rejections are attributed to `your.name@example.com`** and are NOT to be corrected.
+>    Recorded in `OPERATIONAL-ACTIONS.md`. An `UPDATE` would make the database look cleaner while
+>    making the audit trail less honest, and would risk implying the corrected identity was present
+>    at decision time. #111 prevents recurrence; it does not edit history.
+>
+> ## ⏭ PREVIOUS RESUME POINT — `VEX-SCOPE-1` implementation, spec'd and ready
 >
 > **Domain-design checkpoint: [`EDR-VEX-02`](decisions/EDR-VEX-02.md) at `6ded066`** (D1–D9).
 > Decisions are settled and are NOT to be reopened. No code written.

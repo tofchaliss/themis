@@ -10,6 +10,24 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+### 🔢 Priority order agreed 2026-09-21 (start of the next session)
+
+The tracker holds item STATE; this is the order to work them in. It lives here because a list of
+open items with no order is how the credential rotation survived five sessions.
+
+| # | item | why here | who |
+| --- | --- | --- | --- |
+| **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure on the list; re-exposed 2026-09-21; five sessions old | human |
+| **P1** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | cheap, no decision needed, and the one open question that could expose a SEVENTH defect | human runs, then review |
+| **P2** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
+| **P3** | enable inbound auth so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while the node logs `AUTH DISABLED` — easy to mistake for done. **After P0** | human |
+| **P4** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` — **do not design against it** | measured population ZERO (R4c). Trigger: the first release with no distribution packages at all | wait |
+| **P5** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
+
+**P1 before P2** deliberately: P1 is a measurement that could change what P2 is even for, and it
+costs one restart and one query.
+
+
 **Updated:** 2026-08-27 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
 Status of what **is** done lives in `PHASE3-STATUS.md`; the monolith→greenfield capability diff lives in
 [`engineering/PARITY-GAP.md`](engineering/PARITY-GAP.md). This file is only the open work. Each item states
