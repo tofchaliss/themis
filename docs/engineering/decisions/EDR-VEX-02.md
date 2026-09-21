@@ -228,6 +228,23 @@ not a new escape hatch.
 release case, or reporting it as `not_applicable`. The first is what D4 already forbids; the
 second would assert a comparison Themis did not make.
 
+**RETROSPECTIVE CORRECTION, added the same day (2026-09-21) — D11's measured trigger was a
+DEFECT, not the world.** The three `unknown` rows quoted above were produced by
+`DEF_GOV_RELEASE_SCOPE_FROM_FINDING` (D12): the release scope was being read from one Finding's
+components, so a Java Finding on a 688/721-rpm release could place nothing. With D12 fixed, all
+three became `not_applicable`, and a census of the estate found **3 releases, every one resolving
+to a single major, none unplaceable**. So `not_comparable` currently has **zero reachable
+instances here**.
+
+D11 stands, on semantic grounds and not on that measurement: `unknown` and `not_comparable`
+genuinely say different things, the state is non-clearing, and it is the honest answer for a
+release with no distribution packages at all — the case tracked as
+`DEF_VEX_NONRPM_RELEASE_UNPLACEABLE`, which is now known to have no instances on this estate
+either. What is NOT true is that measurement demanded it. **R4c is the rule extracted from this:
+a measured population can be the output of a defect rather than of the domain, and the question
+"is this trigger the world or a bug?" has to be asked before the population is used as
+justification.**
+
 **Explicitly NOT solved here.** Themis still cannot place a non-rpm release against a vendor
 product scope at all — a PyPI, npm or Maven component has no distribution major, so every Red Hat
 statement about it resolves `not_comparable` however clear the vendor was. This decision makes that

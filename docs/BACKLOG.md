@@ -3485,11 +3485,22 @@ under the 2026-08-07 re-derivation standard.
       unknown  ≠  not_comparable              ← D11 fixed this
       PyPI component  ↕  Red Hat product scope ← this is untouched
 
-  **The measured population** is small today and structurally permanent: 3 of 138 rejections, being
-  `spring-web` (Maven, against "Red Hat build of Apache Camel 4 for Quarkus 3"), `setuptools`
-  (PyPI, against "Red Hat build of Quarkus Native builder") and one `python3.12`. The release side
-  places from an rpm `elN` build (`ScopeFromRPMRelease`), and a Maven artifact has no such thing —
-  so no amount of vendor clarity helps.
+  **MEASURED POPULATION: ZERO. Corrected 2026-09-21 — the evidence originally filed here was
+  MISATTRIBUTED.** This entry cited 3 of 138 rejections (`spring-web` against "Apache Camel 4 for
+  Quarkus 3", `setuptools` against "Quarkus Native builder", one `python3.12`). Those rows were
+  produced by `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`, not by this gap: the release scope was read
+  from one Finding's components, so a Java Finding on a 688/721-rpm release placed nothing. With
+  that fixed all three resolve to `not_applicable`, and a census of the estate returns **3
+  releases, all resolving to a single major, 0 with no distribution packages, 0 straddling**.
+  **So the same three rows were used to justify two issues and only one of them was real** (R4c).
+  **The condition that would make this real**, and it is a matter of what gets uploaded rather
+  than of Themis: a release whose SBOM contains **no distribution packages at all** — a pure-Java
+  or pure-Python container image, a language-only application manifest. The release side places
+  from an rpm `elN` build (`ScopeFromRPMRelease`), and a Maven artifact has no such thing, so no
+  amount of vendor clarity would help. Nothing on this estate looks like that today.
+  **Status therefore: a known MODEL LIMITATION with no measured instances, kept open deliberately
+  and NOT to be designed against until one appears** — "don't solve an unmeasured problem". The
+  first pure-language release uploaded is the trigger to revisit.
   **The real question** is what a release's product scope even IS when its components are not
   distribution packages. A release is not one product: a Rocky 8.10 host running a Python app has
   an OS scope AND a language-ecosystem context, and Red Hat's statements about Quarkus or Camel

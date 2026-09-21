@@ -154,6 +154,43 @@ have given: a derived value cannot be independent evidence about the thing it wa
 populated". Ask where its value CAME FROM. If it was derived from the same input the decision is already
 using, it adds nothing no matter how many rows carry it.
 
+### R4c — The population you measured may be the output of a DEFECT, not of the domain
+
+R4 says to measure a rule's trigger before encoding it. This is the trap one level in: you measure
+the trigger, find a real population, and encode a rule for it — and the population exists only
+because something else is broken. Fix that, and the justification evaporates.
+
+**The measured case (2026-09-21, EDR-VEX-02 D11 and D12, three hours apart).** A cleanup run
+surfaced three statements answering `unknown` where the vendor had named an unambiguous product:
+
+    spring-web → "Red Hat build of Apache Camel 4 for Quarkus 3"   [unknown × 6]
+
+That was read as evidence for a missing semantic distinction, and a fourth state
+(`not_comparable`) was designed and shipped for it. The reading was correct as far as it went. But
+the three rows were **produced by a second defect** — the release scope was being read from one
+Finding's matched components, so a Java Finding on a release with 688 of 721 rpm components could
+place nothing at all. With that fixed, all three resolved to `not_applicable`, and a census found
+**every release on the estate resolves cleanly**. The new state has zero reachable instances.
+
+The design survives on semantic grounds — the two words do mean different things — but **the
+measurement that justified it was a symptom, and the same three rows were used to justify two
+separate issues, only one of which was real.**
+
+**How to apply.** When a measurement is about to justify a design:
+
+1. Ask what PRODUCED each member of the population, not just how many there are.
+2. Inspect one member end to end, through the code that generated its value — R4's step 3, aimed
+   at provenance rather than at the data.
+3. If the population is uniform in a suspicious way (here: six identical verdicts on one Finding,
+   because one resolution failed once), treat the uniformity as a clue that ONE upstream fact is
+   responsible, not N independent cases.
+4. Where a design is right on principle but its measured basis dissolves, **say so in the record**
+   rather than leaving the original numbers standing as though they still support it.
+
+**Corollary:** a defect-generated population is the most persuasive kind, because it is real,
+reproducible, and points somewhere plausible. Agreement with the data is not evidence about the
+cause.
+
 ## R5 — A change that alters CARDINALITY must have its invariants and tests re-derived
 
 Elevated to a convention 2026-09-21 by the user, after two defects in one day that a green test
