@@ -34,7 +34,64 @@ and the resume pointer, never item state.
 > CARDINALITY needs its invariants and tests RE-DERIVED, not re-run). R5 is a design-review
 > obligation, not a testing technique.
 >
-> ### 🔢 PRIORITIZED — start here tomorrow
+> ### 🌙 EVENING SESSION 2026-09-21 — the AI-plane trace, and ATTR-GAP-2
+>
+> Started as one question — *why does `CVE-2026-33006` say "the Gateway doesn't have any answer"?* —
+> and ended with four filed defects and a design review. **`main` = see the head of this file.**
+>
+> **The answer, and it is not an AI problem.** Carrier `http_server`, installed `httpd`, both
+> components `scope`, zero proposals. A textbook `EDR-ATTRIBUTION-01` D5/D9 httpd case, and one of
+> the 227 gaps the ATTR-GAP-1 tile already counts. The summary says it plainly to a human — *"a
+> timing attack against **mod_auth_digest** in **Apache HTTP Server**"* — and Themis cannot get
+> from `http_server` to `httpd` without guessing, so it says so. The AI declined for the SAME
+> reason: grounding uses carriers only, and there were none. **The `scope` label and the "no
+> answer" are one fact seen twice.**
+>
+> **Four defects on the path there** (#115–#118): the reason header is a COMPOSITE
+> (`business_invalid: <detail>`) and the page does exact-match, so a *safety refusal* rendered as
+> "no answer" (#117 — the actual cause); the page maps 6 of 12 reasons (#116); the decline metric
+> is never SET when escalation fires, so `themis_ai_declines_total` is empty (#118); and an empty
+> Information answer would report `ok` (#115 — **latent, not observed**).
+>
+> **One operational finding, not a code defect:** the escalation tier is a **7B Q4** model behind a
+> **20B** primary (`cyberpal20b` → `WhiteRabbitNeo-V3-7B`), which INVERTS escalation — the env
+> var's own comment says *"LARGER model"*. Two runs, a minute apart, produced the identical
+> hallucinated NEVRA and both were refused by the gate (second recorded instance; first
+> 2026-08-13). **Recommended: unset `THEMIS_INTELLIGENCE_MODEL_ESCALATION`** so cyberpal's honest
+> `insufficient` stands. Not done — operator's call.
+>
+> **ATTR-GAP-2 is spec'd and awaiting review** — `EDR-ATTRIBUTION-01` **PROPOSED D10–D15**, five
+> decisions and two measurements, raised by the user with an explicit order that puts identity
+> evidence LAST. Governing principle, worth promoting to a convention: *improve the ability to
+> EXPLAIN and RESOLVE uncertainty before improving the willingness to ELIMINATE it.*
+>
+> **Two findings inside that review that change the work:** `carrier_products` **does not cross the
+> Knowledge→Governance seam at all**, so the drawer cannot name the carrier today (D10 is an API
+> change, not a rendering change); and the AI-eligibility predicate **already exists** —
+> `GroundingThinness` returns the zero-carriers case, computed before any model runs, and AI-204-2
+> deliberately uses it only as a label. D12 is "promote a label to a gate", not "add a rule".
+>
+> ### 🔢 PRIORITIZED — start here tomorrow (revised 2026-09-21 evening)
+>
+> **Operator, independent of all code work — do it whenever, it gates nothing:**
+> **rotate the exposed PostgreSQL credential** (see P0 below; unchanged, and now six sessions old).
+>
+> **Then, in this order:**
+>
+> | | item | why here |
+> | --- | --- | --- |
+> | **1** | **ATTR-GAP-2 design review** — `EDR-ATTRIBUTION-01` PROPOSED D10–D15 | the user asked for it today; 5 decisions, no code until taken, and 2 measurements that can run first |
+> | **2** | **#117 + #116** — the composite reason, and the page's reason map | one file each, and **#116 gates ATTR-GAP-2 D12** |
+> | **3** | **verify #114's payoff** — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a seventh defect |
+> | **4** | **#112 proposal identity** — decide the id shape, then repair the 8 via the event path | the last user-visible wrongness; 5th instance of R5's cardinality pattern |
+> | **5** | **#118 decline metric** | unblocks ever measuring whether escalation earns its keep |
+> | **6** | enable inbound auth (after the rotation) | D10's production half is inert while the node logs `AUTH DISABLED` |
+> | **7** | #113 (zero measured instances) · #115 (latent) | **do not design against either** |
+> | **8** | CSAF scope path · KN-IDENT-1 · KN-STREAM-1 | unchanged deferrals |
+>
+> The full reasoning for each is in `BACKLOG.md` Part 1's priority table and the entries themselves.
+>
+> ### 🔢 PRIORITIZED — as of the 2026-09-21 day session (superseded by the table above)
 >
 > **P0 · Rotate the exposed PostgreSQL credential** — [`OPERATIONAL-ACTIONS.md`](../OPERATIONAL-ACTIONS.md).
 > *Human action, not architecture. Five sessions old and RE-EXPOSED on 2026-09-21.* The only live

@@ -17,15 +17,31 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-| **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure on the list; re-exposed 2026-09-21; five sessions old | human |
-| **P1** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | cheap, no decision needed, and the one open question that could expose a SEVENTH defect | human runs, then review |
-| **P2** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
-| **P3** | enable inbound auth so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while the node logs `AUTH DISABLED` — easy to mistake for done. **After P0** | human |
-| **P4** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` — **do not design against it** | measured population ZERO (R4c). Trigger: the first release with no distribution packages at all | wait |
-| **P5** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
+**Revised after the 2026-09-21 evening session**, which added ATTR-GAP-2 and four AI-plane defects.
 
-**P1 before P2** deliberately: P1 is a measurement that could change what P2 is even for, and it
-costs one restart and one query.
+| # | item | why here | who |
+| --- | --- | --- | --- |
+| **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
+| **P1** | **ATTR-GAP-2 design review** — `EDR-ATTRIBUTION-01` PROPOSED D10–D15 | the user asked for it; 5 decisions, no code until taken, and 2 measurements that can run first | decide, then implement |
+| **P2** | `DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE` | one file each, and the second **gates ATTR-GAP-2 D12** | implement |
+| **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
+| **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
+| **P5** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | unblocks ever measuring whether escalation earns its keep | implement |
+| **P6** | enable inbound auth so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while the node logs `AUTH DISABLED` — easy to mistake for done. **After P0** | human |
+| **P7** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (R4c) | wait |
+| **P8** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
+
+**P2 before P1's implementation** is a hard constraint, not a preference: ATTR-GAP-2's D12 adds a
+new outcome reason, and the page maps 6 of 12 reasons today — shipping D12 first would render it as
+"the Gateway stated no reason", the exact defect P2 fixes.
+
+**P3 is a measurement that could change what P4 is for**, and it costs one restart and one query.
+
+**One operational item that is NOT a defect:** the escalation model tier is a 7B Q4 behind a 20B
+primary, inverting escalation (`THEMIS_INTELLIGENCE_MODEL_ESCALATION`). Recommended: unset it, so
+cyberpal's honest `insufficient` stands. Recorded under
+`DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION`; operator's call, and P5 is what would let it be
+judged on a rate rather than on two log lines.
 
 
 **Updated:** 2026-08-27 · The one consolidated list of everything **not yet done** in the Phase-3 rebuild.
@@ -3419,6 +3435,38 @@ under the 2026-08-07 re-derivation standard.
   Verification — the gate working, for the second recorded time (first: 2026-08-13). Recommended:
   unset the escalation model, so cyberpal's honest `insufficient` stands. **Neither of these two
   metrics could show any of that**, which is the point of this entry.
+
+- [ ] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
+  2026-09-21, FOR REVIEW 2026-09-22.** **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
+  specified as **PROPOSED D10–D15 in EDR-ATTRIBUTION-01**. No code until the decisions are taken.
+  **Raised from a live walkthrough of CVE-2026-33006** — carrier `http_server`, installed `httpd`,
+  both components `scope`, zero proposals, AI "no answer". A textbook D5/D9 httpd case, and one of
+  the 227 gaps the tile already counts.
+  **The governing principle (user's words), which sets the order:** *improve the system's ability
+  to EXPLAIN and RESOLVE uncertainty before improving its willingness to ELIMINATE it.* Sibling of
+  R4/R4c; **recommended for promotion to a convention**. Explicit non-goal: nothing here makes the
+  AI more aggressive.
+  **Decisions needed (all on CLAUDE.md's "Must ask" list):**
+  1. **D10 — carry `carrier_products` across the Knowledge→Governance seam.** API change, additive.
+     **Blocking finding: it does not cross today** — absent from the Knowledge read API, the
+     Governance Knowledge client, and the assessment. The drawer literally cannot name the carrier;
+     `isAttributionGap` works only because D3's equivalence needs nothing but claim classes.
+  2. **D11 — "why unresolved" is data, "evidence required" is a doc link.** The second list is
+     identical on all 227 rows; a field whose value never varies carries no information.
+  3. **D12 — promote `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
+     ONLY. The predicate already exists, already runs before any model call, and AI-204-2
+     deliberately uses it only to explain. Needs a distinct outcome reason (`budget_exhausted` is
+     the precedent) — **and must ship with or after #116**, or it renders as "stated no reason".
+  4. **D14 — Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
+     user's proposed first-class structure would copy facts that exist elsewhere, which is the
+     generation-stamp trap hit twice in September. `VendorStatements` is the precedent shape.
+  5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.**
+  **Measurements to run first (no decision needed):** (a) the gap's shape split — carriers named
+  but unmatched vs **no carriers at all**; `vm-verify` counts the 227 as "carrier named, none
+  matched", so `carrier_missing` may be separate and uncounted. (b) Does Red Hat's `package_state`
+  flaw-specific state discriminate carriers from module-rebuild members? If yes, an authoritative
+  bridge is **already ingested**; if it enumerates the whole stream, it is the same rebuild artifact
+  in other clothing.
 
 - [ ] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
   DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated

@@ -197,6 +197,144 @@ conclusion:
 vendor-authored SBOM carrying real CPEs, or an upstream mapping Themis consumes rather than maintains.
 Absent that, the gap stands, and surfacing it (D6) is the whole of the work.
 
+## PROPOSED D10–D15 — explaining and gating the gap (ATTR-GAP-2, for review 2026-09-22)
+
+**Status: PROPOSED, NOT ACCEPTED.** Raised by the user 2026-09-21 after a live walkthrough of
+`CVE-2026-33006` — carrier `http_server`, installed `httpd`, both components `scope`, zero
+proposals, and an AI "no answer". A textbook instance of the D5/D9 httpd cluster, and one of the
+227 gaps the ATTR-GAP-1 tile already counts.
+
+**The governing principle the user stated, and it is the reason these five are in this order:**
+
+> *Improve the system's ability to EXPLAIN and RESOLVE uncertainty before improving its
+> willingness to ELIMINATE uncertainty.*
+
+That is the sibling of CONVENTIONS R4/R4c and it is what D9 already embodies. Recommended for
+promotion to a convention in its own right. **The explicit non-goal: none of this makes the AI more
+aggressive.**
+
+Proposed order of work, which deliberately puts identity evidence LAST:
+
+    1. the gap is explicit          → D10
+    2. say WHY it is unresolved     → D11
+    3. AI ineligible before invoke  → D12
+    4. measure the gap's classes    → D13
+    5. only then, evidence bridges  → D14
+
+### PROPOSED D10 — The gap states its two sides, and `carrier_products` must cross the seam
+
+A Finding must say *"vulnerability carrier: `http_server` · installed component: `httpd` · no
+deterministic identity relationship established"*, rather than leaving a reviewer to infer it from
+a `scope` label.
+
+**The blocking finding, measured in code 2026-09-21: `carrier_products` does not reach Governance
+at all** — absent from the Knowledge read API, from Governance's Knowledge client, and from the
+assessment projection. `isAttributionGap` works today only because it needs nothing but the
+components' claim classes (D3's equivalence). The dashboard therefore **cannot name the carrier**.
+
+So D10 is not a rendering change: it is an additive field through Knowledge read API → client DTO →
+`FaultlineKnowledge` → assessment schema → drawer. Two API contracts. **This is the first thing to
+approve.**
+
+### PROPOSED D11 — "Why unresolved" is DATA; "evidence required" is DOCUMENTATION
+
+Split, because only one half is per-Finding:
+
+    Why unresolved            → varies per card → a field
+      • NVD supplied carrier: http_server
+      • installed identity: httpd
+      • no independent CPE identity (D7a)
+      • no vendor identity mapping configured
+
+    Evidence required         → IDENTICAL on all 227 → a link
+      • vendor/package identity mapping
+      • authoritative CPE mapping
+      • other independent product identity evidence
+
+A field whose value never varies carries no information, and persisting invariant prose into a
+projection turns it into a CMS. The second block becomes one link to this EDR. **If D13 shows the
+reasons diverge by class, the second block becomes data at that point** — not before.
+
+### PROPOSED D12 — Promote the existing thinness predicate from a LABEL to a GATE
+
+The predicate is **already written and already measured**. `domain.GroundingThinness` returns
+*"N component(s), all scope-class (zero carriers) — no evidence any component carries the flaw"*,
+and its comment cites a prior instance (CVE-2026-42496, 37 components from a module rebuild set).
+It is computed **before any model runs**, and AI-204-2 deliberately applies it *only on the
+insufficient exits* — as an explanation, never as a refusal.
+
+So D12 is small: promote it to a gate. Measured cost of not doing so on `CVE-2026-33006` — two
+invocations, 72s and 35s, output discarded both times by Grounding Verification.
+
+**Gate on the ZERO-CARRIERS reason only**, not all three thinness reasons:
+
+| thinness reason | gate | why |
+| --- | --- | --- |
+| all components scope-class ⇒ zero carriers | **yes** | there is no security subject at all |
+| every carrier cleared by a vendor fix | no | there IS a subject, with a known disposition |
+| no ranges and no fix versions | no | the model may still reason from the summary |
+
+**A distinct outcome reason is justified** — *"not invoked, no grounded subject"* is a different
+operator fact from *"invoked, model declined"*, which is precisely the argument the repo already
+accepted for `budget_exhausted` (*"a distinct reason because the operator response is unlike every
+other no-proposal"*). **Hard sequencing constraint: it must ship with or after
+`DEF_GUI_AI_REASON_MAP_INCOMPLETE` (#116)**, or it renders as *"the Gateway stated no reason"* —
+the exact defect diagnosed the same evening.
+
+### PROPOSED D13 — Measure the gap's classes BEFORE inventing a taxonomy for them
+
+The user's own instruction, and R4 verbatim: *"I wouldn't create this taxonomy yet. First measure
+the attribution-gap population and see whether multiple stable failure modes actually exist."*
+
+A `claim_reason` beside `claim_class` (`carrier_component_unresolved`, `carrier_missing`,
+`component_identity_unresolved`, `ambiguous_carrier_match`) is **deferred** until the population
+shows the classes are real. The discriminating measurement is cheap: carriers named but unmatched
+versus **no carriers at all**. `vm-verify` reports the 227 as *"carrier named, none matched"*, so
+`carrier_missing` may be a separate and currently uncounted population.
+
+### PROPOSED D14 — Attribution is a PROJECTION. D3 already decided this.
+
+The user proposed Attribution as a first-class structure on the Finding. The shape is right; the
+location is not, and **D3 already settles it** — *"no column, no event, no migration … a read-model
+derivation over data both contexts already hold."*
+
+    Finding (aggregate)     ← stores NOTHING new
+          └── FindingAssessment.Attribution     ← computed at read time
+                   ├── carrier(s)      from the card (needs D10)
+                   ├── component(s)    from the Finding
+                   ├── status          derived via D3's equivalence
+                   └── unresolved_because  derived (D11)
+
+Two reasons beyond D3. Every field would copy a fact that already exists elsewhere, and copying
+derived state into an aggregate is the generation-stamp trap hit twice in September — it is why
+`DEF_GOV_RELEASE_SCOPE_FROM_FINDING` rejected stamping the scope onto the Finding at open. And the
+shape has precedent: `FindingAssessment.VendorStatements` is exactly this — one read-time structure
+the drawer, the queue and the AI all consume, owning no state.
+
+This still delivers the user's goal of **one structured fact with three consumers**. It just does
+not create a fourth place for it to go stale.
+
+### PROPOSED D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed
+
+The user's boundary is exact and unchanged from D7a: *"`httpd` → generate CPE → `httpd` → compare
+CPE"* does not qualify, because the evidence was generated from the component name itself.
+
+**The candidate: Red Hat's per-CVE `package_state`,** which names `httpd` directly. That is Red Hat
+tracking *this CVE* against *that package name* — not derived from the customer's SBOM, so it is
+independent in the required sense, and **it already flows into Themis** (this card's
+`severity_source` is `redhat`).
+
+**The trap, and it is this arc's founding observation.** A module-stream advisory rebuilds every RPM
+in the stream and publishes a fixed version for each, so *"Red Hat shipped a fix for httpd"* is
+**not** evidence that httpd carries the flaw. `CVE-2026-33006` is a module build
+(`2.4.37-65.module+el8.10.0+40257+286895ef.9`).
+
+So the question is narrow and empirical: does `package_state`'s **flaw-specific state**
+(`Affected` / `Not affected` / `Fix deferred`) discriminate carriers from rebuild members, or does
+it enumerate the whole stream as well? If it discriminates, there is an authoritative bridge already
+in the data. If it enumerates, it is the same rebuild artifact in different clothing.
+**This measurement belongs in D13's step, not D15's** — nothing is designed until it answers.
+
 ## Validation criterion
 
 1. The gap is countable and visible, and equals the all-scope Finding population (227 measured).
