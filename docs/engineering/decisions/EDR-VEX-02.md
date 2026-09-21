@@ -260,6 +260,63 @@ read API emits them flat: a half-populated object must not be readable as an est
 written before the field decodes with an empty scope and therefore reads as `unknown` — which per D4
 cannot suppress anything.
 
+### D12 — The release's scope is a property of the RELEASE, not of one Finding
+
+Decided 2026-09-21, minutes after D11 shipped, from the output taken to verify it
+(`DEF_GOV_RELEASE_SCOPE_FROM_FINDING`).
+
+D3/D6 said to compare the vendor's scope against "the release's scope" and left where that comes
+from implicit. The implementation derived it from **the Finding's own matched components**, which
+is wrong whenever a Finding carries only Maven/PyPI/npm packages — it places nothing, even when
+the release around it is almost entirely rpm.
+
+**Measured.** Release `7bc21a1b`: **688 of 721** components carry `el8`, 33 carry no marker, and
+**no conflicts**. A Java Finding on that release reported:
+
+    xbean     | enterprise-linux 9 | not_comparable   ← the truth was not_applicable
+    resteasy  | enterprise-linux 9 | not_comparable   ← the truth was not_applicable
+
+Estate-wide, **49 Findings** were unplaceable from their own components while their release was
+placeable.
+
+**And it was worse than a lost distinction — it suppressed `applicable` too.** The guard test run
+against the pre-fix code reports `not_comparable` for the `enterprise-linux 8` statement as well,
+so a vendor clearance that genuinely covered the release could never raise a proposal. Same
+false-negative class as `DEF_VEX_COVERING_FIRST_MATCH`, reached by a different route.
+
+**Resolution — narrow evidence first, then the release:**
+
+    the Finding's own components place the release?
+      ├── yes → use that                 (unchanged; the most specific evidence)
+      └── no  → ask the release          (D12)
+                  ├── exactly one major → use it
+                  └── none, or several   → unresolved, today's behaviour
+
+**Additive by construction, which is the whole safety argument.** A Finding that already placed its
+release keeps exactly the scope it had, so no existing `applicable` or `not_applicable` verdict can
+move. The repository is consulted only where the Finding placed *nothing* — so this can fill in a
+verdict that was `not_comparable` and can never change one that was decided.
+
+**Several majors is not a tie to break.** A release built from one base with packages from another
+genuinely has no single product scope, and choosing the most common one would assert a fact nobody
+established — R4's rule applied to a resolver rather than to a rule. The estate resolves cleanly,
+so that branch is a guard, not a workaround.
+
+**One resolution rule, shared.** Both the raise path and the assessment projection call the same
+function, because a drawer and a decision that disagreed about one statement would be worse than
+either answer alone.
+
+**Derived in Go, not in SQL.** The query fetches distinct versions; `value.ScopeFromRPMRelease`
+does the judging. A second implementation of "what major is this build" in SQL would be a second
+thing to keep correct, and `RPMReleaseMajor` already handles `.el8`, `+el8` and `el8_10`.
+
+**Fail-safe.** A repository error degrades to the unresolved scope — today's behaviour — rather
+than failing the fold or the read. An unplaced release yields `not_comparable`, which cannot clear
+anything.
+
+**Does NOT close `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE`.** A release with no distribution packages
+at all still cannot be placed, and should not be: that gap is real and remains open.
+
 ## Implementation sequence
 
 Ordered so that each step is verifiable before the next depends on it:

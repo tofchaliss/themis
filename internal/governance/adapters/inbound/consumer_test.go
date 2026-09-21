@@ -344,3 +344,10 @@ func TestConsumer_FaultlineEnriched_ApplicabilityScopeMismatchRaisesNothing(t *t
 		})
 	}
 }
+
+// ReleaseScope is the WIDE release evidence (EDR-VEX-02 D12). The zero scope means the release
+// does not resolve, which reproduces the pre-D12 behaviour — so these consumer tests keep
+// asserting exactly what they asserted before.
+func (r *memRepo) ReleaseScope(_ context.Context, _ string) (value.ProductScope, error) {
+	return value.ProductScope{}, nil
+}

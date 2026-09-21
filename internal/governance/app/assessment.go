@@ -100,7 +100,7 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 	}
 	if k, kerr := s.knowledge.GetFaultline(ctx, f.FaultlineID()); kerr == nil {
 		out.Knowledge = selectFixes(k, f.Components())
-		out.VendorStatements = vendorStatements(&f, k.Applicabilities)
+		out.VendorStatements = vendorStatements(&f, releaseScopeFor(ctx, s.repo, &f), k.Applicabilities)
 	}
 	return out, nil
 }
@@ -128,7 +128,7 @@ type VendorStatement struct {
 // Finding. It exists so a blocked statement stays visible: a statement whose scope does not cover
 // the release raises no Proposal, so without this it would vanish from the drawer entirely —
 // which would recreate the invisibility D2 forbids.
-func vendorStatements(f *domain.Finding, apps []Applicability) []VendorStatement {
+func vendorStatements(f *domain.Finding, release value.ProductScope, apps []Applicability) []VendorStatement {
 	if len(apps) == 0 {
 		return nil
 	}
@@ -137,7 +137,7 @@ func vendorStatements(f *domain.Finding, apps []Applicability) []VendorStatement
 		out = append(out, VendorStatement{
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
 			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
-			Applicability: string(applicabilityOf(f, a)),
+			Applicability: string(applicabilityOf(release, a)),
 		})
 	}
 	return out

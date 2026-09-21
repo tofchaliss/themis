@@ -3399,11 +3399,15 @@ under the 2026-08-07 re-derivation standard.
   determination (D2), so a reviewer opening one of the eight sees the applicable EL 8 statement
   marked `applies here` beside the proposal's stale wording. Misleading, not dangerous.
 
-- [ ] **DEF_GOV_RELEASE_SCOPE_FROM_FINDING — the release's product scope is derived from ONE
-  FINDING'S components instead of from the release, so a placeable release reports as unplaceable
-  (found + MEASURED 2026-09-21 on the deployment, immediately after D11 shipped).** **MED, and it
-  is a LOST DISTINCTION, not a false negative**; EDR-VEX-02 D3/D6/D11. **NOT FIXED — it changes
-  where Governance reads release identity from, which is a port/data-source decision.**
+- [x] **DEF_GOV_RELEASE_SCOPE_FROM_FINDING — the release's product scope was derived from ONE
+  FINDING'S components instead of from the release, so a placeable release reported as unplaceable
+  (found + MEASURED 2026-09-21 on the deployment, immediately after D11 shipped; FIXED same day as
+  EDR-VEX-02 D12).**
+  **HIGH, FALSE-NEGATIVE path — severity CORRECTED upward during implementation.** It was filed as
+  "MED, a lost distinction, not a false negative". That was wrong: running the guard test against
+  the pre-fix code shows the `enterprise-linux 8` statement ALSO reported `not_comparable`, so a
+  vendor clearance that genuinely covered the release could never raise a proposal. Same class as
+  DEF_VEX_COVERING_FIRST_MATCH, reached by a different route, and bounded by the 49 Findings below.
   **Measured, not inferred.** On release `7bc21a1b`, **688 of 721** components carry an `elN`
   marker — the release is unambiguously `enterprise-linux 8`. A Java Finding on that same release
   reports:
@@ -3448,11 +3452,27 @@ under the 2026-08-07 re-derivation standard.
                       the exact shape of the generation-stamp problems already
                       fixed twice this month
 
-  **Measure before choosing (R4):** a release can legitimately straddle majors (a container image
-  built FROM one base with packages from another), so "the release's major" may not be a single
-  value. Option (a)'s majority vote would hide that; option (b) would expose it. The 688/721 split
-  on this very release is 33 components that are NOT el-marked, and what those are should be looked
-  at before any of this is encoded.
+  **Measured before choosing (R4), and the measurement shaped the rule.** The release resolves
+  cleanly — 688 at `el8`, 33 with no marker, **zero conflicts** — but a release CAN legitimately
+  straddle majors (a container built FROM one base with packages from another), so the resolver
+  returns a scope only when the release yields **exactly one** major. Several is not a tie to
+  break: choosing the most common would assert a fact nobody established. That removed the need to
+  measure every release before shipping, because the code is correct either way.
+  **Chosen: option (a)**, the in-context query, with narrow evidence first — the Finding's own
+  components are consulted before the release, so a Finding that already placed its release keeps
+  exactly the scope it had. **Additive by construction:** this can fill in a verdict that was
+  `not_comparable` and can never move one that was `applicable` or `not_applicable`.
+  Option (c) was rejected on the spot: a Finding is opened before its release is fully correlated,
+  so a stamp would be wrong and then stale — the generation-stamp shape already fixed twice this
+  month. Option (b) stays available if an authoritative answer is ever needed; (a) needs no
+  cross-context call because Governance already owns every Finding.
+  **One resolution rule, shared by the raise path and the assessment projection** — a drawer and a
+  decision that disagreed about one statement would be worse than either answer alone. Derived in
+  Go by `ScopeFromRPMRelease`, never by an SQL regex: a second implementation of "what major is
+  this build" would be a second thing to keep correct. A repository error degrades to today's
+  behaviour rather than failing the fold.
+  **Does NOT close DEF_VEX_NONRPM_RELEASE_UNPLACEABLE** — a release with no distribution packages
+  at all still cannot be placed, and should not be.
 
 - [ ] **DEF_VEX_NONRPM_RELEASE_UNPLACEABLE — a non-rpm release cannot be placed against a vendor
   product scope AT ALL, so every vendor statement about a PyPI/npm/Maven component resolves

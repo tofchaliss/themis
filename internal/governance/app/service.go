@@ -303,27 +303,56 @@ type Applicability struct {
 	Scope value.ProductScope
 }
 
-// applicabilityOf determines whether a vendor statement covers this Finding's release
-// (EDR-VEX-02 D3/D4/D6/D11).
+// applicabilityOf determines whether a vendor statement covers a release, given that release's
+// already-resolved scope (EDR-VEX-02 D3/D4/D6/D11/D12).
 //
-// The release's scope comes from its own components' rpm builds: an `elN` marker IS the
+// PURE on purpose. It used to derive the release scope itself, from the Finding's own components,
+// and both of those were mistakes in turn: deriving it here made the resolution invisible to the
+// caller, and deriving it from ONE FINDING reported a placeable release as unplaceable whenever
+// that Finding happened to carry only Maven/PyPI/npm packages (D12). The scope is now resolved
+// once, by the caller, from the widest evidence available — and this function only compares.
+func applicabilityOf(release value.ProductScope, a Applicability) value.ScopeMatch {
+	return value.MatchScope(a.Scope, release)
+}
+
+// findingScope places a release from ONE Finding's matched components: an `elN` marker IS the
 // family+major statement, which is what lets a `Red Hat Enterprise Linux 8` statement cover a
-// `Rocky Linux 8.10` release with no product-string comparison. The FIRST component that places
-// the release decides; components of one release do not straddle EL majors.
+// `Rocky Linux 8.10` release with no product-string comparison.
 //
-// The whole determination is delegated to MatchScope, including the case where NOTHING places the
-// release — a zero scope, passed through deliberately rather than short-circuited here. That is
-// what keeps the two unplaceable states apart (D11): this function used to return `unknown`
-// itself, which reported an unreadable vendor CPE and an unplaceable release as the same word.
-func applicabilityOf(f *domain.Finding, a Applicability) value.ScopeMatch {
-	var release value.ProductScope // zero = nothing on this Finding places the release
+// This is the NARROW evidence, kept as a separate step because it is preferred: a component
+// actually matched on the Finding being judged is more specific than a fact about the release
+// around it, and on a single-major release the two agree anyway.
+func findingScope(f *domain.Finding) value.ProductScope {
 	for _, c := range f.Components() {
 		if s := value.ScopeFromRPMRelease(c.Version); s.Known() {
-			release = s
-			break
+			return s
 		}
 	}
-	return value.MatchScope(a.Scope, release)
+	return value.ProductScope{} // nothing on this Finding places the release
+}
+
+// resolveReleaseScope places the release for applicability, narrow evidence first (D12).
+//
+// ADDITIVE BY CONSTRUCTION, which is the whole safety argument: the Finding's own components are
+// consulted first, so a Finding that already placed its release keeps exactly the scope it had,
+// and the repository is asked only when it placed NOTHING. So this can fill in a verdict that was
+// `not_comparable`; it can never change one that was `applicable` or `not_applicable`.
+//
+// A repository error degrades to the zero scope — today's behaviour — rather than failing the
+// operation. An applicability determination is not worth failing a fold over, and the fail-safe
+// direction is unchanged: an unplaced release yields `not_comparable`, which cannot clear anything.
+// A free function rather than a method because BOTH services need it: FindingService decides
+// whether to raise, and ReadService renders the same determination in the assessment. One
+// resolution rule, or the drawer and the raise path would disagree about the same statement.
+func releaseScopeFor(ctx context.Context, repo Repository, f *domain.Finding) value.ProductScope {
+	if narrow := findingScope(f); narrow.Known() {
+		return narrow
+	}
+	scope, err := repo.ReleaseScope(ctx, f.ReleaseID())
+	if err != nil {
+		return value.ProductScope{}
+	}
+	return scope
 }
 
 // proposalFor maps an enrichment signal to the Governance Proposal it should raise (D6). It
@@ -507,7 +536,11 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 	proposer := domain.Actor{Kind: domain.ActorSystem, ID: vexApplicabilityActorID}
 	for _, id := range ids {
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-			covered, ok := coveringStatement(f, notAffected)
+			// Resolved ONCE per Finding, before selection: the release scope is the same for
+			// every statement on it, and both the selection and the block below must judge
+			// against the same answer.
+			release := releaseScopeFor(ctx, s.repo, f)
+			covered, ok := coveringStatement(f, release, notAffected)
 			if !ok {
 				return nil, errNoop // no vendor statement covers this Finding's components
 			}
@@ -524,7 +557,7 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 			// Linux 7", and ~90% of surviving statements were scoped to products it does not run.
 			// `unknown` is blocked for the same fail-safe reason an unknown claim class acts as
 			// carrier: absent evidence must never suppress.
-			if applicabilityOf(f, covered) != value.ScopeApplicable {
+			if applicabilityOf(release, covered) != value.ScopeApplicable {
 				return nil, errNoop
 			}
 			pid := domain.ProposalID("vex:" + string(id) + ":" + packageKey(covered.Package))
@@ -602,14 +635,14 @@ func (s *FindingService) reactToVersionRange(ctx context.Context, sig Enrichment
 // scope — so for one package the LOWER major sorts first, and a first-match reader on a Rocky 8.10
 // estate would pick the RHEL 7 statement, find it `not_applicable`, and block the applicable RHEL 8
 // statement sitting right behind it. That is a false negative built out of two correct halves.
-func coveringStatement(f *domain.Finding, apps []Applicability) (Applicability, bool) {
+func coveringStatement(f *domain.Finding, release value.ProductScope, apps []Applicability) (Applicability, bool) {
 	var fallback Applicability
 	found := false
 	for _, a := range apps {
 		if !f.CoversPackage(a.Package) {
 			continue
 		}
-		if applicabilityOf(f, a) == value.ScopeApplicable {
+		if applicabilityOf(release, a) == value.ScopeApplicable {
 			return a, true
 		}
 		if !found {
