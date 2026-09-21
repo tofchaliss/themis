@@ -3383,6 +3383,43 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
+- [ ] **DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION — an escalated invocation loses the primary's
+  decline class, so the G-AI-2c eval signal is dark for exactly the population that would answer
+  "is escalation worth running?" (found 2026-09-21).** **MED, observability**; G-AI-2c + the model
+  router. **NOT FIXED.**
+  **Observed:** `themis_ai_declines_total` is EMPTY on the deployment, while the journal proves
+  the primary declined at least twice — escalation only fires on `insufficient`.
+  **Mechanism:** an invocation is recorded once, by its TERMINAL reason, and the decline counter
+  is gated on `oc.DeclineClass != ""`, which is set only where the stance is `insufficient`. When
+  the primary declines and escalation then fails, the terminal reason becomes `business_invalid`,
+  the class is never set for the run, and the primary's honest decline is **overwritten and never
+  counted**.
+  **Why it is worse than a missing number.** The counter's `class` label (`thin_grounding` vs
+  `model_undetermined`) is the whole basis for judging escalation: the escalation site's own
+  comment says *"the larger model may extract more from the SAME grounding"*, which holds only for
+  `model_undetermined`. On `thin_grounding`, escalating is pointless by construction — nothing can
+  extract what the grounding never contained. **The counter is blind to precisely the runs that
+  would settle it.**
+  Same form as two prior findings: a gate nobody runs cannot report its own absence (DEV-PROP-1,
+  `make test-property` broken six weeks) and a counter computed but never emitted (KN-SCAN-OBS-1).
+  Here it IS emitted — only on the branch that makes it uninformative.
+  **Fix:** record the primary's decline at the point of escalation, with `tier="primary"`, and let
+  the terminal outcome be counted separately. An escalated run produced two outcomes; the metric
+  currently describes one.
+  **Adjacent:** `themis_ai_invocations_total` carries no `tier` label either, so two escalated runs
+  appear only as `reason="business_invalid"`, indistinguishable from a primary-only business
+  failure — and the operator response differs completely (swap the escalation model vs fix the
+  prompt contract).
+  **Operational finding from the same investigation (NOT a code defect):** this deployment's
+  escalation tier is a **7B Q4** model behind a **20B** primary
+  (`THEMIS_INTELLIGENCE_MODEL=cyberpal20b:latest`,
+  `THEMIS_INTELLIGENCE_MODEL_ESCALATION=WhiteRabbitNeo-V3-7B ... Q4_K_M`), which **inverts** the
+  escalation mechanism. Two escalated runs, 21:59 and 22:00, both produced the **identical**
+  hallucinated NEVRA (`app:…+el8.10.0+40257+286895ef.9`) and both were refused by Grounding
+  Verification — the gate working, for the second recorded time (first: 2026-08-13). Recommended:
+  unset the escalation model, so cyberpal's honest `insufficient` stands. **Neither of these two
+  metrics could show any of that**, which is the point of this entry.
+
 - [ ] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
   DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated
   no reason" (found 2026-09-21; **this is the ACTUAL cause** of the CVE-2026-33006 message).**
