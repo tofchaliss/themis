@@ -3383,10 +3383,44 @@ under the 2026-08-07 re-derivation standard.
   **Not a code defect on its own path:** nothing was suppressed, no Position was established, and
   all 138 Findings stayed open. The damage is confined to the provenance of a decision.
 
-- [ ] **DEF_AI_EMPTY_INFORMATION_REPORTED_OK — a BLANK Information answer is recorded as
-  `reason=ok`, so a decline is counted as a success and rendered as "the Gateway stated no reason"
-  (found 2026-09-21 from a user question about CVE-2026-33006).** **MED**; EDR-INTELLIGENCE-01
-  T7/T8 + AI-204-1. **NOT FIXED.**
+- [ ] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
+  DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated
+  no reason" (found 2026-09-21; **this is the ACTUAL cause** of the CVE-2026-33006 message).**
+  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **NOT FIXED.**
+  **All four steps verified in code.** The Gateway returns 204 with TWO headers
+  (`X-Themis-AI-Reason: business_invalid` + `X-Themis-AI-Detail: <detail>`);
+  `governance/adapters/intelligence/client.go` merges them into `reason += ": " + d`;
+  `RecommendPosition` sets that composite on Governance's own reason header; the dashboard looks
+  it up by EXACT MATCH and misses, because the key is `business_invalid`, not
+  `business_invalid: <detail>`. Confirmed by the deployment's metric:
+  `recommend_position produced=false reason=business_invalid` ×2.
+  **The worst of the three to get wrong.** `business_invalid` is the ONE reason meaning the safety
+  gate fired — the model answered, cited something absent from its grounding, and Themis refused
+  to show it. Rendering that as "no answer, no reason given" tells the operator the AI plane is
+  idle or broken when it just protected them. The chip class is `chip-crit`: the page is trying to
+  shout and the lookup silences it.
+  **Two correct halves again.** The detail is appended for a good reason, stated in the code:
+  *"`provider_error` alone does not say the provider timed out at 60s."* Exact-match rendering of a
+  closed taxonomy is also right. They are incompatible — the enrichment changed the value's SHAPE
+  from a closed enum to a free-form composite and no consumer was re-derived. **A generalisation of
+  R5: a change to a value's SHAPE needs its consumers re-derived, not only a change to
+  cardinality.**
+  **Fix:** keep the two facts in two fields — the Gateway already sends them separately and it is
+  Governance that flattens them. That is EDR-VEX-02 D1's "three concepts, three fields" discipline
+  applied here. Splitting on the first `": "` at the render boundary is the one-line alternative
+  and would also harden the page against a detail appearing anywhere.
+
+- [ ] **DEF_AI_EMPTY_INFORMATION_REPORTED_OK — a BLANK Information answer would be recorded as
+  `reason=ok`, counting a decline as a success (found 2026-09-21).** **LOW — LATENT, code-reading
+  only, NO measured instances**; EDR-INTELLIGENCE-01 T7/T8. **NOT FIXED, and not to be worked
+  before the two above.**
+  **CORRECTED 2026-09-21: this was filed as the cause of the CVE-2026-33006 message and it was
+  NOT.** The cause is DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY. I inferred `204 + reason=ok`
+  for that CVE from an AGGREGATE metric that cannot attribute per-CVE — and for an Information
+  capability `produced=false, reason=ok` is the SUCCESS path, so all 14 of those are successful
+  explanations. Two further checks contradicted the story: the card carries a 207-character NVD
+  summary, and my journal grep found nothing because I had omitted `business_invalid` from my own
+  pattern. **R4c, second instance in one day** (see DEF_VEX_NONRPM_RELEASE_UNPLACEABLE).
   **The chain, read from the code.** For an Information capability the SUCCESS path is
   `produced=false` + `reason=ok` — deliberate, and the code says so: *"produced stays FALSE: there
   is no proposal to record."* The HTTP layer returns the prose only when there IS prose
