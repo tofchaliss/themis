@@ -3310,6 +3310,40 @@ under the 2026-08-07 re-derivation standard.
   smoke — assert the selected package list is non-empty and contains the known property packages —
   would have caught this on the day.
 
+- [x] **DEF_VEX_SCOPE_STALE_TWIN — a statement observed before the scope existed stays in the
+  view forever beside its scoped re-observation, and renders as `unknown` (found 2026-09-21 in the
+  VM output for the two defects above, FIXED same day).** **MED, MISLEADING-DISPLAY + it hid the
+  validation metric**; EDR-VEX-02 D4/D8/D10.
+  **The symptom.** After deploying the codec fix and letting the Red Hat sweep heal every card,
+  the scope distribution was a real spread (enterprise-linux 5–10, plus ~30 non-OS Red Hat
+  products) — **but `(none)` was still the largest bucket at 1594 of ~3100 statements.** That is
+  precisely the number EDR-VEX-02's validation order says to STOP on, because a large `unknown`
+  population is supposed to mean the resolver is not placing scopes.
+  **It was not the resolver.** The reconciled view is the UNION of every applicability Proposal
+  ever appended (`appSet[*p.applicability]`), and a Proposal is immutable. So every statement
+  observed before the scope was readable stays in the union permanently, sitting beside the same
+  assertion re-observed with its scope. The estate's history holds three generations — the
+  original one-per-package statements, the multi-product statements from the sweep that ran while
+  the codec was still dropping the field, and the scoped ones — and the first two collapse into
+  each other but never into the third.
+  **Why it is a defect and not just noise.** A scope-less row reads as applicability `unknown`,
+  which per D4 means *"Themis cannot determine whether this applies."* That is false when the
+  twin beside it determines exactly that. The row asserts an uncertainty that no longer exists —
+  and it made the operator's own validation query unreadable, history masquerading as a broken
+  resolver.
+  **Fixed** as a reconciliation rule on the derived view: a statement with an EXACTLY empty scope
+  is dropped when an otherwise identical statement (same package, status, justification, to the
+  character) carries a known scope. **No record is discarded** — D8 governs the append-only
+  Proposal, which is untouched; this is the view deciding which evidence wins, which is what
+  reconciliation is for, and it is the same shape as the legacy fixed-version fallback:
+  strictly-less-informative legacy data degrades rather than competing. A statement Red Hat
+  genuinely publishes with no readable CPE has no scoped twin, survives, and still reads
+  `unknown` — the distinction D4 exists to protect, asserted by its own test.
+  **Open, and deliberately NOT folded in:** how many of the **146** standing vendor proposals rest
+  on a statement that is `not_applicable` to this estate. They were raised before EDR-VEX-02 with
+  no scope check at all, and this change blocks new ones without withdrawing old ones. Retiring
+  them is KN-SCAN-4(b)'s problem shape and needs a decision, not a guess.
+
 - [x] **DEF_VEX_COVERING_FIRST_MATCH — an inapplicable vendor statement blocks an APPLICABLE one
   for the same package, because selection is still by array position (found 2026-09-21 while
   verifying EDR-VEX-02 D7, FIXED same day).** **HIGH, FALSE-NEGATIVE path** — this one suppresses
