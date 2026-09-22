@@ -30,7 +30,7 @@ fixed while verifying. What follows is the forward list, ordered by what it cost
 | **P4** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | `themis_ai_declines_total` is empty whenever escalation fires, so "does escalation earn its keep" is unmeasurable. Small, and it unblocks a question | implement |
 | **P5** | **enable inbound auth** so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while nodes log `AUTH DISABLED` — easy to mistake for done. The dashboard's gate is already on; the API nodes are not. **After P0** | human |
 | **P6** | `DEF_GOV_RETIRED_ROWS_IN_DECISION_INPUTS` | `ProvablyOutOfRange` and the signal-driven fix selection still read retired components. **Fail-safe direction** (an extra row can only refuse a suppression, never grant one), so LOW — but it is the same root as the projection defect fixed this round | implement |
-| **P7** | **ATTR-GAP follow-up: the case-1 reason string** | D13 measured a real, cheaply-derivable class — *the card names no package-level carrier at all* (`fedora`, `debian_linux`, `leap`, NetApp/Oracle appliances). Not an identity failure and currently indistinguishable from one. The only taxonomy member the measurement supports | design |
+| **P7** | **`ATTR-GAP-3`** — the one reason string D13's measurement supports | *the card names no package-level carrier at all* (`fedora` 105, `debian_linux` 85, `leap` 35, NetApp/Oracle appliances). Not an identity failure, and today indistinguishable from one. Settle what makes a name "package-shaped" before encoding anything (CONVENTIONS R4) | design |
 | **P8** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (CONVENTIONS R4c) | wait |
 | **P9** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
 
@@ -3447,9 +3447,33 @@ under the 2026-08-07 re-derivation standard.
   unset the escalation model, so cyberpal's honest `insufficient` stands. **Neither of these two
   metrics could show any of that**, which is the point of this entry.
 
-- [ ] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
-  2026-09-21, reviewed 2026-09-22. THE VISIBILITY HALF (D10 · D11 · D14) AND THE GATE (D12) ARE
-  SHIPPED — code green, live verification pending; only the two MEASUREMENTS (D13/D15) remain.**
+- [ ] **ATTR-GAP-3 — "the card names no package-level carrier at all" is the ONE reason string the
+  measurement supports (filed 2026-09-22 from D13's result).** **LOW-MED, explainability**;
+  EDR-ATTRIBUTION-01 D13.
+  **What D13 measured.** The commonest "carriers" on gap cards are not packages: `fedora` 105,
+  `debian_linux` 85, `ubuntu_linux` 36, `leap` 35, `enterprise_linux` 26, plus NetApp and Oracle
+  appliances. No component can ever match those — not because the names disagree but because they
+  are different KINDS of thing. That is not an identity failure, and today it renders identically
+  to one (`http_server` ⇄ `httpd`, which IS one).
+  **Why this member and no other.** D13 rejected the proposed four-value taxonomy because the
+  useful distinction — a derivable name mapping vs a genuine bystander — is not derivable from the
+  data the classes would be computed from. This one IS: "does the carrier list contain any
+  package-shaped name at all" is a property of the list itself. It is the only member the
+  evidence justifies, and it should be filed, designed and measured on its own merits rather than
+  smuggled in as a taxonomy.
+  **Open question to settle first:** what makes a name "package-shaped" without re-inventing the
+  identity guess D7a refused? A distro/product allow-list is evidence-free; NVD's CPE `part`
+  (`/a`, `/o`) may be the honest discriminator and is already in the data. **Measure before
+  encoding (CONVENTIONS R4).**
+
+- [x] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
+  2026-09-21, reviewed, implemented, LIVE-VERIFIED and MEASURED 2026-09-22. COMPLETE.** Landed on
+  `main` as `95a780a`. D10/D11/D14 (explain) and D12 (gate) shipped and verified on the estate;
+  D13 and D15 measured and closed. **Live evidence:** the drawer names `http_server` ⇄ `httpd`
+  with its three reasons; *Recommend a position* returns `204 no_subject` in **3 ms with 0
+  tokens** (the same card previously burned 72 s and 35 s on two invocations both discarded by
+  Grounding Verification); `explain_vulnerability` still answers, which is the Decision-only
+  scoping working.
   **What shipped 2026-09-22.** `carrier_products` now crosses BOTH API contracts (Knowledge
   `EnterpriseView` → Governance `FaultlineKnowledge`), and the derived answer rides beside it as
   `attribution` — status (`attributed` | `unresolved` | `no_components`) · carriers · components ·
@@ -3537,8 +3561,9 @@ under the 2026-08-07 re-derivation standard.
 - [x] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
   DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated
   no reason" (found 2026-09-21; **this is the ACTUAL cause** of the CVE-2026-33006 message).**
-  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **FIXED 2026-09-22** (live
-  verification pending).
+  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **FIXED + LIVE-VERIFIED
+  2026-09-22** — the wire shows `X-Themis-Ai-Reason: no_subject` and `X-Themis-Ai-Detail: …` as
+  TWO separate headers.
   **Fixed as filed:** the two facts are two fields end to end. `app.NoProposal{Reason, Detail}`
   replaces the flattened string on the `PositionAdvisor` port, the client stops concatenating, and
   Governance re-emits the Gateway's OWN two headers (`X-Themis-AI-Reason` + `X-Themis-AI-Detail`)
@@ -3603,8 +3628,9 @@ under the 2026-08-07 re-derivation standard.
 
 - [x] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
   reasons, so the other six render as "the Gateway stated no reason" (found 2026-09-21, same
-  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **FIXED 2026-09-22** (live verification
-  pending).
+  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **FIXED + LIVE-VERIFIED 2026-09-22.**
+  The guard test earned itself within the hour: adding D12's `no_subject` made it fail
+  immediately, which is this defect's own shape caught before it could ship again.
   **Fixed, and the count was understated: 6 of FIFTEEN.** Governance states four reasons of its
   own, two of which (`declined`, `business_verification_failed`) were also unmapped — the second
   being the one that says Governance itself refused to record an AI claim. All fifteen are mapped

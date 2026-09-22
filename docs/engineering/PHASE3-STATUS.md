@@ -178,7 +178,11 @@ and the resume pointer, never item state.
 > `GroundingThinness` returns the zero-carriers case, computed before any model runs, and AI-204-2
 > deliberately uses it only as a label. D12 is "promote a label to a gate", not "add a rule".
 >
-> ### 🔢 PRIORITIZED — start here tomorrow (revised 2026-09-21 evening)
+> ### 🔢 PRIORITIZED — 2026-09-21 evening (SUPERSEDED — the live list is `BACKLOG.md` Part 1)
+>
+> *Kept for the reasoning, not the order. Everything marked 1, 2 and 5 below shipped on 2026-09-22;
+> items 3, 4, 6 and 7 carry forward and are re-ranked in the backlog's own table, which is the
+> single system of record for item state (tracking rule, 2026-08-27).*
 >
 > **Operator, independent of all code work — do it whenever, it gates nothing:**
 > **rotate the exposed PostgreSQL credential** (see P0 below; unchanged, and now six sessions old).
