@@ -68,3 +68,27 @@ func TestNoopAdvisor(t *testing.T) {
 		t.Errorf("no-op must decline; got %v, %v", produced, err)
 	}
 }
+
+// The 204's two headers stay two fields. They were once concatenated into
+// "<reason>: <detail>", which turned a closed enum into free text and made every
+// exact-match consumer miss — a `business_invalid` safety refusal reached the operator as
+// "the Gateway stated no reason" (DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY).
+func TestClientKeepsReasonAndDetailApart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Themis-AI-Reason", "business_invalid")
+		w.Header().Set("X-Themis-AI-Detail", "ungrounded citation: httpd-2.4.37-65")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	_, produced, no, err := NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
+	if err != nil || produced {
+		t.Fatalf("204 → no proposal, nil err; got %v, %v", produced, err)
+	}
+	if no.Reason != "business_invalid" {
+		t.Errorf("Reason = %q, want the bare taxonomy word — a consumer switches on it", no.Reason)
+	}
+	if no.Detail != "ungrounded citation: httpd-2.4.37-65" {
+		t.Errorf("Detail = %q, want the elaboration preserved beside the reason", no.Detail)
+	}
+}

@@ -1,10 +1,43 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-09-21 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-09-22 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-09-21 · the VEX-scope arc is CLOSED; six defects fixed and live-verified
+> ## ⏭ RESUME POINT — 2026-09-22 · the VISIBILITY HALF is closed; verify it on the VM next
+>
+> **Shipped today, `make check-ci` green, NOT yet seen on the running system.** Three changes, one
+> theme: **the system now says what it knows and why it declined, and nothing behaves differently.**
+> That separation was the point — the user's governing principle is *improve the ability to EXPLAIN
+> and RESOLVE uncertainty before improving the willingness to ELIMINATE it*, and everything here
+> sits on the explain side of that line.
+>
+> | | what changed | why it was wrong before |
+> | --- | --- | --- |
+> | **ATTR-GAP-2 D10/D11/D14** | `carrier_products` crosses both API contracts; a read-time `attribution` projection states carrier ⇄ installed and why they could not be related; the drawer names both sides | the drawer showed one `attribution gap` chip and could not name the carrier — `carrier_products` never left the Knowledge context |
+> | **#117** composite reason | reason and detail stay TWO fields end to end (`app.NoProposal`), re-emitted as the Gateway's own two headers | Governance flattened them to `"business_invalid: <detail>"`, so the page's exact-match lookup missed and a **safety refusal** rendered as *"the Gateway stated no reason"* |
+> | **#116** reason map | all **fifteen** reasons mapped (not 12 — Governance states four of its own), detail displayed, an unknown reason NAMED rather than denied, and a guard test that reads both servers' `Reason*` constants and fails when either grows | the page knew 6; the other nine asserted that no reason was given, when a precise one always was |
+>
+> **The D12 sequencing constraint is now satisfied** — that was the whole reason #116 had to land
+> first. D12 itself is deliberately NOT in this change: it is a gate, so it changes behaviour.
+>
+> ### ⏭ Do this next
+>
+> 1. **Verify on the VM** — open a gap Finding's drawer (CVE-2026-33006 is the worked case) and
+>    confirm it names carrier `http_server` beside installed `httpd`; then trigger a recommend and
+>    confirm the no-answer states its reason instead of "no answer". **Every defect in this arc was
+>    invisible to a green suite and visible in one look at the running system** — assume nothing
+>    until that drawer is read.
+> 2. **Then ATTR-GAP-2's remaining half**: D12 (the gate), D13 (measure the gap's classes — half of
+>    it now comes free, because "no carrier named" and "carriers named, none matched" render
+>    differently), D15 (does Red Hat's `package_state` discriminate carriers from rebuild members?).
+> 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
+>    nothing, which is how it has survived six sessions.
+>
+> The priority table in [`BACKLOG.md`](../BACKLOG.md) Part 1 is the current one; the table in the
+> 2026-09-21 checkpoint below is superseded by it.
+>
+> ## ⏭ PREVIOUS RESUME POINT — 2026-09-21 · the VEX-scope arc is CLOSED; six defects fixed and live-verified
 >
 > **`main` = `0f7701d`. Both CI workflows green. Deployed and verified on the VM.**
 > Domain-design checkpoint: [`EDR-VEX-02`](decisions/EDR-VEX-02.md) **D1–D12** and

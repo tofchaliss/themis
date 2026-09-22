@@ -427,8 +427,8 @@ type stubAdvisor struct {
 	produced bool
 }
 
-func (s stubAdvisor) RecommendPosition(context.Context, string) (app.Recommendation, bool, string, error) {
-	return s.rec, s.produced, "", nil
+func (s stubAdvisor) RecommendPosition(context.Context, string) (app.Recommendation, bool, app.NoProposal, error) {
+	return s.rec, s.produced, app.NoProposal{}, nil
 }
 
 // Governance validates the returned claim against ITS OWN truth before recording anything.

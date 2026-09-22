@@ -23,6 +23,13 @@ type FaultlineKnowledge struct {
 	KEV            bool
 	ExploitPublic  bool
 	AffectedRanges []string
+	// CarrierProducts are the products the card's sources say CARRY the flaw
+	// (EDR-CORRELATION-01 D4), read from Knowledge unchanged. Governance classifies nothing —
+	// Knowledge already matched this Finding's components against exactly this list, and the
+	// result is each component's claim class. They are carried so an unresolved attribution can
+	// NAME the carrier it could not place (EDR-ATTRIBUTION-01 D10); empty means no source named
+	// one at all.
+	CarrierProducts []string
 	// Applicabilities are the vendor VEX statements the card holds, with the scope the VENDOR
 	// stated. Themis's determination about whether each covers this release is computed per
 	// Finding (see VendorStatement) and never written back onto these (EDR-VEX-02 D1).
@@ -80,6 +87,93 @@ type FindingAssessment struct {
 	// BLOCKED still reaches the reviewer: a non-applicable statement raises no Proposal, and
 	// without this it would disappear from the drawer instead of being visibly inapplicable.
 	VendorStatements []VendorStatement
+	// Attribution states BOTH SIDES of the carrier question for this Finding — what the card
+	// says carries the flaw, what is actually installed, and whether Themis could relate the
+	// two (EDR-ATTRIBUTION-01 D10/D11/D14).
+	Attribution Attribution
+}
+
+// Attribution statuses. A small closed set on purpose: D13 defers any richer taxonomy until the
+// population is measured, and an enum invented ahead of that measurement is the mistake R4 names.
+const (
+	// AttributionAttributed — at least one installed component acts as a carrier. The ordinary
+	// case, and the one where a remediation plan and the AI's grounding have a subject.
+	AttributionAttributed = "attributed"
+	// AttributionUnresolved — components are recorded and EVERY one is scope-class, so nothing
+	// installed is evidenced to carry the flaw. This is the Attribution Gap (D1): an
+	// OBSERVATION about the evidence, never a verdict that the release is unaffected.
+	AttributionUnresolved = "unresolved"
+	// AttributionNoComponents — the Finding lists no components at all. Distinct from a gap,
+	// which requires something installed to have gone unattributed.
+	AttributionNoComponents = "no_components"
+)
+
+// Attribution is the carrier question, answered at READ TIME from facts both sides already
+// hold: the card's carrier products (Knowledge) and this Finding's matched components with
+// their claim classes (Governance). It is a PROJECTION and stores nothing — D3 settled that,
+// and copying a derived fact onto the aggregate is the generation-stamp trap this repo has hit
+// twice. `VendorStatements` beside it is the same shape for the same reason.
+//
+// Its value is that it states BOTH SIDES. "Attribution gap" as a bare label leaves a reviewer to
+// infer from claim classes what Themis could not relate; naming the carrier it could not place
+// ("carrier: http_server · installed: httpd") turns the same fact into something a human can act
+// on — and makes visible that the two names are a vocabulary problem, not an absence of risk.
+type Attribution struct {
+	// Status is one of the three constants above.
+	Status string
+	// Carriers are the products the card says carry the flaw, verbatim from Knowledge. Empty
+	// means NO source named one — a materially different gap from "named, none matched", and
+	// the split D13's measurement needs.
+	Carriers []string
+	// Components are the installed components this Finding matched, by name. The other side.
+	Components []string
+	// UnresolvedBecause states, in plain language, why the two sides could not be related —
+	// per-Finding DATA, and empty unless Status is AttributionUnresolved.
+	//
+	// D11: only the facts that VARY belong here. What evidence would RESOLVE the gap is
+	// identical on every one of the 227 measured instances, so it is documentation
+	// (EDR-ATTRIBUTION-01), not a field — a value that never varies carries no information, and
+	// persisting invariant prose into a projection turns it into a CMS.
+	UnresolvedBecause []string
+}
+
+// attributionFor derives the projection. Governance re-derives NO classification here: it reads
+// the claim classes Knowledge already decided (D3's equivalence — "every component is
+// scope-class" is exactly the gap) and pairs them with the carriers the card named.
+func attributionFor(comps []domain.MatchedComponent, carriers []string) Attribution {
+	a := Attribution{Carriers: carriers}
+	if len(comps) == 0 {
+		a.Status = AttributionNoComponents
+		return a
+	}
+	a.Components = make([]string, 0, len(comps))
+	attributed := false
+	for _, c := range comps {
+		a.Components = append(a.Components, c.Name)
+		if c.ActsAsCarrier() {
+			attributed = true // unknown counts as carrier — absence of evidence never hides risk
+		}
+	}
+	if attributed {
+		a.Status = AttributionAttributed
+		return a
+	}
+	a.Status = AttributionUnresolved
+	if len(carriers) == 0 {
+		// The uncounted half of the gap: `vm-verify` reports the population as "carrier named,
+		// none matched", which cannot be true of a card that named none. Stating it separately
+		// is what lets the two be counted apart (D13's measurement).
+		a.UnresolvedBecause = []string{
+			"no source named a product that carries this flaw, so there was nothing to match against",
+		}
+		return a
+	}
+	a.UnresolvedBecause = []string{
+		"the card names carrier product(s) " + strings.Join(carriers, ", "),
+		"the installed component(s) here are " + strings.Join(a.Components, ", "),
+		"no deterministic identity relationship between the two is established",
+	}
+	return a
 }
 
 // GetFindingAssessment builds the projection for one Finding.
@@ -101,6 +195,7 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 	if k, kerr := s.knowledge.GetFaultline(ctx, f.FaultlineID()); kerr == nil {
 		out.Knowledge = selectFixes(k, f.Components())
 		out.VendorStatements = vendorStatements(&f, releaseScopeFor(ctx, s.repo, &f), k.Applicabilities)
+		out.Attribution = attributionFor(f.Components(), k.CarrierProducts)
 	}
 	return out, nil
 }

@@ -268,6 +268,18 @@ components:
             Trust class of the sources that contributed the affected ranges / fixed versions
             (EDR-TRUST-01 T2/T3). Absent when no range evidence contributed. Per field-group,
             not per card - a vendor statement elsewhere must not downgrade public ranges.
+        carrier_products:
+          type: array
+          description: >-
+            The products the flaw-describing sources say CARRY the flaw (EDR-CORRELATION-01 D4) —
+            the union across sources, normalized. This is the OTHER SIDE of a correlation: a
+            component matched against these is a `carrier`, one that matched none is `scope` (it
+            was in the rebuild set). Carried on the read API so a consuming context can NAME the
+            carrier when no component matched it, instead of leaving a reviewer to infer the fact
+            from a claim class (EDR-ATTRIBUTION-01 D10). Empty means no source named a carrier at
+            all, which is a materially different gap from "carrier named, none matched".
+          items:
+            type: string
         applicabilities:
           type: array
           description: Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).

@@ -110,8 +110,15 @@ and logs `provider_error` — so a caller-side timeout is misread as an Intellig
 aborting at 59.99s with `THEMIS_LLM_TIMEOUT=300s` set is exactly what that looks like.
 
 A no-proposal `204` now states its cause on `X-Themis-AI-Reason` (AI-204-1): `disabled` · `unreachable` ·
-`insufficient` (the model correctly declined — the seam working) · `provider_error` · `business_invalid`.
-Before that, all of them read as "the AI declined".
+`insufficient` (the model correctly declined — the seam working) · `provider_error` · `business_invalid` ·
+`budget_exhausted` · `no_grounding` · `schema_invalid` · `prompt_error` · `unauthorized` ·
+`selection_mismatch` · `unknown_capability` · `ok`, plus Governance's own `declined` and
+`business_verification_failed`. Before that, all of them read as "the AI declined".
+**The reason and its elaboration are always TWO headers** (`X-Themis-AI-Reason` + `X-Themis-AI-Detail`)
+and must never be concatenated: Governance flattened them into `"<reason>: <detail>"`, which turned a
+closed enum into free text, and every consumer looking the reason up in a table missed — a safety
+refusal displayed to the operator as "the Gateway stated no reason" (fixed 2026-09-22). A consumer
+switches on the reason and displays the detail.
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
 

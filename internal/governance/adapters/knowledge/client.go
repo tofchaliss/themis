@@ -46,6 +46,11 @@ type faultlineResponse struct {
 		ExploitPublic  bool     `json:"exploit_public"`
 		AffectedRanges []string `json:"affected_ranges"`
 		FixedVersions  []string `json:"fixed_versions"`
+		// CarrierProducts — which products the sources say CARRY the flaw (EDR-ATTRIBUTION-01
+		// D10). Knowledge classified this Finding's components against exactly these; carrying
+		// them lets Governance state BOTH SIDES of an unresolved attribution ("carrier
+		// http_server · installed httpd") instead of only the verdict that nothing matched.
+		CarrierProducts []string `json:"carrier_products"`
 		// Fixes is the PACKAGE-ATTRIBUTED form of the same data (KN-FIX-1). `fixed_versions`
 		// is a flat union across every package the CVE affects, so it cannot answer "what do I
 		// upgrade THIS component to" — reading it produced a recommendation citing another
@@ -111,6 +116,7 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 		ExploitPublic:   body.View.ExploitPublic,
 		AffectedRanges:  body.View.AffectedRanges,
 		FixedVersions:   body.View.FixedVersions,
+		CarrierProducts: body.View.CarrierProducts,
 		Fixes:           fixes,
 		RangeTrust:      value.TrustClass(body.View.RangeTrust),
 		Applicabilities: apps,

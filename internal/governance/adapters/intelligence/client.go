@@ -58,7 +58,7 @@ const (
 // RecommendPosition invokes recommend_position for a Finding. produced=false on a 204
 // ("no proposal"). A transport/HTTP failure returns an error, which the caller treats
 // as "disabled ≡ unavailable" (a safe no-proposal outcome).
-func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.Recommendation, bool, string, error) {
+func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.Recommendation, bool, app.NoProposal, error) {
 	// The Selection shape (EDR-TRUST-01 T9). Governance's own app port is unchanged — it
 	// still passes a finding id; constructing the Selection is this adapter's job, which is
 	// exactly what an anti-corruption layer is for.
@@ -66,37 +66,40 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		"subject": map[string]any{"type": "finding", "ids": []string{findingID}},
 	})
 	if err != nil {
-		return app.Recommendation{}, false, "", err
+		return app.Recommendation{}, false, app.NoProposal{}, err
 	}
 	url := fmt.Sprintf("%s/api/v1/capabilities/%s/invoke", c.baseURL, c.capability)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return app.Recommendation{}, false, "", err
+		return app.Recommendation{}, false, app.NoProposal{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return app.Recommendation{}, false, "", err
+		return app.Recommendation{}, false, app.NoProposal{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNoContent {
-		// The Gateway states WHY on the 204 (AI-204-1). A detail is appended when present —
-		// `provider_error` alone does not say the provider timed out at 60s.
-		reason := resp.Header.Get(gatewayReasonHeader)
-		if d := resp.Header.Get(gatewayDetailHeader); d != "" {
-			reason += ": " + d
-		}
-		return app.Recommendation{}, false, reason, nil // no proposal — a safe outcome
+		// The Gateway states WHY on the 204 (AI-204-1) in TWO headers, and they stay two fields
+		// here. They were once flattened into "<reason>: <detail>" — the detail is worth having
+		// (`provider_error` alone does not say the provider timed out at 60s) but concatenating
+		// it changed the value's SHAPE from a closed enum to free text, and the dashboard's
+		// exact-match lookup then rendered a `business_invalid` safety refusal as "the Gateway
+		// stated no reason" (DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY).
+		return app.Recommendation{}, false, app.NoProposal{
+			Reason: resp.Header.Get(gatewayReasonHeader),
+			Detail: resp.Header.Get(gatewayDetailHeader),
+		}, nil // no proposal — a safe outcome
 	}
 	if resp.StatusCode != http.StatusOK {
-		return app.Recommendation{}, false, "", fmt.Errorf("intelligence API: status %d", resp.StatusCode)
+		return app.Recommendation{}, false, app.NoProposal{}, fmt.Errorf("intelligence API: status %d", resp.StatusCode)
 	}
 
 	var wp wireProposal
 	if err := json.NewDecoder(resp.Body).Decode(&wp); err != nil {
-		return app.Recommendation{}, false, "", err
+		return app.Recommendation{}, false, app.NoProposal{}, err
 	}
 	return app.Recommendation{
 		Stance:            wp.Stance,
@@ -106,7 +109,7 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		DecidedBy:         wp.DecidedBy,
 		Evidence:          evidenceRefs(wp),
 		RationaleWarnings: wp.RationaleWarnings,
-	}, true, "", nil
+	}, true, app.NoProposal{}, nil
 }
 
 // evidenceRefs extracts the cited references so Governance can Business-Verify them against

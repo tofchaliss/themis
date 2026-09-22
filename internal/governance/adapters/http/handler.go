@@ -87,11 +87,28 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 		}
 		out.VendorStatements = &vs
 	}
+	// Attribution rides beside the vendor statements and for the same reason: an unresolved
+	// attribution is precisely the case where the rest of the drawer has least to say, so it
+	// must not depend on anything else resolving (EDR-ATTRIBUTION-01 D10). Omitted only when it
+	// could not be derived at all — an absent status means Knowledge was unreachable, not that
+	// the carrier question was answered.
+	if a.Attribution.Status != "" {
+		att := gen.Attribution{
+			Status:     (*gen.AttributionStatus)(strptr(a.Attribution.Status)),
+			Carriers:   &a.Attribution.Carriers,
+			Components: &a.Attribution.Components,
+		}
+		if len(a.Attribution.UnresolvedBecause) > 0 {
+			att.UnresolvedBecause = &a.Attribution.UnresolvedBecause
+		}
+		out.Attribution = &att
+	}
 	k := a.Knowledge
 	if k.FaultlineID == "" {
 		return out
 	}
 	ranges, fixes := k.AffectedRanges, k.FixedVersions
+	carriers := k.CarrierProducts
 	kev, pub := k.KEV, k.ExploitPublic
 	cvss, epss := float32(k.CVSSScore), float32(k.EPSS)
 	kn := gen.FaultlineKnowledge{
@@ -99,6 +116,7 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 		Summary:   strptr(k.Summary),
 		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
 		AffectedRanges: &ranges, FixedVersions: &fixes,
+		CarrierProducts: &carriers,
 	}
 	// The package-attributed selection and the count of what could not be attributed
 	// (AI-GROUND-1). Both ride out so a consumer can distinguish "no fix published" from
@@ -307,16 +325,21 @@ func (h *Handler) ArchiveFinding(w http.ResponseWriter, r *http.Request, id stri
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// aiReasonHeader carries why no proposal was produced on a 204 (AI-204-1). Advisory metadata,
-// not a contract: an absent header simply means an older node.
-const aiReasonHeader = "X-Themis-AI-Reason"
+// The two headers carrying why no proposal was produced on a 204 (AI-204-1). Advisory metadata,
+// not a contract: an absent header simply means an older node. They are the SAME two headers the
+// Gateway sets, re-emitted unflattened — a consumer switches on the reason and displays the
+// detail, and neither has to parse the other out of one string.
+const (
+	aiReasonHeader = "X-Themis-AI-Reason"
+	aiDetailHeader = "X-Themis-AI-Detail"
+)
 
 // RecommendPosition handles POST /findings/{id}/recommend — the on-demand AI seam
 // (D8/D13, Revision 2). It invokes the Intelligence Gateway (when enabled) and records
 // an ADVISORY AI proposal, never auto-accepted. When AI is disabled, unavailable, or
 // declines, it returns 204 (no proposal) — the pipeline is unaffected.
 func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id string) {
-	pid, produced, reason, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
+	pid, produced, no, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
 	if err != nil {
 		writeErr(w, "cannot recommend position", err)
 		return
@@ -324,9 +347,12 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 	if !produced {
 		// WHY, on the 204 (AI-204-1). "the model correctly declined" and "the provider is down"
 		// are the same status code and opposite operator actions; a caller that ignores the
-		// header behaves exactly as before.
-		if reason != "" {
-			w.Header().Set(aiReasonHeader, reason)
+		// headers behaves exactly as before.
+		if no.Reason != "" {
+			w.Header().Set(aiReasonHeader, no.Reason)
+		}
+		if no.Detail != "" {
+			w.Header().Set(aiDetailHeader, no.Detail)
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return

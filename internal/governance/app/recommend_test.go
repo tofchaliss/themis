@@ -14,13 +14,14 @@ import (
 type fakeAdvisor struct {
 	rec      app.Recommendation
 	produced bool
+	no       app.NoProposal
 	err      error
 	calls    int
 }
 
-func (a *fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, string, error) {
+func (a *fakeAdvisor) RecommendPosition(_ context.Context, _ string) (app.Recommendation, bool, app.NoProposal, error) {
 	a.calls++
-	return a.rec, a.produced, "", a.err
+	return a.rec, a.produced, a.no, a.err
 }
 
 func seedFinding(t *testing.T, repo *fakeRepo) domain.FindingID {

@@ -17,13 +17,17 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-**Revised after the 2026-09-21 evening session**, which added ATTR-GAP-2 and four AI-plane defects.
+**Revised 2026-09-22**, after the VISIBILITY HALF shipped: ATTR-GAP-2's D10/D11/D14 and both
+AI-reason defects (P1's first half and all of P2) are DONE — code green, **live verification
+pending**. What remains of ATTR-GAP-2 is its behaviour half (D12) and its two measurements
+(D13/D15), and the sequencing constraint that held D12 back is now satisfied.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
 | **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
-| **P1** | **ATTR-GAP-2 design review** — `EDR-ATTRIBUTION-01` PROPOSED D10–D15 | the user asked for it; 5 decisions, no code until taken, and 2 measurements that can run first | decide, then implement |
-| **P2** | `DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE` | one file each, and the second **gates ATTR-GAP-2 D12** | implement |
+| **P1** | **verify the visibility half on the VM** — open a gap Finding's drawer; confirm it names carrier `http_server` beside installed `httpd`, and that an AI no-answer states its reason | the change is unverified until one drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
+| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 ACCEPTED + IMPLEMENTED 2026-09-22**; **D12/D13/D15 still open** | the visibility half is shipped; what is left changes behaviour (D12) or needs a measurement (D13/D15) | decide, then implement |
+| **P2** | ~~`DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE`~~ **FIXED 2026-09-22** | both shipped; D12's sequencing constraint is satisfied | done |
 | **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
 | **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
 | **P5** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | unblocks ever measuring whether escalation earns its keep | implement |
@@ -31,9 +35,11 @@ open items with no order is how the credential rotation survived five sessions.
 | **P7** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (R4c) | wait |
 | **P8** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
 
-**P2 before P1's implementation** is a hard constraint, not a preference: ATTR-GAP-2's D12 adds a
-new outcome reason, and the page maps 6 of 12 reasons today — shipping D12 first would render it as
-"the Gateway stated no reason", the exact defect P2 fixes.
+**P2 before D12** was a hard constraint, not a preference: D12 adds a new outcome reason, and the
+page mapped 6 of 15 reasons — shipping D12 first would have rendered it as "the Gateway stated no
+reason", the exact defect P2 fixes. **Satisfied 2026-09-22**: the page now maps every reason both
+servers can state, a guard test fails when either vocabulary grows, and an unrecognised reason is
+NAMED rather than denied.
 
 **P3 is a measurement that could change what P4 is for**, and it costs one restart and one query.
 
@@ -3437,7 +3443,21 @@ under the 2026-08-07 re-derivation standard.
   metrics could show any of that**, which is the point of this entry.
 
 - [ ] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
-  2026-09-21, FOR REVIEW 2026-09-22.** **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
+  2026-09-21, reviewed 2026-09-22. THE VISIBILITY HALF (D10 · D11 · D14) IS SHIPPED — code green,
+  live verification pending; D12/D13/D15 remain open.**
+  **What shipped 2026-09-22.** `carrier_products` now crosses BOTH API contracts (Knowledge
+  `EnterpriseView` → Governance `FaultlineKnowledge`), and the derived answer rides beside it as
+  `attribution` — status (`attributed` | `unresolved` | `no_components`) · carriers · components ·
+  `unresolved_because`. A read-time projection: no column, no event, no migration (D3/D14). The
+  drawer names both sides — *carrier `http_server` ⇄ installed `httpd`* — where it showed one chip.
+  Additive everywhere, and both fields are OMITTED when Knowledge did not answer, so an outage
+  still reads as an outage rather than as a settled carrier question.
+  **A side effect worth having:** "no source named a carrier" and "carriers named, none matched"
+  now produce different text on the Finding, so half of D13's measurement comes free — `vm-verify`
+  counts the whole 227 as the latter, which cannot be true of a card that named none.
+  **Still open, and deliberately not bundled:** D12 (promote the thinness predicate to a GATE — it
+  changes behaviour), D13 (measure the gap's classes), D15 (does Red Hat's `package_state`
+  discriminate carriers from module-rebuild members?). **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
   specified as **PROPOSED D10–D15 in EDR-ATTRIBUTION-01**. No code until the decisions are taken.
   **Raised from a live walkthrough of CVE-2026-33006** — carrier `http_server`, installed `httpd`,
   both components `scope`, zero proposals, AI "no answer". A textbook D5/D9 httpd case, and one of
@@ -3447,17 +3467,21 @@ under the 2026-08-07 re-derivation standard.
   R4/R4c; **recommended for promotion to a convention**. Explicit non-goal: nothing here makes the
   AI more aggressive.
   **Decisions needed (all on CLAUDE.md's "Must ask" list):**
-  1. **D10 — carry `carrier_products` across the Knowledge→Governance seam.** API change, additive.
+  1. **D10 — ACCEPTED + IMPLEMENTED 2026-09-22. Carry `carrier_products` across the
+     Knowledge→Governance seam.** API change, additive.
      **Blocking finding: it does not cross today** — absent from the Knowledge read API, the
      Governance Knowledge client, and the assessment. The drawer literally cannot name the carrier;
      `isAttributionGap` works only because D3's equivalence needs nothing but claim classes.
-  2. **D11 — "why unresolved" is data, "evidence required" is a doc link.** The second list is
+  2. **D11 — ACCEPTED + IMPLEMENTED 2026-09-22. "Why unresolved" is data, "evidence required" is
+     prose written once.** The second list is
      identical on all 227 rows; a field whose value never varies carries no information.
-  3. **D12 — promote `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
+  3. **D12 — STILL OPEN (a behaviour change, kept out of the visibility half). Promote
+     `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
      ONLY. The predicate already exists, already runs before any model call, and AI-204-2
      deliberately uses it only to explain. Needs a distinct outcome reason (`budget_exhausted` is
      the precedent) — **and must ship with or after #116**, or it renders as "stated no reason".
-  4. **D14 — Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
+     **That constraint is now satisfied: #116 shipped 2026-09-22.**
+  4. **D14 — ACCEPTED + IMPLEMENTED 2026-09-22. Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
      user's proposed first-class structure would copy facts that exist elsewhere, which is the
      generation-stamp trap hit twice in September. `VendorStatements` is the precedent shape.
   5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.**
@@ -3468,10 +3492,18 @@ under the 2026-08-07 re-derivation standard.
   bridge is **already ingested**; if it enumerates the whole stream, it is the same rebuild artifact
   in other clothing.
 
-- [ ] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
+- [x] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
   DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated
   no reason" (found 2026-09-21; **this is the ACTUAL cause** of the CVE-2026-33006 message).**
-  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **NOT FIXED.**
+  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **FIXED 2026-09-22** (live
+  verification pending).
+  **Fixed as filed:** the two facts are two fields end to end. `app.NoProposal{Reason, Detail}`
+  replaces the flattened string on the `PositionAdvisor` port, the client stops concatenating, and
+  Governance re-emits the Gateway's OWN two headers (`X-Themis-AI-Reason` + `X-Themis-AI-Detail`)
+  unflattened. `business_verification_failed` now carries the ref that failed as its detail — it
+  had no elaboration at all before. The page splits on a leading `"<reason>: "` anyway, so a node
+  still running the old shape renders correctly. Guards: the client keeps the two apart, and the
+  endpoint states them on two headers.
   **All four steps verified in code.** The Gateway returns 204 with TWO headers
   (`X-Themis-AI-Reason: business_invalid` + `X-Themis-AI-Detail: <detail>`);
   `governance/adapters/intelligence/client.go` merges them into `reason += ": " + d`;
@@ -3527,9 +3559,18 @@ under the 2026-08-07 re-derivation standard.
   **Likely trigger for the observed CVE:** thin grounding, typically a card with no stored
   summary, so the model had nothing to write. Unconfirmed — the `summary_len` check is the test.
 
-- [ ] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
+- [x] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
   reasons, so the other six render as "the Gateway stated no reason" (found 2026-09-21, same
-  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **NOT FIXED — one-file change.**
+  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **FIXED 2026-09-22** (live verification
+  pending).
+  **Fixed, and the count was understated: 6 of FIFTEEN.** Governance states four reasons of its
+  own, two of which (`declined`, `business_verification_failed`) were also unmapped — the second
+  being the one that says Governance itself refused to record an AI claim. All fifteen are mapped
+  now, the detail is displayed beneath the explanation, and an unrecognised reason is NAMED rather
+  than denied, so the next reason either server grows degrades to something actionable.
+  **The guard matters more than the list.** `TestAIReasonTaxonomyIsCoveredByTheDashboard` reads the
+  `Reason*` constants out of both servers' source and fails when one has no entry on the page —
+  R5's re-derivation made automatic, because a hand-copied list going stale is exactly this defect.
   Mapped: `insufficient` · `disabled` · `unreachable` · `provider_error` · `budget_exhausted` ·
   `business_invalid`. **Missing:** `ok` · `no_grounding` · `prompt_error` · `schema_invalid` ·
   `unauthorized` · `selection_mismatch` · `unknown_capability`.

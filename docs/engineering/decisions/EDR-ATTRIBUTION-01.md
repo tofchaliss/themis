@@ -197,9 +197,15 @@ conclusion:
 vendor-authored SBOM carrying real CPEs, or an upstream mapping Themis consumes rather than maintains.
 Absent that, the gap stands, and surfacing it (D6) is the whole of the work.
 
-## PROPOSED D10–D15 — explaining and gating the gap (ATTR-GAP-2, for review 2026-09-22)
+## D10–D15 — explaining and gating the gap (ATTR-GAP-2, reviewed 2026-09-22)
 
-**Status: PROPOSED, NOT ACCEPTED.** Raised by the user 2026-09-21 after a live walkthrough of
+**Status, per decision:** **D10, D11 and D14 are ACCEPTED and IMPLEMENTED (2026-09-22)** — the
+*visibility half*, taken first because the governing principle below puts explaining before
+eliminating. **D12, D13 and D15 remain PROPOSED**: D12 is a behaviour change (a gate) and D13/D15
+are measurements against the live estate, none of which belong in the same change as making the
+state visible.
+
+Raised by the user 2026-09-21 after a live walkthrough of
 `CVE-2026-33006` — carrier `http_server`, installed `httpd`, both components `scope`, zero
 proposals, and an AI "no answer". A textbook instance of the D5/D9 httpd cluster, and one of the
 227 gaps the ATTR-GAP-1 tile already counts.
@@ -213,15 +219,21 @@ That is the sibling of CONVENTIONS R4/R4c and it is what D9 already embodies. Re
 promotion to a convention in its own right. **The explicit non-goal: none of this makes the AI more
 aggressive.**
 
-Proposed order of work, which deliberately puts identity evidence LAST:
+Order of work, which deliberately puts identity evidence LAST:
 
-    1. the gap is explicit          → D10
-    2. say WHY it is unresolved     → D11
-    3. AI ineligible before invoke  → D12
-    4. measure the gap's classes    → D13
-    5. only then, evidence bridges  → D14
+    1. the gap is explicit          → D10   DONE 2026-09-22 ┐ the VISIBILITY half:
+    2. say WHY it is unresolved     → D11   DONE 2026-09-22 ┘ nothing behaves differently
+    3. AI ineligible before invoke  → D12   open — a GATE, so it changes behaviour
+    4. measure the gap's classes    → D13   open — a measurement, not a design
+    5. only then, evidence bridges  → D15   open — and only if D13's measurement supports one
 
-### PROPOSED D10 — The gap states its two sides, and `carrier_products` must cross the seam
+The split at the line is deliberate and is the principle applied to this document's own delivery:
+steps 1–2 make the state legible and change no outcome, so they carry almost no risk and can be
+verified by reading one drawer. Step 3 removes an invocation; steps 4–5 rest on measurements nobody
+has taken. Shipping the first two alone leaves the system strictly more honest and no more
+aggressive — the stated non-goal, met by construction.
+
+### D10 (ACCEPTED, IMPLEMENTED 2026-09-22) — The gap states its two sides, and `carrier_products` must cross the seam
 
 A Finding must say *"vulnerability carrier: `http_server` · installed component: `httpd` · no
 deterministic identity relationship established"*, rather than leaving a reviewer to infer it from
@@ -236,7 +248,15 @@ So D10 is not a rendering change: it is an additive field through Knowledge read
 `FaultlineKnowledge` → assessment schema → drawer. Two API contracts. **This is the first thing to
 approve.**
 
-### PROPOSED D11 — "Why unresolved" is DATA; "evidence required" is DOCUMENTATION
+**As shipped (2026-09-22).** `carrier_products` is additive on `EnterpriseView` (Knowledge) and on
+`FaultlineKnowledge` (Governance's assessment), and the derived answer rides beside it as
+`attribution` — status · carriers · components · `unresolved_because`. Additive everywhere: an older
+consumer is unaffected, and both are omitted when Knowledge did not answer, so an outage still reads
+as an outage rather than as "the carrier question was settled". The drawer names both sides where it
+previously showed one chip. Guards: the carrier list is asserted on the wire at both hops, and
+`unresolved_because` is asserted to carry only the varying half (D11).
+
+### D11 (ACCEPTED, IMPLEMENTED 2026-09-22) — "Why unresolved" is DATA; "evidence required" is DOCUMENTATION
 
 Split, because only one half is per-Finding:
 
@@ -254,6 +274,15 @@ Split, because only one half is per-Finding:
 A field whose value never varies carries no information, and persisting invariant prose into a
 projection turns it into a CMS. The second block becomes one link to this EDR. **If D13 shows the
 reasons diverge by class, the second block becomes data at that point** — not before.
+
+**As shipped (2026-09-22).** `unresolved_because` is served per Finding and carries only the varying
+half: which carriers the card named (or that none did), which components are installed, and that no
+deterministic identity relationship exists between them. The invariant half — what evidence would
+RESOLVE it, and that a name-derived CPE does not qualify (D7a) — is written once in the drawer's own
+prose, not shipped per row. One consequence worth recording: the two gaps are now distinguishable at
+the Finding level, because "no source named a carrier" produces a different single line from
+"carriers named, none matched". That is half of D13's measurement, obtained as a side effect of
+stating the fact honestly rather than as a separate exercise.
 
 ### PROPOSED D12 — Promote the existing thinness predicate from a LABEL to a GATE
 
@@ -279,7 +308,10 @@ operator fact from *"invoked, model declined"*, which is precisely the argument 
 accepted for `budget_exhausted` (*"a distinct reason because the operator response is unlike every
 other no-proposal"*). **Hard sequencing constraint: it must ship with or after
 `DEF_GUI_AI_REASON_MAP_INCOMPLETE` (#116)**, or it renders as *"the Gateway stated no reason"* —
-the exact defect diagnosed the same evening.
+the exact defect diagnosed the same evening. **That constraint is now satisfied**: #116 and #117
+shipped 2026-09-22, the page maps every reason both servers can state (with a guard test that fails
+when either vocabulary grows), and an unrecognised reason is named rather than denied. D12 itself is
+still PROPOSED — it changes behaviour, and it is not part of the visibility half.
 
 ### PROPOSED D13 — Measure the gap's classes BEFORE inventing a taxonomy for them
 
@@ -292,7 +324,7 @@ shows the classes are real. The discriminating measurement is cheap: carriers na
 versus **no carriers at all**. `vm-verify` reports the 227 as *"carrier named, none matched"*, so
 `carrier_missing` may be a separate and currently uncounted population.
 
-### PROPOSED D14 — Attribution is a PROJECTION. D3 already decided this.
+### D14 (ACCEPTED, IMPLEMENTED 2026-09-22) — Attribution is a PROJECTION. D3 already decided this.
 
 The user proposed Attribution as a first-class structure on the Finding. The shape is right; the
 location is not, and **D3 already settles it** — *"no column, no event, no migration … a read-model
@@ -313,6 +345,11 @@ the drawer, the queue and the AI all consume, owning no state.
 
 This still delivers the user's goal of **one structured fact with three consumers**. It just does
 not create a fourth place for it to go stale.
+
+**As shipped (2026-09-22).** `app.Attribution`, derived in `GetFindingAssessment` from the Finding's
+claim classes and the card's carriers. No column, no event, no migration — exactly as D3 requires.
+Governance re-derives no classification: it reads the classes Knowledge already decided, so the
+single source of the claim-class rule is untouched.
 
 ### PROPOSED D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed
 

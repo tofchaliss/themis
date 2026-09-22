@@ -451,3 +451,37 @@ func TestGetFaultline_CarriesVendorScope(t *testing.T) {
 		t.Error("an unscoped statement must still be carried, with an empty scope meaning unknown")
 	}
 }
+
+// The carrier products must reach the wire (EDR-ATTRIBUTION-01 D10). They decide every
+// component's claim class inside Knowledge, and without them a consuming context can see that
+// nothing matched a carrier but cannot say WHICH carrier it failed to place — which is the whole
+// difference between "attribution gap" as a label and as a statement a reviewer can act on.
+func TestGetFaultline_CarriesTheCarrierProducts(t *testing.T) {
+	cve, _ := value.NewCVEID("CVE-2026-33006")
+	f, _ := domain.NewFaultline("fl-carrier", cve)
+	p, err := domain.NewVulnFactsProposal("nvd", feedClock{}.Now(), domain.VulnFacts{
+		Severity:        value.SeverityMedium,
+		CarrierProducts: []string{"http_server"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FoldProposal(p, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+
+	srv := server(t, fakeRepo{card: f, found: true}, fakeProjection{})
+	status, body := get(t, srv.URL+"/faultlines/fl-carrier")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", status, body)
+	}
+	var out struct {
+		View struct {
+			CarrierProducts []string `json:"carrier_products"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, body)
+	}
+	if len(out.View.CarrierProducts) != 1 || out.View.CarrierProducts[0] != "http_server" {
+		t.Errorf("carrier_products = %v, want the card's carrier on the wire", out.View.CarrierProducts)
+	}
+}
