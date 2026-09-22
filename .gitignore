@@ -36,3 +36,11 @@
 # macOS
 .DS_Store
 /intelligence-eval
+
+# Estate data dropped beside the scripts that consume it — scanner exports, SBOMs, sidecars.
+# `scripts/` is where these land on a working machine, and one of them was committed by a
+# `git add -A scripts` on 2026-09-22 (a 1264-row scan export with image names, PURLs and file
+# paths). Ignored here so the next one cannot ride along; the real discipline is staging explicit
+# paths, not trusting a guard.
+scripts/*.csv
+scripts/*_SBOM_Files_*/
