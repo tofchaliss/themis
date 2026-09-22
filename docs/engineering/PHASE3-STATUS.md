@@ -4,13 +4,24 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-09-22 · ATTR-GAP-2 is DONE but for its two measurements; ONE VM round verifies all of it
+> ## ⏭ RESUME POINT — 2026-09-22 · ATTR-GAP-2 COMPLETE, verified on the estate, merged to `main`
 >
-> **Shipped today, `make check-ci` green, NOTHING yet seen on the running system** — testing is
-> deliberately deferred to one round at the end (the user's call). **Four changes in two commits**,
-> and they went in that order because the arc's own principle demanded it: *improve the ability to
-> EXPLAIN and RESOLVE uncertainty before improving the willingness to ELIMINATE it*. The visibility
-> half first — it changes no outcome — then the gate, which does.
+> **`main` = `17ea6a7`.** Squash-merged as `95a780a` (+ backlog/status/gitignore follow-ups),
+> `make check-ci` green on `main` itself before the push, deployed and verified on the VM. Nothing
+> is pending merge: the repo squash-merges, so every branch stays "unmerged" by ancestry forever —
+> `feat/attr-gap2-visibility-half` differs from `main` only by the three files `main` changed
+> AFTER the squash, and the older branches' artifacts are all present in `main`.
+>
+> **THE ONE-LINE STATE:** every ATTR-GAP-2 decision is implemented and live-verified or measured
+> and closed; **the next real defect is `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`**, and it starts at
+> the Knowledge event boundary, not at the Governance drawer.
+>
+> ### What shipped, and in this order for a reason
+>
+> The arc's own principle set the sequence — *improve the ability to EXPLAIN and RESOLVE
+> uncertainty before improving the willingness to ELIMINATE it*. The visibility half first, because
+> it changes no outcome; then the gate, which does. Nothing here makes the AI more willing to
+> speak, which was the stated non-goal.
 >
 > | | what changed | why it was wrong before |
 > | --- | --- | --- |
@@ -56,7 +67,7 @@ and the resume pointer, never item state.
 >   scope-class cannot be created, only observed: it means the re-classification sweep is behind.
 >   Non-zero there is a staleness signal, never a domain change.
 >
-> ### ✅ THE VM ROUND RAN 2026-09-22 — everything above is verified, and it cost three defects
+> ### ✅ THE VM ROUND — everything above verified on the running estate, and it cost three defects
 >
 > **Verified live:** both API hops of D10 and the Attribution projection; D12 (`204 no_subject`,
 > **3 ms**, 0 tokens — the same card burned 72 s and 35 s before the gate); #117 as two separate
@@ -107,6 +118,39 @@ and the resume pointer, never item state.
 >    last user-visible wrongness with a decision in front of it.
 > 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
 >    nothing, which is how it has survived six sessions.
+>
+> ### 🔧 Operational facts this round established — do not rediscover them
+>
+> - **The units run binaries from INSIDE the repo:** `ExecStart=/opt/themis/src/themis/bin/%i`,
+>   `EnvironmentFile=/etc/themis/%i.env`. So the deploy is
+>   `go build -o bin/ ./cmd/...` then `systemctl restart`. (`/opt/themis/bin/` holds a stale
+>   Sep-10 binary that nothing runs — ignore it.)
+> - **The dashboard serves EMBEDDED assets** — no `THEMIS_DASHBOARD_ASSETS` is set — so a page
+>   change needs the dashboard BINARY rebuilt. Verify a deploy offline with
+>   `grep -ac '<marker>' bin/dashboard`; `curl` against the static files only returns the session
+>   gate.
+> - **Auth is asymmetric and easy to misread:** the dashboard's session gate is ON (its `/login`
+>   takes an API key from the GREENFIELD auth store — `~/.themis_admin_api_key` is the legacy
+>   monolith's key and is refused), while Governance/Knowledge/Intelligence accept unauthenticated
+>   calls. "Auth works" on one node says nothing about the others.
+> - **Get `PGBASE` without printing a credential:**
+>   `export PGBASE="$(sudo sed -n 's#^THEMIS_DATABASE_DSN=\(postgres://[^/]*\)/.*#\1#p' /etc/themis/knowledge.env | head -1)"`.
+> - **`findings.selected_fixes` holds `null` on 121 of 809 rows**, so every
+>   `jsonb_array_elements` over it needs `jsonb_typeof(selected_fixes) = 'array'` — and the
+>   `null`/`[]` split is SEMANTIC (not computed vs computed-nothing-applicable), never to be
+>   normalized away.
+> - **The worked case, for any future attribution question:** `CVE-2026-33006` · faultline
+>   `c4152e02-df35-42b3-af71-01b11b5aca16` · finding `86685455-37a5-424e-90b0-d8123052f026`.
+>
+> ### 📌 Two things left deliberately undone, both the operator's call
+>
+> 1. **The 25 stale stamps are NOT repaired.** No `UPDATE` — that is a second un-audited history,
+>    the same objection that kept the 138 attributions and the 8 miscited proposals untouched.
+> 2. **`origin/feat/attr-gap2-visibility-half` still holds an estate CSV** in its history
+>    (`d7b1a16`, committed by a stray `git add -A scripts`). It is untracked and git-ignored going
+>    forward and is NOT in `main`'s tree — verified with `git ls-tree`. Deleting that remote branch
+>    is what removes the blob from the remote; its content is fully in `main`, so the only loss is
+>    15 per-commit messages. Force-push is denied, so a history rewrite is an explicit ask.
 >
 > The priority table in [`BACKLOG.md`](../BACKLOG.md) Part 1 is the current one; the table in the
 > 2026-09-21 checkpoint below is superseded by it.
