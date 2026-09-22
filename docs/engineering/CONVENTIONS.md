@@ -245,6 +245,10 @@ cannot represent N product-scoped statements for one package.
 **Related:** R4 measures a rule's trigger; this measures a change's *shape*. A rule can have a
 perfectly sound trigger and still break because the data around it changed multiplicity.
 
+> **Naming note.** `BACKLOG.md` carries its own unrelated `R1`–`R7` series for WORK CLUSTERS, and
+> the two collided when this rule was added. Rules in this file are cited as **`CONVENTIONS Rn`**
+> wherever both could be meant.
+
 ## R6 — A plausible mechanism is not a root cause until PERSISTED STATE rules out its rivals
 
 Elevated to a convention 2026-09-22 by the user, from a measured mistake in the same session that

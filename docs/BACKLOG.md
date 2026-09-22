@@ -85,6 +85,12 @@ Ordered by priority; **cluster IDs are stable, so they are not in numeric order*
 R1–R5 and outrank them. "Measured" means the claim rests on an observation from a running system, not a
 code reading.
 
+> **Two R-series exist in this repo and they are unrelated.** The `R1`–`R7` here are WORK CLUSTERS
+> (this table). The `R1`–`R6` in [`CONVENTIONS.md`](engineering/CONVENTIONS.md) are standing
+> cross-cutting RULES. They collided on 2026-09-22 when the convention R6 was added beside the
+> long-closed cluster R6. **Always cite a rule as `CONVENTIONS Rn`**; a bare `Rn` in this file
+> means a cluster.
+
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
 | **R7** | ~~The blast multiplier destroys the order it exists to create~~ ✅ **CLOSED 2026-08-23** | ~~P2, measured~~ | Resolved by **EDR-GOVERNANCE-01 D17**: the output clamp is removed — `effective_priority`/`residual_priority` are unclamped ranking numbers (0–200; the bound lives on the multiplier's saturation). A constant multiplier now provably preserves within-release order and amplifies across releases as C2 intended. | GOV-15 ✅ |
