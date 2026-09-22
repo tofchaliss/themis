@@ -69,6 +69,21 @@ command -v jq >/dev/null || { echo "probe: jq is required" >&2; exit 2; }
 [ -n "$FIXTURES" ] || command -v curl >/dev/null || { echo "probe: curl is required" >&2; exit 2; }
 
 CVES=("$@")
+# The installed side is derived whenever a database is reachable, EVEN WITH EXPLICIT CVE
+# ARGUMENTS: the bridge question is the one that decides D15, and asking it only on the default
+# population would leave every targeted run unable to answer it.
+if [ -n "${PGBASE:-}" ] && command -v psql >/dev/null; then
+  INSTALLED_TSV="$(mktemp)"
+  trap 'rm -f "$INSTALLED_TSV"' EXIT
+  psql "$PGBASE/governance?sslmode=disable" -At -F $'\t' -c "
+    select f.cve, string_agg(distinct c.name, ' ')
+      from findings f
+      join finding_components c on c.finding_id = f.id
+     where c.retired_at is null and c.name <> '' and f.cve <> ''
+     group by f.id, f.cve
+    having bool_and(c.claim_class = 'scope')" > "$INSTALLED_TSV" 2>/dev/null
+fi
+
 if [ ${#CVES[@]} -eq 0 ]; then
   command -v psql >/dev/null || { echo "probe: psql is required to derive the gap population" >&2; exit 2; }
   if [ -z "${PGBASE:-}" ]; then
@@ -80,29 +95,26 @@ if [ ${#CVES[@]} -eq 0 ]; then
   # count descending so the module-rebuild shapes — the ones the trap is about — come first.
   # read -r in a loop rather than mapfile: this has to run wherever the operator is, and macOS
   # ships bash 3.2, where mapfile does not exist.
+  # STRATIFIED by fan-out, half from each end, and this is not a refinement — it is a correction.
+  # Ordering by fan-out DESCENDING (the first version) samples only the module-rebuild sets and
+  # never reaches the single-component gaps, which are 68% of the population and include the whole
+  # httpd cluster this question was raised for. Measured 2026-09-22: that biased sample returned
+  # 25 of 25 NEITHER and would have answered D15 "no" without ever probing the case D15 is about.
+  # A sample that can only see one shape cannot answer a question about which shapes exist.
+  half=$(( LIMIT / 2 )); [ "$half" -lt 1 ] && half=1
   CVES=()
   while IFS= read -r line; do [ -n "$line" ] && CVES+=("$line"); done < <(psql "$PGBASE/governance?sslmode=disable" -Atc "
-    select f.cve
-      from findings f
-      join finding_components c on c.finding_id = f.id
-     where c.retired_at is null and f.cve <> ''
-     group by f.id, f.cve
-    having bool_and(c.claim_class = 'scope')
-     order by count(*) desc
-     limit $LIMIT" 2>/dev/null)
+    (select f.cve from findings f join finding_components c on c.finding_id = f.id
+      where c.retired_at is null and f.cve <> ''
+      group by f.id, f.cve having bool_and(c.claim_class = 'scope')
+      order by count(*) desc limit $half)
+    union
+    (select f.cve from findings f join finding_components c on c.finding_id = f.id
+      where c.retired_at is null and f.cve <> ''
+      group by f.id, f.cve having bool_and(c.claim_class = 'scope')
+      order by count(*) asc limit $half)" 2>/dev/null)
   [ ${#CVES[@]} -gt 0 ] || { echo "probe: no attribution-gap CVEs found" >&2; exit 1; }
-  printf 'probe: taking %d attribution-gap CVE(s) from the estate\n' "${#CVES[@]}" >&2
-  # The installed component names per gap CVE, so the bridge question can be asked of the very
-  # Findings that are stuck. Read-only, same connection, one query.
-  INSTALLED_TSV="$(mktemp)"
-  trap 'rm -f "$INSTALLED_TSV"' EXIT
-  psql "$PGBASE/governance?sslmode=disable" -At -F $'\t' -c "
-    select f.cve, string_agg(distinct c.name, ' ')
-      from findings f
-      join finding_components c on c.finding_id = f.id
-     where c.retired_at is null and c.name <> '' and f.cve <> ''
-     group by f.id, f.cve
-    having bool_and(c.claim_class = 'scope')" > "$INSTALLED_TSV" 2>/dev/null
+  printf 'probe: taking %d attribution-gap CVE(s) from the estate (stratified by fan-out)\n' "${#CVES[@]}" >&2
 fi
 
 fetch() {
