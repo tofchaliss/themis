@@ -204,12 +204,11 @@ The visibility half (D10/D11/D14) landed first, because the governing principle 
 explaining before eliminating and because D12's own sequencing constraint required it. D12 — the
 gate — followed in its own change.
 
-**D13 and D15 are MEASUREMENTS, and they stay OPEN until the estate answers them.** Their
-instruments are written, exercised against synthetic populations, and committed
-(`scripts/attribution-gap-census.sh`, `scripts/redhat-package-state-probe.sh`); what is missing
-is the one thing no amount of code supplies, which is the number. Writing the instrument is not
-taking the measurement, and neither decision may be marked settled on the strength of a script
-that has never seen the estate.
+**D13 and D15 were MEASURED on the estate 2026-09-22 and are now CLOSED** — see the RESULT blocks
+under each. D13: the classes are real but are not the proposed ones, and the `claim_reason`
+taxonomy stays deferred on the strength of the numbers rather than for want of them. D15: the
+bridge exists and is authoritative, covers ~17% of one cluster and nothing else, and is not worth
+building now. Instruments: `scripts/attribution-gap-census.sh`, `scripts/redhat-package-state-probe.sh`.
 
 Raised by the user 2026-09-21 after a live walkthrough of
 `CVE-2026-33006` — carrier `http_server`, installed `httpd`, both components `scope`, zero
@@ -230,8 +229,8 @@ Order of work, which deliberately puts identity evidence LAST:
     1. the gap is explicit          → D10   DONE 2026-09-22 ┐ the VISIBILITY half:
     2. say WHY it is unresolved     → D11   DONE 2026-09-22 ┘ nothing behaves differently
     3. AI ineligible before invoke  → D12   DONE 2026-09-22 — a GATE, in its own change
-    4. measure the gap's classes    → D13   instrument ready; AWAITING THE ESTATE
-    5. only then, evidence bridges  → D15   instrument ready; AWAITING THE ESTATE
+    4. measure the gap's classes    → D13   MEASURED 2026-09-22 — taxonomy stays deferred
+    5. only then, evidence bridges  → D15   MEASURED 2026-09-22 — answered NO (too thin)
 
 The split at the line is deliberate and is the principle applied to this document's own delivery:
 steps 1–2 make the state legible and change no outcome, so they carry almost no risk and can be
@@ -345,7 +344,7 @@ when either vocabulary grows), and an unrecognised reason is named rather than d
 Attribution section (D10) is what tells the reviewer why — the two ship together by design, which
 is why the visibility half went first.
 
-### D13 — Measure the gap's classes BEFORE inventing a taxonomy for them (INSTRUMENT READY 2026-09-22; measurement pending)
+### D13 — Measure the gap's classes BEFORE inventing a taxonomy for them (MEASURED 2026-09-22)
 
 The user's own instruction, and R4 verbatim: *"I wouldn't create this taxonomy yet. First measure
 the attribution-gap population and see whether multiple stable failure modes actually exist."*
@@ -381,6 +380,59 @@ while the card still named carriers and the re-classification sweep has not caug
 counts those separately. Non-zero is "the sweep is behind", never "the domain changed" — the
 coupling the Honest limits section names, given a number.
 
+#### D13 RESULT (measured on the estate 2026-09-22)
+
+**The populations.** 809 Findings carry at least one active component:
+
+    attributed        463   57.2%
+    gap               227   28.1%   <- matches the ATTR-GAP-1 tile exactly
+    no-carrier card   119   14.7%   <- a real population, and NOT a gap
+    stale classes       0           <- the re-classification sweep is current
+
+The gap count agreeing with the tile to the unit is worth as much as any other number here: the
+census derives it independently, from the other side of the seam, and gets the same answer.
+
+**Fan-out killed the working assumption.** 155 of 227 gaps (68.3%) carry a SINGLE component; only
+6 carry more than five. The module-stream rebuild set is the *loudest* shape, not the dominant one.
+
+**What is actually in the gaps.** Three names hold nearly the whole population — `python3-pyyaml`
+(116), `httpd` (87), `python3-ply` (66), then `perl-*` at 6 apiece. This is one or two failure
+modes wearing many CVE numbers, not a long tail of distinct problems.
+
+**And the carrier column is the real finding.** The most common "carriers" are not packages at
+all: `fedora` 105, `http_server` 91, `debian_linux` 85, `python` 68, `zfs_storage_appliance_kit`
+43, `ubuntu_linux` 36, `leap` 35, `enterprise_linux` 26, plus a tail of Oracle and NetApp
+appliances. `fedora` will never match `httpd`, and not because the names disagree — because they
+are different KINDS of thing.
+
+**So the gap has one root cause and three relationships, which is not the taxonomy anyone
+proposed.** The carrier list is expressed in NVD's CPE PRODUCT vocabulary; the components are
+expressed in DISTRO PACKAGE vocabulary. Every gap is that mismatch. What differs is whether a
+correct mapping exists at all:
+
+1. **No package-level carrier exists in the list** — the card names only distributions and vendor
+   products. Nothing could ever match, and calling this an identity failure misdescribes it.
+2. **A package-level carrier exists and maps to the installed package under a name Themis cannot
+   derive** — `http_server` ⇄ `httpd`, 87 Findings.
+3. **A package-level carrier exists and the installed component genuinely is not it** —
+   `python3-ply` in a CPython advisory's rebuild set. The classification is CORRECT here.
+
+**Cases 2 and 3 are indistinguishable without independent evidence**, which is precisely D15's
+question — so the two decisions turn out to be one. A `claim_reason` enum would have to answer 2
+vs 3 to be worth storing, and D15 measures how often anything can.
+
+**The lens failed in the measured way, and that is the strongest argument for R4 in this
+document.** The proximity heuristic put `CVE-2015-20107` in NEAR because a carrier token `python`
+prefixes the component token `python3` — while `python3-ply` and `python3-pyyaml` are textbook
+case 3. A predicate that looked obviously reasonable collapsed two classes that demand opposite
+outcomes, inside the instrument built to enforce that exact lesson. The lens stays a lens.
+
+**Decision: the `claim_reason` taxonomy stays DEFERRED.** Not for want of measurement now, but
+because the measurement says the useful distinction (2 vs 3) is not derivable from the data the
+classes would be computed from. Case 1 — a carrier list holding no package-level name at all — IS
+cheaply derivable and is the one honest reason string available today; recording it is a candidate
+for a future change, on its own merits, with this number behind it.
+
 ### D14 (ACCEPTED, IMPLEMENTED 2026-09-22) — Attribution is a PROJECTION. D3 already decided this.
 
 The user proposed Attribution as a first-class structure on the Finding. The shape is right; the
@@ -408,7 +460,7 @@ claim classes and the card's carriers. No column, no event, no migration — exa
 Governance re-derives no classification: it reads the classes Knowledge already decided, so the
 single source of the claim-class rule is untouched.
 
-### D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed (INSTRUMENT READY 2026-09-22; measurement pending)
+### D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed (MEASURED 2026-09-22 — ANSWERED NO as a general bridge)
 
 The user's boundary is exact and unchanged from D7a: *"`httpd` → generate CPE → `httpd` → compare
 CPE"* does not qualify, because the evidence was generated from the component name itself.
@@ -451,6 +503,49 @@ attribution bridge, never a verdict.
 this measurement is about — are parsed and dropped. If D15 answers yes, that is the seam to
 revisit; until it does, nothing there changes.
 
+#### D15 RESULT (measured on the estate 2026-09-22) — the bridge is real, authoritative, and too thin
+
+**ANSWER: NO, not as a general bridge.** `package_state` is not the rebuild artifact in other
+clothing — that hypothesis is dead, and a different limit killed the idea.
+
+**Two samples, and the first one was mine to get wrong.** The default population, ordered by
+fan-out descending, probed only module-rebuild sets and returned **0 BRIDGE / 25 NEITHER**. That
+sample could not reach a single-component gap, which is 68% of the population and the whole
+`httpd` cluster — the case D15 was raised for. Reported as-is it would have answered D15 from the
+population least able to answer it. The sampling is now stratified; the finding is recorded here
+because the next measurement will be tempted the same way.
+
+**Targeted at the httpd cluster, 12 Findings:**
+
+    package_state NAMES the installed `httpd`          12 / 12
+      ASSERTS   Affected · Fix deferred                 2      <- the only carrier evidence
+      DENIES    Not affected                            6      <- VEX, already ingested
+      NO CLAIM  Out of support scope                    4      <- about support, not the flaw
+    the other clusters (python3-*, perl-*)              0 / 25
+
+**So the vocabulary DOES reach this estate** — Red Hat speaks in distro package names, and names
+`httpd` on every one. The independence D7a demanded is satisfied, and by a route nobody proposed:
+it never resolves `http_server` at all, it supplies a SECOND carrier list in package vocabulary.
+
+**But as carrier evidence it covers 2 of 12** — about 17% of one cluster, and nothing outside it.
+A rule built on it would correct a known misclassification (D5's 87 httpd cases) on roughly a
+sixth of them, would need per-statement CPE scope checking exactly as EDR-VEX-02 D5 does (a
+`RHEL 9 Affected` must not attribute on an EL8 estate), and would introduce a second attribution
+authority for that minority. **The measurement is what makes the answer cheap: not worth building
+now, and the number to revisit it against is on record.**
+
+**Two things the run established beyond the question asked.** `Out of support scope` is the single
+most common state on the cluster, so a fix_state vocabulary read as two-valued reports an
+assertion where none was made — the probe made that exact error before it was corrected. And the
+DENIES half was verified end to end: on `CVE-2024-38476` the statements are Red Hat's `not_affected`
+for RHEL **10** and RHEL **6**, both correctly `not_applicable` against a Rocky 8.10 release, with
+the old `vex-applicability` proposal already `rejected`. EDR-VEX-02 is working; nothing was hiding
+there.
+
+**What the Red Hat ACL does with `package_state` is unchanged:** it folds the `Not affected`
+entries as VEX applicability, and drops the rest. The 2 asserting cases are the only thing this
+result says might be worth reading, and 2 is not enough to change a seam for.
+
 ## Validation criterion
 
 1. The gap is countable and visible, and equals the all-scope Finding population (227 measured).
@@ -480,7 +575,9 @@ cheap to derive (D3) is the predicate that made the rejected rule unsound.
 ## Honest limits
 
 - **The 87 httpd cases remain misclassified** for as long as this EDR stands alone. That is a stated cost,
-  not an oversight: the alternative breaks 182 correct answers.
+  not an oversight: the alternative breaks 182 correct answers. **Measured 2026-09-22 (D15):** Red Hat's
+  `package_state` could correct roughly a sixth of them on independent evidence and nothing else on the
+  estate, so the cost is now a known quantity rather than an open question.
 - **The gap derivation depends on classification currency.** If the re-classification sweep stops running,
   the equivalence in D3 silently weakens. That coupling is real and belongs in whatever surfaces the gap.
 - **`perl-*` and `javapackages-filesystem` in the all-scope population are a MIXED set** — some genuine

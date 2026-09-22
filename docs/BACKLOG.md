@@ -20,9 +20,10 @@ open items with no order is how the credential rotation survived five sessions.
 **Revised 2026-09-22**, after the visibility half, the gate, AND both measurement instruments:
 ATTR-GAP-2's **D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live
 verification pending for all of it** (the user's call: testing happens in one round at the end).
-**D13 and D15 now have instruments** (`attribution-gap-census.sh`, `redhat-package-state-probe.sh`)
-exercised against synthetic populations and committed — but **writing the instrument is not taking
-the measurement**, and both decisions stay open until the estate answers.
+**D13 and D15 were MEASURED on the estate the same day and are CLOSED** — the taxonomy stays
+deferred on the numbers, and the identity bridge is answered NO (real, authoritative, ~17% of one
+cluster). **ATTR-GAP-2 is complete.** The VM round also found and fixed one defect
+(`DEF_GOV_RETIRED_COMPONENTS_IN_READ_PROJECTIONS`) and corrected the probe three times.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
@@ -3465,8 +3466,26 @@ under the 2026-08-07 re-derivation standard.
   gates (missing classes are missing classification, not zero carriers), and `no_subject` scores as
   a PASS in the eval loop. Two existing tests were **re-derived, not re-run** (R5): both drove the
   all-scope grounding, which can no longer reach a model on a Decision capability.
-  **D13/D15 — INSTRUMENTS READY 2026-09-22, MEASUREMENTS PENDING.** Both are read-only and both
-  run in the same VM round as the verification:
+  **D13/D15 — MEASURED 2026-09-22, both CLOSED.** Full numbers in `EDR-ATTRIBUTION-01`'s RESULT
+  blocks. **D13:** 809 Findings with components — attributed 463, gap **227** (matching the tile
+  exactly, derived independently from the other side of the seam), **no-carrier card 119**, stale
+  classes 0. 68% of gaps carry ONE component, so module-rebuild fan-out is the loudest shape and
+  not the dominant one. Three names hold the population (`python3-pyyaml` 116, `httpd` 87,
+  `python3-ply` 66) and the top "carriers" are not packages at all (`fedora` 105, `debian_linux`
+  85, `leap` 35, NetApp/Oracle appliances). Root cause is ONE mismatch — CPE product vocabulary vs
+  distro package vocabulary — with three relationships, and the useful distinction (a derivable
+  name mapping vs a genuine bystander) is **not derivable from the data**, which is why the
+  taxonomy stays deferred. **D15: NO.** `package_state` names the installed `httpd` on 12/12, but
+  ASSERTS on only 2 — 6 DENY (VEX, already ingested and verified correct end to end) and 4 make no
+  claim (`Out of support scope`). ~17% of one cluster, nothing elsewhere; not worth a second
+  attribution authority.
+  **The measurement mistakes are part of the record.** The probe's default sample ordered by
+  fan-out descending and never reached a single-component gap, so its first run returned 25/25
+  NEITHER and would have answered D15 from the population least able to answer it; and its
+  fix_state vocabulary was read as two-valued when `Out of support scope` — the commonest state on
+  the cluster — is neither an assertion nor a denial. Both are fixed, both are recorded, and both
+  are R4 committed by the instrument built to enforce R4.
+  Originally, both were to be read-only and run in the same VM round as the verification:
   `PGBASE=… ./scripts/attribution-gap-census.sh` splits the population three ways (attributed ·
   gap · **no-carrier card**), buckets the gaps by fan-out, and applies a lexical-proximity LENS
   (a ≥4-char shared token between a carrier and a component — explicitly not a classifier;
