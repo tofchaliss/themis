@@ -260,3 +260,55 @@ func TestGetFindingAssessment_ELStreamMismatchExcludesAFixWithNoStatedEcosystem(
 		t.Errorf("fixes = %+v, want the el8 fix kept", a2.Knowledge.Fixes)
 	}
 }
+
+// `no fixes to choose from` and `fixes existed, none applied` are DIFFERENT ANSWERS, and the
+// difference survives as nil vs empty. It is load-bearing: persisted to `findings.selected_fixes`
+// it is the difference between JSON `null` ("not computed") and `[]` ("computed, nothing
+// applicable"), and a reader that collapses them can no longer tell "no fix has been published"
+// from "fixes exist and none is yours" — the distinction `unattributed_fixes` exists to report.
+//
+// Pinned by test because it was accidental: the behaviour fell out of selectFixesFor's early
+// return, nothing asserted it, and on 2026-09-22 it was normalized away to make one SQL query
+// simpler before the semantics were noticed.
+func TestGetFindingAssessment_NoFixesToChooseFromIsNotAnEmptySelection(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-33006")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", Version: "2.4.37-65.el8_10",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+
+	// The card holds NO fixes: nothing to compute from.
+	bare := app.NewReadService(repo, fakeProjection{}, nil, 0).
+		WithKnowledge(stubKnowledge{k: app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2026-33006"}})
+	a, err := bare.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if a.Knowledge.Fixes != nil {
+		t.Errorf("Fixes = %#v, want nil — the card had nothing to select from", a.Knowledge.Fixes)
+	}
+
+	// The card holds fixes and none applies: computed, empty result.
+	other := app.NewReadService(repo, fakeProjection{}, nil, 0).
+		WithKnowledge(stubKnowledge{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2026-33006",
+			Fixes: []app.FixedVersion{{Package: "python3-ply", Version: "3.11-1.el8"}},
+		}})
+	a2, err := other.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if a2.Knowledge.Fixes == nil {
+		t.Fatal("Fixes = nil, want an EMPTY selection — a fix existed and did not apply")
+	}
+	if len(a2.Knowledge.Fixes) != 0 {
+		t.Errorf("Fixes = %#v, want empty", a2.Knowledge.Fixes)
+	}
+	if a2.Knowledge.UnattributedFixes != 1 {
+		t.Errorf("unattributed = %d, want 1 — the count is the other half of the same fact",
+			a2.Knowledge.UnattributedFixes)
+	}
+}

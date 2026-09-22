@@ -631,13 +631,23 @@ func (s *Store) SetComponentVerdict(ctx context.Context, releaseID, faultlineID 
 // Both together are what let a release posture answer "which are critical, and what do I upgrade?"
 // in a single read.
 func (s *Store) SetBandAndFixes(ctx context.Context, findingID, band string, fixes []app.FixedVersion) error {
-	// An empty selection is stored as `[]`, never as JSON `null`. json.Marshal writes `null` for
-	// a nil slice, which reads back identically in Go (a nil slice either way) and differently in
-	// SQL: measured 2026-09-22, `jsonb_array_elements` over the column failed outright with
-	// "cannot extract elements from a scalar" on 121 of 809 rows. The column means one thing now.
-	if fixes == nil {
-		fixes = []app.FixedVersion{}
-	}
+	// `null` and `[]` are DIFFERENT ANSWERS here and are stored as written — do not normalize
+	// them, however convenient it makes a query.
+	//
+	//   null  the card carried no fix versions at all: NOTHING TO COMPUTE FROM
+	//   []    the card carried fixes and none of them applies to this Finding's components:
+	//         COMPUTED, NOTHING APPLICABLE
+	//
+	// selectFixesFor produces exactly that distinction (nil on an empty input, a non-nil empty
+	// slice on an empty result), and "no fix has been published" versus "fixes exist and none is
+	// yours" is a distinction this projection already exists to preserve — it is what
+	// `unattributed_fixes` reports on the other side. Collapsing the column to `[]` would make
+	// the two indistinguishable in storage for the sake of SQL ergonomics.
+	//
+	// The cost is real and must be paid by the QUERY, not the writer: a `jsonb_array_elements`
+	// over this column fails with "cannot extract elements from a scalar" on the `null` rows
+	// (121 of 809, measured 2026-09-22), so every such query needs
+	// `jsonb_typeof(selected_fixes) = 'array'`.
 	raw, err := json.Marshal(fixes)
 	if err != nil {
 		return err

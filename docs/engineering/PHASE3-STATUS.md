@@ -94,10 +94,15 @@ and the resume pointer, never item state.
 >
 > ### ⏭ Do this next
 >
-> 1. **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** — design the Knowledge-side re-emit. 25 Findings
->    carry wrong upgrade advice that cannot heal on its own, and this is the generation-stamp
->    class for the THIRD time. Not an `UPDATE`: that is a second un-audited history, the same
->    objection that kept the 138 attributions and the 8 miscited proposals untouched.
+> 1. **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** — and **start at the Knowledge event boundary, not
+>    at the Governance drawer.** The question is not "can we recalculate the 25" (25 of 349
+>    Findings with stamped advice, ≈7.2%) but **what event or state transition tells Knowledge that
+>    an existing stamp is now invalid** — without that, these 25 get repaired and the next 25
+>    appear. Knowledge re-establishes truth; Governance converges on it. Define the three
+>    cardinalities before writing code — 0, 1, >1 matching components — especially **0**, where
+>    "retain the previous value" recreates exactly this defect. Not an `UPDATE`: that is a second
+>    un-audited history, the same objection that kept the 138 attributions and the 8 miscited
+>    proposals untouched.
 > 2. **`DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`** (the 8 miscited proposals) — unchanged, still the
 >    last user-visible wrongness with a decision in front of it.
 > 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates

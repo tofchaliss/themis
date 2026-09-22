@@ -3671,7 +3671,9 @@ under the 2026-08-07 re-derivation standard.
   present the OLD code would have excluded both. The real cause is
   `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE` below — a row written before the rule existed.
   I inferred the cause from reading the code path and did not check the stored row until the
-  query came back. **R4c, again: the observation was real and the explanation was invented.**
+  query came back. **The observation was real and the explanation was invented** — now
+  **CONVENTIONS R6**, elevated by the user from this exact mistake: a plausible mechanism is not a
+  root cause until persisted state rules out its rivals.
   **What the change is worth on its own merits:** a guard that depends on an ADDITIVE field stops
   guarding for every record written before that field existed, and the enrichment signal's
   `Ecosystem` is exactly such a field (absent on any payload predating KN-FIX-3). An `.el9` in the
@@ -3709,20 +3711,66 @@ under the 2026-08-07 re-derivation standard.
   GENERATION of the rule that wrote it and nothing records which generation that was. Sibling of
   `DEF_GOV_RELEASE_SCOPE_FROM_FINDING` (which rejected stamping scope onto the Finding at open)
   and of the retired-twin projection defect found the same morning.
-  **MEASURED 2026-09-22 — the size of the wrongness.** 809 Findings: 688 hold an array, 121 hold
-  JSON `null`; ~349 carry actual advice (the rest are empty selections), and **25 of those name a
-  fix whose EL stream matches no active component**. So ~7% of stamped advice is wrong, which
-  makes the re-emit worth designing without making it urgent. The query is in the session log;
-  it needs a `jsonb_typeof(...) = 'array'` guard (see the null/[] note below).
-  **Cheap mitigation shipped meanwhile:** the drawer now prefers the LIVE assessment fixes over
-  the stamped ones when an assessment is loaded, so the two halves of one screen agree. The
-  posture table, which loads no assessment, still shows the stamped value — this is a display
-  preference, not a repair, and those 25 are still visible there.
-  **Fixed in passing:** an empty selection was stored as JSON `null` rather than `[]`
-  (`json.Marshal` of a nil slice). Identical to the Go reader, NOT identical to SQL — a
-  `jsonb_array_elements` over the column failed outright on the 121 `null` rows. New writes store
-  `[]`; the existing 121 stay until re-stamped, so a query over this column still needs the type
-  guard.
+  **MEASURED 2026-09-22, and state the denominator precisely:** *25 of 349 Findings carrying
+  stamped upgrade advice name a fix whose EL stream matches no active component* — ≈7.2%. The
+  denominator matters: 809 Findings total, 688 holding an array and 121 holding `null`, of which
+  ~349 carry actual advice and the rest are empty selections. "25 Findings are wrong" is the weak
+  form; the precise statement defines the failure condition and gives the repair a bounded
+  regression target.
+
+  **THE PROOF OBLIGATION FOR THE NEXT CHANGE, and it is not "recalculate the 25".** The question
+  to answer first is:
+
+      what event or state transition tells Knowledge that an existing stamped
+      `selected_fixes` has become invalid?
+
+  Without that, the 25 get repaired and the defect survives for the next 25. The repair must run
+  the same way truth already flows — **Knowledge re-establishes truth, Governance converges on
+  it** — never as a Governance-side recompute and never as an `UPDATE`:
+
+      component/finding source state changes
+                    ↓
+      Knowledge detects the affected Finding
+                    ↓
+      re-derive selected_fixes
+                    ↓
+      emit a Knowledge event
+                    ↓
+      Governance projection consumes it
+                    ↓
+      new generation stamped
+
+  **The three cardinalities must be DEFINED before any code, especially zero.** For a re-derivation
+  over a changed component set:
+
+      0 matching components  → selected_fixes = ?   ← the dangerous one
+      1 matching component   → selected_fixes = ?
+      >1 matching components → selected_fixes = ?
+
+  The unsafe implementation is *"no match ⇒ retain the previous value"*, which recreates precisely
+  the defect measured here — stale advice surviving a change in the population it was derived
+  from. Zero matches must be able to CLEAR a stamp, and clearing it must be distinguishable from
+  never having computed one (see the `null` vs `[]` note below, which is exactly that distinction
+  already in the storage).
+
+  **Cheap mitigation shipped meanwhile:** the drawer prefers the LIVE assessment fixes over the
+  stamped ones when an assessment is loaded, so the two halves of one screen agree. The posture
+  table, which loads no assessment, still shows the stamped value — a display preference, not a
+  repair, and the 25 remain visible there.
+
+  **`null` vs `[]` — a REAL distinction, deliberately preserved (corrected 2026-09-22).** It was
+  briefly normalized to `[]` so one SQL query would stop failing; the user rejected that, and
+  inspection showed the semantics were already load-bearing:
+
+      null  the card carried no fix versions at all      — NOT COMPUTED
+      []    fixes existed and none applies here          — COMPUTED, NOTHING APPLICABLE
+
+  `selectFixesFor` produces exactly that (nil on empty input, non-nil empty on an empty result),
+  and it is the same distinction `unattributed_fixes` reports on the other side: "no fix has been
+  published" and "fixes exist and none is yours" are different answers to an operator. The cost is
+  paid by the QUERY, not the writer — every `jsonb_array_elements` over this column needs
+  `jsonb_typeof(selected_fixes) = 'array'`. Now pinned by test, because the behaviour was
+  accidental and nothing asserted it.
 
 - [x] **DEF_AI_DETAIL_HEADER_MANGLES_UTF8 — the AI detail rendered as `zero carriers) â no
   evidence...` in the browser, because a UTF-8 em dash was carried in an HTTP header (found on
