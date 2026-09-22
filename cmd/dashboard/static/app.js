@@ -1678,7 +1678,13 @@ async function openDrawer(entry) {
            pip-installed copy below the upstream fix (open). */
         const comps = f.components || entry.components || [];
         if (!comps.length) return `<div class="empty">none recorded</div>`;
-        const fixes = entry.fixes || (k && k.fixes) || [];
+        // LIVE assessment fixes first, the stamped posture value only as a fallback.
+        // `findings.selected_fixes` is materialized by whatever rule was current when the
+        // enrichment event arrived and is never re-derived, so a corrected rule does not reach
+        // it: measured 2026-09-22, this line advertised an el9 and an el10 build for an el8
+        // install while the panel above — computed live — correctly said none. An empty live
+        // list is a real answer and must win; an ABSENT one (no assessment loaded) falls back.
+        const fixes = (k && k.fixes) || entry.fixes || [];
         const row = (c) =>
           `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${verdictChip(c)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}${c.detection_origin && c.detection_origin !== "discovery" ? ` <span class="chip chip-accent" title="which engine produced this match (KN-SCAN-2) — provenance only, never authority; unmarked components came from feed discovery">found by ${esc(c.detection_origin)}</span>` : ""}${occurrenceFixAdvice(c, fixes)}${verdictCleared(c) && c.verdict_reason ? `<div class="muted" style="margin:1px 0 0 12px;font-size:.85em" title="the clearance's stated premise, verbatim from Knowledge">${esc(c.verdict_reason)}</div>` : ""}</div>`;
         const open = comps.filter((c) => !verdictCleared(c));

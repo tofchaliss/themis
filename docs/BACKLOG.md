@@ -3661,17 +3661,27 @@ under the 2026-08-07 re-derivation standard.
   so it can refuse a suppression, never grant one. Loosening a suppression guard is its own
   decision and does not belong in a mid-test-round fix. **Follow-up filed below.**
 
-- [x] **DEF_GOV_FIX_EL_STREAM_GUARD_NEEDS_A_LABEL — an el9/el10 fix was advertised for an el8
-  install, because the EL-stream check sat behind the fix DECLARING an ecosystem (found on the
-  VM 2026-09-22 by reading the drawer; FIXED same day).**
-  **MED — wrong remediation advice, and self-contradictory on one screen**; KN-FIX-3, AI-GROUND-1.
-  **How it surfaced.** The drawer showed `fix: 0:2.4.62-13.el9_8.5  0:2.4.63-13.el10_2.4` on a
-  `2.4.37-65.module+el8.10.0` httpd occurrence — while the panel directly above it said
-  *"Fixes (attributed): none for these components"*. **Two paths, same function, different input
-  fidelity:** the assessment reads Knowledge's fixes, which carry `ecosystem: rpm`, so the guard
-  fired; the posture stamps fixes from the enrichment SIGNAL, whose `Ecosystem` is additive
-  (KN-FIX-3) and absent on any payload predating it, so `fixEco == ""` skipped the whole branch —
-  including the EL-major comparison nested inside it.
+- [x] **DEF_GOV_FIX_EL_STREAM_GUARD_NEEDS_A_LABEL — the EL-stream check sat behind the fix
+  DECLARING an ecosystem, so an unlabelled fix skipped it entirely (hardened 2026-09-22).**
+  **LOW — latent; no measured instance**; KN-FIX-3, AI-GROUND-1.
+  **CORRECTED 2026-09-22, an hour after filing: this was filed as the CAUSE of the el9/el10 fix
+  advice seen in the drawer, and it was NOT.** The stamped rows carry `"Ecosystem": "rpm"`, and
+  `RPMReleaseMajor` parses every string involved correctly (`0:2.4.62-13.el9_8.5` → 9,
+  `0:2.4.63-13.el10_2.4` → 10, `2.4.37-65.module+el8.10.0+40257+286895ef.9` → 8). With the label
+  present the OLD code would have excluded both. The real cause is
+  `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE` below — a row written before the rule existed.
+  I inferred the cause from reading the code path and did not check the stored row until the
+  query came back. **R4c, again: the observation was real and the explanation was invented.**
+  **What the change is worth on its own merits:** a guard that depends on an ADDITIVE field stops
+  guarding for every record written before that field existed, and the enrichment signal's
+  `Ecosystem` is exactly such a field (absent on any payload predating KN-FIX-3). An `.el9` in the
+  version string IS the positive evidence that this is an RPM release; requiring a second, weaker
+  label before believing the first discards evidence already in hand. Kept as hardening, with no
+  instance to its name.
+  **How the symptom surfaced.** The drawer showed `fix: 0:2.4.62-13.el9_8.5  0:2.4.63-13.el10_2.4`
+  on a `2.4.37-65.module+el8.10.0` httpd occurrence — while the panel directly above it said
+  *"Fixes (attributed): none for these components"*. Two paths, one page, two claims: the panel
+  computes live from Knowledge, the occurrence line reads the stamped column.
   **Fix:** the EL-stream check no longer depends on the label. An `.el9` in the version string IS
   the positive evidence that this is an RPM release, and requiring a second, weaker label before
   believing the first discards evidence already in hand. A DECLARED non-rpm ecosystem still opts
@@ -3680,6 +3690,29 @@ under the 2026-08-07 re-derivation standard.
   **The lesson, which is the reusable half:** a guard that depends on an ADDITIVE field is a guard
   that silently stops guarding for every record written before the field existed. The same shape
   as `vet-tags` (a tagged file nobody compiles) and as R5's cardinality cases.
+
+- [ ] **DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE — `findings.selected_fixes` is written once by
+  whatever rule was current at stamp time, and NOTHING re-derives it when the rule changes
+  (found + measured on the VM 2026-09-22).** **MED — wrong remediation advice that cannot heal**;
+  DASH-2 / PLAN-3, and the generation-stamp class this repo has now hit three times.
+  **Measured:** the httpd Finding's stamped column holds `0:2.4.62-13.el9_8.5` and
+  `0:2.4.63-13.el10_2.4` for an `el8` install, while the same Finding's live assessment computes
+  `fixes: []` with `unattributed: 4`. **470 Findings estate-wide carry a stamped fix.**
+  **Why it cannot heal.** `SetBandAndFixes` runs only on an enrichment event. Restarting
+  Governance replays nothing, and Knowledge re-emits only when a card CHANGES — so a Finding whose
+  card is stable keeps advice computed by a rule that has since been corrected, indefinitely. The
+  EL-stream rule (KN-FIX-4/D12) landed 2026-09-10; every row stamped before it is still wrong.
+  **Not to be repaired with an UPDATE.** The same objection that kept the 138 attributions and the
+  8 miscited proposals untouched: a direct write is a second, un-audited history. The repair path
+  is a Knowledge-side re-emit for affected cards, which is a change to design, not a query to run.
+  **The general defect, and the reason this keeps happening:** a materialized value carries the
+  GENERATION of the rule that wrote it and nothing records which generation that was. Sibling of
+  `DEF_GOV_RELEASE_SCOPE_FROM_FINDING` (which rejected stamping scope onto the Finding at open)
+  and of the retired-twin projection defect found the same morning.
+  **Cheap mitigation shipped meanwhile:** the drawer now prefers the LIVE assessment fixes over
+  the stamped ones when an assessment is loaded, so the two halves of one screen agree. The
+  posture table, which loads no assessment, still shows the stamped value — this is a display
+  preference, not a repair.
 
 - [x] **DEF_AI_DETAIL_HEADER_MANGLES_UTF8 — the AI detail rendered as `zero carriers) â no
   evidence...` in the browser, because a UTF-8 em dash was carried in an HTTP header (found on
