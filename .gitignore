@@ -42,5 +42,14 @@
 # `git add -A scripts` on 2026-09-22 (a 1264-row scan export with image names, PURLs and file
 # paths). Ignored here so the next one cannot ride along; the real discipline is staging explicit
 # paths, not trusting a guard.
+#
+# JSON is ignored for the same reason and it is the COMMON case, not an edge one: the scripts
+# themselves name `scripts/oamp.json` as the default SBOM (release-smoke-test.sh, and the
+# gf-upload-sbom.sh usage example), and that file has always been a local drop — a real customer
+# SBOM, never committed. Sidecar reports and scanner output land here too.
+#
+# Nothing in `scripts/` is tracked as .csv or .json today, so this hides no existing file. If one
+# ever genuinely belongs in the repo — a fixture, not estate data — `git add -f` it deliberately.
 scripts/*.csv
+scripts/*.json
 scripts/*_SBOM_Files_*/
