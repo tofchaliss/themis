@@ -615,6 +615,17 @@ Four choices worth recording, because each could reasonably have gone the other 
 Exhaustion is its own outcome, `budget_exhausted`, never folded into `insufficient`: nothing is
 broken, nothing declined on the merits, and it clears when the window rolls.
 
+**The same argument earned a second distinct outcome, `no_subject` (2026-09-22,
+EDR-ATTRIBUTION-01 D12).** A Decision capability whose grounding names no carrier — every matched
+component scope-class — is **not invoked at all**: there is no security subject to take a stance
+about, and the backend knows it before any model runs. Distinct from `insufficient` because the
+operator response is unlike it: "not invoked, no grounded subject" is an attribution gap to close,
+while "invoked, model declined" is a model/prompt question, and folding them would send someone to
+tune a model that was never asked. Distinct from `no_grounding`, its near-opposite: there the
+projection could not be read; here it was read perfectly and contains no carrier. The gate is
+scoped to Decision capabilities — an Information answer proposes no stance, and explaining what a
+flaw means for the components that ARE installed is the one useful answer left in that case.
+
 **Still deferred:** the per-run cost ceiling beyond the existing prompt-size guard, the autonomous
 pool, and the global enterprise ceiling.
 

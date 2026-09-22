@@ -110,8 +110,17 @@ and logs `provider_error` — so a caller-side timeout is misread as an Intellig
 aborting at 59.99s with `THEMIS_LLM_TIMEOUT=300s` set is exactly what that looks like.
 
 A no-proposal `204` now states its cause on `X-Themis-AI-Reason` (AI-204-1): `disabled` · `unreachable` ·
-`insufficient` (the model correctly declined — the seam working) · `provider_error` · `business_invalid`.
-Before that, all of them read as "the AI declined".
+`insufficient` (the model correctly declined — the seam working) · `provider_error` · `business_invalid` ·
+`budget_exhausted` · `no_grounding` · `schema_invalid` · `prompt_error` · `unauthorized` ·
+`selection_mismatch` · `unknown_capability` · `ok` · **`no_subject`** (EDR-ATTRIBUTION-01 D12 — a
+Decision capability was NOT invoked because every matched component is scope-class, so there is no
+carrier to take a stance about; the opposite of `no_grounding`, which means the projection could
+not be read), plus Governance's own `declined` and `business_verification_failed`. Before that, all of them read as "the AI declined".
+**The reason and its elaboration are always TWO headers** (`X-Themis-AI-Reason` + `X-Themis-AI-Detail`)
+and must never be concatenated: Governance flattened them into `"<reason>: <detail>"`, which turned a
+closed enum into free text, and every consumer looking the reason up in a table missed — a safety
+refusal displayed to the operator as "the Gateway stated no reason" (fixed 2026-09-22). A consumer
+switches on the reason and displays the detail.
 
 **Run a single test** (add `-tags=integration` for integration/embedded-Postgres tests):
 
@@ -333,6 +342,16 @@ OpenVEX / CSAF out.
   would be right the day it was written and silently wrong after (the defect that left the systemd
   installer loading only the first registry migration). Strictly read-only: mutations stay in a
   human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
+- `scripts/attribution-gap-census.sh` · `scripts/redhat-package-state-probe.sh` — the two
+  **measurement** instruments for EDR-ATTRIBUTION-01 D13/D15, read-only and estate-facing. The
+  census splits the attribution population three ways (attributed · gap · **no-carrier card**,
+  which is NOT a gap — `ClassifyClaim` returns `unknown` on an empty carrier list and unknown acts
+  as carrier), buckets gaps by fan-out, and applies a lexical-proximity **lens** that nothing
+  consumes. The probe asks whether Red Hat's flaw-specific `package_state` is smaller than
+  `affected_release`, the module rebuild set. Both carry a fixture/replay seam
+  (`CENSUS_*_TSV`, `PROBE_FIXTURE_DIR`) so the analysis can be exercised without an estate — which
+  is how they were tested before first use. **They measure; they classify nothing and decide
+  nothing**, because D13 defers the taxonomy until the population says the classes are real.
 - `scripts/vex-reject-inapplicable.sh` — the **one mutation** in this family, and it is opt-in. It
   reviews the standing vendor-VEX `not_affected` proposals and rejects those resting on a statement
   Themis determined does not cover the release (the pre-EDR-VEX-02 raises, made with no scope check

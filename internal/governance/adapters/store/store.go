@@ -121,9 +121,11 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	// what openCarriers and the cleared tile read), never from the write model. Keeping the row
 	// here is what makes a re-delivered ComponentMatched a no-op instead of resurrecting the
 	// duplicate — AbsorbComponent sees the purl it already holds and reports no change.
+	// The flag rides along so a read projection can exclude them: domain.ActiveComponents is the
+	// one place that knows which list a consumer wants, and every projection uses it.
 	rows, err := s.querier(ctx).Query(ctx,
 		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin,
-		        verdict_state, verdict_grade, verdict_reason
+		        verdict_state, verdict_grade, verdict_reason, retired_at IS NOT NULL
 		 FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
@@ -134,7 +136,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	for rows.Next() {
 		var c domain.MatchedComponent
 		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin,
-			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason); err != nil {
+			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason, &c.Retired); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -629,6 +631,23 @@ func (s *Store) SetComponentVerdict(ctx context.Context, releaseID, faultlineID 
 // Both together are what let a release posture answer "which are critical, and what do I upgrade?"
 // in a single read.
 func (s *Store) SetBandAndFixes(ctx context.Context, findingID, band string, fixes []app.FixedVersion) error {
+	// `null` and `[]` are DIFFERENT ANSWERS here and are stored as written — do not normalize
+	// them, however convenient it makes a query.
+	//
+	//   null  the card carried no fix versions at all: NOTHING TO COMPUTE FROM
+	//   []    the card carried fixes and none of them applies to this Finding's components:
+	//         COMPUTED, NOTHING APPLICABLE
+	//
+	// selectFixesFor produces exactly that distinction (nil on an empty input, a non-nil empty
+	// slice on an empty result), and "no fix has been published" versus "fixes exist and none is
+	// yours" is a distinction this projection already exists to preserve — it is what
+	// `unattributed_fixes` reports on the other side. Collapsing the column to `[]` would make
+	// the two indistinguishable in storage for the sake of SQL ergonomics.
+	//
+	// The cost is real and must be paid by the QUERY, not the writer: a `jsonb_array_elements`
+	// over this column fails with "cannot extract elements from a scalar" on the `null` rows
+	// (121 of 809, measured 2026-09-22), so every such query needs
+	// `jsonb_typeof(selected_fixes) = 'array'`.
 	raw, err := json.Marshal(fixes)
 	if err != nil {
 		return err

@@ -172,9 +172,13 @@ func runEval(ctx context.Context, st *store.Store) error {
 // scorePass: a produced proposal, a valid Information answer, or an HONEST decline passes; a
 // contract failure (schema/business/grounding) fails. no_grounding here means the frozen context
 // itself was thin — treated as a pass (the model behaved correctly given nothing to work with).
+// no_subject is a pass for the same reason and more strongly: the gate refused to ask a model
+// for a stance about a Finding with zero carriers (EDR-ATTRIBUTION-01 D12), so scoring it as a
+// failure would penalise the run for a case the system deliberately never put to a model.
 func scorePass(oc app.Outcome) bool {
 	switch oc.Reason {
-	case app.ReasonOK, app.ReasonInsufficient, app.ReasonNoGrounding, app.ReasonBudgetExhausted:
+	case app.ReasonOK, app.ReasonInsufficient, app.ReasonNoGrounding, app.ReasonBudgetExhausted,
+		app.ReasonNoSubject:
 		return true
 	default: // schema_invalid, business_invalid, provider_error, ...
 		return false

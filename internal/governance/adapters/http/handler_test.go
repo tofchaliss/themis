@@ -784,3 +784,77 @@ func TestProposerActorIsBoundToAuthenticatedPrincipal(t *testing.T) {
 func (r *fakeRepo) ReleaseScope(_ context.Context, _ string) (value.ProductScope, error) {
 	return r.releaseScope, nil
 }
+
+// The Attribution projection on the wire (EDR-ATTRIBUTION-01 D10/D11/D14). Both sides are named,
+// `unresolved_because` carries only what varies, and the whole structure is absent when Knowledge
+// did not answer — an outage must not read as "the carrier question was settled".
+func TestGetFindingAssessment_Attribution(t *testing.T) {
+	newSrv := func(t *testing.T, kr app.FaultlineKnowledgeReader) *httptest.Server {
+		t.Helper()
+		repo := newRepo()
+		f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-33006")
+		_, _ = f.AbsorbComponent(domain.MatchedComponent{
+			PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope,
+		})
+		repo.seed(f)
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0)
+		if kr != nil {
+			read = read.WithKnowledge(kr)
+		}
+		srv := httptest.NewServer(govhttp.NewHandler(
+			app.NewFindingService(repo, &seqIDs{}, fixedClock{}), read).Router())
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	t.Run("unresolved names both sides", func(t *testing.T) {
+		srv := newSrv(t, stubKnowledgeReader{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2026-33006", CarrierProducts: []string{"http_server"},
+		}})
+		status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, body)
+		}
+		var v struct {
+			Attribution struct {
+				Status            string   `json:"status"`
+				Carriers          []string `json:"carriers"`
+				Components        []string `json:"components"`
+				UnresolvedBecause []string `json:"unresolved_because"`
+			} `json:"attribution"`
+			Knowledge struct {
+				CarrierProducts []string `json:"carrier_products"`
+			} `json:"knowledge"`
+		}
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("decode: %v; body=%s", err, body)
+		}
+		if v.Attribution.Status != "unresolved" {
+			t.Errorf("status = %q, want unresolved", v.Attribution.Status)
+		}
+		if len(v.Attribution.Carriers) != 1 || v.Attribution.Carriers[0] != "http_server" {
+			t.Errorf("carriers = %v, want the card's carrier named", v.Attribution.Carriers)
+		}
+		if len(v.Attribution.Components) != 1 || v.Attribution.Components[0] != "httpd" {
+			t.Errorf("components = %v, want the installed side named", v.Attribution.Components)
+		}
+		if len(v.Attribution.UnresolvedBecause) == 0 {
+			t.Error("unresolved_because is empty — the reviewer is left inferring the gap again")
+		}
+		if len(v.Knowledge.CarrierProducts) != 1 {
+			t.Errorf("knowledge.carrier_products = %v, want the card's list carried through",
+				v.Knowledge.CarrierProducts)
+		}
+	})
+
+	t.Run("omitted when knowledge is unavailable", func(t *testing.T) {
+		srv := newSrv(t, stubKnowledgeReader{err: errors.New("knowledge down")})
+		status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, body)
+		}
+		if strings.Contains(string(body), `"attribution"`) {
+			t.Errorf("attribution must be absent when it could not be derived; body=%s", string(body))
+		}
+	})
+}

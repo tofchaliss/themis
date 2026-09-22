@@ -163,6 +163,7 @@ func toView(f domain.Faultline) gen.FaultlineView {
 	v := f.View()
 	id, cve, stage := string(f.ID()), f.CVE().String(), string(f.Stage())
 	ranges, fixes := v.AffectedRanges, v.FixedVersions
+	carriers := v.CarrierProducts
 	kev, pub := v.KEV, v.ExploitPublic
 	ev := gen.EnterpriseView{
 		Severity:       strptr(string(v.Severity)),
@@ -179,6 +180,12 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		ExploitPublic:  &pub,
 		Priority:       strptr(v.Priority()),
 		Score:          intptr(v.Score()),
+		// The carrier side of the correlation (EDR-ATTRIBUTION-01 D10). Knowledge has always
+		// held it and used it to classify claims; it never left the context, so a consumer
+		// could see that NO component matched a carrier but could not say WHICH carrier went
+		// unmatched. Emitting it costs nothing and is the difference between "attribution gap"
+		// as a label and as a statement a reviewer can act on.
+		CarrierProducts: &carriers,
 	}
 	// Omitted when no range evidence contributed — absent reads as "nothing to say", which
 	// is exactly right, and keeps a card with no ranges byte-identical on the wire.

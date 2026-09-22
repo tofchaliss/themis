@@ -17,13 +17,20 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-**Revised after the 2026-09-21 evening session**, which added ATTR-GAP-2 and four AI-plane defects.
+**Revised 2026-09-22**, after the visibility half, the gate, AND both measurement instruments:
+ATTR-GAP-2's **D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live
+verification pending for all of it** (the user's call: testing happens in one round at the end).
+**D13 and D15 were MEASURED on the estate the same day and are CLOSED** — the taxonomy stays
+deferred on the numbers, and the identity bridge is answered NO (real, authoritative, ~17% of one
+cluster). **ATTR-GAP-2 is complete.** The VM round also found and fixed one defect
+(`DEF_GOV_RETIRED_COMPONENTS_IN_READ_PROJECTIONS`) and corrected the probe three times.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
 | **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
-| **P1** | **ATTR-GAP-2 design review** — `EDR-ATTRIBUTION-01` PROPOSED D10–D15 | the user asked for it; 5 decisions, no code until taken, and 2 measurements that can run first | decide, then implement |
-| **P2** | `DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE` | one file each, and the second **gates ATTR-GAP-2 D12** | implement |
+| **P1** | **verify the whole ATTR-GAP-2 arc on the VM in ONE round** — a gap Finding's drawer names carrier `http_server` beside installed `httpd`; *Recommend a position* on it returns **not asked — no carrier** with no model call in the log; an AI no-answer elsewhere states its own reason | none of it is verified until a drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
+| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 + D12 ACCEPTED + IMPLEMENTED 2026-09-22**; **D13/D15 instruments ready, MEASUREMENTS PENDING** | everything designable is shipped; what is left is two numbers only the estate has. Run both scripts in the same VM round as the verification — neither mutates anything | measure, then decide |
+| **P2** | ~~`DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE`~~ **FIXED 2026-09-22** | both shipped; D12's sequencing constraint is satisfied | done |
 | **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
 | **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
 | **P5** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | unblocks ever measuring whether escalation earns its keep | implement |
@@ -31,9 +38,11 @@ open items with no order is how the credential rotation survived five sessions.
 | **P7** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (R4c) | wait |
 | **P8** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
 
-**P2 before P1's implementation** is a hard constraint, not a preference: ATTR-GAP-2's D12 adds a
-new outcome reason, and the page maps 6 of 12 reasons today — shipping D12 first would render it as
-"the Gateway stated no reason", the exact defect P2 fixes.
+**P2 before D12** was a hard constraint, not a preference: D12 adds a new outcome reason, and the
+page mapped 6 of 15 reasons — shipping D12 first would have rendered it as "the Gateway stated no
+reason", the exact defect P2 fixes. **Satisfied 2026-09-22**: the page now maps every reason both
+servers can state, a guard test fails when either vocabulary grows, and an unrecognised reason is
+NAMED rather than denied.
 
 **P3 is a measurement that could change what P4 is for**, and it costs one restart and one query.
 
@@ -75,6 +84,12 @@ together, and some close for free.
 Ordered by priority; **cluster IDs are stable, so they are not in numeric order** — R6/R7 were added after
 R1–R5 and outrank them. "Measured" means the claim rests on an observation from a running system, not a
 code reading.
+
+> **Two R-series exist in this repo and they are unrelated.** The `R1`–`R7` here are WORK CLUSTERS
+> (this table). The `R1`–`R6` in [`CONVENTIONS.md`](engineering/CONVENTIONS.md) are standing
+> cross-cutting RULES. They collided on 2026-09-22 when the convention R6 was added beside the
+> long-closed cluster R6. **Always cite a rule as `CONVENTIONS Rn`**; a bare `Rn` in this file
+> means a cluster.
 
 | # | Cluster | Priority | What is actually wrong | Items |
 |---|---|---|---|---|
@@ -3437,7 +3452,57 @@ under the 2026-08-07 re-derivation standard.
   metrics could show any of that**, which is the point of this entry.
 
 - [ ] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
-  2026-09-21, FOR REVIEW 2026-09-22.** **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
+  2026-09-21, reviewed 2026-09-22. THE VISIBILITY HALF (D10 · D11 · D14) AND THE GATE (D12) ARE
+  SHIPPED — code green, live verification pending; only the two MEASUREMENTS (D13/D15) remain.**
+  **What shipped 2026-09-22.** `carrier_products` now crosses BOTH API contracts (Knowledge
+  `EnterpriseView` → Governance `FaultlineKnowledge`), and the derived answer rides beside it as
+  `attribution` — status (`attributed` | `unresolved` | `no_components`) · carriers · components ·
+  `unresolved_because`. A read-time projection: no column, no event, no migration (D3/D14). The
+  drawer names both sides — *carrier `http_server` ⇄ installed `httpd`* — where it showed one chip.
+  Additive everywhere, and both fields are OMITTED when Knowledge did not answer, so an outage
+  still reads as an outage rather than as a settled carrier question.
+  **A side effect worth having:** "no source named a carrier" and "carriers named, none matched"
+  now produce different text on the Finding, so half of D13's measurement comes free — `vm-verify`
+  counts the whole 227 as the latter, which cannot be true of a card that named none.
+  **D12 shipped the same day, in its own change** (after the visibility half, which its own
+  sequencing constraint required): a Decision capability whose grounding names no carrier is now
+  **not invoked at all** — outcome `no_subject`, `decided_by = gate:no-subject`, no model call.
+  Scoped to Decision capabilities; `explain_vulnerability` still answers, because an explanation is
+  the one useful answer left when attribution is unresolved. A partially-classified Finding never
+  gates (missing classes are missing classification, not zero carriers), and `no_subject` scores as
+  a PASS in the eval loop. Two existing tests were **re-derived, not re-run** (R5): both drove the
+  all-scope grounding, which can no longer reach a model on a Decision capability.
+  **D13/D15 — MEASURED 2026-09-22, both CLOSED.** Full numbers in `EDR-ATTRIBUTION-01`'s RESULT
+  blocks. **D13:** 809 Findings with components — attributed 463, gap **227** (matching the tile
+  exactly, derived independently from the other side of the seam), **no-carrier card 119**, stale
+  classes 0. 68% of gaps carry ONE component, so module-rebuild fan-out is the loudest shape and
+  not the dominant one. Three names hold the population (`python3-pyyaml` 116, `httpd` 87,
+  `python3-ply` 66) and the top "carriers" are not packages at all (`fedora` 105, `debian_linux`
+  85, `leap` 35, NetApp/Oracle appliances). Root cause is ONE mismatch — CPE product vocabulary vs
+  distro package vocabulary — with three relationships, and the useful distinction (a derivable
+  name mapping vs a genuine bystander) is **not derivable from the data**, which is why the
+  taxonomy stays deferred. **D15: NO.** `package_state` names the installed `httpd` on 12/12, but
+  ASSERTS on only 2 — 6 DENY (VEX, already ingested and verified correct end to end) and 4 make no
+  claim (`Out of support scope`). ~17% of one cluster, nothing elsewhere; not worth a second
+  attribution authority.
+  **The measurement mistakes are part of the record.** The probe's default sample ordered by
+  fan-out descending and never reached a single-component gap, so its first run returned 25/25
+  NEITHER and would have answered D15 from the population least able to answer it; and its
+  fix_state vocabulary was read as two-valued when `Out of support scope` — the commonest state on
+  the cluster — is neither an assertion nor a denial. Both are fixed, both are recorded, and both
+  are R4 committed by the instrument built to enforce R4.
+  Originally, both were to be read-only and run in the same VM round as the verification:
+  `PGBASE=… ./scripts/attribution-gap-census.sh` splits the population three ways (attributed ·
+  gap · **no-carrier card**), buckets the gaps by fan-out, and applies a lexical-proximity LENS
+  (a ≥4-char shared token between a carrier and a component — explicitly not a classifier;
+  nothing consumes it). `./scripts/redhat-package-state-probe.sh [CVE…]` compares Red Hat's
+  flaw-specific `package_state` against `affected_release`, the rebuild set, per CVE.
+  **Two things the census settled by reading the code before it ran.** `carrier_missing` can
+  never BE a gap — `ClassifyClaim` returns `unknown` on an empty carrier list and unknown acts as
+  carrier, so those Findings count as attributed everywhere on evidence nobody supplied; it is a
+  real population, just not that one. And a no-carrier card whose components are all scope-class
+  is *impossible to create and possible to observe* — it means the re-classification sweep is
+  behind, which is the EDR's own stated honest limit, now given a number. **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
   specified as **PROPOSED D10–D15 in EDR-ATTRIBUTION-01**. No code until the decisions are taken.
   **Raised from a live walkthrough of CVE-2026-33006** — carrier `http_server`, installed `httpd`,
   both components `scope`, zero proposals, AI "no answer". A textbook D5/D9 httpd case, and one of
@@ -3447,20 +3512,25 @@ under the 2026-08-07 re-derivation standard.
   R4/R4c; **recommended for promotion to a convention**. Explicit non-goal: nothing here makes the
   AI more aggressive.
   **Decisions needed (all on CLAUDE.md's "Must ask" list):**
-  1. **D10 — carry `carrier_products` across the Knowledge→Governance seam.** API change, additive.
+  1. **D10 — ACCEPTED + IMPLEMENTED 2026-09-22. Carry `carrier_products` across the
+     Knowledge→Governance seam.** API change, additive.
      **Blocking finding: it does not cross today** — absent from the Knowledge read API, the
      Governance Knowledge client, and the assessment. The drawer literally cannot name the carrier;
      `isAttributionGap` works only because D3's equivalence needs nothing but claim classes.
-  2. **D11 — "why unresolved" is data, "evidence required" is a doc link.** The second list is
+  2. **D11 — ACCEPTED + IMPLEMENTED 2026-09-22. "Why unresolved" is data, "evidence required" is
+     prose written once.** The second list is
      identical on all 227 rows; a field whose value never varies carries no information.
-  3. **D12 — promote `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
+  3. **D12 — ACCEPTED + IMPLEMENTED 2026-09-22. Promote
+     `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
      ONLY. The predicate already exists, already runs before any model call, and AI-204-2
      deliberately uses it only to explain. Needs a distinct outcome reason (`budget_exhausted` is
      the precedent) — **and must ship with or after #116**, or it renders as "stated no reason".
-  4. **D14 — Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
+     **That constraint is now satisfied: #116 shipped 2026-09-22.**
+  4. **D14 — ACCEPTED + IMPLEMENTED 2026-09-22. Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
      user's proposed first-class structure would copy facts that exist elsewhere, which is the
      generation-stamp trap hit twice in September. `VendorStatements` is the precedent shape.
-  5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.**
+  5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.** Instruments
+     written and exercised 2026-09-22; the measurements themselves are still outstanding.
   **Measurements to run first (no decision needed):** (a) the gap's shape split — carriers named
   but unmatched vs **no carriers at all**; `vm-verify` counts the 227 as "carrier named, none
   matched", so `carrier_missing` may be separate and uncounted. (b) Does Red Hat's `package_state`
@@ -3468,10 +3538,18 @@ under the 2026-08-07 re-derivation standard.
   bridge is **already ingested**; if it enumerates the whole stream, it is the same rebuild artifact
   in other clothing.
 
-- [ ] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
+- [x] **DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY — the advisor client appends the Gateway's
   DETAIL to the reason word, so a `business_invalid` safety refusal renders as "the Gateway stated
   no reason" (found 2026-09-21; **this is the ACTUAL cause** of the CVE-2026-33006 message).**
-  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **NOT FIXED.**
+  **MED — a safety refusal displayed as "no answer"**; AI-204-1. **FIXED 2026-09-22** (live
+  verification pending).
+  **Fixed as filed:** the two facts are two fields end to end. `app.NoProposal{Reason, Detail}`
+  replaces the flattened string on the `PositionAdvisor` port, the client stops concatenating, and
+  Governance re-emits the Gateway's OWN two headers (`X-Themis-AI-Reason` + `X-Themis-AI-Detail`)
+  unflattened. `business_verification_failed` now carries the ref that failed as its detail — it
+  had no elaboration at all before. The page splits on a leading `"<reason>: "` anyway, so a node
+  still running the old shape renders correctly. Guards: the client keeps the two apart, and the
+  endpoint states them on two headers.
   **All four steps verified in code.** The Gateway returns 204 with TWO headers
   (`X-Themis-AI-Reason: business_invalid` + `X-Themis-AI-Detail: <detail>`);
   `governance/adapters/intelligence/client.go` merges them into `reason += ": " + d`;
@@ -3527,9 +3605,18 @@ under the 2026-08-07 re-derivation standard.
   **Likely trigger for the observed CVE:** thin grounding, typically a card with no stored
   summary, so the model had nothing to write. Unconfirmed — the `summary_len` check is the test.
 
-- [ ] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
+- [x] **DEF_GUI_AI_REASON_MAP_INCOMPLETE — the dashboard knows 6 of the Gateway's 12 outcome
   reasons, so the other six render as "the Gateway stated no reason" (found 2026-09-21, same
-  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **NOT FIXED — one-file change.**
+  trace).** **LOW-MED, misleading diagnostics**; AI-204-1. **FIXED 2026-09-22** (live verification
+  pending).
+  **Fixed, and the count was understated: 6 of FIFTEEN.** Governance states four reasons of its
+  own, two of which (`declined`, `business_verification_failed`) were also unmapped — the second
+  being the one that says Governance itself refused to record an AI claim. All fifteen are mapped
+  now, the detail is displayed beneath the explanation, and an unrecognised reason is NAMED rather
+  than denied, so the next reason either server grows degrades to something actionable.
+  **The guard matters more than the list.** `TestAIReasonTaxonomyIsCoveredByTheDashboard` reads the
+  `Reason*` constants out of both servers' source and fails when one has no entry on the page —
+  R5's re-derivation made automatic, because a hand-copied list going stale is exactly this defect.
   Mapped: `insufficient` · `disabled` · `unreachable` · `provider_error` · `budget_exhausted` ·
   `business_invalid`. **Missing:** `ok` · `no_grounding` · `prompt_error` · `schema_invalid` ·
   `unauthorized` · `selection_mismatch` · `unknown_capability`.
@@ -3545,6 +3632,176 @@ under the 2026-08-07 re-derivation standard.
   **Fix:** add the seven, and make the fallback honest — name the unrecognised reason rather than
   denying one exists, so the NEXT server-side reason degrades to something actionable. Keep the
   deliberate `disabled`/`unreachable` special-case in `explainRequest` (enabled-only rendering).
+
+- [x] **DEF_GOV_RETIRED_COMPONENTS_IN_READ_PROJECTIONS — a WITHDRAWN match still appeared in the
+  assessment, the drawer and the AI's grounding, because the aggregate loads retired rows on
+  purpose and every read projection was built from that list (found + FIXED on the VM 2026-09-22,
+  minutes after the Attribution projection shipped).**
+  **MED — inflated lists measured, a hidden attribution gap latent**; KN-SCAN-4(b),
+  EDR-ATTRIBUTION-01 D14.
+  **How it surfaced.** The first live read of the new projection returned
+  `components: ["httpd", "httpd"]` for a Finding whose estate has ONE active `httpd`. The second
+  row is the retired `app:httpd@2.4.37-65...` twin superseded by
+  `pkg:rpm/rocky/httpd@2.4.37-65...` — KN-SCAN-4(b) working exactly as designed. The AI's own
+  grounding string said `2 component(s)` for the same reason.
+  **Two correct halves, again.** `Store.loadComponents` keeps retired rows deliberately and says
+  so: *"This is the AGGREGATE, not a query: retirement removes a component from the ACTIVE
+  PROJECTION, never from the write model"* — dropping them would let a re-delivered
+  ComponentMatched resurrect the twin. And a projection must show what is installed. The two were
+  never reconciled because the aggregate carried no way to TELL them apart: `retired_at` was not
+  loaded at all, so `f.Components()` was the only list on offer.
+  **Measured blast radius before fixing** (the interesting part): 87 Findings carry retired rows,
+  **0** would change Attribution status, **0** have only retired rows. So the harm today is
+  inflated lists. The DANGEROUS direction — a retired CARRIER making an attribution gap read as
+  `attributed`, a withdrawn match silencing the statement the gap exists to make — is a zero
+  population, and nothing but this fix stops the first instance. **R4c in the other direction:**
+  a zero measurement is a reason to fix cheaply now, not a reason to defer.
+  **Fix:** `MatchedComponent.Retired` loaded from `retired_at IS NOT NULL`, plus
+  `Finding.ActiveComponents()` — the one place that knows which list a consumer wants.
+  `Components()` stays the write model (persistence + dedup); the assessment (Attribution AND fix
+  selection) and the wire `FindingView` use the active list, which also fixes the drawer and, via
+  the assessment, the AI's grounding.
+  **Deliberately NOT changed, and why.** `ProvablyOutOfRange` (the auto-suppression guard) and the
+  signal-driven fix selection also read `f.Components()`. Including a retired row there is
+  CONSERVATIVE — an extra row can only make "every component is out of range" harder to satisfy,
+  so it can refuse a suppression, never grant one. Loosening a suppression guard is its own
+  decision and does not belong in a mid-test-round fix. **Follow-up filed below.**
+
+- [x] **DEF_GOV_FIX_EL_STREAM_GUARD_NEEDS_A_LABEL — the EL-stream check sat behind the fix
+  DECLARING an ecosystem, so an unlabelled fix skipped it entirely (hardened 2026-09-22).**
+  **LOW — latent; no measured instance**; KN-FIX-3, AI-GROUND-1.
+  **CORRECTED 2026-09-22, an hour after filing: this was filed as the CAUSE of the el9/el10 fix
+  advice seen in the drawer, and it was NOT.** The stamped rows carry `"Ecosystem": "rpm"`, and
+  `RPMReleaseMajor` parses every string involved correctly (`0:2.4.62-13.el9_8.5` → 9,
+  `0:2.4.63-13.el10_2.4` → 10, `2.4.37-65.module+el8.10.0+40257+286895ef.9` → 8). With the label
+  present the OLD code would have excluded both. The real cause is
+  `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE` below — a row written before the rule existed.
+  I inferred the cause from reading the code path and did not check the stored row until the
+  query came back. **The observation was real and the explanation was invented** — now
+  **CONVENTIONS R6**, elevated by the user from this exact mistake: a plausible mechanism is not a
+  root cause until persisted state rules out its rivals.
+  **What the change is worth on its own merits:** a guard that depends on an ADDITIVE field stops
+  guarding for every record written before that field existed, and the enrichment signal's
+  `Ecosystem` is exactly such a field (absent on any payload predating KN-FIX-3). An `.el9` in the
+  version string IS the positive evidence that this is an RPM release; requiring a second, weaker
+  label before believing the first discards evidence already in hand. Kept as hardening, with no
+  instance to its name.
+  **How the symptom surfaced.** The drawer showed `fix: 0:2.4.62-13.el9_8.5  0:2.4.63-13.el10_2.4`
+  on a `2.4.37-65.module+el8.10.0` httpd occurrence — while the panel directly above it said
+  *"Fixes (attributed): none for these components"*. Two paths, one page, two claims: the panel
+  computes live from Knowledge, the occurrence line reads the stamped column.
+  **Fix:** the EL-stream check no longer depends on the label. An `.el9` in the version string IS
+  the positive evidence that this is an RPM release, and requiring a second, weaker label before
+  believing the first discards evidence already in hand. A DECLARED non-rpm ecosystem still opts
+  out — an npm version is not an EL stream — so the rule stays "exclude only on positive evidence
+  of mismatch".
+  **The lesson, which is the reusable half:** a guard that depends on an ADDITIVE field is a guard
+  that silently stops guarding for every record written before the field existed. The same shape
+  as `vet-tags` (a tagged file nobody compiles) and as R5's cardinality cases.
+
+- [ ] **DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE — `findings.selected_fixes` is written once by
+  whatever rule was current at stamp time, and NOTHING re-derives it when the rule changes
+  (found + measured on the VM 2026-09-22).** **MED — wrong remediation advice that cannot heal**;
+  DASH-2 / PLAN-3, and the generation-stamp class this repo has now hit three times.
+  **Measured:** the httpd Finding's stamped column holds `0:2.4.62-13.el9_8.5` and
+  `0:2.4.63-13.el10_2.4` for an `el8` install, while the same Finding's live assessment computes
+  `fixes: []` with `unattributed: 4`. **470 Findings estate-wide carry a stamped fix.**
+  **Why it cannot heal.** `SetBandAndFixes` runs only on an enrichment event. Restarting
+  Governance replays nothing, and Knowledge re-emits only when a card CHANGES — so a Finding whose
+  card is stable keeps advice computed by a rule that has since been corrected, indefinitely. The
+  EL-stream rule (KN-FIX-4/D12) landed 2026-09-10; every row stamped before it is still wrong.
+  **Not to be repaired with an UPDATE.** The same objection that kept the 138 attributions and the
+  8 miscited proposals untouched: a direct write is a second, un-audited history. The repair path
+  is a Knowledge-side re-emit for affected cards, which is a change to design, not a query to run.
+  **The general defect, and the reason this keeps happening:** a materialized value carries the
+  GENERATION of the rule that wrote it and nothing records which generation that was. Sibling of
+  `DEF_GOV_RELEASE_SCOPE_FROM_FINDING` (which rejected stamping scope onto the Finding at open)
+  and of the retired-twin projection defect found the same morning.
+  **MEASURED 2026-09-22, and state the denominator precisely:** *25 of 349 Findings carrying
+  stamped upgrade advice name a fix whose EL stream matches no active component* — ≈7.2%. The
+  denominator matters: 809 Findings total, 688 holding an array and 121 holding `null`, of which
+  ~349 carry actual advice and the rest are empty selections. "25 Findings are wrong" is the weak
+  form; the precise statement defines the failure condition and gives the repair a bounded
+  regression target.
+
+  **THE PROOF OBLIGATION FOR THE NEXT CHANGE, and it is not "recalculate the 25".** The question
+  to answer first is:
+
+      what event or state transition tells Knowledge that an existing stamped
+      `selected_fixes` has become invalid?
+
+  Without that, the 25 get repaired and the defect survives for the next 25. The repair must run
+  the same way truth already flows — **Knowledge re-establishes truth, Governance converges on
+  it** — never as a Governance-side recompute and never as an `UPDATE`:
+
+      component/finding source state changes
+                    ↓
+      Knowledge detects the affected Finding
+                    ↓
+      re-derive selected_fixes
+                    ↓
+      emit a Knowledge event
+                    ↓
+      Governance projection consumes it
+                    ↓
+      new generation stamped
+
+  **The three cardinalities must be DEFINED before any code, especially zero.** For a re-derivation
+  over a changed component set:
+
+      0 matching components  → selected_fixes = ?   ← the dangerous one
+      1 matching component   → selected_fixes = ?
+      >1 matching components → selected_fixes = ?
+
+  The unsafe implementation is *"no match ⇒ retain the previous value"*, which recreates precisely
+  the defect measured here — stale advice surviving a change in the population it was derived
+  from. Zero matches must be able to CLEAR a stamp, and clearing it must be distinguishable from
+  never having computed one (see the `null` vs `[]` note below, which is exactly that distinction
+  already in the storage).
+
+  **Cheap mitigation shipped meanwhile:** the drawer prefers the LIVE assessment fixes over the
+  stamped ones when an assessment is loaded, so the two halves of one screen agree. The posture
+  table, which loads no assessment, still shows the stamped value — a display preference, not a
+  repair, and the 25 remain visible there.
+
+  **`null` vs `[]` — a REAL distinction, deliberately preserved (corrected 2026-09-22).** It was
+  briefly normalized to `[]` so one SQL query would stop failing; the user rejected that, and
+  inspection showed the semantics were already load-bearing:
+
+      null  the card carried no fix versions at all      — NOT COMPUTED
+      []    fixes existed and none applies here          — COMPUTED, NOTHING APPLICABLE
+
+  `selectFixesFor` produces exactly that (nil on empty input, non-nil empty on an empty result),
+  and it is the same distinction `unattributed_fixes` reports on the other side: "no fix has been
+  published" and "fixes exist and none is yours" are different answers to an operator. The cost is
+  paid by the QUERY, not the writer — every `jsonb_array_elements` over this column needs
+  `jsonb_typeof(selected_fixes) = 'array'`. Now pinned by test, because the behaviour was
+  accidental and nothing asserted it.
+
+- [x] **DEF_AI_DETAIL_HEADER_MANGLES_UTF8 — the AI detail rendered as `zero carriers) â no
+  evidence...` in the browser, because a UTF-8 em dash was carried in an HTTP header (found on
+  the VM 2026-09-22 in the drawer; FIXED same day).** **LOW — cosmetic, but it lands on the
+  operator's screen at exactly the moment the system is explaining itself**; AI-204-1.
+  Header values are effectively latin-1 at the browser boundary, so the domain's perfectly good
+  UTF-8 arrives mangled — while the SAME sentence, delivered as JSON elsewhere on the page, was
+  correct. The transport is the problem, not the text.
+  **Fix:** fold to printable ASCII at each HTTP boundary (em/en dashes, smart quotes and ellipsis
+  mapped; anything else dropped rather than mangled, since a header is a diagnostic pointer and
+  the telemetry keeps the original). Applied in BOTH the Intelligence and Governance adapters —
+  duplicated deliberately, because the two are different bounded contexts and may not import each
+  other. The reason header needs no folding: it is a closed ASCII taxonomy by construction.
+
+- [ ] **DEF_GOV_RETIRED_ROWS_IN_DECISION_INPUTS — the suppression guard and the signal-driven fix
+  selection still read retired components (filed 2026-09-22, spun out of the fix above).**
+  **LOW — fail-safe direction, no measured instance.**
+  `ProvablyOutOfRange(f.Components(), ...)` decides whether a vendor range can auto-suppress, and
+  `selectFixesFor(in.Fixes, f.Components())` picks the fix versions a signal attaches to a
+  Finding. Both should read the ACTIVE list for the same reason the projections now do.
+  **Why it is LOW and was not bundled:** the current direction is safe. For the guard, an extra
+  row makes the all-out-of-range conclusion HARDER, so a stale twin can only block a suppression.
+  For fix selection the cost is a fix version advertised for a withdrawn twin — noise in advice,
+  never a missed vulnerability. Changing the guard alters when auto-suppression fires, which is a
+  governed behaviour and needs its own review, not a drive-by.
 
 - [ ] **DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE — a vendor proposal id is `(finding, package)`, which
   cannot represent N product-scoped statements for one package (filed 2026-09-21 by user decision;

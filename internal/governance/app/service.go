@@ -95,26 +95,27 @@ const (
 // absent, unreachable, or declining is invisible: it simply produces no proposal
 // (disabled ≡ unavailable), never blocking. This runs off the pipeline hot path.
 // The third return is WHY nothing was produced (AI-204-1): "disabled", the Gateway's own
-// reason, or "business_verification_failed" when the claim did not check out against our truth.
+// reason (with its own detail kept in its own field), or "business_verification_failed" when
+// the claim did not check out against our truth — whose detail is the ref that failed.
 // It is diagnostic only — every no-proposal path behaves identically, leaving the Finding
 // untouched. What it buys is that an operator can tell a correct refusal from an outage.
-func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain.FindingID) (domain.ProposalID, bool, string, error) {
+func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain.FindingID) (domain.ProposalID, bool, NoProposal, error) {
 	if s.advisor == nil {
-		return "", false, ReasonAIDisabled, nil // AI not wired — disabled
+		return "", false, NoProposal{Reason: ReasonAIDisabled}, nil // AI not wired — disabled
 	}
 	f, err := s.repo.GetByID(ctx, findingID)
 	if err != nil {
-		return "", false, "", err // re-check the Finding exists before spending AI (defense in depth)
+		return "", false, NoProposal{}, err // re-check the Finding exists before spending AI (defense in depth)
 	}
-	rec, produced, reason, err := s.advisor.RecommendPosition(ctx, string(findingID))
+	rec, produced, no, err := s.advisor.RecommendPosition(ctx, string(findingID))
 	if err != nil {
-		return "", false, ReasonAIUnreachable, nil // an outage is a safe no-proposal outcome
+		return "", false, NoProposal{Reason: ReasonAIUnreachable}, nil // an outage is a safe no-proposal outcome
 	}
 	if !produced {
-		if reason == "" {
-			reason = ReasonAIDeclined
+		if no.Reason == "" {
+			no.Reason = ReasonAIDeclined
 		}
-		return "", false, reason, nil
+		return "", false, no, nil
 	}
 	// Business Verification (EDR-TRUST-01 T8): before recording anything, check the claim
 	// against OUR truth. The runtime's Grounding Verification proved the model reasoned only
@@ -126,7 +127,7 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	// normal outcome and must never block a human's request (D13).
 	for _, ref := range rec.Evidence {
 		if !vouchesRef(f, ref) {
-			return "", false, ReasonBusinessVerificationFailed, nil
+			return "", false, NoProposal{Reason: ReasonBusinessVerificationFailed, Detail: ref}, nil
 		}
 	}
 	provenance := ""
@@ -151,9 +152,9 @@ func (s *FindingService) RecommendPosition(ctx context.Context, findingID domain
 	// check (T4) bars it from automatic acceptance under any policy — a human decides.
 	pid, err := s.RaiseProposal(ctx, findingID, proposer, domain.Stance(rec.Stance), rationale, value.TrustInferred)
 	if err != nil {
-		return "", false, "", err
+		return "", false, NoProposal{}, err
 	}
-	return pid, true, "", nil
+	return pid, true, NoProposal{}, nil
 }
 
 // OpenOrUpdateFinding find-or-creates the Finding for a (Release, Faultline) pair from a

@@ -245,6 +245,59 @@ cannot represent N product-scoped statements for one package.
 **Related:** R4 measures a rule's trigger; this measures a change's *shape*. A rule can have a
 perfectly sound trigger and still break because the data around it changed multiplicity.
 
+> **Naming note.** `BACKLOG.md` carries its own unrelated `R1`–`R7` series for WORK CLUSTERS, and
+> the two collided when this rule was added. Rules in this file are cited as **`CONVENTIONS Rn`**
+> wherever both could be meant.
+
+## R6 — A plausible mechanism is not a root cause until PERSISTED STATE rules out its rivals
+
+Elevated to a convention 2026-09-22 by the user, from a measured mistake in the same session that
+produced R4c and R5: *"Never promote a plausible mechanism to root cause until persisted state
+distinguishes it from competing explanations."*
+
+**The forensic order is fixed, and reading code is the LAST step, not the first:**
+
+    observation
+        ↓
+    stored state            what is actually recorded?
+        ↓
+    provenance / generation  which rule wrote it, and when?
+        ↓
+    code                     what could produce that?
+        ↓
+    explanation
+
+The tempting order — observation → read code → invent explanation — reliably produces an answer,
+because a large codebase always contains SOME path that would produce the symptom. Finding one
+feels like diagnosis and is not: it is constructing a hypothesis and then declining to test it.
+
+**The measured case (2026-09-22, `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`).** A drawer advertised
+an `el9` and an `el10` fix for an `el8` install. Reading the code found a real path that would do
+exactly that — the EL-stream guard sat behind the fix DECLARING an ecosystem, and the enrichment
+signal's `Ecosystem` field is additive, so an older payload would skip the check. Plausible,
+consistent with the symptom, and **wrong**: one `SELECT` showed the stored rows carry
+`"Ecosystem": "rpm"`, and the release-major parser handles every string involved. With the label
+present, the old code would have excluded them. The true cause was that the value was **stamped
+before the rule existed and is never re-derived** — invisible in the code path and obvious in the
+row.
+
+The defect was filed, committed and pushed with the invented explanation before the query ran.
+Both entries are kept in `BACKLOG.md`, the wrong one corrected in place rather than deleted.
+
+**What the rule asks for, concretely.** Before writing "the cause is X":
+
+1. read the stored row, not the code that writes it;
+2. ask what ELSE would produce the same row — stale data and a wrong rule look identical from the
+   symptom, and only provenance separates them;
+3. name the observation that would falsify X, and make it.
+
+**Why this repo in particular.** Themis materializes derived state across context boundaries by
+design (`base_score`, `band`, `selected_fixes`, `signal_*`), so at any moment a stored value may
+have been written by a rule that no longer exists. In a system like this, "the code does Y"
+answers what happens NEXT time, never what happened to the row in front of you. Sibling of R4/R4c
+(measure the predicate before encoding it) and of R5 (re-derive, do not re-run): all three are the
+same discipline — **check the estate before believing yourself.**
+
 ## How these apply per node
 
 Both rules are **shared infrastructure**, not re-implemented per context: one observability bootstrap

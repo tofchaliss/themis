@@ -87,11 +87,28 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 		}
 		out.VendorStatements = &vs
 	}
+	// Attribution rides beside the vendor statements and for the same reason: an unresolved
+	// attribution is precisely the case where the rest of the drawer has least to say, so it
+	// must not depend on anything else resolving (EDR-ATTRIBUTION-01 D10). Omitted only when it
+	// could not be derived at all — an absent status means Knowledge was unreachable, not that
+	// the carrier question was answered.
+	if a.Attribution.Status != "" {
+		att := gen.Attribution{
+			Status:     (*gen.AttributionStatus)(strptr(a.Attribution.Status)),
+			Carriers:   &a.Attribution.Carriers,
+			Components: &a.Attribution.Components,
+		}
+		if len(a.Attribution.UnresolvedBecause) > 0 {
+			att.UnresolvedBecause = &a.Attribution.UnresolvedBecause
+		}
+		out.Attribution = &att
+	}
 	k := a.Knowledge
 	if k.FaultlineID == "" {
 		return out
 	}
 	ranges, fixes := k.AffectedRanges, k.FixedVersions
+	carriers := k.CarrierProducts
 	kev, pub := k.KEV, k.ExploitPublic
 	cvss, epss := float32(k.CVSSScore), float32(k.EPSS)
 	kn := gen.FaultlineKnowledge{
@@ -99,6 +116,7 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 		Summary:   strptr(k.Summary),
 		CvssScore: &cvss, Epss: &epss, Kev: &kev, ExploitPublic: &pub,
 		AffectedRanges: &ranges, FixedVersions: &fixes,
+		CarrierProducts: &carriers,
 	}
 	// The package-attributed selection and the count of what could not be attributed
 	// (AI-GROUND-1). Both ride out so a consumer can distinguish "no fix published" from
@@ -307,16 +325,21 @@ func (h *Handler) ArchiveFinding(w http.ResponseWriter, r *http.Request, id stri
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// aiReasonHeader carries why no proposal was produced on a 204 (AI-204-1). Advisory metadata,
-// not a contract: an absent header simply means an older node.
-const aiReasonHeader = "X-Themis-AI-Reason"
+// The two headers carrying why no proposal was produced on a 204 (AI-204-1). Advisory metadata,
+// not a contract: an absent header simply means an older node. They are the SAME two headers the
+// Gateway sets, re-emitted unflattened — a consumer switches on the reason and displays the
+// detail, and neither has to parse the other out of one string.
+const (
+	aiReasonHeader = "X-Themis-AI-Reason"
+	aiDetailHeader = "X-Themis-AI-Detail"
+)
 
 // RecommendPosition handles POST /findings/{id}/recommend — the on-demand AI seam
 // (D8/D13, Revision 2). It invokes the Intelligence Gateway (when enabled) and records
 // an ADVISORY AI proposal, never auto-accepted. When AI is disabled, unavailable, or
 // declines, it returns 204 (no proposal) — the pipeline is unaffected.
 func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id string) {
-	pid, produced, reason, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
+	pid, produced, no, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
 	if err != nil {
 		writeErr(w, "cannot recommend position", err)
 		return
@@ -324,9 +347,12 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 	if !produced {
 		// WHY, on the 204 (AI-204-1). "the model correctly declined" and "the provider is down"
 		// are the same status code and opposite operator actions; a caller that ignores the
-		// header behaves exactly as before.
-		if reason != "" {
-			w.Header().Set(aiReasonHeader, reason)
+		// headers behaves exactly as before.
+		if no.Reason != "" {
+			w.Header().Set(aiReasonHeader, no.Reason)
+		}
+		if d := headerText(no.Detail); d != "" {
+			w.Header().Set(aiDetailHeader, d)
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -340,7 +366,10 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 func toFindingView(f domain.Finding) gen.FindingView {
 	id, rel, fl, cve, stage := string(f.ID()), f.ReleaseID(), f.FaultlineID(), f.CVE(), string(f.Stage())
 
-	comps := toComponents(f.Components())
+	// ACTIVE components only. This view feeds the drawer and, through the assessment, the AI's
+	// grounding — a withdrawn twin in either is a match the estate has already retracted
+	// (KN-SCAN-4(b)). The aggregate keeps the row; no projection shows it.
+	comps := toComponents(f.ActiveComponents())
 	positions := make([]gen.PositionView, 0, len(f.Positions()))
 	for _, p := range f.Positions() {
 		positions = append(positions, toPositionView(p))
@@ -659,4 +688,43 @@ func verdictGradePtr(s string) *gen.ComponentVerdictGrade {
 	}
 	v := gen.ComponentVerdictGrade(s)
 	return &v
+}
+
+// headerText makes a free-text diagnostic safe to carry in an HTTP header VALUE.
+//
+// Header values are effectively latin-1 at the browser boundary (RFC 9110 leaves non-ASCII
+// opaque), so UTF-8 punctuation arrives mangled. Measured on the deployment 2026-09-22: the
+// dashboard rendered "zero carriers) â no evidence any component carries the flaw" for a
+// detail whose JSON-delivered twin on the same page was perfect. The domain writes good UTF-8;
+// it is the TRANSPORT that cannot carry it, so the folding belongs at this boundary and nowhere
+// else — the log keeps the original text either way.
+//
+// The reason header needs none of this: it is a closed ASCII taxonomy by construction.
+//
+// Duplicated from the Intelligence adapter DELIBERATELY: the two are different bounded
+// contexts and may not import each other, and a shared package for twenty lines of
+// transport hygiene would be a worse trade than the copy.
+func headerText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\u2014' || r == '\u2013' || r == '\u2212':
+			b.WriteByte('-')
+		case r == '\u2019' || r == '\u2018':
+			b.WriteByte('\'')
+		case r == '\u201c' || r == '\u201d':
+			b.WriteByte('"')
+		case r == '\u2026':
+			b.WriteString("...")
+		case r < 0x20 || r > 0x7e:
+			// Anything else outside printable ASCII is dropped rather than mangled. A header is
+			// a diagnostic pointer, not the record; mojibake in the operator's face is worse
+			// than a missing glyph, and the full string is in the telemetry.
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

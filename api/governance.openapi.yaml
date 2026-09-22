@@ -500,6 +500,48 @@ components:
             and without this it would vanish from the view rather than being visibly inapplicable.
           items:
             $ref: '#/components/schemas/VendorStatement'
+        attribution:
+          $ref: '#/components/schemas/Attribution'
+    Attribution:
+      type: object
+      description: >-
+        BOTH SIDES of the carrier question for this Finding (EDR-ATTRIBUTION-01 D10/D11/D14):
+        what the card says carries the flaw, what is installed here, and whether Themis could
+        relate the two. A read-time PROJECTION over facts both contexts already hold — no
+        column, no event, nothing stored (D3). Absent when Knowledge's enrichment was
+        unavailable when the projection was built.
+      properties:
+        status:
+          type: string
+          enum: [attributed, unresolved, no_components]
+          description: >-
+            `attributed` — at least one installed component acts as a carrier (unknown counts as
+            carrier: absence of attribution evidence must never hide a live vulnerability).
+            `unresolved` — the Attribution Gap: components ARE recorded and every one is
+            scope-class, so nothing installed is evidenced to carry the flaw. An OBSERVATION
+            about the evidence, never a verdict that the release is unaffected — the measured
+            proof is a `requests` flaw whose only components are python3-ply and python3-pyyaml,
+            legitimate bystanders every one.
+            `no_components` — the Finding lists no components at all, which is not a gap.
+        carriers:
+          type: array
+          description: >-
+            The products the card's sources say carry the flaw, verbatim. EMPTY means no source
+            named one, which is a materially different gap from "carrier named, none matched" —
+            the two are counted apart deliberately.
+          items: { type: string }
+        components:
+          type: array
+          description: The installed components this Finding matched, by name — the other side.
+          items: { type: string }
+        unresolved_because:
+          type: array
+          description: >-
+            Why the two sides could not be related, in plain language. Per-Finding DATA, and
+            populated only when status is `unresolved`. What evidence would RESOLVE the gap is
+            deliberately NOT here: it is identical on every instance, so it is documentation
+            (EDR-ATTRIBUTION-01), and a field whose value never varies carries no information.
+          items: { type: string }
     VendorStatement:
       type: object
       description: >-
@@ -561,6 +603,14 @@ components:
         exploit_public: { type: boolean }
         affected_ranges:
           type: array
+          items: { type: string }
+        carrier_products:
+          type: array
+          description: >-
+            The products the card's sources say CARRY the flaw (EDR-CORRELATION-01 D4), read from
+            Knowledge unchanged. Governance classifies nothing with them — Knowledge already
+            matched this Finding's components against exactly this list and the result is each
+            component's claim class. See `attribution` for the derived, per-Finding answer.
           items: { type: string }
         fixed_versions:
           type: array

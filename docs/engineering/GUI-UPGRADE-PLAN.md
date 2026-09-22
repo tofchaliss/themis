@@ -310,6 +310,12 @@ transient toast:
   `insufficient` · `provider_error` · `budget_exhausted` · `business_invalid`) — today a toast
   that vanishes. `insufficient` is the seam *working*; `unreachable` is an ops problem. The UI
   should render them differently.
+  **Correction, 2026-09-22:** these six are not the taxonomy, they are a SUBSET of it, and
+  shipping exactly this list is how `DEF_GUI_AI_REASON_MAP_INCOMPLETE` happened — the page
+  rendered the other nine as "the Gateway stated no reason". The vocabulary now has sixteen
+  members across two servers and is not to be transcribed into a plan document again: the source
+  of truth is `intelligence/app/gateway.go`'s `Reason*` constants plus `governance/app`'s
+  `ReasonAI*`, and `TestAIReasonTaxonomyIsCoveredByTheDashboard` fails when either grows.
 - **`precedents_used`** — surfaced on the API precisely because it is "the only externally
   visible evidence that the retrieval plane contributed at all" — the GUI doesn't show it.
 - **`decided_by`** (`rule:<stance>` vs `llm:<stance>`) — whether a deterministic rule or the

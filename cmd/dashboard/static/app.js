@@ -198,21 +198,57 @@ function occurrenceFixAdvice(c, fixes) {
 }
 
 /* The X-Themis-AI-Reason taxonomy (AI-204-1), rendered instead of a vanishing
-   toast: each no-answer states what KIND of no-answer it was. */
+   toast: each no-answer states what KIND of no-answer it was.
+
+   The list must cover EVERY reason the Gateway and Governance can state. It once held six of
+   fifteen, so the other nine rendered as "the Gateway stated no reason" — an assertion, and a
+   false one: the server implemented AI-204-1 correctly and the page put the ambiguity back on
+   this side of the wire (DEF_GUI_AI_REASON_MAP_INCOMPLETE). Keep it in step with
+   intelligence/app/gateway.go's Reason* constants and governance/app's ReasonAI* constants. */
 const AI_REASONS = {
+  // Intelligence Gateway (internal/intelligence/app/gateway.go)
   insufficient: ["declined honestly", "chip-accent", "Not enough grounded evidence to answer — the safety seam working, not a failure."],
-  disabled: ["AI disabled", "chip-info", "The AI plane is switched off on this node."],
-  unreachable: ["Intelligence unreachable", "chip-warn", "The Intelligence node did not answer — an operations problem, not an AI verdict."],
+  no_subject: ["not asked — no carrier", "chip-accent", "No installed component is evidenced to carry this flaw, so there was no subject to take a position on. Themis did not spend a model call to establish that, and this says nothing about whether these components are affected — see Attribution above."],
+  business_invalid: ["failed grounding", "chip-crit", "The model answered but its citations failed Grounding Verification — the answer was refused rather than shown."],
   provider_error: ["provider error", "chip-warn", "The model provider failed mid-call. A caller timeout shorter than the model's latency also lands here."],
   budget_exhausted: ["budget exhausted", "chip-warn", "This capability's token ceiling for the current window is spent; it resets when the window rolls."],
-  business_invalid: ["failed grounding", "chip-crit", "The model answered but its citations failed Grounding Verification — the answer was refused rather than shown."],
+  no_grounding: ["no grounding assembled", "chip-warn", "The Gateway found nothing to reason from for this subject — a data gap upstream, not a model verdict."],
+  schema_invalid: ["malformed answer", "chip-crit", "The model's answer did not match the capability's schema and was discarded — the contract gate working."],
+  prompt_error: ["prompt error", "chip-crit", "The prompt could not be built for this capability — a contract problem on this node, not an AI outcome."],
+  unauthorized: ["not permitted", "chip-crit", "Admission refused the caller before any model ran — a credentials or policy problem."],
+  selection_mismatch: ["wrong subject", "chip-crit", "This capability does not accept the subject it was handed — a caller bug, not a decline."],
+  unknown_capability: ["capability not registered", "chip-crit", "This node's Gateway does not know that capability — an older or differently-configured Intelligence node."],
+  ok: ["empty answer", "chip-warn", "The Gateway reported success and returned nothing — an empty answer counted as one that worked."],
+  // Governance's own no-proposal reasons (internal/governance/app/service.go)
+  disabled: ["AI disabled", "chip-info", "The AI plane is switched off on this node."],
+  unreachable: ["Intelligence unreachable", "chip-warn", "The Intelligence node did not answer — an operations problem, not an AI verdict."],
+  declined: ["no reason stated", "chip-info", "The Gateway produced nothing and sent no reason — typically an Intelligence node older than AI-204-1."],
+  business_verification_failed: ["failed our own check", "chip-crit", "The answer cited evidence Governance could not vouch for against its own record, so nothing was recorded."],
 };
 
-function aiOutcomeHTML(reason) {
-  const [label, cls, why] = AI_REASONS[reason]
-    || ["no answer", "chip-info", "The Gateway returned no proposal and stated no reason."];
-  return `<div class="ai-outcome"><span class="chip ${cls}"><i></i>${esc(label)}</span><span>${esc(why)}</span></div>`;
+/* Render a no-answer. `detail` is the Gateway's free-form elaboration (X-Themis-AI-Detail) and
+   is never parsed — only shown. The split on ": " is belt-and-braces for a node that still
+   flattens the two into one header (the pre-fix Governance shape); it keeps the lookup working
+   whatever shape arrives. */
+function aiOutcomeHTML(reason, detail) {
+  let key = (reason || "").trim();
+  let extra = (detail || "").trim();
+  const cut = key.indexOf(": ");
+  if (cut > 0 && !AI_REASONS[key]) {
+    if (!extra) extra = key.slice(cut + 2);
+    key = key.slice(0, cut);
+  }
+  // An unrecognised reason is NAMED, never denied: the next reason the server grows degrades to
+  // something an operator can act on instead of "no reason was stated".
+  const [label, cls, why] = AI_REASONS[key] || (key
+    ? [key, "chip-warn", "The Gateway stated a reason this page does not recognise — it is shown verbatim above."]
+    : ["no answer", "chip-info", "The Gateway returned no proposal and stated no reason."]);
+  const detailHTML = extra ? `<div class="ai-detail mono">${esc(extra)}</div>` : "";
+  return `<div class="ai-outcome"><span class="chip ${cls}"><i></i>${esc(label)}</span><span>${esc(why)}${detailHTML}</span></div>`;
 }
+
+/* Both halves of the no-answer, from a fetch Response. */
+const aiOutcomeFrom = (r) => aiOutcomeHTML(r.headers.get("X-Themis-AI-Reason"), r.headers.get("X-Themis-AI-Detail"));
 
 /* Provenance the wire already states (GUI-9): which plan step decided, and
    whether the enterprise's own decision history was consulted. */
@@ -637,7 +673,7 @@ async function viewRelease(releaseId, version) {
         out.innerHTML = `<div class="plan-head">${aiProvenance(j)}</div>
           <div class="plan-text">${aiProse(j.information || "")}</div>`;
       } else if (r.status === 204) {
-        out.innerHTML = aiOutcomeHTML(r.headers.get("X-Themis-AI-Reason"));
+        out.innerHTML = aiOutcomeFrom(r);
       } else {
         out.innerHTML = `<div class="err">plan_remediation returned ${r.status}: ${esc(await problemDetail(r))}</div>`;
       }
@@ -727,6 +763,41 @@ function vendorStatementsSection(assessment) {
         </div>
         ${v.justification ? `<div class="prec-rationale">${esc(v.justification)}</div>` : ""}
       </div>`).join("")}
+    </section>`;
+}
+
+/* The Attribution Gap, stated rather than labelled (EDR-ATTRIBUTION-01 D10/D11).
+
+   The drawer used to show a single `attribution gap` chip and leave the reviewer to infer the
+   rest from claim classes. The measured cost: CVE-2026-33006 names carrier `http_server`, the
+   release runs `httpd`, and nothing on the page connected the two names — so a vocabulary
+   problem read as an unexplained silence, and the AI's matching refusal read as a second one.
+
+   TWO HALVES, deliberately split. `unresolved_because` is DATA and varies per Finding, so it
+   comes from the server. What evidence would RESOLVE the gap is identical on every instance of
+   it, so it is DOCUMENTATION and is written here once — a value that never varies carries no
+   information, and shipping it per row would turn a projection into a CMS. */
+function attributionSection(assessment) {
+  const a = assessment && assessment.attribution;
+  if (!a || a.status !== "unresolved") return ""; // an attributed finding says it with claim classes
+  const carriers = a.carriers || [];
+  const components = a.components || [];
+  const why = a.unresolved_because || [];
+  return `
+    <section>
+      <h3 class="section-h">Attribution <span class="chip chip-warn" title="the card's carrier could not be related to anything installed here. An OBSERVATION about the evidence, never a verdict that this release is unaffected.">unresolved</span></h3>
+      <div class="attr">
+        <div class="attr-sides">
+          <div><span class="attr-label">Vulnerability carrier</span>
+            ${carriers.length ? carriers.map((c) => `<span class="mono">${esc(c)}</span>`).join(" ")
+              : `<span class="chip chip-info" title="no source named a product that carries this flaw — a different gap from 'named, none matched'">none named by any source</span>`}</div>
+          <div class="attr-arrow" aria-hidden="true">⇄</div>
+          <div><span class="attr-label">Installed here</span>
+            ${components.length ? components.map((c) => `<span class="mono">${esc(c)}</span>`).join(" ") : "—"}</div>
+        </div>
+        ${why.length ? `<ul class="attr-why">${why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+        <p class="attr-note">This says <b>nothing</b> about whether these components are affected — only that Themis has no deterministic way to relate the two names. Resolving it needs independent identity evidence: a vendor package-identity mapping, an authoritative CPE mapping, or another product-identity source. A name-derived CPE does <b>not</b> qualify (measured, EDR-ATTRIBUTION-01 D7a), which is why nothing is guessed here.</p>
+      </div>
     </section>`;
 }
 
@@ -1125,7 +1196,7 @@ async function viewCompare() {
             const reason = r.headers.get("X-Themis-AI-Reason");
             aiOut.innerHTML = (reason === "disabled" || reason === "unreachable")
               ? `<div class="empty"><b>Advisor unavailable</b>The AI plane is ${esc(reason)} — the comparison above stands on its own.</div>`
-              : aiOutcomeHTML(reason);
+              : aiOutcomeFrom(r);
           } else if (r.status === 404) {
             aiOut.innerHTML = `<div class="empty"><b>Not on this node yet</b>The intelligence node predates compare_releases.</div>`;
           } else {
@@ -1525,7 +1596,7 @@ function explainRequest(fid) {
     if (r.status === 204) {
       const reason = r.headers.get("X-Themis-AI-Reason");
       if (reason === "disabled" || reason === "unreachable") return null; // enabled-only
-      return aiOutcomeHTML(reason); // insufficient / budget / grounding — worth showing
+      return aiOutcomeFrom(r); // insufficient / budget / grounding — worth showing
     }
     if (r.status === 404) return null; // an older node without the capability — no placeholder
     return `<div class="err">explain returned ${r.status}: ${esc(await problemDetail(r))}</div>`;
@@ -1595,6 +1666,8 @@ async function openDrawer(entry) {
       <div id="explain-out"></div>
     </section>
 
+    ${attributionSection(assessment)}
+
     <section>
       <h3 class="section-h">Matched components</h3>
       ${(() => {
@@ -1605,7 +1678,13 @@ async function openDrawer(entry) {
            pip-installed copy below the upstream fix (open). */
         const comps = f.components || entry.components || [];
         if (!comps.length) return `<div class="empty">none recorded</div>`;
-        const fixes = entry.fixes || (k && k.fixes) || [];
+        // LIVE assessment fixes first, the stamped posture value only as a fallback.
+        // `findings.selected_fixes` is materialized by whatever rule was current when the
+        // enrichment event arrived and is never re-derived, so a corrected rule does not reach
+        // it: measured 2026-09-22, this line advertised an el9 and an el10 build for an el8
+        // install while the panel above — computed live — correctly said none. An empty live
+        // list is a real answer and must win; an ABSENT one (no assessment loaded) falls back.
+        const fixes = (k && k.fixes) || entry.fixes || [];
         const row = (c) =>
           `<div style="margin:3px 0"><span class="mono">${esc(c.purl || c.name)}</span>${claimNote(c.claim_class)}${verdictChip(c)}${c.source ? ` <span class="chip chip-info" title="source package a fix ships under">src: ${esc(c.source)}</span>` : ""}${c.detection_origin && c.detection_origin !== "discovery" ? ` <span class="chip chip-accent" title="which engine produced this match (KN-SCAN-2) — provenance only, never authority; unmarked components came from feed discovery">found by ${esc(c.detection_origin)}</span>` : ""}${occurrenceFixAdvice(c, fixes)}${verdictCleared(c) && c.verdict_reason ? `<div class="muted" style="margin:1px 0 0 12px;font-size:.85em" title="the clearance's stated premise, verbatim from Knowledge">${esc(c.verdict_reason)}</div>` : ""}</div>`;
         const open = comps.filter((c) => !verdictCleared(c));
@@ -1798,7 +1877,7 @@ async function openDrawer(entry) {
         reload();
         return; // the reload re-renders the drawer; this button no longer exists
       } else if (r.status === 204) {
-        $("#ai-outcome-wrap").innerHTML = aiOutcomeHTML(r.headers.get("X-Themis-AI-Reason"));
+        $("#ai-outcome-wrap").innerHTML = aiOutcomeFrom(r);
       } else {
         toast(`Recommend returned ${r.status}.`);
       }

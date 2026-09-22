@@ -1,10 +1,117 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-09-21 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-09-22 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-09-21 · the VEX-scope arc is CLOSED; six defects fixed and live-verified
+> ## ⏭ RESUME POINT — 2026-09-22 · ATTR-GAP-2 is DONE but for its two measurements; ONE VM round verifies all of it
+>
+> **Shipped today, `make check-ci` green, NOTHING yet seen on the running system** — testing is
+> deliberately deferred to one round at the end (the user's call). **Four changes in two commits**,
+> and they went in that order because the arc's own principle demanded it: *improve the ability to
+> EXPLAIN and RESOLVE uncertainty before improving the willingness to ELIMINATE it*. The visibility
+> half first — it changes no outcome — then the gate, which does.
+>
+> | | what changed | why it was wrong before |
+> | --- | --- | --- |
+> | **ATTR-GAP-2 D10/D11/D14** | `carrier_products` crosses both API contracts; a read-time `attribution` projection states carrier ⇄ installed and why they could not be related; the drawer names both sides | the drawer showed one `attribution gap` chip and could not name the carrier — `carrier_products` never left the Knowledge context |
+> | **#117** composite reason | reason and detail stay TWO fields end to end (`app.NoProposal`), re-emitted as the Gateway's own two headers | Governance flattened them to `"business_invalid: <detail>"`, so the page's exact-match lookup missed and a **safety refusal** rendered as *"the Gateway stated no reason"* |
+> | **#116** reason map | every reason mapped — **fifteen**, not the 12 filed, because Governance states four of its own (sixteen once D12 added `no_subject` an hour later); detail displayed; an unknown reason NAMED rather than denied; and a guard test that reads both servers' `Reason*` constants and fails when either grows | the page knew 6; the other nine asserted that no reason was given, when a precise one always was |
+>
+> **Then D12 — the gate (second commit).** A Decision capability whose grounding names NO carrier
+> is no longer invoked at all: outcome **`no_subject`**, `decided_by = gate:no-subject`, zero model
+> calls. Measured cost of not having it, on this very card: two invocations, 72s and 35s, both
+> discarded by Grounding Verification. The predicate already existed and already ran before any
+> model — AI-204-2 deliberately used it only as a label — so this was "promote a label to a gate",
+> not a new rule.
+>
+> Three things about D12 worth carrying forward:
+>
+> - **It is scoped to DECISION capabilities.** `explain_vulnerability` still answers, because when
+>   attribution is unresolved the explanation is the one useful answer left. Gating it would have
+>   removed value from exactly the cards this EDR exists for.
+> - **The guard test earned itself within the hour.** Adding `no_subject` made
+>   `TestAIReasonTaxonomyIsCoveredByTheDashboard` fail immediately — the vocabulary grew and the
+>   consumer had not been re-derived, which is the whole defect #116 was. It caught it on the
+>   first run, not on a VM three weeks later.
+> - **Two existing tests were RE-DERIVED, not re-run (R5).** Both drove the all-scope grounding to
+>   exercise the thin-decline label; that population can no longer reach a model on a Decision
+>   capability, so each was re-pointed at a thinness reason that still labels. A green re-run
+>   would have proved only that the fixtures still compile.
+>
+> **And D13/D15 — the two MEASUREMENTS — now have instruments** (third commit), exercised against
+> synthetic populations because a measuring instrument that has never been run is a guess with a
+> shell script around it. `scripts/attribution-gap-census.sh` splits the population three ways and
+> buckets the gaps by fan-out; `scripts/redhat-package-state-probe.sh` asks whether Red Hat's
+> flaw-specific `package_state` is smaller than the rebuild set. Both read-only, both for the same
+> VM round. **Writing the instrument is not taking the measurement** — D13 and D15 stay open.
+>
+> Two things the census settled by reading the code before it ever ran:
+>
+> - **`carrier_missing` can never BE a gap.** `ClassifyClaim` returns `unknown` on an empty
+>   carrier list and unknown acts as CARRIER, so a card naming no carrier yields components that
+>   count as attributed everywhere — on evidence nobody supplied. A real population, and not the
+>   one D13 suspected it was; the census gives it its own line.
+> - **The EDR's honest limit is now measurable.** A no-carrier card whose components are all
+>   scope-class cannot be created, only observed: it means the re-classification sweep is behind.
+>   Non-zero there is a staleness signal, never a domain change.
+>
+> ### ✅ THE VM ROUND RAN 2026-09-22 — everything above is verified, and it cost three defects
+>
+> **Verified live:** both API hops of D10 and the Attribution projection; D12 (`204 no_subject`,
+> **3 ms**, 0 tokens — the same card burned 72 s and 35 s before the gate); #117 as two separate
+> headers on the wire; #116's page taxonomy; `explain_vulnerability` still answering, which is
+> D12's Decision-only scoping working; and EDR-VEX-02 end to end on `CVE-2024-38476`.
+>
+> **D13 — MEASURED.** 809 Findings with components: attributed 463, gap **227** (matching the
+> tile exactly, derived independently from the other side of the seam), **no-carrier card 119**,
+> stale classes 0. 68% of gaps carry ONE component, so the module-rebuild set is the loudest
+> shape and not the dominant one. Three names hold the population (`python3-pyyaml` 116, `httpd`
+> 87, `python3-ply` 66) and the commonest "carriers" are not packages at all (`fedora` 105,
+> `debian_linux` 85, `leap` 35). One root cause — CPE product vocabulary vs distro package
+> vocabulary — with three relationships, of which the useful distinction is **not derivable from
+> the data**. Taxonomy stays deferred, now on the numbers.
+>
+> **D15 — MEASURED, answered NO.** `package_state` names the installed `httpd` on 12/12 but
+> ASSERTS on only 2; 6 DENY (VEX, already ingested and verified correct) and 4 make no claim
+> (`Out of support scope`). ~17% of one cluster, nothing elsewhere.
+>
+> **Three defects found, all invisible to a green suite:**
+>
+> | | found by | state |
+> | --- | --- | --- |
+> | retired twins in every read projection (`httpd, httpd` for one installed component; a retired CARRIER would have hidden a gap) | the first live read of the new projection | FIXED |
+> | the AI detail header mangled UTF-8 (`â` where an em dash belongs) | reading the drawer | FIXED |
+> | `findings.selected_fixes` is stamped once and NEVER re-derived — **25 Findings serve upgrade advice matching no component's EL stream** | reading the drawer, then the stored row | FILED, mitigated in the drawer |
+>
+> **And four mistakes of mine, corrected in flight and recorded rather than tidied away:** an
+> estate CSV committed by `git add -A scripts`; D15 sampled from the one population that could
+> not answer it; `fix_state` read as two-valued when `Out of support scope` is neither assertion
+> nor denial; and the el9/el10 advice diagnosed from the code path as a missing-label bug when
+> the stored row disproved it. The last is the one to carry forward — **the observation was real
+> and the explanation was invented** (R4c), and one query would have settled it before the
+> commit rather than after.
+>
+> ### ⏭ Do this next
+>
+> 1. **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** — and **start at the Knowledge event boundary, not
+>    at the Governance drawer.** The question is not "can we recalculate the 25" (25 of 349
+>    Findings with stamped advice, ≈7.2%) but **what event or state transition tells Knowledge that
+>    an existing stamp is now invalid** — without that, these 25 get repaired and the next 25
+>    appear. Knowledge re-establishes truth; Governance converges on it. Define the three
+>    cardinalities before writing code — 0, 1, >1 matching components — especially **0**, where
+>    "retain the previous value" recreates exactly this defect. Not an `UPDATE`: that is a second
+>    un-audited history, the same objection that kept the 138 attributions and the 8 miscited
+>    proposals untouched.
+> 2. **`DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`** (the 8 miscited proposals) — unchanged, still the
+>    last user-visible wrongness with a decision in front of it.
+> 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
+>    nothing, which is how it has survived six sessions.
+>
+> The priority table in [`BACKLOG.md`](../BACKLOG.md) Part 1 is the current one; the table in the
+> 2026-09-21 checkpoint below is superseded by it.
+>
+> ## ⏭ PREVIOUS RESUME POINT — 2026-09-21 · the VEX-scope arc is CLOSED; six defects fixed and live-verified
 >
 > **`main` = `0f7701d`. Both CI workflows green. Deployed and verified on the VM.**
 > Domain-design checkpoint: [`EDR-VEX-02`](decisions/EDR-VEX-02.md) **D1–D12** and

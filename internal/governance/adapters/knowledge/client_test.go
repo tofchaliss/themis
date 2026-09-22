@@ -79,3 +79,23 @@ func TestGetFaultlineErrors(t *testing.T) {
 		t.Error("a malformed URL must error")
 	}
 }
+
+// carrier_products must cross the seam (EDR-ATTRIBUTION-01 D10). Knowledge has always held it —
+// it is what every component's claim class is decided against — but it never left the context,
+// so Governance could see that NO component matched a carrier and still not say WHICH carrier
+// went unmatched.
+func TestGetFaultlineCarriesTheCarrierProducts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"fl-1","cve":"CVE-2026-33006","view":{
+			"severity":"medium","carrier_products":["http_server","apache_http_server"]}}`))
+	}))
+	defer srv.Close()
+
+	got, err := NewClient(srv.URL, srv.Client()).GetFaultline(context.Background(), "fl-1")
+	if err != nil {
+		t.Fatalf("GetFaultline: %v", err)
+	}
+	if len(got.CarrierProducts) != 2 || got.CarrierProducts[0] != "http_server" {
+		t.Errorf("CarrierProducts = %v, want both carriers the card named, in order", got.CarrierProducts)
+	}
+}

@@ -107,12 +107,27 @@ type Repository interface {
 // no-op advisor. Intelligence owns no truth — Governance records the advice as its own
 // (advisory) Proposal.
 type PositionAdvisor interface {
-	// The string return is WHY nothing was produced (AI-204-1) — "disabled", "provider_error",
-	// "insufficient", … — empty when a recommendation WAS produced. It is diagnostic only and
-	// never changes what Governance does: a declined recommendation and an outage both leave
-	// the Finding untouched. What differs is what an operator should do about it, and a bare
-	// "no proposal" cannot tell them.
-	RecommendPosition(ctx context.Context, findingID string) (Recommendation, bool, string, error)
+	// The NoProposal return is WHY nothing was produced (AI-204-1) — "disabled",
+	// "provider_error", "insufficient", … — zero when a recommendation WAS produced. It is
+	// diagnostic only and never changes what Governance does: a declined recommendation and an
+	// outage both leave the Finding untouched. What differs is what an operator should do about
+	// it, and a bare "no proposal" cannot tell them.
+	RecommendPosition(ctx context.Context, findingID string) (Recommendation, bool, NoProposal, error)
+}
+
+// NoProposal states why the advisor produced nothing: a CLOSED-vocabulary Reason and an
+// optional free-form Detail.
+//
+// Two fields, not one string. The Gateway already sends them as two headers; this adapter
+// seam used to flatten them into "business_invalid: <detail>", and every consumer that looked
+// the reason up in a table then missed — a safety refusal rendered to the operator as "the
+// Gateway stated no reason", the exact ambiguity AI-204-1 exists to remove
+// (DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY, 2026-09-21). Detail is worth keeping — the
+// bare word `provider_error` does not say the provider timed out at 60s — so it is carried
+// beside the reason rather than inside it (EDR-VEX-02 D1's "three concepts, three fields").
+type NoProposal struct {
+	Reason string // the closed taxonomy a consumer may switch on
+	Detail string // free-form elaboration; never parsed, only displayed
 }
 
 // Recommendation is the advisory content Intelligence returns, mapped into Governance's

@@ -680,6 +680,13 @@ func TestRetireComponent_LeavesTheProjectionAndStaysStored(t *testing.T) {
 	if len(got.Components()) != 2 {
 		t.Errorf("aggregate components = %d, want 2 — the write model keeps the row", len(got.Components()))
 	}
+	// ...and the aggregate knows WHICH row is withdrawn, so a read projection built from it can
+	// exclude the twin. Without this flag the Attribution projection reported `httpd, httpd` for
+	// one installed component (measured on the estate 2026-09-22).
+	active := got.ActiveComponents()
+	if len(active) != 1 || active[0].PURL != good {
+		t.Errorf("ActiveComponents() = %+v, want only %s", active, good)
+	}
 
 	// ACTIVE PROJECTION drops it: the posture is what openCarriers and the cleared tile read.
 	entries, err := st.ReleasePosture(ctx, "rel-r")
