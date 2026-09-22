@@ -17,16 +17,16 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-**Revised 2026-09-22**, after the VISIBILITY HALF shipped: ATTR-GAP-2's D10/D11/D14 and both
-AI-reason defects (P1's first half and all of P2) are DONE — code green, **live verification
-pending**. What remains of ATTR-GAP-2 is its behaviour half (D12) and its two measurements
-(D13/D15), and the sequencing constraint that held D12 back is now satisfied.
+**Revised 2026-09-22**, after the visibility half AND the gate shipped: ATTR-GAP-2's
+**D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live verification
+pending for all of it** (the user's call: testing happens in one round at the end). What remains of
+ATTR-GAP-2 is its two MEASUREMENTS, D13 and D15; nothing is designed until they answer.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
 | **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
-| **P1** | **verify the visibility half on the VM** — open a gap Finding's drawer; confirm it names carrier `http_server` beside installed `httpd`, and that an AI no-answer states its reason | the change is unverified until one drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
-| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 ACCEPTED + IMPLEMENTED 2026-09-22**; **D12/D13/D15 still open** | the visibility half is shipped; what is left changes behaviour (D12) or needs a measurement (D13/D15) | decide, then implement |
+| **P1** | **verify the whole ATTR-GAP-2 arc on the VM in ONE round** — a gap Finding's drawer names carrier `http_server` beside installed `httpd`; *Recommend a position* on it returns **not asked — no carrier** with no model call in the log; an AI no-answer elsewhere states its own reason | none of it is verified until a drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
+| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 + D12 ACCEPTED + IMPLEMENTED 2026-09-22**; **D13/D15 still open** | both the visibility half and the gate are shipped; what is left is two measurements against the live estate | measure, then decide |
 | **P2** | ~~`DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE`~~ **FIXED 2026-09-22** | both shipped; D12's sequencing constraint is satisfied | done |
 | **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
 | **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
@@ -3443,8 +3443,8 @@ under the 2026-08-07 re-derivation standard.
   metrics could show any of that**, which is the point of this entry.
 
 - [ ] **ATTR-GAP-2 — explain and gate the attribution gap: 5 decisions + 2 measurements, spec'd
-  2026-09-21, reviewed 2026-09-22. THE VISIBILITY HALF (D10 · D11 · D14) IS SHIPPED — code green,
-  live verification pending; D12/D13/D15 remain open.**
+  2026-09-21, reviewed 2026-09-22. THE VISIBILITY HALF (D10 · D11 · D14) AND THE GATE (D12) ARE
+  SHIPPED — code green, live verification pending; only the two MEASUREMENTS (D13/D15) remain.**
   **What shipped 2026-09-22.** `carrier_products` now crosses BOTH API contracts (Knowledge
   `EnterpriseView` → Governance `FaultlineKnowledge`), and the derived answer rides beside it as
   `attribution` — status (`attributed` | `unresolved` | `no_components`) · carriers · components ·
@@ -3455,9 +3455,16 @@ under the 2026-08-07 re-derivation standard.
   **A side effect worth having:** "no source named a carrier" and "carriers named, none matched"
   now produce different text on the Finding, so half of D13's measurement comes free — `vm-verify`
   counts the whole 227 as the latter, which cannot be true of a card that named none.
-  **Still open, and deliberately not bundled:** D12 (promote the thinness predicate to a GATE — it
-  changes behaviour), D13 (measure the gap's classes), D15 (does Red Hat's `package_state`
-  discriminate carriers from module-rebuild members?). **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
+  **D12 shipped the same day, in its own change** (after the visibility half, which its own
+  sequencing constraint required): a Decision capability whose grounding names no carrier is now
+  **not invoked at all** — outcome `no_subject`, `decided_by = gate:no-subject`, no model call.
+  Scoped to Decision capabilities; `explain_vulnerability` still answers, because an explanation is
+  the one useful answer left when attribution is unresolved. A partially-classified Finding never
+  gates (missing classes are missing classification, not zero carriers), and `no_subject` scores as
+  a PASS in the eval loop. Two existing tests were **re-derived, not re-run** (R5): both drove the
+  all-scope grounding, which can no longer reach a model on a Decision capability.
+  **Still open:** D13 (measure the gap's classes) and D15 (does Red Hat's `package_state`
+  discriminate carriers from module-rebuild members?) — measurements, not designs. **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
   specified as **PROPOSED D10–D15 in EDR-ATTRIBUTION-01**. No code until the decisions are taken.
   **Raised from a live walkthrough of CVE-2026-33006** — carrier `http_server`, installed `httpd`,
   both components `scope`, zero proposals, AI "no answer". A textbook D5/D9 httpd case, and one of
@@ -3475,7 +3482,7 @@ under the 2026-08-07 re-derivation standard.
   2. **D11 — ACCEPTED + IMPLEMENTED 2026-09-22. "Why unresolved" is data, "evidence required" is
      prose written once.** The second list is
      identical on all 227 rows; a field whose value never varies carries no information.
-  3. **D12 — STILL OPEN (a behaviour change, kept out of the visibility half). Promote
+  3. **D12 — ACCEPTED + IMPLEMENTED 2026-09-22. Promote
      `GroundingThinness` from a label to a GATE**, on the zero-carriers reason
      ONLY. The predicate already exists, already runs before any model call, and AI-204-2
      deliberately uses it only to explain. Needs a distinct outcome reason (`budget_exhausted` is

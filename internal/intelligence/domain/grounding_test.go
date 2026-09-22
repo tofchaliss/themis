@@ -296,3 +296,58 @@ func TestFindingViewComponentLines(t *testing.T) {
 		t.Errorf("bare clearance line = %q", l)
 	}
 }
+
+// EDR-ATTRIBUTION-01 D12: the zero-carriers case is separated out because it is the ONLY
+// thinness reason that gates a Decision capability rather than labelling its decline. The other
+// two describe a subject — one whose disposition is known, or one poorly evidenced — and a model
+// may still have something to say about those.
+func TestGroundingHasNoSubject(t *testing.T) {
+	base := func() FindingAssessment {
+		return FindingAssessment{
+			Finding:   FindingView{ID: "F1", Components: []string{"a", "b"}, ClaimClasses: []string{"scope", "scope"}},
+			Knowledge: FaultlineView{AffectedRanges: []string{"<1.2"}},
+		}
+	}
+	if !GroundingHasNoSubject(base()) {
+		t.Error("all components scope-class ⇒ no subject")
+	}
+
+	mixed := base()
+	mixed.Finding.ClaimClasses = []string{"scope", "carrier"}
+	if GroundingHasNoSubject(mixed) {
+		t.Error("one carrier IS a subject — the gate must not fire")
+	}
+
+	// Unknown acts as carrier (EDR-CORRELATION-01): absence of attribution evidence must never
+	// hide a live vulnerability, and it must not silence a recommendation either.
+	unknown := base()
+	unknown.Finding.ClaimClasses = []string{"scope", ""}
+	if GroundingHasNoSubject(unknown) {
+		t.Error("an unknown class acts as carrier — the gate must not fire")
+	}
+
+	// A partially-classified Finding is evidence of MISSING CLASSIFICATION, not of zero
+	// carriers. Gating on it would silence a recommendation for want of a label.
+	misaligned := base()
+	misaligned.Finding.ClaimClasses = []string{"scope"}
+	if GroundingHasNoSubject(misaligned) {
+		t.Error("misaligned class list must never gate")
+	}
+
+	none := base()
+	none.Finding.Components, none.Finding.ClaimClasses = nil, nil
+	if GroundingHasNoSubject(none) {
+		t.Error("no components at all is not the zero-carriers case")
+	}
+
+	// The two must not drift: the gate's predicate and the label's first branch are one rule.
+	if got := GroundingThinness(base()); !strings.Contains(got, "all scope-class") {
+		t.Errorf("thinness = %q, want the same case to be named by the label too", got)
+	}
+	// The OTHER thinness reasons are thin without being subjectless — that is exactly why they
+	// label and do not gate.
+	noEvidence := FindingAssessment{Finding: FindingView{ID: "F1", Components: []string{"a"}, ClaimClasses: []string{"carrier"}}}
+	if GroundingHasNoSubject(noEvidence) || GroundingThinness(noEvidence) == "" {
+		t.Error("no version evidence must be thin but NOT subjectless")
+	}
+}

@@ -56,6 +56,22 @@ const (
 	// (Δ2): the LLM declined, or the whole plan deferred without producing. It is
 	// produced=false but NOT an error, and is distinct from AI being switched off.
 	ReasonInsufficient = "insufficient"
+	// ReasonNoSubject — a Decision capability was NOT INVOKED because its grounding names no
+	// component evidenced to carry the flaw (EDR-ATTRIBUTION-01 D12). Every matched component is
+	// scope-class, so there is no security subject to take a stance about, and the backend knows
+	// it before any model runs.
+	//
+	// A distinct reason on the same argument that earned `budget_exhausted` one: the operator
+	// response is unlike every other no-proposal. "Not invoked, no grounded subject" is an
+	// ATTRIBUTION gap to close (EDR-ATTRIBUTION-01), while "invoked, model declined" is a
+	// model/prompt question. Folding it into `insufficient` would send someone to tune a model
+	// that was never asked.
+	//
+	// It is NOT `no_grounding`, which is a different failure: there the projection could not be
+	// read at all (an outage, or a subject that does not exist). Here the grounding was read
+	// perfectly and is complete — it simply contains no carrier. One is broken plumbing, the
+	// other is honest evidence.
+	ReasonNoSubject = "no_subject"
 )
 
 // Outcome is the per-invocation telemetry record (D9). It carries no sensitive prompt
@@ -106,8 +122,8 @@ type Outcome struct {
 	// the output column was audit data no gate read. This field is the missing wire, and its
 	// capture is asserted by test now, so it cannot silently rot again.
 	Output string
-	// Detail is WHY the outcome ended as it did, in the words of the check that ended it —
-	// telemetry only, never returned to the caller (TRUST-6).
+	// Detail is WHY the outcome ended as it did, in the words of the check that ended it
+	// (TRUST-6).
 	//
 	// Reason alone is a constant, and four very different failures collapse into
 	// ReasonBusinessInvalid: a wrong finding_id echo, a confidence outside [0,1], a
@@ -115,10 +131,16 @@ type Outcome struct {
 	// stricter response schema, a prompt change, or a thicker projection — and on a live VM
 	// the missing distinction made a real 204 undiagnosable from logs.
 	//
-	// It stays out of the HTTP response deliberately. A 204 must remain opaque: "AI disabled",
-	// "AI unreachable" and "AI declined" are one outcome by design, because the pipeline is
-	// correct in all three. Leaking which one occurred would put the Gateway's operational
-	// state into a business API that treats AI as optional.
+	// It rides OUT on `X-Themis-AI-Detail`, beside the reason and never inside it. This comment
+	// used to say "telemetry only, never returned to the caller", written when a 204 was meant
+	// to stay opaque — AI-204-1 retired that invariant deliberately, because "AI disabled",
+	// "AI unreachable" and "the model correctly declined" demand opposite operator responses and
+	// collapsing them cost a round-trip through this node's logs every time. What survives of
+	// the old rule is the shape: the REASON is a closed taxonomy a consumer may switch on, the
+	// DETAIL is free text it may only display, and the two never merge into one value — doing
+	// so is what made a safety refusal render as "the Gateway stated no reason"
+	// (DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY). Detail is redacted on the way out because
+	// these messages quote model output verbatim.
 	Detail string
 }
 
@@ -402,6 +424,29 @@ func (g *Gateway) Invoke(
 	// decline carries its why in telemetry (the 204 header stays opaque per AI-204-1). Computed
 	// once here; applied only on the insufficient exits below — an error's own detail wins.
 	thinGrounding := domain.GroundingThinness(ac.Projection)
+
+	// EDR-ATTRIBUTION-01 D12 — the ONE thinness reason that gates rather than labels.
+	//
+	// Every matched component is scope-class, so nothing in the grounding is evidenced to carry
+	// the flaw and a Decision capability is being asked for a stance about no subject. That is
+	// not a model's question to answer: measured on CVE-2026-33006, two invocations spent 72s
+	// and 35s and Grounding Verification discarded both, which is the seam working twice at the
+	// wrong end of the pipeline.
+	//
+	// Scoped to Decision capabilities on purpose. An Information capability proposes no stance —
+	// explaining what a flaw means for the components that ARE installed is exactly what a human
+	// wants in this case, and it is the attribution gap, not the explanation, that is missing.
+	// Refusing it would remove the one useful answer available here.
+	//
+	// The gate makes the AI strictly less willing to speak, never more (the arc's stated
+	// non-goal), and it decides nothing: the Finding is untouched, as on every no-proposal path.
+	if capb.Output == domain.OutputDecision && domain.GroundingHasNoSubject(ac.Projection) {
+		oc.Duration = g.now().Sub(start)
+		oc.DecidedBy, oc.Reason = "gate:no-subject", ReasonNoSubject
+		oc.DeclineClass = DeclineThinGrounding
+		oc.Detail = thinGrounding
+		return domain.Proposal{}, oc
+	}
 
 	for _, step := range capb.Plan {
 		// Knowledge (retrieval) step (Δ3a): best-effort precedent grounding, delegated whole to

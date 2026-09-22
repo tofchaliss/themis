@@ -216,6 +216,15 @@ A `204` carries **`X-Themis-AI-Reason`** (and `X-Themis-AI-Detail`) explaining w
 | `business_invalid` | the claim did not check out against our own truth | a prompt/gate disagreement — the citation form was refused |
 | `budget_exhausted` | the capability's spend ceiling for this window is used up | nothing; it clears when the window rolls |
 | `provider_error` | the provider failed | check the model runtime |
+| `no_subject` | a **Decision** capability was NOT invoked: no component on the Finding is evidenced to carry the flaw | close the attribution gap (`EDR-ATTRIBUTION-01`) — there is no model to tune here |
+| `no_grounding` | the projection could not be read at all | check the upstream context; this is plumbing, not evidence |
+
+`no_subject` and `no_grounding` are easy to confuse and are opposites: the first read the grounding
+perfectly and found it contains no carrier, the second could not read it.
+
+The reason is a CLOSED taxonomy a caller may switch on; the detail is free text it may only
+display. They travel as two headers and must never be merged into one value — doing so turned the
+enum into a composite and made a safety refusal render as "the Gateway stated no reason".
 
 A caller that treats every `204` as "the AI had nothing to say" will misread a timeout, a budget
 pause and a correct refusal as the same event.

@@ -208,6 +208,7 @@ function occurrenceFixAdvice(c, fixes) {
 const AI_REASONS = {
   // Intelligence Gateway (internal/intelligence/app/gateway.go)
   insufficient: ["declined honestly", "chip-accent", "Not enough grounded evidence to answer — the safety seam working, not a failure."],
+  no_subject: ["not asked — no carrier", "chip-accent", "No installed component is evidenced to carry this flaw, so there was no subject to take a position on. Themis did not spend a model call to establish that, and this says nothing about whether these components are affected — see Attribution above."],
   business_invalid: ["failed grounding", "chip-crit", "The model answered but its citations failed Grounding Verification — the answer was refused rather than shown."],
   provider_error: ["provider error", "chip-warn", "The model provider failed mid-call. A caller timeout shorter than the model's latency also lands here."],
   budget_exhausted: ["budget exhausted", "chip-warn", "This capability's token ceiling for the current window is spent; it resets when the window rolls."],

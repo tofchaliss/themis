@@ -199,11 +199,11 @@ Absent that, the gap stands, and surfacing it (D6) is the whole of the work.
 
 ## D10–D15 — explaining and gating the gap (ATTR-GAP-2, reviewed 2026-09-22)
 
-**Status, per decision:** **D10, D11 and D14 are ACCEPTED and IMPLEMENTED (2026-09-22)** — the
-*visibility half*, taken first because the governing principle below puts explaining before
-eliminating. **D12, D13 and D15 remain PROPOSED**: D12 is a behaviour change (a gate) and D13/D15
-are measurements against the live estate, none of which belong in the same change as making the
-state visible.
+**Status, per decision:** **D10, D11, D14 and D12 are ACCEPTED and IMPLEMENTED (2026-09-22).**
+The visibility half (D10/D11/D14) landed first, because the governing principle below puts
+explaining before eliminating and because D12's own sequencing constraint required it. D12 — the
+gate — followed in its own change. **D13 and D15 remain PROPOSED**: both are measurements against
+the live estate, and nothing is designed until they answer.
 
 Raised by the user 2026-09-21 after a live walkthrough of
 `CVE-2026-33006` — carrier `http_server`, installed `httpd`, both components `scope`, zero
@@ -223,7 +223,7 @@ Order of work, which deliberately puts identity evidence LAST:
 
     1. the gap is explicit          → D10   DONE 2026-09-22 ┐ the VISIBILITY half:
     2. say WHY it is unresolved     → D11   DONE 2026-09-22 ┘ nothing behaves differently
-    3. AI ineligible before invoke  → D12   open — a GATE, so it changes behaviour
+    3. AI ineligible before invoke  → D12   DONE 2026-09-22 — a GATE, in its own change
     4. measure the gap's classes    → D13   open — a measurement, not a design
     5. only then, evidence bridges  → D15   open — and only if D13's measurement supports one
 
@@ -284,7 +284,7 @@ the Finding level, because "no source named a carrier" produces a different sing
 "carriers named, none matched". That is half of D13's measurement, obtained as a side effect of
 stating the fact honestly rather than as a separate exercise.
 
-### PROPOSED D12 — Promote the existing thinness predicate from a LABEL to a GATE
+### D12 (ACCEPTED, IMPLEMENTED 2026-09-22) — Promote the existing thinness predicate from a LABEL to a GATE
 
 The predicate is **already written and already measured**. `domain.GroundingThinness` returns
 *"N component(s), all scope-class (zero carriers) — no evidence any component carries the flaw"*,
@@ -308,10 +308,36 @@ operator fact from *"invoked, model declined"*, which is precisely the argument 
 accepted for `budget_exhausted` (*"a distinct reason because the operator response is unlike every
 other no-proposal"*). **Hard sequencing constraint: it must ship with or after
 `DEF_GUI_AI_REASON_MAP_INCOMPLETE` (#116)**, or it renders as *"the Gateway stated no reason"* —
-the exact defect diagnosed the same evening. **That constraint is now satisfied**: #116 and #117
+the exact defect diagnosed the same evening. **That constraint was satisfied first**: #116 and #117
 shipped 2026-09-22, the page maps every reason both servers can state (with a guard test that fails
-when either vocabulary grows), and an unrecognised reason is named rather than denied. D12 itself is
-still PROPOSED — it changes behaviour, and it is not part of the visibility half.
+when either vocabulary grows), and an unrecognised reason is named rather than denied.
+
+**As shipped (2026-09-22).**
+
+- The predicate is now `domain.GroundingHasNoSubject`, extracted from `GroundingThinness`'s first
+  branch — which calls it, so the gate and the label cannot drift about what "thin" meant.
+- The gate runs where the label was computed: after the projection is read, before any prompt is
+  rendered. Outcome `no_subject`, `decided_by = gate:no-subject`, `decline_class = thin_grounding`,
+  and the thinness string as the detail. The Finding is untouched, exactly as on every other
+  no-proposal path.
+- **Scoped to Decision capabilities**, which the proposal implied and the code now states.
+  `explain_vulnerability` is Information: it proposes no stance, and what the flaw means for the
+  components that ARE installed is precisely what a human wants when attribution is unresolved.
+  Gating it would have removed the one useful answer left on exactly the cards this EDR is about.
+- **A partially-classified Finding never gates.** Missing claim classes are evidence of missing
+  classification, not of zero carriers, and unknown still acts as carrier — the fail-safe direction
+  is unchanged and asserted.
+- `no_subject` counts as a PASS in the eval loop (`cmd/intelligence-eval`), for the same reason
+  `no_grounding` does: scoring it as a failure would penalise a run for a case the system
+  deliberately never put to a model.
+- **Two existing tests were RE-DERIVED, not re-run (CONVENTIONS R5).** Both drove the all-scope
+  grounding to exercise AI-204-2's label and the `thin_grounding` decline class; that population
+  can no longer reach a model on a Decision capability, so each was re-pointed at a thinness reason
+  that still labels. A green re-run would have proved only that the fixtures still compile.
+
+**What it does NOT do:** make the AI more willing to speak anywhere. It is a refusal, and the
+Attribution section (D10) is what tells the reviewer why — the two ship together by design, which
+is why the visibility half went first.
 
 ### PROPOSED D13 — Measure the gap's classes BEFORE inventing a taxonomy for them
 

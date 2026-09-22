@@ -880,14 +880,20 @@ func TestInvokeTokensAccumulateAcrossAttempts(t *testing.T) {
 	}
 }
 
-// AI-204-2: when the grounding is deterministically thin (all components scope-class), an
-// honest decline's telemetry names the why — the fact the backend knew before the model ran.
-// The header/API behaviour is untouched (AI-204-1): Detail is journal-only.
+// AI-204-2: when the grounding is deterministically thin, an honest decline's telemetry names
+// the why — the fact the backend knew before the model ran. The header/API behaviour is
+// untouched (AI-204-1): Detail is journal-only.
+//
+// RE-DERIVED for EDR-ATTRIBUTION-01 D12 (CONVENTIONS R5): this test used to drive the
+// all-scope/zero-carriers grounding, which is now GATED and never reaches a model on a Decision
+// capability. The label behaviour it guards belongs to the thinness reasons that still label —
+// here, no ranges and no fixes on record. The predicate's population changed, so the test was
+// re-derived rather than re-run.
 func TestInvokeInsufficientCarriesThinGroundingDetail(t *testing.T) {
 	thin := fakeProjection{proj: domain.FindingAssessment{
 		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
-			Components: []string{"pkg:rpm/a@1", "pkg:rpm/b@1"}, ClaimClasses: []string{"scope", "scope"}},
-		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+			Components: []string{"pkg:rpm/a@1", "pkg:rpm/b@1"}, ClaimClasses: []string{"carrier", "carrier"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"}, // no ranges, no fixes
 	}}
 	decline := `{"finding_id":"F1","recommended_stance":"insufficient","confidence":0,"evidence":[],"reasoning":"cannot tell"}`
 	g, err := NewGateway(GatewayConfig{
@@ -901,7 +907,7 @@ func TestInvokeInsufficientCarriesThinGroundingDetail(t *testing.T) {
 	if oc.Reason != ReasonInsufficient {
 		t.Fatalf("outcome = %+v", oc)
 	}
-	if !strings.Contains(oc.Detail, "all scope-class") {
+	if !strings.Contains(oc.Detail, "no affected ranges and no fix versions") {
 		t.Errorf("detail = %q, want the deterministic thinness named", oc.Detail)
 	}
 
@@ -973,10 +979,13 @@ func TestInvokeDeclineClassSeparatesThinFromUndetermined(t *testing.T) {
 		t.Errorf("healthy decline class = %q, want model_undetermined", oc.DeclineClass)
 	}
 
+	// Thin, but with a SUBJECT — a carrier component and no version evidence. The
+	// zero-carriers grounding cannot appear here any more: D12 gates it before the model runs,
+	// and its own test asserts that (R5 — the population this predicate sees has changed).
 	thin := fakeProjection{proj: domain.FindingAssessment{
 		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
-			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"scope"}},
-		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1", AffectedRanges: []string{"<9"}},
+			Components: []string{"pkg:rpm/a@1"}, ClaimClasses: []string{"carrier"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-1"}, // no ranges, no fixes
 	}}
 	g2, err := NewGateway(GatewayConfig{
 		Registry: domain.DefaultRegistry(), Projection: thin,
@@ -1152,5 +1161,80 @@ func TestInvokeCaptureRunsOnLiveContextAfterTimeout(t *testing.T) {
 	}
 	if cap.ctxErrs[0] != nil {
 		t.Errorf("capture ran on a CANCELLED context (%v) — the store write would fail silently", cap.ctxErrs[0])
+	}
+}
+
+// EDR-ATTRIBUTION-01 D12: a Decision capability whose grounding names NO carrier is not invoked
+// at all. Every matched component is scope-class, so the model would be asked for a stance about
+// no subject — measured on CVE-2026-33006, two invocations spent 72s and 35s and Grounding
+// Verification discarded both. The predicate already existed and only labelled; this promotes it.
+func TestInvokeGatesDecisionWhenGroundingHasNoSubject(t *testing.T) {
+	noSubject := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/httpd@2.4.37"}, ClaimClasses: []string{"scope"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-33006", AffectedRanges: []string{"<9"}},
+	}}
+	// A model that WOULD have produced a proposal, so the assertion is about the gate and not
+	// about what the model happened to answer.
+	okRaw := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[{"kind":"cve","ref":"CVE-1"}],"reasoning":"grounded"}`
+	eng := &fakeEngine{replies: []engineReply{{raw: okRaw}}}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: noSubject,
+		Prompt: fakePrompt{}, Engines: []Engine{eng},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, oc := g.Invoke(context.Background(), "recommend_position", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason != ReasonNoSubject || oc.DecidedBy != "gate:no-subject" {
+		t.Fatalf("outcome = %+v, want no_subject at gate:no-subject", oc)
+	}
+	if eng.calls != 0 {
+		t.Errorf("engine calls = %d, want 0 — the point of the gate is that no model runs", eng.calls)
+	}
+	if oc.Produced {
+		t.Error("a gated invocation must produce nothing")
+	}
+	// The reason is distinct from `insufficient` on purpose: "not invoked, no grounded subject"
+	// is an attribution gap to close, not a model to tune. Folding them would send an operator
+	// to debug a model that was never asked.
+	if oc.Reason == ReasonInsufficient || oc.Reason == ReasonNoGrounding {
+		t.Error("the gate must not reuse insufficient (the model declined) or no_grounding (the projection could not be read)")
+	}
+	if oc.DeclineClass != DeclineThinGrounding {
+		t.Errorf("decline class = %q, want thin_grounding — the backend knew before any model ran", oc.DeclineClass)
+	}
+	if !strings.Contains(oc.Detail, "all scope-class") {
+		t.Errorf("detail = %q, want the deterministic reason named", oc.Detail)
+	}
+}
+
+// The gate is scoped to DECISION capabilities. An Information capability proposes no stance, and
+// explaining what a flaw means for the components that ARE installed is exactly what a human
+// wants when attribution is unresolved — refusing it would remove the one useful answer left.
+func TestInvokeDoesNotGateInformationWhenGroundingHasNoSubject(t *testing.T) {
+	noSubject := fakeProjection{proj: domain.FindingAssessment{
+		Finding: domain.FindingView{ID: "F1", FaultlineID: "FL1",
+			Components: []string{"pkg:rpm/httpd@2.4.37"}, ClaimClasses: []string{"scope"}},
+		Knowledge: domain.FaultlineView{ID: "FL1", CVE: "CVE-2026-33006",
+			Summary: "a timing attack against mod_auth_digest in Apache HTTP Server"},
+	}}
+	info := `{"finding_id":"F1","recommended_stance":"affected","confidence":0.5,"evidence":[],"reasoning":"what this means here"}`
+	eng := &fakeEngine{replies: []engineReply{{raw: info}}}
+	g, err := NewGateway(GatewayConfig{
+		Registry: domain.DefaultRegistry(), Projection: noSubject,
+		Prompt: fakePrompt{}, Engines: []Engine{eng},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, oc := g.Invoke(context.Background(), "explain_vulnerability", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+	if oc.Reason == ReasonNoSubject {
+		t.Fatalf("an Information capability must not be gated: %+v", oc)
+	}
+	if eng.calls == 0 {
+		t.Error("the model was not asked — the explanation is the answer that still has value here")
 	}
 }

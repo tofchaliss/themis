@@ -4,33 +4,53 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-09-22 · the VISIBILITY HALF is closed; verify it on the VM next
+> ## ⏭ RESUME POINT — 2026-09-22 · ATTR-GAP-2 is DONE but for its two measurements; ONE VM round verifies all of it
 >
-> **Shipped today, `make check-ci` green, NOT yet seen on the running system.** Three changes, one
-> theme: **the system now says what it knows and why it declined, and nothing behaves differently.**
-> That separation was the point — the user's governing principle is *improve the ability to EXPLAIN
-> and RESOLVE uncertainty before improving the willingness to ELIMINATE it*, and everything here
-> sits on the explain side of that line.
+> **Shipped today, `make check-ci` green, NOTHING yet seen on the running system** — testing is
+> deliberately deferred to one round at the end (the user's call). **Four changes in two commits**,
+> and they went in that order because the arc's own principle demanded it: *improve the ability to
+> EXPLAIN and RESOLVE uncertainty before improving the willingness to ELIMINATE it*. The visibility
+> half first — it changes no outcome — then the gate, which does.
 >
 > | | what changed | why it was wrong before |
 > | --- | --- | --- |
 > | **ATTR-GAP-2 D10/D11/D14** | `carrier_products` crosses both API contracts; a read-time `attribution` projection states carrier ⇄ installed and why they could not be related; the drawer names both sides | the drawer showed one `attribution gap` chip and could not name the carrier — `carrier_products` never left the Knowledge context |
 > | **#117** composite reason | reason and detail stay TWO fields end to end (`app.NoProposal`), re-emitted as the Gateway's own two headers | Governance flattened them to `"business_invalid: <detail>"`, so the page's exact-match lookup missed and a **safety refusal** rendered as *"the Gateway stated no reason"* |
-> | **#116** reason map | all **fifteen** reasons mapped (not 12 — Governance states four of its own), detail displayed, an unknown reason NAMED rather than denied, and a guard test that reads both servers' `Reason*` constants and fails when either grows | the page knew 6; the other nine asserted that no reason was given, when a precise one always was |
+> | **#116** reason map | every reason mapped — **fifteen**, not the 12 filed, because Governance states four of its own (sixteen once D12 added `no_subject` an hour later); detail displayed; an unknown reason NAMED rather than denied; and a guard test that reads both servers' `Reason*` constants and fails when either grows | the page knew 6; the other nine asserted that no reason was given, when a precise one always was |
 >
-> **The D12 sequencing constraint is now satisfied** — that was the whole reason #116 had to land
-> first. D12 itself is deliberately NOT in this change: it is a gate, so it changes behaviour.
+> **Then D12 — the gate (second commit).** A Decision capability whose grounding names NO carrier
+> is no longer invoked at all: outcome **`no_subject`**, `decided_by = gate:no-subject`, zero model
+> calls. Measured cost of not having it, on this very card: two invocations, 72s and 35s, both
+> discarded by Grounding Verification. The predicate already existed and already ran before any
+> model — AI-204-2 deliberately used it only as a label — so this was "promote a label to a gate",
+> not a new rule.
+>
+> Three things about D12 worth carrying forward:
+>
+> - **It is scoped to DECISION capabilities.** `explain_vulnerability` still answers, because when
+>   attribution is unresolved the explanation is the one useful answer left. Gating it would have
+>   removed value from exactly the cards this EDR exists for.
+> - **The guard test earned itself within the hour.** Adding `no_subject` made
+>   `TestAIReasonTaxonomyIsCoveredByTheDashboard` fail immediately — the vocabulary grew and the
+>   consumer had not been re-derived, which is the whole defect #116 was. It caught it on the
+>   first run, not on a VM three weeks later.
+> - **Two existing tests were RE-DERIVED, not re-run (R5).** Both drove the all-scope grounding to
+>   exercise the thin-decline label; that population can no longer reach a model on a Decision
+>   capability, so each was re-pointed at a thinness reason that still labels. A green re-run
+>   would have proved only that the fixtures still compile.
 >
 > ### ⏭ Do this next
 >
-> 1. **Verify on the VM** — open a gap Finding's drawer (CVE-2026-33006 is the worked case) and
->    confirm it names carrier `http_server` beside installed `httpd`; then trigger a recommend and
->    confirm the no-answer states its reason instead of "no answer". **Every defect in this arc was
->    invisible to a green suite and visible in one look at the running system** — assume nothing
->    until that drawer is read.
-> 2. **Then ATTR-GAP-2's remaining half**: D12 (the gate), D13 (measure the gap's classes — half of
->    it now comes free, because "no carrier named" and "carriers named, none matched" render
->    differently), D15 (does Red Hat's `package_state` discriminate carriers from rebuild members?).
+> 1. **One VM round verifies the whole arc** — open CVE-2026-33006's drawer (the worked case) and
+>    confirm it names carrier `http_server` beside installed `httpd`; press *Recommend a position*
+>    and confirm **not asked — no carrier**, with NO invocation in the Intelligence log; then check
+>    an AI no-answer elsewhere states its own reason rather than "no answer". **Every defect in this
+>    arc was invisible to a green suite and visible in one look at the running system** — assume
+>    nothing until that drawer is read.
+> 2. **Then ATTR-GAP-2's remaining two, both MEASUREMENTS:** D13 (the gap's classes — half of it
+>    now comes free, because "no carrier named" and "carriers named, none matched" render
+>    differently), D15 (does Red Hat's `package_state` discriminate carriers from rebuild members,
+>    or does it enumerate the whole stream?).
 > 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
 >    nothing, which is how it has survived six sessions.
 >
