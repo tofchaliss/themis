@@ -39,6 +39,23 @@ and the resume pointer, never item state.
 >   capability, so each was re-pointed at a thinness reason that still labels. A green re-run
 >   would have proved only that the fixtures still compile.
 >
+> **And D13/D15 — the two MEASUREMENTS — now have instruments** (third commit), exercised against
+> synthetic populations because a measuring instrument that has never been run is a guess with a
+> shell script around it. `scripts/attribution-gap-census.sh` splits the population three ways and
+> buckets the gaps by fan-out; `scripts/redhat-package-state-probe.sh` asks whether Red Hat's
+> flaw-specific `package_state` is smaller than the rebuild set. Both read-only, both for the same
+> VM round. **Writing the instrument is not taking the measurement** — D13 and D15 stay open.
+>
+> Two things the census settled by reading the code before it ever ran:
+>
+> - **`carrier_missing` can never BE a gap.** `ClassifyClaim` returns `unknown` on an empty
+>   carrier list and unknown acts as CARRIER, so a card naming no carrier yields components that
+>   count as attributed everywhere — on evidence nobody supplied. A real population, and not the
+>   one D13 suspected it was; the census gives it its own line.
+> - **The EDR's honest limit is now measurable.** A no-carrier card whose components are all
+>   scope-class cannot be created, only observed: it means the re-classification sweep is behind.
+>   Non-zero there is a staleness signal, never a domain change.
+>
 > ### ⏭ Do this next
 >
 > 1. **One VM round verifies the whole arc** — open CVE-2026-33006's drawer (the worked case) and
@@ -47,10 +64,10 @@ and the resume pointer, never item state.
 >    an AI no-answer elsewhere states its own reason rather than "no answer". **Every defect in this
 >    arc was invisible to a green suite and visible in one look at the running system** — assume
 >    nothing until that drawer is read.
-> 2. **Then ATTR-GAP-2's remaining two, both MEASUREMENTS:** D13 (the gap's classes — half of it
->    now comes free, because "no carrier named" and "carriers named, none matched" render
->    differently), D15 (does Red Hat's `package_state` discriminate carriers from rebuild members,
->    or does it enumerate the whole stream?).
+> 2. **In the SAME round, run both instruments** — `PGBASE=… ./scripts/attribution-gap-census.sh`
+>    and `./scripts/redhat-package-state-probe.sh` (no arguments: it takes the estate's own gap
+>    CVEs, largest fan-out first). Neither mutates anything. The census answers D13; the probe
+>    answers D15 yes or no, and "no" is a real answer that costs one run and closes the question.
 > 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
 >    nothing, which is how it has survived six sessions.
 >

@@ -17,16 +17,18 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-**Revised 2026-09-22**, after the visibility half AND the gate shipped: ATTR-GAP-2's
-**D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live verification
-pending for all of it** (the user's call: testing happens in one round at the end). What remains of
-ATTR-GAP-2 is its two MEASUREMENTS, D13 and D15; nothing is designed until they answer.
+**Revised 2026-09-22**, after the visibility half, the gate, AND both measurement instruments:
+ATTR-GAP-2's **D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live
+verification pending for all of it** (the user's call: testing happens in one round at the end).
+**D13 and D15 now have instruments** (`attribution-gap-census.sh`, `redhat-package-state-probe.sh`)
+exercised against synthetic populations and committed — but **writing the instrument is not taking
+the measurement**, and both decisions stay open until the estate answers.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
 | **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
 | **P1** | **verify the whole ATTR-GAP-2 arc on the VM in ONE round** — a gap Finding's drawer names carrier `http_server` beside installed `httpd`; *Recommend a position* on it returns **not asked — no carrier** with no model call in the log; an AI no-answer elsewhere states its own reason | none of it is verified until a drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
-| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 + D12 ACCEPTED + IMPLEMENTED 2026-09-22**; **D13/D15 still open** | both the visibility half and the gate are shipped; what is left is two measurements against the live estate | measure, then decide |
+| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 + D12 ACCEPTED + IMPLEMENTED 2026-09-22**; **D13/D15 instruments ready, MEASUREMENTS PENDING** | everything designable is shipped; what is left is two numbers only the estate has. Run both scripts in the same VM round as the verification — neither mutates anything | measure, then decide |
 | **P2** | ~~`DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE`~~ **FIXED 2026-09-22** | both shipped; D12's sequencing constraint is satisfied | done |
 | **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
 | **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
@@ -3463,8 +3465,19 @@ under the 2026-08-07 re-derivation standard.
   gates (missing classes are missing classification, not zero carriers), and `no_subject` scores as
   a PASS in the eval loop. Two existing tests were **re-derived, not re-run** (R5): both drove the
   all-scope grounding, which can no longer reach a model on a Decision capability.
-  **Still open:** D13 (measure the gap's classes) and D15 (does Red Hat's `package_state`
-  discriminate carriers from module-rebuild members?) — measurements, not designs. **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
+  **D13/D15 — INSTRUMENTS READY 2026-09-22, MEASUREMENTS PENDING.** Both are read-only and both
+  run in the same VM round as the verification:
+  `PGBASE=… ./scripts/attribution-gap-census.sh` splits the population three ways (attributed ·
+  gap · **no-carrier card**), buckets the gaps by fan-out, and applies a lexical-proximity LENS
+  (a ≥4-char shared token between a carrier and a component — explicitly not a classifier;
+  nothing consumes it). `./scripts/redhat-package-state-probe.sh [CVE…]` compares Red Hat's
+  flaw-specific `package_state` against `affected_release`, the rebuild set, per CVE.
+  **Two things the census settled by reading the code before it ran.** `carrier_missing` can
+  never BE a gap — `ClassifyClaim` returns `unknown` on an empty carrier list and unknown acts as
+  carrier, so those Findings count as attributed everywhere on evidence nobody supplied; it is a
+  real population, just not that one. And a no-carrier card whose components are all scope-class
+  is *impossible to create and possible to observe* — it means the re-classification sweep is
+  behind, which is the EDR's own stated honest limit, now given a number. **Successor to ATTR-GAP-1 (surfacing, shipped 2026-09-17)**;
   specified as **PROPOSED D10–D15 in EDR-ATTRIBUTION-01**. No code until the decisions are taken.
   **Raised from a live walkthrough of CVE-2026-33006** — carrier `http_server`, installed `httpd`,
   both components `scope`, zero proposals, AI "no answer". A textbook D5/D9 httpd case, and one of
@@ -3491,7 +3504,8 @@ under the 2026-08-07 re-derivation standard.
   4. **D14 — ACCEPTED + IMPLEMENTED 2026-09-22. Attribution is a PROJECTION, not Finding state.** D3 already decided this; the
      user's proposed first-class structure would copy facts that exist elsewhere, which is the
      generation-stamp trap hit twice in September. `VendorStatements` is the precedent shape.
-  5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.**
+  5. **D13/D15 — no `claim_reason` taxonomy and no identity bridge until measured.** Instruments
+     written and exercised 2026-09-22; the measurements themselves are still outstanding.
   **Measurements to run first (no decision needed):** (a) the gap's shape split — carriers named
   but unmatched vs **no carriers at all**; `vm-verify` counts the 227 as "carrier named, none
   matched", so `carrier_missing` may be separate and uncounted. (b) Does Red Hat's `package_state`

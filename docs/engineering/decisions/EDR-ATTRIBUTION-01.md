@@ -202,8 +202,14 @@ Absent that, the gap stands, and surfacing it (D6) is the whole of the work.
 **Status, per decision:** **D10, D11, D14 and D12 are ACCEPTED and IMPLEMENTED (2026-09-22).**
 The visibility half (D10/D11/D14) landed first, because the governing principle below puts
 explaining before eliminating and because D12's own sequencing constraint required it. D12 — the
-gate — followed in its own change. **D13 and D15 remain PROPOSED**: both are measurements against
-the live estate, and nothing is designed until they answer.
+gate — followed in its own change.
+
+**D13 and D15 are MEASUREMENTS, and they stay OPEN until the estate answers them.** Their
+instruments are written, exercised against synthetic populations, and committed
+(`scripts/attribution-gap-census.sh`, `scripts/redhat-package-state-probe.sh`); what is missing
+is the one thing no amount of code supplies, which is the number. Writing the instrument is not
+taking the measurement, and neither decision may be marked settled on the strength of a script
+that has never seen the estate.
 
 Raised by the user 2026-09-21 after a live walkthrough of
 `CVE-2026-33006` — carrier `http_server`, installed `httpd`, both components `scope`, zero
@@ -224,8 +230,8 @@ Order of work, which deliberately puts identity evidence LAST:
     1. the gap is explicit          → D10   DONE 2026-09-22 ┐ the VISIBILITY half:
     2. say WHY it is unresolved     → D11   DONE 2026-09-22 ┘ nothing behaves differently
     3. AI ineligible before invoke  → D12   DONE 2026-09-22 — a GATE, in its own change
-    4. measure the gap's classes    → D13   open — a measurement, not a design
-    5. only then, evidence bridges  → D15   open — and only if D13's measurement supports one
+    4. measure the gap's classes    → D13   instrument ready; AWAITING THE ESTATE
+    5. only then, evidence bridges  → D15   instrument ready; AWAITING THE ESTATE
 
 The split at the line is deliberate and is the principle applied to this document's own delivery:
 steps 1–2 make the state legible and change no outcome, so they carry almost no risk and can be
@@ -339,7 +345,7 @@ when either vocabulary grows), and an unrecognised reason is named rather than d
 Attribution section (D10) is what tells the reviewer why — the two ship together by design, which
 is why the visibility half went first.
 
-### PROPOSED D13 — Measure the gap's classes BEFORE inventing a taxonomy for them
+### D13 — Measure the gap's classes BEFORE inventing a taxonomy for them (INSTRUMENT READY 2026-09-22; measurement pending)
 
 The user's own instruction, and R4 verbatim: *"I wouldn't create this taxonomy yet. First measure
 the attribution-gap population and see whether multiple stable failure modes actually exist."*
@@ -349,6 +355,31 @@ A `claim_reason` beside `claim_class` (`carrier_component_unresolved`, `carrier_
 shows the classes are real. The discriminating measurement is cheap: carriers named but unmatched
 versus **no carriers at all**. `vm-verify` reports the 227 as *"carrier named, none matched"*, so
 `carrier_missing` may be a separate and currently uncounted population.
+
+**The instrument: `scripts/attribution-gap-census.sh`** (read-only; two SELECTs joined in `awk`,
+because the carriers live in Knowledge's database and the components in Governance's and the
+architecture keeps those apart on purpose). It reports:
+
+1. **The three populations** — `attributed`, `gap` (the D1 gap), and `no-carrier card`.
+2. **Gap fan-out** by component count (1 · 2-5 · 6-20 · 21+) — a module-stream rebuild set is
+   large (37 components, measured), an identity mismatch is one or two. Bimodality here is two
+   failure modes visible without naming either.
+3. **Lexical proximity** — does any carrier share a ≥4-character token with any component
+   (`http_server` ⇄ `httpd`)? A LENS for reading the population, explicitly **not** a classifier:
+   acting on a shared prefix is the guess D7a measured and refused, and nothing in Themis consumes
+   the number.
+
+**One thing the instrument settled before it ran, by reading the code:** `carrier_missing` can
+**never** appear as an attribution gap. `ClassifyClaim` returns `unknown` on an empty carrier list,
+and unknown acts as **carrier** — so a card that names no carrier produces components that count as
+attributed everywhere, on evidence nobody supplied. It is a real and separate population, just not
+a gap, and the census counts it as its own line rather than folding it into either neighbour.
+
+**And it measures this EDR's own honest limit.** A no-carrier card whose components are all
+scope-class is impossible to create and possible to *observe*: it means the classes were written
+while the card still named carriers and the re-classification sweep has not caught up. The census
+counts those separately. Non-zero is "the sweep is behind", never "the domain changed" — the
+coupling the Honest limits section names, given a number.
 
 ### D14 (ACCEPTED, IMPLEMENTED 2026-09-22) — Attribution is a PROJECTION. D3 already decided this.
 
@@ -377,7 +408,7 @@ claim classes and the card's carriers. No column, no event, no migration — exa
 Governance re-derives no classification: it reads the classes Knowledge already decided, so the
 single source of the claim-class rule is untouched.
 
-### PROPOSED D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed
+### D15 — Independent identity evidence: one candidate is ALREADY ingested, and must be measured before it is believed (INSTRUMENT READY 2026-09-22; measurement pending)
 
 The user's boundary is exact and unchanged from D7a: *"`httpd` → generate CPE → `httpd` → compare
 CPE"* does not qualify, because the evidence was generated from the component name itself.
@@ -397,6 +428,28 @@ So the question is narrow and empirical: does `package_state`'s **flaw-specific 
 it enumerate the whole stream as well? If it discriminates, there is an authoritative bridge already
 in the data. If it enumerates, it is the same rebuild artifact in different clothing.
 **This measurement belongs in D13's step, not D15's** — nothing is designed until it answers.
+
+**The instrument: `scripts/redhat-package-state-probe.sh`** (read-only; outbound only to the
+public Security Data API the Red Hat feed already uses). Per CVE it compares the distinct
+**package-level `package_state`** names against the distinct package names in
+**`affected_release`** — the fixed-build list, which IS the rebuild set — and reports whether the
+flaw-specific set is strictly smaller and a subset. With no arguments it takes the estate's own
+gap CVEs, largest fan-out first, since those are the shapes the trap is about. Container and
+layered-product artifacts are excluded exactly as the feed ACL excludes them: a name carrying `/`,
+`:` or a `-container` suffix can never match an rpm/pypi/npm component, so it could not bridge to
+anything installed even if it were flaw-specific.
+
+**Read the result strictly.** "Discriminates" on most of the population makes D15 a design
+question — one that still has to be grilled and measured on its own terms. "Enumerates" answers
+D15 **no**, and the httpd cluster stays exactly where D5 left it; that is a real answer and it
+costs one run. Either way the bridge would be **RPM-world only** (nothing for Maven, PyPI or npm,
+nothing for a distro Red Hat does not publish) and would name a package, never a version — an
+attribution bridge, never a verdict.
+
+**Note on what is ingested today:** the Red Hat ACL reads `package_state` but folds only its
+`Not affected` entries, as VEX applicability. The `Affected` / `Fix deferred` states — the half
+this measurement is about — are parsed and dropped. If D15 answers yes, that is the seam to
+revisit; until it does, nothing there changes.
 
 ## Validation criterion
 

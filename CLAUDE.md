@@ -342,6 +342,16 @@ OpenVEX / CSAF out.
   would be right the day it was written and silently wrong after (the defect that left the systemd
   installer loading only the first registry migration). Strictly read-only: mutations stay in a
   human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
+- `scripts/attribution-gap-census.sh` · `scripts/redhat-package-state-probe.sh` — the two
+  **measurement** instruments for EDR-ATTRIBUTION-01 D13/D15, read-only and estate-facing. The
+  census splits the attribution population three ways (attributed · gap · **no-carrier card**,
+  which is NOT a gap — `ClassifyClaim` returns `unknown` on an empty carrier list and unknown acts
+  as carrier), buckets gaps by fan-out, and applies a lexical-proximity **lens** that nothing
+  consumes. The probe asks whether Red Hat's flaw-specific `package_state` is smaller than
+  `affected_release`, the module rebuild set. Both carry a fixture/replay seam
+  (`CENSUS_*_TSV`, `PROBE_FIXTURE_DIR`) so the analysis can be exercised without an estate — which
+  is how they were tested before first use. **They measure; they classify nothing and decide
+  nothing**, because D13 defers the taxonomy until the population says the classes are real.
 - `scripts/vex-reject-inapplicable.sh` — the **one mutation** in this family, and it is opt-in. It
   reviews the standing vendor-VEX `not_affected` proposals and rejects those resting on a statement
   Themis determined does not cover the release (the pre-EDR-VEX-02 raises, made with no scope check
