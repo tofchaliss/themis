@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
@@ -89,5 +90,36 @@ func TestRecommendPositionEndpointStatesReasonAndDetailSeparately(t *testing.T) 
 	}
 	if got := resp.Header.Get("X-Themis-AI-Detail"); got != adv.no.Detail {
 		t.Errorf("detail header = %q, want the elaboration on its own header", got)
+	}
+}
+
+// A header value is latin-1 at the browser boundary, so UTF-8 punctuation in a diagnostic
+// arrives as mojibake. Measured on the deployment 2026-09-22: the dashboard rendered
+// "zero carriers) â no evidence any component carries the flaw" from a detail the domain had
+// written perfectly — and the same sentence, delivered as JSON on the same page, was fine.
+func TestRecommendPositionEndpointFoldsTheDetailToASCII(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "F1", "rel-1", "fl-1", "CVE-1"))
+	srv := serverWithAdvisor(t, repo, fakeAdvisor{produced: false, no: app.NoProposal{
+		Reason: "no_subject",
+		Detail: "grounding: 1 component(s), all scope-class (zero carriers) — no evidence…",
+	}})
+
+	resp, err := http.Post(srv.URL+"/findings/F1/recommend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got := resp.Header.Get("X-Themis-AI-Detail")
+	if strings.ContainsAny(got, "—…") {
+		t.Errorf("detail = %q, want the non-ASCII punctuation folded", got)
+	}
+	if !strings.Contains(got, "(zero carriers) - no evidence...") {
+		t.Errorf("detail = %q, want the em dash as '-' and the ellipsis spelled out", got)
+	}
+	// The taxonomy word is untouched — it is what a consumer switches on.
+	if resp.Header.Get("X-Themis-AI-Reason") != "no_subject" {
+		t.Errorf("reason = %q, want it carried verbatim", resp.Header.Get("X-Themis-AI-Reason"))
 	}
 }

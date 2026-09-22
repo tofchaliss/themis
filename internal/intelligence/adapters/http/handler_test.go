@@ -221,3 +221,53 @@ func TestInvokeSurfacesPrecedentsUsed(t *testing.T) {
 		t.Errorf("precedents_used = %v, want an explicit 0", got0.PrecedentsUsed)
 	}
 }
+
+// The 204's detail is folded to ASCII before it becomes a header value. Header values are
+// latin-1 at the browser boundary, so the domain's UTF-8 punctuation arrives mangled: measured
+// on the deployment 2026-09-22, the dashboard showed "zero carriers) â no evidence any component
+// carries the flaw" for a sentence that is perfect everywhere it travels as JSON.
+//
+// This is the FIRST of the two boundaries — Governance re-emits the same pair one hop later and
+// folds again, because each context owns its own wire.
+func TestInvokeNoProposal_DetailIsFoldedToASCII(t *testing.T) {
+	inv := &fakeInvoker{outcome: app.Outcome{
+		Produced: false,
+		Reason:   app.ReasonNoSubject,
+		Detail:   "grounding: 1 component(s), all scope-class (zero carriers) — no evidence…",
+	}}
+	rr := do(t, NewHandler(inv, nil), `{"finding_id":"F1"}`)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rr.Code)
+	}
+	got := rr.Header().Get("X-Themis-AI-Detail")
+	if strings.ContainsAny(got, "—…") {
+		t.Errorf("detail = %q, want the non-ASCII punctuation folded", got)
+	}
+	if !strings.Contains(got, "(zero carriers) - no evidence...") {
+		t.Errorf("detail = %q, want the em dash as '-' and the ellipsis spelled out", got)
+	}
+	if rr.Header().Get("X-Themis-AI-Reason") != app.ReasonNoSubject {
+		t.Errorf("reason = %q, want the taxonomy word verbatim", rr.Header().Get("X-Themis-AI-Reason"))
+	}
+}
+
+// Non-ASCII with no ASCII equivalent is DROPPED, not mangled and not turned into noise: a header
+// is a diagnostic pointer and the telemetry keeps the original. Quotes and apostrophes fold,
+// because model output is full of them.
+func TestInvokeNoProposal_DetailFoldingDropsWhatItCannotRepresent(t *testing.T) {
+	inv := &fakeInvoker{outcome: app.Outcome{
+		Produced: false,
+		Reason:   app.ReasonBusinessInvalid,
+		Detail:   "the model cited “パッケージ” which isn’t in its grounding",
+	}}
+	rr := do(t, NewHandler(inv, nil), `{"finding_id":"F1"}`)
+	got := rr.Header().Get("X-Themis-AI-Detail")
+	for _, r := range got {
+		if r < 0x20 || r > 0x7e {
+			t.Fatalf("detail = %q, want printable ASCII only (found %q)", got, r)
+		}
+	}
+	if !strings.Contains(got, `cited ""`) || !strings.Contains(got, "isn't in its grounding") {
+		t.Errorf("detail = %q, want the quotes and apostrophe folded and the rest intact", got)
+	}
+}

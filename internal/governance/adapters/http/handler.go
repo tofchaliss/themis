@@ -351,8 +351,8 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 		if no.Reason != "" {
 			w.Header().Set(aiReasonHeader, no.Reason)
 		}
-		if no.Detail != "" {
-			w.Header().Set(aiDetailHeader, no.Detail)
+		if d := headerText(no.Detail); d != "" {
+			w.Header().Set(aiDetailHeader, d)
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -688,4 +688,43 @@ func verdictGradePtr(s string) *gen.ComponentVerdictGrade {
 	}
 	v := gen.ComponentVerdictGrade(s)
 	return &v
+}
+
+// headerText makes a free-text diagnostic safe to carry in an HTTP header VALUE.
+//
+// Header values are effectively latin-1 at the browser boundary (RFC 9110 leaves non-ASCII
+// opaque), so UTF-8 punctuation arrives mangled. Measured on the deployment 2026-09-22: the
+// dashboard rendered "zero carriers) â no evidence any component carries the flaw" for a
+// detail whose JSON-delivered twin on the same page was perfect. The domain writes good UTF-8;
+// it is the TRANSPORT that cannot carry it, so the folding belongs at this boundary and nowhere
+// else — the log keeps the original text either way.
+//
+// The reason header needs none of this: it is a closed ASCII taxonomy by construction.
+//
+// Duplicated from the Intelligence adapter DELIBERATELY: the two are different bounded
+// contexts and may not import each other, and a shared package for twenty lines of
+// transport hygiene would be a worse trade than the copy.
+func headerText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\u2014' || r == '\u2013' || r == '\u2212':
+			b.WriteByte('-')
+		case r == '\u2019' || r == '\u2018':
+			b.WriteByte('\'')
+		case r == '\u201c' || r == '\u201d':
+			b.WriteByte('"')
+		case r == '\u2026':
+			b.WriteString("...")
+		case r < 0x20 || r > 0x7e:
+			// Anything else outside printable ASCII is dropped rather than mangled. A header is
+			// a diagnostic pointer, not the record; mojibake in the operator's face is worse
+			// than a missing glyph, and the full string is in the telemetry.
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

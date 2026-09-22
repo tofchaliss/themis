@@ -207,3 +207,56 @@ func TestGetFindingAssessment_AttributionIgnoresRetiredComponents(t *testing.T) 
 		t.Errorf("status = %q, want unresolved — a withdrawn carrier cannot attribute anything", a2.Attribution.Status)
 	}
 }
+
+// An EL-stream mismatch excludes a fix even when the source never said "rpm".
+//
+// Measured live 2026-09-22: an el8 httpd occurrence showed `0:2.4.62-13.el9_8.5` and
+// `0:2.4.63-13.el10_2.4` as its fix advice, while the same page's attributed-fixes panel said
+// "none for these components". The guard existed but sat behind a declared ecosystem, and the
+// enrichment signal's Ecosystem field is additive — absent on any payload predating KN-FIX-3.
+func TestGetFindingAssessment_ELStreamMismatchExcludesAFixWithNoStatedEcosystem(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-33006")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL:    "pkg:rpm/rocky/httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9",
+		Name:    "httpd",
+		Version: "2.4.37-65.module+el8.10.0+40257+286895ef.9",
+	}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).
+		WithKnowledge(stubKnowledge{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2026-33006",
+			Fixes: []app.FixedVersion{
+				{Package: "httpd", Version: "0:2.4.62-13.el9_8.5"},  // no ecosystem stated
+				{Package: "httpd", Version: "0:2.4.63-13.el10_2.4"}, // no ecosystem stated
+			},
+		}})
+
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(a.Knowledge.Fixes) != 0 {
+		t.Errorf("fixes = %+v, want none — an el9/el10 build is not what an el8 host upgrades to", a.Knowledge.Fixes)
+	}
+	if a.Knowledge.UnattributedFixes != 2 {
+		t.Errorf("unattributed = %d, want 2 — fixes exist, none of them is this component's",
+			a.Knowledge.UnattributedFixes)
+	}
+
+	// The matching stream still applies: the rule excludes on mismatch, never on absence.
+	read2 := app.NewReadService(repo, fakeProjection{}, nil, 0).
+		WithKnowledge(stubKnowledge{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2026-33006",
+			Fixes: []app.FixedVersion{{Package: "httpd", Version: "0:2.4.37-66.el8_10"}},
+		}})
+	a2, err := read2.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(a2.Knowledge.Fixes) != 1 {
+		t.Errorf("fixes = %+v, want the el8 fix kept", a2.Knowledge.Fixes)
+	}
+}

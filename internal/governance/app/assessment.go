@@ -320,11 +320,23 @@ func fixAppliesTo(f FixedVersion, c domain.MatchedComponent) bool {
 		if compEco := value.CanonicalEcosystem(c.Ecosystem); compEco != "" && compEco != fixEco {
 			return false
 		}
-		if fixEco == "rpm" {
-			fixMajor, instMajor := value.RPMReleaseMajor(f.Version), value.RPMReleaseMajor(c.Version)
-			if fixMajor != "" && instMajor != "" && fixMajor != instMajor {
-				return false
-			}
+	}
+	// The EL-stream check does NOT depend on the fix DECLARING an ecosystem, and that is the
+	// point. It used to sit inside the branch above, so a fix whose source stated no ecosystem
+	// skipped it entirely — and the enrichment signal's Ecosystem is additive (KN-FIX-3), absent
+	// on any payload predating it. Measured live 2026-09-22: an el8 httpd occurrence advertised
+	// `0:2.4.62-13.el9_8.5` and `0:2.4.63-13.el10_2.4` in the drawer while the panel directly
+	// above it, fed by the same function from Knowledge's ecosystem-bearing fixes, correctly said
+	// "none for these components". One page, two claims, one missing label.
+	//
+	// An `.el9` in the version string IS the positive evidence that this is an RPM release — the
+	// rule stays "exclude only on positive evidence of mismatch", and requiring a second, weaker
+	// label before believing the first discards evidence we already hold. A declared NON-rpm
+	// ecosystem still opts out: an npm version is not an EL stream.
+	if fixEco == "" || fixEco == "rpm" {
+		fixMajor, instMajor := value.RPMReleaseMajor(f.Version), value.RPMReleaseMajor(c.Version)
+		if fixMajor != "" && instMajor != "" && fixMajor != instMajor {
+			return false
 		}
 	}
 	return true

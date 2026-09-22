@@ -3661,6 +3661,39 @@ under the 2026-08-07 re-derivation standard.
   so it can refuse a suppression, never grant one. Loosening a suppression guard is its own
   decision and does not belong in a mid-test-round fix. **Follow-up filed below.**
 
+- [x] **DEF_GOV_FIX_EL_STREAM_GUARD_NEEDS_A_LABEL — an el9/el10 fix was advertised for an el8
+  install, because the EL-stream check sat behind the fix DECLARING an ecosystem (found on the
+  VM 2026-09-22 by reading the drawer; FIXED same day).**
+  **MED — wrong remediation advice, and self-contradictory on one screen**; KN-FIX-3, AI-GROUND-1.
+  **How it surfaced.** The drawer showed `fix: 0:2.4.62-13.el9_8.5  0:2.4.63-13.el10_2.4` on a
+  `2.4.37-65.module+el8.10.0` httpd occurrence — while the panel directly above it said
+  *"Fixes (attributed): none for these components"*. **Two paths, same function, different input
+  fidelity:** the assessment reads Knowledge's fixes, which carry `ecosystem: rpm`, so the guard
+  fired; the posture stamps fixes from the enrichment SIGNAL, whose `Ecosystem` is additive
+  (KN-FIX-3) and absent on any payload predating it, so `fixEco == ""` skipped the whole branch —
+  including the EL-major comparison nested inside it.
+  **Fix:** the EL-stream check no longer depends on the label. An `.el9` in the version string IS
+  the positive evidence that this is an RPM release, and requiring a second, weaker label before
+  believing the first discards evidence already in hand. A DECLARED non-rpm ecosystem still opts
+  out — an npm version is not an EL stream — so the rule stays "exclude only on positive evidence
+  of mismatch".
+  **The lesson, which is the reusable half:** a guard that depends on an ADDITIVE field is a guard
+  that silently stops guarding for every record written before the field existed. The same shape
+  as `vet-tags` (a tagged file nobody compiles) and as R5's cardinality cases.
+
+- [x] **DEF_AI_DETAIL_HEADER_MANGLES_UTF8 — the AI detail rendered as `zero carriers) â no
+  evidence...` in the browser, because a UTF-8 em dash was carried in an HTTP header (found on
+  the VM 2026-09-22 in the drawer; FIXED same day).** **LOW — cosmetic, but it lands on the
+  operator's screen at exactly the moment the system is explaining itself**; AI-204-1.
+  Header values are effectively latin-1 at the browser boundary, so the domain's perfectly good
+  UTF-8 arrives mangled — while the SAME sentence, delivered as JSON elsewhere on the page, was
+  correct. The transport is the problem, not the text.
+  **Fix:** fold to printable ASCII at each HTTP boundary (em/en dashes, smart quotes and ellipsis
+  mapped; anything else dropped rather than mangled, since a header is a diagnostic pointer and
+  the telemetry keeps the original). Applied in BOTH the Intelligence and Governance adapters —
+  duplicated deliberately, because the two are different bounded contexts and may not import each
+  other. The reason header needs no folding: it is a closed ASCII taxonomy by construction.
+
 - [ ] **DEF_GOV_RETIRED_ROWS_IN_DECISION_INPUTS — the suppression guard and the signal-driven fix
   selection still read retired components (filed 2026-09-22, spun out of the fix above).**
   **LOW — fail-safe direction, no measured instance.**
