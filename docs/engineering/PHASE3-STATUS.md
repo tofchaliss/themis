@@ -56,18 +56,50 @@ and the resume pointer, never item state.
 >   scope-class cannot be created, only observed: it means the re-classification sweep is behind.
 >   Non-zero there is a staleness signal, never a domain change.
 >
+> ### ✅ THE VM ROUND RAN 2026-09-22 — everything above is verified, and it cost three defects
+>
+> **Verified live:** both API hops of D10 and the Attribution projection; D12 (`204 no_subject`,
+> **3 ms**, 0 tokens — the same card burned 72 s and 35 s before the gate); #117 as two separate
+> headers on the wire; #116's page taxonomy; `explain_vulnerability` still answering, which is
+> D12's Decision-only scoping working; and EDR-VEX-02 end to end on `CVE-2024-38476`.
+>
+> **D13 — MEASURED.** 809 Findings with components: attributed 463, gap **227** (matching the
+> tile exactly, derived independently from the other side of the seam), **no-carrier card 119**,
+> stale classes 0. 68% of gaps carry ONE component, so the module-rebuild set is the loudest
+> shape and not the dominant one. Three names hold the population (`python3-pyyaml` 116, `httpd`
+> 87, `python3-ply` 66) and the commonest "carriers" are not packages at all (`fedora` 105,
+> `debian_linux` 85, `leap` 35). One root cause — CPE product vocabulary vs distro package
+> vocabulary — with three relationships, of which the useful distinction is **not derivable from
+> the data**. Taxonomy stays deferred, now on the numbers.
+>
+> **D15 — MEASURED, answered NO.** `package_state` names the installed `httpd` on 12/12 but
+> ASSERTS on only 2; 6 DENY (VEX, already ingested and verified correct) and 4 make no claim
+> (`Out of support scope`). ~17% of one cluster, nothing elsewhere.
+>
+> **Three defects found, all invisible to a green suite:**
+>
+> | | found by | state |
+> | --- | --- | --- |
+> | retired twins in every read projection (`httpd, httpd` for one installed component; a retired CARRIER would have hidden a gap) | the first live read of the new projection | FIXED |
+> | the AI detail header mangled UTF-8 (`â` where an em dash belongs) | reading the drawer | FIXED |
+> | `findings.selected_fixes` is stamped once and NEVER re-derived — **25 Findings serve upgrade advice matching no component's EL stream** | reading the drawer, then the stored row | FILED, mitigated in the drawer |
+>
+> **And four mistakes of mine, corrected in flight and recorded rather than tidied away:** an
+> estate CSV committed by `git add -A scripts`; D15 sampled from the one population that could
+> not answer it; `fix_state` read as two-valued when `Out of support scope` is neither assertion
+> nor denial; and the el9/el10 advice diagnosed from the code path as a missing-label bug when
+> the stored row disproved it. The last is the one to carry forward — **the observation was real
+> and the explanation was invented** (R4c), and one query would have settled it before the
+> commit rather than after.
+>
 > ### ⏭ Do this next
 >
-> 1. **One VM round verifies the whole arc** — open CVE-2026-33006's drawer (the worked case) and
->    confirm it names carrier `http_server` beside installed `httpd`; press *Recommend a position*
->    and confirm **not asked — no carrier**, with NO invocation in the Intelligence log; then check
->    an AI no-answer elsewhere states its own reason rather than "no answer". **Every defect in this
->    arc was invisible to a green suite and visible in one look at the running system** — assume
->    nothing until that drawer is read.
-> 2. **In the SAME round, run both instruments** — `PGBASE=… ./scripts/attribution-gap-census.sh`
->    and `./scripts/redhat-package-state-probe.sh` (no arguments: it takes the estate's own gap
->    CVEs, largest fan-out first). Neither mutates anything. The census answers D13; the probe
->    answers D15 yes or no, and "no" is a real answer that costs one run and closes the question.
+> 1. **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** — design the Knowledge-side re-emit. 25 Findings
+>    carry wrong upgrade advice that cannot heal on its own, and this is the generation-stamp
+>    class for the THIRD time. Not an `UPDATE`: that is a second un-audited history, the same
+>    objection that kept the 138 attributions and the 8 miscited proposals untouched.
+> 2. **`DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`** (the 8 miscited proposals) — unchanged, still the
+>    last user-visible wrongness with a decision in front of it.
 > 3. **Unchanged and independent:** rotate the exposed PostgreSQL credential (P0 below). It gates
 >    nothing, which is how it has survived six sessions.
 >

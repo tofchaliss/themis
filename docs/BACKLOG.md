@@ -3709,10 +3709,20 @@ under the 2026-08-07 re-derivation standard.
   GENERATION of the rule that wrote it and nothing records which generation that was. Sibling of
   `DEF_GOV_RELEASE_SCOPE_FROM_FINDING` (which rejected stamping scope onto the Finding at open)
   and of the retired-twin projection defect found the same morning.
+  **MEASURED 2026-09-22 — the size of the wrongness.** 809 Findings: 688 hold an array, 121 hold
+  JSON `null`; ~349 carry actual advice (the rest are empty selections), and **25 of those name a
+  fix whose EL stream matches no active component**. So ~7% of stamped advice is wrong, which
+  makes the re-emit worth designing without making it urgent. The query is in the session log;
+  it needs a `jsonb_typeof(...) = 'array'` guard (see the null/[] note below).
   **Cheap mitigation shipped meanwhile:** the drawer now prefers the LIVE assessment fixes over
   the stamped ones when an assessment is loaded, so the two halves of one screen agree. The
   posture table, which loads no assessment, still shows the stamped value — this is a display
-  preference, not a repair.
+  preference, not a repair, and those 25 are still visible there.
+  **Fixed in passing:** an empty selection was stored as JSON `null` rather than `[]`
+  (`json.Marshal` of a nil slice). Identical to the Go reader, NOT identical to SQL — a
+  `jsonb_array_elements` over the column failed outright on the 121 `null` rows. New writes store
+  `[]`; the existing 121 stay until re-stamped, so a query over this column still needs the type
+  guard.
 
 - [x] **DEF_AI_DETAIL_HEADER_MANGLES_UTF8 — the AI detail rendered as `zero carriers) â no
   evidence...` in the browser, because a UTF-8 em dash was carried in an HTTP header (found on

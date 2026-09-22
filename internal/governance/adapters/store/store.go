@@ -631,6 +631,13 @@ func (s *Store) SetComponentVerdict(ctx context.Context, releaseID, faultlineID 
 // Both together are what let a release posture answer "which are critical, and what do I upgrade?"
 // in a single read.
 func (s *Store) SetBandAndFixes(ctx context.Context, findingID, band string, fixes []app.FixedVersion) error {
+	// An empty selection is stored as `[]`, never as JSON `null`. json.Marshal writes `null` for
+	// a nil slice, which reads back identically in Go (a nil slice either way) and differently in
+	// SQL: measured 2026-09-22, `jsonb_array_elements` over the column failed outright with
+	// "cannot extract elements from a scalar" on 121 of 809 rows. The column means one thing now.
+	if fixes == nil {
+		fixes = []app.FixedVersion{}
+	}
 	raw, err := json.Marshal(fixes)
 	if err != nil {
 		return err
