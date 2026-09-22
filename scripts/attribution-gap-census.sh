@@ -126,6 +126,13 @@ awk -F'\t' '
     else if (n <= 20) bucket["6-20"]++
     else              bucket["21+"]++
 
+    # What is actually installed on a gap, by name — the frequency table is what shows whether
+    # the population is a handful of recurring vocabulary failures or a long tail.
+    nc = split(comps, cn, " ")
+    for (i = 1; i <= nc; i++) if (cn[i] != "") gapcomp[cn[i]]++
+    nk = split(carriers[fl], ck, " ")
+    for (i = 1; i <= nk; i++) if (ck[i] != "") gapcarr[ck[i]]++
+
     near = proximate(carriers[fl], comps)
     if (near) { nearN++; if (nearShown < 12) { nearEx[++nearShown] = sprintf("%-18s %-34s <- %s", cve, trunc(carriers[fl]), trunc(comps)) } }
     else      { farN++;  if (farShown  < 12) { farEx[++farShown]   = sprintf("%-18s %-34s <- %s", cve, trunc(carriers[fl]), trunc(comps)) } }
@@ -148,6 +155,16 @@ awk -F'\t' '
     return 0
   }
   function trunc(s) { return length(s) > 32 ? substr(s, 1, 29) "..." : s }
+  # Top-N by count, printed without sort(1) so the whole report stays one awk pass.
+  function topn(arr, n,   k, i, bestk, bestv, used, shown) {
+    for (shown = 0; shown < n; shown++) {
+      bestv = -1; bestk = ""
+      for (k in arr) if (!(k in used) && arr[k] > bestv) { bestv = arr[k]; bestk = k }
+      if (bestv < 0) return
+      used[bestk] = 1
+      printf "     %6d  %s\n", bestv, bestk
+    }
+  }
   function pct(a, b) { return b ? sprintf("%5.1f%%", 100 * a / b) : "    -" }
 
   END {
@@ -182,6 +199,15 @@ awk -F'\t' '
     printf "   no shared token                                %6d  %s\n", farN, pct(farN, gaps)
     if (nearShown) { printf "\n   NEAR — candidate vocabulary mismatches (carrier <- components)\n"; for (i = 1; i <= nearShown; i++) printf "     %s\n", nearEx[i] }
     if (farShown)  { printf "\n   FAR — candidate genuine bystanders (carrier <- components)\n";     for (i = 1; i <= farShown; i++)  printf "     %s\n", farEx[i] }
+    printf "\n4. WHAT IS ACTUALLY IN THE GAPS (top names, gap Findings only)\n"
+    printf "   installed components\n"
+    topn(gapcomp, 12)
+    printf "   carriers named by the cards\n"
+    topn(gapcarr, 12)
+    printf "\n   A few names repeating across most of the population is ONE failure mode wearing\n"
+    printf "   many CVE numbers; a long tail of distinct names is many. That distinction is what\n"
+    printf "   D13 asks for, and it is visible here without any classifier at all.\n"
+
     printf "\n   A shared prefix is NOT evidence that two names are the same product: deriving\n"
     printf "   identity from the component name is exactly what D7a measured and refused. Read\n"
     printf "   this split only to answer D13: do two stable shapes exist, or one continuum?\n\n"

@@ -23,6 +23,23 @@
 #   strictly fewer, and a subset  -> it discriminates; an authoritative bridge is already ingested
 #   the same, or a superset       -> the same rebuild artifact, and D15 is answered NO
 #
+# AND THE QUESTION THAT ACTUALLY DECIDES IT (added 2026-09-22, after the first run). "Smaller than
+# the rebuild set" is necessary and NOT sufficient. Measured on this estate: package_state is
+# smaller on 24 of 25 CVEs, but most of those sets are not SUBSETS — it names `python`, `python2.7`
+# and `python3.9` where the rebuild set carries `python39` and `rh-python38-python`. Flaw-specific,
+# certainly; in a DIFFERENT VOCABULARY, also certainly. A bridge has to land on the name the
+# estate actually installed, so with a database this now asks, per gap Finding:
+#
+#   BRIDGE   the installed component name appears in package_state
+#            -> Red Hat attributes the flaw to the very thing installed. The gap would close.
+#   REBUILD  it appears ONLY in the rebuild set
+#            -> positive evidence it is a rebuild member, not a carrier. The trap, confirmed.
+#   NEITHER  it appears in neither
+#            -> package_state speaks a vocabulary that does not reach this component; no bridge.
+#
+# NEITHER is the outcome that kills the idea, and REBUILD is the outcome that is worth more than
+# a bridge: it is evidence for the scope classification Themis already made.
+#
 # STRICTLY READ-ONLY, and outbound only to the public Security Data API the Red Hat feed already
 # uses. It changes nothing in Themis and consumes nothing from it but a list of CVE ids.
 #
@@ -39,7 +56,9 @@
 # — the population D15 exists to serve. With arguments it probes exactly those and needs no
 # database at all.
 #
-# Replay / test seam: PROBE_FIXTURE_DIR=<dir> reads <dir>/<CVE>.json instead of the network.
+# Replay / test seam: PROBE_FIXTURE_DIR=<dir> reads <dir>/<CVE>.json instead of the network, and
+# INSTALLED_TSV=<file> (rows of "CVE<TAB>component names") supplies the installed side without a
+# database. Both were used to exercise the bridge logic before it ever ran against an estate.
 set -uo pipefail
 
 BASE="${THEMIS_REDHAT_URL:-https://access.redhat.com/hydra/rest/securitydata}"
@@ -73,6 +92,17 @@ if [ ${#CVES[@]} -eq 0 ]; then
      limit $LIMIT" 2>/dev/null)
   [ ${#CVES[@]} -gt 0 ] || { echo "probe: no attribution-gap CVEs found" >&2; exit 1; }
   printf 'probe: taking %d attribution-gap CVE(s) from the estate\n' "${#CVES[@]}" >&2
+  # The installed component names per gap CVE, so the bridge question can be asked of the very
+  # Findings that are stuck. Read-only, same connection, one query.
+  INSTALLED_TSV="$(mktemp)"
+  trap 'rm -f "$INSTALLED_TSV"' EXIT
+  psql "$PGBASE/governance?sslmode=disable" -At -F $'\t' -c "
+    select f.cve, string_agg(distinct c.name, ' ')
+      from findings f
+      join finding_components c on c.finding_id = f.id
+     where c.retired_at is null and c.name <> '' and f.cve <> ''
+     group by f.id, f.cve
+    having bool_and(c.claim_class = 'scope')" > "$INSTALLED_TSV" 2>/dev/null
 fi
 
 fetch() {
@@ -84,7 +114,13 @@ printf '========================================================================
 printf '%-18s %5s %5s %5s  %s\n' "CVE" "ps" "ar" "" "reading"
 printf '%-18s %5s %5s %5s  %s\n' "" "pkgs" "pkgs" "sub?" ""
 
+installed_for() {
+  [ -n "${INSTALLED_TSV:-}" ] || return 0
+  awk -F'\t' -v c="$1" '$1 == c { print $2; exit }' "$INSTALLED_TSV"
+}
+
 disc=0; enum=0; nops=0; nodoc=0; noar=0; total=0
+bridge=0; rebuild=0; neither=0
 for cve in "${CVES[@]}"; do
   [ -n "$cve" ] || continue
   total=$((total + 1))
@@ -139,6 +175,24 @@ for cve in "${CVES[@]}"; do
   # The names themselves, because the counts are the question and the names are the evidence.
   printf '                   flaw-specific: %s\n' "$(printf '%s ' $ps_names | cut -c1-96)"
   printf '                   rebuild set  : %s\n' "$(printf '%s ' $ar_names | cut -c1-96)"
+
+  # THE BRIDGE QUESTION, asked only when the estate is available: does either list name what is
+  # actually installed on the gap this CVE belongs to?
+  inst="$(installed_for "$cve")"
+  if [ -n "$inst" ]; then
+    hit=""; reb=""
+    for name in $inst; do
+      printf '%s\n' "$ps_names" | grep -qix -- "$name" && hit="$hit $name"
+      printf '%s\n' "$ar_names" | grep -qix -- "$name" && reb="$reb $name"
+    done
+    if [ -n "$hit" ]; then
+      bridge=$((bridge + 1));  printf '                   BRIDGE : package_state names the installed%s\n' "$hit"
+    elif [ -n "$reb" ]; then
+      rebuild=$((rebuild + 1)); printf '                   REBUILD: installed appears only in the rebuild set%s — evidence of scope, not carrier\n' "$reb"
+    else
+      neither=$((neither + 1)); printf '                   NEITHER: installed (%s) appears in neither list\n' "$(printf '%s ' $inst | cut -c1-60)"
+    fi
+  fi
 done
 
 printf '\nSUMMARY over %d CVE(s)\n' "$total"
@@ -147,6 +201,15 @@ printf '  enumerates    (not smaller)                                 %4d\n' "$e
 printf '  no package-level package_state                              %4d\n' "$nops"
 printf '  no rebuild set to compare                                   %4d\n' "$noar"
 printf '  no Red Hat document                                         %4d\n' "$nodoc"
+if [ $((bridge + rebuild + neither)) -gt 0 ]; then
+  printf '\nTHE BRIDGE QUESTION (gap Findings whose installed component was checked)\n'
+  printf '  BRIDGE  package_state names the installed component            %4d\n' "$bridge"
+  printf '  REBUILD installed appears only in the rebuild set              %4d\n' "$rebuild"
+  printf '  NEITHER installed appears in neither list                      %4d\n' "$neither"
+  printf '  A high BRIDGE count is the only result that makes D15 a design question. REBUILD is\n'
+  printf '  positive evidence for the scope classification Themis already made. NEITHER means the\n'
+  printf '  flaw-specific list speaks a vocabulary that never reaches this estate.\n'
+fi
 printf '\nHOW TO READ IT. "discriminates" on most of the population means an authoritative,\n'
 printf 'independent attribution bridge is ALREADY ingested and D15 becomes a design question.\n'
 printf '"enumerates" means package_state is the same rebuild artifact in other clothing, D15 is\n'
