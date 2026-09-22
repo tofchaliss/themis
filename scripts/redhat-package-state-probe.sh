@@ -132,7 +132,7 @@ installed_for() {
 }
 
 disc=0; enum=0; nops=0; nodoc=0; noar=0; total=0
-bridge=0; rebuild=0; neither=0; bridge_aff=0; bridge_notaff=0
+bridge=0; rebuild=0; neither=0; bridge_aff=0; bridge_notaff=0; bridge_noclaim=0
 for cve in "${CVES[@]}"; do
   [ -n "$cve" ] || continue
   total=$((total + 1))
@@ -209,15 +209,29 @@ for cve in "${CVES[@]}"; do
             [ .package_state // [] | .[] | select((.package_name // "") == $n) | .fix_state // "" ]
             | unique | join(" | ")' 2>/dev/null)"
         printf '                   BRIDGE : package_state names installed %-14s fix_state: %s\n' "$name" "$st"
-        # A package is stated per PRODUCT, so one name routinely carries several states at once
-        # (measured: httpd `Affected` in one RHEL major and `Not affected` in another). ANY
-        # asserting state is carrier evidence — Red Hat placing the flaw in that package
-        # somewhere — while `Not affected` alone is the opposite claim. Asserting is tested
-        # first for exactly that reason; the pair must never be read as the negative.
+        # THREE buckets, because Red Hat's fix_state vocabulary holds three KINDS of statement and
+        # collapsing them is how this script was wrong twice.
+        #
+        #   ASSERTS   Affected · Fix deferred · Will not fix
+        #             The flaw IS in this package; they are simply not fixing it (here, yet, ever).
+        #             This is the only carrier evidence, and it is independent of our SBOM.
+        #   DENIES    Not affected
+        #             The opposite claim, already ingested as VEX applicability and scoped by CPE.
+        #   NO CLAIM  Out of support scope · Under investigation · New
+        #             Administrative or provisional: Red Hat is saying something about the SUPPORT
+        #             relationship or their own progress, not about whether the flaw is in the
+        #             package. Measured 2026-09-22: `Out of support scope` is the single most
+        #             common state on the httpd cluster, and counting it as an assertion turned
+        #             2 real assertions into 9.
+        #
+        # A package is stated per PRODUCT, so one name carries several states at once (httpd is
+        # `Affected` in one RHEL major and `Not affected` in another). Asserts wins over denies
+        # wins over no-claim: one product where Red Hat places the flaw is carrier evidence
+        # whatever the others say, and a denial somewhere is a real statement where OOSS is not.
         case "$st" in
-          *"Affected"*|*"Fix deferred"*|*"Will not fix"*|*"Under investigation"*|*"Out of support"*)
-            bridge_aff=$((bridge_aff + 1)) ;;
-          *) bridge_notaff=$((bridge_notaff + 1)) ;;
+          *"Affected"*|*"Fix deferred"*|*"Will not fix"*) bridge_aff=$((bridge_aff + 1)) ;;
+          *"Not affected"*)                               bridge_notaff=$((bridge_notaff + 1)) ;;
+          *)                                              bridge_noclaim=$((bridge_noclaim + 1)) ;;
         esac
       done
     elif [ -n "$reb" ]; then
@@ -237,8 +251,12 @@ printf '  no Red Hat document                                         %4d\n' "$n
 if [ $((bridge + rebuild + neither)) -gt 0 ]; then
   printf '\nTHE BRIDGE QUESTION (gap Findings whose installed component was checked)\n'
   printf '  BRIDGE  package_state names the installed component            %4d\n' "$bridge"
-  printf '            of those, a state ASSERTING the flaw is in it             %4d\n' "$bridge_aff"
-  printf '            of those, `Not affected` (a VEX statement, the opposite)  %4d\n' "$bridge_notaff"
+  printf '            ASSERTS  the flaw is in it (Affected/Fix deferred/Will not fix) %4d\n' "$bridge_aff"
+  printf '            DENIES   Not affected — a VEX statement, already ingested        %4d\n' "$bridge_notaff"
+  printf '            NO CLAIM Out of support scope / Under investigation / New        %4d\n' "$bridge_noclaim"
+  printf '  Only ASSERTS is carrier evidence. DENIES belongs to the VEX path and should already be\n'
+  printf '  raising a proposal where its CPE scope covers the release; NO CLAIM is Red Hat talking\n'
+  printf '  about support or their own progress, not about the flaw.\n' 
   printf '  REBUILD installed appears only in the rebuild set              %4d\n' "$rebuild"
   printf '  NEITHER installed appears in neither list                      %4d\n' "$neither"
   printf '  A high BRIDGE count is the only result that makes D15 a design question. REBUILD is\n'
