@@ -366,7 +366,10 @@ func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id s
 func toFindingView(f domain.Finding) gen.FindingView {
 	id, rel, fl, cve, stage := string(f.ID()), f.ReleaseID(), f.FaultlineID(), f.CVE(), string(f.Stage())
 
-	comps := toComponents(f.Components())
+	// ACTIVE components only. This view feeds the drawer and, through the assessment, the AI's
+	// grounding — a withdrawn twin in either is a match the estate has already retracted
+	// (KN-SCAN-4(b)). The aggregate keeps the row; no projection shows it.
+	comps := toComponents(f.ActiveComponents())
 	positions := make([]gen.PositionView, 0, len(f.Positions()))
 	for _, p := range f.Positions() {
 		positions = append(positions, toPositionView(p))

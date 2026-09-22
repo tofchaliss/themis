@@ -193,9 +193,13 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 		return out, nil // no Knowledge seam wired (single-context dev)
 	}
 	if k, kerr := s.knowledge.GetFaultline(ctx, f.FaultlineID()); kerr == nil {
-		out.Knowledge = selectFixes(k, f.Components())
+		// ACTIVE components only — this is a read projection, and a withdrawn twin must not
+		// appear in it, pull in a fix version, or count toward the carrier question
+		// (KN-SCAN-4(b); measured 2026-09-22 as `httpd, httpd` for one installed component).
+		active := f.ActiveComponents()
+		out.Knowledge = selectFixes(k, active)
 		out.VendorStatements = vendorStatements(&f, releaseScopeFor(ctx, s.repo, &f), k.Applicabilities)
-		out.Attribution = attributionFor(f.Components(), k.CarrierProducts)
+		out.Attribution = attributionFor(active, k.CarrierProducts)
 	}
 	return out, nil
 }

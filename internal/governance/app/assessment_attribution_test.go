@@ -154,3 +154,56 @@ func TestGetFindingAssessment_AttributionNoComponentsAndNoKnowledge(t *testing.T
 		t.Errorf("status = %q, want absent when no Knowledge seam answered", a.Attribution.Status)
 	}
 }
+
+// A withdrawn match is not installed, so it must not reach the Attribution projection — neither
+// as an extra name nor, the dangerous half, as a CARRIER that turns a gap into "attributed".
+// Measured on the estate 2026-09-22: one live `pkg:rpm/rocky/httpd@…` beside a retired
+// `app:httpd@…` twin reported `components: [httpd, httpd]` (KN-SCAN-4(b)).
+func TestGetFindingAssessment_AttributionIgnoresRetiredComponents(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-33006")
+	for _, c := range []domain.MatchedComponent{
+		{PURL: "app:httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope, Retired: true},
+		{PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope},
+	} {
+		if _, err := f.AbsorbComponent(c); err != nil {
+			t.Fatalf("absorb: %v", err)
+		}
+	}
+	repo.seed(f)
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0).
+		WithKnowledge(stubKnowledge{k: app.FaultlineKnowledge{
+			FaultlineID: "fl-1", CVE: "CVE-2026-33006", CarrierProducts: []string{"http_server"},
+		}})
+
+	a, err := read.GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if len(a.Attribution.Components) != 1 {
+		t.Errorf("components = %v, want the ONE live component", a.Attribution.Components)
+	}
+	if !strings.Contains(strings.Join(a.Attribution.UnresolvedBecause, " "), "are httpd") {
+		t.Errorf("unresolved_because = %v, want the live component named once", a.Attribution.UnresolvedBecause)
+	}
+
+	// The dangerous half: a RETIRED carrier must not answer the carrier question. The estate had
+	// zero of these when this was written, and nothing but this rule stops the first one.
+	f2 := identified(t, "fnd-2", "rel-1", "fl-1", "CVE-2026-33006")
+	for _, c := range []domain.MatchedComponent{
+		{PURL: "pkg:rpm/rocky/http_server@1", Name: "http_server", ClaimClass: "carrier", Retired: true},
+		{PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope},
+	} {
+		if _, err := f2.AbsorbComponent(c); err != nil {
+			t.Fatalf("absorb: %v", err)
+		}
+	}
+	repo.seed(f2)
+	a2, err := read.GetFindingAssessment(context.Background(), "fnd-2")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	if a2.Attribution.Status != app.AttributionUnresolved {
+		t.Errorf("status = %q, want unresolved — a withdrawn carrier cannot attribute anything", a2.Attribution.Status)
+	}
+}

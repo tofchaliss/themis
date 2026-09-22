@@ -3608,6 +3608,52 @@ under the 2026-08-07 re-derivation standard.
   denying one exists, so the NEXT server-side reason degrades to something actionable. Keep the
   deliberate `disabled`/`unreachable` special-case in `explainRequest` (enabled-only rendering).
 
+- [x] **DEF_GOV_RETIRED_COMPONENTS_IN_READ_PROJECTIONS — a WITHDRAWN match still appeared in the
+  assessment, the drawer and the AI's grounding, because the aggregate loads retired rows on
+  purpose and every read projection was built from that list (found + FIXED on the VM 2026-09-22,
+  minutes after the Attribution projection shipped).**
+  **MED — inflated lists measured, a hidden attribution gap latent**; KN-SCAN-4(b),
+  EDR-ATTRIBUTION-01 D14.
+  **How it surfaced.** The first live read of the new projection returned
+  `components: ["httpd", "httpd"]` for a Finding whose estate has ONE active `httpd`. The second
+  row is the retired `app:httpd@2.4.37-65...` twin superseded by
+  `pkg:rpm/rocky/httpd@2.4.37-65...` — KN-SCAN-4(b) working exactly as designed. The AI's own
+  grounding string said `2 component(s)` for the same reason.
+  **Two correct halves, again.** `Store.loadComponents` keeps retired rows deliberately and says
+  so: *"This is the AGGREGATE, not a query: retirement removes a component from the ACTIVE
+  PROJECTION, never from the write model"* — dropping them would let a re-delivered
+  ComponentMatched resurrect the twin. And a projection must show what is installed. The two were
+  never reconciled because the aggregate carried no way to TELL them apart: `retired_at` was not
+  loaded at all, so `f.Components()` was the only list on offer.
+  **Measured blast radius before fixing** (the interesting part): 87 Findings carry retired rows,
+  **0** would change Attribution status, **0** have only retired rows. So the harm today is
+  inflated lists. The DANGEROUS direction — a retired CARRIER making an attribution gap read as
+  `attributed`, a withdrawn match silencing the statement the gap exists to make — is a zero
+  population, and nothing but this fix stops the first instance. **R4c in the other direction:**
+  a zero measurement is a reason to fix cheaply now, not a reason to defer.
+  **Fix:** `MatchedComponent.Retired` loaded from `retired_at IS NOT NULL`, plus
+  `Finding.ActiveComponents()` — the one place that knows which list a consumer wants.
+  `Components()` stays the write model (persistence + dedup); the assessment (Attribution AND fix
+  selection) and the wire `FindingView` use the active list, which also fixes the drawer and, via
+  the assessment, the AI's grounding.
+  **Deliberately NOT changed, and why.** `ProvablyOutOfRange` (the auto-suppression guard) and the
+  signal-driven fix selection also read `f.Components()`. Including a retired row there is
+  CONSERVATIVE — an extra row can only make "every component is out of range" harder to satisfy,
+  so it can refuse a suppression, never grant one. Loosening a suppression guard is its own
+  decision and does not belong in a mid-test-round fix. **Follow-up filed below.**
+
+- [ ] **DEF_GOV_RETIRED_ROWS_IN_DECISION_INPUTS — the suppression guard and the signal-driven fix
+  selection still read retired components (filed 2026-09-22, spun out of the fix above).**
+  **LOW — fail-safe direction, no measured instance.**
+  `ProvablyOutOfRange(f.Components(), ...)` decides whether a vendor range can auto-suppress, and
+  `selectFixesFor(in.Fixes, f.Components())` picks the fix versions a signal attaches to a
+  Finding. Both should read the ACTIVE list for the same reason the projections now do.
+  **Why it is LOW and was not bundled:** the current direction is safe. For the guard, an extra
+  row makes the all-out-of-range conclusion HARDER, so a stale twin can only block a suppression.
+  For fix selection the cost is a fix version advertised for a withdrawn twin — noise in advice,
+  never a missed vulnerability. Changing the guard alters when auto-suppression fires, which is a
+  governed behaviour and needs its own review, not a drive-by.
+
 - [ ] **DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE — a vendor proposal id is `(finding, package)`, which
   cannot represent N product-scoped statements for one package (filed 2026-09-21 by user decision;
   blocks the 8 miscited proposals).** **MED, and it is the SAME CARDINALITY SHAPE as

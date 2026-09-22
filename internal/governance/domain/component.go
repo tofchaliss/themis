@@ -42,6 +42,15 @@ type MatchedComponent struct {
 	VerdictState  string
 	VerdictGrade  string
 	VerdictReason string
+	// Retired marks a match that has been WITHDRAWN (KN-SCAN-4(b)) — typically a twin: the same
+	// occurrence recorded under two identifiers, one of which was superseded (measured:
+	// `app:httpd@2.4.37-65...` beside `pkg:rpm/rocky/httpd@2.4.37-65...`).
+	//
+	// The row stays on the AGGREGATE deliberately: retirement removes a component from the
+	// active PROJECTION, never from the write model, and keeping it is what makes a re-delivered
+	// ComponentMatched a no-op instead of resurrecting the duplicate. Every read projection must
+	// therefore exclude it — see ActiveComponents, which is the one place that knows how.
+	Retired bool
 }
 
 // VerdictIsOpen reports whether this occurrence must be treated as live. Only the affirmative

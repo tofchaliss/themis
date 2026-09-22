@@ -121,9 +121,11 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	// what openCarriers and the cleared tile read), never from the write model. Keeping the row
 	// here is what makes a re-delivered ComponentMatched a no-op instead of resurrecting the
 	// duplicate — AbsorbComponent sees the purl it already holds and reports no change.
+	// The flag rides along so a read projection can exclude them: domain.ActiveComponents is the
+	// one place that knows which list a consumer wants, and every projection uses it.
 	rows, err := s.querier(ctx).Query(ctx,
 		`SELECT purl, name, version, ecosystem, source, claim_class, detection_origin,
-		        verdict_state, verdict_grade, verdict_reason
+		        verdict_state, verdict_grade, verdict_reason, retired_at IS NOT NULL
 		 FROM finding_components WHERE finding_id = $1 ORDER BY purl`, id)
 	if err != nil {
 		return nil, err
@@ -134,7 +136,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 	for rows.Next() {
 		var c domain.MatchedComponent
 		if err := rows.Scan(&c.PURL, &c.Name, &c.Version, &c.Ecosystem, &c.Source, &c.ClaimClass, &c.DetectionOrigin,
-			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason); err != nil {
+			&c.VerdictState, &c.VerdictGrade, &c.VerdictReason, &c.Retired); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

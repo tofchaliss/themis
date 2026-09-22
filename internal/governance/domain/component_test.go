@@ -104,3 +104,30 @@ func TestMatchedComponentActsAsCarrier(t *testing.T) {
 		}
 	}
 }
+
+// KN-SCAN-4(b): the aggregate keeps a withdrawn match, and no read projection shows it. Both
+// halves are asserted together on purpose — dropping the row from the aggregate would let the
+// next re-delivery resurrect the twin, and keeping it in a projection is what reported `httpd,
+// httpd` for one installed component (measured 2026-09-22).
+func TestActiveComponentsExcludesRetiredButTheAggregateKeepsThem(t *testing.T) {
+	f, err := domain.NewFinding("F1", "rel-1", "fl-1", "CVE-2026-33006")
+	if err != nil {
+		t.Fatalf("NewFinding: %v", err)
+	}
+	for _, c := range []domain.MatchedComponent{
+		{PURL: "app:httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope, Retired: true},
+		{PURL: "pkg:rpm/rocky/httpd@2.4.37", Name: "httpd", ClaimClass: domain.ClaimScope},
+	} {
+		if _, aerr := f.AbsorbComponent(c); aerr != nil {
+			t.Fatalf("absorb: %v", aerr)
+		}
+	}
+
+	if got := len(f.Components()); got != 2 {
+		t.Errorf("Components() = %d, want both rows — the write model must not forget a retired twin", got)
+	}
+	active := f.ActiveComponents()
+	if len(active) != 1 || active[0].PURL != "pkg:rpm/rocky/httpd@2.4.37" {
+		t.Errorf("ActiveComponents() = %+v, want only the live row", active)
+	}
+}

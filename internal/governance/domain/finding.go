@@ -318,9 +318,31 @@ func (f Finding) FaultlineID() string { return f.faultlineID }
 // CVE returns the carried CVE alias (for thin events / reads); the ids are authoritative.
 func (f Finding) CVE() string { return f.cve }
 
-// Components returns a copy of the matched components (content, not identity).
+// Components returns a copy of EVERY matched component the aggregate holds, retired rows
+// included. This is the WRITE model: persistence and AbsorbComponent's dedup both need the full
+// set, because a row that vanished here would be re-created by the next re-delivery.
 func (f Finding) Components() []MatchedComponent {
 	return append([]MatchedComponent(nil), f.components...)
+}
+
+// ActiveComponents returns only the components that have NOT been withdrawn — what is actually
+// installed, as far as the estate knows (KN-SCAN-4(b)).
+//
+// Every READ PROJECTION must use this, and the distinction is not cosmetic. Measured 2026-09-22:
+// the Attribution projection counted a retired twin and reported `httpd, httpd` for one installed
+// component, and the AI's own grounding said "2 component(s)" for the same reason. The inflated
+// list is the harmless half. The dangerous half is that a retired CARRIER would make an
+// attribution gap read as `attributed` — a withdrawn match silencing the very statement the gap
+// exists to make. Zero instances on the estate when this was written, and nothing but this
+// accessor stops the first one.
+func (f Finding) ActiveComponents() []MatchedComponent {
+	out := make([]MatchedComponent, 0, len(f.components))
+	for _, c := range f.components {
+		if !c.Retired {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // CoversPackage reports whether a vendor VEX statement about `pkg` applies to this Finding —
