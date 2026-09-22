@@ -17,26 +17,22 @@ open items with no order is how the credential rotation survived five sessions.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-**Revised 2026-09-22**, after the visibility half, the gate, AND both measurement instruments:
-ATTR-GAP-2's **D10/D11/D14 and D12** are DONE, as are both AI-reason defects — code green, **live
-verification pending for all of it** (the user's call: testing happens in one round at the end).
-**D13 and D15 were MEASURED on the estate the same day and are CLOSED** — the taxonomy stays
-deferred on the numbers, and the identity bridge is answered NO (real, authoritative, ~17% of one
-cluster). **ATTR-GAP-2 is complete.** The VM round also found and fixed one defect
-(`DEF_GOV_RETIRED_COMPONENTS_IN_READ_PROJECTIONS`) and corrected the probe three times.
+**Revised 2026-09-22 (post-VM-round, ATTR-GAP-2 landed on `main` as `95a780a`).** The whole arc is
+verified on the running estate, both measurements are closed, and three defects were found and two
+fixed while verifying. What follows is the forward list, ordered by what it costs to be wrong.
 
 | # | item | why here | who |
 | --- | --- | --- | --- |
-| **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; re-exposed 2026-09-21; six sessions old. **Independent of all code work — it gates nothing, so do it whenever** | human |
-| **P1** | **verify the whole ATTR-GAP-2 arc on the VM in ONE round** — a gap Finding's drawer names carrier `http_server` beside installed `httpd`; *Recommend a position* on it returns **not asked — no carrier** with no model call in the log; an AI no-answer elsewhere states its own reason | none of it is verified until a drawer is read; every defect this arc found was invisible to a green suite and visible in one look at the running system | human runs, then review |
-| **P1b** | ~~ATTR-GAP-2 design review~~ → **D10/D11/D14 + D12 ACCEPTED + IMPLEMENTED 2026-09-22**; **D13/D15 instruments ready, MEASUREMENTS PENDING** | everything designable is shipped; what is left is two numbers only the estate has. Run both scripts in the same VM round as the verification — neither mutates anything | measure, then decide |
-| **P2** | ~~`DEF_GOV_AI_REASON_COMPOSITE_BREAKS_TAXONOMY` + `DEF_GUI_AI_REASON_MAP_INCOMPLETE`~~ **FIXED 2026-09-22** | both shipped; D12's sequencing constraint is satisfied | done |
-| **P3** | verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query; the only open question that could expose a SEVENTH defect | human runs, then review |
-| **P4** | `DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE` — decide the id shape, measure the noise, then repair the 8 through the event path | the last user-visible wrongness; 5th instance of the R5 cardinality pattern | decide, then implement |
-| **P5** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | unblocks ever measuring whether escalation earns its keep | implement |
-| **P6** | enable inbound auth so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while the node logs `AUTH DISABLED` — easy to mistake for done. **After P0** | human |
-| **P7** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (R4c) | wait |
-| **P8** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
+| **P0** | **Rotate the exposed PostgreSQL credential** (`OPERATIONAL-ACTIONS.md`) | the only LIVE exposure; seven sessions old. **Independent of all code work — it gates nothing, which is exactly how it has survived seven sessions** | human |
+| **P1** | **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** — start at the **Knowledge event boundary**, not the drawer | **25 of 349 Findings with stamped advice name a fix matching no component's EL stream (≈7.2%)**, and it cannot heal. Generation-stamp class, **third instance**. The proof obligation comes first: *what event or state transition tells Knowledge a stamp is invalid?* Define the 0/1/>1 cardinalities before code — **0 is the dangerous one**. Never an `UPDATE` | design, then implement |
+| **P2** | **`DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`** — decide the id shape, measure the noise, repair the 8 via the event path | the last user-visible wrongness; 5th instance of the CONVENTIONS R5 cardinality pattern. Decision first: is a proposal about a package, or a package + statement + scope? | decide, then implement |
+| **P3** | **verify `DEF_GOV_RELEASE_SCOPE_FROM_FINDING`'s payoff** — does `proposed` rise above 8 after a Knowledge sweep? | one restart + one query, and the only open question that could still expose a defect in the raise path. **Carried from 2026-09-21 and still not run** | human runs, then review |
+| **P4** | `DEF_AI_DECLINE_METRIC_BLIND_TO_ESCALATION` | `themis_ai_declines_total` is empty whenever escalation fires, so "does escalation earn its keep" is unmeasurable. Small, and it unblocks a question | implement |
+| **P5** | **enable inbound auth** so `EDR-SECURITY-01` D10's `key:` provenance engages | D10's production half is INERT while nodes log `AUTH DISABLED` — easy to mistake for done. The dashboard's gate is already on; the API nodes are not. **After P0** | human |
+| **P6** | `DEF_GOV_RETIRED_ROWS_IN_DECISION_INPUTS` | `ProvablyOutOfRange` and the signal-driven fix selection still read retired components. **Fail-safe direction** (an extra row can only refuse a suppression, never grant one), so LOW — but it is the same root as the projection defect fixed this round | implement |
+| **P7** | **ATTR-GAP follow-up: the case-1 reason string** | D13 measured a real, cheaply-derivable class — *the card names no package-level carrier at all* (`fedora`, `debian_linux`, `leap`, NetApp/Oracle appliances). Not an identity failure and currently indistinguishable from one. The only taxonomy member the measurement supports | design |
+| **P8** | `DEF_VEX_NONRPM_RELEASE_UNPLACEABLE` · `DEF_AI_EMPTY_INFORMATION_REPORTED_OK` — **do not design against either** | measured population ZERO and latent-unobserved respectively (CONVENTIONS R4c) | wait |
+| **P9** | CSAF/non-Red-Hat scope path · `KN-IDENT-1` · `KN-STREAM-1` | unchanged deferrals, reasons on record | wait |
 
 **P2 before D12** was a hard constraint, not a preference: D12 adds a new outcome reason, and the
 page mapped 6 of 15 reasons — shipping D12 first would have rendered it as "the Gateway stated no
