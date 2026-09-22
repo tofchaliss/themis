@@ -132,7 +132,7 @@ installed_for() {
 }
 
 disc=0; enum=0; nops=0; nodoc=0; noar=0; total=0
-bridge=0; rebuild=0; neither=0
+bridge=0; rebuild=0; neither=0; bridge_aff=0; bridge_notaff=0
 for cve in "${CVES[@]}"; do
   [ -n "$cve" ] || continue
   total=$((total + 1))
@@ -198,7 +198,28 @@ for cve in "${CVES[@]}"; do
       printf '%s\n' "$ar_names" | grep -qix -- "$name" && reb="$reb $name"
     done
     if [ -n "$hit" ]; then
-      bridge=$((bridge + 1));  printf '                   BRIDGE : package_state names the installed%s\n' "$hit"
+      bridge=$((bridge + 1))
+      # WHICH STATE, and it decides what the hit is worth. `Affected` / `Fix deferred` /
+      # `Will not fix` are Red Hat asserting the flaw is IN that package — carrier evidence, and
+      # independent of our SBOM. `Not affected` is the OPPOSITE assertion, it is already ingested
+      # as VEX applicability, and counting it as carrier evidence would invert its meaning. A hit
+      # without its state is not a measurement, it is a coincidence of names.
+      for name in $hit; do
+        st="$(printf '%s' "$doc" | jq -r --arg n "$name" '
+            [ .package_state // [] | .[] | select((.package_name // "") == $n) | .fix_state // "" ]
+            | unique | join(" | ")' 2>/dev/null)"
+        printf '                   BRIDGE : package_state names installed %-14s fix_state: %s\n' "$name" "$st"
+        # A package is stated per PRODUCT, so one name routinely carries several states at once
+        # (measured: httpd `Affected` in one RHEL major and `Not affected` in another). ANY
+        # asserting state is carrier evidence — Red Hat placing the flaw in that package
+        # somewhere — while `Not affected` alone is the opposite claim. Asserting is tested
+        # first for exactly that reason; the pair must never be read as the negative.
+        case "$st" in
+          *"Affected"*|*"Fix deferred"*|*"Will not fix"*|*"Under investigation"*|*"Out of support"*)
+            bridge_aff=$((bridge_aff + 1)) ;;
+          *) bridge_notaff=$((bridge_notaff + 1)) ;;
+        esac
+      done
     elif [ -n "$reb" ]; then
       rebuild=$((rebuild + 1)); printf '                   REBUILD: installed appears only in the rebuild set%s — evidence of scope, not carrier\n' "$reb"
     else
@@ -216,6 +237,8 @@ printf '  no Red Hat document                                         %4d\n' "$n
 if [ $((bridge + rebuild + neither)) -gt 0 ]; then
   printf '\nTHE BRIDGE QUESTION (gap Findings whose installed component was checked)\n'
   printf '  BRIDGE  package_state names the installed component            %4d\n' "$bridge"
+  printf '            of those, a state ASSERTING the flaw is in it             %4d\n' "$bridge_aff"
+  printf '            of those, `Not affected` (a VEX statement, the opposite)  %4d\n' "$bridge_notaff"
   printf '  REBUILD installed appears only in the rebuild set              %4d\n' "$rebuild"
   printf '  NEITHER installed appears in neither list                      %4d\n' "$neither"
   printf '  A high BRIDGE count is the only result that makes D15 a design question. REBUILD is\n'
