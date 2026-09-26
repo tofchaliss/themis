@@ -1,0 +1,33 @@
+{
+ "version": 1,
+ "name": "remediate-dependency",
+ "skill_version": 4,
+ "workflow": {
+  "path": "workflow.json",
+  "sha256": "32f66aceb34b117f35f66a5abff989fa3abbe6621fa476922236a9a0bca61b4f"
+ },
+ "workflow_ceiling": {
+  "path": "ceiling.json",
+  "sha256": "5321e6d99dbb25b44e68d3b15faaa075deb7d076cc7380e9d9663662faa7c84f"
+ },
+ "context_contract": {
+  "path": "contract.json",
+  "sha256": "dfb4ade9c5fe1f2d6f8b285ec9099c407842fa16f7a48f87cea051e9d4ed8f96"
+ },
+ "grant_template": {
+  "path": "grant-template.json",
+  "sha256": "464aa70705efaa4c2355387d25e94109d8a4474fca4d0ccbcd39a63e149904b5"
+ },
+ "spec_template": {
+  "path": "spec-template.json",
+  "sha256": "17c14c2a99a6e9cab3949ec13123058955db606f7579c17c5c4fe9fdb4c7aaaa"
+ },
+ "input_schema": {
+  "path": "input-schema.json",
+  "sha256": "d06e92de195002f1c8e83e04ba0f62e7d27802563701c01fcf7cdf64d98910a8"
+ },
+ "procedure": {
+  "path": "procedure.md",
+  "sha256": "672e3c0d630635616e6237c80417d33655dcf5291ccee42c9a292dcb80e8e65f"
+ }
+}

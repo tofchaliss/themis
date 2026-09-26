@@ -263,10 +263,23 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 	// A human's proposal is Asserted: a declaration Themis cannot re-derive. It changes no
 	// behaviour today — a non-system proposal is never policy-auto-accepted regardless — but
 	// it states the evidence honestly rather than leaving it unset.
-	pid, err := h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, value.TrustAsserted)
-	if err != nil {
-		writeErr(w, "cannot raise proposal", err)
-		return
+	var pid domain.ProposalID
+	if body.Evidence != nil {
+		// EDR-HARNESS-01 (D-I-5): a HUMAN proposal whose evidence basis is a
+		// commissioned harness execution. The trust class is the one the
+		// intake DERIVED; Governance refuses any other. The service checks
+		// the commission correspondence and Business-Verifies the refs.
+		pid, err = h.write.RaiseHarnessProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, fromHarnessEvidence(*body.Evidence), harnessTrust(body))
+		if err != nil {
+			writeHarnessErr(w, "cannot raise proposal", err)
+			return
+		}
+	} else {
+		pid, err = h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, value.TrustAsserted)
+		if err != nil {
+			writeErr(w, "cannot raise proposal", err)
+			return
+		}
 	}
 	pidStr := string(pid)
 	writeJSON(w, http.StatusCreated, gen.RaiseProposalResponse{ProposalId: &pidStr})
@@ -378,10 +391,14 @@ func toFindingView(f domain.Finding) gen.FindingView {
 	for _, p := range f.Proposals() {
 		proposals = append(proposals, toProposalView(p))
 	}
+	commissions := make([]gen.CommissionView, 0, len(f.Commissions()))
+	for _, c := range f.Commissions() {
+		commissions = append(commissions, toCommissionView(c))
+	}
 
 	view := gen.FindingView{
 		Id: &id, ReleaseId: &rel, FaultlineId: &fl, Cve: &cve, Stage: &stage,
-		Components: &comps, Positions: &positions, Proposals: &proposals,
+		Components: &comps, Positions: &positions, Proposals: &proposals, Commissions: &commissions,
 	}
 	if cur, ok := f.CurrentPosition(); ok {
 		cv := toPositionView(cur)
@@ -407,7 +424,7 @@ func toPositionView(p domain.Position) gen.PositionView {
 
 func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
 	raised := p.RaisedAt()
-	return gen.ProposalView{
+	v := gen.ProposalView{
 		Id:           strptr(string(p.ID())),
 		ProposerKind: strptr(string(p.Proposer().Kind)),
 		ProposerId:   strptr(p.Proposer().ID),
@@ -423,6 +440,11 @@ func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
 		// reasoning. A guarantee nobody can see is one nobody can act on.
 		EvidenceTrust: strptr(string(p.EvidenceTrust())),
 	}
+	if ev := p.HarnessEvidence(); ev != nil {
+		v.CommissionId = strptr(string(ev.CommissionID))
+		v.HarnessEvidence = toHarnessEvidenceView(ev)
+	}
+	return v
 }
 
 // toComponents maps matched components to the wire shape, carrying `source` — the only key that

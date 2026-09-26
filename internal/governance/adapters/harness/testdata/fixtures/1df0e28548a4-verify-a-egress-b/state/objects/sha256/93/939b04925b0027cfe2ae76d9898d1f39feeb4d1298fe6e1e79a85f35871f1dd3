@@ -1,0 +1,1 @@
+{"content":"","termination":"tool_calls","tool_calls":[{"id":"c1","name":"get_finding","arguments":{"id":"b1be6f86-2ecd-451f-9411-95f1f32fd501"}}]}

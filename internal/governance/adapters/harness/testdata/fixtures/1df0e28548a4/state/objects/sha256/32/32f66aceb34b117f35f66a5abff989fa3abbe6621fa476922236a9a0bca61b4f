@@ -1,0 +1,131 @@
+{
+ "version": 1,
+ "name": "remediate-dependency",
+ "declared_events": [
+  "turn-no-action",
+  "turn-provider-error",
+  "turns-exhausted",
+  "tool-error",
+  "signal:phase-completion-requested",
+  "verification-pass",
+  "verification-fail",
+  "verification-inconclusive",
+  "verification-unavailable",
+  "verification-invalid"
+ ],
+ "initial": "ANALYZE",
+ "phases": [
+  {
+   "name": "ANALYZE",
+   "capabilities": [
+    "get_finding",
+    "read_file",
+    "list_directory",
+    "search_code",
+    "delegate",
+    "declare_done"
+   ],
+   "max_model_turns": 8,
+   "edges": [
+    {
+     "on": "signal:phase-completion-requested",
+     "to": "REMEDIATE"
+    },
+    {
+     "on": "turn-no-action",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "turn-provider-error",
+     "to": "@fail"
+    },
+    {
+     "on": "tool-error",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "turns-exhausted",
+     "to": "@fail"
+    }
+   ]
+  },
+  {
+   "name": "REMEDIATE",
+   "capabilities": [
+    "read_file",
+    "write_file",
+    "verify_report",
+    "declare_done"
+   ],
+   "max_model_turns": 8,
+   "edges": [
+    {
+     "on": "signal:phase-completion-requested",
+     "gate": {
+      "contract": "report-valid@2",
+      "outcome": "PASS"
+     },
+     "to": "@complete"
+    },
+    {
+     "on": "signal:phase-completion-requested",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "verification-pass",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "verification-fail",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "verification-inconclusive",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "verification-unavailable",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "verification-invalid",
+     "to": "@fail"
+    },
+    {
+     "on": "turn-no-action",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "turn-provider-error",
+     "to": "@fail"
+    },
+    {
+     "on": "tool-error",
+     "to": "@stay",
+     "counter": 3,
+     "exhausted_to": "@fail"
+    },
+    {
+     "on": "turns-exhausted",
+     "to": "@fail"
+    }
+   ]
+  }
+ ]
+}

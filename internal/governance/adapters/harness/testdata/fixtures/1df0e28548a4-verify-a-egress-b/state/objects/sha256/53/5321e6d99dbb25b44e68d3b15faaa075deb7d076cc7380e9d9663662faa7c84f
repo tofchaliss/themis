@@ -1,0 +1,16 @@
+{
+ "version": 1,
+ "allowed_tools": [
+  "read_file",
+  "list_directory",
+  "search_code",
+  "get_finding",
+  "write_file",
+  "verify_report",
+  "delegate",
+  "declare_done"
+ ],
+ "max_total_calls": 60,
+ "max_walk_length": 400,
+ "max_turns_per_phase": 10
+}

@@ -162,8 +162,10 @@ func (r *fakeRepo) GetByID(_ context.Context, id domain.FindingID) (domain.Findi
 // clone reconstitutes an independent Finding so a returned aggregate never aliases the
 // stored one — faithful to the real store, which rebuilds fresh objects on every load.
 func clone(f domain.Finding) domain.Finding {
-	return domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 		f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version())
+	domain.ReconstituteCommissions(&c, f.Commissions())
+	return c
 }
 
 func (r *fakeRepo) FindingsByFaultline(_ context.Context, fl string) ([]domain.FindingID, error) {

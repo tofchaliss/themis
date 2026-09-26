@@ -1,0 +1,55 @@
+{
+ "version": 2,
+ "entries": [
+  {
+   "name": "investigate-cve",
+   "version": 1,
+   "composition_sha256": "148fd68dd0b70e07abfe6208adf4e901858923d60fb85fd8d5599897ae6f6c0c",
+   "manifest_path": "investigate-cve/skill.json",
+   "state": "active",
+   "steward": "security-engineering",
+   "decision_ref": "reg-skill-investigate-cve-1",
+   "decision_sha256": "50c1badf8c858aabd3863ecd90ab67349aa099d076af09cee9f6915998fd9d5b"
+  },
+  {
+   "name": "remediate-dependency",
+   "version": 1,
+   "composition_sha256": "fd59500a97dec8120d8d0e5a1335bf3d4caccc0d2a34b6b6b962bef9eca3063d",
+   "manifest_path": "remediate-dependency/skill.json",
+   "state": "active",
+   "steward": "security-engineering",
+   "decision_ref": "reg-skill-remediate-dependency-1",
+   "decision_sha256": "cb573adf0dc7ded46baf99eb9a9696a4d6c0cf2030aba5a6de0275cb09dc9715"
+  },
+  {
+   "name": "remediate-dependency",
+   "version": 2,
+   "composition_sha256": "c9afaeaad051c39ff1bcfe825aba8b910f9fdb8546b79d7b4040515346ac1c99",
+   "manifest_path": "remediate-dependency-2/skill.json",
+   "state": "active",
+   "steward": "security-engineering",
+   "decision_ref": "reg-skill-remediate-dependency-2",
+   "decision_sha256": "0270a3fd49d25442ac3d056966215db441380fca1ea5e925b72a2afb046b6520"
+  },
+  {
+   "name": "remediate-dependency",
+   "version": 3,
+   "composition_sha256": "17aa6cfa8e2f932687ab24b7750916a3b903717261dd1be144e9d00c919e4703",
+   "manifest_path": "remediate-dependency-3/skill.json",
+   "state": "active",
+   "steward": "security-engineering",
+   "decision_ref": "reg-skill-remediate-dependency-3",
+   "decision_sha256": "0e84040900b4c82a3685f8a0d31cf01dae203080e26aae92c3e353bd1fd38c34"
+  },
+  {
+   "name": "remediate-dependency",
+   "version": 4,
+   "composition_sha256": "be6398748de39e9053e70b94efb5f65df53a233774988e7dda9846a4e3e204de",
+   "manifest_path": "remediate-dependency-4/skill.json",
+   "state": "active",
+   "steward": "security-engineering",
+   "decision_ref": "reg-skill-remediate-dependency-4",
+   "decision_sha256": "3d482ab732791fc39afdc6547e7a605482d91e2732ea92a83dd8ef64a0249999"
+  }
+ ]
+}

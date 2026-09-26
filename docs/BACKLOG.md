@@ -10,6 +10,12 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+> **2026-09-26 — `phase3-harness-integration` (EDR-HARNESS-01) implemented on branch
+> `feat/harness-integration`, uncommitted pending the user's ask.** Commissions, harness-evidence
+> proposals, the intake adapter + `themis-intake` CLI, walls. OPEN: the runtime `go.mod` pin (after
+> the runtime repo is pushed), `make test-integration` for migration 000014 and the two new event
+> schema refs, then `make check`. See `openspec/changes/phase3-harness-integration/tasks.md`.
+
 ### 🔢 Priority order agreed 2026-09-21 (start of the next session)
 
 The tracker holds item STATE; this is the order to work them in. It lives here because a list of

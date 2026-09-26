@@ -44,8 +44,10 @@ func (r *fakeRepo) seed(f domain.Finding) {
 }
 
 func clone(f domain.Finding) domain.Finding {
-	return domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 		f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version())
+	domain.ReconstituteCommissions(&c, f.Commissions())
+	return c
 }
 
 func (r *fakeRepo) GetByKey(_ context.Context, rel, fl string) (domain.Finding, bool, error) {

@@ -35,6 +35,10 @@ type GovernanceProposal struct {
 	status    ProposalStatus
 	decidedBy Actor
 	decidedAt time.Time
+	// harness is the harness execution this proposal rests on, when its
+	// evidence basis is a commissioned AI-runtime execution
+	// (EDR-HARNESS-01); nil otherwise. Immutable once raised.
+	harness *HarnessExecution
 	// evidenceTrust is the trust class of the evidence this proposal rests on
 	// (EDR-TRUST-01 T2/T3) — a property of the evidence, never of the proposer (T1).
 	// It is what the constitutional check reads; the proposer is recorded only for

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.commission_withdrawn.v1.schema.json",
+  "title": "governance.commission_withdrawn.v1",
+  "description": "Integration-contract v1 for the CommissionWithdrawn event payload (EDR-HARNESS-01 D2): the forward-only withdrawal of a commission; affects future proposal admissibility only, never recorded executions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "CommissionID", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "CommissionID": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

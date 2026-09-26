@@ -125,6 +125,21 @@ linters:
             - $gostd
             - github.com/themis-project/themis/internal/kernel
             - github.com/themis-project/themis/internal/governance/domain
+        governance-harness-adapter-readonly:
+          # EDR-HARNESS-01 / D-I-7: the only Themis package that imports the AI runtime, and
+          # only its read-only record contracts — never orchestration, tools, execution, or
+          # the model runtime. Themis reconstructs evidence; it acquires no execution authority.
+          files:
+            - "internal/governance/adapters/harness/**"
+          allow:
+            - $gostd
+            - github.com/themis-project/themis/internal/kernel
+            - github.com/themis-project/themis/internal/governance/domain
+            - github.com/themis-project/themis/internal/governance/app
+            - github.com/tofchaliss/themis-ai-runtime/src/harness/state
+            - github.com/tofchaliss/themis-ai-runtime/src/harness/deployment
+            - github.com/tofchaliss/themis-ai-runtime/src/harness/verification
+            - github.com/tofchaliss/themis-ai-runtime/src/harness/verification/seam
         governance-no-cross-context:
           files:
             - "internal/governance/**"

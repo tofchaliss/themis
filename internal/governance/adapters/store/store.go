@@ -44,6 +44,8 @@ var schemaRefByEventType = map[string]string{
 	app.EventPositionEstablished: "governance.position_established.v1",
 	app.EventPositionRevised:     "governance.position_revised.v1",
 	app.EventDispositionStale:    "governance.disposition_stale.v1",
+	app.EventFindingCommissioned: "governance.finding_commissioned.v1",
+	app.EventCommissionWithdrawn: "governance.commission_withdrawn.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -110,9 +112,15 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 	if err != nil {
 		return domain.Finding{}, err
 	}
+	commissions, err := s.loadCommissions(ctx, id)
+	if err != nil {
+		return domain.Finding{}, err
+	}
 
-	return domain.ReconstituteFinding(domain.FindingID(id), releaseID, faultlineID, cve,
-		components, domain.Stage(stage), proposals, positions, version, sig), nil
+	f := domain.ReconstituteFinding(domain.FindingID(id), releaseID, faultlineID, cve,
+		components, domain.Stage(stage), proposals, positions, version, sig)
+	domain.ReconstituteCommissions(&f, commissions)
+	return f, nil
 }
 
 func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.MatchedComponent, error) {
@@ -147,7 +155,7 @@ func (s *Store) loadComponents(ctx context.Context, id string) ([]domain.Matched
 func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.GovernanceProposal, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT proposal_id, proposer_kind, proposer_id, stance, rationale, raised_at,
-		       status, decided_kind, decided_id, decided_at, evidence_trust
+		       status, decided_kind, decided_id, decided_at, evidence_trust, harness_evidence
 		FROM finding_proposals WHERE finding_id = $1 ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
@@ -161,23 +169,32 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 			evidenceTrust                                                                    string
 			raisedAt                                                                         time.Time
 			decidedAt                                                                        *time.Time
+			harnessJSON                                                                      []byte
 		)
 		if err := rows.Scan(&pid, &proposerKind, &proposerID, &stance, &rationale, &raisedAt,
-			&status, &decidedKind, &decidedID, &decidedAt, &evidenceTrust); err != nil {
+			&status, &decidedKind, &decidedID, &decidedAt, &evidenceTrust, &harnessJSON); err != nil {
 			return nil, err
 		}
 		var dat time.Time
 		if decidedAt != nil {
 			dat = *decidedAt
 		}
-		out = append(out, domain.ReconstituteProposal(
+		p := domain.ReconstituteProposal(
 			domain.ProposalID(pid),
 			domain.Actor{Kind: domain.ActorKind(proposerKind), ID: proposerID},
 			domain.Stance(stance), rationale, raisedAt,
 			domain.ProposalStatus(status),
 			decidedActor(decidedKind, decidedID), dat,
 			value.TrustClass(evidenceTrust),
-		))
+		)
+		if len(harnessJSON) > 0 {
+			ev, err := decodeHarnessEvidence(harnessJSON)
+			if err != nil {
+				return nil, err
+			}
+			domain.ReconstituteProposalHarness(&p, ev)
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }
@@ -277,6 +294,9 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 	if err := s.savePositions(ctx, tx, f); err != nil {
 		return err
 	}
+	if err := s.saveCommissions(ctx, tx, f); err != nil {
+		return err
+	}
 	if err := s.saveNotes(ctx, tx, f, notes); err != nil {
 		return err
 	}
@@ -351,16 +371,20 @@ func (s *Store) saveProposals(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 			t := p.DecidedAt()
 			decidedAt = &t
 		}
+		harnessJSON, commissionID, err := encodeHarnessEvidence(p.HarnessEvidence())
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_proposals
-			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at, evidence_trust)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			  (finding_id, proposal_id, seq, proposer_kind, proposer_id, stance, rationale, raised_at, status, decided_kind, decided_id, decided_at, evidence_trust, commission_id, harness_evidence)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 			ON CONFLICT (finding_id, proposal_id)
 			DO UPDATE SET status=EXCLUDED.status, decided_kind=EXCLUDED.decided_kind,
 			              decided_id=EXCLUDED.decided_id, decided_at=EXCLUDED.decided_at`,
 			string(f.ID()), string(p.ID()), seq, string(p.Proposer().Kind), p.Proposer().ID,
 			string(p.Stance()), p.Rationale(), p.RaisedAt(), string(p.Status()),
-			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt, string(p.EvidenceTrust())); err != nil {
+			string(p.DecidedBy().Kind), p.DecidedBy().ID, decidedAt, string(p.EvidenceTrust()), commissionID, harnessJSON); err != nil {
 			return err
 		}
 	}

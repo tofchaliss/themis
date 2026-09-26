@@ -32,7 +32,10 @@ type Finding struct {
 	stage     Stage
 	proposals []GovernanceProposal
 	positions []Position
-	version   int
+	// commissions is the append-only authority history for governed
+	// work against this Finding (EDR-HARNESS-01 / D-C-1..6).
+	commissions []Commission
+	version     int
 }
 
 // NewFinding opens a Finding for a (Release, Faultline) pair at stage Identified with no

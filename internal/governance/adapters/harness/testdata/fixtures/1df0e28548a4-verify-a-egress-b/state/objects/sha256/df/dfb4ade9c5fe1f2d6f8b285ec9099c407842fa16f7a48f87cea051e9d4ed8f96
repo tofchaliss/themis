@@ -1,0 +1,8 @@
+{
+ "version": 1,
+ "workflow": "remediate-dependency",
+ "slots": [
+  {"name": "task-payload", "kind": "task-brief", "requirement": "required", "classes": ["external-untrusted"]}
+ ],
+ "sensitivity_ceiling": "public"
+}

@@ -1,0 +1,1 @@
+{"content":"The Finding says demo-vuln-app pins vulnerable-dep v1; ADV-2026-1 is fixed in v2. I will bump it.","termination":"stop","tool_calls":null}

@@ -1,0 +1,11 @@
+## Context
+
+[slot: task-payload | availability: delivered]
+--ctx-8e4b57fa2053--
+kind: task-brief
+source: task-payload
+authority: external-untrusted
+hash: eb8c8dc3d1e8c41c91c375677b5949ae6349f9e3127efa7bfb1fad78a20c4a9a
+--ctx-8e4b57fa2053--
+{"advisory":"ADV-2026-1","dependency":"vulnerable-dep","finding":"b1be6f86-2ecd-451f-9411-95f1f32fd501"}
+--ctx-8e4b57fa2053-end--
