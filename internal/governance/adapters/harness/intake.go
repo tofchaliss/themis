@@ -572,14 +572,19 @@ func failedChecks(rep verification.Report) string {
 }
 
 func delegationOf(ev state.Event) Delegation {
+	// The body is the runtime's delegation.Event (subagents/delegation):
+	// the governed template identity is `template.ref` (name@version),
+	// the governed model is `model_identity.governed.name`. Decoded by
+	// field name here — the runtime package is not imported (D-I-7).
 	var b struct {
 		ParentCallSeq int64 `json:"parent_call_seq"`
 		Template      struct {
-			Name    string `json:"name"`
-			Version int    `json:"version"`
+			Ref string `json:"ref"`
 		} `json:"template"`
 		ModelIdentity struct {
-			Model string `json:"model"`
+			Governed struct {
+				Name string `json:"name"`
+			} `json:"governed"`
 		} `json:"model_identity"`
 		EvidenceRefs []struct {
 			Seq      int64  `json:"seq"`
@@ -589,10 +594,7 @@ func delegationOf(ev state.Event) Delegation {
 		Outcome         string `json:"outcome"`
 	}
 	_ = json.Unmarshal(ev.Body, &b)
-	d := Delegation{Seq: ev.Seq, ParentCallSeq: b.ParentCallSeq, Model: b.ModelIdentity.Model, OutputID: b.OutputObjectRef, Outcome: b.Outcome}
-	if b.Template.Name != "" {
-		d.Template = fmt.Sprintf("%s@%d", b.Template.Name, b.Template.Version)
-	}
+	d := Delegation{Seq: ev.Seq, ParentCallSeq: b.ParentCallSeq, Template: b.Template.Ref, Model: b.ModelIdentity.Governed.Name, OutputID: b.OutputObjectRef, Outcome: b.Outcome}
 	for _, r := range b.EvidenceRefs {
 		d.EvidenceRefs = append(d.EvidenceRefs, fmt.Sprintf("%d:%s", r.Seq, r.ObjectID))
 	}

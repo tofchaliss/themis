@@ -3,9 +3,13 @@ package http_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
+	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/platform/auth"
 )
 
 const (
@@ -176,6 +180,45 @@ func TestCommissionActorIsBoundToPrincipal(t *testing.T) {
 	}
 	f := repo.byID["fnd-1"]
 	if cs := f.Commissions(); len(cs) != 1 || cs[0].CommissionedBy().ID != "key:k-42" {
+		t.Fatalf("%+v", cs)
+	}
+}
+
+// The runtime's credential cannot commission: with inbound auth on, the
+// commission door sits behind RequireWriteScope like every other write.
+// A read-only key gets 403 before the handler runs; a product-scoped
+// key (the operator) gets through (D-C-6, D-I-8).
+func TestReadKeyCannotCommission(t *testing.T) {
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
+	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
+	router := auth.RequireWriteScope(govhttp.NewHandler(write, read).Router())
+	serveAs := func(scopes ...string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.WithPrincipal(r.Context(), auth.Principal{KeyID: "k-" + scopes[0], Name: scopes[0], Scopes: scopes})
+			router.ServeHTTP(w, r.WithContext(ctx))
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	harness := serveAs(auth.ScopeRead)
+	if s, body := do(t, http.MethodPost, harness.URL+"/findings/fnd-1/commissions", commissionBody()); s != http.StatusForbidden {
+		t.Fatalf("read key commission: %d %s", s, body)
+	}
+	if s, _ := do(t, http.MethodGet, harness.URL+"/findings/fnd-1", nil); s != http.StatusOK {
+		t.Fatalf("read key read: %d", s)
+	}
+	f := repo.byID["fnd-1"]
+	if len(f.Commissions()) != 0 {
+		t.Fatal("nothing may be recorded from a refused write")
+	}
+	operator := serveAs("product:prod-1")
+	if s, body := do(t, http.MethodPost, operator.URL+"/findings/fnd-1/commissions", commissionBody()); s != http.StatusCreated {
+		t.Fatalf("operator commission: %d %s", s, body)
+	}
+	f = repo.byID["fnd-1"]
+	if cs := f.Commissions(); len(cs) != 1 || cs[0].CommissionedBy().ID != "key:k-product:prod-1" {
 		t.Fatalf("%+v", cs)
 	}
 }

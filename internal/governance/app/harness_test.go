@@ -133,3 +133,53 @@ func TestHarnessProposalAggregateRefusals(t *testing.T) {
 		t.Fatalf("archived finding: %v", err)
 	}
 }
+
+// UC9 (D-I-6, D-T-4): a Position is replayable cold from its own
+// record — Position → AcceptedProposalID → proposal → harness-execution/v1
+// → the commission it cites, all on the Finding, nothing re-resolved.
+func TestHarnessPositionReplaysToCommission(t *testing.T) {
+	svc, repo, fid := harnessWorld(t)
+	ctx := context.Background()
+	operator := domain.Actor{Kind: domain.ActorHuman, ID: "key:operator"}
+	decider := domain.Actor{Kind: domain.ActorHuman, ID: "key:decider"}
+	cid, err := svc.Commission(ctx, fid, domain.MethodIdentity{Skill: "remediate-dependency@4", Composition: hxA}, domain.DeploymentIdentity{Anchor: "rsys@6", Artifact: hxB}, operator, "remediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := svc.RaiseHarnessProposal(ctx, fid, operator, domain.StanceMitigated, "bumped", evidenceFor(cid), value.TrustInferred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AcceptProposal(ctx, fid, pid, decider); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := repo.GetByID(ctx, fid) // a fresh reconstitution, as a later reader gets it
+	pos := f.Positions()
+	if len(pos) != 1 || pos[0].Inputs().AcceptedProposalID != pid || pos[0].Actor() != decider {
+		t.Fatalf("position: %+v", pos)
+	}
+	var accepted *domain.GovernanceProposal
+	for _, p := range f.Proposals() {
+		if p.ID() == pos[0].Inputs().AcceptedProposalID {
+			pp := p
+			accepted = &pp
+		}
+	}
+	if accepted == nil || accepted.HarnessEvidence() == nil {
+		t.Fatal("the accepted proposal must carry its evidence")
+	}
+	ev := accepted.HarnessEvidence()
+	if ev.CommissionID != cid || ev.AnchorHash != hxB || ev.TaskID != "fx-1" || ev.ArtifactSeq != 31 {
+		t.Fatalf("tuple from the record: %+v", ev)
+	}
+	var commission *domain.Commission
+	for _, c := range f.Commissions() {
+		if c.ID() == ev.CommissionID {
+			cc := c
+			commission = &cc
+		}
+	}
+	if commission == nil || commission.Method().Skill != ev.Skill || commission.Deployment().Anchor != ev.Anchor || commission.CommissionedBy() != operator {
+		t.Fatalf("commission from the record: %+v", commission)
+	}
+}

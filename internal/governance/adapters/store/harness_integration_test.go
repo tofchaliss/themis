@@ -70,4 +70,42 @@ func TestHarnessCommissionAndEvidenceRoundTrip(t *testing.T) {
 	if rt.CommissionID != "c-1" || rt.VerifiedPath != "report.json" || rt.Witness != "l5-witnessed" || rt.Delegations.Count != 1 || len(rt.Delegations.Seqs) != 1 || rt.Delegations.Seqs[0] != 17 || len(rt.BusinessRefs) != 1 {
 		t.Fatalf("evidence round-trip: %+v", rt)
 	}
+
+	// UC9 cold replay through the store: accept, persist, reload, and walk
+	// Position → AcceptedProposalID → proposal → evidence → commission
+	// from the persisted rows alone (D-I-6, D-T-4).
+	prev = got.Version()
+	decider := domain.Actor{Kind: domain.ActorHuman, ID: "key:decider"}
+	if _, err := got.AcceptProposal("p-h1", decider, t0.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(ctx, got, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := s.GetByID(ctx, f.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos := cold.Positions()
+	if len(pos) != 1 || pos[0].Inputs().AcceptedProposalID != "p-h1" || pos[0].Actor() != decider {
+		t.Fatalf("position: %+v", pos)
+	}
+	var evidence *domain.HarnessExecution
+	for _, p := range cold.Proposals() {
+		if p.ID() == pos[0].Inputs().AcceptedProposalID {
+			evidence = p.HarnessEvidence()
+		}
+	}
+	if evidence == nil || evidence.CommissionID != "c-1" || evidence.TaskID != "fx-1" || evidence.ArtifactSeq != 31 || evidence.AnchorHash != h {
+		t.Fatalf("tuple from the persisted record: %+v", evidence)
+	}
+	found := false
+	for _, c := range cold.Commissions() {
+		if c.ID() == evidence.CommissionID && c.Method().Skill == evidence.Skill && c.Deployment().Anchor == evidence.Anchor {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the cited commission must be on the Finding: %+v", cold.Commissions())
+	}
 }
