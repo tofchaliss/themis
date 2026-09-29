@@ -54,5 +54,5 @@ scripts/*.csv
 scripts/*.json
 scripts/*_SBOM_Files_*/
 
-# themis-ai runtime state (task records, audit log)
+# chopin orchestrator state (task records, audit log)
 agent-state/

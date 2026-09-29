@@ -1,4 +1,4 @@
-# Configuration for themis-ai-runtime (github.com/rsys-fchaliss/themis-ai-runtime).
+# Configuration for chopin, the Themis orchestrator (github.com/tofchaliss/chopin).
 # The orchestrator runs these checks itself, in this checkout, on the task's
 # feature branch — agents never self-report test results.
 tests:
