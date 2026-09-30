@@ -75,13 +75,15 @@ func (r *RollupPublication) Supersede(by RollupPublicationID) error {
 }
 
 // Accessors (immutable content; version guards optimistic concurrency).
-func (r RollupPublication) ID() RollupPublicationID           { return r.id }
-func (r RollupPublication) ReleaseID() string                 { return r.releaseID }
-func (r RollupPublication) ProductPURL() string               { return r.productPURL }
-func (r RollupPublication) Format() string                    { return r.format }
-func (r RollupPublication) Audience() string                  { return r.audience }
-func (r RollupPublication) Payload() []byte                   { return append([]byte(nil), r.payload...) }
-func (r RollupPublication) InputSet() []RollupInputRecord     { return append([]RollupInputRecord(nil), r.inputSet...) }
+func (r RollupPublication) ID() RollupPublicationID { return r.id }
+func (r RollupPublication) ReleaseID() string       { return r.releaseID }
+func (r RollupPublication) ProductPURL() string     { return r.productPURL }
+func (r RollupPublication) Format() string          { return r.format }
+func (r RollupPublication) Audience() string        { return r.audience }
+func (r RollupPublication) Payload() []byte         { return append([]byte(nil), r.payload...) }
+func (r RollupPublication) InputSet() []RollupInputRecord {
+	return append([]RollupInputRecord(nil), r.inputSet...)
+}
 func (r RollupPublication) AsOf() time.Time                   { return r.asOf }
 func (r RollupPublication) Statements() int                   { return r.statements }
 func (r RollupPublication) WithdrawnExcluded() int            { return r.withdrawnExcluded }

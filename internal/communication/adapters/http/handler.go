@@ -23,7 +23,8 @@ import (
 type Handler struct {
 	write   *app.PublicationService
 	read    *app.ReadService
-	rollups *app.RollupService // release-scoped VEX rollups (D13); nil = not configured
+	rollups *app.RollupService         // release-scoped VEX rollups (D13); nil = not configured
+	intents *app.DeliveryIntentService // outward-action intents (N-M1a); nil = not configured
 }
 
 // NewHandler builds a Handler.
@@ -36,6 +37,15 @@ func NewHandler(write *app.PublicationService, read *app.ReadService) *Handler {
 // always sets it.
 func (h *Handler) WithRollups(rs *app.RollupService) *Handler {
 	h.rollups = rs
+	return h
+}
+
+// WithDeliveryIntents wires the outward-action operator surface (N-M1a) and returns the
+// handler for chaining, on the same terms as WithRollups: left unset, the /delivery routes
+// answer 501 rather than panicking, so a node that does no outward delivery is still a valid
+// deployment.
+func (h *Handler) WithDeliveryIntents(is *app.DeliveryIntentService) *Handler {
+	h.intents = is
 	return h
 }
 

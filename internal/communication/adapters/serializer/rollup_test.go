@@ -50,10 +50,10 @@ func TestOpenVEXRollup(t *testing.T) {
 	for _, want := range []string{
 		`"pkg:generic/MRF/cdmrf-oamp@20.1.0.0-118"`, // the product line a consumer can match (D13.4)
 		`"not_affected"`, `"vulnerable_code_not_in_execute_path"`, // the decided statement + justification
-		`"under_investigation"`,                        // the honest undecided status (D13.1)
-		`[note: setuptools@39.2.0 cleared`,             // the clearance as annotation, bracketed
-		`"pkg:pypi/setuptools@70.3.0"`,                 // the OPEN copy as subcomponent
-		`"timestamp": "2026-09-02T16:00:00Z"`,          // the vintage inline (D13.2)
+		`"under_investigation"`,               // the honest undecided status (D13.1)
+		`[note: setuptools@39.2.0 cleared`,    // the clearance as annotation, bracketed
+		`"pkg:pypi/setuptools@70.3.0"`,        // the OPEN copy as subcomponent
+		`"timestamp": "2026-09-02T16:00:00Z"`, // the vintage inline (D13.2)
 		`"release_ref": "rel-1"`, `"findings_covered": 2`, `"withdrawn_cves_excluded": 3`,
 	} {
 		if !strings.Contains(body, want) {

@@ -173,6 +173,132 @@ paths:
                 $ref: '#/components/schemas/RollupStatus'
         '500':
           $ref: '#/components/responses/Problem'
+  /delivery/intents:
+    get:
+      operationId: listDeliveryIntents
+      summary: >-
+        List outward-action delivery intents (EDR-DELIVERY-01 N-M1a) - the operator's view of
+        what Themis decided to send outside the estate and how it went. Admin-only, like every
+        route under /delivery.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: PENDING | DELIVERED | DEAD_LETTER | CANCELLED (case-insensitive). Omit for any.
+          schema:
+            type: string
+        - name: kind
+          in: query
+          required: false
+          description: jira_issue | email | ci_build. Omit for any.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryIntent'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /delivery/intents/{id}:
+    get:
+      operationId: getDeliveryIntent
+      summary: One delivery intent with its full append-only attempt history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIntent'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /delivery/intents/{id}/retry:
+    post:
+      operationId: retryDeliveryIntent
+      summary: >-
+        Re-open a dead-lettered or cancelled intent for the workers - PENDING again, attempts
+        back to zero, due immediately. The attempt HISTORY is kept: a retry adds a chapter, it
+        does not erase one. Refused (409) on a PENDING or DELIVERED intent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Re-opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIntent'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /delivery/intents/{id}/cancel:
+    post:
+      operationId: cancelDeliveryIntent
+      summary: >-
+        Withdraw a PENDING intent. The record survives as the statement that a human decided
+        this outward action should not happen. Cancelling an already-cancelled intent is a
+        no-op success; anything else (DELIVERED, DEAD_LETTER) is refused (409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIntent'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /publishable-positions:
     get:
       operationId: getPublishableQueue
@@ -345,6 +471,74 @@ components:
           type: string
         stale:
           type: boolean
+    DeliveryIntent:
+      type: object
+      description: >-
+        One recorded decision to act outside the estate (EDR-DELIVERY-01 N-M1a). The lineage
+        and the payload are a SNAPSHOT frozen when the governance fact crossed the bus, so a
+        send that happens later delivers what the fact said THEN. `destination` is a governed
+        NAME, never a credential - no secret is ever stored on an intent (D-N-6).
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: jira_issue | email | ci_build
+        destination:
+          type: string
+        status:
+          type: string
+          description: PENDING | DELIVERED | DEAD_LETTER | CANCELLED (forward-only; a retry re-opens, it does not erase).
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        last_error:
+          type: string
+        origin_event_id:
+          type: string
+          description: The causing bus envelope - also the dedup identity, so a replay creates no second intent.
+        origin_event_type:
+          type: string
+        origin_event_time:
+          type: string
+        finding_id:
+          type: string
+        release_id:
+          type: string
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        proposal_id:
+          type: string
+        position_version:
+          type: integer
+        payload_hash:
+          type: string
+          description: sha-256 of the materialized payload bytes recorded with the intent.
+        next_attempt_at:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        attempts_history:
+          type: array
+          description: Append-only send history (single-intent reads only; the list omits it).
+          items:
+            $ref: '#/components/schemas/DeliveryAttempt'
+    DeliveryAttempt:
+      type: object
+      properties:
+        attempt_no:
+          type: integer
+        ok:
+          type: boolean
+        error:
+          type: string
+        attempted_at:
+          type: string
     Problem:
       type: object
       properties:

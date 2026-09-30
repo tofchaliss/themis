@@ -116,6 +116,30 @@ printf '    evidence=%s  faultlines=%s  matches=%s  findings=%s  positions=%s  p
   "${EV:-?}" "${FL:-?}" "${MA:-?}" "${FN:-?}" "${PO:-?}" "${PU:-?}"
 printf '    bus events=%s\n' "${BUS:-?}"
 
+# Outward actions (EDR-DELIVERY-01 N-M1a): what Themis decided to send outside the estate and
+# how far it got. DEAD_LETTER is the number that matters — those are outward actions that gave
+# up and are now waiting for a person to retry or cancel them
+# (POST /api/v1/delivery/intents/<id>/retry). A large PENDING count with nothing DELIVERED is
+# the other shape worth noticing: the channel's worker is disabled, or its sender is refusing.
+#
+# q() swallows stderr, so a node predating these migrations yields empty strings rather than an
+# error — the line degrades to "n/a" and this report stays usable on a partially upgraded
+# estate. That is deliberate: a verification script that dies on an absent table is a script
+# people stop running.
+DI_P="$(q communication "select count(*) from delivery_intents where status='PENDING'")"
+DI_D="$(q communication "select count(*) from delivery_intents where status='DELIVERED'")"
+DI_X="$(q communication "select count(*) from delivery_intents where status='DEAD_LETTER'")"
+DI_C="$(q communication "select count(*) from delivery_intents where status='CANCELLED'")"
+if [ -z "$DI_P" ] && [ -z "$DI_D" ] && [ -z "$DI_X" ] && [ -z "$DI_C" ]; then
+  printf '    delivery: n/a (no delivery_intents table — node predates outward actions N-M1a)\n'
+else
+  printf '    delivery: pending=%s  delivered=%s  dead_letter=%s  cancelled=%s\n' \
+    "${DI_P:-0}" "${DI_D:-0}" "${DI_X:-0}" "${DI_C:-0}"
+  if [ "${DI_X:-0}" != "0" ]; then
+    info "$DI_X outward action(s) dead-lettered — GET /api/v1/delivery/intents?status=dead_letter"
+  fi
+fi
+
 # Occurrence verdicts (EDR-VERDICT-01): how many matches are recorded cleared (and at which
 # evidence grade), and how many are STALE — stamp behind their card, i.e. the re-verdict
 # sweep's remaining queue. A persistently large stale count with feeds folding is the shape of

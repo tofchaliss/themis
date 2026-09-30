@@ -342,7 +342,8 @@ func newPipeline(t *testing.T) *pipeline {
 	commPool := mustPool(t, dsnFor("communication"))
 	t.Cleanup(commPool.Close)
 	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL,
-		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool))
+		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool),
+		commwiring.OutwardConfig{}, log)
 	communicationSrv := httptest.NewServer(mount(comm.Handler))
 	t.Cleanup(communicationSrv.Close)
 	commReader := comminbound.Subscription.NewReader(busPool, log, commstore.NewInboxConsumer(commPool, comm.Consumer))

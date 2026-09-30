@@ -16,6 +16,10 @@ var ErrConcurrent = errors.New("communication: concurrent modification")
 // Position cannot be fetched from Governance (no decision yet).
 var ErrPositionNotFound = errors.New("communication: position not found")
 
+// ErrIntentNotFound is returned when an operator asks for a delivery intent that does not
+// exist (outward actions, N-M1a).
+var ErrIntentNotFound = errors.New("communication: delivery intent not found")
+
 // Communication integration/audit event types (D8) — thin, terminal completed facts.
 const (
 	EventPublicationCreated    = "communication.publication_created"

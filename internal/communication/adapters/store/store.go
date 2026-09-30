@@ -349,7 +349,8 @@ func (s *Store) PrunePayloads(ctx context.Context, before time.Time) (int, error
 // Purge removes all Communication rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`)
+		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications,
+			delivery_attempts, delivery_intents RESTART IDENTITY CASCADE`)
 	return err
 }
 

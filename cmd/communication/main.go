@@ -13,6 +13,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +27,8 @@ import (
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/adapters/wiring"
+	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
@@ -49,6 +53,22 @@ type config struct {
 
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
+
+	// Outward actions (EDR-DELIVERY-01 N-M1a). The event reader only RECORDS a delivery
+	// intent; these knobs govern the separate per-channel workers that try to send it, and
+	// are deliberately isolated from the event bus's own retry envelope even though the
+	// defaults mirror it (100ms → 30s): a slow mail relay must be givable more patience
+	// without also making the governance stream more patient.
+	deliveryMaxAttempts   int           // THEMIS_DELIVERY_MAX_ATTEMPTS — tries before an intent is DEAD_LETTERED (default 5).
+	deliveryBackoffBase   time.Duration // THEMIS_DELIVERY_BACKOFF_BASE_MS — first retry wait, doubled per attempt (default 100).
+	deliveryBackoffCap    time.Duration // THEMIS_DELIVERY_BACKOFF_CAP_MS — ceiling on that wait (default 30000).
+	deliveryWorkerTick    time.Duration // THEMIS_DELIVERY_WORKER_INTERVAL_MS — how often each worker looks for due intents (default 500).
+	deliveryEnableJira    bool          // THEMIS_DELIVERY_ENABLE_JIRA — "0" disables the jira_issue worker; its intents still accumulate as PENDING (default 1).
+	deliveryEnableEmail   bool          // THEMIS_DELIVERY_ENABLE_EMAIL — "0" disables the email worker (default 1).
+	deliveryEnableCI      bool          // THEMIS_DELIVERY_ENABLE_CI — "0" disables the ci_build worker (default 1).
+	deliveryFakeJiraMode  string        // THEMIS_DELIVERY_FAKE_JIRA_MODE — success | fail | flaky. N-M1a ships FAKE senders only (default success).
+	deliveryFakeEmailMode string        // THEMIS_DELIVERY_FAKE_EMAIL_MODE — success | fail | flaky (default success).
+	deliveryFakeCIMode    string        // THEMIS_DELIVERY_FAKE_CI_MODE — success | fail | flaky (default success).
 }
 
 func loadConfig() config {
@@ -67,6 +87,39 @@ func loadConfig() config {
 
 		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
 		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
+
+		deliveryMaxAttempts:   envInt("THEMIS_DELIVERY_MAX_ATTEMPTS", 5),
+		deliveryBackoffBase:   time.Duration(envInt("THEMIS_DELIVERY_BACKOFF_BASE_MS", 100)) * time.Millisecond,
+		deliveryBackoffCap:    time.Duration(envInt("THEMIS_DELIVERY_BACKOFF_CAP_MS", 30000)) * time.Millisecond,
+		deliveryWorkerTick:    time.Duration(envInt("THEMIS_DELIVERY_WORKER_INTERVAL_MS", 500)) * time.Millisecond,
+		deliveryEnableJira:    envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_JIRA"),
+		deliveryEnableEmail:   envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_EMAIL"),
+		deliveryEnableCI:      envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_CI"),
+		deliveryFakeJiraMode:  os.Getenv("THEMIS_DELIVERY_FAKE_JIRA_MODE"),
+		deliveryFakeEmailMode: os.Getenv("THEMIS_DELIVERY_FAKE_EMAIL_MODE"),
+		deliveryFakeCIMode:    os.Getenv("THEMIS_DELIVERY_FAKE_CI_MODE"),
+	}
+}
+
+// outwardConfig assembles the outward-actions wiring input from the parsed environment.
+func (c config) outwardConfig() wiring.OutwardConfig {
+	return wiring.OutwardConfig{
+		Intents: app.DeliveryIntentConfig{
+			MaxAttempts: c.deliveryMaxAttempts,
+			Backoff:     domain.BackoffPolicy{Base: c.deliveryBackoffBase, Cap: c.deliveryBackoffCap},
+			Destination: app.DefaultIntentDestination,
+		},
+		Interval: c.deliveryWorkerTick,
+		EnableFor: map[domain.DeliveryKind]bool{
+			domain.DeliveryJiraIssue: c.deliveryEnableJira,
+			domain.DeliveryEmail:     c.deliveryEnableEmail,
+			domain.DeliveryCIBuild:   c.deliveryEnableCI,
+		},
+		FakeModes: map[domain.DeliveryKind]delivery.FakeMode{
+			domain.DeliveryJiraIssue: delivery.ParseFakeMode(c.deliveryFakeJiraMode),
+			domain.DeliveryEmail:     delivery.ParseFakeMode(c.deliveryFakeEmailMode),
+			domain.DeliveryCIBuild:   delivery.ParseFakeMode(c.deliveryFakeCIMode),
+		},
 	}
 }
 
@@ -108,9 +161,16 @@ func main() {
 	}
 
 	comm := wiring.Wire(pool, cfg.governanceURL, cfg.registryURL,
-		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher)
+		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher,
+		cfg.outwardConfig(), logger)
 
 	go workerLoop(comm, logger.Component("worker"))
+
+	// Outward actions (N-M1a): one worker per enabled channel, each on its own goroutine and
+	// its own ticker, isolated from the bus reader below. A refusing channel dead-letters its
+	// own intents and touches nothing else.
+	comm.IntentWorkers.Run(ctx)
+	logDeliveryState(ctx, comm, cfg, logger.Component("delivery"))
 
 	// The bus reader drives the publishable-positions worklist off the Governance stream
 	// (EB-07/08). Without a bus it is disabled — Position events then arrive only over the
@@ -254,6 +314,47 @@ func envDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envInt reads a positive integer knob, falling back to the default for anything unset,
+// unparseable or non-positive — a zero attempt budget or a zero tick would stop outward
+// delivery silently, which is the one failure mode this milestone exists to prevent.
+func envInt(key string, def int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+// envBoolDefaultOn reads a switch that is ON unless it is explicitly "0".
+func envBoolDefaultOn(key string) bool { return os.Getenv(key) != "0" }
+
+// logDeliveryState states the outward-actions posture at startup: which channels have a
+// worker, and how many intents sit in each status. An operator reading one line has to be
+// able to tell "nothing to send" from "nothing is sending" — a dead-letter backlog with no
+// worker enabled looks exactly like a healthy idle node otherwise. It is a READ; a failure
+// to take it never blocks startup.
+func logDeliveryState(ctx context.Context, comm wiring.Communication, cfg config, logger *observability.Logger) {
+	kinds := make([]string, 0, len(comm.IntentWorkers))
+	for _, w := range comm.IntentWorkers {
+		kinds = append(kinds, string(w.Kind()))
+	}
+	logger.Info("outward-action workers started (FAKE senders — no real Jira/SMTP/CI at N-M1a)",
+		observability.String("kinds", strings.Join(kinds, ",")),
+		observability.Int("max_attempts", cfg.deliveryMaxAttempts),
+		observability.Duration("interval", cfg.deliveryWorkerTick))
+
+	counts, err := comm.Intents.IntentCounts(ctx)
+	if err != nil {
+		logger.Warn("could not read delivery-intent counts", observability.Err(err))
+		return
+	}
+	logger.Info("delivery intents",
+		observability.Int("pending", counts[domain.IntentPending]),
+		observability.Int("delivered", counts[domain.IntentDelivered]),
+		observability.Int("dead_letter", counts[domain.IntentDeadLetter]),
+		observability.Int("cancelled", counts[domain.IntentCancelled]))
 }
 
 // openBus opens the pool on the `bus` database (optionally migrating it), or returns nil when

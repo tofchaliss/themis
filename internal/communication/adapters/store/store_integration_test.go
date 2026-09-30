@@ -94,7 +94,8 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications,
+			delivery_attempts, delivery_intents RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

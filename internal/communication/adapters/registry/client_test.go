@@ -52,9 +52,9 @@ func TestReleaseIdentity(t *testing.T) {
 // carries ErrIncompleteIdentity so the transport layer can say why with a 422.
 func TestReleaseIdentity_FailsClosed(t *testing.T) {
 	for name, overrides := range map[string]map[string]string{
-		"release missing": {"/api/v1/releases/rel-1": ""},
-		"project missing": {"/api/v1/projects/proj-1": ""},
-		"product missing": {"/api/v1/products/prod-1": ""},
+		"release missing":    {"/api/v1/releases/rel-1": ""},
+		"project missing":    {"/api/v1/projects/proj-1": ""},
+		"product missing":    {"/api/v1/products/prod-1": ""},
 		"blank product name": {"/api/v1/products/prod-1": `{"id":"prod-1","name":"  "}`},
 		"blank version":      {"/api/v1/releases/rel-1": `{"id":"rel-1","project_id":"proj-1","version":""}`},
 		"malformed hop":      {"/api/v1/projects/proj-1": `{`},

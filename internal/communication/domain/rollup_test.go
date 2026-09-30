@@ -161,9 +161,18 @@ func TestRollupPublicationLifecycle(t *testing.T) {
 
 	// Constructor validation.
 	for name, run := range map[string]func() error{
-		"empty id":      func() error { _, e := domain.NewRollupPublication("", art, "openvex", "", []byte(`{}`), "", rollupAt); return e },
-		"empty format":  func() error { _, e := domain.NewRollupPublication("rp", art, "", "", []byte(`{}`), "", rollupAt); return e },
-		"empty payload": func() error { _, e := domain.NewRollupPublication("rp", art, "openvex", "", nil, "", rollupAt); return e },
+		"empty id": func() error {
+			_, e := domain.NewRollupPublication("", art, "openvex", "", []byte(`{}`), "", rollupAt)
+			return e
+		},
+		"empty format": func() error {
+			_, e := domain.NewRollupPublication("rp", art, "", "", []byte(`{}`), "", rollupAt)
+			return e
+		},
+		"empty payload": func() error {
+			_, e := domain.NewRollupPublication("rp", art, "openvex", "", nil, "", rollupAt)
+			return e
+		},
 		"incomplete product": func() error {
 			_, e := domain.NewRollupPublication("rp", domain.RollupArtifact{AsOf: rollupAt}, "openvex", "", []byte(`{}`), "", rollupAt)
 			return e
