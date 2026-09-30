@@ -331,7 +331,7 @@ func newPipeline(t *testing.T) *pipeline {
 	// `affected` Position, and the rule only ever accepts a system-raised `not_affected` on
 	// Observed evidence.
 	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", "", 0,
-		govdomain.DefaultMitigatedWeight, govdomain.DefaultEPSSDriftThreshold,
+		govdomain.DefaultMitigatedWeight, govdomain.DefaultEPSSDriftThreshold, log,
 		govdomain.AutoAcceptObservedNotAffectedPolicy())
 	governanceSrv := httptest.NewServer(mount(gov.Handler))
 	t.Cleanup(governanceSrv.Close)

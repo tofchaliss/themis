@@ -1,11 +1,15 @@
 // Command authadmin manages API keys in the shared `auth` database (EDR-SECURITY-01 D6).
 //
-//	authadmin create-key --name ci --scopes admin[,read,product:<id>] [--ttl 720h]
+//	authadmin create-key --name ci --scopes admin[,read,product:<id>,delivery:callback] [--ttl 720h]
 //	authadmin revoke-key --id key-<uuid>
 //
 // create-key mints an opaque token, prints it ONCE, and stores only its bcrypt hash;
 // revoke-key disables a key by id. Both read the store DSN from THEMIS_AUTH_DATABASE_DSN
 // (set THEMIS_AUTH_MIGRATE=1 to apply the auth migrations first).
+//
+// The scope vocabulary is CLOSED (EDR-DELIVERY-01 N-M0): `admin`, `read`, `product:<id>`,
+// `delivery:callback` and nothing else. An unrecognized scope is refused at mint time rather
+// than stored to be misread later as authorization.
 package main
 
 import (
@@ -44,19 +48,32 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  authadmin create-key --name <name> [--scopes admin,read,product:<id>] [--ttl 720h]")
+	fmt.Fprintln(os.Stderr, "  authadmin create-key --name <name> [--scopes admin,read,product:<id>,delivery:callback] [--ttl 720h]")
 	fmt.Fprintln(os.Stderr, "  authadmin revoke-key --id <key-id>")
+	fmt.Fprintln(os.Stderr, "\nscopes (closed vocabulary):")
+	fmt.Fprintln(os.Stderr, "  admin              read + write, every product")
+	fmt.Fprintln(os.Stderr, "  read               read-only")
+	fmt.Fprintln(os.Stderr, "  product:<id>       write confined to that product's resources (UUID as registered)")
+	fmt.Fprintln(os.Stderr, "  delivery:callback  an outward delivery target calling back; NO Governance write")
+	fmt.Fprintln(os.Stderr, "\nAn unknown scope is refused at mint time, and no longer grants write when READ either:")
+	fmt.Fprintln(os.Stderr, "  a key already in api_keys whose scopes are outside this list has lost write capability.")
+	fmt.Fprintln(os.Stderr, "  Audit and re-mint:  SELECT id, name, scopes FROM api_keys WHERE revoked_at IS NULL;")
 	fmt.Fprintln(os.Stderr, "\nreads THEMIS_AUTH_DATABASE_DSN (THEMIS_AUTH_MIGRATE=1 applies migrations first)")
 }
 
 func createKey(args []string) int {
 	fs := flag.NewFlagSet("create-key", flag.ExitOnError)
 	name := fs.String("name", "", "human label for the key (required)")
-	scopes := fs.String("scopes", "", "comma-separated scopes: admin,read,product:<id>")
+	scopes := fs.String("scopes", "", "comma-separated scopes: admin,read,product:<id>,delivery:callback")
 	ttl := fs.Duration("ttl", 0, "optional lifetime, e.g. 720h; 0 = no expiry")
 	_ = fs.Parse(args)
 	if *name == "" {
 		fmt.Fprintln(os.Stderr, "create-key: --name is required")
+		return 2
+	}
+	granted, err := validScopes(parseScopes(*scopes))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "create-key:", err)
 		return 2
 	}
 
@@ -76,7 +93,7 @@ func createKey(args []string) int {
 		ID:      "key-" + uuid.NewString(),
 		Name:    *name,
 		KeyHash: hash,
-		Scopes:  parseScopes(*scopes),
+		Scopes:  granted,
 	}
 	if *ttl > 0 {
 		exp := time.Now().Add(*ttl).UTC()
@@ -142,6 +159,20 @@ func openAuthDB() (*pgxpool.Pool, func(), error) {
 		return nil, nil, err
 	}
 	return pool, pool.Close, nil
+}
+
+// validScopes checks the requested grants against the closed vocabulary
+// (auth.KnownScope) and returns them unchanged, or names the first offender. Minting is the
+// only place the vocabulary can be enforced — a stored scope is read by every node afterwards,
+// and a typo'd `produc:xyz` used to be accepted AND treated as write-capable.
+func validScopes(scopes []string) ([]string, error) {
+	for _, s := range scopes {
+		if !auth.KnownScope(s) {
+			return nil, fmt.Errorf("unknown scope %q; allowed: %s, %s, %s<id>, %s",
+				s, auth.ScopeAdmin, auth.ScopeRead, auth.ProductScopePrefix, auth.ScopeDeliveryCallback)
+		}
+	}
+	return scopes, nil
 }
 
 func parseScopes(csv string) []string {

@@ -126,6 +126,24 @@ func (p fakeProjection) FaultlineBlastRadius(context.Context, string) ([]string,
 	return p.blast, p.err
 }
 
+// stubProducts is the Registry read seam behind product-scope confinement (EDR-DELIVERY-01
+// N-M0): a release → product map, plus an `err` that stands in for an unreachable Registry so
+// the fail-closed path is provable without a network.
+type stubProducts struct {
+	byRelease map[string]string
+	err       error
+}
+
+func (s stubProducts) ProductOfRelease(_ context.Context, releaseID string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	if p, ok := s.byRelease[releaseID]; ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("registry: no product for release %q", releaseID)
+}
+
 type seqIDs struct{ n int }
 
 func (g *seqIDs) NewID() string { g.n++; return fmt.Sprintf("id-%d", g.n) }
