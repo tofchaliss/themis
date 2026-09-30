@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -466,8 +467,10 @@ func TestCancelDeliveryIntent(t *testing.T) {
 	}
 }
 
-// A node that does no outward delivery is a valid deployment: the routes answer 501 rather
-// than panicking on a nil service.
+// The DEFAULT deployment: the operator API is off (the API addition is an outstanding must-ask,
+// EDR-DELIVERY-01 D15), so the four routes answer 501 rather than panicking on a nil service.
+// The refusal must name the switch — a 501 that does not is indistinguishable from a broken node,
+// and this is the one surface an operator hits before reading any document.
 func TestDeliveryIntents_NotConfigured(t *testing.T) {
 	pubs := newRepo()
 	write := app.NewPublicationService(pubs, fakePositions{}, serializer.Default(), &ids{}, clk{})
@@ -481,8 +484,43 @@ func TestDeliveryIntents_NotConfigured(t *testing.T) {
 		{http.MethodPost, "/delivery/intents/int-1/retry"},
 		{http.MethodPost, "/delivery/intents/int-1/cancel"},
 	} {
-		if status, _ := do(t, r.method, srv.URL+r.path, nil); status != http.StatusNotImplemented {
+		status, body := do(t, r.method, srv.URL+r.path, nil)
+		if status != http.StatusNotImplemented {
 			t.Errorf("%s %s unconfigured = %d, want 501", r.method, r.path, status)
 		}
+		if !strings.Contains(string(body), "THEMIS_DELIVERY_OPERATOR_API") {
+			t.Errorf("%s %s: the 501 does not name the switch that enables it: %s", r.method, r.path, body)
+		}
+	}
+}
+
+// The gate is the composition root's, not the handler's: `wiring.Wire` hands the handler the
+// intent service only when OperatorAPI is set. Pinned here because the default is the SHIPPED
+// behaviour — a later refactor that wires the service unconditionally would publish four routes
+// nobody approved, and no other test would notice.
+func TestWiringGatesTheOperatorAPI(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		repo := newIntentRepo()
+		seedIntent(t, repo, "int-1", domain.DeliveryEmail)
+		svc := app.NewDeliveryIntentService(repo, &intentIDs{}, intentClock{},
+			app.DeliveryIntentConfig{MaxAttempts: 2})
+
+		pubs := newRepo()
+		write := app.NewPublicationService(pubs, fakePositions{}, serializer.Default(), &ids{}, clk{})
+		read := app.NewReadService(pubs, fakePositions{}, serializer.Default())
+		h := commhttp.NewHandler(write, read)
+		if enabled {
+			h = h.WithDeliveryIntents(svc)
+		}
+		srv := httptest.NewServer(h.Router())
+
+		want := http.StatusNotImplemented
+		if enabled {
+			want = http.StatusOK
+		}
+		if status, body := do(t, http.MethodGet, srv.URL+"/delivery/intents", nil); status != want {
+			t.Errorf("operator API enabled=%v: got %d, want %d (%s)", enabled, status, want, body)
+		}
+		srv.Close()
 	}
 }

@@ -26,12 +26,28 @@ The single project backlog. Two parts:
 > a real deployment. Operator surface, **admin-only including the reads** (D15):
 > `GET /api/v1/delivery/intents?status=dead_letter`, `GET …/{id}` (with the attempt history),
 > `POST …/{id}/retry`, `POST …/{id}/cancel`. `scripts/vm-verify.sh` gained a `delivery:` line that
-> degrades to `n/a` on a node predating migrations 000006/000007. **CARRIED LIMIT:** `ci_build` is
-> structurally present and, on a real estate, dormant — `governance.proposal_accepted.v1` does not
-> state the accepted proposal's evidence schema and N-M1a changes no event schema, so today only the
-> e-mail intent is recorded. That field is M2's, where the CI payload also gains its artifact
-> members. Nothing re-drives a dead letter on a timer; a person does. See
-> `openspec/changes/phase3-outward-actions/tasks.md` group 2.
+> degrades to `n/a` on a node predating migrations 000006/000007.
+>
+> **TWO OPERATOR NOTES, both "expected, not a fault":**
+> 1. **The operator API is OFF BY DEFAULT** (`THEMIS_DELIVERY_OPERATOR_API=1` enables it). The API
+>    addition is an unapproved must-ask, so the four routes answer 501 — naming the switch in the
+>    body — until an owner says yes. Recording, sending, retry and dead-lettering are NOT gated, so a
+>    default node performs every outward action; it just has no HTTP window onto them, and a dead
+>    letter can be seen in the counts but not retried or cancelled over the API.
+>    **OPEN, needs the owner:** `openspec/changes/phase3-outward-actions/tasks.md` item 2.0a.
+> 2. **No `ci_build` intent will ever appear yet, and that is correct.**
+>    `governance.proposal_accepted` does not state the accepted proposal's evidence schema (its v1
+>    payload is frozen over four fields, and N-M1a changes no event schema), so an acceptance records
+>    the e-mail intent only. The `ci_build` worker is enabled and idle; the node says so in one line
+>    at startup and `deploy/node.env.example` repeats it. Governance emits the field in **M2**, where
+>    the CI payload also gains its artifact members — no config change needed then.
+>
+> Also **OPEN, needs the owner:** the dedup key is `(origin_event_id, origin_event_type, kind,
+> destination)` and not the `origin_event_seq` the step named — the kernel `Envelope` carries no seq,
+> while `event_log.envelope_id` is the bus's own UNIQUE dedup key and the publisher is idempotent on
+> it (EDR-DELIVERY-01 D11; `tasks.md` item 2.0b). Nothing re-drives a dead letter on a timer; a
+> person does. Acceptance criteria as built:
+> `openspec/changes/phase3-outward-actions/design.md`.
 
 > **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
 > routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,

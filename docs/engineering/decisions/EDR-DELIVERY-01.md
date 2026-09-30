@@ -209,6 +209,29 @@ rule applied to outward actions: the audit of what Themis tried to do outside th
 cache, and a dead letter with no stated cause is as opaque as a dropped one.
 
 ### D11 — The dedup identity is the ENVELOPE ID, not the bus `seq`
+
+**This is the system of record for the column, and it supersedes the `origin_event_seq` wording in
+the step's original description.** The restated acceptance criteria live in
+`openspec/changes/phase3-outward-actions/design.md` ("Acceptance criteria as BUILT"); the deviation
+is an outstanding must-ask tracked as `tasks.md` 2.0b. Three facts in this tree decide it, all three
+checkable:
+
+1. `internal/kernel/event/envelope.go` — the kernel `Envelope` has **no `seq` field**. The bus seq is
+   scanned into the reader's private `stamped` struct and used as the cursor key
+   (`internal/platform/eventbus/reader.go`); `Consumer.Handle` never receives it, so a consuming
+   context cannot key on it without a kernel change.
+2. `internal/platform/eventbus/migrations/000001_bus.up.sql` — `event_log.envelope_id` is
+   `NOT NULL UNIQUE`, commented "UNIQUE = at-most-once append + dedup key (D5)". The envelope id is
+   **the bus's own dedup identity**, one-to-one with seq.
+3. `internal/platform/eventbus/publisher.go` — the append is `ON CONFLICT (envelope_id) DO NOTHING`,
+   i.e. the publisher is already idempotent on exactly this identity.
+
+So the envelope id is not a substitute for the seq: it is the identity the bus itself deduplicates
+on, and the seq is a cursor derived from it. Keying the intent on the id gives the asked-for
+guarantee using the stronger of the two, and the schema contains no `origin_event_seq` column at
+all — asserted column-by-column against the live index, negative assertion included, by
+`TestDeliveryIntent_UniquePerOriginKindDestination`.
+
 The uniqueness guarantee asked for is one intent per (causing event, kind, destination), so that a
 replay or a redelivery creates no second Jira ticket. The step's specification named
 `origin_event_seq` for the first element; the implemented index uses `origin_event_id`. The reason
@@ -253,14 +276,24 @@ the uniqueness guarantee.
 
 ### D15 — The operator surface is ADMIN-ONLY, reads included
 
-**Approval status: the API addition is an outstanding must-ask.** CLAUDE.md requires explicit owner
-approval for an API change, and these four routes are new. They are implemented because the step
-requires that a person be able to see, retry and cancel failed outward actions and this repository
-has no other surface for that — but the approval is NOT on record. The ask, its alternatives, its
-blast radius and the exact revert are written out in
-`openspec/changes/phase3-outward-actions/tasks.md` item 2.0, which stays unchecked until an answer
-exists. Nothing else in N-M1a depends on the routes: the record, the workers and the dead-lettering
-stand without them.
+**Approval status: the API addition is an outstanding must-ask, and the surface is therefore OFF BY
+DEFAULT.** CLAUDE.md requires explicit owner approval for an API change, and these four routes are
+new. `THEMIS_DELIVERY_OPERATOR_API=1` serves them; unset — the shipped default — `wiring.Wire`
+withholds the intent service from the handler and all four answer `501` with a detail naming the
+switch. A route nobody approved must not appear on a node merely because the binary contains it.
+
+What is NOT gated: the event reader still records intents, the workers still send them, failures
+still retry and still dead-letter, and the counts still reach the startup log and
+`scripts/vm-verify.sh`. So the default node does every outward action and simply has no HTTP window
+onto them. The cost is stated plainly rather than minimized: on a default node a dead letter can be
+seen but not retried or cancelled over the API, which is one env var short of the step's "a person
+can retry them or cancel them". The ask, its four alternatives, the blast radius, the exact revert
+and the one-line flip if approved are in `openspec/changes/phase3-outward-actions/tasks.md` item
+2.0a, which stays unchecked until an answer exists.
+
+A 401 is never produced by these routes: an unauthenticated request is refused upstream by
+`auth.RequireAPIKey` and never reaches a handler. The 403 is the route's own. Both are stated in the
+OpenAPI operation descriptions, because the layer that answers is not guessable from the status.
 
 `GET /delivery/intents`, `GET /delivery/intents/{id}`, `POST …/retry`, `POST …/cancel` — all four
 require `admin`, not merely the node's write floor. Two reasons pointing the same way. A mutation

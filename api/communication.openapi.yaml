@@ -180,6 +180,17 @@ paths:
         List outward-action delivery intents (EDR-DELIVERY-01 N-M1a) - the operator's view of
         what Themis decided to send outside the estate and how it went. Admin-only, like every
         route under /delivery.
+      description: >-
+        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        unauthenticated request is refused upstream by the node's auth middleware
+        (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
+        /delivery surface is admin-only, reads included, because a delivery intent's lineage
+        does not always reach a product and so a product-scoped key cannot be confined to one
+        (EDR-DELIVERY-01 D15). On a node with inbound auth disabled there is no principal at
+        all and the whole /api/v1 surface is open, exactly as for every other route. A 501
+        means this node does not serve the operator surface: it is OFF BY DEFAULT while the
+        API addition awaits owner approval - set THEMIS_DELIVERY_OPERATOR_API=1 to enable it.
+        Delivery intents are recorded, sent and dead-lettered either way.
       parameters:
         - name: status
           in: query
@@ -216,7 +227,11 @@ paths:
                   $ref: '#/components/schemas/DeliveryIntent'
         '400':
           $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
         '403':
+          $ref: '#/components/responses/Problem'
+        '501':
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
@@ -224,6 +239,17 @@ paths:
     get:
       operationId: getDeliveryIntent
       summary: One delivery intent with its full append-only attempt history.
+      description: >-
+        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        unauthenticated request is refused upstream by the node's auth middleware
+        (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
+        /delivery surface is admin-only, reads included, because a delivery intent's lineage
+        does not always reach a product and so a product-scoped key cannot be confined to one
+        (EDR-DELIVERY-01 D15). On a node with inbound auth disabled there is no principal at
+        all and the whole /api/v1 surface is open, exactly as for every other route. A 501
+        means this node does not serve the operator surface: it is OFF BY DEFAULT while the
+        API addition awaits owner approval - set THEMIS_DELIVERY_OPERATOR_API=1 to enable it.
+        Delivery intents are recorded, sent and dead-lettered either way.
       parameters:
         - name: id
           in: path
@@ -237,9 +263,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
+        '401':
+          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
+          $ref: '#/components/responses/Problem'
+        '501':
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
@@ -250,6 +280,17 @@ paths:
         Re-open a dead-lettered or cancelled intent for the workers - PENDING again, attempts
         back to zero, due immediately. The attempt HISTORY is kept: a retry adds a chapter, it
         does not erase one. Refused (409) on a PENDING or DELIVERED intent.
+      description: >-
+        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        unauthenticated request is refused upstream by the node's auth middleware
+        (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
+        /delivery surface is admin-only, reads included, because a delivery intent's lineage
+        does not always reach a product and so a product-scoped key cannot be confined to one
+        (EDR-DELIVERY-01 D15). On a node with inbound auth disabled there is no principal at
+        all and the whole /api/v1 surface is open, exactly as for every other route. A 501
+        means this node does not serve the operator surface: it is OFF BY DEFAULT while the
+        API addition awaits owner approval - set THEMIS_DELIVERY_OPERATOR_API=1 to enable it.
+        Delivery intents are recorded, sent and dead-lettered either way.
       parameters:
         - name: id
           in: path
@@ -263,11 +304,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
+        '401':
+          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '501':
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
@@ -278,6 +323,17 @@ paths:
         Withdraw a PENDING intent. The record survives as the statement that a human decided
         this outward action should not happen. Cancelling an already-cancelled intent is a
         no-op success; anything else (DELIVERED, DEAD_LETTER) is refused (409).
+      description: >-
+        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        unauthenticated request is refused upstream by the node's auth middleware
+        (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
+        /delivery surface is admin-only, reads included, because a delivery intent's lineage
+        does not always reach a product and so a product-scoped key cannot be confined to one
+        (EDR-DELIVERY-01 D15). On a node with inbound auth disabled there is no principal at
+        all and the whole /api/v1 surface is open, exactly as for every other route. A 501
+        means this node does not serve the operator surface: it is OFF BY DEFAULT while the
+        API addition awaits owner approval - set THEMIS_DELIVERY_OPERATOR_API=1 to enable it.
+        Delivery intents are recorded, sent and dead-lettered either way.
       parameters:
         - name: id
           in: path
@@ -291,11 +347,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
+        '401':
+          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '501':
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'

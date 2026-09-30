@@ -38,6 +38,10 @@ import (
 // `TestDeliveryIntents_AdminOnly` enumerates all four routes × three refused principals, so a
 // fifth route added without this call fails the matrix. That is the only place completeness can
 // be checked mechanically.
+//
+// A 401 never comes from here. An unauthenticated request is refused upstream by the node's
+// `auth.RequireAPIKey` middleware and never reaches a handler; what this function decides is the
+// 403, i.e. an authenticated principal that is not admin.
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := auth.PrincipalFrom(r.Context())
 	if !ok {
@@ -51,14 +55,27 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// intentSurfaceUnavailable answers the four /delivery routes when this node does not serve them,
+// which at N-M1a has ONE cause worth stating: the operator surface is OFF BY DEFAULT because the
+// API addition is an outstanding must-ask (EDR-DELIVERY-01 D15). An operator who hits this needs
+// to know it is a switch and which switch, not that something is broken — so the refusal names
+// the variable. Recording, sending, retrying and dead-lettering all run regardless; only this
+// read/mutate surface is gated, which is why the detail says where the counts still are.
+func intentSurfaceUnavailable(w http.ResponseWriter) {
+	writeProblem(w, http.StatusNotImplemented, "delivery-intent operator API not enabled",
+		"this node does not serve /delivery/intents: set THEMIS_DELIVERY_OPERATOR_API=1 to enable it. "+
+			"It is off by default while the API addition awaits owner approval (EDR-DELIVERY-01 D15). "+
+			"Delivery intents are still recorded, sent and dead-lettered; see the node log and "+
+			"scripts/vm-verify.sh for their counts.")
+}
+
 // ListDeliveryIntents handles GET /delivery/intents?status=&kind=&limit=&offset=.
 func (h *Handler) ListDeliveryIntents(w http.ResponseWriter, r *http.Request, params gen.ListDeliveryIntentsParams) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
 	if h.intents == nil {
-		writeProblem(w, http.StatusNotImplemented, "delivery intents not configured",
-			"this node has no outward-delivery service wired")
+		intentSurfaceUnavailable(w)
 		return
 	}
 	// The OpenAPI declares `limit` with `default: 50`, and oapi-codegen does NOT bind a
@@ -107,8 +124,7 @@ func (h *Handler) GetDeliveryIntent(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 	if h.intents == nil {
-		writeProblem(w, http.StatusNotImplemented, "delivery intents not configured",
-			"this node has no outward-delivery service wired")
+		intentSurfaceUnavailable(w)
 		return
 	}
 	intent, attempts, err := h.intents.GetIntent(r.Context(), id)
@@ -147,8 +163,7 @@ func (h *Handler) transitionIntent(w http.ResponseWriter, r *http.Request, id, t
 		return
 	}
 	if h.intents == nil {
-		writeProblem(w, http.StatusNotImplemented, "delivery intents not configured",
-			"this node has no outward-delivery service wired")
+		intentSurfaceUnavailable(w)
 		return
 	}
 	intent, err := apply(r, id)

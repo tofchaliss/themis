@@ -79,6 +79,46 @@ guard fails the matrix, which is the only place completeness can be checked mech
 - `cmd/authadmin`: `validScopes` accepts the vocabulary and names the offender otherwise; the
   usage text mentions `delivery:callback` and `product:<id>`.
 
+## Acceptance criteria as BUILT (authoritative for N-M1a)
+
+`phase3-*` changes carry no `specs/` deltas, so this section and the EDR are the system of record
+for what N-M1a actually guarantees. Where the step's original wording and this section differ, the
+difference is named here on purpose and the reason is cited — reading the original wording as still
+current is the regression this section exists to prevent.
+
+| # | Criterion, as built | Deviation from the step's wording |
+|---|---|---|
+| 1 | Migrations create **`delivery_intents`** and **`delivery_attempts`** in the `communication` DATABASE, default (`public`) schema, and reverse cleanly | The step writes `communication.delivery_intents`; that names the database, not a Postgres schema. This repo is database-per-context and no Communication table is schema-qualified (`publications`, `communication_outbox`, `publishable_positions`, `release_rollups`). Asserted by `TestDeliveryIntentMigrations_SchemaMatchesTheStore` |
+| 2 | `delivery_intents` carries a UNIQUE index on **`(origin_event_id, origin_event_type, kind, destination)`** | **Named deviation.** The step says `origin_event_seq`. The kernel `Envelope` carries no seq; `event_log.envelope_id` is the bus's own `UNIQUE` dedup key and the publisher is idempotent on it. Reason of record EDR-DELIVERY-01 **D11**; approval pending as `tasks.md` 2.0b. There is no `origin_event_seq` column anywhere in the schema |
+| 3 | `governance.finding_opened` ⇒ exactly one PENDING `jira_issue` intent, non-empty `payload_hash`, **no sender contacted** — structurally, since the consumer holds no sender | none |
+| 4 | `governance.proposal_accepted` ⇒ `ci_build` + `email` with harness-execution evidence, `email` alone without | Structurally complete, **dormant on a real estate**: `governance.proposal_accepted.v1` is `additionalProperties: false` over four fields and states no evidence schema, and N-M1a changes no event schema. Tests stub the payload; M2 adds the field. Stated at startup by the node |
+| 5 | Worker: `fail` + max_attempts=3 ⇒ DEAD_LETTER, `last_error` set, 3 history rows; `success` ⇒ DELIVERED, 1 row | none |
+| 6 | Operator API: list by status/kind, retry a DEAD_LETTER to PENDING with attempts zeroed, cancel a PENDING, 403 for non-admin | **Named deviation: OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves the routes; unset, they answer `501` naming the switch. The API addition is an unapproved must-ask (`tasks.md` 2.0a). Recording, sending, retry and dead-lettering are NOT gated |
+| 7 | Coverage: `domain`/`app` 100%, adapters ≥90%, store ≥80% | none |
+| 8 | `deploy/node.env.example` documents every `THEMIS_DELIVERY_*` knob inline (R2) | none |
+| 9 | `scripts/vm-verify.sh` prints a delivery summary, non-fatal when the tables are absent | none |
+
+### Verifying criterion 9 by hand
+
+The line is `delivery: pending=… delivered=… dead_letter=… cancelled=…`, printed in the
+"Pipeline" block with an `EDR-DELIVERY-01 N-M1a` comment above it. Graceful degradation is
+structural rather than conditional: `q()` runs `psql … 2>/dev/null`, and the script sets
+`-uo pipefail` but **not** `-e`, so a query against a missing table yields an empty string and the
+run continues. All four counts empty ⇒ the `n/a (no delivery_intents table — node predates
+outward actions N-M1a)` branch. To confirm on a live host:
+
+```sh
+# 1. Expect the n/a line: point the script at a database with no delivery_intents table.
+psql "$PGBASE/communication?sslmode=disable" -c 'ALTER TABLE delivery_intents RENAME TO delivery_intents_x'
+PGBASE="$PGBASE" ./scripts/vm-verify.sh | grep delivery:
+# 2. Put it back, expect the counts line.
+psql "$PGBASE/communication?sslmode=disable" -c 'ALTER TABLE delivery_intents_x RENAME TO delivery_intents'
+PGBASE="$PGBASE" ./scripts/vm-verify.sh | grep delivery:
+```
+
+Step 1 is the only mutation in this procedure and it is reversible by step 2; do it on a dev
+estate, never on the one being verified.
+
 ## What the N-M1a tests pin
 
 - **The event path sends nothing** (`adapters/inbound`): a `finding_opened` envelope yields exactly

@@ -69,6 +69,7 @@ type config struct {
 	deliveryFakeJiraMode  string        // THEMIS_DELIVERY_FAKE_JIRA_MODE — success | fail | flaky. N-M1a ships FAKE senders only (default success).
 	deliveryFakeEmailMode string        // THEMIS_DELIVERY_FAKE_EMAIL_MODE — success | fail | flaky (default success).
 	deliveryFakeCIMode    string        // THEMIS_DELIVERY_FAKE_CI_MODE — success | fail | flaky (default success).
+	deliveryOperatorAPI   bool          // THEMIS_DELIVERY_OPERATOR_API=1 — serve the four /delivery/intents routes. OFF by default: the API addition is an outstanding must-ask (EDR-DELIVERY-01 D15). Recording, the workers and dead-lettering run either way.
 }
 
 func loadConfig() config {
@@ -98,6 +99,7 @@ func loadConfig() config {
 		deliveryFakeJiraMode:  os.Getenv("THEMIS_DELIVERY_FAKE_JIRA_MODE"),
 		deliveryFakeEmailMode: os.Getenv("THEMIS_DELIVERY_FAKE_EMAIL_MODE"),
 		deliveryFakeCIMode:    os.Getenv("THEMIS_DELIVERY_FAKE_CI_MODE"),
+		deliveryOperatorAPI:   os.Getenv("THEMIS_DELIVERY_OPERATOR_API") == "1",
 	}
 }
 
@@ -120,6 +122,7 @@ func (c config) outwardConfig() wiring.OutwardConfig {
 			domain.DeliveryEmail:     delivery.ParseFakeMode(c.deliveryFakeEmailMode),
 			domain.DeliveryCIBuild:   delivery.ParseFakeMode(c.deliveryFakeCIMode),
 		},
+		OperatorAPI: c.deliveryOperatorAPI,
 	}
 }
 
@@ -354,6 +357,17 @@ func logDeliveryState(ctx context.Context, comm wiring.Communication, cfg config
 	if cfg.deliveryEnableCI {
 		logger.Info("ci_build intents are DORMANT: governance.proposal_accepted carries no evidence schema yet, " +
 			"so an acceptance records only the e-mail intent (M2 adds the field). The worker is enabled and idle.")
+	}
+
+	// Whether the operator has a window onto all this is worth one unambiguous line. Off, a
+	// dead letter still happens and is still counted — it just cannot be retried over the API,
+	// and an operator who does not know that would read a 501 as a broken node.
+	if cfg.deliveryOperatorAPI {
+		logger.Info("delivery-intent operator API ENABLED at /api/v1/delivery/intents (admin-only, reads included)")
+	} else {
+		logger.Info("delivery-intent operator API DISABLED (default): /api/v1/delivery/intents answers 501. " +
+			"Set THEMIS_DELIVERY_OPERATOR_API=1 to serve it. Failures are still recorded and counted — " +
+			"see the dead_letter line in scripts/vm-verify.sh — but cannot be retried or cancelled over HTTP.")
 	}
 
 	counts, err := comm.Intents.IntentCounts(ctx)

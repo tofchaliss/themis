@@ -372,6 +372,67 @@ func TestDeliveryIntentMigrations_ReverseAndReapply(t *testing.T) {
 	}
 }
 
+// The migrations and the store must describe the SAME schema. The round-trip test proves the
+// columns the store touches work; this one proves the migration defines exactly them — no column
+// the code writes is missing (a runtime error on first insert) and no column it never reads is
+// left behind (dead schema that the next author has to guess about). Both tables are checked,
+// because "two tables with these columns" is the step's acceptance criterion.
+//
+// On the SCHEMA NAME: the acceptance text says `communication.delivery_intents`, which names the
+// communication DATABASE, not a Postgres schema. This repository is database-per-context and every
+// Communication table lives in the default `public` schema (`publications`, `communication_outbox`,
+// `publishable_positions`, `release_rollups` — none of them schema-qualified), so these two follow
+// that convention. Asserted here so the reading is on the record rather than inferred.
+func TestDeliveryIntentMigrations_SchemaMatchesTheStore(t *testing.T) {
+	pool := newPool(t)
+
+	for table, want := range map[string][]string{
+		"delivery_intents": {
+			"attempts", "created_at", "destination", "finding_id", "id", "kind", "last_error",
+			"max_attempts", "next_attempt_at", "origin_event_id", "origin_event_time",
+			"origin_event_type", "payload_bytes", "payload_hash", "position_version", "product_id",
+			"release_id", "snapshot", "status", "updated_at",
+		},
+		"delivery_attempts": {
+			"attempt_no", "attempted_at", "error", "id", "intent_id", "ok",
+		},
+	} {
+		got := columnsOf(t, pool, table)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s columns:\n got %v\nwant %v", table, got, want)
+		}
+		if schema := scalar(t, pool, `SELECT table_schema FROM information_schema.tables
+			WHERE table_name = $1`, table); schema != "public" {
+			t.Errorf("%s lives in schema %q, want public (database-per-context)", table, schema)
+		}
+	}
+}
+
+// columnsOf returns one table's column names, sorted, so the comparison does not depend on the
+// order the migration happens to declare them in.
+func columnsOf(t *testing.T, pool *pgxpool.Pool, table string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT column_name FROM information_schema.columns
+		 WHERE table_name = $1 ORDER BY column_name`, table)
+	if err != nil {
+		t.Fatalf("columns of %s: %v", table, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("columns of %s: %v", table, err)
+	}
+	return out
+}
+
 func ids(intents []domain.DeliveryIntent) []string {
 	out := make([]string, 0, len(intents))
 	for _, in := range intents {

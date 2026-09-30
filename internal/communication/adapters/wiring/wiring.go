@@ -46,6 +46,13 @@ type OutwardConfig struct {
 	Interval  time.Duration
 	EnableFor map[domain.DeliveryKind]bool
 	FakeModes map[domain.DeliveryKind]commdelivery.FakeMode
+
+	// OperatorAPI serves the four /delivery/intents routes. It is OFF by default (the zero
+	// value), because the API addition is an outstanding must-ask (EDR-DELIVERY-01 D15): a
+	// route nobody approved must not appear on a node just because the binary contains it.
+	// Off, the routes answer 501 naming the switch; everything else — recording, the workers,
+	// retry, dead-lettering — is unaffected, because none of it runs through HTTP.
+	OperatorAPI bool
 }
 
 // Communication bundles the wired components for a composition root: the REST handler, the
@@ -88,8 +95,18 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 	// and nothing else, which is the whole separation: the event path has no sender to call.
 	intents := app.NewDeliveryIntentService(st, idGen{}, clock, outward.Intents)
 
+	// The operator API is the ONLY gated half. The handler is given the service only when the
+	// node opts in; otherwise `h.intents` stays nil and the four routes answer 501 naming the
+	// switch. Note what is NOT behind the gate: the consumer still records intents and the
+	// workers still send them, so a node with the surface off still does every outward action —
+	// it just has no HTTP window onto them (the log and scripts/vm-verify.sh remain).
+	api := commhttp.NewHandler(write, read).WithRollups(rollups)
+	if outward.OperatorAPI {
+		api = api.WithDeliveryIntents(intents)
+	}
+
 	return Communication{
-		Handler:       commhttp.NewHandler(write, read).WithRollups(rollups).WithDeliveryIntents(intents).Router(),
+		Handler:       api.Router(),
 		Store:         st,
 		Consumer:      inbound.NewConsumer(write).WithDeliveryIntents(intents),
 		Delivery:      app.NewDeliveryService(st, deliverer, redactor, clock),

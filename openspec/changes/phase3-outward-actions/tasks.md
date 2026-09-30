@@ -54,32 +54,80 @@ truth), so `openspec validate` reporting "no deltas" is expected; archive with
 The record + the isolated workers + the operator surface. All of it in the Communication context;
 senders are FAKES (D13) — real Jira/SMTP/CI are M2/M3.
 
-- [ ] **2.0 MUST-ASK, OUTSTANDING — the API change is NOT approved.** CLAUDE.md puts "API change"
-      on the must-ask list, and N-M1a adds four routes to `api/communication.openapi.yaml`:
+- [ ] **2.0a MUST-ASK, OUTSTANDING — the API change is NOT approved, and the routes are OFF BY
+      DEFAULT until it is.** CLAUDE.md puts "API change" on the must-ask list, and N-M1a adds four
+      routes to `api/communication.openapi.yaml`:
       `GET /delivery/intents`, `GET /delivery/intents/{id}`, `POST /delivery/intents/{id}/retry`,
-      `POST /delivery/intents/{id}/cancel`. They are implemented because the step's own requirement
-      is that "a person can see failed requests, retry them or cancel them", and an API is the only
-      surface this repository has for that (no GUI is in scope). **No approval has been recorded**,
-      so this item stays open until the owner gives one. What is being asked for:
+      `POST /delivery/intents/{id}/cancel`.
+      **Resolution taken while approval is pending:** the surface is gated on
+      `THEMIS_DELIVERY_OPERATOR_API` and the default is OFF — `wiring.Wire` hands the handler the
+      intent service only when the flag is set, so on a default node the four routes answer `501`
+      with a detail naming the switch. Nothing else is gated: intents are still recorded by the
+      event reader, still sent by the workers, still retried and still dead-lettered, and their
+      counts still reach the startup log and `scripts/vm-verify.sh`.
+      **The honest cost of that default:** on a node that has not set the flag, a dead letter can be
+      SEEN (counts) but not retried or cancelled over the API, so the step's "a person can retry
+      them or cancel them" is one env var away rather than in the box. That is the conservative
+      reading of a must-ask, not a claim that it is equivalent. Flipping the default is a
+      one-line change in `cmd/communication` the moment approval is recorded.
+      What is being asked for:
       - **Why:** a dead-lettered outward action is invisible and un-redrivable without it; the
         milestone ships the failures and the means to see them in the same step, deliberately.
       - **Alternatives considered:** (a) a read-only list with no retry/cancel — leaves an operator
         able to see a failure and unable to act on it, and a `psql` UPDATE then becomes the
-        remediation path, which is a mutation outside the event stream; (b) a `scripts/` SQL report
-        instead of routes — same objection, and it cannot mutate through the API either; (c) gating
-        the routes behind an off-by-default flag — makes the deployed default a node where failures
-        are invisible, which is the condition this step exists to remove.
-      - **Impact:** additive only. Four new paths, two new schemas (`DeliveryIntent`,
-        `DeliveryAttempt`); no existing path, schema or response shape changes; problem bodies use
-        the existing `Problem` envelope. **Admin-only, reads included** (D15), so no new capability
-        reaches a non-admin key. Unwired ⇒ `501`, so a node that does no outward delivery is
-        unaffected.
+        remediation path, i.e. a mutation outside the event stream; (b) a `scripts/` SQL report
+        instead of routes — same objection, and it cannot mutate through the API either;
+        (c) deferring the whole operator half to a later milestone — ships the failures without the
+        means to act on them, which is the one combination this step exists to avoid;
+        (d) **the off-by-default flag — CHOSEN**, because it is the only option that leaves the
+        approved surface area unchanged on a default node while keeping the capability built,
+        tested and one variable away.
+      - **Impact:** additive only, and dormant unless switched on. Four new paths, two new schemas
+        (`DeliveryIntent`, `DeliveryAttempt`); no existing path, schema or response shape changes;
+        problem bodies use the existing `Problem` envelope. **Admin-only, reads included** (D15), so
+        even enabled it grants no non-admin capability.
       - **Files:** `api/communication.openapi.yaml`, `internal/communication/adapters/http/gen/…`
-        (generated), `adapters/http/handler_delivery_intents.go` (+ its test).
-      - **If refused:** revert the four paths and the two schemas, regenerate, and delete
-        `handler_delivery_intents.go`; the record, the workers and the dead-lettering all keep
-        working, and the operator's view falls back to `scripts/vm-verify.sh`'s counts with no way
-        to retry or cancel.
+        (generated), `adapters/http/handler_delivery_intents.go` (+ its test),
+        `adapters/wiring/wiring.go` (the gate), `cmd/communication/main.go` (the flag + the
+        startup line that states which way it is set), `deploy/node.env.example`.
+      - **If refused:** revert the four paths and the two schemas, regenerate, delete
+        `handler_delivery_intents.go` and `OutwardConfig.OperatorAPI`; the record, the workers and
+        the dead-lettering all keep working untouched, and the operator's view stays
+        `scripts/vm-verify.sh`'s counts with no way to retry or cancel.
+      - **If approved:** flip the default in `cmd/communication.loadConfig` (one line:
+        `envBoolDefaultOn("THEMIS_DELIVERY_OPERATOR_API")`), and update
+        `deploy/node.env.example` + EDR D15.
+
+- [ ] **2.0b MUST-ASK, OUTSTANDING — the dedup key deviates from the step's stated column, and the
+      deviation needs an owner's yes.** The step names
+      `(origin_event_seq, origin_event_type, kind, destination)`; the implementation enforces
+      `(origin_event_id, origin_event_type, kind, destination)`. The reason of record is
+      EDR-DELIVERY-01 **D11**, and the three facts under it are verified in this tree:
+      - `internal/kernel/event/envelope.go` — the kernel `Envelope` has **no `seq` field**. The bus
+        `seq` is the reader's cursor key (`internal/platform/eventbus/reader.go`: "the seq is not
+        part of the wire Envelope"), scanned into the reader's private `stamped` struct and never
+        handed to `Consumer.Handle`. A consuming context cannot see it.
+      - `internal/platform/eventbus/migrations/000001_bus.up.sql` — `event_log.envelope_id` is
+        `NOT NULL UNIQUE` and is commented "UNIQUE = at-most-once append + dedup key (D5)". The
+        envelope id is therefore **the bus's own dedup identity**, one-to-one with `seq`.
+      - `internal/platform/eventbus/publisher.go` — the append is `ON CONFLICT (envelope_id) DO
+        NOTHING`, so the publisher is idempotent on exactly that identity.
+      So keying on the envelope id gives the guarantee the step asked for — one intent per (causing
+      event, kind, destination), whatever the bus replays — using the identity the bus itself
+      dedups on, while `seq` would key on a value derived from it that the consumer cannot read.
+      - **Alternative considered and rejected:** carry `seq` into the `Envelope` (or widen
+        `Consumer.Handle`). That is a kernel change visible to **every** context and to the bus, to
+        surface a transport cursor inside business adapters — itself a must-ask ("domain model
+        change"), and a larger blast radius than the thing it would fix.
+      - **If refused:** the migration is unapplied on any estate, so realigning is
+        `000006`'s column plus `SaveIntent`'s `ON CONFLICT`, `DeliveryOrigin`, the snapshot doc and
+        the tests — after the kernel `Envelope` grows the field, which is the change that has to
+        come first.
+      - **Consistency is done on the code side already:** nothing in the tree asserts or stores a
+        `origin_event_seq` — the migration says so outright, the index is asserted column-by-column
+        against `pg_indexes` by `TestDeliveryIntent_UniquePerOriginKindDestination` (including a
+        negative assertion that no seq appears in it), and the authoritative restatement of the
+        acceptance criteria is in `design.md` under "Acceptance criteria as BUILT".
 
 - [x] 2.1 `internal/communication/domain/delivery_intent.go`: the `DeliveryIntent` aggregate —
       `DeliveryKind` (`jira_issue`/`email`/`ci_build`) and `IntentStatus`
