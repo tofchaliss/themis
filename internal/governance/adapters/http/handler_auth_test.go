@@ -5,11 +5,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/platform/auth"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // EXPLICIT write-scope authorization on the Governance write surface (EDR-DELIVERY-01 N-M0,
@@ -28,17 +34,30 @@ import (
 // test), with the Registry product seam stubbed.
 func authzServer(t *testing.T, repo *fakeRepo, products govhttp.ProductResolver, scopes *[]string) *httptest.Server {
 	t.Helper()
+	return authzServerWithLogger(t, repo, products, scopes, nil)
+}
+
+// authzServerWithLogger is the same, with the shared logger attached — the half of a refusal the
+// response withholds. The wrapper echoes a caller's correlation id onto the response exactly as
+// observability.RequestLogger does, because that is where the handler reads it from.
+func authzServerWithLogger(t *testing.T, repo *fakeRepo, products govhttp.ProductResolver,
+	scopes *[]string, logger *observability.Logger,
+) *httptest.Server {
+	t.Helper()
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{}).WithAdvisor(fakeAdvisor{
 		produced: true,
 		rec:      app.Recommendation{Stance: "affected", Confidence: 0.9, Reasoning: "KEV-listed", Capability: "recommend_position@v1"},
 	})
 	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
-	h := govhttp.NewHandler(write, read)
+	h := govhttp.NewHandler(write, read).WithLogger(logger)
 	if products != nil {
 		h = h.WithProductResolver(products)
 	}
 	router := h.Router()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cid := r.Header.Get(observability.CorrelationHeader); cid != "" {
+			w.Header().Set(observability.CorrelationHeader, cid)
+		}
 		ctx := auth.WithPrincipal(r.Context(), auth.Principal{KeyID: "k-1", Name: "test", Scopes: *scopes})
 		router.ServeHTTP(w, r.WithContext(ctx))
 	}))
@@ -297,6 +316,93 @@ func TestWriteToUnknownFindingIsNotFound(t *testing.T) {
 		map[string]any{"stance": "affected"}); status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", status, body)
 	}
+}
+
+// A refusal states the RULE and never the estate. The 403 body is the one surface an
+// unauthorized caller is guaranteed to read, so it must not carry the owning product id, the
+// Registry endpoint, or a transport error — those answer questions the caller was just refused
+// permission to ask. The operator loses nothing: the log line carries strictly more, keyed by
+// correlation id (R1).
+func TestRefusalWithholdsEstateDetailFromTheCallerButLogsIt(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := observability.New(zap.New(core))
+
+	repo := newRepo()
+	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
+	scopes := []string{auth.ProductScopePrefix + "prod-2"}
+	srv := authzServerWithLogger(t, repo, stubProducts{byRelease: map[string]string{"rel-1": "prod-1"}}, &scopes, logger)
+
+	// (a) wrong product: the product that DOES own the Finding must not appear on the wire.
+	status, body := doWithCorrelation(t, srv.URL+"/findings/fnd-1/proposals",
+		map[string]any{"stance": "affected"}, "cid-42")
+	if status != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", status, body)
+	}
+	if strings.Contains(string(body), "prod-1") {
+		t.Errorf("the owning product leaked to an unauthorized caller: %s", body)
+	}
+
+	// (b) unresolvable product: the transport detail must not appear either.
+	down := newRepo()
+	down.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
+	downScopes := []string{auth.ProductScopePrefix + "prod-1"}
+	downSrv := authzServerWithLogger(t, down,
+		stubProducts{err: errors.New("dial tcp 10.0.3.7:8082: connection refused")}, &downScopes, logger)
+	status, body = do(t, http.MethodPost, downSrv.URL+"/findings/fnd-1/proposals", map[string]any{"stance": "affected"})
+	if status != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", status, body)
+	}
+	for _, leak := range []string{"10.0.3.7", "connection refused", "dial tcp"} {
+		if strings.Contains(string(body), leak) {
+			t.Errorf("deployment internals leaked to the caller (%q): %s", leak, body)
+		}
+	}
+
+	// And the operator half: both refusals are on the log, with the identity, the resource, the
+	// reason, and — for (b) — the underlying error the response withheld.
+	entries := logs.FilterMessage("governance write refused").All()
+	if len(entries) != 2 {
+		t.Fatalf("logged %d refusals, want 2", len(entries))
+	}
+	first := entries[0].ContextMap()
+	if first["key_id"] != "k-1" || first["finding_id"] != "fnd-1" || first["release_id"] != "rel-1" {
+		t.Errorf("the log must identify who and what: %v", first)
+	}
+	if first["correlation_id"] != "cid-42" {
+		t.Errorf("correlation_id = %v, want cid-42 — a refusal must line up with its request", first["correlation_id"])
+	}
+	if r, _ := first["reason"].(string); !strings.Contains(r, "different product") {
+		t.Errorf("reason = %v, want the wrong-product rule named", first["reason"])
+	}
+	// The operator's whole question on a wrong-product refusal — and precisely what the caller
+	// may not be told.
+	if first["owning_product_id"] != "prod-1" {
+		t.Errorf("owning_product_id = %v, want prod-1 on the log", first["owning_product_id"])
+	}
+	second := entries[1].ContextMap()
+	if e, _ := second["error"].(string); !strings.Contains(e, "connection refused") {
+		t.Errorf("the withheld cause must reach the log, got %v", second["error"])
+	}
+}
+
+// doWithCorrelation posts with a caller-supplied correlation id, the id the node echoes and the
+// refusal is logged against.
+func doWithCorrelation(t *testing.T, url string, body map[string]any, cid string) (int, []byte) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(b)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set(observability.CorrelationHeader, cid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var buf [4096]byte
+	n, _ := resp.Body.Read(buf[:])
+	return resp.StatusCode, buf[:n]
 }
 
 // A scope outside the closed vocabulary authorizes nothing. It used to authorize EVERY write:

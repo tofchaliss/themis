@@ -97,6 +97,11 @@ func TestRequireWriteScope(t *testing.T) {
 		{"POST admin passes", http.MethodPost, &Principal{Scopes: []string{ScopeAdmin}}, http.StatusOK},
 		{"POST product-scoped passes", http.MethodPost, &Principal{Scopes: []string{ProductScopePrefix + "p1"}}, http.StatusOK},
 		{"POST read-only forbidden", http.MethodPost, &Principal{Scopes: []string{ScopeRead}}, http.StatusForbidden},
+		// The closed vocabulary at the seam every non-Governance context mounts (EDR-DELIVERY-01
+		// D5). These three used to pass — the floor granted write to anything that was not `read`.
+		{"POST unknown scope forbidden", http.MethodPost, &Principal{Scopes: []string{"governance:write"}}, http.StatusForbidden},
+		{"POST typo'd product scope forbidden", http.MethodPost, &Principal{Scopes: []string{"produc:p1"}}, http.StatusForbidden},
+		{"POST delivery callback forbidden", http.MethodPost, &Principal{Scopes: []string{ScopeDeliveryCallback}}, http.StatusForbidden},
 		{"DELETE no principal unauthorized", http.MethodDelete, nil, http.StatusUnauthorized},
 	}
 	for _, tt := range tests {

@@ -26,6 +26,7 @@ import (
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/platform/auth"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // Handler implements gen.ServerInterface over the Governance write + read services.
@@ -36,6 +37,9 @@ type Handler struct {
 	// seam is unconfigured, and a product-scoped key can then write NOTHING (fail-closed);
 	// admin is unaffected, so a node without the Registry seam still operates.
 	products ProductResolver
+	// logger carries the DETAIL of an authorization refusal, which the HTTP response
+	// deliberately does not (R1; see authorizeGovernanceWrite). Never nil.
+	logger *observability.Logger
 }
 
 // ProductResolver is the read seam behind product-scope confinement: which product owns a
@@ -45,9 +49,10 @@ type ProductResolver interface {
 	ProductOfRelease(ctx context.Context, releaseID string) (string, error)
 }
 
-// NewHandler builds a Handler.
+// NewHandler builds a Handler. Logging is off until WithLogger is called (a no-op logger, as in
+// the Intelligence handler), so a test needs no observability wiring.
 func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
-	return &Handler{write: write, read: read}
+	return &Handler{write: write, read: read, logger: observability.Nop()}
 }
 
 // WithProductResolver attaches the Registry read seam that confines a `product:<id>` key to its
@@ -55,6 +60,16 @@ func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
 // refusal is deliberate: a scope that cannot be checked must not be honoured.
 func (h *Handler) WithProductResolver(pr ProductResolver) *Handler {
 	h.products = pr
+	return h
+}
+
+// WithLogger attaches the shared logger (R1: console + OTel from one call). A nil logger keeps
+// the no-op. It is what makes the deliberately vague authorization refusals diagnosable: the
+// caller is told only that the write was refused, the operator is told exactly why.
+func (h *Handler) WithLogger(l *observability.Logger) *Handler {
+	if l != nil {
+		h.logger = l
+	}
 	return h
 }
 
@@ -284,6 +299,14 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request, faultli
 // resource, which is exactly why it could never confine a product key (EDR-SECURITY-01 D4
 // realization note; the gap EDR-HARNESS-01 D4 carried forward).
 //
+// WHAT THE CALLER IS TOLD. A refusal states the RULE and never the estate: which product owns
+// the Finding, whether Registry answered, what a transport error said — all of it goes to the
+// log (R1, with the key id, Finding, release and correlation id) and none of it to the response.
+// A 403 body is the one surface an unauthorized caller is guaranteed to read; "cannot resolve
+// product for release X: dial tcp 10.0.3.7:8082: connection refused" answers questions they were
+// refused permission to ask. The operator loses nothing — they have the log line, which carries
+// strictly more.
+//
 // Returns true when the request may proceed; it has already written the Problem envelope
 // otherwise.
 func (h *Handler) authorizeGovernanceWrite(w http.ResponseWriter, r *http.Request, findingID string) bool {
@@ -291,7 +314,10 @@ func (h *Handler) authorizeGovernanceWrite(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return true
 	}
+	refusal := writeRefusal{principal: p, findingID: findingID}
 	if p.IsDeliveryCallback() {
+		refusal.reason = "delivery-callback key on a Governance write"
+		h.logRefusal(w, r, refusal)
 		writeProblem(w, http.StatusForbidden, "Forbidden",
 			"a "+auth.ScopeDeliveryCallback+" key may not write to Governance")
 		return false
@@ -300,41 +326,102 @@ func (h *Handler) authorizeGovernanceWrite(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	if !p.HasScopePrefix(auth.ProductScopePrefix) {
+		refusal.reason = "key holds neither admin nor a product scope"
+		h.logRefusal(w, r, refusal)
 		writeProblem(w, http.StatusForbidden, "Forbidden",
 			"this write requires "+auth.ScopeAdmin+" or "+auth.ProductScopePrefix+"<product-id>")
 		return false
 	}
-	productID, err := h.productOfFinding(r.Context(), findingID)
+	productID, releaseID, err := h.productOfFinding(r.Context(), findingID)
+	refusal.releaseID, refusal.productID = releaseID, productID
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeProblem(w, http.StatusNotFound, "finding not found", err.Error())
+			writeProblem(w, http.StatusNotFound, "finding not found", "no such Finding")
 			return false
 		}
-		// Fail closed, and say which half could not be established — an operator reading
-		// "Registry unreachable" fixes a different thing than one reading "wrong product".
+		refusal.reason, refusal.err = "product could not be resolved (fail-closed)", err
+		h.logRefusal(w, r, refusal)
+		// Deliberately incurious about WHY, on the wire. An operator reading the log line knows
+		// whether to fix Registry or the key; the caller learns only that Themis would not act.
 		writeProblem(w, http.StatusForbidden, "Forbidden",
-			"cannot confine this key to the Finding's product: "+err.Error())
+			"the product this Finding belongs to could not be established, so the write was refused")
 		return false
 	}
 	if !p.HasProductScope(productID) {
+		refusal.reason = "key is scoped to a different product"
+		h.logRefusal(w, r, refusal)
 		writeProblem(w, http.StatusForbidden, "Forbidden",
-			"this key is not scoped to product "+productID)
+			"this key is not scoped to the product this Finding belongs to")
 		return false
 	}
 	return true
 }
 
+// writeRefusal is what the log is told about a refused write and the response is not. A struct
+// rather than six positional strings: `findingID`, `releaseID`, `productID` and `reason` are all
+// strings, so a swapped pair would compile and quietly mislabel an audit line.
+type writeRefusal struct {
+	principal auth.Principal
+	findingID string
+	releaseID string
+	productID string // the product that owns the Finding — set only once it resolved
+	reason    string
+	err       error
+}
+
+// logRefusal records the half of an authorization refusal the response withholds (R1: one call
+// tees console + OTel). Only the key ID identifies the caller — never the token, and no field
+// here carries anything the principal itself supplied.
+func (h *Handler) logRefusal(w http.ResponseWriter, r *http.Request, ref writeRefusal) {
+	fields := []observability.Field{
+		observability.String("reason", ref.reason),
+		observability.String("key_id", ref.principal.KeyID),
+		observability.String("finding_id", ref.findingID),
+		observability.String("method", r.Method),
+		observability.String("path", r.URL.Path),
+		observability.String("correlation_id", correlationID(w, r)),
+	}
+	if ref.releaseID != "" {
+		fields = append(fields, observability.String("release_id", ref.releaseID))
+	}
+	// The owning product goes to the LOG and never to the wire: "which product would have been
+	// required" is the operator's whole question on a wrong-product refusal, and is exactly what
+	// the caller may not be told.
+	if ref.productID != "" {
+		fields = append(fields, observability.String("owning_product_id", ref.productID))
+	}
+	if ref.err != nil {
+		fields = append(fields, observability.Err(ref.err))
+	}
+	// Warn, not Error: a refused write is the gate working. It becomes an operator's problem only
+	// when it repeats, which is what makes it worth a level above Info.
+	h.logger.Warn("governance write refused", fields...)
+}
+
+// correlationID reads the id RequestLogger derived for this request (it echoes it on the
+// response before the handler runs) and falls back to whatever the caller sent, so a refusal can
+// be lined up with the request record even on a node that mounts no request logger.
+func correlationID(w http.ResponseWriter, r *http.Request) string {
+	if cid := w.Header().Get(observability.CorrelationHeader); cid != "" {
+		return cid
+	}
+	return r.Header.Get(observability.CorrelationHeader)
+}
+
 // productOfFinding resolves the product a Finding belongs to: Finding → release → product. The
-// first hop is Governance's own store, the second the Registry read seam.
-func (h *Handler) productOfFinding(ctx context.Context, findingID string) (string, error) {
+// first hop is Governance's own store, the second the Registry read seam. The release id is
+// returned beside the product because a fail-closed refusal is logged with it — the operator's
+// first question is which release could not be resolved.
+func (h *Handler) productOfFinding(ctx context.Context, findingID string) (product, release string, err error) {
 	f, err := h.read.GetFinding(ctx, domain.FindingID(findingID))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if h.products == nil {
-		return "", errors.New("the Registry read seam is not configured on this node")
+		return "", f.ReleaseID(), errors.New("the Registry read seam is not configured on this node")
 	}
-	return h.products.ProductOfRelease(ctx, f.ReleaseID())
+	product, err = h.products.ProductOfRelease(ctx, f.ReleaseID())
+	return product, f.ReleaseID(), err
 }
 
 // --- writes (triage) -----------------------------------------------------------------

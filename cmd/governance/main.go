@@ -145,7 +145,7 @@ func main() {
 	}
 
 	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.evidenceURL,
-		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold,
+		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold, logger.Component("api"),
 		autoAcceptPolicies(cfg.autoAccept, logger)...)
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))

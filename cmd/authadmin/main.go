@@ -55,6 +55,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  read               read-only")
 	fmt.Fprintln(os.Stderr, "  product:<id>       write confined to that product's resources (UUID as registered)")
 	fmt.Fprintln(os.Stderr, "  delivery:callback  an outward delivery target calling back; NO Governance write")
+	fmt.Fprintln(os.Stderr, "\nAn unknown scope is refused at mint time, and no longer grants write when READ either:")
+	fmt.Fprintln(os.Stderr, "  a key already in api_keys whose scopes are outside this list has lost write capability.")
+	fmt.Fprintln(os.Stderr, "  Audit and re-mint:  SELECT id, name, scopes FROM api_keys WHERE revoked_at IS NULL;")
 	fmt.Fprintln(os.Stderr, "\nreads THEMIS_AUTH_DATABASE_DSN (THEMIS_AUTH_MIGRATE=1 applies migrations first)")
 }
 

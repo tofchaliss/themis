@@ -8,13 +8,15 @@ credential every governance write; the runtime holds no governance authority.
 | EDR decision | Realization |
 |---|---|
 | D1 Explicit per-route gate | `Handler.authorizeGovernanceWrite(w, r, findingID)` in `internal/governance/adapters/http/handler.go`; called first in all nine mutations (7 in `handler.go`, `CommissionFinding`/`WithdrawCommission` in `harness.go`) |
-| D1 `AuthorizeWrite` retired for Governance | no Governance call site remains; `auth.RequireWriteScope` (method floor, other contexts) unchanged |
-| D2 Callback refused on the scope | `Principal.IsDeliveryCallback()` checked FIRST, before the admin branch; `AuthorizeWrite` also skips `ScopeDeliveryCallback` |
+| D1 `AuthorizeWrite` retired for Governance | no Governance call site remains; `auth.RequireWriteScope` keeps its role (method floor, other contexts) |
+| D2 Callback refused on the scope | `Principal.IsDeliveryCallback()` checked FIRST, before the admin branch; `AuthorizeWrite` excludes it too |
 | D3 Finding → Release → Product | `Handler.productOfFinding` (store hop via `read.GetFinding`) + `registry.Client.ProductOfRelease` (`GET /api/v1/releases/{id}` → `project_id`, `GET /api/v1/projects/{id}` → `product_id`) |
-| D3 No cross-context import | `govhttp.ProductResolver` declared at the CONSUMER; `adapters/wiring` supplies the Registry client |
+| D3 No cross-context import | `govhttp.ProductResolver` declared at the CONSUMER; `adapters/wiring` supplies the Registry client and asserts `var _ govhttp.ProductResolver = (*registry.Client)(nil)` |
 | D4 Fail closed | resolver nil / transport error / non-200 / blank hop ⇒ 403; `store.ErrNotFound` ⇒ 404; `admin` never resolves |
 | D5 Closed vocabulary | `auth.ScopeDeliveryCallback`, `auth.KnownScope`; `validScopes` in `cmd/authadmin` refuses at mint time |
 | D5 Explicit helpers | `Principal.HasScopeExact` (with `HasScope` delegating to it), `HasScopePrefix`, `HasProductScope`, `IsDeliveryCallback` — none of them fold in admin |
+| D5 Closure at the READ end | `AuthorizeWrite() = IsAdmin() \|\| HasScopePrefix(ProductScopePrefix)` — every other scope, known or not, is refused by the floor in Knowledge/Evidence/Communication/Registry/Intelligence, not only at mint time |
+| D5a Refusal withholds the estate | generic 403 details; `writeRefusal` + `Handler.logRefusal` send key id, Finding, release, owning product, rule, correlation id and the withheld error to `observability.Logger` (`WithLogger`; no-op by default) |
 | D6 Edge-only, reads untouched | the check lives in the HTTP adapter; `domain`/`app` unchanged; no read route gated |
 | D7 Per-route, not middleware | the decision needs the resource; the route knows it, a path-parsing middleware would duplicate the router |
 
@@ -26,6 +28,17 @@ credential every governance write; the runtime holds no governance authority.
 EDR-SECURITY-01 D1 keeps free of scopes. The composition root (`adapters/wiring`) builds ONE
 Registry client and hands it to both seams — the fail-open blast-radius reader and the fail-closed
 product resolver — so a deployment cannot have one without the other.
+
+## Why the write floor had to close too
+
+Governance's explicit gate does not protect Knowledge, Evidence, Communication, Registry or
+Intelligence — those mount `RequireWriteScope`, whose whole decision is `AuthorizeWrite()`. Closing
+the vocabulary only at MINT time would have left every already-minted key with an unrecognized
+scope holding write access to all of them: the guarantee "these four scopes and nothing else" is
+made by the code that READS scopes, not by the code that writes them. So the floor now answers
+`admin ∪ product:<id>` and nothing else. It is a behaviour change outside this change's nominal
+blast radius, in the only safe direction, and it is the one place where a typo could previously be
+mistaken for authority.
 
 ## Why one guard line per handler beats one middleware
 
@@ -46,7 +59,12 @@ guard fails the matrix, which is the only place completeness can be checked mech
 - **Fail-closed**: Registry unreachable · release unknown · seam not wired ⇒ 403, while `admin`
   still writes. Unknown Finding ⇒ 404.
 - **Unknown scope authorizes nothing** — the regression that `AuthorizeWrite` used to allow.
-- `platform/auth`: the four helpers (admin implies nothing) and `KnownScope`'s closed list.
+- **A refusal leaks nothing, and logs everything**: the 403 body carries neither the owning
+  product nor the transport error, while the captured log (zap observer) carries key id, Finding,
+  release, owning product, rule, correlation id and the withheld cause.
+- `platform/auth`: the four helpers (admin implies nothing), `KnownScope`'s closed list, and
+  `AuthorizeWrite`'s closed write set — asserted both directly and through `RequireWriteScope`,
+  the seam every non-Governance context mounts.
 - `governance/adapters/registry`: both hops, and a blank hop returning an error rather than `""`.
 - `cmd/authadmin`: `validScopes` accepts the vocabulary and names the offender otherwise; the
   usage text mentions `delivery:callback` and `product:<id>`.

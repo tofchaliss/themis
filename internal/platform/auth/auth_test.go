@@ -103,6 +103,51 @@ func TestPrincipalExplicitScopeHelpers(t *testing.T) {
 	}
 }
 
+// The write floor is CLOSED, in every context (EDR-DELIVERY-01 D5). Only `admin` and
+// `product:<id>` are write-capable; everything else is refused by RequireWriteScope before any
+// handler runs.
+//
+// This is the finding that made the vocabulary's closure real rather than declared: the floor
+// used to grant write on the first scope that was not `read`, so a typo'd or invented grant was
+// indistinguishable from admin at every mutating endpoint outside Governance. Validating at mint
+// time stops NEW keys; it does nothing about the ones already in the table.
+func TestAuthorizeWriteIsClosedToKnownWriteScopes(t *testing.T) {
+	writeCapable := [][]string{
+		{ScopeAdmin},
+		{ProductScopePrefix + "p1"},
+		{ScopeRead, ProductScopePrefix + "p1"},             // read beside a real grant still writes
+		{ScopeDeliveryCallback, ProductScopePrefix + "p1"}, // the callback scope does not subtract
+		{"governance:write", ScopeAdmin},                   // an unknown scope beside admin is irrelevant
+	}
+	for _, scopes := range writeCapable {
+		if !(Principal{Scopes: scopes}).AuthorizeWrite() {
+			t.Errorf("AuthorizeWrite() = false for %v, want true", scopes)
+		}
+	}
+
+	refused := [][]string{
+		nil,
+		{},
+		{""},
+		{" "},
+		{ScopeRead},
+		{ScopeDeliveryCallback},
+		{"write"},
+		{"governance:write"},
+		{"produc:prod-1"},    // a typo must not be a grant
+		{ProductScopePrefix}, // the bare prefix names no product
+		{"admin "},           // whitespace is not admin
+		{"Admin"},            // scopes are compared verbatim, never folded
+		{"delivery:webhook"}, // an invented delivery grant
+		{ScopeRead, "x-legacy-scope"},
+	}
+	for _, scopes := range refused {
+		if (Principal{Scopes: scopes}).AuthorizeWrite() {
+			t.Errorf("AuthorizeWrite() = true for %v — only admin and product:<id> may write", scopes)
+		}
+	}
+}
+
 // The vocabulary is closed, and this is the list. Before it was, any string at all could be
 // stored as a scope — and AuthorizeWrite granted write to every one of them that was not `read`.
 func TestKnownScope(t *testing.T) {

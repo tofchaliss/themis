@@ -14,9 +14,13 @@ The single project backlog. Two parts:
 > routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,
 > `product:<id>` confined to the Finding's own product (route resolves Finding → release → product
 > over the Registry read API, fail-closed). `AuthorizeWrite` retired as Governance's decision and
-> the scope vocabulary CLOSED — which **closes the deferral in EDR-SECURITY-01 D4's realization
-> note and the gap EDR-HARNESS-01 D4 carried** (`product:<id>` was write-capable estate-wide, and
-> any scope that was not `read` granted write). CARRIED LIMIT: the Governance → Registry read seam
+> the scope vocabulary CLOSED AT BOTH ENDS (refused at mint time AND at read time — the write floor
+> is `admin` ∪ `product:<id>` in every context) — which **closes the deferral in EDR-SECURITY-01
+> D4's realization note and the gap EDR-HARNESS-01 D4 carried** (`product:<id>` was write-capable
+> estate-wide, and any scope that was not `read` granted write anywhere). **OPERATOR ACTION on
+> deploy:** audit `api_keys` for scopes outside the vocabulary — they silently had write capability
+> and now have none; query + remediation in EDR-DELIVERY-01 D5. A refused write now states the rule
+> only, with the estate detail on the log (D5a). CARRIED LIMIT: the Governance → Registry read seam
 > sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve its product and
 > therefore cannot write (admin is unaffected) — a credential for that seam is M1's business, see
 > `openspec/changes/phase3-outward-actions/tasks.md` group 2. M1–M3 (delivery, CI, mail) NOT STARTED.

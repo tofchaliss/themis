@@ -19,7 +19,13 @@ import (
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
+
+// The Registry client IS the handler's product-scope seam (EDR-DELIVERY-01 D3). Stated as an
+// assertion rather than left to the call below, so a change to either side fails here — at the
+// one place that can see both — instead of degrading a security check to "seam not wired".
+var _ govhttp.ProductResolver = (*registry.Client)(nil)
 
 type idGen struct{}
 
@@ -47,10 +53,13 @@ type Governance struct {
 // the multiplier defaults to 1.0 — fail-safe, C2), the Knowledge and Evidence read-API base
 // URLs (empty degrades the assessment projection / refuses the compare read respectively —
 // D16), the blast-radius saturation cap (any value < 2 is normalized to
-// domain.DefaultBlastRadiusCap), and optional Governance-owned auto-accept policies (D11).
+// domain.DefaultBlastRadiusCap), the shared logger (nil ⇒ no-op; it carries the detail an
+// authorization refusal withholds from the caller — EDR-DELIVERY-01 D1), and optional
+// Governance-owned auto-accept policies (D11).
 func Wire(
 	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
 	registryURL, knowledgeURL, evidenceURL string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
+	logger *observability.Logger,
 	policies ...domain.PolicyRule,
 ) Governance {
 	st := store.New(pool)
@@ -93,7 +102,7 @@ func Wire(
 		read = read.WithEvidence(evidence.NewClient(evidenceURL, &http.Client{Timeout: 10 * time.Second}))
 	}
 	relay := store.NewRelay(pool, pub, 100)
-	handler := govhttp.NewHandler(write, read)
+	handler := govhttp.NewHandler(write, read).WithLogger(logger)
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}

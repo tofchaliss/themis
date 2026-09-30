@@ -122,26 +122,24 @@ func (p Principal) AuthorizeProduct(productID string) bool {
 	return p.IsAdmin() || p.HasScope(ProductScopePrefix+productID)
 }
 
-// AuthorizeWrite reports whether the principal may perform a mutating operation: a read-only
-// key (its only grant is ScopeRead) may not; admin and product-scoped keys may.
+// AuthorizeWrite reports whether the principal may perform a mutating operation. Exactly two
+// grants are write-capable, in every context: `admin`, and `product:<id>` for some id. Every
+// other scope — `read`, `delivery:callback`, and anything outside the closed vocabulary — is
+// not.
 //
 // It is the METHOD-based floor behind RequireWriteScope and stays exactly that. Governance no
-// longer authorizes its writes with it (EDR-DELIVERY-01 N-M0): this function cannot confine
+// longer authorizes its writes with it (EDR-DELIVERY-01 N-M0/D1): this function cannot confine
 // `product:<id>` to one product's Findings, because it sees a principal and no resource. The
-// Governance handlers now decide explicitly; the floor below them is unchanged.
+// Governance handlers decide that explicitly; this floor sits below them, unchanged in role.
 //
-// `delivery:callback` is excluded here as well as at the Governance edge. Otherwise the new
-// scope would fall into "any non-read grant is write-capable" and hand a callback credential
-// mutating access to every OTHER context — a hole opened by minting the scope, not by using it.
+// WHAT CHANGED, AND WHY IT HAD TO. It used to grant write on the first scope that was not
+// `read` or empty. So a typo (`produc:prod-1`), an invented grant (`governance:write`) and a
+// scope minted for something else entirely were all indistinguishable from admin at any
+// mutating endpoint in Knowledge, Evidence, Communication, Registry or Intelligence — a
+// privilege escalation reachable by misspelling a flag. Closing the vocabulary (D5) is only a
+// guarantee if the check that READS it is closed too; validating at mint time merely stops new
+// ones being created. Operator consequence: a previously minted key whose scopes are outside the
+// vocabulary loses write capability everywhere — see EDR-DELIVERY-01 D5 for the audit query.
 func (p Principal) AuthorizeWrite() bool {
-	if p.IsAdmin() {
-		return true
-	}
-	for _, s := range p.Scopes {
-		if s == "" || s == ScopeRead || s == ScopeDeliveryCallback {
-			continue
-		}
-		return true
-	}
-	return false
+	return p.IsAdmin() || p.HasScopePrefix(ProductScopePrefix)
 }

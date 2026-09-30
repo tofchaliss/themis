@@ -22,15 +22,20 @@ gap EDR-HARNESS-01 D4 carried forward.
   `internal/governance/adapters/http`: `delivery:callback` refused unconditionally → `admin`
   allowed → `product:<id>` allowed only for the Finding's own product → everything else refused.
   All nine Governance mutations gated. `AuthorizeWrite` retired as Governance's decision, retained
-  as the method floor for the other contexts.
+  as the method floor for the other contexts. A refusal states the rule only — the product that
+  owns the Finding and any Registry failure go to the shared logger, never the 403 body (D5a).
 - **Resource resolution over the existing read seam (D3, D4)** —
   `registry.Client.ProductOfRelease`: Finding → release → `GET /releases/{id}` →
   `GET /projects/{id}` → product. Fail-closed: an indeterminate product refuses the write; a
   missing Finding is 404, not 403.
-- **Closed scope vocabulary (D5)** — `auth.ScopeDeliveryCallback`, `auth.KnownScope`, and the
-  explicit `Principal` helpers (`HasScopeExact`, `HasScopePrefix`, `HasProductScope`,
-  `IsDeliveryCallback`); `cmd/authadmin create-key` mints `delivery:callback` and `product:<id>`
-  and refuses anything outside the vocabulary.
+- **Closed scope vocabulary, at BOTH ends (D5)** — `auth.ScopeDeliveryCallback`,
+  `auth.KnownScope`, and the explicit `Principal` helpers (`HasScopeExact`, `HasScopePrefix`,
+  `HasProductScope`, `IsDeliveryCallback`); `cmd/authadmin create-key` mints `delivery:callback`
+  and `product:<id>` and refuses anything outside the vocabulary; and `AuthorizeWrite` — the floor
+  every OTHER context mounts — is closed to `admin` ∪ `product:<id>`. It used to grant write on any
+  scope that was not `read`, so a typo'd or invented grant was indistinguishable from admin at
+  every mutating endpoint in Knowledge, Evidence, Communication, Registry and Intelligence.
+  Validating at mint time stops new keys; it does nothing about the ones already in the table.
 - **The matrix as the guarantee** — every Governance write route × every scope
   {read, delivery:callback, product:wrong, product:correct, admin}, plus fail-closed and
   nothing-recorded-on-refusal tests.
@@ -38,13 +43,21 @@ gap EDR-HARNESS-01 D4 carried forward.
 ## Impact
 
 Governance HTTP adapter + its Registry client, the platform auth package, `cmd/authadmin`, and
-Governance's composition wiring (one client, two seams). **No** API spec change, no migration, no
-domain or app change, no change to the read surface, and no change to Knowledge, Evidence,
-Communication or Registry behaviour.
+Governance's composition wiring (one client, two seams; `Wire` now takes the shared logger). **No**
+API spec change, no migration, no domain or app change, and no change to the read surface anywhere.
+The other contexts' write paths change in exactly one way — their floor no longer honours a scope
+outside the vocabulary — which is the point of D5 rather than a side effect.
 
-Operationally: a `product:<id>` key can no longer write outside its product (the point), and on an
-auth-enabled estate it cannot write at all until the Registry read seam carries a credential — an
-honest limit recorded in the EDR, not worked around here.
+Operationally, three things:
+
+1. A `product:<id>` key can no longer write outside its product (the point), and on an auth-enabled
+   estate it cannot write at all until the Registry read seam carries a credential — an honest
+   limit recorded in the EDR, not worked around here.
+2. **A key already minted with a scope outside the vocabulary loses write capability everywhere.**
+   Audit before deploying: `SELECT id, name, scopes FROM api_keys WHERE revoked_at IS NULL;` (see
+   EDR-DELIVERY-01 D5). Reads are unaffected; `admin`, `read` and `product:<id>` keys are unchanged.
+3. A 403 on a Governance write is less informative to the caller by design; the corresponding log
+   line is more informative than anything that existed before.
 
 ## Not in this change
 
