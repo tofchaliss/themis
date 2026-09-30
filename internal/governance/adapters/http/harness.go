@@ -15,6 +15,12 @@ import (
 // server cannot verify never overwrites one it can.
 
 func (h *Handler) CommissionFinding(w http.ResponseWriter, r *http.Request, id gen.FindingId) {
+	// The commission door is a write like any other: explicit scope first (EDR-DELIVERY-01
+	// N-M0). This is the route that made D4's carried gap concrete — a product-scoped operator
+	// could commission governed work against any product's Finding.
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	var body gen.CommissionRequest
 	if !decode(w, r, &body) {
 		return
@@ -45,6 +51,9 @@ func (h *Handler) CommissionFinding(w http.ResponseWriter, r *http.Request, id g
 }
 
 func (h *Handler) WithdrawCommission(w http.ResponseWriter, r *http.Request, id gen.FindingId, commissionID string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	var body gen.WithdrawCommissionRequest
 	if !decode(w, r, &body) {
 		return

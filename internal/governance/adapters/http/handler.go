@@ -32,11 +32,30 @@ import (
 type Handler struct {
 	write *app.FindingService
 	read  *app.ReadService
+	// products resolves a release's owning product for write-scope confinement. Nil ⇒ the
+	// seam is unconfigured, and a product-scoped key can then write NOTHING (fail-closed);
+	// admin is unaffected, so a node without the Registry seam still operates.
+	products ProductResolver
+}
+
+// ProductResolver is the read seam behind product-scope confinement: which product owns a
+// release (EDR-DELIVERY-01 N-M0). Declared here, at the consumer, so this package needs no
+// import of the Registry client adapter; the composition root supplies it.
+type ProductResolver interface {
+	ProductOfRelease(ctx context.Context, releaseID string) (string, error)
 }
 
 // NewHandler builds a Handler.
 func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
 	return &Handler{write: write, read: read}
+}
+
+// WithProductResolver attaches the Registry read seam that confines a `product:<id>` key to its
+// own product's Findings. Without it, only `admin` may write (EDR-DELIVERY-01 N-M0) — the
+// refusal is deliberate: a scope that cannot be checked must not be honoured.
+func (h *Handler) WithProductResolver(pr ProductResolver) *Handler {
+	h.products = pr
+	return h
 }
 
 // Router returns an http.Handler serving the Governance routes; mount it under the OpenAPI
@@ -239,10 +258,92 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request, faultli
 	writeJSON(w, http.StatusOK, releases)
 }
 
+// --- write-scope authorization (EDR-DELIVERY-01 N-M0) --------------------------------
+
+// authorizeGovernanceWrite is the EXPLICIT gate in front of every Governance mutation. It
+// replaces `auth.Principal.AuthorizeWrite()` as the authorization decision for this context
+// (N-M0, runtime-side D-N-6) and answers one question per write, in this order:
+//
+//  1. `delivery:callback` → REFUSED, always. A credential an outward delivery target holds must
+//     never be able to raise, accept, reject, commission or resolve anything, even if the same
+//     key also carries admin — the refusal is on the SCOPE, not on what is missing beside it.
+//  2. `admin` → allowed, with no Registry read at all.
+//  3. `product:<id>` → allowed only for the product that owns THIS Finding's release. The
+//     Finding is loaded and the release resolved to its product before the answer; anything
+//     else (read-only keys, and any scope outside the closed vocabulary) is refused.
+//
+// Two properties make it safe rather than merely correct. It is FAIL-CLOSED: if the product
+// cannot be resolved — no Registry seam wired, Registry unreachable, a blank hop — a
+// product-scoped key is refused, because an unverifiable confinement is not a confinement.
+// And it is SILENT when auth is disabled at the inbound edge (no principal on the context):
+// that mode is dev-only by design and already open, so this gate neither invents an identity
+// nor blocks the path (same posture as actorProvenance).
+//
+// Why it lives per-route rather than in middleware: the decision needs the RESOURCE, and only
+// the route knows which Finding is being written. `AuthorizeWrite` sees a principal and no
+// resource, which is exactly why it could never confine a product key (EDR-SECURITY-01 D4
+// realization note; the gap EDR-HARNESS-01 D4 carried forward).
+//
+// Returns true when the request may proceed; it has already written the Problem envelope
+// otherwise.
+func (h *Handler) authorizeGovernanceWrite(w http.ResponseWriter, r *http.Request, findingID string) bool {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok {
+		return true
+	}
+	if p.IsDeliveryCallback() {
+		writeProblem(w, http.StatusForbidden, "Forbidden",
+			"a "+auth.ScopeDeliveryCallback+" key may not write to Governance")
+		return false
+	}
+	if p.IsAdmin() {
+		return true
+	}
+	if !p.HasScopePrefix(auth.ProductScopePrefix) {
+		writeProblem(w, http.StatusForbidden, "Forbidden",
+			"this write requires "+auth.ScopeAdmin+" or "+auth.ProductScopePrefix+"<product-id>")
+		return false
+	}
+	productID, err := h.productOfFinding(r.Context(), findingID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeProblem(w, http.StatusNotFound, "finding not found", err.Error())
+			return false
+		}
+		// Fail closed, and say which half could not be established — an operator reading
+		// "Registry unreachable" fixes a different thing than one reading "wrong product".
+		writeProblem(w, http.StatusForbidden, "Forbidden",
+			"cannot confine this key to the Finding's product: "+err.Error())
+		return false
+	}
+	if !p.HasProductScope(productID) {
+		writeProblem(w, http.StatusForbidden, "Forbidden",
+			"this key is not scoped to product "+productID)
+		return false
+	}
+	return true
+}
+
+// productOfFinding resolves the product a Finding belongs to: Finding → release → product. The
+// first hop is Governance's own store, the second the Registry read seam.
+func (h *Handler) productOfFinding(ctx context.Context, findingID string) (string, error) {
+	f, err := h.read.GetFinding(ctx, domain.FindingID(findingID))
+	if err != nil {
+		return "", err
+	}
+	if h.products == nil {
+		return "", errors.New("the Registry read seam is not configured on this node")
+	}
+	return h.products.ProductOfRelease(ctx, f.ReleaseID())
+}
+
 // --- writes (triage) -----------------------------------------------------------------
 
 // RaiseProposal handles POST /findings/{id}/proposals.
 func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	var body gen.RaiseProposalRequest
 	if !decode(w, r, &body) {
 		return
@@ -287,6 +388,9 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 
 // AcceptProposal handles POST /findings/{id}/proposals/{proposalId}/accept.
 func (h *Handler) AcceptProposal(w http.ResponseWriter, r *http.Request, id, proposalID string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	decider, reviewBy, ok := decisionFrom(w, r)
 	if !ok {
 		return
@@ -300,6 +404,9 @@ func (h *Handler) AcceptProposal(w http.ResponseWriter, r *http.Request, id, pro
 
 // RejectProposal handles POST /findings/{id}/proposals/{proposalId}/reject.
 func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request, id, proposalID string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	decider, ok := deciderFrom(w, r)
 	if !ok {
 		return
@@ -313,6 +420,9 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request, id, pro
 
 // ResolveFinding handles POST /findings/{id}/resolve.
 func (h *Handler) ResolveFinding(w http.ResponseWriter, r *http.Request, id string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	if err := h.write.ResolveFinding(r.Context(), domain.FindingID(id)); err != nil {
 		writeErr(w, "cannot resolve finding", err)
 		return
@@ -322,6 +432,9 @@ func (h *Handler) ResolveFinding(w http.ResponseWriter, r *http.Request, id stri
 
 // ReopenFinding handles POST /findings/{id}/reopen.
 func (h *Handler) ReopenFinding(w http.ResponseWriter, r *http.Request, id string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	if err := h.write.ReopenFinding(r.Context(), domain.FindingID(id)); err != nil {
 		writeErr(w, "cannot reopen finding", err)
 		return
@@ -331,6 +444,9 @@ func (h *Handler) ReopenFinding(w http.ResponseWriter, r *http.Request, id strin
 
 // ArchiveFinding handles POST /findings/{id}/archive.
 func (h *Handler) ArchiveFinding(w http.ResponseWriter, r *http.Request, id string) {
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	if err := h.write.ArchiveFinding(r.Context(), domain.FindingID(id)); err != nil {
 		writeErr(w, "cannot archive finding", err)
 		return
@@ -352,6 +468,10 @@ const (
 // an ADVISORY AI proposal, never auto-accepted. When AI is disabled, unavailable, or
 // declines, it returns 204 (no proposal) — the pipeline is unaffected.
 func (h *Handler) RecommendPosition(w http.ResponseWriter, r *http.Request, id string) {
+	// Gated like any other write: it RECORDS an advisory AI proposal on the Finding.
+	if !h.authorizeGovernanceWrite(w, r, id) {
+		return
+	}
 	pid, produced, no, err := h.write.RecommendPosition(r.Context(), domain.FindingID(id))
 	if err != nil {
 		writeErr(w, "cannot recommend position", err)

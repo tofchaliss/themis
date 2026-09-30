@@ -1,7 +1,9 @@
-// Package registry is the Governance context's client for Registry's blast-radius read API
-// (EDR-ESTATE-01 C2/D7): it reads how many unique customers a release reaches over HTTP and
-// implements the app BlastRadiusReader port. It never imports the Registry context or touches
-// its tables (Book III §3.5) — the two collaborate solely via the read API.
+// Package registry is the Governance context's client for Registry's read API: the
+// blast-radius rollup (EDR-ESTATE-01 C2/D7 — how many unique customers a release reaches,
+// implementing the app BlastRadiusReader port) and the upward hop release → project → product
+// that confines a `product:<id>` key to its own product's Findings (EDR-DELIVERY-01 N-M0). It
+// never imports the Registry context or touches its tables (Book III §3.5) — the two
+// collaborate solely via the read API.
 package registry
 
 import (
@@ -54,6 +56,62 @@ func (c *Client) BlastRadius(ctx context.Context, releaseID string) (int, error)
 		return 0, err
 	}
 	return body.UniqueCustomers, nil
+}
+
+type releaseView struct {
+	ProjectID string `json:"project_id"`
+}
+
+type projectView struct {
+	ProductID string `json:"product_id"`
+}
+
+// ProductOfRelease walks the two upward hops of Registry's identity chain — release →
+// `project_id`, project → `product_id` — and returns the owning product id.
+//
+// It is the resource→product resolution that `auth.Principal.AuthorizeWrite` could not do
+// (EDR-SECURITY-01 D4 realization note, EDR-HARNESS-01 D4's carried gap): the Governance write
+// routes key on a Finding, and a product-scoped key may only write to its own product's
+// Findings. It fails CLOSED — a transport failure, a non-200, or a blank hop is an error, never
+// an empty product id, because the caller turns "cannot resolve" into a refusal and a blank
+// string would compare equal to a blank scope. The deliberate OPPOSITE trade from BlastRadius
+// above, which fails open to 1.0×: over-stating priority is a nuisance, granting a write to the
+// wrong product is a breach.
+func (c *Client) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
+	if releaseID == "" {
+		return "", fmt.Errorf("registry: product-of-release: no release id")
+	}
+	var rel releaseView
+	if err := c.get(ctx, "/api/v1/releases/"+releaseID, &rel); err != nil {
+		return "", fmt.Errorf("registry: release %s: %w", releaseID, err)
+	}
+	if rel.ProjectID == "" {
+		return "", fmt.Errorf("registry: release %s: no project id", releaseID)
+	}
+	var proj projectView
+	if err := c.get(ctx, "/api/v1/projects/"+rel.ProjectID, &proj); err != nil {
+		return "", fmt.Errorf("registry: project %s: %w", rel.ProjectID, err)
+	}
+	if proj.ProductID == "" {
+		return "", fmt.Errorf("registry: project %s: no product id", rel.ProjectID)
+	}
+	return proj.ProductID, nil
+}
+
+func (c *Client) get(ctx context.Context, path string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: status %d", path, resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(into)
 }
 
 var _ app.BlastRadiusReader = (*Client)(nil)

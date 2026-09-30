@@ -187,13 +187,17 @@ func TestCommissionActorIsBoundToPrincipal(t *testing.T) {
 // The runtime's credential cannot commission: with inbound auth on, the
 // commission door sits behind RequireWriteScope like every other write.
 // A read-only key gets 403 before the handler runs; a product-scoped
-// key (the operator) gets through (D-C-6, D-I-8).
+// key (the operator) gets through (D-C-6, D-I-8) — and since N-M0 only
+// for its OWN product's Findings, which is why the product seam is wired
+// here (EDR-DELIVERY-01; the gap D4 carried).
 func TestReadKeyCannotCommission(t *testing.T) {
 	repo := newRepo()
 	repo.seed(identified(t, "fnd-1", "rel-1", "fl-1", "CVE-1"))
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
 	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
-	router := auth.RequireWriteScope(govhttp.NewHandler(write, read).Router())
+	handler := govhttp.NewHandler(write, read).
+		WithProductResolver(stubProducts{byRelease: map[string]string{"rel-1": "prod-1"}})
+	router := auth.RequireWriteScope(handler.Router())
 	serveAs := func(scopes ...string) *httptest.Server {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := auth.WithPrincipal(r.Context(), auth.Principal{KeyID: "k-" + scopes[0], Name: scopes[0], Scopes: scopes})

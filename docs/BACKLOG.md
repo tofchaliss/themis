@@ -10,6 +10,17 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+> **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
+> routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,
+> `product:<id>` confined to the Finding's own product (route resolves Finding → release → product
+> over the Registry read API, fail-closed). `AuthorizeWrite` retired as Governance's decision and
+> the scope vocabulary CLOSED — which **closes the deferral in EDR-SECURITY-01 D4's realization
+> note and the gap EDR-HARNESS-01 D4 carried** (`product:<id>` was write-capable estate-wide, and
+> any scope that was not `read` granted write). CARRIED LIMIT: the Governance → Registry read seam
+> sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve its product and
+> therefore cannot write (admin is unaffected) — a credential for that seam is M1's business, see
+> `openspec/changes/phase3-outward-actions/tasks.md` group 2. M1–M3 (delivery, CI, mail) NOT STARTED.
+
 > **2026-09-26 — `phase3-harness-integration` (EDR-HARNESS-01) implemented on branch
 > `feat/harness-integration`, uncommitted pending the user's ask.** Commissions, harness-evidence
 > proposals, the intake adapter + `themis-intake` CLI, walls. OPEN: the runtime `go.mod` pin (after

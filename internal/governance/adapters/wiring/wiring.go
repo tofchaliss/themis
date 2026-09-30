@@ -64,9 +64,15 @@ func Wire(
 	if advisor != nil {
 		write = write.WithAdvisor(advisor)
 	}
+	// One Registry client, two seams: the blast-radius multiplier (fail-open to 1.0×) and the
+	// release → product hop that confines a `product:<id>` key to its own product's Findings
+	// (fail-closed — EDR-DELIVERY-01 N-M0). Empty URL ⇒ neither is wired, so only `admin` may
+	// write.
+	var reg *registry.Client
 	var blast app.BlastRadiusReader
 	if registryURL != "" {
-		blast = registry.NewClient(registryURL, &http.Client{Timeout: 10 * time.Second})
+		reg = registry.NewClient(registryURL, &http.Client{Timeout: 10 * time.Second})
+		blast = reg
 	}
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
 	read := app.NewReadService(st, st, blast, blastCap)
@@ -87,8 +93,12 @@ func Wire(
 		read = read.WithEvidence(evidence.NewClient(evidenceURL, &http.Client{Timeout: 10 * time.Second}))
 	}
 	relay := store.NewRelay(pool, pub, 100)
+	handler := govhttp.NewHandler(write, read)
+	if reg != nil {
+		handler = handler.WithProductResolver(reg)
+	}
 	return Governance{
-		Handler:   govhttp.NewHandler(write, read).Router(),
+		Handler:   handler.Router(),
 		Store:     st,
 		Consumer:  inbound.NewConsumer(app.NewCoordinator(write)),
 		Relay:     relay,

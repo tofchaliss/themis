@@ -224,6 +224,11 @@ governing principle):
 - **Product-scope *isolation* to a specific product is deferred.** Greenfield routes key on release / finding
   / faultline, not product, so restricting a `product:<id>` key to one product needs resource→product
   resolution — a follow-up. Product-scoped keys are currently treated as write-capable (BACKLOG follow-up).
+  **CLOSED 2026-09-30 for the Governance write surface by `EDR-DELIVERY-01` (N-M0):** those routes now
+  resolve Finding → release → product over the Registry read API and authorize `admin` or that product
+  explicitly, fail-closed. `AuthorizeWrite` remains the method floor for the other contexts, where the
+  deferral stands. The vocabulary gained a fourth scope there (`delivery:callback`) and is now CLOSED —
+  validated at mint time, and an unknown scope no longer counts as write-capable anywhere.
 - **D7 spec `securitySchemes` are documentation-only** under the current codegen (they annotate the API
   contract but do not generate enforcement). Still worth adding for accurate API docs; enforcement stays in
   the composition-root middleware.

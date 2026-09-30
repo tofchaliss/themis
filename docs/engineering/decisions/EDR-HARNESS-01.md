@@ -43,7 +43,9 @@ internal events; Communication does not consume them.
 Authenticated write-capable humans only (never AI/policy/system). The runtime cannot commission
 (its credential is read-scoped). Commissioner may equal proposer; decider must differ —
 operationally, not as a Governance invariant. Known gap carried: `AuthorizeWrite` does not confine
-`product:<id>` to that product's Findings (row 14 of the integration matrix).
+`product:<id>` to that product's Findings (row 14 of the integration matrix) — **closed
+2026-09-30 by `EDR-DELIVERY-01` (N-M0)**: the commission door now resolves Finding → release →
+product and authorizes `admin` or that product explicitly.
 
 ### D5 — The proposal's evidence is first-class and its trust is DERIVED (D-I-5)
 A proposal whose basis is a runtime execution is raised by a HUMAN with an immutable
@@ -85,7 +87,8 @@ table re-affirms.
 
 - The `harness-execution/v1` evidence is as true as `themis-intake`'s reconstruction; Governance
   does not re-run it. The runtime record remains the evidence; the proposal is the reference.
-- Product-scope write confinement (D4) is a pre-existing authorization gap, not created here.
+- Product-scope write confinement (D4) is a pre-existing authorization gap, not created here —
+  closed since, by `EDR-DELIVERY-01` (N-M0).
 - The runtime dependency pin (`go.mod`) is added when the runtime commit is published; until
   then the repository builds only inside a `go.work` that includes the runtime checkout.
 
