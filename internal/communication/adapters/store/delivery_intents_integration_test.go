@@ -5,10 +5,12 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/communication/adapters/store"
@@ -18,10 +20,33 @@ import (
 
 var intentEpoch = time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
 
+// scalar reads one text value, returning "" when the row is absent — so a missing index is a
+// readable assertion failure rather than a fatal scan error.
+func scalar(t *testing.T, pool *pgxpool.Pool, query string, args ...any) string {
+	t.Helper()
+	var s string
+	err := pool.QueryRow(context.Background(), query, args...).Scan(&s)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("scalar %q: %v", query, err)
+	}
+	return s
+}
+
 func testIntent(t *testing.T, id string, kind domain.DeliveryKind, eventID string) domain.DeliveryIntent {
 	t.Helper()
-	in, err := domain.NewDeliveryIntent(id, kind, "default", domain.DeliveryOrigin{
-		EventID: eventID, EventType: "governance.finding_opened", EventTime: intentEpoch,
+	return testIntentTo(t, id, kind, eventID, "governance.finding_opened", "default")
+}
+
+// testIntentTo builds an intent with every component of the dedup key
+// (origin_event_id, origin_event_type, kind, destination) under the caller's control, so a test
+// can vary exactly one of them at a time.
+func testIntentTo(t *testing.T, id string, kind domain.DeliveryKind, eventID, eventType, destination string) domain.DeliveryIntent {
+	t.Helper()
+	in, err := domain.NewDeliveryIntent(id, kind, destination, domain.DeliveryOrigin{
+		EventID: eventID, EventType: eventType, EventTime: intentEpoch,
 		FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2026-1",
 		ProductID: "prod-1", ProposalID: "prop-1", PositionVersion: 2,
 	}, 3, intentEpoch)
@@ -96,22 +121,46 @@ func TestDeliveryIntent_UniquePerOriginKindDestination(t *testing.T) {
 		t.Errorf("rows = %d, want 1", n)
 	}
 
-	// A different KIND for the same event is a different action and is allowed.
-	if created, err := st.SaveIntent(ctx, testIntent(t, "int-3", domain.DeliveryEmail, "env-1")); err != nil || !created {
-		t.Errorf("distinct kind = %v, %v", created, err)
+	// Each of the FOUR key components, varied one at a time: every one of them makes a
+	// different outward action, so every one of them must be admitted. Asserting only the
+	// refusal would pass just as well on an index that is too WIDE or too narrow.
+	for _, c := range []struct {
+		name   string
+		intent domain.DeliveryIntent
+	}{
+		{"kind", testIntentTo(t, "int-3", domain.DeliveryEmail, "env-1", "governance.finding_opened", "default")},
+		{"event id", testIntentTo(t, "int-4", domain.DeliveryJiraIssue, "env-2", "governance.finding_opened", "default")},
+		{"event type", testIntentTo(t, "int-5", domain.DeliveryJiraIssue, "env-1", "governance.proposal_accepted", "default")},
+		{"destination", testIntentTo(t, "int-6", domain.DeliveryJiraIssue, "env-1", "governance.finding_opened", "secondary")},
+	} {
+		if created, err := st.SaveIntent(ctx, c.intent); err != nil || !created {
+			t.Errorf("distinct %s = %v, %v", c.name, created, err)
+		}
 	}
-	// A different EVENT is a different fact and is allowed.
-	if created, err := st.SaveIntent(ctx, testIntent(t, "int-4", domain.DeliveryJiraIssue, "env-2")); err != nil || !created {
-		t.Errorf("distinct event = %v, %v", created, err)
-	}
-	if n := count(t, pool, `SELECT count(*) FROM delivery_intents`); n != 3 {
-		t.Errorf("rows = %d, want 3", n)
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents`); n != 5 {
+		t.Errorf("rows = %d, want 5 (the first plus one per key component)", n)
 	}
 
-	// The index is really there and really unique.
-	if n := count(t, pool, `SELECT count(*) FROM pg_indexes
-		WHERE tablename = 'delivery_intents' AND indexname = 'ux_delivery_intents_origin'`); n != 1 {
-		t.Error("ux_delivery_intents_origin is missing")
+	// The index is really there, really unique, and really on the FOUR columns the store's
+	// ON CONFLICT names — a conflict target that does not match a unique index is a runtime
+	// error, and one that matches a DIFFERENT index would dedup on the wrong identity.
+	def := scalar(t, pool, `SELECT indexdef FROM pg_indexes
+		WHERE tablename = 'delivery_intents' AND indexname = 'ux_delivery_intents_origin'`)
+	if def == "" {
+		t.Fatal("ux_delivery_intents_origin is missing")
+	}
+	if !strings.Contains(def, "UNIQUE") {
+		t.Errorf("ux_delivery_intents_origin is not unique: %s", def)
+	}
+	for _, col := range []string{"origin_event_id", "origin_event_type", "kind", "destination"} {
+		if !strings.Contains(def, col) {
+			t.Errorf("ux_delivery_intents_origin does not cover %s: %s", col, def)
+		}
+	}
+	// NOT origin_event_seq: the bus seq is not part of the wire Envelope, so the dedup identity
+	// is the envelope id (EDR-DELIVERY-01 D11). Pinned here so the deviation stays deliberate.
+	if strings.Contains(def, "origin_event_seq") {
+		t.Errorf("the index keys on a bus seq the Envelope does not carry: %s", def)
 	}
 }
 

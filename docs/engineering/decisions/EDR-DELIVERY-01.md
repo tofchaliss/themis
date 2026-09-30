@@ -252,6 +252,16 @@ already, so multiple targets per kind can arrive later without a migration and w
 the uniqueness guarantee.
 
 ### D15 — The operator surface is ADMIN-ONLY, reads included
+
+**Approval status: the API addition is an outstanding must-ask.** CLAUDE.md requires explicit owner
+approval for an API change, and these four routes are new. They are implemented because the step
+requires that a person be able to see, retry and cancel failed outward actions and this repository
+has no other surface for that — but the approval is NOT on record. The ask, its alternatives, its
+blast radius and the exact revert are written out in
+`openspec/changes/phase3-outward-actions/tasks.md` item 2.0, which stays unchecked until an answer
+exists. Nothing else in N-M1a depends on the routes: the record, the workers and the dead-lettering
+stand without them.
+
 `GET /delivery/intents`, `GET /delivery/intents/{id}`, `POST …/retry`, `POST …/cancel` — all four
 require `admin`, not merely the node's write floor. Two reasons pointing the same way. A mutation
 here **re-drives an action against a system outside the estate**, and the only non-admin write grant

@@ -54,6 +54,33 @@ truth), so `openspec validate` reporting "no deltas" is expected; archive with
 The record + the isolated workers + the operator surface. All of it in the Communication context;
 senders are FAKES (D13) — real Jira/SMTP/CI are M2/M3.
 
+- [ ] **2.0 MUST-ASK, OUTSTANDING — the API change is NOT approved.** CLAUDE.md puts "API change"
+      on the must-ask list, and N-M1a adds four routes to `api/communication.openapi.yaml`:
+      `GET /delivery/intents`, `GET /delivery/intents/{id}`, `POST /delivery/intents/{id}/retry`,
+      `POST /delivery/intents/{id}/cancel`. They are implemented because the step's own requirement
+      is that "a person can see failed requests, retry them or cancel them", and an API is the only
+      surface this repository has for that (no GUI is in scope). **No approval has been recorded**,
+      so this item stays open until the owner gives one. What is being asked for:
+      - **Why:** a dead-lettered outward action is invisible and un-redrivable without it; the
+        milestone ships the failures and the means to see them in the same step, deliberately.
+      - **Alternatives considered:** (a) a read-only list with no retry/cancel — leaves an operator
+        able to see a failure and unable to act on it, and a `psql` UPDATE then becomes the
+        remediation path, which is a mutation outside the event stream; (b) a `scripts/` SQL report
+        instead of routes — same objection, and it cannot mutate through the API either; (c) gating
+        the routes behind an off-by-default flag — makes the deployed default a node where failures
+        are invisible, which is the condition this step exists to remove.
+      - **Impact:** additive only. Four new paths, two new schemas (`DeliveryIntent`,
+        `DeliveryAttempt`); no existing path, schema or response shape changes; problem bodies use
+        the existing `Problem` envelope. **Admin-only, reads included** (D15), so no new capability
+        reaches a non-admin key. Unwired ⇒ `501`, so a node that does no outward delivery is
+        unaffected.
+      - **Files:** `api/communication.openapi.yaml`, `internal/communication/adapters/http/gen/…`
+        (generated), `adapters/http/handler_delivery_intents.go` (+ its test).
+      - **If refused:** revert the four paths and the two schemas, regenerate, and delete
+        `handler_delivery_intents.go`; the record, the workers and the dead-lettering all keep
+        working, and the operator's view falls back to `scripts/vm-verify.sh`'s counts with no way
+        to retry or cancel.
+
 - [x] 2.1 `internal/communication/domain/delivery_intent.go`: the `DeliveryIntent` aggregate —
       `DeliveryKind` (`jira_issue`/`email`/`ci_build`) and `IntentStatus`
       (`PENDING`/`DELIVERED`/`DEAD_LETTER`/`CANCELLED`) as closed vocabularies, `DeliveryOrigin`

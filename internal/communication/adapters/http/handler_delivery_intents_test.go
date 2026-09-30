@@ -11,6 +11,7 @@ import (
 	"time"
 
 	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
+	"github.com/themis-project/themis/internal/communication/adapters/http/gen"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -278,6 +279,74 @@ func TestListDeliveryIntents_Filters(t *testing.T) {
 	if status, _ := do(t, http.MethodGet, srv.URL+"/delivery/intents", nil); status != http.StatusInternalServerError {
 		t.Errorf("store failure = %d, want 500", status)
 	}
+}
+
+// The call an operator actually makes: no query string at all. It must return the page the
+// OpenAPI promises rather than an empty one.
+//
+// This is a real probe, not a formality. `memIntentRepo.ListIntents` truncates to `f.Limit`
+// exactly as Postgres' `LIMIT` does, so a limit of 0 arriving at the store would come back here
+// as an empty list — and an empty list is precisely how "there are no failed deliveries" looks.
+// An explicit `limit=0` is covered on the same terms: asking for zero must mean the same as not
+// asking, not "show me nothing".
+func TestListDeliveryIntents_DefaultPageSizeWhenLimitOmitted(t *testing.T) {
+	repo := newIntentRepo()
+	for i := 1; i <= 3; i++ {
+		seedIntent(t, repo, fmt.Sprintf("int-%d", i), domain.DeliveryEmail)
+	}
+	srv := intentServer(t, repo, &auth.Principal{Scopes: []string{auth.ScopeAdmin}})
+
+	// No limit · an explicit zero · a filter but still no limit · above the cap: every one of
+	// them must page at the default (or the cap) and return what is there.
+	for _, query := range []string{"", "?limit=0", "?status=pending", "?kind=email", "?limit=99999"} {
+		status, body := do(t, http.MethodGet, srv.URL+"/delivery/intents"+query, nil)
+		if status != http.StatusOK {
+			t.Fatalf("list %q = %d (%s)", query, status, body)
+		}
+		got := decodeIntents(t, body)
+		if len(got) != 3 {
+			t.Errorf("list %q returned %d intents, want all 3", query, len(got))
+		}
+		if len(got) > app.DefaultIntentPageSize {
+			t.Errorf("list %q returned %d intents, past the default page size", query, len(got))
+		}
+	}
+
+	// An explicit, positive limit still wins over the default.
+	if _, body := do(t, http.MethodGet, srv.URL+"/delivery/intents?limit=2", nil); len(decodeIntents(t, body)) != 2 {
+		t.Errorf("limit=2 did not page to 2: %s", body)
+	}
+}
+
+// Spec-first means the published contract is the contract, so the default page size is checked
+// against the SPEC and not against a second literal. oapi-codegen binds no declared default (an
+// omitted `limit` is a nil pointer), so nothing but this test can catch the spec's `default: 50`
+// and `app.DefaultIntentPageSize` drifting apart — and the symptom of that drift would be an
+// operator's page size quietly disagreeing with the documentation they read.
+func TestListDeliveryIntents_SpecDefaultMatchesTheCode(t *testing.T) {
+	spec, err := gen.GetSpec()
+	if err != nil {
+		t.Fatalf("embedded spec: %v", err)
+	}
+	item := spec.Paths.Find("/delivery/intents")
+	if item == nil || item.Get == nil {
+		t.Fatal("the embedded spec has no GET /delivery/intents")
+	}
+	for _, p := range item.Get.Parameters {
+		if p.Value == nil || p.Value.Name != "limit" {
+			continue
+		}
+		declared, ok := p.Value.Schema.Value.Default.(float64)
+		if !ok {
+			t.Fatalf("limit declares no numeric default: %v", p.Value.Schema.Value.Default)
+		}
+		if int(declared) != app.DefaultIntentPageSize {
+			t.Errorf("spec declares limit default %d, app.DefaultIntentPageSize is %d",
+				int(declared), app.DefaultIntentPageSize)
+		}
+		return
+	}
+	t.Error("GET /delivery/intents declares no `limit` parameter")
 }
 
 func TestGetDeliveryIntent_CarriesTheAttemptHistory(t *testing.T) {

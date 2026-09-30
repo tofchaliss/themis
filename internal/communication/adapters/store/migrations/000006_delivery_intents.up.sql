@@ -28,6 +28,13 @@
 -- So the guarantee asked for — one intent per (causing event, kind, destination), whatever
 -- the bus replays or redelivers — is the one enforced, keyed on the identity that actually
 -- crosses the boundary.
+--
+-- THE CONTRACT, UNAMBIGUOUSLY: the unique index below is on
+--   (origin_event_id, origin_event_type, kind, destination)
+-- and there is NO origin_event_seq column anywhere in this schema. That is also the conflict
+-- target the store's ON CONFLICT names, and both the column list and the absence of a seq are
+-- asserted against the live index by TestDeliveryIntent_UniquePerOriginKindDestination.
+-- Reason of record: EDR-DELIVERY-01 D11.
 
 CREATE TABLE IF NOT EXISTS delivery_intents (
     id                TEXT PRIMARY KEY,

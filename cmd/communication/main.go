@@ -345,6 +345,17 @@ func logDeliveryState(ctx context.Context, comm wiring.Communication, cfg config
 		observability.Int("max_attempts", cfg.deliveryMaxAttempts),
 		observability.Duration("interval", cfg.deliveryWorkerTick))
 
+	// State the DORMANT path once, here, rather than per event. An operator watching a fresh
+	// deployment will see `email` intents appear on every acceptance and no `ci_build` ones ever,
+	// and the reason is not a misconfiguration: governance.proposal_accepted.v1 does not state the
+	// accepted proposal's evidence schema, so the harness-backed case cannot be recognized yet
+	// (EDR-DELIVERY-01 "Honest limits — N-M1a"). Saying it per accepted proposal would log a line
+	// whose content never varies, on the one path that is always taken.
+	if cfg.deliveryEnableCI {
+		logger.Info("ci_build intents are DORMANT: governance.proposal_accepted carries no evidence schema yet, " +
+			"so an acceptance records only the e-mail intent (M2 adds the field). The worker is enabled and idle.")
+	}
+
 	counts, err := comm.Intents.IntentCounts(ctx)
 	if err != nil {
 		logger.Warn("could not read delivery-intent counts", observability.Err(err))

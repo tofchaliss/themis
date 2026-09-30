@@ -29,6 +29,15 @@ import (
 // When inbound auth is DISABLED on the node there is no principal at all and the whole
 // /api/v1 surface is open (dev, and the node says so loudly at startup). The gate then adds
 // nothing, exactly like every other route.
+//
+// WHY ONE GUARD LINE PER ROUTE AND NOT A MIDDLEWARE ON THE GROUP. This follows the precedent
+// EDR-DELIVERY-01 D7 set for Governance's write gate, for the same reason: the generated chi
+// router owns the routing table, so a middleware mounted on a path PREFIX would be a second
+// table that can silently disagree with it — and the failure mode of that disagreement is a
+// route that looks gated and is not. The completeness guarantee lives in the test instead:
+// `TestDeliveryIntents_AdminOnly` enumerates all four routes × three refused principals, so a
+// fifth route added without this call fails the matrix. That is the only place completeness can
+// be checked mechanically.
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := auth.PrincipalFrom(r.Context())
 	if !ok {
@@ -52,7 +61,15 @@ func (h *Handler) ListDeliveryIntents(w http.ResponseWriter, r *http.Request, pa
 			"this node has no outward-delivery service wired")
 		return
 	}
-	filter := app.IntentFilter{Limit: derefInt(params.Limit), Offset: derefInt(params.Offset)}
+	// The OpenAPI declares `limit` with `default: 50`, and oapi-codegen does NOT bind a
+	// declared default — an omitted `limit` arrives as a nil pointer, and a nil pointer
+	// dereferenced to 0 would mean `LIMIT 0` to Postgres: an empty page, which an operator
+	// asking "what failed?" would read as "nothing failed". So the edge applies the contract
+	// it publishes, from the same constant the app's floor uses. Both ends, one number.
+	filter := app.IntentFilter{Limit: app.DefaultIntentPageSize, Offset: derefInt(params.Offset)}
+	if params.Limit != nil && *params.Limit > 0 {
+		filter.Limit = *params.Limit
+	}
 	if params.Status != nil && *params.Status != "" {
 		// Accept `dead_letter` as readily as `DEAD_LETTER`: the status is upper-case in the
 		// record and lower-case in every query string a person actually types.

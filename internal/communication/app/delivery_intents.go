@@ -32,9 +32,18 @@ type IntentFilter struct {
 	Offset int
 }
 
+// The page-size contract, in ONE place because two rings depend on it and they must not be
+// able to disagree. `DefaultIntentPageSize` is also the `default:` declared for `limit` in
+// `api/communication.openapi.yaml`; oapi-codegen does not bind a declared default (an omitted
+// `limit` arrives as a nil pointer), so the HTTP adapter applies it explicitly from this
+// constant rather than from a literal of its own.
 const (
-	defaultIntentPageSize = 50
-	maxIntentPageSize     = 500
+	// DefaultIntentPageSize is the page size an operator gets when they ask for no particular
+	// one. It must equal the `limit` default declared in the OpenAPI spec.
+	DefaultIntentPageSize = 50
+	// MaxIntentPageSize caps what a caller may ask for, so one operator query cannot pull the
+	// whole table.
+	MaxIntentPageSize = 500
 )
 
 // DeliveryIntentRepository persists delivery intents and their append-only attempt history.
@@ -134,7 +143,7 @@ func (s *DeliveryIntentService) record(ctx context.Context, origin domain.Delive
 // DueIntents returns the next batch of intents of one kind whose backoff has elapsed.
 func (s *DeliveryIntentService) DueIntents(ctx context.Context, kind domain.DeliveryKind, limit int) ([]domain.DeliveryIntent, error) {
 	if limit <= 0 {
-		limit = defaultIntentPageSize
+		limit = DefaultIntentPageSize
 	}
 	return s.repo.DueIntents(ctx, kind, s.clock.Now(), limit)
 }
@@ -183,12 +192,18 @@ func (s *DeliveryIntentService) GetIntent(ctx context.Context, id string) (domai
 
 // ListIntents returns the filtered intent list, clamping the page size so an operator query
 // cannot pull the whole table.
+//
+// The clamp is a FLOOR under every caller, not the place the HTTP default lives: a non-positive
+// limit from any ring becomes the default page size here, so no caller can turn a list into
+// `LIMIT 0` — an empty page that reads exactly like "there are no failures". The HTTP adapter
+// applies the same default at the edge as well, because that is where the OpenAPI declares it;
+// both read it from DefaultIntentPageSize, so the two cannot drift.
 func (s *DeliveryIntentService) ListIntents(ctx context.Context, filter IntentFilter) ([]domain.DeliveryIntent, error) {
 	if filter.Limit <= 0 {
-		filter.Limit = defaultIntentPageSize
+		filter.Limit = DefaultIntentPageSize
 	}
-	if filter.Limit > maxIntentPageSize {
-		filter.Limit = maxIntentPageSize
+	if filter.Limit > MaxIntentPageSize {
+		filter.Limit = MaxIntentPageSize
 	}
 	if filter.Offset < 0 {
 		filter.Offset = 0
