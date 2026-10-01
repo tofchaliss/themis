@@ -61,3 +61,30 @@ truth), so `openspec validate` reporting "no deltas" is expected; archive with
 ## Group 3 — M2 CI — NOT STARTED
 
 ## Group 4 — M3 mail — NOT STARTED
+
+## Group 5 — Remediation cycle — **documentation only, 2026-10-01**
+
+No code, API spec, schema, migration or generated handler changes in this group. Runtime-side
+source: `themis-ai-runtime/openspec/changes/outward-actions` **D-N-8..D-N-12**.
+
+- [x] 5.1 `docs/engineering/decisions/EDR-DELIVERY-01.md`: **Revision 2 (2026-10-01)** with
+      RC-1..RC-8 — evaluation-complete trigger + the Themis-owned pub/sub notification (transport
+      deferred to its own EDR); Jira one ticket per Release with CVE ids for Critical/High only;
+      `ci_rebuild` approved (policy-gated, callback carries new SBOM id + image digest, `ci_build`
+      unchanged); new-vs-previous SBOM comparison; mail after the comparison; default
+      max-attempts 2; ownership and invariants; **N-M0 unchanged**. Status line updated.
+- [x] 5.2 `design.md`: "Acceptance as documented — Remediation Cycle" block mirroring RC-1..RC-8,
+      marked as documentation rather than a realization map.
+- [x] 5.3 `proposal.md`: the owner's loop restated, doc-only scope, `ci_build` semantics and N-M0
+      explicitly preserved. The operator-configurable **max-attempts default = 2** knob is recorded
+      as documentation — its configuration locus and name are NOT fixed here — and the Jira content
+      rule (CVE ids listed only for Critical and High; Medium/Low by count) is recorded with it.
+- [x] 5.4 Gates: `make check` green (build · vet-tags · test · lint · clean-arch · arch-test ·
+      coverage · deadcode), proving no code drift from a documentation-only change.
+- [ ] 5.5 Dedicated EDR + API change for the Themis→harness notification seam before any
+      implementation: event name(s), at-least-once semantics, transport, subscriber
+      authentication, owning context (Communication or Governance). Class 4 — owner approval first.
+- [ ] 5.6 Fix the configuration locus and name of the max-attempts knob, and whether per-Release
+      overrides are supported.
+- [ ] 5.7 Confirm the comparison baseline: strictly the immediately-previous SBOM id for the
+      Release, or a configured baseline window.
