@@ -40,6 +40,49 @@ type CreatePublicationResponse struct {
 	PublicationId *string `json:"publication_id,omitempty"`
 }
 
+// DeliveryAttempt defines model for DeliveryAttempt.
+type DeliveryAttempt struct {
+	AttemptNo   *int    `json:"attempt_no,omitempty"`
+	AttemptedAt *string `json:"attempted_at,omitempty"`
+	Error       *string `json:"error,omitempty"`
+	Ok          *bool   `json:"ok,omitempty"`
+}
+
+// DeliveryIntent One recorded decision to act outside the estate (EDR-DELIVERY-01 N-M1a). The lineage and the payload are a SNAPSHOT frozen when the governance fact crossed the bus, so a send that happens later delivers what the fact said THEN. `destination` is a governed NAME, never a credential - no secret is ever stored on an intent (D-N-6).
+type DeliveryIntent struct {
+	Attempts *int `json:"attempts,omitempty"`
+
+	// AttemptsHistory Append-only send history (single-intent reads only; the list omits it).
+	AttemptsHistory *[]DeliveryAttempt `json:"attempts_history,omitempty"`
+	CreatedAt       *string            `json:"created_at,omitempty"`
+	Cve             *string            `json:"cve,omitempty"`
+	Destination     *string            `json:"destination,omitempty"`
+	FaultlineId     *string            `json:"faultline_id,omitempty"`
+	FindingId       *string            `json:"finding_id,omitempty"`
+	Id              *string            `json:"id,omitempty"`
+
+	// Kind jira_issue | email | ci_build
+	Kind          *string `json:"kind,omitempty"`
+	LastError     *string `json:"last_error,omitempty"`
+	MaxAttempts   *int    `json:"max_attempts,omitempty"`
+	NextAttemptAt *string `json:"next_attempt_at,omitempty"`
+
+	// OriginEventId The causing bus envelope - also the dedup identity, so a replay creates no second intent.
+	OriginEventId   *string `json:"origin_event_id,omitempty"`
+	OriginEventTime *string `json:"origin_event_time,omitempty"`
+	OriginEventType *string `json:"origin_event_type,omitempty"`
+
+	// PayloadHash sha-256 of the materialized payload bytes recorded with the intent.
+	PayloadHash     *string `json:"payload_hash,omitempty"`
+	PositionVersion *int    `json:"position_version,omitempty"`
+	ProposalId      *string `json:"proposal_id,omitempty"`
+	ReleaseId       *string `json:"release_id,omitempty"`
+
+	// Status PENDING | DELIVERED | DEAD_LETTER | CANCELLED (forward-only; a retry re-opens, it does not erase).
+	Status    *string `json:"status,omitempty"`
+	UpdatedAt *string `json:"updated_at,omitempty"`
+}
+
 // PreviewRequest Same subject union as CreatePublicationRequest - exactly one of finding_id / release_id.
 type PreviewRequest struct {
 	ArtifactType string  `json:"artifact_type"`
@@ -132,6 +175,19 @@ type RollupView struct {
 	WithdrawnExcluded *int    `json:"withdrawn_excluded,omitempty"`
 }
 
+// ListDeliveryIntentsParams defines parameters for ListDeliveryIntents.
+type ListDeliveryIntentsParams struct {
+	// Status PENDING | DELIVERED | DEAD_LETTER | CANCELLED (case-insensitive). Omit for any.
+	Status *string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Kind jira_issue | email | ci_build. Omit for any.
+	Kind *string `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// Limit Page size, 1..500. Omitted means 50. A limit above 500 is REFUSED with 400 rather than silently clamped - on the endpoint whose job is "show me every failure", a truncated page that looks complete is the worst way to be wrong. Page with offset instead.
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListPublicationsParams defines parameters for ListPublications.
 type ListPublicationsParams struct {
 	Release string `form:"release" json:"release"`
@@ -156,6 +212,18 @@ type CreatePublicationJSONRequestBody = CreatePublicationRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// List outward-action delivery intents (EDR-DELIVERY-01 N-M1a) - the operator's view of what Themis decided to send outside the estate and how it went. Admin-only, like every route under /delivery.
+	// (GET /delivery/intents)
+	ListDeliveryIntents(w http.ResponseWriter, r *http.Request, params ListDeliveryIntentsParams)
+	// One delivery intent with its full append-only attempt history.
+	// (GET /delivery/intents/{id})
+	GetDeliveryIntent(w http.ResponseWriter, r *http.Request, id string)
+	// Withdraw a PENDING intent. The record survives as the statement that a human decided this outward action should not happen. Cancelling an already-cancelled intent is a no-op success; anything else (DELIVERED, DEAD_LETTER) is refused (409).
+	// (POST /delivery/intents/{id}/cancel)
+	CancelDeliveryIntent(w http.ResponseWriter, r *http.Request, id string)
+	// Re-open a dead-lettered or cancelled intent for the workers - PENDING again, attempts back to zero, due immediately. The attempt HISTORY is kept: a retry adds a chapter, it does not erase one. Refused (409) on a PENDING or DELIVERED intent.
+	// (POST /delivery/intents/{id}/retry)
+	RetryDeliveryIntent(w http.ResponseWriter, r *http.Request, id string)
 	// Render a Position into an artifact without recording a Publication.
 	// (POST /previews)
 	PreviewPublication(w http.ResponseWriter, r *http.Request)
@@ -185,6 +253,30 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// List outward-action delivery intents (EDR-DELIVERY-01 N-M1a) - the operator's view of what Themis decided to send outside the estate and how it went. Admin-only, like every route under /delivery.
+// (GET /delivery/intents)
+func (_ Unimplemented) ListDeliveryIntents(w http.ResponseWriter, r *http.Request, params ListDeliveryIntentsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// One delivery intent with its full append-only attempt history.
+// (GET /delivery/intents/{id})
+func (_ Unimplemented) GetDeliveryIntent(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Withdraw a PENDING intent. The record survives as the statement that a human decided this outward action should not happen. Cancelling an already-cancelled intent is a no-op success; anything else (DELIVERED, DEAD_LETTER) is refused (409).
+// (POST /delivery/intents/{id}/cancel)
+func (_ Unimplemented) CancelDeliveryIntent(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Re-open a dead-lettered or cancelled intent for the workers - PENDING again, attempts back to zero, due immediately. The attempt HISTORY is kept: a retry adds a chapter, it does not erase one. Refused (409) on a PENDING or DELIVERED intent.
+// (POST /delivery/intents/{id}/retry)
+func (_ Unimplemented) RetryDeliveryIntent(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Render a Position into an artifact without recording a Publication.
 // (POST /previews)
@@ -242,6 +334,156 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListDeliveryIntents operation middleware
+func (siw *ServerInterfaceWrapper) ListDeliveryIntents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDeliveryIntentsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDeliveryIntents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDeliveryIntent operation middleware
+func (siw *ServerInterfaceWrapper) GetDeliveryIntent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDeliveryIntent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelDeliveryIntent operation middleware
+func (siw *ServerInterfaceWrapper) CancelDeliveryIntent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelDeliveryIntent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryDeliveryIntent operation middleware
+func (siw *ServerInterfaceWrapper) RetryDeliveryIntent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryDeliveryIntent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // PreviewPublication operation middleware
 func (siw *ServerInterfaceWrapper) PreviewPublication(w http.ResponseWriter, r *http.Request) {
@@ -572,6 +814,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/delivery/intents", wrapper.ListDeliveryIntents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/delivery/intents/{id}", wrapper.GetDeliveryIntent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/delivery/intents/{id}/cancel", wrapper.CancelDeliveryIntent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/delivery/intents/{id}/retry", wrapper.RetryDeliveryIntent)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/previews", wrapper.PreviewPublication)
 	})
 	r.Group(func(r chi.Router) {
@@ -604,42 +858,70 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1Fnvctu4EX+VHbYzkaYkZcfJh/pbmvgyae9i18nddOaS0cHEUsSFBBhgKZlNPNOH6BP2SToASIqyQDn/",
-	"7+6bbIILYH+/3f3t8l2UqapWEiWZ6PRdpNHUShp0f1xodVViZX9mShJKsj9ZXZciYySUXPxqlLT/M1mB",
-	"FbO//qwxj06jPy22dhf+qVn09m5ubuKIo8m0qK2Z6DQ601rpNLIPutXW2GONjPCiueo3vMS3DRp3jN33",
-	"XxYIprn6FTMCYYDBj8+fnT+H2dmTy+Tx+Q8//Pj82eNHL5+dP0+OjuHJ8Un6cH4KeM0yKltQEkHlkAvJ",
-	"hVwtBYcZgxp1cqGMsBsA0yRyllEMT07moDRoLJEZdGupwP7vxGSqRg4/nf0LtCrLpo7tbpCAkmU7mFlS",
-	"WyP8ssbrX+xp16wUHKhAjfMUXjR1XbZCruBKUWE3kyjsQ3+xB0dHaRRHtVY1ahIeqR3D+95Z4zW8B8bX",
-	"wijdwnuQikTe+dQ+abigpcZaaYriyBuJDGkhV9FNHNnnKDNnee9hVjApsQw+27o0/FjpigXQVDVKf+as",
-	"zUolkV8n3d+G5fAeKqbfcLWxZ7cUTPzR4T0QXgdvsMUrzJ3uOWwKZbCDDkhBxQi1YKX4N8LsyfHJ/NSx",
-	"pWpKEokhRlihJOAqa9wPtUZtkbSGSoRaGWo0QgLDWgO5VhX01DKOGTFULCuERMhKZJrJDA0wA0xKRQ4l",
-	"E0PelCVkdge2whg0Zkpz5CBk3RAYpBQuMW8Mcpg9uH9/DpsCpTvMJa6EId2CZBVCVjAhIXO2QXCUJPLW",
-	"rau14k1GMMuZKJOsVAa5I3D6YJ7uu9X59W0jNPLo9OdbJBzQfT28p1x8WjgCge3zjkVnl9r1dtEkehI3",
-	"nTvuGRAcEvDx+52nH4w2glxpYONY79JGDGxgQYe/XzoK9T7DzHKkrHAuKxkRalgLBk/PXsLCv2oW7wS/",
-	"mfDZnjcuNK4FbiaT2wuLWr93I11CMjCVHCE5kNgWo+t8QBr59IC+IwK/GJMG303yh7WlYhObBswNJW/X",
-	"DEdiIpzkSFCJH2p/C9dPAjf7+9wNwScn42wdfodjKdao26XNUY0JA8uakkohcRL5TybGxBvTuMVR3SXP",
-	"5Rq1EV6CdIuEJFyhvpNxcWSITXnRNDVqgxzHb14pVSKTYVz/2WCDZ5J0G4Z1yvef69e777hDzeEOB69/",
-	"wKuhu1+6lPdiIM8tQpulysO80yKnwAtDzVva0jiRDjlmwh4yBi7yHLUtvts3bcpboa61kDYfVkIqDW4/",
-	"V8XT++PUPKKMDZ8V8mVv3YSZJXGz7IAxU9yr1Br5wVUhX+aqkYEil7PSiROUIFVfnjbMAFq94UqkKZC7",
-	"ikWFMDDriBGDj7wY+rQxvvmIDvtldppMu2cj3eBWathUMsgeD02neJxMdie/ZwLixRZt2bpS7vS1819f",
-	"umLokBnhbovzAHji9LVfFL7gVoCFETNNVTEdoNtFyYRMSiZXDVthx6JuNcxeRVmjLfteRe5Ir6IXLx99",
-	"fwYJHO+deWbmMaRp+ir6UGXgQ2uiUvSBFeiEJKtNoeiegbWQZI89u/zu8cnJyV/n1s+lUV6QWv8bwdGB",
-	"M4hYQQbLPP34TsApEr6cSPSfVQNCkl1y1Na9/blnmK5Sd5XzGqXtwf7+4vz5PIY16itGogpeqRO9y7rR",
-	"ZXinXj4nHLWwrMwaQ6pCneQss/qy181eTFPrk0xQM39Iyr6Dp31tWl61h6uXmdpjI6jgmm3kEq+zstmt",
-	"cwfyk/2XkLnad9NjVVWN7DW2mxZcE8wuCtsUn8BKI8pcYMnn8L///Nc3GyNRbhqdswxTeKnFatW1UNve",
-	"yy9SOTAJZ5JcYjc49FAgJCn7rGfn0GjDrGgqJhPyZpG73aUC1pCqnNm57aQY32akkUSzDZhrzIW2GXWF",
-	"EjW7KnEOHTNNDKUwtL2PKezzpB66u43Sb+yS2JmqvVoFtj27pzFYSFRD3TGEXKVgqddf5J4BX7DdEKDc",
-	"sNZALq6Rw5Vv3QZ7M+lqgkbhHYWEfJ6+ktEgVC2nK2FgF7NHF8+iUemPjtOj9MiSxTbjrBbRaXSSHqUn",
-	"tmlgVDh2Lrr7+LKvfO9ic5Qz+Yzb7OlXjJwaea2Phv6mePsFh0s7TdTNbk9hi5T7x2i8df/o6Mvv3rUh",
-	"gRHX+T9S684HfteQseF020mZXf/go9Y//Cj748IXXXoqskBg9fG0R1O7eoutn+AtRqHtPL3CADO+F4bG",
-	"seaIpVmFhNpEpz+/i4R129sGdRvFkWSV5W6XPaPb4MYjoG4X1tefCbwgrMydDLjV2W2zJ9OatQcY8RmI",
-	"WR9OZC4/vLj07kq7rikAw94Y4SvF5+Qs94Mi9fhrnmM6Zv1i/nsP3L5qhirm7WAO0mWvTs4DkexmWpPh",
-	"/BRpl0ShYLaVYxvLgn/TMP6o6D2Qv78ZrE+RJvHqBAj0qsRp+Rxq3chb6N2WJHci6F9wE43oW2TOW7OT",
-	"b5I4nbaSrGwNDRLNacPtXN6qwhZI9cLOdncrJRFcH9x5uCtHPja64W+ynaNN+XlnZPIVQiUOF8+uAxu/",
-	"ydGNoLYfXUKNadja0Av+VkG748WvRpOBHg53icaAVpt+jnTq1Hc3Axh/ODgwgXGtgCAD9iSNjVw/VGAr",
-	"JmTXTezMUbqJfgxSEbC61upa2FzPY6CCyTfG0tR/hgx9E+oIbNWaIds5MHDpHlhGPY/9Z4uDYu2yW/PH",
-	"1mmjkcq3k2jDV6R7ZvRt2MQgcYOGIBfakP+S7L7ydS28sb0YFMKQ0i0k8OQhvEGsjfsyPN+F7s7q7C/+",
-	"RyvMY7h+LzXZFoEh0rqQn1VIjDNi8JcuEm9Npxxc1hTqde96N3GKFqwWi/VxdPP65v8BAAD//w==",
+	"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",
+	"P9z//wA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

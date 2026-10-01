@@ -19,6 +19,18 @@ credential every governance write; the runtime holds no governance authority.
 | D5a Refusal withholds the estate | generic 403 details; `writeRefusal` + `Handler.logRefusal` send key id, Finding, release, owning product, rule, correlation id and the withheld error to `observability.Logger` (`WithLogger`; no-op by default) |
 | D6 Edge-only, reads untouched | the check lives in the HTTP adapter; `domain`/`app` unchanged; no read route gated |
 | D7 Per-route, not middleware | the decision needs the resource; the route knows it, a path-parsing middleware would duplicate the router |
+| D8 Record, never send | `inbound.Consumer.handleFindingOpened` / `handleProposalAccepted` → `app.DeliveryIntentService.Record*`; the consumer holds no `Sender`. `store.SaveIntent` joins the inbox unit of work on the context, so the row commits with the envelope claim |
+| D9 Snapshot + freeze | `domain.NewDeliveryIntent` calls `MaterializeDeliveryPayload` + `MarshalDeliverySnapshot` itself and hashes the result; `snapshot` / `payload_bytes` / `payload_hash` columns |
+| D10 Forward-only, append-only | `RecordSuccess` / `RecordFailure` / `Retry` / `Cancel` on the aggregate; `store.RecordAttempt` writes state + the `delivery_attempts` row in ONE transaction; the port has no Delete |
+| D11 Envelope id as dedup key | `ux_delivery_intents_origin (origin_event_id, origin_event_type, kind, destination)`; `inbound.originID` supplies the dev-seam surrogate. Why not the bus `seq`: it is not on the wire `Envelope` |
+| D12 Worker per kind, decides nothing | `delivery.IntentWorker` (kind-scoped `DueIntents`, its own ticker) reports outcomes to the aggregate; `next_attempt_at` IS the schedule, so there are no timers and no sleeps in the tests |
+| D13 Fake senders | `delivery.Sender` port + `delivery.FakeSender` (success / fail / flaky, no network); `THEMIS_DELIVERY_FAKE_*_MODE`, unrecognized ⇒ success |
+| D14 No credential on an intent | `destination` is a governed NAME (`app.DefaultIntentDestination`); no secret column exists |
+| D15 Admin-only operator surface | `http.Handler.requireAdmin` on all four `/delivery/intents` routes — reads included, because `product:<id>` cannot be confined from an intent's lineage and the list is a cross-product view |
+| D16 Retry/Cancel transitions | `domain.ErrIntentNotRetryable` / `ErrIntentNotCancellable` → 409; `app.ErrIntentNotFound` → 404; cancel on `CANCELLED` is a no-op success |
+| D17 Disabled kind ⇒ no worker | `wiring.intentWorkers` skips a kind absent from `OutwardConfig.EnableFor`; `cmd/communication.logDeliveryState` states the enabled kinds beside the per-status counts |
+| D18 Page cap refused, faults say nothing | `ListDeliveryIntents` answers 400 above `app.MaxIntentPageSize`; `Handler.writeIntentFault` logs the cause via `WithLogger` and returns a generic detail + correlation id. 404/409 keep the domain's own sentences |
+| D19 Sender errors are a leak boundary | Obligations written on the `delivery.Sender` port and at `app.DeliveryIntentService.RecordOutcome`; `app.Redactor` is the port if a rule is needed |
 
 ## Why the interface is declared at the consumer
 
@@ -68,3 +80,90 @@ guard fails the matrix, which is the only place completeness can be checked mech
 - `governance/adapters/registry`: both hops, and a blank hop returning an error rather than `""`.
 - `cmd/authadmin`: `validScopes` accepts the vocabulary and names the offender otherwise; the
   usage text mentions `delivery:callback` and `product:<id>`.
+
+## Acceptance criteria as BUILT (authoritative for N-M1a)
+
+`phase3-*` changes carry no `specs/` deltas, so this section and the EDR are the system of record
+for what N-M1a actually guarantees. Where the step's original wording and this section differ, the
+difference is named here on purpose and the reason is cited — reading the original wording as still
+current is the regression this section exists to prevent.
+
+| # | Criterion, as built | Deviation from the step's wording |
+|---|---|---|
+| 1 | Migrations create **`delivery_intents`** and **`delivery_attempts`** in the `communication` DATABASE, default (`public`) schema, and reverse cleanly | The step writes `communication.delivery_intents`; that names the database, not a Postgres schema. This repo is database-per-context and no Communication table is schema-qualified (`publications`, `communication_outbox`, `publishable_positions`, `release_rollups`). Asserted by `TestDeliveryIntentMigrations_SchemaMatchesTheStore` |
+| 2 | `delivery_intents` carries a UNIQUE index on **`(origin_event_id, origin_event_type, kind, destination)`** | Deviation from the step's `origin_event_seq`, **APPROVED by the owner 2026-10-01** ("use the event id as the duplicate key, not the sequence number"). Reason of record EDR-DELIVERY-01 **D11**; `tasks.md` 2.0b CLOSED. There is no `origin_event_seq` column anywhere in the schema, and the index is asserted column-by-column against live `pg_indexes` |
+| 3 | `governance.finding_opened` ⇒ exactly one PENDING `jira_issue` intent, non-empty `payload_hash`, **no sender contacted** — structurally, since the consumer holds no sender | none |
+| 4 | `governance.proposal_accepted` ⇒ **`email` alone** at N-M1a | **DECIDED by the owner 2026-10-01**: "CI build requests stay switched off in N-M1a; they come in N-M2… Do not change the Governance event." The frozen v1 payload states no evidence schema and is not being widened, so the harness-execution condition can never be true here. `THEMIS_DELIVERY_ENABLE_CI` defaults OFF; the node states the decision at startup. The mapping and its stubbed test REMAIN so N-M2 is a field plus a default. EDR **D20**, `tasks.md` 2.0c |
+| 5 | Worker: `fail` + max_attempts=3 ⇒ DEAD_LETTER, `last_error` set, 3 history rows; `success` ⇒ DELIVERED, 1 row | none |
+| 6 | Operator API: list by status/kind, retry a DEAD_LETTER to PENDING with attempts zeroed, cancel a PENDING, 403 for non-admin | **Named deviation: OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves the routes; unset, they answer `501` naming the switch. The API addition is an unapproved must-ask (`tasks.md` 2.0a). Recording, sending, retry and dead-lettering are NOT gated |
+| 7 | Coverage: `domain`/`app` 100%, adapters ≥90%, store ≥80% | none |
+| 7a | `limit` is 1..500 (default 50); above the cap is a `400` naming it, not a silent clamp. A `500` states no backend detail — generic body + correlation id, cause to the shared logger | Addition beyond the step's wording (EDR **D18**) |
+| 8 | `deploy/node.env.example` documents every `THEMIS_DELIVERY_*` knob inline (R2) | none |
+| 9 | `scripts/vm-verify.sh` prints a delivery summary, non-fatal when the tables are absent | none |
+
+### Verifying criterion 9 by hand
+
+The line is `delivery: pending=… delivered=… dead_letter=… cancelled=…`, printed in the
+"Pipeline" block with an `EDR-DELIVERY-01 N-M1a` comment above it. Graceful degradation is
+structural rather than conditional: `q()` runs `psql … 2>/dev/null`, and the script sets
+`-uo pipefail` but **not** `-e`, so a query against a missing table yields an empty string and the
+run continues. All four counts empty ⇒ the `n/a (no delivery_intents table — node predates
+outward actions N-M1a)` branch. To confirm on a live host:
+
+```sh
+# 1. Expect the n/a line: point the script at a database with no delivery_intents table.
+psql "$PGBASE/communication?sslmode=disable" -c 'ALTER TABLE delivery_intents RENAME TO delivery_intents_x'
+PGBASE="$PGBASE" ./scripts/vm-verify.sh | grep delivery:
+# 2. Put it back, expect the counts line.
+psql "$PGBASE/communication?sslmode=disable" -c 'ALTER TABLE delivery_intents_x RENAME TO delivery_intents'
+PGBASE="$PGBASE" ./scripts/vm-verify.sh | grep delivery:
+```
+
+Step 1 is the only mutation in this procedure and it is reversible by step 2; do it on a dev
+estate, never on the one being verified. The two expected outputs, verbatim:
+
+```
+# tables present (step 2) — one line inside the Pipeline block
+    delivery: pending=3  delivered=11  dead_letter=1  cancelled=0
+    1 outward action(s) dead-lettered — GET /api/v1/delivery/intents?status=dead_letter
+# tables absent (step 1) — no error, no non-zero exit
+    delivery: n/a (no delivery_intents table — node predates outward actions N-M1a)
+```
+
+The dead-letter hint prints only when that count is non-zero, so a healthy node shows one line.
+
+## What the N-M1a tests pin
+
+- **The event path sends nothing** (`adapters/inbound`): a `finding_opened` envelope yields exactly
+  one PENDING `jira_issue` intent with a non-empty payload hash, and the consumer's collaborator set
+  contains no sender to call. A `proposal_accepted` yields `email` alone, or `ci_build` + `email`
+  when the payload states `harness-execution/v1` evidence (stubbed — the frozen v1 payload cannot
+  carry it yet; see the EDR's honest limits).
+- **A redelivered envelope records no second intent** — the dedup, asserted through the consumer,
+  and again in the store against the real unique index.
+- **An envelope with no id still distinguishes facts** — the dev-seam surrogate (D11); without it
+  every event of a type would collapse onto one intent.
+- **The lifecycle, without a single sleep** (`adapters/delivery`): `fail` + max_attempts=3 ⇒
+  DEAD_LETTER with `last_error` set and three failed history rows, and the dead letter is then OFF
+  the queue; `success` ⇒ DELIVERED with one history row, and a later pass does not re-send it;
+  `flaky` ⇒ DELIVERED with fail/fail/success on the record. Backoff is crossed by stepping an
+  injected clock, so no test is timing-dependent.
+- **Isolation between channels**: one kind's outage leaves another kind's queue untouched.
+- **A store failure stops the pass** rather than sending the next intent unrecorded.
+- **An operator retry puts a dead letter back on the queue** — and the failed attempts stay on the
+  record.
+- **Store integration** (embedded Postgres): round-trip, the unique constraint on
+  (origin_event_id, origin_event_type, kind, destination), append-only history, due-queue scoping by
+  kind AND due time, list/count, and migrations 000006/000007 down-then-up again.
+- **A fault leaks nothing and logs everything** (`TestDeliveryIntents_FaultsDoNotLeakTheBackendError`):
+  a repo error carrying a password, a host:port and a table name produces a 500 on all four routes
+  whose body contains none of the three, while the zap observer shows the withheld cause — the
+  assertion is deliberately two-sided, because withholding the detail from the caller AND failing to
+  log it is strictly worse than leaking it.
+- **The page cap refuses rather than truncates**
+  (`TestListDeliveryIntents_RefusesAPageAboveTheCap`): above `MaxIntentPageSize` ⇒ 400 stating the
+  cap; exactly at it ⇒ 200, so an off-by-one cannot refuse a legitimate page.
+- **HTTP** (`adapters/http`): admin-only on all four routes (non-admin ⇒ 403, no principal ⇒ open,
+  matching every other route on an auth-disabled node), the status/kind filters, the history on the
+  single read, retry 409 on PENDING and 200 on DEAD_LETTER with attempts zeroed, cancel 200 on
+  PENDING and 409 on DELIVERED, 404 on an unknown id, 501 when the service is not wired.

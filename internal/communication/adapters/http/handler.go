@@ -17,18 +17,32 @@ import (
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // Handler implements gen.ServerInterface over the Communication write + read services.
 type Handler struct {
 	write   *app.PublicationService
 	read    *app.ReadService
-	rollups *app.RollupService // release-scoped VEX rollups (D13); nil = not configured
+	rollups *app.RollupService         // release-scoped VEX rollups (D13); nil = not configured
+	intents *app.DeliveryIntentService // outward-action intents (N-M1a); nil = not configured
+	logger  *observability.Logger
 }
 
-// NewHandler builds a Handler.
+// NewHandler builds a Handler. Logging is off until WithLogger is called (a no-op logger, as in
+// the Governance and Intelligence handlers), so a test needs no observability wiring.
 func NewHandler(write *app.PublicationService, read *app.ReadService) *Handler {
-	return &Handler{write: write, read: read}
+	return &Handler{write: write, read: read, logger: observability.Nop()}
+}
+
+// WithLogger attaches the shared logger (R1: console + OTel from one call). A nil logger keeps
+// the no-op. It is what lets a 500 stay generic to the caller while the operator still gets the
+// underlying cause — the same split EDR-DELIVERY-01 D5a makes for an authorization refusal.
+func (h *Handler) WithLogger(l *observability.Logger) *Handler {
+	if l != nil {
+		h.logger = l
+	}
+	return h
 }
 
 // WithRollups wires the release-rollup service (D13) and returns the handler for chaining —
@@ -36,6 +50,15 @@ func NewHandler(write *app.PublicationService, read *app.ReadService) *Handler {
 // always sets it.
 func (h *Handler) WithRollups(rs *app.RollupService) *Handler {
 	h.rollups = rs
+	return h
+}
+
+// WithDeliveryIntents wires the outward-action operator surface (N-M1a) and returns the
+// handler for chaining, on the same terms as WithRollups: left unset, the /delivery routes
+// answer 501 rather than panicking, so a node that does no outward delivery is still a valid
+// deployment.
+func (h *Handler) WithDeliveryIntents(is *app.DeliveryIntentService) *Handler {
+	h.intents = is
 	return h
 }
 

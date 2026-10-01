@@ -10,6 +10,47 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+> **2026-09-30 — `phase3-outward-actions` N-M1a (EDR-DELIVERY-01 D8–D17) implemented.** Themis now
+> WRITES DOWN the outward actions a governance fact calls for, and separate workers try to send
+> them. On `governance.finding_opened` the Communication reader records a `jira_issue` intent; on
+> `governance.proposal_accepted` an `email` intent (and a `ci_build` one when the proposal rested on
+> harness evidence). **The event path records and never sends** (D8) — it holds no sender at all, so
+> an unreachable Jira cannot fail an envelope or stall the stream; the intent commits inside the
+> reader's inbox transaction. Each intent is a SNAPSHOT (D9): frozen lineage + deterministic payload
+> bytes + sha-256, so a send that happens later delivers what the fact said THEN. Statuses move
+> forward only and nothing is deleted; every attempt appends to `delivery_attempts` and an operator
+> retry adds a chapter rather than erasing one (D10). One worker per kind (D12), backoff held as
+> `next_attempt_at` on the row so there are no timers and no sleeping tests. **Senders are FAKES**
+> (D13) — no real Jira, SMTP or CI client exists yet (M2/M3) and they touch no network; the
+> `THEMIS_DELIVERY_FAKE_*_MODE` knobs exist so the retry → dead-letter → retry path can be walked on
+> a real deployment. Operator surface, **admin-only including the reads** (D15):
+> `GET /api/v1/delivery/intents?status=dead_letter`, `GET …/{id}` (with the attempt history),
+> `POST …/{id}/retry`, `POST …/{id}/cancel`. `scripts/vm-verify.sh` gained a `delivery:` line that
+> degrades to `n/a` on a node predating migrations 000006/000007.
+>
+> **TWO OPERATOR NOTES, both "expected, not a fault":**
+> 1. **The operator API is OFF BY DEFAULT** (`THEMIS_DELIVERY_OPERATOR_API=1` enables it). The API
+>    addition is an unapproved must-ask, so the four routes answer 501 — naming the switch in the
+>    body — until an owner says yes. Recording, sending, retry and dead-lettering are NOT gated, so a
+>    default node performs every outward action; it just has no HTTP window onto them, and a dead
+>    letter can be seen in the counts but not retried or cancelled over the API.
+>    **OPEN, needs the owner:** `openspec/changes/phase3-outward-actions/tasks.md` item 2.0a.
+> 2. **`ci_build` is OFF, by owner decision 2026-10-01** — "CI build requests stay switched off in
+>    N-M1a; they come in N-M2, the CI build step. Do not change the Governance event."
+>    `THEMIS_DELIVERY_ENABLE_CI` therefore defaults to **0**: the frozen `proposal_accepted` payload
+>    states no evidence schema, so no `ci_build` intent can exist yet and a worker polling for one
+>    would read as a live channel silently failing. An acceptance records the e-mail intent only. The
+>    mapping code and its stubbed test stay, so N-M2 is a field plus a default (EDR **D20**).
+>
+> **DECIDED 2026-10-01:** the dedup key is `(origin_event_id, origin_event_type, kind, destination)`
+> and not the `origin_event_seq` the step named — "use the event id as the duplicate key, not the
+> sequence number". The kernel `Envelope` carries no seq, `event_log.envelope_id` is the bus's own
+> UNIQUE dedup key, the publisher is idempotent on it, and on the non-bus dev seam no seq exists at
+> all (a `BIGINT` column could only store 0 and would collapse every event of a type onto one
+> intent). EDR **D11**; `tasks.md` 2.0b CLOSED. Nothing re-drives a dead letter on a timer; a person
+> does. Acceptance criteria as built, with the completion matrix:
+> `openspec/changes/phase3-outward-actions/{design,proposal}.md`.
+
 > **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
 > routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,
 > `product:<id>` confined to the Finding's own product (route resolves Finding → release → product
@@ -23,7 +64,8 @@ The single project backlog. Two parts:
 > only, with the estate detail on the log (D5a). CARRIED LIMIT: the Governance → Registry read seam
 > sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve its product and
 > therefore cannot write (admin is unaffected) — a credential for that seam is M1's business, see
-> `openspec/changes/phase3-outward-actions/tasks.md` group 2. M1–M3 (delivery, CI, mail) NOT STARTED.
+> `openspec/changes/phase3-outward-actions/tasks.md` group 2 (N-M1a has since landed — see the note
+> above; M2 CI and M3 mail are still NOT STARTED).
 
 > **2026-09-26 — `phase3-harness-integration` (EDR-HARNESS-01) implemented on branch
 > `feat/harness-integration`, uncommitted pending the user's ask.** Commissions, harness-evidence
