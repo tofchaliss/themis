@@ -100,7 +100,7 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 	// switch. Note what is NOT behind the gate: the consumer still records intents and the
 	// workers still send them, so a node with the surface off still does every outward action —
 	// it just has no HTTP window onto them (the log and scripts/vm-verify.sh remain).
-	api := commhttp.NewHandler(write, read).WithRollups(rollups)
+	api := commhttp.NewHandler(write, read).WithRollups(rollups).WithLogger(logger.Component("api"))
 	if outward.OperatorAPI {
 		api = api.WithDeliveryIntents(intents)
 	}

@@ -152,6 +152,21 @@ func (s *DeliveryIntentService) DueIntents(ctx context.Context, kind domain.Deli
 // DEAD_LETTER once they run out) on failure. Either way an attempt row is appended, so the
 // history is complete whichever way the send went.
 //
+// GUARDRAIL FOR WHOEVER WIRES A REAL SENDER (M2/M3). `sendErr.Error()` is PERSISTED verbatim as
+// `last_error` and as the attempt row's `error`, and it is logged. With the N-M1a fakes that text
+// is a constant and carries nothing. A real Jira, SMTP or CI client is the opposite case: its
+// error strings routinely quote the request that failed, and that can include a bearer token or
+// basic-auth header, a signed webhook URL, an issue body echoed back, or a recipient address
+// (PII). Those would then be at rest in `delivery_attempts` — which is append-only and never
+// pruned, so a leak there is permanent — and in the OTel stream.
+//
+// So when a real sender lands, the error must be sanitized BEFORE it reaches this method: give the
+// sender a mapping from transport failure to a safe, enumerated reason (status + a short class),
+// or run it through a redactor on the way out — `app.Redactor` already exists as the port for
+// exactly this shape of rule, with `delivery.PassThroughRedactor` as today's no-op. Sanitizing
+// here instead would be too late for the sender's own logging, and sanitizing at the sink would
+// leave the stored copy raw.
+//
 // It RETURNS the updated intent because the caller's copy is now stale, and the caller is
 // the worker that has to say what happened. Taking the intent by value and discarding the
 // result would leave the worker logging the pre-attempt state — so a dead letter would be

@@ -181,7 +181,8 @@ paths:
         what Themis decided to send outside the estate and how it went. Admin-only, like every
         route under /delivery.
       description: >-
-        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        AUTH, and which layer answers what: a 401 is never produced by this route and is not
+        listed among its responses - an
         unauthenticated request is refused upstream by the node's auth middleware
         (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
         /delivery surface is admin-only, reads included, because a delivery intent's lineage
@@ -207,9 +208,15 @@ paths:
         - name: limit
           in: query
           required: false
+          description: >-
+            Page size, 1..500. Omitted means 50. A limit above 500 is REFUSED with 400 rather than
+            silently clamped - on the endpoint whose job is "show me every failure", a truncated
+            page that looks complete is the worst way to be wrong. Page with offset instead.
           schema:
             type: integer
             default: 50
+            minimum: 1
+            maximum: 500
         - name: offset
           in: query
           required: false
@@ -227,8 +234,6 @@ paths:
                   $ref: '#/components/schemas/DeliveryIntent'
         '400':
           $ref: '#/components/responses/Problem'
-        '401':
-          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '501':
@@ -240,7 +245,8 @@ paths:
       operationId: getDeliveryIntent
       summary: One delivery intent with its full append-only attempt history.
       description: >-
-        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        AUTH, and which layer answers what: a 401 is never produced by this route and is not
+        listed among its responses - an
         unauthenticated request is refused upstream by the node's auth middleware
         (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
         /delivery surface is admin-only, reads included, because a delivery intent's lineage
@@ -263,8 +269,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
-        '401':
-          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
@@ -281,7 +285,8 @@ paths:
         back to zero, due immediately. The attempt HISTORY is kept: a retry adds a chapter, it
         does not erase one. Refused (409) on a PENDING or DELIVERED intent.
       description: >-
-        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        AUTH, and which layer answers what: a 401 is never produced by this route and is not
+        listed among its responses - an
         unauthenticated request is refused upstream by the node's auth middleware
         (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
         /delivery surface is admin-only, reads included, because a delivery intent's lineage
@@ -304,8 +309,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
-        '401':
-          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
@@ -324,7 +327,8 @@ paths:
         this outward action should not happen. Cancelling an already-cancelled intent is a
         no-op success; anything else (DELIVERED, DEAD_LETTER) is refused (409).
       description: >-
-        AUTH, and which layer answers what: a 401 is never produced by this route - an
+        AUTH, and which layer answers what: a 401 is never produced by this route and is not
+        listed among its responses - an
         unauthenticated request is refused upstream by the node's auth middleware
         (auth.RequireAPIKey) and never reaches the handler. The 403 IS this route's own: the
         /delivery surface is admin-only, reads included, because a delivery intent's lineage
@@ -347,8 +351,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryIntent'
-        '401':
-          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':

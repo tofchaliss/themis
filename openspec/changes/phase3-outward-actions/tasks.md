@@ -184,6 +184,18 @@ senders are FAKES (D13) — real Jira/SMTP/CI are M2/M3.
       line, degrading to `n/a` on a node predating the migrations (a verification script that dies
       on an absent table is a script people stop running) and pointing at the dead-letter query when
       the count is non-zero. Read-only, as the whole script is.
+- [x] 2.9a Hardening on the operator surface (D18, D19): `limit` bounded at the edge — above
+      `app.MaxIntentPageSize` is a `400` naming the cap rather than a silent clamp, because a
+      truncated page that looks complete is the expensive way to be wrong on a "show me every
+      failure" endpoint; `500` bodies carry a generic detail + the correlation id while the cause
+      goes to the shared logger through the new `Handler.WithLogger` (the D5a split — a pgx error
+      can quote the DSN, a host:port, a constraint or part of the statement, and a response body
+      outlives the admin-only gate the moment it is pasted into a ticket). `404`/`409` keep the
+      domain's own sentences. Plus the M2/M3 guardrail: the obligations on a real sender's error
+      (no credential, no signed URL, no echoed payload, no recipient; and distinguish "refused" from
+      "unreachable") are written on the `delivery.Sender` port and at `RecordOutcome`, because
+      `last_error` and `delivery_attempts` are append-only and never pruned. Tests: the cap's two
+      sides, and the two-sided leak assertion (nothing in the body, everything on the log).
 - [x] 2.10 Gates: `go build ./...`, `go vet -tags=integration` + `-tags=e2e`, unit + integration
       tests, `golangci-lint run` (0 issues), `go-cleanarch` on `internal/communication`,
       `tests/architecture`. Coverage — `communication/domain` **100%**, `communication/app`

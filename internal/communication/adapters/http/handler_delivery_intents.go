@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
 	"github.com/themis-project/themis/internal/platform/auth"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // The outward-actions operator surface (EDR-DELIVERY-01 N-M1a): see what Themis decided to
@@ -85,6 +87,17 @@ func (h *Handler) ListDeliveryIntents(w http.ResponseWriter, r *http.Request, pa
 	// it publishes, from the same constant the app's floor uses. Both ends, one number.
 	filter := app.IntentFilter{Limit: app.DefaultIntentPageSize, Offset: derefInt(params.Offset)}
 	if params.Limit != nil && *params.Limit > 0 {
+		// REFUSE a page past the cap rather than silently clamping it. Both bound the query
+		// equally, but a clamp lets the caller believe they received everything there was —
+		// which, on the one endpoint whose job is "show me every failure", is the worst
+		// possible way to be wrong. The app's clamp stays underneath as the floor for callers
+		// that are not this edge.
+		if *params.Limit > app.MaxIntentPageSize {
+			writeProblem(w, http.StatusBadRequest, "limit too large",
+				fmt.Sprintf("limit must be at most %d (got %d); page with offset instead",
+					app.MaxIntentPageSize, *params.Limit))
+			return
+		}
 		filter.Limit = *params.Limit
 	}
 	if params.Status != nil && *params.Status != "" {
@@ -108,7 +121,7 @@ func (h *Handler) ListDeliveryIntents(w http.ResponseWriter, r *http.Request, pa
 
 	intents, err := h.intents.ListIntents(r.Context(), filter)
 	if err != nil {
-		writeProblem(w, http.StatusInternalServerError, "cannot list delivery intents", err.Error())
+		h.writeIntentFault(w, r, "cannot list delivery intents", err)
 		return
 	}
 	out := make([]gen.DeliveryIntent, 0, len(intents))
@@ -129,7 +142,7 @@ func (h *Handler) GetDeliveryIntent(w http.ResponseWriter, r *http.Request, id s
 	}
 	intent, attempts, err := h.intents.GetIntent(r.Context(), id)
 	if err != nil {
-		writeIntentErr(w, "cannot read delivery intent", err)
+		h.writeIntentErr(w, r, "cannot read delivery intent", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toDeliveryIntentView(intent, attempts))
@@ -168,24 +181,51 @@ func (h *Handler) transitionIntent(w http.ResponseWriter, r *http.Request, id, t
 	}
 	intent, err := apply(r, id)
 	if err != nil {
-		writeIntentErr(w, title, err)
+		h.writeIntentErr(w, r, title, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toDeliveryIntentView(intent, nil))
 }
 
 // writeIntentErr maps the intent-flow errors onto transport statuses: an unknown intent is a
-// 404, a refused transition a 409 (the resource exists and its state says no — not a
-// malformed request), anything else a 500.
-func writeIntentErr(w http.ResponseWriter, title string, err error) {
+// 404, a refused transition a 409 (the resource exists and its state says no — not a malformed
+// request), anything else a 500.
+//
+// The 404 and 409 details are the DOMAIN's own sentences — "this intent is not retryable" tells
+// the caller exactly what they need and reveals nothing they did not already name. A 500 is the
+// opposite case and is handled separately below.
+func (h *Handler) writeIntentErr(w http.ResponseWriter, r *http.Request, title string, err error) {
 	switch {
 	case errors.Is(err, app.ErrIntentNotFound):
 		writeProblem(w, http.StatusNotFound, title, err.Error())
 	case errors.Is(err, domain.ErrIntentNotRetryable), errors.Is(err, domain.ErrIntentNotCancellable):
 		writeProblem(w, http.StatusConflict, title, err.Error())
 	default:
-		writeProblem(w, http.StatusInternalServerError, title, err.Error())
+		h.writeIntentFault(w, r, title, err)
 	}
+}
+
+// writeIntentFault answers an infrastructure failure. The caller gets a GENERIC detail and the
+// operator gets the real one through the shared logger (R1), which is the same split
+// EDR-DELIVERY-01 D5a makes for an authorization refusal and for the same reason: a driver's
+// error text is written for whoever runs the database, not for whoever called the API. A pgx
+// message can carry the DSN, a host and port, a constraint or column name, or a fragment of the
+// statement — estate detail that the response body is the one place guaranteed to be read. The
+// routes being admin-only is why this is defence in depth rather than a leak, not a reason to
+// skip it: an error body gets pasted into tickets and chat logs that the gate does not cover.
+func (h *Handler) writeIntentFault(w http.ResponseWriter, r *http.Request, title string, err error) {
+	// The correlation id is read off the RESPONSE header: observability.RequestLogger sets it
+	// there before the handler runs (echoing an inbound X-Correlation-ID or minting one), so the
+	// log line and the response the caller holds name the same request. That is what makes a
+	// generic body actionable — the caller can quote the id and the operator finds the cause.
+	cid := w.Header().Get(observability.CorrelationHeader)
+	h.logger.Error("delivery-intent request failed",
+		observability.String("title", title),
+		observability.String("path", r.URL.Path),
+		observability.String("correlation_id", cid),
+		observability.Err(err))
+	writeProblem(w, http.StatusInternalServerError, title,
+		"the request could not be completed; the cause is in the node log, under correlation id "+cid)
 }
 
 func toDeliveryIntentView(in domain.DeliveryIntent, attempts []domain.DeliveryAttempt) gen.DeliveryIntent {

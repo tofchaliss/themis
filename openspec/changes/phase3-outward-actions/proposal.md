@@ -1,5 +1,37 @@
 # Proposal — phase3-outward-actions (EDR-DELIVERY-01)
 
+> ## ⛔ N-M1a NEEDS TWO OWNER SIGN-OFFS BEFORE MERGE
+>
+> Both are must-asks under CLAUDE.md, neither can be self-granted, and **neither has been
+> granted**. They are recorded here, at this change's front door, because an approval that lives
+> only in a review thread is not a record. Mitigations are in place for both, so nothing unapproved
+> is reachable on a default node — but the asks stay open.
+>
+> **On the absence of a `specs/` delta:** `phase3-*` changes carry none by design — proposal +
+> design + tasks + the EDR *are* the source of truth, and `openspec validate` reporting "no deltas"
+> is the expected result (CLAUDE.md, "OpenSpec is the system of record"). So the authoritative
+> restatement of what N-M1a guarantees is `design.md` → **"Acceptance criteria as BUILT"**, not a
+> spec file. Its absence is the convention, not an omission.
+>
+> | # | Ask | Mitigation in place | Record | Sign-off |
+> |---|---|---|---|---|
+> | 1 | **Add four Communication API routes** (`/delivery/intents`, `…/{id}`, `…/{id}/retry`, `…/{id}/cancel`) + two schemas to `api/communication.openapi.yaml` | **OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves them; unset, all four answer `501` naming the switch. Recording, sending, retry and dead-lettering are NOT gated | `tasks.md` 2.0a · EDR D15 | ☐ `owner: ______ date: ______` |
+> | 2 | **Dedup key is `origin_event_id`, not the `origin_event_seq` the step named** | None needed — it is strictly stronger (see below), but it IS a stated deviation from the step's wording | `tasks.md` 2.0b · EDR **D11** | ☐ `owner: ______ date: ______` |
+>
+> **Why ask 2 is not merely a convenience.** Four facts, each checkable in this tree:
+> the kernel `Envelope` has no `seq` field and the reader never passes one to `Consumer.Handle`;
+> `event_log.envelope_id` is `NOT NULL UNIQUE` and is commented as the bus's *own* dedup key;
+> the publisher appends `ON CONFLICT (envelope_id) DO NOTHING`, so it is already idempotent on
+> exactly that identity; and — decisively — with `THEMIS_BUS_DATABASE_DSN` unset (a documented dev
+> mode) events arrive over the `/internal/governance-events` seam with **no bus and no seq in
+> existence**, where a `BIGINT` seq column could only ever store `0` and would collapse every event
+> of a type onto one intent. The step's column is not just more invasive to obtain; on that path it
+> is wrong. The rejected alternative — widen the kernel `Envelope` to carry a transport cursor into
+> every context — is itself a must-ask with a far larger blast radius.
+>
+> **If either is refused,** the exact revert is written out in `tasks.md` (2.0a, 2.0b). Neither
+> revert touches the record, the workers or the dead-lettering.
+
 ## Why
 
 Outward actions give Themis credentials that leave the estate (a delivery target calling back, CI

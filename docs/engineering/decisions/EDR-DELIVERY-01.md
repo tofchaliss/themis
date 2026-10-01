@@ -225,6 +225,16 @@ checkable:
    **the bus's own dedup identity**, one-to-one with seq.
 3. `internal/platform/eventbus/publisher.go` — the append is `ON CONFLICT (envelope_id) DO NOTHING`,
    i.e. the publisher is already idempotent on exactly this identity.
+4. **A seq column is not implementable on a supported deployment.** `THEMIS_BUS_DATABASE_DSN`
+   unset is a documented mode (single-context dev, "nothing propagates"), and in it Governance
+   facts reach Communication over the `/internal/governance-events` seam, which decodes a kernel
+   `Envelope` from HTTP and calls `Consumer.Handle` directly — no bus, no `event_log` row, **no
+   seq in existence**. A `BIGINT origin_event_seq` has no value to store there but `0`, so every
+   event of a type would collapse onto one intent and the second Finding opened would silently
+   record nothing. The `TEXT` column holds a `type:subject@occurred_at` surrogate instead, which
+   keeps distinct facts distinct (`inbound.originID`, pinned by
+   `TestConsumer_EnvelopeWithoutIDStillDistinguishesFacts`). The spec's column choice is not
+   merely more invasive — on that path it is incorrect.
 
 So the envelope id is not a substitute for the seq: it is the identity the bus itself deduplicates
 on, and the seq is a cursor derived from it. Keying the intent on the id gives the asked-for
@@ -292,8 +302,47 @@ and the one-line flip if approved are in `openspec/changes/phase3-outward-action
 2.0a, which stays unchecked until an answer exists.
 
 A 401 is never produced by these routes: an unauthenticated request is refused upstream by
-`auth.RequireAPIKey` and never reaches a handler. The 403 is the route's own. Both are stated in the
-OpenAPI operation descriptions, because the layer that answers is not guessable from the status.
+`auth.RequireAPIKey` and never reaches a handler. The 403 is the route's own. The operation
+descriptions say so, and 401 is deliberately NOT listed among the per-route responses — no other
+route in this spec lists it either, because it is a property of the node's auth middleware rather
+than of any route.
+
+### D18 — A page past the cap is REFUSED, and a fault states no backend detail
+
+Two properties of the operator surface that are security-relevant rather than cosmetic:
+
+- **`limit` is bounded at the edge, and exceeding it is a `400`** naming the cap
+  (`app.MaxIntentPageSize`, 500; the default is 50 and `app.DefaultIntentPageSize` is the single
+  constant the OpenAPI's declared default is checked against). Refusing beats silently clamping:
+  both bound the query, but a clamp returns a truncated page that looks complete, and on the one
+  endpoint whose purpose is "show me every failure" believing you have seen them all when you have
+  not is the expensive error. The app's clamp remains underneath as the floor for any caller that is
+  not this edge.
+- **A `500` carries a generic detail plus the correlation id; the cause goes to the shared logger.**
+  A pgx error can quote the DSN, a host and port, a constraint or column name, or a fragment of the
+  statement, and the response body is the one surface guaranteed to be read — and to be pasted into
+  tickets and chat logs that the admin-only gate does not cover. This is the same split D5a makes
+  for an authorization refusal, for the same reason, and the operator ends up with strictly more
+  than before. `404` and `409` keep their explicit sentences: those are the domain's own words
+  about a resource the caller already named, and they reveal nothing.
+
+### D19 — The error a real sender returns is a persistence and logging boundary
+
+`sendErr.Error()` is stored verbatim in `last_error` and in an **append-only, never-pruned**
+`delivery_attempts` row, and it is logged. With the N-M1a fakes it is a constant and carries
+nothing. A real Jira/SMTP/CI client is the opposite case: its error text routinely quotes the failed
+request, which can include a bearer token, a signed webhook URL, an echoed issue body or a recipient
+address (PII) — and a leak into that table is permanent by construction, because the table exists
+precisely so nothing is pruned.
+
+So M2/M3 must sanitize BEFORE the error reaches `RecordOutcome`: map transport failure to an
+enumerated reason (status + short class), or run it through `app.Redactor` (the port already exists;
+`delivery.PassThroughRedactor` is today's no-op). Sanitizing inside `RecordOutcome` would be too
+late for the sender's own logging; sanitizing at the sink would leave the stored copy raw. The
+obligation is written on the `delivery.Sender` port, where whoever implements a real one will read
+it, together with the second obligation it implies: distinguish "refused permanently" from
+"unreachable", because the worker retries every error and will otherwise spend the whole attempt
+budget on a request that can never succeed.
 
 `GET /delivery/intents`, `GET /delivery/intents/{id}`, `POST …/retry`, `POST …/cancel` — all four
 require `admin`, not merely the node's write floor. Two reasons pointing the same way. A mutation

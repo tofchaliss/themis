@@ -11,12 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
 	"github.com/themis-project/themis/internal/communication/adapters/http/gen"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
 	"github.com/themis-project/themis/internal/platform/auth"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 var intentEpoch = time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)
@@ -297,9 +302,10 @@ func TestListDeliveryIntents_DefaultPageSizeWhenLimitOmitted(t *testing.T) {
 	}
 	srv := intentServer(t, repo, &auth.Principal{Scopes: []string{auth.ScopeAdmin}})
 
-	// No limit · an explicit zero · a filter but still no limit · above the cap: every one of
-	// them must page at the default (or the cap) and return what is there.
-	for _, query := range []string{"", "?limit=0", "?status=pending", "?kind=email", "?limit=99999"} {
+	// No limit · an explicit zero · a filter but still no limit · exactly at the cap: every one
+	// of them must page at the default (or the cap) and return what is there. A limit ABOVE the
+	// cap is a 400 and is covered by TestListDeliveryIntents_RefusesAPageAboveTheCap.
+	for _, query := range []string{"", "?limit=0", "?status=pending", "?kind=email", "?limit=500"} {
 		status, body := do(t, http.MethodGet, srv.URL+"/delivery/intents"+query, nil)
 		if status != http.StatusOK {
 			t.Fatalf("list %q = %d (%s)", query, status, body)
@@ -316,6 +322,82 @@ func TestListDeliveryIntents_DefaultPageSizeWhenLimitOmitted(t *testing.T) {
 	// An explicit, positive limit still wins over the default.
 	if _, body := do(t, http.MethodGet, srv.URL+"/delivery/intents?limit=2", nil); len(decodeIntents(t, body)) != 2 {
 		t.Errorf("limit=2 did not page to 2: %s", body)
+	}
+}
+
+// A page past the cap is REFUSED, not clamped. Both bound the query, but a silent clamp hands the
+// caller a truncated page that looks complete — and on the endpoint whose job is "show me every
+// failure", believing you have seen them all when you have not is the expensive mistake.
+func TestListDeliveryIntents_RefusesAPageAboveTheCap(t *testing.T) {
+	repo := newIntentRepo()
+	seedIntent(t, repo, "int-1", domain.DeliveryEmail)
+	srv := intentServer(t, repo, &auth.Principal{Scopes: []string{auth.ScopeAdmin}})
+
+	status, body := do(t, http.MethodGet,
+		fmt.Sprintf("%s/delivery/intents?limit=%d", srv.URL, app.MaxIntentPageSize+1), nil)
+	if status != http.StatusBadRequest {
+		t.Errorf("limit above the cap = %d, want 400 (%s)", status, body)
+	}
+	// The refusal has to say what the cap IS, or the caller's only move is to guess.
+	if !strings.Contains(string(body), fmt.Sprint(app.MaxIntentPageSize)) {
+		t.Errorf("the refusal does not state the cap: %s", body)
+	}
+	// Exactly at the cap is allowed — an off-by-one here would refuse a legitimate page.
+	if status, body := do(t, http.MethodGet,
+		fmt.Sprintf("%s/delivery/intents?limit=%d", srv.URL, app.MaxIntentPageSize), nil); status != http.StatusOK {
+		t.Errorf("limit exactly at the cap = %d, want 200 (%s)", status, body)
+	}
+}
+
+// A 500 must not carry the driver's own words. A pgx error can quote the DSN, a host and port, a
+// constraint or column name, or part of the statement; the response body is the one place
+// guaranteed to be read, and it gets pasted into tickets and chat that the admin-only gate does
+// not cover. The caller gets a generic sentence plus the correlation id; the operator gets the
+// cause through the shared logger. Same split as EDR-DELIVERY-01 D5a.
+func TestDeliveryIntents_FaultsDoNotLeakTheBackendError(t *testing.T) {
+	const secret = "dial tcp 10.0.3.7:5432: password=hunter2 relation \"delivery_intents\" does not exist"
+
+	core, logs := observer.New(zapcore.ErrorLevel)
+	logger := observability.New(zap.New(core))
+	repo := newIntentRepo()
+	seedIntent(t, repo, "int-1", domain.DeliveryEmail)
+	repo.listErr = errors.New(secret)
+	repo.getErr = errors.New(secret)
+
+	pubs := newRepo()
+	write := app.NewPublicationService(pubs, fakePositions{}, serializer.Default(), &ids{}, clk{})
+	read := app.NewReadService(pubs, fakePositions{}, serializer.Default())
+	svc := app.NewDeliveryIntentService(repo, &intentIDs{}, intentClock{}, app.DeliveryIntentConfig{MaxAttempts: 2})
+	handler := commhttp.NewHandler(write, read).WithDeliveryIntents(svc).WithLogger(logger).Router()
+	srv := httptest.NewServer(principalMW(&auth.Principal{Scopes: []string{auth.ScopeAdmin}})(handler))
+	t.Cleanup(srv.Close)
+
+	for _, r := range []struct{ method, path string }{
+		{http.MethodGet, "/delivery/intents"},
+		{http.MethodGet, "/delivery/intents/int-1"},
+		{http.MethodPost, "/delivery/intents/int-1/retry"},
+		{http.MethodPost, "/delivery/intents/int-1/cancel"},
+	} {
+		status, body := do(t, r.method, srv.URL+r.path, nil)
+		if status != http.StatusInternalServerError {
+			t.Errorf("%s %s = %d, want 500 (%s)", r.method, r.path, status, body)
+		}
+		if strings.Contains(string(body), "hunter2") || strings.Contains(string(body), "10.0.3.7") ||
+			strings.Contains(string(body), "delivery_intents") {
+			t.Errorf("%s %s leaked the backend error: %s", r.method, r.path, body)
+		}
+	}
+
+	// ...and the operator loses nothing: the withheld cause is on the log.
+	var found bool
+	for _, e := range logs.All() {
+		if strings.Contains(e.Message, "delivery-intent request failed") &&
+			strings.Contains(fmt.Sprint(e.ContextMap()), "hunter2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the cause was withheld from the caller AND not logged — that is strictly worse than leaking it")
 	}
 }
 

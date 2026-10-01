@@ -29,6 +29,8 @@ credential every governance write; the runtime holds no governance authority.
 | D15 Admin-only operator surface | `http.Handler.requireAdmin` on all four `/delivery/intents` routes — reads included, because `product:<id>` cannot be confined from an intent's lineage and the list is a cross-product view |
 | D16 Retry/Cancel transitions | `domain.ErrIntentNotRetryable` / `ErrIntentNotCancellable` → 409; `app.ErrIntentNotFound` → 404; cancel on `CANCELLED` is a no-op success |
 | D17 Disabled kind ⇒ no worker | `wiring.intentWorkers` skips a kind absent from `OutwardConfig.EnableFor`; `cmd/communication.logDeliveryState` states the enabled kinds beside the per-status counts |
+| D18 Page cap refused, faults say nothing | `ListDeliveryIntents` answers 400 above `app.MaxIntentPageSize`; `Handler.writeIntentFault` logs the cause via `WithLogger` and returns a generic detail + correlation id. 404/409 keep the domain's own sentences |
+| D19 Sender errors are a leak boundary | Obligations written on the `delivery.Sender` port and at `app.DeliveryIntentService.RecordOutcome`; `app.Redactor` is the port if a rule is needed |
 
 ## Why the interface is declared at the consumer
 
@@ -95,6 +97,7 @@ current is the regression this section exists to prevent.
 | 5 | Worker: `fail` + max_attempts=3 ⇒ DEAD_LETTER, `last_error` set, 3 history rows; `success` ⇒ DELIVERED, 1 row | none |
 | 6 | Operator API: list by status/kind, retry a DEAD_LETTER to PENDING with attempts zeroed, cancel a PENDING, 403 for non-admin | **Named deviation: OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves the routes; unset, they answer `501` naming the switch. The API addition is an unapproved must-ask (`tasks.md` 2.0a). Recording, sending, retry and dead-lettering are NOT gated |
 | 7 | Coverage: `domain`/`app` 100%, adapters ≥90%, store ≥80% | none |
+| 7a | `limit` is 1..500 (default 50); above the cap is a `400` naming it, not a silent clamp. A `500` states no backend detail — generic body + correlation id, cause to the shared logger | Addition beyond the step's wording (EDR **D18**) |
 | 8 | `deploy/node.env.example` documents every `THEMIS_DELIVERY_*` knob inline (R2) | none |
 | 9 | `scripts/vm-verify.sh` prints a delivery summary, non-fatal when the tables are absent | none |
 
@@ -142,6 +145,14 @@ estate, never on the one being verified.
 - **Store integration** (embedded Postgres): round-trip, the unique constraint on
   (origin_event_id, origin_event_type, kind, destination), append-only history, due-queue scoping by
   kind AND due time, list/count, and migrations 000006/000007 down-then-up again.
+- **A fault leaks nothing and logs everything** (`TestDeliveryIntents_FaultsDoNotLeakTheBackendError`):
+  a repo error carrying a password, a host:port and a table name produces a 500 on all four routes
+  whose body contains none of the three, while the zap observer shows the withheld cause — the
+  assertion is deliberately two-sided, because withholding the detail from the caller AND failing to
+  log it is strictly worse than leaking it.
+- **The page cap refuses rather than truncates**
+  (`TestListDeliveryIntents_RefusesAPageAboveTheCap`): above `MaxIntentPageSize` ⇒ 400 stating the
+  cap; exactly at it ⇒ 200, so an off-by-one cannot refuse a legitimate page.
 - **HTTP** (`adapters/http`): admin-only on all four routes (non-admin ⇒ 403, no principal ⇒ open,
   matching every other route on an auth-disabled node), the status/kind filters, the history on the
   single read, retry 409 on PENDING and 200 on DEAD_LETTER with attempts zeroed, cancel 200 on
