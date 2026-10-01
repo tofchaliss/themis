@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -368,8 +369,11 @@ func TestDeliveryIntents_FaultsDoNotLeakTheBackendError(t *testing.T) {
 	write := app.NewPublicationService(pubs, fakePositions{}, serializer.Default(), &ids{}, clk{})
 	read := app.NewReadService(pubs, fakePositions{}, serializer.Default())
 	svc := app.NewDeliveryIntentService(repo, &intentIDs{}, intentClock{}, app.DeliveryIntentConfig{MaxAttempts: 2})
+	// Wrapped in the REAL RequestLogger, i.e. the production configuration: the middleware sets
+	// the correlation header before the handler runs, which is the branch a node actually takes.
 	handler := commhttp.NewHandler(write, read).WithDeliveryIntents(svc).WithLogger(logger).Router()
-	srv := httptest.NewServer(principalMW(&auth.Principal{Scopes: []string{auth.ScopeAdmin}})(handler))
+	srv := httptest.NewServer(
+		observability.RequestLogger(logger)(principalMW(&auth.Principal{Scopes: []string{auth.ScopeAdmin}})(handler)))
 	t.Cleanup(srv.Close)
 
 	for _, r := range []struct{ method, path string }{
@@ -398,6 +402,62 @@ func TestDeliveryIntents_FaultsDoNotLeakTheBackendError(t *testing.T) {
 	}
 	if !found {
 		t.Error("the cause was withheld from the caller AND not logged — that is strictly worse than leaking it")
+	}
+}
+
+// The generic 500 body promises the operator a log line, and the correlation id is the only way to
+// find it. These servers are NOT wrapped in observability.RequestLogger (nor is any test's), which
+// is exactly the configuration where the id could come out empty — a body saying "the cause is in
+// the log, under correlation id " would send someone hunting with nothing to match on. So the
+// handler mints one when the middleware has not, and the same id must appear on the response
+// HEADER, in the BODY, and on the LOG line.
+func TestDeliveryIntents_FaultsAlwaysCarryAUsableCorrelationID(t *testing.T) {
+	core, logs := observer.New(zapcore.ErrorLevel)
+	logger := observability.New(zap.New(core))
+	repo := newIntentRepo()
+	repo.listErr = errors.New("db down")
+
+	pubs := newRepo()
+	write := app.NewPublicationService(pubs, fakePositions{}, serializer.Default(), &ids{}, clk{})
+	read := app.NewReadService(pubs, fakePositions{}, serializer.Default())
+	svc := app.NewDeliveryIntentService(repo, &intentIDs{}, intentClock{}, app.DeliveryIntentConfig{MaxAttempts: 2})
+	srv := httptest.NewServer(commhttp.NewHandler(write, read).WithDeliveryIntents(svc).WithLogger(logger).Router())
+	t.Cleanup(srv.Close)
+
+	// No middleware, and no inbound X-Correlation-ID: the handler has to produce one.
+	resp, err := http.Get(srv.URL + "/delivery/intents")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+
+	cid := resp.Header.Get(observability.CorrelationHeader)
+	if cid == "" {
+		t.Fatal("no correlation id on the response — the body's promise of a findable log line is empty")
+	}
+	if !strings.Contains(string(body), cid) {
+		t.Errorf("the body does not quote the correlation id %q: %s", cid, body)
+	}
+	if len(logs.All()) == 0 || !strings.Contains(fmt.Sprint(logs.All()[0].ContextMap()), cid) {
+		t.Errorf("the log line does not carry %q, so the caller cannot be joined to the cause", cid)
+	}
+
+	// An inbound id is honoured rather than replaced — otherwise a caller correlating across nodes
+	// would lose the thread at this hop.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/delivery/intents", nil)
+	req.Header.Set(observability.CorrelationHeader, "given-cid")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get with cid: %v", err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+	body2, _ := io.ReadAll(resp2.Body)
+	if got := resp2.Header.Get(observability.CorrelationHeader); got != "given-cid" {
+		t.Errorf("inbound correlation id replaced: %q", got)
+	}
+	if !strings.Contains(string(body2), "given-cid") {
+		t.Errorf("the body does not quote the inbound correlation id: %s", body2)
 	}
 }
 

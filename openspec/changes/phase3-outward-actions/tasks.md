@@ -98,11 +98,15 @@ senders are FAKES (D13) — real Jira/SMTP/CI are M2/M3.
         `envBoolDefaultOn("THEMIS_DELIVERY_OPERATOR_API")`), and update
         `deploy/node.env.example` + EDR D15.
 
-- [ ] **2.0b MUST-ASK, OUTSTANDING — the dedup key deviates from the step's stated column, and the
-      deviation needs an owner's yes.** The step names
+- [x] **2.0b APPROVED 2026-10-01 — "use the event id as the duplicate key, not the sequence
+      number".** The step's `origin_event_seq` wording is superseded for N-M1a; the enforced key is
+      `(origin_event_id, origin_event_type, kind, destination)` and no `origin_event_seq` column
+      exists anywhere. Reason of record EDR-DELIVERY-01 **D11**; authoritative restatement in
+      `design.md` → "Acceptance criteria as BUILT". The evidence that made the case, kept for
+      whoever revisits it: the step names
       `(origin_event_seq, origin_event_type, kind, destination)`; the implementation enforces
-      `(origin_event_id, origin_event_type, kind, destination)`. The reason of record is
-      EDR-DELIVERY-01 **D11**, and the three facts under it are verified in this tree:
+      `(origin_event_id, origin_event_type, kind, destination)`. Four facts, all verified in this
+      tree:
       - `internal/kernel/event/envelope.go` — the kernel `Envelope` has **no `seq` field**. The bus
         `seq` is the reader's cursor key (`internal/platform/eventbus/reader.go`: "the seq is not
         part of the wire Envelope"), scanned into the reader's private `stamped` struct and never
@@ -112,22 +116,40 @@ senders are FAKES (D13) — real Jira/SMTP/CI are M2/M3.
         envelope id is therefore **the bus's own dedup identity**, one-to-one with `seq`.
       - `internal/platform/eventbus/publisher.go` — the append is `ON CONFLICT (envelope_id) DO
         NOTHING`, so the publisher is idempotent on exactly that identity.
+      - **A seq column is not implementable on a supported deployment.** With
+        `THEMIS_BUS_DATABASE_DSN` unset (documented single-context dev), facts arrive over
+        `/internal/governance-events`, which decodes an `Envelope` from HTTP and calls
+        `Consumer.Handle` directly — no bus, no `event_log` row, **no seq in existence**. A `BIGINT`
+        seq could only store `0` there, collapsing every event of a type onto one intent. The `TEXT`
+        column holds a `type:subject@occurred_at` surrogate instead
+        (`TestConsumer_IDLessEnvelopeDedupsOnReplay`, `…StillDistinguishesFacts`).
       So keying on the envelope id gives the guarantee the step asked for — one intent per (causing
       event, kind, destination), whatever the bus replays — using the identity the bus itself
-      dedups on, while `seq` would key on a value derived from it that the consumer cannot read.
+      dedups on, while `seq` would key on a value derived from it that the consumer cannot read and
+      that does not exist at all on the non-bus path.
       - **Alternative considered and rejected:** carry `seq` into the `Envelope` (or widen
         `Consumer.Handle`). That is a kernel change visible to **every** context and to the bus, to
         surface a transport cursor inside business adapters — itself a must-ask ("domain model
         change"), and a larger blast radius than the thing it would fix.
-      - **If refused:** the migration is unapplied on any estate, so realigning is
-        `000006`'s column plus `SaveIntent`'s `ON CONFLICT`, `DeliveryOrigin`, the snapshot doc and
-        the tests — after the kernel `Envelope` grows the field, which is the change that has to
-        come first.
-      - **Consistency is done on the code side already:** nothing in the tree asserts or stores a
-        `origin_event_seq` — the migration says so outright, the index is asserted column-by-column
-        against `pg_indexes` by `TestDeliveryIntent_UniquePerOriginKindDestination` (including a
-        negative assertion that no seq appears in it), and the authoritative restatement of the
-        acceptance criteria is in `design.md` under "Acceptance criteria as BUILT".
+      - **Consistency, enforced not asserted:** nothing in the tree stores or asserts an
+        `origin_event_seq` — the migration says so outright, and the index is checked
+        column-by-column against live `pg_indexes` by
+        `TestDeliveryIntent_UniquePerOriginKindDestination`, including a negative assertion that no
+        seq appears in it.
+
+- [x] **2.0c DECIDED 2026-10-01 — "CI build requests stay switched off in N-M1a; they come in N-M2,
+      the CI build step. Do not change the Governance event."** So `governance.proposal_accepted`
+      keeps its frozen v1 payload (no evidence schema), the harness-execution condition can never be
+      true at this milestone, and an acceptance records the `email` intent ALONE.
+      Realized as EDR **D20**: `THEMIS_DELIVERY_ENABLE_CI` now defaults to **OFF** — a worker
+      polling a kind that cannot occur reads to an operator as a live channel silently failing,
+      whereas off, the node states the decision in one line at startup. Set it to `1` and the worker
+      starts and warns that it will find nothing.
+      **The mapping code and its test stub REMAIN** (`proposalAcceptedDTO.EvidenceSchema`,
+      `RecordProposalAccepted(..., harnessExecution bool)`,
+      `TestConsumer_ProposalAcceptedRecordsMailAndOptionallyCI` stubbing the field), so the intended
+      behaviour is executable and pinned today and N-M2 turns it on by emitting the field plus
+      flipping one default — deleting a tested mapping to rebuild it later would save nothing.
 
 - [x] 2.1 `internal/communication/domain/delivery_intent.go`: the `DeliveryIntent` aggregate —
       `DeliveryKind` (`jira_issue`/`email`/`ci_build`) and `IntentStatus`

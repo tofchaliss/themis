@@ -171,6 +171,27 @@ model a question.
 - Nothing in this revision addresses outward DELIVERY itself (M1–M3). The scope exists and is
   refused everywhere it must be refused; what it will eventually be ALLOWED to do is undecided.
 
+## Owner decisions — 2026-10-01
+
+Two questions this EDR had carried as open must-asks were decided by the owner. Both are now
+settled and the corresponding items in `openspec/changes/phase3-outward-actions/tasks.md` are
+closed; they are recorded here because the EDR is the reason of record.
+
+1. **The dedup identity is the EVENT ID, not the sequence number.** D11 is accepted as written.
+   The step's `origin_event_seq` wording is superseded for N-M1a and no `origin_event_seq` column
+   exists. (`tasks.md` 2.0b — CLOSED.)
+2. **`ci_build` requests stay switched OFF in N-M1a; they arrive in N-M2, the CI build step. The
+   Governance event is NOT to change.** So `governance.proposal_accepted` keeps its frozen v1
+   payload, no `ci_build` intent can be recorded at this milestone, and the kind's worker is now
+   **off by default** (`THEMIS_DELIVERY_ENABLE_CI=1` to start it) — a worker polling for a kind
+   that cannot occur reads to an operator as a live channel that is silently failing. The mapping
+   code and its test stub stay, so the day Governance states the evidence schema the path works
+   with no change here. See D20.
+
+**Still NOT decided, and still gated:** the API addition (D15). The four `/delivery/intents`
+routes remain OFF by default (`THEMIS_DELIVERY_OPERATOR_API=1`) and the completion matrix row for
+them stays PENDING.
+
 ## Decisions — N-M1a (delivery intents)
 
 N-M0 settled who may ask Themis to act outward. N-M1a settles what Themis DOES with such an
@@ -372,18 +393,31 @@ worker beside the per-status counts: "nothing to send" and "nothing is sending" 
 same, and a dead-letter backlog under a disabled channel otherwise looks exactly like a healthy
 idle node.
 
-## Honest limits — N-M1a
+### D20 — `ci_build` is OFF for N-M1a by decision, and the mapping stays in place
 
-- **`ci_build`'s trigger is structurally present and, on a real estate, dormant.** An acceptance
-  fires a CI build only when the accepted proposal rested on `harness-execution/v1` evidence, and
-  the frozen `governance.proposal_accepted.v1` payload does not state the proposal's evidence
-  schema (`additionalProperties: false` over exactly FindingID, ProposalID, PositionVersion,
-  OccurredAt). N-M1a changes no existing event schema, so today only the `email` intent is
-  recorded. The decision, the kind, the payload and the tests exist and start working the day
-  Governance's event carries the schema — which is M2's job, where the CI payload gains the
-  artifact members it needs anyway. The alternative considered and rejected: asking Governance over
-  HTTP what a finished event meant, i.e. putting a cross-context read on the event path to recover
-  a fact the producer already knew.
+The owner decided (2026-10-01) that CI build requests belong to **N-M2**, and that
+`governance.proposal_accepted` must not change to accommodate them here. Three consequences, all
+deliberate:
+
+- **No `ci_build` intent is recorded at this milestone.** The frozen v1 payload states no evidence
+  schema (`additionalProperties: false` over FindingID, ProposalID, PositionVersion, OccurredAt),
+  and it is not being widened, so the harness-execution condition can never be true yet. An
+  acceptance records the `email` intent alone.
+- **The worker is off by default** (`THEMIS_DELIVERY_ENABLE_CI=1` starts it, and it warns that it
+  will find nothing). A worker polling a kind that cannot occur is worse than no worker: an
+  operator reading `kinds=jira,email,ci` at startup would reasonably conclude CI was live and wait
+  for builds that no code path can create. Off, the node states the decision in one line instead.
+- **The mapping code and its test stub REMAIN.** `proposalAcceptedDTO.EvidenceSchema` and
+  `RecordProposalAccepted(..., harnessExecution bool)` are kept, with
+  `TestConsumer_ProposalAcceptedRecordsMailAndOptionallyCI` stubbing the field — so the intended
+  behaviour is executable and pinned today, and N-M2 turns it on by emitting the field plus
+  flipping one default. Deleting the path and rebuilding it later would discard a tested mapping
+  to save nothing.
+
+Rejected on the way here: asking Governance over HTTP what a finished event meant — a cross-context
+read on the event path to recover a fact the producer already knew.
+
+## Honest limits — N-M1a
 - **The `ci_build` payload is minimal** — no artifact members. Full artifact capture is M2; N-M1a
   sets up the structure and the freezing.
 - **One destination per kind.** Multiple Jira projects or mail audiences are a later step; the

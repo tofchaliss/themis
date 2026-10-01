@@ -35,19 +35,21 @@ The single project backlog. Two parts:
 >    default node performs every outward action; it just has no HTTP window onto them, and a dead
 >    letter can be seen in the counts but not retried or cancelled over the API.
 >    **OPEN, needs the owner:** `openspec/changes/phase3-outward-actions/tasks.md` item 2.0a.
-> 2. **No `ci_build` intent will ever appear yet, and that is correct.**
->    `governance.proposal_accepted` does not state the accepted proposal's evidence schema (its v1
->    payload is frozen over four fields, and N-M1a changes no event schema), so an acceptance records
->    the e-mail intent only. The `ci_build` worker is enabled and idle; the node says so in one line
->    at startup and `deploy/node.env.example` repeats it. Governance emits the field in **M2**, where
->    the CI payload also gains its artifact members — no config change needed then.
+> 2. **`ci_build` is OFF, by owner decision 2026-10-01** — "CI build requests stay switched off in
+>    N-M1a; they come in N-M2, the CI build step. Do not change the Governance event."
+>    `THEMIS_DELIVERY_ENABLE_CI` therefore defaults to **0**: the frozen `proposal_accepted` payload
+>    states no evidence schema, so no `ci_build` intent can exist yet and a worker polling for one
+>    would read as a live channel silently failing. An acceptance records the e-mail intent only. The
+>    mapping code and its stubbed test stay, so N-M2 is a field plus a default (EDR **D20**).
 >
-> Also **OPEN, needs the owner:** the dedup key is `(origin_event_id, origin_event_type, kind,
-> destination)` and not the `origin_event_seq` the step named — the kernel `Envelope` carries no seq,
-> while `event_log.envelope_id` is the bus's own UNIQUE dedup key and the publisher is idempotent on
-> it (EDR-DELIVERY-01 D11; `tasks.md` item 2.0b). Nothing re-drives a dead letter on a timer; a
-> person does. Acceptance criteria as built:
-> `openspec/changes/phase3-outward-actions/design.md`.
+> **DECIDED 2026-10-01:** the dedup key is `(origin_event_id, origin_event_type, kind, destination)`
+> and not the `origin_event_seq` the step named — "use the event id as the duplicate key, not the
+> sequence number". The kernel `Envelope` carries no seq, `event_log.envelope_id` is the bus's own
+> UNIQUE dedup key, the publisher is idempotent on it, and on the non-bus dev seam no seq exists at
+> all (a `BIGINT` column could only store 0 and would collapse every event of a type onto one
+> intent). EDR **D11**; `tasks.md` 2.0b CLOSED. Nothing re-drives a dead letter on a timer; a person
+> does. Acceptance criteria as built, with the completion matrix:
+> `openspec/changes/phase3-outward-actions/{design,proposal}.md`.
 
 > **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
 > routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,

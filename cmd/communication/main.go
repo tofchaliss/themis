@@ -65,7 +65,7 @@ type config struct {
 	deliveryWorkerTick    time.Duration // THEMIS_DELIVERY_WORKER_INTERVAL_MS — how often each worker looks for due intents (default 500).
 	deliveryEnableJira    bool          // THEMIS_DELIVERY_ENABLE_JIRA — "0" disables the jira_issue worker; its intents still accumulate as PENDING (default 1).
 	deliveryEnableEmail   bool          // THEMIS_DELIVERY_ENABLE_EMAIL — "0" disables the email worker (default 1).
-	deliveryEnableCI      bool          // THEMIS_DELIVERY_ENABLE_CI — "0" disables the ci_build worker (default 1).
+	deliveryEnableCI      bool          // THEMIS_DELIVERY_ENABLE_CI=1 — start the ci_build worker. DEFAULT OFF: no ci_build intent can exist at N-M1a (owner decision 2026-10-01 — CI arrives in N-M2 and the Governance event does not change), so the worker would poll for a kind that cannot occur.
 	deliveryFakeJiraMode  string        // THEMIS_DELIVERY_FAKE_JIRA_MODE — success | fail | flaky. N-M1a ships FAKE senders only (default success).
 	deliveryFakeEmailMode string        // THEMIS_DELIVERY_FAKE_EMAIL_MODE — success | fail | flaky (default success).
 	deliveryFakeCIMode    string        // THEMIS_DELIVERY_FAKE_CI_MODE — success | fail | flaky (default success).
@@ -93,9 +93,15 @@ func loadConfig() config {
 		deliveryBackoffBase:   time.Duration(envInt("THEMIS_DELIVERY_BACKOFF_BASE_MS", 100)) * time.Millisecond,
 		deliveryBackoffCap:    time.Duration(envInt("THEMIS_DELIVERY_BACKOFF_CAP_MS", 30000)) * time.Millisecond,
 		deliveryWorkerTick:    time.Duration(envInt("THEMIS_DELIVERY_WORKER_INTERVAL_MS", 500)) * time.Millisecond,
-		deliveryEnableJira:    envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_JIRA"),
-		deliveryEnableEmail:   envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_EMAIL"),
-		deliveryEnableCI:      envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_CI"),
+		deliveryEnableJira:  envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_JIRA"),
+		deliveryEnableEmail: envBoolDefaultOn("THEMIS_DELIVERY_ENABLE_EMAIL"),
+		// CI is OFF by default — owner decision 2026-10-01: CI build requests stay switched off
+		// in N-M1a and arrive in N-M2 (the CI build step), and the Governance event is NOT to
+		// change. So no `ci_build` intent can be recorded at this milestone, and a worker polling
+		// for a kind that cannot occur is pure confusion: an operator reading "jira,email,ci" in
+		// the startup line would reasonably conclude CI was live and wait for builds. Setting
+		// THEMIS_DELIVERY_ENABLE_CI=1 still starts it, which is what N-M2 will flip by default.
+		deliveryEnableCI:      os.Getenv("THEMIS_DELIVERY_ENABLE_CI") == "1",
 		deliveryFakeJiraMode:  os.Getenv("THEMIS_DELIVERY_FAKE_JIRA_MODE"),
 		deliveryFakeEmailMode: os.Getenv("THEMIS_DELIVERY_FAKE_EMAIL_MODE"),
 		deliveryFakeCIMode:    os.Getenv("THEMIS_DELIVERY_FAKE_CI_MODE"),
@@ -246,6 +252,19 @@ func main() {
 // workerLoop runs the background workers on a fixed cadence: deliver pending Publications,
 // drain the terminal-event outbox (the state-based reconciler), and prune payloads past the
 // retention window.
+// workerLoop drives the PUBLICATION machinery and has nothing to do with outward-action delivery
+// intents. The two are easy to confuse because both say "delivery", so, explicitly:
+//
+//   - THIS loop: `comm.Delivery` (`app.DeliveryService`) pushes a materialized **Publication**
+//     artifact to its channel, plus outbox reconcile and payload retention. It is the pre-N-M1a
+//     Communication worker and is unchanged by this milestone.
+//   - `comm.IntentWorkers` (`adapters/delivery`, started separately in main): one worker per
+//     delivery KIND draining `delivery_intents` — the outward actions of N-M1a.
+//
+// They share no state, no table, no ticker and no backoff: a Publication push cannot delay an
+// intent send and vice versa. Consolidating them would couple two schedules that want different
+// cadences for different reasons (2s for a local push; a per-intent `next_attempt_at` computed
+// from a retry policy), so the separation is deliberate rather than leftover.
 func workerLoop(comm wiring.Communication, logger *observability.Logger) {
 	deliverTick := time.NewTicker(2 * time.Second)
 	pruneTick := time.NewTicker(1 * time.Hour)
@@ -354,9 +373,14 @@ func logDeliveryState(ctx context.Context, comm wiring.Communication, cfg config
 	// accepted proposal's evidence schema, so the harness-backed case cannot be recognized yet
 	// (EDR-DELIVERY-01 "Honest limits — N-M1a"). Saying it per accepted proposal would log a line
 	// whose content never varies, on the one path that is always taken.
+	// CI is a decided NOT-YET, not an accident, so the node says which it is either way.
 	if cfg.deliveryEnableCI {
-		logger.Info("ci_build intents are DORMANT: governance.proposal_accepted carries no evidence schema yet, " +
-			"so an acceptance records only the e-mail intent (M2 adds the field). The worker is enabled and idle.")
+		logger.Warn("ci_build worker started, but NO ci_build intent can be recorded at N-M1a: " +
+			"governance.proposal_accepted states no evidence schema and is not changing (owner decision). " +
+			"This worker will poll and find nothing until N-M2 — unset THEMIS_DELIVERY_ENABLE_CI unless you are testing it.")
+	} else {
+		logger.Info("ci_build is OFF for N-M1a by decision: an acceptance records the e-mail intent only. " +
+			"CI build requests arrive in N-M2 (the CI build step).")
 	}
 
 	// Whether the operator has a window onto all this is worth one unambiguous line. Off, a

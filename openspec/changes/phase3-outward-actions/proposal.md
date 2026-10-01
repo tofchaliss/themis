@@ -1,11 +1,9 @@
 # Proposal — phase3-outward-actions (EDR-DELIVERY-01)
 
-> ## ⛔ N-M1a NEEDS TWO OWNER SIGN-OFFS BEFORE MERGE
+> ## COMPLETION MATRIX — owner sign-offs
 >
-> Both are must-asks under CLAUDE.md, neither can be self-granted, and **neither has been
-> granted**. They are recorded here, at this change's front door, because an approval that lives
-> only in a review thread is not a record. Mitigations are in place for both, so nothing unapproved
-> is reachable on a default node — but the asks stay open.
+> Must-asks under CLAUDE.md, recorded here at the change's front door because an approval that
+> lives only in a review thread is not a record.
 >
 > **On the absence of a `specs/` delta:** `phase3-*` changes carry none by design — proposal +
 > design + tasks + the EDR *are* the source of truth, and `openspec validate` reporting "no deltas"
@@ -13,12 +11,18 @@
 > restatement of what N-M1a guarantees is `design.md` → **"Acceptance criteria as BUILT"**, not a
 > spec file. Its absence is the convention, not an omission.
 >
-> | # | Ask | Mitigation in place | Record | Sign-off |
+> | # | Ask | Status | Mitigation / consequence | Record |
 > |---|---|---|---|---|
-> | 1 | **Add four Communication API routes** (`/delivery/intents`, `…/{id}`, `…/{id}/retry`, `…/{id}/cancel`) + two schemas to `api/communication.openapi.yaml` | **OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves them; unset, all four answer `501` naming the switch. Recording, sending, retry and dead-lettering are NOT gated | `tasks.md` 2.0a · EDR D15 | ☐ `owner: ______ date: ______` |
-> | 2 | **Dedup key is `origin_event_id`, not the `origin_event_seq` the step named** | None needed — it is strictly stronger (see below), but it IS a stated deviation from the step's wording | `tasks.md` 2.0b · EDR **D11** | ☐ `owner: ______ date: ______` |
+> | 1 | **Add four Communication API routes** (`/delivery/intents`, `…/{id}`, `…/{id}/retry`, `…/{id}/cancel`) + two schemas to `api/communication.openapi.yaml` | ⏳ **PENDING** — not granted | **OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves them; unset, all four answer `501` naming the switch. Recording, sending, retry and dead-lettering are NOT gated, so a default node still performs every outward action — it has no HTTP window onto them, and a dead letter can be seen in the counts but not retried or cancelled over the API | `tasks.md` 2.0a · EDR D15 |
+> | 2 | **Dedup key is `origin_event_id`, not the `origin_event_seq` the step named** | ✅ **APPROVED 2026-10-01** — "use the event id as the duplicate key, not the sequence number" | None needed. The step's wording is superseded for N-M1a; no `origin_event_seq` column exists | `tasks.md` 2.0b · EDR **D11** |
+> | 3 | **`ci_build` not recorded at N-M1a** (requires a field `governance.proposal_accepted` does not carry) | ✅ **DECIDED 2026-10-01** — "CI build requests stay switched off in N-M1a; they come in N-M2… Do not change the Governance event" | The kind's worker is now **off by default**; the mapping code and its test stub stay, so N-M2 turns it on by emitting the field and flipping one default | `tasks.md` 2.0c · EDR **D20** |
 >
-> **Why ask 2 is not merely a convenience.** Four facts, each checkable in this tree:
+> **RELEASE NOTE for N-M1a.** Two things are deliberately not on by default and should be stated in
+> any release summary: the **operator API** (`THEMIS_DELIVERY_OPERATOR_API`, pending approval) and
+> the **`ci_build` channel** (`THEMIS_DELIVERY_ENABLE_CI`, deferred to N-M2). Jira-issue and e-mail
+> intents are recorded, sent, retried and dead-lettered out of the box.
+>
+> **Why ask 2 was not merely a convenience.** Four facts, each checkable in this tree:
 > the kernel `Envelope` has no `seq` field and the reader never passes one to `Consumer.Handle`;
 > `event_log.envelope_id` is `NOT NULL UNIQUE` and is commented as the bus's *own* dedup key;
 > the publisher appends `ON CONFLICT (envelope_id) DO NOTHING`, so it is already idempotent on
@@ -29,8 +33,8 @@
 > is wrong. The rejected alternative — widen the kernel `Envelope` to carry a transport cursor into
 > every context — is itself a must-ask with a far larger blast radius.
 >
-> **If either is refused,** the exact revert is written out in `tasks.md` (2.0a, 2.0b). Neither
-> revert touches the record, the workers or the dead-lettering.
+> **If ask 1 is refused,** the exact revert is written out in `tasks.md` 2.0a. It does not touch the
+> record, the workers or the dead-lettering.
 
 ## Why
 

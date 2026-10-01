@@ -91,9 +91,9 @@ current is the regression this section exists to prevent.
 | # | Criterion, as built | Deviation from the step's wording |
 |---|---|---|
 | 1 | Migrations create **`delivery_intents`** and **`delivery_attempts`** in the `communication` DATABASE, default (`public`) schema, and reverse cleanly | The step writes `communication.delivery_intents`; that names the database, not a Postgres schema. This repo is database-per-context and no Communication table is schema-qualified (`publications`, `communication_outbox`, `publishable_positions`, `release_rollups`). Asserted by `TestDeliveryIntentMigrations_SchemaMatchesTheStore` |
-| 2 | `delivery_intents` carries a UNIQUE index on **`(origin_event_id, origin_event_type, kind, destination)`** | **Named deviation.** The step says `origin_event_seq`. The kernel `Envelope` carries no seq; `event_log.envelope_id` is the bus's own `UNIQUE` dedup key and the publisher is idempotent on it. Reason of record EDR-DELIVERY-01 **D11**; approval pending as `tasks.md` 2.0b. There is no `origin_event_seq` column anywhere in the schema |
+| 2 | `delivery_intents` carries a UNIQUE index on **`(origin_event_id, origin_event_type, kind, destination)`** | Deviation from the step's `origin_event_seq`, **APPROVED by the owner 2026-10-01** ("use the event id as the duplicate key, not the sequence number"). Reason of record EDR-DELIVERY-01 **D11**; `tasks.md` 2.0b CLOSED. There is no `origin_event_seq` column anywhere in the schema, and the index is asserted column-by-column against live `pg_indexes` |
 | 3 | `governance.finding_opened` ⇒ exactly one PENDING `jira_issue` intent, non-empty `payload_hash`, **no sender contacted** — structurally, since the consumer holds no sender | none |
-| 4 | `governance.proposal_accepted` ⇒ `ci_build` + `email` with harness-execution evidence, `email` alone without | Structurally complete, **dormant on a real estate**: `governance.proposal_accepted.v1` is `additionalProperties: false` over four fields and states no evidence schema, and N-M1a changes no event schema. Tests stub the payload; M2 adds the field. Stated at startup by the node |
+| 4 | `governance.proposal_accepted` ⇒ **`email` alone** at N-M1a | **DECIDED by the owner 2026-10-01**: "CI build requests stay switched off in N-M1a; they come in N-M2… Do not change the Governance event." The frozen v1 payload states no evidence schema and is not being widened, so the harness-execution condition can never be true here. `THEMIS_DELIVERY_ENABLE_CI` defaults OFF; the node states the decision at startup. The mapping and its stubbed test REMAIN so N-M2 is a field plus a default. EDR **D20**, `tasks.md` 2.0c |
 | 5 | Worker: `fail` + max_attempts=3 ⇒ DEAD_LETTER, `last_error` set, 3 history rows; `success` ⇒ DELIVERED, 1 row | none |
 | 6 | Operator API: list by status/kind, retry a DEAD_LETTER to PENDING with attempts zeroed, cancel a PENDING, 403 for non-admin | **Named deviation: OFF BY DEFAULT.** `THEMIS_DELIVERY_OPERATOR_API=1` serves the routes; unset, they answer `501` naming the switch. The API addition is an unapproved must-ask (`tasks.md` 2.0a). Recording, sending, retry and dead-lettering are NOT gated |
 | 7 | Coverage: `domain`/`app` 100%, adapters ≥90%, store ≥80% | none |
@@ -120,7 +120,17 @@ PGBASE="$PGBASE" ./scripts/vm-verify.sh | grep delivery:
 ```
 
 Step 1 is the only mutation in this procedure and it is reversible by step 2; do it on a dev
-estate, never on the one being verified.
+estate, never on the one being verified. The two expected outputs, verbatim:
+
+```
+# tables present (step 2) — one line inside the Pipeline block
+    delivery: pending=3  delivered=11  dead_letter=1  cancelled=0
+    1 outward action(s) dead-lettered — GET /api/v1/delivery/intents?status=dead_letter
+# tables absent (step 1) — no error, no non-zero exit
+    delivery: n/a (no delivery_intents table — node predates outward actions N-M1a)
+```
+
+The dead-letter hint prints only when that count is non-zero, so a healthy node shows one line.
 
 ## What the N-M1a tests pin
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/themis-project/themis/internal/communication/adapters/http/gen"
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -213,12 +215,36 @@ func (h *Handler) writeIntentErr(w http.ResponseWriter, r *http.Request, title s
 // statement — estate detail that the response body is the one place guaranteed to be read. The
 // routes being admin-only is why this is defence in depth rather than a leak, not a reason to
 // skip it: an error body gets pasted into tickets and chat logs that the gate does not cover.
+// correlationID returns the id that must appear BOTH on the log line and in the response body —
+// that shared token is the whole mechanism by which a deliberately generic 500 stays actionable
+// (the caller quotes it, the operator finds the cause).
+//
+// Where it comes from, in order. `observability.RequestLogger` reads an inbound
+// `X-Correlation-ID` (or mints one) and sets it on the RESPONSE header before the handler runs,
+// so the header is the source of truth when the middleware is mounted — which is also why it is
+// read from the ResponseWriter and not from the context: the middleware puts the id on the span
+// and the response header, and does NOT store a context value, so there is nothing in the request
+// context to read.
+//
+// When the middleware is NOT mounted — a test serving the handler directly, or a future
+// composition that forgets it — the header is empty, and an empty id is the one outcome worth
+// preventing: the response would promise the operator a log line they cannot find. So mint one and
+// set it on the response, which both keeps the guarantee and hands the caller something to quote.
+func correlationID(w http.ResponseWriter, r *http.Request) string {
+	if cid := w.Header().Get(observability.CorrelationHeader); cid != "" {
+		return cid
+	}
+	if cid := r.Header.Get(observability.CorrelationHeader); cid != "" {
+		w.Header().Set(observability.CorrelationHeader, cid)
+		return cid
+	}
+	cid := uuid.NewString()
+	w.Header().Set(observability.CorrelationHeader, cid)
+	return cid
+}
+
 func (h *Handler) writeIntentFault(w http.ResponseWriter, r *http.Request, title string, err error) {
-	// The correlation id is read off the RESPONSE header: observability.RequestLogger sets it
-	// there before the handler runs (echoing an inbound X-Correlation-ID or minting one), so the
-	// log line and the response the caller holds name the same request. That is what makes a
-	// generic body actionable — the caller can quote the id and the operator finds the cause.
-	cid := w.Header().Get(observability.CorrelationHeader)
+	cid := correlationID(w, r)
 	h.logger.Error("delivery-intent request failed",
 		observability.String("title", title),
 		observability.String("path", r.URL.Path),

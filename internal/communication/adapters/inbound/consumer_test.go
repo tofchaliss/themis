@@ -2,6 +2,7 @@ package inbound_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,32 @@ func TestConsumer_LifecycleEventsIgnoredWithoutDeliveryService(t *testing.T) {
 		if err := c.Handle(context.Background(), mkEnv(typ, []byte(`{"FindingID":"fnd-1"}`))); err != nil {
 			t.Errorf("%s without a delivery service: %v", typ, err)
 		}
+	}
+}
+
+// The dedup guarantee on the ID-LESS path, stated on its own because it is the one the bus does
+// not cover. The dev `/internal/governance-events` seam decodes an Envelope straight from HTTP and
+// calls Handle directly — no bus, no envelope id — so `originID`'s `type:subject@occurred_at`
+// surrogate is the entire dedup identity there. Re-posting the same body (a replay, a retried
+// curl, a drain repeated by hand) must record ONE intent and must not error, or the seam would
+// manufacture duplicate Jira tickets in exactly the mode used for local development.
+func TestConsumer_IDLessEnvelopeDedupsOnReplay(t *testing.T) {
+	repo := newIntentRepo()
+	c := intentConsumer(repo)
+	body := []byte(`{"FindingID":"fnd-7","ReleaseID":"rel-7","CVE":"CVE-2026-7","OccurredAt":"2026-09-30T09:00:00Z"}`)
+
+	for i := 0; i < 3; i++ {
+		if err := c.Handle(context.Background(), mkEnv("governance.finding_opened", body)); err != nil {
+			t.Fatalf("post %d over the id-less seam: %v", i, err)
+		}
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("the same id-less envelope posted 3× recorded %d intents, want 1", len(repo.saved))
+	}
+	if got := repo.saved[0].Origin().EventID; got == "" {
+		t.Error("the surrogate dedup key is empty — every id-less event would collapse onto one intent")
+	} else if !strings.Contains(got, "fnd-7") || !strings.Contains(got, "governance.finding_opened") {
+		t.Errorf("surrogate = %q, want it to carry the type and the subject", got)
 	}
 }
 
