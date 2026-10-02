@@ -45,6 +45,10 @@ type Communication struct {
 	Relay     *store.Relay
 	Reconcile *app.ReconcileService
 	Retention *app.RetentionService
+	// Posture is Governance's release-posture read seam, carried on the bundle so WireDelivery
+	// can give the outward renderer the severity counts a remediation ticket is made of (N-M1b)
+	// without opening a second client against the same read API.
+	Posture app.ReleaseSeverityReader
 }
 
 // Wire builds the Communication components over the given pool, Governance read-API base
@@ -70,18 +74,23 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 		Relay:     relay,
 		Reconcile: app.NewReconcileService(relay),
 		Retention: app.NewRetentionService(st, defaultRetentionWindow, clock),
+		Posture:   positions,
 	}
 }
 
-// WireDelivery adds the N-M1a outward-delivery plumbing to an already-wired Communication:
-// the delivery-intent service, the fake Jira/mail senders, and the worker that drives them.
-// It also hands the intent service to the inbound consumer — which is what makes the event
-// reader RECORD intents at all.
+// WireDelivery adds the outward-delivery plumbing to an already-wired Communication: the
+// delivery-intent service (with the N-M1b payload renderer), the senders — real or fake per
+// config — and the worker that drives them. It also hands the intent service to the inbound
+// consumer, which is what makes the event reader RECORD intents at all.
 //
 // It returns nil when cfg.Enabled is false, and then the consumer is left without an intent
 // service too: a node that will not send must not accumulate a queue nobody drains. That is
 // the same switch on both halves, deliberately, so "delivery is off" cannot mean "intents pile
 // up invisibly".
+//
+// The renderer is wired whenever a posture read seam is available, independently of WHICH sender
+// is selected: materialization is a property of the record (D-N-3), not of the channel, so a node
+// running the fakes still stores the exact bytes it would have sent.
 func WireDelivery(comm Communication, cfg delivery.Config, logger *observability.Logger) *delivery.Worker {
 	if !cfg.Enabled {
 		return nil
@@ -92,9 +101,9 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	intents := app.NewDeliveryIntentService(comm.Store, idGen{}, sysClock{}, app.DeliveryIntentConfig{
 		DeadLetterAudience: cfg.DeadLetterAudience,
 	})
+	if comm.Posture != nil {
+		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
+	}
 	comm.Consumer.WithIntents(intents)
-	return delivery.NewWorker(cfg, comm.Store, intents, map[app.IntentType]delivery.IntentDeliverer{
-		app.IntentJiraIssue: delivery.NewFakeJiraDeliverer(logger),
-		app.IntentEmail:     delivery.NewFakeMailDeliverer(logger),
-	}, logger)
+	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverers(cfg, logger), logger)
 }

@@ -47,10 +47,13 @@ type config struct {
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
 
-	// Outward delivery (N-M1a) is configured by delivery.ConfigFromEnv — the knobs are
+	// Outward delivery (N-M1a/N-M1b) is configured by delivery.ConfigFromEnv — the knobs are
 	// documented there and in deploy/node.env.example:
-	// THEMIS_COMMUNICATION_DELIVERY_{ENABLED,WORKERS,BATCH,MAX_ATTEMPTS,BACKOFF_INITIAL,BACKOFF_MAX,INTERVAL}
-	// and THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE.
+	// THEMIS_COMMUNICATION_DELIVERY_{ENABLED,WORKERS,BATCH,MAX_ATTEMPTS,BACKOFF_INITIAL,BACKOFF_MAX,INTERVAL},
+	// THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE, and the two REAL senders' switches
+	// THEMIS_COMMUNICATION_JIRA_* / THEMIS_COMMUNICATION_MAIL_* (both off by default; their
+	// SECRETS — the Jira API token, the SMTP password — are read from the environment only and
+	// never appear in the startup line this config prints).
 
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
@@ -117,10 +120,11 @@ func main() {
 
 	go workerLoop(comm, logger.Component("worker"))
 
-	// Outward delivery (N-M1a, EDR-DELIVERY-01 Revision 3). Off by default: with it off the
-	// event reader records no delivery intents and no sender runs, so the node performs no
+	// Outward delivery (N-M1a/N-M1b, EDR-DELIVERY-01 Revisions 3–4). Off by default: with it off
+	// the event reader records no delivery intents and no sender runs, so the node performs no
 	// outward action at all. Wired BEFORE the bus reader starts, because this is what attaches
-	// the intent intake to the consumer.
+	// the intent intake to the consumer. With it ON, the senders are still FAKE until a channel's
+	// own switch is set — "delivery is running" never implies "something left the estate".
 	deliveryCfg := delivery.ConfigFromEnv()
 	if worker := wiring.WireDelivery(comm, deliveryCfg, logger.Component("delivery-intents")); worker != nil {
 		go worker.Run(ctx)
