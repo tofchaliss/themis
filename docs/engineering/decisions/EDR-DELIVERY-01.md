@@ -480,10 +480,25 @@ commented, valueless knobs. `Config.String()` — the startup line an operator r
 either sender carries a credential. The mail configuration's `String()` additionally prints only
 the audience NAMES: a recipient list is estate detail.
 
-One guard is stronger than configuration: a username **without** STARTTLS is refused at startup
-for a non-loopback relay, because the password would cross the network in the clear. `net/smtp`
-enforces the same rule one layer down, so such a node could never have sent anyway — refusing at
-configure time turns a recurring dead letter into one message that says what to set.
+Two guards are stronger than configuration, and they are the SAME rule applied to both channels: **a
+credential never crosses an unencrypted channel.**
+
+- Jira: a `http://` base URL is **refused**, because the credential is HTTP Basic — the token is in
+  every request, and base64 is an encoding, not protection. A scheme that is neither http nor https
+  is refused outright rather than left for `net/http` to fail on later.
+- Mail: a username **without** STARTTLS is **refused**, because the password would cross the network
+  in the clear. `net/smtp` enforces the same rule one layer down, so such a node could never have
+  sent anyway.
+
+Both make exactly one exception, for exactly one reason: a **loopback** host, whose bytes never leave
+the machine. That is also where an `httptest` server and a local relay live, so a development
+deployment needs no knob — and a knob is precisely what must not exist, because a knob that relaxes
+this in development is a knob that can be set in production.
+
+Both refusals happen at CONFIGURE time, not at send time. A misconfiguration that exposes a
+credential must not be discovered by having exposed it once per retry; and because the selection
+(M1b-1) then keeps the fake sender, the node keeps draining its queue and says at ERROR why nothing
+is reaching Jira.
 
 ### M1b-3 — The payload is materialized at ENQUEUE, and a sender never renders (D-N-3)
 
@@ -547,6 +562,29 @@ communication).
 
 Governed audiences are still this map. A central audience registry does not exist yet; the map is
 documented as the registry until one does.
+
+### M1b-6a — Every outward step is BOUNDED, and every header value is FOLDED
+
+Two hardening rules that are easy to leave out and expensive to add back once a queue is live.
+
+**Bounded.** The Jira client carries a per-call timeout; the SMTP conversation bounds *every step*,
+not just the dial. The difference is the failure that actually happens: a relay that accepts the
+connection and then stops answering is not unreachable, so a dial timeout never fires, and a worker
+goroutine blocks in a read forever — `cfg.Workers` such relays and the queue stops draining
+altogether. A per-operation deadline (rather than one for the whole session) is what lets a slow but
+*progressing* transfer finish while a step that is genuinely not moving fails. The worker's context
+also closes the connection, so shutdown is not held up by a relay that is still thinking. The
+Governance read seam is bounded for the same reason, and more sharply since N-M1b: it now runs inside
+the inbox unit of work, where an unbounded read holds a bus-reader transaction open.
+
+**Folded.** A CR or LF in a value destined for a message header does not produce a malformed header —
+it produces ADDITIONAL headers, or an early end of the header block that turns the rest into body.
+Every header value is folded at the boundary where the harm would occur, so no caller has to
+remember; the subject is the one that can carry a newline today, because `SplitPayload` returns
+whatever the stored payload holds and an N-M1a row was never promised to have folded it. An
+ADDRESS, by contrast, is **refused** (a `From`) or **dropped** (a recipient, which leaves its audience
+unmapped and therefore loudly refused): an address nobody can read as an address is a configuration
+mistake, and a silently repaired one sends security mail somewhere the operator never chose.
 
 ### M1b-7 — Still NO CI build and NO rebuild loop
 

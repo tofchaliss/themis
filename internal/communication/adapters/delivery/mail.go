@@ -96,9 +96,15 @@ func ParseAudiences(raw string) map[string][]string {
 		}
 		var to []string
 		for _, address := range strings.Split(addresses, ",") {
-			if a := strings.TrimSpace(address); a != "" {
-				to = append(to, a)
+			a := strings.TrimSpace(address)
+			// A control character in an address is DROPPED, not folded: it would otherwise reach a
+			// `To:` header and inject one, and an address that cannot be read as an address is a
+			// mistake rather than something to repair silently. Dropping every recipient of an
+			// audience leaves the audience unmapped, which the sender refuses loudly.
+			if a == "" || hasControlChars(a) {
+				continue
 			}
+			to = append(to, a)
 		}
 		if len(to) > 0 {
 			out[name] = to
@@ -135,6 +141,18 @@ func (c MailConfig) missing() []string {
 	return out
 }
 
+// checkAddresses refuses a sender address carrying a control character. ParseAudiences already drops
+// such recipients, so this closes the one address that does not come through it — and refusing is
+// right where folding would be wrong: a From nobody can read as an address is a configuration
+// mistake, and a repaired one would make every mail come from somewhere the operator never chose.
+func (c MailConfig) checkAddresses() error {
+	if hasControlChars(c.From) {
+		return fmt.Errorf("delivery: THEMIS_COMMUNICATION_MAIL_FROM contains a control character — " +
+			"a newline in a sender address injects message headers")
+	}
+	return nil
+}
+
 // String renders the mail knobs for a log line: the audience NAMES and whether a password is set
 // — never the password, and never the recipient addresses.
 func (c MailConfig) String() string {
@@ -159,6 +177,9 @@ func NewRealMailDeliverer(cfg MailConfig, logger *observability.Logger) (*RealMa
 	cfg = cfg.withDefaults()
 	if missing := cfg.missing(); len(missing) > 0 {
 		return nil, fmt.Errorf("delivery: mail configuration incomplete, unset: %s", strings.Join(missing, ", "))
+	}
+	if err := cfg.checkAddresses(); err != nil {
+		return nil, err
 	}
 	if cfg.Username != "" && !cfg.StartTLS && !isLoopback(cfg.Host) {
 		return nil, fmt.Errorf("delivery: refusing SMTP authentication to %q without STARTTLS — the password would "+
@@ -215,12 +236,16 @@ func (d *RealMailDeliverer) message(in app.Intent, subject string, body []byte, 
 	if date.IsZero() {
 		date = in.NextAttemptAt
 	}
+	// Every value is folded before it becomes a header. The subject is the one that could carry a
+	// newline today — SplitPayload returns whatever the stored payload holds, and an N-M1a row or a
+	// future renderer was never promised to have folded it — and the addresses are refused upstream;
+	// folding all of them means no later caller has to know which.
 	headers := []string{
-		"From: " + d.cfg.From,
-		"To: " + strings.Join(to, ", "),
-		"Subject: " + subject,
+		"From: " + sanitizeHeaderValue(d.cfg.From),
+		"To: " + sanitizeHeaderValue(strings.Join(to, ", ")),
+		"Subject: " + sanitizeHeaderValue(subject),
 		"Date: " + date.UTC().Format(time.RFC1123Z),
-		"Message-ID: " + mailMessageID(in.ID),
+		"Message-ID: " + sanitizeHeaderValue(mailMessageID(in.ID)),
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=utf-8",
 		// Marks the mail as machine-generated so a recipient's auto-responder does not reply to
@@ -236,15 +261,32 @@ func (d *RealMailDeliverer) message(in app.Intent, subject string, body []byte, 
 	return []byte(b.String())
 }
 
-// send runs the SMTP conversation. The dial is context-bounded so an unreachable relay costs a
-// timeout and a retry, never a stuck worker goroutine.
+// send runs the SMTP conversation. Every step is bounded, so an unreachable OR UNRESPONSIVE relay
+// costs a timeout and a retry, never a stuck worker goroutine.
+//
+// Bounding the dial alone was not enough, and the difference matters: a relay that accepts the
+// connection and then says nothing — a stalled or overloaded one, not a hostile one — would leave a
+// worker goroutine blocked in a read forever, and `cfg.Workers` such relays would stop the queue
+// draining at all. deadlineConn gives every read and write its own deadline, and the context watcher
+// closes the connection on shutdown so the worker's own cancellation is honoured mid-conversation.
 func (d *RealMailDeliverer) send(ctx context.Context, to []string, message []byte) error {
 	addr := net.JoinHostPort(d.cfg.Host, strconv.Itoa(d.cfg.Port))
 	conn, err := (&net.Dialer{Timeout: d.cfg.Timeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("mail: dial %s: %w", addr, err)
 	}
-	client, err := smtp.NewClient(conn, d.cfg.Host)
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close() // unblocks whatever step is in flight; the error surfaces below
+		case <-done:
+		}
+	}()
+
+	client, err := smtp.NewClient(&deadlineConn{Conn: conn, timeout: d.cfg.Timeout}, d.cfg.Host)
 	if err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("mail: greeting from %s: %w", addr, err)
@@ -286,17 +328,30 @@ func (d *RealMailDeliverer) send(ctx context.Context, to []string, message []byt
 	return client.Quit()
 }
 
-// isLoopback reports whether the relay is on this machine. It is the one exception to "no
-// password without STARTTLS", and it is not a convenience: net/smtp's PLAIN mechanism enforces
-// exactly the same rule one layer down (a password goes out unencrypted only to localhost), so a
-// non-loopback relay would refuse at send time anyway. Checking it here turns a recurring dead
-// letter into one startup message that says what to set.
-func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
+// deadlineConn refreshes the connection's deadline before every read and write, so NO single step of
+// the SMTP conversation can exceed the configured timeout.
+//
+// It wraps the connection rather than setting one deadline for the whole exchange because the two
+// are different promises: one deadline for the session would also kill a slow-but-progressing
+// transfer of a large message, while a per-operation deadline only ever fires on a step that is
+// genuinely not moving. STARTTLS keeps the bound — tls.Client reads and writes THROUGH this wrapper.
+type deadlineConn struct {
+	net.Conn
+	timeout time.Duration
+}
+
+func (c *deadlineConn) Read(b []byte) (int, error) {
+	if err := c.SetReadDeadline(time.Now().Add(c.timeout)); err != nil {
+		return 0, err
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return c.Conn.Read(b) // c.Conn, not c: c.Read is this method
+}
+
+func (c *deadlineConn) Write(b []byte) (int, error) {
+	if err := c.SetWriteDeadline(time.Now().Add(c.timeout)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Write(b)
 }
 
 // mailMessageID derives the stable Message-ID of an intent's one mail.

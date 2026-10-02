@@ -161,13 +161,25 @@ callback, no loop control, no API or OpenAPI edit).
       `summary ~ "<uuid>"` — a tokenization near-miss does not fail, it silently opens a second
       ticket. Update is a FULL REPLACE (idempotent by construction); the key lands on the intent
       result. ADF description (v3 requires it). The Authorization header is set in one place and
-      no error, excerpt or log field carries the token.
+      no error, excerpt or log field carries the token. **A clear-text `http://` base URL is
+      REFUSED at configure time** (loopback excepted), as is a non-http(s) scheme: Basic auth puts
+      the token in EVERY request, so this is the same rule 2b.5 applies to a password without
+      STARTTLS — one rule, both channels (EDR Revision 4 M1b-1).
 - [x] 2b.5 `adapters/delivery/mail.go`: `RealMailDeliverer` over `net/smtp` + `crypto/tls`.
       The governed audience NAME becomes recipients here or nowhere — an unmapped audience is
       REFUSED, never redirected to a default. `Date` from the intent's creation time and
       `Message-ID` from its id, so a retry is byte-identical and a relay can collapse it (RC-5).
       A username without STARTTLS is refused at startup for a non-loopback relay (the password
       would cross the network in the clear; `net/smtp` refuses it one layer down anyway).
+      **Every STEP of the conversation is bounded**, not just the dial (`deadlineConn` refreshes a
+      per-operation deadline; the context closes the connection on shutdown) — a relay that accepts
+      and then stops answering is not unreachable, so a dial timeout never fires and the worker
+      goroutine would block forever. **Header values are folded** (CR/LF → space) at the boundary,
+      because a newline in a header value adds HEADERS rather than breaking one; an ADDRESS is
+      refused (`From`) or dropped (a recipient, leaving its audience unmapped and loudly refused),
+      since a silently repaired address mails security content somewhere nobody chose. The
+      Governance read seam is bounded too (`NewClient` with a nil client no longer means
+      `http.DefaultClient`, which has no timeout) — it runs inside the inbox transaction now.
 - [x] 2b.6 `adapters/delivery/delivery.go`: `JiraConfig` + `MailConfig` on `Config`,
       `jiraFromEnv` / `mailFromEnv` / `ParseAudiences`, and `NewDeliverers` — the selection:
       real when enabled AND complete, else the fake with an **ERROR naming the unset knobs**. Both
@@ -191,7 +203,12 @@ callback, no loop control, no API or OpenAPI edit).
       configured-but-disabled making no call; `ConfigFromEnv`) and store integration (the payload
       round-trips and the CLAIM carries it — the N-M1a emptiness assertion is gone).
       **Secrecy is asserted, not assumed**: a zap observer plus the attempt ledger are checked for
-      the token and the password on every path, including the failures.
+      the token and the password on every path, including the failures. The hardening has its own
+      negative paths: the clear-text/`no-scheme`/wrong-scheme Jira refusals **and** the selection
+      keeping the fake for a clear-text site; a relay that stalls on DATA timing out instead of
+      hanging; context cancellation ending a conversation in flight; a payload whose subject carries
+      `CRLF + Bcc:` producing NO extra header; a `From` and a recipient with control characters
+      refused and dropped; and a stalled Governance read honouring its deadline.
       Coverage: `communication/app` 100%, `adapters/serializer` 98.7%, `adapters/delivery` 96.3%,
       `adapters/governance` 95.7% (all ≥90), `adapters/store` ≥80. No package added, so
       `scripts/check-coverage.sh` needs no registration.
@@ -204,6 +221,15 @@ callback, no loop control, no API or OpenAPI edit).
       disposition is a policy decision nobody has taken; (c) a central governed audience registry
       (the env map is the registry until one exists); (d) Jira credential needs
       BROWSE/SEARCH, or first-run idempotence degrades to a duplicate ticket.
+- [ ] 2b.11 **Owner sign-off wanted on one deliberate deviation from the M1b draft design.** The
+      draft allowed a real sender to render ONCE from current facts when an intent carries no
+      payload (back-compat for N-M1a rows) and store the result. This implementation **refuses**
+      instead (`ErrNoPayload`), because that fallback is render-at-send with extra steps and is the
+      determinism hole the plan's own Risks section asks a reviewer to look for. Consequence: an
+      estate upgraded from N-M1a dead-letters its already-queued intents, visibly, for an operator
+      to `deliveryctl cancel` or retry after re-triggering. Recorded in EDR-DELIVERY-01 Revision 4
+      M1b-3 and `deploy/node.env.example`. If the upgrade cost is unacceptable, the alternative is a
+      one-time render path behind its own knob — a knob, so the default stays strict.
 
 ## Group 3 — M2 CI — NOT STARTED
 

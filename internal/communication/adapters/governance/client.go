@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -21,11 +22,23 @@ type Client struct {
 	http    *http.Client
 }
 
+// defaultTimeout bounds one read-API call when the caller supplies no client of its own.
+//
+// http.DefaultClient has NO timeout, and these reads are no longer only on a request path: since
+// N-M1b the remediation-ticket payload is rendered inside the inbox unit of work, so a Governance
+// node that accepts a connection and then stalls would hold a bus-reader transaction open for as
+// long as it liked. A bounded read turns that into a retried envelope.
+//
+// 30s rather than something tighter because a release posture is one query over every Finding of a
+// Release; the bound exists to catch a stall, not to express an SLO.
+const defaultTimeout = 30 * time.Second
+
 // NewClient builds a client against the Governance base URL (e.g. "http://governance:8083").
-// A nil http.Client falls back to http.DefaultClient.
+// A nil http.Client falls back to one with defaultTimeout — never to http.DefaultClient, which
+// would wait forever.
 func NewClient(baseURL string, hc *http.Client) *Client {
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: defaultTimeout}
 	}
 	return &Client{baseURL: baseURL, http: hc}
 }

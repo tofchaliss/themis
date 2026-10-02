@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,9 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/themis-project/themis/internal/communication/adapters/delivery"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // --- N-M1b: the real Jira sender ------------------------------------------------------------
@@ -542,6 +548,75 @@ func TestJiraConfigRefusesIncompleteConfiguration(t *testing.T) {
 				t.Errorf("err = %v, must not quote values", err)
 			}
 		})
+	}
+}
+
+// The token must not cross an unencrypted channel. Jira's credential is HTTP Basic — the token is
+// in EVERY request — so a plain-http base URL is refused at configure time, exactly as an SMTP
+// password without STARTTLS is. Loopback is the one exception, because those bytes never leave the
+// machine (and it is where an httptest server lives).
+func TestJiraConfigRefusesAClearTextBaseURL(t *testing.T) {
+	complete := func(baseURL string) delivery.JiraConfig {
+		return delivery.JiraConfig{Enabled: true, BaseURL: baseURL, ProjectKey: "SEC",
+			User: jiraUser, APIToken: jiraToken}
+	}
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{"plain http to a remote site", "http://jira.acme.example", "clear-text http"},
+		{"plain http with a port", "http://10.0.0.5:8080", "clear-text http"},
+		{"no scheme at all", "jira.acme.example", "not an absolute URL"},
+		{"a scheme that is not http(s)", "ftp://jira.acme.example", "is not supported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := delivery.NewRealJiraDeliverer(complete(tc.baseURL), nil)
+			if err == nil {
+				t.Fatalf("%q must be refused", tc.baseURL)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to mention %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), jiraToken) {
+				t.Errorf("err = %v leaked the token", err)
+			}
+		})
+	}
+
+	for _, allowed := range []string{
+		"https://acme.atlassian.net",
+		"http://127.0.0.1:8080",
+		"http://localhost:8080",
+		"http://[::1]:8080",
+	} {
+		if _, err := delivery.NewRealJiraDeliverer(complete(allowed), nil); err != nil {
+			t.Errorf("%q must be accepted: %v", allowed, err)
+		}
+	}
+}
+
+// And the refusal reaches the SELECTION: an operator who enabled Jira against a plain-http site
+// keeps the fake sender and is told at ERROR — nothing is sent, and no token is put on the wire.
+func TestNewDeliverersRefusesAClearTextJira(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := observability.New(zap.New(core))
+	deliverers := delivery.NewDeliverers(delivery.Config{
+		Enabled: true,
+		Jira: delivery.JiraConfig{Enabled: true, BaseURL: "http://jira.acme.example",
+			ProjectKey: "SEC", User: jiraUser, APIToken: jiraToken},
+	}, logger)
+
+	if _, fake := deliverers[app.IntentJiraIssue].(*delivery.FakeJiraDeliverer); !fake {
+		t.Errorf("jira deliverer = %T, want the fake — the real one would leak the token", deliverers[app.IntentJiraIssue])
+	}
+	if !hasFieldValue(logs, "clear-text http") {
+		t.Error("the refusal must be logged with its reason")
+	}
+	for _, e := range logs.All() {
+		if strings.Contains(fmt.Sprint(e.ContextMap()), jiraToken) {
+			t.Fatal("the token reached the logs")
+		}
 	}
 }
 
