@@ -52,6 +52,26 @@ func (s *intentStore) ListDeadLetters(context.Context, time.Time, int) ([]app.In
 }
 func (s *intentStore) RetryIntent(context.Context, string) error { return nil }
 
+// stubRenderer is an IntentPayloadRenderer double. It renders a recognizable envelope per intent
+// type (and can fail), which is all the service needs to be held to: materialize at enqueue,
+// store the digest, and fail CLOSED when the render fails.
+type stubRenderer struct {
+	err   error
+	empty bool
+	calls int
+}
+
+func (r *stubRenderer) RenderIntentPayload(_ context.Context, in app.Intent) ([]byte, error) {
+	r.calls++
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.empty {
+		return nil, nil
+	}
+	return app.BuildPayload("subject for "+string(in.Type), []byte("body for "+in.ID)), nil
+}
+
 type intentIDs struct{ n int }
 
 func (g *intentIDs) NewID() string { g.n++; return fmt.Sprintf("int-%d", g.n) }
@@ -99,9 +119,10 @@ func TestEnqueueJiraForRelease(t *testing.T) {
 	if in.Attempts != 0 || !in.NextAttemptAt.Equal(intentEpoch) || in.LastError != "" {
 		t.Errorf("work columns = %+v", in)
 	}
-	// The payload is N-M1b's: an intent carries facts, not a rendered body.
+	// Without a renderer the service records facts only — the N-M1a behaviour, which a real
+	// sender refuses rather than improvising a body for.
 	if len(in.PayloadBytes) != 0 || in.PayloadSHA256 != "" {
-		t.Errorf("payload must stay empty in N-M1a: %q / %q", in.PayloadSHA256, in.PayloadBytes)
+		t.Errorf("no renderer wired, so no payload: %q / %q", in.PayloadSHA256, in.PayloadBytes)
 	}
 	want := map[string]string{
 		"finding_id": "fnd-1", "cve": "CVE-2026-1",
@@ -272,5 +293,130 @@ func TestSnapshotOmitsAbsentLineageFacts(t *testing.T) {
 		if _, ok := in.Snapshot[k]; ok {
 			t.Errorf("snapshot carries %q for an empty lineage", k)
 		}
+	}
+}
+
+// --- N-M1b: payload materialization at enqueue (D-N-3) --------------------------------------
+
+// Every enqueue path materializes: the bytes that will be sent are stored with their content
+// address, so a retry re-sends a snapshot instead of re-deriving one from an estate that moved.
+func TestEnqueueMaterializesThePayload(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		enqueue func(*app.DeliveryIntentService) (app.Intent, error)
+		subject string
+	}{
+		{"jira", func(s *app.DeliveryIntentService) (app.Intent, error) {
+			return s.EnqueueJiraForRelease(ctx, lineage(), "env-1", "rel-1", "", "", nil)
+		}, "subject for jira_issue"},
+		{"decision mail", func(s *app.DeliveryIntentService) (app.Intent, error) {
+			return s.EnqueueDecisionMail(ctx, lineage(), "env-2", "prop-1", "fnd-1", "rel-1", "", nil)
+		}, "subject for email"},
+		{"dead-letter mail", func(s *app.DeliveryIntentService) (app.Intent, error) {
+			return s.EnqueueDeadLetterMail(ctx, lineage(), "int-dead", "", nil)
+		}, "subject for email"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newIntentStore()
+			renderer := &stubRenderer{}
+			in, err := tc.enqueue(intentSvc(store, app.DeliveryIntentConfig{}).WithPayloadRenderer(renderer))
+			if err != nil {
+				t.Fatalf("enqueue: %v", err)
+			}
+			if len(in.PayloadBytes) == 0 || in.PayloadSHA256 == "" {
+				t.Fatalf("payload not materialized: %q / %q", in.PayloadSHA256, in.PayloadBytes)
+			}
+			if got := app.PayloadDigest(in.PayloadBytes); got != in.PayloadSHA256 {
+				t.Errorf("digest = %q, does not address the stored bytes (%q)", in.PayloadSHA256, got)
+			}
+			subject, body := app.SplitPayload(in.PayloadBytes)
+			if subject != tc.subject || len(body) == 0 {
+				t.Errorf("envelope = %q / %q", subject, body)
+			}
+			// The payload reached the STORE, not just the returned value.
+			if len(store.created) != 1 || store.created[0].PayloadSHA256 != in.PayloadSHA256 {
+				t.Errorf("stored intent = %+v", store.created)
+			}
+		})
+	}
+}
+
+// A render that fails enqueues NOTHING. An intent whose content could not be determined is the
+// intent that must not exist: the alternative is a sender rendering it later, which is exactly the
+// render-at-send D-N-3 forbids. The originating event is retried by the bus, so nothing is lost.
+func TestEnqueueFailsClosedWhenTheRenderFails(t *testing.T) {
+	ctx := context.Background()
+	boom := errors.New("governance unreachable")
+	for _, tc := range []struct {
+		name     string
+		renderer *stubRenderer
+		want     error
+	}{
+		{"render error", &stubRenderer{err: boom}, boom},
+		{"empty payload", &stubRenderer{empty: true}, app.ErrEmptyPayload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newIntentStore()
+			svc := intentSvc(store, app.DeliveryIntentConfig{}).WithPayloadRenderer(tc.renderer)
+			if _, err := svc.EnqueueJiraForRelease(ctx, lineage(), "env-1", "rel-1", "", "", nil); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if len(store.created) != 0 {
+				t.Error("an intent was recorded despite having no determinable payload")
+			}
+		})
+	}
+}
+
+// A replay re-renders and then DISCARDS the result: CreateIntent returns the row already there,
+// payload included. Determinism is a property of the record, not of the renderer.
+func TestReplayKeepsTheFirstMaterializedPayload(t *testing.T) {
+	ctx := context.Background()
+	store := newIntentStore()
+	renderer := &stubRenderer{}
+	svc := intentSvc(store, app.DeliveryIntentConfig{}).WithPayloadRenderer(renderer)
+
+	first, err := svc.EnqueueJiraForRelease(ctx, lineage(), "env-1", "rel-1", "", "", nil)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := svc.EnqueueJiraForRelease(ctx, lineage(), "env-1", "rel-1", "", "", nil)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if second.ID != first.ID || second.PayloadSHA256 != first.PayloadSHA256 {
+		t.Errorf("replay returned a different intent/payload: %+v vs %+v", second, first)
+	}
+	if len(store.created) != 1 {
+		t.Errorf("created %d intents, want 1", len(store.created))
+	}
+}
+
+// The payload envelope: one Subject line, a blank line, the body — and the round trip.
+func TestPayloadEnvelope(t *testing.T) {
+	payload := app.BuildPayload("  one\nline  ", []byte("first\n\nsecond\n"))
+	if want := "Subject: one line\n\nfirst\n\nsecond\n"; string(payload) != want {
+		t.Errorf("payload = %q, want %q", payload, want)
+	}
+	subject, body := app.SplitPayload(payload)
+	if subject != "one line" || string(body) != "first\n\nsecond\n" {
+		t.Errorf("split = %q / %q", subject, body)
+	}
+	// An N-M1a row (no envelope) yields no subject and the bytes whole — a real sender refuses it
+	// rather than guessing a summary.
+	if subject, body := app.SplitPayload([]byte("legacy body")); subject != "" || string(body) != "legacy body" {
+		t.Errorf("legacy split = %q / %q", subject, body)
+	}
+	// A header with no blank line after it is a subject and no body — refused downstream, never
+	// sent as a bodyless mail.
+	if subject, body := app.SplitPayload([]byte("Subject: alone\n")); subject != "alone" || body != nil {
+		t.Errorf("headers-only split = %q / %q", subject, body)
+	}
+	if app.PayloadDigest(nil) == app.PayloadDigest([]byte("x")) {
+		t.Error("the digest does not distinguish payloads")
+	}
+	if got := len(app.PayloadDigest([]byte("x"))); got != 64 {
+		t.Errorf("digest length = %d, want a hex SHA-256", got)
 	}
 }

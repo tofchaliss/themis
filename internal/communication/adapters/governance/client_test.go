@@ -181,3 +181,56 @@ func TestReleasePosture_Errors(t *testing.T) {
 		t.Error("transport failure must error")
 	}
 }
+
+// The remediation ticket's read (N-M1b): the same posture endpoint, reduced to the CVE id and the
+// intrinsic score its severity bucket is read from. A row with no base_score decodes as 0, which
+// the renderer reports as Unknown — never as Low.
+func TestReleaseSeverity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases/rel-1/posture" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[
+		  {"finding_id":"f1","cve":"CVE-2020-1747","base_score":92,"band":"critical"},
+		  {"finding_id":"f2","cve":"CVE-2025-47273","base_score":40},
+		  {"finding_id":"f3","cve":"CVE-2026-9"}
+		]`))
+	}))
+	defer srv.Close()
+
+	rows, err := governance.NewClient(srv.URL, srv.Client()).ReleaseSeverity(context.Background(), "rel-1")
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	if rows[0].CVE != "CVE-2020-1747" || rows[0].BaseScore != 92 {
+		t.Errorf("row 0 = %+v", rows[0])
+	}
+	if rows[1].BaseScore != 40 {
+		t.Errorf("row 1 = %+v", rows[1])
+	}
+	if rows[2].BaseScore != 0 {
+		t.Errorf("a missing base_score must decode as 0, got %+v", rows[2])
+	}
+}
+
+// Every failure is reported, never degraded to an empty posture: a ticket rendered from zero rows
+// would claim a Release has nothing open, which is the one thing a failed read cannot know.
+func TestReleaseSeverity_Errors(t *testing.T) {
+	notOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer notOK.Close()
+	if _, err := governance.NewClient(notOK.URL, notOK.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("non-200 must error")
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{`))
+	}))
+	defer bad.Close()
+	if _, err := governance.NewClient(bad.URL, bad.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("malformed JSON must error")
+	}
+	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("transport failure must error")
+	}
+}

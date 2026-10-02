@@ -110,6 +110,47 @@ func purls(cs []componentRef) []string {
 	return out
 }
 
+// severityRow mirrors the two fields of the SAME release-posture JSON the remediation ticket
+// consumes (N-M1b / RC-2). It is a second narrow view of one endpoint rather than a widened
+// postureRow: the rollup needs the decided half and the occurrence verdicts, a ticket needs a
+// CVE id and a number, and a struct serving both would tell a reader neither.
+type severityRow struct {
+	CVE       string `json:"cve"`
+	BaseScore int    `json:"base_score"`
+}
+
+// ReleaseSeverity fetches the Release's posture reduced to the ticket's two facts. Implements
+// app.ReleaseSeverityReader. A missing base_score decodes as 0, which the renderer reports as
+// `Unknown` — never as `Low`.
+func (c *Client) ReleaseSeverity(ctx context.Context, releaseID string) ([]app.ReleaseSeverityRow, error) {
+	var rows []severityRow
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/api/v1/releases/%s/posture", c.baseURL, releaseID), &rows); err != nil {
+		return nil, fmt.Errorf("governance: release severity %s: %w", releaseID, err)
+	}
+	out := make([]app.ReleaseSeverityRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, app.ReleaseSeverityRow{CVE: r.CVE, BaseScore: r.BaseScore})
+	}
+	return out, nil
+}
+
+// getJSON performs one read-API GET and decodes the body, or reports the status.
+func (c *Client) getJSON(ctx context.Context, url string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(into)
+}
+
 // postureRow mirrors the fields of Governance's release-posture JSON the rollup consumes
 // (EDR-COMMUNICATION-01 D13.5): the decided half (stance, position version + rationale) and
 // the components with their occurrence-verdict fields.
