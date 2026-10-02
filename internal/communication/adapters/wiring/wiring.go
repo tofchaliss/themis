@@ -11,13 +11,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/communication/adapters/delivery"
 	govclient "github.com/themis-project/themis/internal/communication/adapters/governance"
-	regclient "github.com/themis-project/themis/internal/communication/adapters/registry"
 	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
+	regclient "github.com/themis-project/themis/internal/communication/adapters/registry"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 type idGen struct{}
@@ -69,4 +71,30 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 		Reconcile: app.NewReconcileService(relay),
 		Retention: app.NewRetentionService(st, defaultRetentionWindow, clock),
 	}
+}
+
+// WireDelivery adds the N-M1a outward-delivery plumbing to an already-wired Communication:
+// the delivery-intent service, the fake Jira/mail senders, and the worker that drives them.
+// It also hands the intent service to the inbound consumer — which is what makes the event
+// reader RECORD intents at all.
+//
+// It returns nil when cfg.Enabled is false, and then the consumer is left without an intent
+// service too: a node that will not send must not accumulate a queue nobody drains. That is
+// the same switch on both halves, deliberately, so "delivery is off" cannot mean "intents pile
+// up invisibly".
+func WireDelivery(comm Communication, cfg delivery.Config, logger *observability.Logger) *delivery.Worker {
+	if !cfg.Enabled {
+		return nil
+	}
+	if logger == nil {
+		logger = observability.Nop()
+	}
+	intents := app.NewDeliveryIntentService(comm.Store, idGen{}, sysClock{}, app.DeliveryIntentConfig{
+		DeadLetterAudience: cfg.DeadLetterAudience,
+	})
+	comm.Consumer.WithIntents(intents)
+	return delivery.NewWorker(cfg, comm.Store, intents, map[app.IntentType]delivery.IntentDeliverer{
+		app.IntentJiraIssue: delivery.NewFakeJiraDeliverer(logger),
+		app.IntentEmail:     delivery.NewFakeMailDeliverer(logger),
+	}, logger)
 }

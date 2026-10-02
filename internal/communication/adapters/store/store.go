@@ -1,6 +1,7 @@
 // Package store is the Communication context's Postgres persistence adapter: it owns the
-// publications / communication_outbox / publishable_positions tables and implements the
-// application Repository port as an aggregate-root store. Publication content is immutable;
+// publications / communication_outbox / publishable_positions tables and the outward-delivery
+// tables (delivery_intents / delivery_attempts — see delivery.go), and implements the
+// application Repository and DeliveryIntents ports. Publication content is immutable;
 // only the delivery outcome and the superseded-by link mutate, guarded by optimistic
 // concurrency (D9). A terminal audit event is written in the same transaction as the
 // aggregate mutation (transactional outbox). jsonb columns receive string(...); the bytea
@@ -349,7 +350,8 @@ func (s *Store) PrunePayloads(ctx context.Context, before time.Time) (int, error
 // Purge removes all Communication rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`)
+		`TRUNCATE delivery_attempts, delivery_intents, processed_events, publishable_positions,
+			communication_outbox, publications RESTART IDENTITY CASCADE`)
 	return err
 }
 
