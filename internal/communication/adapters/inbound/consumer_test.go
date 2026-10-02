@@ -2,6 +2,7 @@ package inbound_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestConsumer_PositionRevisedMarksStale(t *testing.T) {
 
 func TestConsumer_UnknownTypeIgnored(t *testing.T) {
 	repo := &memRepo{}
-	if err := consumer(repo).Handle(context.Background(), mkEnv("governance.finding_opened", []byte(`{}`))); err != nil {
+	if err := consumer(repo).Handle(context.Background(), mkEnv("governance.finding_resolved", []byte(`{}`))); err != nil {
 		t.Errorf("unknown type should be ignored, got %v", err)
 	}
 	if len(repo.queue) != 0 {
@@ -101,6 +102,238 @@ func TestConsumer_MalformedPayloads(t *testing.T) {
 	for _, evt := range []string{"governance.position_established", "governance.position_revised"} {
 		if err := c.Handle(context.Background(), mkEnv(evt, []byte("{not json"))); err == nil {
 			t.Errorf("%s: malformed payload should error", evt)
+		}
+	}
+}
+
+// --- N-M1a: outward-delivery intents -------------------------------------------------------
+
+// intentStore is an in-memory DeliveryIntents double reproducing the one store behaviour the
+// mapping depends on: idempotence on the originating event id.
+type intentStore struct {
+	created []app.Intent
+	byEvent map[string]app.Intent
+}
+
+func newIntentStore() *intentStore { return &intentStore{byEvent: map[string]app.Intent{}} }
+
+func (s *intentStore) CreateIntent(_ context.Context, in app.Intent) (app.Intent, error) {
+	if in.OriginEventID != "" {
+		if existing, ok := s.byEvent[in.OriginEventID]; ok {
+			return existing, nil
+		}
+		s.byEvent[in.OriginEventID] = in
+	}
+	s.created = append(s.created, in)
+	return in, nil
+}
+
+func (s *intentStore) GetIntent(context.Context, string) (app.Intent, error) {
+	return app.Intent{}, app.ErrIntentNotFound
+}
+func (s *intentStore) GetPendingForWork(context.Context, time.Time, int) ([]app.Intent, error) {
+	return nil, nil
+}
+func (s *intentStore) RecordAttempt(context.Context, app.Attempt) error               { return nil }
+func (s *intentStore) MarkDelivered(context.Context, string, map[string]string) error { return nil }
+func (s *intentStore) MarkDeadLetter(context.Context, string, string) error           { return nil }
+func (s *intentStore) CancelIntent(context.Context, string) error                     { return nil }
+func (s *intentStore) ListDeadLetters(context.Context, time.Time, int) ([]app.Intent, error) {
+	return nil, nil
+}
+func (s *intentStore) RetryIntent(context.Context, string) error { return nil }
+
+type intentIDs struct{ n int }
+
+func (g *intentIDs) NewID() string { g.n++; return fmt.Sprintf("int-%d", g.n) }
+
+// deliveringConsumer wires a consumer with the delivery intake attached.
+func deliveringConsumer(intents *intentStore) *inbound.Consumer {
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{})
+	return consumer(&memRepo{}).WithIntents(svc)
+}
+
+// govEnv is a Governance envelope carrying the identity fields the intent's lineage records.
+func govEnv(id, typ string, payload []byte) event.Envelope {
+	return event.Envelope{
+		ID: id, Type: typ, SourceContext: "governance", Subject: "fnd-1",
+		SchemaRef: typ + ".v1", CorrelationID: "corr-1",
+		OccurredAt: time.Unix(1_700_000_000, 0).UTC(), Payload: payload,
+	}
+}
+
+const findingOpenedPayload = `{"FindingID":"fnd-1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-2026-1"}`
+
+func TestConsumer_FindingOpenedRecordsOneJiraIntent(t *testing.T) {
+	intents := newIntentStore()
+	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 1 {
+		t.Fatalf("created %d intents, want 1", len(intents.created))
+	}
+	in := intents.created[0]
+	if in.Type != app.IntentJiraIssue || in.ReleaseID != "rel-1" || in.OriginEventID != "env-1" {
+		t.Errorf("intent = %+v", in)
+	}
+	if in.Lineage.EventType != "governance.finding_opened" || in.Lineage.SourceContext != "governance" ||
+		in.Lineage.CorrelationID != "corr-1" || in.Lineage.EventID != "env-1" {
+		t.Errorf("lineage = %+v", in.Lineage)
+	}
+	if in.Snapshot["cve"] != "CVE-2026-1" || in.Snapshot["finding_id"] != "fnd-1" {
+		t.Errorf("snapshot = %v", in.Snapshot)
+	}
+	// Product/project are NOT resolved here: that would be a Registry read on the reader path.
+	if in.ProductID != "" || in.ProjectID != "" {
+		t.Errorf("reader must not resolve product/project: %+v", in)
+	}
+}
+
+// Re-delivering the SAME envelope id must not enqueue a second ticket — the transport is
+// at-least-once, so this is the normal case, not an edge case.
+func TestConsumer_FindingOpenedRedeliveryCreatesNoSecondIntent(t *testing.T) {
+	intents := newIntentStore()
+	c := deliveringConsumer(intents)
+	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	for i := 0; i < 2; i++ {
+		if err := c.Handle(context.Background(), env); err != nil {
+			t.Fatalf("handle %d: %v", i, err)
+		}
+	}
+	if len(intents.created) != 1 {
+		t.Fatalf("created %d intents for one event, want 1", len(intents.created))
+	}
+}
+
+func TestConsumer_ProposalAcceptedRecordsOneDecisionMail(t *testing.T) {
+	intents := newIntentStore()
+	c := deliveringConsumer(intents)
+	env := govEnv("env-2", "governance.proposal_accepted",
+		[]byte(`{"FindingID":"fnd-1","ProposalID":"prop-1","PositionVersion":2}`))
+	for i := 0; i < 2; i++ { // the second delivery is the replay
+		if err := c.Handle(context.Background(), env); err != nil {
+			t.Fatalf("handle %d: %v", i, err)
+		}
+	}
+	if len(intents.created) != 1 {
+		t.Fatalf("created %d intents for one event, want 1", len(intents.created))
+	}
+	in := intents.created[0]
+	if in.Type != app.IntentEmail || in.ProposalID != "prop-1" || in.FindingID != "fnd-1" {
+		t.Errorf("intent = %+v", in)
+	}
+	if in.Destination != "security-decisions" {
+		t.Errorf("destination = %q", in.Destination)
+	}
+	if in.Snapshot["position_version"] != "2" {
+		t.Errorf("snapshot = %v", in.Snapshot)
+	}
+}
+
+// A Finding whose event names no Release records nothing and reports no error: there is no
+// subject to track a fix for, and a retry would not produce one.
+func TestConsumer_FindingOpenedWithoutReleaseRecordsNothing(t *testing.T) {
+	intents := newIntentStore()
+	env := govEnv("env-3", "governance.finding_opened", []byte(`{"FindingID":"fnd-1","ReleaseID":""}`))
+	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 0 {
+		t.Errorf("created %d intents, want 0", len(intents.created))
+	}
+}
+
+func TestConsumer_ProposalAcceptedWithoutSubjectRecordsNothing(t *testing.T) {
+	intents := newIntentStore()
+	env := govEnv("env-4", "governance.proposal_accepted", []byte(`{"PositionVersion":1}`))
+	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 0 {
+		t.Errorf("created %d intents, want 0", len(intents.created))
+	}
+}
+
+func TestConsumer_DeliveryEventsMalformedPayloads(t *testing.T) {
+	c := deliveringConsumer(newIntentStore())
+	for _, evt := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
+		if err := c.Handle(context.Background(), govEnv("env-x", evt, []byte("{not json"))); err == nil {
+			t.Errorf("%s: malformed payload should error (so the event is retried, not dropped)", evt)
+		}
+	}
+}
+
+// Without the intake wired (delivery disabled on this node) the delivery events are inert —
+// no intent, no error — while the Position events keep working.
+func TestConsumer_WithoutIntentsRecordsNoIntents(t *testing.T) {
+	repo := &memRepo{}
+	c := consumer(repo)
+	for _, evt := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
+		if err := c.Handle(context.Background(), govEnv("env-5", evt, []byte(findingOpenedPayload))); err != nil {
+			t.Errorf("%s: %v", evt, err)
+		}
+	}
+	if len(repo.queue) != 0 {
+		t.Error("delivery events must not touch the publishable queue")
+	}
+}
+
+// blockingDeliverer stands in for Jira or a mail relay that never answers. The reader holds no
+// deliverer at all, which is the invariant under test: it writes the intent and returns, so an
+// unreachable external system cannot stall the bus reader path.
+type blockingDeliverer struct{ calls int }
+
+func (d *blockingDeliverer) DeliverIntent(ctx context.Context, _ app.Intent) error {
+	d.calls++
+	<-ctx.Done() // would hang the reader if the reader ever called it
+	return ctx.Err()
+}
+
+func TestConsumer_NeverDelivers(t *testing.T) {
+	intents := newIntentStore()
+	blocked := &blockingDeliverer{}
+
+	// First prove the stand-in really does hang — it is what an unreachable Jira looks like.
+	blockCtx, cancelBlock := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelBlock()
+	if err := blocked.DeliverIntent(blockCtx, app.Intent{}); err == nil {
+		t.Fatal("the blocking stand-in returned without its context being cancelled")
+	}
+	if blocked.calls != 1 {
+		t.Fatalf("stand-in calls = %d, want 1", blocked.calls)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- deliveringConsumer(intents).Handle(ctx,
+			govEnv("env-6", "governance.finding_opened", []byte(findingOpenedPayload)))
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("the event reader blocked — it must only persist the intent")
+	}
+	if blocked.calls != 1 {
+		t.Errorf("deliverer calls = %d; handling an event must add none", blocked.calls)
+	}
+	if len(intents.created) != 1 {
+		t.Errorf("the reader must persist exactly one intent, got %d", len(intents.created))
+	}
+}
+
+// The subscription has to DISPATCH on the new types; an event outside the interest set never
+// reaches Handle, so an undeclared mapping is dead code in production.
+func TestSubscriptionDispatchesOnTheDeliveryTriggers(t *testing.T) {
+	for _, typ := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
+		if !inbound.Subscription.InInterest(typ) {
+			t.Errorf("%s is not in the Communication interest set", typ)
 		}
 	}
 }
