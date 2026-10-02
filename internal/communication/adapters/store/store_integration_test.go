@@ -509,10 +509,19 @@ const (
 	intentID3 = "33333333-3333-4333-8333-333333333333"
 )
 
+// intentPayload is a materialized payload shaped like the serializer's: one Subject line, a blank
+// line, then the body. Since N-M1b every intent carries one, so the store's job includes
+// round-tripping the bytes and their content address.
+func intentPayload(typ app.IntentType) []byte {
+	return app.BuildPayload("Themis "+string(typ)+" for rel-1", []byte("Release:  rel-1\nFindings: 1\n"))
+}
+
 func pendingIntent(id string, typ app.IntentType, originEventID string, due time.Time) app.Intent {
+	payload := intentPayload(typ)
 	return app.Intent{
 		ID: id, Type: typ, Destination: "dest-" + string(typ), State: app.IntentPending,
 		NextAttemptAt: due, Result: map[string]string{},
+		PayloadBytes: payload, PayloadSHA256: app.PayloadDigest(payload),
 		Snapshot: map[string]string{"release_id": "rel-1", "cve": "CVE-2026-1"},
 		Lineage: app.IntentLineage{
 			SourceContext: "governance", EventType: "governance.finding_opened",
@@ -542,8 +551,11 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	if first.Snapshot["cve"] != "CVE-2026-1" || first.Lineage.CorrelationID != "corr-1" {
 		t.Errorf("snapshot/lineage round-trip = %+v / %+v", first.Snapshot, first.Lineage)
 	}
-	if len(first.PayloadBytes) != 0 || first.PayloadSHA256 != "" {
-		t.Errorf("payload columns must stay empty in N-M1a: %q / %q", first.PayloadSHA256, first.PayloadBytes)
+	// N-M1b: the materialized payload is PERSISTED — the bytes a retry re-sends, and the digest
+	// that makes "the same snapshot was delivered" checkable rather than assumed.
+	want := intentPayload(app.IntentJiraIssue)
+	if string(first.PayloadBytes) != string(want) || first.PayloadSHA256 != app.PayloadDigest(want) {
+		t.Errorf("payload round-trip = %q / %q", first.PayloadSHA256, first.PayloadBytes)
 	}
 
 	// A replay of the same envelope, even with a freshly minted intent id.
@@ -593,6 +605,11 @@ func TestDeliveryIntentWorkCycle(t *testing.T) {
 	}
 	if len(work) != 1 || work[0].ID != intentID1 {
 		t.Fatalf("work = %+v, want only the due intent", work)
+	}
+	// The claim carries the materialized payload: a sender transmits what the claim handed it and
+	// never goes back for the content (N-M1b / D-N-3).
+	if string(work[0].PayloadBytes) != string(intentPayload(app.IntentJiraIssue)) {
+		t.Errorf("claimed intent carries no payload: %q", work[0].PayloadBytes)
 	}
 	if work, err = st.GetPendingForWork(ctx, epoch.Add(2*time.Hour), 10); err != nil || len(work) != 2 {
 		t.Fatalf("work later = %d err=%v, want both", len(work), err)

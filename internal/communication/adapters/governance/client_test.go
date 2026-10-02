@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/communication/adapters/governance"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -178,6 +179,91 @@ func TestReleasePosture_Errors(t *testing.T) {
 		t.Error("malformed JSON must error")
 	}
 	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleasePosture(context.Background(), "rel-1"); err == nil {
+		t.Error("transport failure must error")
+	}
+}
+
+// A client built with no http.Client of its own must still be BOUNDED. http.DefaultClient has no
+// timeout, and these reads are no longer only on a request path: since N-M1b a remediation ticket is
+// rendered inside the inbox unit of work, so a Governance node that accepts a connection and then
+// stalls would hold a bus-reader transaction open indefinitely.
+func TestNewClientWithoutAnHTTPClientIsStillBounded(t *testing.T) {
+	// A server that accepts and never answers — the stall a dial timeout does not cover.
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer stalled.Close()
+
+	c := governance.NewClient(stalled.URL, nil)
+	// The ambient deadline stands in for the configured one: the point is that the client HAS a
+	// deadline to honour rather than waiting forever, which is what http.DefaultClient would do.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ReleaseSeverity(ctx, "rel-1")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a stalled read must not read as an empty posture")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read hung instead of honouring its deadline")
+	}
+}
+
+// The remediation ticket's read (N-M1b): the same posture endpoint, reduced to the CVE id and the
+// intrinsic score its severity bucket is read from. A row with no base_score decodes as 0, which
+// the renderer reports as Unknown — never as Low.
+func TestReleaseSeverity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases/rel-1/posture" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[
+		  {"finding_id":"f1","cve":"CVE-2020-1747","base_score":92,"band":"critical"},
+		  {"finding_id":"f2","cve":"CVE-2025-47273","base_score":40},
+		  {"finding_id":"f3","cve":"CVE-2026-9"}
+		]`))
+	}))
+	defer srv.Close()
+
+	rows, err := governance.NewClient(srv.URL, srv.Client()).ReleaseSeverity(context.Background(), "rel-1")
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	if rows[0].CVE != "CVE-2020-1747" || rows[0].BaseScore != 92 {
+		t.Errorf("row 0 = %+v", rows[0])
+	}
+	if rows[1].BaseScore != 40 {
+		t.Errorf("row 1 = %+v", rows[1])
+	}
+	if rows[2].BaseScore != 0 {
+		t.Errorf("a missing base_score must decode as 0, got %+v", rows[2])
+	}
+}
+
+// Every failure is reported, never degraded to an empty posture: a ticket rendered from zero rows
+// would claim a Release has nothing open, which is the one thing a failed read cannot know.
+func TestReleaseSeverity_Errors(t *testing.T) {
+	notOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer notOK.Close()
+	if _, err := governance.NewClient(notOK.URL, notOK.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("non-200 must error")
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{`))
+	}))
+	defer bad.Close()
+	if _, err := governance.NewClient(bad.URL, bad.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("malformed JSON must error")
+	}
+	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
 		t.Error("transport failure must error")
 	}
 }

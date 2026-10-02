@@ -118,14 +118,118 @@ deduplicate on the ORIGINATING EVENT ID, and carry no CI-build content.
       read seam sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve
       its product and therefore cannot write. Giving the read seam a credential is a security-model
       change and belongs to the milestone that needs it.
-- [ ] 2.11 N-M1b: the real Jira and mail senders behind `IntentDeliverer`, and payload
-      materialization (`payload_sha256` / `payload_bytes`, empty in N-M1a). RC-2's ticket content
-      (counts for all four severities, CVE ids for Critical/High only) lands with the Jira sender.
+- [x] 2.11 N-M1b: the real Jira and mail senders behind `IntentDeliverer`, and payload
+      materialization — **implemented 2026-10-02** (Group 2b below).
 - [ ] 2.12 Open, for the owner: (a) confirm the `finding_opened` proxy stands until a
       valuation-complete signal exists, or pause the ticket mapping until then — the proxy means N
       intents per Release today; (b) fix the governed default destination names (the code defaults
       are `themis-remediation`, `security-decisions`, `operations`) and whether they are per-type
-      or per-intent; (c) duplicate suppression when two Communication nodes drain one database.
+      or per-intent; (c) duplicate suppression when two Communication nodes drain one database —
+      N-M1b NARROWS this (an update is idempotent, a mail carries a stable Message-ID) but two
+      nodes racing before either has created the issue can still open it twice; closing it needs a
+      store-level claim.
+
+## Group 2b — N-M1b real Jira + mail senders (EDR-DELIVERY-01 Revision 4) — **implemented 2026-10-02**
+
+The other half of M1: the same seam, two REAL channels. Both **OFF by default** and enabled
+independently; every secret from the environment only; the payload snapshotted at enqueue. The CI
+build and the rebuild loop are STILL not in this step (M1b-7 — no `ci_build`, no `ci_rebuild`, no
+callback, no loop control, no API or OpenAPI edit).
+
+- [x] 2b.1 `internal/communication/app/delivery_intent.go`: the **payload envelope**
+      (`BuildPayload` / `SplitPayload` / `PayloadDigest` — one `Subject:` line, a blank line, the
+      body, so BOTH halves of what goes out live inside the bytes the SHA-256 covers), the
+      `IntentPayloadRenderer` port, the narrow `ReleaseSeverityReader` port +
+      `ReleaseSeverityRow`, `WithPayloadRenderer`, and `create` — which materializes BEFORE
+      persisting, so a render failure means NO intent (`ErrEmptyPayload` / the renderer's error)
+      and the bus retries the event. A replay re-renders and discards: `CreateIntent` returns the
+      stored row, payload included, so determinism is a property of the RECORD.
+- [x] 2b.2 `adapters/serializer/outward.go`: `OutwardRenderer` (implements the app port) with
+      `RenderJiraIssue` / `RenderDecisionEmail` / `RenderOpsDeadLetterEmail`. RC-2's rule is here:
+      counts for Critical/High/Medium/Low, CVE ids for **Critical and High only**, sorted and
+      deduplicated so two renders of one posture are byte-identical. The severity buckets invert
+      Knowledge's own baseline ladder over Governance's `base_score` (90/70/40/>0) because the
+      posture projection carries no severity word — and a score of 0 is `Unknown`, counted
+      separately and only when non-empty, never folded into `Low`.
+- [x] 2b.3 `adapters/governance/client.go`: `ReleaseSeverity` — a SECOND narrow view of the
+      existing posture endpoint (CVE + `base_score`), not a widened `postureRow`: the rollup wants
+      the decided half and the verdicts, a ticket wants an id and a number. Every failure is
+      reported, never degraded to an empty posture — a ticket rendered from zero rows would claim a
+      Release has nothing open, which is the one thing a failed read cannot know.
+- [x] 2b.4 `adapters/delivery/jira.go`: `RealJiraDeliverer` over REST v3 + `net/http` (no client
+      dependency). **One ticket per Release by exact LABEL** (`themis-release-<uuid>`), not by
+      `summary ~ "<uuid>"` — a tokenization near-miss does not fail, it silently opens a second
+      ticket. Update is a FULL REPLACE (idempotent by construction); the key lands on the intent
+      result. ADF description (v3 requires it). The Authorization header is set in one place and
+      no error, excerpt or log field carries the token. **A clear-text `http://` base URL is
+      REFUSED at configure time** (loopback excepted), as is a non-http(s) scheme: Basic auth puts
+      the token in EVERY request, so this is the same rule 2b.5 applies to a password without
+      STARTTLS — one rule, both channels (EDR Revision 4 M1b-1).
+- [x] 2b.5 `adapters/delivery/mail.go`: `RealMailDeliverer` over `net/smtp` + `crypto/tls`.
+      The governed audience NAME becomes recipients here or nowhere — an unmapped audience is
+      REFUSED, never redirected to a default. `Date` from the intent's creation time and
+      `Message-ID` from its id, so a retry is byte-identical and a relay can collapse it (RC-5).
+      A username without STARTTLS is refused at startup for a non-loopback relay (the password
+      would cross the network in the clear; `net/smtp` refuses it one layer down anyway).
+      **Every STEP of the conversation is bounded**, not just the dial (`deadlineConn` refreshes a
+      per-operation deadline; the context closes the connection on shutdown) — a relay that accepts
+      and then stops answering is not unreachable, so a dial timeout never fires and the worker
+      goroutine would block forever. **Header values are folded** (CR/LF → space) at the boundary,
+      because a newline in a header value adds HEADERS rather than breaking one; an ADDRESS is
+      refused (`From`) or dropped (a recipient, leaving its audience unmapped and loudly refused),
+      since a silently repaired address mails security content somewhere nobody chose. The
+      Governance read seam is bounded too (`NewClient` with a nil client no longer means
+      `http.DefaultClient`, which has no timeout) — it runs inside the inbox transaction now.
+- [x] 2b.6 `adapters/delivery/delivery.go`: `JiraConfig` + `MailConfig` on `Config`,
+      `jiraFromEnv` / `mailFromEnv` / `ParseAudiences`, and `NewDeliverers` — the selection:
+      real when enabled AND complete, else the fake with an **ERROR naming the unset knobs**. Both
+      `String()`s report `set`/`unset` for a credential and never a value (and the mail one prints
+      audience NAMES only — an address list is estate detail).
+- [x] 2b.7 `adapters/wiring/wiring.go`: the posture read seam carried on the `Communication`
+      bundle, the renderer wired whenever it is present (materialization is a property of the
+      record, not of the channel — a node on the fakes still stores the exact bytes), and
+      `NewDeliverers` replacing the hard-wired fakes. `WireDelivery`'s signature is unchanged, so
+      M1a-7's one switch over both halves still reads as one switch.
+- [x] 2b.8 Tests: serializer (the content rule, determinism under reordering, the Unknown bucket,
+      the three fail-closed refusals, both mails, the dispatcher); app (materialization on all
+      three enqueue paths incl. the STORED row, fail-closed on a render error and on empty bytes,
+      the replay keeping the first payload, the envelope round trip); governance client
+      (`ReleaseSeverity` + three failure modes); delivery (**httptest** Jira create/update paths
+      asserting JQL, labels, ADF content and the recorded key; the update's idempotence under
+      retry; five Jira refusals as OUTCOMES; an **in-process SMTP server** asserting MAIL FROM,
+      the resolved RCPT TOs, every header and that the body IS the payload body; byte-identical
+      retry; PLAIN auth; three SMTP refusals; the unmapped audience; `ErrNoPayload` on both
+      senders; the selection matrix incl. the loud incomplete-config fallback and
+      configured-but-disabled making no call; `ConfigFromEnv`) and store integration (the payload
+      round-trips and the CLAIM carries it — the N-M1a emptiness assertion is gone).
+      **Secrecy is asserted, not assumed**: a zap observer plus the attempt ledger are checked for
+      the token and the password on every path, including the failures. The hardening has its own
+      negative paths: the clear-text/`no-scheme`/wrong-scheme Jira refusals **and** the selection
+      keeping the fake for a clear-text site; a relay that stalls on DATA timing out instead of
+      hanging; context cancellation ending a conversation in flight; a payload whose subject carries
+      `CRLF + Bcc:` producing NO extra header; a `From` and a recipient with control characters
+      refused and dropped; and a stalled Governance read honouring its deadline.
+      Coverage: `communication/app` 100%, `adapters/serializer` 98.7%, `adapters/delivery` 96.3%,
+      `adapters/governance` 95.7% (all ≥90), `adapters/store` ≥80. No package added, so
+      `scripts/check-coverage.sh` needs no registration.
+- [x] 2b.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 4** (M1b-1..M1b-7 + honest
+      limits) and `deploy/node.env.example` (the two switches, every knob commented, both secrets
+      documented as environment-only and left valueless, and the N-M1a-payload consequence).
+- [ ] 2b.10 Open, for the owner: (a) confirm the Jira flavour (Cloud/REST v3 + Basic
+      email:API-token is what is implemented) and the issue type; (b) the ticket currently counts
+      EVERY Finding of the Release, including those a Position has suppressed — filtering by
+      disposition is a policy decision nobody has taken; (c) a central governed audience registry
+      (the env map is the registry until one exists); (d) Jira credential needs
+      BROWSE/SEARCH, or first-run idempotence degrades to a duplicate ticket.
+- [ ] 2b.11 **Owner sign-off wanted on one deliberate deviation from the M1b draft design.** The
+      draft allowed a real sender to render ONCE from current facts when an intent carries no
+      payload (back-compat for N-M1a rows) and store the result. This implementation **refuses**
+      instead (`ErrNoPayload`), because that fallback is render-at-send with extra steps and is the
+      determinism hole the plan's own Risks section asks a reviewer to look for. Consequence: an
+      estate upgraded from N-M1a dead-letters its already-queued intents, visibly, for an operator
+      to `deliveryctl cancel` or retry after re-triggering. Recorded in EDR-DELIVERY-01 Revision 4
+      M1b-3 and `deploy/node.env.example`. If the upgrade cost is unacceptable, the alternative is a
+      one-time render path behind its own knob — a knob, so the default stays strict.
 
 ## Group 3 — M2 CI — NOT STARTED
 

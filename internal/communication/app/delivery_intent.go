@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -16,6 +18,12 @@ var ErrIntentNotFound = errors.New("communication: delivery intent not found")
 // an outward action whose subject is indeterminate is exactly the action that must not go out
 // (EDR-DELIVERY-01 RC-7).
 var ErrNoSubject = errors.New("communication: delivery intent has no subject")
+
+// ErrEmptyPayload is returned when the renderer produced no bytes. It fails CLOSED for the same
+// reason ErrNoSubject does: an intent whose content could not be determined is an intent that
+// must not be enqueued, because the alternative is a sender rendering it later from facts that
+// have since moved (D-N-3).
+var ErrEmptyPayload = errors.New("communication: delivery intent rendered an empty payload")
 
 // IntentType is the outward channel an intent is destined for. The vocabulary is CLOSED and
 // mirrored by a CHECK constraint in the store: `jira_issue` and `email`. N-M1a deliberately
@@ -72,9 +80,12 @@ type IntentLineage struct {
 }
 
 // Intent is one durable "this must go out" record. It carries NO credential and NO model
-// output: the eventual payload derives from Snapshot and from nothing else (RC-7). The
-// payload columns (PayloadSHA256 / PayloadBytes) stay empty in N-M1a — materialization is
-// N-M1b's, and an invented shape would have to be migrated away.
+// output: the payload derives from Snapshot (and, for a ticket, the Release posture read once)
+// and from nothing else (RC-7).
+//
+// Since N-M1b the payload columns are MATERIALIZED at enqueue (D-N-3): PayloadBytes holds the
+// exact bytes that will be sent and PayloadSHA256 content-addresses them, so every retry
+// delivers the same snapshot however much the estate has moved since. A sender never renders.
 type Intent struct {
 	ID          string
 	Type        IntentType
@@ -161,6 +172,77 @@ type DeliveryIntents interface {
 	RetryIntent(ctx context.Context, id string) error
 }
 
+// ReleaseSeverityRow is one Finding of a Release's posture reduced to the two facts a
+// remediation ticket needs (RC-2): the CVE id, and the intrinsic score its severity bucket is
+// read from. It is deliberately NOT the rollup's posture row — a ticket and a VEX document want
+// different halves of the same projection, and one "everything" type would leave neither
+// consumer's needs legible.
+type ReleaseSeverityRow struct {
+	CVE string
+	// BaseScore is Governance's `base_score`: the CVE-intrinsic composite priority (0–100)
+	// Knowledge computes from the reconciled severity, lifted by EPSS/KEV. It is the only
+	// severity-bearing number the posture projection carries.
+	BaseScore int
+}
+
+// ReleaseSeverityReader reads a Release's posture over Governance's read API, for the
+// remediation ticket's severity counts. The Governance client implements it.
+type ReleaseSeverityReader interface {
+	ReleaseSeverity(ctx context.Context, releaseID string) ([]ReleaseSeverityRow, error)
+}
+
+// IntentPayloadRenderer renders the bytes an intent will send, ONCE, at enqueue time (D-N-3).
+// The outward serializer implements it.
+//
+// It is the only port on this service that may touch another system (a ticket's severity counts
+// are a Governance read), and that is why a rendering failure is returned rather than swallowed:
+// no payload means no intent, and the originating event is retried by the bus. The alternative —
+// recording an intent with an empty payload for a sender to fill in later — is render-at-send
+// with extra steps, and it is exactly what D-N-3 forbids.
+type IntentPayloadRenderer interface {
+	RenderIntentPayload(ctx context.Context, in Intent) ([]byte, error)
+}
+
+// payloadSubjectHeader opens the payload envelope: the materialized payload is one `Subject:`
+// line, a blank line, then the body. Both halves are outward content and both must be constant
+// across retries, so both live inside the bytes PayloadSHA256 covers — a Jira summary rendered
+// at send time would be a second, unsnapshotted payload.
+const payloadSubjectHeader = "Subject: "
+
+// BuildPayload wraps a rendered subject and body into the payload envelope. Newlines are folded
+// out of the subject: a header is one line by construction, not by hope.
+func BuildPayload(subject string, body []byte) []byte {
+	one := strings.Join(strings.Fields(subject), " ")
+	out := make([]byte, 0, len(payloadSubjectHeader)+len(one)+2+len(body))
+	out = append(out, payloadSubjectHeader...)
+	out = append(out, one...)
+	out = append(out, '\n', '\n')
+	return append(out, body...)
+}
+
+// SplitPayload reads the envelope back. A payload with no `Subject:` line is returned whole as
+// the body with an empty subject — an N-M1a row, which a real sender refuses rather than
+// guessing a summary for.
+func SplitPayload(payload []byte) (subject string, body []byte) {
+	s := string(payload)
+	if !strings.HasPrefix(s, payloadSubjectHeader) {
+		return "", payload
+	}
+	rest := s[len(payloadSubjectHeader):]
+	i := strings.Index(rest, "\n\n")
+	if i < 0 {
+		return strings.TrimSpace(rest), nil
+	}
+	return rest[:i], []byte(rest[i+2:])
+}
+
+// PayloadDigest content-addresses a materialized payload (lowercase hex SHA-256). It is what
+// makes "the same snapshot was delivered" checkable after the fact rather than assumed.
+func PayloadDigest(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
 // DeliveryIntentConfig names the GOVERNED destinations an intent may carry. They are names,
 // resolved to real addresses/projects by the sender at delivery time — an intent never holds
 // an address or a credential (RC-5/RC-7).
@@ -199,16 +281,26 @@ func (c DeliveryIntentConfig) withDefaults() DeliveryIntentConfig {
 // call it inside the inbox transaction: persisting an intent is the whole of the reader's
 // outward work (N-M1a).
 type DeliveryIntentService struct {
-	intents DeliveryIntents
-	ids     IDGenerator
-	clock   Clock
-	cfg     DeliveryIntentConfig
+	intents  DeliveryIntents
+	ids      IDGenerator
+	clock    Clock
+	cfg      DeliveryIntentConfig
+	renderer IntentPayloadRenderer
 }
 
 // NewDeliveryIntentService wires the service over the intent store; empty destination names
-// fall back to the documented defaults.
+// fall back to the documented defaults. Without WithPayloadRenderer the service records facts
+// only and the payload columns stay empty (the N-M1a behaviour) — which a real sender refuses.
 func NewDeliveryIntentService(intents DeliveryIntents, ids IDGenerator, clock Clock, cfg DeliveryIntentConfig) *DeliveryIntentService {
 	return &DeliveryIntentService{intents: intents, ids: ids, clock: clock, cfg: cfg.withDefaults()}
+}
+
+// WithPayloadRenderer turns on payload materialization (N-M1b, D-N-3): every intent is rendered
+// at creation and stored with its content address, so a retry re-sends bytes rather than
+// re-deriving them.
+func (s *DeliveryIntentService) WithPayloadRenderer(r IntentPayloadRenderer) *DeliveryIntentService {
+	s.renderer = r
+	return s
 }
 
 // DeadLetterAudience is the governed audience a dead-letter notification goes to.
@@ -227,7 +319,7 @@ func (s *DeliveryIntentService) EnqueueJiraForRelease(ctx context.Context, linea
 	in.Snapshot["release_id"] = releaseID
 	putIfSet(in.Snapshot, "product_id", productID)
 	putIfSet(in.Snapshot, "project_id", projectID)
-	return s.intents.CreateIntent(ctx, in)
+	return s.create(ctx, in)
 }
 
 // EnqueueDecisionMail records the notification intent for an accepted proposal — a decision
@@ -245,7 +337,7 @@ func (s *DeliveryIntentService) EnqueueDecisionMail(ctx context.Context, lineage
 	putIfSet(in.Snapshot, "proposal_id", proposalID)
 	putIfSet(in.Snapshot, "finding_id", findingID)
 	putIfSet(in.Snapshot, "release_id", releaseID)
-	return s.intents.CreateIntent(ctx, in)
+	return s.create(ctx, in)
 }
 
 // EnqueueDeadLetterMail records the notification intent for an intent that gave up. It is
@@ -262,6 +354,27 @@ func (s *DeliveryIntentService) EnqueueDeadLetterMail(ctx context.Context, linea
 	in := s.newIntent(IntentEmail, audience, lineage, "", snapshot)
 	in.Snapshot[snapshotKeyNotification] = notificationDeadLetter
 	in.Snapshot["dead_letter_intent_id"] = intentID
+	return s.create(ctx, in)
+}
+
+// create materializes the payload (when a renderer is wired) and persists the intent. The two
+// steps are in this order on purpose: a payload that cannot be rendered means NO intent, so the
+// queue never holds a row whose content is still undecided.
+//
+// On a replay the render runs again and is then discarded — CreateIntent returns the row that is
+// already there, payload included. The stored snapshot wins, which is what keeps determinism a
+// property of the record rather than of the renderer.
+func (s *DeliveryIntentService) create(ctx context.Context, in Intent) (Intent, error) {
+	if s.renderer != nil {
+		payload, err := s.renderer.RenderIntentPayload(ctx, in)
+		if err != nil {
+			return Intent{}, err
+		}
+		if len(payload) == 0 {
+			return Intent{}, ErrEmptyPayload
+		}
+		in.PayloadBytes, in.PayloadSHA256 = payload, PayloadDigest(payload)
+	}
 	return s.intents.CreateIntent(ctx, in)
 }
 

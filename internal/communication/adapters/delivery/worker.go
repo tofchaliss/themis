@@ -23,8 +23,11 @@ import (
 // Honest limit: the claim is a plain read ordered by due time, so two Communication NODES
 // draining the same database can both pick up the same intent. In-process concurrency is
 // safe — one fetcher feeds the worker goroutines — and a send is required to be idempotent
-// per intent id, which is what makes the cross-node case a duplicate-suppression question for
-// the real senders in N-M1b rather than a correctness hole here.
+// per intent id. The real senders narrow the consequence rather than closing it: a Jira send
+// finds the Release's existing issue and replaces its content, and a mail carries a Message-ID
+// derived from the intent id, so the duplicate is an idempotent update and a collapsible mail —
+// but two nodes racing BEFORE either has created the issue can still open it twice. Closing that
+// needs a claim, which is a store change and its own step (tasks 2.12c).
 type Worker struct {
 	cfg        Config
 	intents    app.DeliveryIntents
