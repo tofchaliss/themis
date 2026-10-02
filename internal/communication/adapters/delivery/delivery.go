@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -346,6 +347,54 @@ func secretState(secret string) string {
 		return "unset"
 	}
 	return "set"
+}
+
+// isLoopback reports whether a host is on this machine. It is the ONE exception both real senders
+// make to "a credential never crosses an unencrypted channel" — the Jira token over plain http,
+// the SMTP password without STARTTLS — and it is not a convenience. A loopback socket does not
+// leave the machine, which is why net/smtp's own PLAIN mechanism draws the line in exactly the
+// same place; and it is what keeps an httptest server or a local relay usable in a development
+// deployment without a knob that could be set in a production one by mistake.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// sanitizeHeaderValue folds CR and LF out of a value destined for a message header.
+//
+// A header is ONE line by definition, so a value carrying a newline does not produce a malformed
+// header — it produces ADDITIONAL headers, or an early end of the header block that turns the rest
+// into body. That is header injection, and the fact that every input here is operator-supplied or
+// Themis-minted is a reason it has not happened, not a reason it cannot: a pasted address, a
+// hand-edited env file, or an N-M1a payload whose subject was never folded all reach this point as
+// strings. Folding is applied at the boundary where the harm would occur, so no caller has to
+// remember.
+func sanitizeHeaderValue(value string) string {
+	// CRLF folds to ONE space rather than two, so the folded line reads the way the author meant it
+	// to; a lone CR or LF folds to a space the same way.
+	value = strings.ReplaceAll(value, "\r\n", " ")
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return ' '
+		}
+		return r
+	}, value)
+}
+
+// hasControlChars reports whether a configured address carries a control character. Unlike a header
+// value, which is folded, an ADDRESS is refused: a recipient nobody can read as an address is a
+// configuration mistake, and silently repairing it would send security mail to an address the
+// operator never checked.
+func hasControlChars(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // getenv reads a knob and trims it: a value pasted into a systemd unit or an env file arrives

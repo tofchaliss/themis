@@ -45,6 +45,9 @@ type testSMTP struct {
 	rejectRcpt string
 	// rejectData refuses the DATA command.
 	rejectData bool
+	// stallData accepts the connection and the envelope and then says NOTHING to DATA — the
+	// unresponsive relay a dial timeout alone does not cover.
+	stallData bool
 
 	mu       sync.Mutex
 	sessions []smtpSession
@@ -120,6 +123,10 @@ func (s *testSMTP) handle(conn net.Conn) {
 			session.to = append(session.to, address)
 			say("250 2.1.5 Ok")
 		case upper == "DATA":
+			if s.stallData {
+				<-time.After(30 * time.Second) // far beyond any configured timeout
+				return
+			}
 			if s.rejectData {
 				say("554 5.5.1 Refused")
 				continue
@@ -431,6 +438,133 @@ func TestRealMailDelivererUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "dial") {
 		t.Errorf("err = %v, want it to name the dial", err)
+	}
+}
+
+// A relay that accepts the connection and then stops answering must TIME OUT, not hang. Bounding
+// the dial does not cover this: the connection succeeded. Without a per-operation deadline the
+// worker goroutine would block in a read forever, and cfg.Workers such relays would stop the queue
+// draining at all.
+func TestRealMailDelivererTimesOutOnAnUnresponsiveRelay(t *testing.T) {
+	srv := newTestSMTP(t)
+	srv.stallData = true
+	cfg := mailConfig(srv.port())
+	cfg.Timeout = 250 * time.Millisecond
+
+	mail, err := delivery.NewRealMailDeliverer(cfg, nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	errs := make(chan error, 1)
+	go func() {
+		_, err := mail.DeliverIntent(context.Background(), app.Intent{
+			ID: "int-1", Type: app.IntentEmail, Destination: "operations", PayloadBytes: decisionPayload()})
+		errs <- err
+	}()
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Fatal("a stalled relay must not read as a successful send")
+		}
+		if !strings.Contains(err.Error(), "DATA") && !strings.Contains(err.Error(), "timeout") {
+			t.Errorf("err = %v, want the stalled step named", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sender hung on an unresponsive relay instead of timing out")
+	}
+}
+
+// Cancelling the worker's context ends a conversation in flight, so shutdown is not held up by a
+// relay that is still thinking.
+func TestRealMailDelivererHonoursContextCancellation(t *testing.T) {
+	srv := newTestSMTP(t)
+	srv.stallData = true
+	cfg := mailConfig(srv.port())
+	cfg.Timeout = 30 * time.Second // long enough that only the cancellation can end this
+
+	mail, err := delivery.NewRealMailDeliverer(cfg, nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errs := make(chan error, 1)
+	go func() {
+		_, err := mail.DeliverIntent(ctx, app.Intent{
+			ID: "int-1", Type: app.IntentEmail, Destination: "operations", PayloadBytes: decisionPayload()})
+		errs <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Fatal("a cancelled send must not read as a successful one")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sender ignored its context")
+	}
+}
+
+// Header injection: a CR or LF in a value destined for a header would not produce a malformed
+// header, it would produce ADDITIONAL ones. Values are folded at the boundary, so a subject carried
+// by an old payload cannot add a Bcc or end the header block early.
+func TestRealMailDelivererFoldsNewlinesOutOfHeaders(t *testing.T) {
+	srv := newTestSMTP(t)
+	mail, err := delivery.NewRealMailDeliverer(mailConfig(srv.port()), nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	// A payload whose subject carries CRLF + an injected header, then a blank line: exactly the
+	// shape that would split the header block if it were written through unchanged.
+	payload := []byte("Subject: innocent\r\nBcc: attacker@evil.example\nX-Injected: 1\n\nthe real body\n")
+	if _, err := mail.DeliverIntent(context.Background(), app.Intent{
+		ID: "int-1", Type: app.IntentEmail, Destination: "operations",
+		PayloadBytes: payload, CreatedAt: epoch,
+	}); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	data := srv.only(t).data
+	headers, body, ok := strings.Cut(data, "\n\n")
+	if !ok {
+		t.Fatalf("message has no header/body split:\n%s", data)
+	}
+	for _, line := range strings.Split(headers, "\n") {
+		name, _, _ := strings.Cut(strings.TrimSpace(line), ":")
+		switch name {
+		case "From", "To", "Subject", "Date", "Message-ID", "MIME-Version", "Content-Type", "Auto-Submitted":
+		default:
+			t.Errorf("injected header %q reached the message:\n%s", line, data)
+		}
+	}
+	if !strings.Contains(headers, "Subject: innocent Bcc: attacker@evil.example X-Injected: 1") {
+		t.Errorf("the subject was not folded onto one line:\n%s", headers)
+	}
+	if strings.TrimSpace(body) != "the real body" {
+		t.Errorf("body = %q", body)
+	}
+}
+
+// An address is REFUSED rather than folded: one that cannot be read as an address is a
+// configuration mistake, and a repaired one sends security mail somewhere nobody chose.
+func TestMailConfigRefusesAddressesWithControlCharacters(t *testing.T) {
+	cfg := mailConfig(2525)
+	cfg.From = "themis@acme.example\r\nBcc: attacker@evil.example"
+	if _, err := delivery.NewRealMailDeliverer(cfg, nil); err == nil {
+		t.Error("a From carrying CRLF must be refused")
+	} else if !strings.Contains(err.Error(), "THEMIS_COMMUNICATION_MAIL_FROM") {
+		t.Errorf("err = %v, want it to name the knob", err)
+	}
+
+	// A recipient carrying CRLF is dropped at parse time, which leaves its audience unmapped — and
+	// an unmapped audience refuses loudly at send time rather than mailing the injected address.
+	got := delivery.ParseAudiences("operations=ops@acme.example\r\nBcc: attacker@evil.example;security-decisions=sec@acme.example")
+	if _, ok := got["operations"]; ok {
+		t.Errorf("a recipient with a control character must be dropped: %v", got)
+	}
+	if strings.Join(got["security-decisions"], ",") != "sec@acme.example" {
+		t.Errorf("the well-formed audience beside it must survive: %v", got)
 	}
 }
 

@@ -111,6 +111,38 @@ func (c JiraConfig) missing() []string {
 	return out
 }
 
+// checkTransport refuses to carry the API token over a channel that does not protect it.
+//
+// Jira's credential is HTTP Basic: the token is the request, on every call, so a `http://` base URL
+// puts it on the wire in base64 — which is an encoding, not protection. This is the same rule the
+// mail sender applies to an SMTP password without STARTTLS, drawn in the same place: plain HTTP is
+// allowed only to a LOOPBACK host, where the bytes never leave the machine (and where an httptest
+// server lives). A scheme that is neither http nor https is refused outright rather than handed to
+// net/http to fail later with a message about an unsupported protocol.
+//
+// Refusing here rather than at send time is deliberate: a misconfiguration that leaks a credential
+// must not be discovered by having leaked it once per retry.
+func (c JiraConfig) checkTransport() error {
+	u, err := url.Parse(c.BaseURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("delivery: THEMIS_COMMUNICATION_JIRA_BASE_URL (%q) is not an absolute URL with a host "+
+			"(expected e.g. https://acme.atlassian.net)", c.BaseURL)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if isLoopback(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("delivery: refusing to send the Jira API token to %q over clear-text http — "+
+			"Basic auth puts the token in every request (set THEMIS_COMMUNICATION_JIRA_BASE_URL to https://…; "+
+			"plain http is accepted only for a loopback host)", u.Host)
+	default:
+		return fmt.Errorf("delivery: THEMIS_COMMUNICATION_JIRA_BASE_URL scheme %q is not supported (use https)", u.Scheme)
+	}
+}
+
 // String renders the Jira knobs for a log line: the token's PRESENCE, never the token.
 func (c JiraConfig) String() string {
 	return fmt.Sprintf("enabled=%t base_url=%q project=%q user=%q issue_type=%q api_token=%s timeout=%s",
@@ -124,12 +156,17 @@ type RealJiraDeliverer struct {
 	logger *observability.Logger
 }
 
-// NewRealJiraDeliverer builds the sender, refusing an incomplete configuration AT CONFIGURE TIME:
-// a sender that cannot possibly succeed must not be wired as one that can.
+// NewRealJiraDeliverer builds the sender, refusing an incomplete or credential-exposing
+// configuration AT CONFIGURE TIME: a sender that cannot possibly succeed must not be wired as one
+// that can, and one that would succeed by putting a token on the wire in the clear must not be
+// wired at all.
 func NewRealJiraDeliverer(cfg JiraConfig, logger *observability.Logger) (*RealJiraDeliverer, error) {
 	cfg = cfg.withDefaults()
 	if missing := cfg.missing(); len(missing) > 0 {
 		return nil, fmt.Errorf("delivery: jira configuration incomplete, unset: %s", strings.Join(missing, ", "))
+	}
+	if err := cfg.checkTransport(); err != nil {
+		return nil, err
 	}
 	if logger == nil {
 		logger = observability.Nop()
