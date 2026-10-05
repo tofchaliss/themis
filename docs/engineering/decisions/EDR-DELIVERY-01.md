@@ -3,9 +3,11 @@
 Status: **Accepted 2026-09-30** for N-M0; **Revision 2 (2026-10-01) — remediation cycle, accepted
 as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a delivery intents,
 IMPLEMENTED** (intents are persisted and sent by workers against FAKE senders); **Revision 4
-(2026-10-02) — N-M1b real Jira + mail senders and payload materialization, IMPLEMENTED** (both
-channels OFF by default, secrets from the environment only, one ticket per Release; the CI build
-and the rebuild loop are still later milestones). The decisions were grilled and locked with the user in
+(2026-10-02, amended 2026-10-05) — N-M1b real Jira + mail senders and payload materialization,
+IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one ticket per
+Release; the CI build and the rebuild loop are still later milestones; **M1b-8** added 2026-10-05
+after the enterprise-VM run: Communication's Governance and Registry READS carry `X-API-Key` from
+`THEMIS_API_KEY`). The decisions were grilled and locked with the user in
 the `themis-ai-runtime` repository (`openspec/changes/outward-actions`, **D-N-6** locked). This
 EDR records what those decisions require of THEMIS, so the Themis-side implementation has a
 reason of record in this repository. Where they disagree, the runtime-side design wins for
@@ -594,6 +596,35 @@ no `ci_build` or `ci_rebuild` intent type (the CHECK constraint still closes the
 RC-3/RC-4/RC-6 remain decisions of record with no realization. N-M0 is unchanged (RC-8): no new
 scope, no relaxation, no Governance write, no API or OpenAPI edit in this step either.
 
+### M1b-8 — Communication's READ seams carry `X-API-Key` from `THEMIS_API_KEY` (owner decision, 2026-10-05)
+
+**Measured on the enterprise VM.** Governance and Registry ran with `THEMIS_AUTH_REQUIRED=1`.
+Communication read the release posture with no credential, Governance answered **401**, the ticket
+payload could not be rendered, so — correctly, by M1b-3 — **no intent was recorded** and the
+`finding_opened` envelope retried. Forever. The pipeline stopped at the first Finding of the first
+Release, behind an error that read like a broken endpoint.
+
+Owner decision: **Communication's Governance and Registry read clients send `X-API-Key` from
+`THEMIS_API_KEY` when it is set; unset means no key, as before.** One variable, the same name the
+Dashboard proxy and the Intelligence node already use — an operator who has provisioned one node has
+provisioned this one. A **read-scoped** key is enough and is what the documentation tells an operator
+to mint: this node writes to neither context, so a key that cannot write is a key that cannot be
+misused if it leaks.
+
+This closes, for Communication only, the limit N-M0 recorded ("the read seam sends no API key"). It
+is the milestone that needed it. The equivalent on **Governance's** Registry client — where the
+consequence is that a `product:<id>` key cannot resolve its product — is still open (task 2.10) and
+is a separate decision, because its failure mode is a refused write rather than a stalled reader.
+
+Two details that are not incidental:
+
+- **Trimmed.** A key pasted into an env file arrives with whitespace the operator cannot see, and
+  `X-API-Key: <key>\n` is not the key. Both clients trim.
+- **The error names the variable.** A 401/403 now says whether the read sent *no* key (set
+  `THEMIS_API_KEY`) or one the node *refused* (check it is current and read-scoped) — two different
+  places to look, and the distinction is the whole value of the message. The key itself never appears
+  in an error, and startup logs only whether one is set.
+
 ### Honest limits (N-M1b)
 
 - **First-run ticket idempotence depends on SEARCH permission.** A Jira credential that may create
@@ -613,7 +644,14 @@ scope, no relaxation, no Governance write, no API or OpenAPI edit in this step e
   or SMTP client (M1a-1 stands), but materialization means ONE read-API call per ticket intent
   inside the inbox unit of work, and a failed read means no intent rather than a half-determined
   one. That is a deliberate trade of reader latency for the snapshot guarantee; the alternative
-  put rendering back in the sender.
+  put rendering back in the sender. **This is what made M1b-8 urgent rather than tidy**: the same
+  read on a request path would have degraded one response, and on the reader path it stalls a
+  stream.
+- **A read-API 401 is still a RETRY LOOP, not a dead letter.** M1b-8 gives the seam a credential; it
+  does not change what happens when the credential is wrong. The envelope retries on the bus's own
+  schedule with no attempt ceiling, because an inbound event is not a delivery intent and has no
+  attempt counter. The error now names the variable, which is what makes the loop diagnosable in one
+  log line — but an operator who ignores it has a stalled stream, not a dead-letter queue.
 - **The ticket counts every Finding of the Release**, including those a Position has already
   suppressed. Filtering by disposition is a policy decision nobody has taken, and inventing one
   here would quietly change what the ticket means.
@@ -622,6 +660,8 @@ scope, no relaxation, no Governance write, no API or OpenAPI edit in this step e
 
 `internal/communication/app/delivery_intent.go` (payload envelope, `IntentPayloadRenderer`,
 `ReleaseSeverityReader`, materialization) · `adapters/serializer/outward.go` ·
-`adapters/governance/client.go` (`ReleaseSeverity`) · `adapters/delivery/{delivery,jira,mail}.go` ·
-`adapters/wiring/wiring.go` · `deploy/node.env.example`. No migration (the columns exist since
-N-M1a), no API change, no new package, no new dependency.
+`adapters/governance/client.go` (`ReleaseSeverity`, `WithAPIKey`) ·
+`adapters/registry/client.go` (`WithAPIKey`) · `adapters/delivery/{delivery,jira,mail}.go` ·
+`adapters/wiring/wiring.go` (`Wire` now takes the read-API key) · `cmd/communication` ·
+`deploy/node.env.example` · `deploy/systemd/install-systemd.sh`. No migration (the columns exist
+since N-M1a), no API change, no new package, no new dependency.

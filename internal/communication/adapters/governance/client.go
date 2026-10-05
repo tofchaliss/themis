@@ -19,6 +19,7 @@ import (
 // Client calls Governance's read API to resolve a Finding's current Enterprise Position.
 type Client struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
@@ -41,6 +42,34 @@ func NewClient(baseURL string, hc *http.Client) *Client {
 		hc = &http.Client{Timeout: defaultTimeout}
 	}
 	return &Client{baseURL: baseURL, http: hc}
+}
+
+// WithAPIKey makes every read carry `X-API-Key` (the inbound-edge credential of EDR-SECURITY-01 F1).
+// An empty key leaves the reads unauthenticated, which is the auth-off development case.
+//
+// Inter-service reads used to send no credential at all, on the reasoning that inbound-edge auth was
+// for the estate's edge and reads were open between nodes. On an estate with `THEMIS_AUTH_REQUIRED=1`
+// that is simply wrong: Governance answers 401, and the consequence is not a degraded read but a
+// STUCK PIPELINE — since N-M1b the remediation-ticket payload is rendered from this read inside the
+// inbox unit of work, so a 401 means no intent is recorded and the envelope is retried forever
+// (measured on the enterprise VM, 2026-10-05). A READ-ONLY key is enough here; this client performs
+// no write, and the key it is given should not be able to.
+func (c *Client) WithAPIKey(apiKey string) *Client {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
+}
+
+// newRequest builds one read-API GET, carrying the key when there is one. Every read in this client
+// goes through it, so "does this seam authenticate" has one answer rather than three.
+func (c *Client) newRequest(ctx context.Context, url string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	return req, nil
 }
 
 // findingView mirrors Governance's FindingView JSON (the read-API contract).
@@ -69,7 +98,7 @@ type positionView struct {
 // the Finding is unknown (404) or has no current Position yet (no decision).
 func (c *Client) GetPosition(ctx context.Context, findingID string) (domain.PositionSnapshot, bool, error) {
 	url := fmt.Sprintf("%s/api/v1/findings/%s", c.baseURL, findingID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newRequest(ctx, url)
 	if err != nil {
 		return domain.PositionSnapshot{}, false, err
 	}
@@ -83,7 +112,8 @@ func (c *Client) GetPosition(ctx context.Context, findingID string) (domain.Posi
 		return domain.PositionSnapshot{}, false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return domain.PositionSnapshot{}, false, fmt.Errorf("governance read API: status %d", resp.StatusCode)
+		return domain.PositionSnapshot{}, false,
+			fmt.Errorf("governance read API: status %d%s", resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 
 	var fv findingView
@@ -149,7 +179,7 @@ func (c *Client) ReleaseSeverity(ctx context.Context, releaseID string) ([]app.R
 
 // getJSON performs one read-API GET and decodes the body, or reports the status.
 func (c *Client) getJSON(ctx context.Context, url string, into any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newRequest(ctx, url)
 	if err != nil {
 		return err
 	}
@@ -159,9 +189,22 @@ func (c *Client) getJSON(ctx context.Context, url string, into any) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return fmt.Errorf("status %d%s", resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 	return json.NewDecoder(resp.Body).Decode(into)
+}
+
+// credentialHint names the likely cause of a 401/403 in the error itself. The error reaches a bus
+// reader's log and a delivery attempt's ledger, and on the enterprise VM "status 401" cost real time
+// to trace back to an unset variable — the read looked broken rather than unauthenticated.
+func (c *Client) credentialHint(status int) string {
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		return ""
+	}
+	if c.apiKey == "" {
+		return " — this read sent no X-API-Key; set THEMIS_API_KEY on this node (a read-scoped key is enough)"
+	}
+	return " — this read sent an X-API-Key Governance refused; check THEMIS_API_KEY is current and has read scope"
 }
 
 // postureRow mirrors the fields of Governance's release-posture JSON the rollup consumes
@@ -187,22 +230,9 @@ type postureRow struct {
 // ReleasePosture fetches the release-scoped Domain Projection — the rollup's first read
 // (D13.5). Implements app.ReleasePostureReader.
 func (c *Client) ReleasePosture(ctx context.Context, releaseID string) ([]app.RollupPostureRow, error) {
-	url := fmt.Sprintf("%s/api/v1/releases/%s/posture", c.baseURL, releaseID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("governance: release posture %s: status %d", releaseID, resp.StatusCode)
-	}
 	var rows []postureRow
-	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-		return nil, err
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/api/v1/releases/%s/posture", c.baseURL, releaseID), &rows); err != nil {
+		return nil, fmt.Errorf("governance: release posture %s: %w", releaseID, err)
 	}
 	out := make([]app.RollupPostureRow, 0, len(rows))
 	for _, r := range rows {

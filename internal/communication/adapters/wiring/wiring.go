@@ -53,9 +53,14 @@ type Communication struct {
 
 // Wire builds the Communication components over the given pool, Governance read-API base
 // URL, delivery channel, redactor, and outbox publisher.
-func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
+//
+// readAPIKey is the credential BOTH read seams (Governance, Registry) send as `X-API-Key`; empty
+// leaves them unauthenticated, which is the auth-off development case. One key for both, because
+// they are the same kind of act — this node reading another node's read API — and a read-scoped key
+// is all either needs.
+func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
 	st := store.New(pool)
-	positions := govclient.NewClient(governanceBaseURL, nil)
+	positions := govclient.NewClient(governanceBaseURL, nil).WithAPIKey(readAPIKey)
 	serializers := serializer.Default()
 	clock := sysClock{}
 
@@ -63,7 +68,8 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 	read := app.NewReadService(st, positions, serializers)
 	// The release-scoped VEX rollup (EDR-COMMUNICATION-01 D13): the same Governance client
 	// supplies the posture read, the Registry client the fail-closed name chain (D13.4).
-	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil), st, serializers, idGen{}, clock)
+	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil).WithAPIKey(readAPIKey),
+		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
 	return Communication{

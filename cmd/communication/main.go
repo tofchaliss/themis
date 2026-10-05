@@ -39,6 +39,7 @@ type config struct {
 	addr           string // THEMIS_COMMUNICATION_ADDR — listen address (default ":8084").
 	governanceURL  string // THEMIS_GOVERNANCE_URL — Governance read-API base URL (default "http://localhost:8083").
 	registryURL    string // THEMIS_REGISTRY_URL — Registry read-API base URL (release rollups' name chain, D13.4 fail-closed; default "http://localhost:8082").
+	readAPIKey     string // THEMIS_API_KEY — sent as X-API-Key on the Governance and Registry READS above. Required on an estate with THEMIS_AUTH_REQUIRED=1, where an unauthenticated read answers 401 and the remediation-ticket intent is never recorded. A READ-SCOPED key is enough: this node writes to neither. Empty = reads are unauthenticated (auth-off dev). Same variable name the Dashboard proxy and the Intelligence node use.
 	migrate        bool   // THEMIS_COMMUNICATION_MIGRATE=1 — apply the communication migrations on startup.
 	devPurge       bool   // THEMIS_COMMUNICATION_DEV_PURGE=1 — expose DELETE /dev/communication (dev only).
 	migrationsPath string // THEMIS_COMMUNICATION_MIGRATIONS — path to the communication migrations dir.
@@ -65,6 +66,7 @@ func loadConfig() config {
 		addr:           envDefault("THEMIS_COMMUNICATION_ADDR", ":8084"),
 		governanceURL:  envDefault("THEMIS_GOVERNANCE_URL", "http://localhost:8083"),
 		registryURL:    envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
+		readAPIKey:     os.Getenv("THEMIS_API_KEY"),
 		migrate:        os.Getenv("THEMIS_COMMUNICATION_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_COMMUNICATION_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_COMMUNICATION_MIGRATIONS", "internal/communication/adapters/store/migrations"),
@@ -115,8 +117,16 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	comm := wiring.Wire(pool, cfg.governanceURL, cfg.registryURL,
+	comm := wiring.Wire(pool, cfg.governanceURL, cfg.registryURL, cfg.readAPIKey,
 		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher)
+
+	// Whether the read seams carry a credential is the difference between a working pipeline and a
+	// 401 loop on an auth-enabled estate, so it is said once at startup — as a BOOLEAN. The key
+	// itself is never logged.
+	logger.Info("governance/registry read seams",
+		observability.String("governance_url", cfg.governanceURL),
+		observability.String("registry_url", cfg.registryURL),
+		observability.Bool("api_key_set", cfg.readAPIKey != ""))
 
 	go workerLoop(comm, logger.Component("worker"))
 
