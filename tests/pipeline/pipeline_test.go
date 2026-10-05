@@ -341,7 +341,10 @@ func newPipeline(t *testing.T) *pipeline {
 	// back from Governance over its read API).
 	commPool := mustPool(t, dsnFor("communication"))
 	t.Cleanup(commPool.Close)
-	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL,
+	// No read-API key: the in-test Governance and Registry nodes mount no auth middleware, which is
+	// the auth-off estate. The authenticated case is covered where the credential lives, in the two
+	// read clients' tests.
+	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL, "",
 		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool))
 	communicationSrv := httptest.NewServer(mount(comm.Handler))
 	t.Cleanup(communicationSrv.Close)

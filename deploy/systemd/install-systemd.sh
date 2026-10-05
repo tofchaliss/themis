@@ -101,13 +101,20 @@ THEMIS_GOVERNANCE_ADDR=:8083
 # THEMIS_INTELLIGENCE_TIMEOUT=300s   # raise WITH THEMIS_LLM_TIMEOUT on the intelligence node
 EOF
 
-# Communication: reads Positions back from Governance.
+# Communication: reads Positions and the release posture back from Governance.
+#
+# THEMIS_API_KEY is commented because this stanza describes an auth-off box. UNCOMMENT it on any
+# estate where Governance/Registry run with auth (THEMIS_AUTH_DATABASE_DSN set, or
+# THEMIS_AUTH_REQUIRED=1): those reads then answer 401, and because the remediation-ticket payload is
+# rendered from the posture read inside the inbox transaction, a 401 means no Jira intent is recorded
+# and the Governance event retries forever. A READ-scoped key is enough — this node writes to neither.
 write_env communication <<EOF
 THEMIS_DATABASE_DSN=${BASE}/communication?sslmode=disable
 THEMIS_BUS_DATABASE_DSN=${BUS}
 THEMIS_GOVERNANCE_URL=http://localhost:8083
 THEMIS_COMMUNICATION_MIGRATE=1
 THEMIS_COMMUNICATION_ADDR=:8084
+# THEMIS_API_KEY=<mint with: authadmin create-key --name communication-read --scopes read>
 EOF
 
 # Intelligence: stateless AI gateway over Ollama.

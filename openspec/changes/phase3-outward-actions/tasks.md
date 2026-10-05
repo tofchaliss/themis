@@ -212,9 +212,30 @@ callback, no loop control, no API or OpenAPI edit).
       Coverage: `communication/app` 100%, `adapters/serializer` 98.7%, `adapters/delivery` 96.3%,
       `adapters/governance` 95.7% (all ≥90), `adapters/store` ≥80. No package added, so
       `scripts/check-coverage.sh` needs no registration.
-- [x] 2b.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 4** (M1b-1..M1b-7 + honest
+- [x] 2b.8a **Field defect, enterprise VM 2026-10-05 — the read seam was unauthenticated.** With
+      Governance and Registry under `THEMIS_AUTH_REQUIRED=1`, Communication's posture read got **401**,
+      so the ticket payload could not be rendered, so (correctly, per 2b.1) NO intent was recorded and
+      the `finding_opened` envelope retried forever — the pipeline stopped at the first Finding.
+      Owner decision: **both read clients send `X-API-Key` from `THEMIS_API_KEY` when set; unset means
+      no key, as before.** Same variable the Dashboard proxy and Intelligence use; a READ-scoped key is
+      enough and is what the docs tell an operator to mint. Implemented as `WithAPIKey` on
+      `adapters/governance` + `adapters/registry` (every read of both goes through one request builder,
+      so "does this seam authenticate" has ONE answer), threaded through `wiring.Wire` from
+      `cmd/communication` — which logs only WHETHER a key is set. Keys are trimmed (a pasted key
+      arrives with a newline the operator cannot see). A 401/403 now says whether the read sent **no**
+      key or one that was **refused** — two different places to look — and never quotes the key.
+      Tests: the auth-on matrix on both clients (all three Governance reads and all three Registry
+      hops carry it; a padded key still authenticates; absent and stale keys refuse with the right
+      sentence and no credential in the error; a refused `GetPosition` is an ERROR, never "no Position
+      yet"), plus the defect itself at the reader — with a key the Jira intent IS recorded and its
+      payload reflects the authenticated posture; without one NOTHING is recorded and `Handle` returns
+      an error naming `THEMIS_API_KEY`. `deploy/node.env.example` and the systemd installer's
+      communication stanza document it. Recorded as EDR-DELIVERY-01 **M1b-8**; closes the N-M0 limit
+      for Communication only (2.10's Governance→Registry half is a separate decision).
+- [x] 2b.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 4** (M1b-1..M1b-8 + honest
       limits) and `deploy/node.env.example` (the two switches, every knob commented, both secrets
-      documented as environment-only and left valueless, and the N-M1a-payload consequence).
+      documented as environment-only and left valueless, the N-M1a-payload consequence, and
+      `THEMIS_API_KEY` for the two read seams).
 - [ ] 2b.10 Open, for the owner: (a) confirm the Jira flavour (Cloud/REST v3 + Basic
       email:API-token is what is implemented) and the issue type; (b) the ticket currently counts
       EVERY Finding of the Release, including those a Position has suppressed — filtering by
