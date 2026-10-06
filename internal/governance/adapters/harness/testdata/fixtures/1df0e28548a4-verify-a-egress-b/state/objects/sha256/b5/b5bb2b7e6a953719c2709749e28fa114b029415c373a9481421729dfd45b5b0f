@@ -1,0 +1,1 @@
+{"id":"b1be6f86-2ecd-451f-9411-95f1f32fd501","release_id":"3f0c1a2e-0000-4000-8000-000000000001","faultline_id":"3f0c1a2e-0000-4000-8000-000000000002","cve":"ADV-2026-1","stage":"identified","components":[{"purl":"pkg:golang/demo/vulnerable-dep@v1","name":"vulnerable-dep","version":"v1","ecosystem":"golang","claim_class":"carrier"}]}

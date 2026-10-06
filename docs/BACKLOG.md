@@ -10,6 +10,36 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+> **2026-10-06 — `phase3-harness-integration` (EDR-HARNESS-01) COMPLETE on branch
+> `feat/harness-integration`, committed, gate green.** Commissions, harness-evidence proposals, the
+> intake adapter + `themis-intake` CLI, walls. Every item the 2026-09-26 banner carried as open is
+> now closed and measured: the runtime pin resolves from `proxy.golang.org` into a cold module
+> cache; `TestHarnessCommissionAndEvidenceRoundTrip` and the two event `schema_ref`s pass; and
+> **`GOWORK=off make check-ci` exits 0** — which is the real gate, because `go.work` is excluded via
+> `.git/info/exclude` and never reaches CI. The branch also carries N-M0 below. **Not merged** (PRs
+> are an explicit ask).
+>
+> Two defects were found while verifying, both invisible to a green suite, both fixed here:
+> an architecture test that named a reachability wall and asserted nothing (`_ = ex` loop body), and
+> the intake adapter unregistered in `scripts/check-coverage.sh` and therefore silently unmeasured.
+> Open follow-ups: **`HARNESS-COV-1`** and **`HARNESS-SEAM-1`** (§C). See
+> `openspec/changes/phase3-harness-integration/tasks.md`.
+
+> **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
+> routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,
+> `product:<id>` confined to the Finding's own product (route resolves Finding → release → product
+> over the Registry read API, fail-closed). `AuthorizeWrite` retired as Governance's decision and
+> the scope vocabulary CLOSED AT BOTH ENDS (refused at mint time AND at read time — the write floor
+> is `admin` ∪ `product:<id>` in every context) — which **closes the deferral in EDR-SECURITY-01
+> D4's realization note and the gap EDR-HARNESS-01 D4 carried** (`product:<id>` was write-capable
+> estate-wide, and any scope that was not `read` granted write anywhere). **OPERATOR ACTION on
+> deploy:** audit `api_keys` for scopes outside the vocabulary — they silently had write capability
+> and now have none; query + remediation in EDR-DELIVERY-01 D5. A refused write now states the rule
+> only, with the estate detail on the log (D5a). CARRIED LIMIT: the Governance → Registry read seam
+> sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve its product and
+> therefore cannot write (admin is unaffected) — a credential for that seam is M1's business, see
+> `openspec/changes/phase3-outward-actions/tasks.md` group 2. M1–M3 (delivery, CI, mail) NOT STARTED.
+
 ### 🔢 Priority order agreed 2026-09-21 (start of the next session)
 
 The tracker holds item STATE; this is the order to work them in. It lives here because a list of
@@ -249,6 +279,39 @@ three angles, and two of them proposed fixes that would not have worked.
 ---
 
 ### C. Deferred follow-ups inside completed contexts
+
+#### Harness-integration follow-ups (filed 2026-10-06 — surfaced verifying EDR-HARNESS-01)
+
+Both were found by reading what the gate did NOT check, not by a failing test. Neither blocks the
+arc; both are recorded so the shortfall is a decision rather than a silent exemption.
+
+- [ ] **HARNESS-COV-1 — close `governance/adapters/harness` to the 90% adapter tier.** LOW,
+  quality. The package is now registered in `scripts/check-coverage.sh` at **80%** and sits at
+  **83.9%** (was 81.0% and *unregistered*, so the gate skipped it entirely — full-repo mode
+  iterates the registered lists only). Every admissibility refusal that DECIDES anything is
+  covered: verify-A-egress-B, PASS over an invalid report, audit/raw mismatch, dropped egress
+  witness, wrong seal reason, the tuple guards, the pre-replay record refusals. **The residue is
+  two different populations and only one is worth tests:** (a) deep replay refusals inside
+  `replayProduction` / `replayL5` / `reestablishVerification`, each needing its own forged runtime
+  record through the existing `forge` harness — real work, real value, own scope; (b) two
+  post-condition branches in `anchorStateAtIntake` that `Resolve`'s call order makes
+  **unreachable** — `deployment.VerifyAnchorRecord` has already loaded and matched the registry
+  before it is called, so a load error or a missing entry there cannot happen. (b) is dead
+  defensive code, and the right answer for it is deletion or a comment, never a test that fakes
+  the state. **Scope:** MED for (a), SMALL for (b). **Dep:** none.
+- [ ] **HARNESS-SEAM-1 — the runtime's `verification/seam` drags the whole runtime into
+  `themis-intake`.** LOW, supply surface. Measured 2026-10-06: `verification/seam` →
+  `orchestration` → `skills` → `tools`, so the intake binary links fifteen runtime packages —
+  `confine`, `context`, `decisions`, `execution`, `instructions`, `internal/llm`, `orchestration`,
+  `runtime/model`, `skills`, `tools` beside the four read-only contracts — and **calls none of
+  them**. This is why EDR-HARNESS-01 D8's wall is a *direct-import* wall, which the EDR's honest
+  limits now say outright. It is not an authority leak — no other Themis binary links the runtime
+  at all (`TestNoThemisBinaryButTheIntakeCLILinksTheRuntime`), the Governance service never reads
+  the record plane, and the reach is pinned (`TestIntakeCLIRuntimeReachIsPinned`) so growth is a
+  decision. Making it a true reachability wall needs the **runtime side** to split its evaluator
+  CONTRACT from its evaluator IMPLEMENTATION; filed here rather than worked around in Themis,
+  because a Themis-side shim would duplicate the contract and the duplicate would drift.
+  **Scope:** runtime repo. **Dep:** a decision in `themis-ai-runtime`.
 
 #### GUI-session follow-ups (filed 2026-08-11 — surfaced by the first live dashboard days)
 

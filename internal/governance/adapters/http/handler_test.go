@@ -44,8 +44,10 @@ func (r *fakeRepo) seed(f domain.Finding) {
 }
 
 func clone(f domain.Finding) domain.Finding {
-	return domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 		f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version())
+	domain.ReconstituteCommissions(&c, f.Commissions())
+	return c
 }
 
 func (r *fakeRepo) GetByKey(_ context.Context, rel, fl string) (domain.Finding, bool, error) {
@@ -122,6 +124,24 @@ func (p fakeProjection) ReleasePosture(context.Context, string) ([]app.PostureEn
 
 func (p fakeProjection) FaultlineBlastRadius(context.Context, string) ([]string, error) {
 	return p.blast, p.err
+}
+
+// stubProducts is the Registry read seam behind product-scope confinement (EDR-DELIVERY-01
+// N-M0): a release → product map, plus an `err` that stands in for an unreachable Registry so
+// the fail-closed path is provable without a network.
+type stubProducts struct {
+	byRelease map[string]string
+	err       error
+}
+
+func (s stubProducts) ProductOfRelease(_ context.Context, releaseID string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	if p, ok := s.byRelease[releaseID]; ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("registry: no product for release %q", releaseID)
 }
 
 type seqIDs struct{ n int }

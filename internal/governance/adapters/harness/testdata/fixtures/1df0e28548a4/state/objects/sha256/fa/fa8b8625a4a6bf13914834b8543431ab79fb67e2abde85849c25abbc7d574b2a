@@ -1,0 +1,1 @@
+{"limits":[{"dimension":"wall_deadline_s","value":300}],"pinned_sha":"75d3fb6d60a9d120ce138c72c184a76b3266d43e","repo":"demo-vuln-app","task_id":"fx-remediate-0001","version":1}

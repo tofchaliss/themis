@@ -43,6 +43,7 @@ declare -a infra_pkgs=(
 	knowledge/adapters/vex
 	knowledge/adapters/http
 	governance/adapters/store
+	governance/adapters/harness
 	governance/adapters/http
 	governance/adapters/inbound
 	governance/adapters/intelligence
@@ -106,6 +107,17 @@ threshold_for() {
 		registry/adapters/store) echo 80; return ;;
 		knowledge/adapters/store) echo 80; return ;;
 		governance/adapters/store) echo 80; return ;;
+		# Governance's harness intake adapter (EDR-HARNESS-01): every admissibility
+		# refusal that DECIDES anything is covered — verify-A-egress-B, PASS over an
+		# invalid report, audit/raw mismatch, dropped egress witness, wrong seal reason,
+		# the tuple guards, and the pre-replay record refusals. The uncovered residue is
+		# record-plane I/O-failure branches and deep replay refusals that each need a
+		# separately forged runtime record, plus two post-condition branches in
+		# anchorStateAtIntake that Resolve's own call order makes unreachable
+		# (VerifyAnchorRecord has already loaded and matched the registry). Raising this
+		# to the 90% adapter tier is forge work with its own scope — tracked in
+		# docs/BACKLOG.md as HARNESS-COV-1, not waved away here.
+		governance/adapters/harness) echo 80; return ;;
 		communication/adapters/store) echo 80; return ;;
 		intelligence/adapters/store) echo 80; return ;;
 	esac

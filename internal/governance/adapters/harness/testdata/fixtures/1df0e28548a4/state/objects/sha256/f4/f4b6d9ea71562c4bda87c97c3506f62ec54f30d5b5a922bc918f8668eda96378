@@ -1,0 +1,1 @@
+{"content":"","termination":"tool_calls","tool_calls":[{"id":"c7","name":"verify_report","arguments":{"path":"report.json","contract":"report-valid@2"}}]}

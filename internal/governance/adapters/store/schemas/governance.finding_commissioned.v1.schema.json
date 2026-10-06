@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.finding_commissioned.v1.schema.json",
+  "title": "governance.finding_commissioned.v1",
+  "description": "Integration-contract v1 for the FindingCommissioned event payload (EDR-HARNESS-01 D3): a thin, Governance-internal completed fact — authority to perform governed AI-runtime work was recorded against a Finding. No investigation stage changes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "CommissionID", "Skill", "Anchor", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "CommissionID": { "type": "string" },
+    "Skill": { "type": "string" },
+    "Anchor": { "type": "string" },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

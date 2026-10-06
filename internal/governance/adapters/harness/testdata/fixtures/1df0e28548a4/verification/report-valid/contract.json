@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "report-valid",
+  "contract_version": 1,
+  "verifier": {
+    "capability": "verify_report",
+    "registry_sha256": "a3e40677643119308e348314940fbffe6e926612a40437350aacd9a55269e4b6"
+  },
+  "evidence": [
+    {
+      "name": "report",
+      "kind": "artifact",
+      "required": true,
+      "task_bound": true
+    }
+  ],
+  "config": {},
+  "result_mapping": {
+    "report_valid": "PASS",
+    "report_invalid": "FAIL"
+  },
+  "provenance": [
+    "execution_record",
+    "raw_output",
+    "canonical_result"
+  ]
+}

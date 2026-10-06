@@ -188,6 +188,67 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/commissions:
+    post:
+      operationId: commissionFinding
+      summary: >-
+        Commission governed AI-runtime work against a Finding BEFORE it runs (EDR-HARNESS-01
+        D-C-1). An authenticated human authority act: records the exact method and deployment
+        identities the runtime must execute under; changes no investigation stage. Returns the
+        Themis-minted commission id the runtime carries verbatim.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommissionRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommissionResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/commissions/{commissionId}/withdraw:
+    post:
+      operationId: withdrawCommission
+      summary: >-
+        Withdraw a commission (forward-only, D-C-3). Historical executions under it stay
+        inspectable evidence; future proposals citing it are refused.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+        - name: commissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawCommissionRequest'
+      responses:
+        '204':
+          description: Withdrawn.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /findings/{id}/recommend:
     post:
       operationId: recommendPosition
@@ -355,6 +416,92 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProposalView'
+        commissions:
+          type: array
+          description: >-
+            Authority records for governed AI-runtime work against this Finding
+            (EDR-HARNESS-01). Append-only; open or withdrawn. Never served to the runtime's
+            model (the harness read door projects them out).
+          items:
+            $ref: '#/components/schemas/CommissionView'
+    CommissionView:
+      type: object
+      properties:
+        id: { type: string }
+        skill: { type: string }
+        composition_sha256: { type: string }
+        anchor: { type: string }
+        artifact_sha256: { type: string }
+        commissioned_kind: { type: string }
+        commissioned_id: { type: string }
+        premise_stage: { type: string }
+        premise_position_version: { type: integer }
+        rationale: { type: string }
+        raised_at: { type: string, format: date-time }
+        state: { type: string, description: open | withdrawn }
+        withdrawn_kind: { type: string }
+        withdrawn_id: { type: string }
+        withdrawn_at: { type: string, format: date-time }
+        withdrawal_rationale: { type: string }
+    CommissionRequest:
+      type: object
+      required: [skill, composition_sha256, anchor, artifact_sha256]
+      properties:
+        skill: { type: string, description: runtime method name@version (opaque to Themis) }
+        composition_sha256: { type: string }
+        anchor: { type: string, description: runtime deployment name@version (opaque to Themis) }
+        artifact_sha256: { type: string }
+        rationale: { type: string }
+        actor_id:
+          type: string
+          description: >-
+            DEVELOPMENT commissioner identity, used only when inbound auth is disabled (recorded
+            with a `dev:` prefix). Ignored when the request is authenticated: the recorded actor
+            is derived from the API key's principal as `key:<key-id>` (EDR-SECURITY-01 D10).
+    CommissionResponse:
+      type: object
+      properties:
+        commission_id: { type: string }
+    WithdrawCommissionRequest:
+      type: object
+      properties:
+        rationale: { type: string }
+        actor_id: { type: string, description: DEVELOPMENT identity; ignored when authenticated. }
+    HarnessExecutionEvidence:
+      type: object
+      description: >-
+        harness-execution/v1 — the immutable evidence a proposal rests on when its basis is a
+        commissioned AI-runtime execution (EDR-HARNESS-01 D-I-5). Every field was DERIVED by
+        Themis's own intake CLI from the runtime record; Governance validates the shape and the
+        correspondence to the cited commission, and never re-reads the runtime record.
+      required: [commission_id, anchor_hash, anchor, anchor_state_at_intake, task_id, artifact_bound_seq, artifact_object_id, verified_member_path, verified_member_sha256, skill, skill_composition_sha256, contract, contract_sha256, contract_state_at_intake, reconstruction, production_witness, constitution_hash, harness_module, delegation_count, delegation_seqs, business_refs]
+      properties:
+        commission_id: { type: string }
+        anchor_hash: { type: string }
+        anchor: { type: string }
+        anchor_state_at_intake: { type: string }
+        task_id: { type: string }
+        artifact_bound_seq: { type: integer, format: int64 }
+        artifact_object_id: { type: string }
+        verified_member_path: { type: string }
+        verified_member_sha256: { type: string }
+        skill: { type: string }
+        skill_composition_sha256: { type: string }
+        contract: { type: string }
+        contract_sha256: { type: string }
+        contract_state_at_intake: { type: string }
+        reconstruction: { type: string, description: consistent-pass }
+        production_witness: { type: string, description: l5-witnessed (Position-eligible) }
+        constitution_hash: { type: string }
+        harness_module: { type: string }
+        delegation_count: { type: integer }
+        delegation_seqs:
+          type: array
+          items: { type: integer, format: int64 }
+        business_refs:
+          type: array
+          description: Identifiers from the RECORDED Finding bytes the execution read (dependency PURL, CVE); Business-Verified against the Finding.
+          items: { type: string }
     PositionView:
       type: object
       properties:
@@ -397,6 +544,11 @@ components:
           type: string
         decided_id:
           type: string
+        commission_id:
+          type: string
+          description: The commission the cited execution ran under (EDR-HARNESS-01); empty for non-harness proposals.
+        harness_evidence:
+          $ref: '#/components/schemas/HarnessExecutionEvidence'
         evidence_trust:
           type: string
           description: >-
@@ -764,6 +916,14 @@ components:
           description: human | ai (defaults to human). system/policy are internal only.
         proposer_id:
           type: string
+        evidence:
+          $ref: '#/components/schemas/HarnessExecutionEvidence'
+        evidence_trust:
+          type: string
+          description: >-
+            With `evidence`: the trust class the intake DERIVED from the execution facts
+            (always `inferred` for harness-execution/v1). Governance refuses a class other than
+            the derived one (D-I-5) — trust is a property of evidence, never an assertion.
     RaiseProposalResponse:
       type: object
       properties:

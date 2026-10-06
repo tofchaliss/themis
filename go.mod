@@ -15,6 +15,7 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/roblaszczak/go-cleanarch v1.2.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/tofchaliss/themis-ai-runtime/src/harness v0.0.0-20260926130325-331d326a4172
 	go.opentelemetry.io/contrib/bridges/otelzap v0.19.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.20.0

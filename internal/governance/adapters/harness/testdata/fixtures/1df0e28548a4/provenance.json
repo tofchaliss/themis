@@ -1,0 +1,16 @@
+{
+ "generator": "src/themis TestThemisIntakeFixture (THEMIS_FIXTURE_GENERATE=1)",
+ "generated_at": "2026-09-26T12:58:28Z",
+ "harness_commit": "5ea73d92228e4f0fbcf308554d0e8ea1d7cef94d",
+ "tree_dirty_at_generation": true,
+ "constitution_hash": "1df0e28548a48b373e779dce8f00ea906c7f98afc009d573afccdf1009d77685",
+ "anchor_hash": "7489bbaa2c289ef7323ea1891ec652506f8fb72a59dc3eebe67faa6231cc1e7f",
+ "anchor_name": "test-rsys",
+ "anchor_version": 6,
+ "task_id": "fx-remediate-0001",
+ "artifact_bound_seq": 31,
+ "commission_id": "c0a8e3d6-5b1e-4f5a-9d3e-2b4c6a8e0f12",
+ "finding_id": "b1be6f86-2ecd-451f-9411-95f1f32fd501",
+ "skill": "remediate-dependency@4",
+ "note": "A real remediate-dependency@4 walk under a test anchor with the HTTP read door (httptest Governance/Registry serving the demo Finding). The report was verified once (report-valid@2 PASS) and egressed unchanged. The Themis repository's intake tests reconstruct this record; they must never edit it. Regenerate whenever the L6 constitution hash moves."
+}

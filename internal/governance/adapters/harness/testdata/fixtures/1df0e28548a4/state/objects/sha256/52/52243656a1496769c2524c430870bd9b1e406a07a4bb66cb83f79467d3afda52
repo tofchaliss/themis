@@ -1,0 +1,1 @@
+{"content":"","termination":"tool_calls","tool_calls":[{"id":"c3","name":"read_file","arguments":{"path":"go.mod"}}]}
