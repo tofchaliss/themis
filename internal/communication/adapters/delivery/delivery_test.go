@@ -948,6 +948,12 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	if cfg.Jira.IssueType != "" || cfg.Mail.Port != 587 {
 		t.Errorf("unset defaults = %s / %s", cfg.Jira, cfg.Mail)
 	}
+	// The flavour defaults to Jira CLOUD, so a deployment that predates the Data Center knobs needs
+	// neither of them. They are resolved here rather than at construction because this is what the
+	// startup line prints — an operator debugging the wrong flavour must see the one in force.
+	if cfg.Jira.Auth != delivery.JiraAuthBasic || cfg.Jira.APIVersion != 3 {
+		t.Errorf("unset flavour = %s, want basic/3 (Cloud)", cfg.Jira)
+	}
 
 	t.Setenv("THEMIS_COMMUNICATION_JIRA_ENABLED", "1")
 	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://acme.atlassian.net/ ")
@@ -989,10 +995,33 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 			t.Fatalf("Config.String() leaked a credential: %s", line)
 		}
 	}
-	for _, want := range []string{"api_token=set", "password=set"} {
+	for _, want := range []string{"api_token=set", "password=set", "auth=basic", "api_version=3"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("Config.String() = %s, missing %q", line, want)
 		}
+	}
+
+	// The Data Center flavour, read from the two knobs that select it — including a base URL with a
+	// PATH, which is how a self-hosted instance is usually mounted.
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_AUTH", "Bearer") // case-insensitive
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_VERSION", "2")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://almsbx.radisys.com/jira/")
+	cfg = delivery.ConfigFromEnv()
+	if cfg.Jira.Auth != delivery.JiraAuthBearer || cfg.Jira.APIVersion != 2 {
+		t.Errorf("data-center flavour = %s", cfg.Jira)
+	}
+	if cfg.Jira.BaseURL != "https://almsbx.radisys.com/jira" {
+		t.Errorf("base URL = %q — the PATH must survive and the trailing slash must not", cfg.Jira.BaseURL)
+	}
+	if got := cfg.String(); !strings.Contains(got, "auth=bearer") || !strings.Contains(got, "api_version=2") {
+		t.Errorf("Config.String() = %s, want the flavour in force", got)
+	}
+
+	// An out-of-range API version is NOT silently defaulted by the reader: it is carried so the
+	// constructor can name it back. Defaulting it here would send ADF to a v2 instance.
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_VERSION", "7")
+	if got := delivery.ConfigFromEnv().Jira.APIVersion; got != 7 {
+		t.Errorf("api version = %d, want the configured value carried to the refusal", got)
 	}
 }
 
