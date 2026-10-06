@@ -232,12 +232,33 @@ callback, no loop control, no API or OpenAPI edit).
       an error naming `THEMIS_API_KEY`. `deploy/node.env.example` and the systemd installer's
       communication stanza document it. Recorded as EDR-DELIVERY-01 **M1b-8**; closes the N-M0 limit
       for Communication only (2.10's Governance→Registry half is a separate decision).
+- [x] 2b.8b **Field defect, enterprise VM 2026-10-06 — the estate's Jira is self-hosted DATA CENTER**
+      (`https://almsbx.radisys.com/jira`), not Cloud. The first cut was wrong three ways at once: HTTP
+      Basic where Data Center issues a **Personal Access Token** for `Authorization: Bearer`,
+      `/rest/api/3` where it serves **v2**, and an ADF description where v2 wants **plain text**.
+      Owner decision: two knobs, **defaulting to Cloud** so an existing deployment sets neither —
+      `THEMIS_COMMUNICATION_JIRA_AUTH` (`basic` | `bearer`) and `THEMIS_COMMUNICATION_JIRA_API_VERSION`
+      (`3` | `2`). The version knob selects the path prefix AND the description encoding together,
+      because they are not independent; neither vocabulary falls back (a typo'd `bearer` sending a PAT
+      as a password is a 401 that reads as "the token is wrong", so it is refused at startup with the
+      variable named and both options spelled out); and the USER is required only under `basic`,
+      because a PAT identifies its own owner. The base URL may carry a **path** — every endpoint
+      APPENDS to it, so `/jira` is preserved with no second code path, and a bare `host/path` with no
+      scheme is refused as the likeliest paste. Everything else is SHARED: the JQL label search, the
+      labels, the summary, the full-replace update, the content rule. Tests run **both flavours**
+      through one table over create, update, path addressing (the stub 404s outside
+      `<basePath>/rest/api/<v>`, so a mis-addressed call fails rather than passing quietly) and the
+      whole posture-to-ticket path — plus the closed-vocabulary refusals and
+      "bearer needs no user / basic still does / the Cloud defaults need no new variable".
+      Recorded as EDR-DELIVERY-01 **M1b-3a**; `deploy/node.env.example` documents both flavours and
+      carries a complete, commented Data Center stanza.
 - [x] 2b.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 4** (M1b-1..M1b-8 + honest
       limits) and `deploy/node.env.example` (the two switches, every knob commented, both secrets
       documented as environment-only and left valueless, the N-M1a-payload consequence, and
       `THEMIS_API_KEY` for the two read seams).
-- [ ] 2b.10 Open, for the owner: (a) confirm the Jira flavour (Cloud/REST v3 + Basic
-      email:API-token is what is implemented) and the issue type; (b) the ticket currently counts
+- [ ] 2b.10 Open, for the owner: (a) ~~confirm the Jira flavour~~ — **settled 2026-10-06 by 2b.8b**:
+      both Cloud and Data Center are supported, the estate is Data Center; the ISSUE TYPE for the
+      estate's project is still unconfirmed (the default is `Task`); (b) the ticket currently counts
       EVERY Finding of the Release, including those a Position has suppressed — filtering by
       disposition is a policy decision nobody has taken; (c) a central governed audience registry
       (the env map is the registry until one exists); (d) Jira credential needs

@@ -3,11 +3,13 @@
 Status: **Accepted 2026-09-30** for N-M0; **Revision 2 (2026-10-01) — remediation cycle, accepted
 as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a delivery intents,
 IMPLEMENTED** (intents are persisted and sent by workers against FAKE senders); **Revision 4
-(2026-10-02, amended 2026-10-05) — N-M1b real Jira + mail senders and payload materialization,
-IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one ticket per
-Release; the CI build and the rebuild loop are still later milestones; **M1b-8** added 2026-10-05
-after the enterprise-VM run: Communication's Governance and Registry READS carry `X-API-Key` from
-`THEMIS_API_KEY`). The decisions were grilled and locked with the user in
+(2026-10-02, amended 2026-10-05 and 2026-10-06) — N-M1b real Jira + mail senders and payload
+materialization, IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one
+ticket per Release; the CI build and the rebuild loop are still later milestones). Two amendments
+came out of the enterprise-VM run: **M1b-8** (2026-10-05) — Communication's Governance and Registry
+READS carry `X-API-Key` from `THEMIS_API_KEY`; **M1b-3a** (2026-10-06) — the estate's Jira is
+self-hosted **Data Center**, so auth mode (`basic`/`bearer`) and REST version (`3`/`2`) are
+configurable, defaulting to Cloud. The decisions were grilled and locked with the user in
 the `themis-ai-runtime` repository (`openspec/changes/outward-actions`, **D-N-6** locked). This
 EDR records what those decisions require of THEMIS, so the Themis-side implementation has a
 reason of record in this repository. Where they disagree, the runtime-side design wins for
@@ -520,6 +522,44 @@ the renderer.
 Consequence, recorded because it is operator-visible: intents written by N-M1a carry no payload,
 and a real sender dead-letters them instead of inventing a body.
 
+### M1b-3a — TWO Jira flavours, two knobs, one sender (owner decision, 2026-10-06)
+
+**Measured on the enterprise VM.** The estate's Jira is **self-hosted Data Center** at
+`https://almsbx.radisys.com/jira`, not Cloud. The first cut assumed Cloud throughout and was wrong in
+three ways at once: it sent the credential as HTTP Basic (Data Center issues a **Personal Access
+Token** for `Authorization: Bearer`), it addressed `/rest/api/3` (Data Center serves **v2**), and v3's
+description is an **Atlassian Document Format** object where v2 wants a **plain string**.
+
+Owner decision: two knobs, **defaulting to Cloud** so an existing deployment sets neither.
+
+| | `THEMIS_COMMUNICATION_JIRA_AUTH` | `THEMIS_COMMUNICATION_JIRA_API_VERSION` |
+| --- | --- | --- |
+| Cloud (default) | `basic` — account email + API token | `3` — description as ADF |
+| Data Center / Server | `bearer` — PAT, no user at all | `2` — description as plain text |
+
+Three things about the shape, each chosen rather than fallen into:
+
+- **The version knob selects the path prefix AND the description encoding**, because they are not
+  independent. Splitting them would let an operator configure a combination that cannot work, and the
+  failure (a 400 on every attempt) would read as "Jira rejects our tickets" rather than as a
+  configuration error.
+- **Neither vocabulary falls back.** An unrecognized value is refused at startup with the variable
+  named and both options spelled out. A fallback to `basic` sends a PAT as a password — a 401 that
+  reads as "the token is wrong" — and a fallback to `3` sends ADF to v2. Both make a typo look like
+  someone else's fault.
+- **The USER is required only under `basic`.** A PAT identifies its own owner; demanding an account
+  email under `bearer` would make an operator invent a value for a field the request does not carry.
+
+**The base URL may carry a PATH**, which is how a self-hosted instance is normally mounted. Every
+endpoint is built by APPENDING to the configured URL — never by replacing its path — so `/jira` is
+preserved and no second code path exists for it. A bare `host/path` with no scheme is refused, since
+that is the likeliest paste and it would otherwise become a relative request.
+
+**Everything else is shared, and that is the claim worth making.** The JQL label search, the
+labels, the summary, the full-replace update, the content rule — all identical, because
+one-ticket-per-Release must not be a property that holds on one flavour. Both flavours run the same
+behavioural tests: create, update, path addressing and the whole posture-to-ticket path.
+
 ### M1b-4 — One ticket per Release is a LABEL, not a summary search (RC-2)
 
 The Jira sender looks for the Release's existing issue by the exact label
@@ -635,9 +675,10 @@ Two details that are not incidental:
   The real senders narrow M1a's limit rather than closing it: a duplicate send after creation is an
   idempotent update and a collapsible mail. Closing the race needs a store-level claim, which is
   its own step.
-- **Jira REST v3 / Cloud is the assumed flavour** — JQL search, `POST`/`PUT /rest/api/3/issue`,
-  and an Atlassian Document Format description. A self-hosted instance that differs yields dead
-  letters, not a halted stream (D-N-2 / RC-7).
+- **Two Jira flavours are supported, and a THIRD would be a third decision** (M1b-3a): Cloud
+  (`basic` + v3) and Data Center / Server (`bearer` + v2). OAuth, a reverse proxy that rewrites the
+  REST path, and Jira's own newer `/search/jql` endpoint are all out of scope here. An instance that
+  differs yields dead letters, not a halted stream (D-N-2 / RC-7).
 - **The TLS handshake of STARTTLS is not covered by a test** (it needs a trusted certificate). The
   "configured but not offered" refusal is.
 - **Rendering a ticket reads Governance on the enqueue path.** The reader still holds no Jira, mail
