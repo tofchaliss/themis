@@ -12,9 +12,11 @@ and the resume pointer, never item state.
 >
 > `phase3-harness-integration` realizes commissions (D1–D4), harness-execution evidence on
 > proposals (D5–D6), the intake adapter and `themis-intake` (D8–D9), and the walls. The branch also
-> carries **`phase3-outward-actions` N-M0 / EDR-DELIVERY-01** (PR #121, merged into the branch
+> carried **`phase3-outward-actions` N-M0 / EDR-DELIVERY-01** (PR #121, merged into the branch
 > 2026-09-30) — explicit write-scope authorization, which closed the `product:<id>` gap D4 had
-> carried. Clean, **unmerged** to `main` — a PR is an explicit ask.
+> carried. **MERGED to `main` as `552c4e1` (PR #126)**, both checks green, and the squash verified
+> content-identical to the branch tip. Because this repo squash-merges, none of the branch commits
+> are ancestors of `main` — stack on the merged `main`, never on the branch.
 >
 > ### The gate, and why `GOWORK=off` is the only honest way to run it
 >
