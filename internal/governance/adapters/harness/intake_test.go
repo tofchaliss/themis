@@ -213,3 +213,106 @@ func copyDir(t *testing.T, src, dst string) {
 		t.Fatal(err)
 	}
 }
+
+// The tuple guards (D-T-1): an execution is referencable only through a
+// well-formed tuple, and each malformation is refused by NAME before
+// any record is read. These are the refusals a caller meets first, so
+// they are the ones whose message has to say which element was wrong.
+func TestResolveTupleGuards(t *testing.T) {
+	dir, p := fixture(t)
+	root, _ := state.OpenRoot(filepath.Join(dir, "state"))
+	ck := checkoutFor(dir)
+	good := Tuple{AnchorHash: p.AnchorHash, TaskID: p.TaskID, ArtifactBoundSeq: p.ArtifactBoundSeq}
+
+	for _, tc := range []struct {
+		name string
+		root *state.Root
+		tp   func(Tuple) Tuple
+		link string
+	}{
+		{"no record plane", nil, func(t Tuple) Tuple { return t }, "no record plane"},
+		{"task id not well-formed", root, func(t Tuple) Tuple { t.TaskID = "../escape"; return t }, "is not well-formed"},
+		{"empty task id", root, func(t Tuple) Tuple { t.TaskID = ""; return t }, "is not well-formed"},
+		{"anchor hash not a sha256", root, func(t Tuple) Tuple { t.AnchorHash = "deadbeef"; return t }, "well-formed sha256 identity"},
+		{"seq zero", root, func(t Tuple) Tuple { t.ArtifactBoundSeq = 0; return t }, "must be positive"},
+		{"seq negative", root, func(t Tuple) Tuple { t.ArtifactBoundSeq = -1; return t }, "must be positive"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Resolve(tc.root, ck, tc.tp(good))
+			if err == nil || !errors.Is(err, ErrNotReferencable) || !strings.Contains(err.Error(), tc.link) {
+				t.Fatalf("got %v, want %v naming %q", err, ErrNotReferencable, tc.link)
+			}
+		})
+	}
+}
+
+// bareTask builds a minimal real record through the runtime's own L6
+// primitives — a task with the given governed hashes and nothing else —
+// so the EARLY admissibility refusals can be driven without forging a
+// whole production chain. The record is honest; it is simply missing
+// the things Themis insists on.
+func bareTask(t *testing.T, governed map[string]string, complete bool) (*state.Root, string) {
+	t.Helper()
+	root, err := state.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const task = "fx-bare-0001"
+	tr, err := root.CreateTask(task, state.TaskOptions{GovernedHashes: governed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	if complete {
+		if err := tr.Transition(state.StatusRunning, "bare"); err != nil {
+			t.Fatal(err)
+		}
+		if err := tr.Transition(state.StatusCompleted, "bare"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root, task
+}
+
+// The record-level refusals before any replay (D-T-1, D-T-2): an
+// execution still running, an execution that was never anchored to a
+// governed deployment, and one whose record never materialized the
+// anchor Themis is asked to equality-check. Each is refused by its own
+// link, because "we cannot reference this" and "we cannot establish the
+// deployment" are different answers to the operator.
+func TestResolveRefusesRecordsBeforeReplay(t *testing.T) {
+	dir, p := fixture(t)
+	ck := checkoutFor(dir)
+
+	t.Run("execution not completed", func(t *testing.T) {
+		root, task := bareTask(t, map[string]string{"deployment_anchor": p.AnchorHash}, false)
+		_, err := Resolve(root, ck, Tuple{AnchorHash: p.AnchorHash, TaskID: task, ArtifactBoundSeq: 1})
+		if err == nil || !errors.Is(err, ErrNotReferencable) || !strings.Contains(err.Error(), "not a completed execution") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("unanchored execution", func(t *testing.T) {
+		root, task := bareTask(t, map[string]string{}, true)
+		_, err := Resolve(root, ck, Tuple{AnchorHash: p.AnchorHash, TaskID: task, ArtifactBoundSeq: 1})
+		if err == nil || !errors.Is(err, ErrNotReferencable) || !strings.Contains(err.Error(), "unanchored execution") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("anchor never materialized in the record", func(t *testing.T) {
+		root, task := bareTask(t, map[string]string{"deployment_anchor": p.AnchorHash}, true)
+		_, err := Resolve(root, ck, Tuple{AnchorHash: p.AnchorHash, TaskID: task, ArtifactBoundSeq: 1})
+		if err == nil || !errors.Is(err, ErrDeployment) || !strings.Contains(err.Error(), "no materialized deployment_anchor object") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("tuple names a seq the record has no event at", func(t *testing.T) {
+		root, _ := state.OpenRoot(filepath.Join(dir, "state"))
+		_, err := Resolve(root, ck, Tuple{AnchorHash: p.AnchorHash, TaskID: p.TaskID, ArtifactBoundSeq: 1 << 40})
+		if err == nil || !errors.Is(err, ErrProvenance) || !strings.Contains(err.Error(), "no event at seq") {
+			t.Fatalf("got %v", err)
+		}
+	})
+}

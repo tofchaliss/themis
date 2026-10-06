@@ -7,11 +7,18 @@
 //
 // It is the ONLY Themis package that imports the runtime module, and it
 // imports exactly its read-only record contracts: state, deployment,
-// verification, verification/seam. It never executes anything, writes
-// nothing, and reaches no runtime execution package (depguard +
-// tests/architecture enforce both). Themis's Governance service never
-// links this package: it is composed only by cmd/themis-intake, the
-// human-operated bridge (D-I-1).
+// verification, verification/seam. It never executes anything and
+// writes nothing. Themis's Governance service never links this package:
+// it is composed only by cmd/themis-intake, the human-operated bridge
+// (D-I-1), and no other Themis binary carries the runtime at all.
+//
+// The wall is a DIRECT-IMPORT wall, not a reachability wall, and the
+// difference is load-bearing: verification/seam imports the runtime's
+// own evaluator half, which reaches orchestration, skills and tools, so
+// cmd/themis-intake LINKS runtime execution code that Themis never
+// calls. depguard enforces the direct imports; tests/architecture
+// enforces them, pins that transitive reach so it cannot grow
+// unnoticed, and holds every other binary at zero.
 package harness
 
 import (

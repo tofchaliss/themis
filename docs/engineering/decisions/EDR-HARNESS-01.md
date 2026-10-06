@@ -72,7 +72,8 @@ the runtime record by reference. No second Position mechanism.
 ### D8 — Placement and walls (D-I-1, D-I-7, D-R-4)
 `internal/governance/adapters/harness` is the ONLY Themis package that imports the runtime, and
 only its read-only record contracts (`state`, `deployment`, `verification`, `verification/seam`);
-depguard and `tests/architecture` enforce it. `cmd/themis-intake` (human-operated, same host as
+depguard and `tests/architecture` enforce it. The wall is on **direct imports**, not on
+reachability — see the honest limit below. `cmd/themis-intake` (human-operated, same host as
 the runtime record plane) consumes the adapter and raises the proposal over the authenticated
 API; the Governance service never links the adapter and never reads the record plane. The intake
 DERIVES the commission id from the runtime's CREATED event and accepts no override.
@@ -87,10 +88,26 @@ table re-affirms.
 
 - The `harness-execution/v1` evidence is as true as `themis-intake`'s reconstruction; Governance
   does not re-run it. The runtime record remains the evidence; the proposal is the reference.
+- **D8's wall holds direct imports, not reachability, and `themis-intake` links the whole runtime.**
+  `verification/seam` imports the runtime's own evaluator half, which reaches `orchestration` →
+  `skills` → `tools`, so the intake binary carries fifteen runtime packages — `confine`, `context`,
+  `decisions`, `execution`, `instructions`, `internal/llm`, `orchestration`, `runtime/model`,
+  `skills`, `tools` beside the four contracts — and calls none of them. Measured 2026-10-06. This is
+  a binary-size and supply-surface fact about ONE human-operated CLI, not an authority leak: the
+  adapter reaches no execution package by any call path, no other Themis binary links the runtime
+  (`TestNoThemisBinaryButTheIntakeCLILinksTheRuntime`), and the reach is pinned
+  (`TestIntakeCLIRuntimeReachIsPinned`) so growth is a decision rather than a build detail. Making
+  it a true reachability wall needs the runtime to split its evaluator contract from its evaluator
+  implementation; that is a runtime-side change, filed rather than worked around here.
 - Product-scope write confinement (D4) is a pre-existing authorization gap, not created here —
   closed since, by `EDR-DELIVERY-01` (N-M0).
-- The runtime dependency pin (`go.mod`) is added when the runtime commit is published; until
-  then the repository builds only inside a `go.work` that includes the runtime checkout.
+- ~~The runtime dependency pin (`go.mod`) is added when the runtime commit is published; until
+  then the repository builds only inside a `go.work` that includes the runtime checkout.~~
+  **No longer a limit (2026-10-06):** the pin is in `go.mod`
+  (`v0.0.0-20260926130325-331d326a4172`) and resolves from `proxy.golang.org` into a cold module
+  cache, so `go.work` is a developer convenience. No Themis service links the runtime at all, and
+  `cmd/themis` plus all eight nodes build with the module absent and `GOPROXY=off` — only
+  `cmd/themis-intake` needs it.
 
 ## Realizes
 

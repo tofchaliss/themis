@@ -1,10 +1,65 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-09-22 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-10-06 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-09-22 · ATTR-GAP-2 COMPLETE, verified on the estate, merged to `main`
+> ## ⏭ RESUME POINT — 2026-10-06 · EDR-HARNESS-01 COMPLETE on `feat/harness-integration`, gate green, NOT merged
+>
+> **THE ONE-LINE STATE:** the AI-runtime integration is done and the gate passes against the
+> published module pin; **the forward list is unchanged — resume at
+> `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE` (BACKLOG P1), from the Knowledge event boundary.**
+>
+> `phase3-harness-integration` realizes commissions (D1–D4), harness-execution evidence on
+> proposals (D5–D6), the intake adapter and `themis-intake` (D8–D9), and the walls. The branch also
+> carries **`phase3-outward-actions` N-M0 / EDR-DELIVERY-01** (PR #121, merged into the branch
+> 2026-09-30) — explicit write-scope authorization, which closed the `product:<id>` gap D4 had
+> carried. Clean, **unmerged** to `main` — a PR is an explicit ask.
+>
+> ### The gate, and why `GOWORK=off` is the only honest way to run it
+>
+> `go.work` is excluded via `.git/info/exclude`, so it never reaches CI: CI resolves the runtime
+> through the `go.mod` pin alone. Verified 2026-10-06 — the pin
+> (`v0.0.0-20260926130325-331d326a4172`) **downloads from `proxy.golang.org` into a cold module
+> cache**, and **`GOWORK=off make check-ci` exits 0** across build · vet-tags · test-greenfield ·
+> lint · js-check · clean-arch · arch-test · coverage-greenfield · deadcode. Every item the
+> 2026-09-26 banner carried as open was already satisfiable; three of the four had simply never
+> been run.
+>
+> ### Two defects, both invisible to a green suite, and the same root
+>
+> Neither was found by a failing test. Both were found by asking what the gate *does not* check —
+> which is the same move that found the three ATTR-GAP-2 defects a round earlier.
+>
+> | | what was wrong | why green told us nothing |
+> | --- | --- | --- |
+> | **the wall that asserted nothing** | `TestIntakeCLIReachesNoRuntimeExecution` named a reachability wall; its inner loop body was `_ = ex`. The only live assertion was that the CLI imports the adapter | a test that asserts nothing passes forever, and its NAME is what everyone reads. EDR D8 and the package doc both cited it as enforcement |
+> | **the unmeasured package** | `governance/adapters/harness` was not in `scripts/check-coverage.sh`, and full-repo mode iterates the registered lists only — so the gate skipped it in silence at 81.0% against a 90% tier | "All package coverage thresholds satisfied" is true and says nothing about a package nobody registered. The script only errors on an unknown package in *per-package* mode |
+>
+> **The honest finding behind the first one: the wall cannot be a reachability wall.** Measured —
+> `verification/seam` → `orchestration` → `skills` → `tools`, so `themis-intake` links fifteen
+> runtime packages and calls none of them. The fix was not to make the test pass but to make it
+> *say something true*: the reach is now pinned (growth fails the build and has to be re-affirmed),
+> and the guarantee D-I-1 actually makes — **no other Themis binary links the runtime at all**,
+> Governance's service and the frozen monolith included — is now asserted for the first time. All
+> three new assertions were mutation-checked, because the defect being fixed is precisely a test
+> that was never checked for biting.
+>
+> **Carry forward:** a rule the build enforces and a rule a document claims are different things,
+> and the gap between them is silent in both directions. This is the second time in two rounds that
+> the defect was in the *checker*, not the checked.
+>
+> ### ⏭ Do this next
+>
+> 1. **Unchanged: `DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** (BACKLOG P1) — start at the Knowledge
+>    event boundary, define the 0/1/>1 cardinalities before code, never an `UPDATE`.
+> 2. Then **`DEF_GOV_PROPOSAL_IDENTITY_TOO_COARSE`** (P2), and **rotate the exposed PostgreSQL
+>    credential** (P0) — independent of all code work, which is how it has survived eight sessions.
+> 3. `HARNESS-COV-1` / `HARNESS-SEAM-1` are LOW and recorded; neither gates anything.
+
+---
+
+> ## RESUME POINT — 2026-09-22 · ATTR-GAP-2 COMPLETE, verified on the estate, merged to `main`
 >
 > **`main` = `17ea6a7`.** Squash-merged as `95a780a` (+ backlog/status/gitignore follow-ups),
 > `make check-ci` green on `main` itself before the push, deployed and verified on the VM. Nothing
