@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,7 +40,7 @@ type config struct {
 	addr           string // THEMIS_COMMUNICATION_ADDR — listen address (default ":8084").
 	governanceURL  string // THEMIS_GOVERNANCE_URL — Governance read-API base URL (default "http://localhost:8083").
 	registryURL    string // THEMIS_REGISTRY_URL — Registry read-API base URL (release rollups' name chain, D13.4 fail-closed; default "http://localhost:8082").
-	readAPIKey     string // THEMIS_API_KEY — sent as X-API-Key on the Governance and Registry READS above. Required on an estate with THEMIS_AUTH_REQUIRED=1, where an unauthenticated read answers 401 and the remediation-ticket intent is never recorded. A READ-SCOPED key is enough: this node writes to neither. Empty = reads are unauthenticated (auth-off dev). Same variable name the Dashboard proxy and the Intelligence node use.
+	readAPIKey     string // THEMIS_API_KEY — sent as X-API-Key on the Governance and Registry READS above. Required on an estate with THEMIS_AUTH_REQUIRED=1, where an unauthenticated read answers 401 and the remediation-ticket intent is never recorded. A READ-SCOPED key is enough: this node writes to neither. Empty = reads are unauthenticated (auth-off dev). Same variable name the Dashboard proxy and the Intelligence node use. TRIMMED at read time (as well as inside each client): a key pasted into an env file or a unit arrives with whitespace the operator cannot see, and what this node passes on — and reports as set — should be the key itself, not a key plus a newline that only the clients know to strip.
 	migrate        bool   // THEMIS_COMMUNICATION_MIGRATE=1 — apply the communication migrations on startup.
 	devPurge       bool   // THEMIS_COMMUNICATION_DEV_PURGE=1 — expose DELETE /dev/communication (dev only).
 	migrationsPath string // THEMIS_COMMUNICATION_MIGRATIONS — path to the communication migrations dir.
@@ -66,7 +67,7 @@ func loadConfig() config {
 		addr:           envDefault("THEMIS_COMMUNICATION_ADDR", ":8084"),
 		governanceURL:  envDefault("THEMIS_GOVERNANCE_URL", "http://localhost:8083"),
 		registryURL:    envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
-		readAPIKey:     os.Getenv("THEMIS_API_KEY"),
+		readAPIKey:     strings.TrimSpace(os.Getenv("THEMIS_API_KEY")),
 		migrate:        os.Getenv("THEMIS_COMMUNICATION_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_COMMUNICATION_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_COMMUNICATION_MIGRATIONS", "internal/communication/adapters/store/migrations"),
