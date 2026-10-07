@@ -5,10 +5,7 @@ as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a 
 IMPLEMENTED** (intents are persisted and sent by workers against FAKE senders); **Revision 4
 (2026-10-02, amended 2026-10-05, -06 and -07) — N-M1b real Jira + mail senders and payload
 materialization, IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one
-ticket per Release; the CI build and the rebuild loop are still later milestones); **Revision 5
-(2026-10-07) — N-M2, the plan's "Revision 3 — N-M2": the release-evaluated trigger, the polling
-subscriber seam, `ci_rebuild` over Jenkins and the loop — accepted as a decision of record,
-DOCUMENTATION ONLY, NOT implemented**. **Revision 4**'s three amendments
+ticket per Release; the CI build and the rebuild loop are still later milestones). Three amendments
 came out of the enterprise-VM run: **M1b-8** (2026-10-05) — Communication's Governance and Registry
 READS carry `X-API-Key` from `THEMIS_API_KEY`; **M1b-3a** (2026-10-06) — the estate's Jira is
 self-hosted **Data Center**, so auth mode (`basic`/`bearer`) and REST version (`3`/`2`) are
@@ -366,11 +363,6 @@ RC-1 / D-N-8 names "release posture evaluated" as the trigger. No such signal ex
 proxies it with **`governance.finding_opened`** and records the deviation here, in the code
 comment at the mapping, and in the change's tasks. `governance.proposal_accepted` maps to the
 decision mail and is not a proxy — an accepted proposal is exactly the fact being notified.
-
-**Superseded by Revision 5 (M2-1..M2-3, built by N-M2a/N-M2b/N-M2c).** The proxy is replaced by
-`governance.release_evaluated.v1`, a per-Release signal that carries the product and the project,
-so the two consequences recorded below stop being consequences: a ticket intent names its product,
-and one Release yields one intent.
 
 Product and project are left EMPTY on a ticket intent: the `finding_opened` contract does not
 carry them, and resolving them would mean a Registry read on the reader path, which M1a-1
@@ -787,21 +779,39 @@ Two details that are not incidental:
 `deploy/node.env.example` · `deploy/systemd/install-systemd.sh`. No migration (the columns exist
 since N-M1a), no API change, no new package, no new dependency.
 
-## Revision 5 (2026-10-07) — N-M2, the plan's **Revision 3 — N-M2**: release-evaluated trigger, polling subscriber, `ci_rebuild` and the loop
+## Revision 3 — N-M2 (2026-10-07)
 
-**Numbering note.** The owner's plan calls this revision **Revision 3 — N-M2**: the third revision
-of the outward-actions PLAN (N-M0 authorization → the remediation cycle → N-M2). This FILE's
-revision counter is already at 4, because N-M1a and N-M1b each took one as they landed. The
-section keeps the file's counter so the status line above stays readable, and carries the plan's
-title verbatim so a reader who was given "Revision 3 — N-M2" finds it. Both names mean this
-section.
+The release-evaluated trigger, the polling subscriber seam, `ci_rebuild` over Jenkins, and the
+loop. **Accepted as a decision of record. DOCUMENTATION ONLY — NOT implemented.**
+
+**Numbering note.** This is the outward-actions PLAN's **Revision 3 — N-M2** (N-M0 authorization →
+the remediation cycle → N-M2), and it is this FILE's fifth revision section: the sections above are
+numbered 2, 3 and 4, because N-M1a and N-M1b each took one as they landed. The heading carries the
+plan's name because that is the name this decision was given. Nothing above this line is amended —
+not the status line, not a prior section's prose: **this record is append-only**, and where a later
+section disagrees with an earlier one it says so here, in the later section.
 
 **Documentation only. Nothing here is implemented.** No Go code, no OpenAPI edit, no generated
 handler, no migration and no new dependency lands with it; `make check` is run to prove exactly
 that. M2-1..M2-9 are decisions of record and N-M2a..N-M2j are the steps that will realize them.
 This revision CLOSES every question Revision 2 left open (RC-1's transport and owning context,
-RC-4's baseline window, RC-6's knob name and locus) and supersedes **M1a-3's temporary
-`finding_opened` proxy**.
+RC-4's baseline window, RC-6's knob name and locus).
+
+### What this revision supersedes (read M1a-3 with this)
+
+**M1a-3's temporary `finding_opened` proxy is superseded by M2-1..M2-3, and will be removed from
+the code by N-M2c.** M1a-3 recorded the deviation honestly and named what it cost: RC-1's
+"release posture evaluated" signal did not exist, so N-M1a proxied it with
+`governance.finding_opened`, which carries neither product nor project and fires once per Finding
+rather than once per Release. Both consequences stop being consequences here —
+`governance.release_evaluated.v1` is a per-Release signal that carries the product and the project,
+so a ticket intent names its product and one Release evaluation yields one intent. That is also
+what finally realizes RC-2's one-ticket-per-Release rule, which M1a-2 recorded as not yet
+realizable.
+
+Nothing else in M1a-3 changes: `governance.proposal_accepted` → the decision mail was never a proxy
+and is untouched, and M1a-1's rule (the reader persists, it never delivers) still forbids resolving
+identity on the reader path — the new event is the reason that resolution is no longer needed.
 
 ### M2-1 — The trigger is a release-evaluated EVENT, and the ordering is a bus property, not a race
 

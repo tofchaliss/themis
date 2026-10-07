@@ -96,9 +96,9 @@ and relaxes nothing.
 
 ## Added 2026-10-07 — N-M2 designed, the owner's decisions recorded (documentation only)
 
-The plan's **Revision 3 — N-M2**, recorded as `EDR-DELIVERY-01`'s **Revision 5 (2026-10-07) —
-N-M2** section (M2-1..M2-9), with the acceptance block in `design.md` and the steps in `tasks.md`
-Group 6. The owner settled the six things Revision 2 had left as mechanisms-to-be-decided:
+The plan's **Revision 3 — N-M2**, recorded as the `EDR-DELIVERY-01` section of that name
+(M2-1..M2-9, appended 2026-10-07), with the acceptance block in `design.md` and the steps in
+`tasks.md` Group 6. The owner settled the six things Revision 2 had left as mechanisms-to-be-decided:
 
 1. **The release-evaluated signal is two events.** Knowledge publishes
    `knowledge.release_correlation_completed.v1` **once per SBOM, after all its other events for

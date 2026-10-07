@@ -335,7 +335,7 @@ source: `themis-ai-runtime/openspec/changes/outward-actions` **D-N-8..D-N-12**.
 - [x] 5.4 Gates: `make check` green (build · vet-tags · test · lint · clean-arch · arch-test ·
       coverage · deadcode), proving no code drift from a documentation-only change.
 - [x] 5.5 **Settled 2026-10-07 by Group 6** — the notification seam is designed in
-      `EDR-DELIVERY-01` Revision 5 (M2-1/M2-2/M2-4): event names
+      `EDR-DELIVERY-01` **Revision 3 — N-M2** (M2-1/M2-2/M2-4): event names
       `knowledge.release_correlation_completed.v1` + `governance.release_evaluated.v1`,
       at-least-once with dedupe by event id, transport = polling a Governance cursor read API,
       subscriber auth = `X-API-Key` read scope, owning context = **Governance**. The API change
@@ -346,19 +346,22 @@ source: `themis-ai-runtime/openspec/changes/outward-actions` **D-N-8..D-N-12**.
 - [x] 5.7 **Settled 2026-10-07 by Group 6** (M2-5): strictly the **immediately-previous SBOM of
       the same Release by upload order**. No configured baseline window.
 
-## Group 6 — N-M2 the release-evaluated trigger, polling subscriber, `ci_rebuild` and the loop (EDR-DELIVERY-01 Revision 5 = the plan's **Revision 3 — N-M2**) — **designed 2026-10-07, documentation only**
+## Group 6 — N-M2 the release-evaluated trigger, polling subscriber, `ci_rebuild` and the loop (EDR-DELIVERY-01 **Revision 3 — N-M2**) — **designed 2026-10-07, documentation only**
 
 No code, API spec, schema, migration or generated handler changes in the DESIGN step (6.0); the
-steps **N-M2a..N-M2j** below are the build plan, each small and testable alone. Runtime-side source:
-`themis-ai-runtime/openspec/changes/outward-actions` (D-N-8..D-N-12 + the subscriber-seam lock).
-Owner decisions recorded in `proposal.md` and accepted in `design.md`.
+steps **N-M2a..N-M2j** below are the build plan, each small and testable alone. API/schema deltas:
+**N-M2d** (events table + cursor read API), **N-M2h** (the callback route) and **N-M2g** (a
+constraint migration only — the intent-type CHECK widened to admit `ci_rebuild`). Runtime-side
+source: `themis-ai-runtime/openspec/changes/outward-actions` (D-N-8..D-N-13). Owner decisions
+recorded in `proposal.md` and accepted in `design.md`.
 
-- [x] 6.0 Design recorded: `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 5** (M2-1..M2-9,
-      the N-M2a..N-M2j step table, the closed-questions table, honest limits), `design.md`
-      ("Acceptance as documented — Revision 3 (N-M2)"), `proposal.md` (owner decisions 1–6 plus the
-      shape decisions that leave nothing to an implementer), and the forward pointer on M1a-3 whose
-      `finding_opened` proxy this supersedes. Gates: `make check` green, proving no code drift from a
-      documentation-only change.
+- [x] 6.0 Design recorded: `docs/engineering/decisions/EDR-DELIVERY-01.md`, the appended section
+      **Revision 3 — N-M2** (M2-1..M2-9, the supersession of M1a-3's `finding_opened` proxy stated
+      inside that section, the N-M2a..N-M2j step table, the closed-questions table, honest limits).
+      The EDR is **append-only**: no earlier section and no status line is amended. Plus `design.md`
+      ("Acceptance as documented — Revision 3 (N-M2)") and `proposal.md` (owner decisions 1–6 plus
+      the shape decisions that leave nothing to an implementer). Gates: `make check` green, proving
+      no code drift from a documentation-only change.
 - [ ] 6.1 **N-M2a** (`themis`; no API, no schema) — Knowledge publishes
       `knowledge.release_correlation_completed.v1` **once per SBOM**, appended to the outbox AFTER
       every other Knowledge event for that SBOM, carrying the discovery cause. Test:

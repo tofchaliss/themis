@@ -89,10 +89,9 @@ API, schema or generated-handler realization exists for any row below, which is 
 
 ## Acceptance as documented — Revision 3 (N-M2) (2026-10-07)
 
-The outward-actions plan's **Revision 3 — N-M2**, recorded in `EDR-DELIVERY-01` as the section
-**Revision 5 (2026-10-07) — N-M2** (the EDR's own counter is at 4 because N-M1a and N-M1b each took
-one; both names mean the same section). Decisions **M2-1..M2-9**, mirroring the runtime-side
-subscriber-seam lock in `themis-ai-runtime/openspec/changes/outward-actions/design.md`.
+The outward-actions plan's **Revision 3 — N-M2**, recorded in `EDR-DELIVERY-01` as the appended
+section of that exact name (decisions **M2-1..M2-9**), and mirroring the runtime-side
+subscriber-seam lock in `themis-ai-runtime/openspec/changes/outward-actions/design.md` (D-N-13).
 
 **Documentation only** — no code, API spec, schema, migration or generated-handler realization
 exists for any row below, which is why this is "accepted as documented" and not a realization map.
