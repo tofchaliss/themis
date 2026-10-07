@@ -306,8 +306,11 @@ func ValidDiscoveryCause(cause string) bool {
 //
 // Knowledge says only "I am done with this SBOM"; it deliberately states nothing about WHAT
 // the posture is, because the counts are Governance's Findings over Governance's own
-// projection (M2-1). The body is snake_case — unlike the older Knowledge events, which marshal
-// Go field names — because it is the shape M2-2 fixes for this pair of events.
+// projection (M2-1). For the same reason it names no PRODUCT and no PROJECT (M2a-1): identity
+// lives in Registry and Knowledge holds no seam to it, so those two ids ride
+// governance.release_evaluated.v1, which Governance — already reading Registry, already owning
+// the counts — can state in full. The body is snake_case, unlike the older Knowledge events
+// which marshal Go field names, because it is the shape M2-2 fixes for this pair of events.
 type ReleaseCorrelationCompleted struct {
 	ReleaseID string `json:"release_id"`
 	// SBOMID is the Evidence id of the SBOM that was correlated, carried verbatim as TEXT and

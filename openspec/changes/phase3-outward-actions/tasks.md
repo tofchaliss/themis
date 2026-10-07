@@ -367,33 +367,46 @@ recorded in `proposal.md` and accepted in `design.md`.
       every other Knowledge event for that SBOM, carrying the discovery cause. Test:
       `TestEventSchema_Knowledge_ReleaseCorrelationCompletedV1` (`internal/knowledge/adapters/store`)
       — schema, the ordering proof (its `seq` exceeds every other event for that SBOM), and the
-      zero-match case. **Implemented 2026-10-07.** Body is `{release_id, sbom_id, cause,
-      occurred_at}` (snake_case, `additionalProperties:false`, the cause enum closed) — per owner
-      feedback it carries NO product/project id, so Knowledge gains no Registry seam; Governance
-      resolves those in N-M2b, where the counts already come from. The emitting locus is
-      `ApplyCorrelation`'s tail (`internal/knowledge/app/correlate.go`) — the one place that knows
-      every other event for the SBOM is already queued, and the one write phase BOTH paths share:
-      the upload (via the coordinator's `kind=="sbom"` branch, so VEX and scanner-report cannot
-      reach it) and the KN-RECOR-1 sweep, which states `cause=rediscovery` rather than letting a
-      consumer infer it (M2-3). Unconditional on the outcome — zero matches still publishes.
-      **ORDERING is a property of the WRITE, not of the clock**: the outbox has no sequence column
-      and the relay drains it `ORDER BY occurred_at`, so the store's append takes one in-transaction
-      `MAX(occurred_at)` over the unsent rows and lands strictly after all of them. Trusting the
-      caller's timestamp would tie wherever the clock is coarse or frozen — every fold note and
-      match note of one correlation can share an instant — and a tie leaves the relay's order
-      undefined, which is the exact guarantee the event exists to provide. Tests: the integration
-      test proves schema conformance, BOTH halves of the ordering (the stored timestamps and the
-      relay's publish order, which is the bus's `seq` order), the zero-match case, both causes on
-      one release, and that a VEX and a scanner-report upload raise their own events and this one
-      NEVER; plus app/domain unit tests (announced last, zero-match, the sweep's cause, the closed
-      vocabulary refusing a third value, the write failure failing the apply). Coverage:
-      `knowledge/app` + `knowledge/domain` still 100%, `knowledge/adapters/store` 84.5% (≥80). One
-      harness fix rode along: the shared store test `truncate` now clears `correlated_releases`,
-      which used to leak the ledger between tests so a sweep could drain another test's releases.
+      zero-match case. **Implemented 2026-10-07** — decided and recorded in
+      `docs/engineering/decisions/EDR-DELIVERY-01.md`, the appended section
+      **"Revision 3 — N-M2a as built"** (**M2a-1..M2a-4**), which is the reason of record for the
+      two things the step row left open:
+      **(a) the BODY is `{release_id, sbom_id, cause, occurred_at}`** — snake_case,
+      `additionalProperties:false`, the cause enum closed — and it carries **no product or project
+      id** (M2a-1, owner decision): Knowledge holds no Registry seam and its whole statement here is
+      "I am done with this SBOM", so M2-2 keeps those two ids on `governance.release_evaluated.v1`,
+      where Governance already reads Registry and already owns the counts. **N-M2b resolves them**
+      (task 6.2).
+      **(b) ORDERING is enforced PER SBOM** (M2a-3), by the append position plus the relay's
+      tie-break (`ORDER BY occurred_at, (event_type = <completion>)`) — the outbox has no sequence
+      column, and a correlation reads the clock once per note, so a frozen or coarse clock can stamp
+      a whole unit of work alike. A global `MAX(occurred_at)` over the unsent rows was built first
+      and rejected: it claims a last-in-outbox position nothing asked for, reorders unrelated SBOMs'
+      events, and two concurrent transactions can still pick the same instant. The honest limits (a
+      backwards clock step inside one unit of work; two completions sharing an instant; "for that
+      SBOM" meaning that correlation RUN) are in M2a-3.
+      Emitting locus: `ApplyCorrelation`'s tail — the one place that knows every other event for the
+      SBOM is queued, and the one write phase BOTH paths share, the upload reaching it only through
+      the coordinator's existing `kind=="sbom"` dispatch (so VEX and scanner-report cannot) and the
+      KN-RECOR-1 sweep stating `cause=rediscovery` rather than letting a consumer infer it (M2-3).
+      Unconditional on the outcome — zero matches still publishes. Tests: the integration test
+      proves schema conformance, BOTH halves of the per-SBOM ordering (the stored timestamps and the
+      relay's publish order, which is the bus's `seq` order, each scoped to the rows that
+      correlation raised), the shared-instant case as a REGRESSION test of the tie-break rather than
+      a restatement of it, the zero-match case, both causes on one release, and that a VEX and a
+      scanner-report upload raise their own events and this one NEVER; plus app/domain unit tests
+      (announced last, zero-match, the sweep's cause, the closed vocabulary refusing a third value,
+      the write failure failing the apply). Coverage: `knowledge/app` + `knowledge/domain` still
+      100%, `knowledge/adapters/store` 84.5% (≥80). One harness fix rode along: the shared store test
+      `truncate` now clears `correlated_releases`, which used to leak the ledger between tests so a
+      sweep could drain another test's releases.
 - [ ] 6.2 **N-M2b** (`themis`; no API, no schema) — Governance consumes it and publishes
       `governance.release_evaluated.v1`: snake_case `product_id` / `project_id` / `release_id` /
       `sbom_id`, integer `severity_counts {critical, high, medium, low}` off M1b-5's `base_score`
-      ladder, `cause` mapped verbatim. Test:
+      ladder, `cause` mapped verbatim. **`product_id` and `project_id` are RESOLVED HERE**
+      (EDR-DELIVERY-01 M2a-1): the Knowledge event carries only the release and the SBOM, and
+      Governance is the context that already reads Registry (`ProductOfRelease` over
+      `THEMIS_REGISTRY_URL`, task 1.2) and already owns the counts. Test:
       `TestReleaseEvaluatedEvent_ZeroCounts_AndCauseMapping` — zero counts emitted as the success
       case, both causes mapped, no third cause accepted.
 - [ ] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
