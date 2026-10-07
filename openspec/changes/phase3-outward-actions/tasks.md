@@ -49,15 +49,111 @@ truth), so `openspec validate` reporting "no deltas" is expected; archive with
       integration/e2e `govwiring.Wire` callers when the logger parameter was added — exactly the
       defect class it exists for.
 
-## Group 2 — M1 delivery — NOT STARTED
+## Group 2 — N-M1a delivery intents (EDR-DELIVERY-01 Revision 3) — **implemented 2026-10-02**
 
-- [ ] 2.1 Awaiting the runtime-side grilling of the delivery milestone. `delivery:callback` exists
-      and is refused on every Governance write; what it may DO is undecided.
-- [ ] 2.2 Carried limit from N-M0 (EDR-DELIVERY-01 "Honest limits"): the Governance → Registry
+Half of M1: Themis RECORDS what must go out and SENDS it in a worker, against FAKE senders. Real
+Jira/mail senders are N-M1b; the CI build and the rebuild loop are NOT in this step at all (M1a-9
+— no `ci_build`, no `ci_rebuild`, no CI worker, no callback). Owner feedback shaped two things:
+deduplicate on the ORIGINATING EVENT ID, and carry no CI-build content.
+
+- [x] 2.1 `internal/communication/adapters/store/migrations/000006_delivery_intents.{up,down}.sql`:
+      `delivery_intents` (+ `delivery_attempts`, append-only, FK-cascading). Idempotence is a
+      PARTIAL UNIQUE INDEX on `origin_event_id WHERE origin_event_id IS NOT NULL` — worker-sourced
+      intents store NULL and collide with nothing. Type and state are CHECK-closed
+      (`jira_issue|email`, `pending|delivered|dead_letter|cancelled`), which is also what makes a
+      CI kind impossible to add by accident. Foreign ids are TEXT, not UUID (other contexts'
+      identities, carried verbatim — the D5 rule). Reversibility is covered by the existing
+      `TestMigrationDownUp`.
+- [x] 2.2 `internal/communication/adapters/store/delivery.go`: `CreateIntent` (idempotent,
+      `ON CONFLICT (origin_event_id) WHERE … DO NOTHING RETURNING`, returning the existing row),
+      `GetIntent`, `GetPendingForWork`, `RecordAttempt` (counters + ledger; NOT state),
+      `MarkDelivered` / `MarkDeadLetter` / `CancelIntent` / `RetryIntent` (guarded transitions →
+      `app.ErrIntentNotFound` on zero rows, so an operator never sees a silent success),
+      `ListDeadLetters`. A new `q(ctx)` joins the ambient inbox transaction (the Exec-only
+      `exec(ctx)` cannot: the idempotent insert needs `QueryRow`). `Purge` + the test `truncate`
+      cover the new tables.
+- [x] 2.3 `internal/communication/app/delivery_intent.go`: `Intent` / `Attempt` / `IntentLineage`,
+      the closed `IntentType` + `IntentState` vocabularies, the `DeliveryIntents` port, and
+      `DeliveryIntentService` with `EnqueueJiraForRelease` / `EnqueueDecisionMail` /
+      `EnqueueDeadLetterMail`. The service is the ONLY way an intent is created, which puts three
+      guarantees in one place: governed destination names, the identity facts stamped into the
+      snapshot (a caller cannot omit them), and `ErrNoSubject` — nothing is enqueued for an
+      indeterminate subject. `lineage` carries no `event_seq` (not in the kernel Envelope, EB-02).
+- [x] 2.4 `internal/communication/adapters/inbound/consumer.go`: `governance.finding_opened` →
+      one ticket intent for the Release, `governance.proposal_accepted` → one decision mail, both
+      keyed on the envelope id; both added to `Subscription.Interest` (an undeclared type never
+      reaches `Handle`). `WithIntents` keeps the mappings OPT-IN. The reader holds no Jira, mail or
+      HTTP client — M1a-1, asserted by `TestConsumer_NeverDelivers`. The `finding_opened` trigger
+      is a RECORDED TEMPORARY PROXY for "release posture evaluated" (RC-1 / D-N-8), and the
+      consequence is recorded with it: one event → one intent, so RC-2's one-ticket-per-Release is
+      not yet realized.
+- [x] 2.5 `internal/communication/adapters/delivery/{delivery,worker}.go`: `IntentDeliverer` +
+      `Result`, `FakeJiraDeliverer` / `FakeMailDeliverer` (log-only, programmable, NO network),
+      `Config` + `ConfigFromEnv` (R2 — every knob documented, out-of-range falls back to its
+      default), and `Worker` (one fetcher + N senders; exponential backoff capped; dead-letter on
+      exhaustion → an operations mail INTENT, never an inline send; the notification chain stops at
+      one; an already-exhausted pending intent is finished WITHOUT sending again). A failed
+      delivery is an outcome — only a STORE failure is reported as an error.
+- [x] 2.6 `internal/communication/adapters/wiring/wiring.go` `WireDelivery` + `cmd/communication`:
+      ONE switch over BOTH halves (M1a-7) — `THEMIS_COMMUNICATION_DELIVERY_ENABLED=0` (default)
+      wires no worker and leaves the consumer without the intake, so nothing is recorded and
+      nothing is sent.
+- [x] 2.7 `cmd/deliveryctl`: `list-deadletters` · `retry` · `cancel` over the Communication store,
+      following `cmd/authadmin`. **No HTTP surface added.** An unknown or already-delivered id
+      exits non-zero; `retry` clears the counters but never the attempt ledger.
+- [x] 2.8 Tests: store integration (idempotence on the event id, due-time claim order, attempt
+      ledger, terminal transitions refusing a delivered intent, dead-letter list + paging + window,
+      retry/cancel, purge); inbound unit (one intent per event, replay creates no second, no
+      Release ⇒ nothing, malformed ⇒ error, intake absent ⇒ inert, the reader never delivers);
+      worker unit (fail-twice-then-succeed with the backoff asserted per attempt, the cap,
+      exhaustion → dead_letter + an operations email intent, the chain stopping, no-deliverer, the
+      store-failure matrix, the disabled toggle, the loop, logs carry the correlation ids and never
+      the payload); CLI unit (list/retry/cancel, exit codes 0/1/2). Coverage: `communication/app`
+      100%, `adapters/delivery` 98.1%, `adapters/inbound` 100%, `adapters/store` 81.8% (≥80),
+      `cmd/deliveryctl` 90.6%. No package added under `internal/`, so
+      `scripts/check-coverage.sh` needs no registration.
+- [x] 2.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 3** (M1a-1..M1a-9 + honest
+      limits) and `deploy/node.env.example` (the eight knobs + the operator CLI).
+- [ ] 2.10 Carried limit from N-M0 (EDR-DELIVERY-01 "Honest limits"): the Governance → Registry
       read seam sends no API key, so on an auth-enabled estate a `product:<id>` key cannot resolve
       its product and therefore cannot write. Giving the read seam a credential is a security-model
       change and belongs to the milestone that needs it.
+- [ ] 2.11 N-M1b: the real Jira and mail senders behind `IntentDeliverer`, and payload
+      materialization (`payload_sha256` / `payload_bytes`, empty in N-M1a). RC-2's ticket content
+      (counts for all four severities, CVE ids for Critical/High only) lands with the Jira sender.
+- [ ] 2.12 Open, for the owner: (a) confirm the `finding_opened` proxy stands until a
+      valuation-complete signal exists, or pause the ticket mapping until then — the proxy means N
+      intents per Release today; (b) fix the governed default destination names (the code defaults
+      are `themis-remediation`, `security-decisions`, `operations`) and whether they are per-type
+      or per-intent; (c) duplicate suppression when two Communication nodes drain one database.
 
 ## Group 3 — M2 CI — NOT STARTED
 
 ## Group 4 — M3 mail — NOT STARTED
+
+## Group 5 — Remediation cycle — **documentation only, 2026-10-01**
+
+No code, API spec, schema, migration or generated handler changes in this group. Runtime-side
+source: `themis-ai-runtime/openspec/changes/outward-actions` **D-N-8..D-N-12**.
+
+- [x] 5.1 `docs/engineering/decisions/EDR-DELIVERY-01.md`: **Revision 2 (2026-10-01)** with
+      RC-1..RC-8 — evaluation-complete trigger + the Themis-owned pub/sub notification (transport
+      deferred to its own EDR); Jira one ticket per Release with CVE ids for Critical/High only;
+      `ci_rebuild` approved (policy-gated, callback carries new SBOM id + image digest, `ci_build`
+      unchanged); new-vs-previous SBOM comparison; mail after the comparison; default
+      max-attempts 2; ownership and invariants; **N-M0 unchanged**. Status line updated.
+- [x] 5.2 `design.md`: "Acceptance as documented — Remediation Cycle" block mirroring RC-1..RC-8,
+      marked as documentation rather than a realization map.
+- [x] 5.3 `proposal.md`: the owner's loop restated, doc-only scope, `ci_build` semantics and N-M0
+      explicitly preserved. The operator-configurable **max-attempts default = 2** knob is recorded
+      as documentation — its configuration locus and name are NOT fixed here — and the Jira content
+      rule (CVE ids listed only for Critical and High; Medium/Low by count) is recorded with it.
+- [x] 5.4 Gates: `make check` green (build · vet-tags · test · lint · clean-arch · arch-test ·
+      coverage · deadcode), proving no code drift from a documentation-only change.
+- [ ] 5.5 Dedicated EDR + API change for the Themis→harness notification seam before any
+      implementation: event name(s), at-least-once semantics, transport, subscriber
+      authentication, owning context (Communication or Governance). Class 4 — owner approval first.
+- [ ] 5.6 Fix the configuration locus and name of the max-attempts knob, and whether per-Release
+      overrides are supported.
+- [ ] 5.7 Confirm the comparison baseline: strictly the immediately-previous SBOM id for the
+      Release, or a configured baseline window.

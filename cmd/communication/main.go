@@ -47,6 +47,11 @@ type config struct {
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
 
+	// Outward delivery (N-M1a) is configured by delivery.ConfigFromEnv — the knobs are
+	// documented there and in deploy/node.env.example:
+	// THEMIS_COMMUNICATION_DELIVERY_{ENABLED,WORKERS,BATCH,MAX_ATTEMPTS,BACKOFF_INITIAL,BACKOFF_MAX,INTERVAL}
+	// and THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE.
+
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
 }
@@ -111,6 +116,18 @@ func main() {
 		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher)
 
 	go workerLoop(comm, logger.Component("worker"))
+
+	// Outward delivery (N-M1a, EDR-DELIVERY-01 Revision 3). Off by default: with it off the
+	// event reader records no delivery intents and no sender runs, so the node performs no
+	// outward action at all. Wired BEFORE the bus reader starts, because this is what attaches
+	// the intent intake to the consumer.
+	deliveryCfg := delivery.ConfigFromEnv()
+	if worker := wiring.WireDelivery(comm, deliveryCfg, logger.Component("delivery-intents")); worker != nil {
+		go worker.Run(ctx)
+		logger.Info("outward delivery enabled", observability.String("config", deliveryCfg.String()))
+	} else {
+		logger.Info("outward delivery DISABLED (THEMIS_COMMUNICATION_DELIVERY_ENABLED != 1): no delivery intents recorded, no senders running")
+	}
 
 	// The bus reader drives the publishable-positions worklist off the Governance stream
 	// (EB-07/08). Without a bus it is disabled — Position events then arrive only over the

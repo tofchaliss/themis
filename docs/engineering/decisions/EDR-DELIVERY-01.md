@@ -1,6 +1,9 @@
 # EDR-DELIVERY-01 — Outward actions: explicit write-scope authorization (N-M0)
 
-Status: **Accepted 2026-09-30** for N-M0. The decisions were grilled and locked with the user in
+Status: **Accepted 2026-09-30** for N-M0; **Revision 2 (2026-10-01) — remediation cycle, accepted
+as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a delivery intents,
+IMPLEMENTED** (see the Revision 3 section at the end: intents are persisted and sent by workers
+against FAKE senders; the real Jira/mail senders and the rebuild loop are later milestones). The decisions were grilled and locked with the user in
 the `themis-ai-runtime` repository (`openspec/changes/outward-actions`, **D-N-6** locked). This
 EDR records what those decisions require of THEMIS, so the Themis-side implementation has a
 reason of record in this repository. Where they disagree, the runtime-side design wins for
@@ -172,3 +175,275 @@ EDR-SECURITY-01 D1/D4 (the scope vocabulary as the authorization contract, now e
 resource AND closed at both ends), EDR-HARNESS-01 D4 (the carried gap, closed), CONVENTIONS R1 (the
 refusal's detail reaches console + OTel through the one shared logger), CON-0016 (traceability —
 the principal is already the recorded actor; now it is also the authorization subject).
+
+## Revision 2 (2026-10-01) — Remediation cycle (documentation only)
+
+The owner restated the outward-actions workflow as a LOOP and gave the decisions that shape it.
+Grilled and recorded runtime-side as **D-N-8..D-N-12**
+(`themis-ai-runtime/openspec/changes/outward-actions/design.md`); this revision records what they
+require of THEMIS.
+
+The cycle: an SBOM is uploaded under Product / Project / Release / SBOM id and Themis lists its
+vulnerabilities → a Jira ticket tracks the fix → a Jenkins build produces a new image and a new
+SBOM uploaded to the same Product / Project / Release under a new SBOM id → Themis compares new
+against previous (closed vs still open) and updates the ticket → the result goes out by mail →
+the loop repeats until the targeted vulnerabilities are closed or a configured maximum number of
+rebuilds is reached, after which it stops and tells a person.
+
+**Nothing in this revision is implemented.** It changes no code, no API, no schema and no
+generated handler. RC-1..RC-8 are decisions of record for the milestones that follow N-M0; where
+a mechanism is genuinely undecided (RC-1's transport) it is named as such and deferred to its own
+EDR and API change.
+
+### RC-1 — The trigger is "release posture evaluated", not document receipt
+
+SBOM upload starts an ASYNCHRONOUS evaluation. The remediation cycle starts when that evaluation
+completes for the Release — not when the document is received. Until then no Jira ticket is
+written, no mail is sent and no rebuild intent is issued: a ticket written from a half-evaluated
+SBOM lists a subset and reads as truth, and a rebuild triggered on receipt rebuilds against
+nothing.
+
+Themis MAY publish a Themis-owned pub/sub notification carrying that signal, to which the AI
+Harness may subscribe. Outward actions remain Themis-owned either way — the notification tells the
+harness that a posture is settled; it delegates nothing.
+
+Deferred, deliberately: event name(s), delivery semantics (at-least-once assumed), transport
+(webhook vs bus-backed fanout vs long-poll), subscriber authentication, and whether the seam
+belongs to Communication or Governance. That is a trust-boundary change and needs its own EDR and
+API change before implementation. Until it exists, the current Governance events (`finding_opened`
+and the posture-evaluated path) remain the effective trigger in code.
+
+### RC-2 — Jira: one ticket per Release, CVE ids for Critical and High only
+
+One ticket per Release, not one per Finding. The body carries severity COUNTS for Critical, High,
+Medium and Low, and lists the CVE ids for **Critical and High only**; Medium and Low are counts
+with no CVE list. The ticket is updated in place across the cycle's attempts, idempotently, keyed
+by delivery intent id and attempt index.
+
+The unit a rebuild addresses is a Release, so the unit a tracking ticket addresses is a Release.
+Listing every CVE id at every severity makes the ticket unreadable at estate scale. Jira stays a
+projection: no Themis state follows from a Jira transition, and the authoritative relationship
+lives in Themis (D-N-7).
+
+### RC-3 — `ci_rebuild`: a new delivery kind, APPROVED
+
+A fourth delivery kind joins `jira_issue`, `ci_build` and `email`: **`ci_rebuild`** (Communication,
+policy-gated). It rebuilds a Release without a fresh human proposal acceptance — the cycle's
+authority comes from the policy that started it, bounded by lineage and knobs.
+
+- Snapshot: destination pipeline name, Product / Project / Release identity, prior SBOM id, the
+  targeted Finding set, attempt index. **No credentials, no keys, no model output** — destinations
+  stay governed names (D3 of this EDR's parent decisions, D-N-3 runtime-side).
+- Callback: MUST carry the **new SBOM id** and the **image digest**, alongside
+  `{intent_id, build_id, git_ref}`. It is recorded as governed-external evidence on the intent and
+  changes no Finding state. A build system asserting a fix is refused; only the evaluation of the
+  new SBOM can establish absence of a fault.
+- Authorization is unchanged: the callback enters through the Communication boundary under
+  `delivery:callback` (or the HMAC transport variant), which D1/D2 keep refused on every Governance
+  write.
+
+**`ci_build` is unchanged** and keeps its governance-controlled path: it carries an accepted change
+artifact and follows `proposal_accepted`. `ci_rebuild` carries no artifact. The two must not be
+conflated — one materializes a human-accepted change, the other repeats a build.
+
+Approved means approved as a decision of record. It is NOT implemented, and its knobs are
+documentation until the milestone that builds them.
+
+### RC-4 — Comparison: new SBOM against previous, per Release
+
+On each new SBOM produced by a rebuild and evaluated, Themis compares it against the previous SBOM
+for the same Product / Project / Release to determine which targeted vulnerabilities are CLOSED and
+which are STILL OPEN. That comparison is the cycle's only measure of progress, and the Jira ticket
+(RC-2) is updated from it.
+
+Open: whether the baseline is strictly the immediately-previous SBOM id for the Release or a
+configured baseline window.
+
+### RC-5 — Email after the comparison, never from the callback
+
+A plain-text mail goes out on each attempt, AFTER the comparison of RC-4 — not on the build
+callback, which only says a build happened. Recipients are governed Communication audiences
+resolved by the mail worker; addresses and credentials are never carried in the intent. Content
+derives from the immutable delivery snapshot: no model output, no workspace content, no key
+material, no attachments. One mail per intent id; a retry is a delivery retry, not a new
+communication event.
+
+### RC-6 — Loop control: default max-attempts = 2 per Release
+
+Success is the targeted set closed; the loop stops. Otherwise it repeats, bounded by a maximum
+number of rebuild attempts per Release: **default 2**, operator-configurable (configuration locus
+and name to be fixed by the implementing milestone; raising it later is expected once the loop has
+a reliability record). Two is deliberately low — a loop that cannot fix a Release in two attempts
+will not fix it in ten, and a high limit means a pipeline hammering itself while nobody reads the
+mail.
+
+On exhaustion the loop STOPS and tells a person: mail to the governed audience plus a Jira update
+stating the attempts are exhausted. **Findings are never auto-resolved** — resolution is a decision
+about exposure, not about the existence of a fix, and stays a human act (D-N-7). A failed attempt
+is an outcome, not an error: it is recorded, the Finding stays as it is, and the original Release
+stays affected.
+
+### RC-7 — Ownership and the invariants a loop is most likely to erode
+
+**Themis owns** security truth and every outward effect: SBOM intake and evaluation, posture and
+Findings, the RC-4 comparison, delivery intents and workers, Jira, CI (`ci_build` and
+`ci_rebuild`), mail, the attempt counter, the stop condition, and the RC-1 notification it
+publishes. **The AI Harness owns** runtime execution and orchestration of its own work and MAY
+subscribe to the RC-1 notification; it remains networkless for Jira, CI and mail, holds no outward
+credential, and initiates no Governance act.
+
+Invariants restated because a loop is where they slip: model output is advisory and never enters a
+delivery payload; payloads derive only from the immutable snapshot; secrets never travel in an
+intent; controls fail closed (no evaluation signal → no outward action); and external availability
+never blocks or changes Themis truth — outward failure is dead-letter state, never a Finding
+change.
+
+### RC-8 — N-M0 is unchanged (see also M1a-9: N-M1a changes nothing here either)
+
+Explicit per-route write-scope authorization stands exactly as implemented (D1–D7, Group 1,
+2026-09-30): `delivery:callback` refused on every Governance write unconditionally, `admin`
+allowed, `product:<id>` confined to the product that owns the Finding's release, everything else
+refused, the scope vocabulary closed at both ends. `ci_rebuild`, the RC-1 notification and the loop
+imply **no new scope, no relaxation and no new Governance write path**. Any reading of this
+revision that weakens N-M0 is wrong.
+
+## Revision 3 (2026-10-02) — N-M1a: delivery intents, IMPLEMENTED
+
+Revision 2 recorded the loop. **N-M1a builds its first half, and only its first half**: Themis
+now RECORDS what must go out and SENDS it in a worker, against fake senders. Scope was fixed by
+owner feedback on the plan: deduplicate on the originating event id, and carry **no CI-build
+content of any kind** in this step.
+
+What landed (Communication context, greenfield tree): two tables, a store, an app service, two
+mappings in the Governance-stream reader, a worker with retry/backoff/dead-letter, fake Jira and
+mail senders, and an operator CLI. No API change, no OpenAPI edit, no generated handler, no
+network call.
+
+### M1a-1 — The event reader PERSISTS; it never delivers
+
+The inbound consumer's whole outward job is to write a `delivery_intents` row inside the inbox
+unit of work. It holds no Jira client, no mail client and no HTTP client at all, so an
+unreachable external system cannot block, slow or stall the bus reader path. Sending is a
+separate worker on its own cadence.
+
+This is the structural form of RC-7's "external availability never blocks or changes Themis
+truth". Stating it as a rule is not enough — a reader that *could* call out would eventually be
+made to, so the reader is wired without the means.
+
+### M1a-2 — Idempotence is keyed on the ORIGINATING EVENT ID
+
+`delivery_intents.origin_event_id` is the kernel envelope id, under a partial unique index
+(`WHERE origin_event_id IS NOT NULL`). `CreateIntent` inserts `ON CONFLICT DO NOTHING` and
+returns the row that is already there. The bus is at-least-once, so a replay is the normal case:
+it yields one ticket and one mail, never two.
+
+The owner chose this over the partial uniqueness per `(release_id, type)` that the first plan
+carried, and the consequence is recorded rather than papered over: the mapping is now strictly
+**one event → one intent**. Combined with the proxy trigger in M1a-3, a Release with twelve
+opened Findings currently asks for twelve ticket intents — so **RC-2's "one ticket per Release"
+is NOT yet realized**. It cannot be, honestly, until the trigger is a per-Release signal; keying
+dedup on a per-Release guess would have produced one ticket whose contents depended on which
+Finding happened to arrive first.
+
+Worker-sourced intents (the dead-letter notification) store NULL and take part in no
+uniqueness — there is no event to dedupe them against.
+
+### M1a-3 — The trigger is a recorded TEMPORARY PROXY
+
+RC-1 / D-N-8 names "release posture evaluated" as the trigger. No such signal exists, so N-M1a
+proxies it with **`governance.finding_opened`** and records the deviation here, in the code
+comment at the mapping, and in the change's tasks. `governance.proposal_accepted` maps to the
+decision mail and is not a proxy — an accepted proposal is exactly the fact being notified.
+
+Product and project are left EMPTY on a ticket intent: the `finding_opened` contract does not
+carry them, and resolving them would mean a Registry read on the reader path, which M1a-1
+forbids. An intent that names no Release records **nothing at all** — an outward action with an
+indeterminate subject is precisely the one that must not go out (fail closed).
+
+### M1a-4 — Giving up is a state, and it tells a person with another INTENT
+
+An attempt that fails is recorded (append-only `delivery_attempts`), backed off
+(`initial × 2^(n-1)`, capped), and retried. After `MAX_ATTEMPTS` the intent moves to
+`dead_letter` — terminal until a person acts — and the worker **enqueues an email intent** to
+the governed dead-letter audience. It does not send one inline: the failure path must not depend
+on the channel that just failed.
+
+The chain stops at one. A dead-letter notification that itself dead-letters does NOT produce
+another notification — it is logged at error instead. Otherwise one unreachable relay fills the
+table with notifications about notifications, and the alert that matters (the telling-a-person
+channel is broken) is buried in them.
+
+A failed delivery is an **outcome, not an error**: nothing about a Finding, a Position or a
+posture changes. The worker reports an error only when the STORE fails — the one failure that
+means the record of what happened is itself unreliable.
+
+### M1a-5 — FAKE senders, deliberately
+
+Both deliverers log and return an outcome; neither opens a socket. The mechanics N-M1a has to
+get right — claim order, attempt ledger, backoff, exhaustion, the notification, the operator
+reset — are all provable without a Jira instance, and a half-real sender would have made the
+step's test suite depend on a credential. The real senders arrive in N-M1b behind the same
+`IntentDeliverer` seam. `payload_sha256` / `payload_bytes` stay empty for the same reason:
+materialization belongs with the sender that fixes the body's shape.
+
+### M1a-6 — The operator surface is a CLI, not an API
+
+`cmd/deliveryctl` (`list-deadletters` · `retry` · `cancel`), reading the Communication database
+like `cmd/authadmin` reads the auth one. N-M1a adds **no HTTP surface**. An id that names
+nothing actionable — unknown, or already delivered — exits non-zero: an operator who typed the
+wrong id has to be told. `retry` clears the counters but never the attempt ledger: the counter
+answers "may we try again", the ledger answers "what happened", and a retry must not erase the
+second. Neither command touches a Finding or a Position.
+
+### M1a-7 — One switch over BOTH halves
+
+`THEMIS_COMMUNICATION_DELIVERY_ENABLED` (default **off**) gates the worker **and** the reader's
+intent recording. Off means off: no intents are written and nothing is sent. Gating only the
+worker would have let a default-configured node silently accumulate a queue nobody drains, which
+is indistinguishable from an outage to the person who later turns delivery on.
+
+### M1a-8 — The intent carries facts, never credentials or model output
+
+`snapshot` holds the identity facts of record (stamped by the app service, so a caller cannot
+omit them), `lineage` the originating envelope's identity, and `destination` a **governed name**
+— an audience, a project alias — resolved to real addresses by the sender. No address, no key,
+no model output, no workspace content. Telemetry carries the intent id, the destination, the
+origin event id and the correlation id, and never the payload: a delivery body is outward
+content, and a log is not an outward channel.
+
+### M1a-9 — NO CI-build content in this step
+
+There is no `ci_build` and no `ci_rebuild` intent type, no CI worker, no callback route and no
+rebuild loop. The intent-type vocabulary is CLOSED to `jira_issue` and `email`, enforced by a
+CHECK constraint, so a CI kind cannot appear by accident. RC-3's `ci_rebuild` and the `ci_build`
+path remain decisions of record with **no realization**; the rebuild loop (RC-4/RC-6) is
+untouched. N-M0 is likewise unchanged (RC-8): no new scope, no relaxation, no Governance write.
+
+### Honest limits (N-M1a)
+
+- **RC-2's ticket content and one-per-Release rule are not implemented** — see M1a-2/M1a-3. What
+  exists is the intent, not the ticket body.
+- **Two Communication NODES draining the same database can both claim the same intent.** The
+  claim is a plain due-time read, in-process concurrency is safe (one fetcher, N senders), and
+  the `IntentDeliverer` contract requires idempotence per intent id — which makes this a
+  duplicate-suppression question for the real senders in N-M1b, not a correctness hole now.
+- **State transitions are owned by `MarkDelivered` / `MarkDeadLetter` / `CancelIntent` /
+  `RetryIntent`, not by `RecordAttempt`** (one writer per transition). A crash between the last
+  failed attempt and the dead-letter write is self-healing: a worker that fetches a pending
+  intent whose attempts already reached the maximum finishes it WITHOUT sending again.
+- **`lineage` carries no `event_seq`.** The bus sequence is the `event_log`'s own ordering column
+  and is not carried in the kernel Envelope (EB-02); recording it would mean inventing a number.
+- The foreign ids (product/project/release/finding/proposal) are **TEXT, not UUID**: they are
+  other contexts' identities, carried verbatim and never parsed, so no format is imposed on
+  Registry or Governance — the same rule D5 applies to `product:<id>`. The intent's own id is a
+  UUID, because Communication mints it.
+- The dead-letter notification has **no deduplication key** (it is worker-sourced). Nothing
+  deduplicates it but the fact that an intent dead-letters once.
+
+### Realizes
+
+`internal/communication/adapters/store/migrations/000006_delivery_intents.{up,down}.sql` ·
+`adapters/store/delivery.go` · `app/delivery_intent.go` · `adapters/inbound/consumer.go` ·
+`adapters/delivery/{delivery,worker}.go` · `adapters/wiring/wiring.go` (`WireDelivery`) ·
+`cmd/communication` · `cmd/deliveryctl` · `deploy/node.env.example`. Conventions: R1 (console +
+OTel from the one shared logger, secrets and payloads redacted), R2 (self-documented config).

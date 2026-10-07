@@ -59,8 +59,45 @@ Operationally, three things:
 3. A 403 on a Governance write is less informative to the caller by design; the corresponding log
    line is more informative than anything that existed before.
 
+## Added 2026-10-01 — the remediation cycle, recorded (documentation only)
+
+The owner restated the outward-actions workflow as a loop: SBOM uploaded under Product / Project /
+Release / SBOM id → Themis lists its vulnerabilities → a Jira ticket tracks the fix → a Jenkins
+build produces a new image and a new SBOM under a new SBOM id for the same Release → Themis
+compares new against previous and updates the ticket → the result goes out by mail → repeat until
+fixed or the rebuild limit is reached, then stop and tell a person.
+
+Grilled runtime-side as **D-N-8..D-N-12** and recorded here as **EDR-DELIVERY-01 Revision 2**
+(RC-1..RC-8), with the acceptance block in `design.md` and the doc-only steps in `tasks.md`
+(Group 5). What it settles:
+
+- **Trigger (RC-1)** — the cycle starts on *evaluation complete* for the Release, not on SBOM
+  receipt. A Themis-owned pub/sub notification may carry that signal to the AI Harness; its
+  transport, event names, delivery semantics, subscriber auth and owning context are deferred to a
+  dedicated EDR + API change.
+- **Jira (RC-2)** — one ticket per Release, severity counts for all four levels, CVE ids listed
+  for Critical and High only.
+- **`ci_rebuild` (RC-3)** — a new, policy-gated delivery kind, **approved as a decision of record,
+  not implemented**. Its callback must carry the new SBOM id and the image digest. **Existing
+  `ci_build` semantics are preserved unchanged**: it still carries the accepted change artifact and
+  still follows the `proposal_accepted` path.
+- **Comparison and mail (RC-4, RC-5)** — Jira updates and mail happen only after the new-vs-previous
+  SBOM comparison, never from the build callback alone.
+- **Loop control (RC-6)** — default maximum 2 rebuild attempts per Release, operator-configurable;
+  exhaustion stops the loop and tells a person; Findings are never auto-resolved.
+- **Ownership (RC-7)** — Themis owns security truth, every outward effect and the loop; the harness
+  subscribes and nothing more.
+
+**Scope: documentation only.** No code, API spec, schema, migration or generated-handler change
+lands with it; `make check` is run to prove exactly that. **N-M0 is preserved in full** (RC-8):
+explicit per-route write-scope authorization, `delivery:callback` refused on every Governance
+write, `product:<id>` confined to its product, closed scope vocabulary — the cycle adds no scope
+and relaxes nothing.
+
 ## Not in this change
 
-M1 (delivery), M2 (CI), M3 (mail). `delivery:callback` exists and is refused everywhere it must be
-refused; what it will be ALLOWED to do is undecided and will be grilled in the runtime repository
-before it lands here.
+M1 (delivery), M2 (CI), M3 (mail) — including every mechanism Revision 2 describes. The
+remediation cycle is recorded, not built: `ci_rebuild` has no code, the valuation-complete
+notification has no transport, and the max-attempts knob has no name yet. `delivery:callback`
+exists and is refused everywhere it must be refused; what it will be ALLOWED to do is undecided and
+will be grilled in the runtime repository before it lands here.

@@ -68,3 +68,21 @@ guard fails the matrix, which is the only place completeness can be checked mech
 - `governance/adapters/registry`: both hops, and a blank hop returning an error rather than `""`.
 - `cmd/authadmin`: `validScopes` accepts the vocabulary and names the offender otherwise; the
   usage text mentions `delivery:callback` and `product:<id>`.
+
+## Acceptance as documented — Remediation Cycle (2026-10-01)
+
+`EDR-DELIVERY-01` **Revision 2** (RC-1..RC-8), mirroring runtime-side **D-N-8..D-N-12**
+(`themis-ai-runtime/openspec/changes/outward-actions/design.md`). **Documentation only** — no code,
+API, schema or generated-handler realization exists for any row below, which is why this block is
+"accepted as documented" and not a realization map.
+
+| EDR Revision 2 decision | Accepted as documented |
+|---|---|
+| RC-1 Trigger | The cycle starts on **evaluation complete** ("release posture evaluated") for the Release, never on SBOM receipt; a Themis-owned pub/sub notification MAY carry that signal to the harness. Transport, event names, delivery semantics, subscriber auth and owning context are deferred to their own EDR + API change — until then `finding_opened` / the posture-evaluated path remains the effective trigger in code. |
+| RC-2 Jira | One ticket **per Release**; severity counts for Critical/High/Medium/Low; **CVE ids listed for Critical and High only**; updates idempotent by intent id + attempt index; Jira stays a projection. |
+| RC-3 `ci_rebuild` | New delivery kind, **approved, not implemented**. Policy-gated (no fresh proposal acceptance); snapshot = pipeline name, Product/Project/Release, prior SBOM id, targeted Finding set, attempt index, no credentials; callback MUST carry **new SBOM id + image digest**. `ci_build` unchanged (`proposal_accepted` path, carries the accepted artifact). |
+| RC-4 Comparison | New SBOM vs previous SBOM for the same Product/Project/Release → closed vs still open; the only measure of progress; drives the Jira update. Baseline window open. |
+| RC-5 Email | Plain text, **after the comparison** on each attempt, never from the build callback; governed audiences; idempotent per intent id; snapshot facts only. |
+| RC-6 Loop control | **Default max-attempts = 2** per Release, operator-configurable (locus/name TBD); success = targeted set closed; exhaustion → stop + mail + Jira update; **never auto-resolve a Finding**. |
+| RC-7 Ownership | Themis owns security truth, all outward effects and loop control; the harness is a subscriber only — networkless for Jira/CI/mail, no outward credential, no Governance act. Model output advisory; secrets excluded from intents; controls fail closed. |
+| RC-8 N-M0 | **Unchanged.** Group 1 stands as implemented; no new scope, no relaxation, no new Governance write path. |
