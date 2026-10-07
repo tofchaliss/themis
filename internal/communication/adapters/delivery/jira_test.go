@@ -48,18 +48,27 @@ type jiraStub struct {
 
 	// existingKey, when set, is what the JQL search finds (the update path).
 	existingKey string
-	// searchStatus / createStatus override the success status for the refusal paths.
+	// searchStatus / createStatus / updateStatus override the success status for the refusal paths.
 	searchStatus, createStatus, updateStatus int
+	// labelStatus refuses the LABEL edit only — the ME project's shape, where a create succeeds and
+	// the follow-up label edit does not.
+	labelStatus int
+	// refuseLabelsOnCreate reproduces the ME project exactly: a create that carries `labels` is
+	// refused with Jira's own message, so a sender that still sent them on create fails here.
+	refuseLabelsOnCreate bool
 	// malformedSearch answers the search with unparseable JSON.
 	malformedSearch bool
 	// keylessCreate answers a create with no issue key.
 	keylessCreate bool
 
-	searches, creates, updates int
-	jql                        string
-	authorization              string
-	created, updated           map[string]any
-	updatedPath                string
+	// updates counts CONTENT edits (a `fields` PUT); labelEdits counts label edits (an `update` PUT).
+	// They are counted apart because the whole change is that one create became a create plus a
+	// separate, best-effort label edit.
+	searches, creates, updates, labelEdits int
+	jql                                    string
+	authorization                          string
+	created, updated, labelEdit            map[string]any
+	updatedPath, labelPath                 string
 }
 
 // prefix is where this instance answers; anything outside it is a 404.
@@ -108,6 +117,17 @@ func (s *jiraStub) handler() http.Handler {
 		case r.Method == http.MethodPost && resource == "/issue":
 			s.creates++
 			s.created = decodeBody(r)
+			if s.refuseLabelsOnCreate {
+				if fields, ok := s.created["fields"].(map[string]any); ok {
+					if _, sent := fields["labels"]; sent {
+						// Jira's own wording, verbatim: the ME project's create screen has no labels
+						// field, and this refuses the WHOLE create, not just the field.
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte(`{"errorMessages":[],"errors":{"labels":"Field 'labels' cannot be set. It is not on the appropriate screen, or unknown."}}`))
+						return
+					}
+				}
+			}
 			if s.createStatus != 0 {
 				w.WriteHeader(s.createStatus)
 				_, _ = w.Write([]byte(`{"errors":{"issuetype":"not valid"}}`))
@@ -121,8 +141,20 @@ func (s *jiraStub) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"id":"10001","key":"SEC-7"}`))
 
 		case r.Method == http.MethodPut && strings.HasPrefix(resource, "/issue/"):
+			body := decodeBody(r)
+			if _, isLabelEdit := body["update"]; isLabelEdit {
+				s.labelEdits++
+				s.labelPath, s.labelEdit = r.URL.Path, body
+				if s.labelStatus != 0 {
+					w.WriteHeader(s.labelStatus)
+					_, _ = w.Write([]byte(`{"errors":{"labels":"Field 'labels' cannot be set."}}`))
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			s.updates++
-			s.updatedPath, s.updated = r.URL.Path, decodeBody(r)
+			s.updatedPath, s.updated = r.URL.Path, body
 			if s.updateStatus != 0 {
 				w.WriteHeader(s.updateStatus)
 				return
@@ -145,6 +177,32 @@ func (s *jiraStub) counts() (int, int, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.searches, s.creates, s.updates
+}
+
+// labelCount is how many LABEL edits the stub saw — the follow-up that replaced labels-on-create.
+func (s *jiraStub) labelCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.labelEdits
+}
+
+// labelAdds reads the label names an `update` edit asked Jira to add.
+func labelAdds(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	update, ok := body["update"].(map[string]any)
+	if !ok {
+		t.Fatalf("not a label edit: %v", body)
+	}
+	var out []string
+	for _, op := range toSlice(update["labels"]) {
+		entry, _ := op.(map[string]any)
+		if add, ok := entry["add"]; ok {
+			out = append(out, asString(add))
+		} else {
+			t.Errorf("label operation %v is not an `add` — Themis never removes a label it did not set", entry)
+		}
+	}
+	return out
 }
 
 // jiraConfig is a complete Jira CLOUD configuration against the stub: Basic auth, REST v3, and both
@@ -318,7 +376,10 @@ func TestRealJiraDelivererCreatesTheReleaseTicket(t *testing.T) {
 				t.Fatalf("delivered %d, want 1", n)
 			}
 			if searches, creates, updates := stub.counts(); searches != 1 || creates != 1 || updates != 0 {
-				t.Errorf("calls = search %d / create %d / update %d, want 1/1/0", searches, creates, updates)
+				t.Errorf("calls = search %d / create %d / content update %d, want 1/1/0", searches, creates, updates)
+			}
+			if got := stub.labelCount(); got != 1 {
+				t.Errorf("label edits = %d, want 1 (labels are added AFTER the create)", got)
 			}
 
 			in := h.intents.get(t, id)
@@ -328,11 +389,14 @@ func TestRealJiraDelivererCreatesTheReleaseTicket(t *testing.T) {
 			if in.Result["jira_issue_key"] != "SEC-7" || in.Result["jira_action"] != "created" {
 				t.Errorf("result = %v, want the issue key", in.Result)
 			}
+			if in.Result["jira_labels"] != "added" || in.Result["jira_found_by"] != "created" {
+				t.Errorf("result = %v, want the label outcome and how the ticket was found", in.Result)
+			}
 
 			// The search is by LABEL, exactly — not a summary text match whose near-miss opens a
 			// second ticket for a Release that already had one. Identical JQL on both flavours.
 			stub.mu.Lock()
-			jql, auth, created := stub.jql, stub.authorization, stub.created
+			jql, auth, created, labelEdit, labelPath := stub.jql, stub.authorization, stub.created, stub.labelEdit, stub.labelPath
 			stub.mu.Unlock()
 			for _, want := range []string{`project = "SEC"`, `labels = "themis-release-rel-1"`} {
 				if !strings.Contains(jql, want) {
@@ -350,9 +414,17 @@ func TestRealJiraDelivererCreatesTheReleaseTicket(t *testing.T) {
 			if issuetype, _ := fields["issuetype"].(map[string]any); issuetype["name"] != "Task" {
 				t.Errorf("issuetype = %v, want the default Task", fields["issuetype"])
 			}
-			labels := toSlice(fields["labels"])
-			if len(labels) != 2 || labels[0] != "themis" || labels[1] != "themis-release-rel-1" {
-				t.Errorf("labels = %v", labels)
+			// The create carries NO labels: a project whose create screen has none refuses the whole
+			// create over that one field.
+			if _, sent := fields["labels"]; sent {
+				t.Errorf("the create must not carry labels: %v", fields["labels"])
+			}
+			// They arrive by a follow-up edit on the SAME issue instead.
+			if want := flavour.wantPrefix + "/issue/SEC-7"; labelPath != want {
+				t.Errorf("label edit path = %q, want %q", labelPath, want)
+			}
+			if adds := labelAdds(t, labelEdit); len(adds) != 2 || adds[0] != "themis" || adds[1] != "themis-release-rel-1" {
+				t.Errorf("label adds = %v", adds)
 			}
 
 			// The content rule reaches Jira in this flavour's own encoding: counts for all four
@@ -396,7 +468,12 @@ func TestRealJiraDelivererAddressesTheInstancesOwnPath(t *testing.T) {
 				t.Fatalf("deliver: %v", err)
 			}
 
-			want := []string{flavour.wantPrefix + "/search", flavour.wantPrefix + "/issue/SEC-3"}
+			// Search, then the content edit, then the label edit — all three under the instance's path.
+			want := []string{
+				flavour.wantPrefix + "/search",
+				flavour.wantPrefix + "/issue/SEC-3",
+				flavour.wantPrefix + "/issue/SEC-3",
+			}
 			if strings.Join(paths, " ") != strings.Join(want, " ") {
 				t.Errorf("paths = %v, want %v", paths, want)
 			}
@@ -461,6 +538,9 @@ func TestOutwardPathFromPostureToJira(t *testing.T) {
 			if searches, creates, updates := stub.counts(); searches != 1 || creates != 1 || updates != 0 {
 				t.Errorf("calls = %d/%d/%d, want one search and one create", searches, creates, updates)
 			}
+			if got := stub.labelCount(); got != 1 {
+				t.Errorf("label edits = %d, want 1", got)
+			}
 
 			stub.mu.Lock()
 			created := stub.created
@@ -514,11 +594,19 @@ func TestRealJiraDelivererUpdatesTheExistingTicket(t *testing.T) {
 			h.runOnce(t)
 
 			if searches, creates, updates := stub.counts(); searches != 1 || creates != 0 || updates != 1 {
-				t.Errorf("calls = search %d / create %d / update %d, want 1/0/1", searches, creates, updates)
+				t.Errorf("calls = search %d / create %d / content update %d, want 1/0/1", searches, creates, updates)
+			}
+			// The labels are re-asserted on every update, which is how a create whose label edit
+			// failed heals without anybody tracking that it did.
+			if got := stub.labelCount(); got != 1 {
+				t.Errorf("label edits = %d, want 1 (the update retries them)", got)
 			}
 			in := h.intents.get(t, id)
 			if in.State != app.IntentDelivered || in.Result["jira_issue_key"] != "SEC-3" || in.Result["jira_action"] != "updated" {
 				t.Errorf("intent = %+v", in)
+			}
+			if in.Result["jira_found_by"] != "label_search" {
+				t.Errorf("found_by = %q, want the label search (no Themis record was wired)", in.Result["jira_found_by"])
 			}
 
 			stub.mu.Lock()
@@ -541,6 +629,423 @@ func TestRealJiraDelivererUpdatesTheExistingTicket(t *testing.T) {
 
 // The update is a FULL REPLACE, so repeating it is a no-op by construction: two passes over one
 // Release leave one ticket holding the same content.
+// --- The ME project: labels are not on the create screen -------------------------------------
+
+// recordedTickets is Themis's own ticket record: the `jira_issue_key` an earlier delivered intent
+// carries for a Release. It can also fail, to prove the search still backs it up.
+type recordedTickets struct {
+	keys  map[string]string
+	err   error
+	calls int
+}
+
+func (r *recordedTickets) JiraIssueKeyForRelease(_ context.Context, releaseID string) (string, bool, error) {
+	r.calls++
+	if r.err != nil {
+		return "", false, r.err
+	}
+	key, ok := r.keys[releaseID]
+	return key, ok, nil
+}
+
+// The ME project refuses a create that carries labels — Jira's own "Field 'labels' cannot be set" —
+// so the create must carry none and the labels must arrive by a follow-up edit. The stub FAILS the
+// create if labels are sent, which is what makes this a regression test rather than a restatement.
+func TestRealJiraDelivererCreatesWithoutLabelsThenAddsThem(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	h := newHarness(t, testConfig())
+	jira, err := delivery.NewRealJiraDeliverer(jiraConfig(srv.URL), h.logger)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	h.withDeliverers(testConfig(), map[app.IntentType]delivery.IntentDeliverer{app.IntentJiraIssue: jira})
+	id := h.seedIntent(t, h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload()))
+
+	if n := h.runOnce(t); n != 1 {
+		t.Fatalf("delivered %d, want 1 — a project without labels on its create screen must still get a ticket", n)
+	}
+	in := h.intents.get(t, id)
+	if in.Result["jira_issue_key"] != "SEC-7" || in.Result["jira_labels"] != "added" {
+		t.Errorf("result = %v", in.Result)
+	}
+	if got := stub.labelCount(); got != 1 {
+		t.Errorf("label edits = %d, want 1", got)
+	}
+}
+
+// A label edit that FAILS after a successful create must not lose the ticket: the key is recorded,
+// the delivery succeeds, and the next cycle updates that ticket instead of opening a second one.
+// This is the exact sequence the owner asked for, run twice.
+func TestRealJiraDelivererRecordsTheKeyWhenTheLabelEditFails(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true, labelStatus: http.StatusBadRequest}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	h := newHarness(t, testConfig())
+	jira, err := delivery.NewRealJiraDeliverer(jiraConfig(srv.URL), h.logger)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	h.withDeliverers(testConfig(), map[app.IntentType]delivery.IntentDeliverer{app.IntentJiraIssue: jira})
+	id := h.seedIntent(t, h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload()))
+
+	if n := h.runOnce(t); n != 1 {
+		t.Fatalf("delivered %d, want 1 — a refused label edit must not fail a delivery whose ticket landed", n)
+	}
+	in := h.intents.get(t, id)
+	if in.Result["jira_issue_key"] != "SEC-7" {
+		t.Fatalf("the key must be recorded even when the labels did not land: %v", in.Result)
+	}
+	if in.Result["jira_labels"] != "pending" {
+		t.Errorf("jira_labels = %q, want pending so an operator can see it", in.Result["jira_labels"])
+	}
+	if !hasMessage(h.logs, "jira refused the label edit") {
+		t.Error("a refused label edit must be logged")
+	}
+
+	// A SECOND intent for the same Release. The label never landed, so Jira's search cannot find the
+	// ticket — only Themis's own answer can. No second create.
+	stub.mu.Lock()
+	stub.existingKey = "" // the search finds nothing, because the label is not there
+	stub.mu.Unlock()
+	second := h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload())
+	second.ID, second.OriginEventID = "int-second", "env-2"
+	h.seedIntent(t, second)
+
+	if n := h.runOnce(t); n != 1 {
+		t.Fatalf("second pass delivered %d, want 1", n)
+	}
+	if _, creates, updates := stub.counts(); creates != 1 || updates != 1 {
+		t.Errorf("creates = %d, content updates = %d — the second intent must UPDATE the first ticket", creates, updates)
+	}
+	if got := h.intents.get(t, "int-second").Result["jira_found_by"]; got != "memo" {
+		t.Errorf("found_by = %q, want this process's memo (the store has not been asked yet)", got)
+	}
+	if got := stub.labelCount(); got != 2 {
+		t.Errorf("label edits = %d, want 2 — the update retries the labels that never landed", got)
+	}
+}
+
+// Themis's OWN RECORD is consulted before Jira, and it is what carries the one-ticket rule across a
+// restart: a new process has no memo, and a ticket whose label edit failed is invisible to the search.
+func TestRealJiraDelivererPrefersThemisOwnRecordOverTheSearch(t *testing.T) {
+	stub := &jiraStub{existingKey: "SEC-999"} // the search would answer, and must not be asked
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	tickets := &recordedTickets{keys: map[string]string{"rel-1": "SEC-42"}}
+	jira, err := delivery.NewRealJiraDeliverer(jiraConfig(srv.URL), nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	res, err := jira.WithTicketIndex(tickets).DeliverIntent(context.Background(), app.Intent{
+		ID: "int-1", Type: app.IntentJiraIssue, ReleaseID: "rel-1", PayloadBytes: ticketPayload(),
+	})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if res.Metadata["jira_issue_key"] != "SEC-42" || res.Metadata["jira_found_by"] != "themis_record" {
+		t.Errorf("result = %v, want the recorded key", res.Metadata)
+	}
+	if tickets.calls != 1 {
+		t.Errorf("record reads = %d, want 1", tickets.calls)
+	}
+	if searches, creates, updates := stub.counts(); searches != 0 || creates != 0 || updates != 1 {
+		t.Errorf("calls = search %d / create %d / update %d — the search must not be needed", searches, creates, updates)
+	}
+}
+
+// The search is the FALLBACK, in both the senses that matter: when Themis has no record for the
+// Release, and when the record cannot be read at all. An unreachable index must not stop a ticket
+// being updated — and must certainly not cause a second one.
+func TestRealJiraDelivererFallsBackToTheLabelSearch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tickets *recordedTickets
+	}{
+		{"no record for this Release", &recordedTickets{keys: map[string]string{"rel-other": "SEC-1"}}},
+		{"the record could not be read", &recordedTickets{err: errors.New("db down")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &jiraStub{existingKey: "SEC-3"}
+			srv := httptest.NewServer(stub.handler())
+			defer srv.Close()
+
+			jira, err := delivery.NewRealJiraDeliverer(jiraConfig(srv.URL), nil)
+			if err != nil {
+				t.Fatalf("configure: %v", err)
+			}
+			res, err := jira.WithTicketIndex(tc.tickets).DeliverIntent(context.Background(), app.Intent{
+				ID: "int-1", Type: app.IntentJiraIssue, ReleaseID: "rel-1", PayloadBytes: ticketPayload(),
+			})
+			if err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			if res.Metadata["jira_issue_key"] != "SEC-3" || res.Metadata["jira_found_by"] != "label_search" {
+				t.Errorf("result = %v, want the searched key", res.Metadata)
+			}
+			if searches, creates, _ := stub.counts(); searches != 1 || creates != 0 {
+				t.Errorf("searches = %d, creates = %d", searches, creates)
+			}
+		})
+	}
+}
+
+// Two intents for ONE Release, delivered CONCURRENTLY by two worker goroutines — the shape the
+// finding_opened proxy produces by the dozen. Exactly one create, because the create path is
+// serialized per Release; without the lock both would search, both would miss, and both would open a
+// ticket.
+func TestRealJiraDelivererCreatesOnceForConcurrentIntentsOfOneRelease(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	cfg := testConfig()
+	cfg.Workers = 4
+	h := newHarness(t, cfg)
+	jira, err := delivery.NewRealJiraDeliverer(jiraConfig(srv.URL), h.logger)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	h.withDeliverers(cfg, map[app.IntentType]delivery.IntentDeliverer{app.IntentJiraIssue: jira})
+
+	// Eight intents, one Release — all due now, all in one batch.
+	for i := 0; i < 8; i++ {
+		in := h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload())
+		in.ID = fmt.Sprintf("int-%d", i)
+		in.OriginEventID = fmt.Sprintf("env-%d", i)
+		h.seedIntent(t, in)
+	}
+
+	if n := h.runOnce(t); n != 8 {
+		t.Fatalf("delivered %d, want 8", n)
+	}
+	_, creates, updates := stub.counts()
+	if creates != 1 {
+		t.Errorf("creates = %d, want exactly 1 — one Release, one ticket", creates)
+	}
+	if updates != 7 {
+		t.Errorf("content updates = %d, want 7 (the other intents update the one ticket)", updates)
+	}
+	for i := 0; i < 8; i++ {
+		if got := h.intents.get(t, fmt.Sprintf("int-%d", i)).Result["jira_issue_key"]; got != "SEC-7" {
+			t.Errorf("intent %d landed on %q, want the one ticket", i, got)
+		}
+	}
+}
+
+// --- The ME project: issue type by ID, and the project's own required fields -----------------
+
+// A project whose issue types are renamed, localized or duplicated can only be addressed by ID — and
+// an ID is what a Jira admin reads off the screen that worked manually. When one is set the NAME is
+// not sent at all, because sending both lets Jira decide which it believes.
+func TestRealJiraDelivererSendsTheIssueTypeByIDWhenConfigured(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	cfg := jiraConfig(srv.URL)
+	cfg.IssueTypeID = "10501"
+	cfg.IssueType = "Task" // present, and deliberately NOT sent
+	jira, err := delivery.NewRealJiraDeliverer(cfg, nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	if _, err := jira.DeliverIntent(context.Background(), app.Intent{
+		ID: "int-1", Type: app.IntentJiraIssue, ReleaseID: "rel-1", PayloadBytes: ticketPayload(),
+	}); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	stub.mu.Lock()
+	created := stub.created
+	stub.mu.Unlock()
+	issuetype, _ := fieldsOf(t, created)["issuetype"].(map[string]any)
+	if issuetype["id"] != "10501" {
+		t.Errorf("issuetype = %v, want the configured id", issuetype)
+	}
+	if _, sentName := issuetype["name"]; sentName {
+		t.Errorf("issuetype = %v, must carry the id alone", issuetype)
+	}
+	if got := cfg.String(); !strings.Contains(got, `issue_type_id="10501"`) || strings.Contains(got, `issue_type=`) {
+		t.Errorf("the startup line must report the id in force: %s", got)
+	}
+}
+
+// The ME project's own required fields, merged into every create verbatim — and only into a CREATE.
+// Re-asserting a priority or a version on every cycle would overwrite whatever a human changed.
+func TestRealJiraDelivererMergesTheProjectsExtraFields(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	cfg := jiraConfig(srv.URL)
+	cfg.IssueTypeID = "10501"
+	cfg.ExtraFieldsJSON = `{
+		"customfield_10911": {"value": "Critical"},
+		"customfield_11408": {"value": "Internal"},
+		"customfield_11409": {"value": "Implementation"},
+		"customfield_10804": {"value": "All"},
+		"versions": [{"id": "83572"}]
+	}`
+	jira, err := delivery.NewRealJiraDeliverer(cfg, nil)
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	if _, err := jira.DeliverIntent(context.Background(), app.Intent{
+		ID: "int-1", Type: app.IntentJiraIssue, ReleaseID: "rel-1", PayloadBytes: ticketPayload(),
+	}); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	stub.mu.Lock()
+	created := stub.created
+	stub.mu.Unlock()
+	fields := fieldsOf(t, created)
+	for name, want := range map[string]string{
+		"customfield_10911": "Critical", "customfield_11408": "Internal",
+		"customfield_11409": "Implementation", "customfield_10804": "All",
+	} {
+		value, _ := fields[name].(map[string]any)
+		if value["value"] != want {
+			t.Errorf("%s = %v, want %q", name, fields[name], want)
+		}
+	}
+	versions := toSlice(fields["versions"])
+	if len(versions) != 1 {
+		t.Fatalf("versions = %v", fields["versions"])
+	}
+	if version, _ := versions[0].(map[string]any); version["id"] != "83572" {
+		t.Errorf("versions = %v", fields["versions"])
+	}
+	// Themis's own fields survive the merge.
+	if fields["summary"] != "Themis remediation - Release rel-1" {
+		t.Errorf("summary = %v", fields["summary"])
+	}
+
+	// The UPDATE carries content only — no extra fields to fight a human with.
+	stub.mu.Lock()
+	stub.existingKey = "SEC-7"
+	stub.mu.Unlock()
+	if _, err := jira.DeliverIntent(context.Background(), app.Intent{
+		ID: "int-2", Type: app.IntentJiraIssue, ReleaseID: "rel-2", PayloadBytes: ticketPayload(),
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	stub.mu.Lock()
+	updated := stub.updated
+	stub.mu.Unlock()
+	updateFields := fieldsOf(t, updated)
+	for _, unwanted := range []string{"customfield_10911", "versions"} {
+		if _, sent := updateFields[unwanted]; sent {
+			t.Errorf("the update must not re-assert %s: %v", unwanted, updateFields)
+		}
+	}
+}
+
+// Extra fields may ADD to a create; they may never take over a field Themis owns. A configuration
+// file silently replacing the summary or the body of a security ticket is the one thing this seam
+// must not permit — so a reserved key is dropped and the operator is told it was.
+func TestExtraFieldsCannotOverrideThemisOwnFields(t *testing.T) {
+	stub := &jiraStub{refuseLabelsOnCreate: true}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	cfg := jiraConfig(srv.URL)
+	cfg.ExtraFieldsJSON = `{"summary":"anything","description":"anything","project":{"key":"OTHER"},
+		"issuetype":{"id":"1"},"labels":["mine"],"customfield_1":"kept"}`
+	jira, err := delivery.NewRealJiraDeliverer(cfg, observability.New(zap.New(core)))
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	if _, err := jira.DeliverIntent(context.Background(), app.Intent{
+		ID: "int-1", Type: app.IntentJiraIssue, ReleaseID: "rel-1", PayloadBytes: ticketPayload(),
+	}); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	stub.mu.Lock()
+	created := stub.created
+	stub.mu.Unlock()
+	fields := fieldsOf(t, created)
+	if fields["summary"] != "Themis remediation - Release rel-1" {
+		t.Errorf("summary = %v, must be Themis's", fields["summary"])
+	}
+	if project, _ := fields["project"].(map[string]any); project["key"] != "SEC" {
+		t.Errorf("project = %v, must be the configured one", fields["project"])
+	}
+	if issuetype, _ := fields["issuetype"].(map[string]any); issuetype["name"] != "Task" {
+		t.Errorf("issuetype = %v, must be Themis's", fields["issuetype"])
+	}
+	if _, sent := fields["labels"]; sent {
+		t.Errorf("labels must not reach a create at all: %v", fields["labels"])
+	}
+	if body := adfText(t, fields["description"]); !strings.Contains(body, "CVE-2026-0100") {
+		t.Errorf("description must be the snapshot, got %q", body)
+	}
+	// The one non-reserved field is kept — dropping is targeted, not wholesale.
+	if fields["customfield_1"] != "kept" {
+		t.Errorf("customfield_1 = %v, want it kept", fields["customfield_1"])
+	}
+	entry, ok := findMessage(logs, "tried to set fields Themis owns")
+	if !ok {
+		t.Fatal("an ignored reserved field must be logged")
+	}
+	for _, name := range reservedFieldNames {
+		if !strings.Contains(fmt.Sprint(entry.ContextMap()), name) {
+			t.Errorf("the warning must name %s: %v", name, entry.ContextMap())
+		}
+	}
+}
+
+var reservedFieldNames = []string{"project", "issuetype", "summary", "description", "labels"}
+
+// Invalid JSON refuses the sender at CONFIGURE time and keeps the fake wired. These fields exist
+// because a Jira screen requires them, so a typo must not be discovered one failed create per
+// Release, forever.
+func TestExtraFieldsInvalidJSONRefusesTheSender(t *testing.T) {
+	cfg := jiraConfig("https://acme.atlassian.net")
+	for _, raw := range []string{`{"customfield_1":`, `not json at all`, `["an array, not an object"]`, `"a string"`} {
+		cfg.ExtraFieldsJSON = raw
+		_, err := delivery.NewRealJiraDeliverer(cfg, nil)
+		if err == nil {
+			t.Errorf("%q must be refused", raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS") {
+			t.Errorf("err = %v, want it to name the variable", err)
+		}
+	}
+
+	// And the refusal reaches the SELECTION: the fake stays wired, loudly.
+	core, logs := observer.New(zapcore.DebugLevel)
+	bad := delivery.Config{Enabled: true, Jira: jiraConfig("https://acme.atlassian.net")}
+	bad.Jira.ExtraFieldsJSON = `{broken`
+	deliverers := delivery.NewDeliverers(bad, nil, observability.New(zap.New(core)))
+	if _, fake := deliverers[app.IntentJiraIssue].(*delivery.FakeJiraDeliverer); !fake {
+		t.Errorf("jira deliverer = %T, want the fake", deliverers[app.IntentJiraIssue])
+	}
+	if !hasFieldValue(logs, "THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS") {
+		t.Error("the refusal must name the variable in the log")
+	}
+}
+
+// An empty or whitespace-only value is NOT a parse error: it means "this project needs nothing extra",
+// which is every project that works out of the box.
+func TestExtraFieldsEmptyIsNotAnError(t *testing.T) {
+	cfg := jiraConfig("https://acme.atlassian.net")
+	for _, raw := range []string{"", "   ", "{}"} {
+		cfg.ExtraFieldsJSON = raw
+		if _, err := delivery.NewRealJiraDeliverer(cfg, nil); err != nil {
+			t.Errorf("%q must be accepted: %v", raw, err)
+		}
+	}
+}
+
 func TestRealJiraDelivererUpdateIsIdempotent(t *testing.T) {
 	stub := &jiraStub{existingKey: "SEC-3"}
 	srv := httptest.NewServer(stub.handler())
@@ -845,7 +1350,7 @@ func TestNewDeliverersRefusesAClearTextJira(t *testing.T) {
 		Enabled: true,
 		Jira: delivery.JiraConfig{Enabled: true, BaseURL: "http://jira.acme.example",
 			ProjectKey: "SEC", User: jiraUser, APIToken: jiraToken},
-	}, logger)
+	}, nil, logger)
 
 	if _, fake := deliverers[app.IntentJiraIssue].(*delivery.FakeJiraDeliverer); !fake {
 		t.Errorf("jira deliverer = %T, want the fake — the real one would leak the token", deliverers[app.IntentJiraIssue])

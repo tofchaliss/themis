@@ -3,13 +3,16 @@
 Status: **Accepted 2026-09-30** for N-M0; **Revision 2 (2026-10-01) — remediation cycle, accepted
 as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a delivery intents,
 IMPLEMENTED** (intents are persisted and sent by workers against FAKE senders); **Revision 4
-(2026-10-02, amended 2026-10-05 and 2026-10-06) — N-M1b real Jira + mail senders and payload
+(2026-10-02, amended 2026-10-05, -06 and -07) — N-M1b real Jira + mail senders and payload
 materialization, IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one
-ticket per Release; the CI build and the rebuild loop are still later milestones). Two amendments
+ticket per Release; the CI build and the rebuild loop are still later milestones). Three amendments
 came out of the enterprise-VM run: **M1b-8** (2026-10-05) — Communication's Governance and Registry
 READS carry `X-API-Key` from `THEMIS_API_KEY`; **M1b-3a** (2026-10-06) — the estate's Jira is
 self-hosted **Data Center**, so auth mode (`basic`/`bearer`) and REST version (`3`/`2`) are
-configurable, defaulting to Cloud. The decisions were grilled and locked with the user in
+configurable, defaulting to Cloud; **M1b-4a/4b** (2026-10-07) — the estate's project forbids labels on
+create, so Themis's OWN RECORD became the ticket index and labels a best-effort follow-up edit, and the
+project's issue-type id + required custom fields are configurable. The decisions were grilled and
+locked with the user in
 the `themis-ai-runtime` repository (`openspec/changes/outward-actions`, **D-N-6** locked). This
 EDR records what those decisions require of THEMIS, so the Themis-side implementation has a
 reason of record in this repository. Where they disagree, the runtime-side design wins for
@@ -576,6 +579,71 @@ The update is a **full replace**, which is what makes it idempotent by construct
 twice leaves the issue in the same state, so a retry after a timeout whose PUT actually landed
 costs nothing. Jira stays a projection — no Themis state follows from a Jira transition (D-N-7).
 
+### M1b-4a — A project may forbid labels on create, so THEMIS'S OWN RECORD is the index (owner decision, 2026-10-07)
+
+**Measured on the enterprise VM, project ME.** Labels are not on that project's create screen, so Jira
+answered `Field 'labels' cannot be set` — and refused **the whole create** over that one field. Every
+ticket failed. Worse, the fix is not just "move the labels": if labels can fail to apply, then a label
+search can fail to FIND, and the one-ticket rule was resting entirely on it.
+
+The ordering changed, and this is the substance of the decision:
+
+1. **Themis's own record** — the `jira_issue_key` on an earlier *delivered* intent for that Release.
+2. **The label search** — now the FALLBACK, for a Release Themis has no record of.
+3. Create.
+
+Themis's record depends on nothing external: not on the search index having caught up, not on the
+credential being allowed to browse, not on a label having been applied. Asking Jira what Jira knows
+about work Themis did was always the weaker question; the ME project just made the weakness fatal.
+
+The create carries **no labels**, and they are added by a follow-up `update`-style edit that is
+**best effort**: on failure the ticket stands, the key is recorded, and the next update retries —
+`add` is idempotent, so every later cycle retries for free with no state to track. A failed label edit
+must never fail the delivery, because a failed delivery retries the whole thing *including the create*,
+on an intent whose key the store has not yet recorded. That is precisely the path that opens a second
+ticket, and a second ticket costs more than a missing label.
+
+Work on one Release is **serialized in-process** (a per-Release lock held across lookup AND create).
+Checking first and creating later with no lock between is the race, not a fix for it — and the
+`finding_opened` proxy produces intents for one Release by the dozen, all due at once, drained by
+`cfg.Workers` goroutines. A process-local memo of the key sits beside the lock because the durable
+record arrives too late to help: the key reaches the store when the WORKER marks the intent delivered,
+which is after the sender has returned.
+
+The delivery result now records **how** the ticket was found (`jira_found_by`: `memo`,
+`themis_record`, `label_search`, `created`) and **whether the labels landed** (`jira_labels`:
+`added` / `pending`), so an operator can see which mechanism is carrying the rule rather than
+inferring it.
+
+### M1b-4b — Issue type by ID, and the project's own required fields (owner decision, 2026-10-07)
+
+The same project needs `issuetype` **by id** (10501) and four required custom fields plus a version
+before it will accept a create at all. Two knobs, both unset by default:
+
+- `THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE_ID` — when set, the issue type is sent by id and the **name is
+  not sent at all**. Sending both would let Jira decide which it believes. An id is also the only way
+  to address a project whose type names are renamed, localized or duplicated across schemes.
+- `THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS` — a JSON object merged into every **create**'s `fields`,
+  passed through verbatim so the field's own shape stays the operator's choice.
+
+Three constraints on the merge, each load-bearing:
+
+- **It can never override `project`, `issuetype`, `summary`, `description` or `labels`.** Those are the
+  ticket's identity and its snapshotted content; a configuration file silently replacing the body of a
+  security ticket is the one thing this seam must not permit. A reserved key is dropped and the node
+  logs which, so an operator who tried is told rather than left wondering.
+- **Invalid JSON refuses the sender at startup**, and the fake stays wired. These fields exist because
+  a screen *requires* them, so a typo must not be discovered one failed create per Release, forever.
+- **Create only.** Re-asserting a priority or a version on every cycle would overwrite whatever a
+  human changed on the ticket — the opposite of what a projection should do.
+
+Also fixed with them: the issue type **name defaulted in only one half of the node**. The sender
+applied `Task` internally while `ConfigFromEnv` left the field empty, so the startup line read
+`issue_type=""` and disagreed with the request it was describing — and an operator debugging the
+create failure above spent that disagreement looking for a gap that was not there. The effective
+value is now resolved where it is read, like the auth mode and the API version beside it. A default
+that only one half of a node knows about is a default that lies.
+
 ### M1b-5 — The ticket's four severity buckets are read off `base_score`
 
 RC-2 asks for counts for Critical/High/Medium/Low and CVE ids for Critical and High only. The
@@ -667,14 +735,18 @@ Two details that are not incidental:
 
 ### Honest limits (N-M1b)
 
-- **First-run ticket idempotence depends on SEARCH permission.** A Jira credential that may create
-  but not search the project will not find the existing issue and will open a second one next
-  cycle. The issue key is recorded on the intent result, so which ticket an obligation landed on
-  stays answerable — but the duplicate is real.
-- **Two Communication NODES racing before either has created the issue can still open it twice.**
-  The real senders narrow M1a's limit rather than closing it: a duplicate send after creation is an
-  idempotent update and a collapsible mail. Closing the race needs a store-level claim, which is
-  its own step.
+- **Two Communication NODES can still open two tickets for one Release.** The per-Release lock is
+  in-process, and Themis's record only answers once the first node's intent is marked delivered — so a
+  genuine simultaneous first delivery on two nodes is not covered. M1b-4a narrows this a long way (the
+  record answers from the second delivery onward, whatever Jira's index or labels do) without closing
+  it; closing it needs a store-level claim, which is its own step.
+- **A create that succeeds but whose outcome is never recorded can be repeated.** If the process dies
+  between Jira accepting the create and the worker marking the intent delivered, the key is lost from
+  Themis's record; the label search is then the only backstop, and on a project that forbids labels on
+  create there may be no label to find. The window is one write wide and the consequence is a second
+  ticket, not lost work — but it is real, and Jira offers no idempotency key to close it.
+- **Search permission still matters, but only for the fallback.** A credential that may create and
+  edit but not browse now works for every Release Themis has a record of.
 - **Two Jira flavours are supported, and a THIRD would be a third decision** (M1b-3a): Cloud
   (`basic` + v3) and Data Center / Server (`bearer` + v2). OAuth, a reverse proxy that rewrites the
   REST path, and Jira's own newer `/search/jql` endpoint are all out of scope here. An instance that
