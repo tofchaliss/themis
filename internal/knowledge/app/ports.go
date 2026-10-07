@@ -29,6 +29,11 @@ const (
 	// is the word this codebase already uses in prose for a terminal, relationship-free exit
 	// (see Finding.Archive), as distinct from `superseded`, which names a replacement.
 	EventComponentRetired = "knowledge.component_retired"
+	// EventReleaseCorrelationCompleted — Knowledge finished correlating one SBOM
+	// (EDR-DELIVERY-01 M2-1). Unlike every other event here it is about a RELEASE, not a card,
+	// so its subject is the release id; it is the only Knowledge event a consumer may read as
+	// "there is nothing more coming for this SBOM".
+	EventReleaseCorrelationCompleted = "knowledge.release_correlation_completed"
 )
 
 // OutboxNote is one integration event queued for delivery in the aggregate's own

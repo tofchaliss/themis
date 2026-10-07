@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // DefaultRediscoveryStaleAfter is how old a release's last discovery may grow before the
@@ -57,7 +59,12 @@ func (s *RediscoveryService) Sweep(ctx context.Context) (swept, newMatches int, 
 		// Correlate re-runs discovery against the release's LATEST correlated inventory and
 		// applies through the standard gates; ApplyCorrelation re-stamps the ledger, so a
 		// swept release leaves the stale queue even when nothing new was found.
-		n, cerr := s.correlate.Correlate(ctx, r.ReleaseID, r.EvidenceID)
+		//
+		// The cause is stated, not inferred (EDR-DELIVERY-01 M2-3): a sweep is a real posture
+		// change, but nothing was built and no new SBOM exists, so the completion event it
+		// publishes must say `rediscovery` — a rebuild loop that read it as a new upload would
+		// spend a release's attempt budget on a feed update nobody asked for.
+		n, cerr := s.correlate.CorrelateCause(ctx, r.ReleaseID, r.EvidenceID, domain.CauseRediscovery)
 		if cerr != nil {
 			continue
 		}

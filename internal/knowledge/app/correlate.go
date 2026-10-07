@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -112,6 +113,11 @@ type CorrelationService struct {
 	fold      *FaultlineService
 	matches   MatchRecorder
 	ledger    ReleaseLedger // optional: nil = no re-discovery ledger (KN-RECOR-1)
+	// completed is optional (nil = the completion fact is not published). Production wiring
+	// always sets it; without it a context that only correlates still works exactly as before,
+	// which is the correct degradation for single-context dev and for the unit tests that
+	// construct this service with no store.
+	completed CorrelationAnnouncer
 	clock     Clock
 	// inferredBridge arms the D4 guess grade of the ownership bridge (default ON; the strict
 	// estate disables it via THEMIS_VERDICT_INFERRED_BRIDGE=0 in the composition root).
@@ -138,6 +144,14 @@ func (s *CorrelationService) WithLedger(l ReleaseLedger) *CorrelationService {
 	return s
 }
 
+// WithCompletion adds the per-SBOM completion announcer (EDR-DELIVERY-01 M2-1). Separate from
+// the constructor for the same reason as the ledger: every existing call site keeps compiling,
+// and production wiring always sets it.
+func (s *CorrelationService) WithCompletion(a CorrelationAnnouncer) *CorrelationService {
+	s.completed = a
+	return s
+}
+
 // CorrelatedRelease is one ledger row: the release and the evidence its inventory came from.
 type CorrelatedRelease struct {
 	ReleaseID  string
@@ -149,6 +163,18 @@ type CorrelatedRelease struct {
 type ReleaseLedger interface {
 	UpsertCorrelatedRelease(ctx context.Context, releaseID, evidenceID string, at time.Time) error
 	StaleReleases(ctx context.Context, olderThan time.Time, limit int) ([]CorrelatedRelease, error)
+}
+
+// CorrelationAnnouncer publishes the once-per-SBOM completion fact (EDR-DELIVERY-01 M2-1).
+// It is a WRITE to the same unit of work the matches went into, never a network call: the
+// implementation appends an outbox row, and the relay delivers it like every other Knowledge
+// event. The port exists so ApplyCorrelation — which owns the end of the unit of work, and is
+// therefore the only place that knows every other event for this SBOM has been queued — can
+// append the completion LAST without knowing how an outbox row is written.
+type CorrelationAnnouncer interface {
+	// AnnounceCorrelationCompleted queues knowledge.release_correlation_completed.v1 for the
+	// (release, sbom) pair, ordered after every other event already queued in this unit of work.
+	AnnounceCorrelationCompleted(ctx context.Context, releaseID, sbomID, cause string, at time.Time) error
 }
 
 // PlannedMatch is one discovered (component, CVE, source Proposal) triple awaiting fold +
@@ -172,6 +198,11 @@ type CorrelationPlan struct {
 	// ledger (KN-RECOR-1) so a later sweep re-reads the same (or a newer) inventory.
 	EvidenceID string
 	Items      []PlannedMatch
+	// Cause is why this correlation ran — one of domain.CauseNewSBOM / domain.CauseRediscovery
+	// (EDR-DELIVERY-01 M2-3). PlanCorrelation stamps the upload cause, which is what building a
+	// plan from a fresh inventory means; the re-discovery sweep overrides it. It rides the plan
+	// rather than the apply call because the read phase is where the reason is known.
+	Cause string
 	// Bridge is the ownership-bridge context judgeOccurrence needs at APPLY time
 	// (EDR-VERDICT-01 D3): the sibling components of the same inventory plus its explicit
 	// ownership edges. Captured in the read phase because the write phase does no I/O (D7).
@@ -188,7 +219,7 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 		return CorrelationPlan{}, err
 	}
 	plan := CorrelationPlan{
-		ReleaseID: releaseID, EvidenceID: evidenceID,
+		ReleaseID: releaseID, EvidenceID: evidenceID, Cause: domain.CauseNewSBOM,
 		Bridge: BridgeContext{Siblings: inv.Components, Owners: inv.Owners, InferredBridge: s.inferredBridge},
 	}
 	for _, comp := range inv.Components {
@@ -262,6 +293,28 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			newMatches++
 		}
 	}
+
+	// The per-SBOM completion fact, appended LAST — after every fold note and every match note
+	// this unit of work produced (EDR-DELIVERY-01 M2-1). Unconditional on the outcome: a plan
+	// that held zero items, or whose every item fell out of the reconciled range, still
+	// correlated this SBOM, and a consumer must be able to tell "evaluated, clean" from "not
+	// evaluated yet". It is skipped only when there is no SBOM to name, which is the same guard
+	// the ledger above uses.
+	if s.completed != nil && plan.EvidenceID != "" {
+		cause := plan.Cause
+		if cause == "" {
+			// A plan built before this field existed (a hand-constructed plan in a test) means an
+			// upload: PlanCorrelation stamps the cause on every plan it builds, and the sweep is
+			// the only path that overrides it.
+			cause = domain.CauseNewSBOM
+		}
+		if !domain.ValidDiscoveryCause(cause) {
+			return newMatches, fmt.Errorf("knowledge: unknown discovery cause %q", cause)
+		}
+		if err := s.completed.AnnounceCorrelationCompleted(ctx, plan.ReleaseID, plan.EvidenceID, cause, s.clock.Now()); err != nil {
+			return newMatches, err
+		}
+	}
 	return newMatches, nil
 }
 
@@ -270,10 +323,19 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 // discovery I/O stays OUTSIDE the inbox transaction. Idempotent — a re-run converges and
 // records no duplicate matches. Returns the number of new matches.
 func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceID string) (int, error) {
+	return s.CorrelateCause(ctx, releaseID, evidenceID, domain.CauseNewSBOM)
+}
+
+// CorrelateCause is Correlate with the discovery cause stated explicitly (EDR-DELIVERY-01
+// M2-3). The re-discovery sweep is its reason to exist: the sweep re-runs exactly this
+// machinery, and the only thing that differs is WHY — which is carried in the completion event
+// so no consumer has to infer it.
+func (s *CorrelationService) CorrelateCause(ctx context.Context, releaseID, evidenceID, cause string) (int, error) {
 	plan, err := s.PlanCorrelation(ctx, releaseID, evidenceID)
 	if err != nil {
 		return 0, err
 	}
+	plan.Cause = cause
 	return s.ApplyCorrelation(ctx, plan)
 }
 

@@ -1136,3 +1136,123 @@ and valueless) · `themis-ai-runtime` (the poller, N-M2j). Conventions: R1 (cons
 one shared logger; no credential, address or payload in a log line), R2 (self-documented config,
 secrets referenced). Runtime-side source: `themis-ai-runtime/openspec/changes/outward-actions`
 (D-N-8..D-N-12 and the subscriber-seam lock).
+
+## Revision 3 — N-M2a as built (2026-10-07): the completion event's BODY and its ordering mechanism
+
+The first build step of **Revision 3 — N-M2** landed. **Accepted as a decision of record.
+IMPLEMENTED.** This section is append-only like the rest of the file: nothing above it is amended,
+and where it states something the N-M2a step row left open or said differently, **this later
+section governs** — which is the convention the N-M2 section itself set out.
+
+Two things needed deciding once code met the event, and both were taken by the owner in the N-M2a
+implementation round: what the body carries, and how "appended AFTER every other Knowledge event
+for that SBOM" is actually enforced.
+
+**Provenance, because M2a-1 NARROWS the N-M2a step row's prose.** The step row and the build
+instruction said the event carries product, project, release and SBOM ids; M2a-1 carries two of
+the four. That is not an implementer's simplification: it is the owner's decision, taken in the
+**N-M2a implementation round on 2026-10-07** ("introduce no Knowledge→Registry seam — remove
+`product_id`/`project_id`; emit only release, SBOM, cause and time"), and this section is its
+record of reference. **Cite it as `EDR-DELIVERY-01 M2a-1`** wherever the narrowing has to be
+justified — a review of the diff alone cannot see the instruction, which is exactly why the
+decision lives here rather than only in a task note. The same round fixed the two other shape
+facts M2a-1 records (snake_case, `occurred_at` in the body) and left M2a-3's mechanism to the
+implementation, where the second iteration of this step scoped it per SBOM.
+
+### M2a-1 — The body is `{release_id, sbom_id, cause, occurred_at}`. It carries NO product or project id
+
+```json
+{
+  "release_id":  "<uuid>",
+  "sbom_id":     "<uuid>",
+  "cause":       "new_sbom",
+  "occurred_at": "2026-10-07T09:30:00Z"
+}
+```
+
+`additionalProperties: false`, all four required, `cause` the closed enum of M2-3.
+
+**The owner's decision was to leave product and project OFF this event**, and the reason is M2-1's
+own division of labour. Knowledge does not know a release's product or project: identity lives in
+Registry, and Knowledge holds **no Registry seam** — adding one to put two ids on an event would
+be a new cross-context read in the context whose whole statement here is "I am done with this
+SBOM". M2-2 keeps `product_id` and `project_id` on **`governance.release_evaluated.v1`**, where
+they belong: Governance already reads Registry (the blast-radius multiplier, C2, over
+`THEMIS_REGISTRY_URL`) and already owns the counts, so it is the context that can state the whole
+fact. **N-M2b resolves them there** — that is now part of its scope, not an accident of it.
+
+The consequence is deliberate and small: a direct subscriber to the *Knowledge* event cannot name
+the product. Nothing subscribes to the Knowledge event but Governance (M2-1), and the published
+surface a harness polls is Governance's (M2-4), which carries all four ids. So the shape nobody
+reads is the narrower one.
+
+Two further shape notes, both divergences from the older Knowledge events and both intentional:
+field names are **snake_case**, matching M2-2 rather than Knowledge's own Go-field-name wire; and
+`occurred_at` rides **in the body** as well as on the envelope, because N-M2d stores these events
+and a stored fact that cannot say when it happened without its transport metadata is incomplete.
+
+### M2a-2 — Published from the correlation WRITE phase, once per run, for `kind == "sbom"` only
+
+The event is appended at the end of `ApplyCorrelation` — the single write phase BOTH paths share,
+and the only place that knows every other event for the SBOM is already queued. The kind gate is
+the coordinator's existing dispatch (`sbom` correlates; `vex` folds applicability; `scanner-report`
+ingests), so a **VEX or scanner-report upload cannot reach the announcement** — it is not a check
+bolted beside the publication, it is the dispatch that was already there.
+
+It is **unconditional on the outcome**: zero items, or every item gated out of the reconciled
+range, still correlated this SBOM (M2-1 — silence must mean a fault). It is skipped only when
+there is no SBOM id to name, which is the same guard the KN-RECOR-1 ledger uses. The sweep states
+`cause: "rediscovery"` explicitly rather than letting a consumer infer it (M2-3).
+
+### M2a-3 — Ordering is enforced per SBOM, by the append position plus the relay's tie-break
+
+Knowledge's outbox has **no sequence column** and the relay drains it `ORDER BY occurred_at`, so
+"appended after every other Knowledge event for that SBOM" needs saying in terms of what the relay
+can sort. Two local facts do it:
+
+1. The row is appended **last in the unit of work**, carrying a clock reading taken after every
+   other note of that correlation was stamped.
+2. The relay sorts the completion **last within a shared instant**
+   (`ORDER BY occurred_at, (event_type = 'knowledge.release_correlation_completed')`). A
+   correlation reads the clock once per note, so a frozen or coarse clock can stamp a whole unit of
+   work alike — and a tie is precisely where the outbox cannot settle the order by itself.
+
+**The promise is scoped to the SBOM, and so is the mechanism.** A timestamp derived from the whole
+outbox (`MAX(occurred_at)` over the unsent rows) was built first and rejected: it claims a global
+last-in-outbox position nothing asked for, it reorders unrelated contexts' — and unrelated SBOMs' —
+events behind one completion, and two concurrent transactions can still read the same MAX and pick
+the same instant, so it does not even remove the tie it exists to remove. The tie-break does, for
+the one relation that matters.
+
+Honest limits, stated rather than engineered around:
+
+- **A wall-clock STEP BACKWARDS inside one unit of work would break the order.** The completion's
+  timestamp is read last, so only a clock that moves backwards mid-correlation (an NTP step, not
+  drift) can put it before a note of its own run. The fix for that is a sequence column, which is a
+  migration and is not in N-M2a's scope.
+- **Two completions sharing one instant are unordered with respect to each other.** They are
+  different SBOMs, and the contract says nothing about their relative order.
+- **"Every other Knowledge event for that SBOM" means that correlation RUN.** A feed enrichment
+  that touches one of the same cards a second later is a separate unit of work and can be delivered
+  after the completion. That is correct — it is news about a card, not an unfinished correlation —
+  but a consumer must not read the completion as "this release's cards will not change again".
+
+### M2a-4 — Still no consumer, no API, no schema
+
+Nothing reads the event yet: Governance picks it up in **N-M2b**. No OpenAPI edit, no generated
+handler, no migration, no new dependency, and `cmd/knowledge` is untouched — the announcer is wired
+where the store is already in hand (`internal/knowledge/adapters/wiring`), with no toggle, because
+an event nothing consumes needs no switch and an unwired producer would be silent in exactly the
+way M2-1 forbids.
+
+### Realizes (N-M2a)
+
+`internal/knowledge/domain/event.go` (`ReleaseCorrelationCompleted` + the closed `DiscoveryCause`
+vocabulary) · `internal/knowledge/app` (the `CorrelationAnnouncer` port, `CorrelationPlan.Cause`,
+`CorrelateCause`, the sweep's cause) · `internal/knowledge/adapters/store`
+(`AnnounceCorrelationCompleted`, the pinned `schema_ref`, the frozen v1 schema under `schemas/`,
+the relay's tie-break) · `internal/knowledge/adapters/wiring` (`WithCompletion`). Tests:
+`TestEventSchema_Knowledge_ReleaseCorrelationCompletedV1` (schema, both halves of the per-SBOM
+ordering, the shared-instant regression, zero-match, both causes, and VEX/scanner-report publishing
+nothing) plus app/domain unit tests. Tracked as task **6.1** in
+`openspec/changes/phase3-outward-actions/tasks.md`.

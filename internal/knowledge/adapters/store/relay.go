@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/kernel/event"
+	"github.com/themis-project/themis/internal/knowledge/app"
 )
 
 // Publisher delivers a completed-fact Envelope to the event bus. A logging stand-in is
@@ -35,11 +36,23 @@ func NewRelay(pool *pgxpool.Pool, pub Publisher, batch int) *Relay {
 // DeliverPending delivers up to one batch of un-sent envelopes and returns how many were
 // delivered. It scans each outbox row directly into a kernel Envelope (the row id is the
 // Envelope id); the relay trusts its own outbox, so no re-validation on read.
+//
+// The sort decides what `seq` a consumer sees, because the bus numbers rows in append order.
+// occurred_at is the primary key of that order, and the per-SBOM completion event
+// (EDR-DELIVERY-01 M2-1 / M2a-3) sorts LAST within a shared instant: a correlation stamps its
+// fold and match notes from one clock reading apiece, so a frozen or coarse clock can give a
+// whole unit of work the same timestamp, and the outbox has no sequence column to fall back on.
+// The rank is an explicit CASE rather than the predicate `(event_type = $2)`: a bare boolean
+// would sort correctly here (false < true in PostgreSQL) but leaves the intended order resting
+// on a type's collation rather than saying it, and 0 before 1 is the one ordering Knowledge
+// promises — "the completion comes after everything it concludes", which is the reason the
+// signal is an appended event rather than a timer.
 func (r *Relay) DeliverPending(ctx context.Context) (int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at
 		FROM knowledge_outbox WHERE sent_at IS NULL
-		ORDER BY occurred_at LIMIT $1`, r.batch)
+		ORDER BY occurred_at, CASE WHEN event_type = $2 THEN 1 ELSE 0 END
+		LIMIT $1`, r.batch, app.EventReleaseCorrelationCompleted)
 	if err != nil {
 		return 0, err
 	}

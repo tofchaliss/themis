@@ -19,7 +19,6 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -96,7 +95,10 @@ func newPool(t *testing.T) *pgxpool.Pool {
 
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health RESTART IDENTITY CASCADE"); err != nil {
+	// correlated_releases is truncated with the rest so the KN-RECOR-1 ledger does not leak
+	// between tests: left standing, it lets a re-discovery sweep in one test drain releases
+	// another test had stamped — the sweep then counts work nobody in that test asked for.
+	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health, correlated_releases RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -345,23 +347,7 @@ func TestConcurrentEnrichConverges(t *testing.T) {
 	}
 }
 
-type fakePublisher struct {
-	mu        sync.Mutex
-	delivered []event.Envelope
-	failFirst bool
-	calls     int
-}
-
-func (p *fakePublisher) Publish(_ context.Context, env event.Envelope) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.calls++
-	if p.failFirst && p.calls == 1 {
-		return errors.New("publish boom")
-	}
-	p.delivered = append(p.delivered, env)
-	return nil
-}
+// fakePublisher lives in publisher_test.go — shared by the relay tests in this package.
 
 func TestRelay_DeliverAndRetry(t *testing.T) {
 	pool := newPool(t)

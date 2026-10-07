@@ -238,6 +238,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		disc = feed.NewMultiSource(disc, feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP))
 	}
 	corr := app.NewCorrelationService(evClient, disc, fold, st, sysClock{}).WithLedger(st).
+		// The per-SBOM completion fact (EDR-DELIVERY-01 M2-1): the same store, appending one
+		// more outbox row at the end of the same unit of work. Without this line correlation
+		// behaves exactly as before and the event is simply never published — so it is wired
+		// here, where the store is already in hand, rather than left to a toggle.
+		WithCompletion(st).
 		WithInferredBridge(!verdict.DisableInferredBridge)
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
