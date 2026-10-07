@@ -94,10 +94,58 @@ explicit per-route write-scope authorization, `delivery:callback` refused on eve
 write, `product:<id>` confined to its product, closed scope vocabulary — the cycle adds no scope
 and relaxes nothing.
 
+## Added 2026-10-07 — N-M2 designed, the owner's decisions recorded (documentation only)
+
+The plan's **Revision 3 — N-M2**, recorded as `EDR-DELIVERY-01`'s **Revision 5 (2026-10-07) —
+N-M2** section (M2-1..M2-9), with the acceptance block in `design.md` and the steps in `tasks.md`
+Group 6. The owner settled the six things Revision 2 had left as mechanisms-to-be-decided:
+
+1. **The release-evaluated signal is two events.** Knowledge publishes
+   `knowledge.release_correlation_completed.v1` **once per SBOM, after all its other events for
+   that SBOM**; because the bus delivers in `seq` order per source context, every earlier event for
+   that SBOM is already processed when Governance handles it. Governance then publishes
+   `governance.release_evaluated.v1` with product, project, release and SBOM ids, the four severity
+   counts, and a `cause` of `new_sbom` or `rediscovery`. **An SBOM with no matched vulnerabilities
+   still emits both events with zero counts — that is the success case**, not a skip. The
+   re-discovery sweep sets `cause=rediscovery` and **never starts or advances the loop**. This
+   **replaces the `governance.finding_opened` proxy** recorded in EDR M1a-3.
+2. **The harness gets it by POLLING a Governance cursor read API** —
+   `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>`, `X-API-Key` read
+   scope, at-least-once, **deduplicated by event id**, with the events stored in a new Governance
+   table. **No SSE and no long-lived connection.** The harness only subscribes: it calls no Jira, no
+   CI and no mail relay.
+3. **Max rebuilds per Release is `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, default 2, with no
+   per-Release override.**
+4. **Each new SBOM is compared with the previous SBOM of the same Release, by upload order** — no
+   configurable baseline window.
+5. **`ci_rebuild` starts a Jenkins job with `buildWithParameters`**, Basic auth (user + API token),
+   settings `THEMIS_COMMUNICATION_JENKINS_{ENABLED,URL,USER,API_TOKEN,JOB}` (the URL must be
+   `https`, refused at startup otherwise, as the Jira sender already requires). The job uploads the
+   new SBOM under a **`product:<id>`**-scoped key and calls back
+   `POST /api/v1/communication/callbacks/ci-rebuild` with a **`delivery:callback`** key, sending
+   intent id, build id, git ref, image digest and the new SBOM id. **The callback is evidence on the
+   intent only and changes no Finding.**
+6. **After the new SBOM is evaluated**, Themis compares, updates the Release's Jira ticket and sends
+   the mail; it stops when the targeted Critical+High set is closed or the maximum is reached,
+   **telling a person** either way. The targeted set is fixed at cycle start and does not grow.
+   **Findings are never auto-resolved.**
+
+Also fixed, so nothing in the design is left to an implementer's choice: the cursor is the
+**sequence** number (not the event id); `limit` defaults to **100** and is capped at **500**; the
+table is **`release_evaluated_events`** with no purge policy; payload fields are **snake_case** and
+the counts are **integers**; there is **no HMAC callback variant** now. No open questions remain.
+
+**Scope: documentation only.** No Go code, no OpenAPI edit, no schema, no migration and no
+generated handler lands with it; `make check` is run to prove exactly that. **N-M0 is preserved in
+full** (M2-9): the cursor route is a read route under a read-scoped key, the callback is a
+Communication route under `delivery:callback` — still refused on every Governance write — and the
+scope vocabulary is unchanged.
+
 ## Not in this change
 
-M1 (delivery), M2 (CI), M3 (mail) — including every mechanism Revision 2 describes. The
-remediation cycle is recorded, not built: `ci_rebuild` has no code, the valuation-complete
-notification has no transport, and the max-attempts knob has no name yet. `delivery:callback`
-exists and is refused everywhere it must be refused; what it will be ALLOWED to do is undecided and
-will be grilled in the runtime repository before it lands here.
+M1 (delivery) is implemented (Groups 2 and 2b); **everything N-M2 describes is designed and not
+built** — `ci_rebuild` has no code, the two events have no publisher, the cursor API has no route or
+table, and the attempts knob is a documented name. `ci_build` (the `proposal_accepted` artifact
+path, Group 3) and M3 are untouched. `delivery:callback` exists and is refused everywhere it must be
+refused; what it will be ALLOWED to do is now designed (the `ci-rebuild` callback, N-M2h) and still
+unbuilt.
