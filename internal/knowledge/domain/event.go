@@ -271,6 +271,62 @@ func NewFaultlineSuperseded(f Faultline, trust value.TrustClass, at time.Time) F
 	return FaultlineSuperseded{FaultlineID: f.ID(), CVE: f.CVE().String(), Trust: trust, OccurredAt: at.UTC()}
 }
 
+// DiscoveryCause names WHY a correlation run happened, and it is a closed two-value
+// vocabulary (EDR-DELIVERY-01 M2-3). The producer knows the reason; a consumer that had to
+// infer it from "did the SBOM id change" would be guessing, and a wrong guess silently spends
+// the rebuild loop's attempt budget on a feed update nobody asked for.
+const (
+	// CauseNewSBOM — correlation ran because an SBOM was uploaded for the release.
+	CauseNewSBOM = "new_sbom"
+	// CauseRediscovery — correlation re-ran from the re-discovery sweep (KN-RECOR-1). A real
+	// posture change, but nothing was built, so the loop must ignore it.
+	CauseRediscovery = "rediscovery"
+)
+
+// ValidDiscoveryCause reports whether cause is one of the two causes the contract admits.
+// An unknown cause is a programming error, not an input to tolerate: it would reach
+// Governance as a third value and leave every consumer's switch without a case.
+func ValidDiscoveryCause(cause string) bool {
+	return cause == CauseNewSBOM || cause == CauseRediscovery
+}
+
+// ReleaseCorrelationCompleted announces that Knowledge has finished correlating ONE SBOM —
+// the signal Governance turns into `governance.release_evaluated.v1` (EDR-DELIVERY-01 M2-1).
+//
+// It is published ONCE per SBOM and appended to the outbox AFTER every other Knowledge event
+// raised for that SBOM, so by the time a consumer handles it, every earlier fact for that SBOM
+// has already been delivered (the bus drains in `seq` order per source context). That ordering
+// is the whole reason the signal is an event appended last rather than a timer or a
+// quiet-for-N-seconds heuristic: a heuristic answers "probably finished", and a posture read
+// from a probably-finished correlation lists a subset and reads as truth.
+//
+// An SBOM with no matched vulnerabilities still publishes it. Suppressing the event when there
+// is nothing to report would make silence ambiguous — "evaluated, clean" would be
+// indistinguishable from "not evaluated yet" and from "the pipeline is broken".
+//
+// Knowledge says only "I am done with this SBOM"; it deliberately states nothing about WHAT
+// the posture is, because the counts are Governance's Findings over Governance's own
+// projection (M2-1). The body is snake_case — unlike the older Knowledge events, which marshal
+// Go field names — because it is the shape M2-2 fixes for this pair of events.
+type ReleaseCorrelationCompleted struct {
+	ReleaseID string `json:"release_id"`
+	// SBOMID is the Evidence id of the SBOM that was correlated, carried verbatim as TEXT and
+	// never parsed — the same rule every foreign id in this flow follows.
+	SBOMID string `json:"sbom_id"`
+	Cause  string `json:"cause"`
+	// OccurredAt rides IN the body as well as on the envelope: the consumer that stores these
+	// events (N-M2d) keeps the body, and a stored fact that cannot say when it happened without
+	// its transport metadata is incomplete.
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// NewReleaseCorrelationCompleted builds the per-SBOM completion fact.
+func NewReleaseCorrelationCompleted(releaseID, sbomID, cause string, at time.Time) ReleaseCorrelationCompleted {
+	return ReleaseCorrelationCompleted{
+		ReleaseID: releaseID, SBOMID: sbomID, Cause: cause, OccurredAt: at.UTC(),
+	}
+}
+
 // NewComponentMatched builds the correlation event for a release's matched components.
 func NewComponentMatched(f Faultline, releaseID string, components []MatchedComponent, at time.Time) ComponentMatched {
 	return ComponentMatched{

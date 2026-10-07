@@ -362,12 +362,34 @@ recorded in `proposal.md` and accepted in `design.md`.
       ("Acceptance as documented — Revision 3 (N-M2)") and `proposal.md` (owner decisions 1–6 plus
       the shape decisions that leave nothing to an implementer). Gates: `make check` green, proving
       no code drift from a documentation-only change.
-- [ ] 6.1 **N-M2a** (`themis`; no API, no schema) — Knowledge publishes
+- [x] 6.1 **N-M2a** (`themis`; no API, no schema) — Knowledge publishes
       `knowledge.release_correlation_completed.v1` **once per SBOM**, appended to the outbox AFTER
       every other Knowledge event for that SBOM, carrying the discovery cause. Test:
       `TestEventSchema_Knowledge_ReleaseCorrelationCompletedV1` (`internal/knowledge/adapters/store`)
       — schema, the ordering proof (its `seq` exceeds every other event for that SBOM), and the
-      zero-match case.
+      zero-match case. **Implemented 2026-10-07.** Body is `{release_id, sbom_id, cause,
+      occurred_at}` (snake_case, `additionalProperties:false`, the cause enum closed) — per owner
+      feedback it carries NO product/project id, so Knowledge gains no Registry seam; Governance
+      resolves those in N-M2b, where the counts already come from. The emitting locus is
+      `ApplyCorrelation`'s tail (`internal/knowledge/app/correlate.go`) — the one place that knows
+      every other event for the SBOM is already queued, and the one write phase BOTH paths share:
+      the upload (via the coordinator's `kind=="sbom"` branch, so VEX and scanner-report cannot
+      reach it) and the KN-RECOR-1 sweep, which states `cause=rediscovery` rather than letting a
+      consumer infer it (M2-3). Unconditional on the outcome — zero matches still publishes.
+      **ORDERING is a property of the WRITE, not of the clock**: the outbox has no sequence column
+      and the relay drains it `ORDER BY occurred_at`, so the store's append takes one in-transaction
+      `MAX(occurred_at)` over the unsent rows and lands strictly after all of them. Trusting the
+      caller's timestamp would tie wherever the clock is coarse or frozen — every fold note and
+      match note of one correlation can share an instant — and a tie leaves the relay's order
+      undefined, which is the exact guarantee the event exists to provide. Tests: the integration
+      test proves schema conformance, BOTH halves of the ordering (the stored timestamps and the
+      relay's publish order, which is the bus's `seq` order), the zero-match case, both causes on
+      one release, and that a VEX and a scanner-report upload raise their own events and this one
+      NEVER; plus app/domain unit tests (announced last, zero-match, the sweep's cause, the closed
+      vocabulary refusing a third value, the write failure failing the apply). Coverage:
+      `knowledge/app` + `knowledge/domain` still 100%, `knowledge/adapters/store` 84.5% (≥80). One
+      harness fix rode along: the shared store test `truncate` now clears `correlated_releases`,
+      which used to leak the ledger between tests so a sweep could drain another test's releases.
 - [ ] 6.2 **N-M2b** (`themis`; no API, no schema) — Governance consumes it and publishes
       `governance.release_evaluated.v1`: snake_case `product_id` / `project_id` / `release_id` /
       `sbom_id`, integer `severity_counts {critical, high, medium, low}` off M1b-5's `base_score`

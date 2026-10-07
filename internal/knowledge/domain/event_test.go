@@ -70,3 +70,34 @@ func TestNewComponentRetired(t *testing.T) {
 		t.Errorf("OccurredAt = %v, want the same instant in UTC", ev.OccurredAt)
 	}
 }
+
+// EDR-DELIVERY-01 M2-1 / N-M2a: the completion fact carries the release, the SBOM, why
+// correlation ran, and when — and nothing about the posture, which is Governance's to state.
+func TestNewReleaseCorrelationCompleted(t *testing.T) {
+	at := time.Date(2026, 10, 7, 9, 30, 0, 0, time.FixedZone("IST", 5*3600+1800))
+	ev := domain.NewReleaseCorrelationCompleted("rel-1", "ev-1", domain.CauseNewSBOM, at)
+
+	if ev.ReleaseID != "rel-1" || ev.SBOMID != "ev-1" || ev.Cause != "new_sbom" {
+		t.Errorf("event = %+v, want rel-1/ev-1/new_sbom", ev)
+	}
+	// UTC on the wire, like every other event here, and the body carries its OWN timestamp — a
+	// stored fact must be able to say when it happened without its transport metadata.
+	if ev.OccurredAt.Location() != time.UTC || !ev.OccurredAt.Equal(at) {
+		t.Errorf("OccurredAt = %v, want the same instant in UTC", ev.OccurredAt)
+	}
+}
+
+// The cause vocabulary is CLOSED (M2-3): two values, and anything else is refused rather than
+// passed through to a consumer whose switch has no case for it.
+func TestValidDiscoveryCause(t *testing.T) {
+	for _, ok := range []string{domain.CauseNewSBOM, domain.CauseRediscovery} {
+		if !domain.ValidDiscoveryCause(ok) {
+			t.Errorf("cause %q must be admitted", ok)
+		}
+	}
+	for _, bad := range []string{"", "New_SBOM", "upload", "rebuild"} {
+		if domain.ValidDiscoveryCause(bad) {
+			t.Errorf("cause %q must be refused", bad)
+		}
+	}
+}

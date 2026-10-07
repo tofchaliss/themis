@@ -108,6 +108,12 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 			Reason:     domain.RetiredDuplicateIdentity,
 			OccurredAt: now,
 		}},
+		// EDR-DELIVERY-01 M2-1 / N-M2a. The only Knowledge event whose body is snake_case and
+		// whose subject is a RELEASE; the schema forbids additional properties and closes the
+		// cause vocabulary, so widening either fails here rather than at a consumer.
+		{app.EventReleaseCorrelationCompleted, domain.NewReleaseCorrelationCompleted(
+			"8f1b6f2e-5a61-4a2e-9d0e-7c0f1f7a1b11", "2c7b1f90-3d44-4f0e-8a71-19b2c6d5e4f3",
+			domain.CauseNewSBOM, now)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {

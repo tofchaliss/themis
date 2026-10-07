@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.release_correlation_completed.v1.schema.json",
+  "title": "knowledge.release_correlation_completed.v1",
+  "description": "Integration-contract v1 for the ReleaseCorrelationCompleted event payload (EDR-DELIVERY-01 M2-1 / N-M2a): Knowledge has finished correlating ONE SBOM. Published once per SBOM and appended to the outbox AFTER every other Knowledge event raised for that SBOM, so a consumer handling it has already handled every earlier fact for that SBOM — the ordering is the transport's, not a timer's. An SBOM with no matched vulnerabilities still publishes it: silence must mean a fault, never 'nothing to report'. It states that correlation finished and deliberately NOT what the posture is — the counts belong to Governance, over Governance's own projection. Field names are snake_case (the convention M2-2 fixes for this pair of events, unlike the older Knowledge events which marshal Go field names), and the ids are carried verbatim as TEXT, never parsed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["release_id", "sbom_id", "cause", "occurred_at"],
+  "properties": {
+    "release_id": { "type": "string", "format": "uuid" },
+    "sbom_id": { "type": "string", "format": "uuid", "description": "The Evidence id of the SBOM that was correlated." },
+    "cause": {
+      "type": "string",
+      "enum": ["new_sbom", "rediscovery"],
+      "description": "Why correlation ran — a closed vocabulary (M2-3). `new_sbom` is an upload; `rediscovery` is the KN-RECOR-1 sweep, which is a real posture change but never starts or advances the rebuild loop. The producer knows the reason; a consumer inferring it from SBOM identity would be guessing, and a wrong guess silently spends an attempt budget."
+    },
+    "occurred_at": { "type": "string", "format": "date-time", "description": "Rides in the body as well as on the envelope: the consumer that stores these events keeps the body, and a stored fact that cannot say when it happened without its transport metadata is incomplete." }
+  }
+}

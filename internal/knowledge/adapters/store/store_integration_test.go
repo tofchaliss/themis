@@ -96,7 +96,10 @@ func newPool(t *testing.T) *pgxpool.Pool {
 
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health RESTART IDENTITY CASCADE"); err != nil {
+	// correlated_releases is truncated with the rest (added here with N-M2a): the KN-RECOR-1
+	// ledger used to survive between tests, so a re-discovery sweep in one test could drain
+	// releases another test had stamped — the sweep counted work nobody in that test asked for.
+	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health, correlated_releases RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

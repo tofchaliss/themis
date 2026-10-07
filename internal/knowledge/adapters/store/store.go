@@ -44,6 +44,8 @@ var schemaRefByEventType = map[string]string{
 	app.EventComponentMatched:        "knowledge.component_matched.v1",
 	app.EventComponentVerdictChanged: "knowledge.component_verdict_changed.v1",
 	app.EventComponentRetired:        "knowledge.component_retired.v1",
+
+	app.EventReleaseCorrelationCompleted: "knowledge.release_correlation_completed.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
