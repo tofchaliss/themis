@@ -778,3 +778,361 @@ Two details that are not incidental:
 `adapters/wiring/wiring.go` (`Wire` now takes the read-API key) · `cmd/communication` ·
 `deploy/node.env.example` · `deploy/systemd/install-systemd.sh`. No migration (the columns exist
 since N-M1a), no API change, no new package, no new dependency.
+
+## Revision 3 — N-M2 (2026-10-07)
+
+The release-evaluated trigger, the polling subscriber seam, `ci_rebuild` over Jenkins, and the
+loop. **Accepted as a decision of record. DOCUMENTATION ONLY — NOT implemented.**
+
+**Numbering note.** This is the outward-actions PLAN's **Revision 3 — N-M2** (N-M0 authorization →
+the remediation cycle → N-M2), and it is this FILE's fifth revision section: the sections above are
+numbered 2, 3 and 4, because N-M1a and N-M1b each took one as they landed. The heading carries the
+plan's name because that is the name this decision was given. Nothing above this line is amended —
+not the status line, not a prior section's prose: **this record is append-only**, and where a later
+section disagrees with an earlier one it says so here, in the later section.
+
+**Documentation only. Nothing here is implemented.** No Go code, no OpenAPI edit, no generated
+handler, no migration and no new dependency lands with it; `make check` is run to prove exactly
+that. M2-1..M2-9 are decisions of record and N-M2a..N-M2j are the steps that will realize them.
+This revision CLOSES every question Revision 2 left open (RC-1's transport and owning context,
+RC-4's baseline window, RC-6's knob name and locus).
+
+### What this revision supersedes (read M1a-3 with this)
+
+**M1a-3's temporary `finding_opened` proxy is superseded by M2-1..M2-3, and will be removed from
+the code by N-M2c.** M1a-3 recorded the deviation honestly and named what it cost: RC-1's
+"release posture evaluated" signal did not exist, so N-M1a proxied it with
+`governance.finding_opened`, which carries neither product nor project and fires once per Finding
+rather than once per Release. Both consequences stop being consequences here —
+`governance.release_evaluated.v1` is a per-Release signal that carries the product and the project,
+so a ticket intent names its product and one Release evaluation yields one intent. That is also
+what finally realizes RC-2's one-ticket-per-Release rule, which M1a-2 recorded as not yet
+realizable.
+
+Nothing else in M1a-3 changes: `governance.proposal_accepted` → the decision mail was never a proxy
+and is untouched, and M1a-1's rule (the reader persists, it never delivers) still forbids resolving
+identity on the reader path — the new event is the reason that resolution is no longer needed.
+
+### M2-1 — The trigger is a release-evaluated EVENT, and the ordering is a bus property, not a race
+
+Two events, in one direction:
+
+1. **Knowledge** publishes `knowledge.release_correlation_completed.v1` **once per SBOM**, strictly
+   AFTER every other Knowledge event it raises for that SBOM.
+2. **Governance** consumes it and publishes `governance.release_evaluated.v1` — the signal RC-1
+   asked for, now with a name.
+
+The ordering guarantee comes from the transport, not from a wait. The bus delivers rows in `seq`
+order per `source_context` (EDR-EVENTBUS-01), so by the time Governance handles the
+correlation-complete event, every earlier Knowledge event for that SBOM has already been handled.
+That is the whole reason the signal is an event appended LAST rather than a timer, a debounce or a
+"quiet for N seconds" heuristic: a heuristic answers "probably finished", and a ticket written from
+a probably-finished posture lists a subset and reads as truth (RC-1).
+
+**The owning context is Governance, and that was a choice.** Knowledge knows when correlation
+finished; it does not know what the posture IS — counts are Governance's Findings, over Governance's
+own projection. A signal published by the context that cannot state the fact would force every
+subscriber to go and ask, which is the asking the signal exists to avoid. Knowledge therefore says
+"I am done with this SBOM" and Governance says "here is what it means".
+
+### M2-2 — `governance.release_evaluated.v1`: the payload, and why zero counts are the SUCCESS case
+
+Field names are **snake_case** and counts are **integers** — the kernel envelope's body convention,
+and the one shape a JSON consumer never has to guess at:
+
+```json
+{
+  "product_id":  "<id>",
+  "project_id":  "<id>",
+  "release_id":  "<id>",
+  "sbom_id":     "<id>",
+  "severity_counts": { "critical": 0, "high": 0, "medium": 0, "low": 0 },
+  "cause": "new_sbom"
+}
+```
+
+`cause` is a closed two-value enum: **`new_sbom`** · **`rediscovery`** (M2-3). The four ids are
+carried verbatim as TEXT, never parsed — the same rule the delivery intent's foreign ids follow
+(N-M1a honest limits) and the same rule `product:<id>` follows (D5).
+
+**An SBOM with no matched vulnerabilities still emits BOTH events, with all four counts zero, and
+that is a success — not a skip.** Suppressing the event when there is nothing to report is the
+single most tempting shortcut here and it is wrong twice over: a subscriber cannot distinguish
+"evaluated, clean" from "not evaluated yet" or from "the pipeline is broken", and the rebuild loop's
+stop condition (M2-8) is literally "the targeted set is empty" — which an SBOM that reports nothing
+can never demonstrate. Silence must mean exactly one thing, and here it means a fault.
+
+The counts use the four-bucket ladder M1b-5 already established over `base_score`
+(Critical ≥ 90, High ≥ 70, Medium ≥ 40, Low > 0), so the event and the Jira body cannot disagree
+about what "High" means. A `base_score` of 0 is `Unknown` and is NOT counted as `low` — the absence
+of severity evidence is not evidence of mildness. `severity_counts` therefore need not sum to the
+Release's Finding count, and a consumer must not assume it does.
+
+### M2-3 — Re-discovery sets a cause, and never starts or advances the loop
+
+The re-discovery sweep (KN-RECOR-1) re-runs correlation for the stalest correlated Releases, so a
+CVE published after a Release's last upload still reaches its inventory. It emits the same two
+events with **`cause: "rediscovery"`**, and the loop ignores them: a rediscovery **never starts a
+cycle and never advances an attempt counter**.
+
+The reason is that a rediscovery is not a rebuild. Nothing was built, no new SBOM exists, and the
+comparison of M2-5 has no new side. A sweep that advanced the loop would burn a Release's two
+attempts (M2-8) on a feed update nobody asked for, and the operator would see "attempts exhausted"
+on a Release that was never rebuilt once. Carrying the cause IN the event rather than letting the
+consumer infer it from "did the SBOM id change" is deliberate: the producer knows why it is
+publishing, the consumer would be guessing, and a wrong guess silently spends a budget.
+
+What a rediscovery MAY do is everything that is not the loop — it is a real posture change and
+subscribers that only report are entitled to it. The rule is scoped to the cycle: no `ci_rebuild`
+intent, no attempt increment, no exhaustion notice.
+
+### M2-4 — The harness subscribes by POLLING a Governance cursor read API
+
+RC-1 deferred the transport. It is decided now, and it is the smallest thing that works:
+
+```
+GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>
+X-API-Key: <read-scoped key>
+```
+
+- **Cursor = the event SEQUENCE number, not the event id.** A cursor has to be ORDERED — `after`
+  means "everything later than this" — and an id is a name, not a position. Paging on an id forces
+  the server to look the id up to find out where it is, and answers nothing at all when the id is
+  one the server has never seen.
+- **`limit` defaults to 100 and is capped at 500.** A default exists so a client that omits it
+  cannot ask for the table; a cap exists so a client that asks for a million cannot be given one.
+  A value above the cap is clamped, not refused — a paging hint is not a correctness claim.
+- **Authentication is `X-API-Key` with READ scope.** The subscriber only reads. A read-scoped key
+  cannot write anywhere in the estate (D5), so this credential leaking costs visibility, never
+  integrity — and the harness holding a write-capable key to learn that an evaluation finished would
+  invert D-N-1 (the harness initiates no Governance act).
+- **At-least-once, deduplicated by EVENT ID.** The same row may be delivered twice (a client that
+  crashes before storing its high-water mark re-reads the page); the consumer discards an event id
+  it has already seen. The sequence orders, the id identifies — each does one job.
+- **No SSE, no webhook, no long-lived connection.** A webhook would make Themis call OUT to the
+  harness, which hands the harness an inbound surface and Themis an outbound credential for it —
+  the exact trade N-M0 exists to avoid. SSE adds a connection whose liveness becomes an operational
+  question ("is the stream up?") separate from the data's. A poll has one failure mode: the next
+  poll. It also makes the subscriber's progress its OWN state, which is why a down harness costs
+  nothing but lag.
+- **The events are stored server-side**, in a new Governance table **`release_evaluated_events`**
+  (N-M2d), because a cursor API cannot be served from a bus that has already delivered the message.
+  The table is the audit trail too: "what did Themis say about this Release, and when".
+- **No retention or purge policy is set.** The rows are small, one per evaluated SBOM, and a purge
+  policy that silently moves a cursor past deleted rows is worse than growth an operator can
+  measure. It is a deliberate non-decision, not an oversight.
+
+**The harness only SUBSCRIBES.** It calls no Jira, no CI and no mail relay, holds no outward
+credential, and takes no Governance act (RC-7 / D-N-12). Reading this endpoint is not authority.
+
+### M2-5 — The baseline is the immediately-previous SBOM, and the targeted set does not GROW
+
+RC-4 left the baseline open. It is now fixed: the comparison is **the new SBOM against the
+immediately-previous SBOM of the SAME Release, by upload order**. No configured window, no
+"baseline of record", no operator knob. Progress is "did THIS rebuild close anything", and a
+configurable window answers a different question — one nobody has asked and whose answer changes
+when the knob changes.
+
+The **targeted set** is the Critical and High Findings present **at cycle start**, and it **does
+NOT grow during the loop**. A Critical that appears mid-cycle (a new feed enrichment, a new CVE)
+shows up in the ticket's counts — the ticket always states the Release's current posture — but it
+does not join the set the loop is trying to close, and it waits for the next cycle.
+
+Both halves of that matter. A growing target can never be reached, so the loop would always exhaust
+its attempts and always report failure, however well the rebuild worked; and the attempt budget of
+two (M2-8) would be spent on work the cycle did not set out to do. Counting it in the ticket while
+excluding it from the target keeps the human's view complete and the machine's goal fixed.
+
+### M2-6 — `ci_rebuild` over Jenkins: `buildWithParameters`, HTTPS or refuse at startup
+
+RC-3's fourth delivery kind gets a sender. It starts a Jenkins job with
+**`buildWithParameters`** over **HTTP Basic auth (user + API token)** — Jenkins's own documented
+remote-build path, which needs no plugin and no webhook back-channel.
+
+| Setting | Meaning |
+| --- | --- |
+| `THEMIS_COMMUNICATION_JENKINS_ENABLED` | off by default, and subordinate to `THEMIS_COMMUNICATION_DELIVERY_ENABLED` (M1a-7, M1b-1) |
+| `THEMIS_COMMUNICATION_JENKINS_URL` | base URL; **must be `https`** |
+| `THEMIS_COMMUNICATION_JENKINS_USER` | Jenkins user |
+| `THEMIS_COMMUNICATION_JENKINS_API_TOKEN` | the user's API token — environment only, never a file, never a log (M1b-2) |
+| `THEMIS_COMMUNICATION_JENKINS_JOB` | the job to build |
+
+**`http://` is refused at CONFIGURE time**, with the one loopback exception, exactly as the Jira
+sender already refuses it (M1b-2) and for the identical reason: the credential is in every request
+and base64 is an encoding, not protection. The refusal keeps the FAKE sender wired and logs at ERROR
+naming the variable (M1b-1), so the queue keeps draining and nobody mistakes "logging instead" for
+"sending". A knob to relax this does not exist, because a knob that relaxes it in development is a
+knob that can be set in production. Enabled-but-incomplete configuration behaves the same way.
+
+As with Jira, the base URL may carry a path and every endpoint is built by APPENDING to it, so an
+instance mounted at `/jenkins` needs no second code path.
+
+The intent's snapshot is RC-3's, unchanged: destination job NAME, Product / Project / Release
+identity, prior SBOM id, the targeted Finding set, the attempt index. **No credential, no key, no
+model output.** Parameters handed to Jenkins are snapshot facts only.
+
+### M2-7 — The job uploads, calls back, and the callback is evidence on the INTENT
+
+The Jenkins job builds the image, uploads the new SBOM to Evidence against the same Product /
+Project / Release under a new SBOM id, and then calls Themis back:
+
+```
+POST /api/v1/communication/callbacks/ci-rebuild
+X-API-Key: <delivery:callback key>
+
+{ "intent_id": "…", "build_id": "…", "git_ref": "…", "image_digest": "…", "sbom_id": "…" }
+```
+
+- The job's **upload** key is scoped **`product:<id>`** — the narrowest scope that can write
+  evidence today. The CALLBACK key is `delivery:callback` and nothing else; D1/D2 keep it refused on
+  every Governance write, unconditionally, however else it is minted.
+- **Two keys, not one.** Uploading evidence and reporting a build are different acts with different
+  blast radii, and a single key for both would mean the credential that may report a build may also
+  write the estate's evidence.
+- **The callback is governed-external evidence on the INTENT. It changes no Finding, no Position
+  and no posture** — not even the Finding the rebuild targeted. A build system asserting a fix is
+  asserted trust and is refused (D-N-4, D-N-7): only the evaluation of the uploaded SBOM can
+  establish that a fault is absent, and that evaluation arrives as M2-1's events like any other.
+- **No HMAC variant is built now.** D-N-6 allows one as a transport variant for a CI system that
+  cannot present a Themis key; Jenkins can, so building a second authentication path would be
+  carrying an untested credential mechanism for a case this estate does not have. The decision is
+  "not now", not "never".
+- `sbom_id` is the NEW SBOM's id, and it is REQUIRED alongside `image_digest` (RC-3). A callback
+  missing either is refused: a rebuild whose output cannot be named gives the loop nothing to
+  compare.
+
+### M2-8 — The loop: compare after evaluation, one knob, stop and tell a person
+
+The cycle, once per attempt, in this order and no other:
+
+1. `ci_rebuild` intent → Jenkins → build → new SBOM uploaded → callback recorded (M2-6, M2-7).
+2. Themis **evaluates** the new SBOM; `governance.release_evaluated.v1` fires with
+   `cause: "new_sbom"` (M2-1).
+3. Themis **compares** new against the immediately-previous SBOM (M2-5): which targeted Findings
+   are closed, which are still open.
+4. Themis **updates the Release's one Jira ticket** (RC-2 / M1b-4: counts for all four severities,
+   CVE ids for Critical and High only, full-replace update) and **sends the mail** (RC-5).
+5. Stop, or go round again.
+
+Jira and mail happen at step 4 and **never at step 1 or 2**. The callback alone says a build
+happened, which is not news about security.
+
+**Loop control is one knob: `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, default 2, with NO
+per-Release override.** It closes RC-6's deferred name and locus. Communication owns the loop, so
+the knob is Communication's and carries its prefix like every other delivery knob. A per-Release
+override was considered and refused: it is a policy surface with no owner, no API and no audit
+trail, and the first Release it is raised for is the one where the loop is already not working —
+raising a limit is not a fix, and an estate-wide limit an operator can read in one line is worth
+more than a per-Release one nobody can inventory.
+
+The loop stops on exactly two conditions:
+
+- **Success** — every Finding in the targeted Critical+High set is closed. Stop.
+- **Exhaustion** — the attempt count reaches the maximum. Stop, and **tell a person**: mail to the
+  governed audience plus a Jira update stating the attempts are exhausted and what is still open.
+
+After a stop, **no further `ci_rebuild` intent is created for that Release in that cycle** — the
+stop is the decision, not a pause. And in neither case is a Finding touched:
+**Findings are NEVER auto-resolved** (RC-6, D-N-7). Resolution is a decision about exposure, not
+about the existence of a fix, and it stays a human act. A failed attempt is an OUTCOME, not an
+error: it is recorded, the Finding stays as it is, and the original Release stays affected.
+
+### M2-9 — What N-M2 does not change
+
+**N-M0 is unchanged** (RC-8, restated for the third time because this is the revision that finally
+builds the things it guards): no new scope, no relaxation of the closed vocabulary, no new
+Governance write path. `release_evaluated_events` is served by a **read** route under a read-scoped
+key; the `ci-rebuild` callback is a **Communication** route under `delivery:callback`, which stays
+refused on every Governance write. The scope vocabulary stays `admin` · `read` · `product:<id>` ·
+`delivery:callback`.
+
+Also unchanged: `ci_build` keeps its governance-controlled path (it carries an accepted change
+artifact and follows `proposal_accepted`), the reader still writes intents and holds no outward
+client (M1a-1), the payload is still materialized at enqueue (M1b-3), and secrets still come from
+the environment and from nowhere else (M1b-2).
+
+### Build steps — N-M2a..N-M2j
+
+Each step is small, lands alone, and is testable alone. **Repo** is the repository that changes;
+**API/schema** marks the two steps that touch a published surface or the database — everything else
+is internal. Test names are the traceability handle, not a promise about file layout.
+
+| Step | Repo | API/schema | What it builds | Test |
+| --- | --- | --- | --- | --- |
+| **N-M2a** | `themis` | — (bus contract) | Knowledge publishes `knowledge.release_correlation_completed.v1` once per SBOM, appended AFTER all its other events for that SBOM; `cause` carried through from the discovery path | `TestEventSchema_Knowledge_ReleaseCorrelationCompletedV1` (`internal/knowledge/adapters/store`) — schema, the ordering proof (the row's `seq` is greater than every other event for that SBOM), and the zero-match case |
+| **N-M2b** | `themis` | — (bus contract) | Governance consumes it and publishes `governance.release_evaluated.v1`: snake_case fields, integer counts, `cause` mapped verbatim | `TestReleaseEvaluatedEvent_ZeroCounts_AndCauseMapping` (`internal/governance`) — zero counts emitted as success, both causes mapped, no third cause accepted |
+| **N-M2c** | `themis` | — | Communication switches triggers: the `finding_opened` → ticket mapping is retired, and a ticket intent is created only on `governance.release_evaluated` with `cause=new_sbom` (product and project now populated) | `TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents` + `TestFindingOpenedAndRediscovery_CreateNoIntents` (`internal/communication/adapters/inbound`) |
+| **N-M2d** | `themis` | **API + schema** (migration up/down) | Governance table `release_evaluated_events` + the cursor read API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>`; `limit` default 100 / max 500; response `items: [{seq, event_id, name, occurred_at, body}]` with the next cursor being the last item's `seq`; standard error mapping | `TestReleaseEvaluatedEventsCursorRead_AfterLimit_AuthMatrix` (handler table test: auth matrix, paging bounds, clamped limit, empty page) + migration up/down reversibility |
+| **N-M2e** | `themis` | — | Comparison baseline: select the immediately-previous SBOM of the Release by upload order; detect closure of the targeted set | `TestSelectPreviousSBOM_ByUploadOrder` + `TestTargetedSetClosure_DoesNotGrowMidLoop` |
+| **N-M2f** | `themis` | — | Jira update and mail emitted after the comparison only | `TestPostEvaluationOnly_ProducesTicketAndMail` + `TestCallbackAlone_NoSideEffects` (worker level; the update stays idempotent) |
+| **N-M2g** | `themis` | — | `ci_rebuild` intent kind + the Jenkins `buildWithParameters` sender + `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`; HTTPS enforced at configure time | `TestCIBuildSender_BasicAuth_Params_HTTPSRefusal` (`httptest`: parameters, Basic auth header, `http://` refused with the fake kept) + config defaulting/override for the knob |
+| **N-M2h** | `themis` | **API** | `POST /api/v1/communication/callbacks/ci-rebuild`, `delivery:callback` only, payload schema enforced | `TestCIRebuildCallback_AuthAndBodySchema` (every other scope refused, missing `sbom_id`/`image_digest` refused) + `TestCallback_NoFindingMutation` |
+| **N-M2i** | `themis` | — | Stop conditions: success and exhaustion; no further `ci_rebuild` intent after a stop; exhaustion tells a person | `TestStopOnSuccessOrExhaustion_NoFurtherIntents` + `TestNotifyPersonOnExhaustion` (ticket + mail wording) |
+| **N-M2j** | `themis-ai-runtime` | — | Harness poller: poll with `after=<sequence>` and `limit`, at-least-once, dedupe by event id, filter `cause=new_sbom`, persist a local high-water mark | `TestHarnessPoller_PollingWithCursor_AtLeastOnce_DedupeAndFilterNewSBOM` (`httptest` Governance stub: paging, a redelivered page proving dedupe is harmless, a `rediscovery` event ignored) |
+
+The intent-type CHECK constraint that closes the vocabulary to `jira_issue` and `email` (M1a-9) is
+widened to admit `ci_rebuild` in **N-M2g**, which is a schema change to a constraint rather than a
+new surface; `ci_build` is still not added.
+
+### The questions this revision closes
+
+| Previously open | Decided |
+| --- | --- |
+| RC-1: event name(s) | `knowledge.release_correlation_completed.v1` + `governance.release_evaluated.v1` |
+| RC-1: transport | Polling a Governance cursor read API. No SSE, no webhook, no long-lived connection |
+| RC-1: subscriber auth | `X-API-Key`, **read** scope |
+| RC-1: delivery semantics | At-least-once; dedupe by **event id** |
+| RC-1: owning context | **Governance** (it owns the counts; Knowledge owns "correlation finished") |
+| Cursor shape | The **sequence** number, never the event id |
+| Paging bounds | `limit` default **100**, max **500** (clamped, not refused) |
+| Event store | New Governance table **`release_evaluated_events`**; no purge/retention policy |
+| Payload shape | **snake_case** field names; severity counts are **integers**; `cause` is a closed enum |
+| RC-4: baseline | The **immediately-previous** SBOM of the Release by upload order. No window, no knob |
+| Targeted set | Critical + High **at cycle start**; it does not grow mid-loop |
+| RC-6: knob name and locus | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, default **2** |
+| RC-6: per-Release override | **No.** Estate-wide only |
+| `ci_rebuild` sender | Jenkins `buildWithParameters`, Basic auth (user + API token) |
+| Jenkins URL scheme | **https mandatory**, refused at startup otherwise (loopback excepted) |
+| Callback auth | `delivery:callback` only. **No HMAC variant now** |
+| Callback payload | `{intent_id, build_id, git_ref, image_digest, sbom_id}` |
+
+No open questions remain in N-M2's design.
+
+### Honest limits (N-M2, as designed)
+
+- **`product:<id>` is honoured but NOT confined at Evidence's upload route.** D3's confinement is
+  Governance's, per Finding; the floor the other contexts mount (D5) answers `admin ∪ product:<id>`
+  without resolving a resource. So the CI job's upload key is the narrowest scope that can write
+  evidence, and it could in principle upload for another product. Narrowing the floor to the
+  resource is a security-model change in five contexts and is deliberately NOT taken here — it is
+  recorded so nobody relies on a confinement that does not exist.
+- **The event is per SBOM, and a Release can have two SBOMs in flight.** Two uploads to one Release
+  produce two evaluations and two events; the loop's attempt counter is per Release, so interleaved
+  uploads can make an attempt's comparison baseline (M2-5) the OTHER upload. Upload order is still
+  total, so the comparison is well defined — it is just not necessarily the pair a human had in mind.
+- **A poll is lag.** A subscriber learns about an evaluation one poll interval late, and the interval
+  is the subscriber's choice. That is the trade bought for having no inbound harness surface and no
+  outward Themis credential, and it is the right one for a loop whose next step is a container build.
+- **The cursor API serves a table that nothing prunes.** One row per evaluated SBOM is small, and
+  the rediscovery sweep adds rows for Releases nobody is rebuilding. An estate will eventually want
+  a retention policy; this revision deliberately does not invent one.
+- **Two Communication nodes still race** (the N-M1b limit, now with a second edge): the per-Release
+  lock is in-process, so two nodes can both create a `ci_rebuild` intent for one Release and spend
+  two attempts on one. Closing it needs a store-level claim, which is its own step.
+- **`cause` is producer-asserted.** A consumer cannot verify that a `new_sbom` event really followed
+  an upload; it trusts Governance, which trusted Knowledge. The alternative — inferring the cause
+  from SBOM identity at every consumer — replaces one trusted statement with N guesses.
+- **Nothing here makes the harness able to act.** It reads; it is on the outside of every effect.
+  That is by design, but it means a harness that notices something wrong can only report it.
+
+### Realizes (planned — no code in this revision)
+
+`internal/knowledge` (correlation-complete publication) · `internal/governance` (the
+release-evaluated publication, `release_evaluated_events` + its migration, the cursor read route in
+`api/governance.openapi.yaml`) · `internal/communication` (trigger switch, comparison, `ci_rebuild`
+kind and Jenkins sender, the `ci-rebuild` callback route in `api/communication.openapi.yaml`, the
+attempt counter) · `deploy/node.env.example` (the five Jenkins knobs + the attempts knob, commented
+and valueless) · `themis-ai-runtime` (the poller, N-M2j). Conventions: R1 (console + OTel from the
+one shared logger; no credential, address or payload in a log line), R2 (self-documented config,
+secrets referenced). Runtime-side source: `themis-ai-runtime/openspec/changes/outward-actions`
+(D-N-8..D-N-12 and the subscriber-seam lock).

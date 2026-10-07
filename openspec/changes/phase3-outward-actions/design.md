@@ -86,3 +86,27 @@ API, schema or generated-handler realization exists for any row below, which is 
 | RC-6 Loop control | **Default max-attempts = 2** per Release, operator-configurable (locus/name TBD); success = targeted set closed; exhaustion → stop + mail + Jira update; **never auto-resolve a Finding**. |
 | RC-7 Ownership | Themis owns security truth, all outward effects and loop control; the harness is a subscriber only — networkless for Jira/CI/mail, no outward credential, no Governance act. Model output advisory; secrets excluded from intents; controls fail closed. |
 | RC-8 N-M0 | **Unchanged.** Group 1 stands as implemented; no new scope, no relaxation, no new Governance write path. |
+
+## Acceptance as documented — Revision 3 (N-M2) (2026-10-07)
+
+The outward-actions plan's **Revision 3 — N-M2**, recorded in `EDR-DELIVERY-01` as the appended
+section of that exact name (decisions **M2-1..M2-9**), and mirroring the runtime-side
+subscriber-seam lock in `themis-ai-runtime/openspec/changes/outward-actions/design.md` (D-N-13).
+
+**Documentation only** — no code, API spec, schema, migration or generated-handler realization
+exists for any row below, which is why this is "accepted as documented" and not a realization map.
+It closes every question Revision 2 deferred (RC-1's transport and owning context, RC-4's baseline
+window, RC-6's knob name and locus) and supersedes M1a-3's `finding_opened` proxy.
+
+| EDR N-M2 decision | Accepted as documented |
+|---|---|
+| M2-1 Trigger and ordering | Knowledge publishes `knowledge.release_correlation_completed.v1` once per SBOM, appended AFTER all its other events for that SBOM; the bus's per-`source_context` `seq` order makes "everything earlier is already processed" a transport property, not a wait. Governance consumes it and publishes the signal, because Governance owns the counts. |
+| M2-2 `governance.release_evaluated.v1` | snake_case `product_id`, `project_id`, `release_id`, `sbom_id`, `severity_counts {critical, high, medium, low}` as integers, `cause` ∈ {`new_sbom`, `rediscovery`}. **Zero counts still emit both events and are the SUCCESS case**, never a skip. Buckets are M1b-5's `base_score` ladder; `Unknown` (score 0) is not `low`, so the counts need not sum to the Finding count. |
+| M2-3 Re-discovery | Emits with `cause=rediscovery` and **never starts or advances the loop** — nothing was built, so there is no new side to compare and no attempt to spend. The cause is carried by the producer, never inferred by a consumer. |
+| M2-4 Subscriber seam | `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>`; `X-API-Key` **read** scope; at-least-once; **dedupe by event id**; cursor is the **sequence**, not the id; `limit` default **100**, max **500** (clamped); rows stored in the new Governance table **`release_evaluated_events`**; no purge policy. **No SSE, no webhook, no long-lived connection.** The harness subscribes only. |
+| M2-5 Baseline and target | Baseline = the **immediately-previous** SBOM of the same Release **by upload order** (no window, no knob — closes RC-4). Targeted set = Critical + High **at cycle start**; it **does not grow** mid-loop; later Critical/High appear in the ticket's counts and wait for the next cycle. |
+| M2-6 `ci_rebuild` sender | Jenkins **`buildWithParameters`**, HTTP Basic auth (user + API token), `THEMIS_COMMUNICATION_JENKINS_{ENABLED,URL,USER,API_TOKEN,JOB}`; off by default and subordinate to `..._DELIVERY_ENABLED`. **`https` mandatory, refused at configure time** (loopback excepted) exactly as M1b-2 refuses it for Jira, with the fake sender kept and the variable named at ERROR. Snapshot unchanged from RC-3: no credential, no key, no model output. |
+| M2-7 Callback | The job uploads the new SBOM under a **`product:<id>`**-scoped key, then `POST /api/v1/communication/callbacks/ci-rebuild` under **`delivery:callback` only** with `{intent_id, build_id, git_ref, image_digest, sbom_id}`. **No HMAC variant now.** The callback is governed-external evidence **on the intent** and changes no Finding, Position or posture. |
+| M2-8 Loop and stop | Compare → update the one-per-Release Jira ticket (RC-2 / M1b-4) → mail, all **after** the evaluation and never from the callback. **`THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, default 2, no per-Release override** (closes RC-6). Stop on success (targeted set closed) or exhaustion (stop + mail + Jira update telling a person); no further `ci_rebuild` intent after a stop; **Findings are never auto-resolved**. |
+| M2-9 N-M0 | **Unchanged.** The cursor route is a READ route under a read-scoped key; the callback is a Communication route under `delivery:callback`, still refused on every Governance write. No new scope, no relaxation, no Governance write path. `ci_build` keeps its `proposal_accepted` path. |
+| Steps | **N-M2a..N-M2j**, each testable alone, in `tasks.md` Group 6. API/schema deltas are **N-M2d** (Governance events table + cursor read API, migration up/down) and **N-M2h** (the Communication callback route); **N-M2g** widens the intent-type CHECK constraint to admit `ci_rebuild`. **N-M2j** is the only step in `themis-ai-runtime`. |

@@ -308,7 +308,10 @@ callback, no loop control, no API or OpenAPI edit).
       M1b-3 and `deploy/node.env.example`. If the upgrade cost is unacceptable, the alternative is a
       one-time render path behind its own knob — a knob, so the default stays strict.
 
-## Group 3 — M2 CI — NOT STARTED
+## Group 3 — M2 CI (`ci_build`, the `proposal_accepted` artifact path) — NOT STARTED
+
+Unchanged and still unstarted. The REBUILD path (`ci_rebuild`, policy-gated, no artifact) is a
+different kind and is designed in Group 6 — the two must not be conflated (RC-3).
 
 ## Group 4 — M3 mail — NOT STARTED
 
@@ -331,10 +334,98 @@ source: `themis-ai-runtime/openspec/changes/outward-actions` **D-N-8..D-N-12**.
       rule (CVE ids listed only for Critical and High; Medium/Low by count) is recorded with it.
 - [x] 5.4 Gates: `make check` green (build · vet-tags · test · lint · clean-arch · arch-test ·
       coverage · deadcode), proving no code drift from a documentation-only change.
-- [ ] 5.5 Dedicated EDR + API change for the Themis→harness notification seam before any
-      implementation: event name(s), at-least-once semantics, transport, subscriber
-      authentication, owning context (Communication or Governance). Class 4 — owner approval first.
-- [ ] 5.6 Fix the configuration locus and name of the max-attempts knob, and whether per-Release
-      overrides are supported.
-- [ ] 5.7 Confirm the comparison baseline: strictly the immediately-previous SBOM id for the
-      Release, or a configured baseline window.
+- [x] 5.5 **Settled 2026-10-07 by Group 6** — the notification seam is designed in
+      `EDR-DELIVERY-01` **Revision 3 — N-M2** (M2-1/M2-2/M2-4): event names
+      `knowledge.release_correlation_completed.v1` + `governance.release_evaluated.v1`,
+      at-least-once with dedupe by event id, transport = polling a Governance cursor read API,
+      subscriber auth = `X-API-Key` read scope, owning context = **Governance**. The API change
+      itself is N-M2d (task 6.4) and is not in this documentation-only group.
+- [x] 5.6 **Settled 2026-10-07 by Group 6** (M2-8):
+      `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, default **2**, Communication-side, **no
+      per-Release override**.
+- [x] 5.7 **Settled 2026-10-07 by Group 6** (M2-5): strictly the **immediately-previous SBOM of
+      the same Release by upload order**. No configured baseline window.
+
+## Group 6 — N-M2 the release-evaluated trigger, polling subscriber, `ci_rebuild` and the loop (EDR-DELIVERY-01 **Revision 3 — N-M2**) — **designed 2026-10-07, documentation only**
+
+No code, API spec, schema, migration or generated handler changes in the DESIGN step (6.0); the
+steps **N-M2a..N-M2j** below are the build plan, each small and testable alone. API/schema deltas:
+**N-M2d** (events table + cursor read API), **N-M2h** (the callback route) and **N-M2g** (a
+constraint migration only — the intent-type CHECK widened to admit `ci_rebuild`). Runtime-side
+source: `themis-ai-runtime/openspec/changes/outward-actions` (D-N-8..D-N-13). Owner decisions
+recorded in `proposal.md` and accepted in `design.md`.
+
+- [x] 6.0 Design recorded: `docs/engineering/decisions/EDR-DELIVERY-01.md`, the appended section
+      **Revision 3 — N-M2** (M2-1..M2-9, the supersession of M1a-3's `finding_opened` proxy stated
+      inside that section, the N-M2a..N-M2j step table, the closed-questions table, honest limits).
+      The EDR is **append-only**: no earlier section and no status line is amended. Plus `design.md`
+      ("Acceptance as documented — Revision 3 (N-M2)") and `proposal.md` (owner decisions 1–6 plus
+      the shape decisions that leave nothing to an implementer). Gates: `make check` green, proving
+      no code drift from a documentation-only change.
+- [ ] 6.1 **N-M2a** (`themis`; no API, no schema) — Knowledge publishes
+      `knowledge.release_correlation_completed.v1` **once per SBOM**, appended to the outbox AFTER
+      every other Knowledge event for that SBOM, carrying the discovery cause. Test:
+      `TestEventSchema_Knowledge_ReleaseCorrelationCompletedV1` (`internal/knowledge/adapters/store`)
+      — schema, the ordering proof (its `seq` exceeds every other event for that SBOM), and the
+      zero-match case.
+- [ ] 6.2 **N-M2b** (`themis`; no API, no schema) — Governance consumes it and publishes
+      `governance.release_evaluated.v1`: snake_case `product_id` / `project_id` / `release_id` /
+      `sbom_id`, integer `severity_counts {critical, high, medium, low}` off M1b-5's `base_score`
+      ladder, `cause` mapped verbatim. Test:
+      `TestReleaseEvaluatedEvent_ZeroCounts_AndCauseMapping` — zero counts emitted as the success
+      case, both causes mapped, no third cause accepted.
+- [ ] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
+      `governance.finding_opened` → ticket mapping (M1a-3's proxy) and create a ticket intent only on
+      `governance.release_evaluated` with `cause=new_sbom`, product and project now populated. This
+      is what finally realizes RC-2's one-ticket-per-Release, because one Release evaluation is one
+      event and dedup is per origin event id (M1a-2). Tests:
+      `TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents` and
+      `TestFindingOpenedAndRediscovery_CreateNoIntents`
+      (`internal/communication/adapters/inbound`).
+- [ ] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
+      `release_evaluated_events` (migration **up/down**, reversibility a gate) and the cursor read
+      API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>` in
+      `api/governance.openapi.yaml` (spec-first, `make generate-api-governance`). Cursor is the
+      **sequence**; `limit` default **100**, max **500** (clamped, not refused); response
+      `items: [{seq, event_id, name, occurred_at, body}]` with the next cursor being the last item's
+      `seq`; `X-API-Key` **read** scope; standard error mapping. Tests:
+      `TestReleaseEvaluatedEventsCursorRead_AfterLimit_AuthMatrix` (handler table test: auth matrix,
+      paging bounds, clamped limit, empty page) + migration up/down reversibility. Coverage: register
+      the store/handler packages in `scripts/check-coverage.sh` if new.
+- [ ] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
+      **immediately-previous SBOM of the Release by upload order** and detect closure of the targeted
+      set. Tests: `TestSelectPreviousSBOM_ByUploadOrder` and
+      `TestTargetedSetClosure_DoesNotGrowMidLoop`.
+- [ ] 6.6 **N-M2f** (`themis`; no API, no schema) — Jira update and mail emitted **after the
+      comparison only**, never from the callback. Tests (worker level):
+      `TestPostEvaluationOnly_ProducesTicketAndMail` and `TestCallbackAlone_NoSideEffects`; the
+      ticket update stays a full-replace and therefore idempotent (M1b-4).
+- [ ] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
+      `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
+      `buildWithParameters` sender (Basic auth, user + API token,
+      `THEMIS_COMMUNICATION_JENKINS_{ENABLED,URL,USER,API_TOKEN,JOB}`, off by default and subordinate
+      to `..._DELIVERY_ENABLED`), **`https` enforced at configure time** with the loopback exception
+      and the fake kept + ERROR naming the variable (M1b-1/M1b-2), and
+      `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (default 2). Tests:
+      `TestCIBuildSender_BasicAuth_Params_HTTPSRefusal` (`httptest`: parameters, Basic auth header,
+      `http://` refused), config defaulting/override for the knob, and the per-call timeout
+      (M1b-6a). `deploy/node.env.example` gains the six commented, valueless knobs (R2).
+- [ ] 6.8 **N-M2h** (`themis`; **API CHANGE**) — `POST /api/v1/communication/callbacks/ci-rebuild`
+      in `api/communication.openapi.yaml` (spec-first), **`delivery:callback` only**, payload
+      `{intent_id, build_id, git_ref, image_digest, sbom_id}` schema-enforced with `image_digest` and
+      `sbom_id` required. Recorded as governed-external evidence **on the intent**. Tests:
+      `TestCIRebuildCallback_AuthAndBodySchema` (every other scope refused, missing members refused)
+      and `TestCallback_NoFindingMutation`.
+- [ ] 6.9 **N-M2i** (`themis`; no API, no schema) — stop conditions: success (targeted set closed)
+      and exhaustion (stop + mail + Jira update telling a person); **no further `ci_rebuild` intent
+      after a stop**; **no Finding is ever auto-resolved**. Tests:
+      `TestStopOnSuccessOrExhaustion_NoFurtherIntents` and `TestNotifyPersonOnExhaustion` (ticket and
+      mail wording).
+- [ ] 6.10 **N-M2j** (`themis-ai-runtime`; no API, no schema) — the harness poller: poll with
+      `after=<sequence>` and `limit`, at-least-once, dedupe by **event id**, filter
+      `cause=new_sbom`, persist a local high-water mark. Subscribes only — no Jira, no CI, no mail.
+      Test: `TestHarnessPoller_PollingWithCursor_AtLeastOnce_DedupeAndFilterNewSBOM` (`httptest`
+      Governance stub: paging, a redelivered page proving dedupe is harmless, a `rediscovery` event
+      ignored).
+- [ ] 6.11 Gates for each build step: `make check` green, and `make vet-tags` as the last act of the
+      group (a tagged caller of a changed seam is invisible otherwise).
