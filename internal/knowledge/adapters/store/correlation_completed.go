@@ -35,8 +35,11 @@ func (s *Store) AnnounceCorrelationCompleted(ctx context.Context, releaseID, sbo
 	}
 
 	// One timestamp for the row and for the body, so the envelope and the payload cannot
-	// disagree about when this happened.
-	occurredAt := at.UTC()
+	// disagree about when this happened. Rounded to the microsecond because that is what a
+	// timestamptz column keeps (PostgreSQL rounds, it does not truncate): an unrounded
+	// nanosecond clock would leave the body more precise than the stored envelope. Rounding is
+	// monotone, so it cannot move the completion before a note of its own run.
+	occurredAt := at.UTC().Round(time.Microsecond)
 	ev := domain.NewReleaseCorrelationCompleted(releaseID, sbomID, cause, occurredAt)
 	if err := s.queueOutbox(ctx, tx, app.EventReleaseCorrelationCompleted, releaseID, ev, occurredAt); err != nil {
 		return err
