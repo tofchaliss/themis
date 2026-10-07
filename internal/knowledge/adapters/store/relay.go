@@ -42,14 +42,17 @@ func NewRelay(pool *pgxpool.Pool, pub Publisher, batch int) *Relay {
 // (EDR-DELIVERY-01 M2-1 / M2a-3) sorts LAST within a shared instant: a correlation stamps its
 // fold and match notes from one clock reading apiece, so a frozen or coarse clock can give a
 // whole unit of work the same timestamp, and the outbox has no sequence column to fall back on.
-// Booleans sort false < true, so the predicate alone states "the completion comes after
-// everything it concludes" — the one ordering Knowledge promises, and the reason the signal is
-// an appended event rather than a timer.
+// The rank is an explicit CASE rather than the predicate `(event_type = $2)`: a bare boolean
+// would sort correctly here (false < true in PostgreSQL) but leaves the intended order resting
+// on a type's collation rather than saying it, and 0 before 1 is the one ordering Knowledge
+// promises — "the completion comes after everything it concludes", which is the reason the
+// signal is an appended event rather than a timer.
 func (r *Relay) DeliverPending(ctx context.Context) (int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at
 		FROM knowledge_outbox WHERE sent_at IS NULL
-		ORDER BY occurred_at, (event_type = $2) LIMIT $1`, r.batch, app.EventReleaseCorrelationCompleted)
+		ORDER BY occurred_at, CASE WHEN event_type = $2 THEN 1 ELSE 0 END
+		LIMIT $1`, r.batch, app.EventReleaseCorrelationCompleted)
 	if err != nil {
 		return 0, err
 	}

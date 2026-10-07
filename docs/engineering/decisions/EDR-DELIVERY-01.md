@@ -1148,6 +1148,17 @@ Two things needed deciding once code met the event, and both were taken by the o
 implementation round: what the body carries, and how "appended AFTER every other Knowledge event
 for that SBOM" is actually enforced.
 
+**Provenance, because M2a-1 NARROWS the N-M2a step row's prose.** The step row and the build
+instruction said the event carries product, project, release and SBOM ids; M2a-1 carries two of
+the four. That is not an implementer's simplification: it is the owner's decision, taken in the
+**N-M2a implementation round on 2026-10-07** ("introduce no Knowledge→Registry seam — remove
+`product_id`/`project_id`; emit only release, SBOM, cause and time"), and this section is its
+record of reference. **Cite it as `EDR-DELIVERY-01 M2a-1`** wherever the narrowing has to be
+justified — a review of the diff alone cannot see the instruction, which is exactly why the
+decision lives here rather than only in a task note. The same round fixed the two other shape
+facts M2a-1 records (snake_case, `occurred_at` in the body) and left M2a-3's mechanism to the
+implementation, where the second iteration of this step scoped it per SBOM.
+
 ### M2a-1 — The body is `{release_id, sbom_id, cause, occurred_at}`. It carries NO product or project id
 
 ```json
