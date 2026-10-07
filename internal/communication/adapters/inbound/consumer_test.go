@@ -3,9 +3,13 @@ package inbound_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	govclient "github.com/themis-project/themis/internal/communication/adapters/governance"
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
@@ -335,5 +339,82 @@ func TestSubscriptionDispatchesOnTheDeliveryTriggers(t *testing.T) {
 		if !inbound.Subscription.InInterest(typ) {
 			t.Errorf("%s is not in the Communication interest set", typ)
 		}
+	}
+}
+
+// --- Auth-enabled estate: the reader's own read must be authenticated -----------------------
+
+// authedPostureStub is a Governance node running with THEMIS_AUTH_REQUIRED=1: every read without
+// the key is a 401.
+func authedPostureStub(t *testing.T, key string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != key {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"finding_id":"fnd-1","cve":"CVE-2026-1","base_score":95}]`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// materializingConsumer is the PRODUCTION shape of the reader on an auth-enabled estate: the intent
+// service renders the ticket payload through the outward serializer, which reads the Release posture
+// over Governance's read API — so the reader's own HTTP read is in the path, with whatever credential
+// the client was given.
+func materializingConsumer(intents *intentStore, governanceURL, apiKey string) *inbound.Consumer {
+	posture := govclient.NewClient(governanceURL, nil).WithAPIKey(apiKey)
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{}).
+		WithPayloadRenderer(serializer.NewOutwardRenderer(posture))
+	return consumer(&memRepo{}).WithIntents(svc)
+}
+
+// WITH the key the ticket intent is recorded, payload and all. This is the enterprise-VM case of
+// 2026-10-05 and the reason the read seam carries a credential at all.
+func TestConsumer_RecordsTheJiraIntentOnAnAuthEnabledEstate(t *testing.T) {
+	const key = "read-scoped-key-abc123"
+	srv := authedPostureStub(t, key)
+	intents := newIntentStore()
+
+	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	if err := materializingConsumer(intents, srv.URL, key).Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 1 {
+		t.Fatalf("created %d intents, want 1", len(intents.created))
+	}
+	in := intents.created[0]
+	if in.PayloadSHA256 == "" || len(in.PayloadBytes) == 0 {
+		t.Fatalf("the intent carries no materialized payload: %q", in.PayloadSHA256)
+	}
+	// The posture the authenticated read returned is IN the ticket: one Critical, its id listed.
+	if body := string(in.PayloadBytes); !strings.Contains(body, "Critical: 1") || !strings.Contains(body, "CVE-2026-1") {
+		t.Errorf("payload does not reflect the posture read:\n%s", body)
+	}
+}
+
+// WITHOUT the key, the same estate reproduces the defect exactly: the read 401s, NOTHING is
+// recorded, and Handle returns an error so the envelope is retried rather than dropped.
+//
+// Both halves are the regression. The error is correct behaviour — an intent whose content could not
+// be determined must not be queued (D-N-3) — but it is also a LOOP: the retry will 401 again, which
+// is why the error has to name the credential rather than look like a broken endpoint.
+func TestConsumer_UnauthenticatedPostureReadRecordsNothingAndRetries(t *testing.T) {
+	srv := authedPostureStub(t, "read-scoped-key-abc123")
+	intents := newIntentStore()
+
+	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	err := materializingConsumer(intents, srv.URL, "").Handle(context.Background(), env)
+	if err == nil {
+		t.Fatal("a 401 on the posture read must surface, so the envelope is retried")
+	}
+	for _, want := range []string{"401", "THEMIS_API_KEY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q — a bare status reads as a broken endpoint", err, want)
+		}
+	}
+	if len(intents.created) != 0 {
+		t.Errorf("an intent was recorded from a refused read: %+v", intents.created)
 	}
 }

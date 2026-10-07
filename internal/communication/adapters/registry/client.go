@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -20,16 +21,34 @@ import (
 // Client walks Registry's read API for the name chain.
 type Client struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
+// defaultTimeout bounds one hop of the name chain when the caller supplies no client of its own.
+// http.DefaultClient has none, and three unbounded hops sit between a rollup request and its
+// answer.
+const defaultTimeout = 30 * time.Second
+
 // NewClient builds a client against the Registry base URL (e.g. "http://registry:8082").
-// A nil http.Client falls back to http.DefaultClient.
+// A nil http.Client falls back to one with defaultTimeout.
 func NewClient(baseURL string, hc *http.Client) *Client {
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: defaultTimeout}
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+}
+
+// WithAPIKey makes every hop carry `X-API-Key`. An empty key leaves the reads unauthenticated (the
+// auth-off development case).
+//
+// On an estate with `THEMIS_AUTH_REQUIRED=1` an unauthenticated hop answers 401, and because this
+// seam fails CLOSED (D13.4), the whole release identity refuses and no rollup can be published —
+// the credential is what keeps a correct refusal from being indistinguishable from a missing
+// product. A READ-ONLY key is enough; this client performs no write.
+func (c *Client) WithAPIKey(apiKey string) *Client {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
 }
 
 var _ app.ReleaseIdentityReader = (*Client)(nil)
@@ -79,13 +98,28 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 	if err != nil {
 		return err
 	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: status %d", path, resp.StatusCode)
+		return fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 	return json.NewDecoder(resp.Body).Decode(into)
+}
+
+// credentialHint names the likely cause of a 401/403 in the error itself, so a refused identity does
+// not read as a missing one.
+func (c *Client) credentialHint(status int) string {
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		return ""
+	}
+	if c.apiKey == "" {
+		return " — this read sent no X-API-Key; set THEMIS_API_KEY on this node (a read-scoped key is enough)"
+	}
+	return " — this read sent an X-API-Key Registry refused; check THEMIS_API_KEY is current and has read scope"
 }

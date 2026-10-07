@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
@@ -253,6 +254,7 @@ type harness struct {
 	worker  *delivery.Worker
 	jira    *delivery.FakeJiraDeliverer
 	mail    *delivery.FakeMailDeliverer
+	logger  *observability.Logger
 	logs    *observer.ObservedLogs
 	now     time.Time
 }
@@ -266,6 +268,7 @@ func newHarness(t *testing.T, cfg delivery.Config) *harness {
 		intents: newMemIntents(),
 		jira:    delivery.NewFakeJiraDeliverer(logger),
 		mail:    delivery.NewFakeMailDeliverer(logger),
+		logger:  logger,
 		logs:    logs,
 		now:     epoch,
 	}
@@ -282,16 +285,52 @@ func newHarness(t *testing.T, cfg delivery.Config) *harness {
 // seed stores one pending intent of the given type and returns its id.
 func (h *harness) seed(t *testing.T, typ app.IntentType) string {
 	t.Helper()
-	in, err := h.intents.CreateIntent(context.Background(), app.Intent{
-		ID: "int-" + string(typ), Type: typ, Destination: "dest", State: app.IntentPending,
+	return h.seedIntent(t, h.pending(typ, "dest", nil))
+}
+
+// pending builds a pending intent of the given type, destination and materialized payload.
+func (h *harness) pending(typ app.IntentType, destination string, payload []byte) app.Intent {
+	in := app.Intent{
+		ID: "int-" + string(typ), Type: typ, Destination: destination, State: app.IntentPending,
 		NextAttemptAt: epoch, OriginEventID: "env-1", Snapshot: map[string]string{},
 		Lineage:   app.IntentLineage{SourceContext: "governance", EventType: "governance.finding_opened", EventID: "env-1", CorrelationID: "corr-1"},
-		ReleaseID: "rel-1",
-	})
+		ReleaseID: "rel-1", CreatedAt: epoch, UpdatedAt: epoch,
+	}
+	if payload != nil {
+		in.PayloadBytes, in.PayloadSHA256 = payload, app.PayloadDigest(payload)
+	}
+	return in
+}
+
+func (h *harness) seedIntent(t *testing.T, in app.Intent) string {
+	t.Helper()
+	stored, err := h.intents.CreateIntent(context.Background(), in)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	return in.ID
+	return stored.ID
+}
+
+// withDeliverers rebuilds the worker over the same store with the given senders. It is how the
+// REAL senders are driven through the very retry/outcome mechanics the fakes were proved against:
+// one seam, one worker, two implementations.
+func (h *harness) withDeliverers(cfg delivery.Config, deliverers map[app.IntentType]delivery.IntentDeliverer) {
+	h.worker = delivery.NewWorker(cfg, h.intents, h.svc, deliverers, h.logger).
+		WithClock(func() time.Time { return h.now })
+}
+
+// assertNoSecretsInLogs is the negative test every real sender runs: a credential must not appear
+// in telemetry, in a message or in a field, not even once and not even on a failure path.
+func (h *harness) assertNoSecretsInLogs(t *testing.T, secrets ...string) {
+	t.Helper()
+	for _, e := range h.logs.All() {
+		line := e.Message + " " + fmt.Sprint(e.ContextMap())
+		for _, secret := range secrets {
+			if secret != "" && strings.Contains(line, secret) {
+				t.Fatalf("a credential reached the logs (%q): %s", secret, line)
+			}
+		}
+	}
 }
 
 func (h *harness) runOnce(t *testing.T) int {
@@ -782,6 +821,217 @@ func TestWorkerDeliversABatchConcurrently(t *testing.T) {
 	}
 	if got := h.mail.Calls(); got != 6 {
 		t.Errorf("deliverer calls = %d, want 6", got)
+	}
+}
+
+// --- N-M1b: which sender a configuration selects --------------------------------------------
+
+// Both channels off — the N-M1a property, and the default: the fakes stay wired, so an operator
+// who has not opted in makes no outbound connection of any kind.
+func TestNewDeliverersDefaultsToTheFakes(t *testing.T) {
+	deliverers := delivery.NewDeliverers(delivery.Config{Enabled: true}, nil, nil) // nil index + logger must not panic
+	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
+	assertFake(t, deliverers[app.IntentEmail], "mail")
+}
+
+// A MIXED state is supported: tickets go to Jira while mail is still logged. The two channels are
+// credentialed separately and are enabled separately.
+func TestNewDeliverersSelectsEachChannelIndependently(t *testing.T) {
+	jiraOnly := delivery.Config{Enabled: true, Jira: delivery.JiraConfig{
+		Enabled: true, BaseURL: "https://acme.atlassian.net", ProjectKey: "SEC",
+		User: "bot@acme.example", APIToken: "token"}}
+	deliverers := delivery.NewDeliverers(jiraOnly, nil, nil)
+	if _, fake := deliverers[app.IntentJiraIssue].(*delivery.FakeJiraDeliverer); fake {
+		t.Error("jira is enabled and complete, so the real sender must be selected")
+	}
+	assertFake(t, deliverers[app.IntentEmail], "mail")
+
+	mailOnly := delivery.Config{Enabled: true, Mail: delivery.MailConfig{
+		Enabled: true, Host: "relay.acme.example", From: "themis@acme.example", StartTLS: true,
+		Audiences: map[string][]string{"operations": {"ops@acme.example"}}}}
+	deliverers = delivery.NewDeliverers(mailOnly, nil, nil)
+	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
+	if _, fake := deliverers[app.IntentEmail].(*delivery.FakeMailDeliverer); fake {
+		t.Error("mail is enabled and complete, so the real sender must be selected")
+	}
+}
+
+// Enabled but misconfigured: the fake stays wired so the queue keeps draining, AND the log says so
+// at ERROR naming the knobs that are missing — "I am sending to Jira" and "I am logging instead"
+// must never be indistinguishable.
+func TestNewDeliverersFallsBackLoudlyOnIncompleteConfiguration(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := observability.New(zap.New(core))
+	deliverers := delivery.NewDeliverers(delivery.Config{
+		Enabled: true,
+		Jira:    delivery.JiraConfig{Enabled: true, BaseURL: "https://acme.atlassian.net"},
+		Mail:    delivery.MailConfig{Enabled: true, Host: "relay.acme.example"},
+	}, nil, logger)
+
+	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
+	assertFake(t, deliverers[app.IntentEmail], "mail")
+	for _, want := range []string{"jira delivery is ENABLED but its configuration is incomplete",
+		"mail delivery is ENABLED but its configuration is incomplete"} {
+		entry, ok := findMessage(logs, want)
+		if !ok {
+			t.Fatalf("missing the log line %q", want)
+		}
+		if entry.Level != zapcore.ErrorLevel {
+			t.Errorf("%q logged at %s, want error", want, entry.Level)
+		}
+	}
+	if !hasMessage(logs, "THEMIS_COMMUNICATION_JIRA_API_TOKEN") && !hasFieldValue(logs, "THEMIS_COMMUNICATION_JIRA_API_TOKEN") {
+		t.Error("the refusal must name the knob to set")
+	}
+}
+
+// Jira disabled: the fake sender delivers, nothing is dialled, and the outcome is logged — the
+// N-M1a behaviour, retained exactly.
+func TestJiraDisabledFallsBackToFakeAndMakesNoCall(t *testing.T) {
+	stub := &jiraStub{}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	cfg := testConfig()
+	// A complete Jira configuration with the switch OFF: being configured is not being enabled.
+	cfg.Jira = jiraConfig(srv.URL)
+	cfg.Jira.Enabled = false
+
+	h := newHarness(t, cfg)
+	h.withDeliverers(cfg, delivery.NewDeliverers(cfg, nil, h.logger))
+	id := h.seedIntent(t, h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload()))
+
+	if n := h.runOnce(t); n != 1 {
+		t.Fatalf("delivered %d, want 1", n)
+	}
+	if searches, creates, updates := stub.counts(); searches+creates+updates != 0 {
+		t.Errorf("a disabled channel made %d/%d/%d calls, want none", searches, creates, updates)
+	}
+	if got := h.intents.get(t, id).Result["transport"]; got != "fake" {
+		t.Errorf("transport = %q, want the fake", got)
+	}
+	if !hasMessage(h.logs, "fake delivery accepted") {
+		t.Error("the fake sender must log its outcome")
+	}
+}
+
+func assertFake(t *testing.T, d delivery.IntentDeliverer, kind string) {
+	t.Helper()
+	switch kind {
+	case "jira":
+		if _, ok := d.(*delivery.FakeJiraDeliverer); !ok {
+			t.Errorf("jira deliverer = %T, want the fake", d)
+		}
+	case "mail":
+		if _, ok := d.(*delivery.FakeMailDeliverer); !ok {
+			t.Errorf("mail deliverer = %T, want the fake", d)
+		}
+	}
+}
+
+func hasFieldValue(logs *observer.ObservedLogs, substr string) bool {
+	for _, e := range logs.All() {
+		if strings.Contains(fmt.Sprint(e.ContextMap()), substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// The real senders' knobs, read from the environment and from nowhere else — both OFF by default,
+// and no secret present in the String() an operator reads at startup.
+func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
+	cfg := delivery.ConfigFromEnv()
+	if cfg.Jira.Enabled || cfg.Mail.Enabled {
+		t.Error("both real senders must be OFF by default")
+	}
+	if cfg.Mail.Port != 587 {
+		t.Errorf("unset defaults = %s / %s", cfg.Jira, cfg.Mail)
+	}
+	// The flavour defaults to Jira CLOUD, so a deployment that predates the Data Center knobs needs
+	// neither of them. They are resolved here rather than at construction because this is what the
+	// startup line prints — an operator debugging the wrong flavour must see the one in force.
+	if cfg.Jira.Auth != delivery.JiraAuthBasic || cfg.Jira.APIVersion != 3 {
+		t.Errorf("unset flavour = %s, want basic/3 (Cloud)", cfg.Jira)
+	}
+	// The ISSUE TYPE is resolved here for the same reason, and that it was NOT is a defect this
+	// assertion exists to keep fixed: the node logged `issue_type=""` while the sender had quietly
+	// defaulted it to "Task", so the startup line disagreed with the request and sent an operator
+	// hunting a configuration gap that was not there.
+	if cfg.Jira.IssueType != "Task" {
+		t.Errorf("unset issue type = %q, want the effective default Task", cfg.Jira.IssueType)
+	}
+	if !strings.Contains(cfg.Jira.String(), `issue_type="Task"`) {
+		t.Errorf("the startup line must report the EFFECTIVE issue type: %s", cfg.Jira)
+	}
+
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_ENABLED", "1")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://acme.atlassian.net/ ")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_PROJECT_KEY", "SEC")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_USER", "bot@acme.example")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_TOKEN", "  "+jiraToken+"  ")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE", "Bug")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_TIMEOUT", "30s")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_ENABLED", "1")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_HOST", "relay.acme.example")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_PORT", "2525")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_USERNAME", "themis")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_PASSWORD", smtpPassword)
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_FROM", "themis@acme.example")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_STARTTLS", "0")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_TIMEOUT", "20s")
+	t.Setenv("THEMIS_COMMUNICATION_MAIL_AUDIENCES", "security-decisions=sec@acme.example;operations=ops@acme.example")
+
+	cfg = delivery.ConfigFromEnv()
+	// The trailing slash and the padding an operator cannot see are trimmed, so a pasted value
+	// does not become a 404 or a 401 nobody can explain.
+	if cfg.Jira.BaseURL != "https://acme.atlassian.net" || cfg.Jira.APIToken != jiraToken {
+		t.Errorf("jira = %+v", cfg.Jira)
+	}
+	if !cfg.Jira.Enabled || cfg.Jira.ProjectKey != "SEC" || cfg.Jira.IssueType != "Bug" || cfg.Jira.Timeout != 30*time.Second {
+		t.Errorf("jira = %s", cfg.Jira)
+	}
+	if !cfg.Mail.Enabled || cfg.Mail.Port != 2525 || cfg.Mail.StartTLS || cfg.Mail.Timeout != 20*time.Second {
+		t.Errorf("mail = %s", cfg.Mail)
+	}
+	if cfg.Mail.Password != smtpPassword || len(cfg.Mail.Audiences) != 2 {
+		t.Errorf("mail = %+v", cfg.Mail)
+	}
+
+	// The startup line carries neither secret.
+	line := cfg.String()
+	for _, secret := range []string{jiraToken, smtpPassword} {
+		if strings.Contains(line, secret) {
+			t.Fatalf("Config.String() leaked a credential: %s", line)
+		}
+	}
+	for _, want := range []string{"api_token=set", "password=set", "auth=basic", "api_version=3"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("Config.String() = %s, missing %q", line, want)
+		}
+	}
+
+	// The Data Center flavour, read from the two knobs that select it — including a base URL with a
+	// PATH, which is how a self-hosted instance is usually mounted.
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_AUTH", "Bearer") // case-insensitive
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_VERSION", "2")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://almsbx.radisys.com/jira/")
+	cfg = delivery.ConfigFromEnv()
+	if cfg.Jira.Auth != delivery.JiraAuthBearer || cfg.Jira.APIVersion != 2 {
+		t.Errorf("data-center flavour = %s", cfg.Jira)
+	}
+	if cfg.Jira.BaseURL != "https://almsbx.radisys.com/jira" {
+		t.Errorf("base URL = %q — the PATH must survive and the trailing slash must not", cfg.Jira.BaseURL)
+	}
+	if got := cfg.String(); !strings.Contains(got, "auth=bearer") || !strings.Contains(got, "api_version=2") {
+		t.Errorf("Config.String() = %s, want the flavour in force", got)
+	}
+
+	// An out-of-range API version is NOT silently defaulted by the reader: it is carried so the
+	// constructor can name it back. Defaulting it here would send ADF to a v2 instance.
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_VERSION", "7")
+	if got := delivery.ConfigFromEnv().Jira.APIVersion; got != 7 {
+		t.Errorf("api version = %d, want the configured value carried to the refusal", got)
 	}
 }
 

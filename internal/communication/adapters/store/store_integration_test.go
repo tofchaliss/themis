@@ -509,10 +509,19 @@ const (
 	intentID3 = "33333333-3333-4333-8333-333333333333"
 )
 
+// intentPayload is a materialized payload shaped like the serializer's: one Subject line, a blank
+// line, then the body. Since N-M1b every intent carries one, so the store's job includes
+// round-tripping the bytes and their content address.
+func intentPayload(typ app.IntentType) []byte {
+	return app.BuildPayload("Themis "+string(typ)+" for rel-1", []byte("Release:  rel-1\nFindings: 1\n"))
+}
+
 func pendingIntent(id string, typ app.IntentType, originEventID string, due time.Time) app.Intent {
+	payload := intentPayload(typ)
 	return app.Intent{
 		ID: id, Type: typ, Destination: "dest-" + string(typ), State: app.IntentPending,
 		NextAttemptAt: due, Result: map[string]string{},
+		PayloadBytes: payload, PayloadSHA256: app.PayloadDigest(payload),
 		Snapshot: map[string]string{"release_id": "rel-1", "cve": "CVE-2026-1"},
 		Lineage: app.IntentLineage{
 			SourceContext: "governance", EventType: "governance.finding_opened",
@@ -542,8 +551,11 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	if first.Snapshot["cve"] != "CVE-2026-1" || first.Lineage.CorrelationID != "corr-1" {
 		t.Errorf("snapshot/lineage round-trip = %+v / %+v", first.Snapshot, first.Lineage)
 	}
-	if len(first.PayloadBytes) != 0 || first.PayloadSHA256 != "" {
-		t.Errorf("payload columns must stay empty in N-M1a: %q / %q", first.PayloadSHA256, first.PayloadBytes)
+	// N-M1b: the materialized payload is PERSISTED — the bytes a retry re-sends, and the digest
+	// that makes "the same snapshot was delivered" checkable rather than assumed.
+	want := intentPayload(app.IntentJiraIssue)
+	if string(first.PayloadBytes) != string(want) || first.PayloadSHA256 != app.PayloadDigest(want) {
+		t.Errorf("payload round-trip = %q / %q", first.PayloadSHA256, first.PayloadBytes)
 	}
 
 	// A replay of the same envelope, even with a freshly minted intent id.
@@ -593,6 +605,11 @@ func TestDeliveryIntentWorkCycle(t *testing.T) {
 	}
 	if len(work) != 1 || work[0].ID != intentID1 {
 		t.Fatalf("work = %+v, want only the due intent", work)
+	}
+	// The claim carries the materialized payload: a sender transmits what the claim handed it and
+	// never goes back for the content (N-M1b / D-N-3).
+	if string(work[0].PayloadBytes) != string(intentPayload(app.IntentJiraIssue)) {
+		t.Errorf("claimed intent carries no payload: %q", work[0].PayloadBytes)
 	}
 	if work, err = st.GetPendingForWork(ctx, epoch.Add(2*time.Hour), 10); err != nil || len(work) != 2 {
 		t.Fatalf("work later = %d err=%v, want both", len(work), err)
@@ -653,6 +670,69 @@ func TestDeliveryIntentWorkCycle(t *testing.T) {
 		if !errors.Is(err, app.ErrIntentNotFound) {
 			t.Errorf("%s on a delivered intent: err = %v, want ErrIntentNotFound", name, err)
 		}
+	}
+}
+
+// Themis's OWN answer to "does this Release already have a Jira ticket" (N-M1b / M1b-4a): the
+// jira_issue_key recorded on an earlier DELIVERED ticket intent. It is what keeps one ticket per
+// Release when the project forbids labels on create and Jira's own search therefore cannot find the
+// ticket at all.
+func TestJiraIssueKeyForRelease(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	// Nothing recorded yet.
+	if key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1"); err != nil || found || key != "" {
+		t.Fatalf("empty store: key=%q found=%v err=%v", key, found, err)
+	}
+
+	// A PENDING ticket intent offers nothing: it may or may not have created an issue, and the key is
+	// only recorded when the delivery is marked delivered.
+	if _, err := st.CreateIntent(ctx, pendingIntent(intentID1, app.IntentJiraIssue, "env-1", epoch)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1"); err != nil || found {
+		t.Errorf("a pending intent must not answer: found=%v err=%v", found, err)
+	}
+
+	// Delivered, with the key.
+	if err := st.MarkDelivered(ctx, intentID1, map[string]string{"jira_issue_key": "SEC-7", "jira_action": "created"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1")
+	if err != nil || !found || key != "SEC-7" {
+		t.Fatalf("key=%q found=%v err=%v", key, found, err)
+	}
+
+	// Another Release's ticket is not this Release's answer.
+	other := pendingIntent(intentID2, app.IntentJiraIssue, "env-2", epoch)
+	other.ReleaseID = "rel-2"
+	if _, err := st.CreateIntent(ctx, other); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	if err := st.MarkDelivered(ctx, intentID2, map[string]string{"jira_issue_key": "SEC-8"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if key, _, _ := st.JiraIssueKeyForRelease(ctx, "rel-1"); key != "SEC-7" {
+		t.Errorf("rel-1 = %q, want its own ticket", key)
+	}
+	if key, _, _ := st.JiraIssueKeyForRelease(ctx, "rel-2"); key != "SEC-8" {
+		t.Errorf("rel-2 = %q", key)
+	}
+
+	// A delivered intent with NO key (a fake sender, or an email) is not an answer either: an empty
+	// key would be read as "this Release has a ticket called nothing".
+	blank := pendingIntent(intentID3, app.IntentJiraIssue, "env-3", epoch)
+	blank.ReleaseID = "rel-3"
+	if _, err := st.CreateIntent(ctx, blank); err != nil {
+		t.Fatalf("create blank: %v", err)
+	}
+	if err := st.MarkDelivered(ctx, intentID3, map[string]string{"transport": "fake"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-3"); err != nil || found || key != "" {
+		t.Errorf("a delivered intent with no key must not answer: key=%q found=%v err=%v", key, found, err)
 	}
 }
 
