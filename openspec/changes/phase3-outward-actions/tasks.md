@@ -252,13 +252,48 @@ callback, no loop control, no API or OpenAPI edit).
       "bearer needs no user / basic still does / the Cloud defaults need no new variable".
       Recorded as EDR-DELIVERY-01 **M1b-3a**; `deploy/node.env.example` documents both flavours and
       carries a complete, commented Data Center stanza.
+- [x] 2b.8c **Field defect, enterprise VM 2026-10-07 — project ME forbids labels on its create screen**
+      (`Field 'labels' cannot be set`), and Jira refuses the WHOLE create over that one field, so every
+      ticket failed. Three owner-directed changes, all implemented:
+      **(a) create without labels, add them afterwards, and stop depending on the label to find the
+      ticket.** The lookup order is now Themis's OWN RECORD (`jira_issue_key` on an earlier delivered
+      intent for that Release) → the label search as FALLBACK → create. If labels can fail to apply then
+      a label search can fail to find, so the rule could not keep resting on it. The labels arrive by a
+      follow-up `update` edit that is BEST EFFORT: on failure the ticket stands, the key is recorded, and
+      the next update retries (`add` is idempotent, so no state tracks it). A failed label edit must
+      never fail the delivery — a retried delivery retries the CREATE, on an intent whose key is not yet
+      in the store, which is exactly how a Release gets two tickets. Work on one Release is serialized
+      in-process by a lock held across lookup AND create, with a process-local memo beside it because the
+      durable key only lands when the worker marks the intent delivered, after the sender has returned.
+      New store read `JiraIssueKeyForRelease` (delivered intents only; a blank key is not an answer);
+      `jira_found_by` and `jira_labels` are recorded so an operator can see which mechanism is carrying
+      the rule. **(b)** `THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE_ID` (sent by id, and then the name is not
+      sent at all) and `THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS` (a JSON object merged into every CREATE's
+      fields, verbatim; it can never override project/issuetype/summary/description/labels — a reserved
+      key is dropped and logged; invalid JSON refuses the sender at startup and keeps the fake; create
+      only, so Themis never overwrites what a human changed). **(c)** fixed the issue-type NAME
+      defaulting in only one half of the node — the sender applied `Task` internally while
+      `ConfigFromEnv` left it empty, so the startup line read `issue_type=""` and disagreed with the
+      request it described. Tests: the stub now REFUSES a create carrying labels (Jira's own wording) and
+      counts content edits apart from label edits, so "no labels on create" is a regression test rather
+      than a restatement; create-then-label on both flavours; a label edit that fails → key recorded,
+      `jira_labels=pending`, and a second intent UPDATES that ticket with no second create; record
+      preferred over search (the search is not even called); the search still used when there is no
+      record AND when the record read FAILS; **eight intents for one Release across four worker
+      goroutines → exactly one create** (passes under `-race`); issue type by id with no name; the ME
+      project's five extra fields reaching a create and NOT an update; every reserved key dropped with
+      the non-reserved one kept and the warning naming them; invalid JSON refused at four shapes and the
+      selection keeping the fake; empty/`{}` accepted; the effective issue type in both the config and
+      the startup line. `deploy/node.env.example` carries the complete, commented **ME** stanza.
+      Recorded as EDR-DELIVERY-01 **M1b-4a/4b**, with two honest limits restated: two NODES can still
+      open two tickets, and a create whose outcome never gets recorded can be repeated.
 - [x] 2b.9 `docs/engineering/decisions/EDR-DELIVERY-01.md` **Revision 4** (M1b-1..M1b-8 + honest
       limits) and `deploy/node.env.example` (the two switches, every knob commented, both secrets
       documented as environment-only and left valueless, the N-M1a-payload consequence, and
       `THEMIS_API_KEY` for the two read seams).
 - [ ] 2b.10 Open, for the owner: (a) ~~confirm the Jira flavour~~ — **settled 2026-10-06 by 2b.8b**:
-      both Cloud and Data Center are supported, the estate is Data Center; the ISSUE TYPE for the
-      estate's project is still unconfirmed (the default is `Task`); (b) the ticket currently counts
+      both Cloud and Data Center are supported, the estate is Data Center; the ISSUE TYPE is settled
+      too (2b.8c — ME uses id 10501 with five required fields); (b) the ticket currently counts
       EVERY Finding of the Release, including those a Position has suppressed — filtering by
       disposition is a policy decision nobody has taken; (c) a central governed audience registry
       (the env map is the registry until one exists); (d) Jira credential needs

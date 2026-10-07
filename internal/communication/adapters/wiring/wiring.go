@@ -111,5 +111,12 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
 	}
 	comm.Consumer.WithIntents(intents)
-	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverers(cfg, logger), logger)
+	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
+	// Release already has is what keeps one ticket per Release when the project forbids labels on
+	// create (EDR-DELIVERY-01 M1b-4a).
+	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverers(cfg, comm.Store, logger), logger)
 }
+
+// The delivery-intent store answers the Jira sender's ticket-index question. Asserted here, at the
+// composition root, so a port change fails the build where both halves are visible.
+var _ delivery.ReleaseTicketIndex = (*store.Store)(nil)

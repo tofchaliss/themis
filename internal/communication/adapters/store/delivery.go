@@ -105,6 +105,37 @@ func (s *Store) GetPendingForWork(ctx context.Context, now time.Time, limit int)
 	return collectIntents(rows)
 }
 
+// JiraIssueKeyForRelease returns the Jira issue key Themis itself recorded for this Release — the
+// `jira_issue_key` written into the delivery outcome of an earlier DELIVERED ticket intent, newest
+// first. found=false when Themis has never successfully delivered a ticket for this Release.
+//
+// This is THEMIS'S OWN ANSWER to "does this Release already have a ticket", and it is consulted ahead
+// of asking Jira. A label search depends on the index having caught up, on the credential being
+// allowed to browse, and on the label having been applied at all — and a project that forbids labels
+// on create (the ME project: "Field 'labels' cannot be set") makes the last of those a real gap. This
+// row depends on none of it.
+//
+// Only `delivered` intents count: an intent that failed may or may not have created an issue, and the
+// key is only recorded when the delivery is marked delivered, so a non-delivered row has nothing to
+// offer here.
+func (s *Store) JiraIssueKeyForRelease(ctx context.Context, releaseID string) (string, bool, error) {
+	var key string
+	err := s.q(ctx).QueryRow(ctx, `
+		SELECT result->>'jira_issue_key'
+		FROM delivery_intents
+		WHERE type='jira_issue' AND state='delivered' AND release_id=$1
+		  AND coalesce(result->>'jira_issue_key', '') <> ''
+		ORDER BY updated_at DESC
+		LIMIT 1`, releaseID).Scan(&key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return key, true, nil
+}
+
 // ListDeadLetters returns dead-lettered intents updated at or after since, newest first — the
 // operator's queue (deliveryctl list-deadletters).
 func (s *Store) ListDeadLetters(ctx context.Context, since time.Time, limit int) ([]app.Intent, error) {

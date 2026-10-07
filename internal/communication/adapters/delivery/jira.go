@@ -47,8 +47,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/themis-project/themis/internal/communication/app"
@@ -108,8 +110,18 @@ type JiraConfig struct {
 	// APIToken is the credential: a Cloud API token under `basic`, a Data Center Personal Access
 	// Token under `bearer`. SECRET — environment only.
 	APIToken string
-	// IssueType is the issue type name to create (default "Task").
+	// IssueType is the issue type NAME to create (default "Task"). Ignored when IssueTypeID is set.
 	IssueType string
+	// IssueTypeID is the issue type ID to create, e.g. "10501". When set it is sent INSTEAD of the
+	// name: a project whose issue types are renamed, localized or ambiguous ("Task" exists twice
+	// under different schemes) can only be addressed by id, and an id is what a Jira admin reads off
+	// the screen that worked manually.
+	IssueTypeID string
+	// ExtraFieldsJSON is a JSON OBJECT merged into every create's `fields` — the project-specific
+	// required fields (a priority custom field, a version, a category) that a Jira screen demands and
+	// Themis has no opinion about. It is carried as raw text and parsed when the sender is built, so
+	// invalid JSON refuses the sender at startup instead of failing every create at run time.
+	ExtraFieldsJSON string
 	// Timeout bounds one HTTP call (default 15s).
 	Timeout time.Duration
 }
@@ -119,16 +131,31 @@ func jiraFromEnv() JiraConfig {
 		Enabled:    envBool("THEMIS_COMMUNICATION_JIRA_ENABLED", false),
 		BaseURL:    strings.TrimRight(getenv("THEMIS_COMMUNICATION_JIRA_BASE_URL"), "/"),
 		ProjectKey: getenv("THEMIS_COMMUNICATION_JIRA_PROJECT_KEY"),
-		// Auth and APIVersion are resolved to their EFFECTIVE values here rather than left blank for
-		// withDefaults, because this is what the startup log line prints: an operator debugging a
-		// wrong-flavour deployment must be able to read the flavour the node actually chose.
-		Auth:       jiraAuthFromEnv(),
-		APIVersion: envInt("THEMIS_COMMUNICATION_JIRA_API_VERSION", defaultJiraAPIVersion),
-		User:       getenv("THEMIS_COMMUNICATION_JIRA_USER"),
-		APIToken:   getenv("THEMIS_COMMUNICATION_JIRA_API_TOKEN"),
-		IssueType:  getenv("THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE"),
-		Timeout:    envDuration("THEMIS_COMMUNICATION_JIRA_TIMEOUT", defaultJiraTimeout),
+		// Auth, APIVersion and IssueType are resolved to their EFFECTIVE values here rather than left
+		// blank for withDefaults, because this is what the startup log line prints: an operator
+		// debugging a wrong-flavour deployment must be able to read what the node actually chose.
+		//
+		// IssueType was the one left out, and the cost was a real estate visit: the node logged
+		// `issue_type=""` while the sender had defaulted it to "Task" internally, so the startup line
+		// disagreed with the request and sent an operator looking for a configuration gap that was not
+		// there. A default that only one half of the node knows about is a default that lies.
+		Auth:            jiraAuthFromEnv(),
+		APIVersion:      envInt("THEMIS_COMMUNICATION_JIRA_API_VERSION", defaultJiraAPIVersion),
+		User:            getenv("THEMIS_COMMUNICATION_JIRA_USER"),
+		APIToken:        getenv("THEMIS_COMMUNICATION_JIRA_API_TOKEN"),
+		IssueType:       envDefaulted("THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE", defaultJiraIssueType),
+		IssueTypeID:     getenv("THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE_ID"),
+		ExtraFieldsJSON: getenv("THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS"),
+		Timeout:         envDuration("THEMIS_COMMUNICATION_JIRA_TIMEOUT", defaultJiraTimeout),
 	}
+}
+
+// envDefaulted reads a knob, falling back to its documented default.
+func envDefaulted(key, def string) string {
+	if v := getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // jiraAuthFromEnv reads the auth mode, case-insensitively, defaulting to `basic`. An unrecognized
@@ -211,6 +238,50 @@ func (c JiraConfig) apiBase() string {
 	return "/rest/api/" + strconv.Itoa(c.APIVersion)
 }
 
+// issueTypeRef is the `issuetype` value a create carries: an ID when one is configured, else the
+// name. By ID is how a Jira admin reads it off the screen that worked manually, and it is the only
+// way to address a project whose type names are renamed, localized or duplicated across schemes.
+func (c JiraConfig) issueTypeRef() map[string]string {
+	if id := strings.TrimSpace(c.IssueTypeID); id != "" {
+		return map[string]string{"id": id}
+	}
+	return map[string]string{"name": c.IssueType}
+}
+
+// reservedJiraFields are the create fields THEMIS owns. Extra fields may add to a create; they may
+// never take one of these over, because each is either the ticket's identity (project, issuetype) or
+// its snapshotted content (summary, description, labels) — and a configuration file silently
+// replacing the body of a security ticket is the one thing this seam must not permit.
+var reservedJiraFields = []string{"project", "issuetype", "summary", "description", "labels"}
+
+// parseExtraFields decodes the configured extra fields and strips any reserved key.
+//
+// Invalid JSON is an ERROR, not an empty map: these fields exist because a Jira screen REQUIRES them,
+// so ignoring a typo would turn one startup refusal into a create that fails for every Release
+// forever. A reserved key is DROPPED with its name reported, so an operator who tried to set the
+// summary from configuration is told rather than left wondering why it had no effect.
+func parseExtraFields(raw string) (map[string]any, []string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil, nil
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, nil, fmt.Errorf("delivery: THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS is not a JSON object: %w", err)
+	}
+	var dropped []string
+	for _, reserved := range reservedJiraFields {
+		if _, taken := fields[reserved]; taken {
+			delete(fields, reserved)
+			dropped = append(dropped, reserved)
+		}
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	return fields, dropped, nil
+}
+
 // checkTransport refuses to carry the API token over a channel that does not protect it.
 //
 // Jira's credential rides every call, as a Basic password or as a Bearer token, so a `http://` base
@@ -248,15 +319,60 @@ func (c JiraConfig) checkTransport() error {
 // and API version are included because they are the two knobs a wrong-flavour deployment turns on,
 // and an operator reading one startup line should be able to tell Cloud from Data Center.
 func (c JiraConfig) String() string {
-	return fmt.Sprintf("enabled=%t base_url=%q project=%q auth=%s api_version=%d user=%q issue_type=%q api_token=%s timeout=%s",
-		c.Enabled, c.BaseURL, c.ProjectKey, c.Auth, c.APIVersion, c.User, c.IssueType, secretState(c.APIToken), c.Timeout)
+	issueType := fmt.Sprintf("issue_type=%q", c.IssueType)
+	if id := strings.TrimSpace(c.IssueTypeID); id != "" {
+		issueType = fmt.Sprintf("issue_type_id=%q", id) // the name is not sent when an id is
+	}
+	return fmt.Sprintf("enabled=%t base_url=%q project=%q auth=%s api_version=%d user=%q %s extra_fields=%d api_token=%s timeout=%s",
+		c.Enabled, c.BaseURL, c.ProjectKey, c.Auth, c.APIVersion, c.User, issueType,
+		len(c.extraFieldNames()), secretState(c.APIToken), c.Timeout)
+}
+
+// extraFieldNames lists the configured extra field names for the startup line — the NAMES only. A
+// project's field VALUES can carry estate detail (a version number, a customer category), and a
+// startup line is read in a terminal somebody else may be looking at.
+func (c JiraConfig) extraFieldNames() []string {
+	fields, _, err := parseExtraFields(c.ExtraFieldsJSON)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ReleaseTicketIndex answers "which Jira issue did Themis already record for this Release?" from
+// Themis's OWN store — the `jira_issue_key` on an earlier delivered intent for the same Release.
+//
+// It is declared here, at the consumer, and the delivery-intent store implements it. It is the FIRST
+// place the one-ticket rule looks, ahead of asking Jira: Themis's own record of what it did is more
+// trustworthy than a search whose index may lag, whose permissions may differ, and whose label may
+// never have been applied at all (which is exactly the ME project's case — see labels below).
+type ReleaseTicketIndex interface {
+	JiraIssueKeyForRelease(ctx context.Context, releaseID string) (string, bool, error)
 }
 
 // RealJiraDeliverer creates or updates one Jira issue per Release.
 type RealJiraDeliverer struct {
-	cfg    JiraConfig
-	http   *http.Client
-	logger *observability.Logger
+	cfg         JiraConfig
+	extraFields map[string]any
+	tickets     ReleaseTicketIndex
+	http        *http.Client
+	logger      *observability.Logger
+
+	// locks serializes everything per Release, so two intents for one Release — which the
+	// finding_opened proxy produces by the dozen — cannot both look, both miss, and both create.
+	// The lock is held across lookup AND create: checking first and creating later with no lock in
+	// between is the race, not a fix for it.
+	locks sync.Map // releaseID -> *sync.Mutex
+	// known is this process's memo of the issue key per Release. It exists because the durable
+	// record arrives too late to help: the key reaches the store when the WORKER marks the intent
+	// delivered, which is after DeliverIntent has returned — so the second intent of the same batch
+	// would find nothing durable and open a second ticket. It is a cache, never the truth.
+	known sync.Map // releaseID -> issue key
 }
 
 // NewRealJiraDeliverer builds the sender, refusing an incomplete or credential-exposing
@@ -274,19 +390,42 @@ func NewRealJiraDeliverer(cfg JiraConfig, logger *observability.Logger) (*RealJi
 	if err := cfg.checkTransport(); err != nil {
 		return nil, err
 	}
+	extraFields, dropped, err := parseExtraFields(cfg.ExtraFieldsJSON)
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		logger = observability.Nop()
 	}
+	logger = logger.Component("jira")
+	if len(dropped) > 0 {
+		logger.Warn("THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS tried to set fields Themis owns; they were IGNORED",
+			observability.String("ignored_fields", strings.Join(dropped, ",")))
+	}
 	return &RealJiraDeliverer{
-		cfg:    cfg,
-		http:   &http.Client{Timeout: cfg.Timeout},
-		logger: logger.Component("jira"),
+		cfg:         cfg,
+		extraFields: extraFields,
+		http:        &http.Client{Timeout: cfg.Timeout},
+		logger:      logger,
 	}, nil
+}
+
+// WithTicketIndex gives the sender Themis's own record of which issue a Release already has, which it
+// consults AHEAD of asking Jira. Without it the sender falls back to the label search alone — which is
+// all a project that permits labels on create ever needed.
+func (d *RealJiraDeliverer) WithTicketIndex(tickets ReleaseTicketIndex) *RealJiraDeliverer {
+	d.tickets = tickets
+	return d
 }
 
 // DeliverIntent sends the intent's materialized ticket: it finds the Release's existing issue and
 // replaces its content, or creates it. The payload is never rendered here — an intent without one
 // is refused (ErrNoPayload).
+//
+// The whole sequence runs under a per-Release lock. The ME project made the reason concrete: with
+// labels unavailable on create, the only index a freshly created ticket has is Themis's own record,
+// and that record is written after this function returns — so two intents racing for one Release
+// must be serialized, not merely deduplicated afterwards.
 func (d *RealJiraDeliverer) DeliverIntent(ctx context.Context, in app.Intent) (Result, error) {
 	summary, description := app.SplitPayload(in.PayloadBytes)
 	if summary == "" || len(description) == 0 {
@@ -295,7 +434,8 @@ func (d *RealJiraDeliverer) DeliverIntent(ctx context.Context, in app.Intent) (R
 	if strings.TrimSpace(in.ReleaseID) == "" {
 		return Result{Excerpt: "jira: intent names no release"}, app.ErrNoSubject
 	}
-	label := jiraLabelPrefix + in.ReleaseID
+	unlock := d.lockRelease(in.ReleaseID)
+	defer unlock()
 
 	fields := []observability.Field{
 		observability.String("intent_id", in.ID),
@@ -303,29 +443,98 @@ func (d *RealJiraDeliverer) DeliverIntent(ctx context.Context, in app.Intent) (R
 		observability.String("project", d.cfg.ProjectKey),
 	}
 
-	key, found, err := d.search(ctx, label)
+	key, source, err := d.find(ctx, in.ReleaseID)
 	if err != nil {
 		return Result{Excerpt: excerpt(err.Error())}, err
 	}
-	if found {
+	if key != "" {
 		if err := d.update(ctx, key, summary, description); err != nil {
 			return Result{Excerpt: excerpt(err.Error())}, err
 		}
-		d.logger.Info("jira issue updated", append(fields, observability.String("jira_issue_key", key))...)
-		return jiraResult(http.StatusNoContent, key, "updated"), nil
+		d.remember(in.ReleaseID, key)
+		// The label edit is retried on EVERY update, which is how a create whose label edit failed
+		// heals: adding a label that is already there is a no-op, and the next cycle tries again.
+		labels := d.ensureLabels(ctx, key, in.ReleaseID, fields)
+		d.logger.Info("jira issue updated", append(fields,
+			observability.String("jira_issue_key", key), observability.String("found_by", source))...)
+		return jiraResult(http.StatusNoContent, key, "updated", source, labels), nil
 	}
 
-	key, err = d.create(ctx, summary, description, label)
+	key, err = d.create(ctx, summary, description)
 	if err != nil {
 		return Result{Excerpt: excerpt(err.Error())}, err
 	}
-	d.logger.Info("jira issue created", append(fields, observability.String("jira_issue_key", key))...)
-	return jiraResult(http.StatusCreated, key, "created"), nil
+	// Remembered BEFORE the label edit: from here on, a second intent for this Release must find
+	// this ticket whatever the label edit does. Losing the key to a failed follow-up call is how a
+	// Release ends up with two tickets.
+	d.remember(in.ReleaseID, key)
+	labels := d.ensureLabels(ctx, key, in.ReleaseID, fields)
+	d.logger.Info("jira issue created", append(fields,
+		observability.String("jira_issue_key", key), observability.String("labels", labels))...)
+	return jiraResult(http.StatusCreated, key, "created", "created", labels), nil
+}
+
+// find locates the Release's ticket, in order of how much the answer can be trusted:
+//
+//  1. this process's memo — the ticket it created or found moments ago, before the store could know;
+//  2. THEMIS'S OWN RECORD — the `jira_issue_key` on an earlier delivered intent for this Release;
+//  3. Jira's label search — the FALLBACK, for a Release whose ticket Themis has no record of.
+//
+// The order is the point. A search depends on the index having caught up, on the credential being
+// allowed to browse, and on the label having been applied — and on the ME project the label CANNOT be
+// applied at create time, so a brand-new ticket is unfindable by search for as long as the follow-up
+// edit keeps failing. Themis's own record depends on none of that.
+//
+// A failing record lookup is NOT fatal: it falls through to the search, because an unreachable index
+// must not stop a ticket being updated.
+func (d *RealJiraDeliverer) find(ctx context.Context, releaseID string) (string, string, error) {
+	if memo, ok := d.known.Load(releaseID); ok {
+		if key, _ := memo.(string); key != "" {
+			return key, "memo", nil
+		}
+	}
+	if d.tickets != nil {
+		key, found, err := d.tickets.JiraIssueKeyForRelease(ctx, releaseID)
+		switch {
+		case err != nil:
+			d.logger.Warn("could not read Themis's own ticket record; falling back to the label search",
+				observability.String("release_id", releaseID), observability.Err(err))
+		case found && key != "":
+			return key, "themis_record", nil
+		}
+	}
+	key, found, err := d.search(ctx, jiraLabelPrefix+releaseID)
+	if err != nil {
+		return "", "", err
+	}
+	if !found {
+		return "", "", nil
+	}
+	return key, "label_search", nil
+}
+
+// lockRelease serializes work on one Release and returns its unlock.
+//
+// Entries are never evicted: one mutex per Release is bounded by the estate's Releases and costs a
+// few dozen bytes each, which is cheaper than the bookkeeping that eviction would need to stay
+// correct under the very concurrency this exists to control.
+func (d *RealJiraDeliverer) lockRelease(releaseID string) func() {
+	value, _ := d.locks.LoadOrStore(releaseID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func (d *RealJiraDeliverer) remember(releaseID, key string) {
+	if key != "" {
+		d.known.Store(releaseID, key)
+	}
 }
 
 // jiraResult is the outcome metadata recorded on the intent — the issue key, so "which ticket did
-// this obligation land on" is answerable from Themis alone.
-func jiraResult(status int, key, action string) Result {
+// this obligation land on" is answerable from Themis alone, and HOW it was found, so an operator can
+// see whether the record, the memo or the search is carrying the one-ticket rule.
+func jiraResult(status int, key, action, foundBy, labels string) Result {
 	return Result{
 		StatusCode: status,
 		Excerpt:    "jira: issue " + action + " " + key,
@@ -333,6 +542,8 @@ func jiraResult(status int, key, action string) Result {
 			"transport":      "jira",
 			"jira_issue_key": key,
 			"jira_action":    action,
+			"jira_found_by":  foundBy,
+			"jira_labels":    labels,
 		},
 	}
 }
@@ -360,19 +571,30 @@ func (d *RealJiraDeliverer) search(ctx context.Context, label string) (string, b
 	return out.Issues[0].Key, true, nil
 }
 
-// create opens the Release's ticket, labelled so the next cycle finds it.
-func (d *RealJiraDeliverer) create(ctx context.Context, summary string, description []byte, label string) (string, error) {
-	body := map[string]any{"fields": map[string]any{
+// create opens the Release's ticket. It carries NO labels.
+//
+// Labels are a separate edit because a project can forbid them on create: the ME project's create
+// screen has no labels field, and Jira answers "Field 'labels' cannot be set" — it refuses the whole
+// create, so a ticket that could not be labelled was a ticket that did not exist. Themis's own record
+// is the index now (see find), and the labels are a convenience for a human searching Jira, so they
+// are added afterwards and their failure costs nothing.
+func (d *RealJiraDeliverer) create(ctx context.Context, summary string, description []byte) (string, error) {
+	fields := map[string]any{
 		"project":     map[string]string{"key": d.cfg.ProjectKey},
-		"issuetype":   map[string]string{"name": d.cfg.IssueType},
+		"issuetype":   d.cfg.issueTypeRef(),
 		"summary":     summary,
-		"labels":      []string{jiraLabel, label},
 		"description": d.description(description),
-	}}
+	}
+	// The project-specific required fields, merged UNDER Themis's own: reserved keys were dropped when
+	// the configuration was parsed, so this cannot overwrite the identity or the snapshot.
+	for name, value := range d.extraFields {
+		fields[name] = value
+	}
+
 	var out struct {
 		Key string `json:"key"`
 	}
-	if err := d.call(ctx, http.MethodPost, d.endpoint("/issue"), body, &out); err != nil {
+	if err := d.call(ctx, http.MethodPost, d.endpoint("/issue"), map[string]any{"fields": fields}, &out); err != nil {
 		return "", err
 	}
 	if out.Key == "" {
@@ -381,8 +603,37 @@ func (d *RealJiraDeliverer) create(ctx context.Context, summary string, descript
 	return out.Key, nil
 }
 
+// ensureLabels adds Themis's labels to an issue with an `update`-style edit, and reports what
+// happened ("added" or "pending") for the delivery result.
+//
+// It is BEST EFFORT by design. A failure here is logged and recorded, never returned: the ticket and
+// its content have landed, and failing the delivery would retry the whole thing — including the
+// create, on an intent whose key the store has not yet recorded. That is the path that opens a second
+// ticket, which is the one outcome worth more than a label.
+//
+// `add` is idempotent (Jira holds labels as a set), so every later update retries this for free.
+func (d *RealJiraDeliverer) ensureLabels(ctx context.Context, key, releaseID string, fields []observability.Field) string {
+	body := map[string]any{"update": map[string]any{
+		"labels": []map[string]string{
+			{"add": jiraLabel},
+			{"add": jiraLabelPrefix + releaseID},
+		},
+	}}
+	if err := d.call(ctx, http.MethodPut, d.endpoint("/issue/"+url.PathEscape(key)), body, nil); err != nil {
+		d.logger.Warn("jira refused the label edit; the ticket stands and the labels will be retried on the next update "+
+			"(Themis's own record, not the label, is what keeps one ticket per Release)",
+			append(fields, observability.String("jira_issue_key", key), observability.Err(err))...)
+		return "pending"
+	}
+	return "added"
+}
+
 // update replaces the issue's summary and description with the snapshot — a full replace, so the
 // operation is idempotent however many times a retry repeats it.
+//
+// The extra fields are NOT re-sent here. They are a project's create-screen requirements, not Themis's
+// content: re-asserting a priority or a version on every cycle would overwrite whatever a human
+// changed on the ticket, which is the opposite of what a projection should do.
 func (d *RealJiraDeliverer) update(ctx context.Context, key, summary string, description []byte) error {
 	body := map[string]any{"fields": map[string]any{
 		"summary":     summary,

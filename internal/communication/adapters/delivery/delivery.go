@@ -191,8 +191,12 @@ var ErrNoPayload = errors.New("delivery: intent carries no materialized payload"
 // that are missing and never their values. That combination is deliberate: a node must keep
 // draining its queue (an undrained queue hides every other outward obligation behind the first
 // misconfiguration), but "I am sending to Jira" and "I am logging instead" must never be
-// indistinguishable in the log.
-func NewDeliverers(cfg Config, logger *observability.Logger) map[app.IntentType]IntentDeliverer {
+// indistinguishable in the log. An unparseable THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS is refused the
+// same way: a required field Jira would reject must not be discovered one failed create per Release.
+//
+// tickets is Themis's own record of which issue a Release already has (nil = fall back to the label
+// search alone).
+func NewDeliverers(cfg Config, tickets ReleaseTicketIndex, logger *observability.Logger) map[app.IntentType]IntentDeliverer {
 	if logger == nil {
 		logger = observability.Nop()
 	}
@@ -206,7 +210,7 @@ func NewDeliverers(cfg Config, logger *observability.Logger) map[app.IntentType]
 			logger.Error("jira delivery is ENABLED but its configuration is incomplete — the FAKE sender stays wired, so NOTHING will reach Jira",
 				observability.Err(err))
 		} else {
-			out[app.IntentJiraIssue] = jira
+			out[app.IntentJiraIssue] = jira.WithTicketIndex(tickets)
 			logger.Info("real jira sender wired", observability.String("config", cfg.Jira.String()))
 		}
 	}

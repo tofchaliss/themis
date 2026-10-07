@@ -829,7 +829,7 @@ func TestWorkerDeliversABatchConcurrently(t *testing.T) {
 // Both channels off — the N-M1a property, and the default: the fakes stay wired, so an operator
 // who has not opted in makes no outbound connection of any kind.
 func TestNewDeliverersDefaultsToTheFakes(t *testing.T) {
-	deliverers := delivery.NewDeliverers(delivery.Config{Enabled: true}, nil) // nil logger must not panic
+	deliverers := delivery.NewDeliverers(delivery.Config{Enabled: true}, nil, nil) // nil index + logger must not panic
 	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
 	assertFake(t, deliverers[app.IntentEmail], "mail")
 }
@@ -840,7 +840,7 @@ func TestNewDeliverersSelectsEachChannelIndependently(t *testing.T) {
 	jiraOnly := delivery.Config{Enabled: true, Jira: delivery.JiraConfig{
 		Enabled: true, BaseURL: "https://acme.atlassian.net", ProjectKey: "SEC",
 		User: "bot@acme.example", APIToken: "token"}}
-	deliverers := delivery.NewDeliverers(jiraOnly, nil)
+	deliverers := delivery.NewDeliverers(jiraOnly, nil, nil)
 	if _, fake := deliverers[app.IntentJiraIssue].(*delivery.FakeJiraDeliverer); fake {
 		t.Error("jira is enabled and complete, so the real sender must be selected")
 	}
@@ -849,7 +849,7 @@ func TestNewDeliverersSelectsEachChannelIndependently(t *testing.T) {
 	mailOnly := delivery.Config{Enabled: true, Mail: delivery.MailConfig{
 		Enabled: true, Host: "relay.acme.example", From: "themis@acme.example", StartTLS: true,
 		Audiences: map[string][]string{"operations": {"ops@acme.example"}}}}
-	deliverers = delivery.NewDeliverers(mailOnly, nil)
+	deliverers = delivery.NewDeliverers(mailOnly, nil, nil)
 	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
 	if _, fake := deliverers[app.IntentEmail].(*delivery.FakeMailDeliverer); fake {
 		t.Error("mail is enabled and complete, so the real sender must be selected")
@@ -866,7 +866,7 @@ func TestNewDeliverersFallsBackLoudlyOnIncompleteConfiguration(t *testing.T) {
 		Enabled: true,
 		Jira:    delivery.JiraConfig{Enabled: true, BaseURL: "https://acme.atlassian.net"},
 		Mail:    delivery.MailConfig{Enabled: true, Host: "relay.acme.example"},
-	}, logger)
+	}, nil, logger)
 
 	assertFake(t, deliverers[app.IntentJiraIssue], "jira")
 	assertFake(t, deliverers[app.IntentEmail], "mail")
@@ -898,7 +898,7 @@ func TestJiraDisabledFallsBackToFakeAndMakesNoCall(t *testing.T) {
 	cfg.Jira.Enabled = false
 
 	h := newHarness(t, cfg)
-	h.withDeliverers(cfg, delivery.NewDeliverers(cfg, h.logger))
+	h.withDeliverers(cfg, delivery.NewDeliverers(cfg, nil, h.logger))
 	id := h.seedIntent(t, h.pending(app.IntentJiraIssue, "themis-remediation", ticketPayload()))
 
 	if n := h.runOnce(t); n != 1 {
@@ -945,7 +945,7 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	if cfg.Jira.Enabled || cfg.Mail.Enabled {
 		t.Error("both real senders must be OFF by default")
 	}
-	if cfg.Jira.IssueType != "" || cfg.Mail.Port != 587 {
+	if cfg.Mail.Port != 587 {
 		t.Errorf("unset defaults = %s / %s", cfg.Jira, cfg.Mail)
 	}
 	// The flavour defaults to Jira CLOUD, so a deployment that predates the Data Center knobs needs
@@ -953,6 +953,16 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	// startup line prints — an operator debugging the wrong flavour must see the one in force.
 	if cfg.Jira.Auth != delivery.JiraAuthBasic || cfg.Jira.APIVersion != 3 {
 		t.Errorf("unset flavour = %s, want basic/3 (Cloud)", cfg.Jira)
+	}
+	// The ISSUE TYPE is resolved here for the same reason, and that it was NOT is a defect this
+	// assertion exists to keep fixed: the node logged `issue_type=""` while the sender had quietly
+	// defaulted it to "Task", so the startup line disagreed with the request and sent an operator
+	// hunting a configuration gap that was not there.
+	if cfg.Jira.IssueType != "Task" {
+		t.Errorf("unset issue type = %q, want the effective default Task", cfg.Jira.IssueType)
+	}
+	if !strings.Contains(cfg.Jira.String(), `issue_type="Task"`) {
+		t.Errorf("the startup line must report the EFFECTIVE issue type: %s", cfg.Jira)
 	}
 
 	t.Setenv("THEMIS_COMMUNICATION_JIRA_ENABLED", "1")
