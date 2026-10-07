@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/communication/adapters/governance"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -178,6 +180,198 @@ func TestReleasePosture_Errors(t *testing.T) {
 		t.Error("malformed JSON must error")
 	}
 	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleasePosture(context.Background(), "rel-1"); err == nil {
+		t.Error("transport failure must error")
+	}
+}
+
+// --- Auth-enabled estate: the read seams carry X-API-Key ------------------------------------
+
+const readKey = "read-scoped-key-abc123"
+
+// newAuthedGovernanceStub answers 401 to any request that does not carry the expected key — the
+// shape of a node running with THEMIS_AUTH_REQUIRED=1. The header check stands in for the real
+// api_keys middleware deliberately: what this client has to get right is the CONTRACT (the header
+// name and that it is sent on every read), and the middleware's own matrix is tested where it lives.
+func newAuthedGovernanceStub(t *testing.T) (*httptest.Server, *int) {
+	t.Helper()
+	refused := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != readKey {
+			refused++
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"title":"unauthorized"}`))
+			return
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/posture"):
+			_, _ = w.Write([]byte(`[{"finding_id":"f1","cve":"CVE-2026-0100","base_score":95,
+			  "components":[{"purl":"pkg:rpm/x@1","claim_class":"carrier"}]}]`))
+		default:
+			_, _ = w.Write([]byte(`{"id":"fnd-1","release_id":"rel-1","faultline_id":"fl-1","cve":"CVE-2026-0100",
+			  "current_position":{"version":1,"stance":"affected","rationale":"in range"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &refused
+}
+
+// WITH the key, every read works on an auth-enabled estate. All three are asserted because the key
+// is only useful if it is on EVERY read — one unauthenticated read is one stuck pipeline.
+func TestReadsCarryTheAPIKeyWhenAuthIsOn(t *testing.T) {
+	srv, refused := newAuthedGovernanceStub(t)
+	c := governance.NewClient(srv.URL, srv.Client()).WithAPIKey(readKey)
+	ctx := context.Background()
+
+	rows, err := c.ReleaseSeverity(ctx, "rel-1")
+	if err != nil || len(rows) != 1 || rows[0].BaseScore != 95 {
+		t.Fatalf("release severity: rows=%+v err=%v", rows, err)
+	}
+	posture, err := c.ReleasePosture(ctx, "rel-1")
+	if err != nil || len(posture) != 1 {
+		t.Fatalf("release posture: rows=%+v err=%v", posture, err)
+	}
+	snap, found, err := c.GetPosition(ctx, "fnd-1")
+	if err != nil || !found || snap.Version != 1 {
+		t.Fatalf("get position: snap=%+v found=%v err=%v", snap, found, err)
+	}
+	if *refused != 0 {
+		t.Errorf("%d read(s) were refused — a read that omits the key is a stuck pipeline", *refused)
+	}
+
+	// Surrounding whitespace is trimmed: a key pasted into an env file arrives with the newline the
+	// operator could not see, and `X-API-Key: key\n` is not the key.
+	padded := governance.NewClient(srv.URL, srv.Client()).WithAPIKey("  " + readKey + "\t")
+	if _, err := padded.ReleaseSeverity(ctx, "rel-1"); err != nil {
+		t.Errorf("a padded key must still authenticate: %v", err)
+	}
+}
+
+// WITHOUT the key the same estate answers 401 — and the error must SAY so. This is the enterprise-VM
+// failure of 2026-10-05: Communication read the posture unauthenticated, got 401, recorded no Jira
+// intent, and the envelope retried forever behind an error that read like a broken endpoint.
+func TestReadsWithoutTheAPIKeyAreRefusedAndSayWhy(t *testing.T) {
+	srv, _ := newAuthedGovernanceStub(t)
+	c := governance.NewClient(srv.URL, srv.Client()) // no WithAPIKey — today's behaviour
+	ctx := context.Background()
+
+	_, err := c.ReleaseSeverity(ctx, "rel-1")
+	if err == nil {
+		t.Fatal("an unauthenticated read against an auth-enabled node must fail")
+	}
+	for _, want := range []string{"401", "sent no X-API-Key", "THEMIS_API_KEY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+
+	// A WRONG key is a different sentence: the variable is set, so telling the operator to set it
+	// would send them looking in the wrong place.
+	_, err = governance.NewClient(srv.URL, srv.Client()).WithAPIKey("stale-key").ReleaseSeverity(ctx, "rel-1")
+	if err == nil {
+		t.Fatal("a refused key must fail")
+	}
+	if !strings.Contains(err.Error(), "Governance refused") {
+		t.Errorf("err = %v, want it to distinguish a refused key from an absent one", err)
+	}
+	if strings.Contains(err.Error(), "stale-key") {
+		t.Errorf("err = %v leaked the credential", err)
+	}
+
+	// The other two reads refuse the same way, and GetPosition's 401 is an ERROR rather than the
+	// "no decision yet" its 404 means — an unauthenticated read must never read as an absent Position.
+	if _, err := c.ReleasePosture(ctx, "rel-1"); err == nil {
+		t.Error("release posture: want a 401 error")
+	}
+	_, found, err := c.GetPosition(ctx, "fnd-1")
+	if err == nil {
+		t.Error("get position: want a 401 error")
+	}
+	if found {
+		t.Error("a refused read must not report a Position as found")
+	}
+}
+
+// A client built with no http.Client of its own must still be BOUNDED. http.DefaultClient has no
+// timeout, and these reads are no longer only on a request path: since N-M1b a remediation ticket is
+// rendered inside the inbox unit of work, so a Governance node that accepts a connection and then
+// stalls would hold a bus-reader transaction open indefinitely.
+func TestNewClientWithoutAnHTTPClientIsStillBounded(t *testing.T) {
+	// A server that accepts and never answers — the stall a dial timeout does not cover.
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer stalled.Close()
+
+	c := governance.NewClient(stalled.URL, nil)
+	// The ambient deadline stands in for the configured one: the point is that the client HAS a
+	// deadline to honour rather than waiting forever, which is what http.DefaultClient would do.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ReleaseSeverity(ctx, "rel-1")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a stalled read must not read as an empty posture")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read hung instead of honouring its deadline")
+	}
+}
+
+// The remediation ticket's read (N-M1b): the same posture endpoint, reduced to the CVE id and the
+// intrinsic score its severity bucket is read from. A row with no base_score decodes as 0, which
+// the renderer reports as Unknown — never as Low.
+func TestReleaseSeverity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases/rel-1/posture" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[
+		  {"finding_id":"f1","cve":"CVE-2020-1747","base_score":92,"band":"critical"},
+		  {"finding_id":"f2","cve":"CVE-2025-47273","base_score":40},
+		  {"finding_id":"f3","cve":"CVE-2026-9"}
+		]`))
+	}))
+	defer srv.Close()
+
+	rows, err := governance.NewClient(srv.URL, srv.Client()).ReleaseSeverity(context.Background(), "rel-1")
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	if rows[0].CVE != "CVE-2020-1747" || rows[0].BaseScore != 92 {
+		t.Errorf("row 0 = %+v", rows[0])
+	}
+	if rows[1].BaseScore != 40 {
+		t.Errorf("row 1 = %+v", rows[1])
+	}
+	if rows[2].BaseScore != 0 {
+		t.Errorf("a missing base_score must decode as 0, got %+v", rows[2])
+	}
+}
+
+// Every failure is reported, never degraded to an empty posture: a ticket rendered from zero rows
+// would claim a Release has nothing open, which is the one thing a failed read cannot know.
+func TestReleaseSeverity_Errors(t *testing.T) {
+	notOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer notOK.Close()
+	if _, err := governance.NewClient(notOK.URL, notOK.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("non-200 must error")
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{`))
+	}))
+	defer bad.Close()
+	if _, err := governance.NewClient(bad.URL, bad.Client()).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
+		t.Error("malformed JSON must error")
+	}
+	if _, err := governance.NewClient("http://127.0.0.1:1", nil).ReleaseSeverity(context.Background(), "rel-1"); err == nil {
 		t.Error("transport failure must error")
 	}
 }

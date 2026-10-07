@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +40,7 @@ type config struct {
 	addr           string // THEMIS_COMMUNICATION_ADDR — listen address (default ":8084").
 	governanceURL  string // THEMIS_GOVERNANCE_URL — Governance read-API base URL (default "http://localhost:8083").
 	registryURL    string // THEMIS_REGISTRY_URL — Registry read-API base URL (release rollups' name chain, D13.4 fail-closed; default "http://localhost:8082").
+	readAPIKey     string // THEMIS_API_KEY — sent as X-API-Key on the Governance and Registry READS above. Required on an estate with THEMIS_AUTH_REQUIRED=1, where an unauthenticated read answers 401 and the remediation-ticket intent is never recorded. A READ-SCOPED key is enough: this node writes to neither. Empty = reads are unauthenticated (auth-off dev). Same variable name the Dashboard proxy and the Intelligence node use. TRIMMED at read time (as well as inside each client): a key pasted into an env file or a unit arrives with whitespace the operator cannot see, and what this node passes on — and reports as set — should be the key itself, not a key plus a newline that only the clients know to strip.
 	migrate        bool   // THEMIS_COMMUNICATION_MIGRATE=1 — apply the communication migrations on startup.
 	devPurge       bool   // THEMIS_COMMUNICATION_DEV_PURGE=1 — expose DELETE /dev/communication (dev only).
 	migrationsPath string // THEMIS_COMMUNICATION_MIGRATIONS — path to the communication migrations dir.
@@ -46,6 +48,14 @@ type config struct {
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
+
+	// Outward delivery (N-M1a/N-M1b) is configured by delivery.ConfigFromEnv — the knobs are
+	// documented there and in deploy/node.env.example:
+	// THEMIS_COMMUNICATION_DELIVERY_{ENABLED,WORKERS,BATCH,MAX_ATTEMPTS,BACKOFF_INITIAL,BACKOFF_MAX,INTERVAL},
+	// THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE, and the two REAL senders' switches
+	// THEMIS_COMMUNICATION_JIRA_* / THEMIS_COMMUNICATION_MAIL_* (both off by default; their
+	// SECRETS — the Jira API token, the SMTP password — are read from the environment only and
+	// never appear in the startup line this config prints).
 
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
@@ -57,6 +67,7 @@ func loadConfig() config {
 		addr:           envDefault("THEMIS_COMMUNICATION_ADDR", ":8084"),
 		governanceURL:  envDefault("THEMIS_GOVERNANCE_URL", "http://localhost:8083"),
 		registryURL:    envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
+		readAPIKey:     strings.TrimSpace(os.Getenv("THEMIS_API_KEY")),
 		migrate:        os.Getenv("THEMIS_COMMUNICATION_MIGRATE") == "1",
 		devPurge:       os.Getenv("THEMIS_COMMUNICATION_DEV_PURGE") == "1",
 		migrationsPath: envDefault("THEMIS_COMMUNICATION_MIGRATIONS", "internal/communication/adapters/store/migrations"),
@@ -107,10 +118,31 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	comm := wiring.Wire(pool, cfg.governanceURL, cfg.registryURL,
+	comm := wiring.Wire(pool, cfg.governanceURL, cfg.registryURL, cfg.readAPIKey,
 		delivery.NewLogDeliverer(logger.Component("delivery")), delivery.PassThroughRedactor{}, publisher)
 
+	// Whether the read seams carry a credential is the difference between a working pipeline and a
+	// 401 loop on an auth-enabled estate, so it is said once at startup — as a BOOLEAN. The key
+	// itself is never logged.
+	logger.Info("governance/registry read seams",
+		observability.String("governance_url", cfg.governanceURL),
+		observability.String("registry_url", cfg.registryURL),
+		observability.Bool("api_key_set", cfg.readAPIKey != ""))
+
 	go workerLoop(comm, logger.Component("worker"))
+
+	// Outward delivery (N-M1a/N-M1b, EDR-DELIVERY-01 Revisions 3–4). Off by default: with it off
+	// the event reader records no delivery intents and no sender runs, so the node performs no
+	// outward action at all. Wired BEFORE the bus reader starts, because this is what attaches
+	// the intent intake to the consumer. With it ON, the senders are still FAKE until a channel's
+	// own switch is set — "delivery is running" never implies "something left the estate".
+	deliveryCfg := delivery.ConfigFromEnv()
+	if worker := wiring.WireDelivery(comm, deliveryCfg, logger.Component("delivery-intents")); worker != nil {
+		go worker.Run(ctx)
+		logger.Info("outward delivery enabled", observability.String("config", deliveryCfg.String()))
+	} else {
+		logger.Info("outward delivery DISABLED (THEMIS_COMMUNICATION_DELIVERY_ENABLED != 1): no delivery intents recorded, no senders running")
+	}
 
 	// The bus reader drives the publishable-positions worklist off the Governance stream
 	// (EB-07/08). Without a bus it is disabled — Position events then arrive only over the

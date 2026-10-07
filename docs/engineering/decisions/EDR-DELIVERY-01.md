@@ -1,6 +1,18 @@
 # EDR-DELIVERY-01 — Outward actions: explicit write-scope authorization (N-M0)
 
-Status: **Accepted 2026-09-30** for N-M0. The decisions were grilled and locked with the user in
+Status: **Accepted 2026-09-30** for N-M0; **Revision 2 (2026-10-01) — remediation cycle, accepted
+as a decision of record, NOT implemented**; **Revision 3 (2026-10-02) — N-M1a delivery intents,
+IMPLEMENTED** (intents are persisted and sent by workers against FAKE senders); **Revision 4
+(2026-10-02, amended 2026-10-05, -06 and -07) — N-M1b real Jira + mail senders and payload
+materialization, IMPLEMENTED** (both channels OFF by default, secrets from the environment only, one
+ticket per Release; the CI build and the rebuild loop are still later milestones). Three amendments
+came out of the enterprise-VM run: **M1b-8** (2026-10-05) — Communication's Governance and Registry
+READS carry `X-API-Key` from `THEMIS_API_KEY`; **M1b-3a** (2026-10-06) — the estate's Jira is
+self-hosted **Data Center**, so auth mode (`basic`/`bearer`) and REST version (`3`/`2`) are
+configurable, defaulting to Cloud; **M1b-4a/4b** (2026-10-07) — the estate's project forbids labels on
+create, so Themis's OWN RECORD became the ticket index and labels a best-effort follow-up edit, and the
+project's issue-type id + required custom fields are configurable. The decisions were grilled and
+locked with the user in
 the `themis-ai-runtime` repository (`openspec/changes/outward-actions`, **D-N-6** locked). This
 EDR records what those decisions require of THEMIS, so the Themis-side implementation has a
 reason of record in this repository. Where they disagree, the runtime-side design wins for
@@ -172,3 +184,597 @@ EDR-SECURITY-01 D1/D4 (the scope vocabulary as the authorization contract, now e
 resource AND closed at both ends), EDR-HARNESS-01 D4 (the carried gap, closed), CONVENTIONS R1 (the
 refusal's detail reaches console + OTel through the one shared logger), CON-0016 (traceability —
 the principal is already the recorded actor; now it is also the authorization subject).
+
+## Revision 2 (2026-10-01) — Remediation cycle (documentation only)
+
+The owner restated the outward-actions workflow as a LOOP and gave the decisions that shape it.
+Grilled and recorded runtime-side as **D-N-8..D-N-12**
+(`themis-ai-runtime/openspec/changes/outward-actions/design.md`); this revision records what they
+require of THEMIS.
+
+The cycle: an SBOM is uploaded under Product / Project / Release / SBOM id and Themis lists its
+vulnerabilities → a Jira ticket tracks the fix → a Jenkins build produces a new image and a new
+SBOM uploaded to the same Product / Project / Release under a new SBOM id → Themis compares new
+against previous (closed vs still open) and updates the ticket → the result goes out by mail →
+the loop repeats until the targeted vulnerabilities are closed or a configured maximum number of
+rebuilds is reached, after which it stops and tells a person.
+
+**Nothing in this revision is implemented.** It changes no code, no API, no schema and no
+generated handler. RC-1..RC-8 are decisions of record for the milestones that follow N-M0; where
+a mechanism is genuinely undecided (RC-1's transport) it is named as such and deferred to its own
+EDR and API change.
+
+### RC-1 — The trigger is "release posture evaluated", not document receipt
+
+SBOM upload starts an ASYNCHRONOUS evaluation. The remediation cycle starts when that evaluation
+completes for the Release — not when the document is received. Until then no Jira ticket is
+written, no mail is sent and no rebuild intent is issued: a ticket written from a half-evaluated
+SBOM lists a subset and reads as truth, and a rebuild triggered on receipt rebuilds against
+nothing.
+
+Themis MAY publish a Themis-owned pub/sub notification carrying that signal, to which the AI
+Harness may subscribe. Outward actions remain Themis-owned either way — the notification tells the
+harness that a posture is settled; it delegates nothing.
+
+Deferred, deliberately: event name(s), delivery semantics (at-least-once assumed), transport
+(webhook vs bus-backed fanout vs long-poll), subscriber authentication, and whether the seam
+belongs to Communication or Governance. That is a trust-boundary change and needs its own EDR and
+API change before implementation. Until it exists, the current Governance events (`finding_opened`
+and the posture-evaluated path) remain the effective trigger in code.
+
+### RC-2 — Jira: one ticket per Release, CVE ids for Critical and High only
+
+One ticket per Release, not one per Finding. The body carries severity COUNTS for Critical, High,
+Medium and Low, and lists the CVE ids for **Critical and High only**; Medium and Low are counts
+with no CVE list. The ticket is updated in place across the cycle's attempts, idempotently, keyed
+by delivery intent id and attempt index.
+
+The unit a rebuild addresses is a Release, so the unit a tracking ticket addresses is a Release.
+Listing every CVE id at every severity makes the ticket unreadable at estate scale. Jira stays a
+projection: no Themis state follows from a Jira transition, and the authoritative relationship
+lives in Themis (D-N-7).
+
+### RC-3 — `ci_rebuild`: a new delivery kind, APPROVED
+
+A fourth delivery kind joins `jira_issue`, `ci_build` and `email`: **`ci_rebuild`** (Communication,
+policy-gated). It rebuilds a Release without a fresh human proposal acceptance — the cycle's
+authority comes from the policy that started it, bounded by lineage and knobs.
+
+- Snapshot: destination pipeline name, Product / Project / Release identity, prior SBOM id, the
+  targeted Finding set, attempt index. **No credentials, no keys, no model output** — destinations
+  stay governed names (D3 of this EDR's parent decisions, D-N-3 runtime-side).
+- Callback: MUST carry the **new SBOM id** and the **image digest**, alongside
+  `{intent_id, build_id, git_ref}`. It is recorded as governed-external evidence on the intent and
+  changes no Finding state. A build system asserting a fix is refused; only the evaluation of the
+  new SBOM can establish absence of a fault.
+- Authorization is unchanged: the callback enters through the Communication boundary under
+  `delivery:callback` (or the HMAC transport variant), which D1/D2 keep refused on every Governance
+  write.
+
+**`ci_build` is unchanged** and keeps its governance-controlled path: it carries an accepted change
+artifact and follows `proposal_accepted`. `ci_rebuild` carries no artifact. The two must not be
+conflated — one materializes a human-accepted change, the other repeats a build.
+
+Approved means approved as a decision of record. It is NOT implemented, and its knobs are
+documentation until the milestone that builds them.
+
+### RC-4 — Comparison: new SBOM against previous, per Release
+
+On each new SBOM produced by a rebuild and evaluated, Themis compares it against the previous SBOM
+for the same Product / Project / Release to determine which targeted vulnerabilities are CLOSED and
+which are STILL OPEN. That comparison is the cycle's only measure of progress, and the Jira ticket
+(RC-2) is updated from it.
+
+Open: whether the baseline is strictly the immediately-previous SBOM id for the Release or a
+configured baseline window.
+
+### RC-5 — Email after the comparison, never from the callback
+
+A plain-text mail goes out on each attempt, AFTER the comparison of RC-4 — not on the build
+callback, which only says a build happened. Recipients are governed Communication audiences
+resolved by the mail worker; addresses and credentials are never carried in the intent. Content
+derives from the immutable delivery snapshot: no model output, no workspace content, no key
+material, no attachments. One mail per intent id; a retry is a delivery retry, not a new
+communication event.
+
+### RC-6 — Loop control: default max-attempts = 2 per Release
+
+Success is the targeted set closed; the loop stops. Otherwise it repeats, bounded by a maximum
+number of rebuild attempts per Release: **default 2**, operator-configurable (configuration locus
+and name to be fixed by the implementing milestone; raising it later is expected once the loop has
+a reliability record). Two is deliberately low — a loop that cannot fix a Release in two attempts
+will not fix it in ten, and a high limit means a pipeline hammering itself while nobody reads the
+mail.
+
+On exhaustion the loop STOPS and tells a person: mail to the governed audience plus a Jira update
+stating the attempts are exhausted. **Findings are never auto-resolved** — resolution is a decision
+about exposure, not about the existence of a fix, and stays a human act (D-N-7). A failed attempt
+is an outcome, not an error: it is recorded, the Finding stays as it is, and the original Release
+stays affected.
+
+### RC-7 — Ownership and the invariants a loop is most likely to erode
+
+**Themis owns** security truth and every outward effect: SBOM intake and evaluation, posture and
+Findings, the RC-4 comparison, delivery intents and workers, Jira, CI (`ci_build` and
+`ci_rebuild`), mail, the attempt counter, the stop condition, and the RC-1 notification it
+publishes. **The AI Harness owns** runtime execution and orchestration of its own work and MAY
+subscribe to the RC-1 notification; it remains networkless for Jira, CI and mail, holds no outward
+credential, and initiates no Governance act.
+
+Invariants restated because a loop is where they slip: model output is advisory and never enters a
+delivery payload; payloads derive only from the immutable snapshot; secrets never travel in an
+intent; controls fail closed (no evaluation signal → no outward action); and external availability
+never blocks or changes Themis truth — outward failure is dead-letter state, never a Finding
+change.
+
+### RC-8 — N-M0 is unchanged (see also M1a-9: N-M1a changes nothing here either)
+
+Explicit per-route write-scope authorization stands exactly as implemented (D1–D7, Group 1,
+2026-09-30): `delivery:callback` refused on every Governance write unconditionally, `admin`
+allowed, `product:<id>` confined to the product that owns the Finding's release, everything else
+refused, the scope vocabulary closed at both ends. `ci_rebuild`, the RC-1 notification and the loop
+imply **no new scope, no relaxation and no new Governance write path**. Any reading of this
+revision that weakens N-M0 is wrong.
+
+## Revision 3 (2026-10-02) — N-M1a: delivery intents, IMPLEMENTED
+
+Revision 2 recorded the loop. **N-M1a builds its first half, and only its first half**: Themis
+now RECORDS what must go out and SENDS it in a worker, against fake senders. Scope was fixed by
+owner feedback on the plan: deduplicate on the originating event id, and carry **no CI-build
+content of any kind** in this step.
+
+What landed (Communication context, greenfield tree): two tables, a store, an app service, two
+mappings in the Governance-stream reader, a worker with retry/backoff/dead-letter, fake Jira and
+mail senders, and an operator CLI. No API change, no OpenAPI edit, no generated handler, no
+network call.
+
+### M1a-1 — The event reader PERSISTS; it never delivers
+
+The inbound consumer's whole outward job is to write a `delivery_intents` row inside the inbox
+unit of work. It holds no Jira client, no mail client and no HTTP client at all, so an
+unreachable external system cannot block, slow or stall the bus reader path. Sending is a
+separate worker on its own cadence.
+
+This is the structural form of RC-7's "external availability never blocks or changes Themis
+truth". Stating it as a rule is not enough — a reader that *could* call out would eventually be
+made to, so the reader is wired without the means.
+
+### M1a-2 — Idempotence is keyed on the ORIGINATING EVENT ID
+
+`delivery_intents.origin_event_id` is the kernel envelope id, under a partial unique index
+(`WHERE origin_event_id IS NOT NULL`). `CreateIntent` inserts `ON CONFLICT DO NOTHING` and
+returns the row that is already there. The bus is at-least-once, so a replay is the normal case:
+it yields one ticket and one mail, never two.
+
+The owner chose this over the partial uniqueness per `(release_id, type)` that the first plan
+carried, and the consequence is recorded rather than papered over: the mapping is now strictly
+**one event → one intent**. Combined with the proxy trigger in M1a-3, a Release with twelve
+opened Findings currently asks for twelve ticket intents — so **RC-2's "one ticket per Release"
+is NOT yet realized**. It cannot be, honestly, until the trigger is a per-Release signal; keying
+dedup on a per-Release guess would have produced one ticket whose contents depended on which
+Finding happened to arrive first.
+
+Worker-sourced intents (the dead-letter notification) store NULL and take part in no
+uniqueness — there is no event to dedupe them against.
+
+### M1a-3 — The trigger is a recorded TEMPORARY PROXY
+
+RC-1 / D-N-8 names "release posture evaluated" as the trigger. No such signal exists, so N-M1a
+proxies it with **`governance.finding_opened`** and records the deviation here, in the code
+comment at the mapping, and in the change's tasks. `governance.proposal_accepted` maps to the
+decision mail and is not a proxy — an accepted proposal is exactly the fact being notified.
+
+Product and project are left EMPTY on a ticket intent: the `finding_opened` contract does not
+carry them, and resolving them would mean a Registry read on the reader path, which M1a-1
+forbids. An intent that names no Release records **nothing at all** — an outward action with an
+indeterminate subject is precisely the one that must not go out (fail closed).
+
+### M1a-4 — Giving up is a state, and it tells a person with another INTENT
+
+An attempt that fails is recorded (append-only `delivery_attempts`), backed off
+(`initial × 2^(n-1)`, capped), and retried. After `MAX_ATTEMPTS` the intent moves to
+`dead_letter` — terminal until a person acts — and the worker **enqueues an email intent** to
+the governed dead-letter audience. It does not send one inline: the failure path must not depend
+on the channel that just failed.
+
+The chain stops at one. A dead-letter notification that itself dead-letters does NOT produce
+another notification — it is logged at error instead. Otherwise one unreachable relay fills the
+table with notifications about notifications, and the alert that matters (the telling-a-person
+channel is broken) is buried in them.
+
+A failed delivery is an **outcome, not an error**: nothing about a Finding, a Position or a
+posture changes. The worker reports an error only when the STORE fails — the one failure that
+means the record of what happened is itself unreliable.
+
+### M1a-5 — FAKE senders, deliberately
+
+Both deliverers log and return an outcome; neither opens a socket. The mechanics N-M1a has to
+get right — claim order, attempt ledger, backoff, exhaustion, the notification, the operator
+reset — are all provable without a Jira instance, and a half-real sender would have made the
+step's test suite depend on a credential. The real senders arrive in N-M1b behind the same
+`IntentDeliverer` seam. `payload_sha256` / `payload_bytes` stay empty for the same reason:
+materialization belongs with the sender that fixes the body's shape.
+
+### M1a-6 — The operator surface is a CLI, not an API
+
+`cmd/deliveryctl` (`list-deadletters` · `retry` · `cancel`), reading the Communication database
+like `cmd/authadmin` reads the auth one. N-M1a adds **no HTTP surface**. An id that names
+nothing actionable — unknown, or already delivered — exits non-zero: an operator who typed the
+wrong id has to be told. `retry` clears the counters but never the attempt ledger: the counter
+answers "may we try again", the ledger answers "what happened", and a retry must not erase the
+second. Neither command touches a Finding or a Position.
+
+### M1a-7 — One switch over BOTH halves
+
+`THEMIS_COMMUNICATION_DELIVERY_ENABLED` (default **off**) gates the worker **and** the reader's
+intent recording. Off means off: no intents are written and nothing is sent. Gating only the
+worker would have let a default-configured node silently accumulate a queue nobody drains, which
+is indistinguishable from an outage to the person who later turns delivery on.
+
+### M1a-8 — The intent carries facts, never credentials or model output
+
+`snapshot` holds the identity facts of record (stamped by the app service, so a caller cannot
+omit them), `lineage` the originating envelope's identity, and `destination` a **governed name**
+— an audience, a project alias — resolved to real addresses by the sender. No address, no key,
+no model output, no workspace content. Telemetry carries the intent id, the destination, the
+origin event id and the correlation id, and never the payload: a delivery body is outward
+content, and a log is not an outward channel.
+
+### M1a-9 — NO CI-build content in this step
+
+There is no `ci_build` and no `ci_rebuild` intent type, no CI worker, no callback route and no
+rebuild loop. The intent-type vocabulary is CLOSED to `jira_issue` and `email`, enforced by a
+CHECK constraint, so a CI kind cannot appear by accident. RC-3's `ci_rebuild` and the `ci_build`
+path remain decisions of record with **no realization**; the rebuild loop (RC-4/RC-6) is
+untouched. N-M0 is likewise unchanged (RC-8): no new scope, no relaxation, no Governance write.
+
+### Honest limits (N-M1a)
+
+- **RC-2's ticket content and one-per-Release rule are not implemented** — see M1a-2/M1a-3. What
+  exists is the intent, not the ticket body.
+- **Two Communication NODES draining the same database can both claim the same intent.** The
+  claim is a plain due-time read, in-process concurrency is safe (one fetcher, N senders), and
+  the `IntentDeliverer` contract requires idempotence per intent id — which makes this a
+  duplicate-suppression question for the real senders in N-M1b, not a correctness hole now.
+- **State transitions are owned by `MarkDelivered` / `MarkDeadLetter` / `CancelIntent` /
+  `RetryIntent`, not by `RecordAttempt`** (one writer per transition). A crash between the last
+  failed attempt and the dead-letter write is self-healing: a worker that fetches a pending
+  intent whose attempts already reached the maximum finishes it WITHOUT sending again.
+- **`lineage` carries no `event_seq`.** The bus sequence is the `event_log`'s own ordering column
+  and is not carried in the kernel Envelope (EB-02); recording it would mean inventing a number.
+- The foreign ids (product/project/release/finding/proposal) are **TEXT, not UUID**: they are
+  other contexts' identities, carried verbatim and never parsed, so no format is imposed on
+  Registry or Governance — the same rule D5 applies to `product:<id>`. The intent's own id is a
+  UUID, because Communication mints it.
+- The dead-letter notification has **no deduplication key** (it is worker-sourced). Nothing
+  deduplicates it but the fact that an intent dead-letters once.
+
+### Realizes
+
+`internal/communication/adapters/store/migrations/000006_delivery_intents.{up,down}.sql` ·
+`adapters/store/delivery.go` · `app/delivery_intent.go` · `adapters/inbound/consumer.go` ·
+`adapters/delivery/{delivery,worker}.go` · `adapters/wiring/wiring.go` (`WireDelivery`) ·
+`cmd/communication` · `cmd/deliveryctl` · `deploy/node.env.example`. Conventions: R1 (console +
+OTel from the one shared logger, secrets and payloads redacted), R2 (self-documented config).
+
+## Revision 4 (2026-10-02) — N-M1b: the real Jira and mail senders, IMPLEMENTED
+
+N-M1a proved the mechanics against fakes. **N-M1b makes two of the three channels real** — Jira
+and mail — behind the same `IntentDeliverer` seam, and materializes the payload at enqueue so a
+retry re-sends bytes instead of re-deriving them. RC-2's ticket content lands with the Jira
+sender. **The CI build and the rebuild loop are still not in this step** (M1b-7).
+
+### M1b-1 — Both real senders are OFF by default, and independently
+
+`THEMIS_COMMUNICATION_JIRA_ENABLED` and `THEMIS_COMMUNICATION_MAIL_ENABLED` are two switches, both
+default off, both subordinate to `THEMIS_COMMUNICATION_DELIVERY_ENABLED`. With the mechanism on
+and both channels off, the fakes stay wired — which keeps M1a-7's property exactly: "delivery is
+running" never implies "something left the estate". A mixed state is supported and expected: the
+two channels are credentialed separately, so they are enabled separately.
+
+An **enabled but incompletely configured** channel keeps the FAKE sender and logs at ERROR naming
+the environment variables that are unset. Both halves of that are deliberate. The queue must keep
+draining — an undrained queue hides every other outward obligation behind the first
+misconfiguration — but "I am sending to Jira" and "I am logging instead" must never be
+indistinguishable in a log, which is why the fallback is loud and names the knob.
+
+### M1b-2 — Secrets come from the environment, and from nowhere else
+
+The Jira API token and the SMTP password are read from the environment only. No configuration file
+in this repository holds one and none may (R2); `deploy/node.env.example` documents them as
+commented, valueless knobs. `Config.String()` — the startup line an operator reads — prints
+`api_token=set` / `password=unset`, never a value, and no error, excerpt or log field built by
+either sender carries a credential. The mail configuration's `String()` additionally prints only
+the audience NAMES: a recipient list is estate detail.
+
+Two guards are stronger than configuration, and they are the SAME rule applied to both channels: **a
+credential never crosses an unencrypted channel.**
+
+- Jira: a `http://` base URL is **refused**, because the credential is HTTP Basic — the token is in
+  every request, and base64 is an encoding, not protection. A scheme that is neither http nor https
+  is refused outright rather than left for `net/http` to fail on later.
+- Mail: a username **without** STARTTLS is **refused**, because the password would cross the network
+  in the clear. `net/smtp` enforces the same rule one layer down, so such a node could never have
+  sent anyway.
+
+Both make exactly one exception, for exactly one reason: a **loopback** host, whose bytes never leave
+the machine. That is also where an `httptest` server and a local relay live, so a development
+deployment needs no knob — and a knob is precisely what must not exist, because a knob that relaxes
+this in development is a knob that can be set in production.
+
+Both refusals happen at CONFIGURE time, not at send time. A misconfiguration that exposes a
+credential must not be discovered by having exposed it once per retry; and because the selection
+(M1b-1) then keeps the fake sender, the node keeps draining its queue and says at ERROR why nothing
+is reaching Jira.
+
+### M1b-3 — The payload is materialized at ENQUEUE, and a sender never renders (D-N-3)
+
+`payload_bytes` + `payload_sha256` are filled when the intent is created, by an app-level
+`IntentPayloadRenderer` the outward serializer implements. Every retry transmits those exact
+bytes. A sender handed an intent with no payload REFUSES it (`ErrNoPayload`) rather than rendering
+one from current facts: render-at-send would make "the same snapshot was delivered" unverifiable,
+and a body nobody recorded is a body nobody can audit.
+
+A render that fails enqueues **nothing** — the originating event is retried by the bus, so the
+obligation is not lost. This is the same fail-closed shape as `ErrNoSubject`: an intent whose
+content could not be determined is exactly the intent that must not sit in a queue waiting for
+somebody to decide what it says. On a replay the render runs again and is discarded, because
+`CreateIntent` returns the row already stored — determinism is a property of the RECORD, not of
+the renderer.
+
+Consequence, recorded because it is operator-visible: intents written by N-M1a carry no payload,
+and a real sender dead-letters them instead of inventing a body.
+
+### M1b-3a — TWO Jira flavours, two knobs, one sender (owner decision, 2026-10-06)
+
+**Measured on the enterprise VM.** The estate's Jira is **self-hosted Data Center** at
+`https://almsbx.radisys.com/jira`, not Cloud. The first cut assumed Cloud throughout and was wrong in
+three ways at once: it sent the credential as HTTP Basic (Data Center issues a **Personal Access
+Token** for `Authorization: Bearer`), it addressed `/rest/api/3` (Data Center serves **v2**), and v3's
+description is an **Atlassian Document Format** object where v2 wants a **plain string**.
+
+Owner decision: two knobs, **defaulting to Cloud** so an existing deployment sets neither.
+
+| | `THEMIS_COMMUNICATION_JIRA_AUTH` | `THEMIS_COMMUNICATION_JIRA_API_VERSION` |
+| --- | --- | --- |
+| Cloud (default) | `basic` — account email + API token | `3` — description as ADF |
+| Data Center / Server | `bearer` — PAT, no user at all | `2` — description as plain text |
+
+Three things about the shape, each chosen rather than fallen into:
+
+- **The version knob selects the path prefix AND the description encoding**, because they are not
+  independent. Splitting them would let an operator configure a combination that cannot work, and the
+  failure (a 400 on every attempt) would read as "Jira rejects our tickets" rather than as a
+  configuration error.
+- **Neither vocabulary falls back.** An unrecognized value is refused at startup with the variable
+  named and both options spelled out. A fallback to `basic` sends a PAT as a password — a 401 that
+  reads as "the token is wrong" — and a fallback to `3` sends ADF to v2. Both make a typo look like
+  someone else's fault.
+- **The USER is required only under `basic`.** A PAT identifies its own owner; demanding an account
+  email under `bearer` would make an operator invent a value for a field the request does not carry.
+
+**The base URL may carry a PATH**, which is how a self-hosted instance is normally mounted. Every
+endpoint is built by APPENDING to the configured URL — never by replacing its path — so `/jira` is
+preserved and no second code path exists for it. A bare `host/path` with no scheme is refused, since
+that is the likeliest paste and it would otherwise become a relative request.
+
+**Everything else is shared, and that is the claim worth making.** The JQL label search, the
+labels, the summary, the full-replace update, the content rule — all identical, because
+one-ticket-per-Release must not be a property that holds on one flavour. Both flavours run the same
+behavioural tests: create, update, path addressing and the whole posture-to-ticket path.
+
+### M1b-4 — One ticket per Release is a LABEL, not a summary search (RC-2)
+
+The Jira sender looks for the Release's existing issue by the exact label
+`themis-release-<release-uuid>` (JQL `labels = "…"`), and replaces its summary and description
+from the snapshot; it creates the issue only when the label matches nothing. The created key is
+recorded on the intent's delivery result (`jira_issue_key`).
+
+A label rather than `summary ~ "<uuid>"` because a text search depends on how Jira tokenizes a
+hyphenated id, and a near-miss there does not fail — it silently opens a second ticket for a
+Release that already had one. This answers the open question Revision 2 left ("is JQL search
+acceptable for idempotent update, or should we set a field/label?"): a label, searched exactly.
+
+The update is a **full replace**, which is what makes it idempotent by construction: applying it
+twice leaves the issue in the same state, so a retry after a timeout whose PUT actually landed
+costs nothing. Jira stays a projection — no Themis state follows from a Jira transition (D-N-7).
+
+### M1b-4a — A project may forbid labels on create, so THEMIS'S OWN RECORD is the index (owner decision, 2026-10-07)
+
+**Measured on the enterprise VM, project ME.** Labels are not on that project's create screen, so Jira
+answered `Field 'labels' cannot be set` — and refused **the whole create** over that one field. Every
+ticket failed. Worse, the fix is not just "move the labels": if labels can fail to apply, then a label
+search can fail to FIND, and the one-ticket rule was resting entirely on it.
+
+The ordering changed, and this is the substance of the decision:
+
+1. **Themis's own record** — the `jira_issue_key` on an earlier *delivered* intent for that Release.
+2. **The label search** — now the FALLBACK, for a Release Themis has no record of.
+3. Create.
+
+Themis's record depends on nothing external: not on the search index having caught up, not on the
+credential being allowed to browse, not on a label having been applied. Asking Jira what Jira knows
+about work Themis did was always the weaker question; the ME project just made the weakness fatal.
+
+The create carries **no labels**, and they are added by a follow-up `update`-style edit that is
+**best effort**: on failure the ticket stands, the key is recorded, and the next update retries —
+`add` is idempotent, so every later cycle retries for free with no state to track. A failed label edit
+must never fail the delivery, because a failed delivery retries the whole thing *including the create*,
+on an intent whose key the store has not yet recorded. That is precisely the path that opens a second
+ticket, and a second ticket costs more than a missing label.
+
+Work on one Release is **serialized in-process** (a per-Release lock held across lookup AND create).
+Checking first and creating later with no lock between is the race, not a fix for it — and the
+`finding_opened` proxy produces intents for one Release by the dozen, all due at once, drained by
+`cfg.Workers` goroutines. A process-local memo of the key sits beside the lock because the durable
+record arrives too late to help: the key reaches the store when the WORKER marks the intent delivered,
+which is after the sender has returned.
+
+The delivery result now records **how** the ticket was found (`jira_found_by`: `memo`,
+`themis_record`, `label_search`, `created`) and **whether the labels landed** (`jira_labels`:
+`added` / `pending`), so an operator can see which mechanism is carrying the rule rather than
+inferring it.
+
+### M1b-4b — Issue type by ID, and the project's own required fields (owner decision, 2026-10-07)
+
+The same project needs `issuetype` **by id** (10501) and four required custom fields plus a version
+before it will accept a create at all. Two knobs, both unset by default:
+
+- `THEMIS_COMMUNICATION_JIRA_ISSUE_TYPE_ID` — when set, the issue type is sent by id and the **name is
+  not sent at all**. Sending both would let Jira decide which it believes. An id is also the only way
+  to address a project whose type names are renamed, localized or duplicated across schemes.
+- `THEMIS_COMMUNICATION_JIRA_EXTRA_FIELDS` — a JSON object merged into every **create**'s `fields`,
+  passed through verbatim so the field's own shape stays the operator's choice.
+
+Three constraints on the merge, each load-bearing:
+
+- **It can never override `project`, `issuetype`, `summary`, `description` or `labels`.** Those are the
+  ticket's identity and its snapshotted content; a configuration file silently replacing the body of a
+  security ticket is the one thing this seam must not permit. A reserved key is dropped and the node
+  logs which, so an operator who tried is told rather than left wondering.
+- **Invalid JSON refuses the sender at startup**, and the fake stays wired. These fields exist because
+  a screen *requires* them, so a typo must not be discovered one failed create per Release, forever.
+- **Create only.** Re-asserting a priority or a version on every cycle would overwrite whatever a
+  human changed on the ticket — the opposite of what a projection should do.
+
+Also fixed with them: the issue type **name defaulted in only one half of the node**. The sender
+applied `Task` internally while `ConfigFromEnv` left the field empty, so the startup line read
+`issue_type=""` and disagreed with the request it was describing — and an operator debugging the
+create failure above spent that disagreement looking for a gap that was not there. The effective
+value is now resolved where it is read, like the auth mode and the API version beside it. A default
+that only one half of a node knows about is a default that lies.
+
+### M1b-5 — The ticket's four severity buckets are read off `base_score`
+
+RC-2 asks for counts for Critical/High/Medium/Low and CVE ids for Critical and High only. The
+Governance release-posture projection carries no severity WORD: it carries `base_score`
+(Knowledge's CVE-intrinsic composite, 0–100) and `band` (which is EXPLOITABILITY, a different
+question). The buckets therefore invert the same ladder Knowledge built the score from —
+Critical ≥ 90, High ≥ 70, Medium ≥ 40, Low > 0 — read over the existing read seam, with no API
+change and no second call per Finding.
+
+Two consequences are stated rather than hidden. A card lifted by EPSS or KEV can cross into the
+bucket above its intrinsic severity, which is the right answer for a ticket about what to fix
+first and the wrong one if the ticket is read as a CVSS report. And a score of **0 is `Unknown`,
+never `Low`** — it is counted and labelled separately, and only when non-empty, because the
+absence of severity evidence is not evidence of mildness.
+
+### M1b-6 — Mail: the audience name becomes recipients HERE, or nowhere
+
+An intent carries a governed audience NAME; the mail sender is the one place it becomes addresses,
+from an environment-supplied map. An audience with no mapping is **refused** rather than
+redirected to a default: the wrong people reading a security decision is a worse outcome than a
+dead letter an operator can see. The message is plain text, with no attachment, and its `Date`
+comes from the intent's creation time and its `Message-ID` from the intent id — both immutable, so
+a retry is byte-identical and a receiving relay can collapse the duplicate a timed-out send may
+already have delivered (RC-5: one mail per intent id; a retry is a delivery retry, not a second
+communication).
+
+Governed audiences are still this map. A central audience registry does not exist yet; the map is
+documented as the registry until one does.
+
+### M1b-6a — Every outward step is BOUNDED, and every header value is FOLDED
+
+Two hardening rules that are easy to leave out and expensive to add back once a queue is live.
+
+**Bounded.** The Jira client carries a per-call timeout; the SMTP conversation bounds *every step*,
+not just the dial. The difference is the failure that actually happens: a relay that accepts the
+connection and then stops answering is not unreachable, so a dial timeout never fires, and a worker
+goroutine blocks in a read forever — `cfg.Workers` such relays and the queue stops draining
+altogether. A per-operation deadline (rather than one for the whole session) is what lets a slow but
+*progressing* transfer finish while a step that is genuinely not moving fails. The worker's context
+also closes the connection, so shutdown is not held up by a relay that is still thinking. The
+Governance read seam is bounded for the same reason, and more sharply since N-M1b: it now runs inside
+the inbox unit of work, where an unbounded read holds a bus-reader transaction open.
+
+**Folded.** A CR or LF in a value destined for a message header does not produce a malformed header —
+it produces ADDITIONAL headers, or an early end of the header block that turns the rest into body.
+Every header value is folded at the boundary where the harm would occur, so no caller has to
+remember; the subject is the one that can carry a newline today, because `SplitPayload` returns
+whatever the stored payload holds and an N-M1a row was never promised to have folded it. An
+ADDRESS, by contrast, is **refused** (a `From`) or **dropped** (a recipient, which leaves its audience
+unmapped and therefore loudly refused): an address nobody can read as an address is a configuration
+mistake, and a silently repaired one sends security mail somewhere the operator never chose.
+
+### M1b-7 — Still NO CI build and NO rebuild loop
+
+Unchanged from M1a-9, restated because this is the step where it would be easy to slip: there is
+no `ci_build` or `ci_rebuild` intent type (the CHECK constraint still closes the vocabulary to
+`jira_issue` and `email`), no callback route, no loop control and no attempt budget per Release.
+RC-3/RC-4/RC-6 remain decisions of record with no realization. N-M0 is unchanged (RC-8): no new
+scope, no relaxation, no Governance write, no API or OpenAPI edit in this step either.
+
+### M1b-8 — Communication's READ seams carry `X-API-Key` from `THEMIS_API_KEY` (owner decision, 2026-10-05)
+
+**Measured on the enterprise VM.** Governance and Registry ran with `THEMIS_AUTH_REQUIRED=1`.
+Communication read the release posture with no credential, Governance answered **401**, the ticket
+payload could not be rendered, so — correctly, by M1b-3 — **no intent was recorded** and the
+`finding_opened` envelope retried. Forever. The pipeline stopped at the first Finding of the first
+Release, behind an error that read like a broken endpoint.
+
+Owner decision: **Communication's Governance and Registry read clients send `X-API-Key` from
+`THEMIS_API_KEY` when it is set; unset means no key, as before.** One variable, the same name the
+Dashboard proxy and the Intelligence node already use — an operator who has provisioned one node has
+provisioned this one. A **read-scoped** key is enough and is what the documentation tells an operator
+to mint: this node writes to neither context, so a key that cannot write is a key that cannot be
+misused if it leaks.
+
+This closes, for Communication only, the limit N-M0 recorded ("the read seam sends no API key"). It
+is the milestone that needed it. The equivalent on **Governance's** Registry client — where the
+consequence is that a `product:<id>` key cannot resolve its product — is still open (task 2.10) and
+is a separate decision, because its failure mode is a refused write rather than a stalled reader.
+
+Two details that are not incidental:
+
+- **Trimmed.** A key pasted into an env file arrives with whitespace the operator cannot see, and
+  `X-API-Key: <key>\n` is not the key. Both clients trim.
+- **The error names the variable.** A 401/403 now says whether the read sent *no* key (set
+  `THEMIS_API_KEY`) or one the node *refused* (check it is current and read-scoped) — two different
+  places to look, and the distinction is the whole value of the message. The key itself never appears
+  in an error, and startup logs only whether one is set.
+
+### Honest limits (N-M1b)
+
+- **Two Communication NODES can still open two tickets for one Release.** The per-Release lock is
+  in-process, and Themis's record only answers once the first node's intent is marked delivered — so a
+  genuine simultaneous first delivery on two nodes is not covered. M1b-4a narrows this a long way (the
+  record answers from the second delivery onward, whatever Jira's index or labels do) without closing
+  it; closing it needs a store-level claim, which is its own step.
+- **A create that succeeds but whose outcome is never recorded can be repeated.** If the process dies
+  between Jira accepting the create and the worker marking the intent delivered, the key is lost from
+  Themis's record; the label search is then the only backstop, and on a project that forbids labels on
+  create there may be no label to find. The window is one write wide and the consequence is a second
+  ticket, not lost work — but it is real, and Jira offers no idempotency key to close it.
+- **Search permission still matters, but only for the fallback.** A credential that may create and
+  edit but not browse now works for every Release Themis has a record of.
+- **Two Jira flavours are supported, and a THIRD would be a third decision** (M1b-3a): Cloud
+  (`basic` + v3) and Data Center / Server (`bearer` + v2). OAuth, a reverse proxy that rewrites the
+  REST path, and Jira's own newer `/search/jql` endpoint are all out of scope here. An instance that
+  differs yields dead letters, not a halted stream (D-N-2 / RC-7).
+- **The TLS handshake of STARTTLS is not covered by a test** (it needs a trusted certificate). The
+  "configured but not offered" refusal is.
+- **Rendering a ticket reads Governance on the enqueue path.** The reader still holds no Jira, mail
+  or SMTP client (M1a-1 stands), but materialization means ONE read-API call per ticket intent
+  inside the inbox unit of work, and a failed read means no intent rather than a half-determined
+  one. That is a deliberate trade of reader latency for the snapshot guarantee; the alternative
+  put rendering back in the sender. **This is what made M1b-8 urgent rather than tidy**: the same
+  read on a request path would have degraded one response, and on the reader path it stalls a
+  stream.
+- **A read-API 401 is still a RETRY LOOP, not a dead letter.** M1b-8 gives the seam a credential; it
+  does not change what happens when the credential is wrong. The envelope retries on the bus's own
+  schedule with no attempt ceiling, because an inbound event is not a delivery intent and has no
+  attempt counter. The error now names the variable, which is what makes the loop diagnosable in one
+  log line — but an operator who ignores it has a stalled stream, not a dead-letter queue.
+- **The ticket counts every Finding of the Release**, including those a Position has already
+  suppressed. Filtering by disposition is a policy decision nobody has taken, and inventing one
+  here would quietly change what the ticket means.
+
+### Realizes
+
+`internal/communication/app/delivery_intent.go` (payload envelope, `IntentPayloadRenderer`,
+`ReleaseSeverityReader`, materialization) · `adapters/serializer/outward.go` ·
+`adapters/governance/client.go` (`ReleaseSeverity`, `WithAPIKey`) ·
+`adapters/registry/client.go` (`WithAPIKey`) · `adapters/delivery/{delivery,jira,mail}.go` ·
+`adapters/wiring/wiring.go` (`Wire` now takes the read-API key) · `cmd/communication` ·
+`deploy/node.env.example` · `deploy/systemd/install-systemd.sh`. No migration (the columns exist
+since N-M1a), no API change, no new package, no new dependency.

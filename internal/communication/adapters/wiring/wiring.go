@@ -11,13 +11,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/communication/adapters/delivery"
 	govclient "github.com/themis-project/themis/internal/communication/adapters/governance"
-	regclient "github.com/themis-project/themis/internal/communication/adapters/registry"
 	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
+	regclient "github.com/themis-project/themis/internal/communication/adapters/registry"
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 type idGen struct{}
@@ -43,13 +45,22 @@ type Communication struct {
 	Relay     *store.Relay
 	Reconcile *app.ReconcileService
 	Retention *app.RetentionService
+	// Posture is Governance's release-posture read seam, carried on the bundle so WireDelivery
+	// can give the outward renderer the severity counts a remediation ticket is made of (N-M1b)
+	// without opening a second client against the same read API.
+	Posture app.ReleaseSeverityReader
 }
 
 // Wire builds the Communication components over the given pool, Governance read-API base
 // URL, delivery channel, redactor, and outbox publisher.
-func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
+//
+// readAPIKey is the credential BOTH read seams (Governance, Registry) send as `X-API-Key`; empty
+// leaves them unauthenticated, which is the auth-off development case. One key for both, because
+// they are the same kind of act — this node reading another node's read API — and a read-scoped key
+// is all either needs.
+func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey string, deliverer app.Deliverer, redactor app.Redactor, pub store.Publisher) Communication {
 	st := store.New(pool)
-	positions := govclient.NewClient(governanceBaseURL, nil)
+	positions := govclient.NewClient(governanceBaseURL, nil).WithAPIKey(readAPIKey)
 	serializers := serializer.Default()
 	clock := sysClock{}
 
@@ -57,7 +68,8 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 	read := app.NewReadService(st, positions, serializers)
 	// The release-scoped VEX rollup (EDR-COMMUNICATION-01 D13): the same Governance client
 	// supplies the posture read, the Registry client the fail-closed name chain (D13.4).
-	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil), st, serializers, idGen{}, clock)
+	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil).WithAPIKey(readAPIKey),
+		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
 	return Communication{
@@ -68,5 +80,43 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL string, deliver
 		Relay:     relay,
 		Reconcile: app.NewReconcileService(relay),
 		Retention: app.NewRetentionService(st, defaultRetentionWindow, clock),
+		Posture:   positions,
 	}
 }
+
+// WireDelivery adds the outward-delivery plumbing to an already-wired Communication: the
+// delivery-intent service (with the N-M1b payload renderer), the senders — real or fake per
+// config — and the worker that drives them. It also hands the intent service to the inbound
+// consumer, which is what makes the event reader RECORD intents at all.
+//
+// It returns nil when cfg.Enabled is false, and then the consumer is left without an intent
+// service too: a node that will not send must not accumulate a queue nobody drains. That is
+// the same switch on both halves, deliberately, so "delivery is off" cannot mean "intents pile
+// up invisibly".
+//
+// The renderer is wired whenever a posture read seam is available, independently of WHICH sender
+// is selected: materialization is a property of the record (D-N-3), not of the channel, so a node
+// running the fakes still stores the exact bytes it would have sent.
+func WireDelivery(comm Communication, cfg delivery.Config, logger *observability.Logger) *delivery.Worker {
+	if !cfg.Enabled {
+		return nil
+	}
+	if logger == nil {
+		logger = observability.Nop()
+	}
+	intents := app.NewDeliveryIntentService(comm.Store, idGen{}, sysClock{}, app.DeliveryIntentConfig{
+		DeadLetterAudience: cfg.DeadLetterAudience,
+	})
+	if comm.Posture != nil {
+		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
+	}
+	comm.Consumer.WithIntents(intents)
+	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
+	// Release already has is what keeps one ticket per Release when the project forbids labels on
+	// create (EDR-DELIVERY-01 M1b-4a).
+	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverers(cfg, comm.Store, logger), logger)
+}
+
+// The delivery-intent store answers the Jira sender's ticket-index question. Asserted here, at the
+// composition root, so a port change fails the build where both halves are visible.
+var _ delivery.ReleaseTicketIndex = (*store.Store)(nil)

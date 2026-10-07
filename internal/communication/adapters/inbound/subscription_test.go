@@ -11,17 +11,21 @@ func TestSubscription(t *testing.T) {
 	if s.Consumer != "communication" || s.Stream != "governance" {
 		t.Errorf("subscription = %+v, want consumer=communication stream=governance", s)
 	}
-	// Positions only (DOM-0025): the interest set is the two Position facts.
-	for _, want := range []string{"governance.position_established", "governance.position_revised"} {
+	// The two Position facts drive the publishable worklist (Positions only — DOM-0025); the
+	// two delivery triggers drive outward-delivery intents (N-M1a).
+	for _, want := range []string{
+		"governance.position_established", "governance.position_revised",
+		"governance.finding_opened", "governance.proposal_accepted",
+	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)
 		}
 	}
-	if len(s.Interest) != 2 {
-		t.Errorf("interest set = %v, want 2 types", s.Interest)
+	if len(s.Interest) != 4 {
+		t.Errorf("interest set = %v, want 4 types", s.Interest)
 	}
 	// A Governance lifecycle event Communication does not consume is out of interest.
-	if s.InInterest("governance.finding_opened") {
-		t.Error("finding_opened must be out of interest")
+	if s.InInterest("governance.finding_resolved") {
+		t.Error("finding_resolved must be out of interest")
 	}
 }

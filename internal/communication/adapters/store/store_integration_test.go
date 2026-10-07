@@ -94,7 +94,8 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE processed_events, publishable_positions, communication_outbox, publications RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE delivery_attempts, delivery_intents, processed_events, publishable_positions,
+			communication_outbox, publications RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -497,5 +498,354 @@ func TestRollupStoreRoundTrip(t *testing.T) {
 
 	if _, err := st.GetRollup(ctx, "ghost"); !errors.Is(err, domain.ErrRollupNotFound) {
 		t.Errorf("unknown rollup err = %v", err)
+	}
+}
+
+// --- N-M1a: outward-delivery intents -------------------------------------------------------
+
+const (
+	intentID1 = "11111111-1111-4111-8111-111111111111"
+	intentID2 = "22222222-2222-4222-8222-222222222222"
+	intentID3 = "33333333-3333-4333-8333-333333333333"
+)
+
+// intentPayload is a materialized payload shaped like the serializer's: one Subject line, a blank
+// line, then the body. Since N-M1b every intent carries one, so the store's job includes
+// round-tripping the bytes and their content address.
+func intentPayload(typ app.IntentType) []byte {
+	return app.BuildPayload("Themis "+string(typ)+" for rel-1", []byte("Release:  rel-1\nFindings: 1\n"))
+}
+
+func pendingIntent(id string, typ app.IntentType, originEventID string, due time.Time) app.Intent {
+	payload := intentPayload(typ)
+	return app.Intent{
+		ID: id, Type: typ, Destination: "dest-" + string(typ), State: app.IntentPending,
+		NextAttemptAt: due, Result: map[string]string{},
+		PayloadBytes: payload, PayloadSHA256: app.PayloadDigest(payload),
+		Snapshot: map[string]string{"release_id": "rel-1", "cve": "CVE-2026-1"},
+		Lineage: app.IntentLineage{
+			SourceContext: "governance", EventType: "governance.finding_opened",
+			EventID: originEventID, EventTime: epoch, CorrelationID: "corr-1",
+		},
+		OriginEventID: originEventID,
+		ReleaseID:     "rel-1", FindingID: "fnd-1",
+		CreatedAt: due, UpdatedAt: due,
+	}
+}
+
+// The deduplication rule: the SAME originating event yields ONE intent, and the second
+// CreateIntent returns the first row rather than failing or duplicating. An intent with no
+// originating event (worker-sourced) is exempt — two of them are two notifications.
+func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	first, err := st.CreateIntent(ctx, pendingIntent(intentID1, app.IntentJiraIssue, "env-1", epoch))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if first.ID != intentID1 || first.State != app.IntentPending || first.Attempts != 0 {
+		t.Errorf("stored = %+v", first)
+	}
+	if first.Snapshot["cve"] != "CVE-2026-1" || first.Lineage.CorrelationID != "corr-1" {
+		t.Errorf("snapshot/lineage round-trip = %+v / %+v", first.Snapshot, first.Lineage)
+	}
+	// N-M1b: the materialized payload is PERSISTED — the bytes a retry re-sends, and the digest
+	// that makes "the same snapshot was delivered" checkable rather than assumed.
+	want := intentPayload(app.IntentJiraIssue)
+	if string(first.PayloadBytes) != string(want) || first.PayloadSHA256 != app.PayloadDigest(want) {
+		t.Errorf("payload round-trip = %q / %q", first.PayloadSHA256, first.PayloadBytes)
+	}
+
+	// A replay of the same envelope, even with a freshly minted intent id.
+	second, err := st.CreateIntent(ctx, pendingIntent(intentID2, app.IntentJiraIssue, "env-1", epoch))
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if second.ID != intentID1 {
+		t.Errorf("replay returned %s, want the existing %s", second.ID, intentID1)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents`); n != 1 {
+		t.Fatalf("rows = %d, want 1 — the event id is the dedup key", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE type='jira_issue'`); n != 1 {
+		t.Errorf("jira_issue rows = %d, want 1", n)
+	}
+
+	// Worker-sourced intents carry NULL and never collide.
+	for _, id := range []string{intentID2, intentID3} {
+		if _, err := st.CreateIntent(ctx, pendingIntent(id, app.IntentEmail, "", epoch)); err != nil {
+			t.Fatalf("create worker-sourced %s: %v", id, err)
+		}
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE origin_event_id IS NULL`); n != 2 {
+		t.Errorf("worker-sourced rows = %d, want 2", n)
+	}
+}
+
+// The work cycle: only DUE pending intents are claimed, an attempt advances the counters and
+// appends to the ledger, and the delivered transition is terminal.
+func TestDeliveryIntentWorkCycle(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	due := pendingIntent(intentID1, app.IntentJiraIssue, "env-1", epoch)
+	later := pendingIntent(intentID2, app.IntentEmail, "env-2", epoch.Add(time.Hour))
+	for _, in := range []app.Intent{due, later} {
+		if _, err := st.CreateIntent(ctx, in); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	work, err := st.GetPendingForWork(ctx, epoch, 10)
+	if err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+	if len(work) != 1 || work[0].ID != intentID1 {
+		t.Fatalf("work = %+v, want only the due intent", work)
+	}
+	// The claim carries the materialized payload: a sender transmits what the claim handed it and
+	// never goes back for the content (N-M1b / D-N-3).
+	if string(work[0].PayloadBytes) != string(intentPayload(app.IntentJiraIssue)) {
+		t.Errorf("claimed intent carries no payload: %q", work[0].PayloadBytes)
+	}
+	if work, err = st.GetPendingForWork(ctx, epoch.Add(2*time.Hour), 10); err != nil || len(work) != 2 {
+		t.Fatalf("work later = %d err=%v, want both", len(work), err)
+	}
+
+	// A failed attempt: counters move, state does NOT.
+	at := epoch.Add(time.Minute)
+	if err := st.RecordAttempt(ctx, app.Attempt{
+		IntentID: intentID1, AttemptNo: 1, Outcome: app.AttemptFailure,
+		Error: "refused", At: at, NextAttemptAt: at.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+	in, err := st.GetIntent(ctx, intentID1)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if in.State != app.IntentPending || in.Attempts != 1 || in.LastError != "refused" {
+		t.Errorf("after failure = %+v", in)
+	}
+	if !in.NextAttemptAt.Equal(at.Add(time.Second)) || !in.LastAttemptAt.Equal(at) {
+		t.Errorf("attempt times = %s / %s", in.NextAttemptAt, in.LastAttemptAt)
+	}
+
+	// A successful attempt, then the terminal transition.
+	if err := st.RecordAttempt(ctx, app.Attempt{
+		IntentID: intentID1, AttemptNo: 2, Outcome: app.AttemptSuccess, StatusCode: 200,
+		ResponseExcerpt: "accepted", At: at.Add(time.Second), NextAttemptAt: at.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("record success: %v", err)
+	}
+	if err := st.MarkDelivered(ctx, intentID1, map[string]string{"reference": "JIRA-7"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if in, err = st.GetIntent(ctx, intentID1); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if in.State != app.IntentDelivered || in.Result["reference"] != "JIRA-7" || in.LastError != "" {
+		t.Errorf("delivered = %+v", in)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_attempts WHERE intent_id=$1`, intentID1); n != 2 {
+		t.Errorf("ledger rows = %d, want 2 (append-only)", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_attempts WHERE intent_id=$1 AND outcome='success' AND status_code=200`, intentID1); n != 1 {
+		t.Errorf("success ledger row missing")
+	}
+
+	// A delivered intent is not work, and cannot be delivered, cancelled or retried again.
+	if work, err = st.GetPendingForWork(ctx, epoch.Add(2*time.Hour), 10); err != nil || len(work) != 1 {
+		t.Errorf("work after delivery = %+v err=%v", work, err)
+	}
+	for name, err := range map[string]error{
+		"deliver": st.MarkDelivered(ctx, intentID1, nil),
+		"cancel":  st.CancelIntent(ctx, intentID1),
+		"retry":   st.RetryIntent(ctx, intentID1),
+		"dead":    st.MarkDeadLetter(ctx, intentID1, "late"),
+	} {
+		if !errors.Is(err, app.ErrIntentNotFound) {
+			t.Errorf("%s on a delivered intent: err = %v, want ErrIntentNotFound", name, err)
+		}
+	}
+}
+
+// Themis's OWN answer to "does this Release already have a Jira ticket" (N-M1b / M1b-4a): the
+// jira_issue_key recorded on an earlier DELIVERED ticket intent. It is what keeps one ticket per
+// Release when the project forbids labels on create and Jira's own search therefore cannot find the
+// ticket at all.
+func TestJiraIssueKeyForRelease(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	// Nothing recorded yet.
+	if key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1"); err != nil || found || key != "" {
+		t.Fatalf("empty store: key=%q found=%v err=%v", key, found, err)
+	}
+
+	// A PENDING ticket intent offers nothing: it may or may not have created an issue, and the key is
+	// only recorded when the delivery is marked delivered.
+	if _, err := st.CreateIntent(ctx, pendingIntent(intentID1, app.IntentJiraIssue, "env-1", epoch)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1"); err != nil || found {
+		t.Errorf("a pending intent must not answer: found=%v err=%v", found, err)
+	}
+
+	// Delivered, with the key.
+	if err := st.MarkDelivered(ctx, intentID1, map[string]string{"jira_issue_key": "SEC-7", "jira_action": "created"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-1")
+	if err != nil || !found || key != "SEC-7" {
+		t.Fatalf("key=%q found=%v err=%v", key, found, err)
+	}
+
+	// Another Release's ticket is not this Release's answer.
+	other := pendingIntent(intentID2, app.IntentJiraIssue, "env-2", epoch)
+	other.ReleaseID = "rel-2"
+	if _, err := st.CreateIntent(ctx, other); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	if err := st.MarkDelivered(ctx, intentID2, map[string]string{"jira_issue_key": "SEC-8"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if key, _, _ := st.JiraIssueKeyForRelease(ctx, "rel-1"); key != "SEC-7" {
+		t.Errorf("rel-1 = %q, want its own ticket", key)
+	}
+	if key, _, _ := st.JiraIssueKeyForRelease(ctx, "rel-2"); key != "SEC-8" {
+		t.Errorf("rel-2 = %q", key)
+	}
+
+	// A delivered intent with NO key (a fake sender, or an email) is not an answer either: an empty
+	// key would be read as "this Release has a ticket called nothing".
+	blank := pendingIntent(intentID3, app.IntentJiraIssue, "env-3", epoch)
+	blank.ReleaseID = "rel-3"
+	if _, err := st.CreateIntent(ctx, blank); err != nil {
+		t.Fatalf("create blank: %v", err)
+	}
+	if err := st.MarkDelivered(ctx, intentID3, map[string]string{"transport": "fake"}); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if key, found, err := st.JiraIssueKeyForRelease(ctx, "rel-3"); err != nil || found || key != "" {
+		t.Errorf("a delivered intent with no key must not answer: key=%q found=%v err=%v", key, found, err)
+	}
+}
+
+// The operator surface: dead-letters are listed newest-first with paging and a window, retry
+// resets the counters, cancel abandons, and an unknown id is an error rather than a silent
+// success.
+func TestDeliveryIntentDeadLetterRetryAndCancel(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	for i, id := range []string{intentID1, intentID2, intentID3} {
+		in := pendingIntent(id, app.IntentJiraIssue, fmt.Sprintf("env-%d", i), epoch)
+		if _, err := st.CreateIntent(ctx, in); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+	for _, id := range []string{intentID1, intentID2} {
+		if err := st.RecordAttempt(ctx, app.Attempt{
+			IntentID: id, AttemptNo: 3, Outcome: app.AttemptFailure, Error: "gave up",
+			At: epoch, NextAttemptAt: epoch,
+		}); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+		if err := st.MarkDeadLetter(ctx, id, "gave up"); err != nil {
+			t.Fatalf("dead letter: %v", err)
+		}
+	}
+
+	dead, err := st.ListDeadLetters(ctx, epoch.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(dead) != 2 {
+		t.Fatalf("dead letters = %d, want 2 (the pending one is not listed)", len(dead))
+	}
+	if dead[0].State != app.IntentDeadLetter || dead[0].LastError != "gave up" || dead[0].Attempts != 3 {
+		t.Errorf("dead letter = %+v", dead[0])
+	}
+	if paged, err := st.ListDeadLetters(ctx, epoch.Add(-time.Hour), 1); err != nil || len(paged) != 1 {
+		t.Errorf("paged = %d err=%v, want 1", len(paged), err)
+	}
+	// The window excludes rows updated before `since`.
+	if recent, err := st.ListDeadLetters(ctx, time.Now().UTC().Add(time.Hour), 10); err != nil || len(recent) != 0 {
+		t.Errorf("future window = %d err=%v, want 0", len(recent), err)
+	}
+
+	// Retry puts one back to work with a clean slate; the ledger is NOT erased.
+	if err := st.RetryIntent(ctx, intentID1); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	in, err := st.GetIntent(ctx, intentID1)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if in.State != app.IntentPending || in.Attempts != 0 || in.LastError != "" {
+		t.Errorf("retried = %+v", in)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_attempts WHERE intent_id=$1`, intentID1); n != 1 {
+		t.Errorf("retry erased the attempt ledger (rows = %d)", n)
+	}
+	work, err := st.GetPendingForWork(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+	if len(work) != 2 {
+		t.Errorf("work after retry = %d, want 2 (the retried one and the untouched one)", len(work))
+	}
+
+	// Cancel abandons the other one.
+	if err := st.CancelIntent(ctx, intentID2); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if in, err = st.GetIntent(ctx, intentID2); err != nil || in.State != app.IntentCancelled {
+		t.Errorf("cancelled = %+v err=%v", in, err)
+	}
+
+	// An unknown id is an error on every operator path.
+	const ghost = "99999999-9999-4999-8999-999999999999"
+	for name, err := range map[string]error{
+		"get":    errOf(st.GetIntent(ctx, ghost)),
+		"retry":  st.RetryIntent(ctx, ghost),
+		"cancel": st.CancelIntent(ctx, ghost),
+	} {
+		if !errors.Is(err, app.ErrIntentNotFound) {
+			t.Errorf("%s(ghost): err = %v, want ErrIntentNotFound", name, err)
+		}
+	}
+}
+
+func errOf(_ app.Intent, err error) error { return err }
+
+// The intent tables go with a Purge (dev reset), and the attempt ledger cascades.
+func TestPurgeClearsDeliveryIntents(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	if _, err := st.CreateIntent(ctx, pendingIntent(intentID1, app.IntentEmail, "env-1", epoch)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := st.RecordAttempt(ctx, app.Attempt{
+		IntentID: intentID1, AttemptNo: 1, Outcome: app.AttemptFailure, Error: "x", At: epoch, NextAttemptAt: epoch,
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := st.Purge(ctx); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents`); n != 0 {
+		t.Errorf("intents after purge = %d", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_attempts`); n != 0 {
+		t.Errorf("attempts after purge = %d", n)
 	}
 }
