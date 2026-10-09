@@ -1,20 +1,22 @@
 // Package inbound is the Governance context's anti-corruption layer for the Knowledge
 // seam: it decodes Knowledge's completed-fact wire events (ComponentMatched /
-// FaultlineEnriched / FaultlineSuperseded) into the app's inbound contract and dispatches
-// them to the non-owning coordinator. It never imports Knowledge — the event JSON is the
-// only contract (D5/D6). Unrelated event types are ignored so the same bus can carry
-// events Governance does not consume.
+// FaultlineEnriched / FaultlineSuperseded, plus the per-SBOM ReleaseCorrelationCompleted)
+// into the app's inbound contract and dispatches them to the non-owning coordinator. It
+// never imports Knowledge — the event JSON is the only contract (D5/D6). Unrelated event
+// types are ignored so the same bus can carry events Governance does not consume.
 package inbound
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/platform/eventbus"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
 // Knowledge integration-event type identifiers Governance consumes (mirrors
@@ -25,26 +27,43 @@ const (
 	eventComponentRetired        = "knowledge.component_retired"
 	eventFaultlineEnriched       = "knowledge.faultline_enriched"
 	eventFaultlineSuperseded     = "knowledge.faultline_superseded"
+	// eventReleaseCorrelationCompleted — Knowledge finished correlating one SBOM
+	// (EDR-DELIVERY-01 M2-1). Unlike the five above it is about a RELEASE, not a card, and it
+	// arrives AFTER every other Knowledge event for that SBOM, so handling it means every
+	// Finding of that upload already exists.
+	eventReleaseCorrelationCompleted = "knowledge.release_correlation_completed"
 )
 
 // Subscription declares Governance's bus binding (EB-07 / D7): it consumes the Knowledge
-// stream and dispatches on the three Faultline facts below (its interest set — the same
-// types Handle switches on). Composition binds this to a platform Reader over the inbox-
-// wrapped Consumer; the interest filter drops any other type the stream may carry.
+// stream and dispatches on the facts below (its interest set — the same types Handle switches
+// on). Composition binds this to a platform Reader over the inbox-wrapped Consumer; the
+// interest filter drops any other type the stream may carry.
 var Subscription = eventbus.Subscription{
 	Consumer: "governance",
 	Stream:   "knowledge",
 	Interest: []string{eventComponentMatched, eventComponentVerdictChanged, eventComponentRetired,
-		eventFaultlineEnriched, eventFaultlineSuperseded},
+		eventFaultlineEnriched, eventFaultlineSuperseded, eventReleaseCorrelationCompleted},
 }
 
 // Consumer translates raw Knowledge events into coordinator calls.
 type Consumer struct {
-	coord *app.Coordinator
+	coord  *app.Coordinator
+	logger *observability.Logger
 }
 
 // NewConsumer wires the inbound consumer over the coordinator.
-func NewConsumer(coord *app.Coordinator) *Consumer { return &Consumer{coord: coord} }
+func NewConsumer(coord *app.Coordinator) *Consumer {
+	return &Consumer{coord: coord, logger: observability.Nop()}
+}
+
+// WithLogger supplies the shared logger. It carries the one thing this ACL has to say that is
+// not an error for the bus to retry: a refused event (nil ⇒ the no-op logger).
+func (c *Consumer) WithLogger(l *observability.Logger) *Consumer {
+	if l != nil {
+		c.logger = l
+	}
+	return c
+}
 
 // Handle decodes and dispatches one Knowledge event carried by the kernel Envelope. It
 // reads the event type + payload from the Envelope (M5 EB-02); the rest of the envelope
@@ -110,6 +129,28 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnFaultlineSuperseded(ctx, app.InboundFaultlineSuperseded{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Trust: value.TrustClass(dto.Trust),
 		})
+	case eventReleaseCorrelationCompleted:
+		var dto releaseCorrelationCompletedDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return err
+		}
+		err := c.coord.OnReleaseCorrelationCompleted(ctx, app.InboundReleaseCorrelationCompleted{
+			ReleaseID: dto.ReleaseID, SBOMID: dto.SBOMID, Cause: dto.Cause,
+		})
+		// A refused fact is LOGGED and skipped, never returned: an unusable cause or subject will
+		// be just as unusable on the fifth redelivery, and returning the error would halt the
+		// whole Knowledge stream into Governance (EDR-EVENTBUS-01 D8) over one notification.
+		// Every other failure — the store write — IS returned, so the bus retries it.
+		if errors.Is(err, app.ErrUnknownDiscoveryCause) || errors.Is(err, app.ErrInvalidEvaluationSubject) {
+			c.logger.Error("release-correlation-completed refused; nothing recorded for this event",
+				observability.String("event_id", env.ID),
+				observability.String("release_id", dto.ReleaseID),
+				observability.String("sbom_id", dto.SBOMID),
+				observability.String("cause", dto.Cause),
+				observability.Err(err))
+			return nil
+		}
+		return err
 	default:
 		return nil // not a Governance-consumed event — ignore
 	}
@@ -232,6 +273,16 @@ type applicabilityDTO struct {
 		Family string `json:"Family"`
 		Major  string `json:"Major"`
 	} `json:"Scope"`
+}
+
+// releaseCorrelationCompletedDTO mirrors knowledge.release_correlation_completed.v1, which —
+// unlike the older Knowledge events above — is snake_case on the wire (M2a-1). `occurred_at`
+// rides in that body too; it is not read here, because the Governance event carries its own
+// publication time from the envelope.
+type releaseCorrelationCompletedDTO struct {
+	ReleaseID string `json:"release_id"`
+	SBOMID    string `json:"sbom_id"`
+	Cause     string `json:"cause"`
 }
 
 type faultlineSupersededDTO struct {

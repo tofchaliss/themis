@@ -1,7 +1,8 @@
 // Package registry is the Governance context's client for Registry's read API: the
 // blast-radius rollup (EDR-ESTATE-01 C2/D7 — how many unique customers a release reaches,
 // implementing the app BlastRadiusReader port) and the upward hop release → project → product
-// that confines a `product:<id>` key to its own product's Findings (EDR-DELIVERY-01 N-M0). It
+// that confines a `product:<id>` key to its own product's Findings (EDR-DELIVERY-01 N-M0) and
+// names the owners on `governance.release_evaluated.v1` (N-M2b). It
 // never imports the Registry context or touches its tables (Book III §3.5) — the two
 // collaborate solely via the read API.
 package registry
@@ -78,24 +79,40 @@ type projectView struct {
 // above, which fails open to 1.0×: over-stating priority is a nuisance, granting a write to the
 // wrong product is a breach.
 func (c *Client) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
+	productID, _, err := c.ProductAndProjectOfRelease(ctx, releaseID)
+	return productID, err
+}
+
+// ProductAndProjectOfRelease walks the same two hops and returns BOTH ids.
+//
+// It is the full answer the hops already produce: `governance.release_evaluated.v1` names the
+// project as well as the product (EDR-DELIVERY-01 M2-2), and the project id is read on the way
+// to the product anyway — throwing it away and asking again would be two more round trips for a
+// fact this call already holds. ProductOfRelease is the narrow view over it, so "how does
+// Governance resolve a release's owners" keeps ONE implementation and one set of refusals.
+//
+// Fails CLOSED at every step: a transport failure, a non-200 or a blank hop is an error, never a
+// blank id. The release-evaluation worker turns that into a deferral and retries; publishing an
+// empty product id would state as fact that the Release belongs to nothing.
+func (c *Client) ProductAndProjectOfRelease(ctx context.Context, releaseID string) (string, string, error) {
 	if releaseID == "" {
-		return "", fmt.Errorf("registry: product-of-release: no release id")
+		return "", "", fmt.Errorf("registry: product-of-release: no release id")
 	}
 	var rel releaseView
 	if err := c.get(ctx, "/api/v1/releases/"+releaseID, &rel); err != nil {
-		return "", fmt.Errorf("registry: release %s: %w", releaseID, err)
+		return "", "", fmt.Errorf("registry: release %s: %w", releaseID, err)
 	}
 	if rel.ProjectID == "" {
-		return "", fmt.Errorf("registry: release %s: no project id", releaseID)
+		return "", "", fmt.Errorf("registry: release %s: no project id", releaseID)
 	}
 	var proj projectView
 	if err := c.get(ctx, "/api/v1/projects/"+rel.ProjectID, &proj); err != nil {
-		return "", fmt.Errorf("registry: project %s: %w", rel.ProjectID, err)
+		return "", "", fmt.Errorf("registry: project %s: %w", rel.ProjectID, err)
 	}
 	if proj.ProductID == "" {
-		return "", fmt.Errorf("registry: project %s: no product id", rel.ProjectID)
+		return "", "", fmt.Errorf("registry: project %s: no product id", rel.ProjectID)
 	}
-	return proj.ProductID, nil
+	return proj.ProductID, rel.ProjectID, nil
 }
 
 func (c *Client) get(ctx context.Context, path string, into any) error {
@@ -114,4 +131,7 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
-var _ app.BlastRadiusReader = (*Client)(nil)
+var (
+	_ app.BlastRadiusReader       = (*Client)(nil)
+	_ app.ReleaseIdentityResolver = (*Client)(nil)
+)

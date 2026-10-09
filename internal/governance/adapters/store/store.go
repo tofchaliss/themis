@@ -46,6 +46,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventDispositionStale:    "governance.disposition_stale.v1",
 	app.EventFindingCommissioned: "governance.finding_commissioned.v1",
 	app.EventCommissionWithdrawn: "governance.commission_withdrawn.v1",
+	app.EventReleaseEvaluated:    "governance.release_evaluated.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -722,7 +723,7 @@ func isUniqueViolation(err error) bool {
 // Purge removes all Governance rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE processed_events, governance_outbox, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
+		`TRUNCATE processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
 	return err
 }
 

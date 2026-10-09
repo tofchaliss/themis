@@ -1256,3 +1256,118 @@ the relay's tie-break) · `internal/knowledge/adapters/wiring` (`WithCompletion`
 ordering, the shared-instant regression, zero-match, both causes, and VEX/scanner-report publishing
 nothing) plus app/domain unit tests. Tracked as task **6.1** in
 `openspec/changes/phase3-outward-actions/tasks.md`.
+
+## Revision 3 — N-M2b as built (2026-10-09): the handler RECORDS, a worker PUBLISHES
+
+The second build step of **Revision 3 — N-M2** landed. **Accepted as a decision of record.
+IMPLEMENTED.** Append-only like the rest of the file: nothing above is amended, and where this
+section states something the N-M2b step row left open or said differently, **this later section
+governs**.
+
+One thing needed deciding once code met the step, and the owner took it in the **N-M2b
+implementation round on 2026-10-09**: *"the inbound handler must never call Registry, because a
+handler error halts the whole Knowledge stream into Governance after 5 attempts"* — approving with
+it the schema change that makes the alternative possible. **Cite it as `EDR-DELIVERY-01 M2b-1`**
+wherever the split has to be justified: the step row reads as one handler doing all of it, and a
+review of the diff alone cannot see the instruction.
+
+### M2b-1 — The handler records a to-do; it resolves, counts and publishes NOTHING
+
+The inbound handler for `knowledge.release_correlation_completed.v1` runs on the bus reader's
+**inbox transaction**. A handler error there is retried and then **halts the stream** after five
+attempts (EDR-EVENTBUS-01 D8) — the whole Knowledge→Governance stream, not this one event. So an
+identity lookup on that path would mean a Registry outage stops **Findings from opening**: the
+pipeline, stopped by a notification. That trade is not acceptable in either direction, which is why
+the step is two halves rather than a more careful handler.
+
+What the handler does is write one row to **`release_evaluations_pending`**
+`(release_id, sbom_id, cause, received_at)`, inside the inbox transaction — so the row is claimed
+atomically with the envelope: the event is never marked processed without its to-do, and a
+rolled-back envelope leaves no orphan. The row is **idempotent on `(release_id, sbom_id, cause)`**,
+so a redelivery adds nothing, while a *rediscovery* of an SBOM already evaluated as `new_sbom` is a
+**different fact** and gets its own row — the cause changes what a subscriber may do with it (M2-3).
+
+Two refusals record **nothing** and are **logged and skipped** rather than returned: a `cause`
+outside the closed enum, and a fact naming no release or no SBOM. Both will be exactly as unusable
+on the fifth redelivery, so returning them would halt the stream to no purpose. Everything else — a
+malformed payload, a failed insert — **is** returned, because a later delivery can resolve it and
+the row is the only record that this Release needs evaluating.
+
+### M2b-2 — The worker is where the failures are allowed to happen
+
+A background worker on the Governance node (`app.ReleaseEvaluationWorker`, started by
+`cmd/governance`) drains the queue: resolve the Release's product and project over the existing
+Registry read seam, count the Findings **at publish time** (not at record time — the posture is
+whatever it is when the event is stated), append the event, mark the row published.
+
+Its cadence is **5s, fixed**, and its retry is an **in-process per-row backoff** of 1s doubling to
+a **1m** cap. Neither is configurable: the poll is the latency of a notification nobody waits on
+synchronously, and there is no estate fact to tune either against. The backoff is deliberately
+process-local — a restart resets the *schedule*, never a *row*, so the cost of losing it is a retry
+burst and never a lost publication. Nothing under `internal/infrastructure` is imported: the legacy
+tree is frozen, and a 15-line schedule is not worth unfreezing it for.
+
+While Registry is unreachable the row **stays pending** and the failure is reported. A **blank
+product or project is treated exactly like an outage** (`ErrUnresolvedReleaseIdentity`) rather than
+published: the two ids are what let a subscriber route a ticket to the right product, and a blank
+one would be stated as fact — the same fail-closed trade N-M0 took at the authorization site, for
+the same reason.
+
+The seam that resolves them is `ProductAndProjectOfRelease`, with the N-M0
+`ProductOfRelease` now a **narrow view over it**. The project id is read on the way to the product
+anyway, so returning both costs no extra round trip, and "how does Governance resolve a Release's
+owners" keeps one implementation and one set of refusals.
+
+### M2b-3 — Publish-and-mark is ONE transaction, and the mark is guarded
+
+`Store.PublishEvaluatedAndMark` appends the outbox note and sets `published_at` in a single
+transaction, with the UPDATE guarded by `published_at IS NULL`. The two writes must not be
+separable: appending without marking republishes on every pass, and marking without appending loses
+the only trigger the rebuild loop runs on. The guard also settles the two-node race the M1b honest
+limits left open for tickets — two workers draining one database produce **one** event, because the
+second finds no unpublished row and commits nothing.
+
+### M2b-4 — One ladder, in the domain, and suppressed Findings are counted
+
+The counts cover **every** Finding of the Release, including the ones a Position has suppressed
+(M1b-4): the event states what the Release CONTAINS, and a suppression is a decision about a
+Finding, not evidence that the flaw left the inventory. A subscriber that wants the undecided half
+reads the posture.
+
+The ladder itself lives in **`domain.CountSeverityBuckets`** (Critical ≥ 90, High ≥ 70, Medium ≥ 40,
+Low > 0; a `base_score` of 0 counted nowhere), and the store hands it the scores instead of
+re-expressing the thresholds as SQL `FILTER` clauses. M2-2's requirement is that the event and the
+Jira body "cannot disagree about what High means" — which is a requirement about there being ONE
+ladder, and a second copy in SQL is a second thing to keep in step. It also makes the ladder
+testable where the named acceptance test lives, rather than only against a database.
+
+### M2b-5 — What is still NOT in this step
+
+No API and no OpenAPI edit (the cursor read API is N-M2d, and `release_evaluated_events` is its
+table — the queue here is a to-do list, not an event store). Nothing consumes the event yet:
+Communication still runs on M1a-3's `finding_opened` proxy until **N-M2c** retires it. No
+`ci_rebuild`, no loop control, no callback.
+
+Two carried limits, stated: with `THEMIS_REGISTRY_URL` empty **no worker is wired** and the rows
+queue (visibly) rather than draining into events with blank owners; and the Governance→Registry read
+seam still sends **no API key** (the N-M0 limit, task 2.10), so on an auth-enabled estate that seam
+must be reachable unauthenticated or every evaluation defers on a 401. Giving it a credential is a
+security-model change and belongs to the milestone that needs it — the failure mode here is a
+deferral an operator can see in the queue, not a wrong event.
+
+### Realizes (N-M2b)
+
+`internal/governance/domain/release_evaluation.go` (the `ReleaseEvaluated` body, `SeverityCounts` +
+the M1b-5 ladder, the re-declared `DiscoveryCause` vocabulary) ·
+`internal/governance/app` (`OnReleaseCorrelationCompleted` + the `PendingEvaluations` /
+`ReleaseEvaluations` / `ReleaseIdentityResolver` / `EvaluationLog` ports,
+`ReleaseEvaluationWorker`, `NextEvaluationBackoff`) ·
+`internal/governance/adapters/inbound` (the sixth interest type, the snake_case DTO, the logged
+refusal) · `internal/governance/adapters/store` (migration **000015**
+`release_evaluations_pending` up/down, `release_evaluation.go`, the pinned `schema_ref` and the
+frozen v1 schema under `schemas/`) · `internal/governance/adapters/registry`
+(`ProductAndProjectOfRelease`) · `internal/governance/adapters/wiring` + `cmd/governance` (the
+worker and its reporting adapter). Tests:
+`TestReleaseEvaluatedEvent_ZeroCounts_AndCauseMapping` (`internal/governance/app`) plus the worker,
+inbound, registry-client and store-integration suites. Tracked as task **6.2** in
+`openspec/changes/phase3-outward-actions/tasks.md`.
