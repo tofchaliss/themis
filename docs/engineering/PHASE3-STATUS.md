@@ -1,10 +1,109 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-10-06 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-10-09 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-06 · EDR-HARNESS-01 COMPLETE on `feat/harness-integration`, gate green, NOT merged
+> ## ⏭ RESUME POINT — 2026-10-09 · THE VM PIPELINE IS HALTED. Restart it first; everything else is paperwork
+>
+> **`main` = `8e3eaa0`.** Four PRs merged today (#132 #133 #134 #135), all documents — **no production
+> code changed on 2026-10-09.** The one thing that needs doing is on the VM, not in the repo.
+>
+> ### ⛔ FIRST: the evidence stream is halted, and a reboot does NOT clear it
+>
+> Knowledge's `evidence` stream stopped at **2026-10-05 11:29:44** and has processed nothing since.
+> Cause: an operator uploaded a Cortex **JSON** export as the raw vendor array (no JSON road existed —
+> every documented one assumed Trivy). `json.Valid` is the whole scanner-report border check, so
+> Evidence filed it, and Knowledge's ACL then refused it 5 times and halted the stream under
+> EDR-EVENTBUS-01 D8. **Working as designed; the border is what failed.**
+>
+> | fact | value |
+> | --- | --- |
+> | poison envelope | `d8e4eecc-dfac-4051-a319-e7a609d2883c` |
+> | its evidence id | `375cc88d-4790-4f6c-b6ef-003ed5a091ae` (kind `scanner-report`) |
+> | bus seq | `35786`, admissible (`insert_xid8` settled — **not** an xmin stall) |
+> | `stream_cursor` | stuck at `35751`, `updated_at` 2026-10-05 10:52:25 |
+> | `processed_events` | 16 rows, last 2026-10-05 10:52:24 |
+> | unit | `active`, `NRestarts=0`, started 2026-09-27 — it has never restarted since the halt |
+>
+> **A restart alone re-jams it.** The reader resumes from its cursor, re-reads `35786`, fails 5 times,
+> halts again. The envelope must be marked applied first:
+>
+> ```sh
+> cd /opt/themis/src/themis
+> DSN=$(sudo grep -h '^THEMIS_DATABASE_DSN=' /etc/themis/governance.env | head -1 | cut -d= -f2-)
+> PGBASE=$(printf '%s' "$DSN" | sed -e 's#?.*##' -e 's#/[^/]*$##')
+> # mark the poison envelope applied — processed_events is the correctness store, so this
+> # survives a cursor rebuild; advancing stream_cursor alone would NOT (it is a read optimization)
+> psql "$PGBASE/knowledge?sslmode=disable" -c "insert into processed_events (envelope_id) values ('d8e4eecc-dfac-4051-a319-e7a609d2883c') on conflict do nothing"
+> sudo systemctl restart themis@knowledge
+> ```
+>
+> Then verify — cursor past `35786`, `processed_events` above 16, no new `HALTED` line:
+>
+> ```sh
+> psql "$PGBASE/bus?sslmode=disable" -c "select last_seq, updated_at from stream_cursor where source_context='evidence'"
+> psql "$PGBASE/knowledge?sslmode=disable" -c "select count(*), max(processed_at) from processed_events"
+> sudo journalctl -u themis@knowledge --since '-3 min' --no-pager 2>&1 | grep -iE 'halt|reader' | tail -5
+> ```
+>
+> **This insert is a deliberate, recorded lie:** it asserts the event was handled when it was not. It
+> is the only place a skip survives a cursor rebuild, and D8 demands "manual intervention" rather than
+> a silent skip — so the intervention is a human's, logged here.
+>
+> ### ⚠ SECOND: a report was re-uploaded on 2026-10-09 and is UNVERIFIED
+>
+> The operator recreated and re-uploaded the scan report; the upload returned success. **That proves
+> only that Evidence saved it** — Evidence accepted the bad file too. Whether Knowledge read it is
+> unknown, because the stream was still halted and the VM then went down for maintenance before the
+> checks could run. After the restart above, confirm the shape:
+>
+> ```sh
+> curl -s "http://localhost:8081/api/v1/evidence/<newest-scanner-report-id>/document" | jq -r '.document' | jq -r 'type'
+> ```
+>
+> `object` = correct (`{"findings":[…]}`). `array` = the same bad shape, and it will jam again.
+>
+> **`/tmp/scan-report-new.json` (the good 427-finding conversion) is almost certainly gone** — `/tmp`
+> clears on reboot. The source export survives at
+> `scripts/R1917.256.OAMP_Scan_Report.json`; regenerate with the seven-column shim + the maintained
+> converter (GUI-16b in BACKLOG has the exact commands, and `observed_at` must be
+> `2026-09-29T07:23:22Z` — derived from `max(last_observed)`, so a regeneration is byte-identical and
+> dedups).
+>
+> **Also on the VM:** `cortex.csv` and `scan-report.json` in the repo root were truncated to empty on
+> 2026-10-09 by a `>` redirect onto existing files. Neither belongs in the checkout; delete them. The
+> `R1917*` export does belong somewhere other than `scripts/`.
+>
+> ### What merged today, and why none of it fixes the VM
+>
+> | PR | what |
+> | --- | --- |
+> | **#132** | `EDR-INTAKE-01` + `phase3-report-intake` — one REST door, CSV **and** JSON accepted, validation at the border (**E1**), SBOM-before-report enforced, receipts. **Spec only; implementation NOT authorized** — two proof obligations open (`tasks.md` group 8) |
+> | **#133** | CLAUDE.md: `gh pr merge` stays denied, `gh pr create` moved to allow |
+> | **#134** | D10 corrected — `knowledge.release_correlation_completed.v1` (PR #129, 2026-10-07) already provides the completion signal D10 said was missing, but **SBOM-only**: one caller (`correlate.go:314`), nothing in `scanner.go:274`. The vulnerability-report case is the uncovered one |
+> | **#135** | GUI-16b (Cortex JSON road) + **OBS-HALT-1/2** — the three reasons the halt went unnoticed for 31 hours |
+>
+> **OBS-HALT-1 is why this checkpoint exists.** `/readyz` checks only the DB pool and the migrations
+> table, so a node with a dead inbound path reports **ready**; there is no halt metric; and
+> `vm-verify.sh` flags `pending > 100`, which can never see a halt because nothing after the poison
+> event is attempted. All three stayed quiet for 31 hours, then 4 more days.
+>
+> ### ⏭ Do this next, in this order
+>
+> 1. **Restart the stream** (commands above), verify, then settle the re-uploaded report's shape.
+> 2. **Re-run `scripts/vm-verify.sh`** and confirm the reader is current. Note it will print `✓` for a
+>    halt — read `stream_cursor.updated_at` yourself until OBS-HALT-1 lands.
+> 3. **`DEF_GOV_STAMPED_FIXES_NEVER_REDERIVE`** (BACKLOG P1) is still the forward defect: start at the
+>    Knowledge event boundary, define the 0/1/>1 cardinalities before code, never an `UPDATE`.
+> 4. **Rotate the exposed PostgreSQL credential** (P0) — independent of all code work, which is how it
+>    has survived eight sessions.
+> 5. Housekeeping: `openspec archive phase3-harness-integration --skip-specs -y` (shipped and merged;
+>    `phase3-report-intake` stays open — spec only).
+
+---
+
+> ## RESUME POINT — 2026-10-06 · EDR-HARNESS-01 COMPLETE on `feat/harness-integration`, gate green, merged as `552c4e1`
 >
 > **THE ONE-LINE STATE:** the AI-runtime integration is done and the gate passes against the
 > published module pin; **the forward list is unchanged — resume at
