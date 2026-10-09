@@ -173,14 +173,47 @@ func smtpAddress(cmd string) string {
 	return cmd[open+1 : closing]
 }
 
+// only returns the single recorded session, WAITING for the server to record it first.
+//
+// The wait is the whole point. `record()` runs in the server's own connection goroutine, on QUIT
+// (see handle), while DeliverIntent returns as soon as the CLIENT has finished writing — so the two
+// are unsynchronised and a test that read s.sessions immediately could observe zero. Measured
+// 2026-10-09: TestRealMailDelivererFoldsNewlinesOutOfHeaders failed in CI with `sessions = 0, want
+// exactly 1` on a run that took 1m37s, and passed on a re-run of the SAME commit that took 3m15s —
+// the FAST run is the one that lost the race. It also passed 30/30 locally, which is why the flake
+// reached main: the race only opens when the client finishes unusually early relative to the server.
+//
+// A sleep would not fix this, it would only move the race. Waiting for the condition does.
 func (s *testSMTP) only(t *testing.T) smtpSession {
 	t.Helper()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.sessions) != 1 {
-		t.Fatalf("sessions = %d, want exactly 1", len(s.sessions))
+	sessions, ok := s.waitFor(1, 5*time.Second)
+	if !ok {
+		t.Fatalf("sessions = %d after waiting 5s, want exactly 1", s.count())
 	}
-	return s.sessions[0]
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want exactly 1", len(sessions))
+	}
+	return sessions[0]
+}
+
+// waitFor returns a snapshot of the recorded sessions once at least n exist, or false on timeout.
+// It polls rather than signalling because the server records from an arbitrary number of
+// connection goroutines and a channel would need a capacity nobody can predict.
+func (s *testSMTP) waitFor(n int, within time.Duration) ([]smtpSession, bool) {
+	deadline := time.Now().Add(within)
+	for {
+		s.mu.Lock()
+		if len(s.sessions) >= n {
+			snapshot := append([]smtpSession(nil), s.sessions...)
+			s.mu.Unlock()
+			return snapshot, true
+		}
+		s.mu.Unlock()
+		if time.Now().After(deadline) {
+			return nil, false
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (s *testSMTP) count() int {
@@ -333,13 +366,17 @@ func TestRealMailDelivererRetrySendsTheSameBytes(t *testing.T) {
 	if _, err := mail.DeliverIntent(ctx, in); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
-	if len(srv.sessions) != 2 {
-		t.Fatalf("sessions = %d, want 2", len(srv.sessions))
+	// Through waitFor for the same reason only() does: the second session is recorded by the
+	// server's goroutine, not by the call that returned above.
+	sessions, ok := srv.waitFor(2, 5*time.Second)
+	if !ok {
+		t.Fatalf("sessions = %d after waiting 5s, want 2", srv.count())
 	}
-	if srv.sessions[0].data != srv.sessions[1].data {
-		t.Errorf("a retry sent different bytes:\n%s\n---\n%s", srv.sessions[0].data, srv.sessions[1].data)
+	if len(sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(sessions))
+	}
+	if sessions[0].data != sessions[1].data {
+		t.Errorf("a retry sent different bytes:\n%s\n---\n%s", sessions[0].data, sessions[1].data)
 	}
 }
 
