@@ -484,10 +484,48 @@ the coupling the architecture spends a bus avoiding.
 A terminal receipt therefore carries `next_checks`: the Knowledge and Governance URLs that answer
 "did the work land" — `GET knowledge/api/v1/scanner-reports/{evidence_id}/unresolved` and
 `GET governance/api/v1/releases/{release_id}/posture`. The client polls those for pipeline
-completion. Honest limit, stated plainly: **there is no single endpoint that says "everything
-downstream of this upload is done"**, and this EDR does not pretend to add one. Making that
-answerable is a bus-level question (a correlation-complete event keyed to the evidence id), filed as
-a follow-up rather than faked here.
+completion.
+
+**CORRECTED 2026-10-09, before any implementation.** The paragraph that stood here said there is no
+single signal for "everything downstream of this upload is done", and filed a correlation-complete
+event keyed to the evidence id as a follow-up. **That event already exists for SBOMs.** PR #129
+(merged 2026-10-07, EDR-DELIVERY-01 N-M2a) added
+`knowledge.release_correlation_completed.v1`: published once per correlation, carrying `sbom_id` —
+the Evidence id of the SBOM — plus a closed `cause` of `new_sbom | rediscovery`, and appended to the
+outbox **after** every other Knowledge event for that upload, so a consumer that handles it has
+already handled every earlier fact. This EDR was drafted against `main` at `552c4e1`, two days
+before that landed; the limit was true when written and false when merged.
+
+**But it covers SBOMs only, and the asymmetry is the load-bearing part for this EDR.** Verified by
+enumerating every caller: `AnnounceCorrelationCompleted` has exactly one non-test call site
+(`app/correlate.go:314`, inside `CorrelationService.ApplyCorrelation`). The scanner-report path
+(`ScannerReportService.ApplyIngest`, `app/scanner.go:274`) contains **no** announcement at all — it
+reports counts through `s.report.ScannerIngest(...)`, a log seam, not the bus. The `vex` branch
+publishes nothing either. `coordinator.go:44` is where the three kinds diverge.
+
+So the state of the world is:
+
+| upload kind | is there a "correlation finished" event? | what the receipt should do |
+| --- | --- | --- |
+| `sbom` | **yes** — `knowledge.release_correlation_completed.v1`, keyed by `sbom_id` | the receipt can reach a real `correlated` state, or at minimum name the event instead of sending the client to poll |
+| `vuln-report` (any dialect) | **no** | `next_checks` polling stands, and is the only option |
+| `vex` | **no** | out of scope here |
+
+**What this changes in the design.** `next_checks` is no longer the answer for every kind — it is
+the fallback for the kinds that have no event. An implementer reading the old text would have built
+polling for the SBOM case that already has a push signal, and would have had no reason to notice
+that the vulnerability-report case — the one this whole EDR exists for — is the uncovered one.
+
+**What it does NOT change.** Evidence still does not poll Knowledge; the coupling argument stands.
+Consuming that event is Governance's or a dedicated consumer's job, not Evidence's, so a receipt
+that reports `correlated` for an SBOM needs a decision about **who** relays the event back to the
+receipt. That is an EDR-DELIVERY-01 N-M2 question and is raised there, not settled here.
+
+**Open question, for the owner of N-M2:** should `ScannerReportService.ApplyIngest` publish the same
+event, with `cause` extended or a sibling event added? It would make the receipt's `correlated`
+state uniform across kinds and remove the polling fallback entirely. It is not proposed here
+because the event's own schema says it describes one SBOM, and widening a published
+integration-contract v1 is a decision for its author.
 
 ### D11 — Validation is a closed taxonomy, refused at the border, before anything is filed
 
@@ -632,6 +670,14 @@ and throughout the change.
 
 Both are recorded as **open approval gates** (`tasks.md` group 8), not as satisfied claims. Neither
 blocks M1, which does not ship `force_reconvert`.
+
+**2026-10-09 (post-merge) — D10's honest limit was stale on the day it merged.**
+
+| # | change | driver |
+| --- | --- | --- |
+| **D10** | The "no correlation-complete signal exists" limit is replaced by what actually exists, split by upload kind, plus an open question for N-M2's owner | PR #129 (2026-10-07) shipped `knowledge.release_correlation_completed.v1` keyed by `sbom_id` — exactly the event D10 filed as a follow-up. This EDR was drafted against `552c4e1`, two days earlier. Verified it is **SBOM-only**: one non-test caller (`correlate.go:314`), nothing in `scanner.go:274`. So the vulnerability-report case this EDR exists for is the one still uncovered, which the old text obscured |
+
+Corrected before implementation started, so no code was written against the wrong assumption.
 
 The reviewer's 20-check contract matrix is adopted as the implementation gate and mapped into
 `openspec/changes/phase3-report-intake/tasks.md` group 6.

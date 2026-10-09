@@ -258,3 +258,23 @@ counterexample that motivated the rule, not a broad success or failure condition
 **Both obligations are open.** Until 8.1–8.2 are green the conflict path is specified and unproven;
 until 8.3 is measured on a real estate, `force_reconvert` stays out of documented remediation
 procedure. Neither blocks M1, which does not ship `force_reconvert`.
+
+## Group 9 — D10 correction follow-through (2026-10-09, post-merge)
+
+D10's "no correlation-complete signal exists" limit was stale on the day this change merged: PR #129
+shipped `knowledge.release_correlation_completed.v1` on 2026-10-07, keyed by `sbom_id`. Verified
+**SBOM-only** — one non-test caller (`app/correlate.go:314`), nothing in `app/scanner.go:274`.
+
+- [ ] 9.1 **M2's receipt consumes the event for SBOMs instead of telling the client to poll.** A
+      receipt for `kind: sbom` can reach a real `correlated` state. Needs a decision first on **who
+      relays** the event to the receipt: Evidence must not poll Knowledge (D10's coupling argument
+      stands), so the relay is Governance's or a dedicated consumer's. **Blocked on 9.3.**
+- [ ] 9.2 **`next_checks` is the fallback, not the default.** Emit it for the kinds with no event
+      (`vuln-report`, `vex`); for `sbom`, name the event. Test: a receipt for an SBOM and a receipt
+      for a report carry **different** completion mechanisms, so a client cannot assume one.
+- [ ] 9.3 **OPEN QUESTION for the owner of EDR-DELIVERY-01 N-M2** — should
+      `ScannerReportService.ApplyIngest` publish the same event (`cause` extended, or a sibling
+      event)? That would make `correlated` uniform across kinds and remove the polling fallback
+      entirely. Not proposed here: the event's schema says it describes one SBOM, and widening a
+      published integration-contract v1 belongs to its author. **This is the question that decides
+      whether 9.1 and 9.2 are two code paths or one.**
