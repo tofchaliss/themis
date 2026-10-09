@@ -2675,6 +2675,27 @@ under the 2026-08-07 re-derivation standard.
 
 ### D. Observability (R1) — remaining signals
 
+- [x] **CI-FLAKE-1 — the mail test's fake SMTP server was read before it had recorded the session
+  (filed and FIXED 2026-10-09).** ✅ **CLOSED same day.** `testSMTP.record()` runs in the server's
+  own connection goroutine on `QUIT`, while `DeliverIntent` returns as soon as the **client** is
+  done — so `only(t)` and the retry test's direct `len(srv.sessions)` read could observe **zero**.
+  **Measured:** `TestRealMailDelivererFoldsNewlinesOutOfHeaders` failed on PR #136 (a docs-only
+  change) with `sessions = 0, want exactly 1`, and passed on a re-run of the **same commit**. The
+  failing run took **1m37s**, the passing one **3m15s** — the FAST run is the one that lost the
+  race, which is why it also passed 30/30 locally and reached `main` in #127.
+  **Fixed** by waiting for the condition (`waitFor(n, 5s)`) rather than assuming it:
+  `only()` and `TestRealMailDelivererRetrySendsTheSameBytes` both go through it. A `time.Sleep`
+  was rejected — it moves a race rather than closing it.
+  **Verified by a controlled experiment, not by a green re-run:** with a 300 ms delay injected
+  before `record()`, the ORIGINAL code fails **three** tests (`SendsPlainText`, `Authenticates`,
+  `RetrySendsTheSameBytes`) and the fixed code passes all of them; with the delay removed, 20
+  consecutive runs under `-race` are clean. The injected delay also found the second racy
+  assertion, which reading the first failure alone had not.
+  **Carry forward:** a new test that passes locally and fails only on a fast CI machine will block
+  an unrelated PR, exactly as this blocked a one-file docs change. The two `srv.count() != 0`
+  assertions are **not** affected — the deliverer refuses before connecting, so no goroutine exists
+  to race.
+
 - [ ] **OBS-HALT-1 — a D8 stream halt is the QUIETEST failure on the box, and D8 promised it would be
   the loudest (filed 2026-10-06, measured).** MED, observability. EDR-EVENTBUS-01 D8's M5 commitment
   is "stream-level halt **with loud alerting**". What exists is three ERROR log lines. **Measured:
