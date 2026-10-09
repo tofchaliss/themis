@@ -81,15 +81,63 @@ type InboundFaultlineSuperseded struct {
 	Trust value.TrustClass
 }
 
+// InboundReleaseCorrelationCompleted is Knowledge's completion fact: correlation finished for
+// one SBOM of one Release (EDR-DELIVERY-01 M2-1). It carries no product and no project —
+// Knowledge holds no Registry seam (M2a-1) — so resolving those is Governance's job, and
+// deliberately NOT the inbound handler's (see OnReleaseCorrelationCompleted).
+type InboundReleaseCorrelationCompleted struct {
+	ReleaseID string
+	SBOMID    string
+	// Cause is carried verbatim onto governance.release_evaluated.v1; the closed vocabulary is
+	// domain.ValidDiscoveryCause.
+	Cause string
+}
+
 // Coordinator sequences the inbound Knowledge seam by calling the app services only
 // (BCK-0044). It owns no state and enforces no rules — it translates a completed Knowledge
 // fact into the matching Governance use case and lets the service govern it (D5/D6).
 type Coordinator struct {
 	svc *FindingService
+	// evaluations is the release-evaluation queue (N-M2b). Optional like the other seams: a
+	// Coordinator without one ignores the completion fact, which is the pre-N-M2b behaviour.
+	evaluations PendingEvaluations
 }
 
 // NewCoordinator wires the coordinator over the Finding service.
 func NewCoordinator(svc *FindingService) *Coordinator { return &Coordinator{svc: svc} }
+
+// WithEvaluations wires the release-evaluation queue the completion fact is recorded in
+// (N-M2b). The composition root always wires it; the option keeps the seam explicit.
+func (c *Coordinator) WithEvaluations(q PendingEvaluations) *Coordinator {
+	c.evaluations = q
+	return c
+}
+
+// OnReleaseCorrelationCompleted RECORDS that a Release is due for evaluation, and does nothing
+// else (EDR-DELIVERY-01 N-M2b).
+//
+// It resolves no identity, reads no counts and publishes nothing, because this runs on the bus
+// reader's inbox transaction: a handler error halts the entire Knowledge stream into Governance
+// after five attempts (EDR-EVENTBUS-01 D8), so a Registry outage here would stop Findings
+// opening — the pipeline — over a notification. The row is written inside that same transaction,
+// so it is claimed exactly once with the envelope, and the background worker
+// (ReleaseEvaluationWorker) does the resolving, the counting and the publishing where a failure
+// costs only a retry.
+//
+// A cause outside the closed vocabulary records NOTHING (ErrUnknownDiscoveryCause); so does a
+// fact naming no release or no SBOM (ErrInvalidEvaluationSubject).
+func (c *Coordinator) OnReleaseCorrelationCompleted(ctx context.Context, m InboundReleaseCorrelationCompleted) error {
+	if !domain.ValidDiscoveryCause(m.Cause) {
+		return ErrUnknownDiscoveryCause
+	}
+	if m.ReleaseID == "" || m.SBOMID == "" {
+		return ErrInvalidEvaluationSubject
+	}
+	if c.evaluations == nil {
+		return nil // queue not wired — the completion fact is inert (pre-N-M2b behaviour)
+	}
+	return c.evaluations.EnqueuePendingReleaseEvaluation(ctx, m.ReleaseID, m.SBOMID, m.Cause)
+}
 
 // OnComponentMatched opens-or-updates the (Release, Faultline) Finding for a match (D5).
 func (c *Coordinator) OnComponentMatched(ctx context.Context, m InboundComponentMatched) error {

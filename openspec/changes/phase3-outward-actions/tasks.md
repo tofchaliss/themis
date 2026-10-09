@@ -400,7 +400,7 @@ recorded in `proposal.md` and accepted in `design.md`.
       100%, `knowledge/adapters/store` 84.5% (≥80). One harness fix rode along: the shared store test
       `truncate` now clears `correlated_releases`, which used to leak the ledger between tests so a
       sweep could drain another test's releases.
-- [ ] 6.2 **N-M2b** (`themis`; no API, no schema) — Governance consumes it and publishes
+- [x] 6.2 **N-M2b** (`themis`; no API, **one migration**) — Governance consumes it and publishes
       `governance.release_evaluated.v1`: snake_case `product_id` / `project_id` / `release_id` /
       `sbom_id`, integer `severity_counts {critical, high, medium, low}` off M1b-5's `base_score`
       ladder, `cause` mapped verbatim. **`product_id` and `project_id` are RESOLVED HERE**
@@ -409,6 +409,63 @@ recorded in `proposal.md` and accepted in `design.md`.
       `THEMIS_REGISTRY_URL`, task 1.2) and already owns the counts. Test:
       `TestReleaseEvaluatedEvent_ZeroCounts_AndCauseMapping` — zero counts emitted as the success
       case, both causes mapped, no third cause accepted.
+      **Implemented 2026-10-09**, and the step row above is NARROWED by an owner decision recorded
+      in `docs/engineering/decisions/EDR-DELIVERY-01.md`, the appended section **"Revision 3 —
+      N-M2b as built"** (**M2b-1..M2b-5**), which is the reason of record:
+      **the inbound handler must NEVER call Registry.** It runs on the bus reader's inbox
+      transaction, where a handler error halts the whole Knowledge stream into Governance after
+      five attempts (EDR-EVENTBUS-01 D8) — so resolving identity there would let a Registry outage
+      stop Findings from opening, the pipeline, over a notification. The step is therefore TWO
+      halves, and the schema change that makes that possible was approved with it:
+      **(a)** `OnReleaseCorrelationCompleted` records ONE row in the new
+      `release_evaluations_pending` (migration **000015**, up/down, reversibility covered by the
+      existing `TestMigrationDownUp`), inside the inbox transaction, idempotent on
+      `(release_id, sbom_id, cause)` — so a redelivery adds nothing while a *rediscovery* of the
+      same SBOM, being a different fact, gets its own row. It resolves nothing, counts nothing and
+      publishes nothing. A cause outside the closed enum and a blank release/SBOM record NOTHING
+      and are LOGGED + skipped rather than returned, because an unusable event is just as unusable
+      on its fifth redelivery and must not halt the stream; every other failure (malformed payload,
+      failed insert) IS returned, so the bus retries it.
+      **(b)** `app.ReleaseEvaluationWorker` on the Governance node (started by `cmd/governance`,
+      polling every **5s**, fixed — no new env knob) resolves the owners through the existing
+      Registry client, counts at PUBLISH time, and appends the event. Registry gained the sibling
+      `ProductAndProjectOfRelease`, with `ProductOfRelease` now a narrow view over it, so the two
+      hops and their four fail-closed refusals keep ONE implementation and the project id costs no
+      extra round trip. A blank product or project is treated exactly like an outage
+      (`ErrUnresolvedReleaseIdentity`): the row stays pending. Backoff is **in-process** and
+      per-row, 1s doubling to a 1m cap (no `internal/infrastructure` import — the legacy tree stays
+      frozen); a restart resets the schedule, never a row.
+      **(c)** `Store.PublishEvaluatedAndMark` appends the outbox note and marks the row published
+      in **ONE transaction**, with the UPDATE guarded by `published_at IS NULL` — so two workers
+      racing produce one event, and a crash between the two writes produces neither.
+      Counts cover EVERY Finding of the Release including the suppressed ones (M1b-4); the ladder
+      lives in `domain.CountSeverityBuckets` (`90 / 70 / 40 / >0`, a `base_score` of 0 counted
+      nowhere) and the store feeds it the scores rather than re-expressing the thresholds as SQL —
+      the event and the Jira body cannot disagree about "High" if there is only one ladder.
+      Tests: the named app test (zero counts as the success case with the wire body asserted as
+      BYTES, both causes verbatim, four refused causes + two blank subjects recording nothing with
+      Registry never called, the ladder edges `90/70/40/1/0`, and a two-pass Registry outage that
+      defers — reported, backed off, nothing dropped — then publishes EXACTLY once; plus both
+      blank-id cases); the worker tests (the backoff policy and its saturation, the schedule
+      cleared on success, a queue-read failure inert, counting and publish failures both leaving
+      the row pending and recovering, a nil log silent, the loop draining and stopping on
+      cancellation); the inbound tests (interest set + count, idempotent record, rediscovery as its
+      own row, four refusals logged and not halted, malformed/store failures propagating, and the
+      handler holding no identity seam); registry client (both ids, two hops only, four
+      fail-closed refusals, transport + decode on BOTH hops); and store integration against real
+      Postgres (insert idempotence on the triple, limit/order incl. the non-positive fallback, the
+      ladder over real `base_score` rows with a genuinely SUPPRESSED Finding counted and another
+      release not leaking in, the one-guarded-transaction publish with its outbox subject /
+      schema_ref / snake_case payload, the second publish appending nothing, and `Purge`).
+      Coverage: `governance/app` + `governance/domain` still **100%**,
+      `governance/adapters/inbound` 95.8%, `governance/adapters/registry` 95.5%,
+      `governance/adapters/store` ≥80. No package added, so `scripts/check-coverage.sh` needs no
+      registration. Gates: `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test` green,
+      and `make e2e-pipeline` still passes with the new interest type in the stream.
+      Carried limit: with `THEMIS_REGISTRY_URL` empty no worker is wired (the event would have to
+      name blank owners), so rows queue until it is set — and the Governance→Registry read seam
+      still sends no API key (task 2.10), so on an auth-enabled estate that seam must be reachable
+      unauthenticated or the rows defer with a 401.
 - [ ] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
       `governance.finding_opened` → ticket mapping (M1a-3's proxy) and create a ticket intent only on
       `governance.release_evaluated` with `cause=new_sbom`, product and project now populated. This

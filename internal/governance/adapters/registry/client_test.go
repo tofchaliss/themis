@@ -112,6 +112,95 @@ func TestClient_ProductOfRelease(t *testing.T) {
 	}
 }
 
+// ProductAndProjectOfRelease is the same two hops returning BOTH ids (EDR-DELIVERY-01 N-M2b):
+// `governance.release_evaluated.v1` names the project as well as the product, and the project id
+// is read on the way to the product anyway. It fails closed identically — a release-evaluation
+// published with a blank id would state that the Release belongs to nothing.
+func TestClient_ProductAndProjectOfRelease(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/releases/rel-1":
+			_, _ = w.Write([]byte(`{"id":"rel-1","project_id":"prj-1","version":"1.2.3"}`))
+		case "/api/v1/projects/prj-1":
+			_, _ = w.Write([]byte(`{"id":"prj-1","product_id":"prod-1","name":"payments"}`))
+		case "/api/v1/releases/rel-blank":
+			_, _ = w.Write([]byte(`{"id":"rel-blank"}`))
+		case "/api/v1/releases/rel-2":
+			_, _ = w.Write([]byte(`{"id":"rel-2","project_id":"prj-blank"}`))
+		case "/api/v1/projects/prj-blank":
+			_, _ = w.Write([]byte(`{"id":"prj-blank","name":"orphan"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := registry.NewClient(srv.URL, srv.Client())
+	product, project, err := c.ProductAndProjectOfRelease(context.Background(), "rel-1")
+	if err != nil {
+		t.Fatalf("ProductAndProjectOfRelease: %v", err)
+	}
+	if product != "prod-1" || project != "prj-1" {
+		t.Errorf("ids = %q/%q, want prod-1/prj-1", product, project)
+	}
+	// Two hops, no third: the project id comes from the release read that was needed anyway.
+	if len(paths) != 2 || paths[0] != "/api/v1/releases/rel-1" || paths[1] != "/api/v1/projects/prj-1" {
+		t.Errorf("hops = %v, want release then project", paths)
+	}
+
+	for _, tc := range []struct{ name, release string }{
+		{"no release id", ""},
+		{"release unknown", "missing"},
+		{"release without a project", "rel-blank"},
+		{"project without a product", "rel-2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			product, project, err := c.ProductAndProjectOfRelease(context.Background(), tc.release)
+			if err == nil {
+				t.Fatalf("want an error, got %q/%q", product, project)
+			}
+			if product != "" || project != "" {
+				t.Errorf("a failed resolution must return no ids, got %q/%q", product, project)
+			}
+		})
+	}
+}
+
+func TestClient_ProductAndProjectOfRelease_TransportAndDecodeErrors(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{not-json`))
+	}))
+	defer bad.Close()
+	if _, _, err := registry.NewClient(bad.URL, nil).ProductAndProjectOfRelease(context.Background(), "rel-1"); err == nil {
+		t.Error("malformed JSON must return a decode error")
+	}
+
+	// The SECOND hop's failures, separately: the release read succeeds and the project read
+	// does not, which is the path a blanket error never reaches.
+	var projectBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/releases/rel-1" {
+			_, _ = w.Write([]byte(`{"project_id":"prj-1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(projectBody))
+	}))
+	defer srv.Close()
+	projectBody = `{not-json`
+	if _, _, err := registry.NewClient(srv.URL, srv.Client()).ProductAndProjectOfRelease(context.Background(), "rel-1"); err == nil {
+		t.Error("a malformed project body must return a decode error")
+	}
+
+	closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := closed.URL
+	closed.Close()
+	if _, _, err := registry.NewClient(url, nil).ProductAndProjectOfRelease(context.Background(), "rel-1"); err == nil {
+		t.Error("transport error must propagate")
+	}
+}
+
 func TestClient_ProductOfRelease_TransportAndDecodeErrors(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{not-json`))

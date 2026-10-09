@@ -22,6 +22,20 @@ var ErrUnauthorized = errors.New("governance: actor may not decide")
 // ErrInvalidMatch is returned when an inbound ComponentMatched lacks a Release or Faultline.
 var ErrInvalidMatch = errors.New("governance: match missing release or faultline")
 
+// ErrUnknownDiscoveryCause is returned when an inbound release-correlation-completed fact
+// carries a cause outside the closed two-value vocabulary (EDR-DELIVERY-01 M2-3). Nothing is
+// recorded: the cause rides `governance.release_evaluated.v1` verbatim, so admitting a third
+// value here would open an enum every consumer switches on.
+//
+// The inbound adapter maps it to a logged refusal rather than a handler error, because a handler
+// error halts the whole Knowledge stream after five attempts (EDR-EVENTBUS-01 D8) and one
+// malformed cause must not stop the pipeline.
+var ErrUnknownDiscoveryCause = errors.New("governance: unknown discovery cause")
+
+// ErrInvalidEvaluationSubject is returned when the same fact names no release or no SBOM. Same
+// reasoning as the cause: a pending row keyed on a blank id could never resolve to anything.
+var ErrInvalidEvaluationSubject = errors.New("governance: release evaluation missing release or sbom id")
+
 // Governance integration/audit event types (D8). Position events are the only ones
 // Communication consumes; the rest are Governance-internal (audit / metrics / workflow).
 const (
@@ -39,6 +53,11 @@ const (
 	// state change: the Position is untouched and remains in force until a human or a governed
 	// policy revises it. An acceptance does not vanish; it EXPIRES when its premise changes.
 	EventDispositionStale = "governance.disposition_stale"
+	// EventReleaseEvaluated announces that a RELEASE has been evaluated against one SBOM
+	// (EDR-DELIVERY-01 M2-2 / N-M2b) — the per-Release trigger Communication turns into one
+	// ticket. It is the only Governance event whose subject is a release rather than a Finding,
+	// and the only one that names the product and the project.
+	EventReleaseEvaluated = "governance.release_evaluated"
 )
 
 // OutboxNote is one integration event queued for delivery in the aggregate's own

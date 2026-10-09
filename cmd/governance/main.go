@@ -150,6 +150,21 @@ func main() {
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 
+	// The release-evaluation worker (EDR-DELIVERY-01 N-M2b): the inbound consumer records a
+	// pending row inside the inbox transaction, and this drains it — resolving the Release's
+	// product and project over the Registry read API, counting its Findings and publishing
+	// governance.release_evaluated.v1. It runs here rather than on the reader path because a
+	// handler error halts the whole Knowledge stream (EDR-EVENTBUS-01 D8), and a Registry outage
+	// must cost a retry, not the pipeline.
+	if gov.Evaluations != nil {
+		go gov.Evaluations.Run(ctx)
+		logger.Info("release-evaluation worker enabled",
+			observability.String("poll", app.DefaultReleaseEvaluationPoll.String()))
+	} else {
+		logger.Warn("release-evaluation worker DISABLED — THEMIS_REGISTRY_URL is empty, so a Release's " +
+			"product and project cannot be resolved; pending evaluations will queue until it is set")
+	}
+
 	// The bus reader drives Finding open/update + re-evaluation off the Knowledge stream
 	// (EB-07/08). Without a bus it is disabled — inbound events then arrive only over the
 	// /internal HTTP seam below (dev).

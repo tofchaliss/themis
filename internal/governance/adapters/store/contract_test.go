@@ -72,6 +72,9 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 		{app.EventPositionRevised, domain.PositionRevised{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Version: 2, Stance: domain.StanceMitigated, OccurredAt: now}},
 		{app.EventFindingCommissioned, domain.FindingCommissioned{FindingID: "fnd-1", CommissionID: "c-1", Skill: "remediate-dependency@4", Anchor: "rsys@6", OccurredAt: now}},
 		{app.EventCommissionWithdrawn, domain.CommissionWithdrawn{FindingID: "fnd-1", CommissionID: "c-1", OccurredAt: now}},
+		// The one event whose subject is a RELEASE (N-M2b). Zero counts are a legitimate payload
+		// and the schema admits them, because they are the success case.
+		{app.EventReleaseEvaluated, domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", "ev-1", domain.CauseNewSBOM, domain.SeverityCounts{})},
 		{app.EventDispositionStale, domain.DispositionStale{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceNotAffected), PositionVersion: 1, Reason: "a public exploit now exists for this CVE", OccurredAt: now}},
 	}
 	for _, tc := range cases {

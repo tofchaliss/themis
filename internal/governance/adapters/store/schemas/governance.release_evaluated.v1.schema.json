@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.release_evaluated.v1.schema.json",
+  "title": "governance.release_evaluated.v1",
+  "description": "Integration-contract v1 for the ReleaseEvaluated event (EDR-DELIVERY-01 M2-2 / N-M2b): Governance has evaluated one Release against one SBOM. Published once per knowledge.release_correlation_completed.v1, which arrives after every other Knowledge event for that SBOM — so the counts are a finished posture, not a partial one. This is the only Governance event whose subject is a RELEASE rather than a Finding, and the only one carrying the product and the project: Knowledge holds no Registry seam (M2a-1), so those two ids are resolved here, where Governance already reads Registry and already owns the counts. A Release with no matched vulnerabilities still publishes, with all four counts zero — that is the SUCCESS case, not a skip: a subscriber cannot otherwise distinguish 'evaluated, clean' from 'not evaluated yet' or from 'the pipeline is broken', and the rebuild loop's stop condition is literally that the targeted set is empty. Field names are snake_case and counts are integers; the four ids are carried verbatim as TEXT and never parsed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["product_id", "project_id", "release_id", "sbom_id", "severity_counts", "cause"],
+  "properties": {
+    "product_id": { "type": "string", "description": "Registry's owning product, resolved release -> project -> product. Never blank: an unresolved identity defers the publication instead of publishing an empty id." },
+    "project_id": { "type": "string", "description": "Registry's owning project. Never blank, for the same reason." },
+    "release_id": { "type": "string" },
+    "sbom_id": { "type": "string", "description": "The Evidence id of the SBOM whose correlation triggered this evaluation." },
+    "severity_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical", "high", "medium", "low"],
+      "description": "Every Finding of the Release bucketed on base_score by the M1b-5 ladder (Critical >= 90, High >= 70, Medium >= 40, Low > 0), INCLUDING the ones a Position has suppressed (M1b-4). A base_score of 0 is Unknown and is counted in no bucket — the absence of severity evidence is not evidence of mildness — so the four counts need not sum to the Release's Finding count and a consumer must not assume they do.",
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cause": {
+      "type": "string",
+      "enum": ["new_sbom", "rediscovery"],
+      "description": "Why correlation ran, copied VERBATIM from the Knowledge event (M2-3). A closed vocabulary: `new_sbom` is an upload, `rediscovery` is the KN-RECOR-1 sweep — a real posture change that never starts or advances the rebuild loop. A third value is refused at the inbound seam, so it can never appear here."
+    }
+  }
+}

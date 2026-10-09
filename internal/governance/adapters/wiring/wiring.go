@@ -38,13 +38,20 @@ func (sysClock) Now() time.Time { return time.Now().UTC() }
 // Governance bundles the wired Governance components for a composition root: the REST
 // handler (routes under /findings, /releases, /faultlines — mount under /api/v1), the
 // Store (operational tasks / dev purge), the inbound Knowledge-event consumer (the Finding
-// worker's input), the outbox Relay, and the state-based Reconcile service.
+// worker's input), the outbox Relay, the state-based Reconcile service, and the
+// release-evaluation worker.
 type Governance struct {
 	Handler   http.Handler
 	Store     *store.Store
 	Consumer  *inbound.Consumer
 	Relay     *store.Relay
 	Reconcile *app.ReconcileService
+	// Evaluations publishes governance.release_evaluated.v1 for the recorded pending rows
+	// (EDR-DELIVERY-01 N-M2b). The composition root runs it on its own goroutine. It is nil when
+	// no Registry URL is configured: the event names the product and the project, and the one
+	// thing the worker must never do is publish them blank — so with no seam to resolve them the
+	// rows stay queued, visibly, rather than draining into half-stated events.
+	Evaluations *app.ReleaseEvaluationWorker
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -106,11 +113,31 @@ func Wire(
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
-	return Governance{
-		Handler:   handler.Router(),
-		Store:     st,
-		Consumer:  inbound.NewConsumer(app.NewCoordinator(write)),
-		Relay:     relay,
-		Reconcile: app.NewReconcileService(relay),
+	// The release-evaluation worker (N-M2b) — the half of the path that may fail. The inbound
+	// consumer only records a pending row; this resolves the Release's owners, counts its
+	// Findings and publishes. Without a Registry seam there is nothing to resolve them WITH, so
+	// no worker is wired and the queue simply holds.
+	var evaluations *app.ReleaseEvaluationWorker
+	if reg != nil {
+		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger})
 	}
+	return Governance{
+		Handler:     handler.Router(),
+		Store:       st,
+		Consumer:    inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st)).WithLogger(logger),
+		Relay:       relay,
+		Reconcile:   app.NewReconcileService(relay),
+		Evaluations: evaluations,
+	}
+}
+
+// evaluationLog adapts the shared logger to the worker's narrow reporting port (R1: the app ring
+// may not import the observability package, so the adapter ring supplies it).
+type evaluationLog struct{ logger *observability.Logger }
+
+func (l evaluationLog) Error(msg, releaseID string, err error) {
+	if l.logger == nil {
+		return
+	}
+	l.logger.Error(msg, observability.String("release_id", releaseID), observability.Err(err))
 }
