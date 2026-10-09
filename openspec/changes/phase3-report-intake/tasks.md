@@ -205,3 +205,56 @@ that a happy-path demo would not exercise.
       47 structurally broken and element 0 valid, committed with a provenance note. Asserts
       `source_invalid` naming index **47**. A general "invalid input is refused" test passes without
       ever reaching element 47, which is exactly how this class survived the first draft.
+
+## Group 8 — The two approval proof obligations (review, third pass 2026-10-09)
+
+The reviewer's standing condition: **evidence for the uniqueness-conflict response path, and for the
+downstream effects of deliberate reconversion.** Neither is satisfied by a declaration. Approval is
+gated on these, and the principle the review generalized applies throughout — *test the specific
+counterexample that motivated the rule, not a broad success or failure condition*.
+
+### 8.1–8.2 The uniqueness-conflict response path (D3)
+
+- [ ] 8.1 **A source-digest conflict must read as an ordinary duplicate, not a persistence
+      failure.** Today `Save` resolves the benign case via `errors.Is(err, pgx.ErrNoRows)`
+      (`store.go:82`) and sends everything else to `case err != nil` (`store.go:97`) as
+      `"evidence: insert: …"`. A `23505` on the new constraint lands there — **a 500 where the API
+      contract requires `200 created=false`.** Implement the constraint-name dispatch in D3 and
+      test it with a **differing fingerprint**, which is the only case the existing handler cannot
+      reach: same source bytes, same release, same resolved `observed_at`, converter bumped so the
+      curated output differs. Expected: `200`, the existing `evidence_id`, `dedup_basis =
+      source_digest`. The counterexample, not a generic duplicate test.
+- [ ] 8.2 **The partial index must be inferable, and the conflict target must be the intended
+      one.** Create it as a **named** partial unique index
+      (`evidence_source_digest_release_observed_key … WHERE provenance_source_digest <> ''`) and
+      assert against real PostgreSQL (`-tags=integration`) that: (a) a statement targeting it
+      **without** restating the `WHERE` predicate fails to infer and errors — proving the predicate
+      is load-bearing rather than decorative; (b) the dispatch keys on
+      `PgError.ConstraintName`, so a future third constraint cannot be silently absorbed into the
+      source-digest branch; (c) pass-through rows (empty `source_digest`) are **outside** the index
+      and unaffected, which is what keeps `POST /evidence` behaviour unchanged.
+
+### 8.3–8.4 Downstream effects of deliberate reconversion (D3a)
+
+- [ ] 8.3 **Occurrence cardinality across a reconversion — the measurement, not the assertion.**
+      `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no evidence
+      id** (`000001_knowledge.up.sql:53`), so the two cases must be measured separately through the
+      full pipeline, not reasoned about:
+      - converter change that leaves identity derivation alone → occurrence count **unchanged**
+        (tuples collapse onto existing rows; re-processing is idempotent).
+      - converter change that **alters** purl or ecosystem derivation → occurrence count **rises**,
+        old rows stay active, both identities live on the same card and release.
+      Record the before/after counts of `faultline_matches` and `COUNT(DISTINCT component_purl)`
+      per `(release, faultline)`. The second case is KN-SCAN-4(b)'s shape — 87 of 87 rows on MRF
+      2026-09-17 — and is the *usual* reason a converter gets bumped, so it is the case that must be
+      measured rather than the comfortable one.
+- [ ] 8.4 **Nothing is retired implicitly.** Assert that a reconversion sets no
+      `faultline_matches.retired_at`: retirement is *asserted, never inferred*
+      (`000010_match_retired.up.sql`), so a new generation must not quietly supersede the old one.
+      Then document, in TESTING.md beside the intake procedure, that `force_reconvert` is **not**
+      routine remediation and that its occurrence delta is checked afterwards — the operational half
+      of D3a, which no test can supply.
+
+**Both obligations are open.** Until 8.1–8.2 are green the conflict path is specified and unproven;
+until 8.3 is measured on a real estate, `force_reconvert` stays out of documented remediation
+procedure. Neither blocks M1, which does not ship `force_reconvert`.

@@ -147,6 +147,43 @@ correctness mechanism: it saves converting a file we have already filed, and it 
 converter upgrade dedup. Correctness under concurrency is the two constraints. A loser of either
 race returns the winner's `evidence_id` with `created=false` — it does not retry and does not error.
 
+**The conflict-resolution path, stated as SQL behaviour because the declaration does not establish
+it.** Two traps, both verified against the current implementation:
+
+1. **A second UNIQUE constraint is not covered by the existing `ON CONFLICT`.** `Save` today is
+   `INSERT … ON CONFLICT (fingerprint) DO NOTHING RETURNING id`, and resolves the benign case by
+   `errors.Is(err, pgx.ErrNoRows)` (`store.go:73–96`). A `23505` violation of the **source-digest**
+   constraint is not `ErrNoRows` — it falls to `case err != nil` (`store.go:97`) and surfaces as
+   `"evidence: insert: …"`, i.e. **a 500 where an idempotent `200` was required.** A single
+   statement cannot name two conflict targets, so the write path must dispatch on the violated
+   constraint **by name**:
+
+   ```text
+   INSERT … ON CONFLICT (fingerprint) DO NOTHING RETURNING id
+     ├── RETURNING a row            → created = true
+     ├── ErrNoRows                  → fingerprint dedup; same release ⇒ 200 created=false,
+     │                                different release ⇒ ContentFiledElsewhereError (409)
+     └── PgError 23505 with
+         ConstraintName = evidence_source_digest_release_observed_key
+                                    → SOURCE-digest dedup: read back that row's id and
+                                      release, apply the SAME same-release / other-release
+                                      rule, and return 200 created=false / 409
+   ```
+
+   An ordinary duplicate must never read as a persistence failure, and a cross-release duplicate
+   must stay the loud `409` it is today — the distinction that was measured live on 2026-08-19,
+   when returning another release's id read as success.
+
+2. **`ON CONFLICT` inference does not match a partial index unless the predicate is restated.** If
+   any statement ever targets the source-digest constraint directly it must be written
+   `ON CONFLICT (provenance_source_digest, subject_release_id, provenance_observed_at)
+   WHERE provenance_source_digest <> ''`; without the `WHERE` clause PostgreSQL cannot infer a
+   partial index and the statement fails outright. The constraint is therefore created as a **named
+   partial unique index** so the name is stable for the dispatch above, and the index name is part
+   of the contract, not an implementation detail.
+
+Both are proof obligations on the implementation, not claims about it — see `tasks.md` group 8.
+
 *Rejected:* putting `converter_version` into the curated document (every upgrade then refiles the
 whole estate); deduping on source digest alone, ignoring release (that is EDR-EVIDENCE-01 D3's 409
 case and must stay a loud refusal, not a silent hit); relying on the lookup alone (the TOCTOU race
@@ -174,6 +211,33 @@ Three properties, stated because each is a way this could have gone wrong:
   versions, and **both** contribute occurrences downstream. KN-SCAN-4's shape is untouched: the
   corrected rows land *beside* the old ones. `force_reconvert` is for deliberately re-reading a
   source under a new converter, and the operator owns the consequence of two generations coexisting.
+
+**What "both contribute occurrences" actually costs, measured in the schema rather than assumed.**
+`faultline_matches` is keyed `PRIMARY KEY (release_id, faultline_id, component_purl)`
+(`000001_knowledge.up.sql:53`) — **the evidence id is not in the key.** So:
+
+| the converter change… | downstream effect |
+| --- | --- |
+| does **not** alter component identity | the second generation produces the **same** `(release, faultline, purl)` tuples, which collapse onto the existing rows. **Occurrence count does not change.** Re-processing is idempotent by construction |
+| **does** alter component identity (purl or ecosystem derivation) | the second generation produces **different** `component_purl` values → **new rows**, while the old rows remain active. **Occurrence count rises**, and both identities are live on the same card and release |
+
+The second row is the honest hazard, and it is the *usual* reason to bump a converter — the `.el8`
+RPM inference and the purl-derived ecosystem are exactly the kind of rule a new version changes.
+This is KN-SCAN-4(b)'s measured shape: on MRF 2026-09-17, 87 rows named one component under a raw
+identifier while the canonical row already existed, in **87 of 87** cases.
+
+Themis has a mechanism for it and it is **not automatic**: `faultline_matches.retired_at`
+(`000010_match_retired.up.sql`) retires a superseded occurrence as a **projection change, never an
+erasure** — the row stays so "we retired this" remains distinguishable from "this never happened".
+Retirement is *asserted*, never inferred, so a reconversion does **not** retire anything on its own.
+
+**Operational consequence, stated as guidance because the review is right to ask for it:**
+`force_reconvert` is **not part of routine remediation**. It is occurrence-neutral only when the
+converter change leaves identity derivation alone, and an operator cannot tell which case they are
+in from the intake response. Until the downstream behaviour is measured on a real estate
+(`tasks.md` 8.3), treat it as a deliberate, supervised operation whose occurrence delta is checked
+afterwards — not a retry button. The intake response therefore echoes both `converter_version`s so
+the delta is at least attributable.
 
 *Rejected:* having `force_reconvert` supersede the prior document (there is no supersede in
 Evidence, and inventing one here would put a mutable edge on an immutable store); having it delete
@@ -558,6 +622,16 @@ and throughout the change.
 | **D3** | Key stated exactly as `(source_digest, release_id, observed_at_resolved)`; identity moved onto **two UNIQUE constraints** with `INSERT … ON CONFLICT`, the lookup demoted to an optimization | A `SELECT`-then-`INSERT` is a TOCTOU race: two concurrent submissions of one source both miss, both convert, both insert. An index accelerates a query; it does not enforce an identity |
 | **D3a** | New — `force_reconvert` creates a **new generation**, never mutates or replaces, and the identical-bytes case is reported with `dedup_basis` rather than silently swallowed | Evidence is immutable with no production delete or supersede (EDR-EVIDENCE-01 D8), so "replace" was never available; and a deliberate reconversion returning the old id must say why |
 | **D5b** | Accepted-input contract written as a table **read off the maintained converter** (its only skip is line 77, `not cve or not (purl or name)`); element 47 named as a committed regression fixture | "Reject malformed records" and "skips are not fatal" are both true of different faults. The boundary had to match the converter's actual behaviour, not approximate it, or the Go port's equivalence gate would encode a different contract |
+
+**2026-10-09 (third pass) — two proof obligations, and what verifying them found.**
+
+| # | change | driver |
+| --- | --- | --- |
+| **D3** | Conflict-resolution path specified as SQL behaviour: dispatch on `PgError.ConstraintName`, plus the partial-index `ON CONFLICT` inference requirement and a **named** index as part of the contract | Verified gap, not hypothetical: `Save` resolves the benign case on `pgx.ErrNoRows` (`store.go:82`) and sends everything else to `case err != nil` (`store.go:97`). A `23505` on the new constraint would surface as `"evidence: insert: …"` — **a 500 where the contract requires `200 created=false`**. A single statement cannot name two conflict targets |
+| **D3a** | Downstream occurrence cardinality stated as a two-case table, with the hazard named and `force_reconvert` placed **outside routine remediation** | `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no evidence id** (`000001_knowledge.up.sql:53`). So a reconversion is occurrence-neutral **iff** identity derivation is unchanged — and altering identity derivation is the usual reason to bump a converter, in which case occurrences rise and both identities stay live. KN-SCAN-4(b)'s shape: 87 of 87 rows, MRF 2026-09-17. `retired_at` exists but is *asserted, never inferred*, so nothing is superseded automatically |
+
+Both are recorded as **open approval gates** (`tasks.md` group 8), not as satisfied claims. Neither
+blocks M1, which does not ship `force_reconvert`.
 
 The reviewer's 20-check contract matrix is adopted as the implementation gate and mapped into
 `openspec/changes/phase3-report-intake/tasks.md` group 6.
