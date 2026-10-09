@@ -10,14 +10,15 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
-> **2026-10-06 — `phase3-harness-integration` (EDR-HARNESS-01) COMPLETE on branch
-> `feat/harness-integration`, committed, gate green.** Commissions, harness-evidence proposals, the
-> intake adapter + `themis-intake` CLI, walls. Every item the 2026-09-26 banner carried as open is
-> now closed and measured: the runtime pin resolves from `proxy.golang.org` into a cold module
-> cache; `TestHarnessCommissionAndEvidenceRoundTrip` and the two event `schema_ref`s pass; and
+> **2026-10-06 — `phase3-harness-integration` (EDR-HARNESS-01) COMPLETE and MERGED to `main` as
+> `552c4e1` (PR #126), CI green.** Commissions, harness-evidence proposals, the intake adapter +
+> `themis-intake` CLI, walls. Every item the 2026-09-26 banner carried as open is now closed and
+> measured: the runtime pin resolves from `proxy.golang.org` into a cold module cache;
+> `TestHarnessCommissionAndEvidenceRoundTrip` and the two event `schema_ref`s pass; and
 > **`GOWORK=off make check-ci` exits 0** — which is the real gate, because `go.work` is excluded via
-> `.git/info/exclude` and never reaches CI. The branch also carries N-M0 below. **Not merged** (PRs
-> are an explicit ask).
+> `.git/info/exclude` and never reaches CI, as PR #126's own CI run then confirmed by downloading the
+> pinned module. The same PR carried **N-M0** (below), so merging it landed a live authorization
+> change — **audit `api_keys` before deploying `main`** (EDR-DELIVERY-01 D5).
 >
 > Two defects were found while verifying, both invisible to a green suite, both fixed here:
 > an architecture test that named a reachability wall and asserted nothing (`_ = ex` loop body), and
@@ -2673,6 +2674,43 @@ under the 2026-08-07 re-derivation standard.
 ---
 
 ### D. Observability (R1) — remaining signals
+
+- [ ] **OBS-HALT-1 — a D8 stream halt is the QUIETEST failure on the box, and D8 promised it would be
+  the loudest (filed 2026-10-06, measured).** MED, observability. EDR-EVENTBUS-01 D8's M5 commitment
+  is "stream-level halt **with loud alerting**". What exists is three ERROR log lines. **Measured:
+  Knowledge's evidence stream halted on a poison event at 2026-10-05 11:29:44 and nothing surfaced it
+  for 31 hours** — the operator found it only because an unrelated read of the bus cursors looked odd.
+  Three independent misses, each worth fixing on its own:
+  - **`/readyz` does not cover reader liveness.** Knowledge registers `PoolCheck("db")` and a
+    migrations `ExecCheck` (`cmd/knowledge/main.go:379`) — nothing asserts the bus reader is running.
+    A node whose entire inbound path is permanently stopped reports **ready**, and the unit stays
+    `active` with `NRestarts=0`. A halted stream is precisely "not ready to do my job".
+  - **No metric.** `themis_ai_*` and `themis_feed_*` exist; a halt has no counter and no gauge, so
+    "is any stream halted" is not a dashboard question. It should be, because the answer is binary
+    and the state is permanent until a human acts.
+  - **`vm-verify.sh` renders it as `✓`.** The reader check flags only `pending > 100`
+    (`scripts/vm-verify.sh:159`), so ONE poison event is invisible — and a halt is exactly the case
+    that never grows past one, because nothing after it is attempted. The script's own comment
+    records that the previous global-head metric was a false positive; the fix traded that for a
+    **false negative on the one state that requires intervention**. Needs an age test:
+    `pending > 0 AND stream_cursor.updated_at` older than an interval.
+  **Do:** a reader-liveness readiness check and a halt metric in `internal/platform/eventbus` +
+  `platform/health` (one owner, all six nodes), and the age test in `vm-verify.sh`. **Dep:** none.
+  **Scope:** SMALL-MED. Root cause of the 31 hours was GUI-16b/E1; this item is only about **why
+  nobody noticed**, which is the half that will repeat with a different poison event.
+
+- [ ] **OBS-HALT-2 — the curated-scanner-report shape is validated only by a RENDERER
+  (filed 2026-10-06, measured).** LOW-MED, operability. The only thing that told the operator their
+  Cortex upload was wrong was the dashboard's **join view** —
+  *"This document is not a curated scanner report ({findings:[…]}) — nothing to join"*
+  (`cmd/dashboard/static/app.js:982`) — on a different screen, **after** the upload had succeeded,
+  been content-addressed, and poisoned Knowledge's reader. The operator reasonably read it as "the
+  upload failed" when the upload had worked and the pipeline was already down. A check that runs
+  after the immutable write, on a page the operator may never open, is not validation. Fixing this
+  properly **is E1** (schema validation at the Evidence border); until then, at minimum the
+  **in-browser upload** should refuse a `kind=scanner-report` document that is not
+  `{"findings":[…]}` and name the conversion road, the way GUI-16 taught it to for CSV. **Dep:** E1
+  for the real fix. **Scope:** SMALL for the browser guard.
 
 - [x] **Metrics (the second R1 signal).** ✅ **DONE 2026-08-07.** `internal/platform/observability` now owns
   a service-scoped Prometheus registry alongside the logger, initialized in `Setup` and served at
@@ -5449,6 +5487,39 @@ under the 2026-08-07 re-derivation standard.
   the evidence contract and the domain model, and should not be done to serve one vendor's export format.
   Prefer (a). **Dep:** none. **Scope:** SMALL. **Open question for the filer:** whether Cortex can export
   scan results as JSON at all — if it can, (a) is a stopgap and this closes as docs-only.
+  **ANSWERED 2026-10-06: yes, Cortex exports JSON.** The CSV converter is therefore the stopgap this
+  filing predicted, and the JSON road is **GUI-16b** below.
+
+- [ ] **GUI-16b — the one sanctioned Cortex converter takes CSV only; Cortex also exports JSON
+  (filed 2026-10-06, user ask).** LOW-MED, operability. **Goal: CSV *and* JSON are both acceptable
+  inputs to `scripts/cortex-csv-to-scan-report.sh`**, so an operator with either export has one road
+  and the estate keeps exactly one converter.
+  **Measured today**, debugging a live stall: a 427-element Cortex **JSON** export was uploaded, and
+  because no JSON road existed it went up as the raw vendor array. The curated contract is
+  `{"findings":[…]}`, so Knowledge's ACL refused it (`cannot unmarshal array into
+  evidence.scannerReportDoc`), retried 5×, and **halted the evidence stream for 31 hours** under
+  EDR-EVENTBUS-01 D8. Converting the same export through the maintained script produced **427 of 427
+  findings**, so nothing in the pipeline needed changing — only the road, exactly as GUI-16 said.
+  **The shim that unblocked it** (verified against a fixture before use, then on the real 427-row
+  export): project the seven fields the script reads to CSV with `jq @csv`, joining array-valued
+  fields on `;` and nulling absent ones, then feed the script unchanged. It works and is recorded in
+  this item, but it is **serialising a list to text so the script can split it again** —
+  `fix_versions` is a JSON array upstream and `re.split(r"[;,]")` downstream — which is the argument
+  for doing it properly.
+  **Do:** teach the one script to detect a leading `[`, `json.load` it, and feed the same row dicts
+  to the existing logic; `fix_versions` then arrives as a list and skips the join/split round-trip.
+  Rename it (`cortex-to-scan-report.sh`) with the old name kept as a symlink or a `$0` check.
+  **Do NOT:** write a second converter. TESTING.md is explicit that a second Cortex converter is "a
+  defect, not a convenience" — the 2026-09-10 case traced 579 permanently-unclearable occurrences to
+  an ad-hoc variant. All the judgement that case paid for (ecosystem from the purl, the `.el8`
+  RPM-build inference behind KN-SCAN-3b, deterministic `observed_at`) must keep living in one place.
+  **Also do NOT** make Knowledge's ACL accept a bare array: a vendor dialect must not reach the
+  domain, and the real defect on that side is **E1** (PARITY-GAP) — Evidence validates `json.Valid`
+  only, so it accepted a document no consumer could read and the failure surfaced 38 minutes later
+  as a halted context. **`observed_at` note:** derive it from the export's own data
+  (`max(last_observed)`, epoch **milliseconds** in this export → RFC3339), never a file mtime, or a
+  re-conversion produces different bytes and Evidence files a second scan instead of deduping.
+  **Dep:** none. **Scope:** SMALL. Related: GUI-16 (CSV road), E1 (ingest validation), KN-SCAN-3b.
 
 ---
 
