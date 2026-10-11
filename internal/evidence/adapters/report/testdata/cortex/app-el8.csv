@@ -1,0 +1,4 @@
+asset_name,vulnerability_id,package_purl,origin_package_name,package_version,package_type,cvss_severity,cvss_score,fix_versions,last_observed
+mrf-node:20.1.0.0-125,CVE-2024-38476,app:httpd@2.4.37-65.module+el8.10.0+22289+a2a65e82,httpd,2.4.37-65.module+el8.10.0+22289+a2a65e82,APP,High,8.2,2.4.37-65.module+el8.10.0+22431+9d1b15ca,1757500000000
+mrf-node:20.1.0.0-125,CVE-2024-38475,,mod_ssl,2.4.37-65.el8_10,APP,High,9.1,,1757500000000
+mrf-node:20.1.0.0-125,CVE-2021-3618,app:nginx@1.20.1-1,nginx,1.20.1-1,APP,Medium,5.9,,1757500000000

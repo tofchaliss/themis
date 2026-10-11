@@ -1,0 +1,6 @@
+asset_name,vulnerability_id,package_purl,origin_package_name,package_version,package_type,cvss_severity,cvss_score,fix_versions,last_observed
+oamp-core:R1917.256,CVE-2024-2961,pkg:rpm/redhat/glibc@2.28-251.el8_10.1,glibc,2.28-251.el8_10.1,OS,High,8.1,2.28-251.el8_10.2,1759130602123
+oamp-core:R1917.256,CVE-2024-38476,app:httpd@2.4.37-65.module+el8.10.0+22289+a2a65e82,httpd,2.4.37-65.module+el8.10.0+22289+a2a65e82,APP,Unknown,9,"2.4.37-65.module+el8.10.0+22431+9d1b15ca;2.4.37-66.module+el8.10.0+22500+aaaaaaa",1759216800000
+oamp-core:R1917.256,CVE-2024-38475,,mod_ssl,2.4.37-65.el8_10,APP,High,,,1759130602123
+oamp-core:R1917.256,,pkg:rpm/redhat/curl@7.61.1-30.el8,curl,7.61.1-30.el8,OS,Medium,5.3,,1759130602123
+oamp-core:R1917.256,CVE-2025-9999,,,,OS,Low,3.1,,1759130602123

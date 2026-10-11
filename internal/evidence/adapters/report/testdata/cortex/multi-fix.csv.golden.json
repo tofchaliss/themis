@@ -1,0 +1,62 @@
+{
+  "findings": [
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "kernel",
+        "purl": "pkg:rpm/redhat/kernel@4.18.0-553.el8",
+        "source": "kernel",
+        "version": "4.18.0-553.el8"
+      },
+      "cve": "CVE-2025-0001",
+      "cvss_score": 7.8,
+      "cvss_vector": "",
+      "fixed": [
+        "4.18.0-553.5.1.el8_10",
+        "4.18.0-553.8.1.el8_10",
+        "4.18.0-553.16.1.el8_10"
+      ],
+      "observed_at": "2025-10-09T08:53:22Z",
+      "scanner": "cortex",
+      "severity": "Important"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "npm",
+        "name": "lodash",
+        "purl": "pkg:npm/lodash@4.17.20",
+        "source": "lodash",
+        "version": "4.17.20"
+      },
+      "cve": "CVE-2025-0002",
+      "cvss_score": 7.5,
+      "cvss_vector": "",
+      "fixed": [
+        "4.17.21",
+        "4.17.22"
+      ],
+      "observed_at": "2025-10-09T08:53:22Z",
+      "scanner": "cortex",
+      "severity": "High"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "maven",
+        "name": "commons-text",
+        "purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+        "source": "commons-text",
+        "version": "1.9"
+      },
+      "cve": "CVE-2025-0003",
+      "cvss_score": 9.8,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-10-09T08:53:22Z",
+      "scanner": "cortex",
+      "severity": "Critical"
+    }
+  ]
+}

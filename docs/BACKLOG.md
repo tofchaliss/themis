@@ -5541,6 +5541,12 @@ under the 2026-08-07 re-derivation standard.
   (`max(last_observed)`, epoch **milliseconds** in this export → RFC3339), never a file mtime, or a
   re-conversion produces different bytes and Evidence files a second scan instead of deduping.
   **Dep:** none. **Scope:** SMALL. Related: GUI-16 (CSV road), E1 (ingest validation), KN-SCAN-3b.
+  **Superseded in approach (2026-10-11): folded into `openspec/changes/phase3-report-intake`.**
+  EDR-INTAKE-01 D4 moves the one Cortex converter server-side into
+  `internal/evidence/adapters/report`; task **1.3** ports the script for **both** the CSV and the JSON
+  array, and task **4.2** turns `scripts/cortex-csv-to-scan-report.sh` into a thin wrapper that POSTs
+  to intake. So the "Do" above is not built in the Python script — that would be the second
+  converter this item forbids. Closes when task 1.3 lands.
 
 ---
 

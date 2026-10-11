@@ -1,0 +1,73 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "myimage:tag",
+  "ArtifactType": "container_image",
+  "CreatedAt": "2026-08-17T10:11:12.1234567Z",
+  "Results": [
+    {
+      "Target": "myimage:tag (redhat 8.10)",
+      "Class": "os-pkgs",
+      "Type": "redhat",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-2961",
+          "PkgName": "glibc",
+          "PkgIdentifier": {
+            "PURL": "pkg:rpm/redhat/glibc@2.28-251.el8_10.1?arch=x86_64"
+          },
+          "InstalledVersion": "2.28-251.el8_10.1",
+          "FixedVersion": "2.28-251.el8_10.2",
+          "Severity": "HIGH",
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 8.1
+            },
+            "redhat": {
+              "V3Score": 7.5
+            }
+          }
+        },
+        {
+          "VulnerabilityID": "CVE-2023-45853",
+          "PkgName": "zlib",
+          "InstalledVersion": "1.2.11-25.el8",
+          "Severity": "",
+          "CVSS": {}
+        },
+        {
+          "PkgName": "a-package-with-no-flaw-id"
+        },
+        null
+      ]
+    },
+    {
+      "Target": "usr/lib/python3.9/site-packages",
+      "Class": "lang-pkgs",
+      "Type": "python-pkg",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2022-48560",
+          "PkgName": "python-dateutil",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/python-dateutil@2.6.1"
+          },
+          "InstalledVersion": "2.6.1",
+          "FixedVersion": "",
+          "Severity": "MEDIUM",
+          "CVSS": {
+            "nvd": {
+              "V3Score": 7.5,
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Target": "a result with no vulnerabilities at all",
+      "Class": "os-pkgs",
+      "Type": "gobinary"
+    }
+  ]
+}

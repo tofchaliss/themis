@@ -1,0 +1,65 @@
+[
+  {
+    "asset_name": "oamp-core:R1917.256",
+    "vulnerability_id": "CVE-2024-2961",
+    "package_purl": "pkg:rpm/redhat/glibc@2.28-251.el8_10.1",
+    "origin_package_name": "glibc",
+    "package_version": "2.28-251.el8_10.1",
+    "package_type": "OS",
+    "cvss_severity": "High",
+    "cvss_score": 8.1,
+    "fix_versions": ["2.28-251.el8_10.2"],
+    "last_observed": 1759130602123
+  },
+  {
+    "asset_name": "oamp-core:R1917.256",
+    "vulnerability_id": "CVE-2024-38476",
+    "package_purl": "app:httpd@2.4.37-65.module+el8.10.0+22289+a2a65e82",
+    "origin_package_name": "httpd",
+    "package_version": "2.4.37-65.module+el8.10.0+22289+a2a65e82",
+    "package_type": "APP",
+    "cvss_severity": "Unknown",
+    "cvss_score": 9,
+    "fix_versions": [
+      "2.4.37-65.module+el8.10.0+22431+9d1b15ca",
+      "2.4.37-66.module+el8.10.0+22500+aaaaaaa"
+    ],
+    "last_observed": 1759216800000
+  },
+  {
+    "asset_name": "oamp-core:R1917.256",
+    "vulnerability_id": "CVE-2024-38475",
+    "package_purl": null,
+    "origin_package_name": "mod_ssl",
+    "package_version": "2.4.37-65.el8_10",
+    "package_type": "APP",
+    "cvss_severity": "High",
+    "cvss_score": null,
+    "fix_versions": [],
+    "last_observed": 1759130602123
+  },
+  {
+    "asset_name": "oamp-core:R1917.256",
+    "vulnerability_id": "",
+    "package_purl": "pkg:rpm/redhat/curl@7.61.1-30.el8",
+    "origin_package_name": "curl",
+    "package_version": "7.61.1-30.el8",
+    "package_type": "OS",
+    "cvss_severity": "Medium",
+    "cvss_score": 5.3,
+    "fix_versions": null,
+    "last_observed": 1759130602123
+  },
+  {
+    "asset_name": "oamp-core:R1917.256",
+    "vulnerability_id": "CVE-2025-9999",
+    "package_purl": null,
+    "origin_package_name": null,
+    "package_version": null,
+    "package_type": "OS",
+    "cvss_severity": "Low",
+    "cvss_score": 3.1,
+    "fix_versions": null,
+    "last_observed": 1759130602123
+  }
+]
