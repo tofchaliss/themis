@@ -5,26 +5,26 @@ Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends
 
 ## Group 1 — Detection and the converter registry (D4, D5) — M3's foundation, built first
 
-- [ ] 1.1 `internal/evidence/adapters/report/registry.go`: `Detect(contentType string, body []byte)
+- [x] 1.1 `internal/evidence/adapters/report/registry.go`: `Detect(contentType string, body []byte)
       (Kind, Dialect, error)` implementing D5's closed table, and a `Converter` port
       `Convert(body []byte, observedAt time.Time) (curated []byte, Stats, error)`.
       Tests: one case per table row **plus** the unrecognised row; the array-shaped Cortex body from
       the 2026-10-05 incident is a named fixture, because it is the regression this change exists for.
-- [ ] 1.2 `report/curated.go` — pass-through + `scannerRecord` schema validation (the E1 half).
-- [ ] 1.3 `report/cortex.go` — **ported**, not reimplemented, from
+- [x] 1.2 `report/curated.go` — pass-through + `scannerRecord` schema validation (the E1 half).
+- [x] 1.3 `report/cortex.go` — **ported**, not reimplemented, from
       `scripts/cortex-csv-to-scan-report.sh`. Both containers: CSV (RFC 4180, multi-line quoted
       fields — a 1264-physical-line export is 557 logical rows) and the JSON array. Must carry over
       every judgement the 2026-09-10 case paid for: ecosystem from the purl, the `(\.|\+)el[0-9]`
       RPM-build inference for `APP` rows (KN-SCAN-3b), `origin_package_name` → `component.source`,
       `fix_versions` split on `[;,]` for CSV and taken as a list for JSON, `Unknown` severity → "".
-- [ ] 1.4 **The equivalence gate (D4).** A fixture corpus under `report/testdata/` and a test that
+- [x] 1.4 **The equivalence gate (D4).** A fixture corpus under `report/testdata/` and a test that
       runs the **existing Python script** and the Go converter over each fixture and asserts
       **byte-identical** curated output. This gate is the whole reason the port is safe; it closes
       GUI-10. Fixtures must include a real Cortex CSV slice, the JSON array, an `APP`/el8 row, a
       multi-version `fix_versions`, and a row with no purl.
-- [ ] 1.5 `report/trivy.go` — ported from the browser's `translateTrivy` (EDR-GUI-01 D16), with the
+- [x] 1.5 `report/trivy.go` — ported from the browser's `translateTrivy` (EDR-GUI-01 D16), with the
       same equivalence approach (the JS output on committed fixtures is the oracle).
-- [ ] 1.6 `observedAt` derivation per dialect (D3): Cortex `max(last_observed)` (epoch **ms**),
+- [x] 1.6 `observedAt` derivation per dialect (D3): Cortex `max(last_observed)` (epoch **ms**),
       Trivy `CreatedAt` when present, curated `max(observed_at)`; **never `now`** —
       `ErrObservedAtUnderivable` when none and none supplied. Property test: `Convert` is pure in
       (bytes, observedAt).

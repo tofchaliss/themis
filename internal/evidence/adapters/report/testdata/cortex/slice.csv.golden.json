@@ -1,0 +1,77 @@
+{
+  "findings": [
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "glibc",
+        "purl": "pkg:rpm/redhat/glibc@2.28-251.el8_10.1",
+        "source": "glibc",
+        "version": "2.28-251.el8_10.1"
+      },
+      "cve": "CVE-2024-2961",
+      "cvss_score": 8.1,
+      "cvss_vector": "",
+      "fixed": [
+        "2.28-251.el8_10.2"
+      ],
+      "observed_at": "2025-09-30T07:20:00Z",
+      "scanner": "cortex",
+      "severity": "High"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "zlib",
+        "purl": "pkg:rpm/redhat/zlib@1.2.11-25.el8",
+        "source": "zlib",
+        "version": "1.2.11-25.el8"
+      },
+      "cve": "CVE-2023-45853",
+      "cvss_score": 0,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-09-30T07:20:00Z",
+      "scanner": "cortex",
+      "severity": ""
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "openssh",
+        "purl": "pkg:rpm/redhat/openssh@8.0p1-24.el8_10",
+        "source": "openssh",
+        "version": "8.0p1-24.el8_10"
+      },
+      "cve": "CVE-2024-6387",
+      "cvss_score": 8.1,
+      "cvss_vector": "",
+      "fixed": [
+        "8.0p1-25.el8_10",
+        "8.0p1-26.el8_10"
+      ],
+      "observed_at": "2025-09-30T07:20:00Z",
+      "scanner": "cortex",
+      "severity": "Critical"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "pypi",
+        "name": "python-dateutil",
+        "purl": "pkg:pypi/python-dateutil@2.6.1",
+        "source": "python-dateutil",
+        "version": "2.6.1"
+      },
+      "cve": "CVE-2022-48560",
+      "cvss_score": 0,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-09-30T07:20:00Z",
+      "scanner": "cortex",
+      "severity": "Medium"
+    }
+  ]
+}

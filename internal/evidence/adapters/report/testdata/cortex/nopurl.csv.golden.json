@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "openssl-libs",
+        "purl": "",
+        "source": "openssl-libs",
+        "version": "1.1.1k-12.el8_9"
+      },
+      "cve": "CVE-2025-1000",
+      "cvss_score": 7.5,
+      "cvss_vector": "",
+      "fixed": [
+        "1.1.1k-14.el8_9"
+      ],
+      "observed_at": "2025-10-20T22:40:00Z",
+      "scanner": "cortex",
+      "severity": "High"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "golang",
+        "name": "",
+        "purl": "pkg:golang/github.com/gorilla/websocket@1.4.2",
+        "source": "",
+        "version": "1.4.2"
+      },
+      "cve": "CVE-2025-1003",
+      "cvss_score": 5.9,
+      "cvss_vector": "",
+      "fixed": [
+        "1.5.0"
+      ],
+      "observed_at": "2025-10-20T22:40:00Z",
+      "scanner": "cortex",
+      "severity": "Medium"
+    }
+  ]
+}

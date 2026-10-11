@@ -36,6 +36,7 @@ declare -a domain_pkgs=(
 declare -a infra_pkgs=(
 	evidence/adapters/http
 	evidence/adapters/store
+	evidence/adapters/report
 	knowledge/adapters/feed
 	knowledge/adapters/store
 	knowledge/adapters/evidence

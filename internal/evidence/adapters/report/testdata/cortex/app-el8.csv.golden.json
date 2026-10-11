@@ -1,0 +1,57 @@
+{
+  "findings": [
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "httpd",
+        "purl": "app:httpd@2.4.37-65.module+el8.10.0+22289+a2a65e82",
+        "source": "httpd",
+        "version": "2.4.37-65.module+el8.10.0+22289+a2a65e82"
+      },
+      "cve": "CVE-2024-38476",
+      "cvss_score": 8.2,
+      "cvss_vector": "",
+      "fixed": [
+        "2.4.37-65.module+el8.10.0+22431+9d1b15ca"
+      ],
+      "observed_at": "2025-09-10T10:26:40Z",
+      "scanner": "cortex",
+      "severity": "High"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "rpm",
+        "name": "mod_ssl",
+        "purl": "",
+        "source": "mod_ssl",
+        "version": "2.4.37-65.el8_10"
+      },
+      "cve": "CVE-2024-38475",
+      "cvss_score": 9.1,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-09-10T10:26:40Z",
+      "scanner": "cortex",
+      "severity": "High"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "",
+        "name": "nginx",
+        "purl": "app:nginx@1.20.1-1",
+        "source": "nginx",
+        "version": "1.20.1-1"
+      },
+      "cve": "CVE-2021-3618",
+      "cvss_score": 5.9,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-09-10T10:26:40Z",
+      "scanner": "cortex",
+      "severity": "Medium"
+    }
+  ]
+}

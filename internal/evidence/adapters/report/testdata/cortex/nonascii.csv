@@ -1,0 +1,3 @@
+vulnerability_id,package_purl,origin_package_name,package_version,cvss_severity,cvss_score,fix_versions,last_observed
+CVE-2025-3000,pkg:deb/debian/libcaf%C3%A9@1.0,libcafé,1.0-café,Low,2.1,1.1-café,1762000000000
+CVE-2025-3001,pkg:npm/%E6%97%A5%E6%9C%AC@2.0,日本語パッケージ,2.0,Medium,4.3,,1762000000000

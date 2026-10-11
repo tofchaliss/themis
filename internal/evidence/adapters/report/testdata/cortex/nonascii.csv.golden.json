@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "deb",
+        "name": "libcaf\u00e9",
+        "purl": "pkg:deb/debian/libcaf%C3%A9@1.0",
+        "source": "libcaf\u00e9",
+        "version": "1.0-caf\u00e9"
+      },
+      "cve": "CVE-2025-3000",
+      "cvss_score": 2.1,
+      "cvss_vector": "",
+      "fixed": [
+        "1.1-caf\u00e9"
+      ],
+      "observed_at": "2025-11-01T12:26:40Z",
+      "scanner": "cortex",
+      "severity": "Low"
+    },
+    {
+      "affected": [],
+      "component": {
+        "ecosystem": "npm",
+        "name": "\u65e5\u672c\u8a9e\u30d1\u30c3\u30b1\u30fc\u30b8",
+        "purl": "pkg:npm/%E6%97%A5%E6%9C%AC@2.0",
+        "source": "\u65e5\u672c\u8a9e\u30d1\u30c3\u30b1\u30fc\u30b8",
+        "version": "2.0"
+      },
+      "cve": "CVE-2025-3001",
+      "cvss_score": 4.3,
+      "cvss_vector": "",
+      "fixed": [],
+      "observed_at": "2025-11-01T12:26:40Z",
+      "scanner": "cortex",
+      "severity": "Medium"
+    }
+  ]
+}

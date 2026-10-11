@@ -1,0 +1,29 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "stamped-nowhere:latest",
+  "Results": [
+    {
+      "Target": "stamped-nowhere:latest (alpine 3.20)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-5535",
+          "PkgName": "openssl",
+          "PkgIdentifier": {
+            "PURL": "pkg:apk/alpine/openssl@3.3.1-r0"
+          },
+          "InstalledVersion": "3.3.1-r0",
+          "FixedVersion": "3.3.2-r0",
+          "Severity": "HIGH",
+          "CVSS": {
+            "nvd": {
+              "V3Score": 9.1,
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

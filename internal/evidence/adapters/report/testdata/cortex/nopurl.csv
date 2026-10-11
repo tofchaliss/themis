@@ -1,0 +1,5 @@
+vulnerability_id,package_purl,origin_package_name,package_version,cvss_severity,cvss_score,fix_versions,last_observed
+CVE-2025-1000,,openssl-libs,1.1.1k-12.el8_9,High,7.5,1.1.1k-14.el8_9,1761000000000
+,pkg:rpm/redhat/curl@7.61.1-30.el8,curl,7.61.1-30.el8,Medium,5.3,,1761000000000
+CVE-2025-1002,,,,Low,3.1,,1761000000000
+CVE-2025-1003,pkg:golang/github.com/gorilla/websocket@1.4.2,,1.4.2,Medium,5.9,1.5.0,1761000000000
