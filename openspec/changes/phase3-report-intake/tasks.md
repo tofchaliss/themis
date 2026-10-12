@@ -77,18 +77,46 @@ Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends
 
 ## Group 4 — Wiring, docs, and retiring the duplicates (D4)
 
-- [ ] 4.1 `cmd/evidence`: wire `ReleaseResolver` + `InventoryReader` onto the registry/evidence
+- [x] 4.1 `cmd/evidence`: wire `ReleaseResolver` + `InventoryReader` onto the registry/evidence
       store (the `SubjectRef` precedent, `main.go:103` — same pool, `registry` schema co-locates).
       `deploy/node.env.example` gains the four `THEMIS_INTAKE_*` vars, self-documented (CONVENTIONS R2).
-- [ ] 4.2 `scripts/cortex-csv-to-scan-report.sh` → thin wrapper that POSTs to intake, **same name
+      Verified already done with group 3 (no change needed): `wiring.EvidenceAPI` passes
+      `subjectref.NewResolver(cfg.Registry)` as the resolver and the evidence store as the
+      `InventoryReader`, and `registryReader` in `cmd/evidence/main.go` is reads-only by
+      construction. `deploy/node.env.example` documents THREE `THEMIS_INTAKE_*` vars because
+      three are what the binary reads (`MAX_BYTES`, `INLINE_BUDGET`, `RECEIPT_TTL`) — D13's
+      `MAX_RECORDS`/`MAX_DEPTH`/`MAX_FIELD` are constants, not env, so documenting a fourth
+      would document a knob that does not exist. `THEMIS_KNOWLEDGE_URL`/`THEMIS_GOVERNANCE_URL`
+      (D10) are documented in the same block.
+- [x] 4.2 `scripts/cortex-csv-to-scan-report.sh` → thin wrapper that POSTs to intake, **same name
       and CLI** so documented procedures survive. Only after 1.4 is green.
-- [ ] 4.3 Dashboard: upload posts to intake; **delete** the D16 in-browser translators; keep the
+      Its Python moved **verbatim** to `report/testdata/oracle/cortex_csv_to_scan_report.py` as a
+      frozen test oracle (with a README saying it is on no operator road) and 1.4's live
+      equivalence run now execs it there — so the byte-equality gate survives the rewiring
+      instead of being retired with the script.
+- [x] 4.3 Dashboard: upload posts to intake; **delete** the D16 in-browser translators; keep the
       file-note UX by reading `findings_total`/`findings_skipped`/`detected_format` from the
       response. `make js-check` green.
-- [ ] 4.4 `scripts/gf-upload-sbom.sh` → one intake call per document, keeping `-r` (reuse release).
-- [ ] 4.5 TESTING.md § scanner reports rewritten around intake, with the design's curl commands;
+      `translateTrivy` + `TRIVY_ECOSYSTEMS` + `detectTranslator` are gone; the translator moved
+      verbatim to `report/testdata/oracle/translate_trivy.js`, where 1.5's oracle now runs it
+      (it used to be extracted from `app.js`, which deleting the function would have broken).
+      Uploads go through the dashboard's own proxy (EDR-GUI-01 D1/D4) — `/api/evidence/intake` is
+      now a `documentPosts` route, so a multi-megabyte body streams instead of hitting the 1 MiB
+      identity buffer (GUI-14). A refusal renders `reason` and `detail` as TWO fields. A **VEX**
+      still takes `POST /evidence`: intake's D5a table does not name that kind, and a door that
+      cannot identify a document must refuse it rather than guess.
+- [x] 4.4 `scripts/gf-upload-sbom.sh` → one intake call per document, keeping `-r` (reuse release).
+      The JSON envelope and its temp file are gone (the body is the artifact), both scripts send
+      `X-API-Key` from `THEMIS_API_KEY` when it is set, and every write uses `--fail-with-body` so
+      a refusal's `reason`/`detail` reaches the operator instead of being swallowed by `-f`.
+- [x] 4.5 TESTING.md § scanner reports rewritten around intake, with the design's curl commands;
       INSTALLATION.md and API.md updated. BACKLOG: close **GUI-16b**, **GUI-10**, **E11**, and E1
       for the intake path (E1 stays open for non-scanner kinds on the old door until 2.4 lands).
+      E1 is recorded as **partly** closed in PARITY-GAP: the unreadable-document class is refused
+      by name at the border (and 2.4 put the same check on the old door), while validation against
+      the embedded CycloneDX/SPDX/OpenVEX/CSAF schemas is the half still open. GUI-10 closed **by
+      removal** — there is no JavaScript converter left to test — and GUI-15 was re-shaped to name
+      a Go `Converter` rather than a browser translator.
 - [ ] 4.6 `make check` green; `openspec archive phase3-report-intake --skip-specs -y`.
 
 ## Group 5 — Live verification on the estate (the gate that has caught every real defect)

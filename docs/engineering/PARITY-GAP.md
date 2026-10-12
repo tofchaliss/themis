@@ -46,7 +46,9 @@ named here are now addressed in-flight.
 Also shipped: a deterministic no-AI **SBOM→VEX CI gate** (#67, now a PR gate) and four decision records
 (`EDR-SECURITY-01`, `EDR-ESTATE-01`, `EDR-VEX-01`, + realization notes on `EDR-KNOWLEDGE-01`). **Remaining
 tail:** A3–A5 (**A6 narrowed** to `related`-only 2026-08-10), B2/B5 (**B6 closed** 2026-08-10), C3–C5, the
-D-series notifications, E1–E11 input-integrity, **F2** (verifier built, endpoint absent), F5/F7/F8
+D-series notifications, E1–E11 input-integrity (**E11 closed** and **E1 partly closed** 2026-10-12 by
+`phase3-report-intake` — the intake border refuses the unreadable-document class by name; embedded-schema
+validation is the half still open), **F2** (verifier built, endpoint absent), F5/F7/F8
 observability (F4 metrics and F6 traces closed 2026-08-06/07).
 
 ## A. Correlation & version matching
@@ -110,17 +112,17 @@ input-only in both). The gaps are in notifications and in VEX content fidelity.
 
 | ID | Capability | Monolith | Greenfield | Sev | Status |
 | --- | --- | --- | --- | --- | --- |
-| **E1** | JSON-schema document validation | validates every upload against embedded CycloneDX/SPDX/OpenVEX/CSAF schemas (`trust/schema.go`) | only `json.Valid` well-formedness; schema-invalid-but-well-formed docs are **accepted** | MED | 🆕 |
+| **E1** | JSON-schema document validation | validates every upload against embedded CycloneDX/SPDX/OpenVEX/CSAF schemas (`trust/schema.go`) | **PARTLY CLOSED 2026-10-12** (`phase3-report-intake`, EDR-INTAKE-01 D5/D11). The class that caused the 2026-10-05 outage — well-formed JSON **no consumer can read** — is refused by name at the border, before anything is filed: `POST /api/v1/intake` identifies the body against a closed table, validates the INPUT against that dialect's rules (`source_invalid` — every element, not just element 0), converts, then validates the OUTPUT it is about to file (`schema_invalid` / `empty_report`); and `trust.Gate` now shape-checks a curated `kind=scanner-report` on the old `POST /evidence` door too. **Still open:** validation against the embedded CycloneDX/SPDX/OpenVEX/CSAF **schemas**. An SBOM is structurally parsed (and one with zero components cannot be filed), but a schema-invalid-yet-parseable SBOM or VEX is still accepted | MED | ⚠️ partly ✅ |
 | **E2** | Trust policy + provenance/supplier enforcement | strict/standard/permissive; requires CI provenance fields, supplier allow-list, unsigned-reject-under-strict (`trust/gate.go`, `policy.go`) | provenance captured as data, **never enforced**; no policy concept | MED | 🆕 |
 | **E3** | Trust audit trail | accept/reject/warning audit records | none | LOW | 🆕 |
-| **E4** | Trivy-native JSON input | `parser/trivy.go` | CycloneDX + SPDX only | LOW | 📋 (§ prior B) |
+| **E4** | Trivy-native JSON input | `parser/trivy.go` | CycloneDX + SPDX only as **SBOM** formats. Raw Trivy JSON **is** accepted since 2026-10-12, but as a vulnerability report through intake (converted to the curated document, EDR-INTAKE-01 D4) — it contributes findings, not an inventory, so this row stays open as stated | LOW | 📋 (§ prior B) |
 | **E5** | Parse timeout | 5-min timeout wrapper (`parser/registry.go:61`) | max-components only, no timeout | LOW | 🆕 |
 | **E6** | SBOM management read surface | list/version/counts/`is_latest`/soft-delete (`sbom_management.go`) | `ListByRelease` summaries only | LOW | 🆕 / partly 🎨 (Evidence is immutable) |
 | **E7** | Artifact / image-digest registration entity | `RegisterArtifact` (globally-unique digest, repo/tag) | image digest is provenance-only; SBOM bytes are the dedup key | LOW | 🎨 (EDR-KERNEL-01 D2) |
 | **E8** | Ingestion status entity + idempotency-key + `GET /ingestions/{id}` | lifecycle RECEIVED→…→NOTIFIED + status endpoint | synchronous content-addressed register; no observable status entity | LOW | 🎨 (dedup is structural) |
 | **E9** | VEX→parent-SBOM integrity linkage | "ingest parent first"; VEX linked by SBOM checksum | VEX references a Release (`SubjectRef`), not a parent SBOM; not parsed | LOW | 🎨 |
 | **E10** | SPDX 3.0 | supports 2.3 + **3.0** | supports **2.2** + 2.3 (dropped 3.0, added 2.2) | LOW | 🆕 |
-| **E11** | `scanner-report` kind produces an inventory | Trivy handled as a format | `kind: scanner-report` accepted but not parsed → stored with **empty inventory** | LOW | 🆕 |
+| **E11** | `scanner-report` kind produces an inventory | Trivy handled as a format | **CLOSED 2026-10-12** (`phase3-report-intake`, EDR-INTAKE-01 D4/D5). A report is no longer "accepted but not parsed": intake identifies the dialect, converts it (raw Trivy JSON, Cortex JSON, Cortex CSV — one converter each, server-side), validates the curated result, and reports `findings_total` / `findings_skipped` on the receipt. The **empty inventory is by design and stays** — a report is not an inventory-bearing document (an SBOM is), and the occurrences it asserts are recorded by Knowledge's scanner ACL against the release's SBOM-derived inventory, which is why D6 refuses a report filed before one exists. The gap was "a vendor dialect has no road and nothing parses it"; that is what closed | LOW | ✅ |
 
 ## F. Security & platform (cross-cutting)
 
@@ -159,7 +161,9 @@ Ranked by "blocks real production use" first, then coverage-correctness, then co
    necessary but not sufficient.
 6. **C1 + C2 + C3 + C4 — asset graph, blast multiplier, VEX/state score modifier, accepted-risk TTL.** Risk
    fidelity; C1 is the large one (a new asset-graph model, likely its own context).
-7. **E1 + E2 — schema validation + trust policy.** Input-integrity hardening.
+7. **E1 + E2 — schema validation + trust policy.** Input-integrity hardening. E1's *border* half
+   landed 2026-10-12 (intake refuses by name before filing); what remains is validation against the
+   embedded CycloneDX/SPDX/OpenVEX/CSAF schemas.
 8. **F5 + F7 — probes, dead-letter.** Operability; each is self-contained. (F4 metrics and F6 traces are
    done — see the table.)
 9. Long tail: A3–A6, B5–B6, C5–C6, D3–D7, E3–E11, F8.

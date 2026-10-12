@@ -1,125 +1,121 @@
 #!/usr/bin/env bash
-# Cortex CSV export -> Themis curated scanner-report document.
+# Cortex CSV export -> Themis, through the one intake door.
 #
-# Produces the {"findings":[...]} envelope internal/knowledge/adapters/evidence/
-# scanner_source.go reads, with per-finding fields matching the scannerRecord
-# contract in internal/knowledge/adapters/feed/scanner.go.
+# This script used to CONVERT (a CPython CSV->curated-JSON pass) and print the curated
+# document for you to upload separately. It no longer converts anything: EDR-INTAKE-01 D4
+# moved the one Cortex converter server-side into internal/evidence/adapters/report, so
+# the CSV is now POSTed to `/api/v1/intake` verbatim and Evidence converts, validates and
+# files it. CSV is a REQUEST ENCODING, never an evidence document (D2).
 #
-# This is an OPERATOR-SIDE conversion (the TESTING.md jq-recipe road, adapted from
-# JSON to CSV). It changes nothing in Themis: what uploads is the curated document,
-# exactly as it would be for Trivy.
+# What that changes for you: what comes back on stdout is the intake RECEIPT (D9) — the
+# evidence id, the detected dialect, the finding counts — not a document to upload. There
+# is no second step, and no local python3 is needed.
 #
-# Usage:  cortex-csv-to-scan-report.sh <cortex.csv> [observed_at RFC3339] > scan-report.json
+# The name and the CLI are unchanged on purpose, so documented procedures and muscle
+# memory survive. The Python that used to live here is frozen as a TEST ORACLE at
+# internal/evidence/adapters/report/testdata/oracle/ — it is on no operator road, and
+# running it is not a supported way to get data into Themis (TESTING.md: a second
+# converter is a defect, not a convenience).
+#
+# Usage:  cortex-csv-to-scan-report.sh <cortex.csv> [observed_at RFC3339] > receipt.json
+#
+# Environment — the release the report is about (intake RESOLVES identity, never creates
+# it, D7, so the release must already be registered; scripts/gf-upload-sbom.sh registers):
+#   RELEASE_ID                      the release id, named directly (wins when set), or
+#   PRODUCT + PROJECT + VERSION     the Product/Project/Release triple, resolved read-only
+#   THEMIS_EVIDENCE_URL             Evidence base URL (default http://localhost:8081)
+#   THEMIS_API_KEY                  sent as X-API-Key when set; omitted when unset (a dev
+#                                   estate that logs AUTH DISABLED needs no key)
 
 set -euo pipefail
 
-CSV="${1:?usage: $0 <cortex.csv> [observed_at RFC3339]}"
+usage() {
+  cat <<'EOF'
+Usage: cortex-csv-to-scan-report.sh <cortex.csv> [observed_at RFC3339] > receipt.json
 
-# observed_at is MANDATORY: feed.parseObserved rejects an empty value and the ACL
-# then skips the finding. The Cortex CSV carries no scan timestamp, so it must be
-# supplied. Default is the file's own mtime, NOT "now" -- a fixed timestamp keeps a
-# re-conversion of the same export byte-identical, so Evidence's content addressing
-# dedups it instead of filing a second scan (the GUI-12 lesson in translateTrivy).
-if [ -n "${2:-}" ]; then
-  OBSERVED="$2"
-else
-  OBSERVED="$(date -u -r "$CSV" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-           || date -u -d "@$(stat -c %Y "$CSV")" +%Y-%m-%dT%H:%M:%SZ)"
+POSTs the CSV to Evidence's intake door; the server converts and files it, and the
+intake receipt is printed to stdout.
+
+Name the release through the environment (it must already be registered — intake
+resolves identity read-only and never creates it):
+
+  RELEASE_ID=<uuid>                       ./scripts/cortex-csv-to-scan-report.sh scan.csv
+  PRODUCT=OAMP PROJECT=oamp-core VERSION=R1917.256 \
+                                          ./scripts/cortex-csv-to-scan-report.sh scan.csv
+
+  THEMIS_EVIDENCE_URL   Evidence base URL (default http://localhost:8081)
+  THEMIS_API_KEY        sent as X-API-Key when set; omitted when unset
+
+observed_at is OPTIONAL and is an assertion about WHICH observation this is. Omitted,
+the server derives it from the export's own data (Cortex max(last_observed)) — it is
+never the upload time, so re-submitting the same export dedups instead of filing a
+second scan.
+EOF
+}
+
+CSV="${1:-}"
+if [ -z "$CSV" ] || [ "$CSV" = "-h" ] || [ "$CSV" = "--help" ]; then
+  usage >&2
+  exit 2
+fi
+if [ ! -f "$CSV" ]; then
+  echo "error: no such file: $CSV" >&2
+  exit 2
 fi
 
-# The CSV is parsed by Python's csv module, not by a regex.
+EVIDENCE_URL="${THEMIS_EVIDENCE_URL:-http://localhost:8081}"
+
+# urlencode builds the query string by hand because curl's own --data-urlencode cannot be
+# used here: it needs -G, and -G moves EVERY --data* argument into the URL — including the
+# --data-binary that carries the CSV. Measured: curl refuses the combination outright with
+# "URL rejected: Malformed input to a URL function", having tried to append the whole
+# document to the query string. The body has to stay the body (that is the whole point of
+# the intake door), so the metadata is encoded here. LC_ALL=C makes the loop walk BYTES, so
+# a non-ASCII product name is percent-encoded per byte, as UTF-8 requires.
+urlencode() {
+  local LC_ALL=C s="$1" i c out=""
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) out+="$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+if [ -n "${RELEASE_ID:-}" ]; then
+  QUERY="release_id=$(urlencode "$RELEASE_ID")"
+elif [ -n "${PRODUCT:-}" ] && [ -n "${PROJECT:-}" ] && [ -n "${VERSION:-}" ]; then
+  QUERY="product=$(urlencode "$PRODUCT")&project=$(urlencode "$PROJECT")&version=$(urlencode "$VERSION")"
+else
+  echo "error: name the release first — set RELEASE_ID, or PRODUCT + PROJECT + VERSION" >&2
+  echo >&2
+  usage >&2
+  exit 2
+fi
+if [ -n "${2:-}" ]; then
+  QUERY="$QUERY&observed_at=$(urlencode "$2")"
+fi
+
+# --fail-with-body, not -f: a refusal's BODY is the useful part (intake names its reason
+# and elaborates it in `detail` — two fields, never concatenated, D11). Plain -f throws
+# the body away and leaves the operator with a bare exit code, which is how a refusal
+# that said exactly what to do next reads as "the upload broke". The exit status is still
+# non-zero on 4xx/5xx, so a script wrapping this one still sees the failure.
 #
-# Cortex quotes cve_description/remediation, and those fields CONTAIN NEWLINES: the
-# 20.1.0.0-125 export is 1264 physical lines carrying 557 logical rows. A parser that
-# splits on "\n" before honouring quotes shreds every such row -- measured 2026-09-10,
-# the previous jq implementation aborted with "Cannot use null as object key" at line
-# 1264. RFC 4180 multi-line fields are the norm in scanner exports, not an edge case.
-exec python3 - "$CSV" "$OBSERVED" <<'PY'
-import csv, json, re, sys
+# The arguments are accumulated in ONE array that is never empty, because `"${EMPTY[@]}"`
+# under `set -u` is an unbound-variable error in bash 3.2 (which is what macOS ships).
+ARGS=(-sS --fail-with-body -X POST "$EVIDENCE_URL/api/v1/intake?$QUERY"
+      -H 'Content-Type: text/csv')
 
-path, observed = sys.argv[1], sys.argv[2]
+# The key goes in a HEADER, never in the URL: a query string lands in access logs and in
+# shell history. An unset key sends no header at all.
+if [ -n "${THEMIS_API_KEY:-}" ]; then
+  ARGS+=(-H "X-API-Key: $THEMIS_API_KEY")
+fi
 
-# The ecosystem comes from the purl itself (pkg:rpm/... -> rpm) rather than from
-# package_type, which is a single constant and carries no ecosystem information.
-# An unmapped value passes through unchanged -- value.NormalizeEcosystem is the
-# server-side net (KN-SCAN-3), and an unknown ecosystem filters nothing (KN-FIX-3).
-PURL_ECO = re.compile(r"^pkg:([^/]+)/")
+# The BODY is the artifact: --data-binary @FILE streams the CSV from disk, however large.
+ARGS+=(--data-binary "@$CSV")
 
-# Cortex identifies binaries it fingerprints on disk as package_type APP with an
-# application-scoped purl ("app:httpd@2.4.37-65.module+el8.10.0+..."), which carries no
-# `pkg:` prefix and therefore no ecosystem. A blank ecosystem closes the verdict path
-# outright: StrictFixesFor returns nil without a positive ecosystem, so NO vendor-fix
-# verdict can ever fire for that component (KN-SCAN-3b, measured 2026-09-10: 87 httpd
-# findings in exactly this state, every one of them un-clearable).
-#
-# An APP row whose version carries an RPM release marker (".el8", "+el8", ".module+el8")
-# IS an rpm package -- the distro built it, the vendor states fixes for it, and the same
-# NEVRA comparison applies. Claiming rpm on that evidence is a statement about the
-# version's SHAPE, not a guess about the scanner's intent, and anything without the
-# marker is left blank exactly as before.
-RPM_BUILD = re.compile(r"(\.|\+)el[0-9]")
-
-def num(s):
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return 0
-
-findings = []
-with open(path, newline="", encoding="utf-8") as fh:
-    for row in csv.DictReader(fh):
-        cve = (row.get("vulnerability_id") or "").strip()
-        purl = (row.get("package_purl") or "").strip()
-        name = (row.get("origin_package_name") or "").strip()
-        # a row with no CVE id or no package identity is unusable -- drop it here
-        # rather than uploading a finding the ACL will silently skip
-        if not cve or not (purl or name):
-            continue
-
-        sev = (row.get("cvss_severity") or "").strip()
-        if sev == "Unknown":
-            sev = ""
-
-        # fix_versions is comma-or-semicolon separated when present; empty when
-        # fix_available is False. These stay UNATTRIBUTED by contract (KN-FIX-1).
-        fixed = [v.strip() for v in re.split(r"[;,]", row.get("fix_versions") or "") if v.strip()]
-
-        eco = ""
-        m = PURL_ECO.match(purl)
-        if m:
-            eco = m.group(1)
-        version = (row.get("package_version") or "").strip()
-        if not eco and RPM_BUILD.search(version):
-            eco = "rpm"
-
-        findings.append({
-            "cve": cve,
-            "observed_at": observed,
-            "scanner": "cortex",
-            "severity": sev,
-            "cvss_score": num((row.get("cvss_score") or "").strip()),
-            "cvss_vector": "",
-            "affected": [],
-            "fixed": fixed,
-            "component": {
-                "purl": purl,
-                "name": name,
-                "version": version,
-                "ecosystem": eco,
-                # `source` is the SOURCE-PACKAGE name, not a path: componentPackage()
-                # prefers it over the component name when asking a feed "what fixes THIS
-                # package?", because vendors key rpm fixes on the source package
-                # (kernel-core -> kernel, perl-Errno -> perl). The Cortex CSV carries no
-                # source-RPM column, so the honest value is the package's own name.
-                #
-                # Measured 2026-09-10: mapping file_path here wrote the literal "Managed
-                # by the Package Manager" into component_source for 144+ findings, and
-                # every fix lookup for them then asked the feeds about a package of that
-                # name and got nothing back, forever.
-                "source": name,
-            },
-        })
-
-json.dump({"findings": findings}, sys.stdout, indent=2, sort_keys=True)
-sys.stdout.write("\n")
-PY
+exec curl "${ARGS[@]}"

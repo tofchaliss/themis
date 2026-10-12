@@ -20,11 +20,12 @@
 //     missing. A plausible identity correlates and an abstention does not, which is
 //     the 2026-09-10 false-positive class in one sentence.
 //
-// The converters are **ports of the maintained implementations**, not rewrites:
-// Cortex from `scripts/cortex-csv-to-scan-report.sh` and Trivy from the browser's
-// `translateTrivy` (EDR-GUI-01 D16). Their output is byte-compared against those
-// oracles on a committed fixture corpus (`testdata/`), which is what makes retiring
-// them safe.
+// The converters are **ports of the implementations they replaced**, not rewrites:
+// Cortex from the Python in `scripts/cortex-csv-to-scan-report.sh` and Trivy from the
+// browser's `translateTrivy` (EDR-GUI-01 D16). Their output is byte-compared against
+// those oracles on a committed fixture corpus (`testdata/`), which is what made
+// retiring them safe — and both are now frozen under `testdata/oracle/`, so the
+// comparison outlives the roads they used to be.
 //
 // That is also why the documents are written by hand-rolled encoders in encode.go
 // rather than by `encoding/json`. **Read the comment on the `encoding` type before

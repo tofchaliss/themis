@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Greenfield (Phase-3) SBOM upload helper: register a Product -> Project -> Release in
-# the Registry, then upload an SBOM to the Evidence context. This is the go-forward
-# counterpart to scripts/upload-sbom.sh (which targets the frozen v0.3.x monolith on
-# :8080 with an API key + artifact/image model). The greenfield services are
-# unauthenticated (dev) and identify a subject by Release id.
+# the Registry, then send the SBOM through Evidence's one intake door. This is the
+# go-forward counterpart to scripts/upload-sbom.sh (which targets the frozen v0.3.x
+# monolith on :8080 with an API key + artifact/image model).
+#
+# ONE intake call per document (EDR-INTAKE-01 D1): the body IS the artifact, so the SBOM
+# streams straight from disk — no JSON envelope, no temp file, no 128KB argv ceiling.
+# `kind` and `format` are detected server-side (D5) and echoed back on the receipt.
 set -euo pipefail
 
 usage() {
@@ -22,6 +25,10 @@ Identity (a fresh Product -> Project -> Release is created unless -r is given):
 Endpoints:
   -R URL         Registry base URL (default: $THEMIS_REGISTRY_URL or http://localhost:8082)
   -E URL         Evidence base URL (default: $THEMIS_EVIDENCE_URL or http://localhost:8081)
+
+Environment:
+  THEMIS_API_KEY  sent as X-API-Key on every write (registration and intake) when set;
+                  omitted when unset — a dev estate that logs AUTH DISABLED needs no key
 
 Prints the Release id at the end so you can query posture:
   curl -s "http://localhost:8083/api/v1/releases/<RELEASE_ID>/posture" | jq .
@@ -54,40 +61,66 @@ done
 command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
 [[ -n "$PRODUCT" ]] || PRODUCT="$(basename "$SBOM_FILE")"; PRODUCT="${PRODUCT%.*}"
 
-J=(-sS -H "content-type: application/json")
+# --fail-with-body, never -f: on a refusal the BODY is the useful part — intake names its
+# reason and elaborates it in `detail` (two fields, never concatenated — EDR-INTAKE-01
+# D11). Plain -f discards it and leaves a bare exit code, which is how a refusal that
+# said exactly what to do next reads as "the upload broke". The status is still non-zero.
+CURL=(-sS --fail-with-body)
 
-require_id() { # $1=value $2=label
-  if [[ -z "$1" || "$1" == "null" ]]; then
-    echo "error: $2 registration returned no id (got '$1') — is the Registry up at $REGISTRY_URL?" >&2
-    exit 1
+# The key goes in a HEADER, never in a URL: a query string lands in access logs and in
+# shell history. An unset key sends no header at all (dev estates run auth-off). It is
+# appended to an already non-empty array, because `"${EMPTY[@]}"` under `set -u` is an
+# unbound-variable error in bash 3.2 (which is what macOS ships).
+if [[ -n "${THEMIS_API_KEY:-}" ]]; then
+  CURL+=(-H "X-API-Key: $THEMIS_API_KEY")
+fi
+
+J=("${CURL[@]}" -H "content-type: application/json")
+
+# register_id POSTs one Registry entity and echoes its id. The whole response is captured
+# so a refusal reaches the operator instead of being swallowed by a jq that found no id.
+register_id() { # $1=path $2=json-body $3=label
+  local resp id rc=0
+  resp="$(curl "${J[@]}" "$REGISTRY_URL/api/v1/$1" -d "$2")" || rc=$?
+  id="$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)" || id=""
+  if [[ $rc -ne 0 || -z "$id" ]]; then
+    echo "error: $3 registration failed — is the Registry up at $REGISTRY_URL?" >&2
+    printf '%s\n' "$resp" >&2
+    # `return`, not `exit`: this function runs in a command substitution, where an exit
+    # would end only the subshell. The caller's `|| exit 1` is what stops the script.
+    return 1
   fi
+  printf '%s' "$id"
 }
 
-# Detect the format from the document (same rule as the monolith helper).
-format="$(jq -r 'if .bomFormat? == "CycloneDX" then "cyclonedx" elif .spdxVersion? != null then "spdx" else "cyclonedx" end' "$SBOM_FILE")"
+# Detect the format from the document for the progress line only. The intake door detects
+# it again, authoritatively, and echoes it back as `detected_format` — this is a hint for
+# the human reading the terminal, never an assertion sent to the server.
+format="$(jq -r 'if .bomFormat? == "CycloneDX" then "cyclonedx" elif .spdxVersion? != null then "spdx" else "unknown" end' "$SBOM_FILE")"
 
 if [[ -z "$RELEASE_ID" ]]; then
-  pid="$(curl "${J[@]}" "$REGISTRY_URL/api/v1/products" -d "$(jq -n --arg n "$PRODUCT" '{name:$n}')" | jq -r '.id')"
-  require_id "$pid" "product"
-  jid="$(curl "${J[@]}" "$REGISTRY_URL/api/v1/projects" -d "$(jq -n --arg p "$pid" --arg n "$PROJECT" '{product_id:$p,name:$n}')" | jq -r '.id')"
-  require_id "$jid" "project"
-  RELEASE_ID="$(curl "${J[@]}" "$REGISTRY_URL/api/v1/releases" -d "$(jq -n --arg j "$jid" --arg v "$VERSION" '{project_id:$j,version:$v}')" | jq -r '.id')"
-  require_id "$RELEASE_ID" "release"
+  pid="$(register_id products "$(jq -n --arg n "$PRODUCT" '{name:$n}')" product)" || exit 1
+  jid="$(register_id projects "$(jq -n --arg p "$pid" --arg n "$PROJECT" '{product_id:$p,name:$n}')" project)" || exit 1
+  RELEASE_ID="$(register_id releases "$(jq -n --arg j "$jid" --arg v "$VERSION" '{project_id:$j,version:$v}')" release)" || exit 1
   echo "registered: product=$pid  project=$jid  release=$RELEASE_ID  ($PRODUCT / $PROJECT / $VERSION)"
 else
   echo "using existing release=$RELEASE_ID"
 fi
 
-echo "uploading $SBOM_FILE (format=$format) -> Evidence ..."
-# Build the request body into a temp file and stream it with --data-binary @FILE. An inline
-# `-d "$payload"` breaks for large SBOMs: a single command-line argument is capped at 128KB on
-# Linux (MAX_ARG_STRLEN), so an 849KB body yields "Argument list too long".
-payload="$(mktemp)"
-trap 'rm -f "$payload"' EXIT
-jq -n --arg r "$RELEASE_ID" --arg fmt "$format" --rawfile d "$SBOM_FILE" \
-  '{kind:"sbom", format:$fmt, subject_release_id:$r, document:$d}' > "$payload"
-resp="$(curl "${J[@]}" "$EVIDENCE_URL/api/v1/evidence" --data-binary @"$payload")"
-echo "evidence: $resp"
+echo "uploading $SBOM_FILE (looks like $format) -> Evidence intake ..."
+# One call, body-is-the-artifact: --data-binary @FILE streams the document however large.
+# RELEASE_ID is a Registry uuid, so it needs no escaping in the query string.
+rc=0
+receipt="$(curl "${CURL[@]}" -X POST "$EVIDENCE_URL/api/v1/intake?release_id=$RELEASE_ID" \
+  -H "content-type: application/json" --data-binary @"$SBOM_FILE")" || rc=$?
+# The receipt (or the refusal) is printed either way — jq when it parses, verbatim when
+# it does not, because an unparseable body is itself the thing the operator needs to see.
+printf '%s\n' "$receipt" | jq . 2>/dev/null || printf '%s\n' "$receipt"
+if [[ $rc -ne 0 ]]; then
+  echo "error: intake refused or failed (curl exit $rc) — the reason and detail are above" >&2
+  exit 1
+fi
+
 echo
 echo "RELEASE_ID=$RELEASE_ID"
 echo "posture: curl -s \"http://localhost:8083/api/v1/releases/$RELEASE_ID/posture\" | jq 'length'"

@@ -12,11 +12,12 @@ import (
 // requiredCortexFields is the field set that identifies a Cortex record, in both
 // containers (D5a rows 1 and 6).
 //
-// It is deliberately the THREE fields the maintained script reads for identity
-// (`cortex-csv-to-scan-report.sh` lines 71-73) and no more. A wider set — demanding
-// `fix_versions`, `cvss_score`, `last_observed` — would refuse real exports, because
-// which optional columns Cortex emits varies by tenant and by the console's column
-// selection, and the script itself tolerates every one of them being absent
+// It is deliberately the THREE fields the oracle reads for identity
+// (`testdata/oracle/cortex_csv_to_scan_report.py`, the `cve`/`purl`/`name` reads) and
+// no more. A wider set — demanding `fix_versions`, `cvss_score`, `last_observed` —
+// would refuse real exports, because which optional columns Cortex emits varies by
+// tenant and by the console's column selection, and the oracle tolerates every one of
+// them being absent
 // (`row.get(…) or ""`). Narrower than three stops discriminating: an array of
 // objects carrying all three of these is a Cortex export by any honest reading.
 var requiredCortexFields = []string{"vulnerability_id", "package_purl", "origin_package_name"}

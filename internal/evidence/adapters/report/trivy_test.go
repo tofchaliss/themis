@@ -30,10 +30,10 @@ var trivyFixtures = []trivyFixture{
 }
 
 // TestTrivyConvertMatchesJSOracle is the D4 equivalence gate for the dialect that
-// lived in the browser (EDR-GUI-01 D16). The oracle is `translateTrivy` EXTRACTED
-// FROM `cmd/dashboard/static/app.js` and run under node — not a copy of it, because a
-// copy is a second converter and would drift silently. Committed goldens keep the
-// comparison running where node is absent.
+// lived in the browser (EDR-GUI-01 D16). The oracle is `translateTrivy` itself, moved
+// verbatim to `testdata/oracle/translate_trivy.js` when the in-browser translators
+// were deleted, and run under node. Committed goldens keep the comparison running
+// where node is absent.
 func TestTrivyConvertMatchesJSOracle(t *testing.T) {
 	for _, fx := range trivyFixtures {
 		t.Run(fx.name, func(t *testing.T) {
@@ -211,21 +211,21 @@ func TestTrivyVersion(t *testing.T) {
 
 // --- the oracle ---
 
-// runTrivyTranslator runs the browser translator itself. Extracting the function
-// from app.js rather than copying it means this test fails the day the two diverge,
-// which is the only thing that makes "one converter per dialect" checkable before
-// the browser copy is deleted in M3.
+// runTrivyTranslator runs the frozen oracle — the browser translator this package
+// replaced, moved verbatim to `testdata/oracle/` when EDR-INTAKE-01 D4 deleted the
+// D16 in-browser translators (tasks.md 4.3). It reports ok=false (with a skip note)
+// where `node` is absent, which is why the committed goldens exist.
 func runTrivyTranslator(t *testing.T, fixture string) ([]byte, bool) {
 	t.Helper()
+	oracle := filepath.Join("testdata", "oracle", "translate_trivy.js")
+	if _, err := os.Stat(oracle); err != nil {
+		t.Skipf("oracle unavailable: %v", err)
+	}
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Logf("skipping the live oracle run: node not on PATH (the committed golden still gates)")
 		return nil, false
 	}
-	driver := filepath.Join(t.TempDir(), "oracle.js")
-	if err := os.WriteFile(driver, []byte(trivyOracleJS(t)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command("node", driver, filepath.Join("testdata", "trivy", fixture)).Output()
+	out, err := exec.Command("node", oracle, filepath.Join("testdata", "trivy", fixture)).Output()
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -234,36 +234,6 @@ func runTrivyTranslator(t *testing.T, fixture string) ([]byte, bool) {
 		t.Fatalf("JS oracle failed on %s: %v", fixture, err)
 	}
 	return out, true
-}
-
-func trivyOracleJS(t *testing.T) string {
-	t.Helper()
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "cmd", "dashboard", "static", "app.js"))
-	if err != nil {
-		t.Skipf("the browser translator is unavailable: %v", err)
-	}
-	js := string(src)
-	return strings.Join([]string{
-		extractJSBlock(t, js, "const TRIVY_ECOSYSTEMS = {", "\n};"),
-		extractJSBlock(t, js, "function translateTrivy(j) {", "\n}"),
-		// The browser uploads `JSON.stringify({findings: out.findings})` (app.js) — that
-		// expression, not the translator's return value, is the document that was filed.
-		`const j = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));`,
-		`process.stdout.write(JSON.stringify({findings: translateTrivy(j).findings}));`,
-	}, "\n")
-}
-
-func extractJSBlock(t *testing.T, src, start, end string) string {
-	t.Helper()
-	i := strings.Index(src, start)
-	if i < 0 {
-		t.Fatalf("app.js no longer contains %q — the Trivy oracle cannot be extracted", start)
-	}
-	j := strings.Index(src[i:], end)
-	if j < 0 {
-		t.Fatalf("app.js: no %q after %q", end, start)
-	}
-	return src[i : i+j+len(end)]
 }
 
 func goldenName(input string) string {
