@@ -25,6 +25,7 @@ import (
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
 	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	"github.com/themis-project/themis/internal/evidence/adapters/wiring"
+	evapp "github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/kernel/event"
 	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
@@ -141,19 +142,33 @@ func main() {
 	}
 	defer pool.Close()
 
-	var registryRead subjectref.Registry
+	// The registry seam, read and write. The write is the ONE operation B2 permits —
+	// find or create a version — and it exists only on the registry-backed path: the
+	// dev stub knows no names, so no triple resolves far enough for a version to be
+	// created, and leaving it unwired there is the honest answer rather than a
+	// stand-in that pretends.
+	var (
+		registryRead  subjectref.Registry
+		registryWrite evapp.ReleaseProvisioner
+	)
 	if len(cfg.knownReleases) > 0 {
 		registryRead = subjectref.NewStub(cfg.knownReleases...)
-		logger.Info("SubjectRef = dev stub", observability.Int("known_releases", len(cfg.knownReleases)))
+		// Said at startup rather than left for an operator to infer from a failed
+		// receipt: on this node `create_release=true` cannot take effect, and the
+		// reason is the wiring, not the request.
+		logger.Info("SubjectRef = dev stub; no registry write seam, so create_release cannot create a version",
+			observability.Int("known_releases", len(cfg.knownReleases)))
 	} else {
-		registryRead = registryReader{store: registrystore.New(pool)}
+		seam := registryReader{store: registrystore.New(pool)}
+		registryRead, registryWrite = seam, subjectref.NewProvisioner(seam)
 		logger.Info("SubjectRef = registry-backed (registry.ReleaseExists)")
 	}
 	apiHandler, st, intake := wiring.EvidenceAPI(wiring.Config{
-		Pool:     pool,
-		Registry: registryRead,
-		Report:   parseLogger{logger.Component("parser")},
-		Logger:   logger.Component("intake"),
+		Pool:      pool,
+		Registry:  registryRead,
+		Provision: registryWrite,
+		Report:    parseLogger{logger.Component("parser")},
+		Logger:    logger.Component("intake"),
 		Intake: evhttp.IntakeConfig{
 			MaxBytes:      cfg.intakeMaxBytes,
 			InlineBudget:  cfg.intakeInlineBudget,
@@ -376,10 +391,13 @@ func splitNonEmpty(s string) []string {
 // tables in the shared database; the registry owns and migrates them (run
 // cmd/registry).
 //
-// READS ONLY, and the composition root is the only place this may be assembled: a
-// write from Evidence into Registry is neither an event nor a read, and intake
-// resolving identity it could also create would let one typo in a product name
-// silently fork the estate graph.
+// Reads, plus EXACTLY ONE write: `UpsertRelease`, the version find-or-create
+// EDR-INTAKE-01 B2 permits (`subjectref.ReleaseWriter`). The composition root remains
+// the only place this may be assembled, and the bound is structural rather than a
+// comment asking for restraint — there is no product or project create to delegate to
+// from here, so a typo in either of those human-owned names is still a refusal and
+// never a creation, which is the hazard D7 refused `create_if_missing` over. An
+// architecture test asserts the seam exposes no second write.
 type registryReader struct{ store *registrystore.Store }
 
 func (v registryReader) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
@@ -422,6 +440,18 @@ func (v registryReader) ReleaseIDByVersion(ctx context.Context, projectID, versi
 // confined key and as today's unchanged answer for an admin.
 func (v registryReader) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
 	return v.store.ProductOfRelease(ctx, releaseID)
+}
+
+// UpsertRelease is the seam's ONE write (EDR-INTAKE-01 B2): thin delegation to the
+// registry's own idempotent find-or-create, which is what keeps Registry the authority
+// on what "one Release" means — the `ON CONFLICT (project_id, version)` constraint, the
+// id it mints and the `created` answer are all the registry's (B4), so two bots
+// building the same version at the same moment get one row rather than two.
+//
+// It is reached only through `subjectref.Provisioner`, at step 8 of the intake order:
+// after every border check, immediately before filing.
+func (v registryReader) UpsertRelease(ctx context.Context, projectID, version string) (string, bool, error) {
+	return v.store.UpsertRelease(ctx, projectID, version)
 }
 
 // translateAmbiguous restates the registry's abstention in Evidence's vocabulary. An error

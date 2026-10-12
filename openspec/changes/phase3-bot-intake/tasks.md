@@ -234,7 +234,7 @@ intake can create one.
   `IntakeCommand` gained `CreateRelease` and `BuildID` here (validation needs the values); plumbing
   `BuildID` onto the provenance and the receipt stays 2.7's.
 
-- [ ] **2.5 — The `ReleaseProvisioner` port and the deferred create.**
+- [x] **2.5 — The `ReleaseProvisioner` port and the deferred create.**
   New port in `internal/evidence/app/ports.go` — `FindOrCreateRelease(ctx, projectID, version)
   (id string, created bool, err error)`, one method, no product or project verb (design §2). Wire
   it as step 9 of design §3: **after** every border check, immediately before filing. The resolver
@@ -245,6 +245,47 @@ intake can create one.
   `TestVersionIsCreatedOnlyOnceAcrossTwoRequests` — the second request finds it (`created=false`);
   `TestFirstFailureStillWins` — an invalid-and-early report reports `schema_invalid`, not a
   release-creation reason (D5 precedence, unchanged).
+  **On implementation (2026-10-12).** The step number is **B7's step 8** (the authoritative order;
+  "step 9 of design §3" above predates that renumbering), and five decisions a reviewer should see:
+  (1) **How "to be created" travels.** `ReleaseResolver.Resolve` now answers an
+  `app.Resolution{ReleaseID | ProjectID+Version}`, and `ToCreate()` is **derived** from an empty
+  release id rather than carried as a second field — a resolution that both names a release and
+  asks for one cannot be constructed. Resolution stays read-only and consults `create_release` in
+  exactly one place: an absent VERSION under a resolved, authorized Product and Project. Every
+  other answer is byte-identical, including the two non-leak properties of 2.6/2.6b.
+  (2) **Where the create runs.** `app.Intake` step 7 (B7's step 8), between D6 and filing.
+  `assertRefused` in `app/intake_test.go` now asserts the provisioner is **uncalled** on EVERY
+  refusal, not only in the three named tests, because the create sits one line above the filing
+  step and a reordering would otherwise pass. The `created` flag is discarded deliberately: a
+  receipt's `created` is about the EVIDENCE (D9), and there is nothing on a receipt that a created
+  ROW answers — `TestVersionIsCreatedOnlyOnceAcrossTwoRequests` therefore asserts it through the
+  fake, which records what it answered.
+  (3) **D6 needs no read for a new version.** A version still to be created has no inventory and no
+  id to read one by, so `HasInventory` is **not** called; the refusal names the VERSION instead of
+  an empty release id, which is the shape that sends an operator hunting.
+  (4) **What the seam delegates to, and why only ONE name is exported.**
+  `subjectref.Provisioner.FindOrCreateRelease` is the package's **only exported write**; the
+  registry's own verb lives on an **unexported** `releaseWriter` interface inside the adapter and
+  delegates to the registry store's `UpsertRelease` (B4's idempotent upsert, where the constraint,
+  the id and the `created` answer live). The adapter translates the verb so the registry's
+  vocabulary stops there, exactly as the read half translates the ambiguity sentinel — and keeping
+  the writer unexported is what makes "exactly one write" true of the **public surface** rather
+  than of a count that permits two names. `cmd/evidence` passes its seam value and never names the
+  type. The registry **app** service's `RegisterRelease` was the alternative; the store is what B2
+  names ("B4's idempotent upsert"), and it keeps the version unnormalized — `domain.NewRelease`
+  trims, and B2 says Themis never corrects a version it was given.
+  (5) **A node with no write seam.** The stub path wires none (it knows no names, so no triple
+  resolves far enough), and `NewIntakeService` replaces a nil provisioner with one that REFUSES:
+  a missing seam is a misconfiguration, and the honest answer to one is a sentence naming it
+  rather than a panic inside the only step that writes.
+  **2.10's write assertion landed here** (`tests/architecture/evidence_subjectref_write_test.go`,
+  `TestEvidenceRegistrySeamExposesOneWrite`), because 2.6b left it with nothing to contradict and
+  this is the step that gives it something: it enumerates the seam's **exported** methods against a
+  named read allow-list, requires the write set to be **exactly one** method named
+  `FindOrCreateRelease`, pins its parameter/result shape and refuses a name containing `Product` or
+  `Project`. Both failure modes were exercised against the real tree before the gate was trusted —
+  a re-exported `UpsertRelease` and a second exported type carrying the permitted verb each fail
+  it. 2.10 still owns `TestEvidenceDoesNotImportRegistry`.
 
 - [x] **2.6 — The authorization order, and the non-leak property.**
   `internal/evidence/adapters/http/intake.go` + `app`: authenticate → resolve the product by name →

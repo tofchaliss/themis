@@ -55,8 +55,8 @@ func TestResolve_ProductScopedKeyCannotDistinguishTheProductLookupsOutcomes(t *t
 				Product: tc.product, Project: "oamp-core", Version: "R1917.256",
 				Authorize: scopedTo("prod-other"),
 			})
-			if got != "" {
-				t.Errorf("resolved %q, want nothing", got)
+			if got != (app.Resolution{}) {
+				t.Errorf("resolved %+v, want nothing", got)
 			}
 			re, ok := domain.AsReject(err)
 			if !ok {
@@ -108,8 +108,8 @@ func TestResolve_AnAuthorizedProductKeyGetsTheAnswersAnAdminGets(t *testing.T) {
 	got, err := subjectref.NewResolver(estate()).Resolve(context.Background(), app.ResolveRequest{
 		Product: "OAMP", Project: "oamp-core", Version: "R1917.256", Authorize: mine,
 	})
-	if err != nil || got != "rel-1" {
-		t.Fatalf("own product = %q, %v, want the release", got, err)
+	if err != nil || got.ReleaseID != "rel-1" {
+		t.Fatalf("own product = %+v, %v, want the release", got, err)
 	}
 
 	for _, tc := range []struct {
@@ -148,8 +148,8 @@ func TestResolve_ReleaseIDPathAuthorizesTheOwningProduct(t *testing.T) {
 		got, err := subjectref.NewResolver(reg).Resolve(context.Background(), app.ResolveRequest{
 			ReleaseID: "rel-1", Authorize: scopedTo("prod-1"),
 		})
-		if err != nil || got != "rel-1" {
-			t.Fatalf("got %q, %v", got, err)
+		if err != nil || got.ReleaseID != "rel-1" {
+			t.Fatalf("got %+v, %v", got, err)
 		}
 	})
 
@@ -190,8 +190,8 @@ func TestResolve_ReleaseIDPathAuthorizesTheOwningProduct(t *testing.T) {
 	t.Run("an unconfined caller keeps the unchanged 404 and reads no ownership", func(t *testing.T) {
 		noOwners := estate()
 		noOwners.owners = map[string]string{} // nothing to read; an admin must not need it
-		if got, err := subjectref.NewResolver(noOwners).Resolve(context.Background(), byID("rel-1")); err != nil || got != "rel-1" {
-			t.Fatalf("own release = %q, %v", got, err)
+		if got, err := subjectref.NewResolver(noOwners).Resolve(context.Background(), byID("rel-1")); err != nil || got.ReleaseID != "rel-1" {
+			t.Fatalf("own release = %+v, %v", got, err)
 		}
 		_, err := subjectref.NewResolver(noOwners).Resolve(context.Background(), byID("rel-nope"))
 		if re, ok := domain.AsReject(err); !ok || re.Reason != domain.ReasonUnknownRelease {
@@ -217,7 +217,7 @@ func TestStub_ProductOfReleaseKnowsNoProducts(t *testing.T) {
 		t.Fatalf("error = %v, want a fail-closed unauthorized refusal", err)
 	}
 	// An admin (no authorizer) is unaffected: it never asks the question.
-	if got, err := subjectref.NewResolver(stub).Resolve(context.Background(), byID("rel-dev")); err != nil || got != "rel-dev" {
-		t.Errorf("admin by id = %q, %v", got, err)
+	if got, err := subjectref.NewResolver(stub).Resolve(context.Background(), byID("rel-dev")); err != nil || got.ReleaseID != "rel-dev" {
+		t.Errorf("admin by id = %+v, %v", got, err)
 	}
 }

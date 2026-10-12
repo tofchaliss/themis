@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 	"unicode/utf8"
@@ -142,6 +143,7 @@ func (c IntakeCommand) ParameterRefusal() *domain.RejectError {
 type IntakeService struct {
 	maxBytes  int64
 	releases  ReleaseResolver
+	provision ReleaseProvisioner
 	inventory InventoryReader
 	reports   ReportRegistry
 	registrar EvidenceRegistrar
@@ -149,11 +151,33 @@ type IntakeService struct {
 
 // NewIntakeService wires the intake ports. A maxBytes of zero or less takes D13's
 // default rather than meaning "no bound".
-func NewIntakeService(maxBytes int64, releases ReleaseResolver, inventory InventoryReader, reports ReportRegistry, registrar EvidenceRegistrar) *IntakeService {
+//
+// A nil provisioner is a node wired with no Registry write seam — the dev stub's
+// posture, and any wiring that supplies none — and it is replaced by one that REFUSES
+// rather than left nil. A missing seam is a misconfiguration, and the honest answer to
+// one is a sentence naming it, not a panic inside the only step that writes.
+func NewIntakeService(maxBytes int64, releases ReleaseResolver, provision ReleaseProvisioner, inventory InventoryReader, reports ReportRegistry, registrar EvidenceRegistrar) *IntakeService {
 	if maxBytes <= 0 {
 		maxBytes = defaultIntakeMaxBytes
 	}
-	return &IntakeService{maxBytes: maxBytes, releases: releases, inventory: inventory, reports: reports, registrar: registrar}
+	if provision == nil {
+		provision = unprovisioned{}
+	}
+	return &IntakeService{
+		maxBytes: maxBytes, releases: releases, provision: provision,
+		inventory: inventory, reports: reports, registrar: registrar,
+	}
+}
+
+// unprovisioned stands in for a node that wires no Registry write seam. It can only be
+// reached by a request whose resolution answered "to be created", which needs both
+// `create_release=true` and a Product and Project that resolved by name — so on the
+// dev stub, which knows no names, it is unreachable by construction.
+type unprovisioned struct{}
+
+func (unprovisioned) FindOrCreateRelease(context.Context, string, string) (string, bool, error) {
+	return "", false, errors.New("this node wires no registry write seam, so intake cannot create a version; " +
+		"register the release first, or run the node against the registry")
 }
 
 // Intake runs the door's steps, in this order, and the order is the decision
@@ -173,11 +197,16 @@ func NewIntakeService(maxBytes int64, releases ReleaseResolver, inventory Invent
 //     what gets stored and what a consumer will read.
 //  6. SBOM-first — AFTER validation, so a report that is both invalid and early
 //     reports the invalidity, which is the more actionable of the two faults.
-//  7. file — the existing Register path: trust gate, aggregate, persist + outbox.
+//  7. find-or-create the version, when resolution said it does not exist yet (B7's
+//     step 8) — the FIRST step that writes anything, and it writes into Registry.
+//  8. file — the existing Register path: trust gate, aggregate, persist + outbox.
 //
-// **The first failure wins and nothing is filed until step 7.** Steps 0-6 are
-// side-effect-free, so a refused intake leaves a receipt and nothing else: no
-// evidence, no event, no bus traffic (D13).
+// **The first failure wins and nothing is created or filed until step 7.** Steps 0-6
+// are side-effect-free, so a refused intake leaves a receipt and nothing else: no
+// release, no evidence, no event, no bus traffic (D13). That is why the create sits
+// here and not with resolution: a create at step 3 would leave an empty Release behind
+// every `schema_invalid` report, and a bot retrying a malformed upload would mint one
+// per attempt (B2).
 //
 // Every outcome is on the receipt. The returned error is non-nil only for an
 // infrastructure fault — a precondition that could not be EVALUATED, or a write that
@@ -236,11 +265,12 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	// project is looked up (so a key that may not see a product cannot learn which
 	// projects it has).
 	//
-	// `create_release` does not change this step: resolution stays read-only, so a
-	// complete triple with `create_release=true` resolves exactly as it does without
-	// it and a missing version is still `unknown_release`. The find-or-create belongs
-	// after every border check, which is a later step of this change.
-	releaseID, err := s.releases.Resolve(ctx, ResolveRequest{
+	// `create_release` changes what an ABSENT version means here and nothing else:
+	// resolution stays read-only and answers "to be created", naming the project the
+	// version will go under (B7's step 4). An unresolved Product or Project is still a
+	// refusal — those names are human-owned, and a typo in one is where a parallel
+	// estate comes from. The create itself is step 7 below.
+	res, err := s.releases.Resolve(ctx, ResolveRequest{
 		Product:       cmd.Product,
 		Project:       cmd.Project,
 		Version:       cmd.Version,
@@ -251,7 +281,14 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	if err != nil {
 		return refusedByPort(r, domain.ReasonUnknownRelease, err)
 	}
-	_ = r.RecordRelease(releaseID)
+	// A version still to be created has no id yet, so there is nothing to record here
+	// and step 7 records it once the create answers. The guard is explicit rather than
+	// resting on "recording an empty id happens to be a no-op": a receipt names the
+	// release the attempt acted on, and a blank subject on a refused receipt would read
+	// as "we resolved nothing" when resolution in fact succeeded.
+	if res.ReleaseID != "" {
+		_ = r.RecordRelease(res.ReleaseID)
+	}
 
 	// 4. Convert (D2/D3). An SBOM is identified, never converted: it is already a
 	// standards document, its bytes ARE the evidence document, and re-serializing it
@@ -280,7 +317,7 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	// 6. SBOM-first (D6) — for a vulnerability report only. An SBOM cannot require an
 	// inventory to already exist: it is the thing that creates one.
 	if filedKind != domain.KindSBOM {
-		has, ierr := s.inventory.HasInventory(ctx, releaseID)
+		has, ierr := s.hasInventory(ctx, res)
 		if ierr != nil {
 			// A precondition that could not be EVALUATED is not a precondition that
 			// failed. Reporting `no_inventory_for_release` here would tell the
@@ -289,17 +326,36 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 		}
 		if !has {
 			if !cmd.AllowWithoutSBOM {
-				return refused(r, domain.ReasonNoInventoryForRelease,
-					fmt.Sprintf("release %s has no SBOM-derived inventory; upload the SBOM first, or resend with allow_without_sbom=true", releaseID))
+				// Refused BEFORE the create, which is the whole reason the create is
+				// late: a report for a brand-new version leaves no empty Release
+				// behind. With B1's two requests this never bites — the SBOM request
+				// creates the version and the report request finds it.
+				return refused(r, domain.ReasonNoInventoryForRelease, noInventoryDetail(res))
 			}
 			prov.WithoutSBOM = true
 		}
 	}
 
-	// 7. File. The only step that writes, and it writes the aggregate with its outbox
-	// note in one transaction.
+	// 7. Find-or-create the version (B7's step 8), when resolution said it does not
+	// exist yet. The first write of the request, and it is Registry's own idempotent
+	// upsert, so two bots building the same version at the same moment get one row.
+	releaseID := res.ReleaseID
+	if res.ToCreate() {
+		// `created` is Registry's answer about the ROW and there is nothing on a
+		// receipt it answers — a receipt's `created` is about the EVIDENCE (D9) — so
+		// it is discarded here deliberately.
+		id, _, perr := s.provision.FindOrCreateRelease(ctx, res.ProjectID, res.Version)
+		if perr != nil {
+			return failed(r, fmt.Sprintf("could not create version %q: %v", res.Version, perr), perr)
+		}
+		releaseID = id
+		_ = r.RecordRelease(releaseID)
+	}
+
+	// 8. File. The only step that writes EVIDENCE, and it writes the aggregate with
+	// its outbox note in one transaction.
 	_ = r.StartRegistering()
-	res, err := s.registrar.Register(ctx, RegisterCommand{
+	filed, err := s.registrar.Register(ctx, RegisterCommand{
 		Raw:              curated,
 		Kind:             filedKind,
 		Format:           dialect,
@@ -309,13 +365,37 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	if err != nil {
 		return failed(r, fmt.Sprintf("register: %v", err), err)
 	}
-	if ferr := r.Filed(string(res.ID), res.Created); ferr != nil {
+	if ferr := r.Filed(string(filed.ID), filed.Created); ferr != nil {
 		// The write reported success without naming a document. "Filed, pointing at
 		// nothing" is the 2026-10-05 shape, so the receipt says `failed` instead of
 		// claiming an id it does not have.
 		return failed(r, ferr.Error(), ferr)
 	}
 	return r, nil
+}
+
+// hasInventory answers D6's precondition for whatever resolution landed on. For a
+// version still to be created the answer is known WITHOUT a read: a release that does
+// not exist yet has no inventory (B7's step 7 says so in one sentence), and there is
+// no id to read one by — asking the store with an empty release id would be a question
+// about every release and none.
+func (s *IntakeService) hasInventory(ctx context.Context, res Resolution) (bool, error) {
+	if res.ToCreate() {
+		return false, nil
+	}
+	return s.inventory.HasInventory(ctx, res.ReleaseID)
+}
+
+// noInventoryDetail names what the caller has to do about D6, and the two cases need
+// different sentences: a release that EXISTS is named by its id, which is what the
+// operator looks it up by, while a version that does not exist yet has no id to name —
+// telling them "release  has no inventory" is the shape that sends people hunting.
+func noInventoryDetail(res Resolution) string {
+	if res.ToCreate() {
+		return fmt.Sprintf("version %q is not registered yet, so it has no inventory for a report to be recorded against; "+
+			"upload the SBOM first — that request creates the version — or resend with allow_without_sbom=true", res.Version)
+	}
+	return fmt.Sprintf("release %s has no SBOM-derived inventory; upload the SBOM first, or resend with allow_without_sbom=true", res.ReleaseID)
 }
 
 // evidenceKind maps the ACL's detected kind onto the kind Evidence files. A

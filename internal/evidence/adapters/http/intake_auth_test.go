@@ -43,6 +43,11 @@ const (
 	fxOtherRel    = "rel-other"
 	fxAmbiguous   = "TWINS"
 	fxMissing     = "acquisition-target"
+	// fxNewVersion is a version the fixture's estate does NOT hold, which is the only
+	// resolution answer `create_release=true` acts on; fxNewRelease is what the write
+	// seam answers with when it creates it.
+	fxNewVersion = "R1918.001"
+	fxNewRelease = "rel-created"
 
 	// The SBOM body every request here submits: identified, never converted, so the
 	// chain reaches the filing step without a converter in the way.
@@ -115,6 +120,21 @@ type hasInventory struct{}
 
 func (hasInventory) HasInventory(context.Context, string) (bool, error) { return true, nil }
 
+// countingProvisioner is the registry WRITE seam, counted. It exists so a test can
+// assert the create was never REACHED on a refused request: "nothing was created" is
+// also what a provisioner that silently did nothing would show, and the two must not
+// be the same test result (EDR-INTAKE-01 B3, "nothing is created on any refusal").
+type countingProvisioner struct {
+	calls                    int
+	gotProjectID, gotVersion string
+}
+
+func (c *countingProvisioner) FindOrCreateRelease(_ context.Context, projectID, version string) (string, bool, error) {
+	c.calls++
+	c.gotProjectID, c.gotVersion = projectID, version
+	return fxNewRelease, true, nil
+}
+
 type countingRegistrar struct{ calls int }
 
 func (c *countingRegistrar) Register(context.Context, app.RegisterCommand) (app.RegisterResult, error) {
@@ -131,6 +151,7 @@ type authFixture struct {
 	open      http.Handler
 	reg       *authRegistry
 	registrar *countingRegistrar
+	provision *countingProvisioner
 }
 
 // newAuthFixture wires both doors over the fake estate, twice: once behind the real
@@ -139,7 +160,8 @@ func newAuthFixture(t *testing.T) authFixture {
 	t.Helper()
 	reg := &authRegistry{}
 	registrar := &countingRegistrar{}
-	intakeSvc := app.NewIntakeService(0, subjectref.NewResolver(reg), hasInventory{}, sbomReports{}, registrar)
+	provision := &countingProvisioner{}
+	intakeSvc := app.NewIntakeService(0, subjectref.NewResolver(reg), provision, hasInventory{}, sbomReports{}, registrar)
 	intake := evhttp.NewIntake(intakeSvc, newReceipts(), nil, evhttp.IntakeConfig{InlineBudget: time.Minute}, nil)
 	t.Cleanup(intake.Close)
 
@@ -176,7 +198,7 @@ func newAuthFixture(t *testing.T) authFixture {
 	open := chi.NewRouter()
 	open.Mount("/api/v1", door)
 
-	return authFixture{authed: router, open: open, reg: reg, registrar: registrar}
+	return authFixture{authed: router, open: open, reg: reg, registrar: registrar, provision: provision}
 }
 
 // response is one answer reduced to the three things B3 requires to be identical.
@@ -350,6 +372,61 @@ func TestReadAndCallbackScopesAreRefusedByTheWriteFloor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- the create, and what never reaches it (task 2.5) -----------------------
+
+// TestProvisionerNotCalledOnUnauthorizedProduct — B3's "nothing is created on any
+// refusal", asserted through the whole chain rather than in the app ring: a
+// `product:<P>` key naming somebody else's product is refused at step 4, so the write
+// seam is never even reached, and the create cannot be the thing that leaks whether
+// that product exists.
+//
+// The positive case is asserted in the same test on purpose. "The provisioner was not
+// called" is also what an unreachable provisioner would show, and a wiring that can
+// never create would pass the negative half forever.
+func TestProvisionerNotCalledOnUnauthorizedProduct(t *testing.T) {
+	createByTriple := func(product string) string {
+		return fmt.Sprintf("/api/v1/intake?product=%s&project=%s&version=%s&create_release=true",
+			product, fxProject, fxNewVersion)
+	}
+
+	t.Run("a key that may not see the product never reaches the create", func(t *testing.T) {
+		f := newAuthFixture(t)
+
+		rec := post(t, f.authed, createByTriple("OTHER"), fxBody, withKey("mine"))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body)
+		}
+		if p := decodeProblem(t, rec); p.Reason == nil || *p.Reason != gen.Unauthorized {
+			t.Errorf("reason = %v, want unauthorized", p.Reason)
+		}
+		if f.provision.calls != 0 {
+			t.Errorf("the write seam was reached %d time(s) by a request refused on authorization", f.provision.calls)
+		}
+		if f.registrar.calls != 0 {
+			t.Errorf("a refused request filed something (%d register call(s))", f.registrar.calls)
+		}
+	})
+
+	t.Run("and its own product's new version IS created, then filed", func(t *testing.T) {
+		f := newAuthFixture(t)
+
+		rec := post(t, f.authed, createByTriple(fxProduct), fxBody, withKey("mine"))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body)
+		}
+		if f.provision.calls != 1 {
+			t.Fatalf("the write seam ran %d time(s), want once", f.provision.calls)
+		}
+		if f.provision.gotProjectID != "proj-1" || f.provision.gotVersion != fxNewVersion {
+			t.Errorf("created under project %q at version %q, want the resolved project and the submitted version",
+				f.provision.gotProjectID, f.provision.gotVersion)
+		}
+		if f.registrar.calls != 1 {
+			t.Errorf("the document was filed %d time(s), want once against the created release", f.registrar.calls)
+		}
+	})
 }
 
 // --- the release_id path, on BOTH doors (task 2.6b) -------------------------
