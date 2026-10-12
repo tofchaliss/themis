@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/registry/app"
 	"github.com/themis-project/themis/internal/registry/domain"
 )
 
@@ -124,6 +125,77 @@ func (s *Store) findOrCreate(ctx context.Context, insert string, insertArgs []an
 		return "", false, err
 	}
 	return out, false, nil
+}
+
+// --- exact-name lookups that abstain (EDR-INTAKE-01 B4) --------------------
+//
+// These back Evidence's read-only release resolution: an intake names a release by
+// {product, project, version} and the registry answers with the id, or declines to.
+//
+// Three answers, and all three are distinct on purpose:
+//
+//	0 matches  → empty id, nil error      — "not found" is an answer, not a fault
+//	1 match    → the id
+//	>1 matches → app.ErrAmbiguousName     — the name is ambiguous, NOT unregistered
+//
+// Picking the first of several matches would be inventing the operator's intent, and it
+// is what `ReleaseIDByVersion` used to do (it scanned a project's releases in the
+// composition root and took the first exact hit), which silently chose a winner the
+// moment two existed.
+//
+// Matching mirrors the uniqueness indexes 000003 builds, which is what makes a lookup
+// find the row an upsert would have returned: names fold case (`lower(name)`), a version
+// is exact. `LIMIT 2` is the whole multiplicity test — one more row than an unambiguous
+// answer allows is all this needs to know, and it costs no count over the table.
+
+// ProductIDByName resolves an exact Product name, folding case, and abstains on anything
+// but a single match.
+func (s *Store) ProductIDByName(ctx context.Context, name string) (string, error) {
+	return s.idOfSingleMatch(ctx,
+		`SELECT id FROM products WHERE lower(name) = lower($1) LIMIT 2`, name)
+}
+
+// ProjectIDByName resolves an exact Project name within a Product, folding case, and
+// abstains on anything but a single match. The same name under a different Product is a
+// different row, so the scoping is part of the key and not a filter on the answer.
+func (s *Store) ProjectIDByName(ctx context.Context, productID, name string) (string, error) {
+	return s.idOfSingleMatch(ctx,
+		`SELECT id FROM projects WHERE product_id = $1 AND lower(name) = lower($2) LIMIT 2`,
+		productID, name)
+}
+
+// ReleaseIDByVersion resolves an EXACT version string within a Project — never by prefix
+// and never by case ("R1917.25" is not "R1917.256", and "r1917.256" is not "R1917.256") —
+// and abstains on anything but a single match.
+func (s *Store) ReleaseIDByVersion(ctx context.Context, projectID, version string) (string, error) {
+	return s.idOfSingleMatch(ctx,
+		`SELECT id FROM releases WHERE project_id = $1 AND version = $2 LIMIT 2`,
+		projectID, version)
+}
+
+// idOfSingleMatch returns the id of the one matching row, the empty string when nothing
+// matched, and app.ErrAmbiguousName as soon as a second row appears.
+func (s *Store) idOfSingleMatch(ctx context.Context, query string, args ...any) (string, error) {
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return "", rows.Err()
+	}
+	var id string
+	if err := rows.Scan(&id); err != nil {
+		return "", err
+	}
+	if rows.Next() {
+		return "", app.ErrAmbiguousName
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 // GetRelease loads a Release by id; a missing row yields ErrNotFound.

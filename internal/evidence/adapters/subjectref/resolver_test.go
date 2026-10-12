@@ -151,6 +151,67 @@ func TestResolve_ALookupThatFailedIsNotAnUnknownRelease(t *testing.T) {
 	}
 }
 
+// TestResolveAmbiguousNameIsNotReportedAsNotRegistered — a name that matches more than
+// one row is a statement about the NAME, not the estate (EDR-INTAKE-01 B4). Reporting it
+// as unknown_release says "no product named X is registered" about a product that is
+// registered twice, and sends the operator hunting for a typo that is not there. The
+// assertion is therefore two-part: the closed reason is `ambiguous_name`, AND the prose
+// does not reuse the not-registered wording a consumer reads past the reason.
+func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
+	cases := []struct {
+		failOn string
+		wantIn string
+	}{
+		{"product", `product "OAMP"`},
+		{"project", `project "oamp-core"`},
+		{"release", `release version "R1917.256"`},
+	}
+	for _, c := range cases {
+		t.Run(c.failOn, func(t *testing.T) {
+			reg := estate()
+			reg.err, reg.failOn = subjectref.ErrAmbiguousName, c.failOn
+
+			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), "OAMP", "oamp-core", "R1917.256", "")
+			if got != "" {
+				t.Errorf("resolved %q, want nothing", got)
+			}
+			re, ok := domain.AsReject(err)
+			if !ok {
+				t.Fatalf("error = %v, want a reason-carrying refusal: an abstention is an answer, not a fault", err)
+			}
+			if re.Reason != domain.ReasonAmbiguousName {
+				t.Errorf("reason = %q, want %q", re.Reason, domain.ReasonAmbiguousName)
+			}
+			if strings.Contains(re.Detail, "not registered") {
+				t.Errorf("detail %q says the name is not registered; it is registered more than once", re.Detail)
+			}
+			if !strings.Contains(re.Detail, "ambiguous") {
+				t.Errorf("detail %q does not say the name is ambiguous", re.Detail)
+			}
+			if !strings.Contains(re.Detail, c.wantIn) {
+				t.Errorf("detail %q does not name %q — the operator still has to guess which part", re.Detail, c.wantIn)
+			}
+		})
+	}
+}
+
+// TestResolve_NotFoundWordingIsUnchanged guards the other half of B4's distinction: zero
+// matches keeps the reason and the wording it has always had. The ambiguous branch is a
+// third answer beside it, not a replacement for it.
+func TestResolve_NotFoundWordingIsUnchanged(t *testing.T) {
+	_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), "NOPE", "oamp-core", "R1917.256", "")
+	re, ok := domain.AsReject(err)
+	if !ok {
+		t.Fatalf("error = %v, want a refusal", err)
+	}
+	if re.Reason != domain.ReasonUnknownRelease {
+		t.Errorf("reason = %q, want unknown_release", re.Reason)
+	}
+	if re.Detail != `no product named "NOPE" is registered` {
+		t.Errorf("detail = %q, want the unchanged not-found wording", re.Detail)
+	}
+}
+
 // TestStub_KnowsIDsAndNoNames pins the dev stub's honest limit: it holds release ids,
 // so the triple road reports unknown_release instead of resolving onto whichever
 // release happened to be in the allow-set.

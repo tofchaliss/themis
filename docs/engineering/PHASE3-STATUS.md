@@ -4,7 +4,7 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-12 · intake is merged; `phase3-bot-intake` Gate B is open at task 1.1
+> ## ⏭ RESUME POINT — 2026-10-12 · `phase3-bot-intake` **Gate B is COMPLETE**; Gates C–F stay on hold
 >
 > **Merged since the last entry.** `phase3-report-intake` **groups 1–4** (#138–#141 — the one intake door,
 > the server-side converters, the receipt, and the GUI + scripts uploading through `POST /intake`);
@@ -15,14 +15,24 @@ and the resume pointer, never item state.
 > amendment ("Bot-friendly intake", `B1`–`B7` + the status-code table) plus the change's
 > proposal/design/tasks. **Documents only — no code in #144.**
 >
-> **Gate B is open, and it is `Group 0` and `Group 1` ONLY.** Gates C–F (Groups 2–4 — intake's
-> `create_release`, the non-leaking authorization, `build_id`, scripts/docs and the VM verification) are
-> **on hold** until Gate B lands.
+> **Gate B — `Group 0` and `Group 1` — is COMPLETE** (#145–#148 and this change: 0.1, 1.1–1.11, all
+> ticked in the change's `tasks.md`). Registry uniqueness is now enforced by the database, the three
+> creates are idempotent find-or-create answering `201`/`200`, and name lookups **abstain and say
+> *ambiguous*** instead of reporting a twice-registered name as unregistered.
+>
+> **Gates C–F (Groups 2–4) remain ON HOLD** — intake's `create_release`, the non-leaking
+> authorization, `build_id`, scripts/docs and the VM verification. **Do not start Group 2** without
+> an explicit go-ahead; Gate B landing is not itself that go-ahead.
 >
 > | state | task |
 > | --- | --- |
-> | done | **0.1** — the four new reject reasons as vocabulary (`create_release_conflict` 400 · `incomplete_release_triple` 400 · `ambiguous_name` 422 · `build_id_invalid` 400) in the domain enum, `api/evidence.openapi.yaml`, the HTTP status table and the dashboard's intake-reason table. Nothing produces them yet |
-> | **next** | **1.1** — the Registry uniqueness migration's pre-flight that **refuses** (B4): one explicit transaction, `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` first, a `DO` block naming every duplicate group. It never merges or reassigns |
+> | done | **0.1** — the four new reject reasons as vocabulary (`create_release_conflict` 400 · `incomplete_release_triple` 400 · `ambiguous_name` 422 · `build_id_invalid` 400) in the domain enum, `api/evidence.openapi.yaml`, the HTTP status table and the dashboard's intake-reason table |
+> | done | **1.1–1.2** — the uniqueness migration `000003`: a pre-flight that **refuses** by name (one explicit transaction, `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` first, never merging or reassigning), then the three named unique indexes; the down drops the indexes only |
+> | done | **1.3–1.6** — find-or-create at the store (`UpsertProduct` / `UpsertProject` / `UpsertRelease`, `ON CONFLICT … DO NOTHING`), including the concurrency property: one row, one id, exactly one `created=true`, no caller errors |
+> | done | **1.7–1.8** — the app's three creates return `(id, created, err)`, and the routes answer `201` when they created and `200` when they found |
+> | done | **1.9–1.10** — name lookups abstain (B4). `ProductIDByName` / `ProjectIDByName` / `ReleaseIDByVersion` live in `registry/adapters/store`: 0 matches → empty id + nil, `>1` → `app.ErrAmbiguousName`, and `ReleaseIDByVersion` no longer returns the first of several. The seam translates it into `subjectref.ErrAmbiguousName` in `cmd/evidence` — no registry error value crosses it — and the resolver refuses with `ambiguous_name`, worded as **ambiguous** and never as not-registered |
+> | done | **1.11** — group gate: `make vet-tags`, `make check-ci` green; `registry/app` 100% and `registry/adapters/store` 80% coverage tiers hold |
+> | **next** | **nothing in this change.** Group 2 (Gate C) opens only on an explicit go-ahead |
 >
 > **The 2026-10-09 entry below is history now:** its "FIRST — the evidence stream is halted" action was
 > carried out on the 2026-10-12 VM round (cursor `35751` → `37090`, no stream halted —

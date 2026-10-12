@@ -2,6 +2,7 @@ package subjectref
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/themis-project/themis/internal/evidence/domain"
@@ -16,6 +17,11 @@ import (
 // error here means the lookup could not be PERFORMED, which is a statement about
 // Themis, so the resolver passes it through unnamed rather than reporting the
 // release unknown.
+//
+// The one exception is [ErrAmbiguousName]: a name lookup that matched more than one
+// row ABSTAINS, and must say so (EDR-INTAKE-01 B4). That is a third answer, not a
+// fault and not a miss — the thing is registered, twice — and an implementation of
+// this seam returns this context's sentinel for it, never the registry's.
 type Registry interface {
 	ReleaseExists(ctx context.Context, releaseID string) (bool, error)
 	ProductIDByName(ctx context.Context, name string) (string, error)
@@ -60,21 +66,21 @@ func (r *Resolver) Resolve(ctx context.Context, product, project, version, relea
 
 	productID, err := r.reg.ProductIDByName(ctx, product)
 	if err != nil {
-		return "", fmt.Errorf("product lookup: %w", err)
+		return "", lookupFailed("product", product, err)
 	}
 	if productID == "" {
 		return "", notFound("product", product)
 	}
 	projectID, err := r.reg.ProjectIDByName(ctx, productID, project)
 	if err != nil {
-		return "", fmt.Errorf("project lookup: %w", err)
+		return "", lookupFailed("project", project, err)
 	}
 	if projectID == "" {
 		return "", notFound("project", project)
 	}
 	resolved, err := r.reg.ReleaseIDByVersion(ctx, projectID, version)
 	if err != nil {
-		return "", fmt.Errorf("release lookup: %w", err)
+		return "", lookupFailed("release version", version, err)
 	}
 	if resolved == "" {
 		return "", notFound("release version", version)
@@ -85,4 +91,20 @@ func (r *Resolver) Resolve(ctx context.Context, product, project, version, relea
 func notFound(what, name string) error {
 	return domain.Reject(domain.ReasonUnknownRelease,
 		fmt.Sprintf("no %s named %q is registered", what, name))
+}
+
+// lookupFailed splits the two things a non-nil lookup error can mean. An abstention
+// ([ErrAmbiguousName]) is a REFUSAL the caller can act on, and it must be worded as
+// ambiguity: "no product named X is registered" is a false statement about a product
+// that is registered twice, and it sends the operator hunting for a typo that is not
+// there. Anything else is a seam that could not be READ, which says nothing about
+// whether the release exists, so it passes through carrying no reason at all.
+func lookupFailed(what, name string, err error) error {
+	if errors.Is(err, ErrAmbiguousName) {
+		return domain.Reject(domain.ReasonAmbiguousName, fmt.Sprintf(
+			"%s %q is ambiguous: it matches more than one row in the registry, and intake will "+
+				"not guess which one you mean — name the release by release_id, or de-duplicate the registry",
+			what, name))
+	}
+	return fmt.Errorf("%s lookup: %w", what, err)
 }
