@@ -5601,6 +5601,16 @@ under the 2026-08-07 re-derivation standard.
 
 ### E. Process / optional refinements
 
+- [ ] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
+  VM round).** LOW, operability. A 555-component SBOM took ~4.5 min to correlate; for that whole
+  time Knowledge's `stream_cursor` sat still (it advances only after Handle returns) and the log
+  showed only the periodic sweeps, so an operator reading the cursor against `max(seq)` saw an
+  apparent 5,600-event backlog that was really other streams' events. **Do:** log one progress
+  line per N components (or every 30 s) while correlating, with the evidence id and the count
+  done/total; and have `scripts/vm-verify.sh` compare the cursor against `max(seq)` for the
+  reader's own `source_context` (it already does — say so in INSTALLATION.md §8, done).
+  Evidence: `docs/engineering/vm-test-2026-10-12.md` Test 2/3.
+
 - [ ] **Record the GUI's vanilla-JS-no-framework choice as an explicit decision (LOW, docs-only).**
   Surfaced 2026-08-17: EDR-GUI-01 fixes D1 (a view, one static binary), D7 (a `node --check` JS
   syntax gate — meaningful only because there is no build step), and D8 (`go:embed` assets), and

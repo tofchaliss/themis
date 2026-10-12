@@ -279,13 +279,16 @@ out of the tool, and Evidence converts them with the one converter per dialect
 omit it on a dev estate that logs `AUTH DISABLED`. Both helper scripts send it from
 `THEMIS_API_KEY` when that is set and send none when it is not.
 
+`--fail-with-body`, not `-f`: a refusal comes back as a 4xx whose body names the `reason` and
+`detail`, and `-f` throws that body away (measured on the VM, 2026-10-12).
+
 **Step 1 — the SBOM, first (D6).** A report for a release with no SBOM-derived inventory is
 refused by name, because there is nothing to record occurrences against:
 
 ```sh
 # the release must already exist — intake RESOLVES identity and never creates it (D7);
 # scripts/gf-upload-sbom.sh registers Product -> Project -> Release and does this call
-curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq .
 ```
@@ -296,7 +299,7 @@ curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
 # EVERY --data* argument into the query string — including the --data-binary carrying the
 # document. (Measured: curl then refuses outright, "URL rejected: Malformed input to a URL
 # function". The design's sketch of this command has that defect; this is the working form.)
-curl -sf -X POST "localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq .
 ```
@@ -307,7 +310,7 @@ difference between the CSV and JSON roads:
 ```sh
 # Cortex JSON — the array-shaped export that halted the stream for 31 hours on 2026-10-05,
 # now a named, converted dialect
-curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @R1917.256.OAMP_Scan_Report.json | jq .
 ```
@@ -315,7 +318,9 @@ curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
 ```sh
 # Cortex CSV — RFC 4180 is parsed server-side (descriptions contain newlines: a 1264-physical-line
 # export is 557 logical rows). scripts/cortex-csv-to-scan-report.sh is a thin wrapper for this call.
-curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+# An export with no usable last_observed column is refused (422 observed_at_underivable) rather than
+# stamped "now": add &observed_at=<RFC3339> to the URL (the wrapper's second argument does this).
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: text/csv' -H "X-API-Key: $KEY" \
   --data-binary @cortex-export.csv | jq .
 ```
@@ -323,7 +328,7 @@ curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
 ```sh
 # Raw Trivy JSON — no jq recipe, no browser
 trivy image --format json --output trivy.json <image:tag>
-curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @trivy.json | jq .
 ```
@@ -369,7 +374,7 @@ on `reason` and displays `detail`:
 
 ```sh
 # the deliberate override, recorded in provenance so a release in that state says so
-curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID&allow_without_sbom=true" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID&allow_without_sbom=true" \
   -H 'Content-Type: text/csv' -H "X-API-Key: $KEY" --data-binary @cortex-export.csv | jq .
 ```
 
