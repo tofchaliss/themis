@@ -517,16 +517,41 @@ number on screen is fetched live). Run it beside the pipeline:
 # governed loop's accepts/publishes go through it; per-operator write PERMISSION is
 # enforced at the dashboard's own gate, so a read-scoped operator still cannot decide):
 #   THEMIS_API_KEY=<key minted with: authadmin create-key --name dashboard --scopes admin>
-# to require operator sign-in (each operator pastes their OWN key once; a server-side
-# session takes over, and their scope decides what the GUI lets them do):
+# to require sign-in (a dashboard username + password, or an operator's OWN key pasted
+# once; a server-side session takes over, and the scope decides what the GUI allows):
 #   THEMIS_AUTH_DATABASE_DSN="postgres://themis:$PGPW@localhost:5432/auth?sslmode=disable"
+#   THEMIS_DASHBOARD_MIGRATE=1   # create the dashboard's own login table + seed admin
 # production guard (refuses to boot with an open edge):
 #   THEMIS_AUTH_REQUIRED=1
 ```
 
+**The default login is `admin` / `Themis@123` — change it first.** With
+`THEMIS_AUTH_DATABASE_DSN` set, the dashboard creates its own `dashboard_users` table in the
+`auth` database (`THEMIS_DASHBOARD_MIGRATE=1`, under its own `dashboard_schema_migrations`
+bookkeeping table) and seeds that one account. Sign in, open the **Admin** tab, and set a
+password of your own: current → new → confirm. There are no complexity requirements. Until you
+do, the Admin tab and the topbar both say the default password is still in use, and changing it
+signs out every other browser signed in as `admin`. An existing row is never overwritten, so a
+restart or a re-install cannot put the default back.
+
+`THEMIS_DASHBOARD_MIGRATE=1` reads its SQL from a path that defaults to the **relative**
+`internal/dashboard/migrations`, resolved against the node's working directory — fine when you
+run `./bin/dashboard` from the repo root, and fine under the systemd unit, whose
+`WorkingDirectory=` is the repo. Anywhere else (a binary copied to `/usr/local/bin`, a
+container with a different workdir), set `THEMIS_DASHBOARD_MIGRATIONS` to an **absolute** path.
+If the directory does not resolve, the node refuses to start and names both the path it looked
+for and that variable.
+
+Two things worth knowing about that account. It is **shared**: every decision taken through it
+is stamped `admin` in the append-only audit trail, so an operator who needs their own name on a
+record signs in with their own API key instead (the paste form is still on the login page,
+below the password form). And it is **the dashboard's own** credential — it is not an
+`internal/platform/auth` API key, so `authadmin revoke-key` has nothing to do with it; the
+Admin tab is where it changes.
+
 Beyond a firewalled network, **front `:8090` with a TLS-terminating reverse proxy** (send
-`X-Forwarded-Proto: https` so the session cookie turns `Secure`) — the login paste is the one
-moment an operator's long-lived key transits the wire. All options are documented in
+`X-Forwarded-Proto: https` so the session cookie turns `Secure`) — sign-in is the one moment a
+password or a long-lived key transits the wire. All options are documented in
 [`deploy/node.env.example`](deploy/node.env.example).
 
 ### 7. Run as systemd services (survive logout / reboot)

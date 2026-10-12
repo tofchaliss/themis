@@ -88,6 +88,11 @@ applyTheme(localStorage.getItem("themis-theme") || "enterprise");
 
 let WHO = "operator"; // filled by /whoami; becomes actor_id / proposer_id on decisions
 let CAN_WRITE = true; // D11: the proxy is the enforcement; this greying is the courtesy
+/* Nobody is admin until an ANSWER says so. It starts false, not true, so a read-scoped
+   operator never sees the Admin link flash into view while /whoami is in flight — the
+   server refuses the routes either way, but a control that appears and then vanishes reads
+   as a permission being taken away. */
+let IS_ADMIN = false;
 
 (async () => {
   try {
@@ -102,11 +107,64 @@ let CAN_WRITE = true; // D11: the proxy is the enforcement; this greying is the 
     $("#user-initials").textContent = user.split(/[\s._-]+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "·";
     if (Array.isArray(j.scopes)) {
       // Scopes only exist on an authenticated session — that is when sign-out means something.
+      IS_ADMIN = j.scopes.includes("admin");
       $("#user-chip").title = `Signed in as ${user} (${j.scopes.join(", ") || "no scopes"})`;
       $("#logout-form").style.display = "";
     }
+    refreshAdminChrome();
   } catch { $("#user-name").textContent = "operator"; $("#user-initials").textContent = "OP"; }
 })();
+
+/* ---------- the dashboard's own administration (EDR-GUI-01 D3 amendment 2026-10-12) ----------
+   These two routes are the only ones the DASHBOARD answers itself: no node owns the GUI's
+   login table, so there is nothing to proxy them to. They keep the /api/… prefix so the page
+   has one URL shape, but each uses a plain fetch rather than apiGET/apiPOST, because those
+   two turn a 401 into "the session is gone, go to /login" — correct for a node route, wrong
+   here, where a 401 means "that is not your current password". */
+
+let ADMIN_STATUS = null; // {auth_enabled, is_default_password} — null until first read
+
+/* The status read has its own fetch rather than apiGET so the three answers stay
+   distinguishable: 403 means "you are not an admin" (a fact about the session), while a
+   network or server failure means "we do not know" — and the tab must say different things
+   about those two. A status we could not read asserts nothing. */
+async function loadAdminStatus() {
+  try {
+    const r = await fetch("/api/dashboard/admin/status", { headers: { Accept: "application/json" } });
+    if (r.status === 401) { sessionGone(); ADMIN_STATUS = null; return ADMIN_STATUS; }
+    if (r.status === 403) { ADMIN_STATUS = { forbidden: true }; return ADMIN_STATUS; }
+    ADMIN_STATUS = r.ok ? await r.json() : null;
+  } catch {
+    ADMIN_STATUS = null;
+  }
+  return ADMIN_STATUS;
+}
+
+/* The change-password POST needs its OWN fetch rather than apiPOST: apiPOST reads a 401 as
+   "the session is gone — go to /login", which is right for every node route, but here a 401
+   means "that is not your current password". Logging an operator out over a typo would be
+   absurd, so this one route reads its own status codes. */
+async function postAdminPassword(body) {
+  return fetch("/api/dashboard/admin/password", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/* The two pieces of chrome the Admin feature owns, both decided from one status read.
+   The rail link is visible for an admin-scope session — or, when auth is DISABLED, for
+   everyone, because then the tab's whole job is to say there is no sign-in and no password
+   here. The topbar notice is plain and persistent: it has to still be there the next time
+   somebody looks, so it is not a toast. */
+async function refreshAdminChrome() {
+  const s = await loadAdminStatus();
+  const authOff = !!(s && s.auth_enabled === false);
+  const rail = $("#rail-admin");
+  if (rail) rail.hidden = !(IS_ADMIN || authOff);
+  const notice = $("#default-pw-notice");
+  if (notice) notice.hidden = !(IS_ADMIN && s && s.auth_enabled && s.is_default_password);
+}
 
 /* ---------- chips & mappings ---------- */
 
@@ -1252,6 +1310,103 @@ async function viewFeeds() {
   }
 }
 
+/* --- Admin: the dashboard's own sign-in --- */
+
+async function viewAdmin() {
+  setRail("admin");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "Admin" }]);
+  loading("admin");
+
+  const s = await loadAdminStatus();
+  if (s && s.forbidden) {
+    // A fact about the session, not a failure: the server said no, and said why.
+    main.innerHTML = `<div class="card">
+        <h2 class="card-title">Admin</h2>
+        <p class="card-sub">This tab administers the dashboard itself and is restricted to
+          <b>admin-scope</b> operators. Your session is signed in as
+          <span class="mono">${esc(WHO)}</span> without that scope, so there is nothing here for you —
+          and the routes behind it refuse the request, not just the page.</p>
+      </div>`;
+    return;
+  }
+  if (!s) {
+    main.innerHTML = `<div class="err">The dashboard could not read its own admin status. Reload the page; if it persists, check the dashboard node's log.</div>`;
+    return;
+  }
+  if (!s.auth_enabled) {
+    // No auth DSN: there is no sign-in and therefore no password to change. Say so rather
+    // than offering a form with nothing behind it.
+    main.innerHTML = `
+      <div class="card">
+        <h2 class="card-title">Sign-in</h2>
+        <p class="card-sub">Authentication is <b>disabled</b> on this dashboard, so there is no login and no
+          password to change. Every visitor reaches the GUI directly and acts as
+          <span class="mono">${esc(WHO)}</span>.</p>
+        <p class="card-sub">To require sign-in, set <span class="mono">THEMIS_AUTH_DATABASE_DSN</span> on the
+          dashboard node and restart it: operators then sign in with a username and password (or their own
+          API key), and this tab gains the change-password form. Beyond a firewalled network, front the
+          dashboard with a TLS-terminating proxy (EDR-GUI-01 D3).</p>
+      </div>`;
+    return;
+  }
+
+  main.innerHTML = `
+    ${s.is_default_password ? `<div class="notice" id="pw-default-banner"><b>The default password is still in use.</b>
+      This deployment's <span class="mono">admin</span> account holds the password it shipped with.
+      Change it below.</div>` : ""}
+    <div class="card">
+      <h2 class="card-title">Change the dashboard password</h2>
+      <p class="card-sub">This is the password for signing in to this GUI — the dashboard's own account,
+        stored only as a bcrypt hash and owned by no node. Changing it signs out every other browser
+        signed in as the same user; this one stays signed in. There are no complexity requirements.
+        Operators who sign in with their own API key change nothing here — they rotate the key with
+        <span class="mono">authadmin</span>.</p>
+      <form class="form-grid" id="pw-form" autocomplete="off">
+        <label>Current password
+          <input type="password" id="pw-current" autocomplete="current-password" required></label>
+        <label>New password
+          <input type="password" id="pw-new" autocomplete="new-password" required></label>
+        <label>Confirm new password
+          <input type="password" id="pw-confirm" autocomplete="new-password" required></label>
+        <div><button class="btn btn-primary" type="submit" id="pw-submit">Change password</button></div>
+      </form>
+      <div id="pw-outcome"></div>
+    </div>`;
+
+  const outcome = $("#pw-outcome");
+  $("#pw-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const current = $("#pw-current").value;
+    const next = $("#pw-new").value;
+    const confirm = $("#pw-confirm").value;
+    // The browser checks the obvious two so a typo costs no round trip; the SERVER checks
+    // both again, because it is the only side that cannot be skipped.
+    if (!next) { outcome.innerHTML = `<div class="err">The new password cannot be empty.</div>`; return; }
+    if (next !== confirm) { outcome.innerHTML = `<div class="err">The new password and its confirmation differ.</div>`; return; }
+
+    const btn = $("#pw-submit");
+    btn.disabled = true;
+    outcome.innerHTML = `<div class="loading"><span class="spin"></span>Changing the password…</div>`;
+    try {
+      const r = await postAdminPassword({ current, new: next, confirm });
+      if (r.status !== 204) {
+        outcome.innerHTML = `<div class="err">${esc(await problemDetail(r))}</div>`;
+        return;
+      }
+      $("#pw-form").reset();
+      outcome.innerHTML = `<div class="notice"><b>Password changed.</b> Any other browser signed in as this
+        user has been signed out. Use the new password next time you sign in.</div>`;
+      await refreshAdminChrome();
+      const banner = $("#pw-default-banner");
+      if (banner) banner.remove(); // the default-password warning is spent
+    } catch (e) {
+      outcome.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 /* --- The in-browser scanner-report translators are GONE (EDR-INTAKE-01 D4).
    They lived here as EDR-GUI-01 D16: one pure translate function per tool, run in
    the browser, so the server never learned a vendor dialect. D4 reverses that for
@@ -1955,6 +2110,7 @@ function route() {
   if (h.startsWith("#/sbom")) return viewSBOM();
   if (h.startsWith("#/compare")) return viewCompare();
   if (h.startsWith("#/feeds")) return viewFeeds();
+  if (h.startsWith("#/admin")) return viewAdmin();
   return viewOverview();
 }
 

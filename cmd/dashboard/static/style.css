@@ -403,10 +403,12 @@ mark.unverified {
 
 .form-grid { display: grid; gap: 12px; max-width: 560px; }
 .form-grid label { font-size: 12px; font-weight: 600; color: var(--ink2); display: grid; gap: 5px; }
-.form-grid select, .form-grid input[type="file"], .form-grid input[type="date"], .form-grid textarea {
+.form-grid select, .form-grid input[type="file"], .form-grid input[type="date"],
+.form-grid input[type="text"], .form-grid input[type="password"], .form-grid textarea {
   font-family: var(--sans); resize: vertical;
 }
-.form-grid select, .form-grid input[type="file"], .form-grid input[type="date"], .form-grid textarea {
+.form-grid select, .form-grid input[type="file"], .form-grid input[type="date"],
+.form-grid input[type="text"], .form-grid input[type="password"], .form-grid textarea {
   font: inherit; color: var(--ink); background: var(--page);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
 }
@@ -418,6 +420,15 @@ mark.unverified {
 .empty { padding: 26px; text-align: center; color: var(--ink2); font-size: 13px; }
 .empty b { display: block; color: var(--ink); margin-bottom: 4px; }
 .err { padding: 14px; border: 1px solid var(--st-crit); border-radius: 8px; color: var(--st-crit); font-size: 13px; }
+/* A standing statement of fact, not an error and not a toast: it has to still be there the
+   next time somebody looks (the default-password notice, and the confirmation after it). */
+.notice { padding: 14px; border: 1px solid var(--st-warn); border-radius: 8px; color: var(--ink); font-size: 13px; line-height: 1.55; }
+.notice b { color: var(--st-warn); }
+.pw-notice {
+  font-size: 12px; font-weight: 600; color: var(--st-warn);
+  border: 1px solid var(--st-warn); border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
+.pw-notice:hover { background: var(--hover); }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -2px; }
 @keyframes rot { to { transform: rotate(360deg); } }
 .loading { color: var(--ink2); font-size: 13px; display: flex; gap: 8px; align-items: center; padding: 18px; }
