@@ -17,11 +17,16 @@ type fakeResolver struct {
 	id  string
 	err error
 
+	calls                                            int
 	gotProduct, gotProject, gotVersion, gotReleaseID string
+	gotCreateRelease                                 bool
+	gotConfined                                      bool
 }
 
-func (f *fakeResolver) Resolve(_ context.Context, product, project, version, releaseID string) (string, error) {
-	f.gotProduct, f.gotProject, f.gotVersion, f.gotReleaseID = product, project, version, releaseID
+func (f *fakeResolver) Resolve(_ context.Context, req app.ResolveRequest) (string, error) {
+	f.calls++
+	f.gotProduct, f.gotProject, f.gotVersion, f.gotReleaseID = req.Product, req.Project, req.Version, req.ReleaseID
+	f.gotCreateRelease, f.gotConfined = req.CreateRelease, req.Confined()
 	return f.id, f.err
 }
 
@@ -134,6 +139,192 @@ func (rig *intakeRig) assertRefused(t *testing.T, r *domain.Receipt, want domain
 	}
 	if rig.registrar.calls != 0 {
 		t.Errorf("a refused intake wrote: %d register call(s)", rig.registrar.calls)
+	}
+}
+
+// ---- step 0: the parameters (EDR-INTAKE-01 B2/B5, B7's step 1) -------------------
+
+// TestCreateReleaseWithReleaseIDIsRefused — the caller named the release two ways and
+// intake will not guess which one it meant (B2, status row 5).
+func TestCreateReleaseWithReleaseIDIsRefused(t *testing.T) {
+	rig := newRig(1 << 20)
+	r := rig.intake(t, app.IntakeCommand{
+		Body:          []byte(`[{"vulnerability_id":"CVE-1"}]`),
+		ReleaseID:     "rel-1",
+		CreateRelease: true,
+		Product:       "OAMP", Project: "oamp-core", Version: "R1917.256",
+	})
+	rig.assertRefused(t, r, domain.ReasonCreateReleaseConflict)
+	if rig.resolver.calls != 0 {
+		t.Error("a request refused on its parameters resolved a release; step 1 is side-effect-free and comes first")
+	}
+}
+
+// TestCreateReleaseNeedsTheWholeTriple — a partial name is not something a version can
+// be created from, so it is a malformed request (B2, status row 6). Each part is
+// checked on its own, because "the triple is incomplete" asserted once would pass with
+// two of the three branches missing.
+func TestCreateReleaseNeedsTheWholeTriple(t *testing.T) {
+	for _, tc := range []struct{ name, product, project, version string }{
+		{"no product", "", "oamp-core", "R1917.256"},
+		{"no project", "OAMP", "", "R1917.256"},
+		{"no version", "OAMP", "oamp-core", ""},
+		{"nothing at all", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newRig(1 << 20)
+			r := rig.intake(t, app.IntakeCommand{
+				Body:          []byte(`[{"vulnerability_id":"CVE-1"}]`),
+				CreateRelease: true,
+				Product:       tc.product, Project: tc.project, Version: tc.version,
+			})
+			rig.assertRefused(t, r, domain.ReasonIncompleteReleaseTriple)
+			if rig.resolver.calls != 0 {
+				t.Error("an incomplete triple reached resolution")
+			}
+		})
+	}
+}
+
+// TestIncompleteTripleWithoutCreateReleaseIsUnchanged — the other half of B2's note on
+// rows 5-6 versus row 4: WITHOUT `create_release` a partial name is a lookup, and "not
+// found" is the honest answer, so it keeps today's `unknown_release` and does NOT
+// become a parameter fault. No existing response moves.
+func TestIncompleteTripleWithoutCreateReleaseIsUnchanged(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.resolver.err = domain.Reject(domain.ReasonUnknownRelease,
+		`name the release either by release_id or by the whole {product, project, version} triple`)
+
+	r := rig.intake(t, app.IntakeCommand{
+		Body:    []byte(`[{"vulnerability_id":"CVE-1"}]`),
+		Product: "OAMP", Version: "R1917.256", // no project
+	})
+	rig.assertRefused(t, r, domain.ReasonUnknownRelease)
+	if rig.resolver.calls != 1 {
+		t.Error("the partial triple never reached resolution; without create_release it is a lookup, not a malformed request")
+	}
+}
+
+// TestBuildIDOverTheBoundIsRefusedNotTruncated — B5. The assertion is two-part: the
+// refusal names `build_id_invalid`, and NOTHING was filed, because the alternative a
+// reviewer should worry about is not a wrong status code but a silently shortened
+// provenance value landing on an evidence row.
+func TestBuildIDOverTheBoundIsRefusedNotTruncated(t *testing.T) {
+	rig := newRig(1 << 20)
+	tooLong := strings.Repeat("a", 257)
+
+	r := rig.intake(t, app.IntakeCommand{
+		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), ReleaseID: "rel-1", BuildID: tooLong,
+	})
+	rig.assertRefused(t, r, domain.ReasonBuildIDInvalid)
+	if !strings.Contains(r.Detail(), "257") || !strings.Contains(r.Detail(), "never truncated") {
+		t.Errorf("detail = %q, want it to state the count and that nothing was truncated", r.Detail())
+	}
+}
+
+// TestBuildIDBoundCountsCodePointsNotBytes — the UNIT is the decision (B5): 256 is the
+// number OpenAPI's `maxLength` counts, so the check is `utf8.RuneCountInString`, never
+// `len`. 256 x "é" is 512 bytes and is ACCEPTED; `len` would refuse it, and the spec
+// and the code would disagree about what "256" means.
+func TestBuildIDBoundCountsCodePointsNotBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		buildID  string
+		accepted bool
+	}{
+		{"256 two-byte code points (512 bytes)", strings.Repeat("é", 256), true},
+		{"257 two-byte code points", strings.Repeat("é", 257), false},
+		{"256 ASCII", strings.Repeat("a", 256), true},
+		{"257 ASCII", strings.Repeat("a", 257), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newRig(1 << 20)
+			r := rig.intake(t, app.IntakeCommand{
+				Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), ReleaseID: "rel-1", BuildID: tc.buildID,
+			})
+			if tc.accepted {
+				if r.Status() != domain.ReceiptFiled {
+					t.Fatalf("status = %q (reason=%q detail=%q), want filed", r.Status(), r.Reason(), r.Detail())
+				}
+				return
+			}
+			rig.assertRefused(t, r, domain.ReasonBuildIDInvalid)
+		})
+	}
+}
+
+// TestBuildIDInvalidUTF8IsRefused — a code-point count of malformed bytes is not a
+// defined quantity, so the same reason refuses it (B5). Repaired would be worse:
+// provenance is the worst place to discover a silent rewrite.
+func TestBuildIDInvalidUTF8IsRefused(t *testing.T) {
+	rig := newRig(1 << 20)
+	r := rig.intake(t, app.IntakeCommand{
+		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), ReleaseID: "rel-1", BuildID: "build-" + string([]byte{0xff}),
+	})
+	rig.assertRefused(t, r, domain.ReasonBuildIDInvalid)
+	if !strings.Contains(r.Detail(), "UTF-8") {
+		t.Errorf("detail = %q, want it to say which of the two faults it is", r.Detail())
+	}
+}
+
+// TestParameterValidationPrecedesTheSizeBound — B7's first stated consequence, as a
+// test so the order is a decision rather than an accident of code layout. Both halves
+// matter: the new parameter wins over the bound, AND a request using no new parameter
+// still reports `payload_too_large`, so no existing answer moved.
+func TestParameterValidationPrecedesTheSizeBound(t *testing.T) {
+	oversized := []byte(strings.Repeat("x", 64))
+
+	t.Run("an oversized body with a malformed build_id reports the build_id", func(t *testing.T) {
+		rig := newRig(8)
+		r := rig.intake(t, app.IntakeCommand{Body: oversized, ReleaseID: "rel-1", BuildID: strings.Repeat("é", 257)})
+		rig.assertRefused(t, r, domain.ReasonBuildIDInvalid)
+	})
+
+	t.Run("an oversized body with no new parameter still reports the bound", func(t *testing.T) {
+		rig := newRig(8)
+		r := rig.intake(t, app.IntakeCommand{Body: oversized, ReleaseID: "rel-1"})
+		rig.assertRefused(t, r, domain.ReasonPayloadTooLarge)
+	})
+}
+
+// TestTheCallersProductAuthorityReachesResolution — authorization happens at the step
+// the resolved product is known (B7's step 4), so what this ring owes it is the
+// caller's confinement, unchanged, on BOTH roads. A nil authorizer is the explicit
+// statement that none applies (`admin`, or an auth-disabled node).
+func TestTheCallersProductAuthorityReachesResolution(t *testing.T) {
+	body := []byte(`[{"vulnerability_id":"CVE-1"}]`)
+
+	rig := newRig(1 << 20)
+	rig.intake(t, app.IntakeCommand{Body: body, ReleaseID: "rel-1"})
+	if rig.resolver.gotConfined {
+		t.Error("a command with no authorizer was reported as confined; nil means no confinement applies")
+	}
+
+	rig = newRig(1 << 20)
+	rig.intake(t, app.IntakeCommand{
+		Body: body, ReleaseID: "rel-1",
+		Authorize: func(string) bool { return true },
+	})
+	if !rig.resolver.gotConfined {
+		t.Error("the caller's product confinement did not reach resolution")
+	}
+}
+
+// TestCreateReleaseReachesResolutionAndChangesNothingYet — with the whole triple,
+// `create_release=true` is carried to resolution and resolution stays READ-ONLY: a
+// version that does not exist is still `unknown_release`. The find-or-create is a
+// later step, deliberately after every border check (design §3).
+func TestCreateReleaseReachesResolutionAndChangesNothingYet(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.resolver.err = domain.Reject(domain.ReasonUnknownRelease, `no release version named "R1917.256" is registered`)
+
+	r := rig.intake(t, app.IntakeCommand{
+		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), CreateRelease: true,
+		Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+	})
+	rig.assertRefused(t, r, domain.ReasonUnknownRelease)
+	if !rig.resolver.gotCreateRelease {
+		t.Error("create_release did not reach resolution")
 	}
 }
 

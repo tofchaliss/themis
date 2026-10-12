@@ -474,3 +474,12 @@ func (v registrySubjectRef) ReleaseIDByVersion(ctx context.Context, projectID, v
 	}
 	return "", nil
 }
+
+// ProductOfRelease is the upward hop both Evidence doors authorize a product-scoped key
+// against (EDR-INTAKE-01 B7), delegated to the registry's own query exactly as
+// cmd/evidence does. This pipeline runs with auth disabled, so nothing asks it here —
+// it is wired because the seam is one interface and a hole in it would only show up on
+// a node where auth is ON.
+func (v registrySubjectRef) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
+	return v.store.ProductOfRelease(ctx, releaseID)
+}

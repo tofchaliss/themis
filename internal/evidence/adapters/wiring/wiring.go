@@ -74,7 +74,11 @@ func EvidenceAPI(cfg Config) (http.Handler, *store.Store, *evhttp.Intake) {
 	intakeSvc := app.NewIntakeService(cfg.Intake.MaxBytes, subjectref.NewResolver(cfg.Registry), st, report.Port{}, svc)
 	intake := evhttp.NewIntake(intakeSvc, st, svc, cfg.Intake, cfg.Logger)
 
-	return evhttp.NewHandler(svc).WithIntake(intake).Router(), st, intake
+	// The same read seam also answers "which product owns this release", which is
+	// what `POST /evidence` authorizes a product-scoped key against (EDR-INTAKE-01
+	// B7) — one seam again, because two wirings of the same question invite them to
+	// disagree.
+	return evhttp.NewHandler(svc).WithIntake(intake).WithReleaseOwnership(cfg.Registry).Router(), st, intake
 }
 
 // --- adapter bridges (concrete adapters -> app ports) ----------------------

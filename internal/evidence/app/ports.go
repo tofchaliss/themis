@@ -72,6 +72,49 @@ type Clock interface {
 	Now() time.Time
 }
 
+// ProductAuthorizer answers ONE question for ONE request: may the caller act on this
+// product? (EDR-INTAKE-01 B3, EDR-SECURITY-01 D4.)
+//
+// It is a function rather than a port because the answer belongs to a CREDENTIAL, and
+// this ring never reads one: the edge that authenticated the request supplies the
+// decision (`auth.Principal.AuthorizeProduct`), and the app only asks it at the step
+// the order requires. That keeps `internal/platform/auth` out of the app ring while
+// the authorization still happens where the resolved product is known.
+//
+// It travels ON the command, not on the context, so the slow path authorizes too: an
+// overflowed intake is retried on a worker whose context is detached from the request,
+// and a confinement that lived on the request context would silently widen to admin
+// exactly when nobody is watching.
+type ProductAuthorizer func(productID string) bool
+
+// ResolveRequest is one release-resolution question: the two roads that can name a
+// release, plus the caller's product authority so resolution can authorize at the
+// step B7 puts it — between the product lookup and the project lookup.
+type ResolveRequest struct {
+	// Product, Project and Version name the release by its triple; ReleaseID names
+	// it directly and wins.
+	Product   string
+	Project   string
+	Version   string
+	ReleaseID string
+	// CreateRelease is the caller's `create_release=true` (B2). Resolution is
+	// read-only and does not act on it: it is carried so the resolver can report
+	// what the caller asked for, and the find-or-create itself happens after every
+	// border check rather than inside resolution.
+	CreateRelease bool
+	// Authorize is the caller's product confinement, or NIL when there is none —
+	// which is the posture of an `admin` key and of an auth-disabled node (B3). The
+	// edge decides which of the two applies, because it is the only ring that may
+	// read a credential; [ResolveRequest.Confined] is how resolution asks.
+	Authorize ProductAuthorizer
+}
+
+// Confined reports whether the caller is restricted to particular products. When it
+// is false the ownership reads are skipped entirely — an admin never pays for a
+// lookup whose answer cannot change the outcome, and an auth-disabled node has no
+// identity to confine.
+func (r ResolveRequest) Confined() bool { return r.Authorize != nil }
+
 // ReleaseResolver resolves the release an intake names — either directly by
 // `release_id`, or by the {product, project, version} triple — and returns the
 // canonical release id (EDR-INTAKE-01 D7).
@@ -84,8 +127,11 @@ type Clock interface {
 //
 // An unresolvable release is reported with [domain.Reject] carrying
 // [domain.ReasonUnknownRelease] and a detail naming which of the three was not found.
+// A caller refused for authorization is reported with [domain.ReasonUnauthorized] and
+// a detail that is the SAME for every outcome a product-scoped key must not
+// distinguish (B3) — stating the rule, never the estate.
 type ReleaseResolver interface {
-	Resolve(ctx context.Context, product, project, version, releaseID string) (string, error)
+	Resolve(ctx context.Context, req ResolveRequest) (string, error)
 }
 
 // InventoryReader answers D6's precondition: does an Evidence document of

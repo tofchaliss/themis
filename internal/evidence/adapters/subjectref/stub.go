@@ -44,3 +44,11 @@ func (s *Stub) ProjectIDByName(context.Context, string, string) (string, error) 
 
 // ReleaseIDByVersion finds nothing: the stub holds no names.
 func (s *Stub) ReleaseIDByVersion(context.Context, string, string) (string, error) { return "", nil }
+
+// ProductOfRelease finds nothing: the stub holds release ids, not the estate graph
+// above them. The consequence is deliberate and FAIL-CLOSED — on a node wired with
+// the stub, a `product:<id>` key is refused even for a release in the allow-set,
+// because the stub cannot establish who owns it, and an unverifiable confinement is
+// not a confinement (EDR-INTAKE-01 B7). An `admin` key and an auth-disabled node are
+// unaffected: neither asks this question.
+func (s *Stub) ProductOfRelease(context.Context, string) (string, error) { return "", nil }

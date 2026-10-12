@@ -207,7 +207,7 @@ intake can create one.
   `store_integration_test.go` — `TestBuildIDPersistsAndReadsBack` and
   `TestBuildIDMigrationReversible` (up → down → up, existing rows intact).
 
-- [ ] **2.4 — Parameter validation: exclusivity, completeness, the bound.**
+- [x] **2.4 — Parameter validation: exclusivity, completeness, the bound.**
   `internal/evidence/app/intake.go` (step 1 of EDR B7 / design §3): `create_release=true` **with**
   `release_id` → `create_release_conflict` (400); `create_release=true` without all three of
   `{product, project, version}` → `incomplete_release_triple` (400); `build_id` over **256 Unicode
@@ -223,6 +223,16 @@ intake can create one.
   `TestParameterValidationPrecedesTheSizeBound` — an oversized body with a 257-code-point `build_id`
   reports `build_id_invalid`, and an oversized body with **no** new parameter still reports
   `payload_too_large` (no existing answer moves).
+  **On implementation (2026-10-12):** the check is `IntakeCommand.ParameterRefusal()` in
+  `internal/evidence/app/intake.go`, and it is applied in **two** places — step 0 of `Intake`, and
+  the HTTP edge before `io.ReadAll`. One implementation, two call sites, for the same reason the
+  size bound is checked twice: only the edge can refuse before the body is buffered, and a
+  parameter fault discovered after a 60 MB read is reported on the wrong thing. The app tests carry
+  the names above; the edge's enforcement is pinned separately in
+  `internal/evidence/adapters/http/intake_test.go` (`TestIntakeParameters_*`), because
+  `TestParameterValidationPrecedesTheSizeBound` in the app ring cannot see the `MaxBytesReader`.
+  `IntakeCommand` gained `CreateRelease` and `BuildID` here (validation needs the values); plumbing
+  `BuildID` onto the provenance and the receipt stays 2.7's.
 
 - [ ] **2.5 — The `ReleaseProvisioner` port and the deferred create.**
   New port in `internal/evidence/app/ports.go` — `FindOrCreateRelease(ctx, projectID, version)
@@ -236,7 +246,7 @@ intake can create one.
   `TestFirstFailureStillWins` — an invalid-and-early report reports `schema_invalid`, not a
   release-creation reason (D5 precedence, unchanged).
 
-- [ ] **2.6 — The authorization order, and the non-leak property.**
+- [x] **2.6 — The authorization order, and the non-leak property.**
   `internal/evidence/adapters/http/intake.go` + `app`: authenticate → resolve the product by name →
   **`auth.Principal.AuthorizeProduct(productID)`** → resolve the project → (2.5's create). The three
   product-lookup outcomes a `product:<P>` key must not distinguish — resolves elsewhere, resolves
@@ -248,8 +258,30 @@ intake can create one.
   `TestAuthorizationPrecedesTheProjectLookup` — a fake project lookup that records calls is **never
   called** for an unauthorized key; `TestAuthDisabledNodeTreatsTheCallerAsAdmin`;
   `TestReadAndCallbackScopesAreRefusedByTheWriteFloor`.
+  **On implementation (2026-10-12), three decisions a reviewer should see:**
+  (1) **Where the check runs.** The edge reads the principal (only adapters may) and carries the
+  decision as `app.ProductAuthorizer` on the command — `nil` meaning "no product confinement
+  applies", which is `admin` and an auth-disabled node. The check itself happens inside resolution
+  (`subjectref.Resolver`), because B7 puts it at step 4: **after** the body is identified (so an
+  unidentifiable body still answers `415`, B7's second stated consequence) and **before** the
+  project lookup. Carrying it on the command rather than on the request context is also what makes
+  the **overflow worker** authorize: its context is detached from the request, so a confinement
+  living on the context would widen to admin exactly when nobody is watching.
+  (2) **The `403` names no receipt.** A fresh `intake_id` per request cannot be byte-identical, so
+  the response that has to be indistinguishable omits it (it is optional in the spec). The attempt
+  is still recorded — D9 is unchanged, and the log carries the key id — and the shape matches the
+  middleware's own `403` (row 2), which is the same class of answer.
+  (3) **`unauthorized` maps to `403`, not `401`.** Nothing produced the reason before this change
+  (a missing key is the middleware's own `401`, which carries no reason), so no existing response
+  moves; rows 2/8-10/17-18 all read `403 unauthorized`.
+  **One gap left open deliberately, for Group 3 (3.3) or a follow-up:** `api/evidence.openapi.yaml`
+  lists `401` but no **`403`** response on `POST /intake`, and neither on `POST /evidence`. Both
+  doors can now answer `403` (the body shape is the already-declared `IntakeProblem` / `Problem`, so
+  nothing about the schemas changes). Adding the two response entries is additive and needs
+  `make generate-api-evidence`; it was left out of this step because the step was scoped to carry no
+  spec change.
 
-- [ ] **2.6b — Authorization on the `release_id` path, on both doors (EDR B7).**
+- [x] **2.6b — Authorization on the `release_id` path, on both doors (EDR B7).**
   Add the read `ProductOfRelease(releaseID) (productID string, err error)` to `subjectref.Registry`
   (delegating to Registry's store through `cmd/evidence`'s `registryReader`); intake's step 4 on the
   `release_id` path loads the owning product and calls `AuthorizeProduct`. A `product:<P>` key gets
@@ -261,6 +293,15 @@ intake can create one.
   `TestProductKeyCannotDistinguishForeignFromMissingReleaseID` — the two `403`s equal as bytes;
   `TestAdminStillGets404ForAMissingReleaseID`; `TestProductKeyFilesAgainstItsOwnRelease`; and the
   architecture assertion of 2.10 still sees exactly one **write** on the seam.
+  **On implementation (2026-10-12):** the seam gained a READ only — 2.5's write is not landed yet,
+  so the seam currently exposes **zero** writes and 2.10's assertion has nothing to contradict.
+  `POST /evidence` is authorized at its own edge (`Handler.authorizeRelease`, Governance's
+  `authorizeGovernanceWrite` shape): no principal or `admin` passes with **no Registry read at
+  all**, so that door's pre-existing answers — including the `422 unknown subject release` an
+  unknown release has always returned there, which is NOT intake's `404` — are untouched. It
+  "gains only the ownership check", as B7 says. The check is **fail-closed**: an unreadable seam,
+  an unwired seam (`subjectref.Stub`, which knows no products) and an unknown release are all the
+  same `403` for a confined key.
 
 - [ ] **2.7 — `build_id` captured and echoed.** Plumb `build_id` from the query into
   `Provenance.BuildID` and onto the receipt (both the synchronous response and `GET

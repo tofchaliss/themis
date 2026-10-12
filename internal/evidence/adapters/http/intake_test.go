@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -296,7 +298,11 @@ func TestIntakeReasonToHTTPStatus_CoversTheWholeTaxonomy(t *testing.T) {
 		domain.ReasonDuplicateOtherRelease:  http.StatusConflict,
 		domain.ReasonPayloadTooLarge:        http.StatusRequestEntityTooLarge,
 		domain.ReasonTooManyRecords:         http.StatusRequestEntityTooLarge,
-		domain.ReasonUnauthorized:           http.StatusUnauthorized,
+		// 403, not 401: an unauthenticated request never reaches this handler (the
+		// middleware answers a missing or invalid key itself, with no reason at all),
+		// so what this reason names is a valid key that may not act on the product
+		// the request identifies — EDR-INTAKE-01 B7's rows 8-10 and 17-18.
+		domain.ReasonUnauthorized: http.StatusForbidden,
 		// The 2026-10-12 amendment's four, transcribed from its status-code table.
 		domain.ReasonCreateReleaseConflict:   http.StatusBadRequest,
 		domain.ReasonIncompleteReleaseTriple: http.StatusBadRequest,
@@ -651,6 +657,134 @@ func TestIntakeBodyBound_RefusesBeforeBuffering(t *testing.T) {
 	}
 	if f.runner.callCount() != 0 {
 		t.Error("the use case was called for a body that was refused at the border")
+	}
+}
+
+// --- the parameters, B7's step 1 (EDR-INTAKE-01 B2/B5) ----------------------
+
+// TestIntakeParameters_RefusedAtTheDoor — the three parameter faults, through the
+// door, each refused by name before the use case is ever called. They are 400 and not
+// 422: the REQUEST is malformed (the release named two ways, named partially, or a
+// `build_id` outside the bound), which is a different thing from a document that was
+// read and declined.
+func TestIntakeParameters_RefusedAtTheDoor(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		query  url.Values
+		reason gen.RejectReason
+		wantIn string
+	}{
+		{
+			name: "create_release together with release_id",
+			query: url.Values{
+				"release_id": {"rel-1"}, "create_release": {"true"},
+				"product": {"OAMP"}, "project": {"oamp-core"}, "version": {"R1917.256"},
+			},
+			reason: gen.CreateReleaseConflict, wantIn: "release_id",
+		},
+		{
+			name:   "create_release without the whole triple",
+			query:  url.Values{"create_release": {"true"}, "product": {"OAMP"}, "version": {"R1917.256"}},
+			reason: gen.IncompleteReleaseTriple, wantIn: "triple",
+		},
+		{
+			name:   "a build_id over the bound",
+			query:  url.Values{"release_id": {"rel-1"}, "build_id": {strings.Repeat("a", 257)}},
+			reason: gen.BuildIdInvalid, wantIn: "never truncated",
+		},
+		{
+			name:   "a build_id that is not valid UTF-8",
+			query:  url.Values{"release_id": {"rel-1"}, "build_id": {"run-" + string([]byte{0xff})}},
+			reason: gen.BuildIdInvalid, wantIn: "UTF-8",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeRunner{build: func(cmd app.IntakeCommand) *domain.Receipt {
+				return filed(t, cmd, "sbom", "cyclonedx", "ev-1", true)
+			}}
+			f := newIntakeFixture(t, evhttp.IntakeConfig{}, runner, nil)
+
+			rec := post(t, f.handler, "/intake?"+tc.query.Encode(), `{"bomFormat":"CycloneDX"}`, nil)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+			}
+			p := decodeProblem(t, rec)
+			if p.Reason == nil || *p.Reason != tc.reason {
+				t.Fatalf("reason = %v, want %q", p.Reason, tc.reason)
+			}
+			if !strings.Contains(p.Detail, tc.wantIn) {
+				t.Errorf("detail %q does not say what to fix", p.Detail)
+			}
+			if f.runner.callCount() != 0 {
+				t.Error("the use case ran for a request refused on its parameters; step 1 is side-effect-free")
+			}
+			// Addressable afterwards like every other refusal at this door (D9).
+			if p.IntakeId == nil {
+				t.Fatal("the refusal names no receipt")
+			}
+			if view := readStoredReceipt(t, f.handler, *p.IntakeId); view.Status != "rejected" {
+				t.Errorf("stored receipt = %+v, want a rejected one", view)
+			}
+		})
+	}
+}
+
+// TestIntakeParameters_ValidatedBeforeTheBodyIsBuffered — B7's step 1 before step 2,
+// at the door, where the size bound is actually enforced (the app re-checks the bound,
+// but only this edge can refuse before the body is read). Both halves: the parameter
+// wins over the bound, and a request using NO new parameter still reports
+// `payload_too_large`, so no existing answer moved.
+func TestIntakeParameters_ValidatedBeforeTheBodyIsBuffered(t *testing.T) {
+	oversized := strings.Repeat("x", 4096)
+
+	t.Run("a malformed build_id wins over the bound", func(t *testing.T) {
+		f := newIntakeFixture(t, evhttp.IntakeConfig{MaxBytes: 32}, &fakeRunner{}, nil)
+		q := url.Values{"release_id": {"rel-1"}, "build_id": {strings.Repeat("é", 257)}}
+		rec := post(t, f.handler, "/intake?"+q.Encode(), oversized, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+		}
+		if p := decodeProblem(t, rec); p.Reason == nil || *p.Reason != gen.BuildIdInvalid {
+			t.Errorf("reason = %v, want build_id_invalid", p.Reason)
+		}
+	})
+
+	t.Run("an oversized body with no new parameter still reports the bound", func(t *testing.T) {
+		f := newIntakeFixture(t, evhttp.IntakeConfig{MaxBytes: 32}, &fakeRunner{}, nil)
+		rec := post(t, f.handler, "/intake?release_id=rel-1", oversized, nil)
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413: %s", rec.Code, rec.Body)
+		}
+		if p := decodeProblem(t, rec); p.Reason == nil || *p.Reason != gen.PayloadTooLarge {
+			t.Errorf("reason = %v, want payload_too_large", p.Reason)
+		}
+	})
+}
+
+// TestIntakeParameters_ABuildIDAtTheBoundIsAccepted — the unit is code points (B5), so
+// 256 x "é" (512 bytes) passes the door. `len` would have refused it, and the spec's
+// `maxLength: 256` and the Go check would then disagree about what "256" means.
+func TestIntakeParameters_ABuildIDAtTheBoundIsAccepted(t *testing.T) {
+	var seen app.IntakeCommand
+	runner := &fakeRunner{build: func(cmd app.IntakeCommand) *domain.Receipt {
+		seen = cmd
+		return filed(t, cmd, "sbom", "cyclonedx", "ev-1", true)
+	}}
+	f := newIntakeFixture(t, evhttp.IntakeConfig{}, runner, nil)
+
+	want := strings.Repeat("é", 256)
+	q := url.Values{"release_id": {"rel-1"}, "build_id": {want}, "create_release": {"false"}}
+	rec := post(t, f.handler, "/intake?"+q.Encode(), `{"bomFormat":"CycloneDX"}`, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body)
+	}
+	// Verbatim, because the whole point of refusing rather than truncating is that a
+	// provenance value is the value the caller recorded.
+	if seen.BuildID != want {
+		t.Errorf("build_id reached the use case as %d code points, want %d", utf8.RuneCountInString(seen.BuildID), utf8.RuneCountInString(want))
+	}
+	if seen.CreateRelease {
+		t.Error("create_release=false reached the use case as true")
 	}
 }
 
