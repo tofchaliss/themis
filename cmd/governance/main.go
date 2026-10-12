@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -50,6 +51,7 @@ type config struct {
 	// first, Governance hangs up, the Gateway sees its request context cancelled mid-provider-call
 	// and reports `provider_error` — so a caller-side timeout is misread as an Intelligence fault.
 	intelligenceTimeout time.Duration
+	readAPIKey          string // THEMIS_API_KEY — sent as X-API-Key on the Registry, Knowledge and Evidence READS. Required where those nodes run with auth on, or the reads answer 401 (the release-evaluation worker then never publishes). A read-scoped key is enough. Empty = unauthenticated reads (auth-off dev). Never logged.
 	registryURL         string // THEMIS_REGISTRY_URL — Registry read-API base URL for the blast-radius multiplier (C2); empty ⇒ the multiplier defaults to 1.0 (fail-safe, no estate amplification).
 	knowledgeURL        string // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL feeding the FindingAssessment Domain Projection (EDR-TRUST-01 T10); empty ⇒ the projection carries the Finding alone (fail-safe, no enrichment).
 	evidenceURL         string // THEMIS_EVIDENCE_URL — Evidence read-API base URL for the compare read's evidence-presence guard (EDR-GOVERNANCE-01 D16); empty ⇒ GET /releases/{id}/compare/{candidate} refuses (fail-CLOSED — a compare that cannot verify evidence would over-claim "fixed"). Every other read is unaffected.
@@ -82,6 +84,7 @@ func loadConfig() config {
 		aiEnabled:           os.Getenv("THEMIS_GOVERNANCE_AI_ENABLED") == "1" && os.Getenv("THEMIS_INTELLIGENCE_ENABLED") != "0",
 		intelligenceURL:     envDefault("THEMIS_INTELLIGENCE_URL", "http://localhost:8086"),
 		intelligenceTimeout: envDurationDefault("THEMIS_INTELLIGENCE_TIMEOUT", 60*time.Second),
+		readAPIKey:          strings.TrimSpace(os.Getenv("THEMIS_API_KEY")),
 		registryURL:         envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		knowledgeURL:        envDefault("THEMIS_KNOWLEDGE_URL", "http://localhost:8085"),
 		evidenceURL:         envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
@@ -144,7 +147,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.evidenceURL,
+	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.evidenceURL, cfg.readAPIKey,
 		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold, logger.Component("api"),
 		autoAcceptPolicies(cfg.autoAccept, logger)...)
 
