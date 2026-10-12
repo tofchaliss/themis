@@ -424,6 +424,12 @@ scanner report uploaded before its SBOM currently succeeds and quietly under-mat
 
 ### D7 — Product/Project/Release is resolved read-only; intake never creates identity
 
+> **AMENDED 2026-10-12 — see the amendment "Bot-friendly intake" at the end of this document.**
+> Intake may now **find-or-create the version** (the Release) under an existing Project when the
+> caller passes `create_release=true` with the whole triple. It still **never** creates a Product or
+> a Project, and the default — no `create_release` — is exactly the read-only behaviour described
+> below. Everything in this decision stands except that one bounded widening.
+
 Intake accepts **either** `release_id`, **or** the triple `{product, project, version}` which it
 resolves **read-only** through the Registry seam. An unresolvable triple is refused with
 `reason: unknown_release` and a body naming which of the three was not found.
@@ -551,6 +557,12 @@ reasons asserts "no reason given" for the other nine.
 | `payload_too_large` | 413 | over `THEMIS_INTAKE_MAX_BYTES` (default 64 MiB) |
 | `too_many_records` | 413 | over `THEMIS_INTAKE_MAX_RECORDS` (default 200 000 findings / CSV rows) |
 | `unauthorized` | 401/403 | inbound-edge auth (EDR-SECURITY-01 F1) |
+
+> **AMENDED 2026-10-12.** The enum grows by four — `create_release_conflict` (400),
+> `incomplete_release_triple` (400), `ambiguous_name` (422) and `build_id_invalid` (400) — for the
+> bot-intake amendment at the end of this document. The closed-enum discipline is unchanged: the
+> OpenAPI enum, `TestIntakeReasonTaxonomyIsClosed` and every consumer rendering intake reasons grow
+> in the same change.
 
 `schema_invalid` is the decision that closes the incident: a curated report is validated against the
 `scannerRecord` contract and an SBOM against its CycloneDX/SPDX schema **before** the aggregate is
@@ -681,3 +693,353 @@ Corrected before implementation started, so no code was written against the wron
 
 The reviewer's 20-check contract matrix is adopted as the implementation gate and mapped into
 `openspec/changes/phase3-report-intake/tasks.md` group 6.
+
+**2026-10-12 — Bot-friendly intake: a version may be created, and Registry identity becomes
+idempotent.**
+
+Driver: intake was built for a human with a runbook, and the next caller is a CI bot. A bot knows
+`{product, project, version}` and its own build id; it retries on failure; and it has nowhere to put
+the "register the release first" step. D7 as written forced that step out of band, and it is the one
+part of the identity triple that is **new on every build** — the product and the project are owned by
+a human and already exist, only the version is new. So a bot either carried a second credential and
+a second service to call, or it hard-coded a release UUID a human had captured once, which is how a
+pipeline ends up filing every build against one Release.
+
+The owner's decisions below are **settled and recorded, not re-opened**. They are labelled `B1`–`B6`
+(the amendment-local "decisions 1 to 6") so they can be cited without colliding with `D1`–`D13`.
+
+### B1 (decision 1) — One request uploads ONE artifact
+
+An intake request files **one** artifact: an SBOM **or** a scan report, never both. A bot sends the
+SBOM and the scan report as **two separate requests**, each retried independently. There is no
+multi-artifact transaction and no batch body.
+
+This is a deliberate refusal of the obvious convenience, for two reasons already load-bearing
+elsewhere in this EDR. First, identity: dedup (D3/D8) and the receipt (D9) are both *per
+document*, so a two-artifact request would have two dedup outcomes, two reasons and two evidence ids
+behind one `intake_id` — a receipt that cannot say what happened. Second, retries: the SBOM may
+dedup while the report is refused `schema_invalid`, and a bot retrying "the upload" would have to
+work out which half to resend. Two requests make each half idempotent on its own, which is what a
+retrying caller needs.
+
+**Ordering is unchanged and still matters:** D6's SBOM-before-report rule applies across the two
+requests exactly as it applies across two script invocations today. The SBOM request is the one that
+creates the version (B2); the report request then finds it.
+
+### B2 (decision 2) — `create_release=true`, the triple only, and the exact order of operations
+
+A new query parameter `create_release=true` is accepted **only together with the whole
+`{product, project, version}` triple**. Intake **never** creates a Product or a Project. The order of
+operations is fixed, and the order is the decision:
+
+The **authoritative** sequence is B7 below (revised at the Gate A review); this list is its
+identity part only. Intake authenticates; resolves the existing Product by name (read-only, never a
+create); **authorizes the key against that Product before any further lookup** (B3); resolves the
+existing Project under it (read-only); and, at B7's step 8 — after every border check — finds or
+creates the version through **Registry's own code** (B4's idempotent upsert), then files the
+artifact against the canonical release id.
+
+`create_release=true` **together with `release_id` is `400`**: the caller named the release two ways
+and intake will not guess which one it meant.
+
+**Why this does not re-open D7's rejection of `create_if_missing`.** D7 refused that flag because "a
+typo in a product name [would] silently fork the estate graph". That hazard is specific to the
+**Product and Project** names, which are human-owned, long-lived, and the place a typo creates a
+*parallel estate*. It does not transfer to the version in the same form, but it does not vanish either, and the
+risk is stated rather than minimised (Gate A review, revision 2). **A typo in the version does not
+create a parallel Product or Project, but it can create a separate Release and cause evidence to be
+filed under the wrong version.** Example: the intended version is `R20.1`, the bot sends `R20.l`
+(letter `l`); Themis creates `R20.l`, files the SBOM against it, and Knowledge raises findings under
+that identity — the Release is not inert. The bounded-create decision **accepts that risk** because
+the version is supplied by the CI pipeline, while the Product and Project identities remain
+human-owned and must already exist: a typo in either of those is a **refusal** (steps 2–4), never a
+creation. The pipeline must therefore supply a **validated** version identifier, and **Themis never
+silently corrects or normalizes a version** (no case-folding, no trimming beyond what the URL
+decoder does, no "did you mean"). This adds no version-format validation to this change's scope; it
+makes the accepted risk explicit. The decision D7 rejected was "create whatever is missing"; this
+one is "create the one thing that is new on every build, under identity a human already
+established".
+
+**Where the create happens in the step order, stated because "nothing is created on any refusal"
+(B3) has to hold for the whole request, not just the authorization part.** Resolution stays where it
+is today (step 3 of D5's order), so every existing refusal keeps its existing precedence — an
+invalid-and-early report still reports `schema_invalid`, not something about release creation. The
+**create** is deferred to immediately before the filing step, so a submission refused for
+`schema_invalid`, `source_invalid`, `empty_report`, `no_inventory_for_release` or any other border
+reason creates **nothing**. The honest exception is named rather than hidden: `duplicate_other_release`
+is discovered by the database **at the insert**, so it is the one refusal that can follow a create.
+The created version is retained (it is a legitimate Release that simply has no evidence yet), and a
+corrected retry reuses it, because the create is idempotent.
+
+**Consequence worth stating for the bot author:** a scan report sent with `create_release=true` for a
+version that does not yet exist is refused `no_inventory_for_release` (D6) **before** the version is
+created — correctly, because D6's point is that a report needs an inventory to be recorded against.
+With B1's two requests this never bites: the SBOM request creates the version, the report request
+finds it. A standalone report still works with `allow_without_sbom: true`, and then the version is
+created.
+
+**The architectural cost, named.** D7's note that "a write from Evidence into Registry is neither an
+event nor a read" was correct and is not retracted — it is narrowed, with what replaces the wall
+stated explicitly:
+
+- the write is **one operation** that can create a version and nothing else; it is structurally
+  incapable of creating a Product or a Project;
+- it is **idempotent and enforced by Registry's own database constraints** (B4), so Registry — not
+  Evidence — remains the authority on what "one Release" means;
+- it is reachable **only through the `cmd/evidence` composition root's seam**, which already wires
+  both rings for the read side (`registryReader`), carries primitives only, and gains exactly one
+  method. An architecture test asserts the seam exposes no other write.
+
+*Rejected:* having intake publish an event for Registry to act on (the release id is needed
+synchronously, in this request, to file the document — an eventual create cannot answer it); having
+the bot call Registry itself (that is the step a bot has nowhere to put, which is the whole driver);
+`create_if_missing` for products and projects (D7's refusal, unchanged).
+
+### B3 (decision 3) — Authorization must not leak existence
+
+A `product:<id>` key naming **any** product other than its own gets the **same `403`** — whether
+that product exists, does not exist, or is ambiguous. Only an **`admin`** key is told
+`404 unknown_release` for a missing Product or Project. **Nothing is created on any refusal.**
+
+This is the non-leak rule stated as a property rather than as a list of cases: for a product-scoped
+key, every outcome of step 2 that is not "resolves to exactly my own product" is indistinguishable.
+Otherwise intake becomes a product-name oracle for any holder of any product key — ask for
+`{product: "acquisition-target", …}` and read the status code.
+
+Three details follow from it, and each is a way the rule could be lost in implementation:
+
+- **The authorization check is step 3, before the Project lookup.** Putting it after would leak
+  project existence under a product the key may not see, by the same oracle.
+- **Once a key is authorized for the Product, it gets the same answers an admin would** for the
+  Project and the version — `404 unknown_release`, `422 ambiguous_name`, everything. There is
+  nothing left to leak: the key already holds authority over that product.
+- **`ambiguous_name` and `unknown_release` are admin-or-authorized answers only.** A product-scoped
+  key that names someone else's product gets `403` even when the real answer is "that name matches
+  two products".
+
+**On an auth-disabled node** (`THEMIS_AUTH_DATABASE_DSN` unset) there is no principal, so intake
+treats the caller as `admin` — the same posture every other route on that node already has, and the
+reason `THEMIS_AUTH_REQUIRED=1` exists. `create_release` does not change the auth switch.
+
+This also **closes part of EDR-SECURITY-01 D4's deferral** for the Evidence write surface, in the
+same shape as EDR-DELIVERY-01 N-M0 closed it for Governance: a route that can resolve its resource
+to a product authorizes `admin` or that product explicitly, fail-closed, instead of resting on the
+method-based `AuthorizeWrite` floor. The existing `release_id` road keeps the floor it has today —
+widening it is a separate decision and is **not** taken here.
+
+### B4 (decision 4) — Registry uniqueness is enforced by the DATABASE, never by check-then-insert
+
+| level | uniqueness |
+| --- | --- |
+| products | unique on `lower(name)` |
+| projects | unique on `(product_id, lower(name))` |
+| releases | unique on `(project_id, version)` — **exact**, not case-folded |
+
+Registry's create-product, create-project and create-release become **idempotent find-or-create**:
+`INSERT … ON CONFLICT` on those constraints, `200` when the row already existed and `201` when it was
+created, so **two concurrent callers get one row**. This is the same reasoning D3 applied to Evidence
+one paragraph at a time: a `SELECT`-then-`INSERT` is a time-of-check / time-of-use race, and an index
+accelerates a query while a constraint enforces an identity. Two bots building the same version at
+the same moment is the normal case, not the exotic one.
+
+Case-folding is **deliberately asymmetric**. `Product` and `Project` names are human-typed labels, so
+`"OAMP"` and `"oamp"` are one product and uniqueness folds case. A **version** is a machine-generated
+build string where case can be meaningful (`R1917.256-RC1` vs `r1917.256-rc1` may genuinely differ in
+a tagging scheme Themis does not own), so release uniqueness is exact. Folding versions would merge
+two builds; not folding names would fork a product on a shift key.
+
+**The stored casing is the FIRST caller's.** A later caller writing `"oamp"` against a stored
+`"OAMP"` gets the existing row, with the existing casing, and no indication that its own spelling was
+not used. That is the right trade — one product, one row — and it is recorded here because it is
+otherwise a surprise.
+
+**The migration refuses; it never repairs.** If any duplicate exists the migration **fails with a
+clear message naming the duplicates**, and it **never merges or reassigns records**: merging two
+products means re-pointing projects, releases, evidence, findings and positions, which is an estate
+decision and not something a migration may take while an operator is watching a progress line. The
+**2026-10-12 VM census found none**, including case-insensitive collisions, which is what makes
+refuse-don't-repair a cheap guarantee rather than a blocked upgrade. The **down migration drops the
+constraints only** and never touches data.
+
+**The pre-flight cannot be raced (Gate A review, revision 2).** A duplicate inserted after the
+pre-flight query but before `CREATE UNIQUE INDEX` would turn the named refusal into a bare `23505`
+from the index build. So the migration runs as **one explicit transaction**. Its **first statement after `BEGIN`** is
+`LOCK TABLE products, projects, releases IN SHARE ROW EXCLUSIVE MODE`. That mode blocks every
+concurrent `INSERT`/`UPDATE`/`DELETE` on the three tables (it conflicts with `ROW EXCLUSIVE`) while
+still allowing reads. Writes are therefore quiesced from the pre-flight through the last index, and
+released at commit. (The mode also conflicts with itself, so two transactions that take it
+serialize; but what stops two migration **runners** from both applying `000003` is golang-migrate's
+own Postgres advisory lock and its `registry_schema_migrations` version row, not this table lock.) The indexes are built
+**without** `CONCURRENTLY` (which cannot run inside a transaction); the lock is held for the
+duration of the pre-flight and three index builds, **expected to be brief on the current registry
+size** (it depends on table size, index-build time and database load), and a Registry write that
+arrives meanwhile waits and then proceeds rather than failing.
+The file says `BEGIN;` … `COMMIT;` explicitly, so the transaction boundary does not depend on how
+the driver sends it. Under these conditions no maintenance window is required for this migration; the 2026-10-12 census is evidence the
+refusal will not fire on the VM, not the mechanism that makes it safe.
+
+**Name lookups abstain, and say *ambiguous*.** A lookup that matches more than one row **refuses**,
+with a message that says the name is ambiguous — **not** that it is not registered. Today the seam
+returns an empty id for both `0` and `>1` matches, and the resolver reports both as
+`unknown_release`: "no product named X is registered" is a false statement about a product that is
+registered twice, and it sends the operator hunting for a typo that is not there.
+**`ReleaseIDByVersion` must abstain too**, instead of returning the first match — it currently scans
+a project's releases and takes the first exact hit, which silently picks a winner the moment two
+exist. Both abstentions survive the constraints above (which make `>1` unreachable) on purpose: an
+un-migrated estate still has the old shape, and a guard that only holds because of an index is a
+guard that disappears with the index.
+
+### B5 (decision 5) — `build_id`: optional, provenance, echoed, and deliberately inert
+
+A new optional query parameter `build_id`, **at most 256 characters**, stored as artifact provenance
+on the evidence record — a **new provenance column** beside `provenance_source` and
+`provenance_image_digest` — and **echoed on the receipt**.
+
+It is **not unique, and it is not used for dedup, correlation or current-SBOM selection.** It is a
+label that answers "which pipeline run produced this document", and nothing reads it to make a
+decision. That inertness is the decision, not an omission: a build id that influenced dedup would
+make two genuinely identical documents from two builds into two evidence rows, and a build id that
+influenced correlation would be a second identity for a component Themis already identifies by purl.
+
+**The dedup interaction, stated because it is the one place `build_id` can look broken.** A
+byte-identical retry **dedups to the existing artifact and keeps the FIRST upload's `build_id`**; the
+retry's value appears **only on its own receipt**. So the receipt's `build_id` and the filed
+document's `build_id` can differ, by design: a receipt records an **attempt**, and the evidence row
+records what was **filed**. Evidence is immutable (CON-0007) — a second upload cannot rewrite the
+first one's provenance, and an `ON CONFLICT … DO NOTHING` write does not try to.
+
+**The bound is 256 Unicode code points, not bytes** — the unit OpenAPI's / JSON Schema's
+`maxLength` counts, so the spec and the code cannot disagree. The Go check is
+`utf8.RuneCountInString(v) <= 256` on the percent-decoded value, never `len(v)`: 256 × `é` is 512
+bytes and is **accepted**; 257 code points of anything is refused. A value that is **not valid
+UTF-8** after decoding is refused by the same reason, because a code-point count of malformed bytes
+is not a defined quantity.
+
+**Over the bound or malformed is a named refusal, not a truncation.** The same reasoning D13 applies
+to invalid UTF-8: a value we silently altered is not the value the caller recorded, and a provenance
+field is exactly where a silent rewrite is most expensive to discover. Bounds at this border refuse
+by name (`build_id_invalid`, `400`, the detail saying which: too long or not UTF-8).
+
+### B6 (decision 6) — What does NOT change
+
+- **Same-bytes dedup** is unchanged (D3, D8): same curated bytes, same release → `200`,
+  `created=false`, the existing `evidence_id`.
+- **A different SBOM or scan report for the same release is filed as NEW HISTORY**, not as a
+  replacement (D8). This is not a convenience: **EDR-DELIVERY-01 M2-5 relies on successive SBOMs per
+  release** — its baseline is "the immediately-previous SBOM of the SAME Release, by upload order" —
+  so a release that accumulated its SBOMs is the precondition for the rebuild loop being able to say
+  whether a rebuild closed anything.
+- **`409 duplicate_other_release`** across releases is unchanged (D8, EDR-EVIDENCE-01 D3). Byte-
+  identical content on a different release stays a loud refusal.
+- **D6's SBOM-before-report rule** is unchanged, including the `allow_without_sbom` override.
+- **No multi-artifact transaction** (B1), and **receipts remain the intake-only checkpoint** — a
+  receipt is terminal at `filed` and claims nothing about pipeline completion beyond D10's
+  `next_checks`.
+
+### Status codes — `create_release` and authorization
+
+The rows are the whole contract; a row that is absent is a case the implementation must not invent.
+`unauthorized`, `unknown_release` and `duplicate_other_release` are existing D11 reasons;
+`create_release_conflict`, `incomplete_release_triple`, `ambiguous_name` and `build_id_invalid` are
+**new values in D11's closed enum**, and adding them is a contract change that grows the OpenAPI
+enum, the guard test and every consumer rendering intake reasons **in the same change** (the #116
+cost, D11).
+
+| # | request | key scope | response | created? |
+| --- | --- | --- | --- | --- |
+| 1 | any | missing / invalid / expired / revoked key | `401` `unauthorized` | nothing |
+| 2 | any | `read` or `delivery:callback` | `403` `unauthorized` (write floor, EDR-SECURITY-01 D4) | nothing |
+| 3 | `release_id`, no `create_release` | authorized | **unchanged**: `201` filed · `200` `created=false` same-release dedup · `409` `duplicate_other_release` · `404` `unknown_release` | no Registry write |
+| 4 | triple, no `create_release` | authorized | **unchanged** D7 behaviour: resolved read-only, `404` `unknown_release` naming the part that missed | no Registry write |
+| 5 | `create_release=true` **and** `release_id` | any | `400` `create_release_conflict` | nothing |
+| 6 | `create_release=true`, triple incomplete | any | `400` `incomplete_release_triple` | nothing |
+| 7 | `create_release=true` + triple | `product:<P>`, product name resolves to **P** | continue to the Project lookup (rows 11–14) | — |
+| 8 | `create_release=true` + triple | `product:<P>`, product name resolves to **another** product | `403` `unauthorized` | nothing |
+| 9 | `create_release=true` + triple | `product:<P>`, product name resolves to **nothing** | `403` `unauthorized` — **byte-identical to row 8** | nothing |
+| 10 | `create_release=true` + triple | `product:<P>`, product name **ambiguous** | `403` `unauthorized` — **byte-identical to rows 8 and 9** | nothing |
+| 11 | `create_release=true` + triple | `admin`, product missing | `404` `unknown_release`, naming the **product** | nothing |
+| 12 | `create_release=true` + triple, product resolves | `admin` or row 7 | project missing → `404` `unknown_release`, naming the **project** | nothing |
+| 13 | `create_release=true` + triple, product resolves | `admin` or row 7 | product or project name matches **>1** row → `422` `ambiguous_name`, wording states **ambiguous**, never not-registered | nothing |
+| 14 | `create_release=true` + triple, product and project resolve | `admin` or row 7 | version find-or-create, then the normal filing outcomes: `201` filed · `200` `created=false` · `409` `duplicate_other_release` · any D11 border refusal | the version is created only immediately before filing — see B2. `409` is the one refusal that can follow a create |
+| 15 | `build_id` over 256 Unicode code points, or not valid UTF-8 | any | `400` `build_id_invalid` | nothing |
+| 16 | `release_id` (any `create_release` value but `true`) | `product:<P>`, release belongs to **P** | the normal filing outcomes, as row 3 | no Registry write |
+| 17 | `release_id` | `product:<P>`, release belongs to **another** product | `403` `unauthorized` | nothing |
+| 18 | `release_id` | `product:<P>`, release **does not exist** | `403` `unauthorized` — **byte-identical to row 17** | nothing |
+| 19 | `release_id` | `admin`, release does not exist | `404` `unknown_release` (unchanged) | nothing |
+
+Note on rows 5 and 6 versus row 4: an **incomplete triple without** `create_release` keeps today's
+`404 unknown_release`, because resolution is a lookup and "not found" is the honest answer. With
+`create_release=true` the caller has asked intake to **create**, and a partial name is not something
+that can be created from — so it is a malformed request, `400`. The distinction is deliberate and no
+existing response changes.
+
+### B7 — Revision 1 (Gate A review, 2026-10-12): authorization on BOTH paths, and the one authoritative order
+
+The first draft authorized a `product:<id>` key only on the **name** path. The `release_id` path
+rested on the method-based write floor (`AuthorizeWrite`), which sees a principal and no resource —
+so a `product:<A>` key could file evidence against **product B's release** just by naming its id.
+That is a gap **today**, not one this change introduces, but `create_release` makes product-scoped
+CI keys the normal caller, so it is closed here, on both doors.
+
+**Both paths authorize the resolved Product, read-only, before anything is written.**
+
+- **Name path:** resolve the Product by name → `AuthorizeProduct` → resolve the Project → look up
+  the version (read-only; "absent" is a valid answer when `create_release=true`).
+- **`release_id` path:** load the Release → its Project → its owning Product → `AuthorizeProduct`.
+  For a `product:<P>` key, a release of another product **and a release that does not exist** get
+  the same `403` (rows 17–18): the non-disclosure rule of B3 applies to ids exactly as to names.
+  An `admin` key keeps today's `404 unknown_release`.
+- **`POST /evidence` (the old door)** gets the same `release_id`-path check, so the old door is not
+  a way around the new one. That route already rejects unknown releases through `SubjectRef`; it
+  gains only the ownership check.
+- **The one existing response that changes:** a `product:<P>` key naming a non-existent
+  `release_id` used to get `404`; it now gets `403`. Admin and auth-disabled callers see no change.
+
+**The authoritative order.** This is the sequence the implementation and its tests conform to; the
+design document's §3 restates it, and where any text in this amendment reads differently, this list
+wins. It keeps the **implemented** D5 order (size → identify → resolve → convert → validate output →
+SBOM-first → file) and inserts the new steps into it; no existing reason moves relative to another.
+
+| # | step | refusals it can produce | writes? |
+| --- | --- | --- | --- |
+| 0 | **Authenticate** + the method write floor (EDR-SECURITY-01) | `401` / `403` `unauthorized` | no |
+| 1 | **Parameter validation**, side-effect-free, needs no body | `create_release_conflict`, `incomplete_release_triple`, `build_id_invalid` | no |
+| 2 | Size bound (D13) | `payload_too_large` | no |
+| 3 | Identify the body (D5a) | `unrecognised_format`, `declared_format_mismatch` | no |
+| 4 | **Resolve + authorize**, read-only, both paths as above | `403` `unauthorized` (non-disclosing), `404` `unknown_release`, `422` `ambiguous_name` | no |
+| 5 | Validate the input + convert (D5b, D3) | `malformed_body`, `source_invalid`, `observed_at_*`, `conversion_failed`, `too_many_records` | no |
+| 6 | Validate the output (D11, the E1 half) | `schema_invalid`, `empty_report` | no |
+| 7 | SBOM-before-report (D6). A version still to be created has no inventory. | `no_inventory_for_release` | no |
+| 8 | **Find-or-create the version** — only with `create_release=true` and only if step 4 found it absent | (a store failure → `failed`) | **Registry** |
+| 9 | File + receipt (D3, D8, D9) | `200` `created=false`, `409` `duplicate_other_release` | **Evidence** |
+
+Two consequences, stated so a test can hold them. **Step 1 before step 2** means a request that is
+both oversized and carries a malformed `build_id` reports `build_id_invalid`; that can only happen
+on requests using the new parameters, so no existing request's answer changes. **Step 3 before
+step 4** means a product-scoped key sending an unidentifiable body about someone else's product gets
+`415`, not `403`; that answer depends only on the body, so it discloses nothing about which
+products exist.
+
+### What this amendment does NOT touch
+
+- **EDR-DELIVERY-01 M2-5 is untouched.** The baseline stays the immediately-previous SBOM of the same
+  Release by upload order, and the targeted set still does not grow mid-cycle. B6 is what M2-5 rests
+  on, and this amendment strengthens it (more releases now accumulate their own SBOMs instead of a
+  pipeline filing every build against one hard-coded Release) without changing a word of it. The
+  `ci_rebuild` callback path is unchanged: nothing here adds, removes or re-times a delivery kind.
+- **Current-SBOM ("effective inventory") selection and finding reconciliation** are **out of scope**
+  and gated behind their own design — filed as **"Current SBOM and finding cleanup"** in
+  `docs/BACKLOG.md`. B6 keeps every SBOM as history, which is correct and is also why a release whose
+  components changed can still carry open Findings for components the newest inventory no longer
+  lists. That is a known, filed gap, not something this amendment may fix in passing.
+- **`build_id` correlation** — nothing reads it (B5).
+- **Receipt retention** — `THEMIS_INTAKE_RECEIPT_TTL` is unchanged at 30 days. A bot that needs a
+  longer audit trail than that is asking for a different record, not a longer-lived receipt.
+
+Implementation loci, so the next reader does not have to re-find them: `internal/registry`
+(store migrations + the app service's three create use cases), `cmd/evidence/main.go`'s
+`registryReader` (the seam, which gains one write and the ambiguity sentinel),
+`internal/evidence/adapters/subjectref/resolver.go` (the resolve/authorize/create order), and
+`internal/evidence/domain/evidence.go`'s `Provenance` (the new `build_id` field) plus the intake
+receipt. The change is scaffolded as `openspec/changes/phase3-bot-intake`. **Scope is the `themis`
+repository only; `themis-ai-runtime` needs no change.**

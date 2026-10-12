@@ -314,6 +314,55 @@ arc; both are recorded so the shortfall is a decision rather than a silent exemp
   because a Themis-side shim would duplicate the contract and the duplicate would drift.
   **Scope:** runtime repo. **Dep:** a decision in `themis-ai-runtime`.
 
+#### Intake / inventory follow-ups (filed 2026-10-12 — surfaced designing bot-friendly intake)
+
+Surfaced writing EDR-INTAKE-01's 2026-10-12 amendment (`B6`): the amendment deliberately keeps "a
+different SBOM for the same release is filed as NEW HISTORY", because EDR-DELIVERY-01 **M2-5**'s
+baseline is "the immediately-previous SBOM of the SAME Release, by upload order" and a release that
+accumulates its SBOMs is the precondition for the rebuild loop meaning anything. Keeping history is
+right; what is missing is what the newest history *means* for the Findings the older history opened.
+
+- [ ] **Current SBOM and finding cleanup** (id `EV-CURRENT-SBOM-1`). **DESIGN-GATED** (see the gate
+  below). **Cluster: none of R1–R7 fits** — it is a design-blocked correctness item, not a defect
+  with a known fix, so it is filed as its own entry per the filing rule at the top of Part 1.
+  **Claim basis: read from code + the 2026-10-12 design review; NOT yet measured on the estate**
+  (how many Findings are in this state is the first thing the design has to count — CONVENTIONS R4).
+
+  **Acceptance** (verbatim, one line — do not re-word or re-wrap it):
+
+  > When a different SBOM is accepted for an existing release, historical component findings may remain open even when the newer inventory no longer contains those components. Design effective-SBOM selection and finding reconciliation without deleting historical evidence or treating absence alone as proof of not_affected.
+
+  **The example that makes it concrete.** A release's first SBOM lists `openssl 1.1`, correlation
+  opens Findings against it, and a human decides some of them. The next build upgrades to
+  `openssl 3.0` and a second SBOM is filed against the **same** Release (which is correct and
+  intended — B6). Nothing in the pipeline says the `openssl 1.1` Findings are no longer about
+  anything shipped: the newer inventory does not contain `openssl 1.1`, both inventories are live
+  evidence, and `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no
+  evidence id**, so the 1.1 rows and the 3.0 rows sit side by side on one release. The posture then
+  shows a release as carrying 1.1's CVEs and 3.0's CVEs at once — the 1.1 half unactionable, the
+  3.0 half real, and nothing distinguishing them.
+
+  **Why it cannot be fixed in passing, and the two traps that make it a design item:**
+  - **Absence is not `not_affected`.** A component missing from the newest SBOM may be *removed*, or
+    the SBOM may be *incomplete* — a partial scan, a failed parse upstream, a scanner that lost a
+    layer. Treating absence as proof of non-affectedness would turn a bad upload into a silent
+    suppression of real risk, which is the one failure mode the whole VEX stance exists to avoid
+    ("gathering is not knowing").
+  - **Nothing may be deleted.** Evidence is immutable with no production delete (CON-0007,
+    EDR-EVIDENCE-01 D8), a Faultline is never deleted (only superseded), and Positions are
+    append-only. So the mechanism is a **projection** change, in the shape
+    `faultline_matches.retired_at` already has — asserted, never inferred — plus a decision about
+    which SBOM is the release's **effective** inventory and what a decided Finding against a
+    no-longer-present component *becomes* (retired? historical? re-opened for review?).
+
+  **DESIGN GATE: no implementation until a new EDR records the decision** — effective-SBOM selection
+  and finding reconciliation, with the 0/1/>1 cardinalities stated before code and the population
+  measured on the estate first. It is **explicitly out of scope** for
+  `openspec/changes/phase3-bot-intake`, which may not partially implement it: a half-built
+  effective-inventory rule is worse than this known gap, because it would suppress Findings on a
+  rule nobody wrote down. **Scope:** MED–LARGE (Knowledge projection + Governance posture + an EDR).
+  **Dep:** the measurement, then the EDR.
+
 #### GUI-session follow-ups (filed 2026-08-11 — surfaced by the first live dashboard days)
 
 The dashboard spike (`gui/dashboard-spike`, `docs/engineering/DASHBOARD-SPIKE.md`) put a human in
