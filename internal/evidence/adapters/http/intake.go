@@ -425,7 +425,15 @@ func (i *Intake) respond(w http.ResponseWriter, rec store.IntakeReceipt, created
 			IntakeId: strptr(rec.IntakeID),
 		})
 	default:
-		writeJSON(w, code, i.view(rec, created, retryAfter))
+		out := i.view(rec, created, retryAfter)
+		// A POST that filed nothing new (a D8 dedup, or an Idempotency-Key replay) says
+		// created=false out loud. Omitting it reads the same as "not reported", and the
+		// contract (EDR-INTAKE-01 D12) promises the explicit false. A GET leaves it out:
+		// whether the original request created the document is not stored on the receipt.
+		if rec.Status == domain.ReceiptFiled && out.Created == nil {
+			out.Created = &created
+		}
+		writeJSON(w, code, out)
 	}
 }
 
