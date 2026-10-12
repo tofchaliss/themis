@@ -6,6 +6,7 @@ package wiring
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,7 +66,7 @@ type Governance struct {
 // Governance-owned auto-accept policies (D11).
 func Wire(
 	pool *pgxpool.Pool, pub store.Publisher, advisor app.PositionAdvisor,
-	registryURL, knowledgeURL, evidenceURL string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
+	registryURL, knowledgeURL, evidenceURL, readAPIKey string, blastCap int, mitigatedWeight, epssDriftThreshold float64,
 	logger *observability.Logger,
 	policies ...domain.PolicyRule,
 ) Governance {
@@ -87,7 +88,7 @@ func Wire(
 	var reg *registry.Client
 	var blast app.BlastRadiusReader
 	if registryURL != "" {
-		reg = registry.NewClient(registryURL, &http.Client{Timeout: 10 * time.Second})
+		reg = registry.NewClient(registryURL, readClient(readAPIKey))
 		blast = reg
 	}
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
@@ -101,12 +102,12 @@ func Wire(
 	// the projection carries the Finding alone, which is the same fail-safe posture the
 	// blast-radius reader takes: a missing seam degrades the view, never the request.
 	if knowledgeURL != "" {
-		read = read.WithKnowledge(knowledge.NewClient(knowledgeURL, &http.Client{Timeout: 10 * time.Second}))
+		read = read.WithKnowledge(knowledge.NewClient(knowledgeURL, readClient(readAPIKey)))
 	}
 	// The Evidence presence seam under the compare read (D16). Empty ⇒ CompareReleases refuses —
 	// fail-CLOSED, unlike the two seams above: a degraded compare would over-claim "fixed".
 	if evidenceURL != "" {
-		read = read.WithEvidence(evidence.NewClient(evidenceURL, &http.Client{Timeout: 10 * time.Second}))
+		read = read.WithEvidence(evidence.NewClient(evidenceURL, readClient(readAPIKey)))
 	}
 	relay := store.NewRelay(pool, pub, 100)
 	handler := govhttp.NewHandler(write, read).WithLogger(logger)
@@ -140,4 +141,29 @@ func (l evaluationLog) Error(msg, releaseID string, err error) {
 		return
 	}
 	l.logger.Error(msg, observability.String("release_id", releaseID), observability.Err(err))
+}
+
+// readClient is the HTTP client for Governance's three read seams (Registry, Knowledge,
+// Evidence). With a key, every request carries it as X-API-Key: on an estate where those nodes
+// run with auth on, an unauthenticated read answers 401, which silently degrades the blast-radius
+// multiplier and the assessment projection and stalls the release-evaluation worker forever
+// (N-M2b). A READ-scoped key is enough — Governance writes to none of them. Empty = reads are
+// unauthenticated (auth-off dev). Same variable, THEMIS_API_KEY, as Communication's reads.
+func readClient(apiKey string) *http.Client {
+	c := &http.Client{Timeout: 10 * time.Second}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		c.Transport = apiKeyTransport{key: apiKey, base: http.DefaultTransport}
+	}
+	return c
+}
+
+type apiKeyTransport struct {
+	key  string
+	base http.RoundTripper
+}
+
+func (t apiKeyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context()) // a RoundTripper must not modify the caller's request
+	r.Header.Set("X-API-Key", t.key)
+	return t.base.RoundTrip(r)
 }
