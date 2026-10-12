@@ -135,6 +135,34 @@ func TestNewEvidence_Accessors(t *testing.T) {
 	}
 }
 
+// TestProvenanceCarriesBuildIDAsData — the build id is a LABEL (EDR-INTAKE-01 B5),
+// with exactly the standing the image digest has: data, never a modeled entity
+// (EDR-KERNEL-01 D2). So a Provenance carrying nothing but a build id is valid, and
+// `NewEvidence` keeps the value verbatim — no normalization, no bound (the bound is
+// the intake door's, not the domain's), nothing read from it.
+func TestProvenanceCarriesBuildIDAsData(t *testing.T) {
+	const buildID = "  Jenkins/OAMP-core/1917 · é  "
+	e, err := domain.NewEvidence(
+		"ev-build",
+		domain.KindSBOM,
+		value.NewContentFingerprint([]byte("raw sbom bytes")),
+		domain.SubjectRef{ReleaseID: "rel-1"},
+		domain.Provenance{BuildID: buildID},
+		domain.TrustAccepted,
+		sampleInventory(t),
+		time.Unix(1_700_000_000, 0),
+	)
+	if err != nil {
+		t.Fatalf("a Provenance with only a build id must be valid: %v", err)
+	}
+	if got := e.Provenance().BuildID; got != buildID {
+		t.Errorf("BuildID = %q, want %q verbatim", got, buildID)
+	}
+	if p := e.Provenance(); p.Source != "" || p.ImageDigest != "" {
+		t.Errorf("a build id invented other provenance: %+v", p)
+	}
+}
+
 func TestNewEvidence_VEXAllowsEmptyInventory(t *testing.T) {
 	_, err := domain.NewEvidence(
 		"ev-vex",

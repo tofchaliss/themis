@@ -179,7 +179,7 @@ intake can create one.
 
 ## Group 2 — Intake: `create_release`, non-leaking authorization, `build_id` (B1, B2, B3, B5, B6)
 
-- [ ] **2.1 — [API] The two query parameters and the receipt field.**
+- [x] **2.1 — [API] The two query parameters and the receipt field.**
   `api/evidence.openapi.yaml`: `create_release` (boolean, query), `build_id` (string, query,
   `maxLength: 256`, described as **Unicode code points**), `IntakeReceipt.build_id`. The four reasons
   already landed in 0.1. Additive only; the `POST /evidence` **schema** is unmodified (its new
@@ -190,14 +190,14 @@ intake can create one.
   the Go enum are the same set (extend the existing contract assertion; it must fail if either side
   grows alone).
 
-- [ ] **2.2 — Domain: `Provenance.BuildID`.**
+- [x] **2.2 — Domain: `Provenance.BuildID`.**
   (The four reasons landed in 0.1.) `internal/evidence/domain/evidence.go` gains `Provenance.BuildID` (data, never a modeled
   entity — the standing of the image digest, EDR-KERNEL-01 D2).
   *Package:* `internal/evidence/domain` (100% tier).
   *Tests:* `TestProvenanceCarriesBuildIDAsData` — a `Provenance` with only a `BuildID` is valid and
   `NewEvidence` keeps it verbatim.
 
-- [ ] **2.3 — [SCHEMA] [MIGRATION] `provenance_build_id` and the receipt's `build_id`.**
+- [x] **2.3 — [SCHEMA] [MIGRATION] `provenance_build_id` and the receipt's `build_id`.**
   `internal/evidence/adapters/store/migrations/000004_evidence_build_id.{up,down}.sql`:
   `ALTER TABLE evidence ADD COLUMN provenance_build_id TEXT NOT NULL DEFAULT ''` and
   `ALTER TABLE intake_receipts ADD COLUMN build_id TEXT NOT NULL DEFAULT ''`. Down drops both.

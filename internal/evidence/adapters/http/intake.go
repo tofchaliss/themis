@@ -452,6 +452,7 @@ func (i *Intake) view(rec store.IntakeReceipt, created bool, retryAfter int) gen
 		Components:      intptr(rec.Components),
 		SourceDigest:    strptr(rec.SourceDigest),
 		ConvertedBy:     strptr(rec.ConvertedBy),
+		BuildId:         strptr(rec.BuildID),
 		CreatedAt:       timeptr(rec.CreatedAt),
 		UpdatedAt:       timeptr(rec.UpdatedAt),
 	}

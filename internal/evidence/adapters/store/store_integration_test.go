@@ -473,8 +473,11 @@ func TestIntakeReceipts_TableShape(t *testing.T) {
 		"components":       "NO",
 		"source_digest":    "NO",
 		"converted_by":     "NO",
-		"created_at":       "NO",
-		"updated_at":       "NO",
+		// What THIS attempt submitted (B5). NOT NULL DEFAULT '': a build id nobody
+		// asserted is the fact "none", not an unknown.
+		"build_id":   "NO",
+		"created_at": "NO",
+		"updated_at": "NO",
 	}
 	for name, nullable := range want {
 		if got[name] == "" {
@@ -727,6 +730,176 @@ func backdate(t *testing.T, pool *pgxpool.Pool, intakeID string, by time.Duratio
 		by.String(), intakeID); err != nil {
 		t.Fatalf("backdate %s: %v", intakeID, err)
 	}
+}
+
+// TestBuildIDPersistsAndReadsBack — the build id reaches both of 000004's columns and
+// comes back out of both. They are separate facts and may differ: the evidence row
+// records what was FILED, the receipt records what THAT ATTEMPT submitted (B5).
+func TestBuildIDPersistsAndReadsBack(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	const filedBuild = "Jenkins/OAMP-core/1917"
+	raw := []byte("sbom-with-a-build-id")
+	e, ev := buildEvidence(t, "ev-build", "rel-build", raw, filedBuild)
+	if _, err := s.Save(ctx, e, raw, ev); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.GetByID(ctx, "ev-build")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Provenance().BuildID != filedBuild {
+		t.Errorf("filed BuildID = %q, want %q", got.Provenance().BuildID, filedBuild)
+	}
+	if got.Provenance().Source != "trivy" {
+		t.Errorf("the new column disturbed its neighbours: %+v", got.Provenance())
+	}
+
+	const retryBuild = "Jenkins/OAMP-core/1918"
+	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-build", Status: domain.ReceiptFiled, EvidenceID: "ev-build",
+		ReleaseID: "rel-build", BuildID: retryBuild,
+	}); err != nil {
+		t.Fatalf("receipt save: %v", err)
+	}
+	rec, err := s.LoadIntakeReceipt(ctx, "in-build")
+	if err != nil {
+		t.Fatalf("receipt load: %v", err)
+	}
+	if rec.BuildID != retryBuild {
+		t.Errorf("receipt BuildID = %q, want %q", rec.BuildID, retryBuild)
+	}
+
+	// A receipt with no asserted build id reads back as the empty string, not as a
+	// scan failure: NOT NULL DEFAULT '' is what makes "none" a fact (B5).
+	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-none", Status: domain.ReceiptAccepted,
+	}); err != nil {
+		t.Fatalf("receipt with no build id: %v", err)
+	}
+	none, err := s.LoadIntakeReceipt(ctx, "in-none")
+	if err != nil || none.BuildID != "" {
+		t.Errorf("absent build id = %q (err %v), want empty", none.BuildID, err)
+	}
+}
+
+// TestBuildIDMigrationReversible — 000004 up → down → up with rows in the tables.
+// Only the two columns move: every document and every receipt is still there
+// afterwards with the rest of its provenance intact, because the down migration
+// touches no data and the re-up defaults rather than rewrites.
+func TestBuildIDMigrationReversible(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	raw := []byte("sbom-across-a-migration")
+	e, ev := buildEvidence(t, "ev-mig", "rel-mig", raw, "build-before-down")
+	if _, err := s.Save(ctx, e, raw, ev); err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-mig", Status: domain.ReceiptFiled, EvidenceID: "ev-mig",
+		ReleaseID: "rel-mig", SourceDigest: "abc", BuildID: "build-before-down",
+	}); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+
+	m, err := migrate.New(migrationsDir(), testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The re-up is also the repair: a failure part-way through must not leave the
+	// shared database a version behind for every later test. It closes the migrator
+	// too, rather than a `defer` doing it — a deferred close runs BEFORE the
+	// cleanups, which would hand the repair a closed migrator.
+	t.Cleanup(func() {
+		upErr := m.Up()
+		m.Close()
+		if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+			t.Fatalf("restore: %v", upErr)
+		}
+	})
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("down one step: %v", err)
+	}
+	for table, column := range map[string]string{"evidence": "provenance_build_id", "intake_receipts": "build_id"} {
+		if hasColumn(t, table, column) {
+			t.Errorf("%s.%s survived the down migration", table, column)
+		}
+	}
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("up again: %v", err)
+	}
+
+	after, err := pgxpool.New(ctx, testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Close()
+	if got := count(t, after, "SELECT count(*) FROM evidence"); got != 1 {
+		t.Errorf("evidence rows after up/down/up = %d, want 1", got)
+	}
+	if got := count(t, after, "SELECT count(*) FROM intake_receipts"); got != 1 {
+		t.Errorf("receipt rows after up/down/up = %d, want 1", got)
+	}
+
+	reread, err := store.New(after).GetByID(ctx, "ev-mig")
+	if err != nil {
+		t.Fatalf("get after up/down/up: %v", err)
+	}
+	if reread.Provenance().Source != "trivy" || reread.Subject().ReleaseID != "rel-mig" {
+		t.Errorf("the surviving row lost something: %+v / %+v", reread.Provenance(), reread.Subject())
+	}
+	// The dropped column's values went with the column — the re-up DEFAULTS them, it
+	// does not resurrect them. Asserted rather than left to be discovered: what 000004
+	// guarantees is that the ROW survives a reversal, not that a dropped value does.
+	if reread.Provenance().BuildID != "" {
+		t.Errorf("re-added column = %q, want the '' default", reread.Provenance().BuildID)
+	}
+	rec, err := store.New(after).LoadIntakeReceipt(ctx, "in-mig")
+	if err != nil {
+		t.Fatalf("receipt after up/down/up: %v", err)
+	}
+	if rec.SourceDigest != "abc" || rec.BuildID != "" {
+		t.Errorf("receipt after up/down/up = %+v", rec)
+	}
+}
+
+func hasColumn(t *testing.T, table, column string) bool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), testDSN)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	var ok bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT EXISTS(SELECT 1 FROM information_schema.columns
+			WHERE table_name = $1 AND column_name = $2)
+	`, table, column).Scan(&ok); err != nil {
+		t.Fatalf("column probe %s.%s: %v", table, column, err)
+	}
+	return ok
+}
+
+func buildEvidence(t *testing.T, id, releaseID string, raw []byte, buildID string) (domain.Evidence, domain.EvidenceRegistered) {
+	t.Helper()
+	purl, err := value.NewPURL("pkg:deb/debian/openssl@3.0.11")
+	if err != nil {
+		t.Fatalf("purl: %v", err)
+	}
+	inv := domain.NewInventory([]domain.Component{{PURL: purl, Name: "openssl", Version: "3.0.11", Ecosystem: "deb"}}, nil)
+	e, err := domain.NewEvidence(domain.EvidenceID(id), domain.KindSBOM, value.NewContentFingerprint(raw),
+		domain.SubjectRef{ReleaseID: releaseID},
+		domain.Provenance{Source: "trivy", BuildID: buildID},
+		domain.TrustAccepted, inv, time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("evidence: %v", err)
+	}
+	return e, domain.NewEvidenceRegistered(e, time.Unix(1_700_000_001, 0))
 }
 
 func sampleReport(t *testing.T, id, releaseID string, raw []byte) (domain.Evidence, domain.EvidenceRegistered) {

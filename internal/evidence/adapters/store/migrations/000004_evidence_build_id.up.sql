@@ -1,0 +1,22 @@
+-- `build_id` (EDR-INTAKE-01 B5): which pipeline run produced this document.
+--
+-- TWO columns, because they record two different facts and are allowed to differ.
+-- `evidence.provenance_build_id` is what was FILED: a byte-identical retry dedups
+-- (`ON CONFLICT … DO NOTHING`) and the row keeps the FIRST upload's value, which
+-- immutability requires (CON-0007) rather than merely permits.
+-- `intake_receipts.build_id` is what THAT ATTEMPT submitted, so the retry's value is
+-- still recorded — on its own receipt. The asymmetry is the design, not a defect to
+-- find later.
+--
+-- Both NOT NULL DEFAULT '': the overwhelming majority of rows predate the parameter
+-- and a build id nobody asserted is a fact ("none"), not an unknown. The default also
+-- makes the ALTER safe on the existing rows, which are not rewritten.
+--
+-- Nothing reads either column to decide anything — not dedup, not correlation, not
+-- current-SBOM selection. That inertness is the decision (B5): a build id that
+-- influenced dedup would turn two identical documents from two builds into two
+-- evidence rows, and one that influenced correlation would be a second identity for a
+-- component Themis already identifies by purl. Hence no index and no constraint: an
+-- index here would be the first step toward reading it.
+ALTER TABLE evidence ADD COLUMN provenance_build_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE intake_receipts ADD COLUMN build_id TEXT NOT NULL DEFAULT '';
