@@ -42,11 +42,16 @@ type Registry interface {
 // Resolver resolves the release an intake names, READ-ONLY (EDR-INTAKE-01 D7). It
 // satisfies the app's ReleaseResolver port.
 //
-// Read-only is the decision, not an implementation detail: intake never creates
-// Registry identity. A write from Evidence into Registry is neither an event nor a
-// read, and no convenience justifies punching through that — a create-if-missing
-// flag would let one typo in a product name silently fork the estate graph, which is
-// the thing Registry exists to prevent.
+// Read-only is the decision, not an implementation detail: resolution creates nothing,
+// which is what keeps every border refusal free of a side effect. The one create intake
+// can make is a VERSION, it goes through [Provisioner] after every border check, and
+// what resolution contributes to it is an answer — "this version does not exist yet,
+// under this project" ([app.Resolution.ToCreate]).
+//
+// A Product or Project that does not resolve is still a refusal and never a creation:
+// those names are human-owned, and a typo in one is where a parallel estate comes from,
+// which is the hazard D7 refused `create_if_missing` over (B2 narrows the wall to the
+// version and says so explicitly).
 type Resolver struct{ reg Registry }
 
 // NewResolver builds a resolver over the registry read seam.
@@ -81,18 +86,18 @@ func unauthorized() error { return domain.Reject(domain.ReasonUnauthorized, unau
 // about a project under a product the key may not see would leak that project's
 // existence by the same oracle the `403` closes.
 //
-// `req.CreateRelease` is deliberately not consulted here yet: resolution stays
-// read-only, so a complete triple with `create_release=true` resolves EXACTLY as it
-// does without it and a missing version is still `unknown_release`. The find-or-create
-// is a later step of this change, and it sits after every border check (design §3,
-// "why the create is late") rather than inside resolution.
-func (r *Resolver) Resolve(ctx context.Context, req app.ResolveRequest) (string, error) {
+// `req.CreateRelease` changes exactly one of the answers: an ABSENT version under a
+// Product and Project that resolved (and that the caller is authorized for) comes back
+// as "to be created", naming the project, instead of `unknown_release`. Resolution
+// still writes nothing — the find-or-create sits after every border check (B7's step 8,
+// design §3 "why the create is late"), and every other answer here is unchanged.
+func (r *Resolver) Resolve(ctx context.Context, req app.ResolveRequest) (app.Resolution, error) {
 	if req.ReleaseID != "" {
 		return r.resolveByID(ctx, req)
 	}
 
 	if req.Product == "" || req.Project == "" || req.Version == "" {
-		return "", domain.Reject(domain.ReasonUnknownRelease, fmt.Sprintf(
+		return app.Resolution{}, domain.Reject(domain.ReasonUnknownRelease, fmt.Sprintf(
 			"name the release either by release_id or by the whole {product, project, version} triple; got product=%q, project=%q, version=%q", req.Product, req.Project, req.Version))
 	}
 
@@ -104,29 +109,36 @@ func (r *Resolver) Resolve(ctx context.Context, req app.ResolveRequest) (string,
 	// Governance's gate already runs on) — while an admin still gets the honest
 	// infrastructure fault below.
 	if req.Confined() && (err != nil || productID == "" || !req.Authorize(productID)) {
-		return "", unauthorized()
+		return app.Resolution{}, unauthorized()
 	}
 	if err != nil {
-		return "", lookupFailed("product", req.Product, err)
+		return app.Resolution{}, lookupFailed("product", req.Product, err)
 	}
 	if productID == "" {
-		return "", notFound("product", req.Product)
+		return app.Resolution{}, notFound("product", req.Product)
 	}
 	projectID, err := r.reg.ProjectIDByName(ctx, productID, req.Project)
 	if err != nil {
-		return "", lookupFailed("project", req.Project, err)
+		return app.Resolution{}, lookupFailed("project", req.Project, err)
 	}
 	if projectID == "" {
-		return "", notFound("project", req.Project)
+		return app.Resolution{}, notFound("project", req.Project)
 	}
 	resolved, err := r.reg.ReleaseIDByVersion(ctx, projectID, req.Version)
 	if err != nil {
-		return "", lookupFailed("release version", req.Version, err)
+		return app.Resolution{}, lookupFailed("release version", req.Version, err)
 	}
 	if resolved == "" {
-		return "", notFound("release version", req.Version)
+		// The only place `create_release` is consulted. The product and the project
+		// are established and authorized at this point, so the absent version is the
+		// one thing B2 lets intake create — reported as an answer, with the project it
+		// goes under, and created later or not at all.
+		if req.CreateRelease {
+			return app.Resolution{ProjectID: projectID, Version: req.Version}, nil
+		}
+		return app.Resolution{}, notFound("release version", req.Version)
 	}
-	return resolved, nil
+	return app.Resolution{ReleaseID: resolved}, nil
 }
 
 // resolveByID is the direct road, and the ownership check comes BEFORE the existence
@@ -137,7 +149,10 @@ func (r *Resolver) Resolve(ctx context.Context, req app.ResolveRequest) (string,
 //
 // An unconfined caller (`admin`, or an auth-disabled node) reads no ownership at all
 // and keeps today's answer unchanged: `404 unknown_release`.
-func (r *Resolver) resolveByID(ctx context.Context, req app.ResolveRequest) (string, error) {
+// `create_release` cannot reach this road: naming the release both ways is refused on
+// the parameters, before anything is read (B2's row 5), so there is nothing to create
+// here and an unknown id stays `unknown_release` for an admin.
+func (r *Resolver) resolveByID(ctx context.Context, req app.ResolveRequest) (app.Resolution, error) {
 	if req.Confined() {
 		productID, err := r.reg.ProductOfRelease(ctx, req.ReleaseID)
 		// An empty id is refused on its own account rather than left to the
@@ -145,18 +160,18 @@ func (r *Resolver) resolveByID(ctx context.Context, req app.ResolveRequest) (str
 		// else's release", and a check that depends on a key never matching the empty
 		// product is a check resting on a coincidence.
 		if err != nil || productID == "" || !req.Authorize(productID) {
-			return "", unauthorized()
+			return app.Resolution{}, unauthorized()
 		}
 	}
 	ok, err := r.reg.ReleaseExists(ctx, req.ReleaseID)
 	if err != nil {
-		return "", fmt.Errorf("release lookup: %w", err)
+		return app.Resolution{}, fmt.Errorf("release lookup: %w", err)
 	}
 	if !ok {
-		return "", domain.Reject(domain.ReasonUnknownRelease, fmt.Sprintf(
+		return app.Resolution{}, domain.Reject(domain.ReasonUnknownRelease, fmt.Sprintf(
 			"release %q is not registered; register Product -> Project -> Release first (intake resolves identity, it never creates it)", req.ReleaseID))
 	}
-	return req.ReleaseID, nil
+	return app.Resolution{ReleaseID: req.ReleaseID}, nil
 }
 
 func notFound(what, name string) error {

@@ -94,12 +94,12 @@ func TestResolve_BothRoadsReachTheSameRelease(t *testing.T) {
 	r := subjectref.NewResolver(estate())
 
 	byRelease, err := r.Resolve(context.Background(), byID("rel-1"))
-	if err != nil || byRelease != "rel-1" {
-		t.Fatalf("by id = %q, %v", byRelease, err)
+	if err != nil || byRelease.ReleaseID != "rel-1" || byRelease.ToCreate() {
+		t.Fatalf("by id = %+v, %v", byRelease, err)
 	}
 	byName, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
-	if err != nil || byName != "rel-1" {
-		t.Fatalf("by triple = %q, %v", byName, err)
+	if err != nil || byName.ReleaseID != "rel-1" || byName.ToCreate() {
+		t.Fatalf("by triple = %+v, %v", byName, err)
 	}
 }
 
@@ -111,8 +111,8 @@ func TestResolve_ReleaseIDWinsOverTheTriple(t *testing.T) {
 	reg.products = map[string]string{} // the triple would not resolve at all
 	got, err := subjectref.NewResolver(reg).Resolve(context.Background(),
 		app.ResolveRequest{Product: "OAMP", Project: "oamp-core", Version: "R1917.256", ReleaseID: "rel-1"})
-	if err != nil || got != "rel-1" {
-		t.Fatalf("got %q, %v", got, err)
+	if err != nil || got.ReleaseID != "rel-1" {
+		t.Fatalf("got %+v, %v", got, err)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestResolve_RefusalsNameWhichPartMissed(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := r.Resolve(context.Background(),
 				app.ResolveRequest{Product: c.product, Project: c.project, Version: c.version, ReleaseID: c.relID})
-			if got != "" {
-				t.Errorf("resolved %q, want nothing", got)
+			if got != (app.Resolution{}) {
+				t.Errorf("resolved %+v, want nothing", got)
 			}
 			re, ok := domain.AsReject(err)
 			if !ok {
@@ -207,8 +207,8 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 			reg.err, reg.failOn = subjectref.ErrAmbiguousName, c.failOn
 
 			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
-			if got != "" {
-				t.Errorf("resolved %q, want nothing", got)
+			if got != (app.Resolution{}) {
+				t.Errorf("resolved %+v, want nothing", got)
 			}
 			re, ok := domain.AsReject(err)
 			if !ok {
@@ -247,6 +247,89 @@ func TestResolve_NotFoundWordingIsUnchanged(t *testing.T) {
 	}
 }
 
+// TestResolveToCreateOnMissingVersion — the ONE answer `create_release=true` changes
+// (EDR-INTAKE-01 B2, B7's step 4): an absent version under a Product and Project that
+// resolved comes back as "to be created", naming the project, instead of
+// `unknown_release`. Resolution still writes nothing — the create is a later step, and
+// every other answer here is unchanged, which the subtests assert one at a time
+// because "create_release resolves differently" asserted once would pass with the
+// product and project guards gone.
+func TestResolveToCreateOnMissingVersion(t *testing.T) {
+	ctx := context.Background()
+	newVersion := func() app.ResolveRequest {
+		return app.ResolveRequest{Product: "OAMP", Project: "oamp-core", Version: "R1918.001", CreateRelease: true}
+	}
+
+	got, err := subjectref.NewResolver(estate()).Resolve(ctx, newVersion())
+	if err != nil {
+		t.Fatalf("error = %v, want the absent version reported as an answer", err)
+	}
+	if !got.ToCreate() {
+		t.Fatalf("resolved %+v, want a version still to be created", got)
+	}
+	if got.ProjectID != "proj-1" || got.Version != "R1918.001" {
+		t.Errorf("to create = %+v, want the resolved project and the submitted version, so the create needs no second lookup", got)
+	}
+
+	t.Run("without create_release the same request is unchanged", func(t *testing.T) {
+		req := newVersion()
+		req.CreateRelease = false
+		_, err := subjectref.NewResolver(estate()).Resolve(ctx, req)
+		re, ok := domain.AsReject(err)
+		if !ok || re.Reason != domain.ReasonUnknownRelease {
+			t.Fatalf("error = %v, want the unchanged unknown_release", err)
+		}
+	})
+
+	t.Run("a version that exists is resolved, never re-created", func(t *testing.T) {
+		req := newVersion()
+		req.Version = "R1917.256"
+		got, err := subjectref.NewResolver(estate()).Resolve(ctx, req)
+		if err != nil || got.ReleaseID != "rel-1" || got.ToCreate() {
+			t.Fatalf("got %+v, %v, want the existing release", got, err)
+		}
+	})
+
+	t.Run("a missing product or project is still a refusal, never a creation", func(t *testing.T) {
+		for _, tc := range []struct{ name, product, project, wantIn string }{
+			{"product", "NOPE", "oamp-core", `product named "NOPE"`},
+			{"project", "OAMP", "nope", `project named "nope"`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				req := newVersion()
+				req.Product, req.Project = tc.product, tc.project
+				got, err := subjectref.NewResolver(estate()).Resolve(ctx, req)
+				if got != (app.Resolution{}) {
+					t.Errorf("resolved %+v, want nothing: those names are human-owned and a typo in one is where a parallel estate comes from", got)
+				}
+				re, ok := domain.AsReject(err)
+				if !ok || re.Reason != domain.ReasonUnknownRelease {
+					t.Fatalf("error = %v, want unknown_release", err)
+				}
+				if !strings.Contains(re.Detail, tc.wantIn) {
+					t.Errorf("detail %q does not name %q", re.Detail, tc.wantIn)
+				}
+			})
+		}
+	})
+
+	t.Run("an unauthorized product is refused before any of it", func(t *testing.T) {
+		req := newVersion()
+		req.Authorize = scopedTo("prod-other")
+		reg := estate()
+		got, err := subjectref.NewResolver(reg).Resolve(ctx, req)
+		if got != (app.Resolution{}) {
+			t.Errorf("resolved %+v for a key that may not see the product", got)
+		}
+		if re, ok := domain.AsReject(err); !ok || re.Reason != domain.ReasonUnauthorized {
+			t.Fatalf("error = %v, want an unauthorized refusal", err)
+		}
+		if reg.projectLookups != 0 {
+			t.Error("`create_release` moved the authorization check: the project was looked up for a key that may not see the product")
+		}
+	})
+}
+
 // TestStub_KnowsIDsAndNoNames pins the dev stub's honest limit: it holds release ids,
 // so the triple road reports unknown_release instead of resolving onto whichever
 // release happened to be in the allow-set.
@@ -254,8 +337,8 @@ func TestStub_KnowsIDsAndNoNames(t *testing.T) {
 	stub := subjectref.NewStub("rel-dev")
 	r := subjectref.NewResolver(stub)
 
-	if got, err := r.Resolve(context.Background(), byID("rel-dev")); err != nil || got != "rel-dev" {
-		t.Fatalf("by id = %q, %v", got, err)
+	if got, err := r.Resolve(context.Background(), byID("rel-dev")); err != nil || got.ReleaseID != "rel-dev" {
+		t.Fatalf("by id = %+v, %v", got, err)
 	}
 	if _, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1")); err == nil {
 		t.Error("the stub resolved a triple it cannot know")

@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +15,13 @@ import (
 // ---- fakes for the intake ports -------------------------------------------------
 
 type fakeResolver struct {
-	id  string
-	err error
+	id string
+	// toCreate is resolution's other answer (B7's step 4): the version does not exist
+	// yet, under this project. It wins over id, exactly as the real resolver's two
+	// answers are exclusive.
+	toCreate           bool
+	projectID, version string
+	err                error
 
 	calls                                            int
 	gotProduct, gotProject, gotVersion, gotReleaseID string
@@ -23,11 +29,49 @@ type fakeResolver struct {
 	gotConfined                                      bool
 }
 
-func (f *fakeResolver) Resolve(_ context.Context, req app.ResolveRequest) (string, error) {
+func (f *fakeResolver) Resolve(_ context.Context, req app.ResolveRequest) (app.Resolution, error) {
 	f.calls++
 	f.gotProduct, f.gotProject, f.gotVersion, f.gotReleaseID = req.Product, req.Project, req.Version, req.ReleaseID
 	f.gotCreateRelease, f.gotConfined = req.CreateRelease, req.Confined()
-	return f.id, f.err
+	if f.toCreate {
+		return app.Resolution{ProjectID: f.projectID, Version: f.version}, f.err
+	}
+	return app.Resolution{ReleaseID: f.id}, f.err
+}
+
+// fakeProvisioner is Registry's find-or-create as the app sees it: the FIRST call for a
+// version creates it, every later call finds the same id. Simulating that rather than
+// always answering `created=true` is what lets a test tell "created once" from
+// "created twice", which is the property B2's idempotence exists for.
+type fakeProvisioner struct {
+	err   error
+	calls int
+	// known is the estate the fake accumulates, and answers records what it ANSWERED
+	// per call: the app discards `created` (a receipt's `created` is about the
+	// evidence), so the answer is only observable here.
+	known                    map[string]string
+	answers                  []bool
+	ids                      []string
+	gotProjectID, gotVersion string
+}
+
+func (f *fakeProvisioner) FindOrCreateRelease(_ context.Context, projectID, version string) (string, bool, error) {
+	f.calls++
+	f.gotProjectID, f.gotVersion = projectID, version
+	if f.err != nil {
+		return "", false, f.err
+	}
+	if f.known == nil {
+		f.known = map[string]string{}
+	}
+	key := projectID + "\x00" + version
+	id, existed := f.known[key]
+	if !existed {
+		id = fmt.Sprintf("rel-created-%d", len(f.known)+1)
+		f.known[key] = id
+	}
+	f.answers, f.ids = append(f.answers, !existed), append(f.ids, id)
+	return id, !existed, nil
 }
 
 type fakeInventory struct {
@@ -83,6 +127,7 @@ func (f *fakeRegistrar) Register(_ context.Context, cmd app.RegisterCommand) (ap
 type intakeRig struct {
 	svc       *app.IntakeService
 	resolver  *fakeResolver
+	provision *fakeProvisioner
 	inventory *fakeInventory
 	reports   *fakeReports
 	registrar *fakeRegistrar
@@ -93,6 +138,7 @@ type intakeRig struct {
 func newRig(maxBytes int64) *intakeRig {
 	rig := &intakeRig{
 		resolver:  &fakeResolver{id: "rel-1"},
+		provision: &fakeProvisioner{},
 		inventory: &fakeInventory{has: true},
 		reports: &fakeReports{
 			kind:         "vuln-report",
@@ -104,7 +150,7 @@ func newRig(maxBytes int64) *intakeRig {
 		},
 		registrar: &fakeRegistrar{res: app.RegisterResult{ID: "ev-1", Created: true}},
 	}
-	rig.svc = app.NewIntakeService(maxBytes, rig.resolver, rig.inventory, rig.reports, rig.registrar)
+	rig.svc = app.NewIntakeService(maxBytes, rig.resolver, rig.provision, rig.inventory, rig.reports, rig.registrar)
 	return rig
 }
 
@@ -121,8 +167,11 @@ func (rig *intakeRig) intake(t *testing.T, cmd app.IntakeCommand) *domain.Receip
 }
 
 // assertRefused checks the receipt refused by the named reason AND that nothing was
-// filed. The second half is the one that matters: steps 1-6 are side-effect-free, so
-// a refused intake must leave a receipt and nothing else (D13).
+// created or filed. The second half is the one that matters: steps 1-6 are
+// side-effect-free, so a refused intake must leave a receipt and nothing else — no
+// evidence (D13) and no Release (B2/B3's "nothing is created on any refusal"). It is
+// asserted on EVERY refusal rather than in one test, because the create sits one line
+// above the filing step and a reordering would otherwise pass.
 func (rig *intakeRig) assertRefused(t *testing.T, r *domain.Receipt, want domain.RejectReason) {
 	t.Helper()
 	if r.Status() != domain.ReceiptRejected {
@@ -139,6 +188,9 @@ func (rig *intakeRig) assertRefused(t *testing.T, r *domain.Receipt, want domain
 	}
 	if rig.registrar.calls != 0 {
 		t.Errorf("a refused intake wrote: %d register call(s)", rig.registrar.calls)
+	}
+	if rig.provision.calls != 0 {
+		t.Errorf("a refused intake created a version: %d find-or-create call(s)", rig.provision.calls)
 	}
 }
 
@@ -310,11 +362,12 @@ func TestTheCallersProductAuthorityReachesResolution(t *testing.T) {
 	}
 }
 
-// TestCreateReleaseReachesResolutionAndChangesNothingYet — with the whole triple,
-// `create_release=true` is carried to resolution and resolution stays READ-ONLY: a
-// version that does not exist is still `unknown_release`. The find-or-create is a
-// later step, deliberately after every border check (design §3).
-func TestCreateReleaseReachesResolutionAndChangesNothingYet(t *testing.T) {
+// TestCreateReleaseReachesResolutionAndTheCreateWaits — with the whole triple,
+// `create_release=true` is carried to resolution, and a refusal from resolution
+// creates nothing: the Product and the Project are human-owned, so a name that does
+// not resolve is still `unknown_release` and never a creation (B2). Only an absent
+// VERSION becomes "to be created", and even then the create waits for step 8.
+func TestCreateReleaseReachesResolutionAndTheCreateWaits(t *testing.T) {
 	rig := newRig(1 << 20)
 	rig.resolver.err = domain.Reject(domain.ReasonUnknownRelease, `no release version named "R1917.256" is registered`)
 
@@ -717,6 +770,195 @@ func TestIntake_RegisterReportsNoEvidenceID_Fails(t *testing.T) {
 	}
 	if r.Status() != domain.ReceiptFailed {
 		t.Fatalf("status = %q, want failed", r.Status())
+	}
+}
+
+// ---- step 7: the version find-or-create (EDR-INTAKE-01 B2, B7's step 8) ---------
+//
+// The create is the LAST thing before filing, and these tests are about where it sits
+// rather than about what it does: Registry owns the upsert, and what intake owes is
+// that nothing is created by a request that was going to be refused anyway.
+
+// newCreateRig is the bot road: an SBOM for a version that does not exist yet, under a
+// project that does — which is the one resolution answer B2 lets intake act on.
+func newCreateRig() *intakeRig {
+	rig := newRig(1 << 20)
+	rig.reports.kind, rig.reports.dialect = "sbom", "cyclonedx"
+	rig.resolver.toCreate = true
+	rig.resolver.projectID, rig.resolver.version = "proj-1", "R1917.256"
+	return rig
+}
+
+// createCmd is one `create_release=true` submission of the whole triple.
+func createCmd(body string) app.IntakeCommand {
+	return app.IntakeCommand{
+		Body: []byte(body), CreateRelease: true,
+		Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+	}
+}
+
+const createSBOM = `{"bomFormat":"CycloneDX","specVersion":"1.5"}`
+
+// TestNothingIsCreatedWhenTheDocumentIsRefused — B3's "nothing is created on any
+// refusal", for a refusal that happens AFTER resolution answered "to be created". If
+// the create sat with resolution, a bot retrying a malformed report would mint an empty
+// Release per attempt, and the estate would fill with versions no evidence ever
+// reached.
+func TestNothingIsCreatedWhenTheDocumentIsRefused(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.resolver.toCreate = true
+	rig.resolver.projectID, rig.resolver.version = "proj-1", "R1917.256"
+	rig.reports.curated = []byte(`[{"cve":"CVE-2024-2961"}]`) // the 2026-10-05 shape
+
+	r := rig.intake(t, createCmd(`[{"vulnerability_id":"CVE-1"}]`))
+	// assertRefused also holds the create: the provisioner must be uncalled.
+	rig.assertRefused(t, r, domain.ReasonSchemaInvalid)
+	if r.ReleaseID() != "" {
+		t.Errorf("the receipt names release %q for a version that was never created", r.ReleaseID())
+	}
+}
+
+// TestVersionIsCreatedOnlyOnceAcrossTwoRequests — find-or-create is idempotent, and
+// the second request FINDS the version rather than forking it. The fake resolver
+// answers "to be created" both times on purpose: that is also the real race, two
+// requests resolving before either has created anything, and the constraint is what
+// settles it (B4) — which is why Registry owns the upsert and intake only asks.
+func TestVersionIsCreatedOnlyOnceAcrossTwoRequests(t *testing.T) {
+	rig := newCreateRig()
+
+	first := rig.intake(t, createCmd(createSBOM))
+	firstFiled := rig.registrar.got.SubjectReleaseID
+	second := rig.intake(t, createCmd(createSBOM))
+
+	if rig.provision.calls != 2 {
+		t.Fatalf("find-or-create ran %d time(s), want one per request", rig.provision.calls)
+	}
+	if want := []bool{true, false}; rig.provision.answers[0] != want[0] || rig.provision.answers[1] != want[1] {
+		t.Errorf("created answers = %v, want %v — the second request must find the version, not create it", rig.provision.answers, want)
+	}
+	if rig.provision.ids[0] != rig.provision.ids[1] {
+		t.Errorf("two ids for one version: %q and %q", rig.provision.ids[0], rig.provision.ids[1])
+	}
+	if rig.provision.gotProjectID != "proj-1" || rig.provision.gotVersion != "R1917.256" {
+		t.Errorf("created under project %q at version %q, want the resolved project and the submitted version",
+			rig.provision.gotProjectID, rig.provision.gotVersion)
+	}
+	// Both documents are filed against the created release, and the receipt names it:
+	// an id resolution never had has to reach both the filing step and the record of
+	// the attempt, or the operator cannot find what they just uploaded.
+	id := rig.provision.ids[0]
+	if firstFiled != id || rig.registrar.got.SubjectReleaseID != id {
+		t.Errorf("filed against %q then %q, want both against the created release %q", firstFiled, rig.registrar.got.SubjectReleaseID, id)
+	}
+	if first.ReleaseID() != id || second.ReleaseID() != id {
+		t.Errorf("receipts name releases %q and %q, want the created release %q", first.ReleaseID(), second.ReleaseID(), id)
+	}
+}
+
+// TestFirstFailureStillWins — D5's precedence is untouched by the new step. A report
+// that is both invalid AND early reports the invalidity, never a release-creation
+// reason, and it reaches neither the inventory read nor the create: deferring the
+// create is what keeps every existing ordering assertion true.
+func TestFirstFailureStillWins(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.resolver.toCreate = true
+	rig.resolver.projectID, rig.resolver.version = "proj-1", "R1917.256"
+	rig.reports.curated = []byte(`[{"cve":"CVE-2024-2961"}]`) // invalid
+	rig.inventory.has = false                                 // and early
+
+	r := rig.intake(t, createCmd(`[{"vulnerability_id":"CVE-1"}]`))
+	rig.assertRefused(t, r, domain.ReasonSchemaInvalid)
+	if rig.inventory.calls != 0 {
+		t.Error("the inventory was read for a document that was never fileable")
+	}
+}
+
+// TestReportForANewVersionNeedsAnSBOMFirst — D6 holds for a version that does not
+// exist yet, and holds BEFORE the create: a version still to be created has no
+// inventory, so the report is refused and nothing is created (B2's consequence for the
+// bot author). With B1's two requests this never bites — the SBOM request creates the
+// version and the report request finds it.
+func TestReportForANewVersionNeedsAnSBOMFirst(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.resolver.toCreate = true
+	rig.resolver.projectID, rig.resolver.version = "proj-1", "R1917.256"
+
+	r := rig.intake(t, createCmd(`[{"vulnerability_id":"CVE-1"}]`))
+	rig.assertRefused(t, r, domain.ReasonNoInventoryForRelease)
+	if !strings.Contains(r.Detail(), "R1917.256") || !strings.Contains(r.Detail(), "allow_without_sbom") {
+		t.Errorf("detail = %q; it must name the VERSION (there is no release id yet) and what to do", r.Detail())
+	}
+	if rig.inventory.calls != 0 {
+		t.Error("the inventory was read for a release that does not exist yet — the answer is known without a read, and there is no id to read it by")
+	}
+
+	t.Run("and with allow_without_sbom the version is created and the report filed", func(t *testing.T) {
+		rig := newRig(1 << 20)
+		rig.resolver.toCreate = true
+		rig.resolver.projectID, rig.resolver.version = "proj-1", "R1917.256"
+
+		cmd := createCmd(`[{"vulnerability_id":"CVE-1"}]`)
+		cmd.AllowWithoutSBOM = true
+		r := rig.intake(t, cmd)
+		if r.Status() != domain.ReceiptFiled {
+			t.Fatalf("status = %q, want filed (detail=%q)", r.Status(), r.Detail())
+		}
+		if rig.provision.calls != 1 {
+			t.Fatalf("find-or-create ran %d time(s), want once", rig.provision.calls)
+		}
+		if rig.registrar.got.SubjectReleaseID != rig.provision.ids[0] {
+			t.Errorf("filed against %q, want the created release %q", rig.registrar.got.SubjectReleaseID, rig.provision.ids[0])
+		}
+		if !rig.registrar.got.Provenance.WithoutSBOM {
+			t.Error("the override was not recorded in provenance — a release whose findings rest on no inventory has to say so")
+		}
+	})
+}
+
+// TestVersionCouldNotBeCreated_Fails — the one refusal step 8 can produce is a store
+// failure, and it is a statement about Themis rather than about the document: the
+// receipt `failed`, the cause is returned so the adapter that owns logging can report
+// it, and nothing is filed against a release that was never created.
+func TestVersionCouldNotBeCreated_Fails(t *testing.T) {
+	rig := newCreateRig()
+	rig.provision.err = errors.New("registry: dial tcp: connection refused")
+
+	r, err := rig.svc.Intake(context.Background(), createCmd(createSBOM))
+	if err == nil {
+		t.Fatal("want the cause returned, so the adapter that owns logging can report it")
+	}
+	if r.Status() != domain.ReceiptFailed {
+		t.Fatalf("status = %q, want failed", r.Status())
+	}
+	if !strings.Contains(r.Detail(), "R1917.256") {
+		t.Errorf("detail = %q; it must name the version that could not be created", r.Detail())
+	}
+	if rig.registrar.calls != 0 {
+		t.Errorf("evidence was filed against a release that was never created (%d register call(s))", rig.registrar.calls)
+	}
+}
+
+// TestANodeWithNoRegistryWriteSeamRefusesToCreate — a node wired with no write seam
+// (the dev-stub posture) answers with a sentence naming the misconfiguration instead
+// of panicking inside the one step that writes. On the stub itself this is unreachable
+// — it knows no names, so no triple resolves far enough — which is why the stand-in is
+// a guard and not a feature.
+func TestANodeWithNoRegistryWriteSeamRefusesToCreate(t *testing.T) {
+	rig := newCreateRig()
+	svc := app.NewIntakeService(1<<20, rig.resolver, nil, rig.inventory, rig.reports, rig.registrar)
+
+	r, err := svc.Intake(context.Background(), createCmd(createSBOM))
+	if err == nil {
+		t.Fatal("want the cause returned")
+	}
+	if r.Status() != domain.ReceiptFailed {
+		t.Fatalf("status = %q, want failed", r.Status())
+	}
+	if !strings.Contains(r.Detail(), "registry write seam") {
+		t.Errorf("detail = %q; it must name the missing seam, which is the thing an operator can fix", r.Detail())
+	}
+	if rig.registrar.calls != 0 {
+		t.Error("evidence was filed against a release that could not be created")
 	}
 }
 

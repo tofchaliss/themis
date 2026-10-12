@@ -97,10 +97,10 @@ type ResolveRequest struct {
 	Project   string
 	Version   string
 	ReleaseID string
-	// CreateRelease is the caller's `create_release=true` (B2). Resolution is
-	// read-only and does not act on it: it is carried so the resolver can report
-	// what the caller asked for, and the find-or-create itself happens after every
-	// border check rather than inside resolution.
+	// CreateRelease is the caller's `create_release=true` (B2). It changes what an
+	// ABSENT version means and nothing else: resolution stays read-only and reports
+	// the version as still to be created ([Resolution.ToCreate]) instead of refusing
+	// it, while the find-or-create itself happens after every border check.
 	CreateRelease bool
 	// Authorize is the caller's product confinement, or NIL when there is none —
 	// which is the posture of an `admin` key and of an auth-disabled node (B3). The
@@ -115,15 +115,43 @@ type ResolveRequest struct {
 // identity to confine.
 func (r ResolveRequest) Confined() bool { return r.Authorize != nil }
 
-// ReleaseResolver resolves the release an intake names — either directly by
-// `release_id`, or by the {product, project, version} triple — and returns the
-// canonical release id (EDR-INTAKE-01 D7).
+// Resolution is what resolution ANSWERS (EDR-INTAKE-01 B7's step 4): which release
+// this intake files against — or, when `create_release=true` named a version that is
+// not registered yet under a Product and Project that are, the project that version
+// is still TO BE CREATED under.
 //
-// It is READ-ONLY, and that is the decision, not an implementation detail: intake
-// never creates Registry identity. A write from Evidence into Registry is neither an
-// event nor a read, and no convenience justifies punching through that — a
-// create-if-missing flag would let one typo in a product name silently fork the
-// estate graph, which is the thing Registry exists to prevent.
+// The second case carries the project id and the version because the create at step 8
+// must not look anything up again: re-resolving there would re-ask a question whose
+// answer was already authorized, and the second answer could differ from the first.
+type Resolution struct {
+	// ReleaseID is the canonical release id, and it is EMPTY exactly when the version
+	// is still to be created.
+	ReleaseID string
+	// ProjectID and Version name the version [ReleaseProvisioner] finds or creates at
+	// step 8. They are set exactly when ReleaseID is empty.
+	ProjectID string
+	Version   string
+}
+
+// ToCreate reports whether resolution ended on a version that does not exist yet.
+//
+// It is DERIVED from the empty release id rather than carried as a second field, so
+// the two cannot disagree: a resolution that both names a release and asks for one to
+// be created is not a state this type can hold.
+func (r Resolution) ToCreate() bool { return r.ReleaseID == "" }
+
+// ReleaseResolver resolves the release an intake names — either directly by
+// `release_id`, or by the {product, project, version} triple (EDR-INTAKE-01 D7).
+//
+// It is READ-ONLY, and that is the decision, not an implementation detail: resolution
+// creates nothing, and that is what keeps every border refusal free of a side effect.
+// With `create_release=true` an absent version is an ANSWER rather than a refusal —
+// [Resolution.ToCreate] — and the create itself is a separate port called at step 8,
+// after every border check (B2, B7).
+//
+// A Product or Project that does not resolve is still a refusal, never a creation:
+// those names are human-owned and a typo in one is where a parallel estate comes from,
+// which is the hazard D7 refused `create_if_missing` over.
 //
 // An unresolvable release is reported with [domain.Reject] carrying
 // [domain.ReasonUnknownRelease] and a detail naming which of the three was not found.
@@ -131,7 +159,33 @@ func (r ResolveRequest) Confined() bool { return r.Authorize != nil }
 // a detail that is the SAME for every outcome a product-scoped key must not
 // distinguish (B3) — stating the rule, never the estate.
 type ReleaseResolver interface {
-	Resolve(ctx context.Context, req ResolveRequest) (string, error)
+	Resolve(ctx context.Context, req ResolveRequest) (Resolution, error)
+}
+
+// ReleaseProvisioner is the ONE write Evidence makes into Registry (EDR-INTAKE-01 B2),
+// and the interface's SHAPE is the bound rather than a comment asking for restraint:
+// it can create a version under a project that already exists, and there is no product
+// or project verb to reach for. D7's wall — "a write from Evidence into Registry is
+// neither an event nor a read" — is narrowed, not removed, and a future widening is a
+// visible interface change instead of a new argument.
+//
+// Registry still owns what "one Release" means: the uniqueness rule, the id and the
+// `created` answer come from its own idempotent upsert, so two bots building the same
+// version at the same moment get one row (B4).
+//
+// It is called at step 8 of the order and nowhere else — after every border check,
+// immediately before filing — so a submission refused for `schema_invalid`,
+// `empty_report`, `no_inventory_for_release` or any other border reason creates
+// NOTHING. `409 duplicate_other_release` is the one refusal that can follow a create,
+// because the database discovers it at the evidence insert; the created version is
+// retained (a legitimate Release with no evidence yet) and a corrected retry reuses it.
+//
+// `created` is Registry's answer about the ROW, and intake has nothing to say with it:
+// a receipt's `created` is about the EVIDENCE (D9). It is in the signature because
+// find-or-create states it, and the app discards it deliberately rather than by
+// oversight.
+type ReleaseProvisioner interface {
+	FindOrCreateRelease(ctx context.Context, projectID, version string) (id string, created bool, err error)
 }
 
 // InventoryReader answers D6's precondition: does an Evidence document of

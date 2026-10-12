@@ -23,7 +23,10 @@ type RejectReason string
 // before anything is filed.
 const (
 	// ReasonUnknownRelease — `release_id` or the {product,project,version} triple
-	// does not resolve (D7: intake resolves, it never creates identity).
+	// does not resolve (D7: intake resolves identity, it does not create it). With
+	// `create_release=true` an absent VERSION is the one exception — it is created
+	// after every border check (B2) — while an unresolved Product or Project is still
+	// this refusal.
 	ReasonUnknownRelease RejectReason = "unknown_release"
 	// ReasonNoInventoryForRelease — D6: no SBOM-derived inventory for the release and
 	// no `allow_without_sbom`.

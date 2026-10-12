@@ -38,6 +38,16 @@ type Config struct {
 	// about the same table and wiring them separately invites them to disagree.
 	Registry subjectref.Registry
 
+	// Provision is the registry WRITE seam — the one write Evidence makes into
+	// Registry: find or create a version under a project that already exists
+	// (EDR-INTAKE-01 B2). Supplied by the composition root beside the read seam.
+	//
+	// nil is a node that wires none, and then intake REFUSES to create instead of
+	// panicking (see [app.NewIntakeService]). On the dev stub that refusal is
+	// unreachable anyway: the stub knows no names, so no triple ever resolves far
+	// enough for a version to be created.
+	Provision app.ReleaseProvisioner
+
 	// Report is the optional parse-outcome reporter (EDR-IDENTITY-01 D6).
 	Report app.ParseReporter
 
@@ -71,7 +81,7 @@ func EvidenceAPI(cfg Config) (http.Handler, *store.Store, *evhttp.Intake) {
 	// rather than a second path into the store: the trust gate, fingerprinting, the
 	// aggregate's invariants and the outbox note in one transaction are what "filed"
 	// means, and a parallel writer would be a second definition of it.
-	intakeSvc := app.NewIntakeService(cfg.Intake.MaxBytes, subjectref.NewResolver(cfg.Registry), st, report.Port{}, svc)
+	intakeSvc := app.NewIntakeService(cfg.Intake.MaxBytes, subjectref.NewResolver(cfg.Registry), cfg.Provision, st, report.Port{}, svc)
 	intake := evhttp.NewIntake(intakeSvc, st, svc, cfg.Intake, cfg.Logger)
 
 	// The same read seam also answers "which product owns this release", which is
