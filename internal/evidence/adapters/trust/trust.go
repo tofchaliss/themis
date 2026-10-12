@@ -5,10 +5,17 @@
 //
 // Per-format JSON-schema validation is intentionally left to the parser ACL, which
 // validates the spec version and document structure; this gate's structural check
-// is the well-formed-JSON baseline.
+// is the well-formed-JSON baseline — plus, for a scanner report, the curated SHAPE
+// (EDR-INTAKE-01 D11). That one addition is deliberate and narrow: `POST /evidence`
+// is the door everything already uses, and `json.Valid` being the whole of its
+// structural check is how an array-shaped Cortex export was filed as a curated
+// report on 2026-10-05 and halted Knowledge's evidence stream for 31 hours. Intake
+// is the good road, but the poison class must not remain reachable through the old
+// one.
 package trust
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,7 +68,48 @@ func (Gate) Admit(a Artifact) (Result, error) {
 		return reject(fp, a.Provenance, "payload is not well-formed JSON"), nil
 	}
 
+	if a.Kind == domain.KindScannerReport {
+		if reason, bad := curatedShapeFault(a.Raw); bad {
+			return reject(fp, a.Provenance, reason), nil
+		}
+	}
+
 	return Result{Fingerprint: fp, Status: domain.TrustAccepted, Provenance: a.Provenance}, nil
+}
+
+// curatedShapeFault is the cheap half of E1: a scanner report filed here is read by
+// Knowledge as `{"findings":[…]}`, so a document of any other shape is one no
+// consumer can read, and filing it is filing a document that will be fetched,
+// re-fetched and never understood.
+//
+// It is a SHAPE check and nothing more. The per-finding contract belongs to the
+// converter ACL and to Knowledge's scanner source, which skip and COUNT a record
+// they cannot decode — one malformed finding must not void a 400-finding report, so
+// a border stricter than the consumer would refuse reports the pipeline has always
+// read. What is refused here is the class with no readable findings at all.
+func curatedShapeFault(raw []byte) (string, bool) {
+	var env struct {
+		Findings []json.RawMessage `json:"findings"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		// Well-formed JSON that is not an object carrying `findings` — a bare array
+		// is the 2026-10-05 body exactly.
+		return "a scanner report is a JSON object {\"findings\":[…]}; this payload is a different shape " +
+			"(a bare array of vendor records is a request encoding, not an evidence document — send it to /intake)", true
+	}
+	if env.Findings == nil {
+		return "a scanner report needs a \"findings\" array; this payload carries none", true
+	}
+	for i, f := range env.Findings {
+		// Each element is already a well-formed JSON value — the unmarshal above
+		// said so — so its first structural byte decides, and nothing is decoded.
+		// HasPrefix rather than f[0] because 0, 1 and >1 bytes are three
+		// cardinalities and only one of them indexes safely (CONVENTIONS R5).
+		if !bytes.HasPrefix(f, []byte("{")) {
+			return fmt.Sprintf("findings[%d] is not an object", i), true
+		}
+	}
+	return "", false
 }
 
 func reject(fp value.ContentFingerprint, prov domain.Provenance, reason string) Result {
