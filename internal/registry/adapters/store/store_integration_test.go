@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,8 +60,37 @@ func migrationsDir() string {
 	return "file://" + path
 }
 
+// registryMigrationsTable is Registry's OWN golang-migrate bookkeeping table, mirroring
+// cmd/registry: Registry co-locates its identity tables in the `evidence` database, so sharing
+// golang-migrate's default `schema_migrations` with Evidence made whichever migrated second
+// read the other's version and skip its own CREATE TABLEs. The tests migrate through the same
+// configuration the node uses, so a test that reads this row reads the row an operator reads.
+const registryMigrationsTable = "registry_schema_migrations"
+
+// migrationDSN attaches the migrations-table parameter to dsn. It MUST stay a separate string
+// from the pool DSN: pgx forwards an unknown parameter to Postgres as a startup option and
+// every runtime connection would fail with `unrecognized configuration parameter`.
+func migrationDSN(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("x-migrations-table", registryMigrationsTable)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func newMigrate(dsn string) (*migrate.Migrate, error) {
+	mdsn, err := migrationDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return migrate.New(migrationsDir(), mdsn)
+}
+
 func migrateUp(dsn string) error {
-	m, err := migrate.New(migrationsDir(), dsn)
+	m, err := newMigrate(dsn)
 	if err != nil {
 		return err
 	}
@@ -293,7 +323,7 @@ func TestMigration_DownUp(t *testing.T) {
 	if testDSN == "" {
 		t.Skip("no database")
 	}
-	m, err := migrate.New(migrationsDir(), testDSN)
+	m, err := newMigrate(testDSN)
 	if err != nil {
 		t.Fatal(err)
 	}

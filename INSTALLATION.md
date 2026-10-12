@@ -638,6 +638,51 @@ Things the 2026-10-12 upgrade ran into:
 - **Reaching the GUI from your laptop** when the VM is firewalled: an SSH tunnel,
   `ssh -N -L 8090:localhost:8090 <user>@<vm-host>`, then open `http://localhost:8090`.
 
+#### If migration 000003 refuses (Registry uniqueness)
+
+Registry's `000003_registry_uniqueness` adds the three unique indexes — products on
+`lower(name)`, projects on `(product_id, lower(name))`, releases on `(project_id, version)` — behind
+a pre-flight that **refuses rather than repairs** (EDR-INTAKE-01 B4): merging two products means
+re-pointing projects, releases, evidence, findings and positions, which is an estate decision and
+not something a migration may take while you watch a progress line. The 2026-10-12 census found no
+duplicates, including case-insensitive ones, so this is expected not to fire.
+
+**Which database.** Registry has no database of its own: its identity tables are **co-located in
+the `evidence` database** (the topology table in Part A, and the `createdb` loop in step 1, which
+creates no `registry` DB), and it keeps its own `registry_schema_migrations` bookkeeping table
+there so it never reads Evidence's version. So every command below targets `evidence` and the
+**table** — not the database — is what carries the word "registry". `scripts/vm-verify.sh` reads
+the same pair.
+
+**Symptom.** Registry exits at startup logging `migrate failed` with
+`registry uniqueness pre-flight refused: duplicate rows exist …`, followed by one line per
+offending group naming the value, the row count and the ids.
+golang-migrate marks the version row **before** running the file, so `registry_schema_migrations`
+is left at `version=3, dirty=true` and a plain restart will **not** retry it.
+
+```sh
+# 1. Read the groups the refusal named, then resolve them yourself — the migration will not.
+#    These are the same three queries, read-only, if you want the list again. The registry
+#    tables live in the `evidence` database (see "Which database" above).
+psql "$PGBASE/evidence?sslmode=disable" -c "SELECT lower(name), count(*), array_agg(id) FROM products GROUP BY lower(name) HAVING count(*) > 1"
+psql "$PGBASE/evidence?sslmode=disable" -c "SELECT product_id, lower(name), count(*), array_agg(id) FROM projects GROUP BY product_id, lower(name) HAVING count(*) > 1"
+psql "$PGBASE/evidence?sslmode=disable" -c "SELECT project_id, version, count(*), array_agg(id) FROM releases GROUP BY project_id, version HAVING count(*) > 1"
+# 2. Clear the dirty flag by forcing the version back to 2 — the refused migration changed
+#    nothing, so there is nothing to undo. x-migrations-table is what points golang-migrate at
+#    Registry's own row instead of Evidence's; without it you would force the WRONG version.
+migrate -path internal/registry/adapters/store/migrations \
+        -database "$PGBASE/evidence?sslmode=disable&x-migrations-table=registry_schema_migrations" \
+        force 2
+# 3. Re-run. Registry applies 000003 again on startup.
+sudo systemctl restart themis@registry
+PGBASE=... ./scripts/vm-verify.sh            # registry at the expected migration version
+```
+
+Without the `migrate` CLI, step 2 is
+`UPDATE registry_schema_migrations SET version = 2, dirty = false;` on the `evidence` database
+(Registry's table, Evidence's database — see above) — and nothing else, because the refusal
+rolled its own transaction back.
+
 ---
 
 ## Part B — v0.3.x single binary (`cmd/themis`)
