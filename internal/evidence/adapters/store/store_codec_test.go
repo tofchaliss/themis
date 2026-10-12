@@ -68,6 +68,35 @@ func TestInventoryCodec_Invalid(t *testing.T) {
 	}
 }
 
+// TestEvidenceCodecRoundTripsBuildID — the build id survives the trip through the
+// stored columns and back. The pair is tested together because a column written and
+// never read is the exact failure mode a deliberately inert label has (EDR-INTAKE-01
+// B5): nothing consults `build_id` to decide anything, so a half-wired codec would
+// look identical to a working one until an operator asked which build produced a
+// document.
+func TestEvidenceCodecRoundTripsBuildID(t *testing.T) {
+	const buildID = "Jenkins/OAMP-core/1917"
+	in := domain.Provenance{Source: "trivy", ImageDigest: "sha256:deadbeef", BuildID: buildID}
+
+	source, digest, stored := provenanceColumns(in)
+	if stored != buildID {
+		t.Fatalf("provenance_build_id column = %q, want %q", stored, buildID)
+	}
+	got := provenanceFromColumns(source, digest, stored)
+	if got.BuildID != buildID {
+		t.Errorf("BuildID round-trip = %q, want %q", got.BuildID, buildID)
+	}
+	if got.Source != in.Source || got.ImageDigest != in.ImageDigest {
+		t.Errorf("the new column disturbed its neighbours: %+v", got)
+	}
+
+	// An absent build id round-trips as the empty string, never as a NULL-shaped
+	// surprise: a build id nobody asserted is the fact "none", not an unknown.
+	if _, _, none := provenanceColumns(domain.Provenance{Source: "trivy"}); none != "" {
+		t.Errorf("absent build id = %q, want empty", none)
+	}
+}
+
 func TestNewEventPayload(t *testing.T) {
 	ev := domain.EvidenceRegistered{
 		EvidenceID: "ev-1", Kind: domain.KindSBOM, SubjectReleaseID: "rel-1",

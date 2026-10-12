@@ -78,6 +78,72 @@ func TestRejectReasonEnumMatchesTheOpenAPISpec(t *testing.T) {
 	}
 }
 
+// TestIntakeSpecStatesTheBotIntakeParametersAndTheReceiptEcho pins what the spec
+// says about `create_release` and `build_id`, because the spec is the only place the
+// BOUND is declared: `maxLength: 256` counts Unicode code points, which is exactly
+// why EDR-INTAKE-01 B5 puts the bound there — so the wire contract and the Go check
+// (`utf8.RuneCountInString`, never `len`) cannot disagree about the unit. The
+// handler's enforcement arrives in its own step; a spec whose bound drifted would
+// make that step's test pass against the wrong number.
+func TestIntakeSpecStatesTheBotIntakeParametersAndTheReceiptEcho(t *testing.T) {
+	// internal/evidence/adapters/http -> the repository root.
+	path := filepath.Join("..", "..", "..", "..", "api", "evidence.openapi.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var spec struct {
+		Paths struct {
+			Intake struct {
+				Post struct {
+					Parameters []struct {
+						Name   string `yaml:"name"`
+						In     string `yaml:"in"`
+						Schema struct {
+							Type      string `yaml:"type"`
+							MaxLength int    `yaml:"maxLength"`
+						} `yaml:"schema"`
+					} `yaml:"parameters"`
+				} `yaml:"post"`
+			} `yaml:"/intake"`
+		} `yaml:"paths"`
+		Components struct {
+			Schemas struct {
+				IntakeReceipt struct {
+					Properties map[string]struct {
+						Type string `yaml:"type"`
+					} `yaml:"properties"`
+				} `yaml:"IntakeReceipt"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	params := spec.Paths.Intake.Post.Parameters
+	find := func(name string) (string, string, int) {
+		for _, p := range params {
+			if p.Name == name {
+				return p.In, p.Schema.Type, p.Schema.MaxLength
+			}
+		}
+		t.Errorf("POST /intake declares no %q parameter", name)
+		return "", "", 0
+	}
+	if in, typ, _ := find("create_release"); in != "query" || typ != "boolean" {
+		t.Errorf("create_release is in=%q type=%q, want query/boolean", in, typ)
+	}
+	if in, typ, max := find("build_id"); in != "query" || typ != "string" || max != 256 {
+		t.Errorf("build_id is in=%q type=%q maxLength=%d, want query/string/256 (B5's code-point bound)", in, typ, max)
+	}
+
+	echo, ok := spec.Components.Schemas.IntakeReceipt.Properties["build_id"]
+	if !ok || echo.Type != "string" {
+		t.Errorf("IntakeReceipt.build_id = %+v (present=%v), want a string — B5 echoes the attempt's build id", echo, ok)
+	}
+}
+
 // TestStatusForReason_AnUnmappedReasonIs422 — unreachable through the domain, which
 // refuses a reason outside the closed taxonomy, and asserted because the alternative
 // to a stated fallback is a zero status code. 422 rather than 500: the document was

@@ -66,14 +66,16 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var insertedID string
+	provSource, provDigest, provBuildID := provenanceColumns(e.Provenance())
 	err = tx.QueryRow(ctx, `
 		INSERT INTO evidence (id, kind, fingerprint, subject_release_id, provenance_source,
-			provenance_image_digest, trust_status, raw_document, canonical_inventory, filed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			provenance_image_digest, provenance_build_id, trust_status, raw_document,
+			canonical_inventory, filed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (fingerprint) DO NOTHING
 		RETURNING id
 	`, string(e.ID()), string(e.Kind()), e.Fingerprint().String(), e.Subject().ReleaseID,
-		e.Provenance().Source, e.Provenance().ImageDigest, string(e.Trust()), raw, string(inv), e.FiledAt(),
+		provSource, provDigest, provBuildID, string(e.Trust()), raw, string(inv), e.FiledAt(),
 	).Scan(&insertedID)
 
 	switch {
@@ -114,16 +116,18 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 // GetByID loads the whole Evidence aggregate by its id.
 func (s *Store) GetByID(ctx context.Context, id domain.EvidenceID) (domain.Evidence, error) {
 	var (
-		kind, fingerprint, releaseID  string
-		provSource, provDigest, trust string
-		invJSON                       []byte
-		filedAt                       time.Time
+		kind, fingerprint, releaseID        string
+		provSource, provDigest, provBuildID string
+		trust                               string
+		invJSON                             []byte
+		filedAt                             time.Time
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT kind, fingerprint, subject_release_id, provenance_source, provenance_image_digest,
-			trust_status, canonical_inventory, filed_at
+			provenance_build_id, trust_status, canonical_inventory, filed_at
 		FROM evidence WHERE id = $1
-	`, string(id)).Scan(&kind, &fingerprint, &releaseID, &provSource, &provDigest, &trust, &invJSON, &filedAt)
+	`, string(id)).Scan(&kind, &fingerprint, &releaseID, &provSource, &provDigest, &provBuildID,
+		&trust, &invJSON, &filedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Evidence{}, ErrNotFound
 	}
@@ -139,7 +143,7 @@ func (s *Store) GetByID(ctx context.Context, id domain.EvidenceID) (domain.Evide
 		return domain.Evidence{}, err
 	}
 	return domain.NewEvidence(id, domain.Kind(kind), fp, domain.SubjectRef{ReleaseID: releaseID},
-		domain.Provenance{Source: provSource, ImageDigest: provDigest}, domain.TrustStatus(trust), inv, filedAt)
+		provenanceFromColumns(provSource, provDigest, provBuildID), domain.TrustStatus(trust), inv, filedAt)
 }
 
 // GetInventory returns just the canonical component inventory for an Evidence id —
@@ -214,6 +218,25 @@ func (s *Store) ListByRelease(ctx context.Context, releaseID string) ([]Summary,
 		out = append(out, sum)
 	}
 	return out, rows.Err()
+}
+
+// --- row codecs ------------------------------------------------------------
+
+// provenanceColumns and provenanceFromColumns are the Provenance <-> stored-columns
+// pair, written as a PAIR so a provenance column cannot be written without being
+// read back — which is the whole failure mode a label like `build_id` has: nothing
+// reads it to decide anything (EDR-INTAKE-01 B5), so a write-only column would look
+// exactly like a working one until an operator asked which build produced a document.
+//
+// Only the three columns the `evidence` table has are here. `SourceDigest`,
+// `ConvertedBy` and `WithoutSBOM` carry no column yet — they live on the intake
+// receipt — and this pair does not pretend otherwise.
+func provenanceColumns(p domain.Provenance) (source, imageDigest, buildID string) {
+	return p.Source, p.ImageDigest, p.BuildID
+}
+
+func provenanceFromColumns(source, imageDigest, buildID string) domain.Provenance {
+	return domain.Provenance{Source: source, ImageDigest: imageDigest, BuildID: buildID}
 }
 
 // --- JSON codecs -----------------------------------------------------------

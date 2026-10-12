@@ -159,6 +159,16 @@ paths:
           in: query
           schema:
             type: string
+        - name: create_release
+          in: query
+          description: >-
+            With the WHOLE triple (`product`, `project`, `version`), find-or-create
+            the Release instead of refusing an unknown version (EDR-INTAKE-01 B2).
+            Rejected alongside `release_id` (`create_release_conflict`) and with an
+            incomplete triple (`incomplete_release_triple`). Products and Projects
+            are still resolved read-only — intake creates versions, never identity.
+          schema:
+            type: boolean
         - name: allow_without_sbom
           in: query
           description: >-
@@ -191,6 +201,18 @@ paths:
           in: query
           schema:
             type: string
+        - name: build_id
+          in: query
+          description: >-
+            Which pipeline run produced this document — stored as artifact provenance
+            and echoed on the receipt (EDR-INTAKE-01 B5). Deliberately inert: nothing
+            reads it for dedup, correlation or current-SBOM selection. The bound is
+            256 **Unicode code points**, not bytes, so the spec and the code count the
+            same thing; over the bound or not valid UTF-8 is `build_id_invalid`,
+            refused and never truncated.
+          schema:
+            type: string
+            maxLength: 256
         - name: Idempotency-Key
           in: header
           description: >-
@@ -540,6 +562,13 @@ components:
         converted_by:
           type: string
           description: The converter and its version (`cortex@1`); empty for a pass-through.
+        build_id:
+          type: string
+          description: >-
+            The `build_id` THIS attempt submitted (B5). A receipt records an attempt
+            and the evidence row records what was filed, so on a byte-identical retry
+            — which dedups and keeps the FIRST upload's provenance — the two differ by
+            design.
         created_at:
           type: string
           format: date-time

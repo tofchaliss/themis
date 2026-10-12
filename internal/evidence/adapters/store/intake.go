@@ -49,8 +49,13 @@ type IntakeReceipt struct {
 	Components      int
 	SourceDigest    string
 	ConvertedBy     string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// BuildID is what THIS attempt submitted (EDR-INTAKE-01 B5). A byte-identical
+	// retry dedups and the evidence row keeps the FIRST upload's build id, so this
+	// value and the filed document's can differ: a receipt records an attempt, the
+	// evidence row records what was filed.
+	BuildID   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // SaveIntakeReceipt writes a receipt, inserting it the first time and advancing it
@@ -65,8 +70,9 @@ func (s *Store) SaveIntakeReceipt(ctx context.Context, r IntakeReceipt) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO intake_receipts (intake_id, idempotency_key, status, reason, detail,
 			evidence_id, release_id, detected_kind, detected_format, findings_total,
-			findings_skipped, components, source_digest, converted_by, created_at, updated_at)
-		VALUES ($1, NULLIF($2,''), $3,$4,$5, NULLIF($6,''), $7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
+			findings_skipped, components, source_digest, converted_by, build_id,
+			created_at, updated_at)
+		VALUES ($1, NULLIF($2,''), $3,$4,$5, NULLIF($6,''), $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
 		ON CONFLICT (intake_id) DO UPDATE SET
 			status = EXCLUDED.status,
 			reason = EXCLUDED.reason,
@@ -80,10 +86,11 @@ func (s *Store) SaveIntakeReceipt(ctx context.Context, r IntakeReceipt) error {
 			components = EXCLUDED.components,
 			source_digest = EXCLUDED.source_digest,
 			converted_by = EXCLUDED.converted_by,
+			build_id = EXCLUDED.build_id,
 			updated_at = EXCLUDED.updated_at
 	`, r.IntakeID, r.IdempotencyKey, string(r.Status), string(r.Reason), r.Detail,
 		r.EvidenceID, r.ReleaseID, r.DetectedKind, r.DetectedFormat, r.FindingsTotal,
-		r.FindingsSkipped, r.Components, r.SourceDigest, r.ConvertedBy, now)
+		r.FindingsSkipped, r.Components, r.SourceDigest, r.ConvertedBy, r.BuildID, now)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == idempotencyConstraint {
@@ -119,11 +126,11 @@ func (s *Store) scanReceipt(ctx context.Context, where string, arg string) (Inta
 	err := s.pool.QueryRow(ctx, `
 		SELECT intake_id, idempotency_key, status, reason, detail, evidence_id, release_id,
 			detected_kind, detected_format, findings_total, findings_skipped, components,
-			source_digest, converted_by, created_at, updated_at
+			source_digest, converted_by, build_id, created_at, updated_at
 		FROM intake_receipts `+where, arg).
 		Scan(&r.IntakeID, &key, &status, &reason, &r.Detail, &evidenceID, &r.ReleaseID,
 			&r.DetectedKind, &r.DetectedFormat, &r.FindingsTotal, &r.FindingsSkipped, &r.Components,
-			&r.SourceDigest, &r.ConvertedBy, &r.CreatedAt, &r.UpdatedAt)
+			&r.SourceDigest, &r.ConvertedBy, &r.BuildID, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return IntakeReceipt{}, ErrNotFound
 	}

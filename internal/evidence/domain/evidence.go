@@ -75,6 +75,13 @@ type Provenance struct {
 	// release with no SBOM-derived inventory behind them. A release in that state
 	// says so rather than looking like any other.
 	WithoutSBOM bool
+	// BuildID labels which pipeline run produced the document (EDR-INTAKE-01 B5).
+	// It has exactly the standing of the image digest: DATA, never a modeled
+	// entity (EDR-KERNEL-01 D2) — nothing here reads it, and nothing downstream
+	// may use it for dedup, correlation or current-SBOM selection. Its only border
+	// is the intake door's bound (256 Unicode code points), which is why the
+	// domain places no constraint on it.
+	BuildID string
 }
 
 // Evidence is the immutable aggregate root of the Evidence context: one filed,
