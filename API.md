@@ -80,14 +80,27 @@ collaborate only via events + read APIs — they never share a database. Errors 
 
 | Method | Path | Operation |
 | ------ | ---- | --------- |
-| POST | `/products` | `registerProduct` |
+| POST | `/products` | `registerProduct` — find-or-create: `201` `created:true` new · `200` `created:false` already registered |
 | GET | `/products` | `listProducts` — the estate entry point (DASH-1): without it a caller had to already know a product id to read anything |
 | GET | `/products/{id}/projects` | `listProjectsOfProduct` (DASH-1) |
-| POST | `/projects` | `registerProject` |
+| POST | `/projects` | `registerProject` — find-or-create (same `201`/`200`); unknown product → `422` |
 | GET | `/projects/{id}/releases` | `listReleasesOfProject` (DASH-1) |
-| POST | `/releases` | `registerRelease` |
+| POST | `/releases` | `registerRelease` — find-or-create (same `201`/`200`); unknown project → `422` |
 | GET | `/releases` | `listReleases` |
 | GET | `/releases/{id}` | `getRelease` (backs Evidence's `SubjectRef` / `ReleaseExists`) |
+
+**The three creates are idempotent find-or-create, and uniqueness is the database's**
+(EDR-INTAKE-01 B4). Registering a name or version that already exists is not an error: the
+existing id comes back with **`200` and `created:false`**, where a first registration answers
+**`201` and `created:true`**. The status line and the body's `created` flag carry the same
+answer, so a client may switch on either. Two bots building one version at the same moment is
+the normal case, not the exotic one, and they get **one row** — `INSERT … ON CONFLICT` against a
+unique index per level, never a `SELECT`-then-`INSERT`.
+
+Case-folding is deliberately asymmetric: product and project names are human-typed labels and
+fold case (`OAMP` and `oamp` are one product, and **the stored casing is the first caller's**),
+while a **version is matched exactly** — a build string's case is not Themis's to fold, and
+folding it would merge two builds.
 
 The **estate graph** (EDR-ESTATE-01, C1) hangs off the same identity spine. It is what turns a technical
 severity into a business one: without it every Finding on every release ranks alike, because nothing knows

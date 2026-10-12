@@ -186,16 +186,25 @@ DSN and never reaches the connection pool — putting `x-migrations-table` on th
 breaks the running service, because pgx forwards the unknown parameter to Postgres and every connection is
 rejected with `FATAL: unrecognized configuration parameter`.
 
-Loading the SQL by hand also still works (the migrations are idempotent `CREATE TABLE IF NOT EXISTS`), and
-is the right choice if the DB role running the service should not hold DDL rights. Load **both** —
-`000001` is the Product→Project→Release identity, `000002` is the enterprise **estate** graph
-(Customer / Microservice / Deployment) that the release blast-radius traversal needs (C1/C2); skip the second
-and `GET /releases/{id}/blast-radius` returns an empty estate and the priority multiplier stays at 1.0×:
+Loading the SQL by hand also still works, and is the right choice if the DB role running the service should
+not hold DDL rights. Load **all three** — `000001` is the Product→Project→Release identity, `000002` is the
+enterprise **estate** graph (Customer / Microservice / Deployment) that the release blast-radius traversal
+needs (C1/C2), and `000003` is the three **unique indexes** the idempotent creates require. Skip `000002`
+and `GET /releases/{id}/blast-radius` returns an empty estate with the priority multiplier stuck at 1.0×;
+skip `000003` and **every** `POST /products`, `/projects` and `/releases` answers `400`
+`no unique or exclusion constraint matching the ON CONFLICT specification`, because find-or-create is
+`INSERT … ON CONFLICT` against those indexes (EDR-INTAKE-01 B4):
 
 ```sh
 psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000001_registry.up.sql
 psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000002_estate.up.sql
+psql "$PGBASE/evidence?sslmode=disable" -f internal/registry/adapters/store/migrations/000003_registry_uniqueness.up.sql
 ```
+
+`000001` and `000002` are idempotent (`CREATE TABLE IF NOT EXISTS`); **`000003` is not** — it is one
+transaction that refuses on existing duplicates and then creates the three indexes by name, so a second run
+fails with `relation "registry_products_name_key" already exists` and changes nothing. If its pre-flight
+refuses, the groups it names are yours to resolve: see section 8, "If migration 000003 refuses".
 
 ```sh
 mkdir -p logs

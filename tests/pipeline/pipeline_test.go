@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,12 +301,12 @@ func newPipeline(t *testing.T) *pipeline {
 	}))
 	t.Cleanup(osv.Close)
 
-	// Registry: co-locates its identity tables in the evidence DB (as in production — it cannot
-	// self-migrate there, so load the idempotent schema directly). It serves the Product →
+	// Registry: co-locates its identity tables in the evidence DB (as in production) and
+	// migrates them itself, through its OWN bookkeeping table. It serves the Product →
 	// Project → Release API the test registers against.
 	evPool := mustPool(t, dsnFor("evidence"))
 	t.Cleanup(evPool.Close)
-	loadSQL(t, evPool, "../../internal/registry/adapters/store/migrations/000001_registry.up.sql")
+	migrateRegistry(t)
 	regHandler, _ := registrywiring.RegistryAPI(evPool)
 	registrySrv := httptest.NewServer(mount(regHandler))
 	t.Cleanup(registrySrv.Close)
@@ -402,16 +403,37 @@ func migrateDB(t *testing.T, db, path string) {
 	}
 }
 
-// loadSQL executes a .sql file against the pool — used to load the registry schema into the
-// evidence DB (the registry co-locates there and cannot self-migrate; the schema is idempotent).
-func loadSQL(t *testing.T, pool *pgxpool.Pool, path string) {
+// migrateRegistry applies Registry's migrations into the evidence database through Registry's
+// OWN golang-migrate bookkeeping table, exactly as cmd/registry does: both binaries migrate the
+// same database, and sharing the default `schema_migrations` makes whichever runs second read
+// the other's version and skip its own CREATE TABLEs.
+//
+// It replaces a hand-loaded `000001_registry.up.sql`, which froze this harness's registry schema
+// at the day that line was written — migration 000003's unique indexes were missing, so the
+// find-or-create creates (EDR-INTAKE-01 B4) failed with "no unique or exclusion constraint
+// matching the ON CONFLICT specification". The migrations DIRECTORY is the source of truth here;
+// a file literal is right once and silently wrong afterwards.
+func migrateRegistry(t *testing.T) {
 	t.Helper()
-	sql, err := os.ReadFile(path)
+	abs, _ := filepath.Abs("../../internal/registry/adapters/store/migrations")
+	// The migrations-table parameter MUST ride a separate DSN from any pool's: pgx forwards an
+	// unknown parameter to Postgres as a startup option and every runtime connection would fail
+	// with `unrecognized configuration parameter`.
+	u, err := url.Parse(dsnFor("evidence"))
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("parse evidence dsn: %v", err)
 	}
-	if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
-		t.Fatalf("load %s: %v", path, err)
+	q := u.Query()
+	q.Set("x-migrations-table", "registry_schema_migrations")
+	u.RawQuery = q.Encode()
+
+	m, err := migrate.New("file://"+abs, u.String())
+	if err != nil {
+		t.Fatalf("migrate.New registry: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		t.Fatalf("migrate registry: %v", err)
 	}
 }
 

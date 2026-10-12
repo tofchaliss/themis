@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	reghttp "github.com/themis-project/themis/internal/registry/adapters/http"
@@ -30,12 +32,19 @@ type fakeRepo struct {
 	blast         int
 	blastErr      error
 	listErr       error
+
+	// Name indexes mirroring the store's unique indexes (B4).
+	productIDs map[string]string
+	projectIDs map[string]string
+	releaseIDs map[string]string
+	rows       int
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{},
 		microservices: map[string]bool{}, customers: map[string]bool{},
+		productIDs: map[string]string{}, projectIDs: map[string]string{}, releaseIDs: map[string]string{},
 	}
 }
 
@@ -58,17 +67,42 @@ func (r *fakeRepo) BlastRadiusCustomers(_ context.Context, _ string) (int, error
 	return r.blast, r.blastErr
 }
 
-func (r *fakeRepo) SaveProduct(_ context.Context, p domain.Product) error {
-	r.products[string(p.ID())] = true
-	return nil
+// The three find-or-creates, standing in for the store's unique indexes (EDR-INTAKE-01 B4):
+// products and projects fold case, a version is matched exactly, and only the caller that
+// minted the row is told created=true.
+func (r *fakeRepo) UpsertProduct(_ context.Context, name string) (string, bool, error) {
+	id, created := r.findOrCreate(r.productIDs, strings.ToLower(name))
+	if created {
+		r.products[id] = true
+	}
+	return id, created, nil
 }
-func (r *fakeRepo) SaveProject(_ context.Context, p domain.Project) error {
-	r.projects[string(p.ID())] = true
-	return nil
+func (r *fakeRepo) UpsertProject(_ context.Context, productID, name string) (string, bool, error) {
+	id, created := r.findOrCreate(r.projectIDs, productID+"\x00"+strings.ToLower(name))
+	if created {
+		r.projects[id] = true
+	}
+	return id, created, nil
 }
-func (r *fakeRepo) SaveRelease(_ context.Context, rel domain.Release) error {
-	r.releases[string(rel.ID())] = rel
-	return nil
+func (r *fakeRepo) UpsertRelease(_ context.Context, projectID, version string) (string, bool, error) {
+	id, created := r.findOrCreate(r.releaseIDs, projectID+"\x00"+version)
+	if created {
+		rel, err := domain.NewRelease(domain.ReleaseID(id), domain.ProjectID(projectID), version)
+		if err != nil {
+			return "", false, err
+		}
+		r.releases[id] = rel
+	}
+	return id, created, nil
+}
+func (r *fakeRepo) findOrCreate(index map[string]string, key string) (string, bool) {
+	if id, ok := index[key]; ok {
+		return id, false
+	}
+	r.rows++
+	id := fmt.Sprintf("row-%d", r.rows)
+	index[key] = id
+	return id, true
 }
 func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Release, error) {
 	rel, ok := r.releases[string(id)]
@@ -153,7 +187,7 @@ type seqIDs struct{ n int }
 
 func (s *seqIDs) NewID() string {
 	s.n++
-	return []string{"", "id-1", "id-2", "id-3"}[s.n]
+	return fmt.Sprintf("id-%d", s.n)
 }
 
 func newServer(t *testing.T, repo app.Repository) *httptest.Server {
@@ -192,6 +226,73 @@ func idOf(t *testing.T, raw []byte) string {
 		t.Fatalf("decode id: %v", err)
 	}
 	return out.Id
+}
+
+// createdOf decodes a find-or-create response. It returns BOTH halves because the whole point
+// of the tests below is that the status line and the body agree.
+func createdOf(t *testing.T, raw []byte) (string, bool) {
+	t.Helper()
+	var out struct {
+		Id      string `json:"id"`
+		Created bool   `json:"created"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode find-or-create response: %v (%s)", err, raw)
+	}
+	return out.Id, out.Created
+}
+
+// assertFindOrCreate POSTs the same body twice and asserts B4's contract at the HTTP edge:
+// `201` + `created=true` first, `200` + `created=false` second, one id throughout. It returns
+// that id so a caller can build the next level on it.
+//
+// Consumer compatibility, re-verified 2026-10-12 for this step
+// (`rg -n 'api/v1/(products|projects|releases)' scripts tests cmd internal`, frozen legacy tree
+// excluded): the only WRITERS of the three routes are scripts/gf-upload-sbom.sh (curl
+// `--fail-with-body`, reads `.id` and never inspects the status — `200` is success),
+// tests/pipeline/pipeline_test.go (one create per fresh database — still `201`) and these
+// tests. scripts/run-alpine-e2e-local.sh posts to the FROZEN v0.3.x monolith on `:8080`
+// (`POST /products/{id}/projects`, a route the greenfield Registry does not serve), so it is
+// not a consumer of this change. Governance, Communication, Intelligence and the dashboard
+// only READ Registry.
+func assertFindOrCreate(t *testing.T, url string, body map[string]string) string {
+	t.Helper()
+	status, raw := post(t, url, body)
+	id, created := createdOf(t, raw)
+	if status != http.StatusCreated || !created {
+		t.Fatalf("first POST %s = %d created=%v, want 201 created=true: %s", url, status, created, raw)
+	}
+	if id == "" {
+		t.Fatalf("first POST %s returned an empty id: %s", url, raw)
+	}
+
+	status, raw = post(t, url, body)
+	again, created := createdOf(t, raw)
+	if status != http.StatusOK || created {
+		t.Fatalf("second POST %s = %d created=%v, want 200 created=false: %s", url, status, created, raw)
+	}
+	if again != id {
+		t.Fatalf("second POST %s id = %q, want the existing %q", url, again, id)
+	}
+	return id
+}
+
+func TestCreateProductIs201NewAnd200Existing(t *testing.T) {
+	srv := newServer(t, newFakeRepo())
+	assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+}
+
+func TestCreateProjectIs201NewAnd200Existing(t *testing.T) {
+	srv := newServer(t, newFakeRepo())
+	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": prodID, "name": "core"})
+}
+
+func TestCreateReleaseIs201NewAnd200Existing(t *testing.T) {
+	srv := newServer(t, newFakeRepo())
+	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	projID := assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": prodID, "name": "core"})
+	assertFindOrCreate(t, srv.URL+"/releases", map[string]string{"project_id": projID, "version": "R1917.256"})
 }
 
 func TestRegisterFlow(t *testing.T) {
