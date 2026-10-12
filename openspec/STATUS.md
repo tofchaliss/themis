@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained by the openspec skills (`propose`, `apply`, `archive`) and by hand when work lands outside a
-change. Last updated: 2026-08-06._
+change. Last updated: 2026-10-12._
 
 **Phase-3 greenfield pivot — the sole go-forward.** The DDD bounded-context rebuild (Evidence → Knowledge →
 Governance → Communication, over Kernel/Registry, with the Intelligence AI gateway beside it), per the
@@ -15,7 +15,8 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 (EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
-**OpenSpec state: no active changes.** `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+**OpenSpec state: see "Active Changes" below** (as of 2026-10-12: `phase3-report-intake` groups 1–4
+merged, `phase3-bot-intake` at Gate B). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
 Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
@@ -45,12 +46,25 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 ## Active Changes
 
-**None.** `phase3-trust-model` was implemented and archived 2026-08-06 (63/63, all 11 groups) — see the
-table below.
+**2026-10-12 — report intake is merged; `phase3-bot-intake` is at Gate B.**
 
-The next change (the AI-capability line — GOV-14, then Δ3b / Δ4) has **not been scaffolded yet**. Scaffold it
-from `EDR-TRUST-01` + `EDR-GOVERNANCE-01`, **not** from `EDR-INTELLIGENCE-01` Revision 5, which is
-superseded.
+- **`phase3-report-intake`** — **groups 1–4 merged** (#138–#141: the one `POST /intake` door, the
+  server-side converters, the receipt, and the GUI + scripts uploading through it). Beside them, **#142**
+  the dashboard's password login and Admin tab, and **#143** the 2026-10-12 VM round (intake dedup fix,
+  the upgrade runbook, the test log). Later groups are still open in the change.
+- **`phase3-bot-intake`** — **Gate A approved and merged** (#144, `69bada2`): EDR-INTAKE-01's 2026-10-12
+  amendment ("Bot-friendly intake", `B1`–`B7` + the status-code table) plus proposal/design/tasks.
+  **Documents only — no code in #144.**
+  **Gate B is open and is `Group 0` + `Group 1` ONLY**; Gates C–F (Groups 2–4) are **on hold**.
+  **0.1 is done** — the four new reject reasons (`create_release_conflict` 400 ·
+  `incomplete_release_triple` 400 · `ambiguous_name` 422 · `build_id_invalid` 400) landed as vocabulary
+  across the domain enum, `api/evidence.openapi.yaml`, the HTTP status table and the dashboard's
+  intake-reason table; nothing produces them yet. **Next task: 1.1** (the Registry uniqueness
+  migration's refusing pre-flight, B4).
+- Other scaffolded `phase3-*` changes under `openspec/changes/` carry their own state in their
+  `tasks.md`; this file records the resume pointer, never per-task state.
+
+Live greenfield narrative and the resume point → `docs/engineering/PHASE3-STATUS.md`.
 
 ## Archived Phase-3 changes
 

@@ -526,6 +526,15 @@ var httpStatusFor = map[domain.RejectReason]int{
 	// 401 is the missing or invalid key; a valid key without write scope is the
 	// auth middleware's 403, which never reaches this handler.
 	domain.ReasonUnauthorized: http.StatusUnauthorized,
+	// The 2026-10-12 amendment's four (its status-code table). The three parameter
+	// faults are malformed REQUESTS — the caller named the release two ways, named
+	// it partially, or sent a `build_id` outside the bound — so they are 400, not
+	// the 422 of a document that was read and declined. `ambiguous_name` is 422
+	// because the request is well-formed and it is the ESTATE that cannot answer it.
+	domain.ReasonCreateReleaseConflict:   http.StatusBadRequest,
+	domain.ReasonIncompleteReleaseTriple: http.StatusBadRequest,
+	domain.ReasonAmbiguousName:           http.StatusUnprocessableEntity,
+	domain.ReasonBuildIDInvalid:          http.StatusBadRequest,
 }
 
 func statusForReason(reason domain.RejectReason) int {

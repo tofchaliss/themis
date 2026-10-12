@@ -22,7 +22,7 @@ and rots silently) and **`make check`** green locally; CI runs `make check-ci`. 
 
 ## Group 0 — The reason enum, first, so no later step depends on a later one
 
-- [ ] **0.1 — [API] The four new reasons, everywhere at once.** `internal/evidence/domain/intake.go`
+- [x] **0.1 — [API] The four new reasons, everywhere at once.** `internal/evidence/domain/intake.go`
   gains `create_release_conflict` (400), `incomplete_release_triple` (400), `ambiguous_name` (422)
   and `build_id_invalid` (400) with their HTTP mapping; `api/evidence.openapi.yaml`'s `RejectReason`
   enum gains the same four (additive); regenerate with `make generate-api-evidence`; the dashboard's
