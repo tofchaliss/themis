@@ -13,7 +13,13 @@ COVERAGE_TXT := coverage.txt
 GO_BUILD_FLAGS ?=
 GO_TEST_FLAGS ?=
 
-COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/... ./internal/domain/... ./internal/usecase/... ./internal/adapter/... ./internal/infrastructure/... ./tests/acceptance/...
+# Full-repo coverage scope. `./internal/dashboard/...` belongs here even though the dashboard
+# is a view, not a context: its packages ARE registered in scripts/check-coverage.sh, and a
+# registered package absent from the profile reports SKIP, not FAIL — so omitting it here
+# meant `make check` printed "All package coverage thresholds satisfied" while measuring the
+# dashboard not at all. The greenfield list below always had it; this one did not, and the
+# two scopes disagreeing is exactly the kind of silence a gate is supposed to prevent.
+COVERAGE_PKGS := ./internal/kernel/... ./internal/registry/... ./internal/evidence/... ./internal/knowledge/... ./internal/governance/... ./internal/communication/... ./internal/intelligence/... ./internal/platform/... ./internal/dashboard/... ./internal/domain/... ./internal/usecase/... ./internal/adapter/... ./internal/infrastructure/... ./tests/acceptance/...
 
 # Greenfield-only coverage scope. The frozen v0.3.x legacy tree (internal/{domain,
 # usecase,adapter,infrastructure}, tests/acceptance) is reference-only and has

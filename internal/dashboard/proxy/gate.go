@@ -17,9 +17,10 @@ import (
 type Gate struct {
 	// Principal resolves the request's session to its operator (session.Handler.Principal).
 	Principal func(*http.Request) (auth.Principal, bool)
-	// Reverify is the mutation-path re-check (D12): the session's key must STILL be
-	// active before a write is forwarded. Nil skips the re-check (tests compose it
-	// separately; production always sets it).
+	// Reverify is the mutation-path re-check (D12): the session's CREDENTIAL must still
+	// be good before a write is forwarded — the API key still active, or, for a password
+	// session, the user row still present with the password it had at login. Nil skips
+	// the re-check (tests compose it separately; production always sets it).
 	Reverify func(*http.Request) (auth.Principal, bool)
 }
 
@@ -69,8 +70,8 @@ func isRead(r *http.Request) bool {
 
 // Wrap enforces, in order: a session exists (401), the scope covers the route class
 // (403), the body's identity claims match the session operator (403, D13), and — writes
-// only — the key is still active (401, D12). Only a request that clears all four is
-// forwarded; the API answers JSON problems, never login redirects, because a fetch
+// only — the session's credential is still good (401, D12). Only a request that clears all
+// four is forwarded; the API answers JSON problems, never login redirects, because a fetch
 // cannot follow a redirect to an HTML form.
 func (g Gate) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +93,10 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 		}
 		if g.Reverify != nil {
 			if _, active := g.Reverify(r); !active {
-				writeProblem(w, http.StatusUnauthorized, "key no longer active", "the session's API key was revoked or expired; sign in again")
+				// One refusal for both session kinds, because the operator's next step is
+				// the same and the proxy has no business naming which credential failed.
+				writeProblem(w, http.StatusUnauthorized, "credential no longer valid",
+					"the session's API key was revoked or expired, or its password was changed; sign in again")
 				return
 			}
 		}

@@ -1,8 +1,10 @@
 # EDR-GUI-01 — The Themis dashboard: productize the spike (GUI-6)
 
-Status: **Accepted — grilled 2026-08-13** (drafted 2026-08-12 from the spike evaluation;
-decisions D1–D13 below — D11–D13 and the D3/Phase amendments are the grill's outcomes)
-Date: 2026-08-12 (grilled 2026-08-13)
+Status: **Accepted — grilled 2026-08-13; D3 amended 2026-10-12** (drafted 2026-08-12 from the
+spike evaluation; decisions D1–D13 below — D11–D13 and the D3/Phase amendments are the grill's
+outcomes; the 2026-10-12 D3 amendment adds username/password sign-in and the Admin tab at
+owner request)
+Date: 2026-08-12 (grilled 2026-08-13; amended 2026-10-12)
 Author: GUI-productization session
 
 ## Purpose
@@ -40,6 +42,11 @@ truth. Every number on screen is fetched live from the six read APIs. It is a **
 Architecture applies as "adapters only": the binary may import `internal/platform/*` and nothing
 from any bounded context.
 
+*Narrowed 2026-10-12 by the D3 amendment:* the binary now owns exactly **one** table — its own
+sign-in directory (`dashboard_users`, in the shared `auth` database). "No truth" is unchanged:
+nothing a node could answer is stored there, and the GUI's own password is not a fact about any
+bounded context. The rest of D1 stands as written.
+
 ### D2 — Identity: named API-key-backed operators (v1)
 
 Decided by the user 2026-08-12 (GUI-UPGRADE-PLAN D5): v1 identity is a **small set of named
@@ -64,6 +71,51 @@ acknowledged exception, the same class as the Phase-1 open port). The session co
 **`Secure` flag automatically when the request arrived over TLS**. Key-paste stays the v1 login
 on purpose: the keys already exist, password infrastructure for a handful of named operators
 would be waste, and SSO is the v2 answer behind the D2 seam.
+
+*Amended 2026-10-12 (owner decision, approved as a security-model change): **username and
+password sign-in is added, and key-paste becomes the secondary door.*** The paragraph above
+called password infrastructure waste. It was wrong about what operators would ask for: they
+asked for a GUI password they can change themselves, from the GUI, without an `authadmin`
+invocation on the VM. A key is minted by someone with shell access on the host, and nothing
+in the GUI could rotate it — so the one credential the GUI owned, the operator did not.
+
+What this adds, and nothing more:
+
+- **A dashboard-local `dashboard_users` table** (username, bcrypt hash, `is_default_password`,
+  `updated_at`) in the shared `auth` database, owned by `internal/dashboard/userstore`, NOT by
+  `internal/platform/auth` — D12's rule unchanged: a browser password is a concern no other
+  node has. It carries its own `dashboard_schema_migrations` bookkeeping table, the way
+  Registry does in the `evidence` database, and `cmd/dashboard` applies it under
+  `THEMIS_DASHBOARD_MIGRATE=1`.
+- **One seeded account**, `admin`, created with the shipped default password on first start
+  and flagged as default. An existing row is never overwritten, so a restart cannot undo a
+  password somebody changed. The plaintext default lives in exactly two places: the seed
+  constant and `INSTALLATION.md`. It is never logged and never embedded in a served asset.
+- **An Admin tab**, visible only to admin-scope sessions, holding the change-password form
+  (current / new / confirm). While the default is in use, the tab and the topbar say so
+  plainly. There are **deliberately no complexity rules** (owner decision): a rule nobody
+  agreed to is a rule operators work around, and a shared GUI behind TLS on a firewalled
+  estate is not where password entropy is the binding constraint.
+- **Two dashboard-local routes** — `GET /api/dashboard/admin/status` and
+  `POST /api/dashboard/admin/password` — mounted BEFORE the `/api/*` proxy and answered by the
+  dashboard itself. This is the one exception to D5's "the GUI adds no private endpoints", and
+  it is not really one: no node owns the GUI's login table, so there is nothing to add an
+  endpoint to. Mounting order is load-bearing and is covered by a test with a proxy spy.
+- **D12 extended, not reinterpreted.** A password login mints the same server-side session a
+  key login does, and the mutation re-verify asks the same question in the password dialect:
+  the user row still exists and its `updated_at` still equals the stamp captured at login. A
+  password change therefore ends that user's other sessions on their next write — the same
+  damage bound a revoked key gets.
+- **D13 unchanged in rule, explicit in content:** the username is the operator id, so the
+  body's `proposer_id` / `actor_id` must read `admin`.
+
+**The trade-off, recorded because it is real:** `admin` is a SHARED account, and every decision
+taken through it is stamped `admin` in an append-only audit trail. A GUI password that several
+people know cannot answer "who accepted this". D2's named-operator identity is still the
+honest answer, which is exactly why key-paste stays on the login page rather than being
+replaced — an operator who needs their own name on a record signs in with their own key. SSO
+(D2's seam) remains the v2 answer for named identity at the browser edge; this amendment buys
+a self-serviceable credential, not an identity model.
 
 ### D4 — Node credentials stay server-side (unchanged from the spike)
 

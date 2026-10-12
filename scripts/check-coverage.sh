@@ -73,6 +73,7 @@ declare -a infra_pkgs=(
 	platform/health
 	dashboard/proxy
 	dashboard/session
+	dashboard/userstore
 	registry/adapters/store
 	registry/adapters/http
 	adapter/osv
@@ -121,6 +122,11 @@ threshold_for() {
 		governance/adapters/harness) echo 80; return ;;
 		communication/adapters/store) echo 80; return ;;
 		intelligence/adapters/store) echo 80; return ;;
+		# The dashboard's own login table (EDR-GUI-01 D3 amendment): same aggregate-store
+		# tier and the same reason — behavior proven by integration tests (migration
+		# up/down, seed-once-never-overwrite, the stamp bump that ends other sessions),
+		# with the uncovered residue being DB-error branches that need pool-fault injection.
+		dashboard/userstore) echo 80; return ;;
 	esac
 	for pkg in "${domain_pkgs[@]}"; do
 		if [[ "$pkg" == "$pkg_path" ]]; then

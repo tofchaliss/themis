@@ -142,8 +142,18 @@ EOF
 # and point the auth DSN at the shared auth DB so operators must sign in
 # (their scope then decides what the GUI lets them do — read keys cannot decide). Remember
 # D3: beyond a firewalled network, front :8090 with a TLS-terminating proxy.
+#
+# THEMIS_DASHBOARD_MIGRATE=1 is set like every other *_MIGRATE flag above, so a fresh
+# install self-creates the dashboard's own `dashboard_users` login table (in the shared auth
+# DB, under its own dashboard_schema_migrations bookkeeping table) and seeds the default
+# admin account. It is a no-op until THEMIS_AUTH_DATABASE_DSN is uncommented — there is no
+# database to migrate before then — and harmless afterwards, which is why it ships ON rather
+# than as a step somebody has to remember at the moment they enable auth. The DSN stays
+# PLAIN: the migration DSN is derived internally, because pgx would reject the
+# x-migrations-table parameter on every runtime connection.
 write_env dashboard <<EOF
 THEMIS_DASHBOARD_ADDR=:8090
+THEMIS_DASHBOARD_MIGRATE=1
 # THEMIS_API_KEY=<mint with: authadmin create-key --name dashboard --scopes admin>
 # THEMIS_AUTH_DATABASE_DSN=${BASE}/auth?sslmode=disable
 EOF

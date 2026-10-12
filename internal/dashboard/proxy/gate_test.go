@@ -1,13 +1,19 @@
 package proxy_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/themis-project/themis/internal/dashboard/proxy"
+	"github.com/themis-project/themis/internal/dashboard/session"
+	"github.com/themis-project/themis/internal/dashboard/userstore"
 	"github.com/themis-project/themis/internal/platform/auth"
 )
 
@@ -149,12 +155,117 @@ func TestGate_WriteReverifiesKey(t *testing.T) {
 		t.Fatalf("read on revoked key = %d, want 200 (reads ride the session until expiry)", rec.Code)
 	}
 	rec := do(h, http.MethodPost, "/api/governance/findings/f-1/proposals/p-1/accept", `{"actor_id":"alice"}`)
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "no longer active") {
-		t.Fatalf("write on revoked key = %d %q, want 401 key-no-longer-active", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "credential no longer valid") {
+		t.Fatalf("write on revoked key = %d %q, want 401 credential-no-longer-valid", rec.Code, rec.Body.String())
 	}
 	if !strings.HasPrefix(*forwarded, "hit:") {
 		t.Log("backend saw only the read, as intended")
 	}
+}
+
+// D12's password half, through the REAL session machinery rather than a scripted hook: a
+// browser signed in with a password keeps reading after someone else changes that password,
+// and is refused the moment it tries to decide something. The two halves — the stamp the
+// session captured at login and the stamp the row now carries — have no compiler between
+// them, so the wiring is what this test exercises.
+func TestGate_PasswordChangeRefusesTheMutation(t *testing.T) {
+	ctx := context.Background()
+	users := &stubUsers{rows: map[string]userstore.User{
+		userstore.AdminUsername: {
+			Username:     userstore.AdminUsername,
+			PasswordHash: hash(t, "Themis@123"),
+			UpdatedAt:    time.Unix(1_700_000_000, 0).UTC(),
+		},
+	}}
+	mgr := session.NewManager(nil, users, 0, nil)
+	sh := session.Handler{Manager: mgr}
+	g := proxy.Gate{Principal: sh.Principal, Reverify: sh.Reverify}
+
+	var forwarded int
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		forwarded++
+		w.WriteHeader(http.StatusOK)
+	})
+	gated := g.Wrap(backend)
+
+	token, _, ok := mgr.LoginPassword(ctx, userstore.AdminUsername, "Themis@123")
+	if !ok {
+		t.Fatal("password login failed")
+	}
+	withCookie := func(method, path, body string) *httptest.ResponseRecorder {
+		var r *http.Request
+		if body != "" {
+			r = httptest.NewRequest(method, path, strings.NewReader(body))
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		r.AddCookie(&http.Cookie{Name: session.CookieName, Value: token})
+		rec := httptest.NewRecorder()
+		gated.ServeHTTP(rec, r)
+		return rec
+	}
+
+	// Before the change: the admin-scope password session reads and writes.
+	if rec := withCookie(http.MethodGet, "/api/governance/findings/f-1", ""); rec.Code != http.StatusOK {
+		t.Fatalf("read = %d, want 200", rec.Code)
+	}
+	// D13: the body's identity must be the session's operator, and for a password session
+	// that operator IS the username.
+	if rec := withCookie(http.MethodPost, "/api/governance/findings/f-1/proposals",
+		`{"actor_id":"admin"}`); rec.Code != http.StatusOK {
+		t.Fatalf("write = %d, want 200 — the username is the operator id (D13)", rec.Code)
+	}
+	if rec := withCookie(http.MethodPost, "/api/governance/findings/f-1/proposals",
+		`{"actor_id":"someone-else"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("identity mismatch = %d, want 403", rec.Code)
+	}
+
+	users.bump(userstore.AdminUsername) // the password changes elsewhere
+	before := forwarded
+	rec := withCookie(http.MethodPost, "/api/governance/findings/f-1/proposals", `{"actor_id":"admin"}`)
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "credential no longer valid") {
+		t.Fatalf("write after the password change = %d %q, want 401", rec.Code, rec.Body.String())
+	}
+	if forwarded != before {
+		t.Error("a mutation was forwarded on a session whose password had changed")
+	}
+}
+
+// stubUsers is the dashboard_users table in a map — enough to drive the session machinery
+// this test wires, without a database.
+type stubUsers struct {
+	rows map[string]userstore.User
+}
+
+func (s *stubUsers) GetUser(_ context.Context, username string) (userstore.User, error) {
+	u, ok := s.rows[username]
+	if !ok {
+		return userstore.User{}, userstore.ErrNotFound
+	}
+	return u, nil
+}
+
+func (s *stubUsers) UpdatePassword(_ context.Context, username string, h []byte) (time.Time, error) {
+	u := s.rows[username]
+	u.PasswordHash = h
+	u.UpdatedAt = u.UpdatedAt.Add(time.Second)
+	s.rows[username] = u
+	return u.UpdatedAt, nil
+}
+
+func (s *stubUsers) bump(username string) {
+	u := s.rows[username]
+	u.UpdatedAt = u.UpdatedAt.Add(time.Second)
+	s.rows[username] = u
+}
+
+func hash(t *testing.T, password string) []byte {
+	t.Helper()
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	return h
 }
 
 // A nil Reverify hook skips the re-check (composition choice), everything else holds.
