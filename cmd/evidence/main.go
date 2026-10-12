@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,7 +31,7 @@ import (
 	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
-	registrydomain "github.com/themis-project/themis/internal/registry/domain"
+	registryapp "github.com/themis-project/themis/internal/registry/app"
 )
 
 // config is read from the environment. Every option is documented here (the
@@ -385,42 +386,44 @@ func (v registryReader) ReleaseExists(ctx context.Context, releaseID string) (bo
 	return v.store.ReleaseExists(ctx, releaseID)
 }
 
-// ProductIDByName resolves an EXACT product name, and abstains on anything but a
-// single match — 0 is "not registered" and >1 is ambiguous, where picking one would
-// be inventing the operator's intent. An empty id means "not found", which the
-// resolver reports as `unknown_release` naming the part that missed.
+// The name half of the seam is THIN delegation plus one translation (EDR-INTAKE-01 B4).
+// The registry owns the matching rule — names fold case, a version is exact, and a name
+// that matches more than one row abstains — because that rule has to agree with the unique
+// indexes the registry built, and a second copy of it here would be a copy that drifts.
+//
+// What this layer owns is the translation: an empty id means "not found", which the
+// resolver reports as `unknown_release` naming the part that missed, and the registry's
+// ambiguity sentinel becomes Evidence's own, so no registry error value crosses the seam.
+
+// ProductIDByName resolves an EXACT product name, abstaining on anything but a single match.
 func (v registryReader) ProductIDByName(ctx context.Context, name string) (string, error) {
-	products, err := v.store.ListProducts(ctx, name)
-	if err != nil || len(products) != 1 {
-		return "", err
-	}
-	return string(products[0].ID()), nil
+	id, err := v.store.ProductIDByName(ctx, name)
+	return id, translateAmbiguous(err)
 }
 
-// ProjectIDByName resolves an exact project name within a product, abstaining the
-// same way.
+// ProjectIDByName resolves an exact project name within a product, abstaining the same way.
 func (v registryReader) ProjectIDByName(ctx context.Context, productID, name string) (string, error) {
-	projects, err := v.store.ListProjects(ctx, registrydomain.ProductID(productID), name)
-	if err != nil || len(projects) != 1 {
-		return "", err
-	}
-	return string(projects[0].ID()), nil
+	id, err := v.store.ProjectIDByName(ctx, productID, name)
+	return id, translateAmbiguous(err)
 }
 
-// ReleaseIDByVersion resolves an exact version string within a project. The registry
-// lists a project's releases rather than filtering by version, so the match is made
-// here — exactly, never by prefix: "R1917.25" is not "R1917.256".
+// ReleaseIDByVersion resolves an exact version string within a project, abstaining the same
+// way — it never picks the first of several, which is what it did before B4.
 func (v registryReader) ReleaseIDByVersion(ctx context.Context, projectID, version string) (string, error) {
-	releases, err := v.store.ListReleases(ctx, registrydomain.ProjectID(projectID))
-	if err != nil {
-		return "", err
+	id, err := v.store.ReleaseIDByVersion(ctx, projectID, version)
+	return id, translateAmbiguous(err)
+}
+
+// translateAmbiguous restates the registry's abstention in Evidence's vocabulary. An error
+// value is part of a package's surface, so handing the registry's sentinel to a subjectref
+// consumer would make Evidence's read seam depend on the registry to say what "ambiguous"
+// means — a cross-context import wearing a different hat. The composition root is where the
+// two contexts legitimately meet, so the translation lives here and nowhere else.
+func translateAmbiguous(err error) error {
+	if errors.Is(err, registryapp.ErrAmbiguousName) {
+		return subjectref.ErrAmbiguousName
 	}
-	for _, r := range releases {
-		if r.Version() == version {
-			return string(r.ID()), nil
-		}
-	}
-	return "", nil
+	return err
 }
 
 type logPublisher struct{ logger *observability.Logger }

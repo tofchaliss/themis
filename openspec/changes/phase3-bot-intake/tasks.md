@@ -149,7 +149,7 @@ intake can create one.
   note that `000003` is not idempotent). Both would otherwise answer `400`
   `no unique or exclusion constraint matching the ON CONFLICT specification` on every create.
 
-- [ ] **1.9 — Name lookups abstain, and say *ambiguous*.** Move the exact-name resolution into
+- [x] **1.9 — Name lookups abstain, and say *ambiguous*.** Move the exact-name resolution into
   `internal/registry/adapters/store` as `ProductIDByName` / `ProjectIDByName` /
   `ReleaseIDByVersion`: `0` matches → empty id, `nil` error; `>1` → `app.ErrAmbiguousName` (new
   sentinel in `internal/registry/app`). `ReleaseIDByVersion` **stops returning the first match**
@@ -160,7 +160,7 @@ intake can create one.
   are applied (or on a table without them), because that is the only estate shape where `>1` is
   reachable; and `TestNameLookupMissIsNotAnError` (0 matches stays empty-id + nil).
 
-- [ ] **1.10 — The seam translates, and carries primitives only.**
+- [x] **1.10 — The seam translates, and carries primitives only.**
   `internal/evidence/adapters/subjectref`: add `ErrAmbiguousName` (owned by **this** context) and
   document it on the `Registry` interface. `cmd/evidence/main.go`'s `registryReader` becomes thin
   delegation to 1.9 plus the sentinel translation — no registry error value crosses the seam.
@@ -171,7 +171,7 @@ intake can create one.
   reason is `ambiguous_name` **and** that the detail string does not contain "not registered".
   (Depends only on 0.1 for the enum value.)
 
-- [ ] **1.11 — Group gate.** `make vet-tags`, `make check` green; coverage tiers for
+- [x] **1.11 — Group gate.** `make vet-tags`, `make check` green; coverage tiers for
   `registry/app` (100%) and `registry/adapters/store` (80%) still pass — both are already registered
   in `scripts/check-coverage.sh`.
 
