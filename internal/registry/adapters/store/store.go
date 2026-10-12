@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -43,6 +44,86 @@ func (s *Store) SaveRelease(ctx context.Context, r domain.Release) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO releases (id, project_id, version) VALUES ($1,$2,$3)`,
 		string(r.ID()), string(r.ProjectID()), r.Version())
 	return err
+}
+
+// --- find-or-create (EDR-INTAKE-01 B4) -------------------------------------
+//
+// Uniqueness is enforced by the DATABASE, never by check-then-insert: a SELECT-then-INSERT
+// is a time-of-check/time-of-use race, and two bots building the same version at the same
+// moment is the normal case. Each upsert therefore insists on the matching unique index from
+// migration 000003 and lets Postgres decide the winner.
+
+// UpsertProduct finds or creates the Product named name and reports whether it created it.
+//
+// Case is folded (registry_products_name_key is UNIQUE on lower(name)), so "OAMP" and "oamp"
+// are one Product — a human-typed label must not fork on a shift key. The stored casing is the
+// FIRST caller's: a later "oamp" gets the existing "OAMP" row, with its spelling, and nothing
+// is renamed or normalized (B4).
+func (s *Store) UpsertProduct(ctx context.Context, name string) (string, bool, error) {
+	return s.findOrCreate(ctx,
+		`INSERT INTO products (id, name) VALUES ($1,$2)
+		 ON CONFLICT (lower(name)) DO NOTHING
+		 RETURNING id`,
+		[]any{uuid.NewString(), name},
+		`SELECT id FROM products WHERE lower(name) = lower($1)`,
+		[]any{name})
+}
+
+// UpsertProject finds or creates the Project named name under product, and reports whether it
+// created it. Uniqueness is scoped to the Product (registry_projects_product_name_key is UNIQUE
+// on (product_id, lower(name))), so the same project name under a different Product is a
+// different row. An unknown product is the foreign key's answer, not this method's.
+func (s *Store) UpsertProject(ctx context.Context, productID, name string) (string, bool, error) {
+	return s.findOrCreate(ctx,
+		`INSERT INTO projects (id, product_id, name) VALUES ($1,$2,$3)
+		 ON CONFLICT (product_id, lower(name)) DO NOTHING
+		 RETURNING id`,
+		[]any{uuid.NewString(), productID, name},
+		`SELECT id FROM projects WHERE product_id = $1 AND lower(name) = lower($2)`,
+		[]any{productID, name})
+}
+
+// UpsertRelease finds or creates the Release at version under project, and reports whether it
+// created it.
+//
+// Version matching is EXACT (registry_releases_project_version_key is UNIQUE on
+// (project_id, version), with no lower()): a version is a machine build string whose case
+// Themis does not own, so "r1917.256" is not "R1917.256" and "R1917.25" is not "R1917.256".
+// Folding versions would merge two builds.
+func (s *Store) UpsertRelease(ctx context.Context, projectID, version string) (string, bool, error) {
+	return s.findOrCreate(ctx,
+		`INSERT INTO releases (id, project_id, version) VALUES ($1,$2,$3)
+		 ON CONFLICT (project_id, version) DO NOTHING
+		 RETURNING id`,
+		[]any{uuid.NewString(), projectID, version},
+		`SELECT id FROM releases WHERE project_id = $1 AND version = $2`,
+		[]any{projectID, version})
+}
+
+// findOrCreate runs an `ON CONFLICT … DO NOTHING RETURNING id` insert and, when the conflict
+// swallowed it, reads the winner back by the SAME key.
+//
+// Two traps, both deliberate (design §5):
+//
+//  1. An expression index needs its expression restated: `ON CONFLICT (name)` does not infer an
+//     index on `lower(name)`, so every caller above writes the index expression verbatim — and
+//     the lookup repeats it, because the row it has to find is the one the index matched.
+//  2. The id minted for a losing insert is DISCARDED. `DO NOTHING` returns no row, so the id
+//     this process generated was never stored; returning it would hand the caller an identity
+//     that does not exist. The winner's id is the only answer, and `created=false` says so.
+func (s *Store) findOrCreate(ctx context.Context, insert string, insertArgs []any, lookup string, lookupArgs []any) (string, bool, error) {
+	var out string
+	err := s.pool.QueryRow(ctx, insert, insertArgs...).Scan(&out)
+	if err == nil {
+		return out, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", false, err
+	}
+	if err := s.pool.QueryRow(ctx, lookup, lookupArgs...).Scan(&out); err != nil {
+		return "", false, err
+	}
+	return out, false, nil
 }
 
 // GetRelease loads a Release by id; a missing row yields ErrNotFound.

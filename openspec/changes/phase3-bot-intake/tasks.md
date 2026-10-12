@@ -77,7 +77,7 @@ intake can create one.
   a seeded DB, row counts and ids unchanged, and after `down` a duplicate insert **succeeds** (proving
   the down actually dropped them).
 
-- [ ] **1.3 — Product find-or-create.** `UpsertProduct` in `internal/registry/adapters/store/store.go`:
+- [x] **1.3 — Product find-or-create.** `UpsertProduct` in `internal/registry/adapters/store/store.go`:
   `INSERT … ON CONFLICT (lower(name)) DO NOTHING RETURNING id`, and on `pgx.ErrNoRows` read the
   winner back by `lower(name)`. Returns `(id, created bool, err)`. Note the expression must be
   restated in `ON CONFLICT` (design §5, trap 1) and the generated id is discarded on a conflict
@@ -86,20 +86,20 @@ intake can create one.
   *Tests:* `TestUpsertProductReturnsExistingIDAndFirstCasing` — insert `"OAMP"`, upsert `"oamp"`,
   assert same id, `created=false`, stored name still `"OAMP"`.
 
-- [ ] **1.4 — Project find-or-create.** `UpsertProject`, `ON CONFLICT (product_id, lower(name))`.
+- [x] **1.4 — Project find-or-create.** `UpsertProject`, `ON CONFLICT (product_id, lower(name))`.
   Same shape as 1.3; the same project name under a **different** product is a different row.
   *Package:* `internal/registry/adapters/store`.
   *Tests:* `TestUpsertProjectIsScopedToItsProduct` (same name, two products → two rows, both
   `created=true`) and `TestUpsertProjectReturnsExistingID`.
 
-- [ ] **1.5 — Release find-or-create.** `UpsertRelease`, `ON CONFLICT (project_id, version)`.
+- [x] **1.5 — Release find-or-create.** `UpsertRelease`, `ON CONFLICT (project_id, version)`.
   Version matching is **exact**: `"R1917.25"` is not `"R1917.256"` and `"r1917.256"` is not
   `"R1917.256"`.
   *Package:* `internal/registry/adapters/store`.
   *Tests:* `TestUpsertReleaseIsExactOnVersion` (case- and prefix-distinct versions are distinct
   rows) and `TestUpsertReleaseReturnsExistingID`.
 
-- [ ] **1.6 — Concurrency: one row, one id, no error.** The property the constraints exist for.
+- [x] **1.6 — Concurrency: one row, one id, no error.** The property the constraints exist for.
   *Package:* `internal/registry/adapters/store`.
   *Tests* (`-tags=integration`): `TestUpsertConcurrentCallersConvergeOnOneRow` — N goroutines upsert
   the same product / project / version simultaneously; assert exactly one row per level, every

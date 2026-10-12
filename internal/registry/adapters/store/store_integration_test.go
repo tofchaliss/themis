@@ -9,7 +9,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
@@ -110,6 +112,32 @@ func newPool(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
+	return registerPool(t, pool)
+}
+
+// newBoundedPool caps the pool's connections. The embedded server runs with a small
+// max_connections, so a test that fires more callers than that would fail on connection
+// exhaustion — which reads like the upsert erroring. Callers above the cap queue on the pool
+// (bounded by their context) and still contend for real.
+func newBoundedPool(t *testing.T, maxConns int32) *pgxpool.Pool {
+	t.Helper()
+	if testDSN == "" {
+		t.Skip("no database")
+	}
+	cfg, err := pgxpool.ParseConfig(testDSN)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	cfg.MaxConns = maxConns
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	return registerPool(t, pool)
+}
+
+func registerPool(t *testing.T, pool *pgxpool.Pool) *pgxpool.Pool {
+	t.Helper()
 	truncate(t, pool)
 	t.Cleanup(func() {
 		truncate(t, pool)
@@ -425,6 +453,268 @@ func TestGetProductAndProject(t *testing.T) {
 	if _, err := s.GetProject(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetProject(missing) = %v, want ErrNotFound", err)
 	}
+}
+
+// --- find-or-create (EDR-INTAKE-01 B4, tasks 1.3–1.6) ----------------------
+
+// Task 1.3. The conflict path is the whole point: a happy-path-only test would pass even with
+// `ON CONFLICT (name)`, which does not infer the expression index at all (design §5, trap 1).
+// And the id this process minted for the losing insert must never be the answer (trap 2) —
+// which is also why the stored casing stays the FIRST caller's: nothing is renamed.
+func TestUpsertProductReturnsExistingIDAndFirstCasing(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	first, created, err := s.UpsertProduct(ctx, "OAMP")
+	if err != nil || !created || first == "" {
+		t.Fatalf("first UpsertProduct = %q, created=%v, err=%v; want a new id and created=true", first, created, err)
+	}
+
+	again, created, err := s.UpsertProduct(ctx, "oamp")
+	if err != nil {
+		t.Fatalf("second UpsertProduct: %v", err)
+	}
+	if again != first {
+		t.Errorf("second UpsertProduct id = %q, want the existing %q (the minted id is discarded)", again, first)
+	}
+	if created {
+		t.Error("second UpsertProduct reported created=true; the row already existed")
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM products`); n != 1 {
+		t.Errorf("products = %d, want 1 ('OAMP' and 'oamp' are one product)", n)
+	}
+
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM products WHERE id = $1`, first).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "OAMP" {
+		t.Errorf("stored name = %q, want %q — the first caller's casing, never renamed", name, "OAMP")
+	}
+}
+
+// Task 1.4. Project uniqueness is scoped to its Product, so the same name under two Products is
+// two rows. A global unique index on lower(name) would collapse them and silently hand the
+// second product the first one's project.
+func TestUpsertProjectIsScopedToItsProduct(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	prodA, _, err := s.UpsertProduct(ctx, "A")
+	must(t, err)
+	prodB, _, err := s.UpsertProduct(ctx, "B")
+	must(t, err)
+
+	inA, createdA, err := s.UpsertProject(ctx, prodA, "core")
+	if err != nil || !createdA {
+		t.Fatalf("UpsertProject(A, core) = %q, created=%v, err=%v; want created=true", inA, createdA, err)
+	}
+	inB, createdB, err := s.UpsertProject(ctx, prodB, "core")
+	if err != nil || !createdB {
+		t.Fatalf("UpsertProject(B, core) = %q, created=%v, err=%v; want created=true", inB, createdB, err)
+	}
+	if inA == inB {
+		t.Errorf("both products got project id %q; the same name under a different product is a different row", inA)
+	}
+
+	if n := countRows(t, pool, `SELECT count(*) FROM projects WHERE lower(name) = lower($1)`, "core"); n != 2 {
+		t.Errorf("projects named core = %d, want 2", n)
+	}
+	for _, p := range []string{prodA, prodB} {
+		if n := countRows(t, pool, `SELECT count(*) FROM projects WHERE product_id = $1 AND lower(name) = lower($2)`, p, "core"); n != 1 {
+			t.Errorf("projects named core under %s = %d, want 1", p, n)
+		}
+	}
+}
+
+// Task 1.4. The conflict path at the project level, including the folded case.
+func TestUpsertProjectReturnsExistingID(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	prod, _, err := s.UpsertProduct(ctx, "A")
+	must(t, err)
+
+	first, created, err := s.UpsertProject(ctx, prod, "Core")
+	if err != nil || !created || first == "" {
+		t.Fatalf("first UpsertProject = %q, created=%v, err=%v", first, created, err)
+	}
+	again, created, err := s.UpsertProject(ctx, prod, "core")
+	if err != nil {
+		t.Fatalf("second UpsertProject: %v", err)
+	}
+	if again != first || created {
+		t.Errorf("second UpsertProject = %q, created=%v; want %q, created=false", again, created, first)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM projects WHERE product_id = $1`, prod); n != 1 {
+		t.Errorf("projects under %s = %d, want 1", prod, n)
+	}
+}
+
+// Task 1.5. A version is a machine build string whose case Themis does not own, so release
+// uniqueness is EXACT: folding it would merge two builds, and a prefix is a different build
+// again. This is the asymmetry B4 takes deliberately against the folded name levels above.
+func TestUpsertReleaseIsExactOnVersion(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	prod, _, err := s.UpsertProduct(ctx, "A")
+	must(t, err)
+	proj, _, err := s.UpsertProject(ctx, prod, "core")
+	must(t, err)
+
+	versions := []string{"R1917.256", "r1917.256", "R1917.25"}
+	ids := make(map[string]string, len(versions))
+	for _, v := range versions {
+		id, created, err := s.UpsertRelease(ctx, proj, v)
+		if err != nil || !created || id == "" {
+			t.Fatalf("UpsertRelease(%q) = %q, created=%v, err=%v; want a new row", v, id, created, err)
+		}
+		for prev, prevID := range ids {
+			if prevID == id {
+				t.Errorf("version %q reused %q's id %q; versions are compared exactly", v, prev, id)
+			}
+		}
+		ids[v] = id
+	}
+
+	if n := countRows(t, pool,
+		`SELECT count(*) FROM releases WHERE project_id = $1 AND version = ANY($2)`,
+		proj, versions); n != len(versions) {
+		t.Errorf("releases = %d, want %d (case- and prefix-distinct versions are distinct rows)", n, len(versions))
+	}
+}
+
+// Task 1.5. The conflict path at the release level.
+func TestUpsertReleaseReturnsExistingID(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	prod, _, err := s.UpsertProduct(ctx, "A")
+	must(t, err)
+	proj, _, err := s.UpsertProject(ctx, prod, "core")
+	must(t, err)
+
+	first, created, err := s.UpsertRelease(ctx, proj, "R1917.256")
+	if err != nil || !created || first == "" {
+		t.Fatalf("first UpsertRelease = %q, created=%v, err=%v", first, created, err)
+	}
+	again, created, err := s.UpsertRelease(ctx, proj, "R1917.256")
+	if err != nil {
+		t.Fatalf("second UpsertRelease: %v", err)
+	}
+	if again != first || created {
+		t.Errorf("second UpsertRelease = %q, created=%v; want %q, created=false", again, created, first)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM releases WHERE project_id = $1`, proj); n != 1 {
+		t.Errorf("releases under %s = %d, want 1", proj, n)
+	}
+}
+
+// Task 1.6 — the property the constraints exist for, and the one a single-threaded test cannot
+// see. Two bots building the same version at the same moment is the normal case: a
+// SELECT-then-INSERT would fork a row here, which is exactly why uniqueness lives in the
+// database and not in a check-then-insert (B4).
+func TestUpsertConcurrentCallersConvergeOnOneRow(t *testing.T) {
+	// Bounded by a test context so a regression fails instead of hanging the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool := newBoundedPool(t, 6)
+	s := store.New(pool)
+	const callers = 25
+
+	products := upsertConcurrently(ctx, callers, func(ctx context.Context) (string, bool, error) {
+		return s.UpsertProduct(ctx, "OAMP")
+	})
+	productID := assertConverged(t, "product", products)
+	if n := countRows(t, pool, `SELECT count(*) FROM products WHERE lower(name) = lower($1)`, "OAMP"); n != 1 {
+		t.Errorf("products named OAMP = %d, want exactly 1", n)
+	}
+
+	projects := upsertConcurrently(ctx, callers, func(ctx context.Context) (string, bool, error) {
+		return s.UpsertProject(ctx, productID, "core")
+	})
+	projectID := assertConverged(t, "project", projects)
+	if n := countRows(t, pool,
+		`SELECT count(*) FROM projects WHERE product_id = $1 AND lower(name) = lower($2)`,
+		productID, "core"); n != 1 {
+		t.Errorf("projects named core under the product = %d, want exactly 1", n)
+	}
+
+	releases := upsertConcurrently(ctx, callers, func(ctx context.Context) (string, bool, error) {
+		return s.UpsertRelease(ctx, projectID, "R1917.256")
+	})
+	assertConverged(t, "release", releases)
+	if n := countRows(t, pool,
+		`SELECT count(*) FROM releases WHERE project_id = $1 AND version = $2`,
+		projectID, "R1917.256"); n != 1 {
+		t.Errorf("releases at R1917.256 under the project = %d, want exactly 1", n)
+	}
+}
+
+// upsertResult is one caller's answer: the id it was given, whether it was the creator, and
+// whether it failed at all.
+type upsertResult struct {
+	id      string
+	created bool
+	err     error
+}
+
+// upsertConcurrently releases n callers at the same instant and collects their answers. The
+// shared start channel matters: goroutines started in a loop would otherwise serialize, and the
+// race this test exists to cover would never be attempted.
+func upsertConcurrently(ctx context.Context, n int, upsert func(context.Context) (string, bool, error)) []upsertResult {
+	out := make([]upsertResult, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range out {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			id, created, err := upsert(ctx)
+			out[i] = upsertResult{id: id, created: created, err: err}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	return out
+}
+
+// assertConverged asserts the find-or-create contract across concurrent callers — no errors,
+// one id, exactly one creator — and returns the id they agreed on.
+func assertConverged(t *testing.T, level string, results []upsertResult) string {
+	t.Helper()
+	var id string
+	creators := 0
+	for i, r := range results {
+		if r.err != nil {
+			t.Errorf("%s caller %d: %v — a losing caller must find the winner, not fail", level, i, r.err)
+			continue
+		}
+		if r.id == "" {
+			t.Errorf("%s caller %d returned an empty id", level, i)
+			continue
+		}
+		if id == "" {
+			id = r.id
+		} else if r.id != id {
+			t.Errorf("%s caller %d returned id %q; caller(s) before it returned %q — the callers forked", level, i, r.id, id)
+		}
+		if r.created {
+			creators++
+		}
+	}
+	if creators != 1 {
+		t.Errorf("%s: %d callers reported created=true, want exactly 1", level, creators)
+	}
+	return id
 }
 
 // The estate-graph existence checks (C1). RegisterDeployment validates its microservice and
