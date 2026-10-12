@@ -42,7 +42,7 @@ and rots silently) and **`make check`** green locally; CI runs `make check-ci`. 
 Lands and is useful on its own: two concurrent registrations stop forking a Release even before
 intake can create one.
 
-- [ ] **1.1 — [SCHEMA] [MIGRATION] The pre-flight that refuses.**
+- [x] **1.1 — [SCHEMA] [MIGRATION] The pre-flight that refuses.**
   `internal/registry/adapters/store/migrations/000003_registry_uniqueness.up.sql`, one explicit
   transaction (`BEGIN; … COMMIT;`) whose first statement after `BEGIN` is
   `LOCK TABLE products, projects, releases IN SHARE ROW EXCLUSIVE MODE` (writes quiesced from the
@@ -65,7 +65,7 @@ intake can create one.
   assert migrate-up fails and the message names **both** ids;
   `TestUniquenessMigrationRefusalNamesEveryLevel` — one duplicate per level, all three named.
 
-- [ ] **1.2 — [SCHEMA] [MIGRATION] The three named unique indexes.**
+- [x] **1.2 — [SCHEMA] [MIGRATION] The three named unique indexes.**
   Same migration, after 1.1: `registry_products_name_key ON products (lower(name))`,
   `registry_projects_product_name_key ON projects (product_id, lower(name))`,
   `registry_releases_project_version_key ON releases (project_id, version)` — **exact** for version
