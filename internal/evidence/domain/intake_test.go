@@ -137,6 +137,41 @@ func TestReceipt_SkipsConversion_ForAPassThrough(t *testing.T) {
 	}
 }
 
+// TestReceipt_RecordsWhatTheAttemptSaw_EvenWhenItIsThenRefused is the reporting half
+// of the receipt: the release it resolved and what the conversion saw are recorded
+// BEFORE the outcome is known, so "427 of 427 converted, then refused" survives as a
+// fact. The alternative — only reporting counts on success — makes a refusal and an
+// unreadable document look identical, and only one of them is actionable.
+func TestReceipt_RecordsWhatTheAttemptSaw_EvenWhenItIsThenRefused(t *testing.T) {
+	var r domain.Receipt
+	mustAccept(t, &r)
+	if err := r.RecordRelease("rel-1917"); err != nil {
+		t.Fatalf("record release: %v", err)
+	}
+	if err := r.StartValidating(); err != nil {
+		t.Fatalf("validating: %v", err)
+	}
+	if err := r.StartConverting(); err != nil {
+		t.Fatalf("converting: %v", err)
+	}
+	if err := r.RecordConversion("cortex@1", "abc123", 500, 73); err != nil {
+		t.Fatalf("record conversion: %v", err)
+	}
+	if err := r.Rejected(domain.ReasonSchemaInvalid, "findings[2] is not an object"); err != nil {
+		t.Fatalf("rejected: %v", err)
+	}
+
+	if r.ReleaseID() != "rel-1917" {
+		t.Errorf("release = %q, want the resolved release on a refused receipt too", r.ReleaseID())
+	}
+	if r.ConvertedBy() != "cortex@1" || r.SourceDigest() != "abc123" {
+		t.Errorf("converted_by=%q source_digest=%q", r.ConvertedBy(), r.SourceDigest())
+	}
+	if r.FindingsTotal() != 500 || r.FindingsSkipped() != 73 {
+		t.Errorf("counts = %d total / %d skipped, want both reported", r.FindingsTotal(), r.FindingsSkipped())
+	}
+}
+
 // TestReceipt_Rejected_CarriesReasonAndDetailSeparately pins the two-field rule: the
 // reason a consumer switches on and the detail it displays never become one string.
 func TestReceipt_Rejected_CarriesReasonAndDetailSeparately(t *testing.T) {
@@ -254,6 +289,8 @@ func TestReceipt_TerminalImmutability_FiledRefuseFurther(t *testing.T) {
 				"rejected":    func() error { return r.Rejected(domain.ReasonSourceInvalid, "late") },
 				"failed":      func() error { return r.Failed("late") },
 				"detected":    func() error { return r.RecordDetected("sbom", "spdx") },
+				"release":     func() error { return r.RecordRelease("rel-other") },
+				"conversion":  func() error { return r.RecordConversion("cortex@2", "deadbeef", 1, 0) },
 			}
 			for what, attempt := range attempts {
 				if err := attempt(); err == nil {

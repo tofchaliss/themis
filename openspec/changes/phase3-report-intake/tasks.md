@@ -49,24 +49,30 @@ Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends
 
 ## Group 3 — Persistence and API (D1, D9, D12)
 
-- [ ] 3.1 Migration `000003_intake_receipts` (+ down, reversibility is a task gate):
+- [x] 3.1 Migration `000003_intake_receipts` (+ down, reversibility is a task gate):
       `intake_receipts(intake_id PK, idempotency_key UNIQUE NULL, status, reason, detail,
       evidence_id NULL, release_id, detected_kind, detected_format, findings_total,
       findings_skipped, components, source_digest, converted_by, created_at, updated_at)`.
       Register `evidence/adapters/store` is already in `scripts/check-coverage.sh`; confirm the tier
       still passes with the new rows.
-- [ ] 3.2 `api/evidence.openapi.yaml`: `POST /intake` (raw body + query metadata — see the design's
+- [x] 3.2 `api/evidence.openapi.yaml`: `POST /intake` (raw body + query metadata — see the design's
       "why the body is raw"), `GET /intake/{intakeId}`, `IntakeReceipt`, `IntakeProblem` with the
       closed `reason`. Additive only; **`POST /evidence` is unmodified**. Regenerate with
       `make generate-api-evidence` — handlers are generated, never hand-edited.
-- [ ] 3.3 `adapters/http/intake.go` + routing; `reason` → HTTP status per D11's table;
+- [x] 3.3 `adapters/http/intake.go` + routing; `reason` → HTTP status per D11's table;
       `Idempotency-Key` replay returning the original receipt (D12).
-- [ ] 3.4 `adapters/store/intake.go`: receipt load/save + `THEMIS_INTAKE_RECEIPT_TTL` retention
+- [x] 3.4 `adapters/store/intake.go`: receipt load/save + `THEMIS_INTAKE_RECEIPT_TTL` retention
       sweep (default 30d). Receipts are operational records, **not** evidence — they are deletable.
-- [ ] 3.5 The `202` slow path (D9): `THEMIS_INTAKE_INLINE_BUDGET` (default `5s`), work continues in a
+      Also `FailStaleNonTerminalReceipts`: a receipt advances in the process doing the work, so a
+      crash leaves one stuck non-terminal and only the NEXT process can close it out — run at
+      startup, named `interrupted by restart; resubmit`.
+- [x] 3.5 The `202` slow path (D9): `THEMIS_INTAKE_INLINE_BUDGET` (default `5s`), work continues in a
       bounded worker, receipt advances. Integration test (`-tags=integration`, embedded Postgres):
       a forced-slow intake returns `202`, the receipt reaches `filed`, and the evidence exists.
-- [ ] 3.6 `next_checks` from `THEMIS_KNOWLEDGE_URL` / `THEMIS_GOVERNANCE_URL` (D10). Absent env →
+      The worker is ONE goroutine behind a 64-deep queue, and the fast path does not use it — a
+      backlog that is full answers `503` + `Retry-After` and creates **no** receipt, so the whole
+      request is safe to retry verbatim.
+- [x] 3.6 `next_checks` from `THEMIS_KNOWLEDGE_URL` / `THEMIS_GOVERNANCE_URL` (D10). Absent env →
       the field is **omitted**, never a broken URL.
 
 ## Group 4 — Wiring, docs, and retiring the duplicates (D4)

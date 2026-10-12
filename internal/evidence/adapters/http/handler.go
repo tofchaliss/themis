@@ -19,10 +19,20 @@ import (
 // Handler implements gen.ServerInterface over the Evidence application service.
 type Handler struct {
 	svc *app.EvidenceService
+	// intake serves the single intake door (EDR-INTAKE-01 D1). nil ⇒ `POST /intake`
+	// refuses honestly rather than 404-ing or pretending to accept: a door that
+	// answers is a door a client will send a 60 MB SBOM through.
+	intake *Intake
 }
 
 // NewHandler builds a Handler.
 func NewHandler(svc *app.EvidenceService) *Handler { return &Handler{svc: svc} }
+
+// WithIntake wires the intake door and returns the handler for chaining.
+func (h *Handler) WithIntake(i *Intake) *Handler {
+	h.intake = i
+	return h
+}
 
 // Router returns an http.Handler serving the Evidence routes; mount it under the
 // OpenAPI base path (/api/v1).

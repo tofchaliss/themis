@@ -51,6 +51,7 @@ import (
 
 	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
 	registrywiring "github.com/themis-project/themis/internal/registry/adapters/wiring"
+	registrydomain "github.com/themis-project/themis/internal/registry/domain"
 )
 
 const (
@@ -311,7 +312,11 @@ func newPipeline(t *testing.T) *pipeline {
 
 	// Evidence: producer of EvidenceRegistered. SubjectRef is registry-backed — it validates a
 	// release id against the registry tables in the shared evidence DB (registry.ReleaseExists).
-	evHandler, _ := evwiring.EvidenceAPI(evPool, registrySubjectRef{store: registrystore.New(evPool)})
+	evHandler, _, evIntake := evwiring.EvidenceAPI(evwiring.Config{
+		Pool:     evPool,
+		Registry: registrySubjectRef{store: registrystore.New(evPool)},
+	})
+	t.Cleanup(evIntake.Close)
 	evidenceSrv := httptest.NewServer(mount(evHandler))
 	t.Cleanup(evidenceSrv.Close)
 	evRelay := evstore.NewRelay(evPool, eventbus.NewPublisher(busPool), 100)
@@ -410,11 +415,40 @@ func loadSQL(t *testing.T, pool *pgxpool.Pool, path string) {
 	}
 }
 
-// registrySubjectRef backs Evidence's SubjectRef with the registry's ReleaseExists read query
-// (mirrors cmd/evidence): in-process it reads the registry tables in the shared evidence DB, so
-// Evidence accepts exactly the releases the test registered.
+// registrySubjectRef backs Evidence's SubjectRef and intake's read-only release resolution with
+// the registry's own read queries (mirrors cmd/evidence): in-process it reads the registry tables
+// in the shared evidence DB, so Evidence accepts exactly the releases the test registered.
 type registrySubjectRef struct{ store *registrystore.Store }
 
 func (v registrySubjectRef) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
 	return v.store.ReleaseExists(ctx, releaseID)
+}
+
+func (v registrySubjectRef) ProductIDByName(ctx context.Context, name string) (string, error) {
+	products, err := v.store.ListProducts(ctx, name)
+	if err != nil || len(products) != 1 {
+		return "", err
+	}
+	return string(products[0].ID()), nil
+}
+
+func (v registrySubjectRef) ProjectIDByName(ctx context.Context, productID, name string) (string, error) {
+	projects, err := v.store.ListProjects(ctx, registrydomain.ProductID(productID), name)
+	if err != nil || len(projects) != 1 {
+		return "", err
+	}
+	return string(projects[0].ID()), nil
+}
+
+func (v registrySubjectRef) ReleaseIDByVersion(ctx context.Context, projectID, version string) (string, error) {
+	releases, err := v.store.ListReleases(ctx, registrydomain.ProjectID(projectID))
+	if err != nil {
+		return "", err
+	}
+	for _, r := range releases {
+		if r.Version() == version {
+			return string(r.ID()), nil
+		}
+	}
+	return "", nil
 }

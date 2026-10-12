@@ -6,9 +6,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	evhttp "github.com/themis-project/themis/internal/evidence/adapters/http"
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
 	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	"github.com/themis-project/themis/internal/evidence/adapters/wiring"
@@ -27,6 +30,7 @@ import (
 	"github.com/themis-project/themis/internal/platform/health"
 	"github.com/themis-project/themis/internal/platform/observability"
 	registrystore "github.com/themis-project/themis/internal/registry/adapters/store"
+	registrydomain "github.com/themis-project/themis/internal/registry/domain"
 )
 
 // config is read from the environment. Every option is documented here (the
@@ -45,9 +49,43 @@ type config struct {
 
 	authDSN      string // THEMIS_AUTH_DATABASE_DSN — DSN of the shared `auth` database (api_keys). When set, inbound /api/v1 requests require a valid X-API-Key (EDR-SECURITY-01); when empty, auth is disabled (dev) unless THEMIS_AUTH_REQUIRED=1.
 	authRequired bool   // THEMIS_AUTH_REQUIRED=1 — hard-fail startup when THEMIS_AUTH_DATABASE_DSN is empty (production guard so a node can never boot open).
+
+	// The single intake door (EDR-INTAKE-01).
+	intakeMaxBytes     int64         // THEMIS_INTAKE_MAX_BYTES — request-body bound, checked before the body is buffered (D13). Default 67108864 (64 MiB).
+	intakeInlineBudget time.Duration // THEMIS_INTAKE_INLINE_BUDGET — how long intake works before answering 202 with a receipt to come back to (D9). Default 5s.
+	intakeReceiptTTL   time.Duration // THEMIS_INTAKE_RECEIPT_TTL — how long receipts are retained before the hourly sweep deletes them. Receipts are operational records, not evidence. Default 720h (30d).
+	knowledgeURL       string        // THEMIS_KNOWLEDGE_URL — Knowledge read-API base URL, for a terminal receipt's `unresolved` next_check (D10). Empty ⇒ the check is omitted, never a broken URL.
+	governanceURL      string        // THEMIS_GOVERNANCE_URL — Governance read-API base URL, for a terminal receipt's `posture` next_check (D10). Empty ⇒ omitted.
 }
 
-func loadConfig() config {
+// loadConfig reads the environment, and FAILS rather than falling back when a value
+// is present but unusable.
+//
+// The distinction is the whole of it: an unset duration means "take the documented
+// default", and a misspelled one means the operator asked for something specific and
+// did not get it. Silently serving the default there is how a node runs for weeks
+// with a retention or budget nobody chose.
+func loadConfig() (config, error) {
+	maxBytes, err := envBytes("THEMIS_INTAKE_MAX_BYTES", evhttp.DefaultMaxBytes)
+	if err != nil {
+		return config{}, err
+	}
+	inlineBudget, err := envDuration("THEMIS_INTAKE_INLINE_BUDGET", evhttp.DefaultInlineBudget)
+	if err != nil {
+		return config{}, err
+	}
+	receiptTTL, err := envDuration("THEMIS_INTAKE_RECEIPT_TTL", evhttp.DefaultReceiptTTL)
+	if err != nil {
+		return config{}, err
+	}
+	cfg := newConfig()
+	cfg.intakeMaxBytes = maxBytes
+	cfg.intakeInlineBudget = inlineBudget
+	cfg.intakeReceiptTTL = receiptTTL
+	return cfg, nil
+}
+
+func newConfig() config {
 	return config{
 		dsn:            os.Getenv("THEMIS_DATABASE_DSN"),
 		addr:           envDefault("THEMIS_EVIDENCE_ADDR", ":8081"),
@@ -62,18 +100,26 @@ func loadConfig() config {
 
 		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
 		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
+
+		knowledgeURL:  os.Getenv("THEMIS_KNOWLEDGE_URL"),
+		governanceURL: os.Getenv("THEMIS_GOVERNANCE_URL"),
 	}
 }
 
 func main() {
-	cfg := loadConfig()
 	ctx := context.Background()
+	cfg, cfgErr := loadConfig()
 
 	logger, shutdownObs, err := observability.Setup(ctx, observability.ConfigFromEnv("evidence"))
 	if err != nil {
 		log.Fatalf("evidence: observability: %v", err)
 	}
 	defer func() { _ = shutdownObs(context.Background()); _ = logger.Sync() }()
+
+	if cfgErr != nil {
+		logger.Error("startup aborted: configuration is invalid", observability.Err(cfgErr))
+		os.Exit(1)
+	}
 
 	if cfg.dsn == "" {
 		logger.Error("startup aborted: THEMIS_DATABASE_DSN is required")
@@ -94,15 +140,39 @@ func main() {
 	}
 	defer pool.Close()
 
-	var apiHandler http.Handler
-	var st *store.Store
+	var registryRead subjectref.Registry
 	if len(cfg.knownReleases) > 0 {
-		apiHandler, st = wiring.EvidenceAPI(pool, subjectref.NewStub(cfg.knownReleases...), parseLogger{logger.Component("parser")})
+		registryRead = subjectref.NewStub(cfg.knownReleases...)
 		logger.Info("SubjectRef = dev stub", observability.Int("known_releases", len(cfg.knownReleases)))
 	} else {
-		apiHandler, st = wiring.EvidenceAPI(pool, registrySubjectRef{store: registrystore.New(pool)}, parseLogger{logger.Component("parser")})
+		registryRead = registryReader{store: registrystore.New(pool)}
 		logger.Info("SubjectRef = registry-backed (registry.ReleaseExists)")
 	}
+	apiHandler, st, intake := wiring.EvidenceAPI(wiring.Config{
+		Pool:     pool,
+		Registry: registryRead,
+		Report:   parseLogger{logger.Component("parser")},
+		Logger:   logger.Component("intake"),
+		Intake: evhttp.IntakeConfig{
+			MaxBytes:      cfg.intakeMaxBytes,
+			InlineBudget:  cfg.intakeInlineBudget,
+			KnowledgeURL:  cfg.knowledgeURL,
+			GovernanceURL: cfg.governanceURL,
+		},
+	})
+	defer intake.Close()
+
+	// A receipt advances in the process doing the work, so a process that died
+	// mid-intake left one stuck non-terminal — and a client polling `status_url`
+	// would wait on a goroutine that no longer exists. Closed out here, before the
+	// first request, because the only process that can tell is the next one.
+	if n, err := intake.RecoverInterruptedReceipts(ctx); err != nil {
+		logger.Error("intake receipt recovery failed", observability.Err(err))
+	} else if n > 0 {
+		logger.Warn("intake receipts were interrupted by a restart and are now failed",
+			observability.Int("receipts", n))
+	}
+	go receiptSweepLoop(st, cfg.intakeReceiptTTL, logger.Component("intake"))
 
 	router := chi.NewRouter()
 	router.Use(observability.RequestLogger(logger))
@@ -158,6 +228,28 @@ func relayLoop(pool *pgxpool.Pool, publisher store.Publisher, logger *observabil
 	for range ticker.C {
 		if _, err := relay.DeliverPending(context.Background()); err != nil {
 			logger.Error("relay failed", observability.Err(err))
+		}
+	}
+}
+
+// receiptSweepLoop deletes intake receipts past their TTL, hourly.
+//
+// Receipts are OPERATIONAL records — the record that someone tried, including the
+// attempts that were refused — not evidence, which is why deleting them is a
+// retention policy and not a hole in CON-0007's immutability. Nothing reachable from
+// a receipt is removed with it.
+func receiptSweepLoop(st *store.Store, ttl time.Duration, logger *observability.Logger) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		n, err := st.PurgeExpiredReceipts(context.Background(), time.Now().UTC().Add(-ttl))
+		if err != nil {
+			logger.Error("intake receipt sweep failed", observability.Err(err))
+			continue
+		}
+		if n > 0 {
+			logger.Info("intake receipts swept",
+				observability.Int("deleted", n), observability.String("ttl", ttl.String()))
 		}
 	}
 }
@@ -234,6 +326,39 @@ func envDefault(key, def string) string {
 	return def
 }
 
+// envDuration reads a Go duration ("5s", "720h"). Unset takes the default; present
+// but unparseable or non-positive is an ERROR, never a silent fallback.
+func envDuration(key string, def time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a duration (e.g. 5s, 720h): %w", key, raw, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s=%q must be positive", key, raw)
+	}
+	return d, nil
+}
+
+// envBytes reads a byte count. Same rule: unset takes the default, unusable fails.
+func envBytes(key string, def int64) (int64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a byte count: %w", key, raw, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s=%q must be positive; a border is protected by bounds, and there is no unlimited setting", key, raw)
+	}
+	return n, nil
+}
+
 func splitNonEmpty(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {
@@ -244,14 +369,58 @@ func splitNonEmpty(s string) []string {
 	return out
 }
 
-// registrySubjectRef backs Evidence's SubjectRef port with the registry's
-// ReleaseExists read query (EDR-KERNEL-01 D1; EDR-EVIDENCE-01 D5). In-process it
-// queries the registry's own tables in the shared database; the registry owns and
-// migrates them (run cmd/registry). Only ReleaseExists is exposed to the app.
-type registrySubjectRef struct{ store *registrystore.Store }
+// registryReader backs Evidence's SubjectRef port and intake's read-only release
+// resolution with the registry's own read queries (EDR-KERNEL-01 D1;
+// EDR-EVIDENCE-01 D5; EDR-INTAKE-01 D7). In-process it queries the registry's own
+// tables in the shared database; the registry owns and migrates them (run
+// cmd/registry).
+//
+// READS ONLY, and the composition root is the only place this may be assembled: a
+// write from Evidence into Registry is neither an event nor a read, and intake
+// resolving identity it could also create would let one typo in a product name
+// silently fork the estate graph.
+type registryReader struct{ store *registrystore.Store }
 
-func (v registrySubjectRef) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
+func (v registryReader) ReleaseExists(ctx context.Context, releaseID string) (bool, error) {
 	return v.store.ReleaseExists(ctx, releaseID)
+}
+
+// ProductIDByName resolves an EXACT product name, and abstains on anything but a
+// single match — 0 is "not registered" and >1 is ambiguous, where picking one would
+// be inventing the operator's intent. An empty id means "not found", which the
+// resolver reports as `unknown_release` naming the part that missed.
+func (v registryReader) ProductIDByName(ctx context.Context, name string) (string, error) {
+	products, err := v.store.ListProducts(ctx, name)
+	if err != nil || len(products) != 1 {
+		return "", err
+	}
+	return string(products[0].ID()), nil
+}
+
+// ProjectIDByName resolves an exact project name within a product, abstaining the
+// same way.
+func (v registryReader) ProjectIDByName(ctx context.Context, productID, name string) (string, error) {
+	projects, err := v.store.ListProjects(ctx, registrydomain.ProductID(productID), name)
+	if err != nil || len(projects) != 1 {
+		return "", err
+	}
+	return string(projects[0].ID()), nil
+}
+
+// ReleaseIDByVersion resolves an exact version string within a project. The registry
+// lists a project's releases rather than filtering by version, so the match is made
+// here — exactly, never by prefix: "R1917.25" is not "R1917.256".
+func (v registryReader) ReleaseIDByVersion(ctx context.Context, projectID, version string) (string, error) {
+	releases, err := v.store.ListReleases(ctx, registrydomain.ProjectID(projectID))
+	if err != nil {
+		return "", err
+	}
+	for _, r := range releases {
+		if r.Version() == version {
+			return string(r.ID()), nil
+		}
+	}
+	return "", nil
 }
 
 type logPublisher struct{ logger *observability.Logger }

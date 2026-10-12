@@ -13,35 +13,68 @@ import (
 
 	evhttp "github.com/themis-project/themis/internal/evidence/adapters/http"
 	"github.com/themis-project/themis/internal/evidence/adapters/parser"
+	"github.com/themis-project/themis/internal/evidence/adapters/report"
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
+	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
 	"github.com/themis-project/themis/internal/evidence/adapters/trust"
 	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
+	"github.com/themis-project/themis/internal/platform/observability"
 )
 
-// EvidenceAPI wires the Evidence application service over the given pool and returns
-// the REST handler (routes under /evidence — mount it under /api/v1) plus the Store
-// for operational tasks (outbox relay, dev purge). The subject validator is supplied
-// by the composition root: a registry-backed adapter in production (the kernel's
-// registry.ReleaseExists) or the allow-set stub in dev/tests. Wiring depends only on
-// the app SubjectRefValidator port, so the choice never leaks in here.
-//
-// report is the optional parse-outcome reporter (EDR-IDENTITY-01 D6) — variadic so every
-// existing caller and test is unaffected; nil or omitted means no reporting.
-func EvidenceAPI(pool *pgxpool.Pool, subject app.SubjectRefValidator, report ...app.ParseReporter) (http.Handler, *store.Store) {
-	st := store.New(pool)
+// Config is the Evidence API's composition input. Everything that differs between
+// the binary and a test is here, so there is exactly one wiring and no "production
+// only" path for a defect to hide in.
+type Config struct {
+	// Pool is the Evidence database. The `registry` schema co-locates in it, which
+	// is what makes the read seam below an in-process read rather than a network
+	// call (EDR-INTAKE-01 D1).
+	Pool *pgxpool.Pool
+
+	// Registry is the registry read seam, supplied by the composition root: a
+	// registry-backed adapter in production, the allow-set stub in dev/tests. It
+	// backs BOTH release-existence (Evidence's SubjectRef port) and intake's
+	// read-only release resolution (D7) — one seam, because they are two questions
+	// about the same table and wiring them separately invites them to disagree.
+	Registry subjectref.Registry
+
+	// Report is the optional parse-outcome reporter (EDR-IDENTITY-01 D6).
+	Report app.ParseReporter
+
+	// Logger is where the adapters log. nil is the no-op logger.
+	Logger *observability.Logger
+
+	// Intake configures the single intake door.
+	Intake evhttp.IntakeConfig
+}
+
+// EvidenceAPI wires the Evidence application service over the configured pool and
+// returns the REST handler (routes under /evidence and /intake — mount it under
+// /api/v1), the Store for operational tasks (outbox relay, receipt sweeps, dev
+// purge), and the intake door, which the composition root must Close and whose
+// interrupted receipts it recovers at startup.
+func EvidenceAPI(cfg Config) (http.Handler, *store.Store, *evhttp.Intake) {
+	st := store.New(cfg.Pool)
 	svc := app.NewEvidenceService(
 		trustGate{},
 		parserBridge{registry: parser.NewRegistry()},
-		subject,
+		cfg.Registry,
 		repoBridge{store: st},
 		idGen{},
 		sysClock{},
 	)
-	if len(report) > 0 && report[0] != nil {
-		svc = svc.WithParseReporter(report[0])
+	if cfg.Report != nil {
+		svc = svc.WithParseReporter(cfg.Report)
 	}
-	return evhttp.NewHandler(svc).Router(), st
+
+	// The one intake door (D1). It writes through the EXISTING Register use case
+	// rather than a second path into the store: the trust gate, fingerprinting, the
+	// aggregate's invariants and the outbox note in one transaction are what "filed"
+	// means, and a parallel writer would be a second definition of it.
+	intakeSvc := app.NewIntakeService(cfg.Intake.MaxBytes, subjectref.NewResolver(cfg.Registry), st, report.Port{}, svc)
+	intake := evhttp.NewIntake(intakeSvc, st, svc, cfg.Intake, cfg.Logger)
+
+	return evhttp.NewHandler(svc).WithIntake(intake).Router(), st, intake
 }
 
 // --- adapter bridges (concrete adapters -> app ports) ----------------------

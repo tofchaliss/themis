@@ -20,6 +20,57 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for NextCheckWhat.
+const (
+	Posture    NextCheckWhat = "posture"
+	Unresolved NextCheckWhat = "unresolved"
+)
+
+// Valid indicates whether the value is a known member of the NextCheckWhat enum.
+func (e NextCheckWhat) Valid() bool {
+	switch e {
+	case Posture:
+		return true
+	case Unresolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReceiptStatus.
+const (
+	Accepted    ReceiptStatus = "accepted"
+	Converting  ReceiptStatus = "converting"
+	Failed      ReceiptStatus = "failed"
+	Filed       ReceiptStatus = "filed"
+	Registering ReceiptStatus = "registering"
+	Rejected    ReceiptStatus = "rejected"
+	Validating  ReceiptStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the ReceiptStatus enum.
+func (e ReceiptStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Converting:
+		return true
+	case Failed:
+		return true
+	case Filed:
+		return true
+	case Registering:
+		return true
+	case Rejected:
+		return true
+	case Validating:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RegisterEvidenceRequestFormat.
 const (
 	Cyclonedx RegisterEvidenceRequestFormat = "cyclonedx"
@@ -53,6 +104,66 @@ func (e RegisterEvidenceRequestKind) Valid() bool {
 	case ScannerReport:
 		return true
 	case Vex:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RejectReason.
+const (
+	ChecksumMismatch       RejectReason = "checksum_mismatch"
+	ConversionFailed       RejectReason = "conversion_failed"
+	DeclaredFormatMismatch RejectReason = "declared_format_mismatch"
+	DuplicateOtherRelease  RejectReason = "duplicate_other_release"
+	EmptyReport            RejectReason = "empty_report"
+	MalformedBody          RejectReason = "malformed_body"
+	NoInventoryForRelease  RejectReason = "no_inventory_for_release"
+	ObservedAtInvalid      RejectReason = "observed_at_invalid"
+	ObservedAtUnderivable  RejectReason = "observed_at_underivable"
+	PayloadTooLarge        RejectReason = "payload_too_large"
+	SchemaInvalid          RejectReason = "schema_invalid"
+	SourceInvalid          RejectReason = "source_invalid"
+	TooManyRecords         RejectReason = "too_many_records"
+	Unauthorized           RejectReason = "unauthorized"
+	UnknownRelease         RejectReason = "unknown_release"
+	UnrecognisedFormat     RejectReason = "unrecognised_format"
+)
+
+// Valid indicates whether the value is a known member of the RejectReason enum.
+func (e RejectReason) Valid() bool {
+	switch e {
+	case ChecksumMismatch:
+		return true
+	case ConversionFailed:
+		return true
+	case DeclaredFormatMismatch:
+		return true
+	case DuplicateOtherRelease:
+		return true
+	case EmptyReport:
+		return true
+	case MalformedBody:
+		return true
+	case NoInventoryForRelease:
+		return true
+	case ObservedAtInvalid:
+		return true
+	case ObservedAtUnderivable:
+		return true
+	case PayloadTooLarge:
+		return true
+	case SchemaInvalid:
+		return true
+	case SourceInvalid:
+		return true
+	case TooManyRecords:
+		return true
+	case Unauthorized:
+		return true
+	case UnknownRelease:
+		return true
+	case UnrecognisedFormat:
 		return true
 	default:
 		return false
@@ -107,11 +218,87 @@ type EvidenceSummary struct {
 	ProvenanceSource *string `json:"provenance_source,omitempty"`
 }
 
+// IntakeProblem A refusal, naming itself. `reason` and `detail` are TWO fields and are never concatenated (D9/D11).
+type IntakeProblem struct {
+	Detail string `json:"detail"`
+
+	// IntakeId The receipt this refusal was recorded on — readable at `GET /intake/{intakeId}`.
+	IntakeId *string `json:"intake_id,omitempty"`
+
+	// Reason The CLOSED taxonomy of intake refusals (EDR-INTAKE-01 D11), identical to `internal/evidence/domain.RejectReason`. Adding a value is a contract change with a guard test: a consumer that knew 6 of 15 reasons reported "no reason given" for the other nine (#116).
+	//
+	// There is deliberately no `inventory_not_ready`: Evidence has no window in which it holds an SBOM whose inventory is pending, so the value could never fire, and a closed enum with a dead value is worse than no value (D6).
+	Reason *RejectReason `json:"reason,omitempty"`
+	Status int           `json:"status"`
+	Title  string        `json:"title"`
+}
+
+// IntakeReceipt The record of one intake attempt. Every intake is addressable, including a refused one: a rejected receipt is the thing that was missing on 2026-10-05.
+type IntakeReceipt struct {
+	// Components Components the filed SBOM's canonical inventory carries.
+	Components *int `json:"components,omitempty"`
+
+	// ConvertedBy The converter and its version (`cortex@1`); empty for a pass-through.
+	ConvertedBy *string `json:"converted_by,omitempty"`
+
+	// Created False when filing resolved to the document already held (a dedup, D8).
+	Created   *bool      `json:"created,omitempty"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+
+	// Detail The refusal's or failure's elaboration. NEVER concatenated with `reason`: a consumer switches on the reason and displays the detail (the 2026-09-22 lesson).
+	Detail *string `json:"detail,omitempty"`
+
+	// DetectedFormat The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `cortex-json`, `cortex-csv`).
+	DetectedFormat *string `json:"detected_format,omitempty"`
+
+	// DetectedKind What the body was identified as (D5a) — `sbom` or `vuln-report`.
+	DetectedKind *string `json:"detected_kind,omitempty"`
+
+	// EvidenceId The filed document's identity. Present only when the status is `filed`.
+	EvidenceId      *string `json:"evidence_id,omitempty"`
+	FindingsSkipped *int    `json:"findings_skipped,omitempty"`
+
+	// FindingsTotal Source records the conversion CONSIDERED. Reported beside `findings_skipped`, never alone: "427 of 427" and "427 of 500" must not look alike.
+	FindingsTotal *int   `json:"findings_total,omitempty"`
+	IntakeId      string `json:"intake_id"`
+
+	// NextChecks Present on a terminal `filed` receipt, and omitted entirely when the base URLs are unset — never a broken URL.
+	NextChecks *[]NextCheck `json:"next_checks,omitempty"`
+
+	// Reason The CLOSED taxonomy of intake refusals (EDR-INTAKE-01 D11), identical to `internal/evidence/domain.RejectReason`. Adding a value is a contract change with a guard test: a consumer that knew 6 of 15 reasons reported "no reason given" for the other nine (#116).
+	//
+	// There is deliberately no `inventory_not_ready`: Evidence has no window in which it holds an SBOM whose inventory is pending, so the value could never fire, and a closed enum with a dead value is worse than no value (D6).
+	Reason *RejectReason `json:"reason,omitempty"`
+
+	// ReleaseId Empty when the attempt was refused before the release was resolved.
+	ReleaseId *string `json:"release_id,omitempty"`
+
+	// RetryAfterSeconds Present on a `202` — how long to wait before reading `status_url`.
+	RetryAfterSeconds *int `json:"retry_after_seconds,omitempty"`
+
+	// SourceDigest Lowercase-hex SHA-256 of the SUBMITTED bytes (which, for a converted submission, are not the filed bytes).
+	SourceDigest *string `json:"source_digest,omitempty"`
+
+	// Status Where one intake attempt has got to (D9). The ladder is forward-only and its three terminals are `filed`, `rejected` and `failed`.
+	Status    ReceiptStatus `json:"status"`
+	StatusUrl string        `json:"status_url"`
+	UpdatedAt *time.Time    `json:"updated_at,omitempty"`
+}
+
 // Inventory defines model for Inventory.
 type Inventory struct {
 	Components   *[]Component      `json:"components,omitempty"`
 	Dependencies *[]DependencyEdge `json:"dependencies,omitempty"`
 }
+
+// NextCheck Who answers "did the work land" (D10). The receipt is terminal at `filed` and does NOT claim correlation is complete — Knowledge owns correlation, and asking Evidence to poll it would invent the coupling the bus exists to avoid.
+type NextCheck struct {
+	Url  string        `json:"url"`
+	What NextCheckWhat `json:"what"`
+}
+
+// NextCheckWhat defines model for NextCheck.What.
+type NextCheckWhat string
 
 // Problem defines model for Problem.
 type Problem struct {
@@ -119,6 +306,9 @@ type Problem struct {
 	SupportedFormats *[]string `json:"supported_formats,omitempty"`
 	Title            *string   `json:"title,omitempty"`
 }
+
+// ReceiptStatus Where one intake attempt has got to (D9). The ladder is forward-only and its three terminals are `filed`, `rejected` and `failed`.
+type ReceiptStatus string
 
 // RegisterEvidenceRequest defines model for RegisterEvidenceRequest.
 type RegisterEvidenceRequest struct {
@@ -145,13 +335,51 @@ type RegisterEvidenceResponse struct {
 	Id      string `json:"id"`
 }
 
+// RejectReason The CLOSED taxonomy of intake refusals (EDR-INTAKE-01 D11), identical to `internal/evidence/domain.RejectReason`. Adding a value is a contract change with a guard test: a consumer that knew 6 of 15 reasons reported "no reason given" for the other nine (#116).
+//
+// There is deliberately no `inventory_not_ready`: Evidence has no window in which it holds an SBOM whose inventory is pending, so the value could never fire, and a closed enum with a dead value is worse than no value (D6).
+type RejectReason string
+
 // ListEvidenceParams defines parameters for ListEvidence.
 type ListEvidenceParams struct {
 	Release string `form:"release" json:"release"`
 }
 
+// SubmitIntakeJSONBody defines parameters for SubmitIntake.
+type SubmitIntakeJSONBody = string
+
+// SubmitIntakeParams defines parameters for SubmitIntake.
+type SubmitIntakeParams struct {
+	// ReleaseId The release this document is about, named directly. Wins over the triple.
+	ReleaseId *string `form:"release_id,omitempty" json:"release_id,omitempty"`
+
+	// Product With `project` and `version`, names the release by its triple — resolved READ-ONLY (D7). Intake never creates Registry identity.
+	Product *string `form:"product,omitempty" json:"product,omitempty"`
+	Project *string `form:"project,omitempty" json:"project,omitempty"`
+	Version *string `form:"version,omitempty" json:"version,omitempty"`
+
+	// AllowWithoutSbom D6's deliberate override: file a vulnerability report for a release with no SBOM-derived inventory. Recorded in provenance, so a release in that state says so.
+	AllowWithoutSbom *bool `form:"allow_without_sbom,omitempty" json:"allow_without_sbom,omitempty"`
+
+	// ObservedAt RFC 3339 assertion about WHICH observation this is (D3). Omitted, the timestamp is derived from the submitted data; it is never the upload time.
+	ObservedAt *string `form:"observed_at,omitempty" json:"observed_at,omitempty"`
+
+	// ExpectedChecksum Lowercase-hex SHA-256 of the SUBMITTED bytes. Verified at the border, because for a converted submission the filed bytes are not the submitted ones (D2).
+	ExpectedChecksum *string `form:"expected_checksum,omitempty" json:"expected_checksum,omitempty"`
+
+	// ProvenanceSource Who produced the document — labeling only, never authority.
+	ProvenanceSource      *string `form:"provenance_source,omitempty" json:"provenance_source,omitempty"`
+	ProvenanceImageDigest *string `form:"provenance_image_digest,omitempty" json:"provenance_image_digest,omitempty"`
+
+	// IdempotencyKey Client-asserted retry identity (D12). The same key within the receipt TTL returns the ORIGINAL receipt instead of starting new work.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // RegisterEvidenceJSONRequestBody defines body for RegisterEvidence for application/json ContentType.
 type RegisterEvidenceJSONRequestBody = RegisterEvidenceRequest
+
+// SubmitIntakeJSONRequestBody defines body for SubmitIntake for application/json ContentType.
+type SubmitIntakeJSONRequestBody = SubmitIntakeJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -170,6 +398,12 @@ type ServerInterface interface {
 	// Get the canonical component inventory by evidence ID.
 	// (GET /evidence/{id}/inventory)
 	GetEvidenceInventory(w http.ResponseWriter, r *http.Request, id string)
+	// The single intake door (EDR-INTAKE-01 D1): submit an SBOM or a vulnerability report as the RAW body, with the metadata as query parameters.
+	// (POST /intake)
+	SubmitIntake(w http.ResponseWriter, r *http.Request, params SubmitIntakeParams)
+	// Get one intake attempt's receipt (D9) — every intake is addressable, including a refused one.
+	// (GET /intake/{intakeId})
+	GetIntakeReceipt(w http.ResponseWriter, r *http.Request, intakeId string)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -203,6 +437,18 @@ func (_ Unimplemented) GetEvidenceDocument(w http.ResponseWriter, r *http.Reques
 // Get the canonical component inventory by evidence ID.
 // (GET /evidence/{id}/inventory)
 func (_ Unimplemented) GetEvidenceInventory(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// The single intake door (EDR-INTAKE-01 D1): submit an SBOM or a vulnerability report as the RAW body, with the metadata as query parameters.
+// (POST /intake)
+func (_ Unimplemented) SubmitIntake(w http.ResponseWriter, r *http.Request, params SubmitIntakeParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get one intake attempt's receipt (D9) — every intake is addressable, including a refused one.
+// (GET /intake/{intakeId})
+func (_ Unimplemented) GetIntakeReceipt(w http.ResponseWriter, r *http.Request, intakeId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -340,6 +586,190 @@ func (siw *ServerInterfaceWrapper) GetEvidenceInventory(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// SubmitIntake operation middleware
+func (siw *ServerInterfaceWrapper) SubmitIntake(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SubmitIntakeParams
+
+	// ------------- Optional query parameter "release_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "release_id", r.URL.Query(), &params.ReleaseId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "release_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "release_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "product" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "product", r.URL.Query(), &params.Product, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "product"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "product", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "project" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "project", r.URL.Query(), &params.Project, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "project"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "allow_without_sbom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "allow_without_sbom", r.URL.Query(), &params.AllowWithoutSbom, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "allow_without_sbom"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "allow_without_sbom", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "observed_at" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "observed_at", r.URL.Query(), &params.ObservedAt, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "observed_at"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "observed_at", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "expected_checksum" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "expected_checksum", r.URL.Query(), &params.ExpectedChecksum, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "expected_checksum"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "expected_checksum", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "provenance_source" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "provenance_source", r.URL.Query(), &params.ProvenanceSource, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "provenance_source"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provenance_source", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "provenance_image_digest" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "provenance_image_digest", r.URL.Query(), &params.ProvenanceImageDigest, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "provenance_image_digest"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provenance_image_digest", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SubmitIntake(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetIntakeReceipt operation middleware
+func (siw *ServerInterfaceWrapper) GetIntakeReceipt(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "intakeId" -------------
+	var intakeId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "intakeId", chi.URLParam(r, "intakeId"), &intakeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "intakeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetIntakeReceipt(w, r, intakeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -468,6 +898,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/evidence/{id}/inventory", wrapper.GetEvidenceInventory)
 	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/intake", wrapper.SubmitIntake)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/intake/{intakeId}", wrapper.GetIntakeReceipt)
+	})
 
 	return r
 }
@@ -477,29 +913,79 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"1Fjbjts2EP2VAdsHG/Vtd/PQOk9J7Q3cNBfsJmmANDBocWwzkUiGHHlX2BjoR/QL+yUFKcmyLTnrpN20",
-	"eZN5GR6emTkz9A2LdGK0QkWODW+YRWe0chh+PLd6FmPiPyOtCBX5T25MLCNOUqv+O6eVH3PREhPuv763",
-	"OGdD9l2/stvPZ12/tLderztMoIusNN4MG7Kxtdr2mJ8oVntjP5c2/A9jtUFLMseGkXaZoxwdZQbZkDmy",
-	"Ui3YusMUT7BxwqQ2bpxwOrVR854VWifze+7NrTvliJ69w4j86hEaVAJVlI3FAuvA51Y3Y7YYB1LdUprG",
-	"BaSPhaCjNGlkTWzN7DrgxRLB8itwpC0KKBfCLCN0wB28fHHe/REIr6nHOnVw76USzVZxJT0dCH4JtNxM",
-	"J/ARVngNH8FFXCm0XYtGW2o3WA7EfEilRcGGb/JjOtU93jZcf1wceM6jPKj3HCBjFFMeOJhrm/gvJjhh",
-	"l2SCTXebS7VAa6zMiavNS9E4XFJSD0KrV6i4inAqE77AqZALdHTb2k+EqEvD7acWY+QOpwcQkU0dTR1x",
-	"St2RsVSSeZkmCbfZ/5zOiqLdOPxtqcFYLdIIBdASq/huYW/RC0NFLAJpHYMXkDb89cefEPMZxlItQKs4",
-	"64DCFVrgKS21lZRBazy66D56OekOTmB0cq/dg3FiKIOrJapgNjWx5gItCClAaQLHs97vqjHSa+xP1AoV",
-	"6Sbed3VbEibuNv2t5LQ6i1vLMxb0uNCtwv5RFvfErma26U5bVWVPnJC4PKDOqfECgWKah9guwnqc792N",
-	"JMV4ZMBf4EI6QlsG/gV+SIvk/Fwt3ShfFW2VinYgRB5XcPnw2RP45fLZ03ajsuK1wchfPVpi9N6lzdWj",
-	"TL0bhsovecOiLIq1QnHNOswZcb2llfWkKjd5dWa+5IVdO+rcuP8OpMxgND1cco/Uuuay0bD1llpSj4a8",
-	"P2rIR4uccBvLTOsYuTooaXsYA5jSSh2LXy7VXNfDrcQGoUm7Jmg9X3KH3TNYWEQ1lxiLXMtscRuQSZIS",
-	"n8VYj1EHLR+Q/Vfj123gSoBFLmDGo/dezqSFuS+rYSbiSisZ8RhkqVOFsuX55hMhkQ42AB88n7Ctfoqd",
-	"9Aa9gedHG1TcSDZkZ71B74x1mOG0DLz2S4T+xwJDaHneQ680EWzIfpWOyiPCTssTJLSODd/cMOkP+pCi",
-	"zVjZF7LC/2zbAWRT7Gw1svvOetvZbY5PB4PPaoyP0tP9alsX1Frn/Oxxzy+7l8NpMr6BvdWA+1woCnrg",
-	"r4qDUM+BL7hUjoBDwVU4xGjXwP9+jhS0oqOHWmT/2uvhkDCvdxPJ+3H9D331eTAKRWjwzYPYJ0+2yTsU",
-	"0JICE6M9jpCSvr/ueksUEinvFoB06B0uHzwZlw5oBw+cDk7+k5tcbN1A4VX7C2LOr//pa7wlH+5SWhwH",
-	"0gEv/LEf46PJ+fn4Yvz0RUl2cA0tpdsMWIxQrjC0cEvfDrZGZ/4b7wMHhVcwS2UsQCEKB5Ic6Cu10dSC",
-	"rtPTL03Rkn7fLtQU+z5YpNQqBxxcruobxZ2M8kf1RkX7N1KsD0rpI7xNSb0uV0IaatbX09BjpDN/9X1K",
-	"KO99qRce4bZOhjI4yw5Q3N9uD2/jevNg/8Y43+C+M7rpwN8SrYb/JdrwQ/4fwyyr3DQZ9eClwzD4WOmr",
-	"GMUCvb4abh36fCoeaAJejV9Da5M5Du0KXQAQziqffmFfGE/ajY6X22+22zxfPfC+MddXwO/U91WLudlc",
-	"NZv7js6hBMcVHIZ/+1ifG9lfnbD12/XfAQAA//8=",
+	"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",
+	"Gu6fO/WiXZGp3cV+dPfL3f8OAA==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
