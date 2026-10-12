@@ -101,11 +101,22 @@ threshold_for() {
 		adapter/osv) echo 90; return ;;
 		adapter/epsskev|adapter/exploitdb|adapter/redhat) echo 85; return ;;
 		adapter/api) echo 80; return ;;
-		# Evidence/registry stores: behavior proven by integration tests (idempotency,
+		# Aggregate stores: behavior proven by integration tests (idempotency,
 		# concurrency, outbox retry, FK membership, migration up/down); remaining
 		# uncovered lines are DB-error branches needing pool-fault injection (an
 		# injectable pgxpool interface — follow-up).
-		evidence/adapters/store) echo 80; return ;;
+		#
+		# evidence/adapters/store is the exception, and it sits at the ADAPTER tier
+		# (90%) rather than this one: EDR-INTAKE-01's bot-intake Group 2 gate (task
+		# 2.11) names 90% for it, and the branches that kept it at 80 are now covered
+		# deterministically by a CANCELLED CONTEXT — every read, both receipt sweeps,
+		# `Save`'s Begin and the relay's outbox read, asserted as "a read that could not
+		# be performed is never reported as an absence". What still needs an injectable
+		# pool is only the fault arriving AFTER a statement has succeeded inside the
+		# transaction (the dedup-resolve, outbox-insert and commit paths) plus two
+		# row-scan branches the NOT NULL schema makes unconstructible — about 6% of the
+		# package, which is the headroom this tier leaves. It is therefore absent from
+		# this list and falls through to infra_pkgs below.
 		registry/adapters/store) echo 80; return ;;
 		knowledge/adapters/store) echo 80; return ;;
 		governance/adapters/store) echo 80; return ;;

@@ -294,7 +294,15 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	// standards document, its bytes ARE the evidence document, and re-serializing it
 	// would change the fingerprint that dedups a re-upload.
 	curated, stats := cmd.Body, ReportStats{}
-	prov := domain.Provenance{Source: cmd.ProvenanceSource, ImageDigest: cmd.ProvenanceImageDigest}
+	// `BuildID` is artifact provenance and travels with the other two labels (B5):
+	// which pipeline run produced the document, recorded beside who produced it and
+	// which image it was about. It is deliberately inert — nothing downstream reads it
+	// to decide anything, which is why it can be copied here and nowhere else.
+	prov := domain.Provenance{
+		Source:      cmd.ProvenanceSource,
+		ImageDigest: cmd.ProvenanceImageDigest,
+		BuildID:     cmd.BuildID,
+	}
 	if filedKind != domain.KindSBOM {
 		_ = r.StartConverting()
 		out, st, convertedBy, sourceDigest, cerr := s.reports.Convert(dialect, cmd.Body, cmd.ObservedAt)

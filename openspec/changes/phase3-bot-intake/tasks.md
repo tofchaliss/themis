@@ -344,37 +344,114 @@ intake can create one.
   an unwired seam (`subjectref.Stub`, which knows no products) and an unknown release are all the
   same `403` for a confined key.
 
-- [ ] **2.7 — `build_id` captured and echoed.** Plumb `build_id` from the query into
+- [x] **2.7 — `build_id` captured and echoed.** Plumb `build_id` from the query into
   `Provenance.BuildID` and onto the receipt (both the synchronous response and `GET
   /intake/{intake_id}`, which is why 2.3 adds the receipt column).
   *Packages:* `internal/evidence/adapters/http`, `internal/evidence/app`.
   *Tests* (`intake_test.go`): `TestBuildIDIsEchoedOnTheReceiptAndStoredOnTheEvidence`;
   `TestBuildIDIsOptional` (absent → empty, never an error).
+  **On implementation (2026-10-12).** 2.1-2.6b had carried the value as far as
+  `IntakeCommand.BuildID` (2.4 needed it to validate) and had rendered `IntakeReceipt.build_id`
+  from the receipt row; the two ENDS were missing, and each was one line:
+  `app.Intake` built its `domain.Provenance` from the source and the image digest only, and the
+  edge never copied `cmd.BuildID` onto the receipt row — so the column existed, the renderer read
+  it, and nothing ever wrote it. Both halves were confirmed RED before the fix (the echo test
+  reported `""` on the POST body, on the `GET` and on the filed provenance).
+  The edge copies it **after** `ParameterRefusal`, not with the rest of the command:
+  `intake_receipts.build_id` is `TEXT`, Postgres rejects malformed UTF-8 outright, and recording
+  the value first would have turned 2.4's named `400` into a failed write.
+  `TestBuildIDIsEchoedOnTheReceiptAndStoredOnTheEvidence` lives in
+  `intake_integration_test.go` rather than `intake_test.go`: "stored on the evidence" is a claim
+  about a real `provenance_build_id` column, and the unit file's fake use case cannot make it.
+  `TestBuildIDIsOptional` stays in `intake_test.go` (no database needed), and asserts the value is
+  empty on BOTH receipt surfaces rather than insisting on omitted-vs-`""` — the other optional
+  strings on a receipt render as `""`, and pinning the encoding instead of the contract would make
+  this a test about `omitempty`.
 
-- [ ] **2.8 — `build_id` is inert, and dedup keeps the first one.**
+- [x] **2.8 — `build_id` is inert, and dedup keeps the first one.**
   No code beyond 2.7 — this step is the **assertions** that make B5's inertness checkable.
   *Packages:* `internal/evidence/adapters/http`, `internal/evidence/adapters/store`.
   *Tests:* `TestTwoSubmissionsDifferingOnlyInBuildIDFileOneEvidenceRow` (dedup is untouched by
   `build_id`); `TestDedupKeepsTheFirstBuildIDAndTheRetryReceiptCarriesItsOwn` — asserts the two
   values **differ**, which is the design, not a bug (design §6).
+  **On implementation (2026-10-12):** both named tests landed in
+  `internal/evidence/adapters/http/intake_integration_test.go`, over the real wiring and a real
+  database, because that is the only place the asymmetry is PRODUCED rather than hand-built: the
+  store-level alternative would construct a filed row and a receipt row with two different values
+  and then assert they differ, which proves nothing about dedup. The store package gained the
+  MECHANISM instead, as `TestDedupDoesNotRewriteTheFiledBuildID` (a second `Save` of the same
+  bytes with a different build id → one row, the first build id, one outbox note) — the layer where
+  `ON CONFLICT … DO NOTHING` is what makes "the first one wins" true.
 
-- [ ] **2.9 — The unchanged behaviours, asserted (B6).** Regression guards, no production code.
+- [x] **2.9 — The unchanged behaviours, asserted (B6).** Regression guards, no production code.
   *Packages:* `internal/evidence/adapters/http`, `internal/evidence/adapters/store`.
   *Tests:* `TestByteIdenticalContentOnAnotherReleaseIsStill409` (`duplicate_other_release`);
   `TestADifferentSBOMForTheSameReleaseIsFiledAsNewHistory` — both evidence rows retained, which is
   what **EDR-DELIVERY-01 M2-5**'s per-release baseline rests on; `TestSBOMBeforeReportStillEnforced`
   including a brand-new version with `create_release=true` → `no_inventory_for_release` **and the
   provisioner uncalled**, and the `allow_without_sbom` path → created.
+  **On implementation (2026-10-12).** All three are in `intake_integration_test.go`, through the
+  door: a regression guard for "this answer did not move" has to be asserted where the answer is a
+  status code and a reason, not where it is an error value. Three things the step needed:
+  (1) the fixture's allow-set stub now knows a SECOND release (`rel-intake-2`), because a
+  cross-release duplicate needs a second release to be refused against;
+  (2) `liveIntakeWith` lets a test supply the registry read seam and the write seam, because the
+  allow-set stub answers every name lookup with "nothing" — so no triple resolves far enough for
+  `create_release` to reach the create, and the `create_release` half of D6 is untestable without
+  a name-aware seam. `TestSBOMBeforeReportStillEnforced` reuses the auth tests' `authRegistry`
+  and `countingProvisioner` rather than adding a third fake estate;
+  (3) one gap the reuse exposed: a real Registry's just-created version EXISTS afterwards, and
+  filing re-validates the subject release through the same seam — so the fake is wrapped
+  (`provisionedRegistry`) to answer accordingly. Without it the create succeeded and the filing
+  then refused the release Themis had made one line earlier, which is also a useful record of how
+  tightly the two halves of the seam are coupled.
+  `TestADifferentSBOMForTheSameReleaseIsFiledAsNewHistory` uses the CycloneDX and SPDX fixtures —
+  two genuinely different SBOMs, not the same bytes with a changed byte.
 
-- [ ] **2.10 — Architecture: the seam has exactly one write.**
+- [x] **2.10 — Architecture: the seam has exactly one write.**
   *Package:* `tests/architecture`.
   *Tests:* `TestEvidenceRegistrySeamExposesOneWrite` — the `subjectref` write port has a single
   method and no product/project verb; `TestEvidenceDoesNotImportRegistry` — no
   `internal/evidence/…` package imports `internal/registry/…` (only `cmd/evidence` may).
+  **On implementation (2026-10-12):** `TestEvidenceRegistrySeamExposesOneWrite` landed with 2.5
+  (see that step's note) and was re-run here, not duplicated — it still reports the seam's write
+  surface as exactly `[Provisioner.FindOrCreateRelease]`. This step added
+  `TestEvidenceDoesNotImportRegistry` beside it in the same file, which is the half that makes the
+  first one worth having: "one write" would otherwise be a statement about one package while any
+  adapter imported `registry/app` and called whatever it liked. It loads
+  `internal/evidence/...` with `Tests: true` — a test is also code that compiles, and a test
+  reaching into the registry to seed an estate is how the import creeps in (the same reason
+  go-cleanarch scans test files) — and it carries a **positive control**: `cmd/evidence` must
+  still import a registry package, so the rule cannot pass by the seam having quietly disappeared.
+  Verified RED against the real tree with a blank import added to `adapters/subjectref`.
 
-- [ ] **2.11 — Group gate.** `make vet-tags`, `make check` green; `clean-arch` green (it scans test
+- [x] **2.11 — Group gate.** `make vet-tags`, `make check` green; `clean-arch` green (it scans test
   files, so a cross-ring test in the wrong directory fails it); coverage tiers for
   `evidence/{domain,app}` (100%) and `evidence/adapters/{http,store,subjectref}` (90%) pass.
+  **Green 2026-10-12:** `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test`,
+  `make e2e-pipeline` and `make check-ci` (which includes the coverage tiers above, and pulls in
+  the integration tests the three steps before this one landed). **Group 2 — Gate C — is
+  complete**; recorded in `docs/engineering/PHASE3-STATUS.md` and `openspec/STATUS.md`.
+  **The store's tier moved, 80% → 90%, which this step's text had asked for all along.**
+  `evidence/adapters/store` measured 86% and passed only because `scripts/check-coverage.sh`
+  registered it in the **aggregate-store** tier (80%) — so the 90% this step names was being
+  measured and not gated, and would have drifted back. The gap was the package's "I could not ask
+  the question" branches, and they turned out NOT to need the pool-fault injection the 80% tier was
+  justified by: a **cancelled context** reaches every read, both receipt sweeps, `Save`'s `Begin`,
+  the relay's outbox read, and — via a publisher that cancels after succeeding — the window where a
+  note was PUBLISHED and could not be marked sent. That is the real shape of this on a node (a
+  client that hung up, a shutdown mid-sweep), it is deterministic, and the assertions are properties
+  rather than line coverage: *a read that could not be performed is never reported as an absence*
+  (`ErrNotFound` on a row that is there says a filed document is gone; `HasInventory` answering
+  `(false, nil)` tells an operator to upload an SBOM they already uploaded), *a fault is not a retry
+  arriving* (`ErrIdempotencyKeyTaken` would send the caller to read back a receipt nobody wrote),
+  *a sweep that never ran must not report "nothing was stale"*, and *an unmarked outbox note is
+  re-delivered, not dropped*. Now **93.6%**, gated at 90%. The residue — 11 statements — is a fault
+  arriving AFTER a statement has succeeded inside `Save`'s transaction (dedup-resolve, the insert
+  error that is not a fingerprint conflict, the outbox insert, the two commits) plus two row-scan
+  branches the schema's `NOT NULL DEFAULT` columns make unconstructible; those still want the
+  injectable pgxpool, which stays the tracked follow-up. `registry/adapters/store` and the other
+  aggregate stores are untouched at 80%.
 
 ---
 
