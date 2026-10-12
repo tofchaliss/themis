@@ -105,7 +105,7 @@ intake can create one.
   the same product / project / version simultaneously; assert exactly one row per level, every
   caller returns the same id, exactly one reports `created=true`, and **no caller errors**.
 
-- [ ] **1.7 — App: the three creates become find-or-create.**
+- [x] **1.7 — App: the three creates become find-or-create.**
   `RegisterProduct` / `RegisterProject` / `RegisterRelease` in `internal/registry/app/service.go`
   return `(id, created bool, err)` and delegate to the upserts. The `ProductExists` /
   `ProjectExists` pre-checks stay — they produce the named `ErrUnknownProduct` /
@@ -115,7 +115,7 @@ intake can create one.
   *Tests* (`service_test.go`): `TestRegisterProductFindOrCreateReportsCreated`,
   `TestRegisterProjectUnknownProductStillNamed`, `TestRegisterReleaseFindOrCreateReportsCreated`.
 
-- [ ] **1.8 — [API] `200` beside `201` on the three create routes.**
+- [x] **1.8 — [API] `200` beside `201` on the three create routes.**
   `api/registry.openapi.yaml`: document the `200` response and add `created` to the three create
   responses; regenerate with `make generate-api-registry`. Handler maps `created → 201`,
   `!created → 200`.
@@ -133,6 +133,21 @@ intake can create one.
   the dashboard only READ Registry. The step re-runs that search
   (`rg -n 'api/v1/(products|projects|releases)' scripts tests cmd internal`) and updates this list if
   it has grown; the `200` response is documented in `api/registry.openapi.yaml` and API.md.
+  **Re-checked on implementation (2026-10-12):** the list has not grown, and one entry is
+  narrower than recorded — `scripts/run-alpine-e2e-local.sh` posts to the **frozen v0.3.x
+  monolith** on `:8080` (`POST /products/{id}/projects`, a route the greenfield Registry does not
+  serve), so it is unaffected by this change rather than merely tolerant of it. `gf-upload-sbom.sh`
+  uses `curl --fail-with-body`, so `200` is success there. The list now lives beside the tests, on
+  `assertFindOrCreate` in `internal/registry/adapters/http/handler_test.go`, where the next person
+  to change the status mapping will read it.
+  **Two schema-provisioning paths froze at a file literal and had to be fixed here**, because
+  1.7 is the first step whose create path actually executes `INSERT … ON CONFLICT` and therefore
+  the first that NEEDS 1.2's indexes at runtime: `tests/pipeline/pipeline_test.go` hand-loaded
+  `000001_registry.up.sql` (now runs the whole migrations directory through Registry's own
+  `registry_schema_migrations`, as `cmd/registry` does — it had also been missing `000002`), and
+  INSTALLATION.md's by-hand alternative listed only `000001`/`000002` (now all three, with the
+  note that `000003` is not idempotent). Both would otherwise answer `400`
+  `no unique or exclusion constraint matching the ON CONFLICT specification` on every create.
 
 - [ ] **1.9 — Name lookups abstain, and say *ambiguous*.** Move the exact-name resolution into
   `internal/registry/adapters/store` as `ProductIDByName` / `ProjectIDByName` /

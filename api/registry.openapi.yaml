@@ -13,6 +13,11 @@ paths:
     post:
       operationId: registerProduct
       summary: Register a product; returns a stable Product ID.
+      description: >-
+        Find-or-create (EDR-INTAKE-01 B4): uniqueness is enforced by the database on
+        `lower(name)`, so registering a name that already exists returns the EXISTING id with
+        `200` rather than failing or forking a second Product. Two concurrent callers get one
+        row. The stored casing is the first caller's.
       requestBody:
         required: true
         content:
@@ -20,12 +25,18 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterProductRequest'
       responses:
+        '200':
+          description: Already registered — the existing id, unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '201':
           description: Registered.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RegisterResponse'
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
     get:
@@ -104,6 +115,10 @@ paths:
     post:
       operationId: registerProject
       summary: Register a project under a product; returns a stable Project ID.
+      description: >-
+        Find-or-create (EDR-INTAKE-01 B4): unique on `(product_id, lower(name))`, so the same
+        project name already registered under this product returns the EXISTING id with `200`.
+        The same name under a DIFFERENT product is a different Project.
       requestBody:
         required: true
         content:
@@ -111,12 +126,18 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterProjectRequest'
       responses:
+        '200':
+          description: Already registered — the existing id, unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '201':
           description: Registered.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RegisterResponse'
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
         '422':
@@ -125,6 +146,12 @@ paths:
     post:
       operationId: registerRelease
       summary: Register a release under a project; returns a stable Release ID.
+      description: >-
+        Find-or-create (EDR-INTAKE-01 B4): unique on `(project_id, version)`, so re-registering
+        a version returns the EXISTING id with `200` — two bots building one version at the same
+        moment get one Release. Version matching is EXACT, never case-folded: a version is a
+        machine build string whose case Themis does not own, so `r1917.256` and `R1917.256` are
+        two Releases.
       requestBody:
         required: true
         content:
@@ -132,12 +159,18 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterReleaseRequest'
       responses:
+        '200':
+          description: Already registered — the existing id, unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '201':
           description: Registered.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RegisterResponse'
+                $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
         '422':
@@ -348,6 +381,19 @@ components:
       properties:
         id:
           type: string
+    FindOrCreateResponse:
+      type: object
+      required: [id, created]
+      properties:
+        id:
+          type: string
+          description: The surviving row's id — the existing one when `created` is false.
+        created:
+          type: boolean
+          description: >-
+            true when THIS request created the row (`201`), false when it already existed
+            (`200`). It carries the same answer as the status code, so a client that reads one
+            and a client that reads the other cannot be told different stories.
     Release:
       type: object
       properties:

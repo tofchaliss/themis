@@ -28,54 +28,75 @@ func NewRegistryService(repo Repository, ids IDGenerator) *RegistryService {
 	return &RegistryService{repo: repo, ids: ids}
 }
 
-// RegisterProduct creates a Product and returns its new stable id.
-func (s *RegistryService) RegisterProduct(ctx context.Context, name string) (domain.ProductID, error) {
+// RegisterProduct finds or creates the Product named name, returning the surviving id and
+// whether THIS call created it (EDR-INTAKE-01 B4). Registering a name that already exists is
+// not an error: it is the same Product, answered idempotently.
+//
+// The aggregate constructed here is the VALIDATION gate and nothing else — the domain decides
+// what a usable name is (trimmed, non-empty) and the trimmed name is what reaches the store.
+// Its id is discarded on purpose: identity belongs to the row that won the insert, and
+// returning a locally minted id that no row carries would be a lie the caller cannot detect.
+func (s *RegistryService) RegisterProduct(ctx context.Context, name string) (domain.ProductID, bool, error) {
 	p, err := domain.NewProduct(domain.ProductID(s.ids.NewID()), name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err := s.repo.SaveProduct(ctx, p); err != nil {
-		return "", err
+	id, created, err := s.repo.UpsertProduct(ctx, p.Name())
+	if err != nil {
+		return "", false, err
 	}
-	return p.ID(), nil
+	return domain.ProductID(id), created, nil
 }
 
-// RegisterProject creates a Project under an existing Product. Unknown product → error.
-func (s *RegistryService) RegisterProject(ctx context.Context, product domain.ProductID, name string) (domain.ProjectID, error) {
+// RegisterProject finds or creates the Project named name under an existing Product. Unknown
+// product → ErrUnknownProduct.
+//
+// The existence pre-check stays because it is the only thing that can produce that NAMED
+// error: the product_id foreign key refuses an unknown parent with a constraint violation,
+// which tells a caller nothing about which part of its request missed. It is no longer
+// load-bearing for uniqueness (B4) — a Product that disappears between the check and the
+// insert is still the foreign key's answer, not a forked row.
+func (s *RegistryService) RegisterProject(ctx context.Context, product domain.ProductID, name string) (domain.ProjectID, bool, error) {
 	ok, err := s.repo.ProductExists(ctx, string(product))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrUnknownProduct, product)
+		return "", false, fmt.Errorf("%w: %q", ErrUnknownProduct, product)
 	}
 	p, err := domain.NewProject(domain.ProjectID(s.ids.NewID()), product, name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err := s.repo.SaveProject(ctx, p); err != nil {
-		return "", err
+	id, created, err := s.repo.UpsertProject(ctx, string(product), p.Name())
+	if err != nil {
+		return "", false, err
 	}
-	return p.ID(), nil
+	return domain.ProjectID(id), created, nil
 }
 
-// RegisterRelease creates a Release under an existing Project. Unknown project → error.
-func (s *RegistryService) RegisterRelease(ctx context.Context, project domain.ProjectID, version string) (domain.ReleaseID, error) {
+// RegisterRelease finds or creates the Release at version under an existing Project. Unknown
+// project → ErrUnknownProject (same reasoning as RegisterProject's pre-check).
+//
+// Version matching is EXACT, not case-folded: a version is a machine build string whose case
+// Themis does not own (B4), so "r1917.256" and "R1917.256" are two Releases.
+func (s *RegistryService) RegisterRelease(ctx context.Context, project domain.ProjectID, version string) (domain.ReleaseID, bool, error) {
 	ok, err := s.repo.ProjectExists(ctx, string(project))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrUnknownProject, project)
+		return "", false, fmt.Errorf("%w: %q", ErrUnknownProject, project)
 	}
 	r, err := domain.NewRelease(domain.ReleaseID(s.ids.NewID()), project, version)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err := s.repo.SaveRelease(ctx, r); err != nil {
-		return "", err
+	id, created, err := s.repo.UpsertRelease(ctx, string(project), r.Version())
+	if err != nil {
+		return "", false, err
 	}
-	return r.ID(), nil
+	return domain.ReleaseID(id), created, nil
 }
 
 // ReleaseExists reports whether a Release with the given id exists. It backs Evidence's

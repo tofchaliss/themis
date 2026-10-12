@@ -26,49 +26,60 @@ func NewHandler(svc *app.RegistryService) *Handler { return &Handler{svc: svc} }
 // OpenAPI base path (/api/v1).
 func (h *Handler) Router() http.Handler { return gen.Handler(h) }
 
-// RegisterProduct handles POST /products.
+// createdStatus is B4's status mapping for the three find-or-create routes: `201` when this
+// request created the row, `200` when it already existed. The body's `created` flag carries
+// the same answer, so a client that switches on the status and a client that reads the body
+// cannot be told different stories.
+func createdStatus(created bool) int {
+	if created {
+		return http.StatusCreated
+	}
+	return http.StatusOK
+}
+
+// RegisterProduct handles POST /products — find-or-create (EDR-INTAKE-01 B4).
 func (h *Handler) RegisterProduct(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
-	id, err := h.svc.RegisterProduct(r.Context(), req.Name)
+	id, created, err := h.svc.RegisterProduct(r.Context(), req.Name)
 	if err != nil {
 		writeRegisterError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(id)})
+	writeJSON(w, createdStatus(created), gen.FindOrCreateResponse{Id: string(id), Created: created})
 }
 
-// RegisterProject handles POST /projects.
+// RegisterProject handles POST /projects — find-or-create (EDR-INTAKE-01 B4).
 func (h *Handler) RegisterProject(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
-	id, err := h.svc.RegisterProject(r.Context(), domain.ProductID(req.ProductId), req.Name)
+	id, created, err := h.svc.RegisterProject(r.Context(), domain.ProductID(req.ProductId), req.Name)
 	if err != nil {
 		writeRegisterError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(id)})
+	writeJSON(w, createdStatus(created), gen.FindOrCreateResponse{Id: string(id), Created: created})
 }
 
-// RegisterRelease handles POST /releases.
+// RegisterRelease handles POST /releases — find-or-create (EDR-INTAKE-01 B4).
 func (h *Handler) RegisterRelease(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterReleaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
-	id, err := h.svc.RegisterRelease(r.Context(), domain.ProjectID(req.ProjectId), req.Version)
+	id, created, err := h.svc.RegisterRelease(r.Context(), domain.ProjectID(req.ProjectId), req.Version)
 	if err != nil {
 		writeRegisterError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(id)})
+	writeJSON(w, createdStatus(created), gen.FindOrCreateResponse{Id: string(id), Created: created})
 }
 
 // RegisterCustomer handles POST /customers.

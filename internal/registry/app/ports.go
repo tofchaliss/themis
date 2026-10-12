@@ -8,9 +8,17 @@ import (
 
 // Repository persists and reads the registry aggregates (implemented by adapters/store).
 type Repository interface {
-	SaveProduct(ctx context.Context, p domain.Product) error
-	SaveProject(ctx context.Context, p domain.Project) error
-	SaveRelease(ctx context.Context, r domain.Release) error
+	// The three creates are find-or-create and the DATABASE owns uniqueness (EDR-INTAKE-01
+	// B4): one unique index per level, `INSERT … ON CONFLICT`, so two concurrent callers
+	// converge on one row instead of forking a Product on a race. Each returns the surviving
+	// id and whether THIS call created it — the `201` / `200` the create routes answer with.
+	//
+	// There is deliberately no plain-insert create beside them: a SELECT-then-INSERT is the
+	// time-of-check / time-of-use race B4 removed, and leaving one on the port would invite it
+	// straight back.
+	UpsertProduct(ctx context.Context, name string) (string, bool, error)
+	UpsertProject(ctx context.Context, productID, name string) (string, bool, error)
+	UpsertRelease(ctx context.Context, projectID, version string) (string, bool, error)
 
 	GetRelease(ctx context.Context, id domain.ReleaseID) (domain.Release, error)
 	// GetProject / GetProduct are the UPWARD hops of the name chain (release → project →

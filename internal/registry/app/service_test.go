@@ -3,6 +3,8 @@ package app_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/registry/app"
@@ -19,12 +21,19 @@ type fakeRepo struct {
 	microservices map[string]bool
 	customers     map[string]bool
 
+	// Name indexes standing in for the store's unique indexes (EDR-INTAKE-01 B4): products
+	// fold case, projects fold case within their product, versions are matched exactly.
+	productIDs map[string]string
+	projectIDs map[string]string
+	releaseIDs map[string]string
+	rows       int
+
 	errProductExists      error
 	errProjectExists      error
 	errReleaseExists      error
-	errSaveProduct        error
-	errSaveProject        error
-	errSaveRelease        error
+	errUpsertProduct      error
+	errUpsertProject      error
+	errUpsertRelease      error
 	errGetRelease         error
 	errList               error
 	errMicroserviceExists error
@@ -40,6 +49,7 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{},
 		microservices: map[string]bool{}, customers: map[string]bool{},
+		productIDs: map[string]string{}, projectIDs: map[string]string{}, releaseIDs: map[string]string{},
 	}
 }
 
@@ -75,28 +85,49 @@ func (r *fakeRepo) BlastRadiusCustomers(_ context.Context, _ string) (int, error
 	return r.blast, r.errBlast
 }
 
-func (r *fakeRepo) SaveProduct(_ context.Context, p domain.Product) error {
-	if r.errSaveProduct != nil {
-		return r.errSaveProduct
+// The three find-or-creates. The ids they hand back are the ROW's ("row-1", …), never the
+// service's IDGenerator's: identity belongs to the row that won the insert (B4), and using a
+// visibly different vocabulary here is what makes a test asserting the wrong one fail.
+func (r *fakeRepo) UpsertProduct(_ context.Context, name string) (string, bool, error) {
+	id, created, err := r.findOrCreate(r.productIDs, strings.ToLower(name), r.errUpsertProduct)
+	if created {
+		r.products[id] = true
 	}
-	r.products[string(p.ID())] = true
-	return nil
+	return id, created, err
 }
 
-func (r *fakeRepo) SaveProject(_ context.Context, p domain.Project) error {
-	if r.errSaveProject != nil {
-		return r.errSaveProject
+func (r *fakeRepo) UpsertProject(_ context.Context, productID, name string) (string, bool, error) {
+	id, created, err := r.findOrCreate(r.projectIDs, productID+"\x00"+strings.ToLower(name), r.errUpsertProject)
+	if created {
+		r.projects[id] = true
 	}
-	r.projects[string(p.ID())] = true
-	return nil
+	return id, created, err
 }
 
-func (r *fakeRepo) SaveRelease(_ context.Context, rel domain.Release) error {
-	if r.errSaveRelease != nil {
-		return r.errSaveRelease
+func (r *fakeRepo) UpsertRelease(_ context.Context, projectID, version string) (string, bool, error) {
+	// No ToLower: release uniqueness is exact on (project_id, version).
+	id, created, err := r.findOrCreate(r.releaseIDs, projectID+"\x00"+version, r.errUpsertRelease)
+	if created {
+		rel, rerr := domain.NewRelease(domain.ReleaseID(id), domain.ProjectID(projectID), version)
+		if rerr != nil {
+			return "", false, rerr
+		}
+		r.releases[id] = rel
 	}
-	r.releases[string(rel.ID())] = rel
-	return nil
+	return id, created, err
+}
+
+func (r *fakeRepo) findOrCreate(index map[string]string, key string, injected error) (string, bool, error) {
+	if injected != nil {
+		return "", false, injected
+	}
+	if id, ok := index[key]; ok {
+		return id, false, nil
+	}
+	r.rows++
+	id := fmt.Sprintf("row-%d", r.rows)
+	index[key] = id
+	return id, true, nil
 }
 
 func (r *fakeRepo) GetRelease(_ context.Context, id domain.ReleaseID) (domain.Release, error) {
@@ -185,7 +216,7 @@ type seqIDs struct{ n int }
 
 func (s *seqIDs) NewID() string {
 	s.n++
-	return map[int]string{1: "id-1", 2: "id-2", 3: "id-3"}[s.n]
+	return fmt.Sprintf("id-%d", s.n)
 }
 
 func newService(repo app.Repository) *app.RegistryService {
@@ -197,23 +228,48 @@ func TestRegisterProduct(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newService(repo)
 
-	id, err := svc.RegisterProduct(ctx, "Themis")
+	id, created, err := svc.RegisterProduct(ctx, "Themis")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if id != "id-1" || !repo.products["id-1"] {
-		t.Errorf("product not saved: id=%q", id)
+	// The id is the STORE's, not the service IDGenerator's: the row that won the insert owns
+	// identity (B4).
+	if id != "row-1" || !created || !repo.products["row-1"] {
+		t.Errorf("product not created: id=%q created=%v", id, created)
 	}
 
-	// Invalid name → domain error, nothing saved.
-	if _, err := newService(newFakeRepo()).RegisterProduct(ctx, "  "); err == nil {
+	// Invalid name → domain error, nothing stored.
+	if _, _, err := newService(newFakeRepo()).RegisterProduct(ctx, "  "); err == nil {
 		t.Error("empty name: expected error")
 	}
-	// Save failure surfaces.
+	// Store failure surfaces.
 	failing := newFakeRepo()
-	failing.errSaveProduct = errors.New("boom")
-	if _, err := newService(failing).RegisterProduct(ctx, "Themis"); err == nil {
-		t.Error("save error: expected error")
+	failing.errUpsertProduct = errors.New("boom")
+	if _, _, err := newService(failing).RegisterProduct(ctx, "Themis"); err == nil {
+		t.Error("upsert error: expected error")
+	}
+}
+
+// B4 at the app layer: the same name twice is ONE Product, and the second caller is told it
+// did not create it. Case folds for a human-typed name (the store's index is on lower(name)),
+// so "themis" finds "Themis" — and the first caller's casing is what stays.
+func TestRegisterProductFindOrCreateReportsCreated(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(newFakeRepo())
+
+	first, created, err := svc.RegisterProduct(ctx, "Themis")
+	if err != nil || !created {
+		t.Fatalf("first register = %q created=%v err=%v, want created", first, created, err)
+	}
+	second, created, err := svc.RegisterProduct(ctx, "themis")
+	if err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	if created {
+		t.Error("created=true on a name that already existed — a duplicate must not fork a Product")
+	}
+	if second != first {
+		t.Errorf("second register id = %q, want the existing %q", second, first)
 	}
 }
 
@@ -223,34 +279,51 @@ func TestRegisterProject(t *testing.T) {
 	repo.products["prod-1"] = true
 	svc := newService(repo)
 
-	id, err := svc.RegisterProject(ctx, "prod-1", "api")
+	id, created, err := svc.RegisterProject(ctx, "prod-1", "api")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if id != "id-1" {
-		t.Errorf("project id = %q, want id-1", id)
+	if id != "row-1" || !created {
+		t.Errorf("project = %q created=%v, want row-1 created", id, created)
 	}
 
 	// Unknown product.
-	if _, err := newService(newFakeRepo()).RegisterProject(ctx, "nope", "api"); !errors.Is(err, app.ErrUnknownProduct) {
+	if _, _, err := newService(newFakeRepo()).RegisterProject(ctx, "nope", "api"); !errors.Is(err, app.ErrUnknownProduct) {
 		t.Errorf("unknown product: err = %v, want ErrUnknownProduct", err)
 	}
 	// ProductExists error.
 	pe := newFakeRepo()
 	pe.errProductExists = errors.New("db down")
-	if _, err := newService(pe).RegisterProject(ctx, "prod-1", "api"); err == nil {
+	if _, _, err := newService(pe).RegisterProject(ctx, "prod-1", "api"); err == nil {
 		t.Error("ProductExists error: expected error")
 	}
 	// Invalid name (product exists).
-	if _, err := svc.RegisterProject(ctx, "prod-1", " "); err == nil {
+	if _, _, err := svc.RegisterProject(ctx, "prod-1", " "); err == nil {
 		t.Error("empty name: expected error")
 	}
-	// Save failure.
+	// Store failure.
 	sf := newFakeRepo()
 	sf.products["prod-1"] = true
-	sf.errSaveProject = errors.New("boom")
-	if _, err := newService(sf).RegisterProject(ctx, "prod-1", "api"); err == nil {
-		t.Error("save error: expected error")
+	sf.errUpsertProject = errors.New("boom")
+	if _, _, err := newService(sf).RegisterProject(ctx, "prod-1", "api"); err == nil {
+		t.Error("upsert error: expected error")
+	}
+}
+
+// The existence pre-check is the only thing that can NAME the missing parent: the product_id
+// foreign key refuses an unknown parent with a constraint violation, which does not tell a
+// caller which part of its request missed. B4 moved UNIQUENESS to the database; it did not
+// move this, and a find-or-create that answered "constraint 23503" would be a regression.
+func TestRegisterProjectUnknownProductStillNamed(t *testing.T) {
+	_, created, err := newService(newFakeRepo()).RegisterProject(context.Background(), "prod-ghost", "api")
+	if !errors.Is(err, app.ErrUnknownProduct) {
+		t.Fatalf("err = %v, want ErrUnknownProduct", err)
+	}
+	if created {
+		t.Error("a refused registration reported created=true")
+	}
+	if !strings.Contains(err.Error(), "prod-ghost") {
+		t.Errorf("error %q does not name the missing product", err)
 	}
 }
 
@@ -260,34 +333,64 @@ func TestRegisterRelease(t *testing.T) {
 	repo.projects["proj-1"] = true
 	svc := newService(repo)
 
-	id, err := svc.RegisterRelease(ctx, "proj-1", "1.2.3")
+	id, created, err := svc.RegisterRelease(ctx, "proj-1", "1.2.3")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if id != "id-1" {
-		t.Errorf("release id = %q, want id-1", id)
+	if id != "row-1" || !created {
+		t.Errorf("release = %q created=%v, want row-1 created", id, created)
 	}
 
 	// Unknown project.
-	if _, err := newService(newFakeRepo()).RegisterRelease(ctx, "nope", "1.0"); !errors.Is(err, app.ErrUnknownProject) {
+	if _, _, err := newService(newFakeRepo()).RegisterRelease(ctx, "nope", "1.0"); !errors.Is(err, app.ErrUnknownProject) {
 		t.Errorf("unknown project: err = %v, want ErrUnknownProject", err)
 	}
 	// ProjectExists error.
 	pe := newFakeRepo()
 	pe.errProjectExists = errors.New("db down")
-	if _, err := newService(pe).RegisterRelease(ctx, "proj-1", "1.0"); err == nil {
+	if _, _, err := newService(pe).RegisterRelease(ctx, "proj-1", "1.0"); err == nil {
 		t.Error("ProjectExists error: expected error")
 	}
 	// Invalid version.
-	if _, err := svc.RegisterRelease(ctx, "proj-1", "  "); err == nil {
+	if _, _, err := svc.RegisterRelease(ctx, "proj-1", "  "); err == nil {
 		t.Error("empty version: expected error")
 	}
-	// Save failure.
+	// Store failure.
 	sf := newFakeRepo()
 	sf.projects["proj-1"] = true
-	sf.errSaveRelease = errors.New("boom")
-	if _, err := newService(sf).RegisterRelease(ctx, "proj-1", "1.0"); err == nil {
-		t.Error("save error: expected error")
+	sf.errUpsertRelease = errors.New("boom")
+	if _, _, err := newService(sf).RegisterRelease(ctx, "proj-1", "1.0"); err == nil {
+		t.Error("upsert error: expected error")
+	}
+}
+
+// Re-registering a version is the SAME Release, answered idempotently — two bots building one
+// version at the same moment is the normal case (B4). Version matching is EXACT, so a
+// differently-cased build string is a different Release and must still be created.
+func TestRegisterReleaseFindOrCreateReportsCreated(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	repo.projects["proj-1"] = true
+	svc := newService(repo)
+
+	first, created, err := svc.RegisterRelease(ctx, "proj-1", "R1917.256")
+	if err != nil || !created {
+		t.Fatalf("first register = %q created=%v err=%v, want created", first, created, err)
+	}
+	second, created, err := svc.RegisterRelease(ctx, "proj-1", "R1917.256")
+	if err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	if created || second != first {
+		t.Errorf("second register = %q created=%v, want %q created=false", second, created, first)
+	}
+
+	other, created, err := svc.RegisterRelease(ctx, "proj-1", "r1917.256")
+	if err != nil || !created {
+		t.Fatalf("lower-cased version = %q created=%v err=%v, want a NEW release", other, created, err)
+	}
+	if other == first {
+		t.Error("a differently-cased version collapsed into one Release — folding a build string merges two builds")
 	}
 }
 
