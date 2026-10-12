@@ -297,6 +297,11 @@ func TestIntakeReasonToHTTPStatus_CoversTheWholeTaxonomy(t *testing.T) {
 		domain.ReasonPayloadTooLarge:        http.StatusRequestEntityTooLarge,
 		domain.ReasonTooManyRecords:         http.StatusRequestEntityTooLarge,
 		domain.ReasonUnauthorized:           http.StatusUnauthorized,
+		// The 2026-10-12 amendment's four, transcribed from its status-code table.
+		domain.ReasonCreateReleaseConflict:   http.StatusBadRequest,
+		domain.ReasonIncompleteReleaseTriple: http.StatusBadRequest,
+		domain.ReasonAmbiguousName:           http.StatusUnprocessableEntity,
+		domain.ReasonBuildIDInvalid:          http.StatusBadRequest,
 	}
 	reasons := domain.AllRejectReasons()
 	if len(want) != len(reasons) {

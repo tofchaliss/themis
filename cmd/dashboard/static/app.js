@@ -1430,6 +1430,40 @@ function intakeContentType(f) {
   return /\.csv$/i.test(f && f.name ? f.name : "") ? "text/csv" : "application/json";
 }
 
+/* The intake refusal taxonomy (EDR-INTAKE-01 D11 + the 2026-10-12 amendment's last
+   four), one plain line each. The reason itself is always shown verbatim — this table
+   only says what it MEANS, so the page never turns a closed enum back into free text.
+
+   It must cover EVERY reason the intake door can state. The AI-reason table above held
+   six of fifteen and the other nine rendered as "no reason stated" (#116,
+   DEF_GUI_AI_REASON_MAP_INCOMPLETE); keep this one in step with
+   internal/evidence/domain/intake.go's AllRejectReasons and the RejectReason enum in
+   api/evidence.openapi.yaml, which grow in the same change. */
+const INTAKE_REASONS = {
+  unknown_release: "the release id, or the product/project/version triple, does not resolve",
+  no_inventory_for_release: "no SBOM is filed for this release — upload the SBOM first, or allow it without one",
+  unrecognised_format: "the document's dialect could not be identified; nothing was filed",
+  declared_format_mismatch: "the declared kind/format contradicts the body, or is not a valid combination",
+  malformed_body: "not well-formed JSON, unparseable CSV, or invalid UTF-8",
+  source_invalid: "the dialect was recognised but the input failed its rules — the detail names the element or row",
+  schema_invalid: "the converted document failed its contract, so it was refused instead of filed unreadable",
+  empty_report: "zero findings, an empty array, or an SBOM with no components",
+  observed_at_underivable: "no observation time could be derived and none was supplied — intake never stamps “now”",
+  observed_at_invalid: "an observation time was supplied but is unparseable or implausible",
+  conversion_failed: "the dialect was valid but no finding survived translation",
+  checksum_mismatch: "the expected checksum does not match the submitted bytes",
+  duplicate_other_release: "these exact bytes are already filed against a different release — a new build is a new release",
+  payload_too_large: "the body is over this node's intake size bound",
+  too_many_records: "more findings or CSV rows than this node's record bound",
+  unauthorized: "the API key is missing, invalid, or not permitted to write here",
+  // The 2026-10-12 amendment's four (B2/B4/B5). Vocabulary for now — nothing produces
+  // them yet, and a reason this page learns only when it first fires is #116 again.
+  create_release_conflict: "release_id and create_release were both supplied — they are mutually exclusive",
+  incomplete_release_triple: "create_release needs the whole product/project/version triple",
+  ambiguous_name: "the name matches more than one registered item — ambiguous, not unregistered",
+  build_id_invalid: "build_id is invalid UTF-8, or over 256 code points",
+};
+
 /* --- SBOM manager (VM feedback #8 — the tab that will grow) --- */
 
 async function viewSBOM() {
@@ -1723,8 +1757,6 @@ async function viewSBOM() {
   // They are never concatenated: Governance flattened exactly this pair into
   // "<reason>: <detail>", which turned a closed enum into free text and made every table
   // lookup miss — a safety refusal rendered as "no reason given" (fixed 2026-09-22).
-  // There is deliberately no per-reason copy here; a table of hand-written sentences is
-  // how a closed enum turns back into free text from the other direction.
   function showRefusal(status, body) {
     const reason = body.reason || "";
     const detail = body.detail || body.title || `status ${status}`;
@@ -1737,11 +1769,16 @@ async function viewSBOM() {
   // renderOutcome's `detail` is HTML — every caller escapes what came off the wire. The
   // reason is escaped here because it is always a bare enum value. Two states only: a
   // refusal is loud, everything else is a note.
+  //
+  // The reason is shown VERBATIM and its meaning beside it, never instead of it: the
+  // enum value is what an operator quotes and what the API documents, and a page that
+  // showed only prose would be free text again (D11).
   function renderOutcome(cls, title, reason, detail) {
     if (!outcome.isConnected) return; // the tab was left while a receipt was being followed
+    const meaning = reason ? (INTAKE_REASONS[reason] || "a reason this page does not recognise — it is shown verbatim above") : "";
     outcome.innerHTML = `<div class="${cls === "err" ? "err" : "card-sub"}" style="margin-top:10px">
       <b>${esc(title)}</b>
-      ${reason ? `<div>Reason <code class="mono">${esc(reason)}</code></div>` : ""}
+      ${reason ? `<div>Reason <code class="mono">${esc(reason)}</code> <span class="muted">— ${esc(meaning)}</span></div>` : ""}
       <div>${detail}</div></div>`;
   }
 

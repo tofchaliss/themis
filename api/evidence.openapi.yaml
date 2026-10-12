@@ -445,6 +445,10 @@ components:
         There is deliberately no `inventory_not_ready`: Evidence has no window in
         which it holds an SBOM whose inventory is pending, so the value could never
         fire, and a closed enum with a dead value is worse than no value (D6).
+
+
+        The last four are the 2026-10-12 amendment's (B2/B4/B5 and its status-code
+        table), appended so no existing value moves.
       enum:
         - unknown_release
         - no_inventory_for_release
@@ -462,6 +466,10 @@ components:
         - payload_too_large
         - too_many_records
         - unauthorized
+        - create_release_conflict
+        - incomplete_release_triple
+        - ambiguous_name
+        - build_id_invalid
     ReceiptStatus:
       type: string
       description: >-

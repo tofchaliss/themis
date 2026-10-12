@@ -1,10 +1,36 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-10-09 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-10-12 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-09 · THE VM PIPELINE IS HALTED. Restart it first; everything else is paperwork
+> ## ⏭ RESUME POINT — 2026-10-12 · intake is merged; `phase3-bot-intake` Gate B is open at task 1.1
+>
+> **Merged since the last entry.** `phase3-report-intake` **groups 1–4** (#138–#141 — the one intake door,
+> the server-side converters, the receipt, and the GUI + scripts uploading through `POST /intake`);
+> **#142** the dashboard's password login and its Admin tab; **#143** the 2026-10-12 VM round (intake
+> dedup fix, the upgrade runbook, the test log).
+>
+> **`phase3-bot-intake` — Gate A approved and merged** (#144, `69bada2`): EDR-INTAKE-01's 2026-10-12
+> amendment ("Bot-friendly intake", `B1`–`B7` + the status-code table) plus the change's
+> proposal/design/tasks. **Documents only — no code in #144.**
+>
+> **Gate B is open, and it is `Group 0` and `Group 1` ONLY.** Gates C–F (Groups 2–4 — intake's
+> `create_release`, the non-leaking authorization, `build_id`, scripts/docs and the VM verification) are
+> **on hold** until Gate B lands.
+>
+> | state | task |
+> | --- | --- |
+> | done | **0.1** — the four new reject reasons as vocabulary (`create_release_conflict` 400 · `incomplete_release_triple` 400 · `ambiguous_name` 422 · `build_id_invalid` 400) in the domain enum, `api/evidence.openapi.yaml`, the HTTP status table and the dashboard's intake-reason table. Nothing produces them yet |
+> | **next** | **1.1** — the Registry uniqueness migration's pre-flight that **refuses** (B4): one explicit transaction, `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` first, a `DO` block naming every duplicate group. It never merges or reassigns |
+>
+> **The 2026-10-09 entry below is history now:** its "FIRST — the evidence stream is halted" action was
+> carried out on the 2026-10-12 VM round (cursor `35751` → `37090`, no stream halted —
+> [`vm-test-2026-10-12.md`](vm-test-2026-10-12.md)). Read it for the narrative, not as the next action.
+
+---
+
+> ## RESUME POINT — 2026-10-09 · THE VM PIPELINE IS HALTED. Restart it first; everything else is paperwork
 >
 > **`main` = `8e3eaa0`.** Four PRs merged today (#132 #133 #134 #135), all documents — **no production
 > code changed on 2026-10-09.** The one thing that needs doing is on the VM, not in the repo.

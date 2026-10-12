@@ -8,10 +8,11 @@ import (
 	"github.com/themis-project/themis/internal/evidence/domain"
 )
 
-// TestIntakeReasonTaxonomyIsClosed is the D11 guard (tasks.md 2.3). It compares the
-// enum against the identifiers written down in the EDR, as a SET — so growing,
-// shrinking or renaming a reason fails here and the change has to carry the spec and
-// the dashboard with it.
+// TestIntakeReasonTaxonomyIsClosed is the D11 guard (tasks.md 2.3, extended by
+// phase3-bot-intake 0.1). It compares the enum against the identifiers written down
+// in the EDR — D11's table plus the 2026-10-12 amendment's four — as a SET, so
+// growing, shrinking or renaming a reason fails here and the change has to carry the
+// spec and the dashboard with it.
 //
 // #116 is what it costs otherwise: a consumer that knew 6 of 15 reasons asserted
 // "no reason given" for the other nine, so refusals the system had named precisely
@@ -37,6 +38,12 @@ func TestIntakeReasonTaxonomyIsClosed(t *testing.T) {
 		"payload_too_large":        true,
 		"too_many_records":         true,
 		"unauthorized":             true,
+		// The 2026-10-12 amendment's four (B2/B4/B5 and the status-code table),
+		// landed as vocabulary before anything produces them.
+		"create_release_conflict":   true,
+		"incomplete_release_triple": true,
+		"ambiguous_name":            true,
+		"build_id_invalid":          true,
 	}
 
 	got := make(map[domain.RejectReason]bool, len(want))

@@ -97,6 +97,46 @@ func TestAIReasonTaxonomyIsCoveredByTheDashboard(t *testing.T) {
 	}
 }
 
+// Every intake refusal Evidence can state must have an entry in the page's taxonomy too
+// (EDR-INTAKE-01 D11 + the 2026-10-12 amendment). Same guard, same cost if it is missing:
+// the page shows the reason verbatim either way, but a reason with no meaning beside it is
+// an enum value an operator has to go and look up.
+func TestIntakeReasonTaxonomyIsCoveredByTheDashboard(t *testing.T) {
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	const marker = "const INTAKE_REASONS = {"
+	start := bytes.Index(js, []byte(marker))
+	if start < 0 {
+		t.Fatalf("app.js no longer defines %s — this guard needs re-pointing", marker)
+	}
+	end := bytes.Index(js[start:], []byte("\n};"))
+	if end < 0 {
+		t.Fatal("INTAKE_REASONS block is unterminated")
+	}
+	block := string(js[start : start+end])
+
+	// Read from the domain's source, never copied: a copy would go stale in exactly the
+	// way this test exists to prevent.
+	const src = "../../internal/evidence/domain/intake.go"
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	reasonConst := regexp.MustCompile(`Reason[A-Za-z]*\s+RejectReason\s+=\s+"([a-z_]+)"`)
+	found := reasonConst.FindAllStringSubmatch(string(b), -1)
+	if len(found) == 0 {
+		t.Fatalf("%s: no RejectReason constants matched — this guard needs re-pointing", src)
+	}
+	for _, m := range found {
+		if !strings.Contains(block, "\n  "+m[1]+": \"") {
+			t.Errorf("intake reason %q has no entry in INTAKE_REASONS — the refusal would reach "+
+				"the operator as a bare enum value with nothing explaining it", m[1])
+		}
+	}
+}
+
 // The Admin tab's wiring, read out of the embedded assets. The SPA has no compiler (which is
 // why `make js-check` exists), so the one thing a Go test CAN prove is that the pieces the
 // server's routes depend on are still present and still spelled the same: a renamed route or

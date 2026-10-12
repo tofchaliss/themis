@@ -61,9 +61,34 @@ const (
 	ReasonTooManyRecords RejectReason = "too_many_records"
 	// ReasonUnauthorized — inbound-edge auth (EDR-SECURITY-01 F1).
 	ReasonUnauthorized RejectReason = "unauthorized"
+
+	// The 2026-10-12 amendment's four (B1-B7, the status-code table). They are
+	// appended rather than interleaved so no existing reason moves, and they are
+	// landed as VOCABULARY: nothing produces them yet, so the later steps that do
+	// depend only on this one.
+
+	// ReasonCreateReleaseConflict — B2: `create_release=true` arrived together with
+	// `release_id`. The caller named the release two ways and intake will not guess
+	// which one it meant.
+	ReasonCreateReleaseConflict RejectReason = "create_release_conflict"
+	// ReasonIncompleteReleaseTriple — B2: `create_release=true` without the whole
+	// {product, project, version} triple. A partial name is not something a version
+	// can be created from, so it is a malformed request — not the `unknown_release`
+	// that a lookup WITHOUT `create_release` still honestly reports.
+	ReasonIncompleteReleaseTriple RejectReason = "incomplete_release_triple"
+	// ReasonAmbiguousName — B4: a name matched more than one row, so the lookup
+	// abstains. The wording must say AMBIGUOUS and never not-registered: "no product
+	// named X is registered" is a false statement about a product registered twice,
+	// and it sends the operator hunting a typo that is not there.
+	ReasonAmbiguousName RejectReason = "ambiguous_name"
+	// ReasonBuildIDInvalid — B5: `build_id` is over 256 Unicode code points, or is
+	// not valid UTF-8 after decoding. Refused by name, never truncated: a provenance
+	// value we silently altered is not the value the caller recorded.
+	ReasonBuildIDInvalid RejectReason = "build_id_invalid"
 )
 
-// AllRejectReasons returns the closed taxonomy, in D11's order. It is the single
+// AllRejectReasons returns the closed taxonomy, in D11's order followed by the
+// 2026-10-12 amendment's four (appended, so no existing reason moves). It is the single
 // source of truth for the set: [RejectReason.Valid] walks it, the guard test compares
 // it against the documented identifiers, and a reason absent from it does not exist.
 //
@@ -93,6 +118,10 @@ func AllRejectReasons() []RejectReason {
 		ReasonPayloadTooLarge,
 		ReasonTooManyRecords,
 		ReasonUnauthorized,
+		ReasonCreateReleaseConflict,
+		ReasonIncompleteReleaseTriple,
+		ReasonAmbiguousName,
+		ReasonBuildIDInvalid,
 	}
 }
 
