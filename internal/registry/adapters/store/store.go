@@ -338,6 +338,31 @@ func (s *Store) ReleaseExists(ctx context.Context, releaseID string) (bool, erro
 	return s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM releases WHERE id = $1)`, releaseID)
 }
 
+// ProductOfRelease returns the id of the Product that OWNS a release, walking
+// release -> project -> product in ONE query (EDR-INTAKE-01 B7: the `release_id`
+// path authorizes the resolved Product before anything is written).
+//
+// An unknown release is an EMPTY id and a nil error, the same contract the name
+// lookups above keep: "no such release" is an answer, not a fault, and a caller
+// that cannot tell the two apart ends up reporting a database outage as a missing
+// release. There is no ambiguity case — a release id is unique by construction and
+// its project FK gives exactly one product.
+func (s *Store) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
+	var productID string
+	err := s.pool.QueryRow(ctx, `
+		SELECT pr.product_id
+		FROM releases r
+		JOIN projects pr ON r.project_id = pr.id
+		WHERE r.id = $1`, releaseID).Scan(&productID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return productID, nil
+}
+
 func (s *Store) exists(ctx context.Context, query, id string) (bool, error) {
 	var ok bool
 	if err := s.pool.QueryRow(ctx, query, id).Scan(&ok); err != nil {

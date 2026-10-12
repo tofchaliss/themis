@@ -414,6 +414,16 @@ func (v registryReader) ReleaseIDByVersion(ctx context.Context, projectID, versi
 	return id, translateAmbiguous(err)
 }
 
+// ProductOfRelease names the Product that owns a release — the upward hop both doors
+// authorize a `product:<id>` key against (EDR-INTAKE-01 B7). It is a READ, so the seam
+// still exposes no write: Evidence learns who owns a release, and gains no ability to
+// change it. The registry owns the traversal (release -> project -> product), and an
+// unknown release comes back as an empty id, which both callers treat as "refused" for a
+// confined key and as today's unchanged answer for an admin.
+func (v registryReader) ProductOfRelease(ctx context.Context, releaseID string) (string, error) {
+	return v.store.ProductOfRelease(ctx, releaseID)
+}
+
 // translateAmbiguous restates the registry's abstention in Evidence's vocabulary. An error
 // value is part of a package's surface, so handing the registry's sentinel to a subjectref
 // consumer would make Evidence's read seam depend on the registry to say what "ambiguous"

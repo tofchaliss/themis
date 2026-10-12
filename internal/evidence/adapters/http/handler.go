@@ -5,6 +5,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,7 +15,18 @@ import (
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
 	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
+	"github.com/themis-project/themis/internal/platform/auth"
 )
+
+// ReleaseOwnership answers which Product owns a Release — the read `POST /evidence`
+// needs to authorize a `product:<id>` key against the release it names
+// (EDR-INTAKE-01 B7: "the old door is not a way around the new one"). Satisfied by
+// the registry read seam the composition root already wires (subjectref.Registry).
+//
+// An unknown release is an empty id and a nil error, the seam's own contract.
+type ReleaseOwnership interface {
+	ProductOfRelease(ctx context.Context, releaseID string) (string, error)
+}
 
 // Handler implements gen.ServerInterface over the Evidence application service.
 type Handler struct {
@@ -23,6 +35,11 @@ type Handler struct {
 	// refuses honestly rather than 404-ing or pretending to accept: a door that
 	// answers is a door a client will send a 60 MB SBOM through.
 	intake *Intake
+	// owner resolves a release to its owning Product. nil ⇒ a product-scoped key is
+	// REFUSED on `POST /evidence`, because an ownership that cannot be established
+	// is not an ownership that can be checked (fail-closed, B7). `admin` keys and
+	// auth-disabled nodes never ask, so neither is affected.
+	owner ReleaseOwnership
 }
 
 // NewHandler builds a Handler.
@@ -31,6 +48,13 @@ func NewHandler(svc *app.EvidenceService) *Handler { return &Handler{svc: svc} }
 // WithIntake wires the intake door and returns the handler for chaining.
 func (h *Handler) WithIntake(i *Intake) *Handler {
 	h.intake = i
+	return h
+}
+
+// WithReleaseOwnership wires the release→product read `POST /evidence` authorizes
+// with, and returns the handler for chaining.
+func (h *Handler) WithReleaseOwnership(o ReleaseOwnership) *Handler {
+	h.owner = o
 	return h
 }
 
@@ -43,6 +67,14 @@ func (h *Handler) RegisterEvidence(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterEvidenceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error(), nil)
+		return
+	}
+	// The ownership check, before the write (B7). The old door rested on the
+	// method-based write floor, which sees a principal and no resource — so a
+	// `product:<A>` key could file against product B's release just by naming its
+	// id. That was a gap TODAY, not one `create_release` introduced, and it is
+	// closed on both doors in the same change.
+	if !h.authorizeRelease(w, r, req.SubjectReleaseId) {
 		return
 	}
 	cmd := app.RegisterCommand{
@@ -112,6 +144,46 @@ func (h *Handler) ListEvidence(w http.ResponseWriter, r *http.Request, params ge
 		return
 	}
 	writeJSON(w, http.StatusOK, toSummaries(list))
+}
+
+// --- product-ownership authorization on the old door (EDR-INTAKE-01 B7) ----
+
+// unauthorizedReleaseDetail is what this door's authorization refusal says, in EVERY
+// case: another product's release, a release that does not exist, and an ownership
+// that could not be read are ONE answer. For a `product:<P>` key those are
+// indistinguishable by decision (B3 applied to ids exactly as to names, rows 17-18),
+// so the string is a constant and names nothing about the estate.
+const unauthorizedReleaseDetail = "this key is not authorized for the product that owns the release this request names; " +
+	"a product-scoped key may file evidence only for its own product"
+
+// authorizeRelease reports whether the request may proceed, having already written
+// the refusal otherwise.
+//
+// The order mirrors the intake door's: no principal (auth disabled at the inbound
+// edge — dev only, and already open) and `admin` pass with no Registry read at all,
+// so neither sees any change, including the `422 unknown subject release` an unknown
+// release has always answered here. Only a confined key pays for the ownership hop,
+// and for it every outcome but "the release belongs to my product" is the same `403`.
+func (h *Handler) authorizeRelease(w http.ResponseWriter, r *http.Request, releaseID string) bool {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok || p.IsAdmin() {
+		return true
+	}
+	productID := ""
+	if h.owner != nil {
+		if id, err := h.owner.ProductOfRelease(r.Context(), releaseID); err == nil {
+			productID = id
+		}
+	}
+	// An empty id covers all three fail-closed cases (no seam, an unreadable seam, no
+	// such release) and is refused on its own account rather than left to the
+	// principal: a check that rests on a key never matching the empty product is a
+	// check resting on a coincidence.
+	if productID == "" || !p.AuthorizeProduct(productID) {
+		writeProblem(w, http.StatusForbidden, "unauthorized", unauthorizedReleaseDetail, nil)
+		return false
+	}
+	return true
 }
 
 // --- error mapping ---------------------------------------------------------

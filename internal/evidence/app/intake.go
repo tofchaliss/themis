@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/themis-project/themis/internal/evidence/domain"
 )
@@ -39,6 +40,19 @@ type IntakeCommand struct {
 	Version string
 	// ReleaseID is the direct road, and wins when supplied — the resolver decides.
 	ReleaseID string
+	// CreateRelease is B2's bounded create: with the WHOLE triple, find-or-create
+	// the version instead of refusing an unknown one. It is accepted only together
+	// with {product, project, version} and never beside ReleaseID — see
+	// [IntakeCommand.ParameterRefusal].
+	CreateRelease bool
+	// BuildID is which pipeline run produced this document (B5): artifact
+	// provenance, at most 256 Unicode CODE POINTS, and deliberately inert —
+	// nothing reads it for dedup, correlation or current-SBOM selection.
+	BuildID string
+	// Authorize is the caller's product confinement, supplied by the edge that
+	// authenticated the request; nil means none applies (an `admin` key, or an
+	// auth-disabled node). See [ProductAuthorizer].
+	Authorize ProductAuthorizer
 	// ObservedAt is the caller's assertion about WHICH observation this is. Zero means
 	// derive it from the body; it is never the upload time (D3).
 	ObservedAt time.Time
@@ -52,6 +66,71 @@ type IntakeCommand struct {
 	// (D8), so the most it can do is make the mismatch visible later.
 	ProvenanceSource      string
 	ProvenanceImageDigest string
+}
+
+// buildIDMaxCodePoints is B5's bound, and the UNIT is the decision: 256 Unicode code
+// points, which is what OpenAPI's / JSON Schema's `maxLength` counts, so the spec and
+// this check cannot disagree about what "256" means. 256 x "é" is 512 bytes and is
+// ACCEPTED; `len` would have refused it.
+const buildIDMaxCodePoints = 256
+
+// ParameterRefusal is step 1 of the intake's order (EDR-INTAKE-01 B7): the checks
+// that need no body, have no side effect, and therefore run BEFORE the size bound.
+// It returns the refusal, or nil when the parameters are coherent.
+//
+// It is exported because the HTTP edge applies it too, before it buffers the body —
+// the same reason the size bound is checked in both places. A parameter fault
+// discovered after a 60 MB read is a fault reported on the wrong thing: a request
+// that is both oversized and carries a malformed `build_id` is told about the
+// `build_id`, which is the fault the caller can actually fix. That can only happen on
+// a request using the new parameters, so no existing answer moves — and
+// `TestParameterValidationPrecedesTheSizeBound` holds the order as a decision rather
+// than as an accident of code layout.
+//
+// The three faults, and why each is a 400 rather than the 422 of a document that was
+// read and declined (B2's status-code table):
+//
+//   - `create_release` WITH `release_id` — the caller named the release two ways and
+//     intake will not guess which one it meant.
+//   - `create_release` without the WHOLE triple — a partial name is not something a
+//     version can be created from. WITHOUT `create_release` the same partial name
+//     keeps today's `404 unknown_release`, because then it is a lookup and "not
+//     found" is the honest answer. The distinction is deliberate (B2's note on rows
+//     5 and 6 versus row 4).
+//   - `build_id` over the bound or not valid UTF-8 — refused by name and NEVER
+//     truncated (B5): a provenance value we silently altered is not the value the
+//     caller recorded, and provenance is the worst place to discover that later.
+func (c IntakeCommand) ParameterRefusal() *domain.RejectError {
+	if c.CreateRelease && c.ReleaseID != "" {
+		return &domain.RejectError{
+			Reason: domain.ReasonCreateReleaseConflict,
+			Detail: fmt.Sprintf("create_release=true names a release to CREATE and release_id=%q names one that exists; "+
+				"send the {product, project, version} triple with create_release=true, or release_id alone", c.ReleaseID),
+		}
+	}
+	if c.CreateRelease && (c.Product == "" || c.Project == "" || c.Version == "") {
+		return &domain.RejectError{
+			Reason: domain.ReasonIncompleteReleaseTriple,
+			Detail: fmt.Sprintf("create_release=true needs the whole {product, project, version} triple; got product=%q, project=%q, version=%q "+
+				"(intake creates the version only, under a Product and Project a human already registered)", c.Product, c.Project, c.Version),
+		}
+	}
+	if c.BuildID != "" {
+		if !utf8.ValidString(c.BuildID) {
+			return &domain.RejectError{
+				Reason: domain.ReasonBuildIDInvalid,
+				Detail: "build_id is not valid UTF-8 after decoding, so a code-point count of it is not a defined quantity; " +
+					"it is refused rather than repaired",
+			}
+		}
+		if n := utf8.RuneCountInString(c.BuildID); n > buildIDMaxCodePoints {
+			return &domain.RejectError{
+				Reason: domain.ReasonBuildIDInvalid,
+				Detail: fmt.Sprintf("build_id is %d Unicode code points, over the %d-code-point bound; it is refused, never truncated", n, buildIDMaxCodePoints),
+			}
+		}
+	}
+	return nil
 }
 
 // IntakeService is the one intake door's use case (EDR-INTAKE-01 D1): it identifies a
@@ -77,13 +156,17 @@ func NewIntakeService(maxBytes int64, releases ReleaseResolver, inventory Invent
 	return &IntakeService{maxBytes: maxBytes, releases: releases, inventory: inventory, reports: reports, registrar: registrar}
 }
 
-// Intake runs the door's seven steps, in this order, and the order is the decision
-// (design.md "Ordering inside app.Intake, and why"):
+// Intake runs the door's steps, in this order, and the order is the decision
+// (EDR-INTAKE-01 B7 is the authoritative list; design.md §3 restates it):
 //
+//  0. parameters — the checks that need no body and have no side effect, so they
+//     precede the size bound (B7's step 1).
 //  1. size — a bound before anything is read into the domain.
 //  2. detect — the cheapest discriminator; a body we cannot name gets no further.
-//  3. resolve the release — before conversion, because converting for a release that
-//     does not exist is wasted work on the common typo.
+//  3. resolve the release AND authorize the resolved product — before conversion,
+//     because converting for a release that does not exist is wasted work on the
+//     common typo, and after detection, so an unidentifiable body answers `415`
+//     rather than disclosing anything about which products exist.
 //  4. convert — the vendor dialect becomes the curated document (an SBOM is already a
 //     standards document and passes straight through).
 //  5. validate what will be FILED — E1. On the converted document, because that is
@@ -92,7 +175,7 @@ func NewIntakeService(maxBytes int64, releases ReleaseResolver, inventory Invent
 //     reports the invalidity, which is the more actionable of the two faults.
 //  7. file — the existing Register path: trust gate, aggregate, persist + outbox.
 //
-// **The first failure wins and nothing is filed until step 7.** Steps 1-6 are
+// **The first failure wins and nothing is filed until step 7.** Steps 0-6 are
 // side-effect-free, so a refused intake leaves a receipt and nothing else: no
 // evidence, no event, no bus traffic (D13).
 //
@@ -111,6 +194,12 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	// that CAN refuse a legal caller (a filed receipt with no evidence id) are
 	// checked where they happen.
 	_ = r.Accept()
+
+	// 0. Parameters (B7's step 1) — before the size bound, because these checks need
+	// no body and have no side effect. See [IntakeCommand.ParameterRefusal].
+	if refusal := cmd.ParameterRefusal(); refusal != nil {
+		return refused(r, refusal.Reason, refusal.Detail)
+	}
 
 	// 1. Size (D13). Checked before the body is read into the domain; the HTTP edge
 	// checks it again before buffering, because a limit applied after the read
@@ -139,8 +228,26 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 			fmt.Sprintf("detected kind %q is not a document Evidence files", kind))
 	}
 
-	// 3. Resolve the release, read-only (D7).
-	releaseID, err := s.releases.Resolve(ctx, cmd.Product, cmd.Project, cmd.Version, cmd.ReleaseID)
+	// 3. Resolve the release, read-only (D7) — and AUTHORIZE the resolved product on
+	// the way (B7's step 4). The authorization is here, inside resolution, because
+	// the decision needs the RESOLVED product and the order is part of the contract:
+	// it runs after the body was identified (so an unidentifiable body still answers
+	// `415`, which discloses nothing about which products exist) and before the
+	// project is looked up (so a key that may not see a product cannot learn which
+	// projects it has).
+	//
+	// `create_release` does not change this step: resolution stays read-only, so a
+	// complete triple with `create_release=true` resolves exactly as it does without
+	// it and a missing version is still `unknown_release`. The find-or-create belongs
+	// after every border check, which is a later step of this change.
+	releaseID, err := s.releases.Resolve(ctx, ResolveRequest{
+		Product:       cmd.Product,
+		Project:       cmd.Project,
+		Version:       cmd.Version,
+		ReleaseID:     cmd.ReleaseID,
+		CreateRelease: cmd.CreateRelease,
+		Authorize:     cmd.Authorize,
+	})
 	if err != nil {
 		return refusedByPort(r, domain.ReasonUnknownRelease, err)
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/themis-project/themis/internal/evidence/adapters/subjectref"
+	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
 )
 
@@ -17,57 +18,88 @@ type fakeRegistry struct {
 	products map[string]string            // product name -> id
 	projects map[string]map[string]string // product id -> project name -> id
 	versions map[string]map[string]string // project id -> version -> release id
+	owners   map[string]string            // release id -> owning product id
 	err      error
-	failOn   string // which method returns err: "exists", "product", "project", "release"
+	failOn   string // which method returns err: "exists", "product", "project", "release", "owner"
+
+	// projectLookups counts the project hop, so a test can assert it was never
+	// reached — "unreached" and "returned nothing" must not be the same result.
+	projectLookups int
 }
 
-func (f fakeRegistry) ReleaseExists(_ context.Context, id string) (bool, error) {
+func (f *fakeRegistry) ReleaseExists(_ context.Context, id string) (bool, error) {
 	if f.failOn == "exists" {
 		return false, f.err
 	}
 	return f.releases[id], nil
 }
 
-func (f fakeRegistry) ProductIDByName(_ context.Context, name string) (string, error) {
+func (f *fakeRegistry) ProductIDByName(_ context.Context, name string) (string, error) {
 	if f.failOn == "product" {
 		return "", f.err
 	}
 	return f.products[name], nil
 }
 
-func (f fakeRegistry) ProjectIDByName(_ context.Context, productID, name string) (string, error) {
+func (f *fakeRegistry) ProjectIDByName(_ context.Context, productID, name string) (string, error) {
+	f.projectLookups++
 	if f.failOn == "project" {
 		return "", f.err
 	}
 	return f.projects[productID][name], nil
 }
 
-func (f fakeRegistry) ReleaseIDByVersion(_ context.Context, projectID, version string) (string, error) {
+func (f *fakeRegistry) ReleaseIDByVersion(_ context.Context, projectID, version string) (string, error) {
 	if f.failOn == "release" {
 		return "", f.err
 	}
 	return f.versions[projectID][version], nil
 }
 
-func estate() fakeRegistry {
-	return fakeRegistry{
+func (f *fakeRegistry) ProductOfRelease(_ context.Context, releaseID string) (string, error) {
+	if f.failOn == "owner" {
+		return "", f.err
+	}
+	return f.owners[releaseID], nil
+}
+
+func estate() *fakeRegistry {
+	return &fakeRegistry{
 		releases: map[string]bool{"rel-1": true},
 		products: map[string]string{"OAMP": "prod-1"},
 		projects: map[string]map[string]string{"prod-1": {"oamp-core": "proj-1"}},
 		versions: map[string]map[string]string{"proj-1": {"R1917.256": "rel-1"}},
+		owners:   map[string]string{"rel-1": "prod-1"},
 	}
+}
+
+// byTriple and byID are the two roads as an unconfined caller (admin, or an
+// auth-disabled node) travels them: no authorizer, which is the explicit statement
+// that no product confinement applies.
+func byTriple(product, project, version string) app.ResolveRequest {
+	return app.ResolveRequest{Product: product, Project: project, Version: version}
+}
+
+func byID(releaseID string) app.ResolveRequest {
+	return app.ResolveRequest{ReleaseID: releaseID}
+}
+
+// scopedTo is a `product:<id>` key's confinement: it authorizes that product and
+// nothing else, exactly as auth.Principal.AuthorizeProduct does for such a key.
+func scopedTo(productID string) app.ProductAuthorizer {
+	return func(id string) bool { return id == productID }
 }
 
 func TestResolve_BothRoadsReachTheSameRelease(t *testing.T) {
 	r := subjectref.NewResolver(estate())
 
-	byID, err := r.Resolve(context.Background(), "", "", "", "rel-1")
-	if err != nil || byID != "rel-1" {
-		t.Fatalf("by id = %q, %v", byID, err)
+	byRelease, err := r.Resolve(context.Background(), byID("rel-1"))
+	if err != nil || byRelease != "rel-1" {
+		t.Fatalf("by id = %q, %v", byRelease, err)
 	}
-	byTriple, err := r.Resolve(context.Background(), "OAMP", "oamp-core", "R1917.256", "")
-	if err != nil || byTriple != "rel-1" {
-		t.Fatalf("by triple = %q, %v", byTriple, err)
+	byName, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
+	if err != nil || byName != "rel-1" {
+		t.Fatalf("by triple = %q, %v", byName, err)
 	}
 }
 
@@ -77,7 +109,8 @@ func TestResolve_BothRoadsReachTheSameRelease(t *testing.T) {
 func TestResolve_ReleaseIDWinsOverTheTriple(t *testing.T) {
 	reg := estate()
 	reg.products = map[string]string{} // the triple would not resolve at all
-	got, err := subjectref.NewResolver(reg).Resolve(context.Background(), "OAMP", "oamp-core", "R1917.256", "rel-1")
+	got, err := subjectref.NewResolver(reg).Resolve(context.Background(),
+		app.ResolveRequest{Product: "OAMP", Project: "oamp-core", Version: "R1917.256", ReleaseID: "rel-1"})
 	if err != nil || got != "rel-1" {
 		t.Fatalf("got %q, %v", got, err)
 	}
@@ -102,7 +135,8 @@ func TestResolve_RefusalsNameWhichPartMissed(t *testing.T) {
 	r := subjectref.NewResolver(estate())
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := r.Resolve(context.Background(), c.product, c.project, c.version, c.relID)
+			got, err := r.Resolve(context.Background(),
+				app.ResolveRequest{Product: c.product, Project: c.project, Version: c.version, ReleaseID: c.relID})
 			if got != "" {
 				t.Errorf("resolved %q, want nothing", got)
 			}
@@ -140,7 +174,8 @@ func TestResolve_ALookupThatFailedIsNotAnUnknownRelease(t *testing.T) {
 		t.Run(c.failOn, func(t *testing.T) {
 			reg := estate()
 			reg.err, reg.failOn = boom, c.failOn
-			_, err := subjectref.NewResolver(reg).Resolve(context.Background(), c.product, c.project, c.version, c.relID)
+			_, err := subjectref.NewResolver(reg).Resolve(context.Background(),
+				app.ResolveRequest{Product: c.product, Project: c.project, Version: c.version, ReleaseID: c.relID})
 			if !errors.Is(err, boom) {
 				t.Fatalf("error = %v, want the cause to survive", err)
 			}
@@ -171,7 +206,7 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 			reg := estate()
 			reg.err, reg.failOn = subjectref.ErrAmbiguousName, c.failOn
 
-			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), "OAMP", "oamp-core", "R1917.256", "")
+			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
 			if got != "" {
 				t.Errorf("resolved %q, want nothing", got)
 			}
@@ -199,7 +234,7 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 // matches keeps the reason and the wording it has always had. The ambiguous branch is a
 // third answer beside it, not a replacement for it.
 func TestResolve_NotFoundWordingIsUnchanged(t *testing.T) {
-	_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), "NOPE", "oamp-core", "R1917.256", "")
+	_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), byTriple("NOPE", "oamp-core", "R1917.256"))
 	re, ok := domain.AsReject(err)
 	if !ok {
 		t.Fatalf("error = %v, want a refusal", err)
@@ -219,10 +254,10 @@ func TestStub_KnowsIDsAndNoNames(t *testing.T) {
 	stub := subjectref.NewStub("rel-dev")
 	r := subjectref.NewResolver(stub)
 
-	if got, err := r.Resolve(context.Background(), "", "", "", "rel-dev"); err != nil || got != "rel-dev" {
+	if got, err := r.Resolve(context.Background(), byID("rel-dev")); err != nil || got != "rel-dev" {
 		t.Fatalf("by id = %q, %v", got, err)
 	}
-	if _, err := r.Resolve(context.Background(), "OAMP", "oamp-core", "R1", ""); err == nil {
+	if _, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1")); err == nil {
 		t.Error("the stub resolved a triple it cannot know")
 	}
 
