@@ -45,6 +45,13 @@ type IntakeCommand struct {
 	// AllowWithoutSBOM is D6's deliberate override, recorded in provenance so a
 	// release whose findings rest on no inventory says so.
 	AllowWithoutSBOM bool
+	// ProvenanceSource and ProvenanceImageDigest carry the same meanings they have
+	// on `POST /evidence`: who produced the document (labeling only, never
+	// authority) and the scanned image's digest. The digest is recorded rather than
+	// checked — intake cannot tell a new image from a new report on the old one
+	// (D8), so the most it can do is make the mismatch visible later.
+	ProvenanceSource      string
+	ProvenanceImageDigest string
 }
 
 // IntakeService is the one intake door's use case (EDR-INTAKE-01 D1): it identifies a
@@ -137,12 +144,13 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	if err != nil {
 		return refusedByPort(r, domain.ReasonUnknownRelease, err)
 	}
+	_ = r.RecordRelease(releaseID)
 
 	// 4. Convert (D2/D3). An SBOM is identified, never converted: it is already a
 	// standards document, its bytes ARE the evidence document, and re-serializing it
 	// would change the fingerprint that dedups a re-upload.
 	curated, stats := cmd.Body, ReportStats{}
-	var prov domain.Provenance
+	prov := domain.Provenance{Source: cmd.ProvenanceSource, ImageDigest: cmd.ProvenanceImageDigest}
 	if filedKind != domain.KindSBOM {
 		_ = r.StartConverting()
 		out, st, convertedBy, sourceDigest, cerr := s.reports.Convert(dialect, cmd.Body, cmd.ObservedAt)
@@ -151,6 +159,7 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 		}
 		curated, stats = out, st
 		prov.ConvertedBy, prov.SourceDigest = convertedBy, sourceDigest
+		_ = r.RecordConversion(convertedBy, sourceDigest, st.FindingsTotal, st.FindingsSkipped)
 	}
 
 	// 5. Validate what will be filed — E1, the decision that closes the 2026-10-05

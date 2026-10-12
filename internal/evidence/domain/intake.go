@@ -183,13 +183,18 @@ func receiptRank(s ReceiptStatus) int {
 //
 // The zero Receipt is usable: [Receipt.Accept] is its one legal first transition.
 type Receipt struct {
-	status         ReceiptStatus
-	reason         RejectReason
-	detail         string
-	evidenceID     string
-	created        bool
-	detectedKind   string
-	detectedFormat string
+	status          ReceiptStatus
+	reason          RejectReason
+	detail          string
+	evidenceID      string
+	created         bool
+	detectedKind    string
+	detectedFormat  string
+	releaseID       string
+	convertedBy     string
+	sourceDigest    string
+	findingsTotal   int
+	findingsSkipped int
 }
 
 // Status returns where the attempt has got to.
@@ -214,6 +219,27 @@ func (r *Receipt) DetectedKind() string { return r.detectedKind }
 
 // DetectedFormat returns the dialect the body was identified as (D5a).
 func (r *Receipt) DetectedFormat() string { return r.detectedFormat }
+
+// ReleaseID returns the release the attempt resolved, empty when it was refused
+// before resolution ever happened (D7).
+func (r *Receipt) ReleaseID() string { return r.releaseID }
+
+// ConvertedBy returns the converter and version that produced the filed document
+// ("cortex@1"), empty when the submitted bytes were filed unchanged (D2).
+func (r *Receipt) ConvertedBy() string { return r.convertedBy }
+
+// SourceDigest returns the SHA-256 of the SUBMITTED bytes — which, for a converted
+// submission, are not the bytes filed (D2).
+func (r *Receipt) SourceDigest() string { return r.sourceDigest }
+
+// FindingsTotal returns how many source records the conversion considered, and
+// [Receipt.FindingsSkipped] how many of them a row-level skip rule refused. Both are
+// reported, never just the kept count: "427 of 427" and "427 of 500" must not look
+// alike, which is the whole of the silent-skip class (KN-SCAN-OBS-1).
+func (r *Receipt) FindingsTotal() int { return r.findingsTotal }
+
+// FindingsSkipped returns how many source records the converter skipped.
+func (r *Receipt) FindingsSkipped() int { return r.findingsSkipped }
 
 // IsTerminal reports whether the attempt has reached an outcome. A terminal receipt
 // is immutable: it is the record of what happened, and a record that can still change
@@ -290,6 +316,35 @@ func (r *Receipt) RecordDetected(kind, format string) error {
 	}
 	r.detectedKind = kind
 	r.detectedFormat = format
+	return nil
+}
+
+// RecordRelease notes the release the attempt resolved onto (D7). Like
+// [Receipt.RecordDetected] it is not a ladder step: resolution is reported alongside
+// whatever the attempt goes on to do, and it is recorded even when the attempt is
+// then refused — a refusal that names no release leaves the operator guessing which
+// release they just failed to update.
+func (r *Receipt) RecordRelease(releaseID string) error {
+	if r.IsTerminal() {
+		return r.terminalError("recording the resolved release")
+	}
+	r.releaseID = releaseID
+	return nil
+}
+
+// RecordConversion notes what the conversion produced: the converter that ran, the
+// digest of the bytes that arrived, and both record counts.
+//
+// It is recorded BEFORE the outcome is known, so a report that converted cleanly and
+// was then refused still reports what the conversion saw. That ordering is the point:
+// "427 of 427 converted, then refused as schema_invalid" and "refused, we have no
+// idea what was in it" are different facts, and only the first one is actionable.
+func (r *Receipt) RecordConversion(convertedBy, sourceDigest string, findingsTotal, findingsSkipped int) error {
+	if r.IsTerminal() {
+		return r.terminalError("recording a conversion")
+	}
+	r.convertedBy, r.sourceDigest = convertedBy, sourceDigest
+	r.findingsTotal, r.findingsSkipped = findingsTotal, findingsSkipped
 	return nil
 }
 

@@ -28,3 +28,19 @@ func (s *Stub) ReleaseExists(_ context.Context, releaseID string) (bool, error) 
 	_, ok := s.known[releaseID]
 	return ok, nil
 }
+
+// The name half of the [Registry] seam. A stub knows release IDS and nothing else,
+// so every name lookup finds nothing — and says so honestly, as an empty id rather
+// than as an error. The consequence is deliberate and visible: on a dev estate the
+// {product, project, version} road reports `unknown_release`, which is exactly what
+// it is without a registry, instead of resolving onto whichever release happened to
+// be in the allow-set.
+
+// ProductIDByName finds nothing: the stub holds no names.
+func (s *Stub) ProductIDByName(context.Context, string) (string, error) { return "", nil }
+
+// ProjectIDByName finds nothing: the stub holds no names.
+func (s *Stub) ProjectIDByName(context.Context, string, string) (string, error) { return "", nil }
+
+// ReleaseIDByVersion finds nothing: the stub holds no names.
+func (s *Stub) ReleaseIDByVersion(context.Context, string, string) (string, error) { return "", nil }

@@ -96,7 +96,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE evidence_outbox, evidence RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE intake_receipts, evidence_outbox, evidence RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -421,7 +421,321 @@ func TestMigration_DownUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), "SELECT 1 FROM evidence LIMIT 0"); err != nil {
-		t.Fatalf("evidence table missing after down/up: %v", err)
+	for _, table := range []string{"evidence", "evidence_outbox", "intake_receipts"} {
+		if _, err := pool.Exec(context.Background(), "SELECT 1 FROM "+table+" LIMIT 0"); err != nil {
+			t.Errorf("%s table missing after down/up: %v", table, err)
+		}
 	}
+}
+
+// TestIntakeReceipts_TableShape pins migration 000003's columns, because the receipt
+// is a CONTRACT with the operator — the record that someone tried, including the
+// attempts that were refused (D9) — and a column quietly renamed or dropped breaks a
+// read nobody is testing.
+func TestIntakeReceipts_TableShape(t *testing.T) {
+	pool := newPool(t)
+	rows, err := pool.Query(context.Background(), `
+		SELECT column_name, is_nullable FROM information_schema.columns
+		WHERE table_name = 'intake_receipts' ORDER BY column_name
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var name, nullable string
+		if err := rows.Scan(&name, &nullable); err != nil {
+			t.Fatal(err)
+		}
+		got[name] = nullable
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{
+		"intake_id": "NO",
+		// Nullable, and that is the decision: a receipt with no asserted key must
+		// not collide with every other keyless receipt on the UNIQUE constraint.
+		"idempotency_key": "YES",
+		"status":          "NO",
+		"reason":          "NO",
+		"detail":          "NO",
+		"evidence_id":     "YES",
+		// NOT NULL but defaulted to '': an attempt refused at detection never
+		// reached release resolution, and D9 requires it to leave a receipt anyway.
+		"release_id":       "NO",
+		"detected_kind":    "NO",
+		"detected_format":  "NO",
+		"findings_total":   "NO",
+		"findings_skipped": "NO",
+		"components":       "NO",
+		"source_digest":    "NO",
+		"converted_by":     "NO",
+		"created_at":       "NO",
+		"updated_at":       "NO",
+	}
+	for name, nullable := range want {
+		if got[name] == "" {
+			t.Errorf("column %q is missing", name)
+			continue
+		}
+		if got[name] != nullable {
+			t.Errorf("column %q is_nullable = %q, want %q", name, got[name], nullable)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("unexpected column %q — the receipt's columns are the contract", name)
+		}
+	}
+}
+
+// TestIntakeReceipts_IdempotencyKeyBindsOnlyAssertedKeys — D12 needs both halves:
+// at most one receipt per asserted key, and NO constraint at all on the keyless ones.
+// Postgres allows any number of NULLs in a unique index, which is exactly that.
+func TestIntakeReceipts_IdempotencyKeyBindsOnlyAssertedKeys(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	for _, id := range []string{"in-1", "in-2", "in-3"} {
+		if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{IntakeID: id, Status: domain.ReceiptAccepted}); err != nil {
+			t.Fatalf("keyless receipt %s: %v", id, err)
+		}
+	}
+	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{IntakeID: "in-4", IdempotencyKey: "k", Status: domain.ReceiptAccepted}); err != nil {
+		t.Fatalf("first keyed receipt: %v", err)
+	}
+
+	err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{IntakeID: "in-5", IdempotencyKey: "k", Status: domain.ReceiptAccepted})
+	if !errors.Is(err, store.ErrIdempotencyKeyTaken) {
+		t.Fatalf("second receipt under one key = %v, want ErrIdempotencyKeyTaken — a retry is not a persistence failure", err)
+	}
+	// The same receipt re-writing itself under its own key is an ADVANCE, not a
+	// collision: that is how the overflow worker records what it finished.
+	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-4", IdempotencyKey: "k", Status: domain.ReceiptFiled, EvidenceID: "ev-1",
+	}); err != nil {
+		t.Fatalf("advancing a keyed receipt: %v", err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM intake_receipts"); got != 4 {
+		t.Errorf("%d receipts, want 4", got)
+	}
+}
+
+// TestIntakeReceipts_SaveLoadAdvance — the round trip, including the two-field rule
+// surviving storage and `updated_at` moving while `created_at` stays put.
+func TestIntakeReceipts_SaveLoadAdvance(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	refused := store.IntakeReceipt{
+		IntakeID: "in-1", IdempotencyKey: "key-1", Status: domain.ReceiptRejected,
+		Reason: domain.ReasonSchemaInvalid, Detail: "findings[2] is not an object",
+		ReleaseID: "rel-1", DetectedKind: "vuln-report", DetectedFormat: "cortex-json",
+		FindingsTotal: 500, FindingsSkipped: 73, SourceDigest: "abc", ConvertedBy: "cortex@1",
+	}
+	if err := s.SaveIntakeReceipt(ctx, refused); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadIntakeReceipt(ctx, "in-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reason != domain.ReasonSchemaInvalid || got.Detail != refused.Detail {
+		t.Errorf("reason=%q detail=%q; the pair must stay two columns", got.Reason, got.Detail)
+	}
+	if got.FindingsTotal != 500 || got.FindingsSkipped != 73 {
+		t.Errorf("counts = %d/%d", got.FindingsTotal, got.FindingsSkipped)
+	}
+	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
+		t.Errorf("timestamps = %v / %v", got.CreatedAt, got.UpdatedAt)
+	}
+
+	byKey, err := s.FindIntakeReceiptByIdempotencyKey(ctx, "key-1")
+	if err != nil || byKey.IntakeID != "in-1" {
+		t.Fatalf("by key = %+v, %v", byKey, err)
+	}
+
+	// An empty key matches nothing: a keyless submission asserts no identity, and
+	// returning "the receipt with no key" would collapse every keyless attempt.
+	if _, err := s.FindIntakeReceiptByIdempotencyKey(ctx, ""); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("empty key = %v, want ErrNotFound", err)
+	}
+	if _, err := s.LoadIntakeReceipt(ctx, "nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown id = %v, want ErrNotFound", err)
+	}
+
+	advanced := got
+	advanced.Status, advanced.EvidenceID, advanced.Components = domain.ReceiptFiled, "ev-9", 1184
+	advanced.Reason, advanced.Detail = "", ""
+	if err := s.SaveIntakeReceipt(ctx, advanced); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.LoadIntakeReceipt(ctx, "in-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != domain.ReceiptFiled || after.EvidenceID != "ev-9" || after.Components != 1184 {
+		t.Errorf("advanced receipt = %+v", after)
+	}
+	if !after.CreatedAt.Equal(got.CreatedAt) {
+		t.Errorf("created_at moved: %v -> %v", got.CreatedAt, after.CreatedAt)
+	}
+	if after.UpdatedAt.Before(got.UpdatedAt) {
+		t.Errorf("updated_at went backwards: %v -> %v", got.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// TestIntakeReceipts_PurgeExpired — the TTL sweep. Receipts are operational records,
+// not evidence, so deleting them removes no document.
+func TestIntakeReceipts_PurgeExpired(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	for _, id := range []string{"old", "fresh"} {
+		if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{IntakeID: id, Status: domain.ReceiptFiled, EvidenceID: "ev-" + id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, pool, "old", 40*24*time.Hour)
+
+	n, err := s.PurgeExpiredReceipts(ctx, time.Now().UTC().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("purged %d, want 1", n)
+	}
+	if _, err := s.LoadIntakeReceipt(ctx, "old"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the expired receipt survived: %v", err)
+	}
+	if _, err := s.LoadIntakeReceipt(ctx, "fresh"); err != nil {
+		t.Errorf("a receipt inside the TTL was deleted: %v", err)
+	}
+}
+
+// TestIntakeReceipts_FailStaleNonTerminal is the startup recovery: a receipt stuck
+// non-terminal after a crash would have a client polling a goroutine that no longer
+// exists. The terminals are left exactly as they are — rewriting a finished record is
+// what the domain's immutability rule forbids, and the sweep must not do it either.
+func TestIntakeReceipts_FailStaleNonTerminal(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	seed := []struct {
+		id     string
+		status domain.ReceiptStatus
+		stale  bool
+	}{
+		{"stale-accepted", domain.ReceiptAccepted, true},
+		{"stale-converting", domain.ReceiptConverting, true},
+		{"stale-filed", domain.ReceiptFiled, true},
+		{"stale-rejected", domain.ReceiptRejected, true},
+		{"fresh-accepted", domain.ReceiptAccepted, false},
+	}
+	for _, s0 := range seed {
+		rec := store.IntakeReceipt{IntakeID: s0.id, Status: s0.status, Detail: "original"}
+		if s0.status == domain.ReceiptFiled {
+			rec.EvidenceID = "ev-" + s0.id
+		}
+		if s0.status == domain.ReceiptRejected {
+			rec.Reason = domain.ReasonEmptyReport
+		}
+		if err := s.SaveIntakeReceipt(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+		if s0.stale {
+			backdate(t, pool, s0.id, time.Hour)
+		}
+	}
+
+	const detail = "interrupted by restart; resubmit"
+	n, err := s.FailStaleNonTerminalReceipts(ctx, time.Now().UTC().Add(-time.Minute), detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("recovered %d, want the 2 stale non-terminal receipts", n)
+	}
+	for _, id := range []string{"stale-accepted", "stale-converting"} {
+		got, err := s.LoadIntakeReceipt(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != domain.ReceiptFailed || got.Detail != detail {
+			t.Errorf("%s = %q / %q, want failed naming the action", id, got.Status, got.Detail)
+		}
+		if got.Reason != "" {
+			t.Errorf("%s carries reason %q; a failure is a statement about Themis and names none", id, got.Reason)
+		}
+	}
+	for _, id := range []string{"stale-filed", "stale-rejected", "fresh-accepted"} {
+		got, err := s.LoadIntakeReceipt(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Detail != "original" {
+			t.Errorf("%s was rewritten: detail = %q", id, got.Detail)
+		}
+	}
+}
+
+// TestHasInventory_ReleaseScopedAndSBOMOnly — D6's precondition, and the two things
+// that make it safe: another release's inventory can never satisfy it, and a scanner
+// report is not an inventory.
+func TestHasInventory_ReleaseScopedAndSBOMOnly(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	if has, err := s.HasInventory(ctx, "rel-1"); err != nil || has {
+		t.Fatalf("empty estate: has=%v err=%v", has, err)
+	}
+
+	e, ev := sampleEvidence(t, "ev-sbom", "rel-1", []byte("sbom-A"))
+	if _, err := s.Save(ctx, e, []byte("sbom-A"), ev); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := s.HasInventory(ctx, "rel-1"); err != nil || !has {
+		t.Errorf("after the SBOM: has=%v err=%v", has, err)
+	}
+	if has, err := s.HasInventory(ctx, "rel-2"); err != nil || has {
+		t.Errorf("rel-2 = %v; another release's inventory must never satisfy the precondition", has)
+	}
+
+	report, reportEv := sampleReport(t, "ev-report", "rel-3", []byte(`{"findings":[]}`))
+	if _, err := s.Save(ctx, report, []byte(`{"findings":[]}`), reportEv); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := s.HasInventory(ctx, "rel-3"); err != nil || has {
+		t.Errorf("rel-3 = %v; a scanner report is not an SBOM-derived inventory", has)
+	}
+}
+
+// backdate ages a receipt so the sweeps have something to find without the test
+// sleeping.
+func backdate(t *testing.T, pool *pgxpool.Pool, intakeID string, by time.Duration) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE intake_receipts SET created_at = created_at - $1::interval WHERE intake_id = $2`,
+		by.String(), intakeID); err != nil {
+		t.Fatalf("backdate %s: %v", intakeID, err)
+	}
+}
+
+func sampleReport(t *testing.T, id, releaseID string, raw []byte) (domain.Evidence, domain.EvidenceRegistered) {
+	t.Helper()
+	e, err := domain.NewEvidence(domain.EvidenceID(id), domain.KindScannerReport, value.NewContentFingerprint(raw),
+		domain.SubjectRef{ReleaseID: releaseID}, domain.Provenance{Source: "cortex"}, domain.TrustAccepted,
+		domain.NewInventory(nil, nil), time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("report evidence: %v", err)
+	}
+	return e, domain.NewEvidenceRegistered(e, time.Unix(1_700_000_001, 0))
 }

@@ -120,6 +120,179 @@ paths:
                 $ref: '#/components/schemas/Document'
         '404':
           $ref: '#/components/responses/Problem'
+  /intake:
+    post:
+      operationId: submitIntake
+      summary: >-
+        The single intake door (EDR-INTAKE-01 D1): submit an SBOM or a vulnerability
+        report as the RAW body, with the metadata as query parameters.
+      description: >
+        The body IS the artifact — unwrapped, so `--data-binary @file` is the whole
+        client and a 60 MB SBOM streams instead of being JSON-escaped into an
+        envelope (see the change's design, "Why the body is raw and the metadata is
+        query parameters"). `kind` and `format` are DETECTED from the body (D5a) and
+        echoed back as `detected_kind` / `detected_format`.
+
+
+        Every outcome is a receipt (D9): `201`/`200` when the work finished inline,
+        `202` when it exceeded `THEMIS_INTAKE_INLINE_BUDGET` and continues
+        server-side, and a refusal naming itself from the closed taxonomy (D11).
+        `POST /evidence` is unchanged and remains the raw, release-id-only door.
+      parameters:
+        - name: release_id
+          in: query
+          description: The release this document is about, named directly. Wins over the triple.
+          schema:
+            type: string
+        - name: product
+          in: query
+          description: >-
+            With `project` and `version`, names the release by its triple — resolved
+            READ-ONLY (D7). Intake never creates Registry identity.
+          schema:
+            type: string
+        - name: project
+          in: query
+          schema:
+            type: string
+        - name: version
+          in: query
+          schema:
+            type: string
+        - name: allow_without_sbom
+          in: query
+          description: >-
+            D6's deliberate override: file a vulnerability report for a release with
+            no SBOM-derived inventory. Recorded in provenance, so a release in that
+            state says so.
+          schema:
+            type: boolean
+        - name: observed_at
+          in: query
+          description: >-
+            RFC 3339 assertion about WHICH observation this is (D3). Omitted, the
+            timestamp is derived from the submitted data; it is never the upload time.
+          schema:
+            type: string
+        - name: expected_checksum
+          in: query
+          description: >-
+            Lowercase-hex SHA-256 of the SUBMITTED bytes. Verified at the border,
+            because for a converted submission the filed bytes are not the submitted
+            ones (D2).
+          schema:
+            type: string
+        - name: provenance_source
+          in: query
+          description: Who produced the document — labeling only, never authority.
+          schema:
+            type: string
+        - name: provenance_image_digest
+          in: query
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: >-
+            Client-asserted retry identity (D12). The same key within the receipt TTL
+            returns the ORIGINAL receipt instead of starting new work.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: string
+              description: The artifact itself — an SBOM, a vendor report, or a curated report.
+          text/csv:
+            schema:
+              type: string
+              description: A Cortex CSV export. CSV is a REQUEST encoding, never an evidence document (D2).
+          application/octet-stream:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: Filed inline, a new evidence document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeReceipt'
+        '200':
+          description: >-
+            Filed inline, resolving to the document already held — a byte-identical
+            re-submission to the SAME release (D8). `created` is false.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeReceipt'
+        '202':
+          description: >-
+            Over the inline budget (D9): the receipt is returned immediately and the
+            work continues server-side. Come back to `status_url`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeReceipt'
+        '400':
+          $ref: '#/components/responses/IntakeProblem'
+        '401':
+          $ref: '#/components/responses/IntakeProblem'
+        '404':
+          $ref: '#/components/responses/IntakeProblem'
+        '409':
+          $ref: '#/components/responses/IntakeProblem'
+        '413':
+          $ref: '#/components/responses/IntakeProblem'
+        '415':
+          $ref: '#/components/responses/IntakeProblem'
+        '422':
+          $ref: '#/components/responses/IntakeProblem'
+        '500':
+          description: >-
+            Themis could not carry the attempt out — a statement about Themis, not
+            about the document, so the receipt is `failed` and carries no reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeProblem'
+        '503':
+          description: >-
+            The bounded intake backlog is full. Nothing was filed and NO receipt was
+            created, so the whole request is safe to retry after `Retry-After`. This
+            is a service condition, not a document refusal, so it carries no reason
+            from the closed taxonomy.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /intake/{intakeId}:
+    get:
+      operationId: getIntakeReceipt
+      summary: Get one intake attempt's receipt (D9) — every intake is addressable, including a refused one.
+      parameters:
+        - name: intakeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: >-
+            The receipt as it stands. Terminal at `filed` — which does NOT claim
+            correlation is complete; `next_checks` names who answers that (D10).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeReceipt'
+        '404':
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -128,6 +301,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Problem'
+    IntakeProblem:
+      description: >-
+        The intake refused the submission, by name. Nothing was filed — stages 1-6
+        are side-effect-free, so the attempt leaves a `rejected` receipt and nothing
+        else (D13).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IntakeProblem'
   schemas:
     RegisterEvidenceRequest:
       type: object
@@ -251,3 +433,136 @@ components:
           type: array
           items:
             type: string
+    RejectReason:
+      type: string
+      description: >
+        The CLOSED taxonomy of intake refusals (EDR-INTAKE-01 D11), identical to
+        `internal/evidence/domain.RejectReason`. Adding a value is a contract change
+        with a guard test: a consumer that knew 6 of 15 reasons reported "no reason
+        given" for the other nine (#116).
+
+
+        There is deliberately no `inventory_not_ready`: Evidence has no window in
+        which it holds an SBOM whose inventory is pending, so the value could never
+        fire, and a closed enum with a dead value is worse than no value (D6).
+      enum:
+        - unknown_release
+        - no_inventory_for_release
+        - unrecognised_format
+        - declared_format_mismatch
+        - malformed_body
+        - source_invalid
+        - schema_invalid
+        - empty_report
+        - observed_at_underivable
+        - observed_at_invalid
+        - conversion_failed
+        - checksum_mismatch
+        - duplicate_other_release
+        - payload_too_large
+        - too_many_records
+        - unauthorized
+    ReceiptStatus:
+      type: string
+      description: >-
+        Where one intake attempt has got to (D9). The ladder is forward-only and its
+        three terminals are `filed`, `rejected` and `failed`.
+      enum: [accepted, validating, converting, registering, filed, rejected, failed]
+    NextCheck:
+      type: object
+      description: >-
+        Who answers "did the work land" (D10). The receipt is terminal at `filed` and
+        does NOT claim correlation is complete — Knowledge owns correlation, and
+        asking Evidence to poll it would invent the coupling the bus exists to avoid.
+      required: [what, url]
+      properties:
+        what:
+          type: string
+          enum: [unresolved, posture]
+        url:
+          type: string
+    IntakeReceipt:
+      type: object
+      description: >-
+        The record of one intake attempt. Every intake is addressable, including a
+        refused one: a rejected receipt is the thing that was missing on 2026-10-05.
+      required: [intake_id, status, status_url]
+      properties:
+        intake_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/ReceiptStatus'
+        reason:
+          $ref: '#/components/schemas/RejectReason'
+        detail:
+          type: string
+          description: >-
+            The refusal's or failure's elaboration. NEVER concatenated with `reason`:
+            a consumer switches on the reason and displays the detail (the 2026-09-22
+            lesson).
+        evidence_id:
+          type: string
+          description: The filed document's identity. Present only when the status is `filed`.
+        created:
+          type: boolean
+          description: False when filing resolved to the document already held (a dedup, D8).
+        release_id:
+          type: string
+          description: Empty when the attempt was refused before the release was resolved.
+        detected_kind:
+          type: string
+          description: What the body was identified as (D5a) — `sbom` or `vuln-report`.
+        detected_format:
+          type: string
+          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `cortex-json`, `cortex-csv`).
+        findings_total:
+          type: integer
+          description: >-
+            Source records the conversion CONSIDERED. Reported beside
+            `findings_skipped`, never alone: "427 of 427" and "427 of 500" must not
+            look alike.
+        findings_skipped:
+          type: integer
+        components:
+          type: integer
+          description: Components the filed SBOM's canonical inventory carries.
+        source_digest:
+          type: string
+          description: Lowercase-hex SHA-256 of the SUBMITTED bytes (which, for a converted submission, are not the filed bytes).
+        converted_by:
+          type: string
+          description: The converter and its version (`cortex@1`); empty for a pass-through.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        status_url:
+          type: string
+        retry_after_seconds:
+          type: integer
+          description: Present on a `202` — how long to wait before reading `status_url`.
+        next_checks:
+          type: array
+          description: Present on a terminal `filed` receipt, and omitted entirely when the base URLs are unset — never a broken URL.
+          items:
+            $ref: '#/components/schemas/NextCheck'
+    IntakeProblem:
+      type: object
+      description: >-
+        A refusal, naming itself. `reason` and `detail` are TWO fields and are never
+        concatenated (D9/D11).
+      required: [title, status, detail]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        reason:
+          $ref: '#/components/schemas/RejectReason'
+        detail:
+          type: string
+        intake_id:
+          type: string
+          description: The receipt this refusal was recorded on — readable at `GET /intake/{intakeId}`.

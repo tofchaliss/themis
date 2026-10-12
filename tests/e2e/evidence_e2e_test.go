@@ -99,7 +99,11 @@ func runSuite(m *testing.M) int {
 	defer pool.Close()
 	testPool = pool
 
-	apiHandler, _ := wiring.EvidenceAPI(pool, subjectref.NewStub(relHappy, relSPDX, relConcurrent))
+	apiHandler, _, intake := wiring.EvidenceAPI(wiring.Config{
+		Pool:     pool,
+		Registry: subjectref.NewStub(relHappy, relSPDX, relConcurrent),
+	})
+	defer intake.Close()
 	router := chi.NewRouter()
 	router.Mount("/api/v1", apiHandler)
 	testSrv = httptest.NewServer(router)
