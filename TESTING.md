@@ -266,70 +266,152 @@ The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-v
 
 ### Scanner reports + the re-discovery sweep (KN-SCAN-1 / KN-RECOR-1)
 
-**Upload an image-scan report** (kept current between SBOM uploads — the scanner is a second
-detection engine at Asserted trust; it never sets truth). The curated document is
-`{"findings":[…]}` where each finding carries the scanner-ACL record fields **plus the component
-it names**. Convert Trivy JSON with jq, then POST it as evidence:
+**Upload an image-scan report through the one intake door** (kept current between SBOM uploads —
+the scanner is a second detection engine at Asserted trust; it never sets truth).
+`POST /api/v1/intake` on Evidence is the **single door** (EDR-INTAKE-01 D1): the body IS the
+artifact, unwrapped, and the metadata rides the query string. There is **no jq recipe and no
+browser translation any more** — raw Trivy JSON, Cortex JSON and Cortex CSV go up as they came
+out of the tool, and Evidence converts them with the one converter per dialect
+(`internal/evidence/adapters/report` — D4). What is FILED is still the curated
+`{"findings":[…]}` document, so nothing downstream changed.
+
+`X-API-Key` is required when the node has `THEMIS_AUTH_DATABASE_DSN` set (EDR-SECURITY-01 F1);
+omit it on a dev estate that logs `AUTH DISABLED`. Both helper scripts send it from
+`THEMIS_API_KEY` when that is set and send none when it is not.
+
+**Step 1 — the SBOM, first (D6).** A report for a release with no SBOM-derived inventory is
+refused by name, because there is nothing to record occurrences against:
 
 ```sh
+# the release must already exist — intake RESOLVES identity and never creates it (D7);
+# scripts/gf-upload-sbom.sh registers Product -> Project -> Release and does this call
+curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq .
+```
+
+```sh
+# ...or name the release by its triple, resolved read-only. The triple goes in the URL
+# already encoded: curl's -G/--data-urlencode cannot be used to build it, because -G moves
+# EVERY --data* argument into the query string — including the --data-binary carrying the
+# document. (Measured: curl then refuses outright, "URL rejected: Malformed input to a URL
+# function". The design's sketch of this command has that defect; this is the working form.)
+curl -sf -X POST "localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq .
+```
+
+**Step 2 — the report, second.** Same endpoint for every dialect; the content type is the only
+difference between the CSV and JSON roads:
+
+```sh
+# Cortex JSON — the array-shaped export that halted the stream for 31 hours on 2026-10-05,
+# now a named, converted dialect
+curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @R1917.256.OAMP_Scan_Report.json | jq .
+```
+
+```sh
+# Cortex CSV — RFC 4180 is parsed server-side (descriptions contain newlines: a 1264-physical-line
+# export is 557 logical rows). scripts/cortex-csv-to-scan-report.sh is a thin wrapper for this call.
+curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: text/csv' -H "X-API-Key: $KEY" \
+  --data-binary @cortex-export.csv | jq .
+```
+
+```sh
+# Raw Trivy JSON — no jq recipe, no browser
 trivy image --format json --output trivy.json <image:tag>
-jq '{findings:[.Results[] as $r | $r.Vulnerabilities[]? | {cve:.VulnerabilityID,
-     observed_at:(now|todate), scanner:"trivy", severity:.Severity,
-     cvss_score:(.CVSS.nvd.V3Score // 0), cvss_vector:(.CVSS.nvd.V3Vector // ""),
-     affected:[], fixed:(if .FixedVersion then [.FixedVersion] else [] end),
-     component:{purl:(.PkgIdentifier.PURL // ""), name:.PkgName,
-                version:.InstalledVersion,
-                ecosystem:(($r.Type // "") | {"python-pkg":"pypi","node-pkg":"npm","gobinary":"golang",
-                           "gomod":"golang","jar":"maven","pom":"maven","gemspec":"gem"}[.] // .),
-                source:""}}]}'   trivy.json > scan-report.json
-# POST like an SBOM but kind=scanner-report (see gf-upload-sbom.sh for the envelope shape)
+curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @trivy.json | jq .
 ```
 
-Findings the translation cannot use are skipped and counted, never fatal — one malformed
-finding must not void a 400-finding report.
+An already-curated `{"findings":[…]}` document passes through unconverted. All four answer with
+a **receipt** (D9) that says what the body was taken to be and what came of it:
 
-**Cortex CSV exports (GUI-16 — the non-JSON road).** Cortex exports scan results as CSV, which
-the in-browser upload rightly refuses (Themis is JSON-only by contract). The maintained
-conversion is `scripts/cortex-csv-to-scan-report.sh` — use it and nothing else; the 2026-09-10
-false-positive case (docs/engineering/FALSE-POSITIVE-CASE-MRF-20260910.md) traced 579
-permanently-unclearable occurrences to an ad-hoc converter variant, so a second converter is a
-defect, not a convenience:
+```json
+{
+  "intake_id": "b7d1…", "status": "filed", "evidence_id": "c044…", "created": true,
+  "detected_kind": "vuln-report", "detected_format": "cortex-json",
+  "findings_total": 427, "findings_skipped": 0,
+  "observed_at": "2026-09-29T07:23:22Z", "converted_by": "cortex@1",
+  "status_url": "/api/v1/intake/b7d1…"
+}
+```
+
+`findings_total` and `findings_skipped` are read as a **pair** — "427 of 427" and "427 of 500"
+must not look alike. A skipped row is one with no CVE id or no component to attach it to:
+counted, never hidden, and never fatal.
+
+**Step 3 — the checkpoint, when the work does not finish inline (D9).** Over
+`THEMIS_INTAKE_INLINE_BUDGET` (default `5s`) the answer is `202` with `status: accepted` and no
+terminal fields; the work continues server-side and the receipt advances on its own:
 
 ```sh
-scripts/cortex-csv-to-scan-report.sh cortex-export.csv > scan-report.json
-jq '.findings|length' scan-report.json   # sanity: should match the CSV's data-row count
-# then POST like an SBOM but kind=scanner-report, or use the dashboard form
+# or block until terminal, polling the receipt
+until curl -sf "localhost:8081/api/v1/intake/$ID" -H "X-API-Key: $KEY" \
+      | jq -e '.status | IN("filed","rejected","failed")' >/dev/null; do sleep 2; done
+curl -sf "localhost:8081/api/v1/intake/$ID" -H "X-API-Key: $KEY" | jq .
 ```
+
+Retry-safe: pass `-H "Idempotency-Key: $(uuidgen)"` and a repeat of the same request returns the
+**original** receipt instead of filing again (D12).
+
+**A refusal names itself, in two fields that are never concatenated** (D11) — a consumer switches
+on `reason` and displays `detail`:
+
+```json
+{"title": "intake refused", "status": 409, "reason": "no_inventory_for_release",
+ "detail": "release R1917.256 has no SBOM-derived inventory; upload the SBOM first, or resend with allow_without_sbom=true"}
+```
+
+```sh
+# the deliberate override, recorded in provenance so a release in that state says so
+curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID&allow_without_sbom=true" \
+  -H 'Content-Type: text/csv' -H "X-API-Key: $KEY" --data-binary @cortex-export.csv | jq .
+```
+
+**ONE converter per dialect, and it is server-side.** The 2026-09-10 false-positive case
+(docs/engineering/FALSE-POSITIVE-CASE-MRF-20260910.md) traced 579 permanently-unclearable
+occurrences to an ad-hoc converter variant: **a second converter is a defect, not a
+convenience**. That is why the CSV road's Python and the browser's `translateTrivy` are both
+gone — the only copies left are frozen as byte-equality **test oracles** under
+`internal/evidence/adapters/report/testdata/oracle/`, which are on no operator road. If you find
+yourself converting a scanner export by hand, that is the defect.
 
 The standard per-scan procedure, in order:
 
 1. **SBOM first, report second.** Upload the release's SBOM (SPDX/CycloneDX) before the scanner
    report so correlation has an inventory to record occurrences against (and the ownership
-   bridge has siblings/edges to reach through).
-2. **Convert with the committed script only.** It parses RFC 4180 properly (Cortex descriptions
-   contain newlines — 1264 physical lines can be 557 rows), maps `origin_package_name` into
-   `component.source` (never `file_path`), and labels rpm-shaped `APP` binaries with the `rpm`
-   ecosystem so the vendor-fix verdict can reach them.
-3. **Do not pass a timestamp unless you must.** `observed_at` defaults to the CSV's mtime, so
-   re-converting the same export is byte-identical and Evidence's content addressing dedups it
-   instead of filing a duplicate scan. Passing `now` breaks that.
+   bridge has siblings/edges to reach through). Intake enforces this by name.
+2. **Send the vendor file as it came out of the tool.** The conversion carries the judgement the
+   2026-09-10 case paid for — `origin_package_name` into `component.source` (never `file_path`),
+   the ecosystem from the purl, and the `.el8` RPM-build inference that labels rpm-shaped `APP`
+   binaries so the vendor-fix verdict can reach them (KN-SCAN-3b).
+3. **Do not pass `observed_at` unless you must.** It is derived from the export's own data
+   (Cortex `max(last_observed)`, Trivy `CreatedAt`) and is **never** the upload time, so
+   re-submitting the same export is byte-identical and Evidence's content addressing dedups it
+   instead of filing a second scan. A supplied timestamp is an assertion that this is a
+   DIFFERENT observation, and it will file a second document.
 4. **Upload to the SAME release** for a re-scan of the same image; a new image version is a new
    Release (register it first — `scripts/gf-upload-sbom.sh` does Product→Project→Release).
 5. **Verify:** `scripts/vm-verify.sh` for the estate; per release, the posture Scans card, and
    `re-verdict sweep complete … changed:N` in the knowledge journal after the feeds fold.
 
 Until KN-SCAN-4 lands, know its shape: an occurrence recorded with wrong attribution is not
-healed by re-uploading corrected data — the corrected rows land beside the old ones. With the
-committed converter the identities are stable, so routine re-scans dedup cleanly; the hazard is
+healed by re-uploading corrected data — the corrected rows land beside the old ones. With one
+converter the identities are stable, so routine re-scans dedup cleanly; the hazard is
 only ever a DIFFERENT converter emitting different identities.
 
-**Or skip the jq entirely:** the dashboard's SBOM-manager form accepts **raw Trivy JSON**
-directly — the same translation runs in the browser (EDR-GUI-01 D16; the server only ever
-sees the curated document), the Kind selector flips to "Scanner report" automatically, and
-the file note shows the finding count plus how many were skipped. Either road, the release
-posture's **Scans** card (D15) then lists the report with its per-scan view: every claim
-the tool asserted joined by CVE to the enterprise posture, with asserted / matched /
-decided / no-Finding counts.
+**Or skip curl entirely:** the dashboard's SBOM-manager form posts the picked file to the same
+intake door through its own same-origin proxy (EDR-GUI-01 D1/D4 — the browser never talks to
+Evidence directly and never holds a node key), accepting `.json` and `.csv`. It keeps its
+file-note UX by reading `detected_format`, `findings_total` and `findings_skipped` off the
+receipt, and renders a refusal as the two fields it is. Either road, the release posture's
+**Scans** card (D15) then lists the report with its per-scan view: every claim the tool asserted
+joined by CVE to the enterprise posture, with asserted / matched / decided / no-Finding counts.
 
 **Verify a fix build** (IDEA-1's operator half): the dashboard's **Compare** tab diffs two
 releases of the same project by CVE — **fixed** (Finding on the baseline, none on the
@@ -341,8 +423,8 @@ The `ecosystem` mapping exists because Trivy speaks its own vocabulary (`python-
 `node-pkg`, …) where the pipeline speaks purl types (`pypi`, `npm`) — measured live
 2026-08-14: a Trivy setuptools finding landed as ecosystem `python-pkg` beside discovery's
 `pypi` for the same package. Harmless (an unknown ecosystem never filters and never hides —
-the KN-FIX-3 fail-safe), but mapped here so the two roads read as one ecosystem; the durable
-in-code canonicalization is KN-SCAN-3.
+the KN-FIX-3 fail-safe), but mapped by the Trivy converter so the two roads read as one
+ecosystem; the durable in-code canonicalization is KN-SCAN-3.
 
 **Occurrence verdicts + the ownership bridge (EDR-VERDICT-01, KN-VERDICT-1).** Every examined
 component is now recorded WITH a verdict — `open` or `cleared_vendor_fix` — instead of a fixed

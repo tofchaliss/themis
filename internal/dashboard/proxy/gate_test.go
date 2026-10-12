@@ -184,6 +184,18 @@ func TestGate_LargeBodies(t *testing.T) {
 		t.Errorf("forwarded body truncated: got %d bytes, want %d", len(*forwarded), wantLen)
 	}
 
+	// The intake door is the same class and is the one that will actually carry 60 MB:
+	// its body is the artifact unwrapped (EDR-INTAKE-01 D1), with the metadata in the
+	// query string, so nothing in it can name an actor and nothing may be buffered.
+	h, forwarded = gateFor(adminOp, true, true)
+	rec = do(h, http.MethodPost, "/api/evidence/intake?release_id=rel-1", big)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("intake upload = %d, want 200", rec.Code)
+	}
+	if len(*forwarded) != len(big)+len("hit:") {
+		t.Errorf("forwarded intake body truncated: got %d bytes, want %d", len(*forwarded), len(big)+len("hit:"))
+	}
+
 	// A decision route refuses an oversized body with 413 — never a truncated forward,
 	// and never a skipped identity check a padded body could hide a claim behind.
 	h, forwarded = gateFor(adminOp, true, true)

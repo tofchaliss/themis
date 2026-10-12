@@ -1,27 +1,30 @@
 # Trivy fixture corpus — the D4 equivalence oracle
 
-The oracle for this dialect is `translateTrivy` in `cmd/dashboard/static/app.js`
-(EDR-GUI-01 D16), the in-browser translator the Go converter replaces. The test
-**extracts the function from app.js and runs it under node** rather than keeping a copy:
-a copy would be a second converter, and TESTING.md is explicit that a second converter
-is a defect, not a convenience. Extracting it means the test fails the day the two
-diverge — which is the only thing that makes "one converter per dialect" checkable
-before the browser copy is deleted in M3.
+The oracle for this dialect is `translateTrivy` — the in-browser translator
+(EDR-GUI-01 D16) the Go converter replaced. While the browser still carried it, the test
+extracted the function from `cmd/dashboard/static/app.js` and ran it under node, so the
+test failed the day the two diverged; that is what made "one converter per dialect"
+checkable before the browser copy was deleted.
+
+The browser copy is now **gone** (tasks.md 4.3 — the dashboard POSTs to intake), and the
+function is frozen verbatim at [`../oracle/translate_trivy.js`](../oracle/README.md),
+where the test runs it. It is a test fixture on no operator road: the alternative was to
+compare the Go converter only against goldens it could itself have produced.
 
 The document compared is `JSON.stringify({findings: out.findings})` — the expression
-app.js actually uploads, not the translator's return value — so the bytes under test are
+app.js actually uploaded, not the translator's return value — so the bytes under test are
 the bytes that were filed. See the Cortex README for why byte equality is load-bearing.
 
 ## Regenerating the goldens
 
 ```sh
-# needs node on PATH (and bash + python3 for the Cortex half of the same test)
+# needs node on PATH (and python3 for the Cortex half of the same test)
 go test ./internal/evidence/adapters/report/ -run TestUpdateGoldens -update-goldens
 ```
 
 Committed so the gate survives a host with no `node` — on such a host the live
-extraction steps aside with a log note and the **committed goldens are the
-authoritative oracle**. Where `node` exists the extraction run keeps them honest. The
+oracle steps aside with a log note and the **committed goldens are the
+authoritative oracle**. Where `node` exists the live run keeps them honest. The
 regeneration test refuses to write anything if the interpreter it needs is missing,
 rather than writing this package's own output over the oracle's.
 

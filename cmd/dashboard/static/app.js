@@ -1252,68 +1252,27 @@ async function viewFeeds() {
   }
 }
 
-/* --- Scanner-report translators (EDR-GUI-01 D16, multi-scanner Phase C).
-   Tool dialects translate HERE, in the browser: one pure function per tool,
-   auto-detected from the raw JSON's shape, all emitting the same curated
-   {findings:[…]} document the CLI jq recipes emit (TESTING.md). The server
-   never learns a vendor dialect — the curated shape stays the single wire
-   contract and the scanner ACL the single interpretation point. Findings a
-   translation cannot use are skipped and counted, never fatal: one malformed
-   finding must not void a 400-finding report. --- */
+/* --- The in-browser scanner-report translators are GONE (EDR-INTAKE-01 D4).
+   They lived here as EDR-GUI-01 D16: one pure translate function per tool, run in
+   the browser, so the server never learned a vendor dialect. D4 reverses that for
+   one reason — a dialect must be converted in exactly ONE place, and a copy in
+   JavaScript is a second converter however pure it is (the 2026-09-10 case traced
+   579 permanently-unclearable occurrences to an ad-hoc variant). The one converter
+   now lives server-side behind `POST /api/v1/intake`
+   (internal/evidence/adapters/report), which takes raw Trivy JSON, Cortex JSON and
+   Cortex CSV as the request BODY. This page sends the file untouched and keeps its
+   file-note UX by reading `detected_format` / `findings_total` / `findings_skipped`
+   off the intake receipt instead of computing them.
+   `translateTrivy` is frozen as a TEST ORACLE at
+   internal/evidence/adapters/report/testdata/oracle/translate_trivy.js, which is
+   what proves the Go converter reproduces it byte for byte. --- */
 
-/* Trivy speaks its own ecosystem vocabulary where the pipeline speaks purl
-   types — unmapped values pass through (KN-SCAN-3 is the server-side net). */
-const TRIVY_ECOSYSTEMS = {
-  "python-pkg": "pypi", "node-pkg": "npm", "gobinary": "golang",
-  "gomod": "golang", "jar": "maven", "pom": "maven", "gemspec": "gem",
-};
-
-function translateTrivy(j) {
-  const findings = [];
-  let skipped = 0;
-  // GUI-12: observed_at derives from the report's own CreatedAt — the time the tool
-  // actually observed — so byte-identical raw re-uploads translate to byte-identical
-  // curated documents and Evidence's content addressing dedups them. A fresh timestamp
-  // here defeated that (measured live 2026-08-17: the same Trivy file re-uploaded
-  // produced a second scan row). Trivy stamps 7-digit fractional seconds; trim to
-  // milliseconds for Date.parse. Only a report with no usable CreatedAt falls back to
-  // "now" — and the file note says so, because silently losing dedup and visibly
-  // losing it must not look alike.
-  const created = typeof j.CreatedAt === "string"
-    ? Date.parse(j.CreatedAt.replace(/\.(\d{3})\d+(?=Z|[+-])/, ".$1")) : NaN;
-  const stamped = !Number.isNaN(created);
-  const observed = stamped ? new Date(created).toISOString() : new Date().toISOString();
-  for (const r of j.Results || []) {
-    for (const v of (r && r.Vulnerabilities) || []) {
-      if (!v || !v.VulnerabilityID || !v.PkgName) { skipped++; continue; }
-      findings.push({
-        cve: v.VulnerabilityID,
-        observed_at: observed,
-        scanner: "trivy",
-        severity: v.Severity || "",
-        cvss_score: (v.CVSS && v.CVSS.nvd && v.CVSS.nvd.V3Score) || 0,
-        cvss_vector: (v.CVSS && v.CVSS.nvd && v.CVSS.nvd.V3Vector) || "",
-        affected: [],
-        fixed: v.FixedVersion ? [v.FixedVersion] : [],
-        component: {
-          purl: (v.PkgIdentifier && v.PkgIdentifier.PURL) || "",
-          name: v.PkgName,
-          version: v.InstalledVersion || "",
-          ecosystem: TRIVY_ECOSYSTEMS[r.Type] || r.Type || "",
-          source: "",
-        },
-      });
-    }
-  }
-  return { findings, skipped, stamped };
-}
-
-/* Further tools (Grype/Xray/Black Duck/Cortex) register here by demand (D16). */
-function detectTranslator(j) {
-  if (j && Array.isArray(j.Results) && (j.SchemaVersion !== undefined || j.ArtifactName !== undefined)) {
-    return { tool: "trivy", translate: translateTrivy };
-  }
-  return null;
+/* intakeContentType names the request ENCODING, which is all a content type is here:
+   `text/csv` is decisive at the door (a body declared CSV is never tried as JSON), and
+   everything else rides as JSON. It says nothing about what the document IS — that is
+   `detected_kind` / `detected_format` on the receipt (EDR-INTAKE-01 D2/D5a). */
+function intakeContentType(f) {
+  return /\.csv$/i.test(f && f.name ? f.name : "") ? "text/csv" : "application/json";
 }
 
 /* --- SBOM manager (VM feedback #8 — the tab that will grow) --- */
@@ -1332,11 +1291,13 @@ async function viewSBOM() {
       <p class="card-sub">An SBOM (CycloneDX / SPDX), a VEX, or a scanner report, filed against a release.
         A build that is not registered yet is the normal case for a fresh SBOM — pick “＋ New…” and the
         release (and, if needed, its product/project) is registered on upload, the same
-        Product→Project→Release chain scripts/gf-upload-sbom.sh drives. Format is detected from the file;
-        raw Trivy JSON is translated to the curated shape in the browser (the server only ever sees the
-        curated document — D16); byte-identical re-uploads to the same release dedup to the same
-        evidence id, and the same bytes pointed at a different release are refused — a new build
-        needs its own document.</p>
+        Product→Project→Release chain scripts/gf-upload-sbom.sh drives. SBOMs and scanner reports go
+        through the one <b>intake door</b>, which detects the format itself and converts vendor dialects
+        server-side (EDR-INTAKE-01): raw <b>Trivy JSON</b>, <b>Cortex JSON</b> and <b>Cortex CSV</b> upload
+        as they came out of the tool — no jq recipe, no in-browser translation. A report needs its
+        release's SBOM filed first, and is refused by name if it is missing. Byte-identical re-uploads to
+        the same release dedup to the same evidence id, and the same bytes pointed at a different release
+        are refused — a new build needs its own document.</p>
       <div class="form-grid">
         <label>Product
           <select id="sb-product"><option value="">— pick a product —</option>
@@ -1350,12 +1311,13 @@ async function viewSBOM() {
           <select id="sb-release" disabled><option value="">—</option></select>
           <input type="text" id="sb-release-new" placeholder="version, e.g. 20.1.0.1-110" style="display:none"></label>
         <label>Kind
-          <select id="sb-kind"><option value="sbom">SBOM</option><option value="vex">VEX</option><option value="scanner-report">Scanner report</option></select></label>
+          <select id="sb-kind"><option value="sbom">SBOM or scanner report</option><option value="vex">VEX</option></select></label>
         <label>Document
-          <input type="file" id="sb-file" accept=".json,application/json">
-          <span class="file-note" id="sb-detect">Pick a .json file — CycloneDX, SPDX and scanner reports are detected automatically.</span></label>
+          <input type="file" id="sb-file" accept=".json,.csv,application/json,text/csv">
+          <span class="file-note" id="sb-detect">Pick a .json or .csv file — the intake door identifies it (CycloneDX · SPDX · Trivy · Cortex · already-curated).</span></label>
         <div><button class="btn btn-primary" id="sb-upload" disabled>Upload</button></div>
       </div>
+      <div id="sb-outcome"></div>
     </div>
     <div class="card">
       <h2 class="card-title">Evidence on the selected release</h2>
@@ -1365,7 +1327,10 @@ async function viewSBOM() {
   const sel = { product: $("#sb-product"), project: $("#sb-project"), release: $("#sb-release") };
   const inp = { product: $("#sb-product-new"), project: $("#sb-project-new"), release: $("#sb-release-new") };
   const fileInput = $("#sb-file"), detect = $("#sb-detect"), uploadBtn = $("#sb-upload");
-  let fileText = null, fileFormat = null, fileScanner = null;
+  const outcome = $("#sb-outcome");
+  // The picked File is kept as-is and sent as the request body: the door wants the
+  // artifact, not a transcription of it (EDR-INTAKE-01 D1/D2).
+  let file = null;
   let loadedProjects = [], loadedReleases = []; // for reuse-not-duplicate guards on "＋ New"
 
   const NEW = "__new__";
@@ -1379,7 +1344,7 @@ async function viewSBOM() {
       inp.release.value.trim() &&
       (sel.project.value !== NEW || inp.project.value.trim()) &&
       (sel.product.value !== NEW || inp.product.value.trim())));
-    uploadBtn.disabled = !(relOK && fileText);
+    uploadBtn.disabled = !(relOK && file);
   };
   for (const input of Object.values(inp)) input.addEventListener("input", gate);
 
@@ -1422,43 +1387,16 @@ async function viewSBOM() {
     refreshEvidence(sel.release.value);
   });
 
-  fileInput.addEventListener("change", async () => {
-    fileText = null; fileFormat = null; fileScanner = null;
-    const f = fileInput.files[0];
-    if (!f) { detect.textContent = "Pick a .json file — CycloneDX and SPDX are detected automatically."; gate(); return; }
-    fileText = await f.text();
-    let findings = null; // a curated scanner report ({findings:[…]} — TESTING.md's jq recipe)
-    let translated = null; // a raw tool report a D16 translator recognized
-    try {
-      const j = JSON.parse(fileText);
-      fileFormat = j.bomFormat === "CycloneDX" ? "cyclonedx" : (j.spdxVersion ? "spdx" : null);
-      if (Array.isArray(j.findings)) {
-        findings = j.findings.length;
-        // The tool labels the evidence row (provenance_source — EDR-GUI-01 D14 / Phase A).
-        const named = j.findings.find((x) => x && typeof x.scanner === "string" && x.scanner);
-        fileScanner = named ? named.scanner : null;
-      } else if (!fileFormat) {
-        const tr = detectTranslator(j);
-        if (tr) {
-          // The curated shape stays the wire contract: what uploads is the translation,
-          // never the vendor dialect (D16). Kind follows automatically — a translated
-          // report uploaded as an SBOM would be a footgun, not a choice.
-          const out = tr.translate(j);
-          fileText = JSON.stringify({ findings: out.findings });
-          fileScanner = tr.tool;
-          findings = out.findings.length;
-          translated = { tool: tr.tool, skipped: out.skipped, stamped: out.stamped };
-          $("#sb-kind").value = "scanner-report";
-        }
-      }
-    } catch { fileText = null; detect.textContent = "That file is not valid JSON — the trust gate would refuse it, so this form does too."; gate(); return; }
-    detect.textContent = fileFormat
-      ? `Detected ${fileFormat === "cyclonedx" ? "CycloneDX" : "SPDX"} · ${(f.size / 1024).toFixed(0)} KB`
-      : (translated
-        ? `Raw ${translated.tool} JSON — translated in-browser · ${findings} findings${translated.skipped ? ` (${translated.skipped} skipped: no CVE id or package name)` : ""}${translated.stamped === false ? " · report carries no CreatedAt — stamped fresh, so a re-upload will NOT dedup" : ""} · Kind set to “Scanner report”.`
-        : (findings !== null
-          ? `Detected scanner report${fileScanner ? ` (${fileScanner})` : ""} · ${findings} findings — set Kind to “Scanner report”.`
-          : `Format not recognized (${(f.size / 1024).toFixed(0)} KB) — uploading anyway lets Evidence decide.`));
+  // Picking a file says what WILL be sent; what it turned out to be is the receipt's to
+  // say (`detected_kind` / `detected_format`), and this page does not guess ahead of it.
+  // Identification is the door's single closed table (D5a) — a second copy of it here is
+  // how the browser came to own a converter in the first place.
+  fileInput.addEventListener("change", () => {
+    file = fileInput.files[0] || null;
+    outcome.innerHTML = "";
+    detect.textContent = file
+      ? `${file.name} · ${(file.size / 1024).toFixed(0)} KB · sent as ${intakeContentType(file)} — the door identifies it`
+      : "Pick a .json or .csv file — the intake door identifies it (CycloneDX · SPDX · Trivy · Cortex · already-curated).";
     gate();
   });
 
@@ -1517,36 +1455,140 @@ async function viewSBOM() {
 
   uploadBtn.addEventListener("click", async () => {
     uploadBtn.disabled = true; uploadBtn.innerHTML = `<span class="spin"></span> Uploading…`;
+    outcome.innerHTML = "";
     try {
       const releaseId = await resolveRelease();
-      const body = { kind: $("#sb-kind").value, subject_release_id: releaseId, document: fileText };
-      // format names an SBOM standard; Evidence uses it only for the sbom kind, so a VEX or
-      // scanner-report upload never sends one.
-      if (fileFormat && body.kind === "sbom") body.format = fileFormat;
-      // The report's own scanner field labels the row — provenance only, never authority (D14).
-      if (fileScanner && body.kind === "scanner-report") body.provenance_source = fileScanner;
-      const r = await fetch("/api/evidence/evidence", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 201) {
-        toast("Evidence registered — correlation runs in the background; check the release posture shortly.");
-      } else if (r.status === 200 && j.created === false) {
-        toast("Already registered against this release — byte-identical content dedups to the same evidence id.");
-      } else if (r.status === 409) {
-        // The content is byte-identical to a document filed against ANOTHER release —
-        // this release received nothing (a new build needs its own document).
-        toast(`Refused: ${j.detail || j.title || "content already filed against another release"}`);
-      } else if (r.status === 422 || r.status === 400) {
-        toast(`Rejected: ${j.detail || j.title || r.status} — check the release id and document.`);
-      } else if (r.status === 502) {
-        toast("Evidence node unreachable.");
-      } else {
-        toast(`Upload returned ${r.status}.`);
-      }
+      // A VEX still goes through `POST /evidence`: intake's identification table (D5a)
+      // names SBOMs and vulnerability reports, and a door that cannot identify a
+      // document must refuse it rather than guess. One road each, both honest.
+      if ($("#sb-kind").value === "vex") await uploadVEX(releaseId);
+      else await uploadIntake(releaseId);
       refreshEvidence(sel.release.value);
     } catch (e) { toast(e.message); }
     uploadBtn.disabled = false; uploadBtn.textContent = "Upload";
   });
+
+  // uploadIntake sends the file through the ONE intake door (EDR-INTAKE-01 D1): the body
+  // is the artifact, unwrapped, and the metadata rides the query string — which is what
+  // lets a 60 MB SBOM and a Cortex CSV take the same road with only a content type
+  // between them. It goes through the dashboard's own proxy (EDR-GUI-01 D1/D4), so the
+  // browser never talks to Evidence directly and never holds a node key.
+  async function uploadIntake(releaseId) {
+    const r = await fetch(`/api/evidence/intake?release_id=${encodeURIComponent(releaseId)}`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": intakeContentType(file) },
+      body: file,
+    });
+    if (r.status === 401) { sessionGone(); return; }
+    if (r.status === 502) { toast("Evidence node unreachable."); return; }
+    const receipt = await r.json().catch(() => ({}));
+    if (r.ok) return showReceipt(r.status, receipt);
+    // 503 carries no receipt at all — the backlog is full, nothing was filed, and the
+    // whole request is safe to retry verbatim.
+    if (r.status === 503) {
+      renderOutcome("err", "Intake is saturated", "", "Nothing was filed and no receipt was created — retry this upload in a moment.");
+      toast("Intake busy — nothing was filed; retry shortly.");
+      return;
+    }
+    showRefusal(r.status, receipt);
+  }
+
+  // uploadVEX is the unchanged `POST /evidence` road, JSON envelope and all.
+  async function uploadVEX(releaseId) {
+    const text = await file.text();
+    const r = await fetch("/api/evidence/evidence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "vex", subject_release_id: releaseId, document: text }),
+    });
+    if (r.status === 401) { sessionGone(); return; }
+    if (r.status === 502) { toast("Evidence node unreachable."); return; }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 201) {
+      renderOutcome("ok", "VEX filed", "", `evidence <span class="mono">${esc(j.id || "")}</span> — Knowledge overlays it on the cards it covers; it never deletes a finding.`);
+      toast("VEX filed — the overlay reaches Governance as a proposal, not a suppression.");
+      return;
+    }
+    if (r.status === 200 && j.created === false) {
+      renderOutcome("ok", "Already filed against this release", "", "Byte-identical content dedups to the same evidence id.");
+      return;
+    }
+    renderOutcome("err", `Refused (${r.status})`, "", esc(j.detail || j.title || "no detail given"));
+    toast(`VEX refused — ${r.status}.`);
+  }
+
+  // showReceipt keeps the file-note UX the in-browser translators used to provide, now
+  // read off the receipt rather than computed here: `detected_format` and, per kind,
+  // `components` or `findings_total` / `findings_skipped`. The counts are always shown as
+  // a PAIR — "427 of 427" and "427 of 500" must not look alike.
+  function showReceipt(status, rec) {
+    if (rec.status === "accepted" || rec.status === "validating" || rec.status === "converting" || rec.status === "registering") {
+      // D9's slow path: over the inline budget the work continues server-side and the
+      // receipt is the thing to come back to. The form comes back to it for you.
+      renderOutcome("note", "Accepted — still working", "", `Larger than the inline budget, so intake answered ${status} and is finishing server-side. Receipt <span class="mono">${esc(rec.intake_id || "?")}</span>; following it…`);
+      toast("Accepted — intake is still working; following the receipt.");
+      return followReceipt(rec);
+    }
+    if (rec.status === "rejected" || rec.status === "failed") return showRefusal(status, rec);
+    const counts = rec.detected_kind === "sbom"
+      ? `${rec.components ?? "?"} components`
+      : `${rec.findings_total ?? "?"} findings considered, ${rec.findings_skipped ?? 0} skipped`;
+    const parts = [
+      `${esc(rec.detected_kind || "?")} / <b>${esc(rec.detected_format || "?")}</b>`,
+      esc(counts),
+      rec.converted_by ? `converted by ${esc(rec.converted_by)}` : "",
+      rec.observed_at ? `observed ${esc(rec.observed_at)}` : "",
+      `evidence <span class="mono">${esc((rec.evidence_id || "").slice(0, 16))}</span>`,
+    ].filter(Boolean);
+    const dedup = rec.created === false;
+    renderOutcome("ok", dedup ? "Already filed — same bytes, same evidence id" : "Filed", "", parts.join(" · "));
+    toast(dedup
+      ? "Already registered against this release — byte-identical content dedups."
+      : "Filed — correlation runs in the background; check the release posture shortly.");
+  }
+
+  // followReceipt polls the receipt to its terminal state. Leaving the operator with an
+  // intake id and no outcome is what a status endpoint exists to prevent.
+  async function followReceipt(rec) {
+    const wait = Math.max(1, rec.retry_after_seconds || 2) * 1000;
+    for (let i = 0; i < 60; i++) {
+      await new Promise((done) => setTimeout(done, wait));
+      let next = null;
+      try { next = await apiGET("evidence", `/intake/${encodeURIComponent(rec.intake_id)}`); }
+      catch { return; } // the node went away mid-poll; the receipt is still readable later
+      if (!next) return;
+      if (next.status === "filed") return showReceipt(200, next);
+      if (next.status === "rejected" || next.status === "failed") return showRefusal(422, next);
+    }
+    if (outcome.isConnected) toast(`Still working — read the receipt at /api/v1/intake/${rec.intake_id}.`);
+  }
+
+  // showRefusal renders the refusal as TWO fields. The reason is a closed-enum value a
+  // consumer SWITCHES ON; the detail is prose a consumer DISPLAYS (EDR-INTAKE-01 D11).
+  // They are never concatenated: Governance flattened exactly this pair into
+  // "<reason>: <detail>", which turned a closed enum into free text and made every table
+  // lookup miss — a safety refusal rendered as "no reason given" (fixed 2026-09-22).
+  // There is deliberately no per-reason copy here; a table of hand-written sentences is
+  // how a closed enum turns back into free text from the other direction.
+  function showRefusal(status, body) {
+    const reason = body.reason || "";
+    const detail = body.detail || body.title || `status ${status}`;
+    // No reason at all means the outcome is a statement about Themis, not about the
+    // document (a 500, or a receipt that `failed`) — there is nothing to switch on.
+    renderOutcome("err", reason ? "Intake refused" : "Intake could not be carried out", reason, esc(detail));
+    toast(reason ? `Refused: ${reason} — see the form for the detail.` : `Intake failed (${status}).`);
+  }
+
+  // renderOutcome's `detail` is HTML — every caller escapes what came off the wire. The
+  // reason is escaped here because it is always a bare enum value. Two states only: a
+  // refusal is loud, everything else is a note.
+  function renderOutcome(cls, title, reason, detail) {
+    if (!outcome.isConnected) return; // the tab was left while a receipt was being followed
+    outcome.innerHTML = `<div class="${cls === "err" ? "err" : "card-sub"}" style="margin-top:10px">
+      <b>${esc(title)}</b>
+      ${reason ? `<div>Reason <code class="mono">${esc(reason)}</code></div>` : ""}
+      <div>${detail}</div></div>`;
+  }
 
   async function refreshEvidence(releaseId) {
     const host = $("#sb-list");

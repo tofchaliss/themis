@@ -547,10 +547,25 @@ under the 2026-08-07 re-derivation standard.
   (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. EDR-GUI-01 D16
   fixed the shape — one pure translate function + a detector per tool, the curated `{findings:[…]}`
   document staying the only wire contract — and Trivy proved it live. Grype is the closest dialect
-  and the most requested; each further tool registers only on demand. **Dep:** GUI-10's test
+  and the most requested; each further tool registers only on demand. ~~**Dep:** GUI-10's test
   harness lands first, so the second translator is born tested (the first one's live-only testing
-  is exactly the gap GUI-10 records). **Scope:** SMALL per tool.
-- [ ] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** LOW, quality.
+  is exactly the gap GUI-10 records).~~ **Re-shaped 2026-10-12:** the item stands, the location
+  does not. EDR-INTAKE-01 D4 retired the in-browser translators, so "a second scanner dialect" is
+  now a **Converter in `internal/evidence/adapters/report`** registered against a `Detect` row —
+  born tested by construction (its tier is 90% coverage and the registry's detection table is a
+  closed, tested enum), which is why GUI-10 closed by removal rather than by harness.
+  **Scope:** SMALL per tool.
+- [x] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** ✅ **CLOSED
+  2026-10-12** — by removal, which is the better answer than the harness this item was asking
+  for. EDR-INTAKE-01 D4 moved the one converter per dialect server-side
+  (`internal/evidence/adapters/report`), and `phase3-report-intake` group 4 deleted the
+  in-browser translators: there is no longer any JavaScript converter to test, and the Go one is
+  covered at `domain`/`app`-tier coverage with a **byte-equality** gate against the
+  implementation it replaced (`testdata/oracle/translate_trivy.js`, run under node where node
+  exists, plus committed goldens where it does not) and named semantic invariants beside it. No
+  JS test runner, no node dev dependency, no build change. The decision this item deferred —
+  "harness vs porting translator tests to Go" — was answered by porting the translator itself.
+  Original filing follows. LOW, quality.
   D16 says each translator is "a pure function with its own tests", but the repo has no JS
   test runner and `cmd/dashboard/static/app.js` is untested by design (the spike-ported GUI is
   tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
@@ -2732,6 +2747,14 @@ under the 2026-08-07 re-derivation standard.
   **in-browser upload** should refuse a `kind=scanner-report` document that is not
   `{"findings":[…]}` and name the conversion road, the way GUI-16 taught it to for CSV. **Dep:** E1
   for the real fix. **Scope:** SMALL for the browser guard.
+  **Update 2026-10-12 — the real fix landed, so do NOT build the browser guard.** E1's intake half
+  shipped (`phase3-report-intake`): `POST /api/v1/intake` validates the document it is about to
+  file and refuses by name **before** the immutable write, and group 2.4 put the same
+  curated-shape check on `POST /evidence`. A guard in the browser would now be a third opinion
+  about document shape in a place that cannot enforce it — the dashboard displays the border's
+  `reason` + `detail` instead. What is still open here is this item's actual subject: the
+  dashboard's **join view** is a renderer, and a validation message arriving on a screen the
+  operator may never open is not validation.
 
 - [x] **Metrics (the second R1 signal).** ✅ **DONE 2026-08-07.** `internal/platform/observability` now owns
   a service-scoped Prometheus registry alongside the logger, initialized in `Setup` and served at
@@ -5511,8 +5534,33 @@ under the 2026-08-07 re-derivation standard.
   **ANSWERED 2026-10-06: yes, Cortex exports JSON.** The CSV converter is therefore the stopgap this
   filing predicted, and the JSON road is **GUI-16b** below.
 
-- [ ] **GUI-16b — the one sanctioned Cortex converter takes CSV only; Cortex also exports JSON
-  (filed 2026-10-06, user ask).** LOW-MED, operability. **Goal: CSV *and* JSON are both acceptable
+- [x] **GUI-16b — the one sanctioned Cortex converter takes CSV only; Cortex also exports JSON
+  (filed 2026-10-06, user ask).** ✅ **CLOSED 2026-10-12** — `openspec/changes/phase3-report-intake`
+  groups 1–4. **Both containers of a Cortex export are now accepted inputs** to one converter, and
+  the converter moved to where a converter belongs: `internal/evidence/adapters/report` behind
+  `POST /api/v1/intake` (EDR-INTAKE-01 D1/D4). The CSV and the JSON array are two **request
+  encodings** of one export and produce a **byte-identical** curated document, so the same scan
+  dedups to one evidence id whichever road it arrives by — `TestCortexJSONEqualsCSVProjection`,
+  plus byte-equality against the retired Python on a committed fixture corpus including the
+  2026-10-05 array body. The `jq @csv` shim this item recorded is gone, and with it the
+  serialise-a-list-so-the-script-can-split-it-again round trip: `fix_versions` arrives as a JSON
+  list and is taken as one. `observed_at` is derived from the export's own data
+  (`max(last_observed)`, epoch ms) and is **never** an mtime or the upload time (D3).
+  `scripts/cortex-csv-to-scan-report.sh` keeps its name and CLI and is now a thin wrapper that
+  POSTs to intake (group 4.2); the rename this item proposed was unnecessary once the script
+  stopped converting. **No second converter was written** — the Python is frozen as a test oracle
+  under `internal/evidence/adapters/report/testdata/oracle/`, on no operator road.
+  **The adjacent defects this item named are resolved with it:** **E1** (PARITY-GAP) is closed
+  **for the intake path** — the border now validates the document it is about to file and refuses
+  the "well-formed but unreadable by any consumer" class by name (`schema_invalid` /
+  `source_invalid` / `unrecognised_format`), before anything is written; group 2.4 put the same
+  curated-shape check on the old `POST /evidence` door for `kind=scanner-report`, so the poison
+  class is unreachable there too. Full embedded-schema validation of SBOM/VEX standards is a
+  different and still-open half of E1 — see PARITY-GAP. **E11** closes too: a `scanner-report` is
+  no longer "accepted but not parsed" (it is converted, counted and shape-validated, with
+  `findings_total`/`findings_skipped` on the receipt). Knowledge's ACL was correctly left
+  unchanged: a vendor dialect still never reaches the domain. Original filing follows.
+  LOW-MED, operability. **Goal: CSV *and* JSON are both acceptable
   inputs to `scripts/cortex-csv-to-scan-report.sh`**, so an operator with either export has one road
   and the estate keeps exactly one converter.
   **Measured today**, debugging a live stall: a 427-element Cortex **JSON** export was uploaded, and
@@ -5546,7 +5594,8 @@ under the 2026-08-07 re-derivation standard.
   `internal/evidence/adapters/report`; task **1.3** ports the script for **both** the CSV and the JSON
   array, and task **4.2** turns `scripts/cortex-csv-to-scan-report.sh` into a thin wrapper that POSTs
   to intake. So the "Do" above is not built in the Python script — that would be the second
-  converter this item forbids. Closes when task 1.3 lands.
+  converter this item forbids. Closes when task 1.3 lands. **(1.3 and 4.2 both landed
+  2026-10-12 — see the closure note at the head of this item.)**
 
 ---
 

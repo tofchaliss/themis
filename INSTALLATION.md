@@ -336,12 +336,13 @@ export RID=<the RELEASE_ID it prints>          # reuse an existing release with:
 # PID=$(curl $J localhost:8082/api/v1/products -d '{"name":"acme"}'                            | jq -r .id)
 # JID=$(curl $J localhost:8082/api/v1/projects -d "{\"product_id\":\"$PID\",\"name\":\"api\"}" | jq -r .id)
 # export RID=$(curl $J localhost:8082/api/v1/releases -d "{\"project_id\":\"$JID\",\"version\":\"1.0.0\"}" | jq -r .id)
-# Upload — inline -d only works for SMALL SBOMs: a single argv is capped at 128KB on Linux
-# (MAX_ARG_STRLEN), so a large document fails with "Argument list too long". For anything sizeable,
-# build the body into a file and stream it (what the helper above does):
-#   tmp=$(mktemp); jq -n --arg r "$RID" --rawfile d ./my-sbom.json \
-#     '{kind:"sbom",format:"cyclonedx",subject_release_id:$r,document:$d}' > "$tmp"
-#   curl $J localhost:8081/api/v1/evidence --data-binary @"$tmp"; rm -f "$tmp"
+# Upload through the ONE intake door: the body IS the artifact, so --data-binary @FILE streams
+# it however large, and `kind`/`format` are detected server-side and echoed on the receipt:
+#   curl -s -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+#     -H content-type:application/json --data-binary @./my-sbom.json | jq .
+# (POST /api/v1/evidence is unchanged and still takes the JSON envelope
+#  {kind,format,subject_release_id,document} — but it makes you JSON-escape the whole SBOM, and
+#  an inline -d is capped at 128KB of argv on Linux, which is why intake takes the raw body.)
 
 # Wait ~10s for the cascade (2s loops × Evidence→Knowledge→Governance hops), then watch a Finding appear:
 curl -s "localhost:8083/api/v1/releases/$RID/posture" | jq .   # → grab the finding_id, set FID below
@@ -395,9 +396,23 @@ curl -s "localhost:8084/api/v1/publications?release=$RID" | jq .
 
 > **Between builds:** discovery runs at upload time, and the **re-discovery sweep** (default on,
 > `THEMIS_REDISCOVERY_*`) re-runs it for the stalest releases so new CVEs reach a registered
-> estate with nobody uploading anything. An **image-scan report** can also be uploaded as
-> `kind:"scanner-report"` for second-opinion findings at scanner trust — the curated document
-> shape and a Trivy conversion recipe are in TESTING.md.
+> estate with nobody uploading anything. An **image-scan report** goes through the same intake
+> door for second-opinion findings at scanner trust — raw Trivy JSON, Cortex JSON or Cortex CSV,
+> sent as it came out of the tool and converted server-side (EDR-INTAKE-01 D4). The report needs
+> its release's SBOM filed first (D6) or it is refused by name; TESTING.md § scanner reports has
+> the full procedure.
+
+> **The intake door, in one paragraph** (EDR-INTAKE-01). `POST /api/v1/intake` is the single
+> door for SBOMs and vulnerability reports: the **body is the artifact** and the metadata is
+> query parameters (`release_id`, or the `product`/`project`/`version` triple — resolved
+> **read-only**, so intake never creates Registry identity). `kind` and `format` are detected
+> from the body and echoed back. **CSV is a request encoding, never an evidence document** — a
+> Cortex CSV is converted and the curated JSON is what gets filed. Every outcome is an
+> addressable **receipt** (`GET /api/v1/intake/{id}`), including a refusal, which names itself
+> from a closed taxonomy in two fields — `reason` and `detail`, never concatenated. With auth
+> enabled (`THEMIS_AUTH_DATABASE_DSN`) send `X-API-Key`; the helper scripts send it from
+> `THEMIS_API_KEY` when set. Tunables: `THEMIS_INTAKE_MAX_BYTES`,
+> `THEMIS_INTAKE_INLINE_BUDGET`, `THEMIS_INTAKE_RECEIPT_TTL` (see `deploy/node.env.example`).
 
 ### 5a. Test vendor-VEX suppression + the fixed verdict (EDR-VEX-01)
 

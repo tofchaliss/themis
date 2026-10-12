@@ -37,6 +37,11 @@ const maxIdentityBody = 1 << 20
 // pure document intake, never one whose body can name an actor.
 var documentPosts = map[string]bool{
 	"/api/evidence/evidence": true,
+	// The intake door is the same class, more so: its body is the artifact UNWRAPPED
+	// (EDR-INTAKE-01 D1) — a raw SBOM or a Cortex CSV, routinely tens of megabytes, with
+	// the metadata in the query string, so there is no field in it that could name an
+	// actor. Omitting it here would 413 every upload over 1 MiB, which is GUI-14 again.
+	"/api/evidence/intake": true,
 }
 
 // statelessPosts are POST routes that RECORD NOTHING, so a read-scoped operator may use

@@ -102,13 +102,38 @@ how many customers a release reaches.
 
 ### Evidence — SBOM/VEX ingestion + immutable evidence
 
+**`POST /intake` is the single door** for SBOMs and vulnerability reports (EDR-INTAKE-01 D1). The
+**body is the artifact**, unwrapped, and the metadata is query parameters — which is what makes
+`--data-binary @file` the whole client and keeps a 60 MB SBOM streaming instead of JSON-escaped
+into an envelope. `kind` and `format` are **detected** from the body (D5a) and echoed back as
+`detected_kind` / `detected_format`; a declared one that contradicts the body is
+`declared_format_mismatch`, never a silent override.
+
 | Method | Path | Operation |
 | ------ | ---- | --------- |
-| POST | `/evidence` | `registerEvidence` (dedup by raw bytes → stable id) |
+| POST | `/intake` | `submitIntake` — raw body + query metadata (`release_id`, or `product`+`project`+`version`; `allow_without_sbom`, `observed_at`, `expected_checksum`, `provenance_*`), `Idempotency-Key` honoured (D12). Answers a **receipt**: `201` filed · `200` dedup (`created:false`) · `202` over `THEMIS_INTAKE_INLINE_BUDGET`, work continues server-side · `503` backlog full, nothing filed and no receipt, safe to retry verbatim |
+| GET | `/intake/{intakeId}` | `getIntakeReceipt` — every intake is addressable, including a refused one. Terminal at `filed`, which does **not** claim correlation is complete; `next_checks` names who answers that (D10) |
+| POST | `/evidence` | `registerEvidence` (dedup by raw bytes → stable id) — **unchanged**, and still the road for a VEX, which intake's identification table does not name |
 | GET | `/evidence` | `listEvidence` |
 | GET | `/evidence/{id}` | `getEvidence` |
 | GET | `/evidence/{id}/inventory` | `getEvidenceInventory` (raw + canonical inventory) |
 | GET | `/evidence/{id}/document` | `getEvidenceDocument` — the stored bytes, verbatim. Knowledge reads uploaded VEX through this seam and parses it itself (EDR-VEX-01 Phase 1): Evidence serves evidence, it does not interpret it |
+
+Three properties of the door are contract, not implementation detail:
+
+- **CSV is a request encoding, never an evidence document** (D2). A Cortex CSV is converted and
+  the curated `{"findings":[…]}` JSON is what gets filed; provenance records the source digest
+  and converter identity (`cortex@1`). One converter per dialect, server-side (D4).
+- **SBOM first** (D6). A vulnerability report for a release with no SBOM-derived inventory is
+  refused `409 no_inventory_for_release`; `allow_without_sbom=true` is the deliberate override
+  and is recorded in provenance.
+- **Identity is resolved read-only** (D7). Intake never creates a Product, Project or Release —
+  a typo in a product name reads as `unknown_release`, not as a forked estate graph.
+
+A refusal is an `IntakeProblem` whose `reason` is a **closed enum** and whose `detail` is prose.
+They are **two fields and are never concatenated**: a consumer switches on `reason` and displays
+`detail` (Governance flattened exactly this pair once, and every table lookup missed —
+fixed 2026-09-22). With auth enabled, send `X-API-Key` (EDR-SECURITY-01 F1).
 
 ### Knowledge — Faultlines (one card per canonical CVE)
 

@@ -22,8 +22,9 @@ import (
 // converter, and then the two roads would dedup separately.
 const cortexVersion = "cortex@1"
 
-// The two regexes are the 2026-09-10 case's judgement, carried over verbatim from
-// `scripts/cortex-csv-to-scan-report.sh`.
+// The two regexes are the 2026-09-10 case's judgement, carried over verbatim from the
+// Python that `scripts/cortex-csv-to-scan-report.sh` used to carry (frozen as an
+// oracle at `testdata/oracle/cortex_csv_to_scan_report.py`).
 var (
 	// purlEcosystem: the ecosystem comes from the purl itself (pkg:rpm/… -> rpm), never
 	// from `package_type`, which is a single constant and carries no ecosystem.
@@ -113,10 +114,10 @@ func cortexDocument(rows []cortexRow, observedAt time.Time, hint string) ([]byte
 	stats := Stats{FindingsTotal: len(rows)}
 	findings := make([]curatedFinding, 0, len(rows))
 	for _, r := range rows {
-		// The maintained converter's ONE skip condition (script line 77,
-		// `if not cve or not (purl or name)`): no flaw id, or no component to attach the
-		// flaw to. Structurally fine, semantically unusable — counted, never hidden, and
-		// never fatal. Everything else the script coerces, and so does this.
+		// The oracle's ONE skip condition (`if not cve or not (purl or name)`): no flaw
+		// id, or no component to attach the flaw to. Structurally fine, semantically
+		// unusable — counted, never hidden, and never fatal. Everything else the oracle
+		// coerces, and so does this.
 		if r.cve == "" || (r.purl == "" && r.name == "") {
 			stats.FindingsSkipped++
 			continue

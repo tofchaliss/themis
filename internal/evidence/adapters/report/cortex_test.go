@@ -52,16 +52,19 @@ var cortexFixtures = []cortexFixture{
 }
 
 // TestCortexConvertMatchesScriptOracle is the D4 equivalence gate: the Go converter
-// must reproduce `scripts/cortex-csv-to-scan-report.sh` BYTE FOR BYTE on every
-// committed fixture. It is the whole reason the port is safe to make, and it is not
+// must reproduce the Python conversion `scripts/cortex-csv-to-scan-report.sh` carried
+// BYTE FOR BYTE on every committed fixture (now frozen at
+// `testdata/oracle/cortex_csv_to_scan_report.py`, the script itself having become a
+// thin intake wrapper). It is the whole reason the port is safe to make, and it is not
 // cosmetic — Evidence's dedup key is the SHA-256 of the filed bytes, so a converter
 // that re-serializes the same findings differently turns every post-cutover
 // re-submission into a duplicate scan.
 //
 // The comparison runs twice over: against committed golden files, which always run,
-// and against the script executed live, which runs wherever `python3` and `bash`
-// exist. The goldens are what keep the gate from silently disappearing on a host
-// without an interpreter; the live run is what keeps the goldens honest.
+// and against the frozen oracle executed live, which runs wherever `python3` exists
+// (`testdata/oracle/` — the Python the script carried until D4 moved the one converter
+// server-side). The goldens are what keep the gate from silently disappearing on a
+// host without an interpreter; the live run is what keeps the goldens honest.
 func TestCortexConvertMatchesScriptOracle(t *testing.T) {
 	for _, fx := range cortexFixtures {
 		t.Run(fx.name, func(t *testing.T) {
@@ -198,7 +201,8 @@ func TestCortexSemanticInvariants(t *testing.T) {
 }
 
 // TestCortexSkipsAreCountedNeverHidden: the converter's one skip condition is the
-// script's line 77, and a skipped row must be COUNTED. "427 of 427" and "427 of 500"
+// oracle's `if not cve or not (purl or name)`, and a skipped row must be COUNTED.
+// "427 of 427" and "427 of 500"
 // must not look alike.
 func TestCortexSkipsAreCountedNeverHidden(t *testing.T) {
 	body := readFixture(t, "cortex", "nopurl.csv")
@@ -426,22 +430,22 @@ func TestCortexVersionIsSharedAcrossContainers(t *testing.T) {
 
 // --- the oracle ---
 
-// runCortexScript executes the maintained converter. It reports ok=false (with a
-// skip note) when the host has no interpreter, which is why the committed goldens
-// exist: the gate must not evaporate on a machine without python3.
+// runCortexScript executes the frozen oracle — the Python conversion this package
+// replaced, moved verbatim to `testdata/oracle/` when the script was rewired to POST
+// to intake (EDR-INTAKE-01 D4, tasks.md 4.2). It reports ok=false (with a skip note)
+// when the host has no interpreter, which is why the committed goldens exist: the gate
+// must not evaporate on a machine without python3.
 func runCortexScript(t *testing.T, fixture, observed string) ([]byte, bool) {
 	t.Helper()
-	script := filepath.Join("..", "..", "..", "..", "scripts", "cortex-csv-to-scan-report.sh")
-	if _, err := os.Stat(script); err != nil {
+	oracle := filepath.Join("testdata", "oracle", "cortex_csv_to_scan_report.py")
+	if _, err := os.Stat(oracle); err != nil {
 		t.Skipf("oracle unavailable: %v", err)
 	}
-	for _, bin := range []string{"bash", "python3"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Logf("skipping the live oracle run: %s not on PATH (the committed golden still gates)", bin)
-			return nil, false
-		}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Logf("skipping the live oracle run: python3 not on PATH (the committed golden still gates)")
+		return nil, false
 	}
-	cmd := exec.Command("bash", script, filepath.Join("testdata", "cortex", fixture), observed)
+	cmd := exec.Command("python3", oracle, filepath.Join("testdata", "cortex", fixture), observed)
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
