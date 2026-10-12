@@ -595,6 +595,49 @@ To change configuration, edit `/etc/themis/<service>.env` then `sudo systemctl r
 `WorkingDirectory` is the repo root (services resolve their migrations by a relative path), so keep the
 built `bin/` in place.
 
+### 8. Upgrade an existing deployment (pull, build, restart)
+
+Measured on the VM on 2026-10-12 (`docs/engineering/vm-test-2026-10-12.md`). An upgrade is not a
+re-install: the installer in step 7 writes `/etc/themis/<svc>.env` only when it creates it, so
+settings added since your install are **not** picked up by re-running it. Do these in order.
+
+```sh
+cd /opt/themis/src/themis                    # your checkout (the systemd WorkingDirectory)
+# 1. Read-only first: which branch is this, and is any event stream halted?
+git status -sb | head -1                     # must say ## main — a feature branch is not a release
+sudo journalctl -u 'themis@*' --since '-7 days' --no-pager | grep -i 'HALTED' | tail -3
+# 2. Switch to main and pull.
+git fetch origin && git checkout main && git pull --ff-only origin main
+# 3. Build. Point the Go caches at your home folder: a GOCACHE inherited from a profile that
+#    names a directory you cannot create makes the build fail, and the restart below would then
+#    quietly run the OLD binaries. The && stops the upgrade there instead.
+env GOCACHE=$HOME/.cache/go-build GOMODCACHE=$HOME/go/pkg/mod go build -o bin/ ./cmd/... && echo BUILD-OK
+# 4. Add settings introduced since your install. /etc/themis/*.env is root-only, so the
+#    guard needs sudo too, or it fails and appends regardless.
+sudo grep -q '^THEMIS_DASHBOARD_MIGRATE=' /etc/themis/dashboard.env || echo 'THEMIS_DASHBOARD_MIGRATE=1' | sudo tee -a /etc/themis/dashboard.env
+sudo grep -q '^THEMIS_KNOWLEDGE_URL=' /etc/themis/evidence.env || printf 'THEMIS_KNOWLEDGE_URL=http://localhost:8085\nTHEMIS_GOVERNANCE_URL=http://localhost:8083\n' | sudo tee -a /etc/themis/evidence.env
+# 5. Restart everything, then verify.
+sudo systemctl restart 'themis@*'
+PGBASE=... ./scripts/vm-verify.sh            # every reader at 0 pending, "no issues found"
+```
+
+Things the 2026-10-12 upgrade ran into:
+
+- **A halted stream survives an upgrade and a reboot.** The reader resumes at its cursor, re-reads
+  the poison event and halts again. Mark the envelope applied in the consumer's
+  `processed_events` first (the 2026-10-09 checkpoint in `docs/engineering/PHASE3-STATUS.md` has
+  the exact commands), then restart.
+- **A large SBOM takes minutes to correlate.** 555 components took about 4.5 minutes. During that
+  time Knowledge's `stream_cursor` does not move, because it advances only after the event is
+  handled. A gap between the cursor and `max(seq)` is not a backlog by itself: `seq` is shared by
+  every stream, so compare against `max(seq)` for the one `source_context`.
+- **Keep your API key somewhere that survives a reboot.** Keys are stored as bcrypt hashes and
+  cannot be read back; a lost key means minting a new one with `bin/authadmin create-key` (4a).
+  A file only you can read works: `( umask 077; … > ~/.themis.key )`, then
+  `export THEMIS_API_KEY=$(cat ~/.themis.key)`.
+- **Reaching the GUI from your laptop** when the VM is firewalled: an SSH tunnel,
+  `ssh -N -L 8090:localhost:8090 <user>@<vm-host>`, then open `http://localhost:8090`.
+
 ---
 
 ## Part B — v0.3.x single binary (`cmd/themis`)

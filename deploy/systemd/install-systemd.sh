@@ -79,6 +79,9 @@ THEMIS_BUS_DATABASE_DSN=${BUS}
 THEMIS_EVIDENCE_MIGRATE=1
 THEMIS_BUS_MIGRATE=1
 THEMIS_EVIDENCE_ADDR=:8081
+# intake receipts point at who answers "is it done?" (EDR-INTAKE-01 D10); unset = omitted
+THEMIS_KNOWLEDGE_URL=http://localhost:8085
+THEMIS_GOVERNANCE_URL=http://localhost:8083
 EOF
 
 # Knowledge: :8085 (NOT the buggy :8082 default); reads Evidence inventory + OSV.

@@ -463,8 +463,8 @@ func TestIntakeFiled_DedupIs200AndCreatedFalse(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if decodeReceipt(t, rec).Created != nil {
-		t.Error("created should be absent, not true, when nothing was created")
+	if c := decodeReceipt(t, rec).Created; c == nil || *c {
+		t.Errorf("created = %v, want an explicit false when nothing was created", c)
 	}
 }
 
