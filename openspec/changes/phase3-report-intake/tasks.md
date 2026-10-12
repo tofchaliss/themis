@@ -31,19 +31,19 @@ Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends
 
 ## Group 2 — Domain, app, and the validation taxonomy (D6, D7, D11)
 
-- [ ] 2.1 `domain/intake.go`: `RejectReason` as a closed enum (D11's twelve), `Receipt` with its
+- [x] 2.1 `domain/intake.go`: `RejectReason` as a closed enum (D11's twelve), `Receipt` with its
       state machine (`accepted → validating → converting → registering → filed` | `rejected` |
       `failed`), and `Provenance` gaining `SourceDigest`, `ConvertedBy`, `WithoutSBOM`. Domain
       tests: every transition legal/illegal; a terminal receipt is immutable.
-- [ ] 2.2 `app/intake.go`: `IntakeService.Intake` in the design's step order (size → detect →
+- [x] 2.2 `app/intake.go`: `IntakeService.Intake` in the design's step order (size → detect →
       resolve → convert → schema → SBOM-first → file), with the **first failure winning** and
       **nothing filed until step 7**. New ports: `ReleaseResolver` (D7, read-only) and
       `InventoryReader` (D6). Tests through fakes: one per reason, plus the ordering assertion that
       an invalid-and-early report reports `schema_invalid`, not `no_inventory_for_release`.
-- [ ] 2.3 `TestIntakeReasonTaxonomyIsClosed` — fails when the enum grows without the spec and the
+- [x] 2.3 `TestIntakeReasonTaxonomyIsClosed` — fails when the enum grows without the spec and the
       dashboard being updated in the same change. #116 cost: a consumer knowing 6 of 15 reasons
       asserted "no reason given" for the other nine.
-- [ ] 2.4 **`trust.Gate` curated-shape check for `kind=scanner-report`** — the cheap half of E1 on
+- [x] 2.4 **`trust.Gate` curated-shape check for `kind=scanner-report`** — the cheap half of E1 on
       the OLD door (`POST /evidence`), so the poison class is unreachable there too. Test: the
       incident body is refused by the gate.
 

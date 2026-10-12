@@ -53,9 +53,28 @@ type SubjectRef struct {
 // Provenance records where the evidence came from — the producing tool and,
 // optionally, the scanned image digest — as data, never as a modeled business
 // entity (the image digest is provenance only; EDR-KERNEL-01 D2).
+//
+// The last three fields are what a CONVERTED submission has to say about itself
+// (EDR-INTAKE-01 D2/D6). The filed document is not the operator's bytes when a
+// vendor dialect was converted, so the record of which bytes arrived and which
+// rules turned them into this document lives here — otherwise the provenance of
+// every converted report is "Themis made it".
 type Provenance struct {
 	Source      string // producing tool, e.g. "trivy"
 	ImageDigest string // optional; the scanned image's digest
+	// SourceDigest is the SHA-256 of the SUBMITTED bytes, which for a converted
+	// document are not the filed bytes. It is also intake's idempotency identity:
+	// the source is what a re-scan repeats, so dedup keys on it rather than on an
+	// output that a converter version could change (D3).
+	SourceDigest string
+	// ConvertedBy names the converter and its version ("cortex@1"), empty when the
+	// submitted bytes were filed unchanged. The output depends on the converter's
+	// own rules, so the rules have to be nameable.
+	ConvertedBy string
+	// WithoutSBOM records the deliberate D6 override: these findings rest on a
+	// release with no SBOM-derived inventory behind them. A release in that state
+	// says so rather than looking like any other.
+	WithoutSBOM bool
 }
 
 // Evidence is the immutable aggregate root of the Evidence context: one filed,
