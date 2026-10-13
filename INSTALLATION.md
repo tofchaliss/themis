@@ -614,6 +614,18 @@ env THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable" \
 TESTING.md § *bot intake* carries the full status-code table (every row of the contract) and the refusal
 examples.
 
+> **The same key may also create a *project* under its product, through Registry** (`POST :8082/api/v1/projects`
+> — intake itself never creates a project). Registry confines a `product:<P>` key exactly as intake does:
+> projects, releases and microservices only under product `P`, the same byte-identical `403` for a foreign or a
+> missing product or project, and `POST /products` answers only with `P`'s own existing id (`200`, any case) —
+> a product key never creates a product. Customers and deployments span products and need an `admin` key.
+> A pipeline that knows only the product NAME looks the id up first:
+>
+> ```sh
+> PID=$(curl -sf "http://localhost:8082/api/v1/products?name=acme" -H "X-API-Key: $THEMIS_API_KEY" | jq -r 'if length == 1 then .[0].id else empty end')
+> curl -sf -X POST "http://localhost:8082/api/v1/projects" -H "X-API-Key: $THEMIS_API_KEY" -H "Content-Type: application/json" -d "{\"product_id\":\"$PID\",\"name\":\"acme-core\"}"
+> ```
+
 ### 6. Intelligence Gateway (optional AI — Ollama)
 
 `cmd/intelligence` is **stateless** (no database) and part of the **optional AI plane** — the pipeline is

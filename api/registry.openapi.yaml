@@ -39,6 +39,13 @@ paths:
                 $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            A product-scoped key may name only its own product (any case), which returns `200` with its existing id; it never creates a product, and every other name is this same `403` whether or not that product exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
     get:
       operationId: listProducts
       summary: List products, optionally filtered by exact name.
@@ -140,6 +147,13 @@ paths:
                 $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            A product-scoped key may register only under its own product. Another product, a product that does not exist and an empty id are one byte-identical answer, so the refusal says nothing about the rest of the estate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
   /releases:
@@ -173,6 +187,13 @@ paths:
                 $ref: '#/components/schemas/FindOrCreateResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            A product-scoped key may register only under a project its own product owns. A foreign project and a project that does not exist are one byte-identical answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
     get:
@@ -271,6 +292,13 @@ paths:
                 $ref: '#/components/schemas/RegisterResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            Customers belong to no single product: only an admin key may register one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /products/{id}/microservices:
     post:
       operationId: registerMicroservice
@@ -296,6 +324,13 @@ paths:
                 $ref: '#/components/schemas/RegisterResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            A product-scoped key may register only under its own product (same answer for a foreign or missing product).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
   /microservices/{id}/deployments:
@@ -323,6 +358,13 @@ paths:
                 $ref: '#/components/schemas/RegisterResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          description: >-
+            A deployment links a product's microservice to a customer, which spans products: only an admin key may register one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
   /releases/{id}/blast-radius:
