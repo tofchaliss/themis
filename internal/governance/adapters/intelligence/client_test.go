@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +91,74 @@ func TestClientKeepsReasonAndDetailApart(t *testing.T) {
 	}
 	if no.Detail != "ungrounded citation: httpd-2.4.37-65" {
 		t.Errorf("Detail = %q, want the elaboration preserved beside the reason", no.Detail)
+	}
+}
+
+// --- Auth-enabled Intelligence node: the invocation carries X-API-Key ------------------------
+
+// The capability invoke is the one inter-service call of Governance's that is NOT a read, and
+// Intelligence's inbound edge refuses a mutation from a read-only key. With the node's key the
+// invocation authenticates; without it the Gateway answers 401 and Governance — which treats an
+// unavailable Gateway as a safe no-proposal (D13) — would otherwise have no way to tell an
+// operator that AI is "off" because a variable is unset.
+func TestClientSendsAPIKeyOnlyWhenSet(t *testing.T) {
+	const writeKey = "admin-scoped-key-abc123"
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-API-Key"))
+		if r.Header.Get("X-API-Key") != writeKey {
+			// What RequireWriteScope answers a read-only key, and RequireAPIKey an absent one.
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"capability":"recommend_position@v1","stance":"affected","confidence":0.8}`))
+	}))
+	defer srv.Close()
+
+	// The key is given with surrounding whitespace, as a unit file hands it over; it is trimmed.
+	padded := NewClient(srv.URL, srv.Client()).WithAPIKey("  " + writeKey + "\n")
+	_, produced, _, err := padded.RecommendPosition(context.Background(), "F1")
+	if err != nil || !produced {
+		t.Fatalf("an authenticated invocation must produce; got %v, %v", produced, err)
+	}
+
+	// Unset: no header at all, an error (never a silent no-proposal), naming the variable AND
+	// the scope this call needs — a read-scoped key is the mistake this seam invites.
+	_, produced, _, err = NewClient(srv.URL, srv.Client()).RecommendPosition(context.Background(), "F1")
+	if err == nil || produced {
+		t.Fatalf("an unauthenticated invocation must error; got %v, %v", produced, err)
+	}
+	for _, want := range []string{"403", "sent no X-API-Key", "THEMIS_API_KEY", "write-capable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(seen) != 2 || seen[1] != "" {
+		t.Errorf("headers seen = %q, want the second request to carry no X-API-Key", seen)
+	}
+
+	// A refused key is a different operator problem from an absent one, and the credential is
+	// never echoed.
+	_, _, _, err = NewClient(srv.URL, srv.Client()).WithAPIKey("read-only-key").
+		RecommendPosition(context.Background(), "F1")
+	if err == nil || !strings.Contains(err.Error(), "Intelligence refused") {
+		t.Errorf("err = %v, want it to distinguish a refused key from an absent one", err)
+	}
+	if strings.Contains(err.Error(), "read-only-key") {
+		t.Errorf("err = %v leaked the credential", err)
+	}
+}
+
+// A 500 carries NO credential advice: naming a variable that is already correct would send an
+// operator after the wrong thing.
+func TestClientCredentialHintOnlyOnAuthFailures(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	_, _, _, err := NewClient(srv.URL, srv.Client()).WithAPIKey("key").
+		RecommendPosition(context.Background(), "F1")
+	if err == nil || strings.Contains(err.Error(), "THEMIS_API_KEY") {
+		t.Errorf("err = %v, want a plain 500 with no credential advice", err)
 	}
 }

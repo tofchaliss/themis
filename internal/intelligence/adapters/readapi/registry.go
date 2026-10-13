@@ -3,8 +3,8 @@ package readapi
 // The Registry client for the Δ4b autonomous sweep (D-Δ4b-2): it enumerates every release id in
 // the estate so the analyst can scan their postures. Registry has no flat "all releases" read, so
 // this walks products → projects → releases over the existing read API — the same composition the
-// analyst is designed around (it needs no new Governance/Registry endpoint). Read-only; sends no
-// key (inter-service reads are auth-open).
+// analyst is designed around (it needs no new Governance/Registry endpoint). Read-only; it carries
+// the node's `X-API-Key` when one is configured (EDR-SECURITY-01 F1) — a read-scoped key is enough.
 
 import (
 	"context"
@@ -20,6 +20,7 @@ import (
 // RegistryClient walks the estate to list release ids.
 type RegistryClient struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
@@ -29,6 +30,16 @@ func NewRegistryClient(baseURL string, hc *http.Client) *RegistryClient {
 		hc = http.DefaultClient
 	}
 	return &RegistryClient{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+}
+
+// WithAPIKey makes every hop of the estate walk carry `X-API-Key` (EDR-SECURITY-01 F1). An empty
+// key leaves the walk unauthenticated — the auth-off development case. A READ-ONLY key is enough.
+//
+// The walk aborts on the FIRST refused hop ("no releases, no work"), so on an auth-enabled
+// Registry node an unauthenticated sweep finds no estate at all rather than part of one.
+func (c *RegistryClient) WithAPIKey(apiKey string) *RegistryClient {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
 }
 
 type idRow struct {
@@ -65,13 +76,17 @@ func (c *RegistryClient) getIDs(ctx context.Context, path string) ([]string, err
 	if err != nil {
 		return nil, err
 	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("registry: %s: status %d", path, resp.StatusCode)
+		return nil, fmt.Errorf("registry: %s: status %d%s",
+			path, resp.StatusCode, credentialHint(c.apiKey, resp.StatusCode, "Registry"))
 	}
 	var rows []idRow
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {

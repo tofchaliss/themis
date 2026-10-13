@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/themis-project/themis/internal/intelligence/domain"
 )
@@ -17,6 +18,7 @@ import (
 // app.PrecedentReader. A per-release read that 404s is simply skipped.
 type PrecedentClient struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
@@ -26,6 +28,18 @@ func NewPrecedentClient(baseURL string, hc *http.Client) *PrecedentClient {
 		hc = http.DefaultClient
 	}
 	return &PrecedentClient{baseURL: baseURL, http: hc}
+}
+
+// WithAPIKey makes every precedent read carry `X-API-Key` (EDR-SECURITY-01 F1). An empty key
+// leaves the reads unauthenticated — the auth-off development case. A READ-ONLY key is enough.
+//
+// Without it, every precedent read on an auth-enabled Governance node answers 401 and the
+// exact-CVE fallback degrades to "no precedent" — which is indistinguishable from an estate
+// that has genuinely never decided this CVE, and that is the one thing a grounding seam must
+// never confuse.
+func (c *PrecedentClient) WithAPIKey(apiKey string) *PrecedentClient {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
 }
 
 type wireCurrentPosition struct {
@@ -105,6 +119,9 @@ func (c *PrecedentClient) getJSON(ctx context.Context, u string, dst any) error 
 	if err != nil {
 		return err
 	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -114,7 +131,8 @@ func (c *PrecedentClient) getJSON(ctx context.Context, u string, dst any) error 
 		return errNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("governance read API: status %d", resp.StatusCode)
+		return fmt.Errorf("governance read API: status %d%s",
+			resp.StatusCode, credentialHint(c.apiKey, resp.StatusCode, "Governance"))
 	}
 	return json.NewDecoder(resp.Body).Decode(dst)
 }

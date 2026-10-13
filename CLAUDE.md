@@ -168,7 +168,18 @@ all six nodes.
   production guard so a node can never boot open). Mint keys with `cmd/authadmin`:
   `THEMIS_AUTH_DATABASE_DSN=… THEMIS_AUTH_MIGRATE=1 go run ./cmd/authadmin create-key --name ci --scopes admin`
   (`--scopes` ∈ `admin`=read+write, `read`=read-only; prints the token **once**, stores only its bcrypt hash;
-  `revoke-key --id` disables one). Auth is **inbound-edge only** — inter-service read clients send no key.
+  `revoke-key --id` disables one).
+  **Enforcement is inbound-edge and per-node; the CREDENTIAL is every node's business.** Every node that
+  calls another node reads **`THEMIS_API_KEY`** and sends it as `X-API-Key` on every such call — set ⇒ sent,
+  unset ⇒ no header (auth-off dev), never logged (a boolean `api_key_set` is logged at startup instead), and a
+  401/403 from a peer yields an error naming the variable and distinguishing *no key sent* from *a key the
+  peer refused*. The old claim that "inter-service read clients send no key" was **false and expensive**: it
+  made auth unswitchable, so Evidence, Registry and Governance were found running `AUTH DISABLED` on the VM
+  (2026-10-13) — with auth on at Evidence, Knowledge's unauthenticated inventory read 401'd and an uploaded
+  SBOM correlated to NOTHING, silently. Scope follows the call: `read` for reads, write-capable for a write —
+  and note a **capability invoke is a POST**, so Governance→Intelligence needs an `admin` key, not a
+  read-only one. See EDR-SECURITY-01's 2026-10-13 realization note (it carries the per-client audit table)
+  and INSTALLATION.md → "Switching auth on for every node".
 - **Registry self-migrates** into the shared `evidence` DB (`THEMIS_REGISTRY_MIGRATE=1`) as of 2026-08-07.
   It keeps its own `registry_schema_migrations` bookkeeping table, so it no longer reads Evidence's version
   and silently skip its own `CREATE TABLE`s. Give it the **plain** DSN: the migrations-table parameter is

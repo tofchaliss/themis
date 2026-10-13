@@ -135,8 +135,14 @@ func main() {
 	// the no-op advisor disables it. The pipeline is correct either way.
 	var advisor app.PositionAdvisor = intelligence.NoopAdvisor{}
 	if cfg.aiEnabled {
-		advisor = intelligence.NewClient(cfg.intelligenceURL, &http.Client{Timeout: cfg.intelligenceTimeout})
-		logger.Info("AI enrichment enabled", observability.String("intelligence_url", cfg.intelligenceURL))
+		// The SAME node credential the three read seams carry (THEMIS_API_KEY). Note the scope
+		// this one needs is larger: a capability invoke is a POST, so an Intelligence node with
+		// auth on refuses a read-only key — see WithAPIKey's doc and INSTALLATION.md.
+		advisor = intelligence.NewClient(cfg.intelligenceURL, &http.Client{Timeout: cfg.intelligenceTimeout}).
+			WithAPIKey(cfg.readAPIKey)
+		logger.Info("AI enrichment enabled",
+			observability.String("intelligence_url", cfg.intelligenceURL),
+			observability.Bool("api_key_set", cfg.readAPIKey != ""))
 	}
 
 	busPool, closeBus := openBus(ctx, cfg, logger)
@@ -150,6 +156,15 @@ func main() {
 	gov := wiring.Wire(pool, publisher, advisor, cfg.registryURL, cfg.knowledgeURL, cfg.evidenceURL, cfg.readAPIKey,
 		cfg.blastRadiusCap, cfg.mitigatedWeight, cfg.epssDriftThreshold, logger.Component("api"),
 		autoAcceptPolicies(cfg.autoAccept, logger)...)
+
+	// Whether the read seams carry a credential is the difference between a working pipeline and
+	// a 401 loop on an auth-enabled estate, so it is said once at startup — as a BOOLEAN. The
+	// key itself is never logged.
+	logger.Info("registry/knowledge/evidence read seams",
+		observability.String("registry_url", cfg.registryURL),
+		observability.String("knowledge_url", cfg.knowledgeURL),
+		observability.String("evidence_url", cfg.evidenceURL),
+		observability.Bool("api_key_set", cfg.readAPIKey != ""))
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
 

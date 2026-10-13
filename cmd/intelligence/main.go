@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,7 +78,7 @@ type config struct {
 	autoMinOverlap float64 // THEMIS_INTELLIGENCE_AUTO_MIN_OVERLAP — minimum release-overlap a precedent must clear.
 	autoMaxPerPass int     // THEMIS_INTELLIGENCE_AUTO_MAX_PER_PASS — hard cap on proposals per sweep (<0 = uncapped).
 	registryURL    string  // THEMIS_REGISTRY_URL — Registry read-API base URL, for the autonomous sweep to enumerate releases.
-	apiWriteKey    string  // THEMIS_API_KEY — the node's WRITE-scoped key for the autonomous push (POST /findings/{id}/proposals). Empty in an auth-off dev deployment. // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
+	nodeAPIKey     string  // THEMIS_API_KEY — this node's own Themis credential, sent as X-API-Key on EVERY inter-service call: the Governance projection + precedent READS, the Registry estate walk, and the autonomous proposal PUSH. A read-scoped key serves the reads; where the autonomous sweep is enabled the key must be write-capable (the push is a POST). Empty = inter-service calls are unauthenticated (auth-off dev). NOT the model-server token (THEMIS_LLM_API_KEY). Never logged. // THEMIS_INTELLIGENCE_LOG_RETENTION — how long the Δ4a invocation log is kept before the age-based prune (0 = no pruning). The golden set promoted from it is durable and untouched.
 	rebuild        bool    // THEMIS_INTELLIGENCE_REBUILD=1 — purge the index + reset the bus cursor on boot, re-embedding every past Position from the stream (use after an embedding-model change).
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database. Set ⇒ the reader drains Governance Position events to populate the index; empty ⇒ no population (single-context dev).
@@ -118,7 +119,7 @@ func loadConfig() config {
 		autoMinOverlap:   envFloatDefault("THEMIS_INTELLIGENCE_AUTO_MIN_OVERLAP", 0),
 		autoMaxPerPass:   envSignedIntDefault("THEMIS_INTELLIGENCE_AUTO_MAX_PER_PASS", 0),
 		registryURL:      envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
-		apiWriteKey:      os.Getenv("THEMIS_API_KEY"),
+		nodeAPIKey:       strings.TrimSpace(os.Getenv("THEMIS_API_KEY")),
 		rebuild:          os.Getenv("THEMIS_INTELLIGENCE_REBUILD") == "1",
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
@@ -192,7 +193,7 @@ func main() {
 		AutoMinOverlap:        cfg.autoMinOverlap,
 		AutoMaxPerPass:        cfg.autoMaxPerPass,
 		RegistryURL:           cfg.registryURL,
-		APIWriteKey:           cfg.apiWriteKey,
+		NodeAPIKey:            cfg.nodeAPIKey,
 	})
 	if err != nil {
 		logger.Error("wire failed", observability.Err(err))
@@ -319,6 +320,14 @@ func main() {
 	router.Get("/readyz", health.Readyz(readyChecks...))
 	closeAuth := authedMount(ctx, router, cfg, logger, intel.Handler)
 	defer closeAuth()
+
+	// Whether the inter-service calls carry a credential is the difference between a working
+	// Gateway and a Gateway that can only report no-grounding on an auth-enabled estate, so it
+	// is said once at startup — as a BOOLEAN. The key itself is never logged.
+	logger.Info("governance/registry inter-service seams",
+		observability.String("governance_url", cfg.governanceURL),
+		observability.String("registry_url", cfg.registryURL),
+		observability.Bool("api_key_set", cfg.nodeAPIKey != ""))
 
 	logger.Info("listening",
 		observability.String("addr", cfg.addr),

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
 )
@@ -19,6 +20,7 @@ import (
 // Client invokes the Intelligence Gateway's reactive capability API.
 type Client struct {
 	baseURL    string
+	apiKey     string
 	capability string
 	http       *http.Client
 }
@@ -30,6 +32,21 @@ func NewClient(baseURL string, hc *http.Client) *Client {
 		hc = http.DefaultClient
 	}
 	return &Client{baseURL: baseURL, capability: "recommend_position", http: hc}
+}
+
+// WithAPIKey makes every invocation carry `X-API-Key` (EDR-SECURITY-01 F1). An empty key leaves
+// the call unauthenticated — the auth-off development case.
+//
+// This seam is the one inter-service call of Governance's that is NOT a read: a capability
+// invocation is a POST, so Intelligence's inbound edge (`RequireWriteScope`) refuses a
+// read-only key with 403. A Governance node that both enables AI and runs against an
+// authenticated Intelligence therefore needs a WRITE-capable (`admin`) key — which it reports
+// here as a plain HTTP error that names the variable, because a refused invocation is otherwise
+// indistinguishable from the Gateway being disabled (D13 treats "unavailable" as a safe
+// no-proposal, and that is exactly how a 403 used to be swallowed).
+func (c *Client) WithAPIKey(apiKey string) *Client {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
 }
 
 type wireProposal struct {
@@ -74,6 +91,9 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		return app.Recommendation{}, false, app.NoProposal{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -94,7 +114,8 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		}, nil // no proposal — a safe outcome
 	}
 	if resp.StatusCode != http.StatusOK {
-		return app.Recommendation{}, false, app.NoProposal{}, fmt.Errorf("intelligence API: status %d", resp.StatusCode)
+		return app.Recommendation{}, false, app.NoProposal{},
+			fmt.Errorf("intelligence API: status %d%s", resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 
 	var wp wireProposal
@@ -110,6 +131,19 @@ func (c *Client) RecommendPosition(ctx context.Context, findingID string) (app.R
 		Evidence:          evidenceRefs(wp),
 		RationaleWarnings: wp.RationaleWarnings,
 	}, true, app.NoProposal{}, nil
+}
+
+// credentialHint names the likely cause of a 401/403 in the error itself. A capability
+// invocation is a POST, so Intelligence requires a WRITE-capable key for it — which is why the
+// 403 wording says so rather than repeating the read-scope advice of the read seams.
+func (c *Client) credentialHint(status int) string {
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		return ""
+	}
+	if c.apiKey == "" {
+		return " — this invocation sent no X-API-Key; set THEMIS_API_KEY on this node (a capability invoke is a POST, so it needs a write-capable key)"
+	}
+	return " — this invocation sent an X-API-Key Intelligence refused; check THEMIS_API_KEY is current and write-capable (a capability invoke is a POST)"
 }
 
 // evidenceRefs extracts the cited references so Governance can Business-Verify them against

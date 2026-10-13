@@ -79,7 +79,17 @@ type Config struct {
 	AutoBudgetTokens int
 	AutoBudgetWindow time.Duration
 	RegistryURL      string // Registry read-API base URL (release enumeration for the sweep)
-	APIWriteKey      string // the node's write-scoped key for the autonomous push
+	// NodeAPIKey is this node's own Themis credential (THEMIS_API_KEY), sent as X-API-Key on
+	// EVERY inter-service call: the Governance projection and precedent reads, the Registry
+	// estate walk, and the autonomous proposal push. Empty = inter-service calls are
+	// unauthenticated (auth-off dev). Distinct from APIKey above, which is the bearer token for
+	// the OpenAI-compatible model server — two different peers, two different credentials, and
+	// conflating them would send the estate's key to a model provider.
+	//
+	// Where the autonomous sweep is enabled the key must be WRITE-capable (the push is a POST
+	// and Governance's edge requires a write-capable key for a mutation); a read-scoped key
+	// serves every read seam.
+	NodeAPIKey string
 	// AUTO-VOL-1 volume controls for the sweep. Unset (0) ⇒ the code defaults apply
 	// (0.75 cosine / 0.5 overlap / 20 per pass). AutoMaxPerPass < 0 ⇒ explicitly uncapped.
 	AutoMinScore   float64
@@ -104,8 +114,12 @@ func Wire(cfg Config) (Intelligence, error) {
 	// One projection read, from the context that owns the Finding Selection Type (T10).
 	// There is deliberately NO Knowledge address here: Governance composes the enrichment
 	// into the projection, which is what stopped the runtime orchestrating its own grounding.
-	proj := readapi.NewAssessmentClient(cfg.GovernanceURL, cfg.HTTPClient)
-	prc := readapi.NewPrecedentClient(cfg.GovernanceURL, cfg.HTTPClient)
+	// Both Governance seams carry the node's key (EDR-SECURITY-01): the Gateway's grounding read
+	// and the precedent fallback are reads like any other, and without the credential a
+	// Governance node with auth on answers 401 — which the Gateway can only report as
+	// no-grounding, indistinguishable from an estate that has nothing to say.
+	proj := readapi.NewAssessmentClient(cfg.GovernanceURL, cfg.HTTPClient).WithAPIKey(cfg.NodeAPIKey)
+	prc := readapi.NewPrecedentClient(cfg.GovernanceURL, cfg.HTTPClient).WithAPIKey(cfg.NodeAPIKey)
 
 	var prov, escProv, ecoProv app.Provider
 	if cfg.UseFake {
@@ -229,8 +243,8 @@ func Wire(cfg Config) (Intelligence, error) {
 	var sweep *app.AutonomousSweep
 	if cfg.Store != nil && cfg.Store.HasPool() && cfg.AutoBudgetTokens > 0 {
 		pool := app.NewBudget(cfg.AutoBudgetTokens, cfg.AutoBudgetWindow)
-		registry := readapi.NewRegistryClient(cfg.RegistryURL, cfg.HTTPClient)
-		writer := readapi.NewProposalWriter(cfg.GovernanceURL, cfg.APIWriteKey, cfg.HTTPClient)
+		registry := readapi.NewRegistryClient(cfg.RegistryURL, cfg.HTTPClient).WithAPIKey(cfg.NodeAPIKey)
+		writer := readapi.NewProposalWriter(cfg.GovernanceURL, cfg.NodeAPIKey, cfg.HTTPClient)
 		sweep = app.NewAutonomousSweep(registry, proj, precedents, writer, cfg.Store, pool)
 		// AUTO-VOL-1: apply operator overrides only when at least one knob is set, so an
 		// all-zero Config leaves the code defaults (0.75 / 0.5 / 20) intact. A configured

@@ -30,6 +30,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 
@@ -56,8 +57,12 @@ import (
 )
 
 const (
-	pgPort    = 15588
-	targetCVE = "CVE-2024-1000"
+	pgPort = 15588
+	// The auth-on pipeline gets its OWN embedded-Postgres port. The two runners are sequential,
+	// so one port would usually do; a second port means a slow shutdown of the first instance
+	// can never make the second test fail for a reason that has nothing to do with auth.
+	pgPortAuth = 15589
+	targetCVE  = "CVE-2024-1000"
 
 	// A minimal CycloneDX SBOM with one PyPI component the fake OSV maps to a CVE.
 	sbomDoc = `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,` +
@@ -69,13 +74,27 @@ const (
 		`"affected":[{"ranges":[{"events":[{"introduced":"0"},{"fixed":"2.0"}]}]}]}`
 )
 
-// pipeline is the composed runner: the three public HTTP surfaces plus the relay/reader drain
+// options configure one composed runner. The zero value is NOT valid — newPipeline is always
+// called with an explicit port, because the auth-on runner needs its own.
+type options struct {
+	pgPort int
+	// auth switches every node's inbound edge ON: a shared `auth` database, per-node keys, and
+	// the same RequireAPIKey + RequireWriteScope middleware each cmd/<ctx> mounts. The test's own
+	// calls then carry an admin key, and each node's inter-service client carries its own.
+	auth bool
+}
+
+// pipeline is the composed runner: the public HTTP surfaces plus the relay/reader drain
 // points the pump advances.
 type pipeline struct {
 	registryURL      string
 	evidenceURL      string
 	governanceURL    string
 	communicationURL string
+
+	// apiKey is the credential the TEST itself presents (an operator's admin key). Empty on the
+	// auth-off runner, where the nodes mount no middleware.
+	apiKey string
 
 	evRelay    *evstore.Relay
 	kn         knwiring.Knowledge
@@ -115,16 +134,25 @@ func (p *pipeline) pump(t *testing.T, n int) {
 // publication, and the published artifact appears with the expected stance. Every observation
 // is over a public HTTP API; no context's tables are read directly.
 func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
-	p := newPipeline(t)
+	newPipeline(t, options{pgPort: pgPort}).sbomToPublishedVEX(t)
+}
+
+// sbomToPublishedVEX is the scenario itself, run by the auth-off proof above and — unchanged,
+// which is the point — by the auth-ON proof in pipeline_auth_test.go. Sharing the body is what
+// makes the second test a statement about credentials and nothing else: if it passes, the same
+// SBOM reached the same published OpenVEX with every node's inbound edge authenticated.
+// It returns the Finding id so a caller can make further assertions about it.
+func (p *pipeline) sbomToPublishedVEX(t *testing.T) string {
+	t.Helper()
 
 	// Register the release through the real Registry (Product → Project → Release), exactly as a
 	// greenfield deployment does — Evidence validates the SBOM's subject_release_id against these
 	// registered ids (a registry-backed SubjectRef), so an unregistered release would be rejected.
-	releaseID := registerRelease(t, p.registryURL)
+	releaseID := p.registerRelease(t)
 	t.Logf("registered release: %s", releaseID)
 
 	// SBOM in (its subject is the just-registered release).
-	uploadSBOM(t, p.evidenceURL, releaseID)
+	p.uploadSBOM(t, releaseID)
 
 	// Evidence → Knowledge (correlate) → Governance (open Finding).
 	p.pump(t, 3)
@@ -134,7 +162,7 @@ func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 		FindingID string `json:"finding_id"`
 		CVE       string `json:"cve"`
 	}
-	getJSON(t, p.governanceURL+"/api/v1/releases/"+releaseID+"/posture", &posture)
+	p.getJSON(t, p.governanceURL+"/api/v1/releases/"+releaseID+"/posture", &posture)
 	findingID := ""
 	for _, e := range posture {
 		if e.CVE == targetCVE {
@@ -150,9 +178,9 @@ func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 	var raised struct {
 		ProposalID string `json:"proposal_id"`
 	}
-	postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals",
+	p.postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals",
 		map[string]any{"stance": "affected", "proposer_kind": "human", "proposer_id": "e2e"}, http.StatusCreated, &raised)
-	postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals/"+raised.ProposalID+"/accept",
+	p.postJSON(t, p.governanceURL+"/api/v1/findings/"+findingID+"/proposals/"+raised.ProposalID+"/accept",
 		map[string]any{"actor_id": "e2e", "actor_kind": "human"}, http.StatusNoContent, nil)
 
 	// Governance Position → Communication publishable.
@@ -162,7 +190,7 @@ func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 	var created struct {
 		PublicationID string `json:"publication_id"`
 	}
-	postJSON(t, p.communicationURL+"/api/v1/publications",
+	p.postJSON(t, p.communicationURL+"/api/v1/publications",
 		map[string]any{"finding_id": findingID, "artifact_type": "vex", "format": "openvex"}, http.StatusCreated, &created)
 	p.pump(t, 2)
 
@@ -175,28 +203,29 @@ func TestPipeline_SBOMToPublishedVEX(t *testing.T) {
 		Stance string `json:"stance"`
 		CVE    string `json:"cve"`
 	}
-	getJSON(t, p.communicationURL+"/api/v1/publications?release="+releaseID, &pubs)
+	p.getJSON(t, p.communicationURL+"/api/v1/publications?release="+releaseID, &pubs)
 	for _, pub := range pubs {
 		if pub.Format == "openvex" && pub.CVE == targetCVE && pub.Stance == "affected" {
 			var full struct {
 				Payload string `json:"payload"`
 			}
-			getJSON(t, p.communicationURL+"/api/v1/publications/"+pub.ID, &full)
+			p.getJSON(t, p.communicationURL+"/api/v1/publications/"+pub.ID, &full)
 			if !strings.Contains(full.Payload, targetCVE) {
 				t.Errorf("OpenVEX payload does not name %s: %s", targetCVE, full.Payload)
 			}
 			t.Log("pipeline OK: SBOM → Evidence → Knowledge → Governance → Communication published OpenVEX (affected)")
-			return
+			return findingID
 		}
 	}
 	t.Fatalf("no published OpenVEX (affected) for %s: %+v", targetCVE, pubs)
+	return ""
 }
 
 // --- HTTP helpers --------------------------------------------------------------------------
 
-func uploadSBOM(t *testing.T, evidenceURL, releaseID string) {
+func (p *pipeline) uploadSBOM(t *testing.T, releaseID string) {
 	t.Helper()
-	postJSON(t, evidenceURL+"/api/v1/evidence", map[string]any{
+	p.postJSON(t, p.evidenceURL+"/api/v1/evidence", map[string]any{
 		"kind": "sbom", "format": "cyclonedx", "subject_release_id": releaseID, "document": sbomDoc,
 	}, http.StatusCreated, nil)
 }
@@ -204,16 +233,16 @@ func uploadSBOM(t *testing.T, evidenceURL, releaseID string) {
 // registerRelease drives the real Registry HTTP API to create a Product → Project → Release chain
 // and returns the generated release id — the deployment-faithful way to obtain a subject the
 // Evidence context will accept (vs a stubbed SubjectRef).
-func registerRelease(t *testing.T, registryURL string) string {
+func (p *pipeline) registerRelease(t *testing.T) string {
 	t.Helper()
 	var product, project, release struct {
 		ID string `json:"id"`
 	}
-	postJSON(t, registryURL+"/api/v1/products",
+	p.postJSON(t, p.registryURL+"/api/v1/products",
 		map[string]any{"name": "acme"}, http.StatusCreated, &product)
-	postJSON(t, registryURL+"/api/v1/projects",
+	p.postJSON(t, p.registryURL+"/api/v1/projects",
 		map[string]any{"product_id": product.ID, "name": "api"}, http.StatusCreated, &project)
-	postJSON(t, registryURL+"/api/v1/releases",
+	p.postJSON(t, p.registryURL+"/api/v1/releases",
 		map[string]any{"project_id": project.ID, "version": "1.0.0"}, http.StatusCreated, &release)
 	if release.ID == "" {
 		t.Fatal("registry returned an empty release id")
@@ -221,28 +250,47 @@ func registerRelease(t *testing.T, registryURL string) string {
 	return release.ID
 }
 
-func getJSON(t *testing.T, url string, out any) {
+// do issues one request carrying the TEST's own credential when the runner is authenticated —
+// the operator's X-API-Key, exactly as `scripts/gf-upload-sbom.sh` sends it. Empty on the
+// auth-off runner, where the nodes mount no middleware.
+func (p *pipeline) do(t *testing.T, req *http.Request) *http.Response {
 	t.Helper()
-	resp, err := http.Get(url)
+	if p.apiKey != "" {
+		req.Header.Set("X-API-Key", p.apiKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", req.Method, req.URL, err)
+	}
+	return resp
+}
+
+func (p *pipeline) getJSON(t *testing.T, url string, out any) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
+	resp := p.do(t, req)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET %s = %d, want 200", url, resp.StatusCode)
+		msg, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET %s = %d, want 200: %s", url, resp.StatusCode, msg)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("decode %s: %v", url, err)
 	}
 }
 
-func postJSON(t *testing.T, url string, body any, wantStatus int, out any) {
+func (p *pipeline) postJSON(t *testing.T, url string, body any, wantStatus int, out any) {
 	t.Helper()
 	raw, _ := json.Marshal(body)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(raw))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
+	req.Header.Set("Content-Type", "application/json")
+	resp := p.do(t, req)
 	defer resp.Body.Close()
 	if resp.StatusCode != wantStatus {
 		msg, _ := io.ReadAll(resp.Body)
@@ -257,7 +305,7 @@ func postJSON(t *testing.T, url string, body any, wantStatus int, out any) {
 
 // --- runner setup --------------------------------------------------------------------------
 
-func newPipeline(t *testing.T) *pipeline {
+func newPipeline(t *testing.T, opt options) *pipeline {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "pipeline-*")
 	if err != nil {
@@ -265,7 +313,7 @@ func newPipeline(t *testing.T) *pipeline {
 	}
 	cfg := embeddedpostgres.DefaultConfig().
 		Username("themis").Password("themis").Database("postgres").
-		Version(embeddedpostgres.V16).Port(pgPort).
+		Version(embeddedpostgres.V16).Port(uint32(opt.pgPort)).
 		DataPath(filepath.Join(dir, "data")).RuntimePath(filepath.Join(dir, "runtime")).
 		BinariesPath(filepath.Join(dir, "bin")).
 		StartParameters(map[string]string{"max_connections": "60"})
@@ -277,22 +325,47 @@ func newPipeline(t *testing.T) *pipeline {
 	t.Cleanup(func() { _ = db.Stop(); _ = os.RemoveAll(dir) })
 
 	ctx := context.Background()
-	admin := mustPool(t, dsnFor("postgres"))
+	admin := mustPool(t, dsnFor(opt.pgPort, "postgres"))
 	defer admin.Close()
-	for _, name := range []string{"evidence", "knowledge", "governance", "communication", "bus"} {
+	// The production topology (INSTALLATION.md Part A): one server, a database per context plus
+	// the shared `bus` — and, when the inbound edge is on, the shared `auth` identity database.
+	databases := []string{"evidence", "knowledge", "governance", "communication", "bus"}
+	if opt.auth {
+		databases = append(databases, "auth")
+	}
+	for _, name := range databases {
 		if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 			t.Fatalf("create db %s: %v", name, err)
 		}
 	}
 
-	migrateDB(t, "evidence", "../../internal/evidence/adapters/store/migrations")
-	migrateDB(t, "knowledge", "../../internal/knowledge/adapters/store/migrations")
-	migrateDB(t, "governance", "../../internal/governance/adapters/store/migrations")
-	migrateDB(t, "communication", "../../internal/communication/adapters/store/migrations")
-	migrateDB(t, "bus", "../../internal/platform/eventbus/migrations")
+	migrateDB(t, opt.pgPort, "evidence", "../../internal/evidence/adapters/store/migrations")
+	migrateDB(t, opt.pgPort, "knowledge", "../../internal/knowledge/adapters/store/migrations")
+	migrateDB(t, opt.pgPort, "governance", "../../internal/governance/adapters/store/migrations")
+	migrateDB(t, opt.pgPort, "communication", "../../internal/communication/adapters/store/migrations")
+	migrateDB(t, opt.pgPort, "bus", "../../internal/platform/eventbus/migrations")
+
+	// The inbound edge (EDR-SECURITY-01 D1/D2): the `auth` schema, the minted per-node keys, and
+	// the authenticator every node mounts. ONE authenticator is shared by the five in-process
+	// nodes rather than five pools against one database — this runner's connection budget is
+	// finite and the middleware only ever READS the key table, so the behaviour is identical to
+	// five nodes each opening THEMIS_AUTH_DATABASE_DSN.
+	var authn *auth.Authenticator
+	var keys nodeKeys
+	if opt.auth {
+		authDSN := dsnFor(opt.pgPort, "auth")
+		migrateDB(t, opt.pgPort, "auth", "../../internal/platform/auth/migrations")
+		keys = mintNodeKeys(t, authDSN)
+		a, closeAuth, err := auth.Open(ctx, authDSN)
+		if err != nil {
+			t.Fatalf("auth open: %v", err)
+		}
+		t.Cleanup(closeAuth)
+		authn = a
+	}
 
 	log := observability.Nop()
-	busPool := mustPool(t, dsnFor("bus"))
+	busPool := mustPool(t, dsnFor(opt.pgPort, "bus"))
 	t.Cleanup(busPool.Close)
 
 	// A fake OSV endpoint so Knowledge's lazy discovery finds a CVE for the SBOM's component.
@@ -304,11 +377,11 @@ func newPipeline(t *testing.T) *pipeline {
 	// Registry: co-locates its identity tables in the evidence DB (as in production) and
 	// migrates them itself, through its OWN bookkeeping table. It serves the Product →
 	// Project → Release API the test registers against.
-	evPool := mustPool(t, dsnFor("evidence"))
+	evPool := mustPool(t, dsnFor(opt.pgPort, "evidence"))
 	t.Cleanup(evPool.Close)
-	migrateRegistry(t)
+	migrateRegistry(t, opt.pgPort)
 	regHandler, _ := registrywiring.RegistryAPI(evPool)
-	registrySrv := httptest.NewServer(mount(regHandler))
+	registrySrv := httptest.NewServer(mount(regHandler, authn))
 	t.Cleanup(registrySrv.Close)
 
 	// Evidence: producer of EvidenceRegistered. SubjectRef is registry-backed — it validates a
@@ -318,41 +391,48 @@ func newPipeline(t *testing.T) *pipeline {
 		Registry: registrySubjectRef{store: registrystore.New(evPool)},
 	})
 	t.Cleanup(evIntake.Close)
-	evidenceSrv := httptest.NewServer(mount(evHandler))
+	evidenceSrv := httptest.NewServer(mount(evHandler, authn))
 	t.Cleanup(evidenceSrv.Close)
 	evRelay := evstore.NewRelay(evPool, eventbus.NewPublisher(busPool), 100)
 
-	// Knowledge: consumes the Evidence stream and correlates (no HTTP surface needed here).
-	knPool := mustPool(t, dsnFor("knowledge"))
+	// Knowledge: consumes the Evidence stream and correlates, reading each release's inventory
+	// back from Evidence over the read API — the seam that carries keys.knowledge. Its own read
+	// API is served too, because Governance reads the assessment projection from it.
+	knPool := mustPool(t, dsnFor(opt.pgPort, "knowledge"))
 	t.Cleanup(knPool.Close)
-	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{}, knwiring.AlpineConfig{}, knwiring.RockyConfig{}, knwiring.VexfeedConfig{}, knwiring.RediscoveryConfig{}, knwiring.VerdictConfig{})
+	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, keys.knowledge, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{}, knwiring.AlpineConfig{}, knwiring.RockyConfig{}, knwiring.VexfeedConfig{}, knwiring.RediscoveryConfig{}, knwiring.VerdictConfig{})
 	knReader := kninbound.Subscription.NewReader(busPool, log, knstore.NewInboxConsumer(knPool, kn.Consumer))
+	knowledgeSrv := httptest.NewServer(mount(kn.Handler, authn))
+	t.Cleanup(knowledgeSrv.Close)
 
 	// Governance: consumes the Knowledge stream; serves posture + triage.
-	govPool := mustPool(t, dsnFor("governance"))
+	govPool := mustPool(t, dsnFor(opt.pgPort, "governance"))
 	t.Cleanup(govPool.Close)
 	// Wired exactly as cmd/governance does, including the one shipped auto-accept policy
 	// (EDR-GOVERNANCE-01 D15) — the pipeline proof should exercise the real composition, not a
 	// permissive or empty one. It changes nothing in this scenario: the human governs an
 	// `affected` Position, and the rule only ever accepts a system-raised `not_affected` on
 	// Observed evidence.
-	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil, "", "", "", "", 0,
+	//
+	// All three read seams are wired (Registry for the blast multiplier + the product-scope hop,
+	// Knowledge for the assessment projection, Evidence for the compare read), each carrying
+	// keys.governance. The posture read in the scenario therefore performs a real authenticated
+	// Governance → Registry read on the auth-on runner.
+	gov := govwiring.Wire(govPool, eventbus.NewPublisher(busPool), nil,
+		registrySrv.URL, knowledgeSrv.URL, evidenceSrv.URL, keys.governance, 0,
 		govdomain.DefaultMitigatedWeight, govdomain.DefaultEPSSDriftThreshold, log,
 		govdomain.AutoAcceptObservedNotAffectedPolicy())
-	governanceSrv := httptest.NewServer(mount(gov.Handler))
+	governanceSrv := httptest.NewServer(mount(gov.Handler, authn))
 	t.Cleanup(governanceSrv.Close)
 	govReader := govinbound.Subscription.NewReader(busPool, log, govstore.NewInboxConsumer(govPool, gov.Consumer))
 
 	// Communication: consumes the Governance stream; serves publish + read (reads Positions
-	// back from Governance over its read API).
-	commPool := mustPool(t, dsnFor("communication"))
+	// back from Governance over its read API, and the name chain from Registry).
+	commPool := mustPool(t, dsnFor(opt.pgPort, "communication"))
 	t.Cleanup(commPool.Close)
-	// No read-API key: the in-test Governance and Registry nodes mount no auth middleware, which is
-	// the auth-off estate. The authenticated case is covered where the credential lives, in the two
-	// read clients' tests.
-	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL, "",
+	comm := commwiring.Wire(commPool, governanceSrv.URL, registrySrv.URL, keys.communication,
 		delivery.NewLogDeliverer(log), delivery.PassThroughRedactor{}, eventbus.NewPublisher(busPool))
-	communicationSrv := httptest.NewServer(mount(comm.Handler))
+	communicationSrv := httptest.NewServer(mount(comm.Handler, authn))
 	t.Cleanup(communicationSrv.Close)
 	commReader := comminbound.Subscription.NewReader(busPool, log, commstore.NewInboxConsumer(commPool, comm.Consumer))
 
@@ -361,6 +441,7 @@ func newPipeline(t *testing.T) *pipeline {
 		evidenceURL:      evidenceSrv.URL,
 		governanceURL:    governanceSrv.URL,
 		communicationURL: communicationSrv.URL,
+		apiKey:           keys.operator,
 		evRelay:          evRelay,
 		kn:               kn,
 		knReader:         knReader,
@@ -371,14 +452,26 @@ func newPipeline(t *testing.T) *pipeline {
 	}
 }
 
-func mount(h http.Handler) http.Handler {
+// mount serves one context's API under /api/v1, behind the inbound edge when an authenticator
+// is supplied — RequireAPIKey then the method-based RequireWriteScope, the same two middlewares
+// every cmd/<ctx>'s authedMount applies. A nil authenticator is the auth-off estate: mounted
+// open, exactly as a node with no THEMIS_AUTH_DATABASE_DSN runs.
+func mount(h http.Handler, authn *auth.Authenticator) http.Handler {
 	r := chi.NewRouter()
-	r.Mount("/api/v1", h)
+	if authn == nil {
+		r.Mount("/api/v1", h)
+		return r
+	}
+	r.Group(func(g chi.Router) {
+		g.Use(authn.RequireAPIKey)
+		g.Use(auth.RequireWriteScope)
+		g.Mount("/api/v1", h)
+	})
 	return r
 }
 
-func dsnFor(db string) string {
-	return fmt.Sprintf("postgres://themis:themis@localhost:%d/%s?sslmode=disable", pgPort, db)
+func dsnFor(port int, db string) string {
+	return fmt.Sprintf("postgres://themis:themis@localhost:%d/%s?sslmode=disable", port, db)
 }
 
 func mustPool(t *testing.T, dsn string) *pgxpool.Pool {
@@ -390,10 +483,10 @@ func mustPool(t *testing.T, dsn string) *pgxpool.Pool {
 	return pool
 }
 
-func migrateDB(t *testing.T, db, path string) {
+func migrateDB(t *testing.T, port int, db, path string) {
 	t.Helper()
 	abs, _ := filepath.Abs(path)
-	m, err := migrate.New("file://"+abs, dsnFor(db))
+	m, err := migrate.New("file://"+abs, dsnFor(port, db))
 	if err != nil {
 		t.Fatalf("migrate.New %s: %v", db, err)
 	}
@@ -413,13 +506,13 @@ func migrateDB(t *testing.T, db, path string) {
 // find-or-create creates (EDR-INTAKE-01 B4) failed with "no unique or exclusion constraint
 // matching the ON CONFLICT specification". The migrations DIRECTORY is the source of truth here;
 // a file literal is right once and silently wrong afterwards.
-func migrateRegistry(t *testing.T) {
+func migrateRegistry(t *testing.T, port int) {
 	t.Helper()
 	abs, _ := filepath.Abs("../../internal/registry/adapters/store/migrations")
 	// The migrations-table parameter MUST ride a separate DSN from any pool's: pgx forwards an
 	// unknown parameter to Postgres as a startup option and every runtime connection would fail
 	// with `unrecognized configuration parameter`.
-	u, err := url.Parse(dsnFor("evidence"))
+	u, err := url.Parse(dsnFor(port, "evidence"))
 	if err != nil {
 		t.Fatalf("parse evidence dsn: %v", err)
 	}

@@ -242,6 +242,17 @@ human governs an **affected** Position → (bus) → Communication publishes the
 embedded Postgres is unavailable, and is **not** part of `make check` (e2e is slow; it runs post-merge in CI
 alongside `make e2e-evidence`).
 
+`TestPipeline_SBOMToPublishedVEX_WithInboundAuthOnEveryNode` runs **the same scenario body** with
+`THEMIS_AUTH_DATABASE_DSN` set on **every** node of the pipeline and each node holding its own minted key
+(EDR-SECURITY-01, realization note 2026-10-13) — so the test is a statement about credentials and nothing
+else. It mints through the same code path `cmd/authadmin` uses, asserts first that an unauthenticated call is
+refused (or it would prove nothing), and then that the authenticated pipeline still reaches a published
+OpenVEX. Four inter-service seams authenticate inside it: Knowledge→Evidence (the inventory read — correlation's
+input, and the hop that used to stall the whole pipeline), Governance→Registry (the blast multiplier),
+Governance→Knowledge (the assessment projection, asserted explicitly because that seam DEGRADES rather than
+fails) and Communication→Governance (the Position behind the document). Intelligence is not in this harness;
+its seams are covered by the header tests beside each client.
+
 ### Vendor-VEX capabilities (EDR-VEX-01: suppression + Red Hat + CSAF-VEX + fixed verdict)
 
 The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-vendor-vex-suppression--the-fixed-verdict-edr-vex-01); enable the feeds per [§ 4b](INSTALLATION.md#4b-enable-enrichment-feeds-optional). What each capability should show:

@@ -54,6 +54,24 @@ install -d -m 0750 /etc/themis
 # have no such group and the install died here.
 #
 # Consequence worth knowing: running a node BY HAND now needs sudo to source its env file.
+#
+# INBOUND AUTH (EDR-SECURITY-01). These stanzas describe an AUTH-OFF box: no
+# THEMIS_AUTH_DATABASE_DSN, so every node logs `AUTH DISABLED` and nothing requires a key. To
+# switch auth ON you need BOTH halves, per node, or the pipeline breaks silently — see
+# INSTALLATION.md "Switching auth on for every node":
+#
+#   1. THEMIS_AUTH_DATABASE_DSN=${BASE}/auth?sslmode=disable   on every node (its inbound edge),
+#      plus THEMIS_AUTH_REQUIRED=1 so a node can never boot open afterwards.
+#   2. THEMIS_API_KEY=<minted key>                             on every node that CALLS another
+#      node — knowledge, governance, communication, intelligence, dashboard. Each gets its OWN
+#      key with the smallest scope its calls need (`read` for reads; `admin` where the node
+#      POSTs to a peer: the dashboard proxy, Intelligence's autonomous push, and Governance's
+#      capability invoke of Intelligence). The commented THEMIS_API_KEY lines below are those
+#      slots — uncomment them when you do step 1.
+#
+# Step 1 without step 2 is the failure that kept this estate auth-off (2026-10-13): Knowledge's
+# inventory read answers 401, so an uploaded SBOM correlates to nothing and the estate stops
+# seeing vulnerabilities with every unit still "active (running)".
 write_env() { # $1=service ; stdin=service-specific KEY=VALUE lines
   local f="/etc/themis/$1.env"
   {
@@ -85,15 +103,25 @@ THEMIS_GOVERNANCE_URL=http://localhost:8083
 EOF
 
 # Knowledge: :8085 (NOT the buggy :8082 default); reads Evidence inventory + OSV.
+#
+# Its Evidence read is correlation's INPUT, so this is the one THEMIS_API_KEY whose absence costs
+# the whole pipeline rather than one view: with auth on at Evidence and no key here, an uploaded
+# SBOM correlates to nothing. A READ-scoped key is enough — this node writes to no peer.
 write_env knowledge <<EOF
 THEMIS_DATABASE_DSN=${BASE}/knowledge?sslmode=disable
 THEMIS_BUS_DATABASE_DSN=${BUS}
 THEMIS_EVIDENCE_URL=http://localhost:8081
 THEMIS_KNOWLEDGE_MIGRATE=1
 THEMIS_KNOWLEDGE_ADDR=:8085
+# THEMIS_API_KEY=<mint with: authadmin create-key --name knowledge-read --scopes read>
 EOF
 
 # Governance: AI ON (calls Intelligence at :8086 only on /recommend).
+#
+# Its key serves FOUR seams: the Registry, Knowledge and Evidence reads, and — because AI is on
+# here — the capability invoke of Intelligence. That last one is a POST, so Intelligence's write
+# floor refuses a read-only key: this node's key must be `admin`, unlike every other read-only
+# node. Nothing in Intelligence is mutated; the floor is method-based (EDR-SECURITY-01 D4).
 write_env governance <<EOF
 THEMIS_DATABASE_DSN=${BASE}/governance?sslmode=disable
 THEMIS_BUS_DATABASE_DSN=${BUS}
@@ -102,15 +130,16 @@ THEMIS_INTELLIGENCE_URL=http://localhost:8086
 THEMIS_GOVERNANCE_MIGRATE=1
 THEMIS_GOVERNANCE_ADDR=:8083
 # THEMIS_INTELLIGENCE_TIMEOUT=300s   # raise WITH THEMIS_LLM_TIMEOUT on the intelligence node
+# THEMIS_API_KEY=<mint with: authadmin create-key --name governance --scopes admin>
 EOF
 
 # Communication: reads Positions and the release posture back from Governance.
 #
-# THEMIS_API_KEY is commented because this stanza describes an auth-off box. UNCOMMENT it on any
-# estate where Governance/Registry run with auth (THEMIS_AUTH_DATABASE_DSN set, or
-# THEMIS_AUTH_REQUIRED=1): those reads then answer 401, and because the remediation-ticket payload is
-# rendered from the posture read inside the inbox transaction, a 401 means no Jira intent is recorded
-# and the Governance event retries forever. A READ-scoped key is enough — this node writes to neither.
+# UNCOMMENT THEMIS_API_KEY on any estate where Governance/Registry run with auth
+# (THEMIS_AUTH_DATABASE_DSN set, or THEMIS_AUTH_REQUIRED=1): those reads then answer 401, and
+# because the remediation-ticket payload is rendered from the posture read inside the inbox
+# transaction, a 401 means no Jira intent is recorded and the Governance event retries forever.
+# A READ-scoped key is enough — this node writes to neither.
 write_env communication <<EOF
 THEMIS_DATABASE_DSN=${BASE}/communication?sslmode=disable
 THEMIS_BUS_DATABASE_DSN=${BUS}
@@ -122,6 +151,12 @@ EOF
 
 # Intelligence: stateless AI gateway over Ollama.
 #
+# Its THEMIS_API_KEY serves the Governance projection + precedent reads (the Gateway's whole
+# grounding — unauthenticated, every invocation can only report `no_grounding`), and, when the
+# Δ4b autonomous sweep is configured, the Registry estate walk and the proposal PUSH. `read`
+# suffices with the sweep off; the push needs `admin`. It is NOT the model-server token, which
+# is THEMIS_LLM_API_KEY.
+#
 # THEMIS_LLM_TIMEOUT here and THEMIS_INTELLIGENCE_TIMEOUT on the Governance node are TWO HALVES OF
 # ONE DEADLINE and the shorter one decides. Raising only this side does nothing visible: Governance
 # hangs up first, the Gateway sees its request context cancelled mid-provider-call, and logs
@@ -132,6 +167,7 @@ THEMIS_GOVERNANCE_URL=http://localhost:8083
 THEMIS_OLLAMA_URL=http://localhost:11434
 THEMIS_INTELLIGENCE_MODEL=${MODEL}
 THEMIS_INTELLIGENCE_ADDR=:8086
+# THEMIS_API_KEY=<mint with: authadmin create-key --name intelligence-read --scopes read>
 # THEMIS_LLM_TIMEOUT=300s
 # THEMIS_INTELLIGENCE_MODEL_ESCALATION=   # larger model: honest 'insufficient' retries once here (G-AI-2b)
 # THEMIS_INTELLIGENCE_MODEL_ECONOMY=      # smaller model: near-exhausted budget degrades here (G-AI-4)
