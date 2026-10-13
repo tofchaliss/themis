@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/knowledge/adapters/evidence"
@@ -128,5 +129,117 @@ func TestClient_EvidenceFacts(t *testing.T) {
 	}
 	if _, _, _, err := c.EvidenceFacts(context.Background(), "malformed"); err == nil {
 		t.Error("a malformed body must surface as an error")
+	}
+}
+
+// --- Auth-enabled estate: every read carries X-API-Key ---------------------------------------
+
+const readKey = "read-scoped-key-abc123"
+
+// authedEvidence answers 401 to any request that does not carry the expected key — an Evidence
+// node running with THEMIS_AUTH_DATABASE_DSN set (EDR-SECURITY-01 F1). It records the header it
+// saw on each request, so the absent-key case can be asserted as an ABSENT header rather than
+// merely a refused call.
+func authedEvidence(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-API-Key"))
+		if r.Header.Get("X-API-Key") != readKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/evidence/ev-1/inventory":
+			_, _ = w.Write([]byte(`{"components":[{"purl":"pkg:deb/debian/openssl@3.0.11"}]}`))
+		case "/api/v1/evidence/ev-1/document":
+			_, _ = w.Write([]byte(`{"kind":"vex","document":"{}"}`))
+		case "/api/v1/evidence/ev-1":
+			_, _ = w.Write([]byte(`{"kind":"sbom","subject_release_id":"rel-1"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
+// WITH the key every read authenticates, so correlation still gets its inventory on an
+// auth-enabled estate. All three reads matter: they are the inputs of correlation, of the
+// uploaded-VEX fold and of the unresolved-components query, and one unauthenticated read is
+// enough to make an upload correlate to nothing.
+func TestClientSendsAPIKeyWhenSet(t *testing.T) {
+	srv, seen := authedEvidence(t)
+	c := evidence.NewClient(srv.URL, srv.Client()).WithAPIKey("  " + readKey + "\n") // whitespace is trimmed
+
+	if _, err := c.GetInventory(context.Background(), "ev-1"); err != nil {
+		t.Errorf("inventory: %v", err)
+	}
+	if _, _, err := c.GetDocument(context.Background(), "ev-1"); err != nil {
+		t.Errorf("document: %v", err)
+	}
+	if _, _, found, err := c.EvidenceFacts(context.Background(), "ev-1"); err != nil || !found {
+		t.Errorf("facts = %v/%v", found, err)
+	}
+	if len(*seen) != 3 {
+		t.Fatalf("saw %d requests, want 3", len(*seen))
+	}
+	for i, got := range *seen {
+		if got != readKey {
+			t.Errorf("request %d sent X-API-Key %q, want the configured key", i, got)
+		}
+	}
+}
+
+// WITHOUT the key the header is ABSENT (not present-and-empty), the reads fail, and the error
+// says the read was unauthenticated and names the variable. A 401 read as "this release has no
+// inventory" is the worst reading available: the estate looks clean while nothing correlates.
+func TestClientSendsNoAPIKeyWhenUnsetAndSaysWhyOn401(t *testing.T) {
+	srv, seen := authedEvidence(t)
+	c := evidence.NewClient(srv.URL, srv.Client())
+
+	_, err := c.GetInventory(context.Background(), "ev-1")
+	if err == nil {
+		t.Fatal("an unauthenticated inventory read must fail")
+	}
+	for _, want := range []string{"401", "sent no X-API-Key", "THEMIS_API_KEY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(*seen) != 1 || (*seen)[0] != "" {
+		t.Errorf("headers seen = %q, want one request carrying no X-API-Key", *seen)
+	}
+	// The other two reads say the same thing, because the remedy is the same variable.
+	if _, _, derr := c.GetDocument(context.Background(), "ev-1"); derr == nil ||
+		!strings.Contains(derr.Error(), "THEMIS_API_KEY") {
+		t.Errorf("document err = %v, want the credential hint", derr)
+	}
+	if _, _, _, ferr := c.EvidenceFacts(context.Background(), "ev-1"); ferr == nil ||
+		!strings.Contains(ferr.Error(), "THEMIS_API_KEY") {
+		t.Errorf("facts err = %v, want the credential hint", ferr)
+	}
+
+	// A key Evidence REFUSES is a different operator problem from an absent one, and the error
+	// distinguishes them — without ever echoing the credential.
+	_, err = evidence.NewClient(srv.URL, srv.Client()).WithAPIKey("stale-key").
+		GetInventory(context.Background(), "ev-1")
+	if err == nil || !strings.Contains(err.Error(), "Evidence refused") {
+		t.Errorf("err = %v, want it to distinguish a refused key from an absent one", err)
+	}
+	if strings.Contains(err.Error(), "stale-key") {
+		t.Errorf("err = %v leaked the credential", err)
+	}
+}
+
+// A 404 or a 500 carries NO credential hint: naming a variable that is already set correctly
+// would send an operator after the wrong thing.
+func TestClientCredentialHintOnlyOnAuthFailures(t *testing.T) {
+	srv := fakeEvidence(t)
+	defer srv.Close()
+	_, err := evidence.NewClient(srv.URL, srv.Client()).WithAPIKey(readKey).
+		GetInventory(context.Background(), "missing")
+	if err == nil || strings.Contains(err.Error(), "THEMIS_API_KEY") {
+		t.Errorf("err = %v, want a plain 404 with no credential advice", err)
 	}
 }

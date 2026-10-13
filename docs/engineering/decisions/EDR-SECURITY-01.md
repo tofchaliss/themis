@@ -252,6 +252,81 @@ distinguished them would make either door a product-existence oracle for the hol
 Evidence write surface, and every other context except Governance, keeps the method-based `AuthorizeWrite`
 floor — widening that is still its own decision, and the deferral above stands for it.
 
+## Realization note (2026-10-13) — "inbound-edge only" was not a model, it was a hole
+
+**What was claimed.** That auth is *inbound-edge only* and **inter-service read clients send no
+key** — written in `CLAUDE.md`, in `internal/intelligence/adapters/readapi/proposal_writer.go`'s
+package doc ("Read clients elsewhere in this package send no key (inbound-edge auth is read-open
+for inter-service reads)") and in `registry.go`'s header ("Read-only; sends no key (inter-service
+reads are auth-open)").
+
+**Why it is false.** There is no such thing as "read-open" at the inbound edge. The edge is one
+switch per node (`THEMIS_AUTH_DATABASE_DSN`), and the method floor (`RequireWriteScope`) lets an
+*authenticated* principal read — it does not let an *anonymous* caller read. A node whose peers
+send no credential therefore cannot have auth switched on at all. Measured on the enterprise VM
+(2026-10-13): **Evidence, Registry and Governance were all running `AUTH DISABLED`**, not by
+choice but because turning them on broke reads that sent no key. The sentence described an
+accident as a design.
+
+It was also already untrue in two places that had hit the wall: Communication's two read seams
+(M1b-8, 2026-10-05) and Governance's three (#131). Each fix was written as a local one, so the
+claim stayed in the documents while the code outgrew it twice.
+
+**What it cost, concretely.** The worst case is not a degraded read; it is a **silent stop**.
+Knowledge's inventory read is correlation's input, so with auth on at Evidence an uploaded SBOM
+correlated to nothing, no Finding opened, and every dashboard stayed green while the estate went
+blind — the failure visible only as a 401 in a bus reader's log.
+
+**The rule, stated once.** *Every* Themis node that calls another Themis node reads
+`THEMIS_API_KEY` and sends it as `X-API-Key` on every such call; unset means no header (the
+auth-off dev case); the key is never logged (a boolean `api_key_set` is logged at startup
+instead); and a 401/403 from a peer produces an error that names the variable and the scope the
+call needs, distinguishing *no key sent* from *a key the peer refused*. Scope follows the call:
+`read` for reads, write-capable for a write.
+
+**One consequence worth stating, because it is the surprise in this change.** A *capability
+invocation* is a POST. Intelligence's edge applies the same method floor as everyone's, so
+Governance calling `recommend_position` on an authenticated Intelligence node needs a
+**write-capable (`admin`) key** — a read-only key authenticates and is then refused. Nothing in
+Intelligence is mutated by it; the floor is method-based (D4 realization), not semantic. That is
+a known cost of the method floor, not a new decision, and the client's 403 says so.
+
+**Audit of every inter-service HTTP client under `internal/*/adapters`** (external feed, Jira and
+LLM-provider clients excluded — they talk to third parties, not to Themis nodes):
+
+| Client | Calls | Before | After |
+| --- | --- | --- | --- |
+| `communication/adapters/governance` | Governance (read) | sends key (M1b-8) | unchanged |
+| `communication/adapters/registry` | Registry (read) | sends key (M1b-8) | unchanged |
+| `governance/adapters/registry` | Registry (read) | sends key (#131) | unchanged |
+| `governance/adapters/knowledge` | Knowledge (read) | sends key (#131) | unchanged |
+| `governance/adapters/evidence` | Evidence (read) | sends key (#131) | unchanged |
+| `governance/adapters/intelligence` | Intelligence (**POST** invoke) | **no key** | `WithAPIKey`; needs a **write-capable** key |
+| `knowledge/adapters/evidence` | Evidence (read ×3) | **no key** | `WithAPIKey`, wired in `knowledge/adapters/wiring` |
+| `intelligence/adapters/readapi/assessment` | Governance (read ×3) | **no key** | `WithAPIKey`, wired |
+| `intelligence/adapters/readapi/precedent` | Governance (read ×2) | **no key** | `WithAPIKey`, wired |
+| `intelligence/adapters/readapi/registry` | Registry (read walk) | **no key** | `WithAPIKey`, wired |
+| `intelligence/adapters/readapi/proposal_writer` | Governance (**POST**) | sends key | key now trimmed; 403 names the scope |
+| `dashboard/proxy` | all six nodes | injects the key | unchanged (not under `internal/*/adapters`) |
+
+Evidence and Registry call no other node: Evidence resolves releases through Registry's **store**
+in the shared `evidence` database, not over HTTP.
+
+**Where it is proven.** A header test beside each client (key set ⇒ `X-API-Key` present and
+exactly the configured value, trimmed; key unset ⇒ the header is ABSENT; 401/403 ⇒ an error that
+names `THEMIS_API_KEY` and never echoes the credential), a wiring guard for the two compositions
+that had to hand the key over (`knowledge/adapters/wiring`, `intelligence/adapters/wiring` —
+"wiring is no gate"), and the end-to-end proof
+`TestPipeline_SBOMToPublishedVEX_WithInboundAuthOnEveryNode` (`make e2e-pipeline`): the same
+SBOM → published-OpenVEX scenario with `THEMIS_AUTH_DATABASE_DSN` set on **every** node of the
+pipeline and each node holding its own minted key, asserting first that an unauthenticated call
+is refused. Intelligence is not in that harness (it needs a provider, and its client would have
+to be wired into Governance before Governance exists), so its five seams are covered by the
+header and wiring tests.
+
+Operator guidance: `INSTALLATION.md` → "Switching auth on for every node";
+`deploy/node.env.example` names the scope each node's key needs.
+
 ## Not in scope (explicit non-goals)
 
 OAuth2 / OIDC / JWT / SSO; per-human user identity (keys are service/tenant credentials, not users); mTLS;

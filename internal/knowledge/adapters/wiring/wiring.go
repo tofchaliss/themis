@@ -37,6 +37,21 @@ func (vexParserAdapter) Parse(raw []byte) ([]app.VEXStatement, error) {
 	return out, nil
 }
 
+// evidenceClient builds the ONE Evidence read client every seam in this context shares
+// (correlation's inventory, the uploaded VEX document, the scanner report's identity
+// candidates, the re-verdict bridge), so the credential is attached in exactly one place — a
+// second client built without the key would 401 on an auth-enabled Evidence node while the
+// first one worked.
+//
+// With a key every read carries it as X-API-Key: on an estate where Evidence runs with auth on
+// (THEMIS_AUTH_DATABASE_DSN set), an unauthenticated inventory read answers 401 and an uploaded
+// SBOM correlates to nothing — the pipeline stops at its first hop, silently. A READ-scoped key
+// is enough; Knowledge writes to no peer. Empty = unauthenticated reads (auth-off dev). Same
+// variable, THEMIS_API_KEY, as every other node's inter-service calls.
+func evidenceClient(baseURL, apiKey string) *evidence.Client {
+	return evidence.NewClient(baseURL, nil).WithAPIKey(apiKey)
+}
+
 type idGen struct{}
 
 func (idGen) NewID() string { return uuid.NewString() }
@@ -211,10 +226,11 @@ type VerdictConfig struct {
 }
 
 // Wire builds the Knowledge components over the given pool, Evidence read-API base URL, OSV
-// discovery base URL, outbox publisher, and NVD-watch config. Reconciliation precedence ranks
-// NVD over OSV (the authoritative source wins ties — D-FEED-2 source tiers), so NVD's watch
-// Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
+// discovery base URL, the node's read API key for the Evidence seam (THEMIS_API_KEY; empty =
+// unauthenticated reads, the auth-off dev case), outbox publisher, and NVD-watch config.
+// Reconciliation precedence ranks NVD over OSV (the authoritative source wins ties — D-FEED-2
+// source tiers), so NVD's watch Proposals become the reconciled headline on cards OSV created.
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -226,7 +242,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL string, pub store.Publ
 		// without it, a stable estate — where no new correlation runs — keeps every component
 		// `unknown` forever.
 		WithMatchReader(st)
-	evClient := evidence.NewClient(evidenceBaseURL, nil)
+	evClient := evidenceClient(evidenceBaseURL, readAPIKey)
 	health := app.NewFeedHealthService(st, sysClock{})
 	// OSV is the always-on discovery feed — queried per component on every upload, with no poll
 	// loop to hang health off. Wrapping it is what puts the one feed that runs constantly into

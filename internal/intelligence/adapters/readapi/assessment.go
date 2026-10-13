@@ -23,6 +23,7 @@ import (
 // business orchestration (EDR-TRUST-01 T10 rule 1).
 type AssessmentClient struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
@@ -33,6 +34,39 @@ func NewAssessmentClient(baseURL string, hc *http.Client) *AssessmentClient {
 		hc = http.DefaultClient
 	}
 	return &AssessmentClient{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+}
+
+// WithAPIKey makes every projection read carry `X-API-Key` (EDR-SECURITY-01 F1). An empty key
+// leaves the reads unauthenticated — the auth-off development case.
+//
+// A READ-ONLY key is enough for this client. The node's own key may be write-capable because
+// the autonomous push writes a Proposal (see ProposalWriter); the credential is one per node,
+// and this seam simply uses it for a read.
+func (c *AssessmentClient) WithAPIKey(apiKey string) *AssessmentClient {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
+}
+
+// get performs one read-API GET and decodes the body, or reports the status with the
+// credential hint. Every read in this client goes through it, so "does this seam
+// authenticate" has one answer rather than three.
+func (c *AssessmentClient) get(ctx context.Context, url, what string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: status %d%s", what, resp.StatusCode, credentialHint(c.apiKey, resp.StatusCode, "Governance"))
+	}
+	return json.NewDecoder(resp.Body).Decode(into)
 }
 
 // assessmentResponse mirrors Governance's FindingAssessment wire shape.
@@ -72,20 +106,8 @@ type assessmentResponse struct {
 // GetAssessment fetches the projection for one Finding.
 func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) (domain.FindingAssessment, error) {
 	url := c.baseURL + "/api/v1/findings/" + findingID + "/assessment"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return domain.FindingAssessment{}, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return domain.FindingAssessment{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return domain.FindingAssessment{}, fmt.Errorf("readapi: assessment %s: status %d", findingID, resp.StatusCode)
-	}
 	var body assessmentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := c.get(ctx, url, "readapi: assessment "+findingID, &body); err != nil {
 		return domain.FindingAssessment{}, err
 	}
 
@@ -163,20 +185,8 @@ type posturePayload struct {
 // benefits equally — not patched here with a second call.
 func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID string) (domain.ReleasePosture, error) {
 	url := c.baseURL + "/api/v1/releases/" + releaseID + "/posture"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return domain.ReleasePosture{}, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return domain.ReleasePosture{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return domain.ReleasePosture{}, fmt.Errorf("governance: release posture %s: status %d", releaseID, resp.StatusCode)
-	}
 	var body []posturePayload
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := c.get(ctx, url, "governance: release posture "+releaseID, &body); err != nil {
 		return domain.ReleasePosture{}, err
 	}
 
@@ -222,20 +232,8 @@ type comparisonPayload struct {
 // the gateway turns it into an honest no-grounding outcome rather than narrating around it.
 func (c *AssessmentClient) GetReleaseComparison(ctx context.Context, baselineID, candidateID string) (domain.ReleaseComparison, error) {
 	url := c.baseURL + "/api/v1/releases/" + baselineID + "/compare/" + candidateID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return domain.ReleaseComparison{}, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return domain.ReleaseComparison{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return domain.ReleaseComparison{}, fmt.Errorf("governance: compare %s vs %s: status %d", baselineID, candidateID, resp.StatusCode)
-	}
 	var body comparisonPayload
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := c.get(ctx, url, "governance: compare "+baselineID+" vs "+candidateID, &body); err != nil {
 		return domain.ReleaseComparison{}, err
 	}
 	out := domain.ReleaseComparison{BaselineID: body.BaselineReleaseID, CandidateID: body.CandidateReleaseID}

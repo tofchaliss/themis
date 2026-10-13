@@ -42,6 +42,7 @@ type config struct {
 	migrationsPath string // THEMIS_KNOWLEDGE_MIGRATIONS — path to the knowledge migrations dir.
 	evidenceURL    string // THEMIS_EVIDENCE_URL — Evidence read-API base URL (inventory source; default "http://localhost:8081").
 	osvURL         string // THEMIS_OSV_URL — OSV query base URL (lazy discovery; default "https://api.osv.dev").
+	readAPIKey     string // THEMIS_API_KEY — sent as X-API-Key on the Evidence READS (inventory, uploaded document, identity candidates). Required where the Evidence node runs with auth on, or every read answers 401 and an uploaded SBOM correlates to nothing. A read-scoped key is enough — this node writes to no peer. Empty = unauthenticated reads (auth-off dev). TRIMMED at read time (as well as inside the client): a key pasted into a unit file arrives with invisible whitespace. Never logged.
 
 	nvdEnabled       bool          // THEMIS_NVD_ENABLED=1 — enable the scheduled NVD modified-since watch (enriches already-carded CVEs with authoritative CVSS/severity; default off).
 	nvdURL           string        // THEMIS_NVD_URL — NVD 2.0 CVE API base URL (empty → the client default, services.nvd.nist.gov).
@@ -114,6 +115,7 @@ func loadConfig() config {
 		migrationsPath: envDefault("THEMIS_KNOWLEDGE_MIGRATIONS", "internal/knowledge/adapters/store/migrations"),
 		evidenceURL:    envDefault("THEMIS_EVIDENCE_URL", "http://localhost:8081"),
 		osvURL:         envDefault("THEMIS_OSV_URL", "https://api.osv.dev"),
+		readAPIKey:     strings.TrimSpace(os.Getenv("THEMIS_API_KEY")),
 
 		nvdEnabled:            os.Getenv("THEMIS_NVD_ENABLED") == "1",
 		nvdURL:                os.Getenv("THEMIS_NVD_URL"),
@@ -208,7 +210,7 @@ func main() {
 		publisher = eventbus.NewPublisher(busPool)
 	}
 
-	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, publisher, wiring.NVDConfig{
+	kn := wiring.Wire(pool, cfg.evidenceURL, cfg.osvURL, cfg.readAPIKey, publisher, wiring.NVDConfig{
 		Enabled:       cfg.nvdEnabled,
 		BackfillLimit: cfg.nvdBackfillLimit,
 		StaleAfter:    cfg.nvdStaleAfter,
@@ -259,6 +261,13 @@ func main() {
 		ReverdictBatch:        cfg.reverdictBatch,
 		ReclassifyBatch:       cfg.reclassifyBatch,
 	})
+
+	// Whether the Evidence read seam carries a credential is the difference between a working
+	// pipeline and a 401 loop on an auth-enabled estate, so it is said once at startup — as a
+	// BOOLEAN. The key itself is never logged.
+	logger.Info("evidence read seam",
+		observability.String("evidence_url", cfg.evidenceURL),
+		observability.Bool("api_key_set", cfg.readAPIKey != ""))
 
 	go relayLoop(kn.Relay, logger.Component("relay"))
 

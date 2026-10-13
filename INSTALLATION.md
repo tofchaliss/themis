@@ -255,8 +255,10 @@ context.)
 ### 4a. Enable inbound edge auth (optional — F1)
 
 By default the runbook above runs **open** (no API key) — fine on a trusted single box. To require an
-`X-API-Key` on every node's `/api/v1`, point each node at the shared `auth` database and mint a key. Auth is
-**inbound-edge only**: it guards external callers, not service-to-service reads (those clients send no key).
+`X-API-Key` on every node's `/api/v1`, point each node at the shared `auth` database and mint a key.
+Enforcement is **per node and at the inbound edge** — but the **credential is every caller's business,
+including the other Themis nodes**, which is step 4a-bis below. Enabling the edge without giving the nodes
+their keys breaks the pipeline silently; do the two together.
 
 ```sh
 export THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable"
@@ -278,9 +280,81 @@ curl -H "X-API-Key: $THEMIS_API_KEY" http://localhost:8081/api/v1/...     # 200;
 ```
 
 > **Gotcha we hit:** exporting `THEMIS_AUTH_DATABASE_DSN` in the *same shell* where you later start the
-> pipeline turns auth **on for every service**, and the plain `gf-upload-sbom.sh` driver sends no key → every
-> registration returns **401**. For an open end-to-end run, keep auth in its own shell (or `unset
-> THEMIS_AUTH_DATABASE_DSN` before step 5); prove auth separately as an edge spot-check.
+> pipeline turns auth **on for every service**, and `gf-upload-sbom.sh` run without `THEMIS_API_KEY` sends no
+> key → every registration returns **401**. For an open end-to-end run, keep auth in its own shell (or
+> `unset THEMIS_AUTH_DATABASE_DSN` before step 5); to run the pipeline WITH auth on, do 4a-bis below.
+
+### 4a-bis. Switching auth on for every node
+
+Section 4a switches on an **edge**. A Themis node is also a **caller**: Knowledge reads Evidence, Governance
+reads Registry/Knowledge/Evidence (and calls Intelligence when AI is on), Communication reads
+Governance/Registry, Intelligence reads Governance/Registry. Every one of those calls carries
+**`THEMIS_API_KEY`** as `X-API-Key` when that node has one, and **no header at all** when it does not.
+
+**Do both halves, or do neither.** With the edge on and the keys missing, the nodes keep running and
+reporting healthy while the pipeline stops: Knowledge's inventory read answers 401, so an uploaded SBOM
+correlates to nothing, no Finding opens, and the estate silently stops seeing vulnerabilities. That is why
+this estate was found with Evidence, Registry and Governance on `AUTH DISABLED` (2026-10-13) — turning them
+on had broken reads that sent no key.
+
+**Which key each node needs.** One key per node, with the smallest scope its own calls need:
+
+| Node | Calls | Scope |
+| --- | --- | --- |
+| `knowledge` | Evidence — inventory, document, identity candidates | `read` |
+| `governance` | Registry, Knowledge, Evidence (reads) | `read` |
+| `governance` | **+ Intelligence**, when `THEMIS_GOVERNANCE_AI_ENABLED=1` | **`admin`** — see below |
+| `communication` | Governance, Registry (reads) | `read` |
+| `intelligence` | Governance, Registry (reads) | `read` |
+| `intelligence` | **+ the autonomous proposal push**, when the Δ4b pool is set | **`admin`** |
+| `dashboard` | all six nodes (server-side injection, EDR-GUI-01 D4) | `admin` |
+| `evidence`, `registry` | nothing — they call no other node over HTTP | — |
+
+A **capability invoke is a POST**, so Intelligence's method-based write floor refuses a read-only key with
+403 even though nothing there is mutated (EDR-SECURITY-01 D4 realization). Give the Governance node an
+`admin` key whenever AI is enabled against an authenticated Intelligence; its error message says this when
+it happens, rather than letting a 403 read as "the AI is disabled".
+
+**Mint them** (from the repo root; each token prints **once**, only its bcrypt hash is stored):
+
+```sh
+export THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable"
+export THEMIS_AUTH_MIGRATE=1          # first run only: creates api_keys
+# Use the built binary (go build -o bin/ ./cmd/authadmin) or `go run ./cmd/authadmin`.
+./bin/authadmin create-key --name knowledge-read     --scopes read
+./bin/authadmin create-key --name governance         --scopes admin   # read seams + the AI invoke
+./bin/authadmin create-key --name communication-read --scopes read
+./bin/authadmin create-key --name intelligence-read  --scopes read    # admin if the Δ4b sweep is on
+./bin/authadmin create-key --name operator           --scopes admin   # for curl / the upload scripts
+```
+
+**Give each node its own env file**, so no node holds a credential it has no use for:
+
+```sh
+# per node: its inbound edge ...
+THEMIS_AUTH_DATABASE_DSN=postgres://themis:...@localhost:5432/auth?sslmode=disable
+THEMIS_AUTH_REQUIRED=1                # production guard: refuse to boot with an empty DSN
+# ... and its own outbound credential (omit on evidence and registry — they call nobody)
+THEMIS_API_KEY=<that node's token>
+```
+
+`deploy/systemd/install-systemd.sh` writes exactly these files and carries a commented
+`THEMIS_API_KEY=<mint with: …>` slot in every node that needs one; `deploy/node.env.example` documents the
+scope per node.
+
+**Verify.** Each node's startup log says both halves — `API-key auth enabled (X-API-Key)` for the edge, and
+a boolean `api_key_set` for its outbound calls (the key itself is never logged):
+
+```sh
+journalctl -u themis@knowledge -n 50 | grep -E "auth|api_key_set"
+# then drive a real SBOM end to end — the only check that proves the inter-service calls authenticate:
+env THEMIS_API_KEY=<operator token> ./scripts/gf-upload-sbom.sh -f sbom.json -p acme -j api -v 1.0.0 -c
+env THEMIS_API_KEY=<operator token> ./scripts/release-posture.sh <release-id>   # a Finding appeared ⇒ Knowledge→Evidence authenticated
+```
+
+A 401/403 between nodes is never silent any more: the error names `THEMIS_API_KEY` and distinguishes *no key
+sent* from *a key the peer refused*. The same scenario runs in CI as
+`TestPipeline_SBOMToPublishedVEX_WithInboundAuthOnEveryNode` (`make e2e-pipeline`).
 
 ### 4b. Enable enrichment feeds (optional)
 

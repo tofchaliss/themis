@@ -17,6 +17,7 @@ import (
 // Client reads inventories from an Evidence service.
 type Client struct {
 	baseURL string
+	apiKey  string
 	http    *http.Client
 }
 
@@ -26,6 +27,45 @@ func NewClient(baseURL string, hc *http.Client) *Client {
 		hc = http.DefaultClient
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+}
+
+// WithAPIKey makes every read carry `X-API-Key` (the inbound-edge credential of
+// EDR-SECURITY-01 F1). An empty key leaves the reads unauthenticated, which is the auth-off
+// development case.
+//
+// Knowledge's reads used to send no credential at all, which made Evidence's inbound auth
+// unswitchable: with `THEMIS_AUTH_DATABASE_DSN` set on the Evidence node every inventory read
+// answers 401, and correlation then opens no Finding for an uploaded SBOM — the whole pipeline
+// stops at its first hop (measured on the enterprise VM, 2026-10-13, which is why Evidence was
+// still running AUTH DISABLED). A READ-ONLY key is enough; this client performs no write.
+func (c *Client) WithAPIKey(apiKey string) *Client {
+	c.apiKey = strings.TrimSpace(apiKey)
+	return c
+}
+
+// newRequest builds one read-API GET, carrying the key when there is one. Every read in this
+// client goes through it, so "does this seam authenticate" has one answer rather than three.
+func (c *Client) newRequest(ctx context.Context, url string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	return req, nil
+}
+
+// credentialHint names the likely cause of a 401/403 in the error itself. These errors reach a
+// bus reader's log, where "status 401" reads as a broken Evidence rather than an unset variable.
+func (c *Client) credentialHint(status int) string {
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		return ""
+	}
+	if c.apiKey == "" {
+		return " — this read sent no X-API-Key; set THEMIS_API_KEY on this node (a read-scoped key is enough)"
+	}
+	return " — this read sent an X-API-Key Evidence refused; check THEMIS_API_KEY is current and has read scope"
 }
 
 type inventoryResponse struct {
@@ -51,7 +91,7 @@ type inventoryResponse struct {
 // API and maps it into the Knowledge-local shape.
 func (c *Client) GetInventory(ctx context.Context, evidenceID string) (app.Inventory, error) {
 	url := c.baseURL + "/api/v1/evidence/" + evidenceID + "/inventory"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newRequest(ctx, url)
 	if err != nil {
 		return app.Inventory{}, err
 	}
@@ -61,7 +101,8 @@ func (c *Client) GetInventory(ctx context.Context, evidenceID string) (app.Inven
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return app.Inventory{}, fmt.Errorf("evidence: inventory %s: status %d", evidenceID, resp.StatusCode)
+		return app.Inventory{}, fmt.Errorf("evidence: inventory %s: status %d%s",
+			evidenceID, resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 
 	var body inventoryResponse
@@ -95,7 +136,7 @@ type documentResponse struct {
 // read path Knowledge uses to parse an uploaded VEX (EDR-VEX-01 D2/D6).
 func (c *Client) GetDocument(ctx context.Context, evidenceID string) ([]byte, string, error) {
 	url := c.baseURL + "/api/v1/evidence/" + evidenceID + "/document"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := c.newRequest(ctx, url)
 	if err != nil {
 		return nil, "", err
 	}
@@ -105,7 +146,8 @@ func (c *Client) GetDocument(ctx context.Context, evidenceID string) ([]byte, st
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("evidence: document %s: status %d", evidenceID, resp.StatusCode)
+		return nil, "", fmt.Errorf("evidence: document %s: status %d%s",
+			evidenceID, resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 	var body documentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -128,7 +170,7 @@ type factsResponse struct {
 // supply it would be asking for something the system can look up.
 func (c *Client) EvidenceFacts(ctx context.Context, evidenceID string) (kind, releaseID string, found bool, err error) {
 	url := c.baseURL + "/api/v1/evidence/" + evidenceID
-	req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, rerr := c.newRequest(ctx, url)
 	if rerr != nil {
 		return "", "", false, rerr
 	}
@@ -141,7 +183,8 @@ func (c *Client) EvidenceFacts(ctx context.Context, evidenceID string) (kind, re
 		return "", "", false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", false, fmt.Errorf("evidence: facts %s: status %d", evidenceID, resp.StatusCode)
+		return "", "", false, fmt.Errorf("evidence: facts %s: status %d%s",
+			evidenceID, resp.StatusCode, c.credentialHint(resp.StatusCode))
 	}
 	var body factsResponse
 	if jerr := json.NewDecoder(resp.Body).Decode(&body); jerr != nil {

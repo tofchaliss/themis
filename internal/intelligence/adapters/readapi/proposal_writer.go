@@ -1,8 +1,10 @@
 // Package readapi's proposal writer is Intelligence's outbound WRITE seam to Governance
 // (Δ4b D-Δ4b-1): the autonomous analyst raises an advisory Proposal on an existing Finding via
 // the EXISTING POST /findings/{id}/proposals with proposer_kind: ai. It is the only place the
-// node writes cross-context, so it carries the node's write-scoped key. Read clients elsewhere
-// in this package send no key (inbound-edge auth is read-open for inter-service reads).
+// node writes cross-context, so the node's key must be WRITE-capable where this sweep is
+// enabled. The read clients elsewhere in this package carry the same key (one credential per
+// node, EDR-SECURITY-01 realization note 2026-10-13); a read-only key serves them but refuses
+// this push.
 package readapi
 
 import (
@@ -29,7 +31,7 @@ func NewProposalWriter(baseURL, apiKey string, hc *http.Client) *ProposalWriter 
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	return &ProposalWriter{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, http: hc}
+	return &ProposalWriter{baseURL: strings.TrimRight(baseURL, "/"), apiKey: strings.TrimSpace(apiKey), http: hc}
 }
 
 type raiseProposalBody struct {
@@ -63,7 +65,8 @@ func (w *ProposalWriter) RaiseAIProposal(ctx context.Context, findingID, stance,
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("governance: raise proposal %s: status %d", findingID, resp.StatusCode)
+		return fmt.Errorf("governance: raise proposal %s: status %d%s",
+			findingID, resp.StatusCode, credentialHint(w.apiKey, resp.StatusCode, "Governance"))
 	}
 	return nil
 }
