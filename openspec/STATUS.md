@@ -16,7 +16,7 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
 **OpenSpec state: see "Active Changes" below** (as of 2026-10-13: `phase3-report-intake` groups 1–4
-merged, `phase3-bot-intake` Groups 0–3 complete, Group 4 — verification on the VM — next). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+merged, `phase3-bot-intake` complete and archived 2026-10-13 as `2026-10-13-phase3-bot-intake`). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
 Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
@@ -46,7 +46,9 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 ## Active Changes
 
-**2026-10-13 — report intake is merged; `phase3-bot-intake` Groups 0–3 are complete, Group 4 is next.**
+**2026-10-13 — `phase3-bot-intake` is COMPLETE and archived** (`openspec/changes/archive/2026-10-13-phase3-bot-intake`). Live VM round passed with inbound auth on every node (#156); results in `docs/engineering/vm-test-2026-10-12.md` (2026-10-13 addendum).
+
+**Earlier the same day — report intake is merged; `phase3-bot-intake` Groups 0–3 were complete, Group 4 next.**
 
 - **`phase3-report-intake`** — **groups 1–4 merged** (#138–#141: the one `POST /intake` door, the
   server-side converters, the receipt, and the GUI + scripts uploading through it). Beside them, **#142**

@@ -528,7 +528,7 @@ and a real sender dead-letters them instead of inventing a body.
 ### M1b-3a — TWO Jira flavours, two knobs, one sender (owner decision, 2026-10-06)
 
 **Measured on the enterprise VM.** The estate's Jira is **self-hosted Data Center** at
-`https://almsbx.radisys.com/jira`, not Cloud. The first cut assumed Cloud throughout and was wrong in
+`https://jira.example.com/jira`, not Cloud. The first cut assumed Cloud throughout and was wrong in
 three ways at once: it sent the credential as HTTP Basic (Data Center issues a **Personal Access
 Token** for `Authorization: Bearer`), it addressed `/rest/api/3` (Data Center serves **v2**), and v3's
 description is an **Atlassian Document Format** object where v2 wants a **plain string**.
