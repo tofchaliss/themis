@@ -588,30 +588,165 @@ intake can create one.
   round's note). If it finds any, **stop**: resolving them is an estate decision for the owner, not
   a migration.
 
-- [ ] **4.2 — The bot test, end to end, two requests.** `-tags=e2e`, `tests/e2e/`:
+- [x] **4.2 — The bot test, end to end, two requests.** `-tags=e2e`, `tests/e2e/`:
   `TestBotIntakeCreateReleaseThenScanReport` — with a `product:<id>` key, (1) `POST /intake` with
   the triple + `create_release=true` + `build_id` and an SBOM → `201`, receipt echoes `build_id`,
   the version exists in Registry; (2) the same triple **without** `create_release` and a scan report
   → `201`, filed against **the same** release id; (3) replay request (1) byte-identical with a
   **different** `build_id` → `200 created=false`, the evidence row keeps the **first** `build_id`,
   the receipt carries the second. Assert Registry holds **one** release.
+  **On implementation:** `tests/e2e/bot_intake_e2e_test.go`, all three steps as written. The harness
+  is new and is the substance of this group: the package's existing suite wires an **allow-set stub**
+  registry (`subjectref.NewStub`), on which no triple resolves and `create_release` is unreachable by
+  construction — so a bot test on it could only have asserted the refusal. `startBotNode` therefore
+  wires the **real** Registry (its HTTP API for Product/Project, `registrystore` behind Evidence's
+  read+write seam, mirroring `cmd/evidence`'s `registryReader`) **and the real inbound-edge auth
+  middleware with real minted keys**, over a database of its own on the suite's embedded Postgres.
+  Verified: step 1 → `201`, `build_id=build-1`, `created=true`, and `GET /projects/{id}/releases`
+  (Registry's own API, not an Evidence table) returns exactly `[R2026.001]` with the id the receipt
+  named; step 2 → `201` on the **same** release id, `detected_kind/format = vuln-report/curated`, a
+  **different** evidence id; step 3 → `200`, an explicit `created=false`, the same evidence id,
+  `build_id=build-2` on the receipt while `evidence.provenance_build_id` is still `build-1` (B5's
+  asymmetry, read straight from the column because no API exposes it — 3.3's correction), and
+  Registry still holds exactly one release after all three requests.
+  Two deliberate harness choices: the inline budget is **60s** (a `202` from a slow embedded
+  Postgres would turn a real failure into an `accepted` receipt), and the three SBOMs across this
+  file are **distinct documents**, because Evidence is content-addressed and the same bytes aimed at
+  a second release are a loud `409` by design (D3 note) — a test that files twice needs two
+  documents, not two releases for one document.
+  **Wiring, as it actually is** (review ask — these were verified against the current code, not
+  assumed): `wiring.EvidenceAPI(wiring.Config) (http.Handler, *store.Store, *evhttp.Intake)`, with
+  the inline budget set through `Config.Intake` (an `evhttp.IntakeConfig`, whose zero fields take the
+  documented defaults), and `wiring.RegistryAPI(*pgxpool.Pool) (http.Handler, *store.Store)`. The
+  handler is mounted under `/api/v1`, the `*Intake` is `Close`d on cleanup, and both `*Store` returns
+  are unused here (they exist for the relay and dev-purge the binaries run). `go vet -tags=e2e` and
+  the suite run are the standing proof.
+  **Bookkeeping-table isolation is asserted, not assumed** (review ask): three schemas share this
+  database, so `botMigrate` reads back each one's applied version and compares it with the HIGHEST
+  `*.up.sql` on disk (`botHighestMigration` — derived, never a literal, the same rule as 4.5). Two
+  schemas sharing one bookkeeping table is otherwise a SILENT defect. Demonstrated by breaking it on
+  purpose: pointing Registry at the default `schema_migrations` fails at setup with
+  `no migration found for version 4` (it had read Evidence's version), and the check restores the
+  loud failure wherever golang-migrate itself would not have objected.
+  **The golang-migrate driver imports are repeated in this file** (review ask): `migrate.New`
+  resolves a source and a database by NAME at run time, from registries the driver packages fill in
+  `init()`, so `_ ".../source/file"` and `_ ".../database/postgres"` are what make `file://` + a
+  Postgres DSN resolvable at all. They were reachable only through the sibling harness file, which
+  made this file's `botMigrate` depend on an import it did not declare — dropping it there would have
+  produced `no source: file` at run time with nothing in THIS file to point at. Repeating them is
+  free: a package's `init()` runs once per binary however many files import it, so the duplicate
+  cannot double-register (both `Register` functions PANIC on a repeated name, which is also the
+  instant proof — the suite would abort at start, and does not). Verified by removing them from the
+  sibling file: the whole suite still passes, so the registration now comes from here.
 
-- [ ] **4.3 — The non-leak matrix on a real auth-enabled node.** Same e2e harness, auth on:
+- [x] **4.3 — The non-leak matrix on a real auth-enabled node.** Same e2e harness, auth on:
   a `product:<P>` key against another product's name, a nonexistent name, and (pre-index seed) an
   ambiguous name → three byte-identical `403`s; an `admin` key → `404 unknown_release` naming the
   part that missed.
   Same matrix on the **`release_id` path** and on **`POST /evidence`**: a `product:<P>` key naming
   another product's release id and a nonexistent release id → two byte-identical `403`s; its own
   release id → filed; `admin` with a nonexistent id → `404`.
+  **On implementation:** `TestBotIntakeAuthNonLeakMatrix`. All three sets of refusals are compared as
+  **raw response bytes** (`bytes.Equal`), which is the only form the property has: a decoded struct
+  cannot carry "these two answers are indistinguishable". Name road, `product:<P>` key — Q's name, a
+  name registered nowhere, a name registered twice → three byte-identical `403 unauthorized`. The
+  ambiguity is seeded by **removing Registry's uniqueness** and inserting the same Product name
+  twice: with 000003 applied it is unreachable, which is the point of 000003, so the pre-index estate
+  is the only place the third refusal can be produced. That removal also disables Registry's
+  `ON CONFLICT` upserts, so the estate is registered **before** it, in a database of this test's own
+  (hence one database per test, not one per suite).
+  **The removal is introspected, not a list of names** (review ask): `registryUniqueness` queries
+  `pg_index`/`pg_constraint` for every **non-primary-key** unique index on `products`, `projects` and
+  `releases`, then drops each through `ALTER TABLE … DROP CONSTRAINT IF EXISTS` when a constraint owns
+  it and `DROP INDEX IF EXISTS` when none does. Primary keys are excluded by `NOT i.indisprimary` —
+  they are unique indexes too, they are on `id`, and they say nothing about whether a NAME is
+  ambiguous. The reason is not only name drift: this test's subject IS the estate that has not taken
+  000003, so pinning it to that migration's three index names would make it assert the shape of the
+  thing it is meant to be independent of. On this checkout it finds and drops exactly the three plain
+  indexes (logged by name in the test output), and **two post-conditions make the removal a fact
+  rather than three statements**: the introspection is re-run and must come back empty, and the
+  duplicate insert is counted back and must yield two rows — otherwise the "ambiguous" case would
+  quietly be exercising the "no such product" refusal under the wrong name, which is the one failure
+  mode that would look like a pass.
+  **The byte-equality assertion was confirmed, not relaxed** (review ask): the refusal is a CONSTANT
+  of exactly four fields — `detail` (the resolver's single constant), `reason: unauthorized`,
+  `status: 403`, `title: intake refused` — with no correlation id, trace id or `intake_id` anywhere,
+  which is what makes byte-equality achievable at all (`refuseUnauthorized` names no receipt on
+  purpose, precisely so the bodies cannot differ on a field a caller can replay against). Verified by
+  printing all three bodies. The test therefore also pins the **field set**: if a per-request field is
+  ever added, this test names it as the cause instead of reporting an unexplained byte difference —
+  and that would be a break of B3 to fix at the source, not a comparison to loosen.
+  Beyond the task: two assertions that keep the `403`s from reading as a blanket answer. A project
+  that does not exist **under the key's own product** is `404 unknown_release` naming it — so the
+  confinement is not "everything is 403"; and the admin arm gets the answers the confined key is not
+  shown — `404 unknown_release` naming the **product**, the **project** and the **version**
+  respectively, `422 ambiguous_name` on the twice-registered name, and on the very triple that was
+  `403` for the P key, **no refusal at all** (`201`, filed). `release_id` road: Q's release id and a
+  nonexistent UUID → two byte-identical `403`s, its own release id → `201` filed, `admin` + unknown
+  id → `404 unknown_release`. `POST /evidence`: the same two → two byte-identical `403 unauthorized`,
+  its own → `201`.
+  **One correction to the task's wording.** For `admin` + a nonexistent id the two doors do **not**
+  answer alike, and asserting `404` on `POST /evidence` would assert a change this change did not
+  make: that door has always met an unregistered subject with **`422 unknown subject release`**
+  (EDR-EVIDENCE-01 D5), and B7 moved nothing for an unconfined caller — the one response B7 moved is
+  a `product:<P>` key naming a nonexistent `release_id` (`404` → `403`, 3.4's note). The test asserts
+  each door's own existing answer and says why at the call site.
 
-- [ ] **4.4 — Concurrency on a real node.** Two simultaneous `create_release=true` requests for the
+- [x] **4.4 — Concurrency on a real node.** Two simultaneous `create_release=true` requests for the
   same unregistered version → **one** Release, two successful responses. This is the defect the
   constraints exist for and the one a single-threaded test cannot see.
+  **On implementation:** `TestBotIntakeCreateReleaseConcurrent` — two goroutines released together on
+  one channel, both posting the same triple + `create_release=true` + the same SBOM under a
+  `product:<id>` key, every request bound to the test's own `context.WithTimeout` so a wedged node
+  fails rather than hangs the suite. Asserted: both answered `201`/`200` with a `filed` receipt, both
+  were given **the same** release id, **exactly one** reported `created=true` (which is what makes the
+  other's `200` honest rather than a silent overwrite), and `GET /projects/{id}/releases` holds
+  exactly one version. The database decides, not the application: both requests resolve the version as
+  absent and both reach `UpsertRelease`, so what is under test is migration 000003's
+  `registry_releases_project_version_key` and the `ON CONFLICT … DO NOTHING` read-back behind it.
+  **The flag claim is backed STRUCTURALLY** (review ask): `created` is always present on a filed
+  receipt — the edge fills in the explicit `false` when the use case did not create (D12) — so
+  "exactly one true" is a claim about the two answers, not about which fields they happened to carry.
+  It is nonetheless no longer the only evidence: the test now also counts the `evidence` rows and the
+  distinct fingerprints for the release and requires **1 and 1**. Two rows with one `created=true`
+  between them would be the worse bug, and the flags alone could not see it. The assertion was not
+  loosened to "both may be deduped": that outcome is unreachable here (`ON CONFLICT (fingerprint) DO
+  NOTHING` hands exactly one caller the insert), and accepting it would have let a genuine
+  double-create pass.
 
-- [ ] **4.5 — `scripts/vm-verify.sh` stays truthful.** Confirm the read-only report still reads the
+- [x] **4.5 — `scripts/vm-verify.sh` stays truthful.** Confirm the read-only report still reads the
   EXPECTED migration version **from the migrations directory** (never a literal) now that Registry
   has a third migration and Evidence a fourth — the defect that left the systemd installer loading
   only the first registry migration.
+  **Confirmed — the derivation was already correct, so NO behaviour changed.** It lives in
+  `check_migration` (`scripts/vm-verify.sh`), and the line is quoted here verbatim so it can be
+  audited without opening the file:
+
+  ```sh
+  want="$(find "$REPO_ROOT/$3" -name '*.up.sql' 2>/dev/null | sed 's#.*/0*\([0-9]*\)_.*#\1#' | sort -n | tail -1)"
+  ```
+
+  `$3` is the migrations directory the caller names, and the five call sites pass only a database, a
+  bookkeeping table and a **directory path**. No version number appears anywhere in the script —
+  grepped for `00000[0-9]`, `version <n>` and trailing numeric assignments; the only numeric literal
+  in the whole file is `ISSUES=0`.
+  Confirmed **by execution**, not by reading: run verbatim against this checkout the pipeline yields
+  `registry=3`, `evidence=4`, `knowledge=10`, `governance=15`, `comms=6` — the integers
+  `golang-migrate` stores in `version`. The `0*` prefix strips the leading zeros, which is also why
+  Knowledge's `000010` reads as `10` and not `1`, and `sort -n` takes the numeric maximum rather than
+  the last name alphabetically. So Registry's third and Evidence's fourth migration are picked up with
+  no edit, and `vm-verify` flags a node still at `registry=2` / `evidence=3` as "running an older
+  schema than this checkout".
+  **One documentation-only change was made** (review ask: make 4.5 auditable from the diff rather
+  than from a claim): six comment lines above that `want=` assignment now state the derivation rule at
+  the point of use — the directory is the generator, the leading zeros are stripped so the value
+  matches what `golang-migrate` stores, the sort is numeric, and the expression is POSIX BRE + POSIX
+  sort so it behaves identically on the VM's GNU userland and on macOS. The existing section comment
+  (why a literal must never appear here — the systemd-installer defect) is unchanged. **No executable
+  line of the script is touched**, which the re-run above confirms.
+  The same rule is now also **exercised in Go**: `botHighestMigration` in
+  `tests/e2e/bot_intake_e2e_test.go` derives the expected version from the directory the same way and
+  `botMigrate` asserts each schema landed on it — see 4.2's note.
 
 - [ ] **4.6 — Final gate.** `make vet-tags` · `make check` · `make check-ci` · `make e2e-evidence`
   green; `openspec validate phase3-bot-intake` (expect **no deltas** — phase3 convention); archive

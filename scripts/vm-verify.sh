@@ -83,6 +83,12 @@ done
 hdr "Migrations (expected = highest migration on disk)"
 check_migration() { # $1=db  $2=table  $3=migrations dir  $4=label
   local want have dirty
+  # `want` is DERIVED from $3 and never written down: the `*.up.sql` filenames in the directory
+  # are the generator. The sed strips the path and the `NNNNNN_` prefix's LEADING ZEROS, so the
+  # result is the integer golang-migrate stores in `version` — `000010_x.up.sql` reads as 10,
+  # not 1 — and `sort -n | tail -1` takes the numeric maximum rather than the last name
+  # alphabetically. POSIX BRE and POSIX sort, so it behaves the same on the VM's GNU userland
+  # and on a BSD/macOS one. Adding a migration requires no edit here.
   want="$(find "$REPO_ROOT/$3" -name '*.up.sql' 2>/dev/null | sed 's#.*/0*\([0-9]*\)_.*#\1#' | sort -n | tail -1)"
   have="$(q "$1" "select version from $2")"
   dirty="$(q "$1" "select dirty from $2")"
