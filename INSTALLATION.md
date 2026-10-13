@@ -459,6 +459,87 @@ Proposal is folded **automatically** for any carded CVE Red Hat marks `not_affec
 Red Hat fix, correlation records **no match**, so no Finding is ever opened for that (already-patched)
 occurrence. A cross-stream fix (an el9 fix vs an el8 install) is never applied — so a live vuln is never hidden.
 
+### 5b. A CI pipeline uploads (the bot road — EDR-INTAKE-01 B1–B7)
+
+Step 5 is the human road: register Product → Project → Release, then upload. A CI bot has nowhere to put the
+"register the release first" step, and the version is the one part of the identity triple that is **new on
+every build**. So intake accepts the `{product, project, version}` triple with **`create_release=true`** and
+finds-or-creates **the version only**.
+
+**A human creates the Product and the Project first.** Intake never creates identity above the version (B2):
+those two names are enterprise identity, long-lived, and a typo in either must be a refusal rather than a
+parallel estate. Create them once, by hand (step 5's `POST /api/v1/products` and `/api/v1/projects`, or the
+dashboard's Admin tab) — after that the pipeline needs no Registry call at all.
+
+**Two requests, SBOM first (B1).** One intake request files **one** artifact. A build that has both an SBOM and
+a scanner report sends **two** requests, each retried independently, and the order matters: D6's
+SBOM-before-report rule holds **across** them, so a report sent first is refused `no_inventory_for_release`.
+The SBOM request is the one that carries `create_release=true` and creates the version; the report request
+then finds it.
+
+```sh
+# 0. the triple a human already owns, plus whatever this build calls itself
+export P=acme J_NAME=api V=R20.1.0
+export BID="$CI_PIPELINE_ID"            # any label; see build_id below
+
+# 1. the SBOM, FIRST — create_release=true, so intake creates the VERSION under acme/api
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=$P&project=$J_NAME&version=$V&create_release=true&build_id=$BID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $THEMIS_API_KEY" \
+  --data-binary @sbom.cdx.json | jq '{status, reason, detail, release_id, build_id, created}'
+
+# 2. the scanner report, SECOND — the same triple, now WITHOUT create_release (the version exists).
+#    Send the vendor file as it came out of the tool; Evidence converts it server-side.
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=$P&project=$J_NAME&version=$V&build_id=$BID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $THEMIS_API_KEY" \
+  --data-binary @trivy.json | jq '{status, reason, detail, release_id, findings_total, findings_skipped}'
+```
+
+Or let the helper script do request 1 — `-c` is `create_release=true` and `-b` is `build_id`:
+
+```sh
+# -c needs the whole triple explicitly (-p -j -v) and makes NO Registry call; -r and -c are exclusive
+./scripts/gf-upload-sbom.sh -f sbom.cdx.json -p acme -j api -v R20.1.0 -c -b "$CI_PIPELINE_ID"
+# it prints RELEASE_ID=<the id intake created-or-found>, read off the receipt
+```
+
+**`build_id` is provenance, and nothing reads it (B5).** At most **256 Unicode code points** and valid UTF-8;
+over that it is refused by name (`400 build_id_invalid`) and **never truncated**. It is stored on the evidence
+row and echoed on the receipt, and it takes no part in dedup, correlation or current-SBOM selection. One
+consequence to expect rather than report as a bug: a byte-identical re-upload **dedups** and the filed document
+keeps the **first** build's id, while the retry's own receipt carries its own — a receipt records an *attempt*,
+the evidence row records what was *filed*.
+
+**The key the pipeline should hold is `product:<id>`, not `admin`.** Mint one against the Registry id of the
+product that pipeline builds (the `auth` database and its table come from §4a):
+
+```sh
+# the product id, by exact name (Registry read API)
+export PID=$(curl -s "http://localhost:8082/api/v1/products?name=acme" | jq -r '.[0].id')
+
+# mint the key — the token prints ONCE; only its bcrypt hash is stored. Either form works:
+env THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable" \
+  go run ./cmd/authadmin create-key --name ci-acme --scopes "product:$PID" --ttl 2160h
+# ...or the built binary, after: go build -o bin/ ./cmd/authadmin
+# env THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable" \
+#   ./bin/authadmin create-key --name ci-acme --scopes "product:$PID" --ttl 2160h
+# → key-<uuid>  <TOKEN>     # the pipeline holds the TOKEN as THEMIS_API_KEY
+```
+
+> **A `403` from intake means "this key is not for this product" — NOT "that product does not exist".**
+> This is deliberate and it is the one thing to know before debugging one (B3). A `product:<P>` key naming any
+> product other than its own gets the **same** `403 unauthorized` whether that product exists, does not exist,
+> or is ambiguous — the three responses are identical **as bytes**. Otherwise intake would be a product-name
+> oracle for the holder of any product key. The same holds on the `release_id` road: another product's release
+> id and a release id that does not exist are one `403` (B7). So when a pipeline gets a `403`, check the key's
+> scope against the product id *first*; the status code will never tell you the name was wrong. Only an
+> **`admin`** key is told `404 unknown_release`, naming the part that missed, and only an `admin` key sees
+> `422 ambiguous_name`. On an auth-disabled node there is no principal, so the caller is treated as `admin`.
+
+TESTING.md § *bot intake* carries the full status-code table (every row of the contract) and the refusal
+examples.
+
 ### 6. Intelligence Gateway (optional AI — Ollama)
 
 `cmd/intelligence` is **stateless** (no database) and part of the **optional AI plane** — the pipeline is

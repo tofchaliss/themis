@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained by the openspec skills (`propose`, `apply`, `archive`) and by hand when work lands outside a
-change. Last updated: 2026-10-12._
+change. Last updated: 2026-10-13._
 
 **Phase-3 greenfield pivot — the sole go-forward.** The DDD bounded-context rebuild (Evidence → Knowledge →
 Governance → Communication, over Kernel/Registry, with the Intelligence AI gateway beside it), per the
@@ -15,8 +15,8 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 (EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
-**OpenSpec state: see "Active Changes" below** (as of 2026-10-12: `phase3-report-intake` groups 1–4
-merged, `phase3-bot-intake` Gates B and C complete, Gates D–F on hold). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+**OpenSpec state: see "Active Changes" below** (as of 2026-10-13: `phase3-report-intake` groups 1–4
+merged, `phase3-bot-intake` Groups 0–3 complete, Group 4 — verification on the VM — next). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
 Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
@@ -46,7 +46,7 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 ## Active Changes
 
-**2026-10-12 — report intake is merged; `phase3-bot-intake` Gates B and C are complete.**
+**2026-10-13 — report intake is merged; `phase3-bot-intake` Groups 0–3 are complete, Group 4 is next.**
 
 - **`phase3-report-intake`** — **groups 1–4 merged** (#138–#141: the one `POST /intake` door, the
   server-side converters, the receipt, and the GUI + scripts uploading through it). Beside them, **#142**
@@ -89,13 +89,39 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
   fault windows, pinned as *a read that could not be performed is never reported as an absence*.
   The other aggregate stores are untouched at 80%, and the injectable-pgxpool follow-up still owns
   the mid-transaction residue.
-  **Gates D–F (Groups 3–4) remain ON HOLD** — the scripts and docs (`gf-upload-sbom.sh`'s `-c`/`-b`,
-  the INSTALLATION/TESTING sections, the EDR-SECURITY-01 realization note) and the VM verification
-  (the duplicate census re-run before `000003` ships, the two-request e2e). **Group 3 is not
-  started**, and Gate C landing is not itself the go-ahead to start it.
-  One gap deliberately left for Group 3 (noted on 2.6): `api/evidence.openapi.yaml` declares no
-  **`403`** response on `POST /intake` or `POST /evidence`, though both doors can now answer one
-  (the body shape is the already-declared `IntakeProblem` / `Problem`, so no schema changes).
+  **Gate D — `Group 3` — is COMPLETE** (3.1–3.6 ticked in the change's `tasks.md`): **documents and
+  one script, no Go code.** `scripts/gf-upload-sbom.sh` gained `-c` (`create_release=true` — the whole
+  triple required explicitly, incompatible with `-r`, and **no Registry call at all**) and `-b`
+  (`build_id`), with the triple percent-encoded through `jq @uri` because curl's `-G` would move the
+  `--data-binary` document into the query string, and the release id read off the receipt's
+  `release_id` since on that road the server is what knows it. INSTALLATION.md **§5b** is the
+  CI-pipeline runbook — two requests, SBOM first, the triple + `create_release=true`, `build_id`,
+  minting a `product:<id>` key with `cmd/authadmin`, and the `403` stated plainly as *this key is not
+  for this product* rather than *that product does not exist*, with Products and Projects created by a
+  human first. TESTING.md **§ bot intake** carries the amendment's 19-row status-code table **copied,
+  not paraphrased** (and the rows-5-and-6 note with it), restates that D6's SBOM-before-report rule
+  holds **across** the two requests, and adds paste-safe `--fail-with-body` + `X-API-Key` examples
+  including the byte-identical-`403` comparison. EDR-SECURITY-01's realization notes now record that
+  D4's product-scope deferral is closed for **both** Evidence write doors — `POST /intake` **and**
+  `POST /evidence` authorize `admin` or the release's owning product, read-only, fail-closed and
+  non-disclosing — while the rest of the Evidence write surface keeps the method-based floor.
+  **Group 4 (Gates E–F) — verification on the VM — is NEXT and is all that remains**: the duplicate
+  census re-run before `000003` reaches the estate (stop if it finds any — resolving one is an estate
+  decision, not a migration), the two-request `-tags=e2e` bot test, the non-leak matrix on a real
+  auth-enabled node, two concurrent `create_release=true` requests for one unregistered version,
+  `vm-verify.sh` still reading the expected migration version from the migrations directory, then the
+  final gate and `openspec archive phase3-bot-intake --skip-specs -y`.
+  Three things Group 3 left alone on purpose, because it carries no code change:
+  `api/evidence.openapi.yaml` still declares no **`403`** response on `POST /intake` or
+  `POST /evidence` though both doors can answer one (the body shape is the already-declared
+  `IntakeProblem` / `Problem`, so the addition is additive — but it needs
+  `make generate-api-evidence`); `EvidenceFacts` does not expose `provenance_build_id`, so the
+  filed-vs-receipt `build_id` asymmetry is observable only in the column, which TESTING.md says
+  outright instead of implying a read API that does not exist; and `gf-upload-sbom.sh`'s
+  long-standing extension strip stays unconditional, so `-p my.app` is still sent as `my` — a
+  first pass narrowed it to the derived default, which is a behaviour change 3.1 forbids, so it was
+  reverted and the limit is documented in `usage()` pending the owner's call (on the `-c` road a
+  truncated product name lands as B3's non-disclosing `403`).
 - Other scaffolded `phase3-*` changes under `openspec/changes/` carry their own state in their
   `tasks.md`; this file records the resume pointer, never per-task state.
 

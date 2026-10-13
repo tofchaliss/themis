@@ -457,33 +457,123 @@ intake can create one.
 
 ## Group 3 — Scripts and docs
 
-- [ ] **3.1 — `scripts/gf-upload-sbom.sh` can drive the bot road.** Add `-c` (`create_release=true`,
+- [x] **3.1 — `scripts/gf-upload-sbom.sh` can drive the bot road.** Add `-c` (`create_release=true`,
   valid only with the triple) and `-b <build_id>`, both documented in the script's `usage()`. Keep
   every existing flag and behaviour — the script is muscle memory for documented procedures.
   Fenced examples must stay **paste-safe** (every interstitial comment inside a fence starts with
   `#`; no bash `VAR=value cmd` prefix — `env VAR=value cmd`).
   *Verification:* `scripts/release-smoke-test.sh` still passes end to end; a `-c` run against an
   unregistered version registers it once and a re-run reuses it.
+  **On implementation (2026-10-13), four decisions a reviewer should see:**
+  (1) **`-c` requires the triple EXPLICITLY**, not merely non-empty. `PRODUCT` defaults to the SBOM's
+  base name, `PROJECT` to `"default"` and `VERSION` to `"1.0.0"`, so "the triple is present" is
+  trivially true on every run and would have made `-c` send a defaulted `default` project at a door
+  that answers B3's **non-disclosing** `403`. The flags therefore carry a "was it given" bit, and the
+  check runs **before** the defaulting, so a `-c` run can never fall back to a derived name.
+  (2) **The triple is percent-encoded with `jq @uri`**, not with curl's `-G`/`--data-urlencode`: `-G`
+  moves EVERY `--data*` argument into the query string, including the `--data-binary` carrying the
+  document, and curl then refuses outright (the defect already recorded in TESTING.md). `jq` is
+  already a hard requirement of the script.
+  (3) **The release id is read off the receipt** (`release_id`) on the `-c` road, because this run
+  makes no registration call to capture it from — so the script's final `RELEASE_ID=…` + posture line,
+  which every runbook depends on, keeps working on both roads.
+  (4) **The extension strip stays exactly as it was**, by review decision (2026-10-13). The original
+  line is `[[ -n "$PRODUCT" ]] || PRODUCT="$(basename …)"; PRODUCT="${PRODUCT%.*}"`, whose `;` makes
+  the strip run on **whatever** `$PRODUCT` holds — so `-p my.app` has always been sent as `my`. A
+  first pass narrowed the strip to the derived default; that is a change to existing behaviour, which
+  **this task forbids**, so it was reverted. The hazard is documented instead, in `usage()` under `-p`
+  and beside the line: a product whose registered name contains a dot cannot be addressed through this
+  script, and on the `-c` road the truncated name does not resolve — which for a product-scoped key is
+  B3's non-disclosing `403` with nothing in it to point at the cause. **Relaxing this needs the
+  owner's say-so and is not taken here.** One new-road-only guard was added: `-c` with a `-p` that
+  strips to the empty string (`-p .json`) refuses locally rather than sending `product=`.
+  (5) **Stdout shape is preserved** (review): the two lines this step adds for the operator (`bot
+  road: …` and `build_id=…`), and the "receipt named no `release_id`" fallback, all go to **stderr**,
+  so a caller grepping stdout for `RELEASE_ID=` or the registration line sees the stream it saw
+  before. The receipt's release id is read with `jq -er` inside an `if`, so the exit status decides
+  and nothing is assigned-then-unset; the two `Content-Type` headers are spelled consistently.
+  (6) **`THEMIS_API_KEY` is refused if it contains whitespace** (security review). The array form
+  (`CURL+=(-H "X-API-Key: $THEMIS_API_KEY")`) already prevents word-splitting, and a minted key is
+  `thm_` + base64url, so the guard cannot fire for a real key; it exists for the way this actually
+  goes wrong — a token pasted with a stray newline, which otherwise reaches the operator as an
+  unreadable `401` instead of a sentence naming the cause. Stated in `usage()` too. **There is no
+  duplicate `Content-Type` on the intake call** (also raised in review): that call uses `CURL`,
+  which carries no content type, while `J` — the only arg set that does — is used by `register_id`
+  alone; a comment now says so at the call site.
+  **Not verified here:** this harness permits no shell interpreter, `make` or `go` invocation, so
+  `bash -n`, a scripted local run and `scripts/release-smoke-test.sh` were **not** executed — the
+  script was reviewed by reading. The smoke test does not call `gf-upload-sbom.sh` (it drives the API
+  directly), and with (4) reverted **no non-`-c` behaviour changes at all**.
 
-- [ ] **3.2 — `INSTALLATION.md`: the bot section.** How a CI pipeline uploads: two requests (B1),
+- [x] **3.2 — `INSTALLATION.md`: the bot section.** How a CI pipeline uploads: two requests (B1),
   the triple + `create_release=true`, `build_id`, and the **`product:<id>` key** it should hold —
   with the non-leak behaviour stated plainly, so an operator debugging a `403` knows it means "this
   key is not for this product" and **not** "that product does not exist".
+  **On implementation:** landed as **§5b** (after 5a, so no existing section number moves). It states
+  that a human creates the Product and the Project first, shows the two requests in order, shows the
+  same thing through `gf-upload-sbom.sh -c -b`, names the `build_id` bound and its dedup asymmetry,
+  and mints the key with `go run ./cmd/authadmin create-key --scopes "product:$PID"` — `go run`, not
+  `./bin/authadmin`, because step 2's build line does not include `./cmd/authadmin` (the note says
+  both forms are shown, `go run` live and the built `./bin/authadmin` beside it, commented).
+  **Every example URL carries an explicit `http://` scheme** (security review): curl guesses a
+  scheme for a bare `host:port`, but an example an operator pastes should not depend on the guess,
+  so all ten new URLs in TESTING.md and all three in INSTALLATION.md were corrected. The
+  scheme-less URLs that remain in both files are **older examples outside this change's sections**;
+  normalizing them is a separate, whole-file edit. Ports and env names re-checked against the code
+  (2026-10-13): Evidence `:8081` and Registry `:8082` are the `cmd/*` defaults, and
+  `THEMIS_AUTH_DATABASE_DSN` / `THEMIS_AUTH_MIGRATE` / `--name` / `--scopes` / `--ttl` are
+  `cmd/authadmin`'s actual names.
 
-- [ ] **3.3 — `TESTING.md`: the status-code table and the two-request order.** Mirror the EDR
+- [x] **3.3 — `TESTING.md`: the status-code table and the two-request order.** Mirror the EDR
   amendment's table (not a paraphrase of it) and restate that SBOM-before-report holds **across**
   the two requests.
+  **On implementation:** a new `### Bot intake …` section before `### Trust model`. The 19 rows and
+  the rows-5-and-6 note are **copied**, and the copy is verified **mechanically**: the header line
+  plus the following 23 lines were extracted from both files (`grep -A23` on the table header) and
+  `diff`ed — identical, character for character, re-run after the review. One correction the copy
+  forced: the draft claimed `GET /evidence/{id}` shows the filed `build_id` — it does **not**
+  (`EvidenceFacts` carries `provenance_source` and `provenance_image_digest` only), so the asymmetry
+  is demonstrated against the `provenance_build_id` column instead of against an API that would have
+  answered nothing. Row 10 (ambiguous) is noted as unreproducible on a migrated node and asserted in
+  Go, which is where B4 put it. Every example URL in the section carries an explicit `http://`
+  scheme (see 3.2's note).
 
-- [ ] **3.4 — `docs/engineering/decisions/EDR-SECURITY-01.md` realization note.** One paragraph: the
+- [x] **3.4 — `docs/engineering/decisions/EDR-SECURITY-01.md` realization note.** One paragraph: the
   Evidence intake route now authorizes `product:<id>` against the resolved product explicitly,
   closing that part of **D4**'s deferral in the same shape N-M0 closed it for Governance; the rest
   of the Evidence write surface keeps the method-based floor.
+  **Corrected on implementation:** since **2.6b** this is true of **BOTH** `POST /api/v1/intake`
+  **and** the older `POST /api/v1/evidence` — the task's wording named intake only, and B7 revision 1
+  is what widened it (the old door was otherwise a way around the new one). The note says both doors,
+  names the two roads (name → Product → authorize → Project; `release_id` → project → owning product
+  → authorize), records that the check is fail-closed and non-disclosing and that the **one** moved
+  response is a `product:<P>` key naming a non-existent `release_id` (`404` → `403`), and keeps the
+  method floor for everything else. The pre-existing bullet that said the deferral "stands" for the
+  other contexts gained a pointer to it, so the bullet is not read alone and left stale.
 
-- [ ] **3.5 — `docs/engineering/PHASE3-STATUS.md` + `openspec/STATUS.md`:** record the change, its
+- [x] **3.5 — `docs/engineering/PHASE3-STATUS.md` + `openspec/STATUS.md`:** record the change, its
   milestones and its state, so the next session resumes from the status page as CLAUDE.md says.
+  **On implementation:** both now read **Groups 0–3 complete, Group 4 (verification on the VM) next**,
+  with Group 4's six steps in order and the three things Group 3 left alone on purpose (the
+  undeclared `403` in `api/evidence.openapi.yaml`, which needs `make generate-api-evidence` and
+  therefore a code change this group does not carry; `EvidenceFacts` not exposing
+  `provenance_build_id`; and `gf-upload-sbom.sh`'s unconditional extension strip, documented and
+  awaiting the owner's call rather than fixed in passing).
 
-- [ ] **3.6 — Group gate.** No code change in this group; `make check` must still be green, and the
+- [x] **3.6 — Group gate.** No code change in this group; `make check` must still be green, and the
   markdown must be clean under the repo's markdownlint config.
+  **On implementation:** no Go file is touched (the diff is one shell script and five markdown files),
+  so the gate is the one Gate C left green. The harness this group ran in permits no `make`, `go`,
+  `bash` or `markdownlint` invocation, so **neither was executed here** — markdown was checked by
+  rule instead, and re-checked after the review: every added prose line is within MD013's 120
+  (tables and code blocks are exempt / bounded at 200 in `.markdownlint.json`, and the only >120
+  additions are table rows and one 124-char URL inside a fence — the >120 prose lines that do exist
+  in these files all predate this change), headings and fences are blank-line-separated, every fence
+  carries a language, and no line gained trailing whitespace (MD009).
+  The repository ships no markdownlint runner (no `Makefile` target, no CI step) — only the two
+  config files. **`make check` is the orchestrator's to run, and so are
+  `bash -n scripts/gf-upload-sbom.sh` and any configured markdown lint** — both were asked for in
+  review and neither can be invoked from here.
 
 ---
 

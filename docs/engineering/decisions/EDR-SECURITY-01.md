@@ -229,9 +229,28 @@ governing principle):
   explicitly, fail-closed. `AuthorizeWrite` remains the method floor for the other contexts, where the
   deferral stands. The vocabulary gained a fourth scope there (`delivery:callback`) and is now CLOSED —
   validated at mint time, and an unknown scope no longer counts as write-capable anywhere.
+  **Also CLOSED 2026-10-12 for Evidence's two write doors** (`POST /intake` and `POST /evidence`) — see the
+  paragraph below this list.
 - **D7 spec `securitySchemes` are documentation-only** under the current codegen (they annotate the API
   contract but do not generate enforcement). Still worth adding for accurate API docs; enforcement stays in
   the composition-root middleware.
+
+**D4's product-scope deferral is now closed for the Evidence write doors too (2026-10-12,
+`phase3-bot-intake` Group 2 / EDR-INTAKE-01 B3 + B7).** **Both** `POST /api/v1/intake` **and** the older
+`POST /api/v1/evidence` resolve their target release to its owning Product and authorize `admin` or exactly
+that product — `auth.Principal.AuthorizeProduct` — read-only and **before anything is written**, in the same
+shape N-M0 closed it for the Governance write surface. On the name road the Product is resolved first and
+authorized before the Project is even looked up; on the `release_id` road the release's project and owning
+product are loaded and authorized the same way, which is why a `product:<P>` key naming another product's
+release id no longer reaches the floor's "a principal and no resource" blind spot. The check is
+**fail-closed** (an unreadable or unwired Registry seam refuses) and **non-disclosing**: for a confined key,
+another product's name, a name that resolves to nothing, an ambiguous name, another product's release id and
+a release id that does not exist are all one `403 unauthorized`, byte-identical, because a status code that
+distinguished them would make either door a product-existence oracle for the holder of any product key; only
+`admin` is told `404 unknown_release` or `422 ambiguous_name`. The **one** existing response that moved is a
+`product:<P>` key naming a non-existent `release_id`, which used to get `404`. Everything else on the
+Evidence write surface, and every other context except Governance, keeps the method-based `AuthorizeWrite`
+floor — widening that is still its own decision, and the deferral above stands for it.
 
 ## Not in scope (explicit non-goals)
 

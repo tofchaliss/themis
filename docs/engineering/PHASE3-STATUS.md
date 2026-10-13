@@ -1,10 +1,10 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-10-12 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-10-13 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-12 · `phase3-bot-intake` **Gates B and C are COMPLETE**; Gates D–F stay on hold
+> ## ⏭ RESUME POINT — 2026-10-13 · `phase3-bot-intake` **Groups 0–3 are COMPLETE**; Group 4 (verification on the VM) is next
 >
 > **Merged since the last entry.** `phase3-report-intake` **groups 1–4** (#138–#141 — the one intake door,
 > the server-side converters, the receipt, and the GUI + scripts uploading through `POST /intake`);
@@ -30,10 +30,37 @@ and the resume pointer, never item state.
 > taking **no** part in dedup — a byte-identical retry keeps the FIRST upload's build id and the
 > retry's value appears only on its own receipt, which is the design, asserted as such.
 >
-> **Gates D–F (Groups 3–4) remain ON HOLD** — the scripts and docs (`gf-upload-sbom.sh`'s `-c`/`-b`,
-> the INSTALLATION/TESTING sections, the EDR-SECURITY-01 realization note) and the VM verification
-> (the duplicate census re-run, the two-request e2e). **Do not start Group 3** without an explicit
-> go-ahead; Gate C landing is not itself that go-ahead.
+> **Gate D — `Group 3` — is COMPLETE** (this change: 3.1–3.6, all ticked in the change's `tasks.md`).
+> **Documents and one script — no Go code.** `scripts/gf-upload-sbom.sh` can drive the bot road (`-c`
+> makes the Registry calls disappear and lets intake create the version; `-b` carries the `build_id`);
+> INSTALLATION.md §5b is the CI-pipeline runbook (two requests, the triple + `create_release=true`, the
+> `product:<id>` key to mint, and the `403` read plainly as *this key is not for this product*);
+> TESTING.md carries the amendment's status-code table **copied, not paraphrased**, with the
+> SBOM-before-report rule restated as holding across the two requests; and EDR-SECURITY-01's realization
+> notes record that **both** `POST /intake` and `POST /evidence` now authorize a `product:<id>` key
+> against the release's owning product, while the rest of the Evidence write surface keeps the
+> method-based floor.
+>
+> **Group 4 (Gates E–F) — verification on the VM — is NEXT, and it is the only thing left.** In order:
+> the duplicate census re-run **before** `000003` ships to the estate (4.1 — if it finds a duplicate,
+> **stop**: resolving one is an estate decision, not a migration), the two-request `-tags=e2e` bot test
+> (4.2), the non-leak matrix on a real auth-enabled node (4.3), two simultaneous `create_release=true`
+> requests for one unregistered version (4.4 — the defect the constraints exist for, and the one a
+> single-threaded test cannot see), `scripts/vm-verify.sh` still reading the expected migration version
+> from the migrations directory now that Registry has three and Evidence four (4.5), and the final gate
+> + archive (4.6, `--skip-specs`).
+>
+> **Three things Group 3 deliberately did NOT do.** `api/evidence.openapi.yaml` still declares no **`403`**
+> response on `POST /intake` or `POST /evidence` though both doors answer one (the body shape is the
+> already-declared `IntakeProblem` / `Problem`, so it is additive) — it needs `make generate-api-evidence`,
+> which is a code change, and Group 3 carries none; it stays a follow-up. `EvidenceFacts` does not
+> expose `provenance_build_id`, so the filed-vs-receipt `build_id` asymmetry is observable only in the
+> column — TESTING.md says so rather than implying a read API that does not exist. And
+> **`gf-upload-sbom.sh`'s extension strip is left exactly as it was**: `PRODUCT="${PRODUCT%.*}"` runs on
+> an explicit `-p` too, so `-p my.app` is sent as `my` and a product whose registered name carries a dot
+> cannot be addressed through the script — on the `-c` road that lands as B3's non-disclosing `403`.
+> Changing it is a behaviour change this group may not make (3.1 says keep every existing behaviour), so
+> it is **documented in `usage()` and awaiting the owner's call**, not fixed in passing.
 >
 > | state | task |
 > | --- | --- |
@@ -50,7 +77,11 @@ and the resume pointer, never item state.
 > | done | **2.7–2.9** — `build_id` plumbed to its two ENDS (the filed document's provenance and the receipt row — the column and the renderer had existed since 2.1–2.3 with nothing writing it), and the assertions that make B5/B6 checkable: dedup is untouched by `build_id`, the filed document keeps the FIRST one while the retry's receipt carries its own (they DIFFER by design), `409 duplicate_other_release` across releases is unchanged, a different SBOM for the same release is still filed as **new history** (both rows retained — **EDR-DELIVERY-01 M2-5** rests on it), and D6's SBOM-before-report holds for a brand-new version **with the provisioner uncalled**, `allow_without_sbom` included |
 > | done | **2.10** — `tests/architecture`: the seam's exported write surface is exactly `[Provisioner.FindOrCreateRelease]`, **and** no `internal/evidence/…` package imports `internal/registry/…` (test packages scanned too; only `cmd/evidence` may, and a positive control asserts it still does) |
 > | done | **2.11** — group gate: `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test`, `make e2e-pipeline` and `make check-ci` green; the tiers this group names all hold — `evidence/{domain,app}` and `adapters/subjectref` 100%, `adapters/http` 98.9%, `adapters/store` **93.6%**, and the store **moved from the 80% aggregate-store tier to the 90% adapter tier** in `scripts/check-coverage.sh`, because the branches that kept it at 80 are now covered deterministically by a cancelled context (every read, both receipt sweeps, `Save`'s `Begin`, the relay's outbox read and its mark-sent window) — asserted as the property *a read that could not be performed is never reported as an absence*. What still needs an injectable pool is only a fault arriving after a statement has already succeeded inside the transaction |
-> | **next** | **nothing in this change.** Group 3 (Gate D) opens only on an explicit go-ahead |
+> | done | **3.1** — `scripts/gf-upload-sbom.sh` drives the bot road: `-c` (`create_release=true`, the whole triple required EXPLICITLY, incompatible with `-r`, **no Registry call at all**) and `-b <build_id>`, both in `usage()`. The triple is percent-encoded with `jq @uri` (curl's `-G` cannot build it — it would move the `--data-binary` document into the query string), and the release id is read off the receipt's `release_id`, since on this road the server is the one that knows it |
+> | done | **3.2–3.3** — INSTALLATION.md **§5b** (the CI-pipeline runbook: two requests SBOM-first, the triple + `create_release=true`, `build_id`, minting `product:<id>` with `cmd/authadmin`, and the `403` stated plainly as "this key is not for this product" and **not** "that product does not exist") and TESTING.md **§ bot intake** (the amendment's 19-row status-code table **copied verbatim**, the rows-5-and-6 note with it, the two-request order, and paste-safe `--fail-with-body` + `X-API-Key` examples including the byte-identical-`403` diff) |
+> | done | **3.4–3.5** — EDR-SECURITY-01's realization note (D4's product-scope deferral closed for **both** Evidence write doors, non-disclosing and fail-closed; the rest of the write surface keeps the method floor) and this status page + `openspec/STATUS.md` |
+> | done | **3.6** — group gate: no Go code changed in this group, so the gate is the same one Gate C left green |
+> | **next** | **Group 4 (Gates E–F) — verification on the VM**: 4.1 the duplicate census re-run (stop if it finds any), 4.2 the two-request `-tags=e2e` bot test, 4.3 the non-leak matrix on a real auth-enabled node, 4.4 two concurrent `create_release=true` requests for one version, 4.5 `vm-verify.sh`'s expected migration version, 4.6 the final gate + `openspec archive … --skip-specs -y` |
 >
 > **The 2026-10-09 entry below is history now:** its "FIRST — the evidence stream is halted" action was
 > carried out on the 2026-10-12 VM round (cursor `35751` → `37090`, no stream halted —
