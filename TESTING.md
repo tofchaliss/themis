@@ -474,6 +474,169 @@ sweep stopped working" must not look alike). A non-zero `new_matches` is the hea
 CVE reached inventory nobody re-uploaded. To force one, set `THEMIS_REDISCOVERY_STALE_AFTER=1m`
 temporarily and restart — every correlated release becomes due on the next tick.
 
+### Bot intake — `create_release`, `build_id`, and the status-code contract (EDR-INTAKE-01 B1–B7)
+
+A CI bot knows `{product, project, version}` and its own build id, and has nowhere to put a "register the
+release first" step. So intake takes the triple with **`create_release=true`** and finds-or-creates **the
+version only** — never a Product or a Project, which a human owns and which must already exist (B2). The
+operator runbook is INSTALLATION.md §5b; this section is what to assert when testing it.
+
+**SBOM first, report second — and the rule holds ACROSS the two requests.** One intake request files **one**
+artifact (B1): an SBOM **or** a report, never both, so a build with both sends **two** requests, each
+idempotent and retried on its own. D6's SBOM-before-report rule applies across them exactly as it applies
+across two script invocations, and that does not change because the version is new: a **report** sent with
+`create_release=true` for a version that does not exist yet is refused `no_inventory_for_release` **before**
+the version is created, because a report needs an inventory to be recorded against. The SBOM request creates
+the version; the report request finds it. A standalone report still works with `allow_without_sbom=true`, and
+then the version is created.
+
+```sh
+# request 1 of 2 — the SBOM, with the triple and create_release=true. --fail-with-body, never -f:
+# on a refusal the BODY is the useful part (reason + detail, two fields, never concatenated).
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&create_release=true&build_id=ci-4711" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq '{status, release_id, build_id, created, components}'
+
+# request 2 of 2 — the report, the SAME triple, WITHOUT create_release (the version now exists)
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&build_id=ci-4711" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, release_id, findings_total, findings_skipped}'
+```
+
+```sh
+# the two refusals to prove, in order. (a) the report FIRST, against a version that does not exist:
+# no_inventory_for_release, and NOTHING is created — assert the version is still absent in Registry.
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R-does-not-exist&create_release=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, reason, detail}'
+
+# (b) the same report with the deliberate override — now it files, and the version IS created
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R-standalone&create_release=true&allow_without_sbom=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, reason, release_id}'
+```
+
+```sh
+# naming the release two ways is refused before the body is read (400 create_release_conflict)
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?release_id=$RID&create_release=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq '{status, reason, detail}'
+
+# the sibling refusal: create_release without the WHOLE triple (400 incomplete_release_triple).
+# Without create_release the same partial name keeps today's 404 unknown_release — see the note
+# under the table; that distinction is deliberate.
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&version=R1917.256&create_release=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq '{status, reason, detail}'
+
+# build_id is bounded at 256 Unicode CODE POINTS and must be valid UTF-8 — over the bound it is
+# refused by name (400 build_id_invalid), never truncated. 256 x "é" (512 bytes) is ACCEPTED,
+# because the unit is code points and never len().
+BID=$(printf 'x%.0s' $(seq 257))
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?release_id=$RID&build_id=$BID" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq '{status, reason, detail}'
+```
+
+`build_id` is **inert** (B5): it is stored on the evidence row and echoed on the receipt, and nothing reads it
+for dedup, correlation or current-SBOM selection. Two submissions differing **only** in `build_id` file **one**
+evidence row, and the dedup keeps the **first** one while the retry's receipt carries its own — the two differ
+**by design**, because a receipt records an *attempt* and the evidence row records what was *filed*:
+
+```sh
+# re-send request 1 byte-identical with a different build_id → 200 created=false, the SAME
+# evidence_id, and a receipt whose build_id is the NEW one. That is not a bug.
+curl -s --fail-with-body -X POST \
+  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&create_release=true&build_id=ci-4712" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
+  --data-binary @sbom.spdx.json | jq '{status, created, evidence_id, build_id}'
+
+# the FILED value is the first one, and the read API does not surface it (EvidenceFacts carries
+# provenance_source and provenance_image_digest only), so the asymmetry is checked in the column:
+psql "$PGBASE/evidence?sslmode=disable" \
+  -c "SELECT id, provenance_build_id FROM evidence ORDER BY filed_at DESC LIMIT 3"
+# → the row keeps ci-4711 while the second receipt says ci-4712
+```
+
+**The status-code contract**, copied from EDR-INTAKE-01's 2026-10-12 amendment (§ *Status codes —
+`create_release` and authorization*). The rows ARE the contract — a row that is absent is a case the
+implementation must not invent, and a test asserting anything else is asserting against the decision record:
+
+| # | request | key scope | response | created? |
+| --- | --- | --- | --- | --- |
+| 1 | any | missing / invalid / expired / revoked key | `401` `unauthorized` | nothing |
+| 2 | any | `read` or `delivery:callback` | `403` `unauthorized` (write floor, EDR-SECURITY-01 D4) | nothing |
+| 3 | `release_id`, no `create_release` | authorized | **unchanged**: `201` filed · `200` `created=false` same-release dedup · `409` `duplicate_other_release` · `404` `unknown_release` | no Registry write |
+| 4 | triple, no `create_release` | authorized | **unchanged** D7 behaviour: resolved read-only, `404` `unknown_release` naming the part that missed | no Registry write |
+| 5 | `create_release=true` **and** `release_id` | any | `400` `create_release_conflict` | nothing |
+| 6 | `create_release=true`, triple incomplete | any | `400` `incomplete_release_triple` | nothing |
+| 7 | `create_release=true` + triple | `product:<P>`, product name resolves to **P** | continue to the Project lookup (rows 11–14) | — |
+| 8 | `create_release=true` + triple | `product:<P>`, product name resolves to **another** product | `403` `unauthorized` | nothing |
+| 9 | `create_release=true` + triple | `product:<P>`, product name resolves to **nothing** | `403` `unauthorized` — **byte-identical to row 8** | nothing |
+| 10 | `create_release=true` + triple | `product:<P>`, product name **ambiguous** | `403` `unauthorized` — **byte-identical to rows 8 and 9** | nothing |
+| 11 | `create_release=true` + triple | `admin`, product missing | `404` `unknown_release`, naming the **product** | nothing |
+| 12 | `create_release=true` + triple, product resolves | `admin` or row 7 | project missing → `404` `unknown_release`, naming the **project** | nothing |
+| 13 | `create_release=true` + triple, product resolves | `admin` or row 7 | product or project name matches **>1** row → `422` `ambiguous_name`, wording states **ambiguous**, never not-registered | nothing |
+| 14 | `create_release=true` + triple, product and project resolve | `admin` or row 7 | version find-or-create, then the normal filing outcomes: `201` filed · `200` `created=false` · `409` `duplicate_other_release` · any D11 border refusal | the version is created only immediately before filing — see B2. `409` is the one refusal that can follow a create |
+| 15 | `build_id` over 256 Unicode code points, or not valid UTF-8 | any | `400` `build_id_invalid` | nothing |
+| 16 | `release_id` (any `create_release` value but `true`) | `product:<P>`, release belongs to **P** | the normal filing outcomes, as row 3 | no Registry write |
+| 17 | `release_id` | `product:<P>`, release belongs to **another** product | `403` `unauthorized` | nothing |
+| 18 | `release_id` | `product:<P>`, release **does not exist** | `403` `unauthorized` — **byte-identical to row 17** | nothing |
+| 19 | `release_id` | `admin`, release does not exist | `404` `unknown_release` (unchanged) | nothing |
+
+Note on rows 5 and 6 versus row 4: an **incomplete triple without** `create_release` keeps today's
+`404 unknown_release`, because resolution is a lookup and "not found" is the honest answer. With
+`create_release=true` the caller has asked intake to **create**, and a partial name is not something
+that can be created from — so it is a malformed request, `400`. The distinction is deliberate and no
+existing response changes.
+
+**What rows 8–10 and 17–18 mean when you test them: the three `403`s must be equal AS BYTES**, not merely all
+`403` (B3). A `product:<P>` key must not be able to tell another product's name from a name that resolves to
+nothing from an ambiguous name, nor another product's release id from one that does not exist — otherwise
+intake is a product-name oracle for the holder of any product key. The `403` therefore names **no receipt**
+(a fresh `intake_id` could never be byte-identical). Only an `admin` key is told `404 unknown_release` naming
+the part that missed, or `422 ambiguous_name`. Diff the whole response, headers included:
+
+```sh
+# the non-leak check: two requests, one body, one product-scoped key. curl writes the headers and
+# the body to files itself (-D / -o), so no shell redirection is involved — a VM shell with
+# noclobber set would refuse a plain ">" and `>|` is not portable.
+rm -f /tmp/a.head /tmp/a.body /tmp/b.head /tmp/b.body
+
+# (a) a product that exists and is NOT this key's
+curl -sS -D /tmp/a.head -o /tmp/a.body -X POST \
+  "http://localhost:8081/api/v1/intake?product=someone-elses&project=p&version=v1&create_release=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $PRODUCT_KEY" --data-binary @sbom.spdx.json
+# (b) a product that does not exist at all
+curl -sS -D /tmp/b.head -o /tmp/b.body -X POST \
+  "http://localhost:8081/api/v1/intake?product=no-such-product&project=p&version=v1&create_release=true" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $PRODUCT_KEY" --data-binary @sbom.spdx.json
+
+# the bodies must be byte-identical (cmp is silent on success), and so must the status line
+cmp /tmp/a.body /tmp/b.body
+# only Date and the per-request correlation id may differ in the headers — nothing else
+diff /tmp/a.head /tmp/b.head
+```
+
+**Row 10 (the ambiguous name) cannot be reproduced on a migrated node**, and that is not a gap in the test:
+Registry's `000003` unique indexes make `>1` match unreachable, so the ambiguous case is asserted in Go
+against a table seeded before the indexes are applied. The abstention is kept anyway, because an
+un-migrated estate still has the old shape and a guard that only holds because of an index disappears with
+the index. The same `403` applies to it on the product road, so an operator never sees the difference.
+
+The whole matrix also lives in Go: `internal/evidence/adapters/http/intake_test.go` +
+`intake_integration_test.go` (the byte-identical `403`s, the parameter refusals, the dedup asymmetry) and
+`internal/registry/adapters/http/handler_test.go` (`201` created / `200` found). `make check-ci` runs them;
+the `-tags=e2e` two-request test over a live auth-enabled node is the VM half (change `phase3-bot-intake`,
+group 4).
+
 ### Trust model (EDR-TRUST-01)
 
 The trust model is exercised entirely by the unit/integration suite — no live stack needed.
