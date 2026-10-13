@@ -99,8 +99,10 @@ func RequireScope(required string) func(http.Handler) http.Handler {
 // enforcement is applied at mount time here rather than per route: read methods (GET/HEAD/
 // OPTIONS) pass for any authenticated principal (the `read` floor), while mutating methods
 // require a write-capable key (admin or product-scoped — not a read-only key). It must run
-// after RequireAPIKey. Product-scope *isolation* to a specific product is a later refinement
-// (greenfield routes key on release/finding, not product), tracked as a follow-up.
+// after RequireAPIKey. It is only the floor: isolation to a specific product is each node's
+// own check at its write routes, because only that node can read which product a route's
+// id belongs to (Evidence's intake + release_id, Governance's decisions, Registry's
+// registrations — EDR-SECURITY-01 2026-10-13 Registry note).
 func RequireWriteScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

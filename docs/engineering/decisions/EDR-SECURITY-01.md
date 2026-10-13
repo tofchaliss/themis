@@ -327,6 +327,28 @@ header and wiring tests.
 Operator guidance: `INSTALLATION.md` → "Switching auth on for every node";
 `deploy/node.env.example` names the scope each node's key needs.
 
+## Realization note (2026-10-13, later) — Registry confined product keys
+
+D4 says a `product:<id>` key authorizes only its own product's resources. Registry never
+checked: behind `RequireWriteScope`'s method floor, any product key could register projects,
+releases, microservices, customers and deployments under **any** product, and could create
+new products. Found while answering how a CI pipeline creates a project under its product.
+
+Registry's write handlers now confine the key (`internal/registry/adapters/http/handler.go`):
+
+| Route | `product:<P>` key | `admin` / auth off |
+| --- | --- | --- |
+| `POST /products` | `200` + `P`'s existing id when the name is `P`'s (case-insensitive); otherwise `403`. Never creates. | find-or-create, unchanged |
+| `POST /projects` | only under `P` | unchanged |
+| `POST /releases` | only under a project `P` owns | unchanged |
+| `POST /products/{id}/microservices` | only `{id}` = `P` | unchanged |
+| `POST /customers`, `POST /microservices/{id}/deployments` | `403` — they span products | unchanged |
+
+The refusal is one constant `403`, byte-identical for a foreign, a missing and an unreadable
+parent, so a product key cannot use Registry as an existence oracle — the rule intake already
+keeps (EDR-INTAKE-01 B3). An `admin` key keeps its `422 unknown product/project`. Proven in
+`internal/registry/adapters/http/handler_auth_test.go`.
+
 ## Not in scope (explicit non-goals)
 
 OAuth2 / OIDC / JWT / SSO; per-human user identity (keys are service/tenant credentials, not users); mTLS;

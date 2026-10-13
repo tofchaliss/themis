@@ -5650,6 +5650,15 @@ under the 2026-08-07 re-derivation standard.
 
 ### E. Process / optional refinements
 
+- [x] **REG-AUTH-1 — a product key could register under ANY product in Registry (filed and closed
+  2026-10-13).** HIGH, security. EDR-SECURITY-01 D4 confines a `product:<id>` key to its product, but
+  Registry checked only the method floor (`RequireWriteScope`), so a CI key for one product could create
+  projects, releases and microservices under every other product, create new products, and register
+  customers and deployments. Found while working out how a Jenkins job creates a project under its own
+  product. **Done:** Registry's write handlers confine the key, with one byte-identical `403` for a foreign,
+  missing or unreadable parent; `POST /products` only returns the key's own product (`200`); customers and
+  deployments are admin-only. See EDR-SECURITY-01's 2026-10-13 Registry note and INSTALLATION.md §5b.
+
 - [ ] **VM-NET-1 — the VM serves every node on the network with no host firewall and no TLS (filed
   2026-10-13, VM round).** MED, operability/security. `ss -ltnp` shows the dashboard on `*:8090` and the
   six nodes on their ports; neither firewalld nor ufw is active, so 8081–8086 are reachable from the

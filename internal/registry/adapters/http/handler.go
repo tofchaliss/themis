@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/themis-project/themis/internal/platform/auth"
 	"github.com/themis-project/themis/internal/registry/adapters/http/gen"
 	"github.com/themis-project/themis/internal/registry/adapters/store"
 	"github.com/themis-project/themis/internal/registry/app"
@@ -44,6 +46,10 @@ func (h *Handler) RegisterProduct(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
+	if p, confined := confinedPrincipal(r); confined {
+		h.registerOwnProduct(w, r, p, req.Name)
+		return
+	}
 	id, created, err := h.svc.RegisterProduct(r.Context(), req.Name)
 	if err != nil {
 		writeRegisterError(w, err)
@@ -57,6 +63,9 @@ func (h *Handler) RegisterProject(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	if !authorizeProduct(w, r, req.ProductId) {
 		return
 	}
 	id, created, err := h.svc.RegisterProject(r.Context(), domain.ProductID(req.ProductId), req.Name)
@@ -74,6 +83,9 @@ func (h *Handler) RegisterRelease(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
+	if !h.authorizeProject(w, r, req.ProjectId) {
+		return
+	}
 	id, created, err := h.svc.RegisterRelease(r.Context(), domain.ProjectID(req.ProjectId), req.Version)
 	if err != nil {
 		writeRegisterError(w, err)
@@ -87,6 +99,9 @@ func (h *Handler) RegisterCustomer(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterCustomerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
+		return
+	}
+	if !requireAdmin(w, r) {
 		return
 	}
 	id, err := h.svc.RegisterCustomer(r.Context(), req.Name)
@@ -104,6 +119,9 @@ func (h *Handler) RegisterMicroservice(w http.ResponseWriter, r *http.Request, i
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
+	if !authorizeProduct(w, r, id) {
+		return
+	}
 	msID, err := h.svc.RegisterMicroservice(r.Context(), domain.ProductID(id), req.Name)
 	if err != nil {
 		writeRegisterError(w, err)
@@ -119,12 +137,106 @@ func (h *Handler) RegisterDeployment(w http.ResponseWriter, r *http.Request, id 
 		writeProblem(w, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
+	if !requireAdmin(w, r) {
+		return
+	}
 	depID, err := h.svc.RegisterDeployment(r.Context(), domain.MicroserviceID(id), domain.CustomerID(req.CustomerId), req.Environment)
 	if err != nil {
 		writeRegisterError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, gen.RegisterResponse{Id: string(depID)})
+}
+
+// --- product confinement (EDR-SECURITY-01 D4) -------------------------------
+
+// unauthorizedProductDetail is the one answer a product-scoped key gets for every write it
+// may not make here: another product, a product or project that does not exist, and an
+// ownership that could not be read. Like the intake door's refusal (EDR-INTAKE-01 B3), it is
+// a constant, so a confined key learns nothing about the rest of the estate from it.
+const unauthorizedProductDetail = "this key is not authorized for the product this request names; " +
+	"a product-scoped key may register only under its own product"
+
+// adminOnlyDetail answers a confined key on the estate-wide writes (customers, deployments),
+// which belong to no single product.
+const adminOnlyDetail = "this operation spans products and requires an admin key"
+
+// confinedPrincipal returns the caller's principal when its writes are confined to its own
+// product(s). An admin key is unconfined, and so is a node with auth disabled (no principal
+// at all — the same posture every other route on that node has, and the reason
+// THEMIS_AUTH_REQUIRED=1 exists). Every other key that reached a write here is confined:
+// RequireWriteScope already refused read-only keys, so in practice this is a product:<id>
+// key, and anything else falls closed with it.
+func confinedPrincipal(r *http.Request) (auth.Principal, bool) {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok || p.IsAdmin() {
+		return auth.Principal{}, false
+	}
+	return p, true
+}
+
+// authorizeProduct reports whether the request may write under productID, having written the
+// 403 otherwise. An empty id is refused on its own account for a confined key, not left to
+// the coincidence that no key carries the empty product.
+func authorizeProduct(w http.ResponseWriter, r *http.Request, productID string) bool {
+	p, confined := confinedPrincipal(r)
+	if !confined {
+		return true
+	}
+	if productID == "" || !p.AuthorizeProduct(productID) {
+		writeProblem(w, http.StatusForbidden, "unauthorized", unauthorizedProductDetail)
+		return false
+	}
+	return true
+}
+
+// authorizeProject reports whether the request may write under projectID, by the product
+// that owns it. For a confined key an unknown project and an unreadable one are the same 403
+// as a foreign one; an admin key keeps the service's own 422 unknown project.
+func (h *Handler) authorizeProject(w http.ResponseWriter, r *http.Request, projectID string) bool {
+	if _, confined := confinedPrincipal(r); !confined {
+		return true
+	}
+	productID := ""
+	if proj, err := h.svc.GetProject(r.Context(), domain.ProjectID(projectID)); err == nil {
+		productID = string(proj.ProductID())
+	}
+	return authorizeProduct(w, r, productID)
+}
+
+// requireAdmin reports whether the request may make an estate-wide write, having written the
+// 403 otherwise.
+func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if _, confined := confinedPrincipal(r); confined {
+		writeProblem(w, http.StatusForbidden, "unauthorized", adminOnlyDetail)
+		return false
+	}
+	return true
+}
+
+// registerOwnProduct answers POST /products for a confined key. Such a key can never CREATE a
+// product — a product key exists only because its product already does — but the
+// find-or-create contract still holds for the product it owns: naming it (case-insensitively,
+// as the uniqueness index compares) returns its existing id with 200, so a script that
+// registers Product → Project → Release with a product key keeps working. Any other name is
+// the same 403 whether or not that product exists.
+func (h *Handler) registerOwnProduct(w http.ResponseWriter, r *http.Request, p auth.Principal, name string) {
+	want := strings.TrimSpace(name)
+	for _, scope := range p.Scopes {
+		own, ok := strings.CutPrefix(scope, auth.ProductScopePrefix)
+		if !ok || own == "" {
+			continue
+		}
+		prod, err := h.svc.GetProduct(r.Context(), domain.ProductID(own))
+		if err != nil {
+			continue
+		}
+		if want != "" && strings.EqualFold(prod.Name(), want) {
+			writeJSON(w, http.StatusOK, gen.FindOrCreateResponse{Id: string(prod.ID()), Created: false})
+			return
+		}
+	}
+	writeProblem(w, http.StatusForbidden, "unauthorized", unauthorizedProductDetail)
 }
 
 // GetBlastRadius handles GET /releases/{id}/blast-radius — unique customers reached (C1).
