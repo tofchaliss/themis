@@ -4,7 +4,16 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-13 · `phase3-bot-intake` **Groups 0–3 are COMPLETE**; Group 4 (verification on the VM) is next
+> ## ⏭ RESUME POINT — 2026-10-13 (evening) · `phase3-bot-intake` **COMPLETE and archived**; auth is ON for every VM node
+>
+> - Bot intake (#144–#155) and "every node sends its key" (#156) are live on the VM (`f64d355`) and verified:
+>   one-call bot upload with `create_release`, product-scoped keys confined (byte-identical 403s), and an SBOM
+>   correlated end to end with inbound auth on all 7 nodes. Log: `docs/engineering/vm-test-2026-10-12.md`
+>   (2026-10-13 addendum). Node env files were backed up as `/etc/themis/*.env.bak-20261013`.
+> - Open, in BACKLOG: "Current SBOM and finding cleanup" (design gate), OBS-CORR-1 (silent long correlation),
+>   and VM-NET-1 (HTTPS front door + host firewall; ports 8081–8086 are reachable on the network).
+>
+> ## Earlier — 2026-10-13 · `phase3-bot-intake` Groups 0–3 were complete; Group 4 (verification on the VM) was next
 >
 > **Merged since the last entry.** `phase3-report-intake` **groups 1–4** (#138–#141 — the one intake door,
 > the server-side converters, the receipt, and the GUI + scripts uploading through `POST /intake`);

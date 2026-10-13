@@ -5650,6 +5650,15 @@ under the 2026-08-07 re-derivation standard.
 
 ### E. Process / optional refinements
 
+- [ ] **VM-NET-1 — the VM serves every node on the network with no host firewall and no TLS (filed
+  2026-10-13, VM round).** MED, operability/security. `ss -ltnp` shows the dashboard on `*:8090` and the
+  six nodes on their ports; neither firewalld nor ufw is active, so 8081–8086 are reachable from the
+  office network. Since #156 every node requires `X-API-Key`, so this is no longer an open write surface,
+  but the GUI login and every key still cross the network in clear text. **Do:** put Caddy (or nginx) on
+  443 with a certificate in front of `localhost:8090` (EDR-GUI-01 D3), and a host firewall that allows only
+  443 and SSH; document both in INSTALLATION.md §8. Evidence: `docs/engineering/vm-test-2026-10-12.md`
+  (2026-10-13 addendum).
+
 - [ ] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
   VM round).** LOW, operability. A 555-component SBOM took ~4.5 min to correlate; for that whole
   time Knowledge's `stream_cursor` sat still (it advances only after Handle returns) and the log

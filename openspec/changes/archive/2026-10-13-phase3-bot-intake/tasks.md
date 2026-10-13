@@ -579,7 +579,7 @@ intake can create one.
 
 ## Group 4 — Verification
 
-- [ ] **4.1 — Re-run the VM duplicate census BEFORE 1.2 ships.** Read-only SQL on the running
+- [x] **4.1 — Re-run the VM duplicate census BEFORE 1.2 ships.** (2026-10-13: 0 rows, session forced read-only; recorded in `docs/engineering/vm-test-2026-10-12.md`.) Read-only SQL on the running
   estate, one query per level: `products` grouped by `lower(name)`, `projects` by
   `(product_id, lower(name))`, `releases` by `(project_id, version)`, each `HAVING count(*) > 1`.
   The 2026-10-12 census found none, **including case-insensitive collisions**; this re-run is what
@@ -748,7 +748,7 @@ intake can create one.
   `tests/e2e/bot_intake_e2e_test.go` derives the expected version from the directory the same way and
   `botMigrate` asserts each schema landed on it — see 4.2's note.
 
-- [ ] **4.6 — Final gate.** `make vet-tags` · `make check` · `make check-ci` · `make e2e-evidence`
+- [x] **4.6 — Final gate.** (2026-10-13: all gates green on #155/#156; live VM round passed with auth on every node.) `make vet-tags` · `make check` · `make check-ci` · `make e2e-evidence`
   green; `openspec validate phase3-bot-intake` (expect **no deltas** — phase3 convention); archive
   with `openspec archive phase3-bot-intake --skip-specs -y`.
 
