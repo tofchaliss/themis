@@ -233,7 +233,7 @@ callback, no loop control, no API or OpenAPI edit).
       communication stanza document it. Recorded as EDR-DELIVERY-01 **M1b-8**; closes the N-M0 limit
       for Communication only (2.10's Governance→Registry half is a separate decision).
 - [x] 2b.8b **Field defect, enterprise VM 2026-10-06 — the estate's Jira is self-hosted DATA CENTER**
-      (`https://almsbx.radisys.com/jira`), not Cloud. The first cut was wrong three ways at once: HTTP
+      (`https://jira.example.com/jira`), not Cloud. The first cut was wrong three ways at once: HTTP
       Basic where Data Center issues a **Personal Access Token** for `Authorization: Bearer`,
       `/rest/api/3` where it serves **v2**, and an ADF description where v2 wants **plain text**.
       Owner decision: two knobs, **defaulting to Cloud** so an existing deployment sets neither —

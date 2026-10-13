@@ -41,7 +41,7 @@ type jiraStub struct {
 	mu sync.Mutex
 
 	// basePath is the path the instance is mounted under: "" for Cloud, "/jira" for the owner's
-	// self-hosted Data Center at https://almsbx.radisys.com/jira.
+	// self-hosted Data Center at https://jira.example.com/jira.
 	basePath string
 	// apiVersion is the REST major version this instance serves; 0 means 3 (Cloud).
 	apiVersion int
@@ -225,7 +225,7 @@ func jiraDataCenterConfig(baseURL string) delivery.JiraConfig {
 }
 
 // jiraDCPath is the path a self-hosted instance is usually mounted under (the owner's is
-// https://almsbx.radisys.com/jira).
+// https://jira.example.com/jira).
 const jiraDCPath = "/jira"
 
 // jiraFlavour is one deployment shape: how the stub answers, how the sender is configured, and the
@@ -444,7 +444,7 @@ func TestRealJiraDelivererCreatesTheReleaseTicket(t *testing.T) {
 }
 
 // Every call lands under the instance's OWN path, version prefix included. A Data Center instance is
-// usually mounted on a path (the owner's is https://almsbx.radisys.com/jira), and a sender that
+// usually mounted on a path (for example https://jira.example.com/jira), and a sender that
 // rebuilt the URL instead of appending to it would 404 on every single call.
 func TestRealJiraDelivererAddressesTheInstancesOwnPath(t *testing.T) {
 	for _, flavour := range jiraFlavours() {
@@ -1311,7 +1311,7 @@ func TestJiraConfigRefusesAClearTextBaseURL(t *testing.T) {
 		{"plain http to a path-mounted instance", "http://jira.acme.example/jira", "clear-text http"},
 		{"no scheme at all", "jira.acme.example", "not an absolute URL"},
 		// The likeliest paste for a self-hosted instance: host and path, no scheme.
-		{"host and path, no scheme", "almsbx.radisys.com/jira", "not an absolute URL"},
+		{"host and path, no scheme", "jira.example.com/jira", "not an absolute URL"},
 		{"a scheme that is not http(s)", "ftp://jira.acme.example", "is not supported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1330,7 +1330,7 @@ func TestJiraConfigRefusesAClearTextBaseURL(t *testing.T) {
 
 	for _, allowed := range []string{
 		"https://acme.atlassian.net",
-		"https://almsbx.radisys.com/jira", // a path-mounted Data Center instance over TLS
+		"https://jira.example.com/jira", // a path-mounted Data Center instance over TLS
 		"http://127.0.0.1:8080",
 		"http://localhost:8080",
 		"http://[::1]:8080",

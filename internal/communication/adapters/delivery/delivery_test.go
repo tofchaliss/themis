@@ -1015,12 +1015,12 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	// PATH, which is how a self-hosted instance is usually mounted.
 	t.Setenv("THEMIS_COMMUNICATION_JIRA_AUTH", "Bearer") // case-insensitive
 	t.Setenv("THEMIS_COMMUNICATION_JIRA_API_VERSION", "2")
-	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://almsbx.radisys.com/jira/")
+	t.Setenv("THEMIS_COMMUNICATION_JIRA_BASE_URL", "https://jira.example.com/jira/")
 	cfg = delivery.ConfigFromEnv()
 	if cfg.Jira.Auth != delivery.JiraAuthBearer || cfg.Jira.APIVersion != 2 {
 		t.Errorf("data-center flavour = %s", cfg.Jira)
 	}
-	if cfg.Jira.BaseURL != "https://almsbx.radisys.com/jira" {
+	if cfg.Jira.BaseURL != "https://jira.example.com/jira" {
 		t.Errorf("base URL = %q — the PATH must survive and the trailing slash must not", cfg.Jira.BaseURL)
 	}
 	if got := cfg.String(); !strings.Contains(got, "auth=bearer") || !strings.Contains(got, "api_version=2") {
