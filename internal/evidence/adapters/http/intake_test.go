@@ -788,6 +788,55 @@ func TestIntakeParameters_ABuildIDAtTheBoundIsAccepted(t *testing.T) {
 	}
 }
 
+// TestBuildIDIsOptional — B5's first word about `build_id` is "optional": a submission
+// that names none is filed exactly as it was before the parameter existed, and the
+// receipt reports it as EMPTY rather than refusing, defaulting or inventing one.
+//
+// Both receipt surfaces are asserted — the synchronous answer and
+// `GET /intake/{intake_id}` — because they are two renderings of the same row and a
+// POST exercises only one of them.
+//
+// Its companion, TestBuildIDIsEchoedOnTheReceiptAndStoredOnTheEvidence, lives in
+// intake_integration_test.go: "stored on the evidence" is a claim about a real
+// provenance column, which a fake use case cannot make.
+func TestBuildIDIsOptional(t *testing.T) {
+	var seen app.IntakeCommand
+	runner := &fakeRunner{build: func(cmd app.IntakeCommand) *domain.Receipt {
+		seen = cmd
+		return filed(t, cmd, "sbom", "cyclonedx", "ev-1", true)
+	}}
+	f := newIntakeFixture(t, evhttp.IntakeConfig{}, runner, nil)
+
+	rec := post(t, f.handler, "/intake?release_id=rel-1", `{"bomFormat":"CycloneDX"}`, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 — an absent build_id is never an error: %s", rec.Code, rec.Body)
+	}
+	// Empty at the use case, which is what the provenance column then records: "this
+	// attempt asserted no build id" is a fact, and the NOT NULL DEFAULT '' is how it is
+	// stored (B5, 2.3's migration).
+	if seen.BuildID != "" {
+		t.Errorf("build_id reached the use case as %q, want empty", seen.BuildID)
+	}
+	posted := decodeReceipt(t, rec)
+	if got := strings.TrimSpace(derefString(posted.BuildId)); got != "" {
+		t.Errorf("the POST receipt reports build_id = %q, want nothing", got)
+	}
+	if got := strings.TrimSpace(derefString(readStoredReceipt(t, f.handler, posted.IntakeId).BuildId)); got != "" {
+		t.Errorf("the stored receipt reports build_id = %q, want nothing", got)
+	}
+}
+
+// derefString reads an optional string off a rendered receipt. A nil pointer and a
+// pointer to "" are the same answer here — the attempt named no build id — and a test
+// that insisted on one of the two would be pinning a JSON encoding detail rather than
+// B5's contract.
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // TestIntakeExpectedChecksum_IsVerifiedOverTheSUBMITTEDBytes — and that is the only
 // place it can be right: for a converted submission the filed bytes are not the bytes
 // the caller hashed (D2), so a gate downstream of the converter would compare the

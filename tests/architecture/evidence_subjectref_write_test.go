@@ -109,6 +109,65 @@ func TestEvidenceRegistrySeamExposesOneWrite(t *testing.T) {
 	t.Logf("the seam's write surface: %v", writes)
 }
 
+// TestEvidenceDoesNotImportRegistry is the other half of the same bound, and the half
+// that makes the first one worth having: the seam exposes one write BECAUSE the Evidence
+// context cannot reach the registry's own API at all. Only `cmd/evidence` — the
+// composition root, the one place that is allowed to know both sides — imports it, and
+// what it hands in is a value satisfying the seam's interfaces, carrying primitives only
+// (EDR-INTAKE-01 B2/D7; the read half's "no registry type reaches this context").
+//
+// Without this, "exactly one write" would be a statement about one package while any
+// adapter could import `registry/app` and call whatever it liked.
+//
+// Test packages are loaded too (`Tests: true`): a test is also code that compiles, and a
+// test reaching into the registry to set up an estate is exactly how the import creeps in
+// — the same reason go-cleanarch scans test files.
+func TestEvidenceDoesNotImportRegistry(t *testing.T) {
+	const (
+		evidenceTree = module + "/internal/evidence"
+		registryTree = module + "/internal/registry"
+		root         = module + "/cmd/evidence"
+	)
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports, Tests: true}
+	pkgs, err := packages.Load(cfg, evidenceTree+"/...", root)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		t.Fatalf("%d load error(s)", n)
+	}
+
+	rootImportsRegistry := false
+	for _, p := range pkgs {
+		// The loader reports a tested package twice (the package, and the test
+		// variant), and `PkgPath` carries the module path either way.
+		inEvidence := strings.HasPrefix(p.PkgPath, evidenceTree+"/") || p.PkgPath == evidenceTree
+		isRoot := strings.HasPrefix(p.PkgPath, root)
+		for imp := range p.Imports {
+			if imp != registryTree && !strings.HasPrefix(imp, registryTree+"/") {
+				continue
+			}
+			switch {
+			case isRoot:
+				rootImportsRegistry = true
+			case inEvidence:
+				t.Errorf("%s imports %s — the Evidence context reaches Registry only through the subjectref seam, "+
+					"which carries primitives and exactly one write (%s); only cmd/evidence may name a registry package",
+					p.PkgPath, imp, theOneWrite)
+			}
+		}
+	}
+
+	// The positive control, so the rule cannot pass by the seam having quietly
+	// disappeared: the composition root is where the two sides meet, and it is still
+	// wiring them. If that genuinely changes — the registry read moving onto an HTTP
+	// client seam, say — this line is the deliberate place to record it.
+	if !rootImportsRegistry {
+		t.Errorf("%s imports no registry package; the seam is wired at the composition root, so either the wiring moved "+
+			"(and this test should say where) or Evidence lost its ability to resolve identity at all", root)
+	}
+}
+
 // signatureShape reduces a method to its parameter and result TYPES, which is what the
 // pin is about: names and receivers differ between an interface method and the concrete
 // one that satisfies it, while the shape must not.

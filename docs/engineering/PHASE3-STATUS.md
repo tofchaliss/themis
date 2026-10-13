@@ -4,7 +4,7 @@
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-12 · `phase3-bot-intake` **Gate B is COMPLETE**; Gates C–F stay on hold
+> ## ⏭ RESUME POINT — 2026-10-12 · `phase3-bot-intake` **Gates B and C are COMPLETE**; Gates D–F stay on hold
 >
 > **Merged since the last entry.** `phase3-report-intake` **groups 1–4** (#138–#141 — the one intake door,
 > the server-side converters, the receipt, and the GUI + scripts uploading through `POST /intake`);
@@ -20,9 +20,20 @@ and the resume pointer, never item state.
 > creates are idempotent find-or-create answering `201`/`200`, and name lookups **abstain and say
 > *ambiguous*** instead of reporting a twice-registered name as unregistered.
 >
-> **Gates C–F (Groups 2–4) remain ON HOLD** — intake's `create_release`, the non-leaking
-> authorization, `build_id`, scripts/docs and the VM verification. **Do not start Group 2** without
-> an explicit go-ahead; Gate B landing is not itself that go-ahead.
+> **Gate C — `Group 2` — is COMPLETE** (#149–#152 and this change: 2.1–2.11, all ticked in the
+> change's `tasks.md`). Intake now has the bot road end to end: `create_release` creates **the
+> version only**, under a Product and Project a human registered, and it creates it at the **last
+> moment** — after every border check, so a refused submission leaves no empty Release; both doors
+> authorize the resolved **Product** before anything is written, and a `product:<id>` key cannot
+> tell someone else's product from a missing one or an ambiguous name (the three `403`s are equal
+> **as bytes**); and `build_id` is captured as artifact provenance and echoed on the receipt while
+> taking **no** part in dedup — a byte-identical retry keeps the FIRST upload's build id and the
+> retry's value appears only on its own receipt, which is the design, asserted as such.
+>
+> **Gates D–F (Groups 3–4) remain ON HOLD** — the scripts and docs (`gf-upload-sbom.sh`'s `-c`/`-b`,
+> the INSTALLATION/TESTING sections, the EDR-SECURITY-01 realization note) and the VM verification
+> (the duplicate census re-run, the two-request e2e). **Do not start Group 3** without an explicit
+> go-ahead; Gate C landing is not itself that go-ahead.
 >
 > | state | task |
 > | --- | --- |
@@ -32,7 +43,14 @@ and the resume pointer, never item state.
 > | done | **1.7–1.8** — the app's three creates return `(id, created, err)`, and the routes answer `201` when they created and `200` when they found |
 > | done | **1.9–1.10** — name lookups abstain (B4). `ProductIDByName` / `ProjectIDByName` / `ReleaseIDByVersion` live in `registry/adapters/store`: 0 matches → empty id + nil, `>1` → `app.ErrAmbiguousName`, and `ReleaseIDByVersion` no longer returns the first of several. The seam translates it into `subjectref.ErrAmbiguousName` in `cmd/evidence` — no registry error value crosses it — and the resolver refuses with `ambiguous_name`, worded as **ambiguous** and never as not-registered |
 > | done | **1.11** — group gate: `make vet-tags`, `make check-ci` green; `registry/app` 100% and `registry/adapters/store` 80% coverage tiers hold |
-> | **next** | **nothing in this change.** Group 2 (Gate C) opens only on an explicit go-ahead |
+> | done | **2.1–2.3** — the two query parameters (`create_release`, `build_id` bounded at 256 **Unicode code points**) + `IntakeReceipt.build_id` in `api/evidence.openapi.yaml`; `Provenance.BuildID` in the domain; migration `000004` adding `evidence.provenance_build_id` and `intake_receipts.build_id` |
+> | done | **2.4** — parameter validation as B7's step 1, **before** the size bound: `create_release` with `release_id` → `create_release_conflict`; without the whole triple → `incomplete_release_triple`; a `build_id` over the bound or not valid UTF-8 → `build_id_invalid`, **refused, never truncated**. One implementation (`IntakeCommand.ParameterRefusal`), two call sites — the app's step 0 and the HTTP edge before `io.ReadAll`, because only the edge can refuse before the body is buffered |
+> | done | **2.5** — the `ReleaseProvisioner` port (one method, no product or project verb) and the **deferred** create: B7's step 8, between D6 and filing, so nothing is created on any refusal. `Resolve` answers an `app.Resolution` whose "to be created" is DERIVED from an empty release id, so a resolution cannot both name a release and ask for one |
+> | done | **2.6 · 2.6b** — the authorization order on **both** roads (B7): resolve the Product by name → `AuthorizeProduct` → resolve the Project; and, on the `release_id` road, release → project → owning product → `AuthorizeProduct`, on `POST /intake` **and** `POST /evidence`. For a `product:<id>` key the non-disclosing `403`s are equal **as bytes** (one detail constant, and the response names no receipt, since a fresh `intake_id` cannot be byte-identical); `admin` keeps today's `404` |
+> | done | **2.7–2.9** — `build_id` plumbed to its two ENDS (the filed document's provenance and the receipt row — the column and the renderer had existed since 2.1–2.3 with nothing writing it), and the assertions that make B5/B6 checkable: dedup is untouched by `build_id`, the filed document keeps the FIRST one while the retry's receipt carries its own (they DIFFER by design), `409 duplicate_other_release` across releases is unchanged, a different SBOM for the same release is still filed as **new history** (both rows retained — **EDR-DELIVERY-01 M2-5** rests on it), and D6's SBOM-before-report holds for a brand-new version **with the provisioner uncalled**, `allow_without_sbom` included |
+> | done | **2.10** — `tests/architecture`: the seam's exported write surface is exactly `[Provisioner.FindOrCreateRelease]`, **and** no `internal/evidence/…` package imports `internal/registry/…` (test packages scanned too; only `cmd/evidence` may, and a positive control asserts it still does) |
+> | done | **2.11** — group gate: `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test`, `make e2e-pipeline` and `make check-ci` green; the tiers this group names all hold — `evidence/{domain,app}` and `adapters/subjectref` 100%, `adapters/http` 98.9%, `adapters/store` **93.6%**, and the store **moved from the 80% aggregate-store tier to the 90% adapter tier** in `scripts/check-coverage.sh`, because the branches that kept it at 80 are now covered deterministically by a cancelled context (every read, both receipt sweeps, `Save`'s `Begin`, the relay's outbox read and its mark-sent window) — asserted as the property *a read that could not be performed is never reported as an absence*. What still needs an injectable pool is only a fault arriving after a statement has already succeeded inside the transaction |
+> | **next** | **nothing in this change.** Group 3 (Gate D) opens only on an explicit go-ahead |
 >
 > **The 2026-10-09 entry below is history now:** its "FIRST — the evidence stream is halted" action was
 > carried out on the 2026-10-12 VM round (cursor `35751` → `37090`, no stream halted —

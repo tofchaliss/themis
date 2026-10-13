@@ -16,7 +16,7 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
 **OpenSpec state: see "Active Changes" below** (as of 2026-10-12: `phase3-report-intake` groups 1–4
-merged, `phase3-bot-intake` Gate B complete, Gates C–F on hold). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+merged, `phase3-bot-intake` Gates B and C complete, Gates D–F on hold). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
 Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,
@@ -46,7 +46,7 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 ## Active Changes
 
-**2026-10-12 — report intake is merged; `phase3-bot-intake` Gate B is complete.**
+**2026-10-12 — report intake is merged; `phase3-bot-intake` Gates B and C are complete.**
 
 - **`phase3-report-intake`** — **groups 1–4 merged** (#138–#141: the one `POST /intake` door, the
   server-side converters, the receipt, and the GUI + scripts uploading through it). Beside them, **#142**
@@ -64,9 +64,38 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
   picks the first match), which `cmd/evidence` translates into `subjectref.ErrAmbiguousName` so no
   registry error value crosses the seam, and the resolver refuses with `ambiguous_name` worded as
   **ambiguous**, never as not-registered.
-  **Gates C–F (Groups 2–4) remain ON HOLD** — intake's `create_release`, the non-leaking
-  authorization, `build_id`, scripts/docs and the VM verification. **Group 2 is not started**, and
-  Gate B landing is not itself the go-ahead to start it.
+  **Gate C — `Group 2` — is COMPLETE** (#149–#152 plus 2.7–2.11; 2.1–2.11 all ticked in the
+  change's `tasks.md`): intake's bot road, end to end. `create_release=true` with the whole
+  `{product, project, version}` triple finds-or-creates **the version only**, through Registry's
+  own idempotent upsert, at B7's **step 8** — after every border check and immediately before
+  filing, so a refused submission creates nothing. Both doors authorize the **resolved Product**
+  read-only before anything is written, and for a `product:<id>` key the refusals B3 requires to be
+  indistinguishable — another product's name, no such name, an ambiguous name, another product's
+  release id, a release id that does not exist — are equal **as bytes** (one detail constant, and
+  the `403` names no receipt, because a fresh `intake_id` could never be byte-identical). `build_id`
+  is captured as artifact provenance on the evidence row and echoed on the receipt, and is
+  deliberately **inert**: it takes no part in dedup, so a byte-identical retry keeps the FIRST
+  upload's build id while the retry's value appears only on its own receipt — the two differ by
+  design, and that is now asserted rather than assumed. B6's unchanged behaviours carry regression
+  guards (`409 duplicate_other_release`; a different SBOM for the same release still filed as new
+  history, which **EDR-DELIVERY-01 M2-5** rests on; D6's SBOM-before-report, including a brand-new
+  version with the provisioner uncalled). Architecture: the Evidence→Registry seam's exported write
+  surface is exactly one method, and **no `internal/evidence/…` package imports
+  `internal/registry/…`** — only `cmd/evidence` may.
+  One shared-gate change came with the group gate: `evidence/adapters/store` moved from the **80%
+  aggregate-store tier to the 90% adapter tier** in `scripts/check-coverage.sh` (86% → **93.6%**),
+  because the branches that justified the lower tier turned out not to need pool-fault injection —
+  a cancelled context reaches every read, both receipt sweeps, `Save`'s `Begin` and the relay's two
+  fault windows, pinned as *a read that could not be performed is never reported as an absence*.
+  The other aggregate stores are untouched at 80%, and the injectable-pgxpool follow-up still owns
+  the mid-transaction residue.
+  **Gates D–F (Groups 3–4) remain ON HOLD** — the scripts and docs (`gf-upload-sbom.sh`'s `-c`/`-b`,
+  the INSTALLATION/TESTING sections, the EDR-SECURITY-01 realization note) and the VM verification
+  (the duplicate census re-run before `000003` ships, the two-request e2e). **Group 3 is not
+  started**, and Gate C landing is not itself the go-ahead to start it.
+  One gap deliberately left for Group 3 (noted on 2.6): `api/evidence.openapi.yaml` declares no
+  **`403`** response on `POST /intake` or `POST /evidence`, though both doors can now answer one
+  (the body shape is the already-declared `IntakeProblem` / `Problem`, so no schema changes).
 - Other scaffolded `phase3-*` changes under `openspec/changes/` carry their own state in their
   `tasks.md`; this file records the resume pointer, never per-task state.
 

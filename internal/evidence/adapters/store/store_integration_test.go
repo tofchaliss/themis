@@ -785,6 +785,46 @@ func TestBuildIDPersistsAndReadsBack(t *testing.T) {
 	}
 }
 
+// TestDedupDoesNotRewriteTheFiledBuildID — the enforcement half of B5's inertness, at
+// the layer that enforces it. `TestDedupKeepsTheFirstBuildIDAndTheRetryReceiptCarriesItsOwn`
+// (adapters/http, task 2.8) asserts the CONTRACT over the whole door; this asserts the
+// mechanism: the dedup key is the content fingerprint, so a second Save of the same bytes
+// with a different build id is `ON CONFLICT … DO NOTHING` — one row, the FIRST build id,
+// no new outbox note. Evidence is immutable (CON-0007), and a provenance column is not an
+// exception to that.
+func TestDedupDoesNotRewriteTheFiledBuildID(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	raw := []byte("one-document-two-builds")
+	first, firstEv := buildEvidence(t, "ev-first", "rel-1", raw, "first-run")
+	if _, err := s.Save(ctx, first, raw, firstEv); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	retry, retryEv := buildEvidence(t, "ev-retry", "rel-1", raw, "retry-run")
+	res, err := s.Save(ctx, retry, raw, retryEv)
+	if err != nil {
+		t.Fatalf("retry save: %v", err)
+	}
+	if res.Created || res.ID != "ev-first" {
+		t.Errorf("retry = %+v, want the first document's id with Created=false — the build id is not part of the dedup key", res)
+	}
+	got, err := s.GetByID(ctx, "ev-first")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Provenance().BuildID != "first-run" {
+		t.Errorf("stored build id = %q, want the first upload's %q", got.Provenance().BuildID, "first-run")
+	}
+	if n := count(t, pool, "SELECT count(*) FROM evidence"); n != 1 {
+		t.Errorf("evidence rows = %d, want 1", n)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM evidence_outbox"); n != 1 {
+		t.Errorf("outbox rows = %d, want 1 — nothing was filed, so nothing happened to announce", n)
+	}
+}
+
 // TestBuildIDMigrationReversible — 000004 up → down → up with rows in the tables.
 // Only the two columns move: every document and every receipt is still there
 // afterwards with the rest of its provenance intact, because the down migration
@@ -883,6 +923,256 @@ func hasColumn(t *testing.T, table, column string) bool {
 		t.Fatalf("column probe %s.%s: %v", table, column, err)
 	}
 	return ok
+}
+
+// --- faults: what the store says when it could not do the work -------------
+//
+// These cover the store's "the question could not be ASKED" branches, which are not
+// cosmetic: every one of them is a place where answering with the normal value instead
+// of an error would turn a transient fault into a false fact. `HasInventory` returning
+// `(false, nil)` tells an operator to upload an SBOM they already uploaded; a read
+// returning `ErrNotFound` says a filed document is gone; `SaveIntakeReceipt` returning
+// `ErrIdempotencyKeyTaken` sends the caller to read back a receipt nobody wrote.
+//
+// The fault is a CANCELLED CONTEXT, which is the real shape of this on a node: a client
+// that hung up, or a shutdown arriving mid-sweep. It is deterministic (no sleeps, no
+// retry windows) and it needs no pool-fault injection — so the branches it reaches are
+// gated here rather than deferred with the mid-transaction ones. What it cannot reach is
+// a fault that arrives AFTER a statement has already succeeded inside a transaction
+// (`Save`'s dedup-resolve, outbox-insert and commit paths) or a row that scans wrong;
+// those still need an injectable pool, and are the residue the follow-up owns.
+
+// TestAReadThatCouldNotBePerformedIsNeverReportedAsAnAbsence — the one property worth
+// asserting over every read at once. The rows below EXIST, which is what makes the
+// assertion sharp: the honest answer to "I could not ask" is an error, never "there is
+// nothing there".
+func TestAReadThatCouldNotBePerformedIsNeverReportedAsAnAbsence(t *testing.T) {
+	pool := newPool(t)
+	s := store.New(pool)
+
+	// Seed under a live context, so every read below has something to find.
+	raw := []byte("sbom-for-the-fault-reads")
+	e, ev := sampleEvidence(t, "ev-fault", "rel-fault", raw)
+	if _, err := s.Save(context.Background(), e, raw, ev); err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+	if err := s.SaveIntakeReceipt(context.Background(), store.IntakeReceipt{
+		IntakeID: "in-fault", Status: domain.ReceiptFiled, EvidenceID: "ev-fault",
+		ReleaseID: "rel-fault", IdempotencyKey: "key-fault",
+	}); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for _, tc := range []struct {
+		name string
+		read func() error
+	}{
+		{"GetByID", func() error { _, err := s.GetByID(dead, "ev-fault"); return err }},
+		{"GetInventory", func() error { _, err := s.GetInventory(dead, "ev-fault"); return err }},
+		{"GetRawDocument", func() error { _, _, err := s.GetRawDocument(dead, "ev-fault"); return err }},
+		{"ListByRelease", func() error { _, err := s.ListByRelease(dead, "rel-fault"); return err }},
+		{"LoadIntakeReceipt", func() error { _, err := s.LoadIntakeReceipt(dead, "in-fault"); return err }},
+		{"FindIntakeReceiptByIdempotencyKey", func() error {
+			_, err := s.FindIntakeReceiptByIdempotencyKey(dead, "key-fault")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.read()
+			if err == nil {
+				t.Fatal("the read answered normally over a dead context; a fault must be reported")
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				t.Errorf("err = %v, want anything but ErrNotFound — the row is there, and "+
+					"reporting a failed read as an absence is how a filed document reads as missing", err)
+			}
+		})
+	}
+
+	// HasInventory is the same property with a bool in front of it, and D6's refusal
+	// text is why it gets its own assertion: `(false, nil)` here would refuse the report
+	// with `no_inventory_for_release` and tell the operator to upload the SBOM that is
+	// sitting in the table.
+	t.Run("HasInventory", func(t *testing.T) {
+		has, err := s.HasInventory(dead, "rel-fault")
+		if err == nil {
+			t.Fatal("HasInventory answered over a dead context; a precondition that could not be EVALUATED is not one that failed")
+		}
+		if has {
+			t.Error("HasInventory = true beside an error; the bool must not be read when the question could not be asked")
+		}
+	})
+}
+
+// TestWritesReportAFaultRatherThanASuccessOrACollision — the write half, and each
+// assertion names the lie the branch exists to prevent.
+func TestWritesReportAFaultRatherThanASuccessOrACollision(t *testing.T) {
+	pool := newPool(t)
+	live := context.Background()
+	s := store.New(pool)
+
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	t.Run("Save", func(t *testing.T) {
+		raw := []byte("never-filed")
+		e, ev := sampleEvidence(t, "ev-dead", "rel-dead", raw)
+		res, err := s.Save(dead, e, raw, ev)
+		if err == nil {
+			t.Fatal("Save reported success over a dead context")
+		}
+		if res.Created {
+			t.Error("Save reported Created beside an error — nothing was written")
+		}
+		// And nothing WAS written: the transaction never opened, so there is no
+		// half-filed document and no outbox note announcing one.
+		if got := count(t, pool, "SELECT count(*) FROM evidence WHERE id = 'ev-dead'"); got != 0 {
+			t.Errorf("%d rows for a failed Save, want 0", got)
+		}
+		if got := count(t, pool, "SELECT count(*) FROM evidence_outbox"); got != 0 {
+			t.Errorf("%d outbox notes for a failed Save, want 0 — nothing landed to announce", got)
+		}
+	})
+
+	t.Run("SaveIntakeReceipt is not a key collision", func(t *testing.T) {
+		err := s.SaveIntakeReceipt(dead, store.IntakeReceipt{
+			IntakeID: "in-dead", Status: domain.ReceiptAccepted, IdempotencyKey: "key-dead",
+		})
+		if err == nil {
+			t.Fatal("the receipt write reported success over a dead context")
+		}
+		// The distinction the caller acts on: a taken key means "read the winner back
+		// and replay its receipt", and there is no winner here.
+		if errors.Is(err, store.ErrIdempotencyKeyTaken) {
+			t.Errorf("err = %v, want anything but ErrIdempotencyKeyTaken — a fault is not a retry arriving", err)
+		}
+		if got := count(t, pool, "SELECT count(*) FROM intake_receipts WHERE intake_id = 'in-dead'"); got != 0 {
+			t.Errorf("%d receipts for a failed write, want 0", got)
+		}
+	})
+
+	// The two sweeps report counts, so "0 and no error" is a positive claim — nothing
+	// was expired, nothing was stale — and a sweep that never ran must not make it.
+	t.Run("the retention sweep", func(t *testing.T) {
+		if err := s.SaveIntakeReceipt(live, store.IntakeReceipt{
+			IntakeID: "in-old", Status: domain.ReceiptAccepted,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		backdate(t, pool, "in-old", 48*time.Hour)
+
+		n, err := s.PurgeExpiredReceipts(dead, time.Now().UTC())
+		if err == nil || n != 0 {
+			t.Errorf("purge = %d / %v, want 0 and a fault", n, err)
+		}
+		if got := count(t, pool, "SELECT count(*) FROM intake_receipts WHERE intake_id = 'in-old'"); got != 1 {
+			t.Errorf("the expired receipt is gone (%d rows) although the sweep failed", got)
+		}
+	})
+
+	t.Run("the startup recovery sweep", func(t *testing.T) {
+		n, err := s.FailStaleNonTerminalReceipts(dead, time.Now().UTC(), "interrupted by restart; resubmit")
+		if err == nil || n != 0 {
+			t.Errorf("recovery = %d / %v, want 0 and a fault", n, err)
+		}
+		// The receipt stays non-terminal, so the NEXT startup still closes it out: a
+		// swallowed error here would leave a client polling a goroutine forever.
+		if got := count(t, pool, "SELECT count(*) FROM intake_receipts WHERE intake_id = 'in-old' AND status = 'accepted'"); got != 1 {
+			t.Errorf("the stale receipt was advanced (%d still accepted) although the sweep failed", got)
+		}
+	})
+}
+
+// TestRelayBatchSizeFallsBackToTheDefault — a non-positive batch size must not reach
+// the query as a literal `LIMIT 0`, which would deliver nothing, forever, silently. The
+// assertion is therefore behavioural: three notes, one pass, all three delivered.
+func TestRelayBatchSizeFallsBackToTheDefault(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	for i := range 3 {
+		raw := []byte(fmt.Sprintf("sbom-batch-%d", i))
+		e, ev := sampleEvidence(t, fmt.Sprintf("ev-batch-%d", i), "rel-batch", raw)
+		if _, err := s.Save(ctx, e, raw, ev); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	pub := &fakePublisher{}
+	n, err := store.NewRelay(pool, pub, 0).DeliverPending(ctx)
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if n != 3 || len(pub.delivered) != 3 {
+		t.Errorf("delivered %d (publisher saw %d), want 3 — a non-positive batch size took the default, not LIMIT 0",
+			n, len(pub.delivered))
+	}
+	if got := count(t, pool, "SELECT count(*) FROM evidence_outbox WHERE sent_at IS NULL"); got != 0 {
+		t.Errorf("%d notes still unsent, want 0", got)
+	}
+}
+
+// TestRelayReportsAFaultAndLeavesTheNoteUnsent — the relay's two fault windows, and the
+// second is the interesting one: the envelope was PUBLISHED and the row could not be
+// marked sent. The note then stays unsent on purpose, because exactly-once-eventually
+// is at-least-once plus a consumer that dedups by envelope id (BCK-0041) — a note
+// marked sent by a failed write would be a delivery nobody can prove and nobody repeats.
+func TestRelayReportsAFaultAndLeavesTheNoteUnsent(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	raw := []byte("sbom-relay-fault")
+	e, ev := sampleEvidence(t, "ev-relay-fault", "rel-relay-fault", raw)
+	if _, err := s.Save(ctx, e, raw, ev); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	t.Run("it cannot even read the outbox", func(t *testing.T) {
+		dead, cancel := context.WithCancel(context.Background())
+		cancel()
+		n, err := store.NewRelay(pool, &fakePublisher{}, 10).DeliverPending(dead)
+		if err == nil || n != 0 {
+			t.Errorf("deliver = %d / %v, want 0 and a fault", n, err)
+		}
+	})
+
+	t.Run("it published and then could not mark the note sent", func(t *testing.T) {
+		shutdown, cancel := context.WithCancel(context.Background())
+		pub := &cancellingPublisher{cancel: cancel}
+		n, err := store.NewRelay(pool, pub, 10).DeliverPending(shutdown)
+		if err == nil {
+			t.Fatal("the relay reported success although the note could not be marked sent")
+		}
+		if n != 0 {
+			t.Errorf("delivered = %d, want 0 — it counts notes it has recorded as sent", n)
+		}
+		if len(pub.delivered) != 1 {
+			t.Fatalf("the publisher saw %d envelopes; this case is about the window AFTER a successful publish", len(pub.delivered))
+		}
+		if got := count(t, pool, "SELECT count(*) FROM evidence_outbox WHERE sent_at IS NULL"); got != 1 {
+			t.Errorf("unsent notes = %d, want 1 — an unmarked note must be re-delivered, not dropped", got)
+		}
+	})
+}
+
+// cancellingPublisher succeeds and then takes the context down, which is the shape of a
+// node shutting down between the publish and the bookkeeping. It is the only way to
+// reach that window deterministically: every earlier fault stops the batch before the
+// publish.
+type cancellingPublisher struct {
+	cancel    func()
+	delivered []event.Envelope
+}
+
+func (p *cancellingPublisher) Publish(_ context.Context, env event.Envelope) error {
+	p.delivered = append(p.delivered, env)
+	p.cancel()
+	return nil
 }
 
 func buildEvidence(t *testing.T, id, releaseID string, raw []byte, buildID string) (domain.Evidence, domain.EvidenceRegistered) {

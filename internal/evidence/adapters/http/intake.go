@@ -229,6 +229,16 @@ func (i *Intake) submit(w http.ResponseWriter, r *http.Request, params gen.Submi
 		i.reject(w, bg, rec, refusal.Reason, refusal.Detail)
 		return
 	}
+	// The receipt records what THIS attempt submitted (B5), which is what makes the
+	// echo work on a refusal and on `GET /intake/{intake_id}` as well as on the
+	// synchronous answer — and, on a byte-identical retry, what makes the receipt's
+	// value differ from the filed document's by design.
+	//
+	// It is copied AFTER the parameter check, not with the rest of the command: an
+	// over-long or non-UTF-8 `build_id` is refused there, and `intake_receipts.build_id`
+	// is a `TEXT` column — Postgres rejects malformed UTF-8 outright, so recording the
+	// value first would turn a named `400` into a failed write.
+	rec.BuildID = cmd.BuildID
 
 	// D13's bound, checked BEFORE the body is buffered — a limit applied after the
 	// read protects nothing it was meant to.
