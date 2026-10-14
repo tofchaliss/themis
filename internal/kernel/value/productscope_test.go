@@ -205,6 +205,8 @@ func TestScopeFromComponent(t *testing.T) {
 		{"no qualifier, no marker", "pkg:golang/stdlib@1.27.1", "go1.27.1", value.ProductScope{}},
 		{"unknown distro", "pkg:apk/wolfi/x@1?distro=wolfi", "1", value.ProductScope{}},
 		{"alpine without minor", "pkg:apk/alpine/x@1?distro=alpine-3", "1", value.ProductScope{}},
+		{"ubuntu without month", "pkg:deb/ubuntu/x@1?distro=ubuntu-22", "1", value.ProductScope{}},
+		{"unknown distro with a version", "pkg:apk/other/x@1?distro=suse-15.5", "1", value.ProductScope{}},
 	}
 	for _, c := range cases {
 		if got := value.ScopeFromComponent(c.purl, c.version); got != c.want {
