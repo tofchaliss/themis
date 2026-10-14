@@ -36,6 +36,233 @@ golangci-lint version                       # expect 2.x, built with go1.25+
 
 ---
 
+## Quick runbooks (a Linux VM under systemd)
+
+Three paste-safe runbooks for the usual jobs on a VM. Every block is bash, every comment starts
+with `#`, and every step ends with what you should see. Part A below explains each step in depth;
+read it when a step fails or you need a setting these runbooks leave at its default.
+
+| Job | Runbook |
+| --- | --- |
+| Empty VM to a running stack, auth on | [R1. Fresh install](#r1-fresh-install) |
+| Stop and start, nothing else changes | [R2. Restart](#r2-restart-an-existing-setup) |
+| New code from `main` onto a running stack | [R3. Pull the latest code and restart](#r3-pull-the-latest-code-and-restart) |
+
+### R1. Fresh install
+
+From an empty Linux VM to all seven nodes running with auth on. Run every block as your normal
+user. Needs Go 1.25+, git, jq and PostgreSQL 14+.
+
+**Step 1. Tools and code.**
+
+```bash
+# RHEL / Rocky. On Ubuntu use: sudo apt-get install -y git jq postgresql
+sudo dnf install -y git jq postgresql-server
+sudo postgresql-setup --initdb
+sudo systemctl enable --now postgresql
+go version
+# expect go1.25 or newer
+sudo mkdir -p /opt/themis/src && sudo chown "$USER" /opt/themis/src
+git clone https://github.com/tofchaliss/themis.git /opt/themis/src/themis
+cd /opt/themis/src/themis
+```
+
+**Step 2. Database password, role and databases.** The password is generated, never typed, and
+saved to a file only you can read, because nothing else prints it again (Part A step 1).
+
+```bash
+( umask 077; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 > ~/.themis-pg.pw )
+export PGPW=$(cat ~/.themis-pg.pw)
+export PGBASE="postgres://themis:$PGPW@localhost:5432"
+sudo -u postgres psql -c "CREATE USER themis WITH PASSWORD '$PGPW';"
+for db in evidence knowledge governance communication bus auth intelligence; do sudo -u postgres psql -c "CREATE DATABASE $db OWNER themis;"; done
+psql "$PGBASE/evidence?sslmode=disable" -tAc 'SELECT 1;'
+# expect: 1
+```
+
+If `SELECT 1` fails with `Ident authentication failed`, PostgreSQL is not using passwords on
+localhost: change `ident` to `scram-sha-256` on the `127.0.0.1` and `::1` lines of `pg_hba.conf`,
+then `sudo systemctl reload postgresql`.
+
+**Step 3. Build.** The cache paths stop a bad profile setting from breaking the build.
+
+```bash
+cd /opt/themis/src/themis
+env GOCACHE=$HOME/.cache/go-build GOMODCACHE=$HOME/go/pkg/mod go build -o bin/ ./cmd/... && echo BUILD-OK
+ls bin/
+# expect: registry evidence knowledge governance communication intelligence dashboard authadmin, among others
+```
+
+**Step 4. Install the systemd services** (Part A step 7). This writes `/etc/themis/<node>.env`
+and starts all seven nodes with auth OFF. Set the model to your Ollama model's tag.
+
+```bash
+cd /opt/themis/src/themis
+sudo THEMIS_PGPW="$PGPW" THEMIS_INTELLIGENCE_MODEL='cyberpal20b:latest' ./deploy/systemd/install-systemd.sh
+systemctl is-active themis@registry themis@evidence themis@knowledge themis@governance themis@communication themis@intelligence themis@dashboard
+# expect: active, seven times
+```
+
+**Step 5. Mint the keys** (Part A step 4a-bis). One key per calling node with the smallest scope
+it needs, plus your own admin key. Each key goes straight into a file and never onto the screen.
+
+```bash
+cd /opt/themis/src/themis
+export THEMIS_AUTH_DATABASE_DSN="$PGBASE/auth?sslmode=disable"
+export THEMIS_AUTH_MIGRATE=1
+mint() { ./bin/authadmin create-key --name "$1" --scopes "$2" | awk '/shown once/{getline; getline; print $1}'; }
+mkdir -p ~/.themis-keys && chmod 700 ~/.themis-keys
+( umask 077; mint knowledge-node read > ~/.themis-keys/knowledge; mint governance-node admin > ~/.themis-keys/governance; mint communication-node read > ~/.themis-keys/communication; mint intelligence-node read > ~/.themis-keys/intelligence; mint dashboard admin > ~/.themis-keys/dashboard; mint operator admin > ~/.themis-keys/operator )
+wc -c ~/.themis-keys/*
+# expect: six files, none of them 0 bytes
+unset THEMIS_AUTH_MIGRATE
+```
+
+**Step 6. Switch auth on for every node.** Two halves: every node checks incoming keys, and every
+calling node sends its own key. Doing only the first half silently breaks the pipeline.
+
+```bash
+for n in registry evidence knowledge governance communication intelligence dashboard; do printf 'THEMIS_AUTH_DATABASE_DSN=%s\nTHEMIS_AUTH_REQUIRED=1\n' "$THEMIS_AUTH_DATABASE_DSN" | sudo tee -a /etc/themis/$n.env > /dev/null; done
+for n in knowledge governance communication intelligence dashboard; do printf 'THEMIS_API_KEY=%s\n' "$(cat ~/.themis-keys/$n)" | sudo tee -a /etc/themis/$n.env > /dev/null; done
+sudo systemctl restart 'themis@*'
+sleep 5
+sudo journalctl -u 'themis@*' --since '-1 min' --no-pager | grep -cE 'API-key auth enabled'
+# expect: 6 (the dashboard logs its sign-in setup instead)
+```
+
+**Step 7. Check end to end.** Run `vm-verify`, then sign in to the GUI at `http://<vm-host>:8090`
+as `admin` / `Themis@123` and change that password in the Admin tab right away (Part A step 6a).
+
+```bash
+cd /opt/themis/src/themis
+env THEMIS_API_KEY=$(cat ~/.themis-keys/operator) ./scripts/vm-verify.sh
+# expect: every reader at 0 pending and "no issues found"
+```
+
+The last proof is a real SBOM: it shows the nodes can call each other with their keys.
+
+```bash
+cd /opt/themis/src/themis
+rm -f ~/smoke-sbom.json
+printf '%s\n' '{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[{"type":"library","name":"log4j-core","group":"org.apache.logging.log4j","version":"2.14.1","purl":"pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"}]}' > ~/smoke-sbom.json
+env THEMIS_API_KEY=$(cat ~/.themis-keys/operator) ./scripts/gf-upload-sbom.sh -f ~/smoke-sbom.json -p smoke -j smoke-core -v 1.0.0 -c
+# expect: RELEASE_ID=... and, about a minute later, Log4Shell findings for that release in the GUI
+```
+
+### R2. Restart an existing setup
+
+No new code and no config change. The start order does not matter: each node resumes its event
+stream where it stopped. After a VM reboot nothing is needed; the units are enabled and start on
+their own.
+
+```bash
+sudo systemctl restart 'themis@*'
+sleep 5
+systemctl is-active themis@registry themis@evidence themis@knowledge themis@governance themis@communication themis@intelligence themis@dashboard
+# expect: active, seven times
+```
+
+One node only, for example after editing its env file:
+
+```bash
+sudo systemctl restart themis@knowledge
+sudo journalctl -u themis@knowledge -n 30 --no-pager
+```
+
+Check it is healthy. The database address is read from the evidence node's own env file, so this
+works on any install.
+
+```bash
+cd /opt/themis/src/themis
+export PGBASE=$(sudo grep -h '^THEMIS_DATABASE_DSN=' /etc/themis/evidence.env | cut -d= -f2- | sed 's|/evidence?.*||')
+export THEMIS_API_KEY=$(cat ~/.themis-keys/operator)
+./scripts/vm-verify.sh
+# expect: every reader at 0 pending and "no issues found"
+unset THEMIS_API_KEY
+```
+
+If a node shows `failed`, read why with `sudo journalctl -u themis@<node> -n 50 --no-pager`:
+
+- `password authentication failed`: the password in `/etc/themis/*.env` no longer matches the
+  `themis` role (Part A step 7 shows how to rewrite them all).
+- `address already in use`: a hand-started copy holds the port. Stop it with `pkill -f bin/<node>`
+  and restart.
+- `HALTED`: an event stream is stuck on one event, and a restart does not clear it (see
+  [step 8](#8-upgrade-an-existing-deployment-pull-build-restart)).
+
+### R3. Pull the latest code and restart
+
+New code from `main` onto a running setup; data and keys stay. Each node migrates its own
+database when it starts, so there is no separate migrate step. Re-running the installer does not
+update existing env files, which is why step 4 exists.
+
+**Step 1. Look before you change anything.** Read-only.
+
+```bash
+cd /opt/themis/src/themis
+git status -sb | head -1
+# expect: ## main...origin/main
+git status --short | head
+# expect: nothing; local edits would block the pull
+sudo journalctl -u 'themis@*' --since '-7 days' --no-pager | grep -i 'HALTED' | tail -3
+# expect: nothing; a HALTED stream stays stuck after the upgrade too (step 8)
+```
+
+**Step 2. Pull `main`.** The first line saves where you were, for going back.
+
+```bash
+cd /opt/themis/src/themis
+git rev-parse HEAD > ~/.themis-last-good
+git fetch origin && git checkout main && git pull --ff-only origin main
+git log --oneline -3
+```
+
+**Step 3. Build.** The `&&` stops here if the build fails, so the restart never runs the old
+binaries by mistake.
+
+```bash
+cd /opt/themis/src/themis
+env GOCACHE=$HOME/.cache/go-build GOMODCACHE=$HOME/go/pkg/mod go build -o bin/ ./cmd/... && echo BUILD-OK
+# expect: BUILD-OK
+```
+
+**Step 4. Add settings introduced since your install.** Check the merged PRs for new env lines.
+These two are safe to run every time: each adds its line only when it is missing. The env files
+are root-only, so the check needs `sudo` too.
+
+```bash
+sudo grep -q '^THEMIS_DASHBOARD_MIGRATE=' /etc/themis/dashboard.env || echo 'THEMIS_DASHBOARD_MIGRATE=1' | sudo tee -a /etc/themis/dashboard.env
+sudo grep -q '^THEMIS_KNOWLEDGE_URL=' /etc/themis/evidence.env || printf 'THEMIS_KNOWLEDGE_URL=http://localhost:8085\nTHEMIS_GOVERNANCE_URL=http://localhost:8083\n' | sudo tee -a /etc/themis/evidence.env
+```
+
+**Step 5. Restart and check.**
+
+```bash
+cd /opt/themis/src/themis
+sudo systemctl restart 'themis@*'
+sleep 10
+systemctl is-active themis@registry themis@evidence themis@knowledge themis@governance themis@communication themis@intelligence themis@dashboard
+# expect: active, seven times
+export PGBASE=$(sudo grep -h '^THEMIS_DATABASE_DSN=' /etc/themis/evidence.env | cut -d= -f2- | sed 's|/evidence?.*||')
+export THEMIS_API_KEY=$(cat ~/.themis-keys/operator)
+./scripts/vm-verify.sh
+# expect: each migration at its expected version, every reader at 0 pending, "no issues found"
+unset THEMIS_API_KEY
+```
+
+**Going back** if the new version misbehaves: check out the commit saved in step 2, rebuild and
+restart. New migrations stay in the database. Themis migrations normally only add tables and
+columns, so older code usually runs on them, but read the PR first if it changed a migration.
+
+```bash
+cd /opt/themis/src/themis
+git checkout $(cat ~/.themis-last-good)
+env GOCACHE=$HOME/.cache/go-build GOMODCACHE=$HOME/go/pkg/mod go build -o bin/ ./cmd/... && sudo systemctl restart 'themis@*'
+# later, to return to main: git checkout main
+```
+
+---
+
 ## Part A — Phase-3 greenfield services
 
 The pipeline is **Evidence → Knowledge → Governance → Communication**, over a **Registry/Kernel**
@@ -757,12 +984,14 @@ sudo THEMIS_PGPW="$PGPW" THEMIS_INTELLIGENCE_MODEL='<ollama-model:tag>' \
 > sudo systemctl restart 'themis@*'
 > ```
 
-It loads the registry schema (idempotent), writes one `EnvironmentFile` per service under `/etc/themis/`
-(mode 0640), installs a single templated `themis@.service`, and enables + starts
-`themis@{registry,evidence,knowledge,governance,communication,intelligence}`. Manage them the usual way:
+It writes one `EnvironmentFile` per service under `/etc/themis/` (mode 0600, root-only: they hold
+the database password), installs a single templated `themis@.service`, and enables + starts all seven
+`themis@{registry,evidence,knowledge,governance,communication,intelligence,dashboard}`. Registry
+migrates itself on start (`THEMIS_REGISTRY_MIGRATE=1`). The env files it writes are auth-OFF; R1
+steps 5–6 switch auth on. Manage them the usual way:
 
 ```sh
-systemctl status 'themis@*'                 # all six
+systemctl status 'themis@*'                 # all seven
 sudo systemctl restart themis@knowledge     # e.g. after a rebuild
 journalctl -u themis@knowledge -f           # follow logs
 ```
@@ -773,29 +1002,10 @@ built `bin/` in place.
 
 ### 8. Upgrade an existing deployment (pull, build, restart)
 
-Measured on the VM on 2026-10-12 (`docs/engineering/vm-test-2026-10-12.md`). An upgrade is not a
-re-install: the installer in step 7 writes `/etc/themis/<svc>.env` only when it creates it, so
-settings added since your install are **not** picked up by re-running it. Do these in order.
-
-```sh
-cd /opt/themis/src/themis                    # your checkout (the systemd WorkingDirectory)
-# 1. Read-only first: which branch is this, and is any event stream halted?
-git status -sb | head -1                     # must say ## main — a feature branch is not a release
-sudo journalctl -u 'themis@*' --since '-7 days' --no-pager | grep -i 'HALTED' | tail -3
-# 2. Switch to main and pull.
-git fetch origin && git checkout main && git pull --ff-only origin main
-# 3. Build. Point the Go caches at your home folder: a GOCACHE inherited from a profile that
-#    names a directory you cannot create makes the build fail, and the restart below would then
-#    quietly run the OLD binaries. The && stops the upgrade there instead.
-env GOCACHE=$HOME/.cache/go-build GOMODCACHE=$HOME/go/pkg/mod go build -o bin/ ./cmd/... && echo BUILD-OK
-# 4. Add settings introduced since your install. /etc/themis/*.env is root-only, so the
-#    guard needs sudo too, or it fails and appends regardless.
-sudo grep -q '^THEMIS_DASHBOARD_MIGRATE=' /etc/themis/dashboard.env || echo 'THEMIS_DASHBOARD_MIGRATE=1' | sudo tee -a /etc/themis/dashboard.env
-sudo grep -q '^THEMIS_KNOWLEDGE_URL=' /etc/themis/evidence.env || printf 'THEMIS_KNOWLEDGE_URL=http://localhost:8085\nTHEMIS_GOVERNANCE_URL=http://localhost:8083\n' | sudo tee -a /etc/themis/evidence.env
-# 5. Restart everything, then verify.
-sudo systemctl restart 'themis@*'
-PGBASE=... ./scripts/vm-verify.sh            # every reader at 0 pending, "no issues found"
-```
+The steps are [R3. Pull the latest code and restart](#r3-pull-the-latest-code-and-restart) at the top of
+this file. An upgrade is not a re-install: the installer in step 7 writes `/etc/themis/<svc>.env`
+only when it creates it, so settings added since your install are **not** picked up by re-running
+it — R3 step 4 adds them.
 
 Things the 2026-10-12 upgrade ran into:
 
