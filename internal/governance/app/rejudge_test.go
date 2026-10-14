@@ -153,3 +153,57 @@ func TestRejudgeVersionRange_NoRangesIsANoop(t *testing.T) {
 		t.Fatalf("no ranges: n=%d err=%v, want 0, nil", n, err)
 	}
 }
+
+// VEX-RAISE-1: the same pass re-applies the vendor overlay. A Finding whose release is
+// placeable (el8) and whose card carries an applicable Red Hat not_affected gets its proposal;
+// Asserted vendor evidence waits for a human; a card with statements but no ranges is not
+// skipped; a second pass raises nothing.
+func TestRangeRejudge_RaisesVendorStatementsToo(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-tiff", "rel-1", "fl-tiff", "CVE-2026-52490", "pkg:rpm/rocky/compat-libtiff3@3.9.4-16.el8_10", "compat-libtiff3"))
+	repo.seed(withComponent(t, "fnd-other", "rel-2", "fl-tiff", "CVE-2026-52490", "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", "libtiff"))
+
+	svc := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
+	kn := knowledgeByID{"fl-tiff": {FaultlineID: "fl-tiff", Applicabilities: []app.Applicability{notAffected("compat-libtiff3", "Red Hat: not affected in Red Hat Enterprise Linux 8")}}}
+	pass := app.NewRangeRejudge(svc, fixedLister{ids: []string{"fl-tiff"}}, kn)
+
+	res, err := pass.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Faultlines != 1 || res.Raised != 0 || res.VendorRaised != 1 || res.Skipped != 0 {
+		t.Fatalf("result = %+v, want 1 vendor proposal raised and nothing skipped", res)
+	}
+	tiff := repo.byID["fnd-tiff"]
+	if len(tiff.Proposals()) != 1 || tiff.Proposals()[0].Stance() != domain.StanceNotAffected {
+		t.Fatalf("compat-libtiff3 proposals = %+v, want one system not_affected", tiff.Proposals())
+	}
+	if _, ok := tiff.CurrentPosition(); ok {
+		t.Fatal("a vendor statement is Asserted evidence — it must wait for a human, not auto-accept")
+	}
+	if other := repo.byID["fnd-other"]; len(other.Proposals()) != 0 {
+		t.Fatalf("libtiff is not the stated package; got %+v", other.Proposals())
+	}
+	again, err := pass.Run(context.Background())
+	if err != nil || again.VendorRaised != 0 {
+		t.Fatalf("second pass = %+v err=%v, want nothing new", again, err)
+	}
+}
+
+func TestRejudgeApplicability_NoStatementsIsANoop(t *testing.T) {
+	svc := writeSvc(newRepo(), domain.AutoAcceptObservedNotAffectedPolicy())
+	if n, err := svc.RejudgeApplicability(context.Background(), "fl-none", nil); n != 0 || err != nil {
+		t.Fatalf("got %d, %v; want 0, nil", n, err)
+	}
+}
+
+func TestRangeRejudge_VendorWriteFailureIsFatal(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-tiff", "rel-1", "fl-tiff", "CVE-2026-52490", "pkg:rpm/rocky/compat-libtiff3@3.9.4-16.el8_10", "compat-libtiff3"))
+	repo.saveErr = errors.New("db down")
+	svc := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
+	kn := knowledgeByID{"fl-tiff": {FaultlineID: "fl-tiff", Applicabilities: []app.Applicability{notAffected("compat-libtiff3", "")}}}
+	if _, err := app.NewRangeRejudge(svc, fixedLister{ids: []string{"fl-tiff"}}, kn).Run(context.Background()); err == nil {
+		t.Fatal("a write failure must abort the pass")
+	}
+}

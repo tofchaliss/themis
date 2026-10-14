@@ -22,10 +22,22 @@ type RangeRejudgeResult struct {
 	Faultlines int
 	Raised     int
 	Skipped    int
+	// VendorRaised is vendor-VEX proposals newly raised from the card's current statements
+	// (VEX-RAISE-1): the same pass re-applies the vendor overlay, because the Findings it was
+	// built for — born after the statement, or placed only since VEX-SCOPE-2 — had no trigger
+	// either.
+	VendorRaised int
 }
 
 // RangeRejudge is the ONE-TIME pass that re-applies the deterministic version-range rule to
 // every undecided Finding (KN-GO-2, 2026-10-14).
+//
+// Since VEX-RAISE-1 (2026-10-14) the same pass also re-applies the vendor-VEX overlay
+// (`RejudgeApplicability`), for the same reason: `reactToApplicability` runs only on an
+// enrichment, so a Finding born after the vendor statement arrived, or whose release could
+// only be placed once VEX-SCOPE-2 read the scope from its own component, never got its
+// proposal. Measured: 174 open compat-libtiff3 Findings with an applicable Red Hat
+// not_affected on the card and no proposal.
 //
 // Why it exists: `reactToVersionRange` runs only when a Faultline is enriched, so a Finding
 // whose verdict changed because THEMIS's own reading of a version changed — KN-GO-1 taught
@@ -66,7 +78,7 @@ func (r *RangeRejudge) Run(ctx context.Context) (RangeRejudgeResult, error) {
 			return res, err
 		}
 		k, kerr := r.knowledge.GetFaultline(ctx, fl)
-		if kerr != nil || len(k.AffectedRanges) == 0 {
+		if kerr != nil || (len(k.AffectedRanges) == 0 && len(k.Applicabilities) == 0) {
 			res.Skipped++
 			continue
 		}
@@ -75,6 +87,11 @@ func (r *RangeRejudge) Run(ctx context.Context) (RangeRejudgeResult, error) {
 			return res, fmt.Errorf("rejudge %s: %w", fl, err)
 		}
 		res.Raised += n
+		v, err := r.svc.RejudgeApplicability(ctx, fl, k.Applicabilities)
+		if err != nil {
+			return res, fmt.Errorf("rejudge vendor statements %s: %w", fl, err)
+		}
+		res.VendorRaised += v
 	}
 	return res, nil
 }

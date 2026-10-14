@@ -393,6 +393,12 @@ OpenVEX / CSAF out.
   `--apply` + `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API. Exists because
   a raised proposal is never re-graded (KN-GO-4: 239 provable verdicts graded `asserted` by a
   fix-only contributor before the grading was fixed). Nothing a vendor or the AI said is touched.
+- `scripts/vex-accept-applicable.sh` — the mirror of the reject script below (VEX-RAISE-1):
+  accepts the standing vendor-VEX `not_affected` proposals whose statement the assessment
+  projection marks `applicable` to the release. Vendor evidence is Asserted, so no policy may
+  auto-accept it; this lets one named person sign the batch. Dry-run by default; `--apply`
+  requires `THEMIS_ACTOR_ID`. Run it after `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, which since
+  VEX-RAISE-1 also raises the vendor proposals a Finding born after the statement never got.
 - `scripts/vex-reject-inapplicable.sh` — the **one mutation** in this family, and it is opt-in. It
   reviews the standing vendor-VEX `not_affected` proposals and rejects those resting on a statement
   Themis determined does not cover the release (the pre-EDR-VEX-02 raises, made with no scope check

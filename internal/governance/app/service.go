@@ -524,6 +524,27 @@ func (s *FindingService) ReactToEnrichment(ctx context.Context, sig EnrichmentSi
 // package (so it never embeds the PURL's '/', which would 404 the accept/reject REST path), and a
 // re-delivery dedups.
 func (s *FindingService) reactToApplicability(ctx context.Context, sig EnrichmentSignal) error {
+	_, err := s.reactToApplicabilityCounted(ctx, sig)
+	return err
+}
+
+// RejudgeApplicability re-applies the vendor-VEX overlay to every Finding of one Faultline
+// against the card's current statements, exactly as an enrichment would, and returns how many
+// proposals it raised (VEX-RAISE-1, 2026-10-14). The narrow entry the one-time re-judge pass
+// needs, beside RejudgeVersionRange: a Finding born after the statement arrived, or judged
+// unplaceable before its release could be placed from its own component (VEX-SCOPE-2), had
+// no trigger — measured: 174 open compat-libtiff3 Findings with a Red Hat not_affected for
+// RHEL 8 on the card and no proposal.
+func (s *FindingService) RejudgeApplicability(ctx context.Context, faultlineID string, statements []Applicability) (int, error) {
+	if len(statements) == 0 {
+		return 0, nil
+	}
+	return s.reactToApplicabilityCounted(ctx, EnrichmentSignal{FaultlineID: faultlineID, Applicabilities: statements})
+}
+
+// reactToApplicabilityCounted is reactToApplicability reporting how many proposals it raised,
+// so the re-judge pass can say what it did; the enrichment path discards the count.
+func (s *FindingService) reactToApplicabilityCounted(ctx context.Context, sig EnrichmentSignal) (int, error) {
 	var notAffected []Applicability
 	for _, a := range sig.Applicabilities {
 		if a.Status == vexStatusNotAffected && strings.TrimSpace(a.Package) != "" {
@@ -531,12 +552,13 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 		}
 	}
 	if len(notAffected) == 0 {
-		return nil // no vendor not_affected statement — nothing to suppress
+		return 0, nil // no vendor not_affected statement — nothing to suppress
 	}
 	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	raised := 0
 	proposer := domain.Actor{Kind: domain.ActorSystem, ID: vexApplicabilityActorID}
 	for _, id := range ids {
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
@@ -577,12 +599,15 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 			if errors.Is(err, domain.ErrDuplicateProposal) {
 				return nil, errNoop // already raised for this statement — idempotent
 			}
+			if err == nil {
+				raised++
+			}
 			return notes, err
 		}); err != nil {
-			return err
+			return raised, err
 		}
 	}
-	return nil
+	return raised, nil
 }
 
 // reactToVersionRange raises a system not_affected Proposal on each Finding whose every
