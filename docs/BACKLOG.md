@@ -320,6 +320,14 @@ three angles, and two of them proposed fixes that would not have worked.
   estate the same evening: CVE-2026-56857 (stdlib 1.26.8, affected) and CVE-2026-85091 (zlib on
   Alpine, affected), each offered five version-range `not_affected` decisions on other CVEs as
   0.8–0.99 "similar" precedent.
+  **AI-RF-4b (2026-10-14, same evening):** the VM prune removed 162 of 479 index rows, and the
+  Alpine zlib drawer still listed five version-range decisions. The 311 range verdicts accepted
+  by hand through `range-accept-provable.sh` are recorded with a HUMAN decider, so a filter on
+  the decider alone keeps them. The Intelligence client now reads the verdict's kind, not the
+  clicker's: a Position whose accepted proposal came from Governance's `system` proposer is the
+  rule's whoever accepted it (`current_position.accepted_proposal_id` joined to
+  `proposals[].proposer_kind`, both already on the read). Re-run the one-time prune after
+  deploying; a human's own or an AI-proposed decision is untouched.
 
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 

@@ -1298,3 +1298,12 @@ genuinely affected Finding. **Decision:** rule-decided Positions are not precede
 events carry `DecidedBy`; Intelligence's indexer skips (and removes) policy-decided Positions,
 the exact-CVE fallback skips them, and a one-time prune cleans an index populated before this
 note. Human- and AI-judged Positions remain precedent exactly as C6 and D-Δ4b-2 intend.
+
+**Amendment, same evening (AI-RF-4b).** The decider is the wrong key. The 311 range verdicts a
+person accepted by hand through `range-accept-provable.sh` carry a human decider and the rule's
+rationale, and the first prune kept every one of them. What makes a Position a rule's is the
+proposal it rests on: one raised by Governance's `system` proposer (the version-range verdict,
+a vendor `not_affected` statement) is arithmetic whoever confirmed it. The client therefore
+reports the verdict's kind — `policy` when the accepted proposal is a system proposal — and the
+indexer, the exact-CVE fallback and the prune act on that. A human accepting a human's or the
+AI's proposal is a judgement and stays precedent.

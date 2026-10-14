@@ -108,3 +108,37 @@ func TestPrecedentClientSkipsPolicyDecidedPositions(t *testing.T) {
 		t.Fatalf("CurrentPosition R1 = kind %q found %v err %v, want policy", kind, found, err)
 	}
 }
+
+// AI-RF-4b: a human accepting a SYSTEM proposal unchanged (the version-range verdict taken by
+// hand through range-accept-provable.sh) is still the rule's verdict, not precedent. The kind
+// reported is the verdict's; a human accepting a human's or the AI's proposal stays human.
+func TestPrecedentClientTreatsAcceptedSystemProposalAsRuleVerdict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/blast-radius"):
+			_, _ = w.Write([]byte(`["R1","R2","R3"]`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/findings"):
+			switch r.URL.Query().Get("release") {
+			case "R1":
+				_, _ = w.Write([]byte(`{"current_position":{"stance":"not_affected","rationale":"every matched component version is outside the reconciled affected range","actor_kind":"human","accepted_proposal_id":"range:f1"},"proposals":[{"id":"range:f1","proposer_kind":"system"}]}`))
+			case "R2":
+				_, _ = w.Write([]byte(`{"current_position":{"stance":"not_affected","rationale":"reviewed by hand","actor_kind":"human","accepted_proposal_id":"p-ai"},"proposals":[{"id":"range:f2","proposer_kind":"system"},{"id":"p-ai","proposer_kind":"ai"}]}`))
+			default:
+				_, _ = w.Write([]byte(`{"current_position":{"stance":"affected","rationale":"no proposals listed","actor_kind":"human","accepted_proposal_id":"p-x"}}`))
+			}
+		}
+	}))
+	defer srv.Close()
+	c := readapi.NewPrecedentClient(srv.URL, srv.Client())
+	got, err := c.GetPrecedents(context.Background(), "FL1", "R0")
+	if err != nil || len(got) != 2 || got[0].ReleaseID != "R2" || got[1].ReleaseID != "R3" {
+		t.Fatalf("precedents = %+v err=%v, want R2 and R3 only", got, err)
+	}
+	_, _, kind, found, err := c.CurrentPosition(context.Background(), "R1", "FL1")
+	if err != nil || !found || kind != readapi.RulePositionActorKind {
+		t.Fatalf("CurrentPosition R1 = kind %q found %v err %v, want the rule's verdict", kind, found, err)
+	}
+	if _, _, kind, _, _ := c.CurrentPosition(context.Background(), "R2", "FL1"); kind != "human" {
+		t.Fatalf("CurrentPosition R2 = kind %q, want human", kind)
+	}
+}
