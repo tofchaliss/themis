@@ -303,8 +303,8 @@ three angles, and two of them proposed fixes that would not have worked.
 
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
-- [ ] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
-  matches can never clear (filed 2026-10-14).** HIGH, correctness/operability. The first
+- [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
+  matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87
   open / 0 cleared, `compat-libtiff3` 59 / 0, `libtiff` 84, `curl` 98, `httpd` 174 — every one
   `detection_origin = scanner/cortex` on a purl with no `distro=` qualifier, on the releases
@@ -323,6 +323,21 @@ three angles, and two of them proposed fixes that would not have worked.
   cover scanner-only releases, whose ledger row today points at no SBOM evidence); (3) measure
   before/after with `match-census.sh`. Red Hat's `Will not fix` for the remainder is the
   vendor-statement work (EDR-VEX-02 follow-up), not this item.
+  **Done, with one deliberate difference from the Do-list:** no purl is stamped. The Cortex
+  export carries no OS field at all (only the purl namespace and the `elN` marker), the
+  converter's output is a byte-equality dedup contract, and `component_purl` is in the match
+  primary key, so rewriting it would mint the KN-SCAN-4(b) twin pairs. Instead
+  `app.DiscoveryHint` builds a QUERY-ONLY copy whose purl carries `distro=` — from the first SBOM
+  sibling that states one, else from the purl's own namespace and build marker (`redhat` +
+  `.el8` → `rhel-8`) — and the match is recorded under the original purl.
+  `CorrelationService.DiscoverComponents` runs discovery for the scanner-only set (the report's
+  usable purls no SBOM sibling names) through the same fold → range gate → record path an SBOM
+  component takes; `ScannerReportService.ApplyIngest` calls it after the claims, and
+  `RediscoverComponents` from the hourly sweep over the release's recorded occurrences. A
+  scanner-only release gets a ledger row with no evidence id (`TouchScannerRelease`, never
+  overwriting an SBOM's row) so the sweep revisits it, skips the SBOM step for it, and moves its
+  stamp (`StampDiscovered`). Measure after deploy: `match-census.sh` before/after on binutils,
+  compat-libtiff3, libtiff, curl, httpd.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 

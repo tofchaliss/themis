@@ -192,7 +192,11 @@ all six nodes.
   re-run needs changed bytes.
   A **scanner report** (`kind:"scanner-report"`, curated per-finding JSON with the component each finding
   names — see TESTING.md) uploads through the same endpoint and folds + matches at scanner (Asserted)
-  trust (KN-SCAN-1). Discovery otherwise runs at upload time only; the **re-discovery sweep**
+  trust (KN-SCAN-1). Since KN-SCAN-5 (2026-10-14) the components only the report names also get
+  feed discovery — queried through a `distro=` hint derived from the release's SBOM siblings or the
+  purl's own namespace and `elN` marker, recorded under the original purl, never a rewritten one —
+  at ingest and from the sweep, so a scanner-only match can learn the vendor fix and clear.
+  Discovery otherwise runs at upload time only; the **re-discovery sweep**
   (KN-RECOR-1, default ON, `THEMIS_REDISCOVERY_*`) re-runs it for the stalest correlated releases so a
   CVE published after a release's last upload still reaches its inventory.
 - **Opt-in enrichment** (off by default — no silent outbound calls; all **relevance-bounded** per

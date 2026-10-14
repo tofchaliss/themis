@@ -30,6 +30,17 @@ type RediscoveryService struct {
 	clock      Clock
 	staleAfter time.Duration
 	limit      int
+	// scanner re-discovers the components only a scanner named (KN-SCAN-5); nil = SBOM only.
+	scanner    *ScannerReportService
+	scanLedger ScannerReleaseLedger
+}
+
+// WithScanner adds the scanner-only half of the sweep (KN-SCAN-5): after each stale release's
+// SBOM re-correlation, its scanner-only components are re-discovered too, and a scanner-only
+// release (ledger row with no evidence id) gets that step alone, then its stamp moved.
+func (s *RediscoveryService) WithScanner(scanner *ScannerReportService, ledger ScannerReleaseLedger) *RediscoveryService {
+	s.scanner, s.scanLedger = scanner, ledger
+	return s
 }
 
 // NewRediscoveryService wires the sweep. staleAfter/limit <= 0 fall back to the defaults.
@@ -56,20 +67,26 @@ func (s *RediscoveryService) Sweep(ctx context.Context) (swept, newMatches int, 
 		return 0, 0, err
 	}
 	for _, r := range stale {
-		// Correlate re-runs discovery against the release's LATEST correlated inventory and
-		// applies through the standard gates; ApplyCorrelation re-stamps the ledger, so a
-		// swept release leaves the stale queue even when nothing new was found.
-		//
-		// The cause is stated, not inferred (EDR-DELIVERY-01 M2-3): a sweep is a real posture
-		// change, but nothing was built and no new SBOM exists, so the completion event it
-		// publishes must say `rediscovery` — a rebuild loop that read it as a new upload would
-		// spend a release's attempt budget on a feed update nobody asked for.
-		n, cerr := s.correlate.CorrelateCause(ctx, r.ReleaseID, r.EvidenceID, domain.CauseRediscovery)
-		if cerr != nil {
-			continue
+		if r.EvidenceID != "" {
+			n, cerr := s.correlate.CorrelateCause(ctx, r.ReleaseID, r.EvidenceID, domain.CauseRediscovery)
+			if cerr != nil {
+				continue
+			}
+			newMatches += n
+		}
+		if s.scanner != nil {
+			n, serr := s.scanner.RediscoverComponents(ctx, r.ReleaseID)
+			if serr != nil {
+				continue
+			}
+			newMatches += n
+			// A scanner-only release has no SBOM correlation to move its stamp, so it is
+			// moved here; an SBOM release's stamp was just moved by ApplyCorrelation.
+			if r.EvidenceID == "" && s.scanLedger != nil {
+				_ = s.scanLedger.StampDiscovered(ctx, r.ReleaseID, s.clock.Now())
+			}
 		}
 		swept++
-		newMatches += n
 	}
 	return swept, newMatches, nil
 }

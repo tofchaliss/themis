@@ -273,6 +273,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		// inventory — the same two ports the D6 re-verdict bridge uses. Without them the
 		// candidate set is the report alone, which ABSTAINS rather than guessing.
 		WithIdentityCandidates(st, evClient).
+		WithDiscovery(corr, st, st).
 		// The on-demand unresolved query (D6) resolves an evidence id to its release through
 		// Evidence's own facts endpoint, so an operator needs only the id the upload returned.
 		WithEvidenceFacts(evClient).
@@ -290,7 +291,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		Health:   health,
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
-		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit),
+		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit).WithScanner(scanSvc, st),
 		// The re-verdict (EDR-VERDICT-01 D6): store supplies the stale rows, the ledger and the
 		// Evidence client rebuild each release's bridge context, and RecordMatch is the same
 		// seam intake judged through — one judge, every door, every moment.

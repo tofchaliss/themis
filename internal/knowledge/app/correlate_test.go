@@ -457,3 +457,63 @@ func TestCorrelate_FixedVerdictUsesTheSourcePackage(t *testing.T) {
 		t.Errorf("verdict = %+v — the installed build carries the SOURCE package's fix and must be cleared", m.Verdict)
 	}
 }
+
+// KN-SCAN-5: the hint is for the QUERY only. A distro purl with no `distro=` takes the release's
+// distro from the first SBOM sibling that states one, else from its own namespace and EL
+// marker; anything else is returned untouched.
+func TestDiscoveryHint(t *testing.T) {
+	rocky := []app.InventoryComponent{{PURL: "pkg:rpm/rocky/curl@7.61.1-34.el8_10?arch=x86_64&distro=rocky-8.10"}}
+	cases := []struct {
+		name string
+		comp app.InventoryComponent
+		sibs []app.InventoryComponent
+		want string
+	}{
+		{"sibling distro", app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Version: "2.30-128.el8_10"}, rocky, "pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rocky-8.10"},
+		{"namespace + el marker", app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Version: "2.30-128.el8_10"}, nil, "pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rhel-8"},
+		{"rocky namespace", app.InventoryComponent{PURL: "pkg:rpm/rocky/httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9?arch=x86_64", Version: "2.4.37-65.module+el8.10.0+40257+286895ef.9"}, nil, "pkg:rpm/rocky/httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9?arch=x86_64&distro=rocky-8"},
+		{"already qualified", app.InventoryComponent{PURL: "pkg:rpm/rocky/curl@1?distro=rocky-8.10", Version: "1"}, nil, "pkg:rpm/rocky/curl@1?distro=rocky-8.10"},
+		{"not a distro purl", app.InventoryComponent{PURL: "pkg:golang/stdlib@1.27.1", Version: "go1.27.1"}, rocky, "pkg:golang/stdlib@1.27.1"},
+		{"no marker, no sibling", app.InventoryComponent{PURL: "pkg:rpm/redhat/x@1", Version: "1"}, nil, "pkg:rpm/redhat/x@1"},
+		{"unknown namespace", app.InventoryComponent{PURL: "pkg:rpm/suse/x@1-2.el8", Version: "1-2.el8"}, nil, "pkg:rpm/suse/x@1-2.el8"},
+	}
+	for _, c := range cases {
+		if got := app.DiscoveryHint(c.comp, c.sibs).PURL; got != c.want {
+			t.Errorf("%s: hint = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// KN-SCAN-5: discovery is asked with the hint, the match is recorded under the ORIGINAL purl
+// at discovery origin, and the range gate still applies.
+func TestDiscoverComponents_RecordsUnderTheOriginalPURL(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Name: "binutils", Version: "2.30-128.el8_10", Ecosystem: "rpm", Source: "binutils"}
+	hinted := "pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rhel-8"
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		hinted: {
+			{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "osv", value.SeverityHigh)},
+			{CVE: cve(t, "CVE-2024-2"), Proposal: vulnFactsRanged(t, "osv", "<2.0")}, // out of range: gated
+		},
+	}}
+	matches := newMatches()
+	s := correlation(t, fakeInventory{}, disc, matches, newRepo())
+
+	n, err := s.DiscoverComponents(ctx, "rel-1", []app.InventoryComponent{comp}, nil)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("new matches = %d, want 1 (the out-of-range one is gated)", n)
+	}
+	m, ok := matches.byPURL[comp.PURL]
+	if !ok {
+		t.Fatalf("match recorded under %v, want the original purl %q", matches.byPURL, comp.PURL)
+	}
+	if m.DetectionOrigin != app.OriginDiscovery || m.CVE != "CVE-2024-1" {
+		t.Errorf("match = origin %q cve %q, want discovery / CVE-2024-1", m.DetectionOrigin, m.CVE)
+	}
+	if _, hintedRecorded := matches.byPURL[hinted]; hintedRecorded {
+		t.Error("the hinted purl must never be recorded")
+	}
+}

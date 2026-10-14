@@ -8,6 +8,7 @@ import (
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // fakeLedger scripts the stale queue and records upserts.
@@ -134,5 +135,36 @@ func TestRediscovery_LimitCapsASweep(t *testing.T) {
 	svc := app.NewRediscoveryService(ledger, corr, fixedClock{}, time.Hour, 1)
 	if swept, _, _ := svc.Sweep(context.Background()); swept != 1 {
 		t.Fatalf("swept = %d, want the limit respected", swept)
+	}
+}
+
+// KN-SCAN-5: a scanner-only release has a ledger row with no evidence id. The sweep must not
+// try to read an SBOM for it; it re-discovers the recorded components and moves the stamp.
+func TestRediscovery_ScannerOnlyReleaseIsSweptWithoutAnSBOM(t *testing.T) {
+	ledger := newLedger(app.CorrelatedRelease{ReleaseID: "rel-s", EvidenceID: ""})
+	inv := fakeInventory{err: errors.New("GetInventory must not be called for a scanner-only release")}
+	binutils := app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Name: "binutils", Version: "2.30-128.el8_10", Ecosystem: "rpm"}
+	disc := &countingDiscovery{byPURL: map[string][]app.ProposalFor{
+		"pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rhel-8": {{CVE: cve(t, "CVE-2024-9"), Proposal: vulnFacts(t, "osv", value.SeverityHigh)}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	corr := app.NewCorrelationService(inv, disc, fold, matches, fixedClock{}).WithLedger(ledger)
+	scanLedger := &fakeScanLedger{}
+	scan := app.NewScannerReportService(fakeScannerSource{}, fold, matches, fixedClock{}).
+		WithIdentityCandidates(identityLedger{found: false}, identityInventory{}).
+		WithDiscovery(corr, fakeOccurrences{comps: []app.InventoryComponent{binutils}}, scanLedger)
+	sweep := app.NewRediscoveryService(ledger, corr, fixedClock{}, time.Hour, 3).WithScanner(scan, scanLedger)
+
+	swept, n, err := sweep.Sweep(context.Background())
+	if err != nil || swept != 1 || n != 1 {
+		t.Fatalf("sweep = %d releases, %d matches, %v; want 1, 1, nil", swept, n, err)
+	}
+	if len(scanLedger.stamped) != 1 || scanLedger.stamped[0] != "rel-s" {
+		t.Errorf("stamped %v, want [rel-s]", scanLedger.stamped)
+	}
+	if _, upserted := ledger.upserts["rel-s"]; upserted {
+		t.Error("a scanner-only release must not be upserted with an SBOM evidence id")
 	}
 }
