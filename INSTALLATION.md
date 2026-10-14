@@ -1040,6 +1040,15 @@ sudo journalctl -u themis@knowledge --since '-3 min' --no-pager | grep 'range re
 sudo sed -i '/^THEMIS_KNOWLEDGE_REPAIR_RANGES=/d' /etc/themis/knowledge.env
 ```
 
+Proposals the rule raised BEFORE the range grading was corrected (KN-GO-4) stay `proposed` with
+`asserted` evidence and are never re-graded. Review and accept them as a person:
+
+```sh
+# dry run first — lists every standing version-range proposal; then --apply under your name
+PGBASE=... ./scripts/range-accept-provable.sh
+PGBASE=... THEMIS_ACTOR_ID=<you> THEMIS_API_KEY=$(cat ~/.themis-keys/operator) ./scripts/range-accept-provable.sh --apply
+```
+
 Things the 2026-10-12 upgrade ran into:
 
 - **A halted stream survives an upgrade and a reboot.** The reader resumes at its cursor, re-reads

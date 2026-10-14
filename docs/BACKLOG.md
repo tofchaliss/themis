@@ -355,6 +355,19 @@ three angles, and two of them proposed fixes that would not have worked.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
+- [x] **KN-GO-4 — a fix-only contributor graded the range verdict, so 239 provable
+  out-of-range proposals waited for a human (filed and closed 2026-10-14, from the KN-GO-3 repair
+  run).** MED, trust model (EDR-TRUST-01 T3). The repair raised 313 version-range proposals: 74
+  `observed` auto-accepted, 239 `asserted` left in `proposed`. The ranges on those cards were
+  OSV's and NVD's (observed); Red Hat's go-toolset FIX (asserted) on the same card dragged
+  `RangeTrust` down, because the fold took every source that contributed ranges OR fixes. The
+  version-range rule never reads a fix. **Done:** `Reconcile` grades `RangeTrust` by the sources
+  whose ranges stand in the reconciled view (the latest per source), not by fix-only
+  contributors; a card with no ranges carries no range grade. The 239 already raised are never
+  re-graded (append-only): `scripts/range-accept-provable.sh` lists them (dry run) and, with
+  `--apply` and `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API. Record the
+  before/after stdlib stance count here.
+
 - [x] **KN-GO-3 — the OSV reader split one interval into two rules, so a lone `>=0` kept every
   Go card in range forever; and a card unioned ranges across time, so the bad rule could never be
   displaced (filed and closed 2026-10-14, from the KN-GO-2 pass on the estate).** HIGH,

@@ -138,11 +138,13 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 					bestSummary = sc
 				}
 			}
-			// Ranges and fixed versions are a union, so the group inherits the highest-risk
-			// class among every source that contributed to it (T3).
-			if len(f.AffectedRanges) > 0 || len(f.Fixes) > 0 {
-				view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(p.source))
-			}
+			// The range verdict is graded by the sources whose RANGES stand in the view (T3): the
+			// weakest of them. A source that only contributed FIXES does not grade it — the
+			// version-range rule never reads a fix, and the fix verdict carries its own grade.
+			// Measured 2026-10-14: Red Hat (asserted) puts a go-toolset fix on every Go card
+			// whose ranges are OSV's and NVD's (observed); graded by the fix, 239 provable
+			// out-of-range verdicts were left for a human while 74 fix-free ones auto-accepted.
+			// The fold happens below, once the latest range statement per source is known.
 			// Ranges are a union ACROSS sources (a distro's backport bound beside upstream's), but
 			// from each source only its LATEST statement that carries ranges counts: the proposal
 			// log is append-only, so a union across time would keep every range a source ever
@@ -200,10 +202,11 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 		view.Summary = bestSummary.text
 		view.SummarySource = bestSummary.source
 	}
-	for _, st := range latestRanges {
+	for src, st := range latestRanges {
 		for _, rng := range st.ranges {
 			rangeSet[rng] = struct{}{}
 		}
+		view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(src))
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
 	view.CarrierProducts = sortedKeys(carrierSet)
