@@ -643,6 +643,18 @@ components:
           $ref: '#/components/schemas/FindingView'
         knowledge:
           $ref: '#/components/schemas/FaultlineKnowledge'
+        release_scope:
+          type: object
+          description: >-
+            The RELEASE'S own product placement (EDR-VEX-02 D12), the side every vendor statement
+            below was compared against: `enterprise-linux 8` for RHEL and its rebuilds, `alpine
+            3.20`, `debian 12`. Absent when the release could not be placed (every statement then
+            reads `not_comparable`). Lets a consumer fold statements about other product families
+            and say "no statement covers this release" only when the vendor speaks about the
+            release's own family.
+          properties:
+            family: { type: string }
+            major: { type: string }
         vendor_statements:
           type: array
           description: >-

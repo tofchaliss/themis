@@ -106,6 +106,12 @@ func (h *Handler) GetFindingAssessment(w http.ResponseWriter, r *http.Request, i
 func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 	view := toFindingView(a.Finding)
 	out := gen.FindingAssessment{Finding: &view}
+	if a.ReleaseScope.Known() {
+		out.ReleaseScope = &struct {
+			Family *string `json:"family,omitempty"`
+			Major  *string `json:"major,omitempty"`
+		}{Family: strptr(a.ReleaseScope.Family), Major: strptr(a.ReleaseScope.Major)}
+	}
 	// The vendor statements ride REGARDLESS of whether the knowledge half resolved, and before
 	// the early return below: a blocked statement's whole purpose is to stay visible
 	// (EDR-VEX-02 D2), so it must not be lost to an unrelated absence.

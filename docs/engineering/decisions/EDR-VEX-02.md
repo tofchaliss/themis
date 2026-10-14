@@ -488,3 +488,23 @@ shape, and it is prevented here rather than filed.
    the explicit no-statement case.
 8. The safety fixture CVE-2026-33006 stays open: a `fixed` or `will_not_fix` statement raises
    nothing.
+
+### Amendment (2026-10-14, evening) — D12 covers every placeable release, not only RHEL's family
+
+D12 made the release's scope a property of the release, but the only placement rule read the
+`.elN` marker of an rpm build, so an Alpine or Debian release had no scope at all: every vendor
+statement on its findings read `not_comparable` — a badge that blames the release — and an
+Alpine zlib finding listed five Red Hat rows with it. Nothing was ever acted on (a proposal needs a
+scope match), so this was noise, not risk; but a user rightly asked why an Alpine SBOM should
+assume anything from Red Hat.
+
+**D12a.** A release is placed from what its component STATES: the rpm build marker, or the
+`distro=` qualifier an apk/deb purl carries (`alpine-3.24.2` → alpine/3.24, `debian-12` →
+debian/12, `ubuntu-22.04` → ubuntu/22.04, the EL clones → enterprise-linux/N). Never a package
+name. A Red Hat statement on an Alpine release then reads `not_applicable`, a known different
+product, which is the honest state.
+
+**D12b.** The assessment carries the release's own scope, and the drawer folds statements whose
+family is not the release's under one closed line. The "no statement covers this release"
+sentence (D16) appears only when some statement shares the release's family — RHEL rows on a Rocky
+release — never for a vendor that does not cover the release's product at all.

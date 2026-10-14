@@ -188,3 +188,32 @@ func TestScopeFromCPE_EdgeShapes(t *testing.T) {
 		}
 	}
 }
+
+// VEX-SCOPE-2: a release is placed from what its component STATES — the rpm build marker, or
+// the `distro=` qualifier an apk/deb purl carries — never from a package name. An Alpine
+// release then reads as alpine/3.20, so a Red Hat statement on it is a known different product.
+func TestScopeFromComponent(t *testing.T) {
+	cases := []struct {
+		name, purl, version string
+		want                value.ProductScope
+	}{
+		{"rpm el marker wins", "pkg:rpm/rocky/httpd@2.4.37-65.el8?distro=rocky-8.10", "2.4.37-65.el8", value.ProductScope{value.FamilyEnterpriseLinux, "8"}},
+		{"rocky qualifier, no marker", "pkg:rpm/rocky/x@1?distro=rocky-8.10", "1", value.ProductScope{value.FamilyEnterpriseLinux, "8"}},
+		{"alpine major.minor", "pkg:apk/alpine/zlib@1.3.2-r0?arch=x86_64&distro=alpine-3.24.2", "1.3.2-r0", value.ProductScope{value.FamilyAlpine, "3.24"}},
+		{"debian major", "pkg:deb/debian/curl@7.88.1-10?distro=debian-12", "7.88.1-10", value.ProductScope{value.FamilyDebian, "12"}},
+		{"ubuntu year.month", "pkg:deb/ubuntu/curl@7.81.0-1?distro=ubuntu-22.04", "7.81.0-1", value.ProductScope{value.FamilyUbuntu, "22.04"}},
+		{"no qualifier, no marker", "pkg:golang/stdlib@1.27.1", "go1.27.1", value.ProductScope{}},
+		{"unknown distro", "pkg:apk/wolfi/x@1?distro=wolfi", "1", value.ProductScope{}},
+		{"alpine without minor", "pkg:apk/alpine/x@1?distro=alpine-3", "1", value.ProductScope{}},
+	}
+	for _, c := range cases {
+		if got := value.ScopeFromComponent(c.purl, c.version); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+	// And the comparison that motivated it.
+	rh := value.ProductScope{value.FamilyEnterpriseLinux, "8"}
+	if got := value.MatchScope(rh, value.ScopeFromComponent("pkg:apk/alpine/zlib@1?distro=alpine-3.24.2", "1")); got != value.ScopeNotApplicable {
+		t.Fatalf("RHEL 8 statement on an Alpine 3.24 release = %s, want not_applicable", got)
+	}
+}
