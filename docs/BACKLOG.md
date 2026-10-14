@@ -281,6 +281,25 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+#### Go stdlib false positives (filed and closed 2026-10-14)
+
+- [x] **KN-GO-1 — a Go stdlib component spelled `go1.27.1` opened long-fixed stdlib CVEs on every
+  Go program (filed and closed 2026-10-14).** HIGH, correctness. Found on the estate as
+  CVE-2022-30632 (fixed in Go 1.17.12 / 1.18.4) open on `pkg:golang/stdlib@1.27.1` in two
+  releases. The SBOM copies the toolchain's spelling, `go1.27.1`, into the component version while
+  the purl and every Go advisory say `1.27.1`. Two faults from one prefix: (a) `osvVersion` sent
+  `go1.27.1` verbatim, and OSV answers an unparseable version with EVERY advisory for the
+  package — 162 for stdlib on 2026-10-14 (checked live; `1.27.1` returns 10); (b) the generic
+  comparator sorts letters below digits, so `go1.27.1` read as older than `1.17.12` and the
+  reconciled-range gate said in range (reproduced with `AffectedRange.Applicability`). Every
+  stdlib finding on a Go program was therefore a candidate false positive, and the version-range
+  rule could never clear them. **Done:** `value.NormalizeVersion` drops a `go`/`v` prefix for the
+  Go ecosystem only, applied once in `CompareVersions` and `AffectedRange.Matches` so every range,
+  verdict and fix comparison agrees, and in the OSV query. After deploy the re-discovery sweep
+  re-judges each stdlib match; the existing version-range rule then raises `not_affected` on
+  observed evidence for the long-fixed ones. **Follow-up to measure after the sweep:** how many
+  stdlib Findings cleared, and whether other ecosystems carry a toolchain spelling (none known).
+
 #### Harness-integration follow-ups (filed 2026-10-06 — surfaced verifying EDR-HARNESS-01)
 
 Both were found by reading what the gate did NOT check, not by a failing test. Neither blocks the

@@ -105,8 +105,8 @@ func TestCompareVersionsAPK(t *testing.T) {
 		{"1.2.foo", "1.2.bar", 1},        // unknown words keep the lexicographic fallback
 		{"1.2.4_rc1", "1.2.4_zeta1", -1}, // known-vs-unknown word: lexicographic fallback
 		{"1.2a", "1.2b", -1},             // digit-letter segments keep the generic fallback
-		{"1.2", "1.10", -1},            // numeric segments compare numerically
-		{"1.10", "1.2", 1},             // mirror
+		{"1.2", "1.10", -1},              // numeric segments compare numerically
+		{"1.10", "1.2", 1},               // mirror
 		{"1.2.3", "1.2.3", 0},
 		{"1.01", "1.1", 0}, // equal ints, different strings → numeric-equal segment branch
 	}
@@ -326,5 +326,59 @@ func TestCanonicalEcosystem(t *testing.T) {
 		if got := CanonicalEcosystem(in); got != want {
 			t.Errorf("CanonicalEcosystem(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// KN-GO-1 (measured 2026-10-14): Go's toolchain writes `go1.27.1` and SBOM generators copy that
+// spelling into the stdlib component, while every Go advisory says `1.27.1`. The prefix is a
+// letter, letters sort below digits, so `go1.27.1` read as OLDER than `1.17.12` and a 2022 flaw
+// fixed in 1.17.12 came back in range. Normalization is per ecosystem: a Go version loses the
+// prefix, any other ecosystem is left exactly as written.
+func TestNormalizeVersion_GoToolchainPrefix(t *testing.T) {
+	cases := []struct{ eco, in, want string }{
+		{"go", "go1.27.1", "1.27.1"},
+		{"golang", "go1.27.1", "1.27.1"},
+		{"gobinary", " go1.18.4 ", "1.18.4"},
+		{"go", "v1.27.1", "1.27.1"},
+		{"go", "1.27.1", "1.27.1"},
+		{"go", "go", "go"}, // no digit follows: not a version prefix
+		{"go", "golden-1.0", "golden-1.0"},
+		{"pypi", "go1.27.1", "go1.27.1"}, // other ecosystems untouched
+		{"rpm", "v1.0-1.el8", "v1.0-1.el8"},
+		{"", "go1.27.1", "go1.27.1"},
+	}
+	for _, c := range cases {
+		if got := NormalizeVersion(c.eco, c.in); got != c.want {
+			t.Errorf("NormalizeVersion(%q, %q) = %q, want %q", c.eco, c.in, got, c.want)
+		}
+	}
+}
+
+func TestCompareVersions_GoPrefixedVersionOrdersByItsNumbers(t *testing.T) {
+	if got := CompareVersions("go", "go1.27.1", "1.17.12"); got != 1 {
+		t.Fatalf("go1.27.1 vs 1.17.12 = %d, want 1 (newer)", got)
+	}
+	if got := CompareVersions("golang", "1.17.12", "go1.27.1"); got != -1 {
+		t.Fatalf("1.17.12 vs go1.27.1 = %d, want -1", got)
+	}
+	if got := CompareVersions("go", "go1.17.12", "1.17.12"); got != 0 {
+		t.Fatalf("go1.17.12 vs 1.17.12 = %d, want 0 (same version, two spellings)", got)
+	}
+}
+
+// The range CVE-2022-30632 carries on OSV (GO-2022-0522): fixed in 1.17.12 and 1.18.4. The
+// estate's stdlib at `go1.27.1` must read as out of range, and the exact-version form of a
+// constraint must match either spelling.
+func TestAffectedRange_GoPrefixedInstalledVersion(t *testing.T) {
+	r := AffectedRange{Ecosystem: "go", Groups: []string{"<1.17.12", ">=1.18.0-0,<1.18.4"}}
+	if v := r.Applicability("go1.27.1"); v != RangeOutOfRange {
+		t.Fatalf("go1.27.1 against %v = %s, want out_of_range", r.Groups, v)
+	}
+	if v := r.Applicability("go1.17.5"); v != RangeInRange {
+		t.Fatalf("go1.17.5 against %v = %s, want in_range", r.Groups, v)
+	}
+	exact := AffectedRange{Ecosystem: "go", Groups: []string{"1.27.1"}}
+	if !exact.Matches("go1.27.1") {
+		t.Fatal("exact constraint 1.27.1 should match the go1.27.1 spelling")
 	}
 }

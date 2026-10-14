@@ -275,3 +275,28 @@ func TestOSVDistroEcosystem_VersionedDistrosStillResolve(t *testing.T) {
 		}
 	}
 }
+
+// KN-GO-1: the Go stdlib component arrives as `go1.27.1`. OSV cannot parse that spelling and
+// answers an unparseable version with EVERY advisory for the package (162 for stdlib on
+// 2026-10-14, including CVE-2022-30632, fixed in 1.17.12), so the query must carry `1.27.1`.
+func TestOSVClient_GoStdlibVersionLosesTheToolchainPrefix(t *testing.T) {
+	var gotReq osvQueryReq
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotReq)
+		_ = json.NewEncoder(w).Encode(map[string]any{"vulns": []any{}})
+	}))
+	t.Cleanup(srv.Close)
+	c := feed.NewOSVClient(srv.URL, srv.Client())
+
+	if _, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL: "pkg:golang/stdlib@1.27.1", Name: "stdlib", Version: "go1.27.1", Ecosystem: "golang",
+	}); err != nil {
+		t.Fatalf("VulnsForPackage: %v", err)
+	}
+	if gotReq.Version != "1.27.1" {
+		t.Errorf("version = %q, want 1.27.1 (the go prefix dropped)", gotReq.Version)
+	}
+	if gotReq.Package.Name != "stdlib" {
+		t.Errorf("name = %q, want stdlib", gotReq.Package.Name)
+	}
+}
