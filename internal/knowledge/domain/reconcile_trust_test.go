@@ -120,3 +120,34 @@ func TestFoldProposal_TrustChangeCountsAsViewChange(t *testing.T) {
 		t.Fatal("expected ViewChanged: the range group's trust weakened to Asserted")
 	}
 }
+
+// 2026-10-14: a source that contributed only a FIX must not grade the range verdict — the
+// version-range rule never reads a fix. Measured: Red Hat's go-toolset fix (asserted) sat on
+// every Go card whose ranges were OSV's and NVD's (observed), and 239 provable out-of-range
+// verdicts waited for a human while 74 fix-free ones auto-accepted.
+func TestReconcile_FixOnlyContributorDoesNotGradeTheRanges(t *testing.T) {
+	prec := domain.NewPrecedence("nvd", "osv")
+	c, _ := value.NewCVSS(7.5, "")
+	redhatFix, err := domain.NewVulnFactsProposal("redhat", time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC), domain.VulnFacts{
+		Severity: value.SeverityHigh, CVSS: c,
+		Fixes: []domain.FixedVersion{{Package: "go-toolset", Version: "1.17.12-1.el8", Ecosystem: "rpm"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := domain.Reconcile([]domain.Proposal{
+		vulnFacts(t, "osv", value.SeverityHigh, ">=0,<1.17.12"),
+		redhatFix,
+	}, prec, trustPolicy())
+	if v.RangeTrust != value.TrustObserved {
+		t.Fatalf("RangeTrust = %q, want %q — the fix-only source did not contribute a range", v.RangeTrust, value.TrustObserved)
+	}
+	if len(v.FixedVersions) != 1 {
+		t.Fatalf("the fix itself must still be on the card: %v", v.FixedVersions)
+	}
+	// A card with NO ranges at all carries no range grade.
+	bare := domain.Reconcile([]domain.Proposal{redhatFix}, prec, trustPolicy())
+	if bare.RangeTrust != "" {
+		t.Fatalf("RangeTrust with no ranges = %q, want empty", bare.RangeTrust)
+	}
+}

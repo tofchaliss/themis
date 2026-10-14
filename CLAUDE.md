@@ -388,6 +388,11 @@ OpenVEX / CSAF out.
   (`CENSUS_*_TSV`, `PROBE_FIXTURE_DIR`) so the analysis can be exercised without an estate — which
   is how they were tested before first use. **They measure; they classify nothing and decide
   nothing**, because D13 defers the taxonomy until the population says the classes are real.
+- `scripts/range-accept-provable.sh` — opt-in, dry-run by default: lists the standing
+  `version-range` `not_affected` proposals (arithmetic over the card's reconciled range) and, with
+  `--apply` + `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API. Exists because
+  a raised proposal is never re-graded (KN-GO-4: 239 provable verdicts graded `asserted` by a
+  fix-only contributor before the grading was fixed). Nothing a vendor or the AI said is touched.
 - `scripts/vex-reject-inapplicable.sh` — the **one mutation** in this family, and it is opt-in. It
   reviews the standing vendor-VEX `not_affected` proposals and rejects those resting on a statement
   Themis determined does not cover the release (the pre-EDR-VEX-02 raises, made with no scope check
