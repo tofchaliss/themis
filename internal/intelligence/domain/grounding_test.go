@@ -210,6 +210,7 @@ func TestPrecedentBeforeIsTotalAndDeterministic(t *testing.T) {
 		{hi, lo, true}, {lo, hi, false},
 		{loSib, lo, true}, {lo, loSib, false},
 		{lo, lo, false},
+		{PrecedentPosition{ExactCVE: true, ReleaseID: "a"}, PrecedentPosition{ExactCVE: true, ReleaseID: "b"}, true}, // both exact: on to release id
 	}
 	for _, c := range cases {
 		if got := c.a.Before(c.b); got != c.want {

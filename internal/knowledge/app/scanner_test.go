@@ -479,3 +479,33 @@ func mustCard(t *testing.T, repo *fakeRepo, cveID string) domain.Faultline {
 	}
 	return f
 }
+
+type failingOccurrences struct{ err error }
+
+func (o failingOccurrences) MatchComponentsForRelease(context.Context, string) ([]app.InventoryComponent, error) {
+	return nil, o.err
+}
+
+func TestScannerReport_RediscoverComponentsEdges(t *testing.T) {
+	ctx := context.Background()
+	// Without discovery wired (the pre-KN-SCAN-5 posture) the call is a no-op.
+	plain := scannerService(t, fakeScannerSource{}, newMatches(), newRepo())
+	if n, err := plain.RediscoverComponents(ctx, "rel-1"); n != 0 || err != nil {
+		t.Fatalf("unwired: n=%d err=%v", n, err)
+	}
+	// An unreadable occurrence set surfaces as an error.
+	svc, corr := scannerWithDiscovery(t, fakeScannerSource{}, &countingDiscovery{}, newMatches(), newRepo())
+	svc = svc.WithDiscovery(corr, failingOccurrences{err: errors.New("db down")}, &fakeScanLedger{})
+	if _, err := svc.RediscoverComponents(ctx, "rel-1"); err == nil {
+		t.Fatal("expected the occurrence read error to surface")
+	}
+	// The scanner-only set skips unusable purls and duplicates.
+	items := []app.ScannerProposal{
+		{Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd"}},
+		{Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@1", Name: "binutils"}},
+		{Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@1", Name: "binutils"}},
+	}
+	if got := app.ScannerOnlyComponentsForTest(items, nil); len(got) != 1 || got[0].PURL != "pkg:rpm/redhat/binutils@1" {
+		t.Fatalf("scanner-only set = %+v, want the one usable, deduplicated purl", got)
+	}
+}

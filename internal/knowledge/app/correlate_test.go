@@ -517,3 +517,23 @@ func TestDiscoverComponents_RecordsUnderTheOriginalPURL(t *testing.T) {
 		t.Error("the hinted purl must never be recorded")
 	}
 }
+
+func TestDiscoverComponents_EdgesAndErrors(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Version: "2.30-128.el8_10", Ecosystem: "rpm"}
+	// A feed error surfaces (the sweep skips the release and retries later).
+	s := correlation(t, fakeInventory{}, fakeDiscovery{err: errors.New("osv down")}, newMatches(), newRepo())
+	if _, err := s.DiscoverComponents(ctx, "rel-1", []app.InventoryComponent{comp}, nil); err == nil {
+		t.Fatal("expected the discovery error to surface")
+	}
+	// Nothing discovered: nothing recorded, no error.
+	matches := newMatches()
+	s = correlation(t, fakeInventory{}, fakeDiscovery{}, matches, newRepo())
+	if n, err := s.DiscoverComponents(ctx, "rel-1", []app.InventoryComponent{comp}, nil); err != nil || n != 0 || matches.calls != 0 {
+		t.Fatalf("empty discovery: n=%d err=%v calls=%d", n, err, matches.calls)
+	}
+	// A distro purl with no namespace has nothing to derive a distro from.
+	if got := app.DiscoveryHint(app.InventoryComponent{PURL: "pkg:rpm/x@1-2.el8", Version: "1-2.el8"}, nil).PURL; got != "pkg:rpm/x@1-2.el8" {
+		t.Errorf("no-namespace purl hint = %q, want unchanged", got)
+	}
+}

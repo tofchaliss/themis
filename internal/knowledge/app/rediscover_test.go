@@ -168,3 +168,19 @@ func TestRediscovery_ScannerOnlyReleaseIsSweptWithoutAnSBOM(t *testing.T) {
 		t.Error("a scanner-only release must not be upserted with an SBOM evidence id")
 	}
 }
+
+// A scanner re-discovery failure skips that release (it is retried on the next sweep) without
+// stopping the others.
+func TestRediscovery_ScannerFailureSkipsTheRelease(t *testing.T) {
+	ledger := newLedger(app.CorrelatedRelease{ReleaseID: "rel-s", EvidenceID: ""})
+	fold := app.NewFaultlineService(newRepo(), &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	corr := app.NewCorrelationService(fakeInventory{}, fakeDiscovery{}, fold, newMatches(), fixedClock{}).WithLedger(ledger)
+	scanLedger := &fakeScanLedger{}
+	scan := app.NewScannerReportService(fakeScannerSource{}, fold, newMatches(), fixedClock{}).
+		WithDiscovery(corr, failingOccurrences{err: errors.New("db down")}, scanLedger)
+	sweep := app.NewRediscoveryService(ledger, corr, fixedClock{}, time.Hour, 3).WithScanner(scan, scanLedger)
+	swept, _, err := sweep.Sweep(context.Background())
+	if err != nil || swept != 0 || len(scanLedger.stamped) != 0 {
+		t.Fatalf("swept=%d err=%v stamped=%v; want the release skipped and not stamped", swept, err, scanLedger.stamped)
+	}
+}

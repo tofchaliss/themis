@@ -218,3 +218,17 @@ func TestDropSupersededScopelessIsExact(t *testing.T) {
 		t.Errorf("set size = %d, want 4 — only an EXACT scope-less duplicate may be dropped: %+v", len(set), set)
 	}
 }
+
+// EDR-VEX-02 D14: two `fixed` statements for one package and product can differ only by the
+// advisory and build; the order must still be total, or the view reports a change every fold.
+func TestSortedApplicabilitiesIsTotalOverAdvisoryAndBuild(t *testing.T) {
+	el8 := value.ProductScope{Family: "enterprise-linux", Major: "8"}
+	a := Applicability{Package: "container-tools", Status: StatusFixed, Scope: el8, Advisory: "RHSA-2022:7529", FixedVersion: "container-tools:3.0-x"}
+	b := Applicability{Package: "container-tools", Status: StatusFixed, Scope: el8, Advisory: "RHSA-2023:2758", FixedVersion: "container-tools:rhel8-y"}
+	c := Applicability{Package: "container-tools", Status: StatusFixed, Scope: el8, Advisory: "RHSA-2023:2758", FixedVersion: "container-tools:rhel8-z"}
+	set := map[Applicability]struct{}{c: {}, b: {}, a: {}}
+	got := sortedApplicabilities(set)
+	if len(got) != 3 || got[0] != a || got[1] != b || got[2] != c {
+		t.Fatalf("order = %+v, want by advisory then build", got)
+	}
+}
