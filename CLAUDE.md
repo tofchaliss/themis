@@ -364,6 +364,12 @@ OpenVEX / CSAF out.
   would be right the day it was written and silently wrong after (the defect that left the systemd
   installer loading only the first registry migration). Strictly read-only: mutations stay in a
   human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
+- `scripts/match-census.sh` — **read-only census of the match table for the SHAPE of a false-positive
+  class** (KN-GO-1 taught this: one Go component spelled `go1.27.1` opened 165 CVEs, 155 false, and
+  the shape was visible all along). Four signs: fan-out per component, purl-version vs
+  version-column spelling, versions that start with a letter per ecosystem, and an OSV cross-check
+  with the purl's version. It measures and flags; it classifies nothing. Replay seam
+  `CENSUS_MATCHES_TSV`. `PGBASE=… ./scripts/match-census.sh [TOP]`; exit 1 when a sign is flagged.
 - `scripts/attribution-gap-census.sh` · `scripts/redhat-package-state-probe.sh` — the two
   **measurement** instruments for EDR-ATTRIBUTION-01 D13/D15, read-only and estate-facing. The
   census splits the attribution population three ways (attributed · gap · **no-carrier card**,
