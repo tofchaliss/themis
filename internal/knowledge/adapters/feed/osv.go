@@ -232,17 +232,3 @@ func pairedRanges(events []osvEvent) []string {
 	}
 	return out
 }
-
-// rangeString renders an OSV introduced/fixed event pair as a human-readable range.
-func rangeString(introduced, fixed string) string {
-	switch {
-	case introduced != "" && fixed != "":
-		return fmt.Sprintf(">=%s,<%s", introduced, fixed)
-	case introduced != "":
-		return fmt.Sprintf(">=%s", introduced)
-	case fixed != "":
-		return fmt.Sprintf("<%s", fixed)
-	default:
-		return ""
-	}
-}
