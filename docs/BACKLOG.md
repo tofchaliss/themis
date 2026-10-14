@@ -355,6 +355,22 @@ three angles, and two of them proposed fixes that would not have worked.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
+- [x] **KN-GO-3 — the OSV reader split one interval into two rules, so a lone `>=0` kept every
+  Go card in range forever; and a card unioned ranges across time, so the bad rule could never be
+  displaced (filed and closed 2026-10-14, from the KN-GO-2 pass on the estate).** HIGH,
+  correctness. The pass checked 919 cards and raised 85 proposals — none of them stdlib: every
+  Go card read `["<1.4.3", "<=1.4.2", ">=0"]`. OSV writes a range as an ordered event list
+  (`{introduced: 0}, {fixed: 1.4.3}`); `osv.go` rendered each event alone, and `AffectedRange`
+  ORs its groups, so `>=0` matched Go 1.27.1 and `ProvablyOutOfRange` was never true. Fixing the
+  reader alone would not have helped: `Reconcile` unioned every range any proposal ever carried,
+  and the log is append-only. **Done:** `pairedRanges` pairs each `introduced` with the bound that
+  follows it (`fixed` or `last_affected`), an unclosed one stays open-ended; `Reconcile` takes
+  ranges from each source's LATEST range-bearing statement (ties at one instant union, for order
+  independence) and still unions across sources. After deploy the re-discovery sweep re-polls OSV
+  per stale release, the corrected statement replaces the old one on each card, the
+  FaultlineEnriched fan-out runs the version-range rule, and the 330 stdlib Findings clear on
+  their own — no second re-judge pass needed. Record the before/after count here.
+
 - [x] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
   matches stay open after KN-GO-1 (filed and closed 2026-10-14).** HIGH, operability. The version-range
   rule (`reactToVersionRange`) runs only on a FaultlineEnriched; a Finding whose verdict changed

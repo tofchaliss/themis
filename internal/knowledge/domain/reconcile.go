@@ -109,6 +109,7 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	var best headlineCandidate
 	var bestSummary summaryCandidate
 	rangeSet := map[string]struct{}{}
+	latestRanges := map[string]rangeStatement{} // source → its latest range-bearing statement
 	fixSet := newFixFold()
 	carrierSet := map[string]struct{}{}
 	epssChosen := false
@@ -142,8 +143,22 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 			if len(f.AffectedRanges) > 0 || len(f.Fixes) > 0 {
 				view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(p.source))
 			}
-			for _, rng := range f.AffectedRanges {
-				rangeSet[rng] = struct{}{}
+			// Ranges are a union ACROSS sources (a distro's backport bound beside upstream's), but
+			// from each source only its LATEST statement that carries ranges counts: the proposal
+			// log is append-only, so a union across time would keep every range a source ever
+			// said — including the shape a since-fixed translator got wrong (measured 2026-10-14:
+			// a lone `>=0` from the old OSV pairing stayed on every Go card forever, and no later
+			// correct statement could displace it).
+			if len(f.AffectedRanges) > 0 {
+				prev, seen := latestRanges[p.source]
+				switch {
+				case !seen || p.observedAt.After(prev.at):
+					latestRanges[p.source] = rangeStatement{at: p.observedAt, ranges: append([]string(nil), f.AffectedRanges...)}
+				case p.observedAt.Equal(prev.at):
+					// Same instant: no order between them, so both count (order independence).
+					prev.ranges = append(prev.ranges, f.AffectedRanges...)
+					latestRanges[p.source] = prev
+				}
 			}
 			for _, fx := range f.Fixes {
 				fixSet.add(fx)
@@ -184,6 +199,11 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 	if bestSummary.set {
 		view.Summary = bestSummary.text
 		view.SummarySource = bestSummary.source
+	}
+	for _, st := range latestRanges {
+		for _, rng := range st.ranges {
+			rangeSet[rng] = struct{}{}
+		}
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
 	view.CarrierProducts = sortedKeys(carrierSet)
@@ -355,6 +375,12 @@ func dropSupersededScopeless(set map[Applicability]struct{}) {
 			delete(set, a)
 		}
 	}
+}
+
+// rangeStatement is one source's latest word on the affected ranges, with when it said it.
+type rangeStatement struct {
+	at     time.Time
+	ranges []string
 }
 
 func sortedApplicabilities(set map[Applicability]struct{}) []Applicability {

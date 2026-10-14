@@ -45,11 +45,15 @@ type osvAffected struct {
 		Name      string `json:"name"`
 	} `json:"package"`
 	Ranges []struct {
-		Events []struct {
-			Introduced string `json:"introduced"`
-			Fixed      string `json:"fixed"`
-		} `json:"events"`
+		Events []osvEvent `json:"events"`
 	} `json:"ranges"`
+}
+
+// osvEvent is one entry of an OSV range's ordered event list.
+type osvEvent struct {
+	Introduced   string `json:"introduced"`
+	Fixed        string `json:"fixed"`
+	LastAffected string `json:"last_affected"`
 }
 
 // osvACL translates OSV records into vuln-facts Proposals.
@@ -112,10 +116,14 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 			carriers = append(carriers, pkg)
 		}
 		for _, rng := range aff.Ranges {
+			// OSV writes a range as an ORDERED event list — `{introduced: 0}, {fixed: 1.4.3}` — not
+			// as pairs. Read one event at a time, this came out as two rules, `>=0` and `<1.4.3`,
+			// OR'd together; and a lone `>=0` matches every version ever written, so no Go card
+			// could ever be provably out of range (measured 2026-10-14: 330 stdlib Findings on
+			// Go 1.27.1 untouched by the KN-GO-2 pass). Pair each introduced with the bound that
+			// FOLLOWS it; an introduced with no following bound is genuinely open-ended.
+			ranges = append(ranges, pairedRanges(rng.Events)...)
 			for _, ev := range rng.Events {
-				if r := rangeString(ev.Introduced, ev.Fixed); r != "" {
-					ranges = append(ranges, r)
-				}
 				if ev.Fixed != "" {
 					// Paired with the package this affected-entry is about, so a consumer can ask
 					// "what fixes MY component?" instead of guessing from a union — and with the
@@ -187,16 +195,40 @@ func isDistroEcosystem(eco string) bool {
 	return false
 }
 
-// rangeString renders an OSV introduced/fixed event pair as a human-readable range.
-func rangeString(introduced, fixed string) string {
-	switch {
-	case introduced != "" && fixed != "":
-		return fmt.Sprintf(">=%s,<%s", introduced, fixed)
-	case introduced != "":
-		return fmt.Sprintf(">=%s", introduced)
-	case fixed != "":
-		return fmt.Sprintf("<%s", fixed)
-	default:
-		return ""
+// pairedRanges walks an OSV event list in order and renders one rule per affected interval:
+// `>=introduced,<fixed`, `>=introduced,<=last_affected`, `>=introduced` when nothing closes it,
+// and `<fixed` / `<=last_affected` for a bound with no opening (a shape OSV does not emit, kept
+// so a malformed record still yields the safe, wider rule).
+func pairedRanges(events []osvEvent) []string {
+	var out []string
+	open := ""
+	hasOpen := false
+	flush := func(upper string) {
+		switch {
+		case hasOpen && upper != "":
+			out = append(out, fmt.Sprintf(">=%s,%s", open, upper))
+		case hasOpen:
+			out = append(out, fmt.Sprintf(">=%s", open))
+		case upper != "":
+			out = append(out, upper)
+		}
+		open, hasOpen = "", false
 	}
+	for _, ev := range events {
+		if ev.Introduced != "" {
+			if hasOpen {
+				flush("") // two introduceds in a row: the first interval never closed
+			}
+			open, hasOpen = ev.Introduced, true
+		}
+		if ev.Fixed != "" {
+			flush("<" + ev.Fixed)
+		} else if ev.LastAffected != "" {
+			flush("<=" + ev.LastAffected)
+		}
+	}
+	if hasOpen {
+		flush("")
+	}
+	return out
 }

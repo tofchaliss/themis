@@ -51,7 +51,9 @@ func TestRegistry_GoldenFiles(t *testing.T) {
 		t.Errorf("osv cve (from alias) = %s", osv.CVE)
 	}
 	of, _ := osv.Proposal.VulnFacts()
-	if of.Severity != "high" || len(of.AffectedRanges) != 2 || len(of.FixVersions()) != 1 {
+	// OSV's ordered event list `{introduced: 0}, {fixed: 3.0.11}` is ONE interval (2026-10-14):
+	// read as two rules, the lone `>=0` matched every version ever written.
+	if of.Severity != "high" || len(of.AffectedRanges) != 1 || of.AffectedRanges[0] != ">=0,<3.0.11" || len(of.FixVersions()) != 1 {
 		t.Errorf("osv ranges/fixes = %+v", of)
 	}
 
