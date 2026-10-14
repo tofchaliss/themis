@@ -43,7 +43,6 @@ done
 
 # ── Load the population: purl \t version \t ecosystem \t faultline_id \t verdict \t source ──────
 TSV="$(mktemp -t match-census.XXXXXX)"
-trap 'rm -f "$TSV"' EXIT
 if [ -n "${CENSUS_MATCHES_TSV:-}" ]; then
   cp "$CENSUS_MATCHES_TSV" "$TSV"
 else
@@ -72,20 +71,41 @@ AWK_PURL='function purlname(p){ i=index(p,"@"); return i?substr(p,1,i-1):p }
           function hexv(ch){ return index("0123456789ABCDEF", toupper(ch)) - 1 }
           function pctdec(v,  o,h){ o=""; while(match(v,/%[0-9A-Fa-f][0-9A-Fa-f]/)){ o=o substr(v,1,RSTART-1); h=substr(v,RSTART+1,2); o=o sprintf("%c", hexv(substr(h,1,1))*16+hexv(substr(h,2,1))); v=substr(v,RSTART+3) }; return o v }'
 
+# ── Governance's side: Findings DECIDED per component ─────────────────────────────────────────
+#
+# Knowledge's verdict says whether a vendor fix cleared an occurrence; Governance's Position says
+# whether a human or a policy decided the Finding. The operator's "open" is the second, and the
+# census used to show only the first — so 296 stdlib Findings decided not_affected by the
+# version-range rule (2026-10-14) still read "165 open". Read from the governance database when
+# PGBASE is set; the replay seam carries no Governance half and shows "-".
+DEC="$(mktemp -t match-census-dec.XXXXXX)"; trap 'rm -f "$TSV" "$TSV".* "$DEC"' EXIT
+if [ -z "${CENSUS_MATCHES_TSV:-}" ]; then
+  psql "$PGBASE/governance?sslmode=disable" -AtF $'\t' -c \
+    "SELECT split_part(c.purl,'@',1), c.version, count(DISTINCT f.id)
+       FROM findings f JOIN finding_components c ON c.finding_id = f.id
+      WHERE f.current_stance IS NOT NULL GROUP BY 1,2" > "$DEC" 2>/dev/null || : > "$DEC"
+fi
+
 # ── 1. fan-out ────────────────────────────────────────────────────────────────────────────────
 hdr "1. Fan-out — distinct CVEs per component, split by verdict (top $TOP; flagged at ≥ $FLAG_AT OPEN)"
 # A long history that Rocky has already fixed shows as cleared_vendor_fix and is not a sign of
 # anything; only the OPEN count can point at a parse or spelling defect.
 awk -F'\t' "$AWK_PURL"'{ k=purlname($1) "\t" $2; if(!(k SUBSEP $4 in seen)){ seen[k SUBSEP $4]=1; n[k]++; if($5=="" || $5=="open") op[k]++; else cl[k]++ } }
   END{ for(k in n) print n[k] "\t" op[k]+0 "\t" cl[k]+0 "\t" k }' "$TSV" | sort -t$'\t' -k1,1nr | head -n "$TOP" > "$TSV.fan"
-printf '  %6s %5s %7s  %-42s %s\n' CVEs open cleared component version
+printf '  %6s %5s %7s %7s  %-42s %s\n' CVEs open cleared decided component version
 FAN=0
 while IFS=$'\t' read -r cnt op cl name ver; do
-  mark=" "; if [ "$op" -ge "$FLAG_AT" ]; then mark="!"; FAN=$((FAN+1)); fi
-  printf '  %s%5s %5s %7s  %-42s %s\n' "$mark" "$cnt" "$op" "$cl" "$name" "$ver"
+  dec="-"
+  if [ -s "$DEC" ]; then
+    dec="$(awk -F'\t' -v n="$name" -v v="$ver" '$1==n && $2==v {print $3; exit}' "$DEC")"; dec="${dec:-0}"
+  fi
+  # "open" here is Knowledge's verdict; what is still open for the OPERATOR is open minus decided.
+  undecided="$op"; [ "$dec" != "-" ] && undecided=$((op - dec)); [ "$undecided" -lt 0 ] && undecided=0
+  mark=" "; if [ "$undecided" -ge "$FLAG_AT" ]; then mark="!"; FAN=$((FAN+1)); fi
+  printf '  %s%5s %5s %7s %7s  %-42s %s\n' "$mark" "$cnt" "$op" "$cl" "$dec" "$name" "$ver"
 done < "$TSV.fan"
 FLAGS=$((FLAGS+FAN))
-[ "$FAN" -gt 0 ] && flag "$FAN component(s) with $FLAG_AT or more OPEN CVEs — a feed asked with a version it could not parse answers with the package's whole history; a long history already cleared does not count" || ok "no component with $FLAG_AT or more open CVEs"
+[ "$FAN" -gt 0 ] && flag "$FAN component(s) with $FLAG_AT or more CVEs still open for the operator (Knowledge open minus Governance decided) — a feed asked with a version it could not parse answers with the package's whole history; a history already cleared or decided does not count" || ok "no component with $FLAG_AT or more undecided open CVEs"
 
 # ── 2. spelling — purl version vs version column ──────────────────────────────────────────────
 hdr "2. Spelling — purl version ≠ version column, by purl type"

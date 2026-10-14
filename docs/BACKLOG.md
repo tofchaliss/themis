@@ -301,6 +301,19 @@ three angles, and two of them proposed fixes that would not have worked.
   cosine at 0; `Before` pins ties (exact first, then cosine, release id, source CVE) in the memory
   index and in `deltaRank`; tests for the table and for a reversed load order.
 
+- [ ] **AI-RF-4 — rule-decided Positions are served as "similar past decisions" and as sweep
+  precedent (filed 2026-10-14, user observation).** MED, advisory quality. CVE-2026-56857 on
+  stdlib 1.26.8 (genuinely affected, fix 1.26.9) showed five `not_affected` precedents at 0.99:
+  all version-range decisions from the same day on OTHER CVEs, rationale "every matched component
+  version is outside the reconciled affected range". That is arithmetic about another CVE's
+  range, not a judgement that transfers; shown as precedent it nudges a human and the Δ4b sweep
+  toward `not_affected` on an affected Finding. **Do:** a Position whose decider is a policy or
+  whose accepted proposal came from a deterministic system proposer (`version-range`,
+  `knowledge-enrichment` withdrawal) is NOT precedent — Intelligence's inbound indexer skips it
+  and `GET /findings/{id}/similar` and the sweep never see it; human and AI-judged Positions
+  stay. Needs the Position event (or the current-position read) to carry the decider kind.
+  Awaiting go (2026-10-14).
+
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
@@ -339,6 +352,20 @@ three angles, and two of them proposed fixes that would not have worked.
   stamp (`StampDiscovered`). Measure after deploy: `match-census.sh` before/after on binutils,
   compat-libtiff3, libtiff, curl, httpd.
 
+- [ ] **VEX-SCOPE-2 — only RHEL-family releases are placeable, so an Alpine release shows every Red
+  Hat row as "release not placeable" (filed 2026-10-14, user observation).** MED, operator trust.
+  `ScopeFromRPMRelease` reads the `.elN` marker in rpm versions and nothing else; an apk or deb
+  release yields a zero scope, every vendor statement on its findings reads `not_comparable`, and
+  the drawer lists five Red Hat rows on an Alpine finding with a badge that blames the release.
+  Nothing is ever acted on (a proposal needs a scope match), so this is noise, not risk. **Do:**
+  (1) place apk/deb releases from the purl `distro=` qualifier (`alpine-3.20` → alpine/3.20,
+  `debian-12` → debian/12; EDR-VEX-02 D12: the release's scope is a property of the release), so a
+  Red Hat row on an Alpine finding reads `not_applicable` — a known different product; (2) carry the
+  release's family + major on the assessment (API, additive) so the drawer folds statements whose
+  family is not the release's under one closed line, "N statements about other products", and
+  shows the "no statement covers this release" sentence only when some statement shares the
+  release's family (RHEL rows on a Rocky release), never for Alpine. Awaiting go (2026-10-14).
+
 #### Vendor statements kept whole (filed and closed 2026-10-14)
 
 - [x] **VEX-STMT-1 — Red Hat's answer for the release's own family was dropped at the door
@@ -365,8 +392,12 @@ three angles, and two of them proposed fixes that would not have worked.
   whose ranges stand in the reconciled view (the latest per source), not by fix-only
   contributors; a card with no ranges carries no range grade. The 239 already raised are never
   re-graded (append-only): `scripts/range-accept-provable.sh` lists them (dry run) and, with
-  `--apply` and `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API. Record the
-  before/after stdlib stance count here.
+  `--apply` and `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API.
+  **Measured 2026-10-14, end of the arc:** range repair 1155 cards / 598 repaired; 313
+  version-range proposals raised (74 observed auto-accepted); accept script 311 accepted, 0
+  failed; Go stdlib Findings 0 cleared / 330 open in the morning → **296 not_affected / 60 open**
+  by 16:50. The 60 are the genuinely affected ones plus cards whose range set carries another
+  product's bound (e.g. CVE-2019-17596's `<=4.23.1f`), which is the next thing to look at.
 
 - [x] **KN-GO-3 — the OSV reader split one interval into two rules, so a lone `>=0` kept every
   Go card in range forever; and a card unioned ranges across time, so the bad rule could never be
