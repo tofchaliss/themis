@@ -266,6 +266,11 @@ func distroMajorMinor(v string) string {
 // epoch — recovering it from the PURL "epoch=" qualifier when the version field omits it.
 func osvVersion(comp app.InventoryComponent) string {
 	v := strings.TrimSpace(comp.Version)
+	if purlType(comp.PURL) == "golang" {
+		// `go1.27.1` → `1.27.1`: OSV cannot parse the toolchain spelling and answers an
+		// unparseable version with EVERY advisory for the package (KN-GO-1).
+		return value.NormalizeVersion("go", v)
+	}
 	if v == "" || purlType(comp.PURL) != "rpm" {
 		return v
 	}

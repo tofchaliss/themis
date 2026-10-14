@@ -108,6 +108,7 @@ func ClassifyEcosystem(ecosystem string) VersionClass {
 // calls, so apk (-rN) and rpm (epoch/release/~) versions order by their own rules
 // on every path.
 func CompareVersions(ecosystem, left, right string) int {
+	left, right = NormalizeVersion(ecosystem, left), NormalizeVersion(ecosystem, right)
 	switch ClassifyEcosystem(ecosystem) {
 	case VersionClassAPK:
 		return compareAPKVersion(left, right)
@@ -137,6 +138,7 @@ func (r AffectedRange) Matches(version string) bool {
 	if len(r.Groups) == 0 {
 		return true
 	}
+	version = NormalizeVersion(r.Ecosystem, version)
 	for _, group := range r.Groups {
 		if matchConstraintGroup(r.Ecosystem, group, version) {
 			return true
@@ -265,6 +267,29 @@ func BuildConstraintGroup(lowerIncl, lowerExcl, upperIncl, upperExcl string) str
 		parts = append(parts, "< "+v)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// NormalizeVersion brings an ecosystem's version spelling onto the form its feeds use, so
+// the same version written two ways compares equal. Today it covers one case, measured on
+// the estate 2026-10-14 (KN-GO-1): Go's own toolchain writes its version as `go1.27.1`, and
+// SBOM generators copy that spelling into the stdlib component (`pkg:golang/stdlib@1.27.1`
+// with version `go1.27.1`), while OSV and every Go advisory say `1.27.1`. Left as-is, the
+// prefix sorts as a letter below every digit, so `go1.27.1` reads as OLDER than `1.17.12`
+// and a 2022 stdlib flaw fixed in 1.17.12 comes back as in range — and OSV, which cannot
+// parse the prefix either, answers the query with every stdlib advisory ever published.
+// The prefix is dropped only when a digit follows it, so a version that merely starts with
+// the letters is untouched. Every other ecosystem passes through unchanged.
+func NormalizeVersion(ecosystem, version string) string {
+	v := strings.TrimSpace(version)
+	if NormalizeEcosystem(ecosystem) != "go" {
+		return v
+	}
+	for _, prefix := range []string{"go", "v"} {
+		if len(v) > len(prefix) && strings.HasPrefix(v, prefix) && v[len(prefix)] >= '0' && v[len(prefix)] <= '9' {
+			return v[len(prefix):]
+		}
+	}
+	return v
 }
 
 // StripVersionQualifiers removes the PURL qualifier (?key=val) and subpath (#path)

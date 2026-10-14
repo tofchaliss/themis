@@ -136,6 +136,31 @@ func TestCorrelate_SkipsOutOfRange(t *testing.T) {
 	}
 }
 
+// KN-GO-1 (measured 2026-10-14): the estate's Go programs carry `pkg:golang/stdlib@1.27.1` with
+// the version spelled `go1.27.1`, the way the toolchain prints it. Against CVE-2022-30632's range
+// (fixed 1.17.12 / 1.18.4) the prefix sorted below every digit, so 1.27.1 read as OLDER than
+// 1.17.12 and a four-year-old, long-fixed flaw opened a Finding — and OSV, asked for `go1.27.1`,
+// returned every stdlib advisory ever published. The range gate must read the number.
+func TestCorrelate_GoStdlibToolchainSpellingIsOutOfRange(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{PURL: "pkg:golang/stdlib@1.27.1", Name: "stdlib", Version: "go1.27.1", Ecosystem: "golang"}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{
+		comp.PURL: {{CVE: cve(t, "CVE-2022-30632"), Proposal: vulnFactsRanged(t, "osv", "<1.17.12", ">=1.18.0-0,<1.18.4")}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	s := correlation(t, inv, disc, matches, repo)
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 0 || matches.calls != 0 {
+		t.Errorf("go1.27.1 recorded a match against a range fixed in 1.17.12 (n=%d, calls=%d), want none", n, matches.calls)
+	}
+}
+
 func TestCorrelate_RecordsRPMFixedAsCleared(t *testing.T) {
 	ctx := context.Background()
 	// The installed RHEL-8 build (release 17) is at/above the Red Hat RHEL-8 fix (release 16), so
