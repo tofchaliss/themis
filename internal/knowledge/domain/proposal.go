@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -137,6 +138,42 @@ type Applicability struct {
 	// A zero Scope means the vendor supplied no readable scope, which downstream reads as
 	// applicability `unknown` — epistemic uncertainty, never a product mismatch (D4).
 	Scope value.ProductScope
+	// Advisory and FixedVersion are set on a `fixed` statement only (EDR-VEX-02 D14): the
+	// advisory that shipped the fix (e.g. RHSA-2023:2758) and the build it shipped (a NEVRA, or
+	// a module stream id for a module build). They are the vendor's words too — part of the
+	// statement, immutable, never a Themis conclusion. Empty on every other status.
+	Advisory     string
+	FixedVersion string
+}
+
+// Vendor statement statuses — the CLOSED set a consumer may switch on (EDR-VEX-02 D13): the
+// OpenVEX four plus the three Red Hat states that are none of them. A status outside this set
+// is refused at the constructor, naming the value, so a new vendor vocabulary fails loudly at
+// the door rather than becoming prose nobody matches on.
+const (
+	StatusNotAffected        = "not_affected"
+	StatusAffected           = "affected"
+	StatusFixed              = "fixed"
+	StatusUnderInvestigation = "under_investigation"
+	StatusWillNotFix         = "will_not_fix"
+	StatusFixDeferred        = "fix_deferred"
+	StatusOutOfSupport       = "out_of_support"
+)
+
+// ApplicabilityStatuses lists the closed status set in a stable order.
+var ApplicabilityStatuses = []string{
+	StatusNotAffected, StatusAffected, StatusFixed, StatusUnderInvestigation,
+	StatusWillNotFix, StatusFixDeferred, StatusOutOfSupport,
+}
+
+// KnownApplicabilityStatus reports whether status is in the closed set.
+func KnownApplicabilityStatus(status string) bool {
+	for _, s := range ApplicabilityStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // Proposal is one source's non-authoritative input about a CVE (CON-0002): tagged with
@@ -242,6 +279,9 @@ func NewApplicabilityProposal(source string, observedAt time.Time, app Applicabi
 	}
 	if strings.TrimSpace(app.Package) == "" || strings.TrimSpace(app.Status) == "" {
 		return Proposal{}, errors.New("proposal: applicability requires package and status")
+	}
+	if !KnownApplicabilityStatus(app.Status) {
+		return Proposal{}, fmt.Errorf("proposal: applicability status %q is not one of %v", app.Status, ApplicabilityStatuses)
 	}
 	a := app
 	return Proposal{source: source, observedAt: observedAt.UTC(), kind: KindApplicability, applicability: &a}, nil

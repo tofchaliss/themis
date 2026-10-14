@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -356,5 +357,155 @@ func TestScannerReport_ReportsOwnComponentsAreCandidates(t *testing.T) {
 	}
 	if _, ok := matches.byPURL["app:httpd"]; ok {
 		t.Error("the raw identifier was recorded as an identity")
+	}
+}
+
+// scannerWithDiscovery builds the scanner service and the correlation service over ONE
+// FaultlineService, as production wiring does — two folds with separate id sequences would
+// mint the same card id twice and the fake match store would collapse them.
+func scannerWithDiscovery(t *testing.T, src app.ScannerReportSource, disc app.PackageVulnSource, matches *fakeMatches, repo *fakeRepo) (*app.ScannerReportService, *app.CorrelationService) {
+	t.Helper()
+	fold := app.NewFaultlineService(repo, &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	corr := app.NewCorrelationService(fakeInventory{}, disc, fold, matches, fixedClock{})
+	return app.NewScannerReportService(src, fold, matches, fixedClock{}), corr
+}
+
+type countingDiscovery struct {
+	byPURL map[string][]app.ProposalFor
+	asked  []string
+}
+
+func (d *countingDiscovery) VulnsForPackage(_ context.Context, c app.InventoryComponent) ([]app.ProposalFor, error) {
+	d.asked = append(d.asked, c.PURL)
+	return d.byPURL[c.PURL], nil
+}
+
+type fakeScanLedger struct{ touched, stamped []string }
+
+func (l *fakeScanLedger) TouchScannerRelease(_ context.Context, r string, _ time.Time) error {
+	l.touched = append(l.touched, r)
+	return nil
+}
+func (l *fakeScanLedger) StampDiscovered(_ context.Context, r string, _ time.Time) error {
+	l.stamped = append(l.stamped, r)
+	return nil
+}
+
+type fakeOccurrences struct{ comps []app.InventoryComponent }
+
+func (o fakeOccurrences) MatchComponentsForRelease(context.Context, string) ([]app.InventoryComponent, error) {
+	return o.comps, nil
+}
+
+// KN-SCAN-5 (measured 2026-10-14: binutils 87 open / 0 cleared, every row scanner/cortex on a
+// purl with no distro): a component only the scanner named now gets discovery too. The query
+// carries the release's distro from an SBOM sibling; the match lands under the scanner's own
+// purl; a component the SBOM already names is not asked again; the release is touched on the
+// ledger so the sweep revisits it.
+func TestScannerReport_ScannerOnlyComponentsAreDiscovered(t *testing.T) {
+	ctx := context.Background()
+	binutils := app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Name: "binutils", Version: "2.30-128.el8_10", Ecosystem: "rpm", Source: "binutils"}
+	curl := app.InventoryComponent{PURL: "pkg:rpm/rocky/curl@7.61.1-34.el8_10?distro=rocky-8.10", Name: "curl", Version: "7.61.1-34.el8_10", Ecosystem: "rpm", Source: "curl"}
+	src := fakeScannerSource{props: []app.ScannerProposal{
+		{CVE: cve(t, "CVE-2024-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh), Component: binutils, Origin: "scanner/cortex"},
+		{CVE: cve(t, "CVE-2024-2"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh), Component: curl, Origin: "scanner/cortex"},
+	}}
+	hinted := "pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rocky-8.10"
+	disc := &countingDiscovery{byPURL: map[string][]app.ProposalFor{
+		hinted: {{CVE: cve(t, "CVE-2024-9"), Proposal: vulnFacts(t, "osv", value.SeverityHigh)}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	ledger := &fakeScanLedger{}
+	svc, corr := scannerWithDiscovery(t, src, disc, matches, repo)
+	svc = svc.WithIdentityCandidates(identityLedger{ev: "sbom-1", found: true}, identityInventory{comps: []app.InventoryComponent{curl}}).
+		WithDiscovery(corr, fakeOccurrences{}, ledger)
+
+	n, err := svc.Ingest(ctx, "rel-1", "scan-1")
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(disc.asked) != 1 || disc.asked[0] != hinted {
+		t.Fatalf("discovery asked %v, want only the hinted binutils query (curl is in the SBOM)", disc.asked)
+	}
+	if n != 3 {
+		t.Fatalf("new matches = %d, want 3 (two scanner claims + one discovered)", n)
+	}
+	for _, cveID := range []string{"CVE-2024-1", "CVE-2024-9"} {
+		if !matches.recorded["rel-1|"+string(mustCard(t, repo, cveID).ID())+"|"+binutils.PURL] {
+			t.Errorf("%s should be recorded under binutils's ORIGINAL purl; recorded = %v", cveID, matches.recorded)
+		}
+	}
+	if m := matches.byPURL[binutils.PURL]; m.DetectionOrigin != app.OriginDiscovery {
+		t.Errorf("the discovered match's origin = %q, want discovery", m.DetectionOrigin)
+	}
+	if _, hintedRecorded := matches.byPURL[hinted]; hintedRecorded {
+		t.Error("the hinted purl must never be recorded")
+	}
+	if len(ledger.touched) != 1 || ledger.touched[0] != "rel-1" {
+		t.Errorf("ledger touched %v, want [rel-1]", ledger.touched)
+	}
+}
+
+// The sweep half: a release's recorded components that no SBOM names are re-discovered; the
+// SBOM ones are not asked again.
+func TestScannerReport_RediscoverComponentsSkipsSBOMComponents(t *testing.T) {
+	ctx := context.Background()
+	binutils := app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@2.30-128.el8_10", Name: "binutils", Version: "2.30-128.el8_10", Ecosystem: "rpm", Source: "binutils"}
+	curl := app.InventoryComponent{PURL: "pkg:rpm/rocky/curl@7.61.1-34.el8_10?distro=rocky-8.10", Name: "curl", Version: "7.61.1-34.el8_10", Ecosystem: "rpm"}
+	disc := &countingDiscovery{byPURL: map[string][]app.ProposalFor{
+		"pkg:rpm/redhat/binutils@2.30-128.el8_10?distro=rocky-8.10": {{CVE: cve(t, "CVE-2024-9"), Proposal: vulnFacts(t, "osv", value.SeverityHigh)}},
+	}}
+	matches := newMatches()
+	repo := newRepo()
+	svc, corr := scannerWithDiscovery(t, fakeScannerSource{}, disc, matches, repo)
+	svc = svc.WithIdentityCandidates(identityLedger{ev: "sbom-1", found: true}, identityInventory{comps: []app.InventoryComponent{curl}}).
+		WithDiscovery(corr, fakeOccurrences{comps: []app.InventoryComponent{binutils, curl}}, &fakeScanLedger{})
+
+	n, err := svc.RediscoverComponents(ctx, "rel-1")
+	if err != nil || n != 1 {
+		t.Fatalf("rediscover = %d, %v; want 1 new match", n, err)
+	}
+	if len(disc.asked) != 1 {
+		t.Fatalf("discovery asked %v, want only binutils", disc.asked)
+	}
+}
+
+func mustCard(t *testing.T, repo *fakeRepo, cveID string) domain.Faultline {
+	t.Helper()
+	f, found, err := repo.GetByCVE(context.Background(), cveID)
+	if err != nil || !found {
+		t.Fatalf("card for %s: found=%v err=%v", cveID, found, err)
+	}
+	return f
+}
+
+type failingOccurrences struct{ err error }
+
+func (o failingOccurrences) MatchComponentsForRelease(context.Context, string) ([]app.InventoryComponent, error) {
+	return nil, o.err
+}
+
+func TestScannerReport_RediscoverComponentsEdges(t *testing.T) {
+	ctx := context.Background()
+	// Without discovery wired (the pre-KN-SCAN-5 posture) the call is a no-op.
+	plain := scannerService(t, fakeScannerSource{}, newMatches(), newRepo())
+	if n, err := plain.RediscoverComponents(ctx, "rel-1"); n != 0 || err != nil {
+		t.Fatalf("unwired: n=%d err=%v", n, err)
+	}
+	// An unreadable occurrence set surfaces as an error.
+	svc, corr := scannerWithDiscovery(t, fakeScannerSource{}, &countingDiscovery{}, newMatches(), newRepo())
+	svc = svc.WithDiscovery(corr, failingOccurrences{err: errors.New("db down")}, &fakeScanLedger{})
+	if _, err := svc.RediscoverComponents(ctx, "rel-1"); err == nil {
+		t.Fatal("expected the occurrence read error to surface")
+	}
+	// The scanner-only set skips unusable purls and duplicates.
+	items := []app.ScannerProposal{
+		{Component: app.InventoryComponent{PURL: "app:httpd", Name: "httpd"}},
+		{Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@1", Name: "binutils"}},
+		{Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@1", Name: "binutils"}},
+	}
+	if got := app.ScannerOnlyComponentsForTest(items, nil); len(got) != 1 || got[0].PURL != "pkg:rpm/redhat/binutils@1" {
+		t.Fatalf("scanner-only set = %+v, want the one usable, deduplicated purl", got)
 	}
 }

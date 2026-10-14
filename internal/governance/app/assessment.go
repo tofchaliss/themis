@@ -216,6 +216,9 @@ type VendorStatement struct {
 	Justification string
 	ScopeFamily   string
 	ScopeMajor    string
+	// Advisory and FixedVersion of a `fixed` statement (EDR-VEX-02 D14); empty otherwise.
+	Advisory     string
+	FixedVersion string
 	// Applicability is `applicable` / `not_applicable` / `unknown` (D3). Only `applicable` can
 	// have become a Proposal; the other two are shown so a reviewer can see that Red Hat DID
 	// speak about this package and why it did not clear the Finding — the audit trail this whole
@@ -236,6 +239,7 @@ func vendorStatements(f *domain.Finding, release value.ProductScope, apps []Appl
 		out = append(out, VendorStatement{
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
 			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
+			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 			Applicability: string(applicabilityOf(release, a)),
 		})
 	}

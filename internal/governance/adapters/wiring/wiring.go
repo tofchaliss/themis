@@ -53,6 +53,10 @@ type Governance struct {
 	// thing the worker must never do is publish them blank — so with no seam to resolve them the
 	// rows stay queued, visibly, rather than draining into half-stated events.
 	Evaluations *app.ReleaseEvaluationWorker
+	// Rejudge is the one-time version-range re-judge pass (KN-GO-2), run by the composition
+	// root only when THEMIS_GOVERNANCE_REJUDGE_RANGES=1. Nil without a Knowledge seam: the pass
+	// reads each card's reconciled ranges there, and with nothing to read it has nothing to judge.
+	Rejudge *app.RangeRejudge
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -101,8 +105,11 @@ func Wire(
 	// The Knowledge read seam feeds the FindingAssessment Domain Projection (T10). Empty ⇒
 	// the projection carries the Finding alone, which is the same fail-safe posture the
 	// blast-radius reader takes: a missing seam degrades the view, never the request.
+	var rejudge *app.RangeRejudge
 	if knowledgeURL != "" {
-		read = read.WithKnowledge(knowledge.NewClient(knowledgeURL, readClient(readAPIKey)))
+		kn := knowledge.NewClient(knowledgeURL, readClient(readAPIKey))
+		read = read.WithKnowledge(kn)
+		rejudge = app.NewRangeRejudge(write, st, kn)
 	}
 	// The Evidence presence seam under the compare read (D16). Empty ⇒ CompareReleases refuses —
 	// fail-CLOSED, unlike the two seams above: a degraded compare would over-claim "fixed".
@@ -129,6 +136,7 @@ func Wire(
 		Relay:       relay,
 		Reconcile:   app.NewReconcileService(relay),
 		Evaluations: evaluations,
+		Rejudge:     rejudge,
 	}
 }
 

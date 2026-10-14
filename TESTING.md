@@ -266,6 +266,17 @@ The full manual walkthrough is [INSTALLATION.md § 5a](INSTALLATION.md#5a-test-v
   severity, and a Red Hat `not_affected` folds the same applicability automatically (no upload). Confirm the
   feed is live via `GET :8085/api/v1/feeds` → `redhat` healthy (tier 2). Covers RHEL and its 1:1 rebuilds
   (Rocky, Alma).
+- **The whole Red Hat record, with its real statuses (EDR-VEX-02 D13–D17, 2026-10-14).** Since this
+  change every Red Hat `package_state` row is a statement — `not_affected`, `affected`, `will_not_fix`,
+  `fix_deferred`, `out_of_support`, `under_investigation` — and every main-stream `affected_release` row is
+  a `fixed` statement carrying `advisory` and `fixed_version`, each with its product scope. What to check
+  on `GET :8083/api/v1/findings/<FID>/assessment` → `vendor_statements[]` for a Rocky 8 release's CVE:
+  the RHEL 8 rows read `applicability:"applicable"` (a `fixed` one shows its RHSA and NEVRA), the RHEL 9 /
+  OpenShift / OpenStack rows read `not_applicable`, and the GUI drawer lists the applicable ones first,
+  folds the rest under "N statements about other products", and prints "No Red Hat statement covers this
+  release's product" when none applies. Only an applicable `not_affected` ever raises a proposal (D15):
+  a `fixed` or `will_not_fix` row that applies changes nothing in Governance. The measured case is
+  CVE-2022-30632 on Rocky 8.10 (RHEL 8: fixed ×5, will-not-fix ×2; RHEL 9: not affected).
 - **CSAF-VEX feed (B4).** With `THEMIS_VEXFEED_ENABLED=1` + `THEMIS_VEXFEED_URLS=<bases>`, generic vendor
   `not_affected` statements fold per carded CVE; `GET :8085/api/v1/feeds` → `vexfeed` (tier 3).
 - **Stream-scoped fixed verdict (B3/PR3).** An SBOM whose `pkg:rpm/...` component is **at or above** its

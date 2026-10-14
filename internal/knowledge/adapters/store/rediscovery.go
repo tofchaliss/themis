@@ -57,3 +57,21 @@ func (s *Store) StaleReleases(ctx context.Context, olderThan time.Time, limit in
 	}
 	return out, rows.Err()
 }
+
+// TouchScannerRelease gives a scanner-only release a ledger row — no evidence id, since there is
+// no SBOM to re-read — only when none exists, so an SBOM's row is never overwritten (KN-SCAN-5).
+// Implements app.ScannerReleaseLedger.
+func (s *Store) TouchScannerRelease(ctx context.Context, releaseID string, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO correlated_releases (release_id, evidence_id, last_discovered_at)
+		VALUES ($1, '', $2)
+		ON CONFLICT (release_id) DO NOTHING`, releaseID, at)
+	return err
+}
+
+// StampDiscovered moves a release's last_discovered_at after a sweep step that is not an SBOM
+// correlation (the scanner-only re-discovery), so it does not read as eternally stale.
+func (s *Store) StampDiscovered(ctx context.Context, releaseID string, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE correlated_releases SET last_discovered_at = $2 WHERE release_id = $1`, releaseID, at)
+	return err
+}

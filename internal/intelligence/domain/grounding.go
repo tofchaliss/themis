@@ -195,6 +195,10 @@ type PrecedentPosition struct {
 	SourceCVE string  // CVE of the precedent decision (may differ from the subject — Δ3a semantic precedent)
 	Component string  // representative component of the precedent decision (label)
 	Score     float64 // cosine similarity in [0,1] for a Δ3a retrieved precedent; 0 for a Δ2 exact-CVE precedent
+	// ExactCVE marks a Δ2 exact-CVE precedent: a Position on the SAME Faultline in another
+	// release. It used to be encoded as Score == 0, which a negative-cosine semantic hit could
+	// impersonate and a genuine exact-CVE hit could lose (audit 2026-10-14, A3); the flag says it.
+	ExactCVE bool
 	// ReleaseOverlap is the posture overlap between the precedent's release and the subject's
 	// (G-AI-3): |persisting| / (|fixed|+|new|+|persisting|) from the deterministic comparison
 	// read (EDR-GOVERNANCE-01 D16). 1.0 = the releases share their whole open surface; 0 =
@@ -219,10 +223,29 @@ func (p PrecedentPosition) DeltaWeight() float64 {
 // scaled by the delta weight for a semantic precedent; the delta weight alone for an exact-CVE
 // precedent (whose Score is 0 by construction, not "no similarity").
 func (p PrecedentPosition) RankScore() float64 {
-	if p.Score > 0 {
-		return p.Score * p.DeltaWeight()
+	if p.ExactCVE {
+		return p.DeltaWeight()
 	}
-	return p.DeltaWeight()
+	if p.Score <= 0 {
+		return 0 // a non-positive cosine is no similarity, never "exact"
+	}
+	return p.Score * p.DeltaWeight()
+}
+
+// Before reports the deterministic order of two precedents at EQUAL rank score, so a tie never
+// falls back to load or array order (audit 2026-10-14, A3): an exact-CVE precedent first, then
+// the higher cosine, then release id, then source CVE.
+func (p PrecedentPosition) Before(o PrecedentPosition) bool {
+	if p.ExactCVE != o.ExactCVE {
+		return p.ExactCVE
+	}
+	if p.Score != o.Score {
+		return p.Score > o.Score
+	}
+	if p.ReleaseID != o.ReleaseID {
+		return p.ReleaseID < o.ReleaseID
+	}
+	return p.SourceCVE < o.SourceCVE
 }
 
 // AssembledContext is the **Capability Context** (EDR-TRUST-01 T10): the shape a capability

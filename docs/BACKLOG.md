@@ -281,10 +281,30 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+#### Roll-forward audit defects (filed and closed 2026-10-14, from the Phase 1 audit)
+
+- [x] **AI-RF-1 — the Δ4b sweep never reached its exact-CVE precedent (filed and closed
+  2026-10-14).** HIGH, correctness. `gather` passed `FaultlineID: ""`, so `Retrieve` returned
+  before the fallback and the "same CVE decided on a sibling release" road — the VAMS roll-forward
+  behaviour — was dead code; the one test for it faked a Score-0 hit. **Done:** the posture row
+  carries `faultline_id`; the sweep asks `RetrieveExact` first (same Faultline, other releases,
+  delta-ranked) and only then the semantic road; a test drives the real fallback.
+- [x] **AI-RF-2 — AI proposals over HTTP were stored Asserted, not Inferred (filed and closed
+  2026-10-14).** MED, authority model. `RaiseProposal` stamped every non-harness proposal
+  `TrustAsserted`, including `proposer_kind: ai`, so only the proposer check stood between the
+  sweep's proposals and auto-accept, and the two AI roads recorded different classes for the same
+  claim. **Done:** the trust class follows the proposer (`ai` → Inferred), with a test that an AI
+  proposal through the handler carries Inferred evidence.
+- [x] **AI-RF-3 — precedent ties fell to load order, and score 0 doubled as the exact-CVE flag
+  (filed and closed 2026-10-14).** LOW, determinism (the investigation's R6). **Done:**
+  `PrecedentPosition.ExactCVE`, set by the fallback; `RankScore` ranks an unflagged non-positive
+  cosine at 0; `Before` pins ties (exact first, then cosine, release id, source CVE) in the memory
+  index and in `deltaRank`; tests for the table and for a reversed load order.
+
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
-- [ ] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
-  matches can never clear (filed 2026-10-14).** HIGH, correctness/operability. The first
+- [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
+  matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87
   open / 0 cleared, `compat-libtiff3` 59 / 0, `libtiff` 84, `curl` 98, `httpd` 174 — every one
   `detection_origin = scanner/cortex` on a purl with no `distro=` qualifier, on the releases
@@ -303,11 +323,40 @@ three angles, and two of them proposed fixes that would not have worked.
   cover scanner-only releases, whose ledger row today points at no SBOM evidence); (3) measure
   before/after with `match-census.sh`. Red Hat's `Will not fix` for the remainder is the
   vendor-statement work (EDR-VEX-02 follow-up), not this item.
+  **Done, with one deliberate difference from the Do-list:** no purl is stamped. The Cortex
+  export carries no OS field at all (only the purl namespace and the `elN` marker), the
+  converter's output is a byte-equality dedup contract, and `component_purl` is in the match
+  primary key, so rewriting it would mint the KN-SCAN-4(b) twin pairs. Instead
+  `app.DiscoveryHint` builds a QUERY-ONLY copy whose purl carries `distro=` — from the first SBOM
+  sibling that states one, else from the purl's own namespace and build marker (`redhat` +
+  `.el8` → `rhel-8`) — and the match is recorded under the original purl.
+  `CorrelationService.DiscoverComponents` runs discovery for the scanner-only set (the report's
+  usable purls no SBOM sibling names) through the same fold → range gate → record path an SBOM
+  component takes; `ScannerReportService.ApplyIngest` calls it after the claims, and
+  `RediscoverComponents` from the hourly sweep over the release's recorded occurrences. A
+  scanner-only release gets a ledger row with no evidence id (`TouchScannerRelease`, never
+  overwriting an SBOM's row) so the sweep revisits it, skips the SBOM step for it, and moves its
+  stamp (`StampDiscovered`). Measure after deploy: `match-census.sh` before/after on binutils,
+  compat-libtiff3, libtiff, curl, httpd.
+
+#### Vendor statements kept whole (filed and closed 2026-10-14)
+
+- [x] **VEX-STMT-1 — Red Hat's answer for the release's own family was dropped at the door
+  (filed and closed 2026-10-14).** HIGH, operator trust. CVE-2022-30632 on a Rocky 8.10 release
+  showed RHEL 9, OpenStack and Satellite statements (all correctly not applicable) and nothing
+  for RHEL 8, while Red Hat's record says RHEL 8 is fixed in five packages and will-not-fix in
+  two: `redhat_client.go` kept only `fix_state == "Not affected"` rows and turned fixed rows
+  into scopeless fix versions. **Done (EDR-VEX-02 D13–D17, `phase3-vendor-statements`):** every
+  package_state row is a statement with its real status from a closed set, every main-stream
+  advisory row a `fixed` statement with advisory and build, each scoped; restatements compared
+  against the set so N statements per poll do not bloat; Governance carries and exposes them
+  and still raises only for an applicable `not_affected`; the drawer lists what applies first,
+  folds the rest, and says in words when nothing covers the release. VM round (task 4.2) pending.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
-- [ ] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
-  matches stay open after KN-GO-1 (filed 2026-10-14).** HIGH, operability. The version-range
+- [x] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
+  matches stay open after KN-GO-1 (filed and closed 2026-10-14).** HIGH, operability. The version-range
   rule (`reactToVersionRange`) runs only on a FaultlineEnriched; a Finding whose verdict changed
   because Themis's own reading of the version changed has no trigger. **Do:** a one-time
   re-judge in Governance — for every open Finding, read the card's reconciled ranges over the
@@ -315,6 +364,10 @@ three angles, and two of them proposed fixes that would not have worked.
   proposal with the card's `RangeTrust`, policy decides as usual). Smallest shape: an opt-in
   startup pass behind `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, idempotent through the existing
   deterministic proposal id, no API or schema change. Measure: the 330 before, the count after.
+  **Done:** `app.RangeRejudge` (`internal/governance/app/rejudge.go`) over a new store lister
+  `UndecidedFaultlines` and the existing Knowledge read seam; `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`
+  runs it once at startup and logs faultlines / raised / skipped. Run on the estate after deploy
+  and record the numbers here.
 
 - [x] **KN-GO-1 — a Go stdlib component spelled `go1.27.1` opened long-fixed stdlib CVEs on every
   Go program (filed and closed 2026-10-14).** HIGH, correctness. Found on the estate as

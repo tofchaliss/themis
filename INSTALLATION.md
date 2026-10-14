@@ -1007,6 +1007,25 @@ this file. An upgrade is not a re-install: the installer in step 7 writes `/etc/
 only when it creates it, so settings added since your install are **not** picked up by re-running
 it — R3 step 4 adds them.
 
+**After an upgrade that changed how Themis reads a version** (KN-GO-1, 2026-10-14: `go1.27.1` now
+compares as 1.27.1), the Findings already open are not re-judged on their own — the rule runs on an
+enrichment, and the cards did not change. Run the one-time pass once (KN-GO-2):
+
+```sh
+# 1. set the switch, restart governance, read the result line, unset the switch
+echo 'THEMIS_GOVERNANCE_REJUDGE_RANGES=1' | sudo tee -a /etc/themis/governance.env
+sudo systemctl restart themis@governance
+sleep 30
+sudo journalctl -u themis@governance --since '-2 min' --no-pager | grep 're-judge'
+# expect: "version-range re-judge done" with faultlines / raised / skipped counts
+sudo sed -i '/^THEMIS_GOVERNANCE_REJUDGE_RANGES=/d' /etc/themis/governance.env
+```
+
+It applies the same version-range rule an enrichment applies, so only Findings whose every
+component is provably outside the card's range get a system `not_affected` proposal, and the
+configured policy decides as usual. Leaving the switch set is harmless (the pass is idempotent)
+but wasteful, which is why the last line removes it.
+
 Things the 2026-10-12 upgrade ran into:
 
 - **A halted stream survives an upgrade and a reboot.** The reader resumes at its cursor, re-reads

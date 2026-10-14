@@ -93,8 +93,8 @@ func TestProposalCodec_StampsEcosystemFromSingleEcosystemSources(t *testing.T) {
 func TestCodec_RoundTripsApplicabilityScope(t *testing.T) {
 	scope := value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}
 	app0 := domain.Applicability{
-		Package: "httpd", Status: "not_affected", Justification: "vulnerable_code_not_present",
-		Scope: scope,
+		Package: "httpd", Status: "fixed", Justification: "Red Hat: fixed in httpd-2.4.37-65.el8 (RHSA-2026:1)",
+		Scope: scope, Advisory: "RHSA-2026:1", FixedVersion: "httpd-2.4.37-65.el8", // D14 fields round-trip too
 	}
 
 	// 1. The Proposal payload — the append-only record the view is recomputed FROM.

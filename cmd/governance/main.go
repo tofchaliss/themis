@@ -66,6 +66,8 @@ type config struct {
 	epssDriftThreshold float64
 	mitigatedWeight    float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
+	rejudgeRanges bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
+
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
 	busMigrationsPath string // THEMIS_BUS_MIGRATIONS — path to the bus migrations dir (default internal/platform/eventbus/migrations).
@@ -94,6 +96,7 @@ func loadConfig() config {
 		epssDriftThreshold:  envFloatDefault("THEMIS_EPSS_DRIFT_THRESHOLD", domain.DefaultEPSSDriftThreshold),
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
+		rejudgeRanges:     os.Getenv("THEMIS_GOVERNANCE_REJUDGE_RANGES") == "1",
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
@@ -167,6 +170,27 @@ func main() {
 		observability.Bool("api_key_set", cfg.readAPIKey != ""))
 
 	go relayLoop(gov.Reconcile, logger.Component("reconcile"))
+
+	// The one-time version-range re-judge (KN-GO-2). Opt-in, runs once, and says what it did:
+	// the operator who set the variable is waiting for exactly these three numbers.
+	if cfg.rejudgeRanges {
+		if gov.Rejudge == nil {
+			logger.Warn("THEMIS_GOVERNANCE_REJUDGE_RANGES=1 but THEMIS_KNOWLEDGE_URL is empty — nothing to judge against; pass skipped")
+		} else {
+			go func() {
+				rl := logger.Component("rejudge")
+				rl.Info("version-range re-judge starting (THEMIS_GOVERNANCE_REJUDGE_RANGES=1)")
+				res, err := gov.Rejudge.Run(ctx)
+				if err != nil {
+					rl.Error("version-range re-judge aborted", observability.Err(err),
+						observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("skipped", res.Skipped))
+					return
+				}
+				rl.Info("version-range re-judge done — unset THEMIS_GOVERNANCE_REJUDGE_RANGES before the next restart",
+					observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("skipped", res.Skipped))
+			}()
+		}
+	}
 
 	// The release-evaluation worker (EDR-DELIVERY-01 N-M2b): the inbound consumer records a
 	// pending row inside the inbox transaction, and this drains it — resolving the Release's

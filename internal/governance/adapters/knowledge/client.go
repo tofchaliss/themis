@@ -71,6 +71,8 @@ type faultlineResponse struct {
 			Justification string `json:"justification"`
 			ScopeFamily   string `json:"scope_family"`
 			ScopeMajor    string `json:"scope_major"`
+			Advisory      string `json:"advisory"`
+			FixedVersion  string `json:"fixed_version"`
 		} `json:"applicabilities"`
 	} `json:"view"`
 }
@@ -102,7 +104,8 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	for _, a := range body.View.Applicabilities {
 		apps = append(apps, app.Applicability{
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
-			Scope: value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+			Scope:    value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 		})
 	}
 	return app.FaultlineKnowledge{

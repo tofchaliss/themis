@@ -99,3 +99,26 @@ func TestGetFaultlineCarriesTheCarrierProducts(t *testing.T) {
 		t.Errorf("CarrierProducts = %v, want both carriers the card named, in order", got.CarrierProducts)
 	}
 }
+
+// EDR-VEX-02 D14: a `fixed` statement's advisory and build survive the read seam.
+func TestGetFaultlineCarriesFixedStatementAdvisoryAndBuild(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"fl-1","cve":"CVE-2022-30632","view":{"severity":"medium","applicabilities":[
+			{"package":"git-lfs","status":"fixed","justification":"Red Hat: fixed in git-lfs-0:2.13.3-3.el8_6 (RHSA-2022:7129)","scope_family":"enterprise-linux","scope_major":"8","advisory":"RHSA-2022:7129","fixed_version":"git-lfs-0:2.13.3-3.el8_6"},
+			{"package":"osbuild-composer","status":"will_not_fix","justification":"Red Hat: will not fix in Red Hat Enterprise Linux 8","scope_family":"enterprise-linux","scope_major":"8"}]}}`))
+	}))
+	defer srv.Close()
+	got, err := NewClient(srv.URL, srv.Client()).GetFaultline(context.Background(), "fl-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Applicabilities) != 2 {
+		t.Fatalf("applicabilities = %+v", got.Applicabilities)
+	}
+	if a := got.Applicabilities[0]; a.Status != "fixed" || a.Advisory != "RHSA-2022:7129" || a.FixedVersion != "git-lfs-0:2.13.3-3.el8_6" || a.Scope.Major != "8" {
+		t.Errorf("fixed statement = %+v", a)
+	}
+	if a := got.Applicabilities[1]; a.Status != "will_not_fix" || a.Advisory != "" {
+		t.Errorf("will_not_fix statement = %+v", a)
+	}
+}

@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,23 @@ func TestNewApplicabilityProposal(t *testing.T) {
 	}
 	if _, err := domain.NewApplicabilityProposal("", obs, domain.Applicability{Package: "p", Status: "affected"}); err == nil {
 		t.Error("empty source: expected error")
+	}
+	// EDR-VEX-02 D13: the status set is closed; an outsider is refused by name.
+	for _, st := range domain.ApplicabilityStatuses {
+		if _, err := domain.NewApplicabilityProposal("redhat", obs, domain.Applicability{Package: "p", Status: st}); err != nil {
+			t.Errorf("%s: %v", st, err)
+		}
+	}
+	if _, err := domain.NewApplicabilityProposal("redhat", obs, domain.Applicability{Package: "p", Status: "wontfix"}); err == nil || !strings.Contains(err.Error(), "wontfix") {
+		t.Errorf("unknown status: err = %v, want a refusal naming it", err)
+	}
+	// D14: a fixed statement carries its advisory and build.
+	p2, err := domain.NewApplicabilityProposal("redhat", obs, domain.Applicability{Package: "git-lfs", Status: domain.StatusFixed, Advisory: "RHSA-2022:7129", FixedVersion: "git-lfs-0:2.13.3-3.el8_6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := p2.Applicability(); a.Advisory != "RHSA-2022:7129" || a.FixedVersion != "git-lfs-0:2.13.3-3.el8_6" {
+		t.Errorf("fixed statement = %+v", a)
 	}
 }
 

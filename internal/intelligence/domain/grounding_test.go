@@ -183,9 +183,39 @@ func TestPrecedentDeltaWeightAndRankScore(t *testing.T) {
 	if full.RankScore() != 0.8 || none.RankScore() != 0.4 {
 		t.Errorf("semantic ranks = %v %v", full.RankScore(), none.RankScore())
 	}
-	exact := PrecedentPosition{Score: 0, ReleaseOverlap: 0.6, OverlapKnown: true}
+	exact := PrecedentPosition{ExactCVE: true, Score: 0, ReleaseOverlap: 0.6, OverlapKnown: true}
 	if exact.RankScore() != 0.8 { // weight alone: 0.5 + 0.5*0.6
 		t.Errorf("exact-CVE rank = %v, want the delta weight", exact.RankScore())
+	}
+	// A3: score 0 no longer doubles as the exact-CVE flag — an unflagged zero or negative cosine
+	// is no similarity and ranks at the bottom, where a negative hit used to outrank real matches.
+	for _, p := range []PrecedentPosition{{Score: 0, ReleaseOverlap: 0.6, OverlapKnown: true}, {Score: -0.3, ReleaseOverlap: 1, OverlapKnown: true}} {
+		if p.RankScore() != 0 {
+			t.Errorf("unflagged score %v ranks %v, want 0", p.Score, p.RankScore())
+		}
+	}
+}
+
+// A3: ties at equal rank are broken by the domain's order, never by load order.
+func TestPrecedentBeforeIsTotalAndDeterministic(t *testing.T) {
+	exact := PrecedentPosition{ExactCVE: true, ReleaseID: "zz"}
+	hi := PrecedentPosition{Score: 0.9, ReleaseID: "b"}
+	lo := PrecedentPosition{Score: 0.7, ReleaseID: "a", SourceCVE: "CVE-2"}
+	loSib := PrecedentPosition{Score: 0.7, ReleaseID: "a", SourceCVE: "CVE-1"}
+	cases := []struct {
+		a, b PrecedentPosition
+		want bool
+	}{
+		{exact, hi, true}, {hi, exact, false},
+		{hi, lo, true}, {lo, hi, false},
+		{loSib, lo, true}, {lo, loSib, false},
+		{lo, lo, false},
+		{PrecedentPosition{ExactCVE: true, ReleaseID: "a"}, PrecedentPosition{ExactCVE: true, ReleaseID: "b"}, true}, // both exact: on to release id
+	}
+	for _, c := range cases {
+		if got := c.a.Before(c.b); got != c.want {
+			t.Errorf("Before(%+v, %+v) = %v, want %v", c.a, c.b, got, c.want)
+		}
 	}
 }
 

@@ -21,10 +21,6 @@ import (
 // API key: the endpoint is public and unauthenticated.
 const defaultRedHatBaseURL = "https://access.redhat.com/hydra/rest/securitydata"
 
-// redhatFixStateNotAffected is the Red Hat package_state fix_state that maps to a VEX
-// not_affected applicability statement (the vendor's backport/scope signal).
-const redhatFixStateNotAffected = "not affected"
-
 // RedHatClient fetches a CVE's Red Hat Security Data document and translates it into source
 // Proposals: the vendor-severity vuln-facts Proposal (when a CVSS is present) plus one
 // not_affected applicability Proposal per package Red Hat marks "Not affected". It implements
@@ -70,9 +66,10 @@ type redhatCVEDocument struct {
 		CPE string `json:"cpe"`
 	} `json:"package_state"`
 	AffectedRelease []struct {
-		Package  string `json:"package"`  // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
-		CPE      string `json:"cpe"`      // the advisory product CPE — carries the EL stream
-		Advisory string `json:"advisory"` // the RHSA that shipped the fix — the KN-MODULE-5 second hop
+		ProductName string `json:"product_name"`
+		Package     string `json:"package"`  // the fixed build's NEVRA (name-[epoch:]version-release[.arch])
+		CPE         string `json:"cpe"`      // the advisory product CPE — carries the EL stream
+		Advisory    string `json:"advisory"` // the RHSA that shipped the fix — the KN-MODULE-5 second hop
 	} `json:"affected_release"`
 }
 
@@ -159,38 +156,95 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 	// Hat's array. Measured consequence: a Rocky 8.10 estate shown "not affected in Red Hat
 	// Enterprise Linux 7", and ~90% of surviving statements scoped to products it does not run.
 	// Nothing is dropped now; Governance decides applicability per statement.
+	// Every package_state row is a statement with its real status (EDR-VEX-02 D13), one per
+	// (package, product, status) (D17). A state outside the table is skipped here; the
+	// constructor would refuse it anyway, naming the value.
 	seen := map[string]struct{}{}
 	for _, ps := range doc.PackageState {
-		if !strings.EqualFold(strings.TrimSpace(ps.FixState), redhatFixStateNotAffected) {
+		status, known := redhatFixStateStatus(ps.FixState)
+		if !known {
 			continue
 		}
 		pkg := strings.TrimSpace(ps.PackageName)
 		if pkg == "" || !redhatIsPackageLevel(pkg) {
 			continue
 		}
-		key := pkg + "\x00" + strings.ToLower(strings.TrimSpace(ps.CPE))
+		key := pkg + "\x00" + strings.ToLower(strings.TrimSpace(ps.CPE)) + "\x00" + status
 		if _, dup := seen[key]; dup {
 			continue
 		}
 		seen[key] = struct{}{}
 		app0 := domain.Applicability{
-			Package: pkg,
-			// The vendor's assertion, VERBATIM and untouched (EDR-VEX-02 D1/D8). Themis's own
-			// determination about whether it applies here lives elsewhere and never overwrites
-			// these two fields.
-			Status:        "not_affected",
-			Justification: "Red Hat: not affected" + productSuffix(ps.ProductName),
-			// The scope the VENDOR stated, classified from the structured CPE (D5) — product
-			// identity first, so a non-OS product's version is never read as an OS major. An
-			// absent or unreadable CPE yields a zero scope, which downstream reads as `unknown`
-			// rather than as a mismatch (D4).
-			Scope: value.ScopeFromCPE(ps.CPE),
+			Package:       pkg,
+			Status:        status,
+			Justification: "Red Hat: " + strings.ToLower(strings.TrimSpace(ps.FixState)) + productSuffix(ps.ProductName),
+			Scope:         value.ScopeFromCPE(ps.CPE),
+		}
+		if p, perr := domain.NewApplicabilityProposal("redhat", observedAt, app0); perr == nil {
+			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})
+		}
+	}
+	// Every main-stream advisory row is a `fixed` statement carrying the advisory and the build
+	// it shipped (D14), scoped by the row's CPE — the RHEL 8 answer the drawer used to lack. The
+	// VulnFacts.Fixes fold above is unchanged; this is the statement that explains it.
+	for _, ar := range doc.AffectedRelease {
+		pkg := strings.TrimSpace(ar.Package)
+		if pkg == "" || !redhatIsMainStream(ar.CPE) {
+			continue
+		}
+		name := value.RPMPackageName(pkg)
+		if name == "" {
+			name = pkg
+		}
+		key := name + "\x00" + strings.ToLower(strings.TrimSpace(ar.CPE)) + "\x00" + domain.StatusFixed + "\x00" + pkg
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		app0 := domain.Applicability{
+			Package:       name,
+			Status:        domain.StatusFixed,
+			Justification: "Red Hat: fixed in " + pkg + productSuffix(ar.ProductName) + advisorySuffix(ar.Advisory),
+			Scope:         value.ScopeFromCPE(ar.CPE),
+			Advisory:      strings.TrimSpace(ar.Advisory),
+			FixedVersion:  pkg,
 		}
 		if p, perr := domain.NewApplicabilityProposal("redhat", observedAt, app0); perr == nil {
 			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})
 		}
 	}
 	return out, nil
+}
+
+// redhatFixStateStatus maps Red Hat's package_state fix_state onto the closed statement set
+// (EDR-VEX-02 D13). Unknown states report !known and are skipped by the caller.
+func redhatFixStateStatus(fixState string) (string, bool) { return RedHatFixStateStatus(fixState) }
+
+// RedHatFixStateStatus is the D13 table, exported for its test.
+func RedHatFixStateStatus(fixState string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(fixState)) {
+	case "not affected":
+		return domain.StatusNotAffected, true
+	case "affected":
+		return domain.StatusAffected, true
+	case "will not fix":
+		return domain.StatusWillNotFix, true
+	case "fix deferred":
+		return domain.StatusFixDeferred, true
+	case "out of support scope":
+		return domain.StatusOutOfSupport, true
+	case "under investigation":
+		return domain.StatusUnderInvestigation, true
+	}
+	return "", false
+}
+
+func advisorySuffix(advisory string) string {
+	advisory = strings.TrimSpace(advisory)
+	if advisory == "" {
+		return ""
+	}
+	return " (" + advisory + ")"
 }
 
 // redhatSeverityLabel maps Red Hat's threat_severity vocabulary to the canonical severity

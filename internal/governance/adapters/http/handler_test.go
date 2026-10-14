@@ -352,6 +352,15 @@ func TestRaiseProposal(t *testing.T) {
 		map[string]any{"stance": "not_affected", "proposer_kind": "ai", "proposer_id": "triage-bot"}); status != http.StatusCreated {
 		t.Errorf("ai proposer status = %d, want 201", status)
 	}
+	// AI-RF-2: the evidence class follows the proposer — a human's word is Asserted, a model's is
+	// Inferred (the class the constitutional bar keys on), the same as RecommendPosition records.
+	trusts := map[domain.ActorKind]value.TrustClass{}
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		trusts[p.Proposer().Kind] = p.EvidenceTrust()
+	}
+	if trusts[domain.ActorHuman] != value.TrustAsserted || trusts[domain.ActorAI] != value.TrustInferred {
+		t.Errorf("evidence by proposer = %v, want human=asserted ai=inferred", trusts)
+	}
 	// Invalid stance → 400.
 	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals", map[string]any{"stance": "bogus"}); status != http.StatusBadRequest {
 		t.Errorf("bad stance status = %d, want 400", status)
@@ -875,6 +884,82 @@ func TestGetFindingAssessment_Attribution(t *testing.T) {
 		}
 		if strings.Contains(string(body), `"attribution"`) {
 			t.Errorf("attribution must be absent when it could not be derived; body=%s", string(body))
+		}
+	})
+}
+
+// EDR-VEX-02 validation 7 — the three outcomes on the wire, for a Rocky 8 release (an el8
+// component places it): a RHEL 8 `fixed` statement applies and carries its advisory and build;
+// statements about other products only all read not_applicable; no statement at all is an
+// empty list, which the drawer renders as silence, never as a clearance.
+func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
+	newSrv := func(t *testing.T, apps []app.Applicability) *httptest.Server {
+		t.Helper()
+		repo := newRepo()
+		f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2022-30632")
+		_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/rocky/git-lfs@2.13.3-2.el8", Name: "git-lfs", Version: "2.13.3-2.el8", Ecosystem: "rpm"})
+		repo.seed(f)
+		write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+		read := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(stubKnowledgeReader{k: app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2022-30632", Applicabilities: apps}})
+		srv := httptest.NewServer(govhttp.NewHandler(write, read).Router())
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	type stmt struct {
+		Package, Status, Advisory, FixedVersion, Applicability string
+		ScopeMajor                                             string `json:"scope_major"`
+	}
+	fetch := func(t *testing.T, srv *httptest.Server) []stmt {
+		t.Helper()
+		status, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d: %s", status, body)
+		}
+		var v struct {
+			VendorStatements []struct {
+				Package, Status, Advisory, Applicability string
+				FixedVersion                             string `json:"fixed_version"`
+				ScopeMajor                               string `json:"scope_major"`
+			} `json:"vendor_statements"`
+		}
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		out := make([]stmt, 0, len(v.VendorStatements))
+		for _, s := range v.VendorStatements {
+			out = append(out, stmt{s.Package, s.Status, s.Advisory, s.FixedVersion, s.Applicability, s.ScopeMajor})
+		}
+		return out
+	}
+	el := func(pkg, status, major string) app.Applicability {
+		return app.Applicability{Package: pkg, Status: status, Justification: "Red Hat: " + status, Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: major}}
+	}
+
+	t.Run("RHEL 8 fixed statement applies with its advisory", func(t *testing.T) {
+		fixed := el("git-lfs", "fixed", "8")
+		fixed.Advisory, fixed.FixedVersion = "RHSA-2022:7129", "git-lfs-0:2.13.3-3.el8_6"
+		got := fetch(t, newSrv(t, []app.Applicability{el("conmon", "not_affected", "9"), fixed}))
+		if len(got) != 2 || got[1].Applicability != "applicable" || got[1].Advisory != "RHSA-2022:7129" || got[1].FixedVersion != "git-lfs-0:2.13.3-3.el8_6" || got[1].Status != "fixed" {
+			t.Fatalf("statements = %+v, want the RHEL 8 fixed one applicable with advisory and build", got)
+		}
+		if got[0].Applicability != "not_applicable" {
+			t.Errorf("the RHEL 9 statement = %+v, want not_applicable", got[0])
+		}
+	})
+	t.Run("other products only", func(t *testing.T) {
+		got := fetch(t, newSrv(t, []app.Applicability{el("conmon", "not_affected", "9"), {Package: "qpid-proton", Status: "not_affected", Justification: "Red Hat: not affected in OpenStack", Scope: value.ProductScope{Family: "openstack", Major: "16.2"}}}))
+		if len(got) != 2 {
+			t.Fatalf("statements = %+v", got)
+		}
+		for _, s := range got {
+			if s.Applicability != "not_applicable" {
+				t.Errorf("%+v, want not_applicable", s)
+			}
+		}
+	})
+	t.Run("no statement at all", func(t *testing.T) {
+		if got := fetch(t, newSrv(t, nil)); len(got) != 0 {
+			t.Fatalf("statements = %+v, want none", got)
 		}
 	})
 }

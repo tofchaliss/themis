@@ -578,3 +578,64 @@ func TestGetFindingAssessment_VendorStatementsCarryThemisDetermination(t *testin
 			a.VendorStatements[0].ScopeMajor, a.VendorStatements[1].ScopeMajor)
 	}
 }
+
+func scopedStatement(pkg, status, family, major string) app.Applicability {
+	return app.Applicability{
+		Package: pkg, Status: status, Justification: "Red Hat: " + status + " in Red Hat Enterprise Linux " + major,
+		Scope: value.ProductScope{Family: family, Major: major},
+	}
+}
+
+// EDR-VEX-02 D15: with the whole vendor record kept (D13), only an APPLICABLE `not_affected`
+// raises a proposal. A `fixed` or `will_not_fix` statement that covers the release is
+// information for the engineer and changes nothing in Governance — the CVE-2026-33006 fixture
+// stays open under a `fixed` statement exactly as it did with none.
+func TestReactToEnrichment_OnlyNotAffectedRaisesAmongTheStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		status     string
+		wantRaised bool
+	}{
+		{"not_affected", true}, {"fixed", false}, {"will_not_fix", false}, {"affected", false},
+		{"fix_deferred", false}, {"out_of_support", false}, {"under_investigation", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			repo := newRepo()
+			repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-33006", "pkg:rpm/rocky/httpd@2.4.37-65.el8", "httpd"))
+			s := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
+			st := scopedStatement("httpd", tc.status, value.FamilyEnterpriseLinux, "8")
+			if tc.status == "fixed" {
+				st.Advisory, st.FixedVersion = "RHSA-2026:1", "httpd-2.4.37-66.el8"
+			}
+			if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{st}}); err != nil {
+				t.Fatalf("react: %v", err)
+			}
+			got := repo.byID["fnd-1"]
+			if raised := len(got.Proposals()) > 0; raised != tc.wantRaised {
+				t.Fatalf("%s applicable: proposals = %+v, want raised=%v", tc.status, got.Proposals(), tc.wantRaised)
+			}
+			if _, decided := got.CurrentPosition(); decided {
+				t.Fatalf("%s: a vendor statement is Asserted evidence and never auto-accepts", tc.status)
+			}
+		})
+	}
+}
+
+// D14 on the projection: a `fixed` statement carries its advisory and build to the assessment.
+func TestGetFindingAssessment_VendorStatementsCarryAdvisoryAndBuild(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2022-30632", "pkg:rpm/rocky/git-lfs@2.13.3-2.el8", "git-lfs"))
+	fixed := scopedStatement("git-lfs", "fixed", value.FamilyEnterpriseLinux, "8")
+	fixed.Advisory, fixed.FixedVersion = "RHSA-2022:7129", "git-lfs-0:2.13.3-3.el8_6"
+	kn := stubKnowledge{k: app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2022-30632", Applicabilities: []app.Applicability{fixed}}}
+	a, err := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn).GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.VendorStatements) != 1 {
+		t.Fatalf("statements = %+v", a.VendorStatements)
+	}
+	v := a.VendorStatements[0]
+	if v.Status != "fixed" || v.Advisory != "RHSA-2022:7129" || v.FixedVersion != "git-lfs-0:2.13.3-3.el8_6" || v.Applicability != "applicable" {
+		t.Errorf("statement = %+v, want fixed / RHSA-2022:7129 / the NEVRA / applicable", v)
+	}
+}

@@ -305,9 +305,19 @@ components:
           type: string
         status:
           type: string
-          description: e.g. affected | not_affected | fixed | under_investigation.
+          enum: [not_affected, affected, fixed, under_investigation, will_not_fix, fix_deferred, out_of_support]
+          description: >-
+            The VENDOR'S assertion, from the closed set (EDR-VEX-02 D13): the OpenVEX four plus
+            Red Hat's `will_not_fix`, `fix_deferred` and `out_of_support`. Never carries Themis's
+            determination.
         justification:
           type: string
+        advisory:
+          type: string
+          description: On a `fixed` statement, the advisory that shipped the fix (D14). Absent otherwise.
+        fixed_version:
+          type: string
+          description: On a `fixed` statement, the build the advisory shipped (a NEVRA or a module stream id). Absent otherwise.
         scope_family:
           type: string
           description: >-

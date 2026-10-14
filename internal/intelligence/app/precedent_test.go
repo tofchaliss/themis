@@ -451,3 +451,32 @@ func TestRetrieveDeltaCachesAndSkips(t *testing.T) {
 		t.Error("no subject release must leave precedent unweighted")
 	}
 }
+
+// A3: two precedents at the same rank score keep the domain's order, not the retriever's.
+func TestRetrieveDeltaRanksBreakTiesDeterministically(t *testing.T) {
+	sem := &recordingSemantic{out: []domain.PrecedentPosition{
+		{ReleaseID: "zz", Score: 0.8}, {ReleaseID: "aa", Score: 0.8},
+	}}
+	cmpr := &deltaComparisons{byRelease: map[string]domain.ReleaseComparison{
+		"zz": bucketsOf(5, 0, 5), "aa": bucketsOf(5, 0, 5),
+	}}
+	s := NewPrecedentService(sem, sem, nil, 5).WithComparisons(cmpr)
+	got := s.Retrieve(context.Background(), subjectQuery())
+	if len(got) != 2 || got[0].ReleaseID != "aa" {
+		t.Fatalf("order = %+v, want aa before zz at equal rank", got)
+	}
+}
+
+// A1: RetrieveExact is nil without a faultline or a fallback, and on a fallback error.
+func TestRetrieveExactEdges(t *testing.T) {
+	if got := NewPrecedentService(nil, nil, nil, 5).RetrieveExact(context.Background(), "fl-1", "R1"); got != nil {
+		t.Errorf("no fallback: %+v", got)
+	}
+	fb := &recordingFallback{err: errors.New("governance down")}
+	if got := NewPrecedentService(nil, nil, fb, 5).RetrieveExact(context.Background(), "fl-1", "R1"); got != nil {
+		t.Errorf("fallback error: %+v", got)
+	}
+	if got := NewPrecedentService(nil, nil, &recordingFallback{}, 5).RetrieveExact(context.Background(), "", "R1"); got != nil {
+		t.Errorf("no faultline: %+v", got)
+	}
+}

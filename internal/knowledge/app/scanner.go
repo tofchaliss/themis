@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/domain"
@@ -58,6 +59,23 @@ type ScannerReportService struct {
 	// report receives the per-ingest outcome counts. The app ring never logs (CONVENTIONS R1),
 	// so the counts leave through a port an adapter owns. Optional; nil = no reporting.
 	report IngestReporter
+	// corr runs discovery for the report's components that no SBOM names (KN-SCAN-5). Nil ⇒
+	// the scanner's own claims are the only intelligence recorded, which is the pre-KN-SCAN-5
+	// behaviour: those matches can never learn a vendor fix and never clear.
+	corr *CorrelationService
+	// occurrences is the release's recorded component set, the re-discovery input.
+	occurrences ReleaseOccurrenceSource
+	// scanLedger marks a scanner-only release as discovered so the sweep revisits it.
+	scanLedger ScannerReleaseLedger
+}
+
+// ScannerReleaseLedger is the re-discovery ledger's scanner-only half (KN-SCAN-5): a release
+// correlation never ran for has no ledger row and would never be swept. TouchScannerRelease
+// creates the row with no evidence id (there is no SBOM to re-read) and only if none exists, so
+// an SBOM's row is never overwritten; StampDiscovered moves last_discovered_at after a sweep.
+type ScannerReleaseLedger interface {
+	TouchScannerRelease(ctx context.Context, releaseID string, at time.Time) error
+	StampDiscovered(ctx context.Context, releaseID string, at time.Time) error
 }
 
 // EvidenceFactsSource resolves an evidence id to its kind and subject release
@@ -100,6 +118,13 @@ func (s *ScannerReportService) WithIngestReporter(r IngestReporter) *ScannerRepo
 }
 
 // WithEvidenceFacts wires the evidence-facts read used by the unresolved-components query (D6).
+// WithDiscovery turns on feed discovery for the components only the scanner named (KN-SCAN-5):
+// at ingest, and again from the re-discovery sweep over the release's recorded occurrences.
+func (s *ScannerReportService) WithDiscovery(corr *CorrelationService, occurrences ReleaseOccurrenceSource, ledger ScannerReleaseLedger) *ScannerReportService {
+	s.corr, s.occurrences, s.scanLedger = corr, occurrences, ledger
+	return s
+}
+
 func (s *ScannerReportService) WithEvidenceFacts(f EvidenceFactsSource) *ScannerReportService {
 	s.facts = f
 	return s
@@ -272,6 +297,79 @@ func (s *ScannerReportService) releaseCandidates(ctx context.Context, releaseID 
 // reason to skip the vendor fixed-verdict. Only the reconciled-range gate stays
 // correlation-only: a range-rejected candidate was never a match, while a scanner's finding is.
 func (s *ScannerReportService) ApplyIngest(ctx context.Context, plan ScannerPlan) (int, error) {
+	newMatches, err := s.applyClaims(ctx, plan)
+	if err != nil {
+		return newMatches, err
+	}
+	// KN-SCAN-5: the components only this report named get the same discovery an SBOM
+	// component gets, so their cards learn the vendor's fixed builds and the verdict path can
+	// clear them. A discovery failure is swallowed here, not fatal: the scanner's claims above
+	// are already recorded and a feed outage must not roll them back; the sweep retries.
+	if s.corr != nil {
+		siblings := s.releaseCandidates(ctx, plan.ReleaseID)
+		only := scannerOnlyComponents(plan.Items, siblings)
+		if n, derr := s.corr.DiscoverComponents(ctx, plan.ReleaseID, only, siblings); derr == nil {
+			newMatches += n
+		}
+		if s.scanLedger != nil {
+			_ = s.scanLedger.TouchScannerRelease(ctx, plan.ReleaseID, s.clock.Now())
+		}
+	}
+	return newMatches, nil
+}
+
+// RediscoverComponents re-runs discovery for the components recorded on a release that no SBOM
+// inventory names (KN-SCAN-5): the scanner-only set. The re-discovery sweep calls it beside the
+// SBOM re-correlation, so a CVE published after the scan reaches a scanner-only component too,
+// and a card that has since learned the vendor fix re-judges the occurrence.
+func (s *ScannerReportService) RediscoverComponents(ctx context.Context, releaseID string) (int, error) {
+	if s.corr == nil || s.occurrences == nil {
+		return 0, nil
+	}
+	recorded, err := s.occurrences.MatchComponentsForRelease(ctx, releaseID)
+	if err != nil {
+		return 0, err
+	}
+	siblings := s.releaseCandidates(ctx, releaseID)
+	only := scannerOnlyComponents(componentsAsClaims(recorded), siblings)
+	return s.corr.DiscoverComponents(ctx, releaseID, only, siblings)
+}
+
+// scannerOnlyComponents returns the distinct usable components among items that no SBOM
+// sibling names by purl — the ones discovery has never been run for.
+func scannerOnlyComponents(items []ScannerProposal, siblings []InventoryComponent) []InventoryComponent {
+	inSBOM := make(map[string]struct{}, len(siblings))
+	for _, sib := range siblings {
+		inSBOM[sib.PURL] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var out []InventoryComponent
+	for _, it := range items {
+		c := it.Component
+		if !UsablePURL(c.PURL) {
+			continue
+		}
+		if _, ok := inSBOM[c.PURL]; ok {
+			continue
+		}
+		if _, dup := seen[c.PURL]; dup {
+			continue
+		}
+		seen[c.PURL] = struct{}{}
+		out = append(out, c)
+	}
+	return out
+}
+
+func componentsAsClaims(comps []InventoryComponent) []ScannerProposal {
+	out := make([]ScannerProposal, 0, len(comps))
+	for _, c := range comps {
+		out = append(out, ScannerProposal{Component: c})
+	}
+	return out
+}
+
+func (s *ScannerReportService) applyClaims(ctx context.Context, plan ScannerPlan) (int, error) {
 	newMatches := 0
 	for _, p := range plan.Items {
 		f, _, err := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)

@@ -68,7 +68,7 @@ func (c *PrecedentClient) GetPrecedents(ctx context.Context, faultlineID, exclud
 			return nil, err
 		}
 		if ok {
-			out = append(out, domain.PrecedentPosition{ReleaseID: rel, Stance: pos.Stance, Rationale: pos.Rationale})
+			out = append(out, domain.PrecedentPosition{ReleaseID: rel, Stance: pos.Stance, Rationale: pos.Rationale, ExactCVE: true})
 		}
 	}
 	return out, nil

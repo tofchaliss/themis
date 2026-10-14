@@ -439,6 +439,28 @@ func materializedPosition(f domain.Finding) (*string, *int) {
 	return &stance, &version
 }
 
+// UndecidedFaultlines lists the distinct Faultlines that still have at least one Finding with
+// no current Position — the population the one-time range re-judge may touch (KN-GO-2). A
+// decided Finding is materialized with a non-null current_stance, so "undecided" is a null
+// stance, not a stage: a reopened Finding is undecided again and belongs here.
+func (s *Store) UndecidedFaultlines(ctx context.Context) ([]string, error) {
+	rows, err := s.querier(ctx).Query(ctx,
+		`SELECT DISTINCT faultline_id FROM findings WHERE current_stance IS NULL ORDER BY faultline_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // FindingsByFaultline lists the ids of every Finding referencing a Faultline — the
 // FaultlineEnriched fan-out (D6).
 func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error) {

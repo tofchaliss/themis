@@ -64,6 +64,9 @@ type applicabilityDTO struct {
 	// as 1844 statements all with an empty scope.
 	ScopeFamily string `json:"scope_family,omitempty"`
 	ScopeMajor  string `json:"scope_major,omitempty"`
+	// D14: the advisory and build of a `fixed` statement — same round-trip contract.
+	Advisory     string `json:"advisory,omitempty"`
+	FixedVersion string `json:"fixed_version,omitempty"`
 }
 
 func marshalView(v domain.EnterpriseView) ([]byte, error) {
@@ -80,6 +83,7 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 		dto.Applicabilities = append(dto.Applicabilities, applicabilityDTO{
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
 			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
+			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 		})
 	}
 	return json.Marshal(dto)
@@ -110,7 +114,8 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 	for _, a := range dto.Applicabilities {
 		v.Applicabilities = append(v.Applicabilities, domain.Applicability{
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
-			Scope: value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+			Scope:    value.ProductScope{Family: a.ScopeFamily, Major: a.ScopeMajor},
+			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 		})
 	}
 	return v, nil
@@ -140,8 +145,10 @@ type proposalPayloadDTO struct {
 	// stays that way — correctly, since the scope was never captured for it. New Proposals from
 	// the same feed carry it, and the reconciled view takes the union, so a card heals as soon
 	// as the feed re-observes it.
-	ScopeFamily string `json:"scope_family,omitempty"`
-	ScopeMajor  string `json:"scope_major,omitempty"`
+	ScopeFamily  string `json:"scope_family,omitempty"`
+	ScopeMajor   string `json:"scope_major,omitempty"`
+	Advisory     string `json:"advisory,omitempty"`
+	FixedVersion string `json:"fixed_version,omitempty"`
 }
 
 func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
@@ -168,6 +175,8 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 		dto.Justification = a.Justification
 		dto.ScopeFamily = a.Scope.Family
 		dto.ScopeMajor = a.Scope.Major
+		dto.Advisory = a.Advisory
+		dto.FixedVersion = a.FixedVersion
 	}
 	return json.Marshal(dto)
 }
@@ -198,7 +207,8 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 	case domain.KindApplicability:
 		return domain.NewApplicabilityProposal(source, observedAt, domain.Applicability{
 			Package: dto.Package, Status: dto.Status, Justification: dto.Justification,
-			Scope: value.ProductScope{Family: dto.ScopeFamily, Major: dto.ScopeMajor},
+			Scope:    value.ProductScope{Family: dto.ScopeFamily, Major: dto.ScopeMajor},
+			Advisory: dto.Advisory, FixedVersion: dto.FixedVersion,
 		})
 	default:
 		return domain.Proposal{}, fmt.Errorf("knowledge: unknown proposal kind %q", kind)

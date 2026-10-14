@@ -248,50 +248,9 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 			return 0, err
 		}
 	}
-	newMatches := 0
-	for _, item := range plan.Items {
-		f, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
-		if err != nil {
-			return newMatches, err
-		}
-		// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
-		// record a match unless the component's version is provably OUT of the reconciled
-		// range. This catches the case discovery cannot — e.g. a distro backport whose
-		// reconciled range excludes a version the feed's query-time filter admitted. An
-		// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
-		// the match: a parse gap must never drop a real vulnerability. This mirrors the
-		// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
-		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem, Groups: f.View().AffectedRanges}
-		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
-			continue
-		}
-		// The occurrence verdict (EDR-VERDICT-01 D2): the vendor fixed-verdicts — the rpm
-		// same-EL-stream rule (EDR-VEX-01 Phase 3) and the apk strict-bounds rule (D9) — run in
-		// judgeOccurrence, shared with the scanner path. A cleared occurrence is RECORDED as
-		// cleared, not dropped: "checked and fine" must be distinguishable from "never looked"
-		// (the two were indistinguishable in the live KN-VERDICT-1 investigation), and a
-		// recorded row is what a later re-judgement can revisit.
-		created, err := s.matches.RecordMatch(ctx, Match{
-			ReleaseID: plan.ReleaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
-			Component: item.Component, Score: f.View().Score(),
-			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
-			Verdict:     judgeOccurrence(f.View(), item.Component, plan.Bridge),
-			CardVersion: f.Version(),
-			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
-			// recorded either way — D2 keeps everything, because an old build inside a superseded
-			// stream genuinely does need replacing. What changes is what a consumer may SAY about
-			// it: a plan and the AI's grounding use carriers, the posture keeps the obligation.
-			ClaimClass: domain.ClassifyClaim(
-				f.View().CarrierProducts, componentPackage(item.Component), item.Component.Name),
-			DetectionOrigin: OriginDiscovery,
-			OccurredAt:      s.clock.Now(),
-		})
-		if err != nil {
-			return newMatches, err
-		}
-		if created {
-			newMatches++
-		}
+	newMatches, err := s.applyDiscovered(ctx, plan.ReleaseID, plan.Items, plan.Bridge)
+	if err != nil {
+		return newMatches, err
 	}
 
 	// The per-SBOM completion fact, appended LAST — after every fold note and every match note
@@ -322,6 +281,148 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 // tests that do not need the split; the event path uses PlanCorrelation + ApplyCorrelation so
 // discovery I/O stays OUTSIDE the inbox transaction. Idempotent — a re-run converges and
 // records no duplicate matches. Returns the number of new matches.
+// applyDiscovered folds every discovered proposal into its card, drops the occurrences the
+// reconciled range provably excludes, and records the rest at discovery origin. It is the write
+// half shared by SBOM correlation and by scanner-component discovery (KN-SCAN-5), so a component
+// that only a scanner named is judged by exactly the rule an SBOM component is.
+func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID string, items []PlannedMatch, bridge BridgeContext) (int, error) {
+	newMatches := 0
+	for _, item := range items {
+		f, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
+		if err != nil {
+			return newMatches, err
+		}
+		// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
+		// record a match unless the component's version is provably OUT of the reconciled
+		// range. This catches the case discovery cannot — e.g. a distro backport whose
+		// reconciled range excludes a version the feed's query-time filter admitted. An
+		// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
+		// the match: a parse gap must never drop a real vulnerability. This mirrors the
+		// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
+		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem, Groups: f.View().AffectedRanges}
+		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
+			continue
+		}
+		// The occurrence verdict (EDR-VERDICT-01 D2): the vendor fixed-verdicts — the rpm
+		// same-EL-stream rule (EDR-VEX-01 Phase 3) and the apk strict-bounds rule (D9) — run in
+		// judgeOccurrence, shared with the scanner path. A cleared occurrence is RECORDED as
+		// cleared, not dropped: "checked and fine" must be distinguishable from "never looked"
+		// (the two were indistinguishable in the live KN-VERDICT-1 investigation), and a
+		// recorded row is what a later re-judgement can revisit.
+		created, err := s.matches.RecordMatch(ctx, Match{
+			ReleaseID: releaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
+			Component: item.Component, Score: f.View().Score(),
+			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
+			Verdict:     judgeOccurrence(f.View(), item.Component, bridge),
+			CardVersion: f.Version(),
+			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
+			// recorded either way — D2 keeps everything, because an old build inside a superseded
+			// stream genuinely does need replacing. What changes is what a consumer may SAY about
+			// it: a plan and the AI's grounding use carriers, the posture keeps the obligation.
+			ClaimClass: domain.ClassifyClaim(
+				f.View().CarrierProducts, componentPackage(item.Component), item.Component.Name),
+			DetectionOrigin: OriginDiscovery,
+			OccurredAt:      s.clock.Now(),
+		})
+		if err != nil {
+			return newMatches, err
+		}
+		if created {
+			newMatches++
+		}
+	}
+	return newMatches, nil
+}
+
+// DiscoverComponents runs discovery for components that are NOT in any SBOM inventory — the
+// ones only a scanner report named (KN-SCAN-5) — and records what it finds exactly as
+// correlation would. Each component is queried through a discovery HINT (a copy whose purl
+// carries the distro the feed needs, derived from the release's SBOM siblings or from the
+// purl's own namespace and build marker); the component RECORDED is the original, so no purl
+// is ever synthesized onto a row (EDR-IDENTITY-01 D3, KN-SCAN-3b rule 4).
+func (s *CorrelationService) DiscoverComponents(ctx context.Context, releaseID string, comps []InventoryComponent, siblings []InventoryComponent) (int, error) {
+	var items []PlannedMatch
+	for _, comp := range comps {
+		discovered, err := s.discover.VulnsForPackage(ctx, DiscoveryHint(comp, siblings))
+		if err != nil {
+			return 0, err
+		}
+		for _, d := range discovered {
+			items = append(items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal})
+		}
+	}
+	if len(items) == 0 {
+		return 0, nil
+	}
+	return s.applyDiscovered(ctx, releaseID, items, BridgeContext{Siblings: siblings, InferredBridge: s.inferredBridge})
+}
+
+// DiscoveryHint returns the component to QUERY a feed with for comp. A distro package purl
+// that carries no `distro=` qualifier cannot be asked of OSV (the ecosystem is "Rocky Linux:8",
+// and nothing in `pkg:rpm/redhat/curl@7.61.1-30.el8` says which); the hint adds the qualifier
+// from the first sibling that has one (the release's SBOM tells its distro), and failing that
+// from the purl's own namespace plus the `elN` build marker in the version. The returned value
+// is for the query only — callers record the original comp. A purl that already carries the
+// qualifier, or is not a distro package, is returned unchanged.
+func DiscoveryHint(comp InventoryComponent, siblings []InventoryComponent) InventoryComponent {
+	if !isDistroPURL(comp.PURL) || value.PURLQualifier(comp.PURL, "distro") != "" {
+		return comp
+	}
+	distro := ""
+	for _, sib := range siblings {
+		if d := value.PURLQualifier(sib.PURL, "distro"); d != "" {
+			distro = d
+			break
+		}
+	}
+	if distro == "" {
+		distro = distroFromNamespace(comp)
+	}
+	if distro == "" {
+		return comp
+	}
+	hint := comp
+	sep := "?"
+	if strings.Contains(hint.PURL, "?") {
+		sep = "&"
+	}
+	hint.PURL = hint.PURL + sep + "distro=" + distro
+	return hint
+}
+
+func isDistroPURL(purl string) bool {
+	for _, t := range []string{"pkg:rpm/", "pkg:apk/", "pkg:deb/"} {
+		if strings.HasPrefix(purl, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// distroFromNamespace derives `<distro>-<major>` from an rpm purl's namespace and the EL
+// marker in its version: `pkg:rpm/redhat/x@1-2.el8` → `rhel-8`, `pkg:rpm/rocky/x@1-2.el8_10`
+// → `rocky-8`. Only the two facts the purl itself states are used; nothing is guessed.
+func distroFromNamespace(comp InventoryComponent) string {
+	rest := strings.TrimPrefix(comp.PURL, "pkg:")
+	parts := strings.SplitN(rest, "/", 3)
+	if len(parts) < 3 || parts[0] != "rpm" {
+		return ""
+	}
+	ns := strings.ToLower(parts[1])
+	switch ns {
+	case "redhat", "rhel":
+		ns = "rhel"
+	case "rocky", "rockylinux", "alma", "almalinux":
+	default:
+		return ""
+	}
+	major := value.RPMReleaseMajor(comp.Version)
+	if major == "" {
+		return ""
+	}
+	return ns + "-" + major
+}
+
 func (s *CorrelationService) Correlate(ctx context.Context, releaseID, evidenceID string) (int, error) {
 	return s.CorrelateCause(ctx, releaseID, evidenceID, domain.CauseNewSBOM)
 }
