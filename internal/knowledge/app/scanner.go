@@ -76,6 +76,9 @@ type ScannerReportService struct {
 type ScannerReleaseLedger interface {
 	TouchScannerRelease(ctx context.Context, releaseID string, at time.Time) error
 	StampDiscovered(ctx context.Context, releaseID string, at time.Time) error
+	// BackfillScannerReleases rows every release that has matches but no ledger row, dated `at`,
+	// so releases that predate KN-SCAN-5 join the sweep on their own (KN-SCAN-5b).
+	BackfillScannerReleases(ctx context.Context, at time.Time) (int, error)
 }
 
 // EvidenceFactsSource resolves an evidence id to its kind and subject release
