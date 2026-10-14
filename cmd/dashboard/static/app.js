@@ -804,23 +804,56 @@ const applicabilityChip = (a) => {
   return `<span class="chip" title="Themis could not establish the statement's product scope — the CPE was absent, malformed or unclassifiable. That is uncertainty, NOT a product mismatch, and an unplaceable statement cannot clear a finding.">scope unknown</span>`;
 };
 
-function vendorStatementsSection(assessment) {
-  const vs = (assessment && assessment.vendor_statements) || [];
-  if (!vs.length) return "";
-  const blocked = vs.filter((v) => v.applicability !== "applicable").length;
-  return `
-    <section>
-      <h3 class="section-h">Vendor statements${blocked ? ` <span class="chip chip-warn">${blocked} not usable here</span>` : ""}</h3>
-      <p class="card-sub" style="margin:0 0 6px">What the vendor asserted, and whether Themis determined it covers <em>this</em> release. A statement is only usable when its product scope matches — one that does not is kept as evidence, never deleted.</p>
-      ${vs.map((v) => `<div class="prec">
+const STATUS_CHIP = {
+  not_affected: ["chip-good", "the vendor says this package is not affected in that product"],
+  fixed: ["chip-good", "the vendor shipped a fix for that product; the advisory and build are shown"],
+  affected: ["chip-warn", "the vendor says this package is affected in that product"],
+  will_not_fix: ["chip-warn", "the vendor says this package is affected in that product and will not ship a fix"],
+  fix_deferred: ["chip-warn", "the vendor says a fix for that product is deferred"],
+  out_of_support: ["", "that product is out of support; the vendor makes no claim"],
+  under_investigation: ["", "the vendor is still investigating that product"],
+};
+const statusChip = (status) => {
+  const [cls, title] = STATUS_CHIP[status] || ["", "a vendor status outside the closed set"];
+  return `<span class="chip ${cls}" title="${esc(title)}">${esc(status || "\u2014")}</span>`;
+};
+const vendorStatementRow = (v) => `<div class="prec">
         <div class="prec-top">
-          <span class="chip ${v.status === "not_affected" ? "chip-good" : ""}">${esc(v.status || "—")}</span>
-          <span class="mono">${esc(v.package || "—")}</span>
+          ${statusChip(v.status)}
+          <span class="mono">${esc(v.package || "\u2014")}</span>
           ${v.scope_family ? `<span class="chip chip-info" title="the product the VENDOR scoped this statement to">${esc(v.scope_family)} ${esc(v.scope_major || "")}</span>` : `<span class="chip chip-info" title="the vendor supplied no readable product scope">no stated scope</span>`}
+          ${v.status === "fixed" && (v.advisory || v.fixed_version) ? `<span class="mono" title="the advisory that shipped the fix, and the build it shipped">${esc(v.advisory || "")}${v.advisory && v.fixed_version ? " \u00b7 " : ""}${esc(v.fixed_version || "")}</span>` : ""}
           ${applicabilityChip(v.applicability)}
         </div>
         ${v.justification ? `<div class="prec-rationale">${esc(v.justification)}</div>` : ""}
-      </div>`).join("")}
+      </div>`;
+
+/* EDR-VEX-02 D16: what applies to THIS release comes first; what the vendor said about other
+   products is kept (D2, D8) but folded; and when the release is placeable and nothing applies,
+   the drawer SAYS so — the measured defect was CVE-2022-30632 on a Rocky 8.10 release showing
+   RHEL 9 and OpenStack rows and nothing for RHEL 8, which read as "Red Hat has not spoken",
+   when Red Hat's RHEL 8 rows had been dropped at the door (D13). An empty applicable set must
+   never render as nothing. */
+function vendorStatementsSection(assessment) {
+  const vs = (assessment && assessment.vendor_statements) || [];
+  if (!vs.length) return "";
+  const applicable = vs.filter((v) => v.applicability === "applicable");
+  const others = vs.filter((v) => v.applicability !== "applicable");
+  const notComparable = vs.length > 0 && vs.every((v) => v.applicability === "not_comparable");
+  // The release's own family + major, as the vendor would name it: the first applicable row's
+  // scope, else the knowledge of the release carried on the others (every row says the same).
+  const vendor = (vs[0].justification || "").split(":")[0] || "The vendor";
+  let silence = "";
+  if (!applicable.length && !notComparable) {
+    silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this release's product.</b> The vendor spoke about ${others.length} other product${others.length === 1 ? "" : "s"} only (folded below). That is not a clearance and not an "affected": it is silence, shown as silence.</p>`;
+  }
+  return `
+    <section>
+      <h3 class="section-h">Vendor statements${applicable.length ? ` <span class="chip chip-good">${applicable.length} appl${applicable.length === 1 ? "ies" : "y"} here</span>` : ""}${others.length ? ` <span class="chip chip-warn">${others.length} not usable here</span>` : ""}</h3>
+      <p class="card-sub" style="margin:0 0 6px">What the vendor asserted, and whether Themis determined it covers <em>this</em> release. A statement is usable when its product scope matches; one that does not is kept as evidence, never deleted. Only an applicable <span class="mono">not_affected</span> can become a proposal; every other status is information.</p>
+      ${applicable.map(vendorStatementRow).join("")}
+      ${silence}
+      ${others.length ? `<details><summary class="card-sub">${others.length} statement${others.length === 1 ? "" : "s"} about other products</summary>${others.map(vendorStatementRow).join("")}</details>` : ""}
     </section>`;
 }
 

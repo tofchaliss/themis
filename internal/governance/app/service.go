@@ -302,6 +302,9 @@ type Applicability struct {
 	// Knowledge. Governance compares it against the release's own scope to determine
 	// APPLICABILITY — its own conclusion, which never overwrites Status or Justification (D1).
 	Scope value.ProductScope
+	// Advisory and FixedVersion ride on a `fixed` statement (EDR-VEX-02 D14); empty otherwise.
+	Advisory     string
+	FixedVersion string
 }
 
 // applicabilityOf determines whether a vendor statement covers a release, given that release's

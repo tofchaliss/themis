@@ -351,3 +351,21 @@ func TestConsumer_FaultlineEnriched_ApplicabilityScopeMismatchRaisesNothing(t *t
 func (r *memRepo) ReleaseScope(_ context.Context, _ string) (value.ProductScope, error) {
 	return value.ProductScope{}, nil
 }
+
+// EDR-VEX-02 D13–D15 on the wire: a `fixed` statement with its advisory and build decodes and
+// raises nothing; only `not_affected` is a premise for a proposal.
+func TestConsumer_FaultlineEnriched_FixedStatementRaisesNothing(t *testing.T) {
+	repo := newMemRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/git-lfs@2.13.3", Name: "git-lfs", Version: "2.13.3-2.el8"}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"low","Applicabilities":[{"Package":"git-lfs","Status":"fixed","Justification":"Red Hat: fixed in git-lfs-0:2.13.3-3.el8_6 (RHSA-2022:7129)","Advisory":"RHSA-2022:7129","FixedVersion":"git-lfs-0:2.13.3-3.el8_6","Scope":{"Family":"enterprise-linux","Major":"8"}}]}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if got := repo.byID["fnd-1"]; len(got.Proposals()) != 0 {
+		t.Errorf("a fixed statement must raise nothing; got %+v", got.Proposals())
+	}
+}

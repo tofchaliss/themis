@@ -112,12 +112,20 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 	if len(a.VendorStatements) > 0 {
 		vs := make([]gen.VendorStatement, 0, len(a.VendorStatements))
 		for _, v := range a.VendorStatements {
-			vs = append(vs, gen.VendorStatement{
-				Package: strptr(v.Package), Status: strptr(v.Status),
+			status := gen.VendorStatementStatus(v.Status)
+			stmt := gen.VendorStatement{
+				Package: strptr(v.Package), Status: &status,
 				Justification: strptr(v.Justification),
 				ScopeFamily:   strptr(v.ScopeFamily), ScopeMajor: strptr(v.ScopeMajor),
 				Applicability: (*gen.VendorStatementApplicability)(strptr(v.Applicability)),
-			})
+			}
+			if v.Advisory != "" {
+				stmt.Advisory = strptr(v.Advisory)
+			}
+			if v.FixedVersion != "" {
+				stmt.FixedVersion = strptr(v.FixedVersion)
+			}
+			vs = append(vs, stmt)
 		}
 		out.VendorStatements = &vs
 	}

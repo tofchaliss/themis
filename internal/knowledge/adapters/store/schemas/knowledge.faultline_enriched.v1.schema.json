@@ -56,6 +56,14 @@
           "Justification": {
             "type": "string"
           },
+          "Advisory": {
+            "type": "string",
+            "description": "On a `fixed` statement: the vendor advisory that shipped the fix (EDR-VEX-02 D14). Optional additive field; empty otherwise."
+          },
+          "FixedVersion": {
+            "type": "string",
+            "description": "On a `fixed` statement: the build the advisory shipped (a NEVRA, or a module stream id). Optional additive field; empty otherwise."
+          },
           "Scope": {
             "type": "object",
             "additionalProperties": false,

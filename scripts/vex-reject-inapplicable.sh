@@ -134,10 +134,13 @@ while IFS='|' read -r finding proposal pkg product; do
     SKIP=$((SKIP + 1)); continue
   fi
 
-  # Themis's own determination, for the statements about THIS package. Absent vendor_statements
-  # (a Knowledge the projection could not reach) yields an empty answer, which is a skip.
+  # Themis's own determination, for the not_affected statements about THIS package — only a
+  # not_affected statement can be the premise of the proposal under review (EDR-VEX-02 D15); a
+  # `fixed` or `will_not_fix` statement that happens to apply must not keep a bad proposal alive.
+  # Absent vendor_statements (a Knowledge the projection could not reach) yields an empty
+  # answer, which is a skip.
   VERDICTS="$(printf '%s' "$BODY" \
-    | jq -r --arg p "$pkg" '[.vendor_statements[]? | select(.package == $p) | .applicability] | join(",")' 2>/dev/null)"
+    | jq -r --arg p "$pkg" '[.vendor_statements[]? | select(.package == $p and .status == "not_affected") | .applicability] | join(",")' 2>/dev/null)"
   if [ -z "$VERDICTS" ]; then
     printf '  \033[33m?\033[0m %s  no vendor statement for this package in the assessment — skipped\n' "$pkg"
     SKIP=$((SKIP + 1)); continue

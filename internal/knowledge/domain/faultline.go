@@ -153,7 +153,17 @@ func (f *Faultline) repeatsLatestFrom(p Proposal) bool {
 		if prev.source != p.source || prev.kind != p.kind {
 			continue
 		}
-		return prev.sameContentAs(p)
+		if prev.sameContentAs(p) {
+			return true
+		}
+		// An applicability source emits N statements per poll — one per package and product
+		// (EDR-VEX-02 D7, D17) — so the LATEST proposal from it is a different statement, not an
+		// older observation of this one. For that kind a restatement is equality with ANY
+		// recorded statement from the source; the latest-only rule stays for the other kinds,
+		// where a repeat after a change is a real observation.
+		if p.kind != KindApplicability {
+			return false
+		}
 	}
 	return false
 }

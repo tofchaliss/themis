@@ -196,7 +196,14 @@ func toView(f domain.Faultline) gen.FaultlineView {
 	apps := make([]gen.Applicability, 0, len(v.Applicabilities))
 	for _, a := range v.Applicabilities {
 		a := a
-		app0 := gen.Applicability{Package: strptr(a.Package), Status: strptr(a.Status), Justification: strptr(a.Justification)}
+		status := gen.ApplicabilityStatus(a.Status)
+		app0 := gen.Applicability{Package: strptr(a.Package), Status: &status, Justification: strptr(a.Justification)}
+		if a.Advisory != "" {
+			app0.Advisory = strptr(a.Advisory)
+		}
+		if a.FixedVersion != "" {
+			app0.FixedVersion = strptr(a.FixedVersion)
+		}
 		// The vendor-stated scope (EDR-VEX-02 D5). Emitted as two flat fields so a consumer
 		// cannot mistake a partially-populated object for an established scope: both empty means
 		// the vendor supplied no readable scope, which reads as applicability `unknown`.

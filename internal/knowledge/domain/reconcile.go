@@ -382,7 +382,15 @@ func sortedApplicabilities(set map[Applicability]struct{}) []Applicability {
 		if out[i].Scope.Family != out[j].Scope.Family {
 			return out[i].Scope.Family < out[j].Scope.Family
 		}
-		return out[i].Scope.Major < out[j].Scope.Major
+		if out[i].Scope.Major != out[j].Scope.Major {
+			return out[i].Scope.Major < out[j].Scope.Major
+		}
+		// D14: a package can be `fixed` by two advisories for one product (two builds); the
+		// advisory and build complete the key so the order stays total.
+		if out[i].Advisory != out[j].Advisory {
+			return out[i].Advisory < out[j].Advisory
+		}
+		return out[i].FixedVersion < out[j].FixedVersion
 	})
 	return out
 }

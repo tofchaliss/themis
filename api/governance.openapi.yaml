@@ -705,10 +705,20 @@ components:
         package: { type: string }
         status:
           type: string
-          description: The VENDOR'S assertion, e.g. `not_affected`. Never carries Themis's conclusion.
+          enum: [not_affected, affected, fixed, under_investigation, will_not_fix, fix_deferred, out_of_support]
+          description: >-
+            The VENDOR'S assertion, from the closed set (EDR-VEX-02 D13). Never carries Themis's
+            conclusion. Only an applicable `not_affected` can have become a Proposal (D15); every
+            other status is information for the engineer.
         justification:
           type: string
           description: The vendor's stated reason, verbatim.
+        advisory:
+          type: string
+          description: On a `fixed` statement, the advisory that shipped the fix (D14). Absent otherwise.
+        fixed_version:
+          type: string
+          description: On a `fixed` statement, the build the advisory shipped. Absent otherwise.
         scope_family:
           type: string
           description: Product family the vendor scoped it to, e.g. `enterprise-linux`. Empty = no readable scope.

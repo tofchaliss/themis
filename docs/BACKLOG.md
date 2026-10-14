@@ -339,6 +339,20 @@ three angles, and two of them proposed fixes that would not have worked.
   stamp (`StampDiscovered`). Measure after deploy: `match-census.sh` before/after on binutils,
   compat-libtiff3, libtiff, curl, httpd.
 
+#### Vendor statements kept whole (filed and closed 2026-10-14)
+
+- [x] **VEX-STMT-1 — Red Hat's answer for the release's own family was dropped at the door
+  (filed and closed 2026-10-14).** HIGH, operator trust. CVE-2022-30632 on a Rocky 8.10 release
+  showed RHEL 9, OpenStack and Satellite statements (all correctly not applicable) and nothing
+  for RHEL 8, while Red Hat's record says RHEL 8 is fixed in five packages and will-not-fix in
+  two: `redhat_client.go` kept only `fix_state == "Not affected"` rows and turned fixed rows
+  into scopeless fix versions. **Done (EDR-VEX-02 D13–D17, `phase3-vendor-statements`):** every
+  package_state row is a statement with its real status from a closed set, every main-stream
+  advisory row a `fixed` statement with advisory and build, each scoped; restatements compared
+  against the set so N statements per poll do not bloat; Governance carries and exposes them
+  and still raises only for an applicable `not_affected`; the drawer lists what applies first,
+  folds the rest, and says in words when nothing covers the release. VM round (task 4.2) pending.
+
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
 - [x] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib

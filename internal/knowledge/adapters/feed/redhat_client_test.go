@@ -45,14 +45,16 @@ func TestRedHatClient_TranslatesSeverityAndNotAffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
-	// vuln-facts (High from Important) + ONE deduped not_affected applicability (openssl). The
-	// "Affected" curl, the empty-package entry, and the container/namespaced product artifacts
-	// (a "-container" image and an "openshift-logging/…" namespaced name — never package-level
-	// SBOM components) are all skipped.
-	if len(got) != 2 {
-		t.Fatalf("proposals = %d, want 2", len(got))
+	// vuln-facts (High from Important) + ONE deduped not_affected applicability (openssl; the
+	// two rows carry no CPE, so they collapse) + the "Affected" curl row, which since EDR-VEX-02
+	// D13 is a statement too. The empty-package entry and the container/namespaced product
+	// artifacts (a "-container" image and an "openshift-logging/…" namespaced name — never
+	// package-level SBOM components) are still skipped.
+	if len(got) != 3 {
+		t.Fatalf("proposals = %d, want 3", len(got))
 	}
 	var sawVF, sawApp bool
+	statuses := map[string]string{}
 	for _, p := range got {
 		if vf, ok := p.Proposal.VulnFacts(); ok {
 			sawVF = true
@@ -62,10 +64,11 @@ func TestRedHatClient_TranslatesSeverityAndNotAffected(t *testing.T) {
 		}
 		if a, ok := p.Proposal.Applicability(); ok {
 			sawApp = true
-			if a.Status != "not_affected" || a.Package != "openssl" {
-				t.Errorf("applicability = %+v, want not_affected openssl", a)
-			}
+			statuses[a.Package] = a.Status
 		}
+	}
+	if statuses["openssl"] != "not_affected" || statuses["curl"] != "affected" {
+		t.Errorf("statuses = %v, want openssl not_affected and curl affected", statuses)
 	}
 	if !sawVF || !sawApp {
 		t.Errorf("want both vuln-facts and applicability; got vf=%v app=%v", sawVF, sawApp)
@@ -125,12 +128,27 @@ func TestRedHatClient_MainStreamFixesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("proposals = %d, want 1 (vuln-facts only)", len(got))
+	// vuln-facts + one `fixed` statement per main-stream row (EDR-VEX-02 D14): el8 and el9.
+	if len(got) != 3 {
+		t.Fatalf("proposals = %d, want 3 (vuln-facts + two fixed statements)", len(got))
 	}
 	vf, ok := got[0].Proposal.VulnFacts()
 	if !ok {
-		t.Fatal("want a vuln-facts proposal")
+		t.Fatal("want the vuln-facts proposal first")
+	}
+	fixed := map[string]domain.Applicability{}
+	for _, p := range got[1:] {
+		a, ok := p.Proposal.Applicability()
+		if !ok || a.Status != domain.StatusFixed || a.Package != "openssl" {
+			t.Fatalf("statement = %+v, want a fixed openssl statement", a)
+		}
+		fixed[a.Scope.Major] = a
+	}
+	if fixed["8"].FixedVersion != "openssl-1:1.0.2k-16.el8_10" || fixed["8"].Scope.Family != "enterprise-linux" {
+		t.Errorf("el8 fixed statement = %+v, want the el8 NEVRA scoped enterprise-linux/8", fixed["8"])
+	}
+	if _, eus := fixed["8.6"]; eus {
+		t.Error("the EUS row must not become a statement")
 	}
 	want := []string{"openssl-1:1.0.2k-16.el8_10", "openssl-1:3.0.1-47.el9_2"} // el8 + el9 main-stream, in doc order
 	if len(vf.FixVersions()) != len(want) {
@@ -429,5 +447,82 @@ func TestRedHatClient_SameAdvisoryFetchedOnce(t *testing.T) {
 		if n != 1 {
 			t.Errorf("resolved fix %q appears %d times, want exactly 1", v, n)
 		}
+	}
+}
+
+// EDR-VEX-02 D13 — the measured case: CVE-2022-30632 on a Rocky 8.10 release. Red Hat's RHEL 8
+// answer is `fixed` (five advisories) and `will not fix` (two packages); only RHEL 9 says `not
+// affected`. Before D13 the RHEL 8 rows were dropped at the door and the drawer showed nothing
+// for the operator's own family. The three regression outcomes (validation 7) ride on this and
+// the two documents after it.
+func TestRedHatClient_KeepsEveryPackageStateRowWithItsStatus(t *testing.T) {
+	body := `{
+		"name":"CVE-2022-30632","threat_severity":"Moderate","public_date":"2022-07-12T00:00:00Z",
+		"cvss3":{"cvss3_base_score":"7.5","cvss3_scoring_vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
+		"affected_release":[
+			{"product_name":"Red Hat Enterprise Linux 8","package":"git-lfs-0:2.13.3-3.el8_6","advisory":"RHSA-2022:7129","cpe":"cpe:/a:redhat:enterprise_linux:8"},
+			{"product_name":"Red Hat Enterprise Linux 9","package":"golang-0:1.17.12-1.el9_0","advisory":"RHSA-2022:5799","cpe":"cpe:/a:redhat:enterprise_linux:9"},
+			{"product_name":"Openshift Serveless 1.24","package":"openshift-serverless-1/kn-cli-artifacts-rhel8:1.3.1-3","advisory":"RHSA-2022:6040","cpe":"cpe:/a:redhat:serverless:1.24::el8"}
+		],
+		"package_state":[
+			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Will not fix","package_name":"osbuild-composer","cpe":"cpe:/o:redhat:enterprise_linux:8"},
+			{"product_name":"Red Hat Enterprise Linux 9","fix_state":"Not affected","package_name":"conmon","cpe":"cpe:/o:redhat:enterprise_linux:9"},
+			{"product_name":"Red Hat Enterprise Linux 9","fix_state":"Fix deferred","package_name":"weldr-client","cpe":"cpe:/o:redhat:enterprise_linux:9"},
+			{"product_name":"Red Hat Ceph Storage 3","fix_state":"Out of support scope","package_name":"golang","cpe":"cpe:/a:redhat:ceph_storage:3"},
+			{"product_name":"Red Hat OpenStack Platform 16.2","fix_state":"Not affected","package_name":"qpid-proton","cpe":"cpe:/a:redhat:openstack:16.2"},
+			{"product_name":"OpenShift Developer Tools and Services","fix_state":"Affected","package_name":"odo","cpe":"cpe:/a:redhat:ocp_tools"},
+			{"product_name":"Red Hat Enterprise Linux 8","fix_state":"Some future state","package_name":"newpkg","cpe":"cpe:/o:redhat:enterprise_linux:8"}
+		]
+	}`
+	srv := rhServer(t, http.StatusOK, body)
+	got, err := feed.NewRedHatClient(srv.URL, srv.Client()).FetchCVE(context.Background(), "CVE-2022-30632")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	type key struct{ pkg, status, major string }
+	seen := map[key]domain.Applicability{}
+	for _, p := range got {
+		if a, ok := p.Proposal.Applicability(); ok {
+			seen[key{a.Package, a.Status, a.Scope.Major}] = a
+		}
+	}
+	// The RHEL 8 answer exists and is scoped to RHEL 8.
+	if a, ok := seen[key{"git-lfs", "fixed", "8"}]; !ok || a.Advisory != "RHSA-2022:7129" || a.FixedVersion != "git-lfs-0:2.13.3-3.el8_6" || a.Scope.Family != "enterprise-linux" {
+		t.Errorf("RHEL 8 fixed git-lfs = %+v ok=%v, want advisory RHSA-2022:7129 and the NEVRA, scoped enterprise-linux/8", a, ok)
+	}
+	if a, ok := seen[key{"osbuild-composer", "will_not_fix", "8"}]; !ok || a.Scope.Family != "enterprise-linux" {
+		t.Errorf("RHEL 8 will_not_fix osbuild-composer = %+v ok=%v", a, ok)
+	}
+	// Every other state is kept with its own status and the vendor's product scope.
+	for _, k := range []key{{"conmon", "not_affected", "9"}, {"weldr-client", "fix_deferred", "9"}, {"golang", "out_of_support", "3"}, {"odo", "affected", ""}} {
+		if _, ok := seen[k]; !ok {
+			t.Errorf("missing statement %+v; have %v", k, seen)
+		}
+	}
+	// A non-OS product's `fixed` row is not a statement (main-stream rule), and an unmapped
+	// fix_state is skipped, never invented.
+	for _, k := range []key{{"kn-cli-artifacts-rhel8", "fixed", ""}, {"newpkg", "", "8"}} {
+		for have := range seen {
+			if have.pkg == k.pkg {
+				t.Errorf("unexpected statement for %s: %+v", k.pkg, seen[have])
+			}
+		}
+	}
+}
+
+func TestRedHatFixStateTable(t *testing.T) {
+	cases := map[string]string{
+		"Not affected": domain.StatusNotAffected, "not affected": domain.StatusNotAffected,
+		"Affected": domain.StatusAffected, "Will not fix": domain.StatusWillNotFix,
+		"Fix deferred": domain.StatusFixDeferred, "Out of support scope": domain.StatusOutOfSupport,
+		"Under investigation": domain.StatusUnderInvestigation,
+	}
+	for in, want := range cases {
+		if got, ok := feed.RedHatFixStateStatus(in); !ok || got != want {
+			t.Errorf("%q → %q ok=%v, want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := feed.RedHatFixStateStatus("Unknown future state"); ok {
+		t.Error("an unmapped state must report !known")
 	}
 }

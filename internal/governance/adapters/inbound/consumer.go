@@ -104,6 +104,7 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		for _, a := range dto.Applicabilities {
 			apps = append(apps, app.Applicability{
 				Package: a.Package, Status: a.Status, Justification: a.Justification,
+				Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 				// The vendor-stated scope (EDR-VEX-02 D5). Absent on an older payload, which
 				// decodes to a zero scope and therefore reads as applicability `unknown` —
 				// the fail-safe direction, since an unplaceable statement cannot suppress.
@@ -266,6 +267,9 @@ type applicabilityDTO struct {
 	Package       string `json:"Package"`
 	Status        string `json:"Status"`
 	Justification string `json:"Justification"`
+	// Advisory and FixedVersion of a `fixed` statement (EDR-VEX-02 D14); absent on older payloads.
+	Advisory     string `json:"Advisory"`
+	FixedVersion string `json:"FixedVersion"`
 	// Scope is the product the VENDOR stated this covers (EDR-VEX-02 D5). Absent on a payload
 	// from before that change, decoding to a zero scope — which reads as applicability
 	// `unknown`, the fail-safe direction, since an unplaceable statement cannot suppress.
