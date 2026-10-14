@@ -365,8 +365,12 @@ three angles, and two of them proposed fixes that would not have worked.
   whose ranges stand in the reconciled view (the latest per source), not by fix-only
   contributors; a card with no ranges carries no range grade. The 239 already raised are never
   re-graded (append-only): `scripts/range-accept-provable.sh` lists them (dry run) and, with
-  `--apply` and `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API. Record the
-  before/after stdlib stance count here.
+  `--apply` and `THEMIS_ACTOR_ID`, accepts them as a human's decision through the API.
+  **Measured 2026-10-14, end of the arc:** range repair 1155 cards / 598 repaired; 313
+  version-range proposals raised (74 observed auto-accepted); accept script 311 accepted, 0
+  failed; Go stdlib Findings 0 cleared / 330 open in the morning → **296 not_affected / 60 open**
+  by 16:50. The 60 are the genuinely affected ones plus cards whose range set carries another
+  product's bound (e.g. CVE-2019-17596's `<=4.23.1f`), which is the next thing to look at.
 
 - [x] **KN-GO-3 — the OSV reader split one interval into two rules, so a lone `>=0` kept every
   Go card in range forever; and a card unioned ranges across time, so the bad rule could never be
