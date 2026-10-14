@@ -283,6 +283,16 @@ three angles, and two of them proposed fixes that would not have worked.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
+- [ ] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
+  matches stay open after KN-GO-1 (filed 2026-10-14).** HIGH, operability. The version-range
+  rule (`reactToVersionRange`) runs only on a FaultlineEnriched; a Finding whose verdict changed
+  because Themis's own reading of the version changed has no trigger. **Do:** a one-time
+  re-judge in Governance — for every open Finding, read the card's reconciled ranges over the
+  Knowledge read seam and run the SAME rule (`ProvablyOutOfRange` → system `range:<fid>`
+  proposal with the card's `RangeTrust`, policy decides as usual). Smallest shape: an opt-in
+  startup pass behind `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, idempotent through the existing
+  deterministic proposal id, no API or schema change. Measure: the 330 before, the count after.
+
 - [x] **KN-GO-1 — a Go stdlib component spelled `go1.27.1` opened long-fixed stdlib CVEs on every
   Go program (filed and closed 2026-10-14).** HIGH, correctness. Found on the estate as
   CVE-2022-30632 (fixed in Go 1.17.12 / 1.18.4) open on `pkg:golang/stdlib@1.27.1` in two
@@ -295,10 +305,11 @@ three angles, and two of them proposed fixes that would not have worked.
   stdlib finding on a Go program was therefore a candidate false positive, and the version-range
   rule could never clear them. **Done:** `value.NormalizeVersion` drops a `go`/`v` prefix for the
   Go ecosystem only, applied once in `CompareVersions` and `AffectedRange.Matches` so every range,
-  verdict and fix comparison agrees, and in the OSV query. After deploy the re-discovery sweep
-  re-judges each stdlib match; the existing version-range rule then raises `not_affected` on
-  observed evidence for the long-fixed ones. **Follow-up to measure after the sweep:** how many
-  stdlib Findings cleared, and whether other ecosystems carry a toolchain spelling (none known).
+  verdict and fix comparison agrees, and in the OSV query. **What it does NOT do:** clear the
+  330 matches already recorded. Re-discovery only iterates what OSV returns, and the correct
+  query no longer returns the 155 false CVEs, so their rows are never revisited; Governance's
+  version-range rule fires only on a FaultlineEnriched, and those cards do not change. A
+  one-time re-judge of open Findings against their card's ranges is needed — see KN-GO-2.
 
 #### Harness-integration follow-ups (filed 2026-10-06 — surfaced verifying EDR-HARNESS-01)
 
