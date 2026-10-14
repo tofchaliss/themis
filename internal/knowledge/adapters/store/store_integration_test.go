@@ -1417,3 +1417,25 @@ func TestApplicabilityScopeSurvivesReload(t *testing.T) {
 		t.Errorf("enriched events = %d after a new scope, want %d — a second scope is a second statement", n, after+1)
 	}
 }
+
+// KN-GO-3: the one-time range repair walks every card, in id order.
+func TestAllFaultlineIDs(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	prec := domain.NewPrecedence("nvd")
+	if ids, err := st.AllFaultlineIDs(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("empty estate: %v %v", ids, err)
+	}
+	for i, id := range []string{"fl-b", "fl-a"} {
+		f, _ := domain.NewFaultline(domain.FaultlineID(id), cveID(t, "CVE-2024-"+string(rune('1'+i))))
+		f.FoldProposal(vulnFacts(t, "nvd", value.SeverityHigh), prec, domain.NewTrustPolicy(nil))
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err := st.AllFaultlineIDs(ctx)
+	if err != nil || len(ids) != 2 || ids[0] != "fl-a" || ids[1] != "fl-b" {
+		t.Fatalf("ids = %v err=%v, want [fl-a fl-b]", ids, err)
+	}
+}

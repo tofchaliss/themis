@@ -289,6 +289,23 @@ func main() {
 		go reattributeLoop(kn.Reattribute, cfg.reattributeInterval, logger.Component("reattribute"), kn.Reverdict.Nudge)
 	}
 
+	// The one-time range repair (KN-GO-3). Opt-in, runs once, says what it did; the operator
+	// who set the variable is waiting for exactly these two numbers.
+	if os.Getenv("THEMIS_KNOWLEDGE_REPAIR_RANGES") == "1" {
+		go func() {
+			rl := logger.Component("range-repair")
+			rl.Info("range repair starting (THEMIS_KNOWLEDGE_REPAIR_RANGES=1)")
+			res, err := kn.RangeRepair.Run(ctx)
+			if err != nil {
+				rl.Error("range repair aborted", observability.Err(err),
+					observability.Int("cards", res.Cards), observability.Int("repaired", res.Repaired))
+				return
+			}
+			rl.Info("range repair done — unset THEMIS_KNOWLEDGE_REPAIR_RANGES before the next restart",
+				observability.Int("cards", res.Cards), observability.Int("repaired", res.Repaired))
+		}()
+	}
+
 	if cfg.rediscoveryEnabled {
 		go rediscoveryLoop(kn.Rediscovery, cfg.rediscoveryInterval, logger.Component("rediscovery"))
 		logger.Info("re-discovery sweep enabled (KN-RECOR-1)",

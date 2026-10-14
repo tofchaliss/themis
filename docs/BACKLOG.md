@@ -368,8 +368,18 @@ three angles, and two of them proposed fixes that would not have worked.
   ranges from each source's LATEST range-bearing statement (ties at one instant union, for order
   independence) and still unions across sources. After deploy the re-discovery sweep re-polls OSV
   per stale release, the corrected statement replaces the old one on each card, the
-  FaultlineEnriched fan-out runs the version-range rule, and the 330 stdlib Findings clear on
-  their own — no second re-judge pass needed. Record the before/after count here.
+  FaultlineEnriched fan-out runs the version-range rule. **Measured after deploy (2026-10-14):
+  still 330 open.** The sweep re-polls OSV with the release's CURRENT version, and OSV answers
+  only with the CVEs that version is affected by — so a card whose only flaw is the old shape
+  (a long-fixed CVE) never hears a corrected statement, and the append-only log keeps the old
+  one forever. **Done, second half:** `app.RangeRepair`, a one-time pass behind
+  `THEMIS_KNOWLEDGE_REPAIR_RANGES=1`: for every card, each source's latest range-bearing
+  statement is re-paired (`domain.RepairSplitRanges` — a lone lower bound followed by a lone
+  upper bound is one interval, recoverable because a proposal keeps its render order) and,
+  where that changes anything, a NEW statement from the same source with the corrected ranges
+  is folded now; Reconcile takes it over the old one, the view changes, and the ordinary fan-out
+  clears the Findings. Nothing edited or deleted; a second pass repairs nothing. Record the
+  cards / repaired counts and the stdlib stance count after it runs.
 
 - [x] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
   matches stay open after KN-GO-1 (filed and closed 2026-10-14).** HIGH, operability. The version-range

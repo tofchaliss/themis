@@ -96,6 +96,25 @@ func (s *Store) GetByCVE(ctx context.Context, cve string) (domain.Faultline, boo
 }
 
 // GetByID loads the card by its own identity.
+// AllFaultlineIDs lists every card, in id order — the population of a one-time estate pass
+// (KN-GO-3 range repair). Implements app.FaultlineLister.
+func (s *Store) AllFaultlineIDs(ctx context.Context) ([]domain.FaultlineID, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM faultlines ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.FaultlineID
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.FaultlineID(id))
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetByID(ctx context.Context, id domain.FaultlineID) (domain.Faultline, error) {
 	return s.load(ctx, "id", string(id))
 }

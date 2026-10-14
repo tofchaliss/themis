@@ -1026,6 +1026,20 @@ component is provably outside the card's range get a system `not_affected` propo
 configured policy decides as usual. Leaving the switch set is harmless (the pass is idempotent)
 but wasteful, which is why the last line removes it.
 
+**If the cards themselves carry the old split ranges** (KN-GO-3: a Go card reading
+`["<1.4.3", ">=0"]`, written by the OSV reader before 2026-10-14), run Knowledge's one-time
+range repair FIRST, then the Governance pass above — the repair folds corrected statements, and
+the enrichment fan-out usually clears the Findings before the pass is even needed:
+
+```sh
+echo 'THEMIS_KNOWLEDGE_REPAIR_RANGES=1' | sudo tee -a /etc/themis/knowledge.env
+sudo systemctl restart themis@knowledge
+sleep 60
+sudo journalctl -u themis@knowledge --since '-3 min' --no-pager | grep 'range repair'
+# expect: "range repair done" with cards / repaired counts
+sudo sed -i '/^THEMIS_KNOWLEDGE_REPAIR_RANGES=/d' /etc/themis/knowledge.env
+```
+
 Things the 2026-10-12 upgrade ran into:
 
 - **A halted stream survives an upgrade and a reboot.** The reader resumes at its cursor, re-reads

@@ -94,6 +94,9 @@ type Knowledge struct {
 	// feed loops kick. Always set — it rides only Knowledge's own store and the Evidence read
 	// seam; the composition root runs its loop.
 	Reverdict *app.ReverdictService
+	// RangeRepair is the one-time KN-GO-3 pass, run by the composition root only when
+	// THEMIS_KNOWLEDGE_REPAIR_RANGES=1.
+	RangeRepair *app.RangeRepair
 	// Reclassify re-announces the recorded matches of cards whose claim-class stamps lag their
 	// version or the current rule generation (EDR-CORRELATION-01 D3/D4, KN-CLAIM-1). Always
 	// set — it rides only Knowledge's own store; the composition root runs its loop.
@@ -291,6 +294,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		Health:   health,
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
+		RangeRepair: app.NewRangeRepair(st, st, fold, sysClock{}),
 		Rediscovery: app.NewRediscoveryService(st, corr, sysClock{}, rediscovery.StaleAfter, rediscovery.Limit).WithScanner(scanSvc, st),
 		// The re-verdict (EDR-VERDICT-01 D6): store supplies the stale rows, the ledger and the
 		// Evidence client rebuild each release's bridge context, and RecordMatch is the same
