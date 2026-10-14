@@ -35,12 +35,13 @@ func (s stubProjection) GetReleaseComparison(context.Context, string, string) (d
 
 type stubPosition struct {
 	stance, rationale string
+	actorKind         string
 	found             bool
 	err               error
 }
 
-func (s stubPosition) CurrentPosition(context.Context, string, string) (string, string, bool, error) {
-	return s.stance, s.rationale, s.found, s.err
+func (s stubPosition) CurrentPosition(context.Context, string, string) (string, string, string, bool, error) {
+	return s.stance, s.rationale, s.actorKind, s.found, s.err
 }
 
 type stubEmbedder struct {
@@ -52,8 +53,9 @@ func (s stubEmbedder) Embed(context.Context, string) ([]float32, error) { return
 func (s stubEmbedder) Model() string                                    { return "stub-model" }
 
 type captureStore struct {
-	recs []store.EmbeddingRecord
-	err  error
+	recs    []store.EmbeddingRecord
+	deleted []string
+	err     error
 	// cached is the stored (hash, vector) the embed-skip consults; zero value = nothing cached,
 	// so every existing test embeds exactly as it did before.
 	cachedHash   string
@@ -74,6 +76,14 @@ func (c *captureStore) Upsert(_ context.Context, r store.EmbeddingRecord) error 
 	return nil
 }
 
+func (c *captureStore) Delete(_ context.Context, id string) error {
+	if c.err != nil {
+		return c.err
+	}
+	c.deleted = append(c.deleted, id)
+	return nil
+}
+
 func (c *captureStore) IndexedForFaultline(_ context.Context, _ string) ([]store.IndexedFinding, error) {
 	c.faultlineReads++
 	return c.indexed, c.indexedErr
@@ -90,9 +100,13 @@ func (c *captureStore) CachedEmbedding(_ context.Context, _ string) (string, []f
 	return c.cachedHash, c.cachedVector, true, nil
 }
 
-type captureIndex struct{ recs []store.EmbeddingRecord }
+type captureIndex struct {
+	recs    []store.EmbeddingRecord
+	deleted []string
+}
 
 func (c *captureIndex) Upsert(r store.EmbeddingRecord) { c.recs = append(c.recs, r) }
+func (c *captureIndex) Delete(id string)               { c.deleted = append(c.deleted, id) }
 
 // --- helpers -----------------------------------------------------------------------------
 
@@ -568,4 +582,110 @@ func TestApplyEnrichmentPropagatesWriteFailure(t *testing.T) {
 	if err := apply(context.Background()); err == nil {
 		t.Fatal("want the write failure to propagate so the inbox tx rolls back")
 	}
+}
+
+// AI-RF-4: a Position a POLICY established is not precedent. Flagged on the event, it is dropped
+// without a projection read or an embed; flagged only by the live Position read (an event from
+// before the field existed), it is dropped too — and any earlier embedding of the Finding goes.
+func TestPrepareDropsAPolicyDecidedPosition(t *testing.T) {
+	t.Run("flagged on the event", func(t *testing.T) {
+		c, st, idx := newConsumer(
+			stubProjection{err: errors.New("must not be read")},
+			stubPosition{err: errors.New("must not be read")},
+			stubEmbedder{err: errors.New("must not embed")},
+		)
+		env := positionEnv("governance.position_established", "f1", "rel-1", "fl-1", "CVE-2026-1", "not_affected")
+		env.Payload = []byte(`{"FindingID":"f1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-2026-1","Version":1,"Stance":"not_affected","DecidedBy":{"Kind":"policy","ID":"auto-not-affected-observed"}}`)
+		apply, err := c.Prepare(context.Background(), env)
+		if err != nil || apply == nil {
+			t.Fatalf("prepare: apply nil=%v err=%v", apply == nil, err)
+		}
+		if err := apply(context.Background()); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if len(st.recs) != 0 || len(idx.recs) != 0 || len(st.deleted) != 1 || st.deleted[0] != "f1" || len(idx.deleted) != 1 {
+			t.Fatalf("policy-decided: store recs=%d deleted=%v index recs=%d deleted=%v; want no upsert and one delete each",
+				len(st.recs), st.deleted, len(idx.recs), idx.deleted)
+		}
+	})
+	t.Run("flagged by the live read", func(t *testing.T) {
+		c, st, idx := newConsumer(
+			stubProjection{err: errors.New("must not be read")},
+			stubPosition{stance: "not_affected", rationale: "every matched component version is outside the reconciled affected range", actorKind: "policy", found: true},
+			stubEmbedder{err: errors.New("must not embed")},
+		)
+		if err := c.Handle(context.Background(), positionEnv("governance.position_revised", "f1", "rel-1", "fl-1", "CVE-2026-1", "not_affected")); err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if len(st.recs) != 0 || len(st.deleted) != 1 || len(idx.deleted) != 1 {
+			t.Fatalf("read-flagged: store recs=%d deleted=%v index deleted=%v", len(st.recs), st.deleted, idx.deleted)
+		}
+	})
+	t.Run("a human decision still indexes", func(t *testing.T) {
+		c, st, _ := newConsumer(
+			projOf([]string{"pkg:golang/x"}, "high"),
+			stubPosition{stance: "not_affected", rationale: "unreachable", actorKind: "human", found: true},
+			stubEmbedder{vec: []float32{1}},
+		)
+		if err := c.Handle(context.Background(), positionEnv("governance.position_established", "f1", "rel-1", "fl-1", "CVE-2026-1", "not_affected")); err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if len(st.recs) != 1 || len(st.deleted) != 0 {
+			t.Fatalf("human-decided: recs=%d deleted=%v", len(st.recs), st.deleted)
+		}
+	})
+}
+
+// On a Faultline re-embed, a Finding whose Position a policy has since established leaves the
+// index instead of being re-upserted.
+func TestPrepareReEmbedDropsPolicyDecidedFindings(t *testing.T) {
+	c, st, idx := newConsumer(
+		projOf([]string{"pkg:golang/x"}, "critical"),
+		stubPosition{stance: "not_affected", actorKind: "policy", found: true},
+		stubEmbedder{vec: []float32{1}},
+	)
+	st.indexed = []store.IndexedFinding{{FindingID: "f1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2026-1", Stance: "not_affected"}}
+	apply, err := c.Prepare(context.Background(), event.Envelope{ID: "e-rf4", Type: "knowledge.faultline_enriched", Payload: []byte(`{"FaultlineID":"fl-1"}`)})
+	if err != nil || apply == nil {
+		t.Fatalf("prepare: apply nil=%v err=%v", apply == nil, err)
+	}
+	if err := apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(st.recs) != 0 || len(st.deleted) != 1 || len(idx.deleted) != 1 {
+		t.Fatalf("re-embed of a policy-decided Finding: recs=%d deleted=%v", len(st.recs), st.deleted)
+	}
+}
+
+// The one-time prune over an index populated before AI-RF-4.
+func TestPruneRulePositions(t *testing.T) {
+	st := &captureStore{}
+	idx := &captureIndex{}
+	byRelease := map[string]stubPosition{
+		"rel-policy": {stance: "not_affected", actorKind: "policy", found: true},
+		"rel-human":  {stance: "affected", actorKind: "human", found: true},
+		"rel-gone":   {found: false},
+	}
+	pos := positionByRelease(byRelease)
+	records := []store.EmbeddingRecord{
+		{FindingID: "f-policy", ReleaseID: "rel-policy", FaultlineID: "fl-1"},
+		{FindingID: "f-human", ReleaseID: "rel-human", FaultlineID: "fl-1"},
+		{FindingID: "f-gone", ReleaseID: "rel-gone", FaultlineID: "fl-1"},
+	}
+	checked, pruned, err := inbound.PruneRulePositions(context.Background(), records, pos, st, idx)
+	if err != nil || checked != 3 || pruned != 1 {
+		t.Fatalf("prune = checked %d pruned %d err %v; want 3, 1, nil", checked, pruned, err)
+	}
+	if len(st.deleted) != 1 || st.deleted[0] != "f-policy" || len(idx.deleted) != 1 {
+		t.Fatalf("deleted store=%v index=%v, want only f-policy", st.deleted, idx.deleted)
+	}
+	if _, _, err := inbound.PruneRulePositions(context.Background(), records, positionByRelease(map[string]stubPosition{"rel-policy": {err: errors.New("gov down")}}), st, idx); err == nil {
+		t.Fatal("a read failure must surface")
+	}
+}
+
+type positionByRelease map[string]stubPosition
+
+func (p positionByRelease) CurrentPosition(ctx context.Context, release, faultline string) (string, string, string, bool, error) {
+	return p[release].CurrentPosition(ctx, release, faultline)
 }

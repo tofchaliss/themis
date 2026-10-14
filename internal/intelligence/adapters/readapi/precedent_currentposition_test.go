@@ -18,7 +18,7 @@ func TestCurrentPositionFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	stance, rationale, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
+	stance, rationale, _, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
 		CurrentPosition(context.Background(), "rel-1", "fl-1")
 	if err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
@@ -34,7 +34,7 @@ func TestCurrentPositionNotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
+	_, _, _, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
 		CurrentPosition(context.Background(), "rel-1", "fl-1")
 	if err != nil || found {
 		t.Fatalf("expected found=false err=nil (release without a position), got found=%v err=%v", found, err)
@@ -47,7 +47,7 @@ func TestCurrentPositionNoPositionInBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
+	_, _, _, found, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
 		CurrentPosition(context.Background(), "rel-1", "fl-1")
 	if err != nil || found {
 		t.Fatalf("expected found=false, got found=%v err=%v", found, err)
@@ -60,7 +60,7 @@ func TestCurrentPositionServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, _, _, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
+	if _, _, _, _, err := readapi.NewPrecedentClient(srv.URL, srv.Client()).
 		CurrentPosition(context.Background(), "rel-1", "fl-1"); err == nil {
 		t.Fatal("expected an error on a 500 response")
 	}

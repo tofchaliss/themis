@@ -13,6 +13,12 @@
     "CVE": { "type": "string" },
     "Version": { "type": "integer" },
     "Stance": { "type": "string" },
+    "DecidedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who established the Position (AI-RF-4): Kind is human | ai | policy. Optional additive field; a consumer reusing Positions as precedent skips policy-decided ones.",
+      "properties": { "Kind": { "type": "string" }, "ID": { "type": "string" } }
+    },
     "OccurredAt": { "type": "string", "format": "date-time" }
   }
 }

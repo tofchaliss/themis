@@ -301,8 +301,8 @@ three angles, and two of them proposed fixes that would not have worked.
   cosine at 0; `Before` pins ties (exact first, then cosine, release id, source CVE) in the memory
   index and in `deltaRank`; tests for the table and for a reversed load order.
 
-- [ ] **AI-RF-4 — rule-decided Positions are served as "similar past decisions" and as sweep
-  precedent (filed 2026-10-14, user observation).** MED, advisory quality. CVE-2026-56857 on
+- [x] **AI-RF-4 — rule-decided Positions are served as "similar past decisions" and as sweep
+  precedent (filed and closed 2026-10-14, user observation).** MED, advisory quality. CVE-2026-56857 on
   stdlib 1.26.8 (genuinely affected, fix 1.26.9) showed five `not_affected` precedents at 0.99:
   all version-range decisions from the same day on OTHER CVEs, rationale "every matched component
   version is outside the reconciled affected range". That is arithmetic about another CVE's
@@ -311,8 +311,15 @@ three angles, and two of them proposed fixes that would not have worked.
   whose accepted proposal came from a deterministic system proposer (`version-range`,
   `knowledge-enrichment` withdrawal) is NOT precedent — Intelligence's inbound indexer skips it
   and `GET /findings/{id}/similar` and the sweep never see it; human and AI-judged Positions
-  stay. Needs the Position event (or the current-position read) to carry the decider kind.
-  Awaiting go (2026-10-14).
+  stay. **Done:** `PositionEstablished`/`PositionRevised` carry `DecidedBy` (additive; schemas
+  updated); the `current_position` read already carried `actor_kind` and the Intelligence client
+  now decodes it; the inbound indexer drops a policy-decided Position (and deletes an earlier
+  embedding of that Finding — a judgement revised into a rule leaves the index), the exact-CVE
+  fallback skips them, and `THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS=1` runs a one-time pass
+  that removes the rows an index populated before this change still holds. Seen twice on the
+  estate the same evening: CVE-2026-56857 (stdlib 1.26.8, affected) and CVE-2026-85091 (zlib on
+  Alpine, affected), each offered five version-range `not_affected` decisions on other CVEs as
+  0.8–0.99 "similar" precedent.
 
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 

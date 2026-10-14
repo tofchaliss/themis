@@ -106,6 +106,9 @@ type Intelligence struct {
 	Index    *index.Memory        // nil when Store is nil — the boot-load target
 	Consumer *inbound.Consumer    // nil when Store is nil — the bus population consumer
 	Sweep    *app.AutonomousSweep // Δ4b: nil unless BOTH a Store and an autonomous pool are configured
+	// Precedents is the Governance read seam the index is built from; the composition root
+	// hands it to the one-time AI-RF-4 prune (THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS=1).
+	Precedents *readapi.PrecedentClient
 }
 
 // Wire assembles the Gateway. It returns an error only if a capability's output schema fails
@@ -260,10 +263,11 @@ func Wire(cfg Config) (Intelligence, error) {
 		}
 	}
 	return Intelligence{
-		Handler:  intelhttp.NewHandler(gw, cfg.Logger).WithPrecedents(precedents, redactor).Routes(),
-		Gateway:  gw,
-		Index:    idx,
-		Consumer: consumer,
-		Sweep:    sweep,
+		Handler:    intelhttp.NewHandler(gw, cfg.Logger).WithPrecedents(precedents, redactor).Routes(),
+		Gateway:    gw,
+		Index:      idx,
+		Consumer:   consumer,
+		Sweep:      sweep,
+		Precedents: prc,
 	}, nil
 }

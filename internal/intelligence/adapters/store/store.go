@@ -73,6 +73,12 @@ func (s *Store) Upsert(ctx context.Context, rec EmbeddingRecord) error {
 
 // LoadAll returns every embedding — the in-memory VectorIndex is populated from this on boot
 // (A3). Cheap: one sequential scan of a <=~50k-row table.
+// Delete removes one Finding's embedding (AI-RF-4). A missing row is not an error.
+func (s *Store) Delete(ctx context.Context, findingID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM position_embeddings WHERE finding_id = $1`, findingID)
+	return err
+}
+
 func (s *Store) LoadAll(ctx context.Context) ([]EmbeddingRecord, error) {
 	rows, err := s.exec(ctx).Query(ctx, `
 		SELECT finding_id, faultline_id, release_id, cve, component, stance, rationale, model, dim, vector, text_hash
