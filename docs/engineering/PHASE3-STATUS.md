@@ -1,10 +1,28 @@
 # Phase-3 Greenfield Rebuild — Status & Resume Point
 
-**Updated:** 2026-10-13 · **Read this first when resuming.** Open work is tracked ONLY in
+**Updated:** 2026-10-14 · **Read this first when resuming.** Open work is tracked ONLY in
 [`docs/BACKLOG.md`](../BACKLOG.md) (tracking rule agreed 2026-08-27) — this file carries the narrative
 and the resume pointer, never item state.
 
-> ## ⏭ RESUME POINT — 2026-10-13 (evening) · `phase3-bot-intake` **COMPLETE and archived**; auth is ON for every VM node
+> ## ⏭ RESUME POINT — 2026-10-14 (evening) · the Go false-positive arc is CLOSED on the estate; `phase3-vendor-statements` COMPLETE and archived
+>
+> - **Merged today (#158–#168):** Registry confines product keys (#158) · INSTALLATION runbooks R1–R3
+>   (#159) · KN-GO-1 `go1.27.1` read as 1.27.1 (#160) · `scripts/match-census.sh` (#161–#163, #168) ·
+>   KN-GO-2 re-judge pass + roll-forward audit defects AI-RF-1..3 + KN-SCAN-5 scanner discovery +
+>   EDR-VEX-02 D13–D17 vendor statements kept whole (#164) · KN-GO-3 OSV event pairing and
+>   latest-per-source ranges (#165) · the one-time range repair (#166) · KN-GO-4 range grade by range
+>   contributors + `range-accept-provable.sh` (#167).
+> - **Measured on the VM** (`docs/engineering/vm-test-2026-10-14.md`): Go stdlib Findings 330 open / 0
+>   cleared in the morning → **296 not_affected / 60 open** by evening (repair 1155/598, 313 proposals,
+>   311 accepted by the operator); rsync CVE-2026-53785 shows RHEL 8 `fixed` RHSA-2026:74095 as the
+>   applicable vendor statement, the other RHEL majors folded.
+> - **Open, in BACKLOG:** the 60 remaining stdlib Findings (cards sharing a range with another
+>   product); KN-SCAN-5 before/after (binutils 87, compat-libtiff3 59, libtiff 42, curl 26 open / 0
+>   cleared is the before, the sweep needs a day); KN-SANITY-1 (a correlation guard against the next
+>   Go-style flood) not yet filed; the Phase 1 roll-forward audit's Phase 2/3 design
+>   (https://claude.ai/code/artifact/3cdf591e-3b40-4f4b-adee-50373115b4b1).
+>
+> ## Earlier — 2026-10-13 (evening) · `phase3-bot-intake` **COMPLETE and archived**; auth is ON for every VM node
 >
 > - Bot intake (#144–#155) and "every node sends its key" (#156) are live on the VM (`f64d355`) and verified:
 >   one-call bot upload with `create_release`, product-scoped keys confined (byte-identical 403s), and an SBOM

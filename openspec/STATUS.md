@@ -1,7 +1,7 @@
 # Themis — Project Status
 
 _Maintained by the openspec skills (`propose`, `apply`, `archive`) and by hand when work lands outside a
-change. Last updated: 2026-10-13._
+change. Last updated: 2026-10-14._
 
 **Phase-3 greenfield pivot — the sole go-forward.** The DDD bounded-context rebuild (Evidence → Knowledge →
 Governance → Communication, over Kernel/Registry, with the Intelligence AI gateway beside it), per the
@@ -15,8 +15,10 @@ relevance-bounded feeds (NVD / EPSS-KEV / ExploitDB / Red Hat / CSAF), governed 
 (EDR-VEX-01 Phase 1–3), the enterprise estate graph + blast-radius priority (EDR-ESTATE-01, C1/C2), and
 inbound-edge API-key auth (EDR-SECURITY-01, F1). Validated end-to-end on a live deployment before tagging.
 
-**OpenSpec state: see "Active Changes" below** (as of 2026-10-13: `phase3-report-intake` groups 1–4
-merged, `phase3-bot-intake` complete and archived 2026-10-13 as `2026-10-13-phase3-bot-intake`). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
+**OpenSpec state: see "Active Changes" below** (as of 2026-10-14: `phase3-report-intake` groups 1–4
+merged, `phase3-bot-intake` archived 2026-10-13 as `2026-10-13-phase3-bot-intake`,
+`phase3-vendor-statements` — EDR-VEX-02 D13–D17, the whole vendor record kept — implemented, verified on
+the VM and archived 2026-10-14 as `2026-10-14-phase3-vendor-statements`). `phase3-trust-model` was implemented and archived 2026-08-06. Every other
 Phase-3 change is archived (see "Archived Phase-3 changes" below). Note: the post-M5 parity / VEX / auth / estate / D14 work
 landed on `main` **driven by its EDRs + `docs/engineering/PARITY-GAP.md` + `docs/BACKLOG.md` directly, not as
 OpenSpec changes** — which is why this file's former "Active Changes" table (branch `phase3-evidence`,

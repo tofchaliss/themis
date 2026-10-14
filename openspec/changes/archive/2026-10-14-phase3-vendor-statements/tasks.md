@@ -54,10 +54,10 @@ locally; CI runs `make check-ci`. No `specs/` deltas — archive with
 ## Group 4 — Verification
 
 - [x] **4.1 — End to end.** Governance assessment test over the three fixtures (validation 7).
-- [ ] **4.2 — VM round.** Deploy; open CVE-2022-30632 on the Rocky 8.10 release: the RHEL 8 `fixed`
+- [x] **4.2 — VM round.** Deploy; open CVE-2022-30632 on the Rocky 8.10 release: the RHEL 8 `fixed`
   rows read "applies here" with their advisories; the RHEL 9 / OpenStack rows are folded; open a
   binutils finding: `will_not_fix` for RHEL 8 applies. Record in `docs/engineering/vm-test-2026-10-14.md`.
-- [ ] **4.3 — Archive.** `openspec archive phase3-vendor-statements --skip-specs -y`.
+- [x] **4.3 — Archive.** `openspec archive phase3-vendor-statements --skip-specs -y`.
 
 ## Out of scope
 
