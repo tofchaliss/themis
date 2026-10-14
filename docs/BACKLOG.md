@@ -281,6 +281,29 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+#### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
+
+- [ ] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
+  matches can never clear (filed 2026-10-14).** HIGH, correctness/operability. The first
+  `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87
+  open / 0 cleared, `compat-libtiff3` 59 / 0, `libtiff` 84, `curl` 98, `httpd` 174 — every one
+  `detection_origin = scanner/cortex` on a purl with no `distro=` qualifier, on the releases
+  that carry a scanner report and no SBOM twin. `ApplyIngest` folds the scanner's CVE claims and
+  records the match (`knowledge/app/scanner.go`), but no discovery source is ever asked about
+  that component: OSV needs the distro ecosystem the purl does not carry, and the re-discovery
+  sweep re-runs `PlanCorrelation` over the SBOM inventory, which these components are not in.
+  So the card never learns Rocky's fixed build, `judgeOccurrence` can never say
+  `cleared_vendor_fix`, the range gate never runs, and the Finding stays open whatever the
+  truth — a scanner's asserted "affected" at scan time becomes permanent. (The same census
+  showed `rsync` 3.1.3-27 against fix 3.1.3-28 correctly OPEN on the discovery road, so the
+  verdict path itself is fine.) **Do:** (1) stamp `distro=<os>-<version>` on scanner purls from
+  the report's OS fields in the Cortex ACL (`evidence/adapters/report/cortex.go`), or from the
+  release's SBOM twins when the report carries none, so the OSV distro query can form; (2) run
+  discovery for scanner components on ingest and in the re-discovery sweep (the sweep should
+  cover scanner-only releases, whose ledger row today points at no SBOM evidence); (3) measure
+  before/after with `match-census.sh`. Red Hat's `Will not fix` for the remainder is the
+  vendor-statement work (EDR-VEX-02 follow-up), not this item.
+
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
 - [ ] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib

@@ -89,7 +89,9 @@ FLAGS=$((FLAGS+FAN))
 
 # ── 2. spelling — purl version vs version column ──────────────────────────────────────────────
 hdr "2. Spelling — purl version ≠ version column, by purl type"
-awk -F'\t' "$AWK_PURL"'{ pv=pctdec(purlver($1)); if(pv!="" && pv!=$2){ t=purltype($1); m[t]++; c[t SUBSEP $1]=1; if(!(t in ex)) ex[t]=pv " vs " $2 } }
+# An rpm purl drops the epoch the version column keeps (`1.28-423.el8_10` vs `0:1.28-423.el8_10`):
+# same version, two spellings by design, so a difference that is ONLY a leading `N:` is not a gap.
+awk -F'\t' "$AWK_PURL"'{ pv=pctdec(purlver($1)); col=$2; sub(/^[0-9]+:/,"",col); if(pv!="" && pv!=col){ t=purltype($1); m[t]++; c[t SUBSEP $1]=1; if(!(t in ex)) ex[t]=pv " vs " $2 } }
   END{ for(t in m){ nc=0; for(k in c){ split(k,a,SUBSEP); if(a[1]==t) nc++ }; print m[t] "\t" nc "\t" t "\t" ex[t] } }' "$TSV" \
   | sort -t$'\t' -k1,1nr > "$TSV.sp"
 if [ -s "$TSV.sp" ]; then
@@ -97,10 +99,8 @@ if [ -s "$TSV.sp" ]; then
   while IFS=$'\t' read -r m nc t ex; do
     printf '  %7s %10s  %-10s %s\n' "$m" "$nc" "$t" "$ex"
   done < "$TSV.sp"
-  # rpm is expected here: the purl drops the epoch the version column keeps (1:1.1.1k vs 1.1.1k).
-  # Anything else is a spelling seam worth a look.
-  other="$(awk -F'\t' '$3!="rpm"' "$TSV.sp" | wc -l | tr -d ' ')"
-  if [ "$other" -gt 0 ]; then flag "$other non-rpm purl type(s) spell the version two ways — the KN-GO-1 shape"; FLAGS=$((FLAGS+other)); else ok "only rpm differs (epoch), which is expected"; fi
+  other="$(wc -l < "$TSV.sp" | tr -d ' ')"
+  flag "$other purl type(s) spell the version two ways beyond the epoch — the KN-GO-1 shape"; FLAGS=$((FLAGS+other))
 else
   ok "purl and version column agree everywhere"
 fi
