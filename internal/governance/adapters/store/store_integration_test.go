@@ -754,6 +754,12 @@ func TestReleaseScope(t *testing.T) {
 	// that used to report the whole release unplaceable.
 	save("fnd-rpm", "rel-el8", "fl-1", domain.MatchedComponent{
 		PURL: "pkg:rpm/rocky/httpd@2.4.37-65.el8", Name: "httpd", Version: "2.4.37-65.el8"})
+	// VEX-SCOPE-2: an Alpine release places from the apk purl's distro qualifier.
+	save("fnd-apk", "rel-alpine", "fl-9", domain.MatchedComponent{
+		PURL: "pkg:apk/alpine/zlib@1.3.2-r0?arch=x86_64&distro=alpine-3.24.2", Name: "zlib", Version: "1.3.2-r0"})
+	if got, err := st.ReleaseScope(ctx, "rel-alpine"); err != nil || got != (value.ProductScope{Family: value.FamilyAlpine, Major: "3.24"}) {
+		t.Fatalf("alpine release scope = %+v err=%v, want alpine/3.24", got, err)
+	}
 	save("fnd-java", "rel-el8", "fl-2", domain.MatchedComponent{
 		PURL: "pkg:maven/org.apache.xbean/xbean@4.5", Name: "xbean", Version: "4.5"})
 

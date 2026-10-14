@@ -501,10 +501,10 @@ func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]
 // event handler.
 func (s *Store) ReleaseScope(ctx context.Context, releaseID string) (value.ProductScope, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
-		SELECT DISTINCT c.version
+		SELECT DISTINCT c.purl, c.version
 		  FROM finding_components c
 		  JOIN findings f ON f.id = c.finding_id
-		 WHERE f.release_id = $1 AND c.version <> ''`, releaseID)
+		 WHERE f.release_id = $1 AND (c.version <> '' OR c.purl LIKE '%distro=%')`, releaseID)
 	if err != nil {
 		return value.ProductScope{}, err
 	}
@@ -512,11 +512,11 @@ func (s *Store) ReleaseScope(ctx context.Context, releaseID string) (value.Produ
 
 	var resolved value.ProductScope
 	for rows.Next() {
-		var version string
-		if err := rows.Scan(&version); err != nil {
+		var purl, version string
+		if err := rows.Scan(&purl, &version); err != nil {
 			return value.ProductScope{}, err
 		}
-		scope := value.ScopeFromRPMRelease(version)
+		scope := value.ScopeFromComponent(purl, version)
 		if !scope.Known() {
 			continue // not a distribution build — says nothing about the release's major
 		}

@@ -22,6 +22,16 @@ type ProductScope struct {
 // RLSA as an RHSA clone) and that RPMReleaseMajor already encodes.
 const FamilyEnterpriseLinux = "enterprise-linux"
 
+// Non-RHEL distribution families a release can be placed in (VEX-SCOPE-2, 2026-10-14). They
+// never match a Red Hat CPE's `enterprise-linux`, which is the point: a Red Hat statement on an
+// Alpine release reads `not_applicable` — a known different product — instead of blaming the
+// release as unplaceable.
+const (
+	FamilyAlpine = "alpine"
+	FamilyDebian = "debian"
+	FamilyUbuntu = "ubuntu"
+)
+
 // Known reports whether a scope was established at all.
 func (s ProductScope) Known() bool { return s.Family != "" && s.Major != "" }
 
@@ -189,6 +199,43 @@ func ScopeFromCPE(cpe string) ProductScope {
 //
 // No resolvable marker → an unestablished scope, so applicability is `unknown` rather than a
 // guess — the fail-safe direction, since an unknown scope cannot suppress anything.
+// ScopeFromComponent places a release from ONE of its components, by the facts the component
+// states: an rpm build's `.elN` marker (RHEL and its 1:1 rebuilds), or for an apk/deb purl the
+// `distro=` qualifier the SBOM generator wrote (`alpine-3.20.2` → alpine/3.20, `debian-12` →
+// debian/12, `rocky-8.10` → enterprise-linux/8). Nothing is derived from a package name. A
+// component that states neither places nothing.
+func ScopeFromComponent(purl, installedVersion string) ProductScope {
+	if s := ScopeFromRPMRelease(installedVersion); s.Known() {
+		return s
+	}
+	distro := strings.ToLower(strings.TrimSpace(PURLQualifier(purl, "distro")))
+	name, ver, ok := strings.Cut(distro, "-")
+	if !ok || name == "" || ver == "" {
+		return ProductScope{}
+	}
+	switch name {
+	case "alpine":
+		// Alpine's security branch is major.minor (v3.20); the patch level says nothing.
+		parts := strings.SplitN(ver, ".", 3)
+		if len(parts) < 2 {
+			return ProductScope{}
+		}
+		return ProductScope{Family: FamilyAlpine, Major: parts[0] + "." + parts[1]}
+	case "debian":
+		return ProductScope{Family: FamilyDebian, Major: strings.SplitN(ver, ".", 2)[0]}
+	case "ubuntu":
+		// Ubuntu releases are year.month (22.04); the point release says nothing.
+		parts := strings.SplitN(ver, ".", 3)
+		if len(parts) < 2 {
+			return ProductScope{}
+		}
+		return ProductScope{Family: FamilyUbuntu, Major: parts[0] + "." + parts[1]}
+	case "rocky", "rockylinux", "alma", "almalinux", "rhel", "redhat", "centos":
+		return ProductScope{Family: FamilyEnterpriseLinux, Major: strings.SplitN(ver, ".", 2)[0]}
+	}
+	return ProductScope{}
+}
+
 func ScopeFromRPMRelease(installedVersion string) ProductScope {
 	major := RPMReleaseMajor(installedVersion)
 	if major == "" {

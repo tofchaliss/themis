@@ -359,8 +359,8 @@ three angles, and two of them proposed fixes that would not have worked.
   stamp (`StampDiscovered`). Measure after deploy: `match-census.sh` before/after on binutils,
   compat-libtiff3, libtiff, curl, httpd.
 
-- [ ] **VEX-SCOPE-2 — only RHEL-family releases are placeable, so an Alpine release shows every Red
-  Hat row as "release not placeable" (filed 2026-10-14, user observation).** MED, operator trust.
+- [x] **VEX-SCOPE-2 — only RHEL-family releases are placeable, so an Alpine release shows every Red
+  Hat row as "release not placeable" (filed and closed 2026-10-14, user observation).** MED, operator trust.
   `ScopeFromRPMRelease` reads the `.elN` marker in rpm versions and nothing else; an apk or deb
   release yields a zero scope, every vendor statement on its findings reads `not_comparable`, and
   the drawer lists five Red Hat rows on an Alpine finding with a badge that blames the release.
@@ -371,7 +371,12 @@ three angles, and two of them proposed fixes that would not have worked.
   release's family + major on the assessment (API, additive) so the drawer folds statements whose
   family is not the release's under one closed line, "N statements about other products", and
   shows the "no statement covers this release" sentence only when some statement shares the
-  release's family (RHEL rows on a Rocky release), never for Alpine. Awaiting go (2026-10-14).
+  release's family (RHEL rows on a Rocky release), never for Alpine. **Done:**
+  `value.ScopeFromComponent` places a release from the rpm `.elN` marker or the apk/deb purl's
+  `distro=` qualifier (alpine → major.minor, debian → major, ubuntu → year.month, the EL clones →
+  enterprise-linux/major), used by `findingScope` and `Store.ReleaseScope`; the assessment carries
+  `release_scope` (additive); the drawer folds statements of another family under one closed
+  line and prints the no-statement sentence only when some statement shares the release's family.
 
 #### Vendor statements kept whole (filed and closed 2026-10-14)
 

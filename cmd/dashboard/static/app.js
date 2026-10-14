@@ -840,12 +840,18 @@ function vendorStatementsSection(assessment) {
   const applicable = vs.filter((v) => v.applicability === "applicable");
   const others = vs.filter((v) => v.applicability !== "applicable");
   const notComparable = vs.length > 0 && vs.every((v) => v.applicability === "not_comparable");
-  // The release's own family + major, as the vendor would name it: the first applicable row's
-  // scope, else the knowledge of the release carried on the others (every row says the same).
   const vendor = (vs[0].justification || "").split(":")[0] || "The vendor";
+  // VEX-SCOPE-2: the vendor "spoke about this release" only when some statement shares the
+  // release's own product FAMILY (RHEL rows on a Rocky release). Red Hat rows on an Alpine
+  // release are a different vendor's world entirely — they fold away quietly, and no sentence
+  // claims Red Hat silence about a product Red Hat never covers. Without a known release scope
+  // (the API omits it) the sentence stays, which is the pre-VEX-SCOPE-2 behaviour.
+  const rs = assessment.release_scope || null;
+  const sameFamily = rs ? vs.some((v) => v.scope_family === rs.family) : true;
   let silence = "";
-  if (!applicable.length && !notComparable) {
-    silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this release's product.</b> The vendor spoke about ${others.length} other product${others.length === 1 ? "" : "s"} only (folded below). That is not a clearance and not an "affected": it is silence, shown as silence.</p>`;
+  if (!applicable.length && !notComparable && sameFamily) {
+    const where = rs ? ` (${esc(rs.family)} ${esc(rs.major || "")})` : "";
+    silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this release's product${where}.</b> The vendor spoke about ${others.length} other product${others.length === 1 ? "" : "s"} only (folded below). That is not a clearance and not an "affected": it is silence, shown as silence.</p>`;
   }
   return `
     <section>

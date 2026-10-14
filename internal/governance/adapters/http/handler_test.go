@@ -962,4 +962,16 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 			t.Fatalf("statements = %+v, want none", got)
 		}
 	})
+	// VEX-SCOPE-2: the release's own placement rides on the wire so the drawer can fold other
+	// families and say "no statement covers this release" only for the release's own family.
+	t.Run("release scope on the wire", func(t *testing.T) {
+		srv := newSrv(t, []app.Applicability{el("git-lfs", "fixed", "8")})
+		_, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1/assessment", nil)
+		var v struct {
+			ReleaseScope *struct{ Family, Major string } `json:"release_scope"`
+		}
+		if err := json.Unmarshal(body, &v); err != nil || v.ReleaseScope == nil || v.ReleaseScope.Family != "enterprise-linux" || v.ReleaseScope.Major != "8" {
+			t.Fatalf("release_scope = %+v err=%v, want enterprise-linux 8", v.ReleaseScope, err)
+		}
+	})
 }

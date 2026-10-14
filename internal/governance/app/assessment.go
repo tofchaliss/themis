@@ -82,6 +82,10 @@ type FaultlineKnowledgeReader interface {
 type FindingAssessment struct {
 	Finding   domain.Finding
 	Knowledge FaultlineKnowledge
+	// ReleaseScope is the release's own product placement (EDR-VEX-02 D12; VEX-SCOPE-2), the
+	// side every vendor statement below was compared against. Zero = the release could not
+	// be placed, which is what every `not_comparable` row already says.
+	ReleaseScope value.ProductScope
 	// VendorStatements are the card's vendor VEX statements with Themis's per-release
 	// applicability determination beside each (EDR-VEX-02 D2). Present so a statement that was
 	// BLOCKED still reaches the reviewer: a non-applicable statement raises no Proposal, and
@@ -198,7 +202,9 @@ func (s *ReadService) GetFindingAssessment(ctx context.Context, id domain.Findin
 		// (KN-SCAN-4(b); measured 2026-09-22 as `httpd, httpd` for one installed component).
 		active := f.ActiveComponents()
 		out.Knowledge = selectFixes(k, active)
-		out.VendorStatements = vendorStatements(&f, releaseScopeFor(ctx, s.repo, &f), k.Applicabilities)
+		release := releaseScopeFor(ctx, s.repo, &f)
+		out.ReleaseScope = release
+		out.VendorStatements = vendorStatements(&f, release, k.Applicabilities)
 		out.Attribution = attributionFor(active, k.CarrierProducts)
 	}
 	return out, nil

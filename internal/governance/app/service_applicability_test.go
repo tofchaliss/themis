@@ -639,3 +639,41 @@ func TestGetFindingAssessment_VendorStatementsCarryAdvisoryAndBuild(t *testing.T
 		t.Errorf("statement = %+v, want fixed / RHSA-2022:7129 / the NEVRA / applicable", v)
 	}
 }
+
+// VEX-SCOPE-2: an Alpine release is placeable from its apk purl's `distro=` qualifier, so a Red
+// Hat statement on it reads `not_applicable` (a known different product), never
+// `not_comparable`; and the assessment says what the release was placed as.
+func TestGetFindingAssessment_AlpineReleaseIsPlacedAndRedHatRowsAreNotApplicable(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-alpine", "fl-1", "CVE-2026-85091")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{
+		PURL: "pkg:apk/alpine/zlib@1.3.2-r0?arch=x86_64&distro=alpine-3.24.2", Name: "zlib", Version: "1.3.2-r0", Ecosystem: "apk",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo.seed(f)
+	kn := stubKnowledge{k: app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2026-85091", Applicabilities: []app.Applicability{
+		scopedStatement("zlib", "fixed", value.FamilyEnterpriseLinux, "8"),
+		scopedStatement("zlib", "not_affected", value.FamilyEnterpriseLinux, "9"),
+	}}}
+	a, err := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn).GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ReleaseScope != (value.ProductScope{Family: value.FamilyAlpine, Major: "3.24"}) {
+		t.Fatalf("release scope = %+v, want alpine/3.24", a.ReleaseScope)
+	}
+	for _, v := range a.VendorStatements {
+		if v.Applicability != "not_applicable" {
+			t.Errorf("%s %s %s = %q, want not_applicable (a known different product)", v.Status, v.ScopeFamily, v.ScopeMajor, v.Applicability)
+		}
+	}
+	// A not_affected statement for RHEL 9 must still raise nothing on the Alpine release.
+	s := writeSvc(repo)
+	if err := s.ReactToEnrichment(context.Background(), app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: kn.k.Applicabilities}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(repo.byID["fnd-1"].Proposals()); n != 0 {
+		t.Fatalf("proposals = %d, want 0", n)
+	}
+}

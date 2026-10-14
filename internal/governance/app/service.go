@@ -328,7 +328,7 @@ func applicabilityOf(release value.ProductScope, a Applicability) value.ScopeMat
 // around it, and on a single-major release the two agree anyway.
 func findingScope(f *domain.Finding) value.ProductScope {
 	for _, c := range f.Components() {
-		if s := value.ScopeFromRPMRelease(c.Version); s.Known() {
+		if s := value.ScopeFromComponent(c.PURL, c.Version); s.Known() {
 			return s
 		}
 	}
