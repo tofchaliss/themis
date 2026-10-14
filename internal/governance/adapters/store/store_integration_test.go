@@ -386,6 +386,13 @@ func TestProjectionsAndFanout(t *testing.T) {
 		t.Fatalf("fan-out = %v err=%v", ids, err)
 	}
 
+	// Undecided Faultlines (KN-GO-2): fl-1 still has fnd-2 with no Position, so it is listed;
+	// fl-9's only Finding is decided, so it is not — a decided Finding is never re-judged.
+	undecided, err := st.UndecidedFaultlines(ctx)
+	if err != nil || len(undecided) != 1 || undecided[0] != "fl-1" {
+		t.Fatalf("undecided faultlines = %v err=%v, want [fl-1]", undecided, err)
+	}
+
 	// Blast radius: releases affected by fl-1.
 	blast, err := st.FaultlineBlastRadius(ctx, "fl-1")
 	if err != nil || len(blast) != 2 || blast[0] != "rel-1" || blast[1] != "rel-2" {

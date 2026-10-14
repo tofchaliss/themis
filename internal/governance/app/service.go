@@ -593,14 +593,23 @@ func (s *FindingService) reactToApplicability(ctx context.Context, sig Enrichmen
 //
 // Idempotent: the proposal id derives from the Finding, so a re-delivery dedups.
 func (s *FindingService) reactToVersionRange(ctx context.Context, sig EnrichmentSignal) error {
+	_, err := s.reactToVersionRangeCounted(ctx, sig)
+	return err
+}
+
+// reactToVersionRangeCounted is reactToVersionRange reporting how many proposals it raised,
+// so the one-time re-judge pass (KN-GO-2) can say what it did; the enrichment path discards
+// the count.
+func (s *FindingService) reactToVersionRangeCounted(ctx context.Context, sig EnrichmentSignal) (int, error) {
 	if len(sig.AffectedRanges) == 0 {
-		return nil // no reconciled range to decide against
+		return 0, nil // no reconciled range to decide against
 	}
 	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	proposer := domain.Actor{Kind: domain.ActorSystem, ID: versionRangeActorID}
+	raised := 0
 	for _, id := range ids {
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
 			if !domain.ProvablyOutOfRange(f.Components(), sig.AffectedRanges) {
@@ -616,12 +625,15 @@ func (s *FindingService) reactToVersionRange(ctx context.Context, sig Enrichment
 			if errors.Is(err, domain.ErrDuplicateProposal) {
 				return nil, errNoop // already raised for this Finding — idempotent
 			}
+			if err == nil {
+				raised++
+			}
 			return notes, err
 		}); err != nil {
-			return err
+			return raised, err
 		}
 	}
-	return nil
+	return raised, nil
 }
 
 // coveringStatement returns the not_affected statement Governance should act on for this Finding:

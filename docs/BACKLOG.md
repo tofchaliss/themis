@@ -306,8 +306,8 @@ three angles, and two of them proposed fixes that would not have worked.
 
 #### Go stdlib false positives (filed and closed 2026-10-14)
 
-- [ ] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
-  matches stay open after KN-GO-1 (filed 2026-10-14).** HIGH, operability. The version-range
+- [x] **KN-GO-2 — open Findings are never re-judged when the comparator changes; 330 stdlib
+  matches stay open after KN-GO-1 (filed and closed 2026-10-14).** HIGH, operability. The version-range
   rule (`reactToVersionRange`) runs only on a FaultlineEnriched; a Finding whose verdict changed
   because Themis's own reading of the version changed has no trigger. **Do:** a one-time
   re-judge in Governance — for every open Finding, read the card's reconciled ranges over the
@@ -315,6 +315,10 @@ three angles, and two of them proposed fixes that would not have worked.
   proposal with the card's `RangeTrust`, policy decides as usual). Smallest shape: an opt-in
   startup pass behind `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, idempotent through the existing
   deterministic proposal id, no API or schema change. Measure: the 330 before, the count after.
+  **Done:** `app.RangeRejudge` (`internal/governance/app/rejudge.go`) over a new store lister
+  `UndecidedFaultlines` and the existing Knowledge read seam; `THEMIS_GOVERNANCE_REJUDGE_RANGES=1`
+  runs it once at startup and logs faultlines / raised / skipped. Run on the estate after deploy
+  and record the numbers here.
 
 - [x] **KN-GO-1 — a Go stdlib component spelled `go1.27.1` opened long-fixed stdlib CVEs on every
   Go program (filed and closed 2026-10-14).** HIGH, correctness. Found on the estate as
