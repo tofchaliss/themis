@@ -327,10 +327,32 @@ three angles, and two of them proposed fixes that would not have worked.
   clicker's: a Position whose accepted proposal came from Governance's `system` proposer is the
   rule's whoever accepted it (`current_position.accepted_proposal_id` joined to
   `proposals[].proposer_kind`, both already on the read). Re-run the one-time prune after
-  deploying; a human's own or an AI-proposed decision is untouched.
+  deploying; a human's own or an AI-proposed decision is untouched. **Measured on the VM
+  (2026-10-14):** first prune 479 checked / 162 pruned (policy-decided); second prune after 4b
+  317 checked / 311 pruned — exactly the hand-accepted range verdicts — leaving 6 judged
+  Positions as precedent.
 
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
+- [x] **VEX-RAISE-1 — an applicable vendor not_affected on the card never reaches a Finding born
+  after it, so the proposal is missing and the Finding stays open (filed and closed 2026-10-14).**
+  HIGH, correctness/operability. Found while reading the KN-SCAN-5 census: compat-libtiff3
+  59 CVEs open / 0 decided, yet the card for CVE-2026-52490 carries Red Hat `not_affected` for
+  compat-libtiff3 in RHEL 8, applicable to a Rocky 8 release. Governance raises the vendor
+  proposal only in `reactToApplicability`, on a FaultlineEnriched event. Three Findings on that
+  CVE created later (2026-09-25, and two of the three created 2026-10-14 15:11) got the
+  `enrich:` proposal and no `vex:` one — 174 open compat-libtiff3 Findings without a vendor
+  proposal on the estate. The two causes: a Finding born after the statement had no trigger,
+  and a Finding whose release could only be placed once VEX-SCOPE-2 read the scope from its own
+  component was blocked as unplaceable at raise time. **Done:** the one-time re-judge pass
+  (`THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, KN-GO-2) also re-applies the vendor overlay per
+  undecided Faultline (`FindingService.RejudgeApplicability`, same proposal id, idempotent) and
+  logs `vendor_raised`; `scripts/vex-accept-applicable.sh` (dry-run default, `--apply` +
+  `THEMIS_ACTOR_ID`) accepts the standing proposals whose statement the assessment projection
+  marks `applicable` — the counterpart of the reject script, because vendor evidence is Asserted
+  and one person has to sign each acceptance. **Open:** the find-or-create path should raise
+  from the card's current statements at creation time, so the pass is not needed for new
+  Findings; tracked as VEX-RAISE-2 (LOW until the next estate shows it).
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87

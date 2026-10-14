@@ -66,7 +66,7 @@ type config struct {
 	epssDriftThreshold float64
 	mitigatedWeight    float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
-	rejudgeRanges bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
+	rejudgeRanges bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -183,11 +183,11 @@ func main() {
 				res, err := gov.Rejudge.Run(ctx)
 				if err != nil {
 					rl.Error("version-range re-judge aborted", observability.Err(err),
-						observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("skipped", res.Skipped))
+						observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("skipped", res.Skipped))
 					return
 				}
 				rl.Info("version-range re-judge done — unset THEMIS_GOVERNANCE_REJUDGE_RANGES before the next restart",
-					observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("skipped", res.Skipped))
+					observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("skipped", res.Skipped))
 			}()
 		}
 	}

@@ -1017,13 +1017,16 @@ echo 'THEMIS_GOVERNANCE_REJUDGE_RANGES=1' | sudo tee -a /etc/themis/governance.e
 sudo systemctl restart themis@governance
 sleep 30
 sudo journalctl -u themis@governance --since '-2 min' --no-pager | grep 're-judge'
-# expect: "version-range re-judge done" with faultlines / raised / skipped counts
+# expect: "version-range re-judge done" with faultlines / raised / vendor_raised / skipped counts
 sudo sed -i '/^THEMIS_GOVERNANCE_REJUDGE_RANGES=/d' /etc/themis/governance.env
 ```
 
 It applies the same version-range rule an enrichment applies, so only Findings whose every
 component is provably outside the card's range get a system `not_affected` proposal, and the
-configured policy decides as usual. Leaving the switch set is harmless (the pass is idempotent)
+configured policy decides as usual. Since VEX-RAISE-1 the same pass also re-applies the vendor
+overlay: a Finding born after the vendor's `not_affected` statement arrived gets the proposal it
+never got (`vendor_raised`). Vendor evidence waits for a person; sign the applicable ones in one
+run with `scripts/vex-accept-applicable.sh` (dry run first, then `--apply` with `THEMIS_ACTOR_ID`). Leaving the switch set is harmless (the pass is idempotent)
 but wasteful, which is why the last line removes it.
 
 **If the cards themselves carry the old split ranges** (KN-GO-3: a Go card reading
