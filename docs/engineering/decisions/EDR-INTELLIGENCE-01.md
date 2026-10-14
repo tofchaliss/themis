@@ -1279,3 +1279,22 @@ an advisory `ai` proposal through the existing Governance seam — where an expl
 constitutional bar guarantees it can never become authority. Deferred: the analyst portfolio,
 portfolio-narrative + its new intake, event-reactive triggering, cloud-tier autonomy, a
 shared-with-priorities pool. Δ4b builds on Δ4a's store and moves no immovable guardrail.
+
+
+## Realization note (2026-10-14) — a rule's decision is not precedent (AI-RF-4)
+
+C6 and D-Δ4b-2 ground `recommend_position` and the autonomous sweep on *Positions for this CVE
+across releases* and on semantically similar decided Findings. The day the KN-GO arc landed, the
+version-range rule decided 311 Findings in one afternoon, and the drawer for an *affected* stdlib
+1.26.8 Finding (CVE-2026-56857) listed five of them at 0.99 similarity as "similar past decisions":
+`not_affected`, rationale *"every matched component version is outside the reconciled affected
+range"* — each about a different CVE. The same evening a zlib Finding on an Alpine release showed
+five more, from Rocky releases.
+
+A Position a **policy** established on a system proposal is arithmetic about one CVE's range. It
+carries no judgement about components, exploitability or context, so it has nothing to transfer
+to another CVE; served as precedent it points the human and the sweep at the wrong stance on a
+genuinely affected Finding. **Decision:** rule-decided Positions are not precedent. The Position
+events carry `DecidedBy`; Intelligence's indexer skips (and removes) policy-decided Positions,
+the exact-CVE fallback skips them, and a one-time prune cleans an index populated before this
+note. Human- and AI-judged Positions remain precedent exactly as C6 and D-Δ4b-2 intend.

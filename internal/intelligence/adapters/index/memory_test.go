@@ -141,3 +141,27 @@ func TestSearchBreaksTiesDeterministically(t *testing.T) {
 		}
 	}
 }
+
+// AI-RF-4: Delete drops one entry and keeps the others searchable and correctly indexed.
+func TestDeleteKeepsTheOthersSearchable(t *testing.T) {
+	m := index.NewMemory()
+	m.Load([]store.EmbeddingRecord{
+		rec("a", "rel-a", "not_affected", []float32{1, 0, 0}),
+		rec("b", "rel-b", "affected", []float32{0, 1, 0}),
+		rec("c", "rel-c", "mitigated", []float32{0, 0, 1}),
+	})
+	m.Delete("a")
+	m.Delete("nope") // absent: no-op
+	if m.Len() != 2 {
+		t.Fatalf("len = %d, want 2", m.Len())
+	}
+	got := m.Search([]float32{0, 0, 1}, 3, "")
+	if len(got) != 2 || got[0].SourceCVE != "CVE-c" || got[1].SourceCVE != "CVE-b" {
+		t.Fatalf("search after delete = %+v, want c then b", got)
+	}
+	// Upsert after a delete lands in the right slot.
+	m.Upsert(rec("b", "rel-b", "affected", []float32{0, 0, 1}))
+	if got := m.Search([]float32{0, 0, 1}, 1, "rel-c"); len(got) != 1 || got[0].SourceCVE != "CVE-b" {
+		t.Fatalf("upsert after delete = %+v", got)
+	}
+}

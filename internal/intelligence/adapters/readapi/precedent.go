@@ -45,7 +45,15 @@ func (c *PrecedentClient) WithAPIKey(apiKey string) *PrecedentClient {
 type wireCurrentPosition struct {
 	Stance    string `json:"stance"`
 	Rationale string `json:"rationale"`
+	ActorKind string `json:"actor_kind"` // human | ai | policy — PositionView already carries it
 }
+
+// RulePositionActorKind is the decider kind of a Position a policy established on a system
+// proposal (the version-range verdict, an upstream withdrawal). Such a Position is arithmetic
+// about ONE CVE's range and carries no judgement to transfer, so it is never precedent
+// (AI-RF-4, 2026-10-14: five of them at 0.99 nudged a human toward not_affected on an affected
+// stdlib Finding).
+const RulePositionActorKind = "policy"
 
 type wireFindingWithPosition struct {
 	CurrentPosition *wireCurrentPosition `json:"current_position"`
@@ -67,7 +75,7 @@ func (c *PrecedentClient) GetPrecedents(ctx context.Context, faultlineID, exclud
 		if err != nil {
 			return nil, err
 		}
-		if ok {
+		if ok && pos.ActorKind != RulePositionActorKind {
 			out = append(out, domain.PrecedentPosition{ReleaseID: rel, Stance: pos.Stance, Rationale: pos.Rationale, ExactCVE: true})
 		}
 	}
@@ -78,12 +86,12 @@ func (c *PrecedentClient) GetPrecedents(ctx context.Context, faultlineID, exclud
 // (release, faultline) — used by Δ3a index population to label a precedent embedding. It reuses
 // the same find-by-key endpoint as GetPrecedents. found=false when that release has no Position
 // yet (or the finding is absent).
-func (c *PrecedentClient) CurrentPosition(ctx context.Context, release, faultline string) (stance, rationale string, found bool, err error) {
+func (c *PrecedentClient) CurrentPosition(ctx context.Context, release, faultline string) (stance, rationale, actorKind string, found bool, err error) {
 	pos, ok, err := c.currentPosition(ctx, release, faultline)
 	if err != nil || !ok {
-		return "", "", false, err
+		return "", "", "", false, err
 	}
-	return pos.Stance, pos.Rationale, true, nil
+	return pos.Stance, pos.Rationale, pos.ActorKind, true, nil
 }
 
 func (c *PrecedentClient) blastRadius(ctx context.Context, faultlineID string) ([]string, error) {

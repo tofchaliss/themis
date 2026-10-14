@@ -71,7 +71,11 @@ type PositionEstablished struct {
 	CVE         string
 	Version     int
 	Stance      Stance
-	OccurredAt  time.Time
+	// DecidedBy is who established this Position (AI-RF-4, 2026-10-14): a human, an AI, or a
+	// policy acting on a system proposal. A consumer that reuses Positions as precedent needs
+	// it — a policy's arithmetic on one CVE's range is no judgement to carry to another.
+	DecidedBy  Actor
+	OccurredAt time.Time
 }
 
 // PositionRevised is a subsequent Enterprise Position version (2+) — a completed fact
@@ -83,7 +87,11 @@ type PositionRevised struct {
 	CVE         string
 	Version     int
 	Stance      Stance
-	OccurredAt  time.Time
+	// DecidedBy is who established this Position (AI-RF-4, 2026-10-14): a human, an AI, or a
+	// policy acting on a system proposal. A consumer that reuses Positions as precedent needs
+	// it — a policy's arithmetic on one CVE's range is no judgement to carry to another.
+	DecidedBy  Actor
+	OccurredAt time.Time
 }
 
 // NewFindingOpened builds the event for a newly opened Finding.
@@ -151,6 +159,7 @@ func NewPositionEvent(f Finding, pos Position, at time.Time) (*PositionEstablish
 			CVE:         f.CVE(),
 			Version:     pos.Version(),
 			Stance:      pos.Stance(),
+			DecidedBy:   pos.Actor(),
 			OccurredAt:  at.UTC(),
 		}
 		return &e, nil
@@ -162,6 +171,7 @@ func NewPositionEvent(f Finding, pos Position, at time.Time) (*PositionEstablish
 		CVE:         f.CVE(),
 		Version:     pos.Version(),
 		Stance:      pos.Stance(),
+		DecidedBy:   pos.Actor(),
 		OccurredAt:  at.UTC(),
 	}
 	return nil, &e

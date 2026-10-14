@@ -58,6 +58,10 @@ func TestNewPositionEvent(t *testing.T) {
 		established.ReleaseID != "rel-1" || established.FaultlineID != "fl-1" || established.CVE != "CVE-2024-1" {
 		t.Errorf("established = %+v", established)
 	}
+	// AI-RF-4: the event says who decided, so a consumer can tell a judgement from a rule.
+	if established.DecidedBy != human {
+		t.Errorf("DecidedBy = %+v, want %+v", established.DecidedBy, human)
+	}
 
 	v2 := domain.ReconstitutePosition(2, domain.StanceMitigated, "fixed", human, domain.PositionInputs{}, epoch)
 	established, revised = domain.NewPositionEvent(f, v2, epoch)

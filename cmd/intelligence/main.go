@@ -217,6 +217,21 @@ func main() {
 		}
 		intel.Index.Load(records)
 		logger.Info("operational semantic index loaded", observability.Int("embeddings", len(records)))
+
+		// The one-time AI-RF-4 prune: rows an index populated before 2026-10-14 still holds for
+		// Findings a POLICY decided. Opt-in, runs once, says what it did.
+		if os.Getenv("THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS") == "1" {
+			pl := logger.Component("precedent-prune")
+			pl.Info("precedent prune starting (THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS=1)")
+			checked, pruned, err := inbound.PruneRulePositions(ctx, records, intel.Precedents, st, intel.Index)
+			if err != nil {
+				pl.Error("precedent prune aborted", observability.Err(err),
+					observability.Int("checked", checked), observability.Int("pruned", pruned))
+			} else {
+				pl.Info("precedent prune done — unset THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS before the next restart",
+					observability.Int("checked", checked), observability.Int("pruned", pruned))
+			}
+		}
 	}
 
 	// The bus reader populates the index from Governance Position events (Δ3a R6). It needs both

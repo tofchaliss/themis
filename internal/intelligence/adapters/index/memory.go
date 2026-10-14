@@ -62,6 +62,21 @@ func (m *Memory) Upsert(r store.EmbeddingRecord) {
 }
 
 // Len returns the number of indexed vectors (telemetry / tests).
+// Delete drops one Finding's entry (AI-RF-4). The order of the others is preserved.
+func (m *Memory) Delete(findingID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, ok := m.byID[findingID]
+	if !ok {
+		return
+	}
+	m.recs = append(m.recs[:i], m.recs[i+1:]...)
+	delete(m.byID, findingID)
+	for j := i; j < len(m.recs); j++ {
+		m.byID[m.recs[j].rec.FindingID] = j
+	}
+}
+
 func (m *Memory) Len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

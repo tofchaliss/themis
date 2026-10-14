@@ -81,3 +81,30 @@ func TestPrecedentClientDefaultHTTPClient(t *testing.T) {
 		t.Error("expected a transport error against an unreachable host")
 	}
 }
+
+// AI-RF-4: a Position a policy established is not precedent. The read carries `actor_kind`,
+// CurrentPosition returns it, and the exact-CVE pull skips such releases.
+func TestPrecedentClientSkipsPolicyDecidedPositions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/blast-radius"):
+			_, _ = w.Write([]byte(`["R1","R2"]`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/findings"):
+			if r.URL.Query().Get("release") == "R1" {
+				_, _ = w.Write([]byte(`{"current_position":{"stance":"not_affected","rationale":"every matched component version is outside the reconciled affected range","actor_kind":"policy"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"current_position":{"stance":"not_affected","rationale":"unreachable here","actor_kind":"human"}}`))
+		}
+	}))
+	defer srv.Close()
+	c := readapi.NewPrecedentClient(srv.URL, srv.Client())
+	got, err := c.GetPrecedents(context.Background(), "FL1", "R0")
+	if err != nil || len(got) != 1 || got[0].ReleaseID != "R2" {
+		t.Fatalf("precedents = %+v err=%v, want only the human-decided R2", got, err)
+	}
+	_, _, kind, found, err := c.CurrentPosition(context.Background(), "R1", "FL1")
+	if err != nil || !found || kind != readapi.RulePositionActorKind {
+		t.Fatalf("CurrentPosition R1 = kind %q found %v err %v, want policy", kind, found, err)
+	}
+}

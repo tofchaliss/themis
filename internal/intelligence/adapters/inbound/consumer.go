@@ -61,13 +61,20 @@ var FaultlineSubscription = eventbus.Subscription{
 // PositionReader reads the current Enterprise Position (stance + rationale) for a
 // (release, faultline) — the precedent labels. The readapi PrecedentClient satisfies it.
 type PositionReader interface {
-	CurrentPosition(ctx context.Context, release, faultline string) (stance, rationale string, found bool, err error)
+	CurrentPosition(ctx context.Context, release, faultline string) (stance, rationale, actorKind string, found bool, err error)
 }
+
+// rulePositionActorKind mirrors readapi.RulePositionActorKind without importing it: a Position a
+// policy established is not precedent (AI-RF-4).
+const rulePositionActorKind = "policy"
 
 // EmbeddingWriter persists an embedding (the store) — the durable write, which joins the inbox
 // transaction.
 type EmbeddingWriter interface {
 	Upsert(ctx context.Context, rec store.EmbeddingRecord) error
+	// Delete removes a Finding's embedding — a Position revised from a judgement to a rule
+	// leaves the index (AI-RF-4). Absent rows are not an error.
+	Delete(ctx context.Context, findingID string) error
 	// CachedEmbedding returns the stored embed-text hash and vector for a Finding, so an
 	// unchanged subject can be re-labelled without paying for another embed call.
 	CachedEmbedding(ctx context.Context, findingID string) (hash string, vector []float32, found bool, err error)
@@ -80,6 +87,7 @@ type EmbeddingWriter interface {
 // aborted transaction is corrected by the boot-time reload from the store).
 type IndexWriter interface {
 	Upsert(rec store.EmbeddingRecord)
+	Delete(findingID string)
 }
 
 // Consumer maintains the Operational Semantic Index from Governance Position events.
@@ -119,9 +127,18 @@ func (c *Consumer) Prepare(ctx context.Context, env event.Envelope) (func(contex
 	if !ok {
 		return nil, nil // not a population event (defensive — the interest filter drops these)
 	}
-	rec, err := c.buildRecord(ctx, dto)
+	rec, drop, err := c.buildRecord(ctx, dto)
 	if err != nil {
 		return nil, err // transient → retry
+	}
+	if drop {
+		return func(txCtx context.Context) error {
+			if err := c.store.Delete(txCtx, dto.FindingID); err != nil {
+				return err
+			}
+			c.index.Delete(dto.FindingID)
+			return nil
+		}, nil
 	}
 	if rec == nil {
 		return func(context.Context) error { return nil }, nil // nothing to embed → claim + skip
@@ -149,9 +166,16 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 	if err != nil || !ok {
 		return err
 	}
-	rec, err := c.buildRecord(ctx, dto)
+	rec, drop, err := c.buildRecord(ctx, dto)
 	if err != nil {
 		return err
+	}
+	if drop {
+		if err := c.store.Delete(ctx, dto.FindingID); err != nil {
+			return err
+		}
+		c.index.Delete(dto.FindingID)
+		return nil
 	}
 	if rec == nil {
 		return nil
@@ -185,13 +209,18 @@ func (c *Consumer) prepareReEmbed(ctx context.Context, env event.Envelope) (func
 		return nil, err // transient → retry
 	}
 	recs := make([]store.EmbeddingRecord, 0, len(indexed))
+	var drops []string // Findings whose Position a policy has since established (AI-RF-4)
 	for _, f := range indexed {
-		rec, err := c.buildRecord(ctx, positionEventDTO{
+		rec, drop, err := c.buildRecord(ctx, positionEventDTO{
 			FindingID: f.FindingID, ReleaseID: f.ReleaseID, FaultlineID: f.FaultlineID,
 			CVE: f.CVE, Stance: f.Stance,
 		})
 		if err != nil {
 			return nil, err // transient → retry the whole event; re-embedding is idempotent
+		}
+		if drop {
+			drops = append(drops, f.FindingID)
+			continue
 		}
 		if rec != nil {
 			recs = append(recs, *rec)
@@ -204,6 +233,12 @@ func (c *Consumer) prepareReEmbed(ctx context.Context, env event.Envelope) (func
 			}
 			c.index.Upsert(rec)
 		}
+		for _, id := range drops {
+			if err := c.store.Delete(txCtx, id); err != nil {
+				return err
+			}
+			c.index.Delete(id)
+		}
 		return nil
 	}, nil
 }
@@ -211,16 +246,30 @@ func (c *Consumer) prepareReEmbed(ctx context.Context, env event.Envelope) (func
 // buildRecord assembles one embedding from the event + read APIs. It returns (nil, nil) when
 // there is nothing to embed (no components and no severity), and an error only for a transient
 // read/embed failure (which the caller retries).
-func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*store.EmbeddingRecord, error) {
+// buildRecord returns the record to index, or drop=true when this Position must NOT be precedent
+// (a policy decided it — AI-RF-4) and any earlier embedding of the Finding must go. The decider
+// comes from the event when it carries one, else from the live Position read, so an event from
+// before the field existed is still judged.
+func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (rec *store.EmbeddingRecord, drop bool, err error) {
+	if dto.DecidedBy.Kind == rulePositionActorKind {
+		return nil, true, nil
+	}
+	_, rationale, actorKind, _, err := c.positions.CurrentPosition(ctx, dto.ReleaseID, dto.FaultlineID)
+	if err != nil {
+		return nil, false, err
+	}
+	if actorKind == rulePositionActorKind {
+		return nil, true, nil
+	}
 	// One projection read, not two gathering reads (T10) — the population path is a consumer
 	// of the same business view the reasoning path uses.
 	proj, err := c.projection.GetAssessment(ctx, dto.FindingID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	text := domain.SubjectText(proj.Knowledge.Severity, proj.Finding.Components)
 	if text == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	hash := textHash(text)
 	// Skip the embed when the SUBJECT text is unchanged. A Position revise usually moves only
@@ -230,11 +279,7 @@ func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*stor
 	// the model call is avoided.
 	vec, err := c.cachedOrEmbed(ctx, dto.FindingID, hash, text)
 	if err != nil {
-		return nil, err
-	}
-	_, rationale, _, err := c.positions.CurrentPosition(ctx, dto.ReleaseID, dto.FaultlineID)
-	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	return &store.EmbeddingRecord{
 		FindingID:   dto.FindingID,
@@ -247,7 +292,32 @@ func (c *Consumer) buildRecord(ctx context.Context, dto positionEventDTO) (*stor
 		Model:       c.model,
 		Vector:      vec,
 		TextHash:    hash,
-	}, nil
+	}, false, nil
+}
+
+// PruneRulePositions is the ONE-TIME pass over an index populated before AI-RF-4: every stored
+// embedding whose current Position a policy established is removed. Run on demand
+// (THEMIS_INTELLIGENCE_PRUNE_RULE_PRECEDENTS=1); a second pass removes nothing.
+func PruneRulePositions(ctx context.Context, records []store.EmbeddingRecord, positions PositionReader, st EmbeddingWriter, idx IndexWriter) (checked, pruned int, err error) {
+	for _, r := range records {
+		if err := ctx.Err(); err != nil {
+			return checked, pruned, err
+		}
+		checked++
+		_, _, actorKind, found, err := positions.CurrentPosition(ctx, r.ReleaseID, r.FaultlineID)
+		if err != nil {
+			return checked, pruned, err
+		}
+		if !found || actorKind != rulePositionActorKind {
+			continue
+		}
+		if err := st.Delete(ctx, r.FindingID); err != nil {
+			return checked, pruned, err
+		}
+		idx.Delete(r.FindingID)
+		pruned++
+	}
+	return checked, pruned, nil
 }
 
 // cachedOrEmbed returns the stored vector when the subject text has not changed, otherwise a
@@ -310,4 +380,8 @@ type positionEventDTO struct {
 	CVE         string `json:"CVE"`
 	Version     int    `json:"Version"`
 	Stance      string `json:"Stance"`
+	DecidedBy   struct {
+		Kind string `json:"Kind"`
+		ID   string `json:"ID"`
+	} `json:"DecidedBy"`
 }
