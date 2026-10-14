@@ -275,14 +275,45 @@ func TestSweepSkipsLowOverlapPrecedent(t *testing.T) {
 
 // An exact-CVE fallback (Score 0 by construction, SAME CVE) is exempt from the cosine floor —
 // same CVE is maximally relevant, matched by lookup not similarity.
-func TestSweepExactCVEFallbackExemptFromScoreFloor(t *testing.T) {
+// A1 (audit 2026-10-14): the exact-CVE road in the sweep was dead — gather passed no faultline,
+// so the fallback never ran and the only "exact" precedent a test ever saw was a faked Score 0.
+// This drives the REAL road: a posture entry carrying its faultline id, a fallback reader that
+// answers for it, and a semantic index that would NOT qualify on its own. The same CVE decided
+// on a sibling release wins, below the cosine floor, and the fallback is asked for that faultline.
+func TestSweepExactCVEPrecedentComesFromTheFallback(t *testing.T) {
 	raiser := &recordingRaiser{}
-	exact := domain.PrecedentPosition{ReleaseID: "rel-2", SourceCVE: "CVE-1", Stance: "not_affected", Score: 0}
-	s := sweepWith(t,
-		map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}},
-		[]domain.PrecedentPosition{exact}, raiser, newMemRecorder(), NewBudget(100, time.Hour))
-	if res, _ := s.Run(context.Background()); res.Proposed != 1 {
-		t.Errorf("an exact-CVE precedent (score 0) must qualify: %+v", res)
+	fb := &recordingFallback{out: []domain.PrecedentPosition{{ReleaseID: "rel-2", Stance: "not_affected", Rationale: "backport"}}}
+	weak := []domain.PrecedentPosition{precedent("rel-3", "CVE-other", "affected", 0.2)} // below the floor
+	ps := NewPrecedentService(fakeEmbed{}, fakeIndex{out: weak}, fb, 5)
+	entry := undecided("f1", 90)
+	entry.FaultlineID, entry.CVE = "fl-1", "CVE-1"
+	s := NewAutonomousSweep(fakeReleases{ids: []string{"rel-1"}},
+		fakePostureReader{byRelease: map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{entry}}}},
+		ps, raiser, newMemRecorder(), NewBudget(100, time.Hour))
+
+	res, _ := s.Run(context.Background())
+	if res.Proposed != 1 {
+		t.Fatalf("an exact-CVE precedent from the fallback must qualify: %+v", res)
+	}
+	if fb.calls != 1 || fb.gotFL != "fl-1" || fb.gotExclude != "rel-1" {
+		t.Errorf("fallback asked %d times for %q excluding %q, want once for fl-1 excluding rel-1", fb.calls, fb.gotFL, fb.gotExclude)
+	}
+	if len(raiser.calls) != 1 || raiser.calls[0] != "f1" {
+		t.Errorf("raised for %v, want [f1]", raiser.calls)
+	}
+}
+
+// With no faultline on the posture row the sweep still works the semantic road, and nothing
+// below the floor qualifies.
+func TestSweepWithoutFaultlineFallsBackToSemantic(t *testing.T) {
+	raiser := &recordingRaiser{}
+	fb := &recordingFallback{out: []domain.PrecedentPosition{{ReleaseID: "rel-2", Stance: "not_affected"}}}
+	ps := NewPrecedentService(fakeEmbed{}, fakeIndex{out: []domain.PrecedentPosition{precedent("rel-3", "CVE-9", "affected", 0.2)}}, fb, 5)
+	s := NewAutonomousSweep(fakeReleases{ids: []string{"rel-1"}},
+		fakePostureReader{byRelease: map[string]domain.ReleasePosture{"rel-1": {ReleaseID: "rel-1", Entries: []domain.PostureEntry{undecided("f1", 90)}}}},
+		ps, raiser, newMemRecorder(), NewBudget(100, time.Hour))
+	if res, _ := s.Run(context.Background()); res.Proposed != 0 || fb.calls != 0 {
+		t.Errorf("res=%+v fallback calls=%d; want nothing proposed and the fallback never asked", res, fb.calls)
 	}
 }
 

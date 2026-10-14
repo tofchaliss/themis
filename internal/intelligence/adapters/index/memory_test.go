@@ -124,3 +124,20 @@ func TestLoadResetsIndex(t *testing.T) {
 		t.Fatalf("expected the reloaded entry, got %+v", got)
 	}
 }
+
+// A3 (audit 2026-10-14): two records at the SAME cosine used to come back in load order, which
+// changes across a restart. The order is now the domain's: release id, then source CVE — so
+// loading the same records reversed yields the same answer.
+func TestSearchBreaksTiesDeterministically(t *testing.T) {
+	same := []float32{1, 0, 0}
+	a := rec("a", "rel-b", "not_affected", same) // CVE-a on rel-b
+	b := rec("b", "rel-a", "affected", same)     // CVE-b on rel-a → first by release id
+	for _, order := range [][]store.EmbeddingRecord{{a, b}, {b, a}} {
+		m := index.NewMemory()
+		m.Load(order)
+		got := m.Search(same, 2, "")
+		if len(got) != 2 || got[0].ReleaseID != "rel-a" || got[1].ReleaseID != "rel-b" {
+			t.Fatalf("load order %v: got %+v, want rel-a then rel-b", []string{order[0].FindingID, order[1].FindingID}, got)
+		}
+	}
+}

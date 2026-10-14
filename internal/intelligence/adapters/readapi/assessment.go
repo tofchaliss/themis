@@ -146,6 +146,7 @@ func (c *AssessmentClient) GetAssessment(ctx context.Context, findingID string) 
 // posturePayload mirrors Governance's release-posture wire shape.
 type posturePayload struct {
 	FindingID         string `json:"finding_id"`
+	FaultlineID       string `json:"faultline_id"`
 	CVE               string `json:"cve"`
 	Stance            string `json:"stance"`
 	ResidualPriority  int    `json:"residual_priority"`
@@ -201,7 +202,7 @@ func (c *AssessmentClient) GetReleasePosture(ctx context.Context, releaseID stri
 // and the comparison read, whose buckets are the same rows.
 func toPostureEntry(e posturePayload) domain.PostureEntry {
 	entry := domain.PostureEntry{
-		FindingID: e.FindingID, CVE: e.CVE, Stance: e.Stance,
+		FindingID: e.FindingID, FaultlineID: e.FaultlineID, CVE: e.CVE, Stance: e.Stance,
 		ResidualPriority: e.ResidualPriority, EffectivePriority: e.EffectivePriority,
 	}
 	for _, c := range e.Components {

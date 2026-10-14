@@ -23,6 +23,7 @@ type ReleasePosture struct {
 // PostureEntry is one outstanding (or decided) Finding on the release.
 type PostureEntry struct {
 	FindingID         string
+	FaultlineID       string // the Knowledge card this Finding references; the key of an exact-CVE precedent pull
 	CVE               string
 	Stance            string
 	ResidualPriority  int

@@ -170,6 +170,9 @@ func (s *PrecedentService) Retrieve(ctx context.Context, q PrecedentQuery) []dom
 	if err != nil {
 		return nil
 	}
+	for i := range prec {
+		prec[i].ExactCVE = true // the fallback IS the exact-CVE pull, whichever reader served it
+	}
 	return s.deltaRank(ctx, q.ReleaseID, prec)
 }
 
@@ -209,8 +212,33 @@ func (s *PrecedentService) deltaRank(ctx context.Context, subjectRelease string,
 		}
 		prec[i].ReleaseOverlap, prec[i].OverlapKnown = v.overlap, v.known
 	}
-	sort.SliceStable(prec, func(i, j int) bool { return prec[i].RankScore() > prec[j].RankScore() })
+	sort.SliceStable(prec, func(i, j int) bool {
+		ri, rj := prec[i].RankScore(), prec[j].RankScore()
+		if ri != rj {
+			return ri > rj
+		}
+		return prec[i].Before(prec[j])
+	})
 	return prec
+}
+
+// RetrieveExact is the Δ2 exact-CVE pull on its own: Positions on the SAME Faultline in other
+// releases, delta-ranked, with no semantic step. The autonomous sweep asks this FIRST (audit
+// 2026-10-14, A1): "this CVE was decided on a sibling release" is the strongest precedent there
+// is, and under Retrieve's semantic-first rule it was unreachable whenever any similar component
+// existed anywhere — which, on an estate, is always. Nil without a faultline or a fallback reader.
+func (s *PrecedentService) RetrieveExact(ctx context.Context, faultlineID, releaseID string) []domain.PrecedentPosition {
+	if s.fallback == nil || faultlineID == "" {
+		return nil
+	}
+	prec, err := s.fallback.GetPrecedents(ctx, faultlineID, releaseID)
+	if err != nil || len(prec) == 0 {
+		return nil
+	}
+	for i := range prec {
+		prec[i].ExactCVE = true
+	}
+	return s.deltaRank(ctx, releaseID, prec)
 }
 
 // semantic embeds the subject and searches KS2. An empty subject text short-circuits before

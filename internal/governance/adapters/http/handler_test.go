@@ -352,6 +352,15 @@ func TestRaiseProposal(t *testing.T) {
 		map[string]any{"stance": "not_affected", "proposer_kind": "ai", "proposer_id": "triage-bot"}); status != http.StatusCreated {
 		t.Errorf("ai proposer status = %d, want 201", status)
 	}
+	// AI-RF-2: the evidence class follows the proposer — a human's word is Asserted, a model's is
+	// Inferred (the class the constitutional bar keys on), the same as RecommendPosition records.
+	trusts := map[domain.ActorKind]value.TrustClass{}
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		trusts[p.Proposer().Kind] = p.EvidenceTrust()
+	}
+	if trusts[domain.ActorHuman] != value.TrustAsserted || trusts[domain.ActorAI] != value.TrustInferred {
+		t.Errorf("evidence by proposer = %v, want human=asserted ai=inferred", trusts)
+	}
 	// Invalid stance → 400.
 	if status, _ := do(t, http.MethodPost, srv.URL+"/findings/fnd-1/proposals", map[string]any{"stance": "bogus"}); status != http.StatusBadRequest {
 		t.Errorf("bad stance status = %d, want 400", status)

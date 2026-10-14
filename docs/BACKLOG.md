@@ -281,6 +281,26 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+#### Roll-forward audit defects (filed and closed 2026-10-14, from the Phase 1 audit)
+
+- [x] **AI-RF-1 — the Δ4b sweep never reached its exact-CVE precedent (filed and closed
+  2026-10-14).** HIGH, correctness. `gather` passed `FaultlineID: ""`, so `Retrieve` returned
+  before the fallback and the "same CVE decided on a sibling release" road — the VAMS roll-forward
+  behaviour — was dead code; the one test for it faked a Score-0 hit. **Done:** the posture row
+  carries `faultline_id`; the sweep asks `RetrieveExact` first (same Faultline, other releases,
+  delta-ranked) and only then the semantic road; a test drives the real fallback.
+- [x] **AI-RF-2 — AI proposals over HTTP were stored Asserted, not Inferred (filed and closed
+  2026-10-14).** MED, authority model. `RaiseProposal` stamped every non-harness proposal
+  `TrustAsserted`, including `proposer_kind: ai`, so only the proposer check stood between the
+  sweep's proposals and auto-accept, and the two AI roads recorded different classes for the same
+  claim. **Done:** the trust class follows the proposer (`ai` → Inferred), with a test that an AI
+  proposal through the handler carries Inferred evidence.
+- [x] **AI-RF-3 — precedent ties fell to load order, and score 0 doubled as the exact-CVE flag
+  (filed and closed 2026-10-14).** LOW, determinism (the investigation's R6). **Done:**
+  `PrecedentPosition.ExactCVE`, set by the fallback; `RankScore` ranks an unflagged non-positive
+  cosine at 0; `Before` pins ties (exact first, then cosine, release id, source CVE) in the memory
+  index and in `deltaRank`; tests for the table and for a reversed load order.
+
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
 - [ ] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its

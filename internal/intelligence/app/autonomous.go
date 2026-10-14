@@ -186,11 +186,16 @@ func (s *AutonomousSweep) gather(ctx context.Context, res *SweepResult) ([]candi
 			}
 			res.Examined++
 			// Precedent for THIS undecided Finding: a decided Position on a similar release.
-			precs := s.precedent.Retrieve(ctx, PrecedentQuery{
-				Severity: severityOf(e), Components: componentsOf(e),
-				FaultlineID: "", ReleaseID: relID,
-			})
+			// Same CVE decided on a sibling release first (A1); only then a similar component.
+			precs := s.precedent.RetrieveExact(ctx, e.FaultlineID, relID)
 			best, ok := s.bestQualifyingPrecedent(precs)
+			if !ok {
+				precs = s.precedent.Retrieve(ctx, PrecedentQuery{
+					Severity: severityOf(e), Components: componentsOf(e),
+					FaultlineID: e.FaultlineID, ReleaseID: relID,
+				})
+				best, ok = s.bestQualifyingPrecedent(precs)
+			}
 			if !ok {
 				res.Skipped++ // no precedent, or none STRONG enough to advise on (AUTO-VOL-1)
 				continue
@@ -222,8 +227,7 @@ func (s *AutonomousSweep) bestQualifyingPrecedent(precs []domain.PrecedentPositi
 		if p.Stance == "" {
 			continue // undecided precedent is not precedent
 		}
-		exactCVE := p.Score == 0 // the Δ2 exact-CVE fallback — same CVE, exempt from the cosine floor
-		if !exactCVE && p.Score < s.minScore {
+		if !p.ExactCVE && p.Score < s.minScore { // an exact-CVE precedent is exempt from the cosine floor
 			continue
 		}
 		if p.OverlapKnown && p.ReleaseOverlap < s.minOverlap {

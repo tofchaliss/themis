@@ -47,7 +47,7 @@ func TestPrecedentClientComposesReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []domain.PrecedentPosition{{ReleaseID: "R2", Stance: "not_affected", Rationale: "backported fix"}}
+	want := []domain.PrecedentPosition{{ReleaseID: "R2", Stance: "not_affected", Rationale: "backported fix", ExactCVE: true}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("precedents = %+v, want %+v (R1 no-position + R3 not-found are skipped)", got, want)
 	}

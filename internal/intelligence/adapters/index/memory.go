@@ -102,7 +102,9 @@ func (m *Memory) Search(query []float32, k int, excludeReleaseID string) []domai
 			Score:     score,
 		})
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	// Ties are broken by the domain's own order, never by load order, which changes across a
+	// restart (audit 2026-10-14, A3).
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Before(hits[j]) })
 	if len(hits) > k {
 		hits = hits[:k]
 	}

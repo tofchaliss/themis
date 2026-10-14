@@ -463,7 +463,15 @@ func (h *Handler) RaiseProposal(w http.ResponseWriter, r *http.Request, id strin
 			return
 		}
 	} else {
-		pid, err = h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, value.TrustAsserted)
+		// The evidence class follows the proposer (audit 2026-10-14, A2): a human's word is
+		// Asserted; a model's is Inferred, the class the constitutional bar keys on (EDR-TRUST-01
+		// T4). Stamping an AI proposal Asserted left only the proposer check between it and
+		// auto-accept, and recorded a different class than RecommendPosition does for the same claim.
+		trust := value.TrustAsserted
+		if proposer.Kind == domain.ActorAI {
+			trust = value.TrustInferred
+		}
+		pid, err = h.write.RaiseProposal(r.Context(), domain.FindingID(id), proposer, domain.Stance(body.Stance), rationale, trust)
 		if err != nil {
 			writeErr(w, "cannot raise proposal", err)
 			return
