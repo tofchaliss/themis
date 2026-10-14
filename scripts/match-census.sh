@@ -25,7 +25,8 @@
 # Usage:
 #   PGBASE="postgres://themis:PASSWORD@localhost:5432" ./scripts/match-census.sh [TOP]
 #     TOP: how many fan-out rows to show and cross-check (default 15)
-#   CENSUS_MATCHES_TSV=file   replay seam: a TSV of (purl, version, ecosystem, faultline_id)
+#   CENSUS_MATCHES_TSV=file   replay seam: a TSV of (purl, version, ecosystem, faultline_id,
+#                             verdict_state, source) — the last two may be empty
 #                             instead of the database, so the analysis runs without an estate.
 #   CENSUS_OSV=0              skip the OSV cross-check.
 #   CENSUS_FANOUT_FLAG=N      flag a component at N or more CVEs (default 30).
@@ -40,7 +41,7 @@ for tool in awk sort; do
   command -v "$tool" >/dev/null || { echo "match-census: $tool is required" >&2; exit 2; }
 done
 
-# ── Load the population: purl \t version \t ecosystem \t faultline_id ────────────────────────
+# ── Load the population: purl \t version \t ecosystem \t faultline_id \t verdict \t source ──────
 TSV="$(mktemp -t match-census.XXXXXX)"
 trap 'rm -f "$TSV"' EXIT
 if [ -n "${CENSUS_MATCHES_TSV:-}" ]; then
@@ -52,7 +53,7 @@ else
     exit 2
   fi
   psql "$PGBASE/knowledge?sslmode=disable" -AtF $'\t' -c \
-    "SELECT component_purl, component_version, component_ecosystem, faultline_id
+    "SELECT component_purl, component_version, component_ecosystem, faultline_id, verdict_state, component_source
        FROM faultline_matches WHERE retired_at IS NULL" > "$TSV" || { echo "match-census: query failed" >&2; exit 2; }
 fi
 
@@ -67,22 +68,28 @@ FLAGS=0
 # shellcheck disable=SC2016
 AWK_PURL='function purlname(p){ i=index(p,"@"); return i?substr(p,1,i-1):p }
           function purlver(p){ i=index(p,"@"); if(!i) return ""; v=substr(p,i+1); j=match(v,/[?#]/); return j?substr(v,1,j-1):v }
-          function purltype(p){ sub(/^pkg:/,"",p); i=index(p,"/"); return i?substr(p,1,i-1):p }'
+          function purltype(p){ sub(/^pkg:/,"",p); i=index(p,"/"); return i?substr(p,1,i-1):p }
+          function hexv(ch){ return index("0123456789ABCDEF", toupper(ch)) - 1 }
+          function pctdec(v,  o,h){ o=""; while(match(v,/%[0-9A-Fa-f][0-9A-Fa-f]/)){ o=o substr(v,1,RSTART-1); h=substr(v,RSTART+1,2); o=o sprintf("%c", hexv(substr(h,1,1))*16+hexv(substr(h,2,1))); v=substr(v,RSTART+3) }; return o v }'
 
 # ── 1. fan-out ────────────────────────────────────────────────────────────────────────────────
-hdr "1. Fan-out — distinct CVEs per component (top $TOP; flagged at ≥ $FLAG_AT)"
-awk -F'\t' "$AWK_PURL"'{ k=purlname($1) "\t" $2; if(!(k SUBSEP $4 in seen)){ seen[k SUBSEP $4]=1; n[k]++ } }
-  END{ for(k in n) print n[k] "\t" k }' "$TSV" | sort -t$'\t' -k1,1nr | head -n "$TOP" > "$TSV.fan"
-printf '  %6s  %-50s %s\n' CVEs component version
-while IFS=$'\t' read -r cnt name ver; do
-  mark=" "; if [ "$cnt" -ge "$FLAG_AT" ]; then mark="!"; FLAGS=$((FLAGS+1)); fi
-  printf '  %s%5s  %-50s %s\n' "$mark" "$cnt" "$name" "$ver"
+hdr "1. Fan-out — distinct CVEs per component, split by verdict (top $TOP; flagged at ≥ $FLAG_AT OPEN)"
+# A long history that Rocky has already fixed shows as cleared_vendor_fix and is not a sign of
+# anything; only the OPEN count can point at a parse or spelling defect.
+awk -F'\t' "$AWK_PURL"'{ k=purlname($1) "\t" $2; if(!(k SUBSEP $4 in seen)){ seen[k SUBSEP $4]=1; n[k]++; if($5=="" || $5=="open") op[k]++; else cl[k]++ } }
+  END{ for(k in n) print n[k] "\t" op[k]+0 "\t" cl[k]+0 "\t" k }' "$TSV" | sort -t$'\t' -k1,1nr | head -n "$TOP" > "$TSV.fan"
+printf '  %6s %5s %7s  %-42s %s\n' CVEs open cleared component version
+FAN=0
+while IFS=$'\t' read -r cnt op cl name ver; do
+  mark=" "; if [ "$op" -ge "$FLAG_AT" ]; then mark="!"; FAN=$((FAN+1)); fi
+  printf '  %s%5s %5s %7s  %-42s %s\n' "$mark" "$cnt" "$op" "$cl" "$name" "$ver"
 done < "$TSV.fan"
-[ "$FLAGS" -gt 0 ] && flag "$FLAGS component(s) at or above $FLAG_AT CVEs — a feed asked with a version it could not parse answers with the package's whole history" || ok "no component above $FLAG_AT CVEs"
+FLAGS=$((FLAGS+FAN))
+[ "$FAN" -gt 0 ] && flag "$FAN component(s) with $FLAG_AT or more OPEN CVEs — a feed asked with a version it could not parse answers with the package's whole history; a long history already cleared does not count" || ok "no component with $FLAG_AT or more open CVEs"
 
 # ── 2. spelling — purl version vs version column ──────────────────────────────────────────────
 hdr "2. Spelling — purl version ≠ version column, by purl type"
-awk -F'\t' "$AWK_PURL"'{ pv=purlver($1); if(pv!="" && pv!=$2){ t=purltype($1); m[t]++; c[t SUBSEP $1]=1; if(!(t in ex)) ex[t]=pv " vs " $2 } }
+awk -F'\t' "$AWK_PURL"'{ pv=pctdec(purlver($1)); if(pv!="" && pv!=$2){ t=purltype($1); m[t]++; c[t SUBSEP $1]=1; if(!(t in ex)) ex[t]=pv " vs " $2 } }
   END{ for(t in m){ nc=0; for(k in c){ split(k,a,SUBSEP); if(a[1]==t) nc++ }; print m[t] "\t" nc "\t" t "\t" ex[t] } }' "$TSV" \
   | sort -t$'\t' -k1,1nr > "$TSV.sp"
 if [ -s "$TSV.sp" ]; then
@@ -118,22 +125,38 @@ if [ "$RUN_OSV" = "1" ]; then
   hdr "4. Feed cross-check — OSV asked with the PURL's version vs CVEs matched"
   command -v curl >/dev/null && command -v jq >/dev/null || { echo "  (skipped: curl and jq required)"; }
   if command -v curl >/dev/null && command -v jq >/dev/null; then
-    printf '  %6s %6s  %-50s %s\n' matched osv component purl-version
-    while IFS=$'\t' read -r cnt name ver; do
-      # Distro packages are queried by (distro ecosystem, source package, epoch-bearing version),
-      # not by purl, so a purl query for them returns nothing and would read as a false gap.
-      case "$name" in pkg:rpm/*|pkg:apk/*|pkg:deb/*) printf '  %s%5s %6s  %-50s %s\n' " " "$cnt" "n/a" "$name" "(distro: not a purl query)"; continue;; esac
-      # one representative purl for this component+version
-      purl="$(awk -F'\t' -v n="$name" -v v="$ver" "$AWK_PURL"'purlname($1)==n && $2==v {print $1; exit}' "$TSV")"
+    printf '  %6s %6s  %-50s %s\n' open osv component query
+    while IFS=$'\t' read -r cnt op cl name ver; do
+      # one representative row for this component+version
+      IFS=$'\t' read -r purl src < <(awk -F'\t' -v n="$name" -v v="$ver" "$AWK_PURL"'purlname($1)==n && $2==v {print $1 "\t" $6; exit}' "$TSV")
       pp="${purl%%\?*}"; pp="${pp%%#*}"; pv="${pp##*@}"; base="${pp%@*}"
-      body="$(jq -nc --arg p "$base@$pv" '{package:{purl:$p}}')"
+      case "$name" in
+        pkg:rpm/*|pkg:apk/*|pkg:deb/*)
+          # Distro packages are queried the way the client does it (osv_client.go): by the
+          # distro ecosystem from the purl's distro= qualifier, the SOURCE package, and the
+          # epoch-bearing version column — a purl query returns nothing for them.
+          distro="$(printf '%s' "$purl" | sed -n 's/.*[?&]distro=\([^&#]*\).*/\1/p')"
+          dname="${distro%%-*}"; dver="${distro#*-}"; dmaj="${dver%%.*}"
+          case "$dname" in
+            rocky|rockylinux) eco="Rocky Linux:$dmaj";; alma|almalinux) eco="AlmaLinux:$dmaj";;
+            debian) eco="Debian:$dmaj";; alpine) eco="Alpine:v${dver%.*}";; rhel|redhat) eco="Red Hat";; *) eco="";;
+          esac
+          if [ -z "$eco" ]; then printf '  %s%5s %6s  %-50s %s\n' " " "$cnt" "n/a" "$name" "(no distro= qualifier)"; continue; fi
+          pkg="${src:-${name##*/}}"
+          body="$(jq -nc --arg n "$pkg" --arg e "$eco" --arg v "$ver" '{package:{name:$n,ecosystem:$e},version:$v}')"
+          pv="$eco $pkg $ver"
+          ;;
+        *) body="$(jq -nc --arg p "$base@$pv" '{package:{purl:$p}}')";;
+      esac
       n="$(curl -sf --max-time 20 -X POST "$OSV_URL" -d "$body" 2>/dev/null | jq -r '.vulns // [] | length' 2>/dev/null)"
       [ -z "$n" ] && n="?"
       mark=" "
-      if [ "$n" != "?" ] && [ "$cnt" -gt $((n * 2 + 5)) ]; then mark="!"; FLAGS=$((FLAGS+1)); fi
-      printf '  %s%5s %6s  %-50s %s\n' "$mark" "$cnt" "$n" "$name" "$pv"
+      # OSV filters by version, so a fixed-and-cleared CVE never comes back; compare against the
+      # OPEN matches only, which is what an unparseable spelling inflates.
+      if [ "$n" != "?" ] && [ "$op" -gt $((n * 2 + 5)) ]; then mark="!"; FLAGS=$((FLAGS+1)); fi
+      printf '  %s%5s %6s  %-50s %s\n' "$mark" "$op" "$n" "$name" "$pv"
     done < "$TSV.fan"
-    echo "  ! = matched far more than the feed returns for the purl's version: the feed was asked with another spelling"
+    echo "  ! = far more OPEN matches than the feed returns for this version today: the feed was asked with another spelling"
   fi
 else
   hdr "4. Feed cross-check — skipped (CENSUS_OSV=0 or replay mode)"
