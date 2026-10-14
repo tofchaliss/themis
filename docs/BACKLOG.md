@@ -301,6 +301,19 @@ three angles, and two of them proposed fixes that would not have worked.
   cosine at 0; `Before` pins ties (exact first, then cosine, release id, source CVE) in the memory
   index and in `deltaRank`; tests for the table and for a reversed load order.
 
+- [ ] **AI-RF-4 — rule-decided Positions are served as "similar past decisions" and as sweep
+  precedent (filed 2026-10-14, user observation).** MED, advisory quality. CVE-2026-56857 on
+  stdlib 1.26.8 (genuinely affected, fix 1.26.9) showed five `not_affected` precedents at 0.99:
+  all version-range decisions from the same day on OTHER CVEs, rationale "every matched component
+  version is outside the reconciled affected range". That is arithmetic about another CVE's
+  range, not a judgement that transfers; shown as precedent it nudges a human and the Δ4b sweep
+  toward `not_affected` on an affected Finding. **Do:** a Position whose decider is a policy or
+  whose accepted proposal came from a deterministic system proposer (`version-range`,
+  `knowledge-enrichment` withdrawal) is NOT precedent — Intelligence's inbound indexer skips it
+  and `GET /findings/{id}/similar` and the sweep never see it; human and AI-judged Positions
+  stay. Needs the Position event (or the current-position read) to carry the decider kind.
+  Awaiting go (2026-10-14).
+
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
