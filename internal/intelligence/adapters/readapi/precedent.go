@@ -43,20 +43,48 @@ func (c *PrecedentClient) WithAPIKey(apiKey string) *PrecedentClient {
 }
 
 type wireCurrentPosition struct {
-	Stance    string `json:"stance"`
-	Rationale string `json:"rationale"`
-	ActorKind string `json:"actor_kind"` // human | ai | policy — PositionView already carries it
+	Stance             string `json:"stance"`
+	Rationale          string `json:"rationale"`
+	ActorKind          string `json:"actor_kind"` // human | ai | policy — PositionView already carries it
+	AcceptedProposalID string `json:"accepted_proposal_id"`
 }
 
-// RulePositionActorKind is the decider kind of a Position a policy established on a system
-// proposal (the version-range verdict, an upstream withdrawal). Such a Position is arithmetic
-// about ONE CVE's range and carries no judgement to transfer, so it is never precedent
-// (AI-RF-4, 2026-10-14: five of them at 0.99 nudged a human toward not_affected on an affected
-// stdlib Finding).
+type wireProposal struct {
+	ID           string `json:"id"`
+	ProposerKind string `json:"proposer_kind"`
+}
+
+// systemProposerKind is Governance's own automation raising a proposal (the version-range
+// verdict, a vendor not_affected statement). Mirrors governance domain.ActorSystem.
+const systemProposerKind = "system"
+
+// RulePositionActorKind is the verdict kind of a Position that rests on a system proposal
+// (the version-range verdict, an upstream withdrawal) — whether a policy accepted it or a
+// human confirmed it unchanged (AI-RF-4b, 2026-10-14: 311 provable range verdicts accepted by
+// hand through `range-accept-provable.sh` survived the first prune because the decider was a
+// person, and still surfaced as "similar past decisions"). Such a Position is arithmetic about
+// ONE CVE's range and carries no judgement to transfer, so it is never precedent (AI-RF-4,
+// 2026-10-14: five of them at 0.99 nudged a human toward not_affected on an affected stdlib
+// Finding). The kind this client reports is therefore the VERDICT's, not the clicker's.
 const RulePositionActorKind = "policy"
 
 type wireFindingWithPosition struct {
 	CurrentPosition *wireCurrentPosition `json:"current_position"`
+	Proposals       []wireProposal       `json:"proposals"`
+}
+
+// verdictKind is who the Position's judgement belongs to: the decider, except that a decision
+// accepting a system proposal is the rule's whoever accepted it.
+func verdictKind(pos wireCurrentPosition, proposals []wireProposal) string {
+	if pos.ActorKind == RulePositionActorKind {
+		return RulePositionActorKind
+	}
+	for _, p := range proposals {
+		if p.ID == pos.AcceptedProposalID && p.ProposerKind == systemProposerKind {
+			return RulePositionActorKind
+		}
+	}
+	return pos.ActorKind
 }
 
 // GetPrecedents returns the current Enterprise Position for the Faultline in every
@@ -117,7 +145,9 @@ func (c *PrecedentClient) currentPosition(ctx context.Context, release, faultlin
 	if wf.CurrentPosition == nil {
 		return wireCurrentPosition{}, false, nil
 	}
-	return *wf.CurrentPosition, true, nil
+	pos := *wf.CurrentPosition
+	pos.ActorKind = verdictKind(pos, wf.Proposals)
+	return pos, true, nil
 }
 
 var errNotFound = fmt.Errorf("readapi: not found")
