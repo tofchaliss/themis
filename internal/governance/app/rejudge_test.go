@@ -127,3 +127,29 @@ func TestRangeRejudge_ListerFailureIsFatal(t *testing.T) {
 		t.Fatal("expected the lister error to surface")
 	}
 }
+
+// A write failure is fatal — it means the service is unhealthy — and a cancelled context stops
+// the pass between Faultlines; both surface as errors with the partial counts intact.
+func TestRangeRejudge_WriteFailureAndCancellationAreFatal(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withStdlib(t, identified(t, "fnd-out", "rel-1", "fl-go", "CVE-2022-30632"), "go1.27.1"))
+	repo.saveErr = errors.New("db down")
+	kn := knowledgeByID{"fl-go": {FaultlineID: "fl-go", AffectedRanges: []string{"<1.17.12"}, RangeTrust: value.TrustObserved}}
+	if _, err := app.NewRangeRejudge(writeSvc(repo), fixedLister{ids: []string{"fl-go"}}, kn).Run(context.Background()); err == nil {
+		t.Fatal("a write failure must abort the pass")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res, err := app.NewRangeRejudge(writeSvc(newRepo()), fixedLister{ids: []string{"fl-go"}}, kn).Run(ctx)
+	if err == nil || res.Raised != 0 {
+		t.Fatalf("cancelled context: err=%v res=%+v, want an error and nothing raised", err, res)
+	}
+}
+
+func TestRejudgeVersionRange_NoRangesIsANoop(t *testing.T) {
+	n, err := writeSvc(newRepo()).RejudgeVersionRange(context.Background(), "fl-go", nil, value.TrustObserved)
+	if err != nil || n != 0 {
+		t.Fatalf("no ranges: n=%d err=%v, want 0, nil", n, err)
+	}
+}
