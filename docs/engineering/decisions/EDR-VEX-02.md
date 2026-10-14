@@ -395,3 +395,96 @@ On the measured estate, after this ships:
 - **Non-Red Hat VEX sources are untouched here.** The generic CSAF path (`csafvex_client.go`) and
   uploaded VEX build the same `Applicability`; whether their scope is structured is not measured, so
   they inherit `unknown` until it is. That is the fail-safe direction under D4.
+
+---
+
+## Amendment (2026-10-14) — the WHOLE vendor statement, not only its `not_affected` rows
+
+**Status:** ACCEPTED (owner: "go first", 2026-10-14) · implemented by `phase3-vendor-statements`
+
+### The measured case
+
+`CVE-2022-30632` on a Rocky Linux 8.10 release. The drawer showed Red Hat statements for RHEL 9
+(`conmon`, not affected), OpenStack 16.2 and Satellite 6, every one correctly `not_applicable` —
+and **nothing for RHEL 8**. The operator read that as "Red Hat has not spoken about our release".
+Red Hat's live record (`/hydra/rest/securitydata/cve/CVE-2022-30632.json`, read 2026-10-14) says
+the opposite for RHEL 8: **fixed** in five packages (`go-toolset`, `git-lfs`, `grafana`,
+`grafana-pcp`, `container-tools`, advisories RHSA-2022:5775, 7129, 7519, 7648 and 2023:2758) and
+**will not fix** for `osbuild-composer` and `weldr-client`. Not one of those rows says "Not
+affected", and `redhat_client.go` turns only `fix_state == "Not affected"` rows into statements
+(`package_state` loop) while `affected_release` rows become bare fix versions with no scope and no
+voice in the drawer. The RHEL 8 answer existed and was thrown away at the door.
+
+A second measurement from the same day (`scripts/match-census.sh`, 4 941 matches): `binutils` 87
+open, `compat-libtiff3` 59, `libtiff` 42, `curl` 26 — scanner-reported packages Red Hat marks
+`Will not fix` or `Affected` for RHEL 8. The drawer could not say so, because the words were
+never kept. D1 says *external evidence stays evidence*; a statement discarded because of its
+STATUS is the same loss as one discarded because of its SCOPE.
+
+### D13 — Every package row is a statement, with its real status
+
+A vendor's per-package, per-product assertion SHALL be kept whatever it asserts. The `Status`
+vocabulary becomes a CLOSED set, the OpenVEX statuses plus the three Red Hat states that are not
+one of them, so a consumer can switch on it:
+
+| Vendor says (Red Hat `fix_state` / row) | `Status` |
+| --- | --- |
+| `Not affected` | `not_affected` |
+| `Affected` | `affected` |
+| `Will not fix` | `will_not_fix` |
+| `Fix deferred` | `fix_deferred` |
+| `Out of support scope` | `out_of_support` |
+| `Under investigation` | `under_investigation` |
+| an `affected_release` row (the advisory shipped a fix) | `fixed` |
+
+Uploaded OpenVEX/CSAF already carry `affected`, `fixed`, `under_investigation` verbatim, so the
+set is a superset of what reaches the card today; a status outside it is refused at the
+constructor, naming the value, so a new vendor vocabulary fails loudly rather than becoming prose.
+
+### D14 — A `fixed` statement carries the advisory and the fixed build
+
+`Applicability` gains two string fields, `Advisory` (e.g. `RHSA-2023:2758`) and `FixedVersion`
+(the NEVRA, or the module stream id for a module build), both empty except on `fixed`. They are
+part of the statement (D8: immutable, the vendor's), ride the FaultlineEnriched event and the
+read APIs, and round-trip through persistence (D10). The `VulnFacts.Fixes` path is unchanged —
+EDR-VEX-01's non-goal stands: Red Hat applicability is additive, the fix path is not replaced —
+so the verdict engine keeps its input and the drawer gains the statement that explains it.
+
+### D15 — Governance acts on `not_affected` exactly as before; everything else is information
+
+`reactToApplicability` keeps its filter (`Status == not_affected` and `applicable`). A `fixed`,
+`will_not_fix`, `affected`, `fix_deferred`, `out_of_support` or `under_investigation` statement
+raises **no proposal** and changes **no verdict**: it is shown to the engineer beside Themis's
+determination of its scope. This is EDR-VEX-01 D4 restated for a larger vocabulary, and D9 of this
+EDR (no change to the auto-accept policy) holds. `scripts/vex-reject-inapplicable.sh` filters on
+`status == "not_affected"` before reading applicability, or it would reject a fixed statement.
+
+### D16 — The drawer says what applies, folds what does not, and names silence
+
+The vendor-statements section SHALL (a) list the statements whose applicability is `applicable`
+first, each with its status chip, package, scope, and for `fixed` the advisory and build; (b) fold
+every other statement under one expandable line, "N statements about other products"; and (c)
+when the release is placeable and no statement applies, say so in one sentence — *"No Red Hat
+statement covers Rocky Linux 8 for this CVE"* — because D2's distinction between "no statement
+exists" and "a statement exists and does not apply" is lost the moment the empty case renders as
+nothing. A `not_comparable` release keeps today's chip on every row.
+
+### D17 — One statement per (package, product, status); restatements compared against the set
+
+D7's key gains the status, because Red Hat can list one package as `fixed` in one advisory row
+and `will_not_fix` in another product's state. And because the feed now emits N statements per
+poll, `repeatsLatestFrom` (which compares a proposal only with the LATEST one from its source)
+would re-append every statement on every poll. A statement SHALL be a restatement when it equals
+ANY recorded applicability proposal from the same source with the same content, not only the
+newest — the bloat the applicability volume would otherwise create is the KN-PROPOSAL-BLOAT-1
+shape, and it is prevented here rather than filed.
+
+### Validation criteria (added)
+
+7. The three outcomes have a test each, end to end from a Hydra fixture to the assessment: a RHEL 8
+   `fixed` statement on a Rocky 8.10 release reads `applicable` with its advisory; a document whose
+   only rows are RHEL 9 / OpenShift reads every statement `not_applicable` and the assessment's
+   `applicable` count is zero; a document with no row for the release's family and major yields
+   the explicit no-statement case.
+8. The safety fixture CVE-2026-33006 stays open: a `fixed` or `will_not_fix` statement raises
+   nothing.
