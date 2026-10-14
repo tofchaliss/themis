@@ -343,6 +343,12 @@ three angles, and two of them proposed fixes that would not have worked.
   cover scanner-only releases, whose ledger row today points at no SBOM evidence); (3) measure
   before/after with `match-census.sh`. Red Hat's `Will not fix` for the remainder is the
   vendor-statement work (EDR-VEX-02 follow-up), not this item.
+  **KN-SCAN-5b (2026-10-14, same day):** the first cut rowed a scanner-only release in the
+  sweep ledger only on a NEW ingest, so the scanner-only releases an estate already held never
+  joined the sweep; verified on the VM (two releases with matches and no ledger row). Every sweep
+  now first backfills a row for each release that has matches and no ledger row
+  (`Store.BackfillScannerReleases`, additive, idempotent), dated past the staleness bar, so no
+  manual insert is needed. Before/after census numbers: pending the VM run.
   **Done, with one deliberate difference from the Do-list:** no purl is stamped. The Cortex
   export carries no OS field at all (only the purl namespace and the `elN` marker), the
   converter's output is a byte-equality dedup contract, and `component_purl` is in the match

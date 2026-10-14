@@ -62,6 +62,13 @@ func NewRediscoveryService(ledger ReleaseLedger, correlate *CorrelationService, 
 // release — it stays stale and the next sweep retries — because one broken release must not
 // starve the rest. Only the ledger read aborts: without the queue there is no work.
 func (s *RediscoveryService) Sweep(ctx context.Context) (swept, newMatches int, err error) {
+	// Scanner-only releases that predate KN-SCAN-5 have no ledger row and would never be swept;
+	// row them, dated past the staleness bar, so they queue behind the genuinely stale ones.
+	if s.scanLedger != nil {
+		if _, err := s.scanLedger.BackfillScannerReleases(ctx, s.clock.Now().Add(-s.staleAfter).Add(-time.Second)); err != nil {
+			return 0, 0, err
+		}
+	}
 	stale, err := s.ledger.StaleReleases(ctx, s.clock.Now().Add(-s.staleAfter), s.limit)
 	if err != nil {
 		return 0, 0, err

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
@@ -16,7 +17,8 @@ import (
 // returns oldest-first under its limit.
 func TestCorrelatedReleaseLedger(t *testing.T) {
 	ctx := context.Background()
-	s := store.New(newPool(t))
+	pool := newPool(t)
+	s := store.New(pool)
 
 	t0 := time.Unix(1_700_000_000, 0).UTC()
 
@@ -70,5 +72,25 @@ func TestCorrelatedReleaseLedger(t *testing.T) {
 	}
 	if none, _ := s.StaleReleases(ctx, t0, 10); len(none) != 0 {
 		t.Fatalf("fresh releases returned as stale: %+v", none)
+	}
+
+	// KN-SCAN-5b: a release with matches and no row gets one, dated as given; rows that exist
+	// are untouched, and a second backfill adds nothing.
+	card, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-1"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatalf("seed card: %v", err)
+	}
+	if _, err := s.RecordMatch(ctx, app.Match{ReleaseID: "rel-scan", FaultlineID: card.ID(), CVE: "CVE-2024-1", Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/binutils@1"}, OccurredAt: t0}); err != nil {
+		t.Fatalf("seed match: %v", err)
+	}
+	n, err := s.BackfillScannerReleases(ctx, t0.Add(30*time.Minute))
+	if err != nil || n != 1 {
+		t.Fatalf("backfill = %d, %v; want 1 new row", n, err)
+	}
+	if n, _ := s.BackfillScannerReleases(ctx, t0.Add(30*time.Minute)); n != 0 {
+		t.Fatalf("second backfill = %d, want 0", n)
+	}
+	if got, _ := s.StaleReleases(ctx, t0.Add(45*time.Minute), 10); len(got) != 1 || got[0].ReleaseID != "rel-scan" || got[0].EvidenceID != "" {
+		t.Fatalf("after backfill: %+v, want only rel-scan with no evidence id", got)
 	}
 }

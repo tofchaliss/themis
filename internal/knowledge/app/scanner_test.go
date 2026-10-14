@@ -380,7 +380,16 @@ func (d *countingDiscovery) VulnsForPackage(_ context.Context, c app.InventoryCo
 	return d.byPURL[c.PURL], nil
 }
 
-type fakeScanLedger struct{ touched, stamped []string }
+type fakeScanLedger struct {
+	touched, stamped []string
+	backfilled       int
+	backfillErr      error
+}
+
+func (l *fakeScanLedger) BackfillScannerReleases(context.Context, time.Time) (int, error) {
+	l.backfilled++
+	return 0, l.backfillErr
+}
 
 func (l *fakeScanLedger) TouchScannerRelease(_ context.Context, r string, _ time.Time) error {
 	l.touched = append(l.touched, r)
