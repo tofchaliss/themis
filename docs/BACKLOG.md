@@ -335,24 +335,41 @@ three angles, and two of them proposed fixes that would not have worked.
 #### Scanner-only matches never enriched (filed 2026-10-14, from the first match census)
 
 - [x] **VEX-RAISE-1 — an applicable vendor not_affected on the card never reaches a Finding born
-  after it, so the proposal is missing and the Finding stays open (filed and closed 2026-10-14).**
-  HIGH, correctness/operability. Found while reading the KN-SCAN-5 census: compat-libtiff3
-  59 CVEs open / 0 decided, yet the card for CVE-2026-52490 carries Red Hat `not_affected` for
-  compat-libtiff3 in RHEL 8, applicable to a Rocky 8 release. Governance raises the vendor
-  proposal only in `reactToApplicability`, on a FaultlineEnriched event. Three Findings on that
-  CVE created later (2026-09-25, and two of the three created 2026-10-14 15:11) got the
-  `enrich:` proposal and no `vex:` one — 174 open compat-libtiff3 Findings without a vendor
-  proposal on the estate. The two causes: a Finding born after the statement had no trigger,
-  and a Finding whose release could only be placed once VEX-SCOPE-2 read the scope from its own
-  component was blocked as unplaceable at raise time. **Done:** the one-time re-judge pass
-  (`THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, KN-GO-2) also re-applies the vendor overlay per
-  undecided Faultline (`FindingService.RejudgeApplicability`, same proposal id, idempotent) and
-  logs `vendor_raised`; `scripts/vex-accept-applicable.sh` (dry-run default, `--apply` +
+  after it, so the proposal is missing (filed and closed 2026-10-14; the population it was filed
+  on turned out to be something else — see the correction).** MED, correctness. Governance raises
+  the vendor proposal only in `reactToApplicability`, on a FaultlineEnriched event; a Finding
+  created after the statement arrived has no trigger. **Done:** the one-time re-judge pass
+  (`THEMIS_GOVERNANCE_REJUDGE_RANGES=1`, KN-GO-2) also re-applies the vendor overlay per undecided
+  Faultline (`FindingService.RejudgeApplicability`, same proposal id, idempotent) and logs
+  `vendor_raised`; `scripts/vex-accept-applicable.sh` (dry-run default, `--apply` +
   `THEMIS_ACTOR_ID`) accepts the standing proposals whose statement the assessment projection
   marks `applicable` — the counterpart of the reject script, because vendor evidence is Asserted
-  and one person has to sign each acceptance. **Open:** the find-or-create path should raise
-  from the card's current statements at creation time, so the pass is not needed for new
-  Findings; tracked as VEX-RAISE-2 (LOW until the next estate shows it).
+  and one person signs each acceptance. **Measured on the VM:** the pass over 742 undecided cards
+  raised 3 (rpm ×2, perl) — real gaps, closed; the accept dry run then listed 29 applicable
+  proposals. **Correction:** this item was filed on "174 open compat-libtiff3 Findings without a
+  vendor proposal", read off ONE CVE (CVE-2026-52490, whose RHEL 8 statement IS not_affected). The
+  per-package census of what Red Hat says for RHEL 8 across each package's open CVEs shows the
+  174 are not missing proposals — there is nothing to raise:
+
+  | package | will_not_fix | fix_deferred | under_investigation | affected | fixed | not_affected |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | compat-libtiff3 (59 CVEs) | 48 | 9 | – | 1 | – | 1 |
+  | binutils (79) | 26 | 46 | 7 | – | – | – |
+  | libtiff (41) | 31 | 7 | – | 2 | 1 | – |
+  | curl (24) | 1 | 17 | – | 5 | 1 | – |
+
+  So the scanner-reported packages the KN-SCAN-5 census flagged (0 cleared) are OPEN CORRECTLY:
+  the vendor acknowledges the flaw and has not fixed it, and `fixed` rows mean the installed build
+  is older than the fix (libtiff 4.0.9-38 vs 4.0.9-39.el8_10 — an upgrade, not a clearance). The
+  GUI shows those statements since EDR-VEX-02 D13–D17; nothing in Knowledge or Governance is
+  wrong here. **Open, LOW (VEX-WNF-1):** a `will_not_fix` / `fix_deferred` statement that applies
+  to the release is today information only, so each such Finding waits in the queue for a human
+  to record `accepted_risk` by hand (over 100 on this estate). A system proposal carrying the
+  vendor's statement as premise — `accepted_risk`, never `not_affected`, decided by a human, never
+  by policy, re-surfaced by the disposition watcher when the vendor's state changes — would make
+  the queue reflect what is actually undecided. Design before code; it is a stance the enterprise
+  takes, not a vendor fact. **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
+  at Finding creation so the pass is not needed for new Findings.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87
@@ -378,7 +395,15 @@ three angles, and two of them proposed fixes that would not have worked.
   joined the sweep; verified on the VM (two releases with matches and no ledger row). Every sweep
   now first backfills a row for each release that has matches and no ledger row
   (`Store.BackfillScannerReleases`, additive, idempotent), dated past the staleness bar, so no
-  manual insert is needed. Before/after census numbers: pending the VM run.
+  manual insert is needed. **Measured after deploy (VM, 2026-10-14 19:00):** the hourly sweep
+  runs (16 that day) and discovery reached the scanner-only cards — every binutils /
+  compat-libtiff3 / libtiff / curl card carries Red Hat's per-release statements — but the
+  fan-out census is unchanged (binutils 87 open / 0 cleared, compat-libtiff3 59 / 0, libtiff
+  42 / 0, curl 26 / 1) because those CVEs are `will_not_fix` / `fix_deferred` /
+  `under_investigation` for RHEL 8 (see the VEX-RAISE-1 correction table). The "0 cleared" the
+  census showed was not a discovery gap after all; it is the vendor's position, now visible in
+  the GUI. The item's code change stands (a scanner-only component does get discovery now); its
+  expected clearing did not exist to be found.
   **Done, with one deliberate difference from the Do-list:** no purl is stamped. The Cortex
   export carries no OS field at all (only the purl namespace and the `elN` marker), the
   converter's output is a byte-equality dedup contract, and `component_purl` is in the match
