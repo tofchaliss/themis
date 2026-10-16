@@ -143,6 +143,7 @@ carry **no `specs/` deltas** — EDRs are the source of truth — so each was ar
 | `phase3-knowledge` | M7 — Knowledge / Faultline aggregate + reconciliation | 25/25 | 2026-07-25 |
 | `phase3-knowledge-feeds` | M7+ — real OSV/NVD clients · CVSS-4.0 (D-NVD-2) · source tiers (D-FEED-2) · scanner Proposals | 19/19 | 2026-07-23 |
 | `phase3-governance` | M8 — Findings + append-only Enterprise Positions | 24/24 | 2026-07-25 |
+| `phase3-rollforward` | EDR-ROLLFORWARD-01 — same-CVE roll-forward as a deterministic proposal (artifact/component level, Inferred, worker + re-judge) | 7/8 (3.4 = VM verify) | 2026-10-16 |
 | `phase3-communication` | M9 — Publication aggregate + 6-serializer registry | 22/22 | 2026-07-25 |
 | `phase3-intelligence` | M4 — AI Gateway Δ1 (reactive `recommend_position`) | 37/37 | 2026-07-25 |
 | `phase3-intelligence-d2` | M4 — Δ2: `[Rule → LLM]` dispatch + admission spine + `insufficient` | 9/9 | 2026-07-25 |

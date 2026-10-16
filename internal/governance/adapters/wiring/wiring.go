@@ -127,7 +127,13 @@ func Wire(
 	// no worker is wired and the queue simply holds.
 	var evaluations *app.ReleaseEvaluationWorker
 	if reg != nil {
-		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger})
+		// Same-CVE roll-forward (EDR-ROLLFORWARD-01) rides the worker: it needs the same
+		// release → project hop, and the same "defer and retry" posture when Registry is down.
+		rollForward := app.NewRollForward(write, st, reg)
+		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger}).WithRollForward(rollForward)
+		if rejudge != nil {
+			rejudge = rejudge.WithRollForward(rollForward)
+		}
 	}
 	return Governance{
 		Handler:     handler.Router(),

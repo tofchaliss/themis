@@ -795,3 +795,43 @@ func TestReleaseScope(t *testing.T) {
 		t.Errorf("unknown release = %+v err=%v, want unresolved and no error", scope, err)
 	}
 }
+
+// EDR-ROLLFORWARD-01: the per-release undecided lister — decided Findings and other releases
+// are left out, ids come back in a stable order.
+func TestUndecidedFindingsByRelease(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	for _, id := range []string{"fnd-b", "fnd-a"} {
+		if err := st.Save(ctx, newFinding(t, id, "rel-1", "fl-"+id, "CVE-2026-1"), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Save(ctx, newFinding(t, "fnd-other", "rel-2", "fl-x", "CVE-2026-1"), true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	decided := newFinding(t, "fnd-decided", "rel-1", "fl-d", "CVE-2026-2")
+	if err := st.Save(ctx, decided, true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	decided, _, _ = load(t, st, "fnd-decided")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "", epoch, value.TrustAsserted)
+	if err := decided.RaiseProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decided.AcceptProposal("p1", human, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, decided, false, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.UndecidedFindingsByRelease(ctx, "rel-1")
+	if err != nil || len(got) != 2 || got[0] != "fnd-a" || got[1] != "fnd-b" {
+		t.Fatalf("undecided rel-1 = %v err=%v, want [fnd-a fnd-b]", got, err)
+	}
+	if none, _ := st.UndecidedFindingsByRelease(ctx, "rel-none"); len(none) != 0 {
+		t.Fatalf("unknown release = %v, want none", none)
+	}
+}

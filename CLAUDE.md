@@ -342,6 +342,13 @@ OpenVEX / CSAF out.
   superseded build is real work — but a remediation plan and the AI's grounding use carriers only.
   Carrier products come from NVD's CPE configurations and from non-distro OSV records; a distro
   record cannot supply them.
+- **Roll-forward proposes, never copies** (EDR-ROLLFORWARD-01, 2026-10-16): when a release's
+  correlation completes, an undecided Finding whose CVE a sibling release **of the same project**
+  already JUDGED (a person's decision on a human or AI proposal — never a rule's verdict) gets a
+  system proposal `rollforward:<target>:<source>` on Inferred evidence, at artifact level (same
+  purls) or component level (same packages, versions moved); vulnerability level is never
+  proposed and a scope-only target gets nothing. It runs on the release-evaluation worker (off the
+  inbox transaction) and in the one-time re-judge pass; no policy can accept it.
 - **AI is advisory** — the Intelligence Gateway *proposes* a position; humans or policy decide. It is
   disable-able and never auto-decides. Its spend is bounded per capability per window
   (`THEMIS_INTELLIGENCE_BUDGET_TOKENS`/`_WINDOW`; unset = unlimited, which is the default because a

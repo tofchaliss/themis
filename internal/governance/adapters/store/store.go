@@ -463,6 +463,26 @@ func (s *Store) UndecidedFaultlines(ctx context.Context) ([]string, error) {
 
 // FindingsByFaultline lists the ids of every Finding referencing a Faultline — the
 // FaultlineEnriched fan-out (D6).
+// UndecidedFindingsByRelease lists the Findings of one release with no Position yet — the
+// population roll-forward proposes on (EDR-ROLLFORWARD-01). Implements app.UndecidedFindingLister.
+func (s *Store) UndecidedFindingsByRelease(ctx context.Context, releaseID string) ([]domain.FindingID, error) {
+	rows, err := s.querier(ctx).Query(ctx,
+		`SELECT id FROM findings WHERE release_id = $1 AND current_stance IS NULL ORDER BY id`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.FindingID
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.FindingID(id))
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error) {
 	rows, err := s.querier(ctx).Query(ctx, `SELECT id FROM findings WHERE faultline_id = $1 ORDER BY id`, faultlineID)
 	if err != nil {
