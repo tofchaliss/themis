@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -586,17 +587,20 @@ func scopedStatement(pkg, status, family, major string) app.Applicability {
 	}
 }
 
-// EDR-VEX-02 D15: with the whole vendor record kept (D13), only an APPLICABLE `not_affected`
-// raises a proposal. A `fixed` or `will_not_fix` statement that covers the release is
-// information for the engineer and changes nothing in Governance — the CVE-2026-33006 fixture
-// stays open under a `fixed` statement exactly as it did with none.
+// EDR-VEX-02 D15 + D18: with the whole vendor record kept (D13), an APPLICABLE `not_affected`
+// proposes not_affected and an applicable `will_not_fix` / `fix_deferred` / `out_of_support`
+// proposes accepted_risk (the vendor ships no fix; the enterprise's stance is its own to take).
+// A `fixed`, `affected` or `under_investigation` statement is information for the engineer and
+// changes nothing in Governance — the CVE-2026-33006 fixture stays open under a `fixed` statement
+// exactly as it did with none. None of them ever auto-accepts.
 func TestReactToEnrichment_OnlyNotAffectedRaisesAmongTheStatuses(t *testing.T) {
 	for _, tc := range []struct {
 		status     string
 		wantRaised bool
+		wantStance domain.Stance
 	}{
-		{"not_affected", true}, {"fixed", false}, {"will_not_fix", false}, {"affected", false},
-		{"fix_deferred", false}, {"out_of_support", false}, {"under_investigation", false},
+		{"not_affected", true, domain.StanceNotAffected}, {"fixed", false, ""}, {"will_not_fix", true, domain.StanceAcceptedRisk}, {"affected", false, ""},
+		{"fix_deferred", true, domain.StanceAcceptedRisk}, {"out_of_support", true, domain.StanceAcceptedRisk}, {"under_investigation", false, ""},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
 			repo := newRepo()
@@ -612,6 +616,15 @@ func TestReactToEnrichment_OnlyNotAffectedRaisesAmongTheStatuses(t *testing.T) {
 			got := repo.byID["fnd-1"]
 			if raised := len(got.Proposals()) > 0; raised != tc.wantRaised {
 				t.Fatalf("%s applicable: proposals = %+v, want raised=%v", tc.status, got.Proposals(), tc.wantRaised)
+			}
+			if tc.wantRaised {
+				p := got.Proposals()[0]
+				if p.Stance() != tc.wantStance || !strings.Contains(p.Rationale(), tc.status) || p.EvidenceTrust() != value.TrustAsserted {
+					t.Fatalf("%s: proposal = stance %s rationale %q trust %s; want %s with the status in the rationale, Asserted", tc.status, p.Stance(), p.Rationale(), p.EvidenceTrust(), tc.wantStance)
+				}
+				if tc.wantStance == domain.StanceAcceptedRisk && !strings.HasPrefix(string(p.ID()), "vexwnf:") {
+					t.Fatalf("%s: proposal id %q must carry the vexwnf: prefix the watcher recognizes", tc.status, p.ID())
+				}
 			}
 			if _, decided := got.CurrentPosition(); decided {
 				t.Fatalf("%s: a vendor statement is Asserted evidence and never auto-accepts", tc.status)
@@ -675,5 +688,145 @@ func TestGetFindingAssessment_AlpineReleaseIsPlacedAndRedHatRowsAreNotApplicable
 	}
 	if n := len(repo.byID["fnd-1"].Proposals()); n != 0 {
 		t.Fatalf("proposals = %d, want 0", n)
+	}
+}
+
+// EDR-VEX-02 D18: both selections may land on one Finding (the vendor says not_affected for one
+// of its packages and will_not_fix for another); a scope that does not apply blocks the
+// accepted_risk raise exactly as it blocks the not_affected one.
+func TestReactToEnrichment_NoFixAndNotAffectedMayBothPropose(t *testing.T) {
+	repo := newRepo()
+	f := withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-1", "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", "libtiff")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/rocky/compat-libtiff3@3.9.4-16.el8_10", Name: "compat-libtiff3", Version: "3.9.4-16.el8_10"}); err != nil {
+		t.Fatal(err)
+	}
+	repo.seed(f)
+	s := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
+	sig := app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{
+		scopedStatement("compat-libtiff3", "not_affected", value.FamilyEnterpriseLinux, "8"),
+		scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "8"),
+		scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "9"), // other product
+	}}
+	if err := s.ReactToEnrichment(context.Background(), sig); err != nil {
+		t.Fatal(err)
+	}
+	ps := repo.byID["fnd-1"].Proposals()
+	if len(ps) != 2 {
+		t.Fatalf("proposals = %+v, want a not_affected and an accepted_risk", ps)
+	}
+	stances := map[domain.Stance]bool{ps[0].Stance(): true, ps[1].Stance(): true}
+	if !stances[domain.StanceNotAffected] || !stances[domain.StanceAcceptedRisk] {
+		t.Fatalf("stances = %v", stances)
+	}
+	// Re-delivery raises nothing new.
+	if err := s.ReactToEnrichment(context.Background(), sig); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(repo.byID["fnd-1"].Proposals()); n != 2 {
+		t.Fatalf("after re-delivery proposals = %d, want 2", n)
+	}
+	// Scope that does not apply: nothing.
+	repo2 := newRepo()
+	repo2.seed(withComponent(t, "fnd-2", "rel-1", "fl-2", "CVE-2026-2", "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", "libtiff"))
+	if err := writeSvc(repo2).ReactToEnrichment(context.Background(), app.EnrichmentSignal{FaultlineID: "fl-2", Applicabilities: []app.Applicability{scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "9")}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(repo2.byID["fnd-2"].Proposals()); n != 0 {
+		t.Fatalf("RHEL 9 statement on an el8 release raised %d proposals, want 0", n)
+	}
+}
+
+// EDR-VEX-02 D20: a Position that accepted a vendor "no fix" statement is re-surfaced when an
+// applicable `fixed` statement for the same package arrives — the premise is gone, the upgrade is
+// the answer. Not by a fix for another package, not by a fix scoped to another product, not when
+// the Position rests on something else; and a fix outranks an expired review date as the reason.
+func TestReactToEnrichment_VendorFixResurfacesAnAcceptedNoFix(t *testing.T) {
+	ctx := context.Background()
+	accepted := func(t *testing.T, reviewBy ...time.Time) (*fakeRepo, *app.FindingService) {
+		t.Helper()
+		repo := newRepo()
+		repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-1", "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", "libtiff"))
+		s := writeSvc(repo)
+		if err := s.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "8")}}); err != nil {
+			t.Fatal(err)
+		}
+		pid := repo.byID["fnd-1"].Proposals()[0].ID()
+		if err := s.AcceptProposal(ctx, "fnd-1", pid, human, reviewBy...); err != nil {
+			t.Fatal(err)
+		}
+		return repo, s
+	}
+	fixed := func(pkg, major string) app.Applicability {
+		st := scopedStatement(pkg, "fixed", value.FamilyEnterpriseLinux, major)
+		st.Advisory, st.FixedVersion = "RHSA-2026:69095", "libtiff-0:4.0.9-39.el8_10"
+		return st
+	}
+
+	repo, s := accepted(t)
+	if err := s.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{fixed("libtiff", "8")}}); err != nil {
+		t.Fatal(err)
+	}
+	_, reason, ok := repo.byID["fnd-1"].DispositionStale()
+	if !ok || !strings.Contains(reason, "libtiff-0:4.0.9-39.el8_10") || !strings.Contains(reason, "RHSA-2026:69095") {
+		t.Fatalf("re-surfaced = %v reason %q; want the fix's build and advisory", ok, reason)
+	}
+	if pos, ok := repo.byID["fnd-1"].CurrentPosition(); !ok || pos.Stance() != domain.StanceAcceptedRisk {
+		t.Fatal("the Position must stand")
+	}
+
+	for name, st := range map[string]app.Applicability{
+		"other package": fixed("curl", "8"),
+		"other product": fixed("libtiff", "9"),
+	} {
+		repo, s := accepted(t)
+		if err := s.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{st}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, ok := repo.byID["fnd-1"].DispositionStale(); ok {
+			t.Fatalf("%s: must not re-surface", name)
+		}
+	}
+
+	// A human's own not_affected (no vexwnf: premise) is not re-surfaced by a vendor fix.
+	repo = newRepo()
+	repo.seed(suppressed(t, domain.StanceNotAffected, domain.ExploitSignals{}))
+	hf := repo.byID["fnd-1"]
+	if _, err := hf.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", Name: "libtiff", Version: "4.0.9-38.el8_10"}); err != nil {
+		t.Fatal(err)
+	}
+	repo.seed(hf)
+	if err := writeSvc(repo).ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{fixed("libtiff", "8")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := repo.byID["fnd-1"].DispositionStale(); ok {
+		t.Fatal("a Position not resting on a vendor no-fix statement is not this drift's business")
+	}
+
+	// Fix and expired review date together: the fix is the reason.
+	repo, s = accepted(t, fixedNow.Add(-time.Hour))
+	if err := s.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{fixed("libtiff", "8")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, _ := repo.byID["fnd-1"].DispositionStale(); !strings.Contains(reason, "ships a fix") {
+		t.Fatalf("reason = %q, want the fix to outrank the review date", reason)
+	}
+	// Expired review date alone, on a no-fix acceptance: the date is the reason.
+	repo, s = accepted(t, fixedNow.Add(-time.Hour))
+	if err := s.ReactToEnrichment(ctx, app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "8")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, ok := repo.byID["fnd-1"].DispositionStale(); !ok || !strings.Contains(reason, "review-by") {
+		t.Fatalf("reason = %q ok=%v, want the review date", reason, ok)
+	}
+}
+
+// A write failure on the accepted_risk raise surfaces like any other.
+func TestReactToEnrichment_NoFixRaiseWriteFailureSurfaces(t *testing.T) {
+	repo := newRepo()
+	repo.seed(withComponent(t, "fnd-1", "rel-1", "fl-1", "CVE-2026-1", "pkg:rpm/rocky/libtiff@4.0.9-38.el8_10", "libtiff"))
+	repo.saveErr = errors.New("db down")
+	err := writeSvc(repo).ReactToEnrichment(context.Background(), app.EnrichmentSignal{FaultlineID: "fl-1", Applicabilities: []app.Applicability{scopedStatement("libtiff", "will_not_fix", value.FamilyEnterpriseLinux, "8")}})
+	if err == nil {
+		t.Fatal("the write failure must surface")
 	}
 }

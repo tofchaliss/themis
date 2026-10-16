@@ -25,7 +25,16 @@ const enrichmentActorID = "knowledge-enrichment"
 const (
 	vexApplicabilityActorID = "vex-applicability"
 	vexStatusNotAffected    = "not_affected"
+	vexStatusFixed          = "fixed"
 )
+
+// vexNoFixStatuses are the vendor statuses that say "the flaw is real and we ship no fix"
+// (EDR-VEX-02 D18): an applicable one proposes `accepted_risk` for a person to take.
+var vexNoFixStatuses = map[string]bool{"will_not_fix": true, "fix_deferred": true, "out_of_support": true}
+
+// vexNoFixProposalPrefix marks the accepted_risk proposals raised from those statements; the
+// disposition watcher recognizes a Position resting on one by it (D20).
+const vexNoFixProposalPrefix = "vexwnf:"
 
 // versionRangeActorID is the proposer id for the system not_affected Proposal raised by the
 // deterministic version-range rule (EDR-TRUST-01 T5). ActorSystem — Governance's own
@@ -545,69 +554,103 @@ func (s *FindingService) RejudgeApplicability(ctx context.Context, faultlineID s
 // reactToApplicabilityCounted is reactToApplicability reporting how many proposals it raised,
 // so the re-judge pass can say what it did; the enrichment path discards the count.
 func (s *FindingService) reactToApplicabilityCounted(ctx context.Context, sig EnrichmentSignal) (int, error) {
-	var notAffected []Applicability
+	var notAffected, noFix []Applicability
 	for _, a := range sig.Applicabilities {
-		if a.Status == vexStatusNotAffected && strings.TrimSpace(a.Package) != "" {
+		if strings.TrimSpace(a.Package) == "" {
+			continue
+		}
+		switch {
+		case a.Status == vexStatusNotAffected:
 			notAffected = append(notAffected, a)
+		case vexNoFixStatuses[a.Status]:
+			noFix = append(noFix, a)
 		}
 	}
-	if len(notAffected) == 0 {
-		return 0, nil // no vendor not_affected statement — nothing to suppress
+	if len(notAffected) == 0 && len(noFix) == 0 {
+		return 0, nil // nothing a stance can be proposed from
 	}
 	ids, err := s.repo.FindingsByFaultline(ctx, sig.FaultlineID)
 	if err != nil {
 		return 0, err
 	}
 	raised := 0
-	proposer := domain.Actor{Kind: domain.ActorSystem, ID: vexApplicabilityActorID}
+	// Two selections, one gate each: an applicable not_affected proposes not_affected (D4/D15),
+	// an applicable will_not_fix / fix_deferred / out_of_support proposes accepted_risk (D18). A
+	// Finding may receive both — the vendor can say not_affected for one of its packages and
+	// will_not_fix for another — and a person picks.
 	for _, id := range ids {
-		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-			// Resolved ONCE per Finding, before selection: the release scope is the same for
-			// every statement on it, and both the selection and the block below must judge
-			// against the same answer.
-			release := releaseScopeFor(ctx, s.repo, f)
-			covered, ok := coveringStatement(f, release, notAffected)
-			if !ok {
-				return nil, errNoop // no vendor statement covers this Finding's components
-			}
-			// EDR-VEX-02 D2/D9 — BLOCK a statement whose scope does not cover this release, and
-			// block one whose scope cannot be established.
-			//
-			// The block is STRUCTURAL rather than a flag: a Proposal is the only thing that can
-			// clear a Finding, so declining to raise one means the statement cannot be used for
-			// disposition, by a policy or by a human. The statement itself is untouched and
-			// remains on the card as vendor evidence (D8) — it is not "ignored", it is a valid
-			// vendor assertion whose scope does not apply here.
-			//
-			// Measured reason: a Rocky 8.10 estate was shown "not affected in Red Hat Enterprise
-			// Linux 7", and ~90% of surviving statements were scoped to products it does not run.
-			// `unknown` is blocked for the same fail-safe reason an unknown claim class acts as
-			// carrier: absent evidence must never suppress.
-			if applicabilityOf(release, covered) != value.ScopeApplicable {
-				return nil, errNoop
-			}
-			pid := domain.ProposalID("vex:" + string(id) + ":" + packageKey(covered.Package))
-			// A vendor VEX statement is Asserted: the vendor is the sole authority on their own
-			// build, so nothing can re-run it. Hard-coded rather than read per-statement because
-			// applicabilities carry no individual class yet (TRUST-1) — every one of them today
-			// originates from vendor or uploaded VEX, so they are uniformly Asserted.
-			p, err := domain.NewGovernanceProposal(pid, proposer, domain.StanceNotAffected, vexRationale(covered), now, value.TrustAsserted)
-			if err != nil {
-				return nil, err
-			}
-			notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
-			if errors.Is(err, domain.ErrDuplicateProposal) {
-				return nil, errNoop // already raised for this statement — idempotent
-			}
-			if err == nil {
-				raised++
-			}
-			return notes, err
-		}); err != nil {
+		n, err := s.raiseVendorProposal(ctx, id, notAffected, "vex:", domain.StanceNotAffected)
+		if err != nil {
 			return raised, err
 		}
+		raised += n
+		n, err = s.raiseVendorProposal(ctx, id, noFix, vexNoFixProposalPrefix, domain.StanceAcceptedRisk)
+		if err != nil {
+			return raised, err
+		}
+		raised += n
 	}
 	return raised, nil
+}
+
+// raiseVendorProposal raises ONE vendor-statement proposal on one Finding from the statements of
+// one selection, when a statement covers a component and applies to the release. It never
+// auto-suppresses: a Governance-owned policy may auto-accept the system proposal (D11), otherwise
+// it awaits a human. The vendor justification is carried into the rationale so a suppression is
+// explainable (D6). Idempotent — the proposal id derives from the Finding + a path-safe hash of
+// the covered package (so it never embeds the PURL's '/', which would 404 the accept/reject REST
+// path), and a re-delivery dedups.
+func (s *FindingService) raiseVendorProposal(ctx context.Context, id domain.FindingID, statements []Applicability, prefix string, stance domain.Stance) (int, error) {
+	if len(statements) == 0 {
+		return 0, nil
+	}
+	proposer := domain.Actor{Kind: domain.ActorSystem, ID: vexApplicabilityActorID}
+	raised := 0
+	err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
+		// Resolved ONCE per Finding, before selection: the release scope is the same for every
+		// statement on it, and both the selection and the block below must judge against the
+		// same answer.
+		release := releaseScopeFor(ctx, s.repo, f)
+		covered, ok := coveringStatement(f, release, statements)
+		if !ok {
+			return nil, errNoop // no vendor statement covers this Finding's components
+		}
+		// EDR-VEX-02 D2/D9 — BLOCK a statement whose scope does not cover this release, and
+		// block one whose scope cannot be established.
+		//
+		// The block is STRUCTURAL rather than a flag: a Proposal is the only thing that can
+		// clear a Finding, so declining to raise one means the statement cannot be used for
+		// disposition, by a policy or by a human. The statement itself is untouched and
+		// remains on the card as vendor evidence (D8) — it is not "ignored", it is a valid
+		// vendor assertion whose scope does not apply here.
+		//
+		// Measured reason: a Rocky 8.10 estate was shown "not affected in Red Hat Enterprise
+		// Linux 7", and ~90% of surviving statements were scoped to products it does not run.
+		// `unknown` is blocked for the same fail-safe reason an unknown claim class acts as
+		// carrier: absent evidence must never suppress.
+		if applicabilityOf(release, covered) != value.ScopeApplicable {
+			return nil, errNoop
+		}
+		pid := domain.ProposalID(prefix + string(id) + ":" + packageKey(covered.Package))
+		// A vendor VEX statement is Asserted: the vendor is the sole authority on their own
+		// build, so nothing can re-run it. Hard-coded rather than read per-statement because
+		// applicabilities carry no individual class yet (TRUST-1) — every one of them today
+		// originates from vendor or uploaded VEX, so they are uniformly Asserted. For an
+		// accepted_risk proposal that also means no policy can ever take it (D19).
+		p, err := domain.NewGovernanceProposal(pid, proposer, stance, vexRationale(covered), now, value.TrustAsserted)
+		if err != nil {
+			return nil, err
+		}
+		notes, err := s.raiseAndMaybeAutoAccept(f, p, now)
+		if errors.Is(err, domain.ErrDuplicateProposal) {
+			return nil, errNoop // already raised for this statement — idempotent
+		}
+		if err == nil {
+			raised++
+		}
+		return notes, err
+	})
+	return raised, err
 }
 
 // reactToVersionRange raises a system not_affected Proposal on each Finding whose every
@@ -697,9 +740,9 @@ func coveringStatement(f *domain.Finding, release value.ProductScope, apps []App
 // justification through for explainability (D6).
 func vexRationale(a Applicability) string {
 	if strings.TrimSpace(a.Justification) == "" {
-		return "vendor VEX: not_affected for " + a.Package
+		return "vendor VEX: " + a.Status + " for " + a.Package
 	}
-	return "vendor VEX: not_affected for " + a.Package + " (" + a.Justification + ")"
+	return "vendor VEX: " + a.Status + " for " + a.Package + " (" + a.Justification + ")"
 }
 
 // packageKey derives a short, path-safe, deterministic token from a package identifier. The vex
@@ -906,6 +949,38 @@ func archivedEvent(f domain.Finding, at time.Time) any { return domain.NewFindin
 //
 // Skipped entirely for a withdrawal, where the CVE has been retired upstream: re-surfacing a
 // Finding because its dead CVE's stale EPSS moved would be noise.
+// vendorFixArrived reports, as the re-surfacing reason, that the Position accepted a vendor
+// "no fix" statement (a `vexwnf:` proposal, EDR-VEX-02 D18) and the card now carries an
+// APPLICABLE `fixed` statement for a package this Finding covers (D20): the premise the
+// acceptance rested on — the vendor ships no fix — is gone. "" when nothing of the kind applies.
+func vendorFixArrived(ctx context.Context, repo Repository, f domain.Finding, pos domain.Position, statements []Applicability) string {
+	if !strings.HasPrefix(string(pos.Inputs().AcceptedProposalID), vexNoFixProposalPrefix) {
+		return ""
+	}
+	var fixed []Applicability
+	for _, a := range statements {
+		if a.Status == vexStatusFixed && strings.TrimSpace(a.Package) != "" {
+			fixed = append(fixed, a)
+		}
+	}
+	if len(fixed) == 0 {
+		return ""
+	}
+	release := releaseScopeFor(ctx, repo, &f)
+	covered, ok := coveringStatement(&f, release, fixed)
+	if !ok || applicabilityOf(release, covered) != value.ScopeApplicable {
+		return ""
+	}
+	reason := "the vendor now ships a fix for " + covered.Package
+	if covered.FixedVersion != "" {
+		reason += " in " + covered.FixedVersion
+	}
+	if covered.Advisory != "" {
+		reason += " (" + covered.Advisory + ")"
+	}
+	return reason
+}
+
 // reviewByExpiredReason is the one re-surfacing reason that is not a drift (D14).
 const reviewByExpiredReason = "the review-by date on this decision has passed"
 
@@ -935,7 +1010,8 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 		}
 		drift := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
 		expired := domain.Expired(pos.Inputs().ReviewBy, s.clock.Now())
-		if !drift.Material() && !expired {
+		vendorFix := vendorFixArrived(ctx, s.repo, f, pos, sig.Applicabilities)
+		if !drift.Material() && !expired && vendorFix == "" {
 			continue
 		}
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
@@ -949,12 +1025,18 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 			d := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
 			reason := d.Reason()
 			if !d.Material() {
-				if !domain.Expired(pos.Inputs().ReviewBy, now) {
+				// Drift takes precedence when several fire: "the CVE entered KEV" is a stronger
+				// call to action than "a fix is out" or "your review date passed", and a
+				// re-surfacing gets read once. A vendor fix outranks the review date: it is the
+				// answer, not a reminder (EDR-VEX-02 D20).
+				switch fix := vendorFixArrived(ctx, s.repo, *f, pos, sig.Applicabilities); {
+				case fix != "":
+					reason = fix
+				case domain.Expired(pos.Inputs().ReviewBy, now):
+					reason = reviewByExpiredReason
+				default:
 					return nil, nil
 				}
-				// Drift takes precedence when both fire: "the CVE entered KEV" is a stronger call
-				// to action than "your review date passed", and a re-surfacing gets read once.
-				reason = reviewByExpiredReason
 			}
 			// The Finding itself records the re-surfacing (RF-2), so the queue, the drawer and
 			// residual_priority see it; the event stays for subscribers. An already-marked

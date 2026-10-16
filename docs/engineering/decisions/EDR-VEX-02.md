@@ -508,3 +508,51 @@ product, which is the honest state.
 family is not the release's under one closed line. The "no statement covers this release"
 sentence (D16) appears only when some statement shares the release's family — RHEL rows on a Rocky
 release — never for a vendor that does not cover the release's product at all.
+
+## Amendment (2026-10-16) — a vendor's "will not fix" becomes an `accepted_risk` proposal (VEX-WNF-1)
+
+**Measured reason.** After D13–D17 the per-package census of what Red Hat says for RHEL 8 across the
+open CVEs of the scanner-reported packages on the estate read: compat-libtiff3 48 `will_not_fix` +
+9 `fix_deferred` of 59; binutils 26 + 46 of 79; libtiff 31 + 7 of 41; curl 1 + 17 of 24. Every one of
+those Findings is OPEN CORRECTLY — the vendor acknowledges the flaw and ships no fix — and every one
+sits in the queue with nothing to do about it but a person recording `accepted_risk` by hand, over
+a hundred times, each time typing the vendor's own words as the reason. D15 made those statements
+visible; it left the stance they call for to be re-typed.
+
+### D18 — An applicable `will_not_fix`, `fix_deferred` or `out_of_support` statement raises a system `accepted_risk` proposal
+
+For a Finding whose release the statement covers (`applicable`, the same test as D2 for
+`not_affected`), Governance raises a system proposal `vexwnf:<finding>:<package-key>` with stance
+**`accepted_risk`**, proposer `system:vex-applicability`, Asserted evidence, and a rationale that
+carries the vendor's status and justification verbatim. It is not `not_affected` — the flaw is
+real and present — and it is not `deferred`: `deferred` means the enterprise postponed its own
+decision, and a vendor's deferral is the vendor's, not the enterprise's. `affected` and
+`under_investigation` statements raise nothing (there is no stance to propose), and `fixed` raises
+nothing (a fix exists; the verdict engine and the fix list already say so).
+
+### D19 — It is never auto-accepted, and D9 holds
+
+Accepting risk is the enterprise's act. The proposal rests on Asserted evidence, so the shipped
+policy (Observed `not_affected` only, EDR-GOVERNANCE-01 D15) cannot touch it, and no policy for it
+is added. A person accepts, with a `review_by` date if they want one; `scripts/vex-accept-applicable.sh`
+lists these proposals only with `--include-will-not-fix`, kept apart from the `not_affected` ones
+because signing them is a different decision.
+
+### D20 — The premise is the vendor's state, and a fix re-surfaces the decision
+
+A Position that accepted a `vexwnf:` proposal rested on "the vendor ships no fix". When a later
+enrichment brings an **applicable `fixed` statement** for the same package, that premise is gone:
+the disposition watcher re-surfaces the Finding (the RF-2 mark, reason *"the vendor now ships a fix
+in <build> (<advisory>)"*) exactly as it does for KEV or an EPSS rise. The Position is not changed;
+the question is re-opened, and the upgrade is now the answer. Nothing else about the statement
+(a `fix_deferred` turning `will_not_fix`) re-surfaces it: the enterprise's acceptance covered both.
+
+### D21 — The drawer shows the vendor's status on the proposal
+
+The proposal's rationale is the vendor's statement, so the existing proposal row needs no new
+field; the status chip D16 already draws beside the statement is the same word the rationale
+carries. No API change.
+
+Implementation: `reactToApplicabilityCounted` (the raise, beside the `not_affected` path),
+`watchDispositions` (the vendor-fix drift), `scripts/vex-accept-applicable.sh`
+(`--include-will-not-fix`). OpenSpec `openspec/changes/phase3-vendor-will-not-fix`.
