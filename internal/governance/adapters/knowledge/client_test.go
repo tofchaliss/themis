@@ -122,3 +122,19 @@ func TestGetFaultlineCarriesFixedStatementAdvisoryAndBuild(t *testing.T) {
 		t.Errorf("will_not_fix statement = %+v", a)
 	}
 }
+
+// KN-RANGE-ECO-1: the statements ride the read seam with their world intact.
+func TestGetFaultlineCarriesRangeStatements(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"fl-1","cve":"CVE-2019-17596","view":{"affected_ranges":["<1.13.2","<21.1.1.1.0"],
+			"affected_range_statements":[{"ecosystem":"go","package":"stdlib","range":"<1.13.2"},{"range":"<21.1.1.1.0"}]}}`))
+	}))
+	defer srv.Close()
+	got, err := NewClient(srv.URL, srv.Client()).GetFaultline(context.Background(), "fl-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RangeStatements) != 2 || got.RangeStatements[0].Ecosystem != "go" || got.RangeStatements[0].Package != "stdlib" || got.RangeStatements[1].Ecosystem != "" {
+		t.Fatalf("statements = %+v", got.RangeStatements)
+	}
+}

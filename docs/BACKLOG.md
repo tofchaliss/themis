@@ -281,8 +281,9 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
-- [ ] **KN-RANGE-ECO-1 — a card's ranges lose their ecosystem, so a range published for another
-  product keeps a Go Finding open (filed 2026-10-16, the measured tail of the KN-GO arc).** MED,
+- [x] **KN-RANGE-ECO-1 — a card's ranges lose their ecosystem, so a range published for another
+  product keeps a Go Finding open (filed and closed 2026-10-16, the measured tail of the KN-GO
+  arc; EDR-KNOWLEDGE-01 D13–D14, `openspec/changes/phase3-range-ecosystem`).** MED,
   false-positive. The 60 open stdlib Findings are 17 CVEs. Thirteen (CVE-2026-56857, -56866,
   -78659/60/63/67/69, -94439/40/48, -97030/31/32) carry `>=0,<1.26.9` and `>=1.27.0-0,<1.27.2`:
   go1.27.1 and 1.26.8 are IN range — genuinely affected, fix in Go 1.27.2 / 1.26.9 — and the
@@ -299,8 +300,12 @@ three angles, and two of them proposed fixes that would not have worked.
   as a compatibility view), and let the version-range rule judge a component against the ranges
   of ITS ecosystem/package only — a range with no ecosystem stays applicable to everything
   (fail-safe, the EDR-CORRELATION-01 "unknown acts as carrier" line). Measure first with
-  `match-census.sh` sign 4 how many cards mix ecosystems. Until then the four are a human
-  decision with the Go range as the reason.
+  `match-census.sh` sign 4 how many cards mix ecosystems. **Done:** `RangeStatements` carried
+  end to end (OSV fills them; flat list unchanged); `EnterpriseView.RangesFor` /
+  `value.SelectRanges` is the one road to a per-component verdict, at match time and in
+  Governance's rule and re-judge pass; a card with no statements judges the flat list as before,
+  a card with statements for other worlds only is undecidable. **Measure on the VM:** after the
+  sweep restates the Go cards, the re-judge pass clears the four (eight Findings).
 
 - [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled

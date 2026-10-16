@@ -340,6 +340,12 @@ OpenVEX / CSAF out.
   and, since VEX-WNF-1 (2026-10-16, D18–D21), on an applicable `will_not_fix` / `fix_deferred` /
   `out_of_support` (proposes **`accepted_risk`**, Asserted, never auto-accepted; a later applicable
   `fixed` for the same package re-surfaces that acceptance); the rest is shown.
+- **A range keeps the world it was published for** (EDR-KNOWLEDGE-01 D13–D14, 2026-10-16): the card
+  carries `RangeStatements {ecosystem, package, range}` beside the flat `AffectedRanges` union, and
+  every per-component verdict (match-time gate, Governance's version-range rule, the re-judge pass)
+  reads `EnterpriseView.RangesFor` / `value.SelectRanges` — never the flat list — so an Oracle
+  appliance's range for the same CVE cannot hold a Go component open. No statements ⇒ the flat
+  list as before; statements for other worlds only ⇒ undecidable, never cleared.
 - **A distro advisory's package list is SCOPE, not N vulnerability claims** (EDR-CORRELATION-01). A
   module-stream advisory rebuilds every RPM in the stream and lists them all as affected; read as N
   claims, a CPython flaw becomes a vulnerability of `python3-pyyaml`. Each matched component

@@ -151,3 +151,44 @@ func TestCodec_ApplicabilityWithoutScopeDecodesUnknown(t *testing.T) {
 		t.Errorf("legacy statement = %+v, want the vendor's words intact", a)
 	}
 }
+
+// KN-RANGE-ECO-1: a range's world survives the proposal and view round-trips; a card written
+// before the field decodes with no statements.
+func TestCodec_RoundTripsRangeStatements(t *testing.T) {
+	c, _ := value.NewCVSS(7.5, "")
+	stmts := []value.RangeStatement{{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"}, {Range: "<=4.23.1f"}}
+	at := time.Unix(1_700_000_000, 0)
+	p, err := domain.NewVulnFactsProposal("osv", at, domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c,
+		AffectedRanges: []string{"<1.13.2", "<=4.23.1f"}, RangeStatements: stmts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := marshalProposalPayload(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := unmarshalProposal("osv", at, string(p.Kind()), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := back.VulnFacts()
+	if len(f.RangeStatements) != 2 || f.RangeStatements[0] != stmts[0] || f.RangeStatements[1] != stmts[1] {
+		t.Fatalf("proposal round-trip statements = %+v", f.RangeStatements)
+	}
+	view := domain.EnterpriseView{AffectedRanges: []string{"<1.13.2"}, RangeStatements: stmts[:1]}
+	vraw, err := marshalView(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vback, err := unmarshalView(vraw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vback.RangeStatements) != 1 || vback.RangeStatements[0] != stmts[0] {
+		t.Fatalf("view round-trip statements = %+v", vback.RangeStatements)
+	}
+	old, err := unmarshalView([]byte(`{"affected_ranges":["<2.0"]}`))
+	if err != nil || len(old.RangeStatements) != 0 || len(old.AffectedRanges) != 1 {
+		t.Fatalf("pre-field view = %+v err=%v, want ranges only", old, err)
+	}
+}

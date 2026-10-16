@@ -23,6 +23,9 @@ type FaultlineKnowledge struct {
 	KEV            bool
 	ExploitPublic  bool
 	AffectedRanges []string
+	// RangeStatements are the ranges with their ecosystem/package (KN-RANGE-ECO-1), read from
+	// Knowledge unchanged; empty for a card that holds none.
+	RangeStatements []value.RangeStatement
 	// CarrierProducts are the products the card's sources say CARRY the flaw
 	// (EDR-CORRELATION-01 D4), read from Knowledge unchanged. Governance classifies nothing —
 	// Knowledge already matched this Finding's components against exactly this list, and the

@@ -61,6 +61,12 @@ type faultlineResponse struct {
 			Ecosystem string `json:"ecosystem"` // absent = source did not say → filters nothing
 		} `json:"fixes"`
 		RangeTrust string `json:"range_trust"`
+		// AffectedRangeStatements are the ranges with their world (KN-RANGE-ECO-1).
+		AffectedRangeStatements []struct {
+			Ecosystem string `json:"ecosystem"`
+			Package   string `json:"package"`
+			Range     string `json:"range"`
+		} `json:"affected_range_statements"`
 		// Applicabilities are the vendor VEX statements the card holds, WITH the product scope
 		// the vendor stated (EDR-VEX-02 D5). Carried so Governance can determine whether each
 		// one covers this release and SHOW that determination beside the vendor's own words —
@@ -108,7 +114,12 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
 		})
 	}
+	var statements []value.RangeStatement
+	for _, st := range body.View.AffectedRangeStatements {
+		statements = append(statements, value.RangeStatement{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
+	}
 	return app.FaultlineKnowledge{
+		RangeStatements: statements,
 		FaultlineID:     body.ID,
 		CVE:             body.CVE,
 		Summary:         body.View.Summary,

@@ -57,6 +57,10 @@ type FaultlineEnriched struct {
 	// correlation's own range gate cannot reach, because that gate only runs at match time,
 	// so a Finding born before the range was known is never revisited.
 	AffectedRanges []string `json:"AffectedRanges,omitempty"`
+	// RangeStatements are the same ranges with the ecosystem and package each was published
+	// for (KN-RANGE-ECO-1), so Governance judges a component against ITS world's ranges and not
+	// against a union that includes another product's. Optional/additive.
+	RangeStatements []RangeStatementWire `json:"RangeStatements,omitempty"`
 	// Trust classes for the reconciled view's field-groups (EDR-TRUST-01 T2/T3), so
 	// Governance can apply the constitutional check (T4) and derive reservations (T12)
 	// without refetching the card.
@@ -253,6 +257,7 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		Fixes:           append([]FixedVersion(nil), v.Fixes...),
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
 		AffectedRanges:  append([]string(nil), v.AffectedRanges...),
+		RangeStatements: rangeStatementsWire(v.RangeStatements),
 		HeadlineTrust:   v.HeadlineTrust,
 		RangeTrust:      v.RangeTrust,
 		SignalTrust:     v.SignalTrust,
@@ -342,4 +347,22 @@ func NewComponentMatched(f Faultline, releaseID string, components []MatchedComp
 		Fixes:       append([]FixedVersion(nil), f.View().Fixes...),
 		OccurredAt:  at.UTC(),
 	}
+}
+
+// RangeStatementWire is a RangeStatement on the event wire (KN-RANGE-ECO-1).
+type RangeStatementWire struct {
+	Ecosystem string `json:"Ecosystem,omitempty"`
+	Package   string `json:"Package,omitempty"`
+	Range     string `json:"Range"`
+}
+
+func rangeStatementsWire(in []value.RangeStatement) []RangeStatementWire {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]RangeStatementWire, 0, len(in))
+	for _, st := range in {
+		out = append(out, RangeStatementWire{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
+	}
+	return out
 }

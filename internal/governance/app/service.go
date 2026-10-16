@@ -299,6 +299,10 @@ type EnrichmentSignal struct {
 	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3), against which the
 	// deterministic version-range rule re-evaluates each Finding (EDR-TRUST-01 T5).
 	AffectedRanges []string
+	// RangeStatements are the same ranges with the ecosystem/package each was published for
+	// (KN-RANGE-ECO-1); the rule judges a component against its own world's ranges. Empty on
+	// a card folded before statements existed — the flat list is judged as before.
+	RangeStatements []value.RangeStatement
 }
 
 // Applicability is one vendor VEX statement distilled from the enrichment event (the raw wire
@@ -683,7 +687,7 @@ func (s *FindingService) reactToVersionRangeCounted(ctx context.Context, sig Enr
 	raised := 0
 	for _, id := range ids {
 		if err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-			if !domain.ProvablyOutOfRange(f.Components(), sig.AffectedRanges) {
+			if !domain.ProvablyOutOfRange(f.Components(), sig.AffectedRanges, sig.RangeStatements...) {
 				return nil, errNoop // in range, undecidable, or unreadable — defer, never suppress
 			}
 			pid := domain.ProposalID("range:" + string(id))

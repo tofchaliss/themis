@@ -485,3 +485,40 @@ func TestGetFaultline_CarriesTheCarrierProducts(t *testing.T) {
 		t.Errorf("carrier_products = %v, want the card's carrier on the wire", out.View.CarrierProducts)
 	}
 }
+
+// KN-RANGE-ECO-1: the read API carries each range's world beside the flat list; a world-less
+// statement omits the empty fields.
+func TestGetFaultlineById_CarriesRangeStatements(t *testing.T) {
+	cve, _ := value.NewCVEID("CVE-2019-17596")
+	f, _ := domain.NewFaultline("fl-1", cve)
+	c, _ := value.NewCVSS(7.5, "")
+	p, _ := domain.NewVulnFactsProposal("osv", time.Unix(1_700_000_000, 0), domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c,
+		AffectedRanges:  []string{"<1.13.2", "<=4.23.1f"},
+		RangeStatements: []value.RangeStatement{{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"}, {Range: "<=4.23.1f"}}})
+	f.FoldProposal(p, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	srv := server(t, fakeRepo{card: f, found: true}, fakeProjection{})
+
+	status, body := get(t, srv.URL+"/faultlines/fl-1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var v struct {
+		View struct {
+			AffectedRanges []string         `json:"affected_ranges"`
+			Statements     []map[string]any `json:"affected_range_statements"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.View.AffectedRanges) != 2 || len(v.View.Statements) != 2 {
+		t.Fatalf("view = %+v", v.View)
+	}
+	// Sorted: the world-less one first (empty ecosystem), then go/stdlib.
+	if _, has := v.View.Statements[0]["ecosystem"]; has || v.View.Statements[0]["range"] != "<=4.23.1f" {
+		t.Fatalf("world-less statement = %+v, want only range", v.View.Statements[0])
+	}
+	if v.View.Statements[1]["ecosystem"] != "go" || v.View.Statements[1]["package"] != "stdlib" || v.View.Statements[1]["range"] != "<1.13.2" {
+		t.Fatalf("go statement = %+v", v.View.Statements[1])
+	}
+}

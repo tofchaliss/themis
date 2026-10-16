@@ -51,6 +51,12 @@ type VulnFacts struct {
 	Severity       value.Severity
 	CVSS           value.CVSS
 	AffectedRanges []string
+	// RangeStatements are the same ranges WITH the world each was published for — the
+	// ecosystem and, when the source said, the package (KN-RANGE-ECO-1). AffectedRanges stays
+	// the flat union for display and for consumers written before this field; a verdict about
+	// one component selects from the statements (value.SelectRanges) and falls back to the flat
+	// list only when a source stated no world at all.
+	RangeStatements []value.RangeStatement
 	// Fixes are the versions that resolve the vulnerability, each PAIRED WITH THE PACKAGE it
 	// applies to.
 	//
@@ -206,6 +212,7 @@ func (f VulnFacts) sameAs(other VulnFacts) bool {
 		f.CVSS == other.CVSS &&
 		f.Summary == other.Summary &&
 		slices.Equal(f.AffectedRanges, other.AffectedRanges) &&
+		slices.Equal(f.RangeStatements, other.RangeStatements) &&
 		slices.Equal(f.CarrierProducts, other.CarrierProducts) &&
 		slices.Equal(f.Fixes, other.Fixes)
 }
@@ -247,11 +254,12 @@ func NewVulnFactsProposal(source string, observedAt time.Time, facts VulnFacts) 
 		return Proposal{}, errors.New("proposal: invalid severity")
 	}
 	copyFacts := VulnFacts{
-		Summary:        facts.Summary,
-		Severity:       facts.Severity,
-		CVSS:           facts.CVSS,
-		AffectedRanges: append([]string(nil), facts.AffectedRanges...),
-		Fixes:          append([]FixedVersion(nil), facts.Fixes...),
+		Summary:         facts.Summary,
+		Severity:        facts.Severity,
+		CVSS:            facts.CVSS,
+		AffectedRanges:  append([]string(nil), facts.AffectedRanges...),
+		RangeStatements: append([]value.RangeStatement(nil), facts.RangeStatements...),
+		Fixes:           append([]FixedVersion(nil), facts.Fixes...),
 		// Defensive copy like the rest: a caller mutating its slice afterwards must not be able
 		// to change a Proposal that has already been recorded. The append-only audit trail is
 		// only trustworthy if a recorded Proposal is immutable.
@@ -303,6 +311,7 @@ func (p Proposal) VulnFacts() (VulnFacts, bool) {
 	}
 	f := *p.vulnFacts
 	f.AffectedRanges = append([]string(nil), p.vulnFacts.AffectedRanges...)
+	f.RangeStatements = append([]value.RangeStatement(nil), p.vulnFacts.RangeStatements...)
 	f.Fixes = append([]FixedVersion(nil), p.vulnFacts.Fixes...)
 	return f, true
 }

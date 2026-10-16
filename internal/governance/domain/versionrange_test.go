@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"github.com/themis-project/themis/internal/kernel/value"
 	"testing"
 
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -81,5 +82,48 @@ func TestProvablyOutOfRange_ReconciledRangeCatchesADistroBackport(t *testing.T) 
 func TestProvablyOutOfRange_NeverDecidesAffected(t *testing.T) {
 	if domain.ProvablyOutOfRange([]domain.MatchedComponent{comp("pkg:pypi/foo@2.0", "2.0", "pypi")}, []string{">= 1.0, < 3.0"}) {
 		t.Error("an in-range component must defer; this rule only ever proves out-of-range")
+	}
+}
+
+// KN-RANGE-ECO-1: with statements on the card, a component is judged against its own world's
+// ranges. A foreign product's range neither holds nor clears it; a card that speaks only about
+// other worlds leaves the verdict undecidable; a world-less statement applies to everything.
+func TestProvablyOutOfRange_JudgesAComponentAgainstItsOwnWorld(t *testing.T) {
+	stdlib := domain.MatchedComponent{PURL: "pkg:golang/stdlib@1.27.1", Name: "stdlib", Version: "go1.27.1", Ecosystem: "golang"}
+	flat := []string{"<1.13.2", "<21.1.1.1.0"}
+	goStmt := value.RangeStatement{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"}
+	oracle := value.RangeStatement{Ecosystem: "oracle", Package: "weblogic", Range: "<21.1.1.1.0"}
+	if domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, flat) {
+		t.Fatal("the flat union must still hold the component (the measured defect)")
+	}
+	if !domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, flat, goStmt, oracle) {
+		t.Fatal("judged against the Go statement, go1.27.1 is provably out of range")
+	}
+	if domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, []string{"<21.1.1.1.0"}, oracle) {
+		t.Fatal("a card that speaks only about Oracle must not clear a Go component")
+	}
+	// A flat range no statement accounts for came from a source that stated no world: it applies.
+	if !domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, flat, oracle) {
+		t.Fatal("the unstated Go range still applies and clears the component")
+	}
+	// NVD's CPE bound for another product: no ecosystem, but a named product that is not ours.
+	cpe := value.RangeStatement{Package: "weblogic_server", Range: "<21.1.1.1.0"}
+	if !domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, flat, goStmt, cpe) {
+		t.Fatal("a world-less bound for another named product must not hold a Go component")
+	}
+	universal := value.RangeStatement{Range: "<21.1.1.1.0"}
+	if domain.ProvablyOutOfRange([]domain.MatchedComponent{stdlib}, flat, goStmt, universal) {
+		t.Fatal("a world-less range applies to everything and still holds the component")
+	}
+	// The purl name serves when the component carries no Name.
+	nameless := domain.MatchedComponent{PURL: "pkg:golang/stdlib@1.27.1", Version: "go1.27.1", Ecosystem: "golang"}
+	if !domain.ProvablyOutOfRange([]domain.MatchedComponent{nameless}, flat, goStmt, oracle) {
+		t.Fatal("the purl's name must match the statement's package")
+	}
+	if domain.ProvablyOutOfRange([]domain.MatchedComponent{{PURL: "pkg:golang", Version: "go1.27.1", Ecosystem: "golang"}}, []string{"<21.1.1.1.0"}, oracle) {
+		t.Fatal("a purl with no name segment yields no name, and the Oracle-only card stays undecidable")
+	}
+	if domain.ProvablyOutOfRange([]domain.MatchedComponent{{PURL: "stdlib", Version: "go1.27.1", Ecosystem: "golang"}}, []string{"<21.1.1.1.0"}, oracle) {
+		t.Fatal("a non-purl identifier yields no purl name, and the Oracle-only card stays undecidable")
 	}
 }

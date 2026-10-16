@@ -382,3 +382,55 @@ func TestAffectedRange_GoPrefixedInstalledVersion(t *testing.T) {
 		t.Fatal("exact constraint 1.27.1 should match the go1.27.1 spelling")
 	}
 }
+
+// KN-RANGE-ECO-1: a card for one CVE holds ranges for several products; a component is judged
+// against the ranges of ITS world. Package-specific statements win over ecosystem-wide ones, a
+// statement with no ecosystem applies to all, an unknown component world sees everything, and
+// a card with no statements falls back to the flat list.
+func TestSelectRanges(t *testing.T) {
+	stmts := []RangeStatement{
+		{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"},
+		{Ecosystem: "go", Package: "golang.org/x/net", Range: "<0.60.0"},
+		{Ecosystem: "oracle", Package: "weblogic", Range: "<21.1.1.1.0"},
+		{Ecosystem: "", Package: "", Range: "<=4.23.1f"},
+		{Ecosystem: "go", Package: "", Range: ">=0,<1.12.11"},
+		{Ecosystem: "pypi", Package: "", Range: "   "},
+	}
+	flat := []string{"<1.13.2", "<0.60.0", "<21.1.1.1.0", "<=4.23.1f"}
+	cases := []struct {
+		name  string
+		eco   string
+		names []string
+		stmts []RangeStatement
+		flat  []string
+		want  []string
+	}{
+		{"go stdlib: its package's range plus the universal one", "golang", []string{"stdlib"}, stmts, flat, []string{"<1.13.2", "<=4.23.1f"}},
+		{"go, package not named: ecosystem-wide plus universal", "go", []string{"something-else"}, stmts, flat, []string{">=0,<1.12.11", "<=4.23.1f"}},
+		{"oracle component", "oracle", []string{"weblogic"}, stmts, flat, []string{"<21.1.1.1.0", "<=4.23.1f"}},
+		{"world the card never spoke about: only the universal", "npm", []string{"left-pad"}, stmts, flat, []string{"<=4.23.1f"}},
+		{"unknown component world: everything", "", []string{"x"}, stmts, flat, []string{"<1.13.2", "<0.60.0", "<21.1.1.1.0", ">=0,<1.12.11", "<=4.23.1f"}},
+		{"no statements: the flat list unchanged", "go", []string{"stdlib"}, nil, flat, flat},
+		{"statements for other worlds only; the unstated flat range still applies", "npm", nil, stmts[:3], flat, []string{"<=4.23.1f"}},
+		{"world-less bound for another named product is not ours", "go", []string{"stdlib"},
+			[]RangeStatement{{Package: "weblogic_server", Range: "<21.1.1.1.0"}, {Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"}}, []string{"<21.1.1.1.0", "<1.13.2"}, []string{"<1.13.2"}},
+		{"world-less bound for our product applies", "go", []string{"stdlib"},
+			[]RangeStatement{{Package: "stdlib", Range: "<1.13.2"}}, []string{"<1.13.2"}, []string{"<1.13.2"}},
+		{"world-less bound for a named product, component unnamed: applies", "go", nil,
+			[]RangeStatement{{Package: "weblogic_server", Range: "<21.1.1.1.0"}}, []string{"<21.1.1.1.0"}, []string{"<21.1.1.1.0"}},
+		{"statements for other worlds only and every flat range stated: empty", "npm", nil, stmts[:3], []string{"<1.13.2", "<0.60.0", "<21.1.1.1.0"}, nil},
+	}
+	for _, tc := range cases {
+		got := SelectRanges(tc.eco, tc.names, tc.stmts, tc.flat)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+				break
+			}
+		}
+	}
+}

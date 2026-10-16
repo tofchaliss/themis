@@ -300,3 +300,36 @@ func TestOSVClient_GoStdlibVersionLosesTheToolchainPrefix(t *testing.T) {
 		t.Errorf("name = %q, want stdlib", gotReq.Package.Name)
 	}
 }
+
+// KN-RANGE-ECO-1: every range an OSV affected-entry yields is also recorded as a statement
+// carrying that entry's canonical ecosystem and package. An entry that names no package yields a
+// world-less statement (applies to everything); a PyPI entry yields pypi/<name>.
+func TestOSVClient_RangesCarryTheirWorld(t *testing.T) {
+	comp := app.InventoryComponent{PURL: "pkg:pypi/urllib3@1.26.20", Name: "urllib3", Version: "1.26.20", Ecosystem: "PyPI"}
+
+	srv, _ := osvServer(t, osvVulnCVE) // the fixture names no package
+	got, err := feed.NewOSVClient(srv.URL, srv.Client()).VulnsForPackage(context.Background(), comp)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("VulnsForPackage: %v (%d)", err, len(got))
+	}
+	vf, _ := got[0].Proposal.VulnFacts()
+	if len(vf.RangeStatements) != len(vf.AffectedRanges) || len(vf.RangeStatements) == 0 {
+		t.Fatalf("statements = %+v vs ranges %v, want one statement per range", vf.RangeStatements, vf.AffectedRanges)
+	}
+	if st := vf.RangeStatements[0]; st.Ecosystem != "" || st.Package != "" || st.Range != vf.AffectedRanges[0] {
+		t.Fatalf("package-less entry: statement = %+v, want world-less", st)
+	}
+
+	packaged := `{"id":"CVE-2024-1000","modified":"2024-01-02T00:00:00Z","summary":"s",
+	  "database_specific":{"severity":"HIGH"},
+	  "affected":[{"package":{"ecosystem":"PyPI","name":"urllib3"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.0"}]}]}]}`
+	srv2, _ := osvServer(t, packaged)
+	got, err = feed.NewOSVClient(srv2.URL, srv2.Client()).VulnsForPackage(context.Background(), comp)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("VulnsForPackage (packaged): %v (%d)", err, len(got))
+	}
+	vf, _ = got[0].Proposal.VulnFacts()
+	if len(vf.RangeStatements) != 1 || vf.RangeStatements[0].Ecosystem != "pypi" || vf.RangeStatements[0].Package != "urllib3" || vf.RangeStatements[0].Range != ">=0,<2.0" {
+		t.Fatalf("packaged entry: statements = %+v, want pypi/urllib3 >=0,<2.0", vf.RangeStatements)
+	}
+}

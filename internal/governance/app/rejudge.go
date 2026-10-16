@@ -93,7 +93,7 @@ func (r *RangeRejudge) Run(ctx context.Context) (RangeRejudgeResult, error) {
 			res.Skipped++
 			continue
 		}
-		n, err := r.svc.RejudgeVersionRange(ctx, fl, k.AffectedRanges, k.RangeTrust)
+		n, err := r.svc.RejudgeVersionRange(ctx, fl, k.AffectedRanges, k.RangeTrust, k.RangeStatements...)
 		if err != nil {
 			return res, fmt.Errorf("rejudge %s: %w", fl, err)
 		}
@@ -119,9 +119,9 @@ func (r *RangeRejudge) Run(ctx context.Context) (RangeRejudgeResult, error) {
 // proposals it raised. It is the narrow entry the one-time pass needs: ReactToEnrichment also
 // stamps the base score, signals and band from its signal, and a pass that carries none of
 // those must not zero them.
-func (s *FindingService) RejudgeVersionRange(ctx context.Context, faultlineID string, ranges []string, trust value.TrustClass) (int, error) {
+func (s *FindingService) RejudgeVersionRange(ctx context.Context, faultlineID string, ranges []string, trust value.TrustClass, statements ...value.RangeStatement) (int, error) {
 	if len(ranges) == 0 {
 		return 0, nil
 	}
-	return s.reactToVersionRangeCounted(ctx, EnrichmentSignal{FaultlineID: faultlineID, AffectedRanges: ranges, RangeTrust: trust})
+	return s.reactToVersionRangeCounted(ctx, EnrichmentSignal{FaultlineID: faultlineID, AffectedRanges: ranges, RangeTrust: trust, RangeStatements: statements})
 }

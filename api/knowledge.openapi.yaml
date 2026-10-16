@@ -231,6 +231,15 @@ components:
           type: array
           items:
             type: string
+        affected_range_statements:
+          type: array
+          description: >-
+            The same ranges WITH the ecosystem and package each was published for
+            (KN-RANGE-ECO-1). A consumer judging ONE component selects the statements of its
+            ecosystem (and package, when named); a statement with no ecosystem applies to all;
+            a card with no statements is judged on `affected_ranges` as before.
+          items:
+            $ref: '#/components/schemas/RangeStatement'
         fixed_versions:
           type: array
           description: >
@@ -298,6 +307,18 @@ components:
             Canonical ecosystem the fix was published for (rpm, apk, npm, ...). Absent when the
             source did not say; a consumer must treat an absent ecosystem as matching any
             component (only positive evidence of mismatch excludes).
+    RangeStatement:
+      type: object
+      required: [range]
+      properties:
+        ecosystem:
+          type: string
+          description: Canonical ecosystem key (rpm, apk, deb, go, pypi, npm, ...); absent when the source did not say.
+        package:
+          type: string
+          description: The package the range was published for; absent when the source did not say.
+        range:
+          type: string
     Applicability:
       type: object
       properties:

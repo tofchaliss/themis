@@ -460,7 +460,7 @@ func splitAPKParts(version string) []string {
 // only affirmatively-known suffixes reorder anything.
 var apkSuffixRank = map[string]int{
 	"alpha": -4, "beta": -3, "pre": -2, "rc": -1,
-	"": 0,
+	"":    0,
 	"cvs": 1, "svn": 2, "git": 3, "hg": 4, "p": 5, "r": 6,
 }
 
@@ -658,3 +658,91 @@ func rpmvercmp(a, b string) int {
 }
 
 func isRPMAlnum(b byte) bool { return isVersionDigit(b) || isVersionLetter(b) }
+
+// RangeStatement is ONE affected range together with the world it was published for: the
+// canonical ecosystem (CanonicalEcosystem vocabulary; "" = the source did not say) and, when the
+// source named it, the package. A card for one CVE routinely holds ranges for several products —
+// an Oracle appliance's `<21.1.1.1.0` beside Go's `<1.13.2` — and a flat union cannot say which
+// range speaks about which component (KN-RANGE-ECO-1, 2026-10-16: four Go CVEs stayed open on
+// go1.27.1 because a foreign product's range "contained" it).
+type RangeStatement struct {
+	Ecosystem string
+	Package   string
+	Range     string
+}
+
+// SelectRanges returns the ranges that speak about a component of the given canonical ecosystem
+// and names (its package name, purl name, source package — any that may match a statement's
+// Package), for a version-range verdict. The rule, in order:
+//
+//   - statements naming the component's package in its ecosystem are the most specific and win;
+//   - else statements in the component's ecosystem that name no package;
+//   - a statement with no ecosystem but a package applies to that package only (NVD's CPE bound
+//     names the product even when it names no ecosystem — a different product is a different
+//     world); a statement with neither applies to everything (the source did not say, so it is
+//     not evidence of a different world — fail-safe, like an unknown claim class), and so does
+//     a flat fallback range that no statement accounts for (a source that states no world at
+//     all, such as NVD's CPE bounds, beside a source that does);
+//   - a component whose ecosystem is unknown is judged against every statement;
+//   - with NO statements at all (a card folded before statements existed) the flat fallback
+//     list is returned unchanged, which is exactly the pre-change behaviour.
+//
+// When statements exist but none applies to the component, the result is EMPTY — "nothing is
+// known about this component's world" — and the caller's verdict is undecidable, never
+// out-of-range: a card that only speaks about other products must not clear this one.
+func SelectRanges(ecosystem string, names []string, statements []RangeStatement, fallback []string) []string {
+	if len(statements) == 0 {
+		return fallback
+	}
+	eco := CanonicalEcosystem(ecosystem)
+	nameSet := map[string]bool{}
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			nameSet[n] = true
+		}
+	}
+	// A flat range no statement accounts for came from a source that stated no world (NVD's
+	// CPE bounds beside OSV's statements on one card): it applies to everything, like a
+	// world-less statement — the source not saying is not evidence of a different world.
+	stated := map[string]bool{}
+	for _, st := range statements {
+		stated[strings.TrimSpace(st.Range)] = true
+	}
+	var byPackage, byEcosystem, universal []string
+	for _, rng := range fallback {
+		if rng = strings.TrimSpace(rng); rng != "" && !stated[rng] {
+			universal = append(universal, rng)
+		}
+	}
+	for _, st := range statements {
+		rng := strings.TrimSpace(st.Range)
+		if rng == "" {
+			continue
+		}
+		stEco := CanonicalEcosystem(st.Ecosystem)
+		switch {
+		case stEco == "" && st.Package != "" && len(nameSet) > 0 && !nameSet[st.Package]:
+			// No ecosystem but a named product that is not this component (NVD's CPE bound for
+			// another vendor's appliance): a different world, however it is spelled.
+			continue
+		case stEco == "" && st.Package != "" && nameSet[st.Package]:
+			byPackage = append(byPackage, rng)
+		case stEco == "":
+			universal = append(universal, rng)
+		case eco == "":
+			// Unknown component world: every statement may speak about it.
+			byEcosystem = append(byEcosystem, rng)
+		case stEco != eco:
+			continue
+		case st.Package != "" && nameSet[st.Package]:
+			byPackage = append(byPackage, rng)
+		case st.Package == "":
+			byEcosystem = append(byEcosystem, rng)
+		}
+	}
+	out := byPackage
+	if len(out) == 0 {
+		out = byEcosystem
+	}
+	return append(out, universal...)
+}

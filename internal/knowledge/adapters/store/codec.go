@@ -22,6 +22,10 @@ type viewDTO struct {
 	Summary        string   `json:"summary,omitempty"`
 	SummarySource  string   `json:"summary_source,omitempty"`
 	AffectedRanges []string `json:"affected_ranges"`
+	// RangeStatements — the ranges with their ecosystem/package (KN-RANGE-ECO-1). Additive and
+	// omitempty: a card written before this decodes with none, and every verdict then reads the
+	// flat list exactly as before.
+	RangeStatements []rangeStatementDTO `json:"range_statements,omitempty"`
 	// CarrierProducts — which product CARRIES the flaw (EDR-CORRELATION-01 D4). Additive and
 	// omitempty: a card written before this decodes to empty, which classifies every component
 	// as ClaimUnknown and therefore as a carrier — exactly the pre-change behaviour.
@@ -74,6 +78,7 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 		Severity: string(v.Severity), CVSSScore: v.CVSS.Score(), CVSSVector: v.CVSS.Vector(),
 		SeveritySource: v.SeveritySource, Summary: v.Summary, SummarySource: v.SummarySource,
 		AffectedRanges:  v.AffectedRanges,
+		RangeStatements: statementsToDTO(v.RangeStatements),
 		CarrierProducts: v.CarrierProducts,
 		Fixes:           fixesToDTO(v.Fixes), FixedVersions: v.FixedVersions,
 		EPSS: v.EPSS, KEV: v.KEV, ExploitPublic: v.ExploitPublic,
@@ -103,6 +108,7 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 		Summary:         dto.Summary,
 		SummarySource:   dto.SummarySource,
 		AffectedRanges:  dto.AffectedRanges,
+		RangeStatements: statementsFromDTO(dto.RangeStatements),
 		CarrierProducts: dto.CarrierProducts,
 		Fixes:           fixesFromDTO(dto.Fixes, dto.FixedVersions),
 		FixedVersions:   dto.FixedVersions,
@@ -124,13 +130,14 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 // proposalPayloadDTO is the persisted (jsonb) shape of a Proposal's kind-specific
 // payload (source/observed-at/kind live in their own columns).
 type proposalPayloadDTO struct {
-	Summary         string            `json:"summary,omitempty"`
-	Severity        string            `json:"severity,omitempty"`
-	CVSSScore       float64           `json:"cvss_score,omitempty"`
-	CVSSVector      string            `json:"cvss_vector,omitempty"`
-	AffectedRanges  []string          `json:"affected_ranges,omitempty"`
-	CarrierProducts []string          `json:"carrier_products,omitempty"`
-	Fixes           []fixedVersionDTO `json:"fixes,omitempty"`
+	Summary         string              `json:"summary,omitempty"`
+	Severity        string              `json:"severity,omitempty"`
+	CVSSScore       float64             `json:"cvss_score,omitempty"`
+	CVSSVector      string              `json:"cvss_vector,omitempty"`
+	AffectedRanges  []string            `json:"affected_ranges,omitempty"`
+	RangeStatements []rangeStatementDTO `json:"range_statements,omitempty"`
+	CarrierProducts []string            `json:"carrier_products,omitempty"`
+	Fixes           []fixedVersionDTO   `json:"fixes,omitempty"`
 	// FixedVersions is the pre-KN-FIX-1 shape, still DECODED so stored Proposals keep working;
 	// nothing writes it any more.
 	FixedVersions []string `json:"fixed_versions,omitempty"`
@@ -161,6 +168,7 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 		dto.CVSSScore = f.CVSS.Score()
 		dto.CVSSVector = f.CVSS.Vector()
 		dto.AffectedRanges = f.AffectedRanges
+		dto.RangeStatements = statementsToDTO(f.RangeStatements)
 		dto.CarrierProducts = f.CarrierProducts
 		dto.Fixes = fixesToDTO(f.Fixes)
 	case domain.KindExploitSignal:
@@ -195,6 +203,7 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 		return domain.NewVulnFactsProposal(source, observedAt, domain.VulnFacts{
 			Summary:  dto.Summary,
 			Severity: value.Severity(dto.Severity), CVSS: cvss, AffectedRanges: dto.AffectedRanges,
+			RangeStatements: statementsFromDTO(dto.RangeStatements),
 			CarrierProducts: dto.CarrierProducts,
 			// A Proposal stored before KN-FIX-1 has only the flat list; decode it as unattributed
 			// rather than dropping it. Unattributed fixes never satisfy a per-component verdict,
@@ -282,4 +291,33 @@ func stampFixEcosystems(source string, fixes []domain.FixedVersion) []domain.Fix
 		}
 	}
 	return fixes
+}
+
+// rangeStatementDTO is a range with its world, as stored (KN-RANGE-ECO-1).
+type rangeStatementDTO struct {
+	Ecosystem string `json:"ecosystem,omitempty"`
+	Package   string `json:"package,omitempty"`
+	Range     string `json:"range"`
+}
+
+func statementsToDTO(in []value.RangeStatement) []rangeStatementDTO {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]rangeStatementDTO, 0, len(in))
+	for _, st := range in {
+		out = append(out, rangeStatementDTO{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
+	}
+	return out
+}
+
+func statementsFromDTO(in []rangeStatementDTO) []value.RangeStatement {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]value.RangeStatement, 0, len(in))
+	for _, st := range in {
+		out = append(out, value.RangeStatement{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
+	}
+	return out
 }

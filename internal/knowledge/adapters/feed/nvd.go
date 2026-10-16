@@ -18,7 +18,10 @@ type nvdRecord struct {
 	VectorString string   `json:"vector_string"`
 	BaseSeverity string   `json:"base_severity"`
 	Affected     []string `json:"affected"`
-	Fixed        []string `json:"fixed"`
+	// AffectedStatements are the same bounds with the CPE product each was stated for
+	// (KN-RANGE-ECO-1); absent on a record stored before the field.
+	AffectedStatements []nvdAffectedStatement `json:"affected_statements,omitempty"`
+	Fixed              []string               `json:"fixed"`
 	// Products are the CPE products NVD says are vulnerable — the only stored answer to "which
 	// package CARRIES this flaw" (EDR-CORRELATION-01 D4). The client already extracted these for
 	// the A2 discovery gate and then threw them away.
@@ -50,6 +53,7 @@ func (a nvdACL) Translate(raw []byte) ([]Translated, error) {
 	p, err := domain.NewVulnFactsProposal(a.Source(), at, domain.VulnFacts{
 		Summary:  domain.TruncateSummary(rec.Summary),
 		Severity: severityFrom(rec.BaseSeverity, cvss), CVSS: cvss, AffectedRanges: rec.Affected,
+		RangeStatements: nvdStatements(rec.AffectedStatements),
 		// NVD's CPE data yields version boundaries without a package name, so these stay
 		// unattributed — visible as "a fix exists", never used to decide about a component.
 		Fixes: unattributedFixes(rec.Fixed),
@@ -61,4 +65,18 @@ func (a nvdACL) Translate(raw []byte) ([]Translated, error) {
 		return nil, err
 	}
 	return []Translated{{CVE: cve, Proposal: p}}, nil
+}
+
+// nvdStatements turns the CPE-product bounds into range statements with no ecosystem (NVD
+// names none) and the product as the package: a bound for another vendor's product then never
+// holds a component it was not stated for (KN-RANGE-ECO-1).
+func nvdStatements(in []nvdAffectedStatement) []value.RangeStatement {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]value.RangeStatement, 0, len(in))
+	for _, st := range in {
+		out = append(out, value.RangeStatement{Package: st.Product, Range: st.Range})
+	}
+	return out
 }

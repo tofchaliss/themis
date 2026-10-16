@@ -6,6 +6,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/themis-project/themis/internal/kernel/value"
 	"net/http"
 
 	"github.com/themis-project/themis/internal/knowledge/adapters/http/gen"
@@ -166,20 +167,21 @@ func toView(f domain.Faultline) gen.FaultlineView {
 	carriers := v.CarrierProducts
 	kev, pub := v.KEV, v.ExploitPublic
 	ev := gen.EnterpriseView{
-		Severity:       strptr(string(v.Severity)),
-		CvssScore:      f32ptr(v.CVSS.Score()),
-		CvssVector:     strptr(v.CVSS.Vector()),
-		SeveritySource: strptr(v.SeveritySource),
-		Summary:        strptr(v.Summary),
-		SummarySource:  strptr(v.SummarySource),
-		AffectedRanges: &ranges,
-		FixedVersions:  &fixes,
-		Fixes:          fixesOut(v.Fixes),
-		Epss:           f32ptr(v.EPSS),
-		Kev:            &kev,
-		ExploitPublic:  &pub,
-		Priority:       strptr(v.Priority()),
-		Score:          intptr(v.Score()),
+		Severity:                strptr(string(v.Severity)),
+		CvssScore:               f32ptr(v.CVSS.Score()),
+		CvssVector:              strptr(v.CVSS.Vector()),
+		SeveritySource:          strptr(v.SeveritySource),
+		Summary:                 strptr(v.Summary),
+		SummarySource:           strptr(v.SummarySource),
+		AffectedRanges:          &ranges,
+		AffectedRangeStatements: statementsOut(v.RangeStatements),
+		FixedVersions:           &fixes,
+		Fixes:                   fixesOut(v.Fixes),
+		Epss:                    f32ptr(v.EPSS),
+		Kev:                     &kev,
+		ExploitPublic:           &pub,
+		Priority:                strptr(v.Priority()),
+		Score:                   intptr(v.Score()),
 		// The carrier side of the correlation (EDR-ATTRIBUTION-01 D10). Knowledge has always
 		// held it and used it to classify claims; it never left the context, so a consumer
 		// could see that NO component matched a carrier but could not say WHICH carrier went
@@ -317,4 +319,24 @@ func (h *Handler) GetUnresolvedComponents(w http.ResponseWriter, r *http.Request
 		Unresolved: len(rep.Unresolved),
 		Components: comps,
 	})
+}
+
+func statementsOut(in []value.RangeStatement) *[]gen.RangeStatement {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]gen.RangeStatement, 0, len(in))
+	for _, st := range in {
+		rs := gen.RangeStatement{Range: st.Range}
+		if st.Ecosystem != "" {
+			e := st.Ecosystem
+			rs.Ecosystem = &e
+		}
+		if st.Package != "" {
+			p := st.Package
+			rs.Package = &p
+		}
+		out = append(out, rs)
+	}
+	return &out
 }

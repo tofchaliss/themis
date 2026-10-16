@@ -515,3 +515,43 @@ Again no amendment to the decisions above — four under-realizations brought up
   garbage sorted ahead of a real vector — the same shape as RANGE-PARSE-1 (`EDR-TRUST-01` T5). A recogniser
   must never be looser than the evaluator that consumes it; it now requires the `AV:`/`Au:` metrics that only
   a genuine v2 vector carries.
+
+## Amendment (2026-10-16) — a range keeps the world it was published for (KN-RANGE-ECO-1)
+
+**Measured reason.** CVE-2019-17596's card reconciled OSV's Go range `<1.13.2` beside `<=4.23.1f`,
+`<21.1.1.1.0`, `<13.7.0` and `<2.0` — ranges published for other products of the same CVE (an
+Oracle appliance, vendor devices, a Python package). The flat union is what the version-range
+rule read, and the rule requires EVERY range to exclude the version, so a foreign range that
+"contained" go1.27.1 kept the Finding open forever. Four of the seventeen open stdlib CVEs on the
+estate were held open this way; the kernel's `AffectedRange` already carried an `Ecosystem`, and the
+card dropped it at the first fold.
+
+### D13 — The card keeps each range's ecosystem and package; the flat list stays as the union
+
+`VulnFacts`, the proposal log, the reconciled view, the `faultline_enriched` event and the read API
+carry **`RangeStatements`** — `{ecosystem, package, range}` per range, the ecosystem in the
+`CanonicalEcosystem` vocabulary and `""` when the source did not say (NVD's CPE bounds). The
+flat **`AffectedRanges`** remains, as the union of every statement's range plus the world-less
+ones, so display and consumers written before this field are unchanged. Reconciliation treats
+statements like ranges: a source's LATEST statement replaces its earlier ones, sources union, and
+`RangeTrust` is graded by the same contributors. OSV fills the statements (ecosystem and package
+per affected entry); Red Hat publishes fixes, not ranges, and NVD and scanner reports state no
+world, so they contribute to the flat list only.
+
+### D14 — A verdict about ONE component reads the ranges of ITS world
+
+`EnterpriseView.RangesFor(ecosystem, names…)` (kernel `value.SelectRanges`) is the only road from
+a card to a component's verdict, at match time (`Correlate`) and in Governance's version-range rule
+(`ProvablyOutOfRange`, the re-judge pass included). Statements naming the component's package in
+its ecosystem win; else the ecosystem's package-less statements; a world-less statement applies to
+everything (the source did not say, which is not evidence of a different world — the same
+fail-safe line as an unknown claim class); a component whose own ecosystem is unknown is judged
+against every statement; a card with **no statements** is judged on the flat list exactly as
+before. A card that holds statements but none for the component's world yields **no range**,
+and the verdict is undecidable — a card that speaks only about other products must never clear
+this one.
+
+**Not changed:** the auto-accept policy, the trust grading, the event version (additive field),
+the GUI (the flat list is what it shows). **Estate note:** cards folded before this amendment hold
+no statements until a source restates them; the re-discovery sweep re-asks OSV for every
+correlated release in turn, after which the re-judge pass clears the held Findings.
