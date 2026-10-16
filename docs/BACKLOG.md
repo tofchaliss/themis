@@ -281,6 +281,17 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+- [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
+  (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled
+  `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
+  package's entire history; nothing noticed until a person read the queue. **Do:** at correlation,
+  when ONE component's discovery returns more than N distinct CVEs (N configurable, default 50)
+  AND the version could not be parsed into the ecosystem's comparator, record the matches at
+  `unknown`/held verdict with a `feed-health` row naming the component and the count, and surface
+  it in `match-census.sh` sign 1 as "suspect fan-out" rather than open findings. A parseable
+  version with a genuinely long history (binutils) must NOT trip it — the guard is on the
+  unparseable-version case only. Design the held state against EDR-VERDICT-01 before code.
+
 #### Roll-forward (EDR-ROLLFORWARD-01, 2026-10-16)
 
 - [x] **RF-1 — same-CVE roll-forward as a deterministic Governance proposal (filed and closed
