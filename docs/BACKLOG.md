@@ -307,7 +307,10 @@ three angles, and two of them proposed fixes that would not have worked.
   human confirming a system proposal — the AI-RF-4b line). The scope-only fixture
   CVE-2026-33006 gets no proposal. The one-time re-judge pass sweeps it for existing Findings
   (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
-  **Measure on the VM:** `rollforward_raised` after the pass; one proposal opened in the GUI.
+  **Measured on the VM (2026-10-16):** the pass raised `rollforward:` proposals — ten listed, all
+  artifact level, stances affected / not_affected / mitigated, rationale as designed (source
+  release, Position v1, decided by human, original reason). Same-project confirmation and the
+  GUI drawer: pending paste.
 - [x] **RF-2 — review-by has no timer, and nothing consumed the stale event (audit B3; filed and
   closed 2026-10-16).** MED. A suppressed Finding whose `review_by` date passed was re-surfaced
   only when its CVE was next enriched (`watchDispositions` runs on FaultlineEnriched), so a quiet

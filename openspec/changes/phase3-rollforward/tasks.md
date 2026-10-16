@@ -24,5 +24,7 @@ No `specs/` deltas — archive with `openspec archive phase3-rollforward --skip-
 - [x] 3.1 `store.UndecidedFindingsByRelease` + integration test.
 - [x] 3.2 Wiring under the Registry seam; `rollforward_raised` in the governance log line.
 - [x] 3.3 EDR-ROLLFORWARD-01; BACKLOG RF-1; CLAUDE.md invariant; INSTALLATION re-judge note.
-- [ ] 3.4 VM: run the re-judge pass, read `rollforward_raised`, open one `rollforward:` proposal
-  in the GUI and confirm the rationale names source release, version, decider and level.
+- [x] 3.4 VM (2026-10-16): the re-judge pass raised `rollforward:` proposals on the estate — ten
+  listed, artifact level, stances `affected` / `not_affected` / `mitigated`, each rationale naming
+  the source release, Position v1, `decided by human`, and the original rationale. Same-project
+  check and the GUI drawer pending the user's paste.
