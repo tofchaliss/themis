@@ -69,6 +69,8 @@ type InboundFaultlineEnriched struct {
 	Fixes []FixedVersion
 	// AffectedRanges is Knowledge's reconciled, backport-aware range (D3).
 	AffectedRanges []string
+	// RangeStatements are the same ranges with their ecosystem/package (KN-RANGE-ECO-1).
+	RangeStatements []value.RangeStatement
 }
 
 // InboundFaultlineSuperseded is Knowledge's FaultlineSuperseded fact: the CVE was withdrawn
@@ -201,6 +203,7 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		RangeTrust:      e.RangeTrust,
 		SignalTrust:     e.SignalTrust,
 		AffectedRanges:  e.AffectedRanges,
+		RangeStatements: e.RangeStatements,
 		Signals:         domain.ExploitSignals{KEV: e.KEV, ExploitPublic: e.ExploitPublic, EPSS: e.EPSS},
 		Band:            e.Priority,
 		Fixes:           e.Fixes,

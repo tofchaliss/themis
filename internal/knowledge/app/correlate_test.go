@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -535,5 +536,42 @@ func TestDiscoverComponents_EdgesAndErrors(t *testing.T) {
 	// A distro purl with no namespace has nothing to derive a distro from.
 	if got := app.DiscoveryHint(app.InventoryComponent{PURL: "pkg:rpm/x@1-2.el8", Version: "1-2.el8"}, nil).PURL; got != "pkg:rpm/x@1-2.el8" {
 		t.Errorf("no-namespace purl hint = %q, want unchanged", got)
+	}
+}
+
+// KN-RANGE-ECO-1 (measured 2026-10-16): CVE-2019-17596's card holds Go's `<1.13.2` beside an
+// Oracle appliance's `<21.1.1.1.0`. Read as one union, the Oracle range "contains" go1.27.1 and
+// the stdlib component matched; judged against the Go statement, it is provably out of range
+// and no match is recorded. A card with no statements still judges the flat list.
+func TestCorrelate_ForeignProductRangeDoesNotHoldAGoComponent(t *testing.T) {
+	ctx := context.Background()
+	comp := app.InventoryComponent{PURL: "pkg:golang/stdlib@1.27.1", Name: "stdlib", Version: "go1.27.1", Ecosystem: "golang"}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{comp}}}
+	c, _ := value.NewCVSS(7.5, "")
+	p, err := domain.NewVulnFactsProposal("osv", time.Unix(1_700_000_000, 0), domain.VulnFacts{
+		Severity: value.SeverityHigh, CVSS: c,
+		AffectedRanges: []string{"<1.13.2", "<21.1.1.1.0"},
+		RangeStatements: []value.RangeStatement{
+			{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"},
+			{Ecosystem: "oracle", Package: "weblogic", Range: "<21.1.1.1.0"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{comp.PURL: {{CVE: cve(t, "CVE-2019-17596"), Proposal: p}}}}
+	matches := newMatches()
+	n, err := correlation(t, inv, disc, matches, newRepo()).Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 0 || matches.calls != 0 {
+		t.Fatalf("the Oracle range held the Go component: n=%d calls=%d, want none", n, matches.calls)
+	}
+	// Without statements the same flat list keeps the match (today's behaviour, the defect).
+	flat := fakeDiscovery{byPURL: map[string][]app.ProposalFor{comp.PURL: {{CVE: cve(t, "CVE-2019-17596"), Proposal: vulnFactsRanged(t, "nvd", "<1.13.2", "<21.1.1.1.0")}}}}
+	matches2 := newMatches()
+	if n, _ := correlation(t, inv, flat, matches2, newRepo()).Correlate(ctx, "rel-1", "ev-1"); n != 1 {
+		t.Fatalf("flat list: n=%d, want the match kept", n)
 	}
 }

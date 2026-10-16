@@ -103,10 +103,12 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 	}
 
 	var ranges []string
+	var statements []value.RangeStatement
 	var fixes []domain.FixedVersion
 	var carriers []string
 	for _, aff := range rec.Affected {
 		pkg := strings.TrimSpace(aff.Package.Name)
+		eco := value.CanonicalEcosystem(aff.Package.Ecosystem)
 		// A NON-DISTRO ecosystem entry names the project the flaw lives in, so its package IS a
 		// carrier (EDR-CORRELATION-01 D4). A distro entry does not: an RLSA/RHSA lists every RPM
 		// rebuilt by one advisory, and reading that list as N vulnerability claims is the whole
@@ -122,7 +124,14 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 			// could ever be provably out of range (measured 2026-10-14: 330 stdlib Findings on
 			// Go 1.27.1 untouched by the KN-GO-2 pass). Pair each introduced with the bound that
 			// FOLLOWS it; an introduced with no following bound is genuinely open-ended.
-			ranges = append(ranges, pairedRanges(rng.Events)...)
+			paired := pairedRanges(rng.Events)
+			ranges = append(ranges, paired...)
+			// The same ranges WITH the world this affected-entry speaks about (KN-RANGE-ECO-1):
+			// a Go range and an Oracle appliance's range for one CVE must not be read as one
+			// union when a Go component is judged.
+			for _, r := range paired {
+				statements = append(statements, value.RangeStatement{Ecosystem: eco, Package: pkg, Range: r})
+			}
 			for _, ev := range rng.Events {
 				if ev.Fixed != "" {
 					// Paired with the package this affected-entry is about, so a consumer can ask
@@ -141,6 +150,7 @@ func (a osvACL) Translate(raw []byte) ([]Translated, error) {
 	facts := domain.VulnFacts{
 		Summary:  osvSummary(rec),
 		Severity: severityFrom(rec.DatabaseSpecific.Severity, cvss), CVSS: cvss, AffectedRanges: ranges, Fixes: fixes,
+		RangeStatements: statements,
 		CarrierProducts: carriers,
 	}
 	out := make([]Translated, 0, len(cves))

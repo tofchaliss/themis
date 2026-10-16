@@ -28,6 +28,10 @@ type EnterpriseView struct {
 	Summary        string
 	SummarySource  string // which source won the summary (explainability, same rule as SeveritySource)
 	AffectedRanges []string
+	// RangeStatements is the union of the latest range statements per source, each with the
+	// ecosystem and package it was published for (KN-RANGE-ECO-1). AffectedRanges is the flat
+	// union of the same ranges, kept for display and older consumers. See RangesFor.
+	RangeStatements []value.RangeStatement
 	// Fixes are the remediations, each attributed to the package it applies to. This is the
 	// authoritative form — use FixesFor to ask "what fixes MY component?".
 	Fixes []FixedVersion
@@ -151,14 +155,17 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 			// said — including the shape a since-fixed translator got wrong (measured 2026-10-14:
 			// a lone `>=0` from the old OSV pairing stayed on every Go card forever, and no later
 			// correct statement could displace it).
-			if len(f.AffectedRanges) > 0 {
+			if len(f.AffectedRanges) > 0 || len(f.RangeStatements) > 0 {
 				prev, seen := latestRanges[p.source]
 				switch {
 				case !seen || p.observedAt.After(prev.at):
-					latestRanges[p.source] = rangeStatement{at: p.observedAt, ranges: append([]string(nil), f.AffectedRanges...)}
+					latestRanges[p.source] = rangeStatement{at: p.observedAt,
+						ranges:     append([]string(nil), f.AffectedRanges...),
+						statements: append([]value.RangeStatement(nil), f.RangeStatements...)}
 				case p.observedAt.Equal(prev.at):
 					// Same instant: no order between them, so both count (order independence).
 					prev.ranges = append(prev.ranges, f.AffectedRanges...)
+					prev.statements = append(prev.statements, f.RangeStatements...)
 					latestRanges[p.source] = prev
 				}
 			}
@@ -202,13 +209,21 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 		view.Summary = bestSummary.text
 		view.SummarySource = bestSummary.source
 	}
+	stmtSet := map[value.RangeStatement]struct{}{}
 	for src, st := range latestRanges {
 		for _, rng := range st.ranges {
 			rangeSet[rng] = struct{}{}
 		}
+		for _, rs := range st.statements {
+			// A statement's range is also part of the flat union, so a consumer reading only
+			// AffectedRanges sees every range the card holds.
+			rangeSet[rs.Range] = struct{}{}
+			stmtSet[rs] = struct{}{}
+		}
 		view.RangeTrust = foldTrust(view.RangeTrust, trust.ClassOf(src))
 	}
 	view.AffectedRanges = sortedKeys(rangeSet)
+	view.RangeStatements = sortedStatements(stmtSet)
 	view.CarrierProducts = sortedKeys(carrierSet)
 	view.Fixes = fixSet.sorted()
 	view.FixedVersions = flatVersions(view.Fixes)
@@ -382,8 +397,9 @@ func dropSupersededScopeless(set map[Applicability]struct{}) {
 
 // rangeStatement is one source's latest word on the affected ranges, with when it said it.
 type rangeStatement struct {
-	at     time.Time
-	ranges []string
+	at         time.Time
+	ranges     []string
+	statements []value.RangeStatement
 }
 
 func sortedApplicabilities(set map[Applicability]struct{}) []Applicability {
@@ -615,3 +631,30 @@ func flatVersions(fixes []FixedVersion) []string {
 // append-only union, so it grows monotonically and differing content always differs in length.
 // A hand-rolled loop would carry a branch no test could reach honestly.
 func equalFixes(a, b []FixedVersion) bool { return slices.Equal(a, b) }
+
+// sortedStatements orders a statement set deterministically (ecosystem, package, range).
+func sortedStatements(set map[value.RangeStatement]struct{}) []value.RangeStatement {
+	out := make([]value.RangeStatement, 0, len(set))
+	for st := range set {
+		out = append(out, st)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Ecosystem != b.Ecosystem {
+			return a.Ecosystem < b.Ecosystem
+		}
+		if a.Package != b.Package {
+			return a.Package < b.Package
+		}
+		return a.Range < b.Range
+	})
+	return out
+}
+
+// RangesFor returns the ranges that speak about a component of the given ecosystem and names
+// (KN-RANGE-ECO-1): the statements selected by value.SelectRanges, or the flat list when the
+// card holds no statements. Every verdict about one component — the match-time gate and
+// Governance's version-range rule — must read ranges through this, never AffectedRanges.
+func (v EnterpriseView) RangesFor(ecosystem string, names ...string) []string {
+	return value.SelectRanges(ecosystem, names, v.RangeStatements, v.AffectedRanges)
+}

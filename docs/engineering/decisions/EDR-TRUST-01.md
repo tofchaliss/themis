@@ -626,3 +626,10 @@ Review"* was never a fourth outcome, it is the existing open `StatusProposed`).
 - **Reservation** — a recorded caveat that a decision rested on evidence weaker than Observed. A property of
   **evidence**, never of the decision: derived from a Position's immutable inputs, surfaced in read models,
   **never persisted as state** (T12).
+
+## Note (2026-10-16) — T5 reads a component's own world (KN-RANGE-ECO-1)
+
+T5's deterministic version-range rule now selects, per component, the ranges published for that
+component's ecosystem and package (EDR-KNOWLEDGE-01 D13/D14) instead of the card's flat union. The
+rule's one-directional certainty is unchanged: a card with no statements is judged on the flat list
+as before, and a card whose statements name only other worlds leaves the verdict undecidable.

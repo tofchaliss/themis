@@ -299,7 +299,11 @@ func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID stri
 		// undecidable verdict (no usable range yet, or an unparseable/absent version) KEEPS
 		// the match: a parse gap must never drop a real vulnerability. This mirrors the
 		// Intelligence Rule Engine, which short-circuits to not-affected only on out-of-range.
-		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem, Groups: f.View().AffectedRanges}
+		// Judged against the ranges that speak about THIS component's world (KN-RANGE-ECO-1):
+		// a card for one CVE holds ranges for several products, and a foreign product's range
+		// must neither clear nor keep a component it never spoke about.
+		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem,
+			Groups: f.View().RangesFor(item.Component.Ecosystem, item.Component.Name, item.Component.Source)}
 		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
 			continue
 		}

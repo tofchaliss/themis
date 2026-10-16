@@ -116,6 +116,28 @@
     "OccurredAt": {
       "type": "string",
       "format": "date-time"
+    },
+    "RangeStatements": {
+      "type": "array",
+      "description": "The reconciled ranges with the ecosystem and package each was published for (KN-RANGE-ECO-1); optional additive field. Governance judges a component against its own world's ranges.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "Range"
+        ],
+        "properties": {
+          "Ecosystem": {
+            "type": "string"
+          },
+          "Package": {
+            "type": "string"
+          },
+          "Range": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

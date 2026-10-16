@@ -10,11 +10,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/themis-project/themis/internal/kernel/value"
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
-	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/platform/eventbus"
 	"github.com/themis-project/themis/internal/platform/observability"
 )
@@ -118,6 +118,7 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 			Fixes:           toAppFixes(dto.Fixes),
 			Applicabilities: apps,
 			AffectedRanges:  dto.AffectedRanges,
+			RangeStatements: rangeStatementsFromDTO(dto.RangeStatements),
 			HeadlineTrust:   value.TrustClass(dto.HeadlineTrust),
 			RangeTrust:      value.TrustClass(dto.RangeTrust),
 			SignalTrust:     value.TrustClass(dto.SignalTrust),
@@ -250,9 +251,12 @@ type faultlineEnrichedDTO struct {
 	// unset class as Inferred, the most conservative answer.
 	// AffectedRanges is Knowledge's reconciled range (D3); absent on an older payload.
 	AffectedRanges []string `json:"AffectedRanges"`
-	HeadlineTrust  string   `json:"HeadlineTrust"`
-	RangeTrust     string   `json:"RangeTrust"`
-	SignalTrust    string   `json:"SignalTrust"`
+	// RangeStatements are the same ranges with their ecosystem/package (KN-RANGE-ECO-1); absent
+	// on an older payload, in which case the flat list is judged as before.
+	RangeStatements []rangeStatementDTO `json:"RangeStatements"`
+	HeadlineTrust   string              `json:"HeadlineTrust"`
+	RangeTrust      string              `json:"RangeTrust"`
+	SignalTrust     string              `json:"SignalTrust"`
 }
 
 type fixDTO struct {
@@ -300,6 +304,23 @@ func toAppFixes(in []fixDTO) []app.FixedVersion {
 	out := make([]app.FixedVersion, 0, len(in))
 	for _, f := range in {
 		out = append(out, app.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
+	}
+	return out
+}
+
+type rangeStatementDTO struct {
+	Ecosystem string `json:"Ecosystem"`
+	Package   string `json:"Package"`
+	Range     string `json:"Range"`
+}
+
+func rangeStatementsFromDTO(in []rangeStatementDTO) []value.RangeStatement {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]value.RangeStatement, 0, len(in))
+	for _, st := range in {
+		out = append(out, value.RangeStatement{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
 	}
 	return out
 }

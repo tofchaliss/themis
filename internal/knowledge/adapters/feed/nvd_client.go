@@ -561,17 +561,18 @@ func (c *NVDClient) translate(cve nvdLiveCVE) (app.ProposalFor, bool, error) {
 		return app.ProposalFor{}, false, nil
 	}
 	observed := parseNVDTime(cve.LastModified)
-	affected, fixed := nvdVersionFacts(cve.Configurations)
+	affected, fixed, statements := nvdVersionFactsWithProducts(cve.Configurations)
 
 	rec := nvdRecord{
-		ID:           cve.ID,
-		ObservedAt:   observed.Format(time.RFC3339),
-		Summary:      nvdEnglishDescription(cve),
-		BaseScore:    score,
-		VectorString: vector,
-		BaseSeverity: severity,
-		Affected:     affected,
-		Fixed:        fixed,
+		AffectedStatements: statements,
+		ID:                 cve.ID,
+		ObservedAt:         observed.Format(time.RFC3339),
+		Summary:            nvdEnglishDescription(cve),
+		BaseScore:          score,
+		VectorString:       vector,
+		BaseSeverity:       severity,
+		Affected:           affected,
+		Fixed:              fixed,
 		// The CPE products, kept rather than discarded (EDR-CORRELATION-01 D4). NVD describes the
 		// FLAW, so it can say which product carries it; a distro advisory describes a SHIPMENT and
 		// cannot.
@@ -621,7 +622,20 @@ func extractNVDCVSS(m nvdMetrics) (severity string, score float64, vector string
 // nvdVersionFacts flattens the vulnerable CPE matches into human-readable affected ranges
 // and fix versions (the fixed version = a versionEndExcluding bound).
 func nvdVersionFacts(configs []nvdConfig) (affected, fixed []string) {
+	affected, fixed, _ = nvdVersionFactsWithProducts(configs)
+	return affected, fixed
+}
+
+// nvdAffectedStatement is one CPE bound with the product it was stated for (KN-RANGE-ECO-1):
+// NVD names no ecosystem, but the product tells a Go component from another vendor's appliance.
+type nvdAffectedStatement struct {
+	Product string `json:"product,omitempty"`
+	Range   string `json:"range"`
+}
+
+func nvdVersionFactsWithProducts(configs []nvdConfig) (affected, fixed []string, statements []nvdAffectedStatement) {
 	seenRange := map[string]struct{}{}
+	seenStmt := map[nvdAffectedStatement]struct{}{}
 	seenFix := map[string]struct{}{}
 	for _, cfg := range configs {
 		for _, node := range cfg.Nodes {
@@ -634,6 +648,11 @@ func nvdVersionFacts(configs []nvdConfig) (affected, fixed []string) {
 						seenRange[r] = struct{}{}
 						affected = append(affected, r)
 					}
+					st := nvdAffectedStatement{Product: cpeProduct(m.Criteria), Range: r}
+					if _, ok := seenStmt[st]; !ok {
+						seenStmt[st] = struct{}{}
+						statements = append(statements, st)
+					}
 				}
 				if m.VersionEndExcluding != "" {
 					if _, ok := seenFix[m.VersionEndExcluding]; !ok {
@@ -644,7 +663,7 @@ func nvdVersionFacts(configs []nvdConfig) (affected, fixed []string) {
 			}
 		}
 	}
-	return affected, fixed
+	return affected, fixed, statements
 }
 
 // cpeRange renders a CPE match's version bounds as a range string.

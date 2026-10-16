@@ -369,3 +369,27 @@ func TestConsumer_FaultlineEnriched_FixedStatementRaisesNothing(t *testing.T) {
 		t.Errorf("a fixed statement must raise nothing; got %+v", got.Proposals())
 	}
 }
+
+// KN-RANGE-ECO-1: the statements on the wire reach the version-range rule. The flat union
+// alone would hold a Go component inside an Oracle range; with the statements the rule clears it.
+func TestConsumer_FaultlineEnriched_RangeStatementsReachTheRule(t *testing.T) {
+	repo := newMemRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2019-17596")
+	_, _ = f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:golang/stdlib@1.27.1", Name: "stdlib", Version: "go1.27.1", Ecosystem: "golang"})
+	repo.seed(f)
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2019-17596","Severity":"high","RangeTrust":"observed",
+		"AffectedRanges":["<1.13.2","<21.1.1.1.0"],
+		"RangeStatements":[{"Ecosystem":"go","Package":"stdlib","Range":"<1.13.2"},{"Ecosystem":"oracle","Package":"weblogic","Range":"<21.1.1.1.0"}]}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	var rangeProposal bool
+	for _, p := range repo.byID["fnd-1"].Proposals() {
+		if p.Stance() == domain.StanceNotAffected && p.Proposer().Kind == domain.ActorSystem {
+			rangeProposal = true
+		}
+	}
+	if !rangeProposal {
+		t.Fatalf("no version-range not_affected proposal; proposals = %+v", repo.byID["fnd-1"].Proposals())
+	}
+}
