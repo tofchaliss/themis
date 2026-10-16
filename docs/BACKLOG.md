@@ -443,7 +443,11 @@ three angles, and two of them proposed fixes that would not have worked.
   / out_of_support for RHEL 8); a second pass raised 0 (idempotent). Signing them is the user's
   decision, per Finding in the GUI or in one run with `--apply --include-will-not-fix`. The two
   dry runs read as designed: 29 not_affected listed with "1008 accepted_risk … not listed", and
-  1037 with the flag, all `accept`, none left standing.
+  1037 with the flag, all `accept`, none left standing. The 29 were signed on 2026-10-16
+  and the 1008 accepted_risk signed the same afternoon (`--apply --include-will-not-fix`: 1008
+  accepted, 0 failed) — the user's decision after the end state was laid out (queue, exports,
+  automatic re-surfacing on a vendor fix / KEV / exploit / EPSS). Vendor proposals on the
+  estate: 1037 accepted · 138 rejected · 0 proposed.
   **Lesson, operational:** a restart during the one-time pass loses its "done" line — the pass
   takes 10–15 minutes on 773 cards; wait for the line before restarting again.
   **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
