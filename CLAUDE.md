@@ -256,7 +256,11 @@ re-surfaces it via `governance.disposition_stale.v1` when that premise drifts (a
 exploit becomes public, EPSS rises past `THEMIS_EPSS_DRIFT_THRESHOLD`) or the review date passes. It
 **never changes the Position**: it re-opens the QUESTION, so an acceptance does not vanish — it expires.
 That watcher is the safety net under `residual_priority`, which removes a suppressed Finding from the
-queue — GOV-14b) →
+queue — GOV-14b. Since RF-2 (2026-10-16) the re-surfacing is RECORDED on the Finding
+(`disposition_stale {since, reason}`, set once by the watcher or by the review-by sweep on
+`THEMIS_REVIEW_BY_INTERVAL`, default 1h; cleared by the next Position), `residual_priority` equals
+`effective_priority` while it is set, and the GUI shows it — before that the event had no
+consumer and an expired review date only mattered if the CVE happened to be enriched) →
 **Communication** (deterministic Publication materialization + serializer
 registry). Beside the pipeline sits **Intelligence** — a reactive AI Gateway; all provider/LLM code is
 confined here behind a provider port (`internal/intelligence/adapters/`), it has no truth-store driver, and

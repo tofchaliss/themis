@@ -66,6 +66,10 @@ type config struct {
 	epssDriftThreshold float64
 	mitigatedWeight    float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
+	// THEMIS_REVIEW_BY_INTERVAL — cadence of the review-by timer (EDR-GOVERNANCE-01 D14, RF-2):
+	// a suppressed Finding whose decision carried a review_by date now past is re-surfaced on a
+	// clock, not only when its CVE happens to be enriched. Go duration, default 1h; "0" disables.
+	reviewByInterval time.Duration
 	rejudgeRanges bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
@@ -97,6 +101,7 @@ func loadConfig() config {
 
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		rejudgeRanges:     os.Getenv("THEMIS_GOVERNANCE_REJUDGE_RANGES") == "1",
+		reviewByInterval:  envDurationDefault("THEMIS_REVIEW_BY_INTERVAL", time.Hour),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
@@ -198,6 +203,23 @@ func main() {
 	// governance.release_evaluated.v1. It runs here rather than on the reader path because a
 	// handler error halts the whole Knowledge stream (EDR-EVENTBUS-01 D8), and a Registry outage
 	// must cost a retry, not the pipeline.
+	// The review-by timer (RF-2): asks "has anyone looked at this lately?" on a clock. It marks
+	// and announces; it decides nothing.
+	if cfg.reviewByInterval > 0 {
+		rb := logger.Component("review-by")
+		go gov.ReviewBy.RunEvery(ctx, cfg.reviewByInterval, func(checked, resurfaced int, err error) {
+			if err != nil {
+				rb.Error("review-by sweep failed", observability.Err(err), observability.Int("checked", checked), observability.Int("resurfaced", resurfaced))
+				return
+			}
+			if checked > 0 {
+				rb.Info("review-by sweep", observability.Int("checked", checked), observability.Int("resurfaced", resurfaced))
+			}
+		})
+		logger.Info("review-by timer enabled", observability.String("interval", cfg.reviewByInterval.String()))
+	} else {
+		logger.Warn("review-by timer DISABLED (THEMIS_REVIEW_BY_INTERVAL=0) — an expired review_by date re-surfaces a Finding only when its CVE is next enriched")
+	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)
 		logger.Info("release-evaluation worker enabled",

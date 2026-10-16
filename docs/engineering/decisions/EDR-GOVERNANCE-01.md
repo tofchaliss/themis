@@ -483,6 +483,20 @@ The watcher (GOV-14b) now exists:
 **Reversing vendor VEX** remains the one named drift signal not yet implemented — it needs the
 per-statement applicability trust class (TRUST-1), which is itself correctly deferred behind a guard.
 
+**Amendment 2026-10-16 (RF-2) — the timer, and a consumer.** The Phase 1 roll-forward audit found
+two holes in this decision as shipped. First, `Expired` was only ever asked on an enrichment of the
+Finding's CVE, so a suppressed Finding whose review date passed came back only if its CVE happened
+to be enriched afterwards — a quiet CVE never did, and `review_by` was a date nobody was held to.
+Second, nothing consumed `disposition_stale.v1`: the event left through the outbox and the queue
+did not change. Both are closed the same way: the **Finding itself records the re-surfacing**
+(`stale_since`, `stale_reason`; set once by the drift watcher or by a new **review-by sweep** on
+`THEMIS_REVIEW_BY_INTERVAL`, default 1h; cleared by the next Position), the read API carries it as
+`disposition_stale {since, reason}` on the Finding and on the posture, **`residual_priority` equals
+`effective_priority` while it is set** (the Finding is back in the queue), and the GUI shows the
+chip and the reason. The event is still emitted for subscribers. The sweep decides nothing, exactly
+as the watcher never did; the first reason stands until a person re-answers, so a drift after an
+expiry does not rewrite why somebody was first asked to look again.
+
 ### D15 — The shipped auto-accept policy is exactly one rule: system-raised `not_affected` resting on **Observed** evidence
 
 Context: D11 sanctioned Governance-owned auto-accept in the abstract and gave one example ("CVE withdrawn

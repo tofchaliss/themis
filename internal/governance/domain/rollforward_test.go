@@ -95,3 +95,60 @@ func TestRollForwardProposalID(t *testing.T) {
 		t.Fatalf("id = %q", got)
 	}
 }
+
+// RF-2: the re-surfacing mark on the Finding — set once on a suppressing Position, idempotent,
+// cleared by a new Position, refused without a suppressing Position or with a zero time.
+func TestMarkDispositionStale(t *testing.T) {
+	human := domain.Actor{Kind: domain.ActorHuman, ID: "alice"}
+	f := newFinding(t)
+	if f.MarkDispositionStale("x", epoch) {
+		t.Fatal("no Position: nothing to re-surface")
+	}
+	if err := f.RaiseProposal(proposal(t, "p-aff", human, domain.StanceAffected)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AcceptProposal("p-aff", human, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if f.MarkDispositionStale("x", epoch) {
+		t.Fatal("an affected Position suppresses nothing — not this mark's business")
+	}
+	if err := f.RaiseProposal(proposal(t, "p-na", human, domain.StanceNotAffected)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AcceptProposal("p-na", human, epoch.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	v := f.Version()
+	if f.MarkDispositionStale("x", time.Time{}) {
+		t.Fatal("a zero time cannot mark")
+	}
+	if !f.MarkDispositionStale("  the CVE entered KEV ", epoch.Add(time.Hour)) {
+		t.Fatal("a suppressing Position must take the mark")
+	}
+	since, reason, ok := f.DispositionStale()
+	if !ok || !since.Equal(epoch.Add(time.Hour)) || reason != "the CVE entered KEV" || f.Version() != v+1 {
+		t.Fatalf("mark = %v %q ok=%v version %d (was %d)", since, reason, ok, f.Version(), v)
+	}
+	if f.MarkDispositionStale("later drift", epoch.Add(2*time.Hour)) {
+		t.Fatal("a second mark must not rewrite the first reason")
+	}
+	if err := f.RaiseProposal(proposal(t, "p-again", human, domain.StanceNotAffected)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AcceptProposal("p-again", human, epoch.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := f.DispositionStale(); ok {
+		t.Fatal("a new Position answers the question and clears the mark")
+	}
+	g := newFinding(t)
+	domain.RestoreDispositionStale(&g, time.Time{}, "ignored")
+	if _, _, ok := g.DispositionStale(); ok {
+		t.Fatal("restoring a zero time restores nothing")
+	}
+	domain.RestoreDispositionStale(&g, epoch, "restored")
+	if since, reason, ok := g.DispositionStale(); !ok || !since.Equal(epoch) || reason != "restored" {
+		t.Fatalf("restored mark = %v %q ok=%v", since, reason, ok)
+	}
+}
