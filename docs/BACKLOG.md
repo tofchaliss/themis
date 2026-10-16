@@ -304,8 +304,13 @@ three angles, and two of them proposed fixes that would not have worked.
   end to end (OSV fills them; flat list unchanged); `EnterpriseView.RangesFor` /
   `value.SelectRanges` is the one road to a per-component verdict, at match time and in
   Governance's rule and re-judge pass; a card with no statements judges the flat list as before,
-  a card with statements for other worlds only is undecidable. **Measure on the VM:** after the
-  sweep restates the Go cards, the re-judge pass clears the four (eight Findings).
+  a card with statements for other worlds only is undecidable. **Measured on the VM
+  (2026-10-16):** after a 20-minute fast sweep restated the cards, the enrichment event cleared
+  the four CVEs (eight Findings, 0 open / 2 decided each) before the pass ran. Range verdicts
+  accepted that afternoon: 8, on exactly those 4 CVEs — no other card on the estate was held by a
+  foreign-product range. (The pass's 448 undecided cards, down from 773 in the morning, came from
+  the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
+  2223.
 
 - [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled
