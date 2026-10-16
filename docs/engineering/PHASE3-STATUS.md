@@ -1267,6 +1267,15 @@ unsupported-format 422, concurrent-duplicate); baseline + test-learnings in
 
 ## Next action (resume here)
 
+**2026-10-16 — roll-forward Phase 2 landed: EDR-ROLLFORWARD-01 (same-CVE roll-forward as a
+deterministic proposal; granularity decided: artifact + component propose, vulnerability never).**
+Code: `governance/domain/rollforward.go`, `governance/app/rollforward.go`, worker + re-judge hooks.
+VM verification pending (OpenSpec task 3.4). Next in order: RF-2 (review-by timer sweep),
+VEX-WNF-1 (accepted_risk from an applicable will-not-fix, design first), the 60 remaining stdlib
+Findings (cards sharing a range across ecosystems), KN-SANITY-1, VEX-RAISE-2. The scanner
+packages (binutils, compat-libtiff3, libtiff, curl) are open correctly — Red Hat will_not_fix /
+fix_deferred for RHEL 8 (BACKLOG VEX-RAISE-1 table); do not re-investigate.
+
 **2026-08-06 — the trust model was discovered; the AI line is re-ordered. START HERE.** A capability-surface
 audit (one AI capability implemented; **0 of Book IV's 9 AI workflows**) opened a design session that escalated
 from "widen the Gateway's invocation surface" into **the enterprise trust model**. Captured as

@@ -27,6 +27,9 @@ type RangeRejudgeResult struct {
 	// built for — born after the statement, or placed only since VEX-SCOPE-2 — had no trigger
 	// either.
 	VendorRaised int
+	// RollForwardRaised is same-CVE roll-forward proposals newly raised (EDR-ROLLFORWARD-01),
+	// when the pass has a Registry seam to place releases with; else zero.
+	RollForwardRaised int
 }
 
 // RangeRejudge is the ONE-TIME pass that re-applies the deterministic version-range rule to
@@ -53,9 +56,17 @@ type RangeRejudgeResult struct {
 // (Observed evidence may auto-accept; anything weaker waits for a human). Idempotent through
 // the proposal id: a second pass raises nothing new.
 type RangeRejudge struct {
-	svc       *FindingService
-	undecided UndecidedFaultlineLister
-	knowledge FaultlineKnowledgeReader
+	svc         *FindingService
+	undecided   UndecidedFaultlineLister
+	knowledge   FaultlineKnowledgeReader
+	rollForward *RollForward
+}
+
+// WithRollForward adds the same-CVE roll-forward sweep to the pass (EDR-ROLLFORWARD-01), for
+// the Findings an estate already held before the proposal existed.
+func (r *RangeRejudge) WithRollForward(rf *RollForward) *RangeRejudge {
+	r.rollForward = rf
+	return r
 }
 
 // NewRangeRejudge builds the pass over the write service, the lister and the Knowledge read seam.
@@ -92,6 +103,13 @@ func (r *RangeRejudge) Run(ctx context.Context) (RangeRejudgeResult, error) {
 			return res, fmt.Errorf("rejudge vendor statements %s: %w", fl, err)
 		}
 		res.VendorRaised += v
+	}
+	if r.rollForward != nil {
+		rf, err := r.rollForward.Sweep(ctx, r.undecided)
+		if err != nil {
+			return res, fmt.Errorf("roll-forward sweep: %w", err)
+		}
+		res.RollForwardRaised = rf.Raised
 	}
 	return res, nil
 }

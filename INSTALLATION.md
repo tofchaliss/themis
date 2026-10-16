@@ -1026,7 +1026,10 @@ component is provably outside the card's range get a system `not_affected` propo
 configured policy decides as usual. Since VEX-RAISE-1 the same pass also re-applies the vendor
 overlay: a Finding born after the vendor's `not_affected` statement arrived gets the proposal it
 never got (`vendor_raised`). Vendor evidence waits for a person; sign the applicable ones in one
-run with `scripts/vex-accept-applicable.sh` (dry run first, then `--apply` with `THEMIS_ACTOR_ID`). Leaving the switch set is harmless (the pass is idempotent)
+run with `scripts/vex-accept-applicable.sh` (dry run first, then `--apply` with `THEMIS_ACTOR_ID`).
+With `THEMIS_REGISTRY_URL` set the pass also runs same-CVE roll-forward (EDR-ROLLFORWARD-01): a
+Finding whose CVE a sibling release of the same project already judged gets that decision as a
+proposal for a person to accept (`rollforward_raised`). Leaving the switch set is harmless (the pass is idempotent)
 but wasteful, which is why the last line removes it.
 
 **If the cards themselves carry the old split ranges** (KN-GO-3: a Go card reading

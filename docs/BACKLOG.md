@@ -281,6 +281,28 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+#### Roll-forward (EDR-ROLLFORWARD-01, 2026-10-16)
+
+- [x] **RF-1 — same-CVE roll-forward as a deterministic Governance proposal (filed and closed
+  2026-10-16; audit B1/B2).** HIGH, the behaviour the investigation asked for. A new release of a
+  project re-opened every Finding its predecessor had already judged, and nothing in the queue
+  said so; the only cross-release reuse was the AI sweep. **Done:** when a release's correlation
+  completes and its project is resolved (the release-evaluation worker, N-M2b — off the inbox
+  transaction, so a Registry failure defers and retries), every undecided Finding whose Faultline
+  carries a JUDGED Position on a sibling release of the same project gets a system proposal
+  `rollforward:<target>:<source>` on **Inferred** evidence (no policy can accept it; a person
+  does), at **artifact** level (same purls) or **component** level (same packages, versions
+  moved) — never at vulnerability level, and never from a rule's verdict (policy-decided, or a
+  human confirming a system proposal — the AI-RF-4b line). The scope-only fixture
+  CVE-2026-33006 gets no proposal. The one-time re-judge pass sweeps it for existing Findings
+  (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
+  **Measure on the VM:** `rollforward_raised` after the pass; one proposal opened in the GUI.
+- [ ] **RF-2 — review-by has no timer (audit B3; filed 2026-10-16).** MED. A suppressed Finding
+  whose `review_by` date passes is re-surfaced only when its CVE is next enriched
+  (`watchDispositions` runs on FaultlineEnriched). A quiet CVE never re-surfaces. **Do:** a small
+  Governance sweep over suppressed Findings with an expired review date, emitting the same
+  `disposition_stale` event, plus a dashboard consumer so the event is visible.
+
 #### Roll-forward audit defects (filed and closed 2026-10-14, from the Phase 1 audit)
 
 - [x] **AI-RF-1 — the Δ4b sweep never reached its exact-CVE precedent (filed and closed

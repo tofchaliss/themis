@@ -183,11 +183,11 @@ func main() {
 				res, err := gov.Rejudge.Run(ctx)
 				if err != nil {
 					rl.Error("version-range re-judge aborted", observability.Err(err),
-						observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("skipped", res.Skipped))
+						observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("rollforward_raised", res.RollForwardRaised), observability.Int("skipped", res.Skipped))
 					return
 				}
 				rl.Info("version-range re-judge done — unset THEMIS_GOVERNANCE_REJUDGE_RANGES before the next restart",
-					observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("skipped", res.Skipped))
+					observability.Int("faultlines", res.Faultlines), observability.Int("raised", res.Raised), observability.Int("vendor_raised", res.VendorRaised), observability.Int("rollforward_raised", res.RollForwardRaised), observability.Int("skipped", res.Skipped))
 			}()
 		}
 	}

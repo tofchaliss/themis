@@ -96,6 +96,10 @@ type ReleaseEvaluationWorker struct {
 	identity ReleaseIdentityResolver
 	clock    Clock
 	log      EvaluationLog
+	// rollForward, when wired, proposes decided sibling Positions on the release's undecided
+	// Findings once its project is known (EDR-ROLLFORWARD-01). It runs BEFORE publish-and-mark
+	// so a failure defers the row and the pass is retried; it is idempotent per pair.
+	rollForward *RollForward
 	// retry is the per-row backoff schedule, keyed by queue row id. Entries are dropped on a
 	// successful publish; a row in backoff is skipped, never removed from the queue.
 	retry map[int64]retrySchedule
@@ -109,6 +113,12 @@ type retrySchedule struct {
 // NewReleaseEvaluationWorker builds the worker. log may be nil (no reporting).
 func NewReleaseEvaluationWorker(st ReleaseEvaluations, identity ReleaseIdentityResolver, clock Clock, log EvaluationLog) *ReleaseEvaluationWorker {
 	return &ReleaseEvaluationWorker{store: st, identity: identity, clock: clock, log: log, retry: map[int64]retrySchedule{}}
+}
+
+// WithRollForward wires the same-CVE roll-forward pass to run per evaluated release.
+func (w *ReleaseEvaluationWorker) WithRollForward(rf *RollForward) *ReleaseEvaluationWorker {
+	w.rollForward = rf
+	return w
 }
 
 // Run drains the queue on the default cadence until ctx is cancelled.
@@ -162,6 +172,11 @@ func (w *ReleaseEvaluationWorker) publish(ctx context.Context, row PendingEvalua
 	}
 	if productID == "" || projectID == "" {
 		return ErrUnresolvedReleaseIdentity
+	}
+	if w.rollForward != nil {
+		if _, err := w.rollForward.ForRelease(ctx, row.ReleaseID, projectID); err != nil {
+			return err
+		}
 	}
 	counts, err := w.store.CountFindingsByBaseScoreBuckets(ctx, row.ReleaseID)
 	if err != nil {
