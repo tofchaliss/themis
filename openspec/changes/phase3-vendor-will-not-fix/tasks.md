@@ -13,5 +13,6 @@ No `specs/` deltas — archive with `openspec archive phase3-vendor-will-not-fix
 - [x] 1.4 EDR amendment, BACKLOG VEX-WNF-1 closed, CLAUDE.md line.
 - [x] 1.5 VM (2026-10-16): the first re-judge pass on the new binary raised **1008** `vexwnf:`
   accepted_risk proposals (its "done" line was lost to an overlapping restart; the second pass
-  logged `vendor_raised: 0`, the idempotence). The accept script's two dry runs and one proposal
-  in the GUI: pending the user's paste. Whether to sign them is the user's call.
+  logged `vendor_raised: 0`, the idempotence). The two dry runs: 29 listed plus "1008 … not listed"
+  without the flag, 1037 all `accept` with it. One proposal in the GUI: not yet opened. Whether
+  to sign them is the user's call.

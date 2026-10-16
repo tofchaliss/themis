@@ -27,4 +27,4 @@ No `specs/` deltas — archive with `openspec archive phase3-rollforward --skip-
 - [x] 3.4 VM (2026-10-16): the re-judge pass raised `rollforward:` proposals on the estate — ten
   listed, artifact level, stances `affected` / `not_affected` / `mitigated`, each rationale naming
   the source release, Position v1, `decided by human`, and the original rationale. Same-project
-  check and the GUI drawer pending the user's paste.
+  check passed (11 proposals, two projects, no crossing). GUI drawer: not yet opened by the user.
