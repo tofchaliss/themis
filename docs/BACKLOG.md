@@ -281,6 +281,17 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+- [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
+  (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled
+  `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
+  package's entire history; nothing noticed until a person read the queue. **Do:** at correlation,
+  when ONE component's discovery returns more than N distinct CVEs (N configurable, default 50)
+  AND the version could not be parsed into the ecosystem's comparator, record the matches at
+  `unknown`/held verdict with a `feed-health` row naming the component and the count, and surface
+  it in `match-census.sh` sign 1 as "suspect fan-out" rather than open findings. A parseable
+  version with a genuinely long history (binutils) must NOT trip it — the guard is on the
+  unparseable-version case only. Design the held state against EDR-VERDICT-01 before code.
+
 #### Roll-forward (EDR-ROLLFORWARD-01, 2026-10-16)
 
 - [x] **RF-1 — same-CVE roll-forward as a deterministic Governance proposal (filed and closed
@@ -296,7 +307,10 @@ three angles, and two of them proposed fixes that would not have worked.
   human confirming a system proposal — the AI-RF-4b line). The scope-only fixture
   CVE-2026-33006 gets no proposal. The one-time re-judge pass sweeps it for existing Findings
   (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
-  **Measure on the VM:** `rollforward_raised` after the pass; one proposal opened in the GUI.
+  **Measured on the VM (2026-10-16):** the pass raised `rollforward:` proposals — ten listed, all
+  artifact level, stances affected / not_affected / mitigated, rationale as designed (source
+  release, Position v1, decided by human, original reason). Same-project confirmation and the
+  GUI drawer: pending paste.
 - [x] **RF-2 — review-by has no timer, and nothing consumed the stale event (audit B3; filed and
   closed 2026-10-16).** MED. A suppressed Finding whose `review_by` date passed was re-surfaced
   only when its CVE was next enriched (`watchDispositions` runs on FaultlineEnriched), so a quiet
@@ -397,7 +411,14 @@ three angles, and two of them proposed fixes that would not have worked.
   vendor's statement as premise — `accepted_risk`, never `not_affected`, decided by a human, never
   by policy, re-surfaced by the disposition watcher when the vendor's state changes — would make
   the queue reflect what is actually undecided. Design before code; it is a stance the enterprise
-  takes, not a vendor fact. **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
+  takes, not a vendor fact. **VEX-WNF-1 DONE 2026-10-16** (EDR-VEX-02 amendment D18–D21,
+  `openspec/changes/phase3-vendor-will-not-fix`): an applicable `will_not_fix` / `fix_deferred` /
+  `out_of_support` raises a system `accepted_risk` proposal (`vexwnf:<finding>:<pkg>`, Asserted,
+  never auto-accepted, the vendor's words as rationale); a later applicable `fixed` for the same
+  package re-surfaces the acceptance (the RF-2 mark, reason naming build + advisory);
+  `vex-accept-applicable.sh --include-will-not-fix` lists them apart from the not_affected ones.
+  **Measure on the VM:** `vendor_raised` from the re-judge pass; the script's dry run with the flag.
+  **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
   at Finding creation so the pass is not needed for new Findings.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first

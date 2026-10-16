@@ -36,7 +36,14 @@ set -uo pipefail
 GOVERNANCE="${THEMIS_GOVERNANCE_URL:-http://localhost:8083}"
 ACTOR="${THEMIS_ACTOR_ID:-}"
 APPLY=0
-[ "${1:-}" = "--apply" ] && APPLY=1
+WNF=0
+for arg in "$@"; do
+  case "$arg" in
+    --apply) APPLY=1 ;;
+    --include-will-not-fix) WNF=1 ;;
+    *) echo "vex-accept: unknown argument $arg (use --apply, --include-will-not-fix)" >&2; exit 2 ;;
+  esac
+done
 
 for tool in psql curl jq; do
   command -v "$tool" >/dev/null || { echo "vex-accept: $tool is required" >&2; exit 2; }
@@ -68,11 +75,12 @@ fi
 
 CANDIDATES="$(psql "$PGBASE/governance?sslmode=disable" -Atc "
 SELECT p.finding_id || '|' || p.proposal_id || '|' ||
-       coalesce(substring(p.rationale from 'not_affected for ([^ ]*)'), '') || '|' || f.cve
+       coalesce(substring(p.rationale from 'vendor VEX: [a-z_]+ for ([^ ]*)'), '') || '|' || f.cve || '|' || p.stance || '|' ||
+       coalesce(substring(p.rationale from 'vendor VEX: ([a-z_]+) for'), 'not_affected')
   FROM finding_proposals p
   JOIN findings f ON f.id = p.finding_id
  WHERE p.proposer_id = 'vex-applicability'
-   AND p.stance = 'not_affected'
+   AND p.stance IN ('not_affected', 'accepted_risk')
    AND p.status = 'proposed'
  ORDER BY 1;" 2>/dev/null)"
 
@@ -81,10 +89,15 @@ if [ -z "$CANDIDATES" ]; then
   exit 0
 fi
 
-TOTAL=0; ACCEPT=0; LEFT=0; SKIP=0; FAIL=0
+TOTAL=0; ACCEPT=0; LEFT=0; SKIP=0; FAIL=0; WNFSKIPPED=0
 
-while IFS='|' read -r finding proposal pkg cve; do
+while IFS='|' read -r finding proposal pkg cve stance vstatus; do
   [ -n "$finding" ] || continue
+  # An accepted_risk proposal from a vendor "will not fix" (EDR-VEX-02 D18) is a different
+  # signature from a not_affected one — the flaw is real — so it is listed only on request.
+  if [ "$stance" = "accepted_risk" ] && [ "$WNF" != "1" ]; then
+    WNFSKIPPED=$((WNFSKIPPED + 1)); continue
+  fi
   TOTAL=$((TOTAL + 1))
   if [ -z "$pkg" ]; then
     printf '  \033[33m?\033[0m %s  no package in the rationale — skipped\n' "$proposal"
@@ -96,14 +109,14 @@ while IFS='|' read -r finding proposal pkg cve; do
     SKIP=$((SKIP + 1)); continue
   fi
   VERDICTS="$(printf '%s' "$BODY" \
-    | jq -r --arg p "$pkg" '[.vendor_statements[]? | select(.package == $p and .status == "not_affected") | .applicability] | join(",")' 2>/dev/null)"
+    | jq -r --arg p "$pkg" --arg st "$vstatus" '[.vendor_statements[]? | select(.package == $p and .status == $st) | .applicability] | join(",")' 2>/dev/null)"
   case ",$VERDICTS," in
     *,applicable,*) ;;
     *)
       printf '  \033[33m=\033[0m %-24s %s  left standing [%s]\n' "$pkg" "$cve" "${VERDICTS:-no statement}"
       LEFT=$((LEFT + 1)); continue ;;
   esac
-  printf '  \033[32m+\033[0m %-24s %s  accept — vendor not_affected applies to this release\n' "$pkg" "$cve"
+  printf '  \033[32m+\033[0m %-24s %s  accept %s — vendor %s applies to this release\n' "$pkg" "$cve" "$stance" "$vstatus"
   ACCEPT=$((ACCEPT + 1))
   [ "$APPLY" = "1" ] || continue
   if ! api -X POST -o /dev/null -H 'Content-Type: application/json' \
@@ -115,6 +128,9 @@ while IFS='|' read -r finding proposal pkg cve; do
 done <<< "$CANDIDATES"
 
 printf '\n  reviewed %d · accept %d · left standing %d · skipped %d\n' "$TOTAL" "$ACCEPT" "$LEFT" "$SKIP"
+if [ "$WNFSKIPPED" -gt 0 ]; then
+  printf '  %d accepted_risk proposal(s) from vendor will-not-fix statements not listed — re-run with --include-will-not-fix to review them\n' "$WNFSKIPPED"
+fi
 if [ "$APPLY" = "1" ]; then
   printf '  written: %d accepted, %d failed\n\n' "$((ACCEPT - FAIL))" "$FAIL"
 else

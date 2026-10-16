@@ -336,7 +336,10 @@ OpenVEX / CSAF out.
   kept, not only its `not_affected` rows (EDR-VEX-02 D13–D17, 2026-10-14): every per-package,
   per-product statement with its real status from a closed set (`not_affected | affected | fixed |
   under_investigation | will_not_fix | fix_deferred | out_of_support`), a `fixed` one carrying the
-  advisory and build; Governance acts only on an applicable `not_affected`, the rest is shown.
+  advisory and build; Governance acts on an applicable `not_affected` (proposes `not_affected`)
+  and, since VEX-WNF-1 (2026-10-16, D18–D21), on an applicable `will_not_fix` / `fix_deferred` /
+  `out_of_support` (proposes **`accepted_risk`**, Asserted, never auto-accepted; a later applicable
+  `fixed` for the same package re-surfaces that acceptance); the rest is shown.
 - **A distro advisory's package list is SCOPE, not N vulnerability claims** (EDR-CORRELATION-01). A
   module-stream advisory rebuilds every RPM in the stream and lists them all as affected; read as N
   claims, a CPython flaw becomes a vulnerability of `python3-pyyaml`. Each matched component
