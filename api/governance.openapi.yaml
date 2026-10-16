@@ -408,6 +408,8 @@ components:
             $ref: '#/components/schemas/Component'
         current_position:
           $ref: '#/components/schemas/PositionView'
+        disposition_stale:
+          $ref: '#/components/schemas/DispositionStale'
         positions:
           type: array
           items:
@@ -502,6 +504,21 @@ components:
           type: array
           description: Identifiers from the RECORDED Finding bytes the execution read (dependency PURL, CVE); Business-Verified against the Finding.
           items: { type: string }
+    DispositionStale:
+      type: object
+      description: >-
+        Present when the current SUPPRESSING Position has been re-surfaced (EDR-GOVERNANCE-01
+        D14, RF-2): its premise drifted (KEV, a public exploit, an EPSS rise) or its review-by
+        date passed, and nobody has re-decided since. While present, residual_priority equals
+        effective_priority — the Finding is back in the queue — and `reason` says why in words.
+        A new accepted proposal clears it. Absent = not re-surfaced.
+      required: [since, reason]
+      properties:
+        since:
+          type: string
+          format: date-time
+        reason:
+          type: string
     PositionView:
       type: object
       properties:
@@ -862,6 +879,8 @@ components:
           description: >-
             The current Position's own rationale (absent when none) - carried onto a release
             rollup's statements as status notes (EDR-COMMUNICATION-01 D13).
+        disposition_stale:
+          $ref: '#/components/schemas/DispositionStale'
         components:
           type: array
           description: >-

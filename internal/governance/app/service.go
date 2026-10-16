@@ -906,6 +906,9 @@ func archivedEvent(f domain.Finding, at time.Time) any { return domain.NewFindin
 //
 // Skipped entirely for a withdrawal, where the CVE has been retired upstream: re-surfacing a
 // Finding because its dead CVE's stale EPSS moved would be noise.
+// reviewByExpiredReason is the one re-surfacing reason that is not a drift (D14).
+const reviewByExpiredReason = "the review-by date on this decision has passed"
+
 func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSignal) error {
 	if sig.Withdrawn {
 		return nil
@@ -926,6 +929,9 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 		pos, ok := f.CurrentPosition()
 		if !ok || !domain.SuppressesTriage(pos.Stance()) {
 			continue // nothing suppressed here — not this watcher's business
+		}
+		if _, _, marked := f.DispositionStale(); marked {
+			continue // already re-surfaced and not yet re-decided (RF-2) — asked once
 		}
 		drift := domain.DetectDispositionDrift(pos.Inputs().DecidedWith, sig.Signals, s.epssDriftThreshold)
 		expired := domain.Expired(pos.Inputs().ReviewBy, s.clock.Now())
@@ -948,7 +954,13 @@ func (s *FindingService) watchDispositions(ctx context.Context, sig EnrichmentSi
 				}
 				// Drift takes precedence when both fire: "the CVE entered KEV" is a stronger call
 				// to action than "your review date passed", and a re-surfacing gets read once.
-				reason = "the review-by date on this decision has passed"
+				reason = reviewByExpiredReason
+			}
+			// The Finding itself records the re-surfacing (RF-2), so the queue, the drawer and
+			// residual_priority see it; the event stays for subscribers. An already-marked
+			// Finding is not re-marked — the first reason stands until a new Position.
+			if !f.MarkDispositionStale(reason, now) {
+				return nil, errNoop // marked between the read and the write — nothing to persist
 			}
 			return []OutboxNote{{
 				EventType:  EventDispositionStale,

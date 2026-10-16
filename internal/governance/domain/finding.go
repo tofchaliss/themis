@@ -35,6 +35,11 @@ type Finding struct {
 	// commissions is the append-only authority history for governed
 	// work against this Finding (EDR-HARNESS-01 / D-C-1..6).
 	commissions []Commission
+	// staleSince / staleReason record that the CURRENT suppressing Position was re-surfaced
+	// (EDR-GOVERNANCE-01 D14, RF-2): its premise drifted or its review-by date passed. Zero =
+	// not re-surfaced. A new Position clears it — the question was re-answered.
+	staleSince  time.Time
+	staleReason string
 	version     int
 }
 
@@ -222,8 +227,42 @@ func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time, reviewBy
 	if f.stage == StageIdentified || f.stage == StageUnderInvestigation {
 		f.stage = StagePositionEstablished
 	}
+	// A new Position answers the re-opened question (RF-2): the re-surfacing mark is cleared.
+	f.staleSince, f.staleReason = time.Time{}, ""
 	f.version++
 	return pos, nil
+}
+
+// DispositionStale reports whether the current suppressing Position has been re-surfaced
+// (RF-2), and since when and why. A Finding with no Position, or a fresh one, is not stale.
+func (f Finding) DispositionStale() (since time.Time, reason string, ok bool) {
+	if f.staleSince.IsZero() {
+		return time.Time{}, "", false
+	}
+	return f.staleSince, f.staleReason, true
+}
+
+// MarkDispositionStale records that the current suppressing Position was re-surfaced, with the
+// reason in words (what moved, or that the review date passed). It reports whether anything
+// changed: a Finding already marked, or one with no suppressing Position, is left alone — the
+// first reason stands until a new Position clears it, so a drift after an expiry does not
+// rewrite the record of why somebody was first asked to look again.
+func (f *Finding) MarkDispositionStale(reason string, at time.Time) bool {
+	pos, ok := f.CurrentPosition()
+	if !ok || !SuppressesTriage(pos.Stance()) || !f.staleSince.IsZero() || at.IsZero() {
+		return false
+	}
+	f.staleSince, f.staleReason = at.UTC(), strings.TrimSpace(reason)
+	f.version++
+	return true
+}
+
+// RestoreDispositionStale rebuilds the re-surfacing mark from persistence (store adapter).
+func RestoreDispositionStale(f *Finding, since time.Time, reason string) {
+	if since.IsZero() {
+		return
+	}
+	f.staleSince, f.staleReason = since.UTC(), reason
 }
 
 // RejectProposal evaluates an open proposal to Rejected, retaining it as history (D4). It

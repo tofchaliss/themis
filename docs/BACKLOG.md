@@ -297,11 +297,18 @@ three angles, and two of them proposed fixes that would not have worked.
   CVE-2026-33006 gets no proposal. The one-time re-judge pass sweeps it for existing Findings
   (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
   **Measure on the VM:** `rollforward_raised` after the pass; one proposal opened in the GUI.
-- [ ] **RF-2 — review-by has no timer (audit B3; filed 2026-10-16).** MED. A suppressed Finding
-  whose `review_by` date passes is re-surfaced only when its CVE is next enriched
-  (`watchDispositions` runs on FaultlineEnriched). A quiet CVE never re-surfaces. **Do:** a small
-  Governance sweep over suppressed Findings with an expired review date, emitting the same
-  `disposition_stale` event, plus a dashboard consumer so the event is visible.
+- [x] **RF-2 — review-by has no timer, and nothing consumed the stale event (audit B3; filed and
+  closed 2026-10-16).** MED. A suppressed Finding whose `review_by` date passed was re-surfaced
+  only when its CVE was next enriched (`watchDispositions` runs on FaultlineEnriched), so a quiet
+  CVE never came back; and `governance.disposition_stale.v1` had no consumer, so even a drift
+  changed nothing a person could see. **Done** (EDR-GOVERNANCE-01 D14 amendment 2026-10-16): the
+  Finding records the re-surfacing (`stale_since` / `stale_reason`, migration 000016; set once by
+  the watcher or by the new `ReviewBySweep` on `THEMIS_REVIEW_BY_INTERVAL`, default 1h, "0"
+  disables; cleared by the next Position); `disposition_stale {since, reason}` on the Finding
+  view and the posture; `residual_priority` equals `effective_priority` while set, so the
+  Finding is back in the queue; the GUI shows a `re-surfaced` chip and the reason in the drawer.
+  The sweep decides nothing. **Measure on the VM:** `review-by sweep` log line (checked /
+  resurfaced) after the first tick; a re-surfaced Finding's residual bar back at full.
 
 #### Roll-forward audit defects (filed and closed 2026-10-14, from the Phase 1 audit)
 

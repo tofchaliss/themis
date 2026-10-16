@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -57,6 +58,12 @@ type PostureEntry struct {
 	// keeping its intrinsic EffectivePriority, so a suppressed Finding leaves the top of the
 	// queue without losing the severity that would justify revisiting it.
 	ResidualPriority int
+	// StaleSince / StaleReason: the current suppressing Position was RE-SURFACED (D14, RF-2) —
+	// its premise drifted or its review-by date passed — and nobody has re-decided since. While
+	// set, the stance weight no longer suppresses: the Finding is back in the queue at full
+	// effective priority, with the reason beside it. Zero = not re-surfaced.
+	StaleSince  time.Time
+	StaleReason string
 	// Reservation is the trust class of the evidence the current Position rested on, when
 	// that is weaker than Observed (EDR-TRUST-01 T12) — e.g. an acceptance leaning on a
 	// vendor's Asserted not_affected. Empty means no Position, or one on Observed evidence.
@@ -199,6 +206,11 @@ func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]P
 		// diverge once a governed decision exists to divide them.
 		entries[i].ResidualPriority = domain.ResidualPriority(
 			entries[i].EffectivePriority, domain.StanceWeight(entries[i].Stance, s.mitigatedWeight))
+		// A re-surfaced suppression (RF-2) stops suppressing until somebody re-decides: the
+		// safety net under the zero weight is only a net if it actually brings the Finding back.
+		if !entries[i].StaleSince.IsZero() {
+			entries[i].ResidualPriority = entries[i].EffectivePriority
+		}
 		// Queue derivation from the occurrence verdicts (EDR-VERDICT-01 D7): priority comes
 		// from the OPEN carrier occurrences only, at full value — one live occurrence keeps
 		// the Finding at full urgency however many cleared rows sit beside it, and only a

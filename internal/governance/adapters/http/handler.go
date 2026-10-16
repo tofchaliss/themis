@@ -633,6 +633,9 @@ func toFindingView(f domain.Finding) gen.FindingView {
 		cv := toPositionView(cur)
 		view.CurrentPosition = &cv
 	}
+	if since, reason, ok := f.DispositionStale(); ok {
+		view.DispositionStale = &gen.DispositionStale{Since: since, Reason: reason}
+	}
 	return view
 }
 
@@ -732,6 +735,10 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if e.PositionVersion > 0 {
 		pv := e.PositionVersion
 		out.PositionVersion = &pv
+	}
+	if !e.StaleSince.IsZero() {
+		since, reason := e.StaleSince, e.StaleReason
+		out.DispositionStale = &gen.DispositionStale{Since: since, Reason: reason}
 	}
 	if e.PositionRationale != "" {
 		pr := e.PositionRationale

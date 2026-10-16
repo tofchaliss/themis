@@ -183,6 +183,18 @@ const bandChip = (band) => {
   return `<span class="chip ${cls}"><i></i>${esc(band || "unbanded")}</span>`;
 };
 
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso || "") : d.toISOString().slice(0, 10);
+}
+
+/* RF-2: a suppressed Finding whose decision was re-surfaced (premise drifted or review date
+   passed) wears a chip beside its stance, and residual_priority no longer suppresses it. */
+function staleChip(ds) {
+  if (!ds) return "";
+  return ` <span class="chip chip-warn" title="${esc(ds.reason || "")}">re-surfaced</span>`;
+}
+
 const stanceChip = (stance, hasPosition) => {
   if (!hasPosition) return `<span class="chip"><i></i>undecided</span>`;
   const cls = { affected: "chip-crit", not_affected: "chip-good", accepted_risk: "chip-warn", mitigated: "chip-elevated" }[stance] || "";
@@ -934,7 +946,7 @@ function postureTable(posture) {
         <td class="num">${p.base_score ?? "—"}</td>
         <td class="num">×${(p.blast_multiplier || 1).toFixed(1)}</td>
         <td>${pbar(p.effective_priority, p.residual_priority)}</td>
-        <td>${stanceChip(p.stance, p.has_position)}</td>
+        <td>${stanceChip(p.stance, p.has_position)}${staleChip(p.disposition_stale)}</td>
         <td>${componentCell(p.components)}</td>
         <td>${(p.fixes || []).length ? `<span class="mono">${esc(p.fixes[0].version)}</span>${p.fixes.length > 1 ? ` <span class="chip chip-info">+${p.fixes.length - 1}</span>` : ""}` : `<span class="chip chip-info">none attributed</span>`}</td>
       </tr>`).join("")}</tbody></table></div>`;
@@ -1118,7 +1130,7 @@ async function viewScan(evidenceId, releaseId, version) {
             <td><span class="mono">${esc(f.component && f.component.name ? f.component.name : "?")}${f.component && f.component.version ? "@" + esc(f.component.version) : ""}</span></td>
             <td>${(f.fixed || []).length ? `<span class="mono">${esc(f.fixed[0])}</span>` : "—"}</td>
             <td>${bandChip(entry.band)}</td>
-            <td>${stanceChip(entry.stance, entry.has_position)}</td>
+            <td>${stanceChip(entry.stance, entry.has_position)}${staleChip(entry.disposition_stale)}</td>
             <td>${pbar(entry.effective_priority, entry.residual_priority)}</td>
           </tr>` : `
           <tr class="dim">
@@ -1989,6 +2001,7 @@ async function openDrawer(entry) {
       ${f.current_position ? `<p class="card-sub" style="margin:0 0 10px">Current position:
         ${stanceChip(f.current_position.stance, true)} <span class="chip chip-info">v${esc(f.current_position.version ?? "?")}</span>
         — a new accepted proposal appends the next immutable version; nothing is ever overwritten.</p>` : ""}
+      ${f.disposition_stale ? `<p class="attr-note"><b>Re-surfaced ${esc(fmtWhen(f.disposition_stale.since))}:</b> ${esc(f.disposition_stale.reason)}. The decision still stands; it is back in the queue because its premise moved or its review date passed. Accepting a new proposal clears this.</p>` : ""}
       <div class="form-grid">
         <label>Stance
           <select id="dc-stance">

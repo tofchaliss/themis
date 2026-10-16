@@ -79,10 +79,21 @@ func (r *fakeRepo) SetComponentVerdict(_ context.Context, releaseID, faultlineID
 					comp.VerdictState, comp.VerdictGrade, comp.VerdictReason
 			}
 		}
-		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
-			comps, f.Stage(), f.Proposals(), f.Positions(), f.Version(), f.Signals())
+		r.byID[id] = rebuilt(f, comps, f.Signals())
 	}
 	return nil
+}
+
+// rebuilt re-creates a stored Finding with new denormalized read data, carrying everything the
+// write model owns that persistence would keep (commissions, the RF-2 re-surfacing mark).
+func rebuilt(f domain.Finding, comps []domain.MatchedComponent, sig domain.ExploitSignals) domain.Finding {
+	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
+		comps, f.Stage(), f.Proposals(), f.Positions(), f.Version(), sig)
+	domain.ReconstituteCommissions(&c, f.Commissions())
+	if since, reason, ok := f.DispositionStale(); ok {
+		domain.RestoreDispositionStale(&c, since, reason)
+	}
+	return c
 }
 
 // retired records the components withdrawn from the active projection (KN-SCAN-4(b)).
@@ -106,8 +117,7 @@ func (r *fakeRepo) SetSignals(_ context.Context, faultlineID string, sig domain.
 		if f.FaultlineID() != faultlineID {
 			continue
 		}
-		r.byID[id] = domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
-			f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version(), sig)
+		r.byID[id] = rebuilt(f, f.Components(), sig)
 	}
 	return nil
 }
@@ -165,6 +175,9 @@ func clone(f domain.Finding) domain.Finding {
 	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 		f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version())
 	domain.ReconstituteCommissions(&c, f.Commissions())
+	if since, reason, ok := f.DispositionStale(); ok {
+		domain.RestoreDispositionStale(&c, since, reason)
+	}
 	return c
 }
 

@@ -47,6 +47,9 @@ func clone(f domain.Finding) domain.Finding {
 	c := domain.ReconstituteFinding(f.ID(), f.ReleaseID(), f.FaultlineID(), f.CVE(),
 		f.Components(), f.Stage(), f.Proposals(), f.Positions(), f.Version())
 	domain.ReconstituteCommissions(&c, f.Commissions())
+	if since, reason, ok := f.DispositionStale(); ok {
+		domain.RestoreDispositionStale(&c, since, reason)
+	}
 	return c
 }
 
@@ -226,6 +229,15 @@ func TestGetFinding(t *testing.T) {
 	}
 	if v.Id != "fnd-1" || v.ReleaseId != "rel-1" || v.Stage != "position_established" || len(v.Components) != 1 {
 		t.Errorf("view = %+v", v)
+	}
+	// RF-2: a Finding that was not re-surfaced carries no disposition_stale.
+	if _, present := func() (any, bool) {
+		var raw map[string]any
+		_ = json.Unmarshal(body, &raw)
+		x, ok := raw["disposition_stale"]
+		return x, ok && x != nil
+	}(); present {
+		t.Error("disposition_stale must be absent when nothing was re-surfaced")
 	}
 	// KN-SCAN-2: the wire carries which engine found the occurrence.
 	if got, _ := v.Components[0]["detection_origin"].(string); got != "scanner/trivy" {
@@ -974,4 +986,42 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 			t.Fatalf("release_scope = %+v err=%v, want enterprise-linux 8", v.ReleaseScope, err)
 		}
 	})
+}
+
+// RF-2: a re-surfaced suppression is on the wire, on the Finding view and on the posture.
+func TestDispositionStaleOnTheWire(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "quiet", fixedClock{}.Now(), value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	_, _ = f.AcceptProposal("p1", human, fixedClock{}.Now())
+	if !f.MarkDispositionStale("the review-by date on this decision has passed", fixedClock{}.Now().Add(time.Hour)) {
+		t.Fatal("mark refused")
+	}
+	repo.seed(f)
+	srv := server(t, repo, fakeProjection{posture: []app.PostureEntry{{
+		FindingID: "fnd-1", Stance: domain.StanceNotAffected, HasPosition: true, BaseScore: 50,
+		StaleSince: fixedClock{}.Now().Add(time.Hour), StaleReason: "the review-by date on this decision has passed",
+	}}})
+
+	_, body := do(t, http.MethodGet, srv.URL+"/findings/fnd-1", nil)
+	var v struct {
+		DispositionStale *struct {
+			Since  string `json:"since"`
+			Reason string `json:"reason"`
+		} `json:"disposition_stale"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil || v.DispositionStale == nil || v.DispositionStale.Reason == "" || v.DispositionStale.Since == "" {
+		t.Fatalf("finding view disposition_stale = %+v err=%v: %s", v.DispositionStale, err, body)
+	}
+	_, body = do(t, http.MethodGet, srv.URL+"/releases/rel-1/posture", nil)
+	var posture []struct {
+		Residual         int `json:"residual_priority"`
+		DispositionStale *struct {
+			Reason string `json:"reason"`
+		} `json:"disposition_stale"`
+	}
+	if err := json.Unmarshal(body, &posture); err != nil || len(posture) != 1 || posture[0].DispositionStale == nil || posture[0].Residual != 50 {
+		t.Fatalf("posture = %+v err=%v: %s", posture, err, body)
+	}
 }

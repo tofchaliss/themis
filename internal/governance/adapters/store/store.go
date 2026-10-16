@@ -91,10 +91,14 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 	)
 	var sig domain.ExploitSignals
 	row := s.querier(ctx).QueryRow(ctx,
-		"SELECT id, release_id, faultline_id, cve, stage, version, signal_kev, signal_exploit_public, signal_epss "+
+		"SELECT id, release_id, faultline_id, cve, stage, version, signal_kev, signal_exploit_public, signal_epss, stale_since, stale_reason "+
 			"FROM findings WHERE "+where, args...)
+	var (
+		staleSince  *time.Time
+		staleReason string
+	)
 	if err := row.Scan(&id, &releaseID, &faultlineID, &cve, &stage, &version,
-		&sig.KEV, &sig.ExploitPublic, &sig.EPSS); err != nil {
+		&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &staleSince, &staleReason); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Finding{}, ErrNotFound
 		}
@@ -121,6 +125,9 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 	f := domain.ReconstituteFinding(domain.FindingID(id), releaseID, faultlineID, cve,
 		components, domain.Stage(stage), proposals, positions, version, sig)
 	domain.ReconstituteCommissions(&f, commissions)
+	if staleSince != nil {
+		domain.RestoreDispositionStale(&f, *staleSince, staleReason)
+	}
 	return f, nil
 }
 
@@ -261,12 +268,17 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 
 	now := time.Now().UTC()
 	curStance, curVersion := materializedPosition(f)
+	var staleSince *time.Time
+	staleReason := ""
+	if since, reason, ok := f.DispositionStale(); ok {
+		staleSince, staleReason = &since, reason
+	}
 
 	if created {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO findings (id, release_id, faultline_id, cve, stage, version, current_stance, current_position_version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
-			string(f.ID()), f.ReleaseID(), f.FaultlineID(), f.CVE(), string(f.Stage()), f.Version(), curStance, curVersion, now); err != nil {
+			INSERT INTO findings (id, release_id, faultline_id, cve, stage, version, current_stance, current_position_version, created_at, updated_at, stale_since, stale_reason)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11)`,
+			string(f.ID()), f.ReleaseID(), f.FaultlineID(), f.CVE(), string(f.Stage()), f.Version(), curStance, curVersion, now, staleSince, staleReason); err != nil {
 			// A concurrent writer created this (Release, Faultline) first — converge by retry.
 			if isUniqueViolation(err) {
 				return app.ErrConcurrent
@@ -275,9 +287,10 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 		}
 	} else {
 		ct, err := tx.Exec(ctx, `
-			UPDATE findings SET stage=$1, version=$2, current_stance=$3, current_position_version=$4, updated_at=$5
+			UPDATE findings SET stage=$1, version=$2, current_stance=$3, current_position_version=$4, updated_at=$5,
+			       stale_since=$8, stale_reason=$9
 			WHERE id=$6 AND version=$7`,
-			string(f.Stage()), f.Version(), curStance, curVersion, now, string(f.ID()), prevVersion)
+			string(f.Stage()), f.Version(), curStance, curVersion, now, string(f.ID()), prevVersion, staleSince, staleReason)
 		if err != nil {
 			return err
 		}
@@ -483,6 +496,34 @@ func (s *Store) UndecidedFindingsByRelease(ctx context.Context, releaseID string
 	return out, rows.Err()
 }
 
+// SuppressedWithExpiredReview lists Findings whose CURRENT suppressing Position carries a
+// review-by date already past and that have not been re-surfaced yet (RF-2). Implements
+// app.ExpiredReviewLister. Oldest review date first, bounded by limit.
+func (s *Store) SuppressedWithExpiredReview(ctx context.Context, now time.Time, limit int) ([]domain.FindingID, error) {
+	rows, err := s.querier(ctx).Query(ctx, `
+		SELECT f.id
+		FROM findings f
+		JOIN finding_positions po ON po.finding_id = f.id AND po.version = f.current_position_version
+		WHERE f.current_stance IN ('not_affected', 'accepted_risk')
+		  AND f.stale_since IS NULL
+		  AND po.review_by IS NOT NULL AND po.review_by < $1
+		ORDER BY po.review_by, f.id
+		LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.FindingID
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.FindingID(id))
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error) {
 	rows, err := s.querier(ctx).Query(ctx, `SELECT id FROM findings WHERE faultline_id = $1 ORDER BY id`, faultlineID)
 	if err != nil {
@@ -559,7 +600,7 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
 		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes,
-		       COALESCE(po.rationale, '')
+		       COALESCE(po.rationale, ''), f.stale_since, f.stale_reason
 		FROM findings f
 		-- The reservation (EDR-TRUST-01 T12) is DERIVED, never stored: join the current
 		-- Position to the proposal it accepted and read that proposal's evidence class. A
@@ -584,9 +625,11 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			evidenceTrust, band         string
 			fixesRaw                    []byte
 			positionRationale           string
+			staleSince                  *time.Time
+			staleReason                 string
 		)
 		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore,
-			&evidenceTrust, &band, &fixesRaw, &positionRationale); err != nil {
+			&evidenceTrust, &band, &fixesRaw, &positionRationale, &staleSince, &staleReason); err != nil {
 			return nil, err
 		}
 		var fixes []app.FixedVersion
@@ -598,11 +641,15 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		e := app.PostureEntry{
 			FindingID:   domain.FindingID(id),
 			FaultlineID: faultlineID,
+			StaleReason: staleReason,
 			CVE:         cve,
 			Stage:       domain.Stage(stage),
 			BaseScore:   baseScore,
 			Band:        band,
 			Fixes:       fixes,
+		}
+		if staleSince != nil {
+			e.StaleSince = staleSince.UTC()
 		}
 		if curStance != nil {
 			e.Stance = domain.Stance(*curStance)

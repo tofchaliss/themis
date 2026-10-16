@@ -835,3 +835,99 @@ func TestUndecidedFindingsByRelease(t *testing.T) {
 		t.Fatalf("unknown release = %v, want none", none)
 	}
 }
+
+// RF-2: the re-surfacing mark round-trips through the aggregate and the posture read, and the
+// expired-review lister returns only suppressed, dated, not-yet-marked Findings, oldest first.
+func TestDispositionStaleRoundTripAndExpiredLister(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	decide := func(id string, stance domain.Stance, reviewBy time.Time) {
+		t.Helper()
+		f := newFinding(t, id, "rel-1", "fl-"+id, "CVE-2026-1")
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		f, _, _ = load(t, st, domain.FindingID(id))
+		prev := f.Version()
+		p, _ := domain.NewGovernanceProposal("p1", human, stance, "", epoch, value.TrustAsserted)
+		if err := f.RaiseProposal(p); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		if reviewBy.IsZero() {
+			_, err = f.AcceptProposal("p1", human, epoch)
+		} else {
+			_, err = f.AcceptProposal("p1", human, epoch, reviewBy)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Save(ctx, f, false, prev, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	decide("fnd-late", domain.StanceNotAffected, epoch.Add(time.Hour))      // expired
+	decide("fnd-later", domain.StanceAcceptedRisk, epoch.Add(2*time.Hour))  // expired, later
+	decide("fnd-ahead", domain.StanceNotAffected, epoch.Add(240*time.Hour)) // not yet
+	decide("fnd-nodate", domain.StanceNotAffected, time.Time{})             // no date agreed
+	decide("fnd-affected", domain.StanceAffected, epoch.Add(time.Hour))     // not suppressing
+
+	now := epoch.Add(3 * time.Hour)
+	got, err := st.SuppressedWithExpiredReview(ctx, now, 10)
+	if err != nil || len(got) != 2 || got[0] != "fnd-late" || got[1] != "fnd-later" {
+		t.Fatalf("expired = %v err=%v, want [fnd-late fnd-later]", got, err)
+	}
+	if one, _ := st.SuppressedWithExpiredReview(ctx, now, 1); len(one) != 1 || one[0] != "fnd-late" {
+		t.Fatalf("limit 1 = %v", one)
+	}
+
+	// Mark one; it leaves the lister, survives the round-trip, and shows on the posture read.
+	f, _, _ := load(t, st, "fnd-late")
+	prev := f.Version()
+	if !f.MarkDispositionStale("the review-by date on this decision has passed", now) {
+		t.Fatal("mark refused")
+	}
+	if err := st.Save(ctx, f, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	back, _, _ := load(t, st, "fnd-late")
+	if since, reason, ok := back.DispositionStale(); !ok || !since.Equal(now) || reason == "" {
+		t.Fatalf("round-trip mark = %v %q ok=%v", since, reason, ok)
+	}
+	if rest, _ := st.SuppressedWithExpiredReview(ctx, now, 10); len(rest) != 1 || rest[0] != "fnd-later" {
+		t.Fatalf("after mark = %v, want [fnd-later]", rest)
+	}
+	posture, err := st.ReleasePosture(ctx, "rel-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, e := range posture {
+		if e.FindingID == "fnd-late" {
+			if e.StaleSince.IsZero() || e.StaleReason == "" {
+				t.Fatalf("posture entry lacks the mark: %+v", e)
+			}
+			marked++
+		} else if !e.StaleSince.IsZero() {
+			t.Fatalf("unmarked entry carries a mark: %+v", e)
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("marked entries = %d", marked)
+	}
+	// A new Position clears it on the way through the store.
+	f, _, _ = load(t, st, "fnd-late")
+	prev = f.Version()
+	p2, _ := domain.NewGovernanceProposal("p2", human, domain.StanceAffected, "", now, value.TrustAsserted)
+	_ = f.RaiseProposal(p2)
+	if _, err := f.AcceptProposal("p2", human, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, f, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	if cleared, _, _ := load(t, st, "fnd-late"); func() bool { _, _, ok := cleared.DispositionStale(); return ok }() {
+		t.Fatal("a new Position must clear the stored mark")
+	}
+}

@@ -57,6 +57,9 @@ type Governance struct {
 	// root only when THEMIS_GOVERNANCE_REJUDGE_RANGES=1. Nil without a Knowledge seam: the pass
 	// reads each card's reconciled ranges there, and with nothing to read it has nothing to judge.
 	Rejudge *app.RangeRejudge
+	// ReviewBy is the review-by timer (EDR-GOVERNANCE-01 D14, RF-2): the composition root runs it
+	// on THEMIS_REVIEW_BY_INTERVAL. Always wired; the cadence (or 0) is the switch.
+	ReviewBy *app.ReviewBySweep
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -143,6 +146,7 @@ func Wire(
 		Reconcile:   app.NewReconcileService(relay),
 		Evaluations: evaluations,
 		Rejudge:     rejudge,
+		ReviewBy:    app.NewReviewBySweep(write, st, sysClock{}),
 	}
 }
 
