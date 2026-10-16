@@ -11,5 +11,8 @@ No `specs/` deltas — archive with `openspec archive phase3-vendor-will-not-fix
   by a non-applicable fix, not when the Position rests on something else.
 - [x] 1.3 `vex-accept-applicable.sh --include-will-not-fix` (D19).
 - [x] 1.4 EDR amendment, BACKLOG VEX-WNF-1 closed, CLAUDE.md line.
-- [ ] 1.5 VM: re-judge pass raises the `vexwnf:` proposals (`vendor_raised`); the accept script's
-  dry run with and without the flag; one proposal in the GUI.
+- [x] 1.5 VM (2026-10-16): the first re-judge pass on the new binary raised **1008** `vexwnf:`
+  accepted_risk proposals (its "done" line was lost to an overlapping restart; the second pass
+  logged `vendor_raised: 0`, the idempotence). The two dry runs: 29 listed plus "1008 … not listed"
+  without the flag, 1037 all `accept` with it. One proposal in the GUI: not yet opened. Whether
+  to sign them is the user's call.

@@ -281,6 +281,27 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### C. Deferred follow-ups inside completed contexts
 
+- [ ] **KN-RANGE-ECO-1 — a card's ranges lose their ecosystem, so a range published for another
+  product keeps a Go Finding open (filed 2026-10-16, the measured tail of the KN-GO arc).** MED,
+  false-positive. The 60 open stdlib Findings are 17 CVEs. Thirteen (CVE-2026-56857, -56866,
+  -78659/60/63/67/69, -94439/40/48, -97030/31/32) carry `>=0,<1.26.9` and `>=1.27.0-0,<1.27.2`:
+  go1.27.1 and 1.26.8 are IN range — genuinely affected, fix in Go 1.27.2 / 1.26.9 — and the
+  Findings are open correctly. Four (CVE-2019-17596, -2020-15586, -2021-34558, -2021-36221) would
+  clear on their Go range (`<1.13.2`, `<1.14.5`, `<1.16.6`, `<1.16.7`) but the card's reconciled
+  list also holds ranges from OTHER products of the same CVE — `<=4.23.1f`, `<21.1.1.1.0`,
+  `<13.7.0`, `<2.0`, `<=0.25` (Oracle, vendor appliances, a Python package) — and
+  `ProvablyOutOfRange` requires EVERY range to exclude the version, so a foreign range that
+  "contains" 1.27.1 keeps the Finding open forever. The kernel `AffectedRange` carries an
+  Ecosystem; the card's `AffectedRanges []string` (proposal, reconcile, event, codec, read API)
+  drops it, so Governance cannot tell a Go range from an Oracle one. **Do (design before code,
+  Knowledge domain + event + API change):** carry the range's ecosystem/package through the
+  card (`affected_ranges[] {ecosystem, package, range}`; the flat strings stay for one release
+  as a compatibility view), and let the version-range rule judge a component against the ranges
+  of ITS ecosystem/package only — a range with no ecosystem stays applicable to everything
+  (fail-safe, the EDR-CORRELATION-01 "unknown acts as carrier" line). Measure first with
+  `match-census.sh` sign 4 how many cards mix ecosystems. Until then the four are a human
+  decision with the Go range as the reason.
+
 - [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled
   `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
@@ -309,8 +330,8 @@ three angles, and two of them proposed fixes that would not have worked.
   (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
   **Measured on the VM (2026-10-16):** the pass raised `rollforward:` proposals — ten listed, all
   artifact level, stances affected / not_affected / mitigated, rationale as designed (source
-  release, Position v1, decided by human, original reason). Same-project confirmation and the
-  GUI drawer: pending paste.
+  release, Position v1, decided by human, original reason). Same-project confirmed: 11 proposals
+  in total, every target in the source's project (two projects on the estate, no crossing).
 - [x] **RF-2 — review-by has no timer, and nothing consumed the stale event (audit B3; filed and
   closed 2026-10-16).** MED. A suppressed Finding whose `review_by` date passed was re-surfaced
   only when its CVE was next enriched (`watchDispositions` runs on FaultlineEnriched), so a quiet
@@ -417,7 +438,14 @@ three angles, and two of them proposed fixes that would not have worked.
   never auto-accepted, the vendor's words as rationale); a later applicable `fixed` for the same
   package re-surfaces the acceptance (the RF-2 mark, reason naming build + advisory);
   `vex-accept-applicable.sh --include-will-not-fix` lists them apart from the not_affected ones.
-  **Measure on the VM:** `vendor_raised` from the re-judge pass; the script's dry run with the flag.
+  **Measured on the VM (2026-10-16):** the first pass raised **1008** accepted_risk proposals
+  across the estate (one per open Finding whose package Red Hat marks will_not_fix / fix_deferred
+  / out_of_support for RHEL 8); a second pass raised 0 (idempotent). Signing them is the user's
+  decision, per Finding in the GUI or in one run with `--apply --include-will-not-fix`. The two
+  dry runs read as designed: 29 not_affected listed with "1008 accepted_risk … not listed", and
+  1037 with the flag, all `accept`, none left standing.
+  **Lesson, operational:** a restart during the one-time pass loses its "done" line — the pass
+  takes 10–15 minutes on 773 cards; wait for the line before restarting again.
   **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
   at Finding creation so the pass is not needed for new Findings.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
