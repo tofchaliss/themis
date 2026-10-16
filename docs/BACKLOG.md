@@ -417,7 +417,12 @@ three angles, and two of them proposed fixes that would not have worked.
   never auto-accepted, the vendor's words as rationale); a later applicable `fixed` for the same
   package re-surfaces the acceptance (the RF-2 mark, reason naming build + advisory);
   `vex-accept-applicable.sh --include-will-not-fix` lists them apart from the not_affected ones.
-  **Measure on the VM:** `vendor_raised` from the re-judge pass; the script's dry run with the flag.
+  **Measured on the VM (2026-10-16):** the first pass raised **1008** accepted_risk proposals
+  across the estate (one per open Finding whose package Red Hat marks will_not_fix / fix_deferred
+  / out_of_support for RHEL 8); a second pass raised 0 (idempotent). Signing them is the user's
+  decision, per Finding in the GUI or in one run with `--apply --include-will-not-fix`.
+  **Lesson, operational:** a restart during the one-time pass loses its "done" line — the pass
+  takes 10–15 minutes on 773 cards; wait for the line before restarting again.
   **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
   at Finding creation so the pass is not needed for new Findings.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
