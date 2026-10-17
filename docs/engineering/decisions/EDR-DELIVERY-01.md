@@ -937,6 +937,11 @@ credential, and takes no Governance act (RC-7 / D-N-12). Reading this endpoint i
 
 ### M2-5 — The baseline is the immediately-previous SBOM, and the targeted set does not GROW
 
+> **Realized 2026-10-17 (N-M2e):** `communication/domain/rebuild.go` — `SelectPreviousSBOM`
+> (upload order, ties by id, none for a first or unknown SBOM), `TargetedSet` captured once at
+> Critical+High, `Closure` with D16's fixed rule and `Complete` as the success stop. Pure; the
+> worker that feeds it is N-M2f.
+
 RC-4 left the baseline open. It is now fixed: the comparison is **the new SBOM against the
 immediately-previous SBOM of the SAME Release, by upload order**. No configured window, no
 "baseline of record", no operator knob. Progress is "did THIS rebuild close anything", and a

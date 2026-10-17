@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 )
 
 // ErrNoPostureReader is returned when a remediation ticket is rendered without the Governance
@@ -243,11 +244,11 @@ func bucket(rows []app.ReleaseSeverityRow) (map[string]int, map[string][]string)
 // knowing it is mild.
 func severityOf(baseScore int) string {
 	switch {
-	case baseScore >= 90:
+	case baseScore >= domain.SeverityCriticalFloor:
 		return sevCritical
-	case baseScore >= 70:
+	case baseScore >= domain.SeverityHighFloor:
 		return sevHigh
-	case baseScore >= 40:
+	case baseScore >= domain.SeverityMediumFloor:
 		return sevMedium
 	case baseScore > 0:
 		return sevLow

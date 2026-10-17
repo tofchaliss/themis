@@ -505,10 +505,19 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestPublishEvaluatedAndMark_OneGuardedTransaction`, `TestMigrationDownUp`. No new packages.
       **Measure on the VM:** after the next upload, `GET …/events/release-evaluated` with a read key
       returns the evaluation with `cause=new_sbom` and `next` > 0; `?after=<next>` is empty.
-- [ ] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
+- [x] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
       **immediately-previous SBOM of the Release by upload order** and detect closure of the targeted
       set. Tests: `TestSelectPreviousSBOM_ByUploadOrder` and
       `TestTargetedSetClosure_DoesNotGrowMidLoop`.
+      **Implemented 2026-10-17** as pure rules in `internal/communication/domain/rebuild.go`:
+      `SelectPreviousSBOM(records, newID)` orders Evidence's listing by filed time (ties by id) and
+      returns the record immediately before the new SBOM — none when it is the first or unknown;
+      `NewTargetedSet(start)` captures the Critical+High CVEs (base_score ≥ 70, the M1b-5 floors
+      restated as `domain.Severity*Floor`, now also what the ticket renderer buckets with) once, and
+      `Closure(current)` partitions them into closed (opens no Finding now — D16's fixed rule) and
+      open, `Complete` being the success stop; a CVE that appears mid-loop is in neither list. The
+      worker that feeds these (Evidence listing by release, posture after evaluation) is N-M2f's;
+      the Evidence read seam Communication does not yet hold is noted there.
 - [ ] 6.6 **N-M2f** (`themis`; no API, no schema) — Jira update and mail emitted **after the
       comparison only**, never from the callback. Tests (worker level):
       `TestPostEvaluationOnly_ProducesTicketAndMail` and `TestCallbackAlone_NoSideEffects`; the

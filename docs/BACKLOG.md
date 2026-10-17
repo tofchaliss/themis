@@ -31,7 +31,8 @@ unblocks the most, highest first:
    publish transaction, cursor read with the paging rules in the app; VM measurement pending:
    the next upload's evaluation readable with a read key).
 3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the
-   targeted set.
+   targeted set. **Shipped 2026-10-17** (pure domain rules with the two named
+   tests; fed by the N-M2f worker).
 4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail
    goes to the audience; never from the callback.
 5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
