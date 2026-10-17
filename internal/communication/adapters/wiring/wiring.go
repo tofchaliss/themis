@@ -106,6 +106,8 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	}
 	intents := app.NewDeliveryIntentService(comm.Store, idGen{}, sysClock{}, app.DeliveryIntentConfig{
 		DeadLetterAudience: cfg.DeadLetterAudience,
+		DecisionAudience:   cfg.DecisionAudience,
+		EvaluationAudience: cfg.EvaluationAudience,
 	})
 	if comm.Posture != nil {
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))

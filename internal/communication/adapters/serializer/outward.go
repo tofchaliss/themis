@@ -83,6 +83,12 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail && in.IsDeadLetterNotification():
 		subject, body := RenderOpsDeadLetterEmail(in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentEmail && in.IsEvaluationNotification():
+		subject, body, err := r.RenderEvaluationEmail(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentEmail:
 		subject, body := RenderDecisionEmail(in)
 		return app.BuildPayload(subject, body), nil
@@ -151,6 +157,57 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 	b.WriteString("transition, and resolving a Finding stays a decision taken in Themis by a person.\n")
 
 	return jiraSummary(in.ReleaseID), []byte(b.String()), nil
+}
+
+// RenderEvaluationEmail renders the mail that follows a Release evaluation (M2-8 step 4 / N-M2f):
+// the same posture the ticket states — counts for all four buckets, CVE ids for Critical and
+// High — told to the governed audience. It reads the posture like the ticket does, so the two
+// cannot disagree about what the Release contains. The ticket, not the mail, is the tracking
+// surface: the mail says where to look.
+func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Intent) (string, []byte, error) {
+	if strings.TrimSpace(in.ReleaseID) == "" {
+		return "", nil, app.ErrNoSubject
+	}
+	if r.posture == nil {
+		return "", nil, ErrNoPostureReader
+	}
+	rows, err := r.posture.ReleaseSeverity(ctx, in.ReleaseID)
+	if err != nil {
+		return "", nil, err
+	}
+	counts, cves := bucket(rows)
+	subject := fmt.Sprintf("Themis evaluated Release %s - Critical %d, High %d", in.ReleaseID, counts[sevCritical], counts[sevHigh])
+
+	var b strings.Builder
+	b.WriteString("Themis has evaluated a new SBOM for this Release. This is the Release's posture as it\n")
+	b.WriteString("stands now; the remediation ticket for the Release carries the same figures.\n\n")
+	writeFacts(&b, []fact{
+		{"Release", in.ReleaseID},
+		{"Project", in.ProjectID},
+		{"Product", in.ProductID},
+		{"SBOM", in.Snapshot["sbom_id"]},
+		{"Findings", fmt.Sprintf("%d", len(rows))},
+		{"Event", eventFact(in)},
+	})
+	b.WriteString("\nSeverity counts\n")
+	for _, sev := range severityOrder {
+		if sev == sevUnknown && counts[sev] == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-9s %d\n", sev+":", counts[sev])
+	}
+	for _, sev := range listedSeverities {
+		if counts[sev] == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s (%d)\n", sev, counts[sev])
+		for _, cve := range cves[sev] {
+			b.WriteString("  " + cve + "\n")
+		}
+	}
+	b.WriteString("\nNo Themis decision follows from this mail. The authoritative record is Themis; this\n")
+	b.WriteString("mail carries no attachment and no model output.\n")
+	return subject, []byte(b.String()), nil
 }
 
 // RenderDecisionEmail renders the notification for an accepted proposal (RC-5): the immutable

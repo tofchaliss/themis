@@ -67,6 +67,11 @@ const snapshotKeyNotification = "notification"
 // notificationDeadLetter is the snapshotKeyNotification value for the dead-letter mail.
 const notificationDeadLetter = "dead_letter"
 
+// notificationReleaseEvaluated is the snapshotKeyNotification value for the mail that follows a
+// Release evaluation (EDR-DELIVERY-01 M2-8 step 4 / N-M2f): what the Release's posture is now
+// that the new SBOM has been judged.
+const notificationReleaseEvaluated = "release_evaluated"
+
 // IntentLineage is the originating envelope's identity, recorded so an outward effect can
 // always be traced back to the fact that caused it. EventSeq is deliberately absent: the bus
 // sequence is the event_log's own ordering column and is not carried in the kernel Envelope
@@ -122,6 +127,12 @@ type Intent struct {
 // intent died.
 func (i Intent) IsDeadLetterNotification() bool {
 	return i.Snapshot[snapshotKeyNotification] == notificationDeadLetter
+}
+
+// IsEvaluationNotification reports whether this intent is the mail that follows a Release
+// evaluation (N-M2f).
+func (i Intent) IsEvaluationNotification() bool {
+	return i.Snapshot[snapshotKeyNotification] == notificationReleaseEvaluated
 }
 
 // Attempt is one append-only row of the attempt ledger plus the intent counters it moves.
@@ -249,6 +260,7 @@ func PayloadDigest(payload []byte) string {
 type DeliveryIntentConfig struct {
 	JiraDestination    string // issue-tracker project alias for release remediation tickets
 	DecisionAudience   string // audience notified when a proposal is accepted
+	EvaluationAudience string // audience told a Release's posture after a new SBOM was judged (N-M2f)
 	DeadLetterAudience string // audience told that a delivery gave up
 }
 
@@ -256,6 +268,7 @@ type DeliveryIntentConfig struct {
 const (
 	defaultJiraDestination    = "themis-remediation"
 	defaultDecisionAudience   = "security-decisions"
+	defaultEvaluationAudience = "security-decisions"
 	defaultDeadLetterAudience = "operations"
 )
 
@@ -265,6 +278,9 @@ func (c DeliveryIntentConfig) withDefaults() DeliveryIntentConfig {
 	}
 	if strings.TrimSpace(c.DecisionAudience) == "" {
 		c.DecisionAudience = defaultDecisionAudience
+	}
+	if strings.TrimSpace(c.EvaluationAudience) == "" {
+		c.EvaluationAudience = defaultEvaluationAudience
 	}
 	if strings.TrimSpace(c.DeadLetterAudience) == "" {
 		c.DeadLetterAudience = defaultDeadLetterAudience
@@ -337,6 +353,27 @@ func (s *DeliveryIntentService) EnqueueDecisionMail(ctx context.Context, lineage
 	putIfSet(in.Snapshot, "proposal_id", proposalID)
 	putIfSet(in.Snapshot, "finding_id", findingID)
 	putIfSet(in.Snapshot, "release_id", releaseID)
+	return s.create(ctx, in)
+}
+
+// EnqueueEvaluationMail records the notification that follows a Release evaluation after a new
+// SBOM (M2-8 step 4, RC-5): the governed audience is told what the Release's posture is now.
+// It is caused by the SAME event as the ticket intent and deduplicated beside it — one event,
+// one intent per type (N-M2f). An empty audience uses the configured default; no Release is no
+// subject.
+func (s *DeliveryIntentService) EnqueueEvaluationMail(ctx context.Context, lineage IntentLineage, originEventID, releaseID, productID, projectID, audience string, snapshot map[string]string) (Intent, error) {
+	if strings.TrimSpace(releaseID) == "" {
+		return Intent{}, ErrNoSubject
+	}
+	if strings.TrimSpace(audience) == "" {
+		audience = s.cfg.EvaluationAudience
+	}
+	in := s.newIntent(IntentEmail, audience, lineage, originEventID, snapshot)
+	in.ReleaseID, in.ProductID, in.ProjectID = releaseID, productID, projectID
+	in.Snapshot[snapshotKeyNotification] = notificationReleaseEvaluated
+	in.Snapshot["release_id"] = releaseID
+	putIfSet(in.Snapshot, "product_id", productID)
+	putIfSet(in.Snapshot, "project_id", projectID)
 	return s.create(ctx, in)
 }
 

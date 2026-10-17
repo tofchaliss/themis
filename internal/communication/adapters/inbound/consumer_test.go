@@ -113,7 +113,7 @@ func TestConsumer_MalformedPayloads(t *testing.T) {
 // --- N-M1a: outward-delivery intents -------------------------------------------------------
 
 // intentStore is an in-memory DeliveryIntents double reproducing the one store behaviour the
-// mapping depends on: idempotence on the originating event id.
+// mapping depends on: idempotence on the originating event id, per intent type.
 type intentStore struct {
 	created []app.Intent
 	byEvent map[string]app.Intent
@@ -123,10 +123,11 @@ func newIntentStore() *intentStore { return &intentStore{byEvent: map[string]app
 
 func (s *intentStore) CreateIntent(_ context.Context, in app.Intent) (app.Intent, error) {
 	if in.OriginEventID != "" {
-		if existing, ok := s.byEvent[in.OriginEventID]; ok {
+		key := in.OriginEventID + "|" + string(in.Type) // one intent per (event, type) — N-M2f
+		if existing, ok := s.byEvent[key]; ok {
 			return existing, nil
 		}
-		s.byEvent[in.OriginEventID] = in
+		s.byEvent[key] = in
 	}
 	s.created = append(s.created, in)
 	return in, nil
@@ -176,15 +177,21 @@ const rediscoveryPayload = `{"product_id":"prod-1","project_id":"prj-1","release
 	`"severity_counts":{"critical":1,"high":2,"medium":0,"low":0,"unknown":0},"cause":"rediscovery"}`
 
 // N-M2c: ONE Release evaluation after a new SBOM is ONE ticket intent, and it names the product
-// and the project the event carries — the reader still performs no Registry read.
+// and the project the event carries — the reader still performs no Registry read. N-M2f: the
+// same event also asks for ONE mail to the governed audience, after the ticket.
 func TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents(t *testing.T) {
 	intents := newIntentStore()
 	env := govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))
 	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(intents.created) != 1 {
-		t.Fatalf("created %d intents, want 1", len(intents.created))
+	if len(intents.created) != 2 {
+		t.Fatalf("created %d intents, want 2 (ticket + evaluation mail)", len(intents.created))
+	}
+	mail := intents.created[1]
+	if mail.Type != app.IntentEmail || !mail.IsEvaluationNotification() || mail.ReleaseID != "rel-1" ||
+		mail.OriginEventID != "env-1" || mail.Destination != "security-decisions" || mail.ProductID != "prod-1" {
+		t.Errorf("evaluation mail = %+v", mail)
 	}
 	in := intents.created[0]
 	if in.Type != app.IntentJiraIssue || in.ReleaseID != "rel-1" || in.OriginEventID != "env-1" {
@@ -236,8 +243,8 @@ func TestConsumer_ReleaseEvaluatedRedeliveryCreatesNoSecondIntent(t *testing.T) 
 			t.Fatalf("handle %d: %v", i, err)
 		}
 	}
-	if len(intents.created) != 1 {
-		t.Fatalf("created %d intents for one event, want 1", len(intents.created))
+	if len(intents.created) != 2 {
+		t.Fatalf("created %d intents for one event, want 2 (one per type)", len(intents.created))
 	}
 }
 
@@ -358,8 +365,8 @@ func TestConsumer_NeverDelivers(t *testing.T) {
 	if blocked.calls != 1 {
 		t.Errorf("deliverer calls = %d; handling an event must add none", blocked.calls)
 	}
-	if len(intents.created) != 1 {
-		t.Errorf("the reader must persist exactly one intent, got %d", len(intents.created))
+	if len(intents.created) != 2 {
+		t.Errorf("the reader must persist exactly the two intents, got %d", len(intents.created))
 	}
 }
 
@@ -412,8 +419,8 @@ func TestConsumer_RecordsTheJiraIntentOnAnAuthEnabledEstate(t *testing.T) {
 	if err := materializingConsumer(intents, srv.URL, key).Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(intents.created) != 1 {
-		t.Fatalf("created %d intents, want 1", len(intents.created))
+	if len(intents.created) != 2 {
+		t.Fatalf("created %d intents, want 2", len(intents.created))
 	}
 	in := intents.created[0]
 	if in.PayloadSHA256 == "" || len(in.PayloadBytes) == 0 {

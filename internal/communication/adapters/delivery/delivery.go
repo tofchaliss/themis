@@ -247,6 +247,11 @@ type Config struct {
 	BackoffMax time.Duration
 	// DeadLetterAudience is the governed audience told that a delivery gave up.
 	DeadLetterAudience string
+	// DecisionAudience is the governed audience told that a proposal was accepted (RC-5).
+	DecisionAudience string
+	// EvaluationAudience is the governed audience told a Release's posture after a new SBOM was
+	// judged (M2-8 step 4 / N-M2f).
+	EvaluationAudience string
 	// Interval is the worker loop's cadence.
 	Interval time.Duration
 
@@ -279,6 +284,8 @@ const (
 //	THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX       cap on the doubling (default 30s)
 //	THEMIS_COMMUNICATION_DELIVERY_INTERVAL          worker loop cadence (default 5s)
 //	THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE        audience told a delivery gave up (default "operations")
+//	THEMIS_COMMUNICATION_DECISION_AUDIENCE          audience told a proposal was accepted (default "security-decisions")
+//	THEMIS_COMMUNICATION_EVALUATION_AUDIENCE        audience told a Release's posture after a new SBOM (default "security-decisions")
 //
 // The real senders are read by jiraFromEnv / mailFromEnv (see jira.go / mail.go), both OFF by
 // default. Every SECRET among their knobs — the Jira API token, the SMTP password — is read from
@@ -296,6 +303,8 @@ func ConfigFromEnv() Config {
 		BackoffMax:         envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX", defaultBackoffMax),
 		Interval:           envDuration("THEMIS_COMMUNICATION_DELIVERY_INTERVAL", defaultInterval),
 		DeadLetterAudience: os.Getenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE"),
+		DecisionAudience:   os.Getenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE"),
+		EvaluationAudience: os.Getenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE"),
 	}
 }
 
@@ -327,9 +336,9 @@ func (c Config) withDefaults() Config {
 // to tell what the node will do. It prints whether each credential is SET, never its value: a
 // startup line is telemetry, and telemetry is not a place a token may appear even once.
 func (c Config) String() string {
-	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q jira=[%s] mail=[%s]",
+	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q jira=[%s] mail=[%s]",
 		c.Enabled, c.Workers, c.Batch, c.MaxAttempts, c.BackoffInitial, c.BackoffMax, c.Interval, c.DeadLetterAudience,
-		c.Jira, c.Mail)
+		c.DecisionAudience, c.EvaluationAudience, c.Jira, c.Mail)
 }
 
 // envBool reads a "1"/"0" switch; anything unset or unrecognized falls back to def.

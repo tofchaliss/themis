@@ -420,3 +420,48 @@ func TestPayloadEnvelope(t *testing.T) {
 		t.Errorf("digest length = %d, want a hex SHA-256", got)
 	}
 }
+
+// N-M2f: the evaluation mail names its Release, takes the configured evaluation audience when
+// none is given per call, carries the product and project the event supplied, and is marked as
+// the evaluation notification so the renderer can tell it from a decision mail.
+func TestEnqueueEvaluationMail(t *testing.T) {
+	store := newIntentStore()
+	in, err := intentSvc(store, app.DeliveryIntentConfig{}).EnqueueEvaluationMail(
+		context.Background(), lineage(), "env-3", "rel-1", "prod-1", "prj-1", "",
+		map[string]string{"sbom_id": "ev-2", "cause": "new_sbom"})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if in.Type != app.IntentEmail || in.Destination != "security-decisions" || !in.IsEvaluationNotification() || in.IsDeadLetterNotification() {
+		t.Errorf("intent = %+v", in)
+	}
+	if in.ReleaseID != "rel-1" || in.ProductID != "prod-1" || in.ProjectID != "prj-1" || in.OriginEventID != "env-3" {
+		t.Errorf("pointers = %+v", in)
+	}
+	if in.Snapshot["release_id"] != "rel-1" || in.Snapshot["product_id"] != "prod-1" || in.Snapshot["project_id"] != "prj-1" ||
+		in.Snapshot["sbom_id"] != "ev-2" {
+		t.Errorf("snapshot = %v", in.Snapshot)
+	}
+
+	// Configured and per-call audiences, in that order of precedence.
+	configured, err := intentSvc(newIntentStore(), app.DeliveryIntentConfig{EvaluationAudience: "release-managers"}).EnqueueEvaluationMail(
+		context.Background(), lineage(), "env-4", "rel-1", "", "", "", nil)
+	if err != nil || configured.Destination != "release-managers" {
+		t.Errorf("configured audience = %q (err %v)", configured.Destination, err)
+	}
+	perCall, err := intentSvc(newIntentStore(), app.DeliveryIntentConfig{EvaluationAudience: "release-managers"}).EnqueueEvaluationMail(
+		context.Background(), lineage(), "env-5", "rel-1", "", "", "per-call", nil)
+	if err != nil || perCall.Destination != "per-call" {
+		t.Errorf("per-call audience = %q (err %v)", perCall.Destination, err)
+	}
+
+	// No Release is no subject: nothing is enqueued and the caller is told.
+	empty := newIntentStore()
+	if _, err := intentSvc(empty, app.DeliveryIntentConfig{}).EnqueueEvaluationMail(
+		context.Background(), lineage(), "env-6", " ", "prod-1", "prj-1", "", nil); !errors.Is(err, app.ErrNoSubject) {
+		t.Fatalf("err = %v, want ErrNoSubject", err)
+	}
+	if len(empty.created) != 0 {
+		t.Error("an evaluation mail without a Release must not be enqueued")
+	}
+}

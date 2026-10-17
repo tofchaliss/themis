@@ -34,7 +34,8 @@ unblocks the most, highest first:
    targeted set. **Shipped 2026-10-17** (pure domain rules with the two named
    tests; fed by the N-M2f worker).
 4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail
-   goes to the audience; never from the callback.
+   goes to the audience; never from the callback. **Shipped 2026-10-17** (evaluation mail beside the ticket, one
+   intent per channel per event; the closed/open wording follows with the stop rules in N-M2i).
 5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
    `buildWithParameters` sender, https enforced, max attempts.
 6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,

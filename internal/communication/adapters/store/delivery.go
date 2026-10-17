@@ -47,7 +47,7 @@ func (s *Store) CreateIntent(ctx context.Context, in app.Intent) (app.Intent, er
 	row := s.q(ctx).QueryRow(ctx, `
 		INSERT INTO delivery_intents (`+intentColumns+`)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-		ON CONFLICT (origin_event_id) WHERE origin_event_id IS NOT NULL DO NOTHING
+		ON CONFLICT (origin_event_id, type) WHERE origin_event_id IS NOT NULL DO NOTHING
 		RETURNING `+intentColumns,
 		in.ID, in.CreatedAt, in.UpdatedAt, string(in.Type), in.Destination, string(in.State), in.Attempts,
 		in.NextAttemptAt, nullTime(in.LastAttemptAt), in.LastError, jsonMap(in.Result), in.PayloadSHA256, payloadOrEmpty(in.PayloadBytes),
@@ -58,7 +58,7 @@ func (s *Store) CreateIntent(ctx context.Context, in app.Intent) (app.Intent, er
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The event is already recorded — return what is there, which is the whole point of
 		// keying idempotence on the event id rather than on the intent's own fields.
-		return s.intentByOriginEvent(ctx, in.OriginEventID)
+		return s.intentByOriginEvent(ctx, in.OriginEventID, in.Type)
 	}
 	if err != nil {
 		return app.Intent{}, err
@@ -66,9 +66,11 @@ func (s *Store) CreateIntent(ctx context.Context, in app.Intent) (app.Intent, er
 	return stored, nil
 }
 
-func (s *Store) intentByOriginEvent(ctx context.Context, originEventID string) (app.Intent, error) {
+// intentByOriginEvent finds the intent an event already asked for, per TYPE (N-M2f): one event
+// may legitimately hold a ticket intent and a mail intent side by side.
+func (s *Store) intentByOriginEvent(ctx context.Context, originEventID string, typ app.IntentType) (app.Intent, error) {
 	row := s.q(ctx).QueryRow(ctx,
-		`SELECT `+intentColumns+` FROM delivery_intents WHERE origin_event_id=$1`, originEventID)
+		`SELECT `+intentColumns+` FROM delivery_intents WHERE origin_event_id=$1 AND type=$2`, originEventID, string(typ))
 	in, err := scanIntent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return app.Intent{}, app.ErrIntentNotFound

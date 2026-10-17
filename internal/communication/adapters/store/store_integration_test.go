@@ -505,6 +505,8 @@ func TestRollupStoreRoundTrip(t *testing.T) {
 
 const (
 	intentID1 = "11111111-1111-4111-8111-111111111111"
+	mailID1   = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e5f"
+	mailID2   = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e60"
 	intentID2 = "22222222-2222-4222-8222-222222222222"
 	intentID3 = "33333333-3333-4333-8333-333333333333"
 )
@@ -571,6 +573,21 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	}
 	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE type='jira_issue'`); n != 1 {
 		t.Errorf("jira_issue rows = %d, want 1", n)
+	}
+	// N-M2f: the SAME event may hold one intent PER TYPE — the ticket and the mail are two
+	// channels for one fact — and the replay rule still holds within each type.
+	mail, err := st.CreateIntent(ctx, pendingIntent(mailID1, app.IntentEmail, "env-1", epoch))
+	if err != nil {
+		t.Fatalf("mail for the same event: %v", err)
+	}
+	if mail.ID != mailID1 || mail.Type != app.IntentEmail {
+		t.Errorf("mail intent = %+v, want a second row of its own type", mail)
+	}
+	if again, err := st.CreateIntent(ctx, pendingIntent(mailID2, app.IntentEmail, "env-1", epoch)); err != nil || again.ID != mailID1 {
+		t.Errorf("mail replay = %+v (err %v), want the existing mail row", again, err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE origin_event_id='env-1'`); n != 2 {
+		t.Fatalf("rows for env-1 = %d, want 2 (one per type)", n)
 	}
 
 	// Worker-sourced intents carry NULL and never collide.

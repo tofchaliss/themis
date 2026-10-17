@@ -1018,6 +1018,11 @@ X-API-Key: <delivery:callback key>
 
 ### M2-8 — The loop: compare after evaluation, one knob, stop and tell a person
 
+> **Realized in part 2026-10-17 (N-M2f):** step 4's ticket update and mail now follow every
+> `new_sbom` evaluation (`EnqueueEvaluationMail`, `RenderEvaluationEmail`, audience
+> `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE`), deduplicated per (event, type) by migration 000007.
+> The comparison wording and the stop rules arrive with N-M2i; the callback with N-M2h.
+
 The cycle, once per attempt, in this order and no other:
 
 1. `ci_rebuild` intent → Jenkins → build → new SBOM uploaded → callback recorded (M2-6, M2-7).

@@ -249,6 +249,47 @@ func TestRenderOpsDeadLetterEmail(t *testing.T) {
 
 // RenderIntentPayload dispatches on the intent type and wraps each body in the payload envelope,
 // so ONE stored byte slice carries both halves of what goes out.
+// N-M2f: the evaluation mail states the same posture the ticket does — counts for every bucket,
+// ids for Critical and High only — and refuses without a Release or a posture reader.
+func TestRenderEvaluationEmail(t *testing.T) {
+	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
+	in := app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", ProductID: "prod-1", ProjectID: "prj-1",
+		Snapshot: map[string]string{"notification": "release_evaluated", "sbom_id": "ev-9"},
+		Lineage:  app.IntentLineage{EventType: "governance.release_evaluated", EventID: "env-1"}}
+	subject, body, err := r.RenderEvaluationEmail(context.Background(), in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.HasPrefix(subject, "Themis evaluated Release rel-1 - Critical ") {
+		t.Errorf("subject = %q", subject)
+	}
+	text := string(body)
+	for _, want := range []string{"Release", "rel-1", "SBOM", "ev-9", "Critical:", "High:", "Medium:", "Low:", "No Themis decision follows"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("body lacks %q:\n%s", want, text)
+		}
+	}
+	// The same bucketing as the ticket: whatever the ticket lists, the mail lists.
+	_, ticket, err := r.RenderJiraIssue(context.Background(), app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1"})
+	if err != nil {
+		t.Fatalf("ticket: %v", err)
+	}
+	for _, line := range strings.Split(string(ticket), "\n") {
+		if strings.HasPrefix(line, "  CVE-") && !strings.Contains(text, line) {
+			t.Errorf("ticket lists %q, the mail does not", strings.TrimSpace(line))
+		}
+	}
+	if _, _, err := r.RenderEvaluationEmail(context.Background(), app.Intent{Type: app.IntentEmail}); err == nil {
+		t.Error("no Release must be refused")
+	}
+	if _, _, err := serializer.NewOutwardRenderer(nil).RenderEvaluationEmail(context.Background(), in); err == nil {
+		t.Error("no posture reader must be refused")
+	}
+	if _, _, err := serializer.NewOutwardRenderer(&postureSource{err: errors.New("governance down")}).RenderEvaluationEmail(context.Background(), in); err == nil {
+		t.Error("a failed posture read must surface")
+	}
+}
+
 func TestRenderIntentPayloadDispatches(t *testing.T) {
 	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
 	ctx := context.Background()
@@ -263,6 +304,11 @@ func TestRenderIntentPayloadDispatches(t *testing.T) {
 			"decision mail",
 			app.Intent{Type: app.IntentEmail, FindingID: "fnd-1", Snapshot: map[string]string{}},
 			"Themis decision - Finding fnd-1",
+		},
+		{
+			"evaluation mail",
+			app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Snapshot: map[string]string{"notification": "release_evaluated"}},
+			"Themis evaluated Release rel-1 - Critical 2, High 2",
 		},
 		{
 			"dead-letter mail",

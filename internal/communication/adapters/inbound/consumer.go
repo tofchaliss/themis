@@ -7,7 +7,8 @@
 //
 // Since N-M1a it also records OUTWARD-DELIVERY INTENTS (EDR-DELIVERY-01 Revision 3): a
 // Release evaluated after a NEW SBOM asks for a remediation ticket (N-M2c, Revision 4 M2-1..M2-3),
-// an accepted proposal asks for a decision mail. The reader's entire outward job is to PERSIST the intent inside the inbox
+// an accepted proposal asks for a decision mail, and the evaluation also tells the governed
+// audience by mail (N-M2f). The reader's entire outward job is to PERSIST the intent inside the inbox
 // unit of work — it holds no Jira client, no mail client and no HTTP client, so no external
 // system can block, slow or stall the bus reader path. Sending happens later, in the delivery
 // worker.
@@ -133,11 +134,17 @@ func (c *Consumer) recordJiraIntent(ctx context.Context, env event.Envelope) err
 	if dto.Cause != causeNewSBOM {
 		return nil // re-discovery: a posture change with nothing built — no ticket (M2-3)
 	}
-	_, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID,
-		map[string]string{"sbom_id": dto.SBOMID, "cause": dto.Cause})
-	if errors.Is(err, app.ErrNoSubject) {
-		return nil // nothing to track a fix for; not a transport failure, so do not retry
+	snapshot := map[string]string{"sbom_id": dto.SBOMID, "cause": dto.Cause}
+	if _, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, snapshot); err != nil {
+		if errors.Is(err, app.ErrNoSubject) {
+			return nil // nothing to track a fix for; not a transport failure, so do not retry
+		}
+		return err
 	}
+	// The mail to the governed audience rides the SAME event (M2-8 step 4 / N-M2f): the ticket
+	// and the mail are two channels for one fact, deduplicated per (event, type). It is enqueued
+	// after the ticket so a Release that reaches the mail already has its ticket intent.
+	_, err := c.intents.EnqueueEvaluationMail(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, "", snapshot)
 	return err
 }
 

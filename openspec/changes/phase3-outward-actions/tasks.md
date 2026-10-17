@@ -518,10 +518,22 @@ recorded in `proposal.md` and accepted in `design.md`.
       open, `Complete` being the success stop; a CVE that appears mid-loop is in neither list. The
       worker that feeds these (Evidence listing by release, posture after evaluation) is N-M2f's;
       the Evidence read seam Communication does not yet hold is noted there.
-- [ ] 6.6 **N-M2f** (`themis`; no API, no schema) — Jira update and mail emitted **after the
+- [x] 6.6 **N-M2f** (`themis`; no API, **one constraint migration**) — Jira update and mail emitted **after the
       comparison only**, never from the callback. Tests (worker level):
       `TestPostEvaluationOnly_ProducesTicketAndMail` and `TestCallbackAlone_NoSideEffects`; the
       ticket update stays a full-replace and therefore idempotent (M1b-4).
+      **Implemented 2026-10-17 (the evaluation half).** The `release_evaluated`/`new_sbom` event now
+      asks for TWO intents — the ticket and an **evaluation mail** to
+      `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE` (default `security-decisions`; the decision mail's
+      audience became configurable beside it, `THEMIS_COMMUNICATION_DECISION_AUDIENCE`) — rendered
+      from the same posture read as the ticket, so the two cannot disagree. Migration **000007**
+      widens the dedup key to (origin event, type): one event, one intent per channel; a replay still
+      adds nothing. `TestPostEvaluationOnly_ProducesTicketAndMail` (worker level: one send each, a
+      replay adds nothing, a rediscovery sends nothing, the next evaluation updates the ticket again).
+      **`TestCallbackAlone_NoSideEffects` lands with N-M2h**, where the callback first exists; the
+      closed-vs-open wording of the ticket and mail (domain.Closure) lands with N-M2i, where the cycle
+      state first exists. **Measure on the VM:** map the audience in `THEMIS_COMMUNICATION_MAIL_AUDIENCES`,
+      upload a changed SBOM, read two intents for the event (jira_issue + email) and one mail received.
 - [ ] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
       `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
       `buildWithParameters` sender (Basic auth, user + API token,

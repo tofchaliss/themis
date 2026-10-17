@@ -75,7 +75,7 @@ func (m *memIntents) CreateIntent(_ context.Context, in app.Intent) (app.Intent,
 	}
 	if in.OriginEventID != "" {
 		for _, id := range m.order {
-			if m.intents[id].OriginEventID == in.OriginEventID {
+			if m.intents[id].OriginEventID == in.OriginEventID && m.intents[id].Type == in.Type {
 				return *m.intents[id], nil
 			}
 		}
@@ -762,14 +762,18 @@ func TestConfigFromEnvDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX", "1m")
 	t.Setenv("THEMIS_COMMUNICATION_DELIVERY_INTERVAL", "3s")
 	t.Setenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE", "oncall")
+	t.Setenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE", "appsec")
+	t.Setenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE", "release-managers")
 	cfg = delivery.ConfigFromEnv()
 	if !cfg.Enabled || cfg.Workers != 4 || cfg.Batch != 7 || cfg.MaxAttempts != 5 ||
 		cfg.BackoffInitial != 2*time.Second || cfg.BackoffMax != time.Minute || cfg.Interval != 3*time.Second ||
-		cfg.DeadLetterAudience != "oncall" {
+		cfg.DeadLetterAudience != "oncall" || cfg.DecisionAudience != "appsec" || cfg.EvaluationAudience != "release-managers" {
 		t.Errorf("configured = %s", cfg)
 	}
-	if !strings.Contains(cfg.String(), "deadletter_audience=\"oncall\"") {
-		t.Errorf("String() = %s", cfg.String())
+	for _, want := range []string{"deadletter_audience=\"oncall\"", "decision_audience=\"appsec\"", "evaluation_audience=\"release-managers\""} {
+		if !strings.Contains(cfg.String(), want) {
+			t.Errorf("String() = %s, want %s", cfg.String(), want)
+		}
 	}
 
 	// A misconfigured knob falls back to its default rather than disabling the mechanism.
