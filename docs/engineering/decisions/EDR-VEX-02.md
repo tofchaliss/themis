@@ -567,3 +567,41 @@ release's correlation completes, with the same rules and the same proposal ids (
 before roll-forward (the deterministic verdict outranks a carried judgement) and before
 publish-and-mark (a Knowledge read failure defers the row; "could not look" never reads as "no
 proposal"). The one-time pass remains for catch-up after an upgrade that changed a rule.
+
+### D23 — Applicability has a second facet: the statement's PACKAGE must be the Finding's (VEX-GUI-2, 2026-10-17)
+
+`applicability` answers one question — does the vendor's product scope cover this RELEASE — and
+the raise rule asks a second before it proposes: is the statement's package one of THIS
+Finding's components (`Finding.CoversPackage`, EDR-VEX-01 D4). The drawer showed only the first.
+Measured on a fresh Rocky 8 release (VEX-RAISE-2's VM round): 18 Findings carried an
+`applicable` `not_affected` or `fix_deferred` statement about a package the Finding does not
+hold (`lz4-java` on an `lz4` Finding, `firefox` on an `nss` one), correctly raised nothing, and
+read as if the vendor had cleared THIS Finding.
+
+The projection SHALL carry the second facet beside the first: `covers_component`, computed with
+the same `CoversPackage` test the raise uses, so the drawer and the raise cannot disagree. The
+two facets stay two fields — a statement can apply to the release and still be about another
+package, and collapsing that into one word is what produced the misreading. The drawer SHALL
+(a) count as "applies here" only statements that are `applicable` AND cover the component; (b)
+show an `applicable` statement about another package with the chip *"applies to this release,
+other package"*, after the covering ones and before the fold; and (c) say vendor silence —
+D16(c) — when NO covering statement applies, naming the other-package statements the vendor
+did make, because "the vendor spoke about this product but not this package" is a third thing,
+different from both silence and clearance. The raise rule is unchanged.
+
+### D24 — A statement about an rpm SOURCE package covers the binaries built from it (VEX-SRC-1, 2026-10-17)
+
+Red Hat states its position per SOURCE package: `package_state` names `perl`, and the
+Finding carries `perl-Carp`, `perl-Encode`, … — the binary sub-packages, each recording
+`Source: perl` on its matched component. `CoversPackage` matched the PURL and the bare name
+only, so the statement covered nothing and raised nothing: the safe side, and the wrong one,
+because the vendor DID speak about exactly these packages.
+
+For a component whose ecosystem is `rpm`, a statement SHALL also cover it when the statement's
+package equals the component's SOURCE package name. The rule is confined to rpm because that is
+the packaging world where the vendor's unit of statement (the SRPM) and the inventory's unit
+(the binary RPM) are different names for one build; it is not extended to language ecosystems,
+whose feeds already speak about the package the inventory carries. The guard fixture:
+`compat-libtiff3` is its own SRPM, so a statement about `libtiff` must still not cover it — the
+join is on the recorded `Source`, never on a name prefix. Applies to the raise (D15, D18) and the
+projection's `covers_component` (D23) alike, since both call the one test.

@@ -18,8 +18,9 @@ import (
 // Compile-time proof that the Store is both halves of the queue. Stated here so a signature
 // drift fails in this file rather than at the composition root.
 var (
-	_ app.PendingEvaluations = (*Store)(nil)
-	_ app.ReleaseEvaluations = (*Store)(nil)
+	_ app.PendingEvaluations          = (*Store)(nil)
+	_ app.ReleaseEvaluations          = (*Store)(nil)
+	_ app.ReleaseEvaluatedEventReader = (*Store)(nil)
 )
 
 // EnqueuePendingReleaseEvaluation records that (release, sbom, cause) is due for evaluation.
@@ -125,12 +126,50 @@ func (s *Store) PublishEvaluatedAndMark(ctx context.Context, row app.PendingEval
 	if ct.RowsAffected() == 0 {
 		return nil // already published by another pass — the deferred rollback drops this attempt
 	}
+	eventID := uuid.NewString()
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO governance_outbox (id, source_context, subject, event_type, schema_ref, correlation_id, payload, occurred_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		uuid.NewString(), sourceContext, row.ReleaseID, app.EventReleaseEvaluated,
+		eventID, sourceContext, row.ReleaseID, app.EventReleaseEvaluated,
 		schemaRefFor(app.EventReleaseEvaluated), row.ReleaseID, string(payload), occurredAt); err != nil {
 		return err
 	}
+	// The event store behind the cursor read API (N-M2d), in the same transaction and under the
+	// same envelope id: the bus and the feed name ONE fact, so a subscriber that sees both
+	// deduplicates on the id (M2-4).
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO release_evaluated_events (event_id, name, release_id, occurred_at, body)
+		VALUES ($1,$2,$3,$4,$5)`,
+		eventID, app.EventReleaseEvaluated, row.ReleaseID, occurredAt, string(payload)); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
+}
+
+// ListReleaseEvaluatedEvents is the cursor read (M2-4): rows strictly after `after` in seq
+// order, at most limit. Clamping and defaulting of limit are the app's rule
+// (ReadService.ReleaseEvaluatedEvents); the store only refuses a non-positive limit.
+func (s *Store) ListReleaseEvaluatedEvents(ctx context.Context, after int64, limit int) ([]app.ReleaseEvaluatedEvent, error) {
+	if limit <= 0 {
+		limit = app.ReleaseEvaluatedEventsDefaultLimit
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT seq, event_id, name, occurred_at, body
+		FROM release_evaluated_events
+		WHERE seq > $1
+		ORDER BY seq LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []app.ReleaseEvaluatedEvent
+	for rows.Next() {
+		var e app.ReleaseEvaluatedEvent
+		if err := rows.Scan(&e.Seq, &e.EventID, &e.Name, &e.OccurredAt, &e.Body); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

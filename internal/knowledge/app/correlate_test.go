@@ -1,9 +1,9 @@
 package app_test
 
 import (
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -651,5 +651,44 @@ func TestCorrelate_FanoutGuardFlagsAnUnparseableVersion(t *testing.T) {
 	}
 	if _, err := app.NewCorrelationService(fakeInventory{}, disc, fold, newMatches(), fixedClock{}).WithFanoutGuard(50, &sanityRec{err: errors.New("db")}).DiscoverComponents(ctx, "rel-2", []app.InventoryComponent{odd}, nil); err == nil {
 		t.Fatal("scanner road: a recorder failure must surface")
+	}
+}
+
+type progressRec struct{ steps []app.CorrelationProgress }
+
+func (r *progressRec) CorrelationProgress(p app.CorrelationProgress) { r.steps = append(r.steps, p) }
+
+// OBS-CORR-1: a correlation reports once per component with done/total and the running match
+// count, so a long correlation is visible while the bus cursor stands still; scanner discovery
+// reports the same way with no evidence id; no reporter means silence, not a panic.
+func TestCorrelation_ReportsProgressPerComponent(t *testing.T) {
+	ctx := context.Background()
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{
+		{PURL: "pkg:rpm/a@1", Name: "a", Version: "1", Ecosystem: "rpm"},
+		{PURL: "pkg:rpm/b@1", Name: "b", Version: "1", Ecosystem: "rpm"},
+		{PURL: "pkg:rpm/c@1", Name: "c", Version: "1", Ecosystem: "rpm"},
+	}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{"pkg:rpm/a@1": {proposalFor(t, "CVE-2026-1", "osv")}}}
+	rec := &progressRec{}
+	if _, err := correlation(t, inv, disc, newMatches(), newRepo()).WithProgressReporter(rec).Correlate(ctx, "rel-1", "ev-1"); err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if len(rec.steps) != 3 {
+		t.Fatalf("steps = %+v, want one per component", rec.steps)
+	}
+	for i, p := range rec.steps {
+		if p.ReleaseID != "rel-1" || p.EvidenceID != "ev-1" || p.Done != i+1 || p.Total != 3 || p.Matches != 1 {
+			t.Errorf("step %d = %+v", i, p)
+		}
+	}
+	rec2 := &progressRec{}
+	if _, err := correlation(t, inv, disc, newMatches(), newRepo()).WithProgressReporter(rec2).DiscoverComponents(ctx, "rel-2", inv.inv.Components[:2], nil); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(rec2.steps) != 2 || rec2.steps[1].EvidenceID != "" || rec2.steps[1].Done != 2 || rec2.steps[1].Total != 2 {
+		t.Errorf("scanner steps = %+v", rec2.steps)
+	}
+	if _, err := correlation(t, inv, disc, newMatches(), newRepo()).Correlate(ctx, "rel-3", "ev-1"); err != nil {
+		t.Errorf("no reporter must stay silent, not fail: %v", err)
 	}
 }

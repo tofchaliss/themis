@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/communication/adapters/delivery"
+	commhttp "github.com/themis-project/themis/internal/communication/adapters/http"
 	"github.com/themis-project/themis/internal/communication/adapters/inbound"
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/adapters/wiring"
@@ -262,7 +263,10 @@ func authedMount(ctx context.Context, router chi.Router, cfg config, logger *obs
 	}
 	router.Group(func(r chi.Router) {
 		r.Use(authn.RequireAPIKey)
-		r.Use(auth.RequireWriteScope)
+		// The CI rebuild callback is the one POST the method-based floor must not judge: its
+		// caller holds `delivery:callback`, which can write nothing, and the handler enforces
+		// that scope itself (EDR-DELIVERY-01 M2-7 / N-M2h). Every other route keeps the floor.
+		r.Use(commhttp.WriteFloorExcept("/api/v1"+commhttp.CallbackRoutePath, auth.RequireWriteScope))
 		r.Mount("/api/v1", handler)
 	})
 	logger.Info("API-key auth enabled (X-API-Key)")

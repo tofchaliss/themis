@@ -466,7 +466,7 @@ recorded in `proposal.md` and accepted in `design.md`.
       name blank owners), so rows queue until it is set — and the Governance→Registry read seam
       still sends no API key (task 2.10), so on an auth-enabled estate that seam must be reachable
       unauthenticated or the rows defer with a 401.
-- [ ] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
+- [x] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
       `governance.finding_opened` → ticket mapping (M1a-3's proxy) and create a ticket intent only on
       `governance.release_evaluated` with `cause=new_sbom`, product and project now populated. This
       is what finally realizes RC-2's one-ticket-per-Release, because one Release evaluation is one
@@ -474,7 +474,16 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents` and
       `TestFindingOpenedAndRediscovery_CreateNoIntents`
       (`internal/communication/adapters/inbound`).
-- [ ] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
+      **Implemented 2026-10-17.** `internal/communication/adapters/inbound/consumer.go` dispatches on
+      `governance.release_evaluated` (snake_case DTO, `cause` read verbatim) and the interest set no
+      longer carries `finding_opened`; a `rediscovery` cause or an empty release records nothing and
+      reports no error; product and project ride the intent from the event (snapshot `sbom_id`,
+      `cause`, `product_id`, `project_id`). The Jira sender's per-Release lock stays — it now guards a
+      redelivery or a dev-seam POST, not a proxy's dozen. Both named tests plus the redelivery and
+      auth-estate tests re-pointed; `communication/adapters/inbound` 100%. **Measure on the VM:**
+      upload a changed SBOM with delivery on and read ONE `jira_issue` intent for the Release, with
+      `product_id`/`project_id` set, and none after the next re-discovery sweep.
+- [x] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
       `release_evaluated_events` (migration **up/down**, reversibility a gate) and the cursor read
       API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>` in
       `api/governance.openapi.yaml` (spec-first, `make generate-api-governance`). Cursor is the
@@ -484,15 +493,48 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestReleaseEvaluatedEventsCursorRead_AfterLimit_AuthMatrix` (handler table test: auth matrix,
       paging bounds, clamped limit, empty page) + migration up/down reversibility. Coverage: register
       the store/handler packages in `scripts/check-coverage.sh` if new.
-- [ ] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
+      **Implemented 2026-10-17.** Migration **000017** `release_evaluated_events` (seq BIGSERIAL,
+      event_id UNIQUE = the outbox envelope id, name, release_id, occurred_at, body JSONB); the
+      worker's publish-and-mark writes it in the SAME transaction as the outbox note, so the bus and
+      the feed name one fact. `GET /api/v1/governance/events/release-evaluated` (spec-first,
+      `getReleaseEvaluatedEvents`): `after` int64 cursor, `limit` default 100 / clamped at 500 — the
+      rules live in `app.ReadService.ReleaseEvaluatedEvents`; `next` = last seq or the caller's own
+      cursor on an empty page; an unwired feed is **503**, never an empty page. Read floor: any
+      authenticated key (the matrix covers no key 401, read, admin and the callback class). Tests:
+      the named handler test + `_Failures`, the app paging rules, the store assertions inside
+      `TestPublishEvaluatedAndMark_OneGuardedTransaction`, `TestMigrationDownUp`. No new packages.
+      **Measure on the VM:** after the next upload, `GET …/events/release-evaluated` with a read key
+      returns the evaluation with `cause=new_sbom` and `next` > 0; `?after=<next>` is empty.
+- [x] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
       **immediately-previous SBOM of the Release by upload order** and detect closure of the targeted
       set. Tests: `TestSelectPreviousSBOM_ByUploadOrder` and
       `TestTargetedSetClosure_DoesNotGrowMidLoop`.
-- [ ] 6.6 **N-M2f** (`themis`; no API, no schema) — Jira update and mail emitted **after the
+      **Implemented 2026-10-17** as pure rules in `internal/communication/domain/rebuild.go`:
+      `SelectPreviousSBOM(records, newID)` orders Evidence's listing by filed time (ties by id) and
+      returns the record immediately before the new SBOM — none when it is the first or unknown;
+      `NewTargetedSet(start)` captures the Critical+High CVEs (base_score ≥ 70, the M1b-5 floors
+      restated as `domain.Severity*Floor`, now also what the ticket renderer buckets with) once, and
+      `Closure(current)` partitions them into closed (opens no Finding now — D16's fixed rule) and
+      open, `Complete` being the success stop; a CVE that appears mid-loop is in neither list. The
+      worker that feeds these (Evidence listing by release, posture after evaluation) is N-M2f's;
+      the Evidence read seam Communication does not yet hold is noted there.
+- [x] 6.6 **N-M2f** (`themis`; no API, **one constraint migration**) — Jira update and mail emitted **after the
       comparison only**, never from the callback. Tests (worker level):
       `TestPostEvaluationOnly_ProducesTicketAndMail` and `TestCallbackAlone_NoSideEffects`; the
       ticket update stays a full-replace and therefore idempotent (M1b-4).
-- [ ] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
+      **Implemented 2026-10-17 (the evaluation half).** The `release_evaluated`/`new_sbom` event now
+      asks for TWO intents — the ticket and an **evaluation mail** to
+      `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE` (default `security-decisions`; the decision mail's
+      audience became configurable beside it, `THEMIS_COMMUNICATION_DECISION_AUDIENCE`) — rendered
+      from the same posture read as the ticket, so the two cannot disagree. Migration **000007**
+      widens the dedup key to (origin event, type): one event, one intent per channel; a replay still
+      adds nothing. `TestPostEvaluationOnly_ProducesTicketAndMail` (worker level: one send each, a
+      replay adds nothing, a rediscovery sends nothing, the next evaluation updates the ticket again).
+      **`TestCallbackAlone_NoSideEffects` lands with N-M2h**, where the callback first exists; the
+      closed-vs-open wording of the ticket and mail (domain.Closure) lands with N-M2i, where the cycle
+      state first exists. **Measure on the VM:** map the audience in `THEMIS_COMMUNICATION_MAIL_AUDIENCES`,
+      upload a changed SBOM, read two intents for the event (jira_issue + email) and one mail received.
+- [x] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
       `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
       `buildWithParameters` sender (Basic auth, user + API token,
       `THEMIS_COMMUNICATION_JENKINS_{ENABLED,URL,USER,API_TOKEN,JOB}`, off by default and subordinate
@@ -502,17 +544,63 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestCIBuildSender_BasicAuth_Params_HTTPSRefusal` (`httptest`: parameters, Basic auth header,
       `http://` refused), config defaulting/override for the knob, and the per-call timeout
       (M1b-6a). `deploy/node.env.example` gains the six commented, valueless knobs (R2).
-- [ ] 6.8 **N-M2h** (`themis`; **API CHANGE**) — `POST /api/v1/communication/callbacks/ci-rebuild`
+      **Implemented 2026-10-17.** `app.IntentCIRebuild` + `EnqueueCIRebuild` (worker-originated;
+      snapshot `prior_sbom_id`, `targeted_cves`, `attempt`; destination = the configured job name);
+      migration **000008** widens the CHECK to admit `ci_rebuild` (down deletes those rows first —
+      an instruction, not truth — and `ci_build` is still refused, asserted); `adapters/delivery/jenkins.go`
+      posts `buildWithParameters` to `<url>/job/<seg>/job/<seg>/buildWithParameters` over Basic auth
+      with the seven `THEMIS_*` string parameters, records the queue item from `Location`, refuses
+      clear-text at configure time (loopback excepted) with the fake kept and an ERROR naming
+      `THEMIS_COMMUNICATION_JENKINS_URL`; `serializer.RenderCIRebuild` makes the intent inspectable
+      and content-addressed like the others; `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (default 2)
+      on `delivery.Config`. Tests: the named sender test (+ `_PerCallTimeout`), the env
+      defaulting/override, renderer, app and store-constraint assertions. Honest limit recorded in
+      the sender: `buildWithParameters` is not idempotent, so a retry after a landed timeout queues
+      a redundant build of the same parameters. **Nothing raises a `ci_rebuild` intent yet** — the
+      loop that does is N-M2i. **Measure on the VM:** configure the job against the estate Jenkins,
+      `deliveryctl`-seed nothing; the first intent arrives with N-M2i.
+- [x] 6.8 **N-M2h** (`themis`; **API CHANGE + one table**) — `POST /api/v1/communication/callbacks/ci-rebuild`
       in `api/communication.openapi.yaml` (spec-first), **`delivery:callback` only**, payload
       `{intent_id, build_id, git_ref, image_digest, sbom_id}` schema-enforced with `image_digest` and
       `sbom_id` required. Recorded as governed-external evidence **on the intent**. Tests:
       `TestCIRebuildCallback_AuthAndBodySchema` (every other scope refused, missing members refused)
       and `TestCallback_NoFindingMutation`.
-- [ ] 6.9 **N-M2i** (`themis`; no API, no schema) — stop conditions: success (targeted set closed)
+      **Implemented 2026-10-17.** `POST /callbacks/ci-rebuild` (spec-first, `recordCIRebuildCallback`,
+      202 with `{intent_id, sbom_id, received_at}`); the handler refuses every principal that is not
+      `delivery:callback` — admin and product keys included, two keys not one — and the composition
+      root mounts the route outside the method-based write floor (`commhttp.WriteFloorExcept`, exact
+      path and POST only) because the floor would refuse the one caller the route exists for.
+      Evidence lives in a new table **`delivery_callbacks`** (migration 000009; PK (intent, sbom) so a
+      job's retry adds nothing; FK to the intent) — "on the intent" needed a place, and the intent's
+      delivery outcome is not it. `app.RecordRebuildCallback` validates (intent exists and is a
+      `ci_rebuild`; `sbom_id` + `image_digest` required), creates no intent, renders nothing, sends
+      nothing. Tests: the two named, `TestWriteFloorExcept`, the app matrix, the store idempotence/FK,
+      and 6.6's `TestCallbackAlone_NoSideEffects` at worker level. **Measure on the VM:** mint a
+      `delivery:callback` key, POST a callback for a `ci_rebuild` intent → 202 and one row; the same
+      key on any other POST → 403.
+- [x] 6.9 **N-M2i** (`themis`; no API, **one table**) — stop conditions: success (targeted set closed)
       and exhaustion (stop + mail + Jira update telling a person); **no further `ci_rebuild` intent
       after a stop**; **no Finding is ever auto-resolved**. Tests:
       `TestStopOnSuccessOrExhaustion_NoFurtherIntents` and `TestNotifyPersonOnExhaustion` (ticket and
       mail wording).
+      **Implemented 2026-10-17.** `app.RebuildLoop` on the reader path (inside the inbox unit of
+      work, so a decision and its intents commit together): `Evaluate` opens a cycle when a `new_sbom`
+      evaluation leaves Critical/High (targeted set captured ONCE — `domain.NewTargetedSet`), compares
+      every later `new_sbom` evaluation of the Release against it (`domain.Closure`), and persists
+      `continuing` (attempts+1) / `succeeded` / `exhausted` (attempts ≥ `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`);
+      `Raise` asks for the rebuild only when the outcome calls for one — a stop raises nothing, and a
+      later new SBOM may open a NEW cycle. State in **`rebuild_cycles`** (migration 000010; at most one
+      open cycle per Release). Order on the consumer: loop decides → ticket → mail (both carry the
+      decision as a "Rebuild loop" section, exhaustion in capitals, "a person decides what happens
+      next") → rebuild intent. Within a loop the baseline is the SBOM Themis judged last
+      (`last_sbom_id`), which is M2-5's immediately-previous SBOM for the loop's own sequence — no
+      Evidence read on the reader path; `domain.SelectPreviousSBOM` stays for an Evidence-backed check
+      later. Rediscovery never reaches the loop (N-M2c). No Finding is touched anywhere. Tests: the two
+      named (worker level), the app loop end to end + failures, the consumer ordering, the renderer
+      section, the store cycle rules, `TargetedSetOf`. **Measure on the VM:** delivery + Jenkins on,
+      upload an SBOM with a Critical → one `ci_rebuild` intent and a ticket whose body says "Opened …
+      attempt 1 of 2"; let the job call back and upload; the next evaluation's ticket says Continuing
+      or Succeeded; after the limit, "ATTEMPTS EXHAUSTED" and no third intent.
 - [ ] 6.10 **N-M2j** (`themis-ai-runtime`; no API, no schema) — the harness poller: poll with
       `after=<sequence>` and `limit`, at-least-once, dedupe by **event id**, filter
       `cause=new_sbom`, persist a local high-water mark. Subscribes only — no Jira, no CI, no mail.

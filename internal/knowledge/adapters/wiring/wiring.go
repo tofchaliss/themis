@@ -68,12 +68,15 @@ type Knowledge struct {
 	Handler  http.Handler
 	Store    *store.Store
 	Consumer *inbound.Consumer
-	Relay    *store.Relay
-	Backfill *app.BackfillService         // nil when NVD enrichment is disabled
-	Signals  *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
-	RedHat   *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
-	Alpine   *app.AlpineEnrichmentService // nil when the Alpine secdb feed is disabled
-	Rocky    *app.RockyEnrichmentService  // nil when the Rocky RXSA errata feed is disabled
+	// Correlation is exposed so the composition root can attach the progress reporter
+	// (OBS-CORR-1) — the one place a logger lives.
+	Correlation *app.CorrelationService
+	Relay       *store.Relay
+	Backfill    *app.BackfillService         // nil when NVD enrichment is disabled
+	Signals     *app.SignalEnrichmentService // nil when exploit-signal enrichment is disabled
+	RedHat      *app.RedHatEnrichmentService // nil when the Red Hat vendor feed is disabled
+	Alpine      *app.AlpineEnrichmentService // nil when the Alpine secdb feed is disabled
+	Rocky       *app.RockyEnrichmentService  // nil when the Rocky RXSA errata feed is disabled
 	// RockyErrata is the per-CVE RLSA fix-bound sweep (KN-MODULE-4); nil when Rocky is disabled.
 	// It rides the same enable flag as Rocky — one Rocky source, two shapes: RXSA whole-universe
 	// (tiny, Rocky-exclusive packages) and RLSA per-CVE (large, the modular fix bounds).
@@ -294,11 +297,12 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	gather := app.NewGatherService(fold,
 		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).WithSanity(st).Router(),
-		Store:    st,
-		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
-		Relay:    store.NewRelay(pool, pub, 100),
-		Health:   health,
+		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).WithSanity(st).Router(),
+		Store:       st,
+		Consumer:    inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
+		Correlation: corr,
+		Relay:       store.NewRelay(pool, pub, 100),
+		Health:      health,
 		// Same discovery fan-out correlation uses — one path to the feeds, not two.
 		Reattribute: app.NewReattributeService(st, disc, fold, 0),
 		RangeRepair: app.NewRangeRepair(st, st, fold, sysClock{}),

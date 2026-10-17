@@ -504,9 +504,13 @@ func TestRollupStoreRoundTrip(t *testing.T) {
 // --- N-M1a: outward-delivery intents -------------------------------------------------------
 
 const (
-	intentID1 = "11111111-1111-4111-8111-111111111111"
-	intentID2 = "22222222-2222-4222-8222-222222222222"
-	intentID3 = "33333333-3333-4333-8333-333333333333"
+	intentID1  = "11111111-1111-4111-8111-111111111111"
+	mailID1    = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e5f"
+	rebuildID1 = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e61"
+	rebuildID2 = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e62"
+	mailID2    = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e60"
+	intentID2  = "22222222-2222-4222-8222-222222222222"
+	intentID3  = "33333333-3333-4333-8333-333333333333"
 )
 
 // intentPayload is a materialized payload shaped like the serializer's: one Subject line, a blank
@@ -571,6 +575,76 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	}
 	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE type='jira_issue'`); n != 1 {
 		t.Errorf("jira_issue rows = %d, want 1", n)
+	}
+	// N-M2f: the SAME event may hold one intent PER TYPE — the ticket and the mail are two
+	// channels for one fact — and the replay rule still holds within each type.
+	mail, err := st.CreateIntent(ctx, pendingIntent(mailID1, app.IntentEmail, "env-1", epoch))
+	if err != nil {
+		t.Fatalf("mail for the same event: %v", err)
+	}
+	if mail.ID != mailID1 || mail.Type != app.IntentEmail {
+		t.Errorf("mail intent = %+v, want a second row of its own type", mail)
+	}
+	if again, err := st.CreateIntent(ctx, pendingIntent(mailID2, app.IntentEmail, "env-1", epoch)); err != nil || again.ID != mailID1 {
+		t.Errorf("mail replay = %+v (err %v), want the existing mail row", again, err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE origin_event_id='env-1'`); n != 2 {
+		t.Fatalf("rows for env-1 = %d, want 2 (one per type)", n)
+	}
+	// N-M2g: the type vocabulary admits ci_rebuild (migration 000008) — and still nothing else.
+	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID1, app.IntentCIRebuild, "env-9", epoch)); err != nil {
+		t.Errorf("ci_rebuild must be admitted: %v", err)
+	}
+	// N-M2h: a callback is evidence ON the intent, idempotent per (intent, sbom); a second SBOM is
+	// a second row; an unknown intent is refused by the FK.
+	cb := app.RebuildCallback{IntentID: rebuildID1, SBOMID: "ev-2", ImageDigest: "sha256:abc", BuildID: "77", GitRef: "main", ReportedBy: "key:k-cb", ReceivedAt: epoch}
+	cb1, err := st.RecordCallback(ctx, cb)
+	if err != nil || cb1.BuildID != "77" || !cb1.ReceivedAt.Equal(epoch) {
+		t.Fatalf("record callback = %+v (err %v)", cb1, err)
+	}
+	cb.BuildID = "78"
+	if again, err := st.RecordCallback(ctx, cb); err != nil || again.BuildID != "77" {
+		t.Errorf("repeat callback = %+v (err %v), want the first row back", again, err)
+	}
+	cb.SBOMID = "ev-3"
+	if _, err := st.RecordCallback(ctx, cb); err != nil {
+		t.Errorf("second sbom: %v", err)
+	}
+	if cbs, err := st.ListCallbacks(ctx, rebuildID1); err != nil || len(cbs) != 2 || cbs[0].SBOMID != "ev-2" || cbs[1].SBOMID != "ev-3" {
+		t.Errorf("callbacks = %+v (err %v)", cbs, err)
+	}
+	if _, err := st.RecordCallback(ctx, app.RebuildCallback{IntentID: rebuildID2, SBOMID: "ev-2", ImageDigest: "x", ReceivedAt: epoch}); err == nil {
+		t.Error("a callback for an intent that does not exist must be refused by the store")
+	}
+	// N-M2i: cycle state — one open cycle per Release, the targeted set round-trips, an update
+	// moves the mutable half, and a closed cycle is no longer "the open one".
+	if _, found, err := st.OpenCycle(ctx, "rel-1"); err != nil || found {
+		t.Fatalf("open cycle before any = %v / %v", found, err)
+	}
+	cy, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", OriginEventID: "env-1", BaselineSBOMID: "ev-1", LastSBOMID: "ev-1",
+		Targeted: []string{"CVE-2026-1", "CVE-2026-2"}, Attempts: 1, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch})
+	if err != nil || cy.ID == 0 {
+		t.Fatalf("create cycle = %+v (err %v)", cy, err)
+	}
+	if _, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", BaselineSBOMID: "ev-1", LastSBOMID: "ev-1", Targeted: []string{"CVE-2026-1"}, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch}); err == nil {
+		t.Error("a second open cycle for one Release must be refused")
+	}
+	got, found, err := st.OpenCycle(ctx, "rel-1")
+	if err != nil || !found || got.ID != cy.ID || len(got.Targeted) != 2 || got.Targeted[1] != "CVE-2026-2" || got.Attempts != 1 {
+		t.Fatalf("open cycle = %+v / %v / %v", got, found, err)
+	}
+	got.LastSBOMID, got.Attempts, got.State, got.UpdatedAt = "ev-2", 2, app.CycleExhausted, epoch.Add(time.Minute)
+	if err := st.UpdateCycle(ctx, got); err != nil {
+		t.Fatalf("update cycle: %v", err)
+	}
+	if _, found, err := st.OpenCycle(ctx, "rel-1"); err != nil || found {
+		t.Errorf("an exhausted cycle is still reported open: %v / %v", found, err)
+	}
+	if _, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", BaselineSBOMID: "ev-3", LastSBOMID: "ev-3", Targeted: []string{"CVE-2026-9"}, Attempts: 1, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch}); err != nil {
+		t.Errorf("a new cycle after a closed one must be allowed: %v", err)
+	}
+	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID2, app.IntentType("ci_build"), "env-10", epoch)); err == nil {
+		t.Error("ci_build is not a delivery kind and must be refused by the constraint")
 	}
 
 	// Worker-sourced intents carry NULL and never collide.

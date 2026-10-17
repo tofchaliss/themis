@@ -13,11 +13,37 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	"github.com/oapi-codegen/runtime"
 )
+
+// CIRebuildCallback defines model for CIRebuildCallback.
+type CIRebuildCallback struct {
+	// BuildId The job's own build identifier, as given.
+	BuildId *string `json:"build_id,omitempty"`
+
+	// GitRef The revision built, as given.
+	GitRef *string `json:"git_ref,omitempty"`
+
+	// ImageDigest The built image's digest. Required (RC-3).
+	ImageDigest string `json:"image_digest"`
+
+	// IntentId The ci_rebuild intent this build served (THEMIS_INTENT_ID as the job received it).
+	IntentId string `json:"intent_id"`
+
+	// SbomId The Evidence id of the NEW SBOM the job uploaded. Required (RC-3).
+	SbomId string `json:"sbom_id"`
+}
+
+// CIRebuildCallbackAck defines model for CIRebuildCallbackAck.
+type CIRebuildCallbackAck struct {
+	IntentId   string    `json:"intent_id"`
+	ReceivedAt time.Time `json:"received_at"`
+	SbomId     string    `json:"sbom_id"`
+}
 
 // CreatePublicationRequest The subject is a UNION (EDR-COMMUNICATION-01 D13.5): exactly one of finding_id (a per-Position artifact, D3) or release_id (the release-scoped VEX rollup, D13 - only artifact_type `vex` is valid there). Supplying both or neither is a 400.
 type CreatePublicationRequest struct {
@@ -148,6 +174,9 @@ type ListRollupsParams struct {
 	Release string `form:"release" json:"release"`
 }
 
+// RecordCIRebuildCallbackJSONRequestBody defines body for RecordCIRebuildCallback for application/json ContentType.
+type RecordCIRebuildCallbackJSONRequestBody = CIRebuildCallback
+
 // PreviewPublicationJSONRequestBody defines body for PreviewPublication for application/json ContentType.
 type PreviewPublicationJSONRequestBody = PreviewRequest
 
@@ -156,6 +185,9 @@ type CreatePublicationJSONRequestBody = CreatePublicationRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture.
+	// (POST /callbacks/ci-rebuild)
+	RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request)
 	// Render a Position into an artifact without recording a Publication.
 	// (POST /previews)
 	PreviewPublication(w http.ResponseWriter, r *http.Request)
@@ -185,6 +217,12 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture.
+// (POST /callbacks/ci-rebuild)
+func (_ Unimplemented) RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Render a Position into an artifact without recording a Publication.
 // (POST /previews)
@@ -242,6 +280,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// RecordCIRebuildCallback operation middleware
+func (siw *ServerInterfaceWrapper) RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecordCIRebuildCallback(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // PreviewPublication operation middleware
 func (siw *ServerInterfaceWrapper) PreviewPublication(w http.ResponseWriter, r *http.Request) {
@@ -572,6 +624,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/callbacks/ci-rebuild", wrapper.RecordCIRebuildCallback)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/previews", wrapper.PreviewPublication)
 	})
 	r.Group(func(r chi.Router) {
@@ -604,42 +659,50 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"sZyP1ife/Y/3/xsA",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -1000,6 +1000,36 @@ To change configuration, edit `/etc/themis/<service>.env` then `sudo systemctl r
 `WorkingDirectory` is the repo root (services resolve their migrations by a relative path), so keep the
 built `bin/` in place.
 
+### 7a. Network edge: loopback nodes, TLS in front of the dashboard, a host firewall (VM-NET-1)
+
+Measured 2026-10-13: the VM served every node on every interface (`ss -ltnp` showed `*:8081`
+… `*:8090`) with no host firewall, so the GUI login and every API key crossed the office network
+in clear text. Since every node requires `X-API-Key`, that is not an open write surface — but a
+pasted key is a key, and a password is a password. Three steps close it; each is reversible.
+
+1. **Bind every node to loopback.** All seven run on one host and reach each other by
+   `localhost`, so nothing needs a routable listener. In each `/etc/themis/<svc>.env` set the
+   listen address to `127.0.0.1:<port>` (`THEMIS_EVIDENCE_ADDR=127.0.0.1:8081`,
+   `THEMIS_REGISTRY_ADDR=127.0.0.1:8082`, `THEMIS_GOVERNANCE_ADDR=127.0.0.1:8083`,
+   `THEMIS_COMMUNICATION_ADDR=127.0.0.1:8084`, `THEMIS_KNOWLEDGE_ADDR=127.0.0.1:8085`,
+   `THEMIS_INTELLIGENCE_ADDR=127.0.0.1:8086`, `THEMIS_DASHBOARD_ADDR=127.0.0.1:8090`), then
+   `sudo systemctl restart 'themis@*'`. The `*_URL` variables already say `localhost`.
+2. **Put TLS in front of the dashboard.** [`deploy/edge/Caddyfile.example`](deploy/edge/Caddyfile.example)
+   terminates HTTPS on 443 and proxies to `127.0.0.1:8090`; Caddy adds `X-Forwarded-Proto`, so
+   the session cookie turns `Secure` (EDR-GUI-01 D3). `tls internal` uses Caddy's local CA
+   (browsers on the office network trust it after `caddy trust`, or install a real certificate
+   and delete the line). Copy it to `/etc/caddy/Caddyfile` with the VM's own hostname and
+   `sudo systemctl enable --now caddy`. The API nodes are NOT proxied: scripts and the intake
+   CLI run on the host, and a remote caller that needs an API node is the moment to add a second
+   `reverse_proxy` block for it, deliberately.
+3. **Allow only SSH and HTTPS in.** [`deploy/edge/firewall.sh`](deploy/edge/firewall.sh) is a
+   dry run by default and prints what it would do; `sudo ./deploy/edge/firewall.sh --apply`
+   enables firewalld with `ssh` and `https` only, and removes any earlier opening of
+   8081–8086, 8090 and 5432. Verify with `ss -ltnp` (every Themis port on `127.0.0.1`) and
+   `firewall-cmd --list-all`.
+
+`scripts/vm-verify.sh` is unaffected: it reads the nodes over `localhost`.
+
 ### 8. Upgrade an existing deployment (pull, build, restart)
 
 The steps are [R3. Pull the latest code and restart](#r3-pull-the-latest-code-and-restart) at the top of

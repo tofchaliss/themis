@@ -125,6 +125,8 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 				ScopeFamily:   strptr(v.ScopeFamily), ScopeMajor: strptr(v.ScopeMajor),
 				Applicability: (*gen.VendorStatementApplicability)(strptr(v.Applicability)),
 			}
+			covers := v.CoversComponent
+			stmt.CoversComponent = &covers
 			if v.Advisory != "" {
 				stmt.Advisory = strptr(v.Advisory)
 			}
@@ -232,6 +234,45 @@ func (h *Handler) GetReleasePosture(w http.ResponseWriter, r *http.Request, rele
 	out := make([]gen.PostureEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, toPostureEntry(e))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// GetReleaseEvaluatedEvents handles GET /events/release-evaluated — the cursor read of the
+// release-evaluated feed (EDR-DELIVERY-01 M2-4 / N-M2d). Paging rules (default, cap, negative
+// cursor) are the app's; this maps the wire. A node with no feed wired answers 503, never an
+// empty page: "nothing happened" and "cannot tell" must not look alike to a subscriber.
+func (h *Handler) GetReleaseEvaluatedEvents(w http.ResponseWriter, r *http.Request, params gen.GetReleaseEvaluatedEventsParams) {
+	var after int64
+	if params.After != nil {
+		after = *params.After
+	}
+	limit := 0
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	page, err := h.read.ReleaseEvaluatedEvents(r.Context(), after, limit)
+	if err != nil {
+		if errors.Is(err, app.ErrEventFeedUnavailable) {
+			writeProblem(w, http.StatusServiceUnavailable, "release-evaluated feed unavailable", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot read release-evaluated events", err.Error())
+		return
+	}
+	out := gen.ReleaseEvaluatedEventsPage{Items: make([]gen.ReleaseEvaluatedEvent, 0, len(page.Items)), Next: page.Next}
+	for _, e := range page.Items {
+		body := map[string]interface{}{}
+		if len(e.Body) > 0 {
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				writeProblem(w, http.StatusInternalServerError, "cannot read release-evaluated events",
+					"stored event "+e.EventID+" is not a JSON object: "+err.Error())
+				return
+			}
+		}
+		out.Items = append(out.Items, gen.ReleaseEvaluatedEvent{
+			Seq: e.Seq, EventId: e.EventID, Name: e.Name, OccurredAt: e.OccurredAt, Body: body,
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

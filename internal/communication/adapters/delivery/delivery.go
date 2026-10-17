@@ -203,6 +203,7 @@ func NewDeliverers(cfg Config, tickets ReleaseTicketIndex, logger *observability
 	out := map[app.IntentType]IntentDeliverer{
 		app.IntentJiraIssue: NewFakeJiraDeliverer(logger),
 		app.IntentEmail:     NewFakeMailDeliverer(logger),
+		app.IntentCIRebuild: NewFakeCIRebuildDeliverer(logger),
 	}
 	if cfg.Jira.Enabled {
 		jira, err := NewRealJiraDeliverer(cfg.Jira, logger)
@@ -224,7 +225,26 @@ func NewDeliverers(cfg Config, tickets ReleaseTicketIndex, logger *observability
 			logger.Info("real mail sender wired", observability.String("config", cfg.Mail.String()))
 		}
 	}
+	if cfg.Jenkins.Enabled {
+		jenkins, err := NewRealJenkinsDeliverer(cfg.Jenkins, logger)
+		if err != nil {
+			logger.Error("jenkins delivery is ENABLED but its configuration is incomplete — the FAKE sender stays wired, so NO rebuild will be started",
+				observability.Err(err))
+		} else {
+			out[app.IntentCIRebuild] = jenkins
+			logger.Info("real jenkins sender wired", observability.String("config", cfg.Jenkins.String()))
+		}
+	}
 	return out
+}
+
+// FakeCIRebuildDeliverer stands in for the build-system sender (N-M2g). It is wired for
+// app.IntentCIRebuild.
+type FakeCIRebuildDeliverer struct{ fakeDeliverer }
+
+// NewFakeCIRebuildDeliverer builds the rebuild stand-in; a nil logger falls back to a no-op logger.
+func NewFakeCIRebuildDeliverer(logger *observability.Logger) *FakeCIRebuildDeliverer {
+	return &FakeCIRebuildDeliverer{newFake("ci_rebuild", logger)}
 }
 
 // Config controls the outward-delivery workers. Every field is documented here and mirrored in
@@ -247,6 +267,11 @@ type Config struct {
 	BackoffMax time.Duration
 	// DeadLetterAudience is the governed audience told that a delivery gave up.
 	DeadLetterAudience string
+	// DecisionAudience is the governed audience told that a proposal was accepted (RC-5).
+	DecisionAudience string
+	// EvaluationAudience is the governed audience told a Release's posture after a new SBOM was
+	// judged (M2-8 step 4 / N-M2f).
+	EvaluationAudience string
 	// Interval is the worker loop's cadence.
 	Interval time.Duration
 
@@ -256,6 +281,12 @@ type Config struct {
 	// Mail configures the REAL SMTP sender (N-M1b). Off by default, independently of Jira — a
 	// node may ship tickets and still log its mail, or the reverse.
 	Mail MailConfig
+	// Jenkins configures the REAL ci_rebuild sender (N-M2g, M2-6). Off by default.
+	Jenkins JenkinsConfig
+	// RebuildMaxAttempts is the rebuild LOOP's one knob (M2-8): how many rebuild cycles a
+	// Release gets before the loop stops and tells a person. Default 2, estate-wide, no
+	// per-Release override. It is not the delivery retry budget (MaxAttempts).
+	RebuildMaxAttempts int
 }
 
 // Documented defaults for every knob (and the fallback for any out-of-range value — a
@@ -267,6 +298,8 @@ const (
 	defaultBackoffInitial = 1 * time.Second
 	defaultBackoffMax     = 30 * time.Second
 	defaultInterval       = 5 * time.Second
+	// defaultRebuildMaxAttempts is M2-8's documented default.
+	defaultRebuildMaxAttempts = 2
 )
 
 // ConfigFromEnv reads the outward-delivery options:
@@ -279,6 +312,9 @@ const (
 //	THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX       cap on the doubling (default 30s)
 //	THEMIS_COMMUNICATION_DELIVERY_INTERVAL          worker loop cadence (default 5s)
 //	THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE        audience told a delivery gave up (default "operations")
+//	THEMIS_COMMUNICATION_DECISION_AUDIENCE          audience told a proposal was accepted (default "security-decisions")
+//	THEMIS_COMMUNICATION_EVALUATION_AUDIENCE        audience told a Release's posture after a new SBOM (default "security-decisions")
+//	THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS       rebuild cycles per Release before the loop stops (default 2)
 //
 // The real senders are read by jiraFromEnv / mailFromEnv (see jira.go / mail.go), both OFF by
 // default. Every SECRET among their knobs — the Jira API token, the SMTP password — is read from
@@ -289,6 +325,8 @@ func ConfigFromEnv() Config {
 		Enabled:            os.Getenv("THEMIS_COMMUNICATION_DELIVERY_ENABLED") == "1",
 		Jira:               jiraFromEnv(),
 		Mail:               mailFromEnv(),
+		Jenkins:            jenkinsFromEnv(),
+		RebuildMaxAttempts: envInt("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", defaultRebuildMaxAttempts),
 		Workers:            envInt("THEMIS_COMMUNICATION_DELIVERY_WORKERS", defaultWorkers),
 		Batch:              envInt("THEMIS_COMMUNICATION_DELIVERY_BATCH", defaultBatch),
 		MaxAttempts:        envInt("THEMIS_COMMUNICATION_DELIVERY_MAX_ATTEMPTS", defaultMaxAttempts),
@@ -296,6 +334,8 @@ func ConfigFromEnv() Config {
 		BackoffMax:         envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX", defaultBackoffMax),
 		Interval:           envDuration("THEMIS_COMMUNICATION_DELIVERY_INTERVAL", defaultInterval),
 		DeadLetterAudience: os.Getenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE"),
+		DecisionAudience:   os.Getenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE"),
+		EvaluationAudience: os.Getenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE"),
 	}
 }
 
@@ -320,6 +360,9 @@ func (c Config) withDefaults() Config {
 	if c.Interval <= 0 {
 		c.Interval = defaultInterval
 	}
+	if c.RebuildMaxAttempts <= 0 {
+		c.RebuildMaxAttempts = defaultRebuildMaxAttempts
+	}
 	return c
 }
 
@@ -327,9 +370,9 @@ func (c Config) withDefaults() Config {
 // to tell what the node will do. It prints whether each credential is SET, never its value: a
 // startup line is telemetry, and telemetry is not a place a token may appear even once.
 func (c Config) String() string {
-	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q jira=[%s] mail=[%s]",
+	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q rebuild_max_attempts=%d jira=[%s] mail=[%s] jenkins=[%s]",
 		c.Enabled, c.Workers, c.Batch, c.MaxAttempts, c.BackoffInitial, c.BackoffMax, c.Interval, c.DeadLetterAudience,
-		c.Jira, c.Mail)
+		c.DecisionAudience, c.EvaluationAudience, c.RebuildMaxAttempts, c.Jira, c.Mail, c.Jenkins)
 }
 
 // envBool reads a "1"/"0" switch; anything unset or unrecognized falls back to def.

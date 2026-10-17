@@ -117,6 +117,38 @@ func TestCoversPackage(t *testing.T) {
 	}
 }
 
+// EDR-VEX-02 D24 (VEX-SRC-1): an rpm component is covered by a statement about its SOURCE
+// package — Red Hat speaks per SRPM, the inventory carries the binaries — but only through the
+// recorded Source, never a name prefix (compat-libtiff3 is its own SRPM and `libtiff` must not
+// cover it), and never for a non-rpm ecosystem.
+func TestCoversPackage_SourcePackageForRPM(t *testing.T) {
+	f := newFinding(t)
+	for _, c := range []domain.MatchedComponent{
+		{PURL: "pkg:rpm/rocky/perl-Carp@1.50-439.el8", Name: "perl-Carp", Ecosystem: "rpm", Source: "perl"},
+		{PURL: "pkg:rpm/rocky/compat-libtiff3@3.9.7-12.el8", Name: "compat-libtiff3", Ecosystem: "rpm", Source: "compat-libtiff3"},
+		{PURL: "pkg:pypi/pyyaml@6.0", Name: "pyyaml", Ecosystem: "pypi", Source: "PyYAML"},
+	} {
+		if _, err := f.AbsorbComponent(c); err != nil {
+			t.Fatalf("absorb %s: %v", c.Name, err)
+		}
+	}
+	for _, tc := range []struct {
+		pkg  string
+		want bool
+	}{
+		{"perl", true},            // the SRPM covers its binary sub-package
+		{"perl-Carp", true},       // the binary name still matches directly
+		{"libtiff", false},        // compat-libtiff3 is its own SRPM: no prefix join
+		{"compat-libtiff3", true}, // its own source name
+		{"PyYAML", false},         // the source join is rpm-only
+		{"pyyaml", true},          // the pypi name matches as before
+	} {
+		if got := f.CoversPackage(tc.pkg); got != tc.want {
+			t.Errorf("CoversPackage(%q) = %v, want %v", tc.pkg, got, tc.want)
+		}
+	}
+}
+
 func TestRaiseProposalFlagsForReview(t *testing.T) {
 	f := newFinding(t)
 	if err := f.RaiseProposal(proposal(t, "p1", human, domain.StanceAffected)); err != nil {

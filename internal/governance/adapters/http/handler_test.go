@@ -920,6 +920,7 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 	type stmt struct {
 		Package, Status, Advisory, FixedVersion, Applicability string
 		ScopeMajor                                             string `json:"scope_major"`
+		CoversComponent                                        *bool  `json:"covers_component"`
 	}
 	fetch := func(t *testing.T, srv *httptest.Server) []stmt {
 		t.Helper()
@@ -932,6 +933,7 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 				Package, Status, Advisory, Applicability string
 				FixedVersion                             string `json:"fixed_version"`
 				ScopeMajor                               string `json:"scope_major"`
+				CoversComponent                          *bool  `json:"covers_component"`
 			} `json:"vendor_statements"`
 		}
 		if err := json.Unmarshal(body, &v); err != nil {
@@ -939,7 +941,7 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 		}
 		out := make([]stmt, 0, len(v.VendorStatements))
 		for _, s := range v.VendorStatements {
-			out = append(out, stmt{s.Package, s.Status, s.Advisory, s.FixedVersion, s.Applicability, s.ScopeMajor})
+			out = append(out, stmt{s.Package, s.Status, s.Advisory, s.FixedVersion, s.Applicability, s.ScopeMajor, s.CoversComponent})
 		}
 		return out
 	}
@@ -967,6 +969,17 @@ func TestGetFindingAssessment_VendorStatementOutcomes(t *testing.T) {
 			if s.Applicability != "not_applicable" {
 				t.Errorf("%+v, want not_applicable", s)
 			}
+		}
+	})
+	// EDR-VEX-02 D23: the second facet is on the wire — true for this finding's package, false
+	// for an applicable statement about another package, always present.
+	t.Run("covers_component on the wire", func(t *testing.T) {
+		got := fetch(t, newSrv(t, []app.Applicability{el("git-lfs", "fixed", "8"), el("git", "not_affected", "8")}))
+		if len(got) != 2 || got[0].CoversComponent == nil || !*got[0].CoversComponent || got[1].CoversComponent == nil || *got[1].CoversComponent {
+			t.Fatalf("statements = %+v, want covers_component true for git-lfs and false for git", got)
+		}
+		if got[1].Applicability != "applicable" {
+			t.Errorf("the other-package statement = %+v, want applicable (scope matches) with covers_component false", got[1])
 		}
 	})
 	t.Run("no statement at all", func(t *testing.T) {

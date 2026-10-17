@@ -173,6 +173,37 @@ paths:
                 $ref: '#/components/schemas/RollupStatus'
         '500':
           $ref: '#/components/responses/Problem'
+  /callbacks/ci-rebuild:
+    post:
+      operationId: recordCIRebuildCallback
+      summary: >
+        CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the
+        intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key
+        holding the `delivery:callback` scope and no other; recorded as governed-external evidence
+        on the intent. It changes no Finding, no Position and no posture.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CIRebuildCallback'
+      responses:
+        '202':
+          description: Recorded (or already recorded for this intent and SBOM).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIRebuildCallbackAck'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /publishable-positions:
     get:
       operationId: getPublishableQueue
@@ -197,6 +228,36 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    CIRebuildCallback:
+      type: object
+      required: [intent_id, sbom_id, image_digest]
+      properties:
+        intent_id:
+          type: string
+          description: The ci_rebuild intent this build served (THEMIS_INTENT_ID as the job received it).
+        sbom_id:
+          type: string
+          description: The Evidence id of the NEW SBOM the job uploaded. Required (RC-3).
+        image_digest:
+          type: string
+          description: The built image's digest. Required (RC-3).
+        build_id:
+          type: string
+          description: The job's own build identifier, as given.
+        git_ref:
+          type: string
+          description: The revision built, as given.
+    CIRebuildCallbackAck:
+      type: object
+      required: [intent_id, sbom_id, received_at]
+      properties:
+        intent_id:
+          type: string
+        sbom_id:
+          type: string
+        received_at:
+          type: string
+          format: date-time
     CreatePublicationRequest:
       type: object
       required: [artifact_type, format]

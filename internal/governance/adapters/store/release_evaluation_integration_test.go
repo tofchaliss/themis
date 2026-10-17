@@ -3,9 +3,12 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/adapters/store"
 	"github.com/themis-project/themis/internal/governance/app"
@@ -177,6 +180,37 @@ func TestPublishEvaluatedAndMark_OneGuardedTransaction(t *testing.T) {
 		t.Errorf("outbox rows = %d, want exactly 1", got)
 	}
 
+	// N-M2d: the SAME transaction wrote the feed row, under the SAME envelope id, so the bus and
+	// the cursor API name one fact (M2-4).
+	var outboxID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM governance_outbox`).Scan(&outboxID); err != nil {
+		t.Fatalf("outbox id: %v", err)
+	}
+	feed, err := st.ListReleaseEvaluatedEvents(ctx, 0, 10)
+	if err != nil || len(feed) != 1 {
+		t.Fatalf("feed = %+v (err %v), want exactly one row", feed, err)
+	}
+	if e := feed[0]; e.EventID != outboxID || e.Name != app.EventReleaseEvaluated || e.Seq < 1 ||
+		!e.OccurredAt.Equal(epoch) || !bytes.Equal(bytes.TrimSpace(e.Body), bytes.TrimSpace(payload)) && !jsonEqual(t, e.Body, payload) {
+		t.Errorf("feed row = %+v, want the outbox fact (id %s, payload %s)", e, outboxID, payload)
+	}
+	// The cursor is strict and ordered: after the one seq there is nothing; a second fact lands
+	// after it.
+	if more, err := st.ListReleaseEvaluatedEvents(ctx, feed[0].Seq, 10); err != nil || len(more) != 0 {
+		t.Errorf("after the last seq = %+v (err %v), want none", more, err)
+	}
+	if err := st.EnqueuePendingReleaseEvaluation(ctx, "rel-1", "ev-1", domain.CauseRediscovery); err != nil {
+		t.Fatalf("enqueue rediscovery: %v", err)
+	}
+	pending, _ := st.ListPendingReleaseEvaluations(ctx, 10)
+	ev2 := domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", "ev-1", domain.CauseRediscovery, domain.SeverityCounts{})
+	if err := st.PublishEvaluatedAndMark(ctx, pending[0], ev2, epoch.Add(time.Minute)); err != nil {
+		t.Fatalf("publish rediscovery: %v", err)
+	}
+	if more, err := st.ListReleaseEvaluatedEvents(ctx, feed[0].Seq, 0); err != nil || len(more) != 1 || more[0].Seq <= feed[0].Seq {
+		t.Errorf("second fact = %+v (err %v), want one row with a later seq (limit 0 = default)", more, err)
+	}
+
 	// Purge clears the queue too (dev reset must not leave a to-do behind for Findings that are
 	// gone).
 	if err := st.Purge(ctx); err != nil {
@@ -214,4 +248,17 @@ func suppress(t *testing.T, st *store.Store, id domain.FindingID) {
 	if err := st.Save(ctx, f, false, 0, nil); err != nil {
 		t.Fatalf("save suppressed: %v", err)
 	}
+}
+
+// jsonEqual compares two JSON documents structurally (jsonb normalizes key order and spacing).
+func jsonEqual(t *testing.T, a, b []byte) bool {
+	t.Helper()
+	var x, y any
+	if err := json.Unmarshal(a, &x); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &y); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }

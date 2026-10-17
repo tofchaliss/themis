@@ -38,7 +38,11 @@ const defaultRetentionWindow = 30 * 24 * time.Hour
 // Store, the inbound Governance Position-event consumer, the delivery worker, the outbox
 // relay, the state-based reconciler, and the retention worker.
 type Communication struct {
-	Handler   http.Handler
+	Handler http.Handler
+	// API is the handler behind Handler, kept so WireDelivery can attach the callback route's
+	// intent service after the fact (N-M2h): the router holds the pointer, so a later setter
+	// takes effect.
+	API       *commhttp.Handler
 	Store     *store.Store
 	Consumer  *inbound.Consumer
 	Delivery  *app.DeliveryService
@@ -72,8 +76,10 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey str
 		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
+	api := commhttp.NewHandler(write, read).WithRollups(rollups)
 	return Communication{
-		Handler:   commhttp.NewHandler(write, read).WithRollups(rollups).Router(),
+		Handler:   api.Router(),
+		API:       api,
 		Store:     st,
 		Consumer:  inbound.NewConsumer(write),
 		Delivery:  app.NewDeliveryService(st, deliverer, redactor, clock),
@@ -106,11 +112,22 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	}
 	intents := app.NewDeliveryIntentService(comm.Store, idGen{}, sysClock{}, app.DeliveryIntentConfig{
 		DeadLetterAudience: cfg.DeadLetterAudience,
-	})
+		DecisionAudience:   cfg.DecisionAudience,
+		EvaluationAudience: cfg.EvaluationAudience,
+		RebuildDestination: cfg.Jenkins.Job,
+	}).WithRebuildCallbacks(comm.Store)
+	if comm.API != nil {
+		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
+	}
 	if comm.Posture != nil {
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
 	}
 	comm.Consumer.WithIntents(intents)
+	// The rebuild loop (N-M2i) needs the posture to decide; without the read seam there is no
+	// loop, and a node without one still tickets and mails.
+	if comm.Posture != nil {
+		comm.Consumer.WithRebuildLoop(app.NewRebuildLoop(comm.Store, comm.Posture, intents, sysClock{}, cfg.RebuildMaxAttempts))
+	}
 	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
 	// Release already has is what keeps one ticket per Release when the project forbids labels on
 	// create (EDR-DELIVERY-01 M1b-4a).

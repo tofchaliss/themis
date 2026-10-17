@@ -10,6 +10,51 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
+
+The Jira and mail SENDERS exist and were live-tested on the estate in early October
+(EDR-DELIVERY-01 Revision 4, N-M1b: one ticket per Release in a Data Center project, decision mail
+and dead-letter mail over SMTP, both off by default behind `THEMIS_COMMUNICATION_{JIRA,MAIL}_*`).
+What is NOT built is the chain that makes them a remediation loop — the trigger, the comparison,
+the CI rebuild and its callback, the stop rules — recorded as N-M2c..N-M2j in
+`openspec/changes/phase3-outward-actions/tasks.md` (6.3–6.10). "Image creation tasks" in the
+owner's words = N-M2g/h, the `ci_rebuild` intent over Jenkins and its callback. Ordered by what
+unblocks the most, highest first:
+
+1. **N-M2c — ticket on `release_evaluated`, not on `finding_opened`** (6.3). Retires the proxy
+   trigger; one Release evaluation = one event = one ticket, product and project populated. No
+   API, no schema. *Unblocks every later step.* **Shipped 2026-10-17** (`consumer.go` dispatches on
+   `release_evaluated`/`new_sbom`, `finding_opened` out of the interest set; VM measurement
+   pending: one `jira_issue` intent per changed upload, none after a sweep).
+2. **N-M2d — the release-evaluated event table + cursor read API** (6.4; API + schema). What the
+   runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`. **Shipped 2026-10-17** (migration 000017, feed row in the
+   publish transaction, cursor read with the paging rules in the app; VM measurement pending:
+   the next upload's evaluation readable with a read key).
+3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the
+   targeted set. **Shipped 2026-10-17** (pure domain rules with the two named
+   tests; fed by the N-M2f worker).
+4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail
+   goes to the audience; never from the callback. **Shipped 2026-10-17** (evaluation mail beside the ticket, one
+   intent per channel per event; the closed/open wording follows with the stop rules in N-M2i).
+5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
+   `buildWithParameters` sender, https enforced, max attempts. **Shipped 2026-10-17** (sender, knobs, constraint migration; nothing
+   raises the intent until N-M2i).
+6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,
+   `delivery:callback` scope only, evidence on the intent. **Shipped 2026-10-17** (route, scope rule, evidence table 000009).
+7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never
+   auto-resolve. **Shipped 2026-10-17** (the loop on the reader path, cycle table 000010,
+   decision written on ticket and mail; VM measurement pending: a Critical upload → one rebuild intent).
+8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
+9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
+10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first). **Shipped 2026-10-17** (D24; rpm source join in `CoversPackage`).
+11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
+12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line); VM-NET-1 repo half shipped (§7a, `deploy/edge/`), VM apply open.
+
+Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
+through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
+file before the next is started.
+
+
 > **2026-10-06 — `phase3-harness-integration` (EDR-HARNESS-01) COMPLETE and MERGED to `main` as
 > `552c4e1` (PR #126), CI green.** Commissions, harness-evidence proposals, the intake adapter +
 > `themis-intake` CLI, walls. Every item the 2026-09-26 banner carried as open is now closed and
@@ -312,8 +357,13 @@ three angles, and two of them proposed fixes that would not have worked.
   the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
   2223.
 
-- [ ] **VEX-SRC-1 — a vendor statement about a SOURCE package does not cover its binary
-  sub-packages (filed 2026-10-17).** LOW, precision. Red Hat's `not_affected` for `perl` (the
+- [x] **VEX-SRC-1 — a vendor statement about a SOURCE package does not cover its binary
+  sub-packages (filed 2026-10-17, closed 2026-10-17; EDR-VEX-02 D24).** LOW, precision. **Done:**
+  `CoversPackage` also matches an rpm component's recorded `Source` (never a name prefix; rpm
+  only), so Red Hat's per-SRPM statements reach the binaries; the raise and `covers_component`
+  share the one test. Fixture: `compat-libtiff3` stays uncovered by `libtiff`. **Measure on the
+  VM:** after the next re-judge pass, the `perl-Carp` Finding shows Red Hat's `perl` statement as
+  "applies here" and carries its proposal. Red Hat's `not_affected` for `perl` (the
   SRPM) sat beside a Finding carrying `perl-Carp`, `perl-Encode`, … (its binary sub-packages,
   `Source: perl` on each component) and raised nothing, because `CoversPackage` matches purl and
   name only. The safe side today; a statement covering by `MatchedComponent.Source` would be
@@ -322,18 +372,13 @@ three angles, and two of them proposed fixes that would not have worked.
   answer is probably yes for rpm — then extend `CoversPackage` to `Source` for rpm components
   only, with the fixture that `compat-libtiff3` (its own SRPM) must still not cover `libtiff`.
 
-- [ ] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
-  2026-10-17).** LOW, clarity. The assessment marks a vendor statement `applicable` when its
-  product scope matches the release (family + major); the raise additionally requires the
-  statement's PACKAGE to be one of the Finding's components (`coveringStatement`). Measured on a
-  fresh Rocky 8 release: 18 Findings showed an "applicable" `not_affected` / `fix_deferred`
-  statement about a package the Finding does not carry (`lz4-java` on an `lz4` Finding,
-  `firefox` on an `nss` one) and correctly got no proposal — but the drawer reads as if the
-  vendor had cleared THIS Finding. **Do:** a third applicability facet on `VendorStatement`
-  (`covers_component: true|false`, computed with the same `CoversPackage` test), the chip
-  reading "applies to this release, other package" when scope matches and the package does not,
-  and the vendor-silence sentence counting only covering statements. Design the wording with
-  EDR-VEX-02 D16 before code.
+- [x] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
+  2026-10-17, closed 2026-10-17; EDR-VEX-02 D23).** LOW, clarity. **Done:** `VendorStatement`
+  carries `covers_component` (the raise's own `CoversPackage` test) beside `applicability`; the
+  drawer counts "applies here" only when both hold, shows an applicable statement about another
+  package as "applies to this release, other package" after the covering ones, and the silence
+  sentence names the other-package statements instead of reading as a clearance. **Measure on
+  the VM:** the Rocky 8 `lz4` Finding's drawer reads "other package" on the `lz4-java` row.
 
 - [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,
@@ -6039,7 +6084,11 @@ under the 2026-08-07 re-derivation standard.
   deployments are admin-only. See EDR-SECURITY-01's 2026-10-13 Registry note and INSTALLATION.md §5b.
 
 - [ ] **VM-NET-1 — the VM serves every node on the network with no host firewall and no TLS (filed
-  2026-10-13, VM round).** MED, operability/security. `ss -ltnp` shows the dashboard on `*:8090` and the
+  2026-10-13, VM round).** MED, operability/security. **Repo half done 2026-10-17:**
+  `deploy/edge/Caddyfile.example` (443 → 127.0.0.1:8090, `X-Forwarded-Proto` ⇒ Secure cookie),
+  `deploy/edge/firewall.sh` (firewalld, ssh + https only, dry-run by default), INSTALLATION.md §7a
+  (bind every node to 127.0.0.1 first). **Open: the VM apply** — the three §7a steps, then
+  `ss -ltnp` shows every Themis port on loopback and `firewall-cmd --list-all` shows ssh, https. `ss -ltnp` shows the dashboard on `*:8090` and the
   six nodes on their ports; neither firewalld nor ufw is active, so 8081–8086 are reachable from the
   office network. Since #156 every node requires `X-API-Key`, so this is no longer an open write surface,
   but the GUI login and every key still cross the network in clear text. **Do:** put Caddy (or nginx) on
@@ -6047,8 +6096,12 @@ under the 2026-08-07 re-derivation standard.
   443 and SSH; document both in INSTALLATION.md §8. Evidence: `docs/engineering/vm-test-2026-10-12.md`
   (2026-10-13 addendum).
 
-- [ ] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
-  VM round).** LOW, operability. A 555-component SBOM took ~4.5 min to correlate; for that whole
+- [x] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
+  VM round; closed 2026-10-17).** LOW, operability. **Done:** the correlation service reports every
+  component through a `ProgressReporter` port (the app ring still never logs); the Knowledge
+  composition root turns that into a `correlation progress` line per 50 components or 30 s and
+  always the last one, with release, evidence, done/total and matches so far. **Measure on the
+  VM:** upload a large SBOM and read the lines between the upload and the completion event. A 555-component SBOM took ~4.5 min to correlate; for that whole
   time Knowledge's `stream_cursor` sat still (it advances only after Handle returns) and the log
   showed only the periodic sweeps, so an operator reading the cursor against `max(seq)` saw an
   apparent 5,600-event backlog that was really other streams' events. **Do:** log one progress

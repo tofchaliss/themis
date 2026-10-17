@@ -799,9 +799,16 @@ function segBarWireTips() {
 
    Three facts, three columns, never merged: the vendor's words, the scope the VENDOR stated, and
    Themis's determination. */
-const applicabilityChip = (a) => {
+const applicabilityChip = (a, coversComponent) => {
+  // EDR-VEX-02 D23 (VEX-GUI-2): "applies here" needs BOTH facets — the product scope covers
+  // this release AND the statement is about one of this finding's packages. A statement that
+  // passes the first and fails the second (lz4-java on an lz4 finding) applies to the release
+  // and clears nothing here; the old single chip read it as a clearance.
+  if (a === "applicable" && coversComponent === false) {
+    return `<span class="chip chip-info" title="the vendor's product scope covers this release, but the statement is about a different package than this finding's components — so it applies to the release and says nothing about THIS finding. No proposal was raised from it (the raise rule requires the package to match), and it is shown so the vendor's words about the product stay visible.">applies to this release, other package</span>`;
+  }
   if (a === "applicable") {
-    return `<span class="chip chip-good" title="the vendor's product scope covers this release, so this statement is usable — it still needs a decision, and policy cannot auto-accept vendor VEX because it is Asserted evidence">applies here</span>`;
+    return `<span class="chip chip-good" title="the vendor's product scope covers this release and the statement is about this finding's package, so this statement is usable — it still needs a decision, and policy cannot auto-accept vendor VEX because it is Asserted evidence">applies here</span>`;
   }
   if (a === "not_applicable") {
     return `<span class="chip chip-warn" title="Themis established the vendor's product scope and it does NOT cover this release, so the statement cannot clear this finding. The statement is kept as evidence — it is not ignored.">does not apply here</span>`;
@@ -835,7 +842,7 @@ const vendorStatementRow = (v) => `<div class="prec">
           <span class="mono">${esc(v.package || "\u2014")}</span>
           ${v.scope_family ? `<span class="chip chip-info" title="the product the VENDOR scoped this statement to">${esc(v.scope_family)} ${esc(v.scope_major || "")}</span>` : `<span class="chip chip-info" title="the vendor supplied no readable product scope">no stated scope</span>`}
           ${v.status === "fixed" && (v.advisory || v.fixed_version) ? `<span class="mono" title="the advisory that shipped the fix, and the build it shipped">${esc(v.advisory || "")}${v.advisory && v.fixed_version ? " \u00b7 " : ""}${esc(v.fixed_version || "")}</span>` : ""}
-          ${applicabilityChip(v.applicability)}
+          ${applicabilityChip(v.applicability, v.covers_component)}
         </div>
         ${v.justification ? `<div class="prec-rationale">${esc(v.justification)}</div>` : ""}
       </div>`;
@@ -849,7 +856,11 @@ const vendorStatementRow = (v) => `<div class="prec">
 function vendorStatementsSection(assessment) {
   const vs = (assessment && assessment.vendor_statements) || [];
   if (!vs.length) return "";
-  const applicable = vs.filter((v) => v.applicability === "applicable");
+  // D23: three groups, not two. "applies here" = scope AND package; "other package" = scope
+  // only (an API older than the facet omits covers_component, and then the scope alone decides,
+  // as before); everything else is folded.
+  const applicable = vs.filter((v) => v.applicability === "applicable" && v.covers_component !== false);
+  const otherPackage = vs.filter((v) => v.applicability === "applicable" && v.covers_component === false);
   const others = vs.filter((v) => v.applicability !== "applicable");
   const notComparable = vs.length > 0 && vs.every((v) => v.applicability === "not_comparable");
   const vendor = (vs[0].justification || "").split(":")[0] || "The vendor";
@@ -863,14 +874,21 @@ function vendorStatementsSection(assessment) {
   let silence = "";
   if (!applicable.length && !notComparable && sameFamily) {
     const where = rs ? ` (${esc(rs.family)} ${esc(rs.major || "")})` : "";
-    silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this release's product${where}.</b> The vendor spoke about ${others.length} other product${others.length === 1 ? "" : "s"} only (folded below). That is not a clearance and not an "affected": it is silence, shown as silence.</p>`;
+    if (otherPackage.length) {
+      // D23(c): the vendor DID speak about this product — about other packages. That is a third
+      // thing, different from silence and from clearance, and it is named as such.
+      silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this finding's package for this release's product${where}.</b> The vendor spoke about ${otherPackage.length} other package${otherPackage.length === 1 ? "" : "s"} of this product (shown below)${others.length ? ` and about ${others.length} other product${others.length === 1 ? "" : "s"} (folded)` : ""}. That is not a clearance of this finding and not an "affected": the vendor's words are about something else.</p>`;
+    } else {
+      silence = `<p class="attr-note"><b>No ${esc(vendor)} statement covers this release's product${where}.</b> The vendor spoke about ${others.length} other product${others.length === 1 ? "" : "s"} only (folded below). That is not a clearance and not an "affected": it is silence, shown as silence.</p>`;
+    }
   }
   return `
     <section>
-      <h3 class="section-h">Vendor statements${applicable.length ? ` <span class="chip chip-good">${applicable.length} appl${applicable.length === 1 ? "ies" : "y"} here</span>` : ""}${others.length ? ` <span class="chip chip-warn">${others.length} not usable here</span>` : ""}</h3>
-      <p class="card-sub" style="margin:0 0 6px">What the vendor asserted, and whether Themis determined it covers <em>this</em> release. A statement is usable when its product scope matches; one that does not is kept as evidence, never deleted. Only an applicable <span class="mono">not_affected</span> can become a proposal; every other status is information.</p>
+      <h3 class="section-h">Vendor statements${applicable.length ? ` <span class="chip chip-good">${applicable.length} appl${applicable.length === 1 ? "ies" : "y"} here</span>` : ""}${otherPackage.length ? ` <span class="chip chip-info" title="product scope matches this release; the package is not this finding's">${otherPackage.length} other package${otherPackage.length === 1 ? "" : "s"}</span>` : ""}${others.length ? ` <span class="chip chip-warn">${others.length} not usable here</span>` : ""}</h3>
+      <p class="card-sub" style="margin:0 0 6px">What the vendor asserted, and whether Themis determined it covers <em>this</em> release <em>and</em> this finding's package. A statement applies here when both hold; one about the right product but another package applies to the release and says nothing about this finding; one whose product scope does not match is kept as evidence, never deleted. Only an applicable <span class="mono">not_affected</span> about this finding's package can become a proposal; every other status is information.</p>
       ${applicable.map(vendorStatementRow).join("")}
       ${silence}
+      ${otherPackage.map(vendorStatementRow).join("")}
       ${others.length ? `<details><summary class="card-sub">${others.length} statement${others.length === 1 ? "" : "s"} about other products</summary>${others.map(vendorStatementRow).join("")}</details>` : ""}
     </section>`;
 }

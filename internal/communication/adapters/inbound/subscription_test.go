@@ -15,7 +15,7 @@ func TestSubscription(t *testing.T) {
 	// two delivery triggers drive outward-delivery intents (N-M1a).
 	for _, want := range []string{
 		"governance.position_established", "governance.position_revised",
-		"governance.finding_opened", "governance.proposal_accepted",
+		"governance.release_evaluated", "governance.proposal_accepted",
 	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)

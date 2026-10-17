@@ -346,6 +346,39 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /events/release-evaluated:
+    get:
+      operationId: getReleaseEvaluatedEvents
+      summary: >
+        Cursor read of the release-evaluated event feed (EDR-DELIVERY-01 M2-4). Rows strictly
+        after the `after` sequence, in sequence order; `limit` defaults to 100 and is clamped to
+        500. At-least-once — a subscriber deduplicates on `event_id` and stores `next` as its
+        cursor. Read scope.
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: The sequence cursor; everything later than it is returned. Omitted = from the start.
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          required: false
+          description: Page size; default 100, values above 500 are clamped.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseEvaluatedEventsPage'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/blast-radius:
     get:
       operationId: getBlastRadius
@@ -754,12 +787,20 @@ components:
         scope_major:
           type: string
           description: Major version of that family, e.g. `8`. Empty = no readable scope.
+        covers_component:
+          type: boolean
+          description: >-
+            The SECOND facet the raise rule asks (EDR-VEX-02 D23): whether the statement's
+            `package` is one of this Finding's components, by the same test the raise uses. An
+            `applicable` statement with `covers_component: false` applies to the release and is
+            about another package — it clears nothing here and was never proposed.
         applicability:
           type: string
           enum: [applicable, not_applicable, unknown, not_comparable]
           description: >-
-            THEMIS'S determination for this release. Only `applicable` can have become a
-            Proposal; every other value is non-clearing.
+            THEMIS'S determination for this release's PRODUCT SCOPE. Only `applicable` can have
+            become a Proposal — and only when `covers_component` is also true; every other value
+            is non-clearing.
             `not_applicable` — the vendor's scope was positively established and does not cover
             this release. A product mismatch, never uncertainty.
             `unknown` — the VENDOR'S STATEMENT could not be placed: no CPE, or one that cannot be
@@ -853,6 +894,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PostureEntry'
+    ReleaseEvaluatedEventsPage:
+      type: object
+      required: [items, next]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseEvaluatedEvent'
+        next:
+          type: integer
+          format: int64
+          description: The cursor for the following call — the last item's seq, or the caller's own cursor when the page is empty.
+    ReleaseEvaluatedEvent:
+      type: object
+      required: [seq, event_id, name, occurred_at, body]
+      properties:
+        seq:
+          type: integer
+          format: int64
+        event_id:
+          type: string
+          description: The bus envelope id of the same fact — the subscriber's dedup key.
+        name:
+          type: string
+          description: governance.release_evaluated
+        occurred_at:
+          type: string
+          format: date-time
+        body:
+          type: object
+          additionalProperties: true
+          description: The governance.release_evaluated.v1 payload exactly as published.
     PostureEntry:
       type: object
       properties:

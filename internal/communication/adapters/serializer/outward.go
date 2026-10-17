@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 )
 
 // ErrNoPostureReader is returned when a remediation ticket is rendered without the Governance
@@ -82,8 +83,17 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail && in.IsDeadLetterNotification():
 		subject, body := RenderOpsDeadLetterEmail(in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentEmail && in.IsEvaluationNotification():
+		subject, body, err := r.RenderEvaluationEmail(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentEmail:
 		subject, body := RenderDecisionEmail(in)
+		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentCIRebuild:
+		subject, body := RenderCIRebuild(in)
 		return app.BuildPayload(subject, body), nil
 	default:
 		return nil, fmt.Errorf("communication: no outward renderer for intent type %q", in.Type)
@@ -146,10 +156,118 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 		b.WriteString("\nUnknown means no severity could be read for those Findings. They are reported\n")
 		b.WriteString("separately rather than counted as Low: absence of evidence is not mildness.\n")
 	}
+	writeRebuildSection(&b, in)
 	b.WriteString("\nThis ticket is a PROJECTION of Themis state. No Themis decision follows from a Jira\n")
 	b.WriteString("transition, and resolving a Finding stays a decision taken in Themis by a person.\n")
 
 	return jiraSummary(in.ReleaseID), []byte(b.String()), nil
+}
+
+// RenderEvaluationEmail renders the mail that follows a Release evaluation (M2-8 step 4 / N-M2f):
+// the same posture the ticket states — counts for all four buckets, CVE ids for Critical and
+// High — told to the governed audience. It reads the posture like the ticket does, so the two
+// cannot disagree about what the Release contains. The ticket, not the mail, is the tracking
+// surface: the mail says where to look.
+func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Intent) (string, []byte, error) {
+	if strings.TrimSpace(in.ReleaseID) == "" {
+		return "", nil, app.ErrNoSubject
+	}
+	if r.posture == nil {
+		return "", nil, ErrNoPostureReader
+	}
+	rows, err := r.posture.ReleaseSeverity(ctx, in.ReleaseID)
+	if err != nil {
+		return "", nil, err
+	}
+	counts, cves := bucket(rows)
+	subject := fmt.Sprintf("Themis evaluated Release %s - Critical %d, High %d", in.ReleaseID, counts[sevCritical], counts[sevHigh])
+
+	var b strings.Builder
+	b.WriteString("Themis has evaluated a new SBOM for this Release. This is the Release's posture as it\n")
+	b.WriteString("stands now; the remediation ticket for the Release carries the same figures.\n\n")
+	writeFacts(&b, []fact{
+		{"Release", in.ReleaseID},
+		{"Project", in.ProjectID},
+		{"Product", in.ProductID},
+		{"SBOM", in.Snapshot["sbom_id"]},
+		{"Findings", fmt.Sprintf("%d", len(rows))},
+		{"Event", eventFact(in)},
+	})
+	b.WriteString("\nSeverity counts\n")
+	for _, sev := range severityOrder {
+		if sev == sevUnknown && counts[sev] == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-9s %d\n", sev+":", counts[sev])
+	}
+	for _, sev := range listedSeverities {
+		if counts[sev] == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s (%d)\n", sev, counts[sev])
+		for _, cve := range cves[sev] {
+			b.WriteString("  " + cve + "\n")
+		}
+	}
+	writeRebuildSection(&b, in)
+	b.WriteString("\nNo Themis decision follows from this mail. The authoritative record is Themis; this\n")
+	b.WriteString("mail carries no attachment and no model output.\n")
+	return subject, []byte(b.String()), nil
+}
+
+// writeRebuildSection states the rebuild loop's decision for this evaluation (M2-8 / N-M2i) when
+// the intent carries one: what the cycle targets, what this rebuild closed, what is still open,
+// and whether the loop goes on, succeeded, or gave up — in which case it says so plainly, because
+// exhaustion is the one outcome that needs a person (M2-8). A clean evaluation carries no section.
+func writeRebuildSection(b *strings.Builder, in app.Intent) {
+	state := in.Snapshot[app.SnapshotRebuildState]
+	if state == "" {
+		return
+	}
+	attempt, limit := in.Snapshot[app.SnapshotRebuildAttempt], in.Snapshot[app.SnapshotRebuildMaxAttempts]
+	b.WriteString("\nRebuild loop\n")
+	switch state {
+	case app.OutcomeOpened:
+		fmt.Fprintf(b, "  Opened: Critical and High Findings remain, so Themis asked the build system for a rebuild (attempt %s of %s).\n", attempt, limit)
+	case app.OutcomeContinuing:
+		fmt.Fprintf(b, "  Continuing: the last rebuild left targeted Findings open, so Themis asked for another (attempt %s of %s).\n", attempt, limit)
+	case app.OutcomeSucceeded:
+		b.WriteString("  Succeeded: every Finding this cycle targeted is closed. No further rebuild is asked for.\n")
+	case app.OutcomeExhausted:
+		fmt.Fprintf(b, "  ATTEMPTS EXHAUSTED (%s of %s): targeted Findings are still open and Themis will not ask for another rebuild in this cycle. A person decides what happens next.\n", attempt, limit)
+	default:
+		fmt.Fprintf(b, "  %s\n", state)
+	}
+	writeFacts(b, []fact{
+		{"Targeted", in.Snapshot[app.SnapshotRebuildTargeted]},
+		{"Closed", in.Snapshot[app.SnapshotRebuildClosed]},
+		{"Still open", in.Snapshot[app.SnapshotRebuildOpen]},
+		{"Compared against", in.Snapshot[app.SnapshotRebuildBaseline]},
+	})
+	b.WriteString("  Findings are never auto-resolved by a rebuild; a closed Finding is one the new SBOM no longer opens.\n")
+}
+
+// RenderCIRebuild renders the rebuild instruction as text (M2-6 / N-M2g): the parameters the
+// build job receives, as the operator will read them on the intent. The Jenkins sender takes the
+// parameters from the snapshot, not from this text; the text exists so a rebuild intent is as
+// inspectable as a ticket or a mail, and so the content-address rule (D-N-3) covers it too.
+func RenderCIRebuild(in app.Intent) (string, []byte) {
+	subject := "Themis rebuild - Release " + in.ReleaseID + " - attempt " + firstNonEmpty(in.Snapshot[app.SnapshotAttempt], "1")
+	var b strings.Builder
+	b.WriteString("Themis asks the build system to rebuild this Release so the targeted Findings can be\n")
+	b.WriteString("re-evaluated from a new SBOM. The job uploads the new SBOM and calls Themis back; the\n")
+	b.WriteString("callback changes no Finding - only the evaluation of the new SBOM can (M2-7).\n\n")
+	writeFacts(&b, []fact{
+		{"Job", in.Destination},
+		{"Release", in.ReleaseID},
+		{"Project", in.ProjectID},
+		{"Product", in.ProductID},
+		{"Prior SBOM", in.Snapshot[app.SnapshotPriorSBOMID]},
+		{"Targeted", in.Snapshot[app.SnapshotTargetedCVEs]},
+		{"Attempt", in.Snapshot[app.SnapshotAttempt]},
+		{"Event", eventFact(in)},
+	})
+	return subject, []byte(b.String())
 }
 
 // RenderDecisionEmail renders the notification for an accepted proposal (RC-5): the immutable
@@ -243,11 +361,11 @@ func bucket(rows []app.ReleaseSeverityRow) (map[string]int, map[string][]string)
 // knowing it is mild.
 func severityOf(baseScore int) string {
 	switch {
-	case baseScore >= 90:
+	case baseScore >= domain.SeverityCriticalFloor:
 		return sevCritical
-	case baseScore >= 70:
+	case baseScore >= domain.SeverityHighFloor:
 		return sevHigh
-	case baseScore >= 40:
+	case baseScore >= domain.SeverityMediumFloor:
 		return sevMedium
 	case baseScore > 0:
 		return sevLow

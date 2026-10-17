@@ -359,6 +359,11 @@ uniqueness — there is no event to dedupe them against.
 
 ### M1a-3 — The trigger is a recorded TEMPORARY PROXY
 
+> **Realized 2026-10-17 (N-M2c):** the proxy is gone from the code. Communication now subscribes
+> to `governance.release_evaluated` and records one ticket intent per evaluation whose `cause` is
+> `new_sbom`, product and project taken from the event; a `rediscovery` evaluation records nothing
+> (M2-3). The text below is kept as the record of the deviation and its cost.
+
 RC-1 / D-N-8 names "release posture evaluated" as the trigger. No such signal exists, so N-M1a
 proxies it with **`governance.finding_opened`** and records the deviation here, in the code
 comment at the mapping, and in the change's tasks. `governance.proposal_accepted` maps to the
@@ -888,6 +893,11 @@ intent, no attempt increment, no exhaustion notice.
 
 ### M2-4 — The harness subscribes by POLLING a Governance cursor read API
 
+> **Realized 2026-10-17 (N-M2d):** migration 000017 `release_evaluated_events`, written in the
+> worker's publish-and-mark transaction under the outbox envelope id; `GET
+> /api/v1/governance/events/release-evaluated?after=&limit=` as specified below, an unwired feed
+> answering 503 rather than an empty page.
+
 RC-1 deferred the transport. It is decided now, and it is the smallest thing that works:
 
 ```
@@ -927,6 +937,11 @@ credential, and takes no Governance act (RC-7 / D-N-12). Reading this endpoint i
 
 ### M2-5 — The baseline is the immediately-previous SBOM, and the targeted set does not GROW
 
+> **Realized 2026-10-17 (N-M2e):** `communication/domain/rebuild.go` — `SelectPreviousSBOM`
+> (upload order, ties by id, none for a first or unknown SBOM), `TargetedSet` captured once at
+> Critical+High, `Closure` with D16's fixed rule and `Complete` as the success stop. Pure; the
+> worker that feeds it is N-M2f.
+
 RC-4 left the baseline open. It is now fixed: the comparison is **the new SBOM against the
 immediately-previous SBOM of the SAME Release, by upload order**. No configured window, no
 "baseline of record", no operator knob. Progress is "did THIS rebuild close anything", and a
@@ -944,6 +959,11 @@ two (M2-8) would be spent on work the cycle did not set out to do. Counting it i
 excluding it from the target keeps the human's view complete and the machine's goal fixed.
 
 ### M2-6 — `ci_rebuild` over Jenkins: `buildWithParameters`, HTTPS or refuse at startup
+
+> **Realized 2026-10-17 (N-M2g):** `communication/adapters/delivery/jenkins.go`, the knobs in the
+> table below plus `THEMIS_COMMUNICATION_JENKINS_TIMEOUT`, migration 000008 admitting
+> `ci_rebuild`, `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`. The loop that raises the intent is
+> N-M2i; until then the sender has nothing to send.
 
 RC-3's fourth delivery kind gets a sender. It starts a Jenkins job with
 **`buildWithParameters`** over **HTTP Basic auth (user + API token)** — Jenkins's own documented
@@ -972,6 +992,10 @@ identity, prior SBOM id, the targeted Finding set, the attempt index. **No crede
 model output.** Parameters handed to Jenkins are snapshot facts only.
 
 ### M2-7 — The job uploads, calls back, and the callback is evidence on the INTENT
+
+> **Realized 2026-10-17 (N-M2h):** the route below, `delivery:callback` only (admin refused too),
+> mounted outside the write floor by exact path; evidence in `delivery_callbacks` (migration
+> 000009, idempotent per intent and SBOM). No HMAC variant, as decided.
 
 The Jenkins job builds the image, uploads the new SBOM to Evidence against the same Product /
 Project / Release under a new SBOM id, and then calls Themis back:
@@ -1002,6 +1026,14 @@ X-API-Key: <delivery:callback key>
   compare.
 
 ### M2-8 — The loop: compare after evaluation, one knob, stop and tell a person
+
+> **Realized 2026-10-17 (N-M2f, N-M2i):** step 4's ticket update and mail follow every `new_sbom`
+> evaluation (`EnqueueEvaluationMail`, `RenderEvaluationEmail`, audience
+> `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE`), deduplicated per (event, type) by migration 000007;
+> the loop itself is `app.RebuildLoop` over `rebuild_cycles` (migration 000010): open on
+> Critical/High, compare against the set captured at start, continue / succeed / exhaust at
+> `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, nothing raised after a stop, exhaustion written on the
+> ticket and the mail. The callback is N-M2h.
 
 The cycle, once per attempt, in this order and no other:
 
