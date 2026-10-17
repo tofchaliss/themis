@@ -100,6 +100,10 @@ type ReleaseEvaluationWorker struct {
 	// Findings once its project is known (EDR-ROLLFORWARD-01). It runs BEFORE publish-and-mark
 	// so a failure defers the row and the pass is retried; it is idempotent per pair.
 	rollForward *RollForward
+	// rejudge, when wired, judges the release's open Findings against their cards (VEX-RAISE-2)
+	// once correlation completes; same posture as roll-forward: before publish-and-mark, a
+	// failure defers the row.
+	rejudge *ReleaseRejudge
 	// retry is the per-row backoff schedule, keyed by queue row id. Entries are dropped on a
 	// successful publish; a row in backoff is skipped, never removed from the queue.
 	retry map[int64]retrySchedule
@@ -118,6 +122,12 @@ func NewReleaseEvaluationWorker(st ReleaseEvaluations, identity ReleaseIdentityR
 // WithRollForward wires the same-CVE roll-forward pass to run per evaluated release.
 func (w *ReleaseEvaluationWorker) WithRollForward(rf *RollForward) *ReleaseEvaluationWorker {
 	w.rollForward = rf
+	return w
+}
+
+// WithReleaseRejudge wires the per-release judgement against the cards (VEX-RAISE-2).
+func (w *ReleaseEvaluationWorker) WithReleaseRejudge(r *ReleaseRejudge) *ReleaseEvaluationWorker {
+	w.rejudge = r
 	return w
 }
 
@@ -172,6 +182,14 @@ func (w *ReleaseEvaluationWorker) publish(ctx context.Context, row PendingEvalua
 	}
 	if productID == "" || projectID == "" {
 		return ErrUnresolvedReleaseIdentity
+	}
+	// The rules first (VEX-RAISE-2), then roll-forward: a Finding the card's own range or the
+	// vendor's statement can settle should not also carry a sibling release's judgement as a
+	// proposal — the deterministic verdict is the stronger, cheaper answer.
+	if w.rejudge != nil {
+		if _, err := w.rejudge.ForRelease(ctx, row.ReleaseID); err != nil {
+			return err
+		}
 	}
 	if w.rollForward != nil {
 		if _, err := w.rollForward.ForRelease(ctx, row.ReleaseID, projectID); err != nil {

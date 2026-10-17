@@ -404,3 +404,109 @@ func TestRollForwardFinding_WriteTimeBranches(t *testing.T) {
 		t.Fatal("a refused proposal must surface")
 	}
 }
+
+// --- VEX-RAISE-2: the release is judged against its cards on the worker ---------------------
+
+type undecidedFLByRelease struct {
+	repo *fakeRepo
+	err  error
+}
+
+func (u undecidedFLByRelease) UndecidedFaultlinesByRelease(_ context.Context, rel string) ([]string, error) {
+	if u.err != nil {
+		return nil, u.err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range u.repo.order {
+		f := u.repo.byID[id]
+		if _, decided := f.CurrentPosition(); f.ReleaseID() == rel && !decided && !seen[f.FaultlineID()] {
+			seen[f.FaultlineID()] = true
+			out = append(out, f.FaultlineID())
+		}
+	}
+	return out, nil
+}
+
+// A new release's open Findings get the version-range verdict and the vendor proposal their
+// cards already support, with no enrichment and no one-time pass; idempotent; a card that
+// cannot be read, a lister failure, a write failure or a cancellation surface so the worker defers.
+func TestReleaseRejudge_JudgesANewReleaseAgainstItsCards(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	repo.seed(withStdlib(t, identified(t, "fnd-go", "rel-new", "fl-go", "CVE-2022-30632"), "go1.27.1"))
+	repo.seed(withComponent(t, "fnd-tiff", "rel-new", "fl-tiff", "CVE-2026-52490", "pkg:rpm/rocky/compat-libtiff3@3.9.4-16.el8_10", "compat-libtiff3"))
+	repo.seed(withStdlib(t, identified(t, "fnd-other", "rel-other", "fl-go", "CVE-2022-30632"), "go1.17.5")) // in range, other release
+	svc := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
+	kn := knowledgeByID{
+		"fl-go":   {FaultlineID: "fl-go", AffectedRanges: []string{"<1.17.12"}, RangeTrust: value.TrustObserved},
+		"fl-tiff": {FaultlineID: "fl-tiff", Applicabilities: []app.Applicability{notAffected("compat-libtiff3", "Red Hat: not affected in Red Hat Enterprise Linux 8")}},
+	}
+	rj := app.NewReleaseRejudge(svc, undecidedFLByRelease{repo: repo}, kn)
+	res, err := rj.ForRelease(ctx, "rel-new")
+	if err != nil || res.Faultlines != 2 || res.Raised != 1 || res.VendorRaised != 1 {
+		t.Fatalf("result = %+v err=%v, want 2 cards, 1 range and 1 vendor proposal", res, err)
+	}
+	if pos, ok := repo.byID["fnd-go"].CurrentPosition(); !ok || pos.Stance() != domain.StanceNotAffected {
+		t.Fatal("the out-of-range Go Finding on Observed evidence must be policy-accepted")
+	}
+	if ps := repo.byID["fnd-tiff"].Proposals(); len(ps) != 1 || ps[0].Stance() != domain.StanceNotAffected || !ps[0].IsOpen() {
+		t.Fatalf("compat-libtiff3 proposals = %+v, want one open vendor not_affected", ps)
+	}
+	if n := len(repo.byID["fnd-other"].Proposals()); n != 0 {
+		t.Fatalf("the in-range Finding on another release got %d proposals, want 0", n)
+	}
+	again, err := rj.ForRelease(ctx, "rel-new")
+	if err != nil || again.Raised != 0 || again.VendorRaised != 0 {
+		t.Fatalf("second run = %+v err=%v, want nothing new", again, err)
+	}
+	if _, err := app.NewReleaseRejudge(svc, undecidedFLByRelease{err: errors.New("db")}, kn).ForRelease(ctx, "rel-new"); err == nil {
+		t.Fatal("lister failure must surface")
+	}
+	if _, err := app.NewReleaseRejudge(svc, undecidedFLByRelease{repo: repo}, knowledgeByID{}).ForRelease(ctx, "rel-new"); err == nil {
+		t.Fatal("an unreadable card must surface, not read as no proposal")
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := rj.ForRelease(cctx, "rel-new"); err == nil {
+		t.Fatal("cancellation must stop the judgement")
+	}
+	// Write failures on either rule surface.
+	repo2 := newRepo()
+	repo2.seed(withStdlib(t, identified(t, "fnd-go", "rel-new", "fl-go", "CVE-2022-30632"), "go1.27.1"))
+	repo2.saveErr = errors.New("db")
+	if _, err := app.NewReleaseRejudge(writeSvc(repo2), undecidedFLByRelease{repo: repo2}, kn).ForRelease(ctx, "rel-new"); err == nil {
+		t.Fatal("a range write failure must surface")
+	}
+	repo3 := newRepo()
+	repo3.seed(withComponent(t, "fnd-tiff", "rel-new", "fl-tiff", "CVE-2026-52490", "pkg:rpm/rocky/compat-libtiff3@3.9.4-16.el8_10", "compat-libtiff3"))
+	repo3.saveErr = errors.New("db")
+	if _, err := app.NewReleaseRejudge(writeSvc(repo3), undecidedFLByRelease{repo: repo3}, kn).ForRelease(ctx, "rel-new"); err == nil {
+		t.Fatal("a vendor write failure must surface")
+	}
+}
+
+// The worker runs the judgement before publish-and-mark: a Knowledge failure defers the row and
+// a later pass completes both.
+func TestWorker_ReleaseRejudgeFailureDefersTheRow(t *testing.T) {
+	ctx := context.Background()
+	q, worker, _, _ := evaluationWorker(t, "prod-1", "prj-A")
+	record(t, q, "rel-new", "ev-1", domain.CauseNewSBOM)
+	repo := newRepo()
+	repo.seed(withStdlib(t, identified(t, "fnd-go", "rel-new", "fl-go", "CVE-2022-30632"), "go1.27.1"))
+	kn := knowledgeByID{} // Knowledge down
+	worker.w.WithReleaseRejudge(app.NewReleaseRejudge(writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy()), undecidedFLByRelease{repo: repo}, kn))
+	worker.Tick(ctx)
+	if len(q.publishedEvents()) != 0 || len(q.pending()) != 1 {
+		t.Fatalf("after a Knowledge failure: published=%d pending=%d, want 0 and 1", len(q.publishedEvents()), len(q.pending()))
+	}
+	kn["fl-go"] = app.FaultlineKnowledge{FaultlineID: "fl-go", AffectedRanges: []string{"<1.17.12"}, RangeTrust: value.TrustObserved}
+	worker.clock.advance(2 * app.EvaluationBackoffMax)
+	worker.Tick(ctx)
+	if len(q.publishedEvents()) != 1 {
+		t.Fatalf("after recovery: published=%d, want 1", len(q.publishedEvents()))
+	}
+	if _, ok := repo.byID["fnd-go"].CurrentPosition(); !ok {
+		t.Fatal("after recovery the Go Finding must be decided")
+	}
+}

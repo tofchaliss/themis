@@ -215,7 +215,7 @@ func TestRangeRejudge_PassesRangeStatementsToTheRule(t *testing.T) {
 	repo.seed(withStdlib(t, identified(t, "fnd-go", "rel-1", "fl-go", "CVE-2019-17596"), "go1.27.1"))
 	svc := writeSvc(repo, domain.AutoAcceptObservedNotAffectedPolicy())
 	kn := knowledgeByID{"fl-go": {FaultlineID: "fl-go", RangeTrust: value.TrustObserved,
-		AffectedRanges: []string{"<1.13.2", "<21.1.1.1.0"},
+		AffectedRanges:  []string{"<1.13.2", "<21.1.1.1.0"},
 		RangeStatements: []value.RangeStatement{{Ecosystem: "go", Package: "stdlib", Range: "<1.13.2"}, {Ecosystem: "oracle", Package: "weblogic", Range: "<21.1.1.1.0"}}}}
 	res, err := app.NewRangeRejudge(svc, fixedLister{ids: []string{"fl-go"}}, kn).Run(context.Background())
 	if err != nil || res.Raised != 1 {

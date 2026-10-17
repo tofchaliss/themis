@@ -339,7 +339,10 @@ OpenVEX / CSAF out.
   advisory and build; Governance acts on an applicable `not_affected` (proposes `not_affected`)
   and, since VEX-WNF-1 (2026-10-16, D18–D21), on an applicable `will_not_fix` / `fix_deferred` /
   `out_of_support` (proposes **`accepted_risk`**, Asserted, never auto-accepted; a later applicable
-  `fixed` for the same package re-surfaces that acceptance); the rest is shown.
+  `fixed` for the same package re-surfaces that acceptance); the rest is shown. Since VEX-RAISE-2
+  (2026-10-17, D22) a NEW release is judged against its cards — the version-range rule and the
+  vendor statements — on the release-evaluation worker as soon as its correlation completes, so
+  the one-time `THEMIS_GOVERNANCE_REJUDGE_RANGES=1` pass is only for catch-up after an upgrade.
 - **A range keeps the world it was published for** (EDR-KNOWLEDGE-01 D13–D14, 2026-10-16): the card
   carries `RangeStatements {ecosystem, package, range}` beside the flat `AffectedRanges` union, and
   every per-component verdict (match-time gate, Governance's version-range rule, the re-judge pass)
