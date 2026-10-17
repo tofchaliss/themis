@@ -460,8 +460,13 @@ three angles, and two of them proposed fixes that would not have worked.
   estate: 1037 accepted · 138 rejected · 0 proposed.
   **Lesson, operational:** a restart during the one-time pass loses its "done" line — the pass
   takes 10–15 minutes on 773 cards; wait for the line before restarting again.
-  **Open, LOW (VEX-RAISE-2):** raise from the card's current statements
-  at Finding creation so the pass is not needed for new Findings.
+  **VEX-RAISE-2 DONE 2026-10-17:** a new release is judged against its cards as soon as its
+  correlation completes — `app.ReleaseRejudge` on the release-evaluation worker (before
+  roll-forward and publish-and-mark; a Knowledge read failure defers the row) re-applies the
+  version-range rule and the vendor statements to the release's open Findings. The one-time
+  pass stays for the catch-up after an upgrade that changed a rule. Needs
+  `THEMIS_KNOWLEDGE_URL` and `THEMIS_REGISTRY_URL` (the worker). **Measure on the VM:** upload
+  a release and read the worker's proposals without running the pass.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87

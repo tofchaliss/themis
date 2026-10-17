@@ -109,8 +109,9 @@ func Wire(
 	// the projection carries the Finding alone, which is the same fail-safe posture the
 	// blast-radius reader takes: a missing seam degrades the view, never the request.
 	var rejudge *app.RangeRejudge
+	var kn *knowledge.Client
 	if knowledgeURL != "" {
-		kn := knowledge.NewClient(knowledgeURL, readClient(readAPIKey))
+		kn = knowledge.NewClient(knowledgeURL, readClient(readAPIKey))
 		read = read.WithKnowledge(kn)
 		rejudge = app.NewRangeRejudge(write, st, kn)
 	}
@@ -136,6 +137,12 @@ func Wire(
 		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger}).WithRollForward(rollForward)
 		if rejudge != nil {
 			rejudge = rejudge.WithRollForward(rollForward)
+		}
+		// A new release is judged against its cards as soon as its correlation completes
+		// (VEX-RAISE-2): the version-range rule and the vendor statements, per release, on the
+		// same worker. Needs the Knowledge read seam.
+		if kn != nil {
+			evaluations = evaluations.WithReleaseRejudge(app.NewReleaseRejudge(write, st, kn))
 		}
 	}
 	return Governance{

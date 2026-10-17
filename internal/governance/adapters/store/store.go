@@ -524,6 +524,26 @@ func (s *Store) SuppressedWithExpiredReview(ctx context.Context, now time.Time, 
 	return out, rows.Err()
 }
 
+// UndecidedFaultlinesByRelease lists the distinct Faultlines of one release that still have an
+// undecided Finding (VEX-RAISE-2). Implements app.UndecidedFaultlineByReleaseLister.
+func (s *Store) UndecidedFaultlinesByRelease(ctx context.Context, releaseID string) ([]string, error) {
+	rows, err := s.querier(ctx).Query(ctx,
+		`SELECT DISTINCT faultline_id FROM findings WHERE release_id = $1 AND current_stance IS NULL ORDER BY faultline_id`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) FindingsByFaultline(ctx context.Context, faultlineID string) ([]domain.FindingID, error) {
 	rows, err := s.querier(ctx).Query(ctx, `SELECT id FROM findings WHERE faultline_id = $1 ORDER BY id`, faultlineID)
 	if err != nil {

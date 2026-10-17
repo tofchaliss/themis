@@ -931,3 +931,33 @@ func TestDispositionStaleRoundTripAndExpiredLister(t *testing.T) {
 		t.Fatal("a new Position must clear the stored mark")
 	}
 }
+
+// VEX-RAISE-2: the per-release undecided Faultline lister — distinct, decided ones left out.
+func TestUndecidedFaultlinesByRelease(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	for _, f := range []struct{ id, rel, fl string }{{"a", "rel-1", "fl-2"}, {"b", "rel-1", "fl-1"}, {"c", "rel-2", "fl-9"}} {
+		if err := st.Save(ctx, newFinding(t, f.id, f.rel, f.fl, "CVE-2026-1"), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := newFinding(t, "d", "rel-1", "fl-3", "CVE-2026-2")
+	if err := st.Save(ctx, d, true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	d, _, _ = load(t, st, "d")
+	prev := d.Version()
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAffected, "", epoch, value.TrustAsserted)
+	_ = d.RaiseProposal(p)
+	if _, err := d.AcceptProposal("p1", human, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, d, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.UndecidedFaultlinesByRelease(ctx, "rel-1")
+	if err != nil || len(got) != 2 || got[0] != "fl-1" || got[1] != "fl-2" {
+		t.Fatalf("rel-1 = %v err=%v, want [fl-1 fl-2]", got, err)
+	}
+}

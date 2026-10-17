@@ -556,3 +556,14 @@ carries. No API change.
 Implementation: `reactToApplicabilityCounted` (the raise, beside the `not_affected` path),
 `watchDispositions` (the vendor-fix drift), `scripts/vex-accept-applicable.sh`
 (`--include-will-not-fix`). OpenSpec `openspec/changes/phase3-vendor-will-not-fix`.
+
+### D22 — A new release is judged against its cards when its correlation completes (VEX-RAISE-2, 2026-10-17)
+
+The raises of D15 and D18 — and the version-range rule of EDR-TRUST-01 T5 — ran only on a
+`FaultlineEnriched` event. A Finding born after its card was enriched waited for the card's next
+enrichment, or for an operator's one-time pass (KN-GO-2). The release-evaluation worker
+(EDR-DELIVERY-01 N-M2b) now judges a release's open Findings against their cards as soon as the
+release's correlation completes, with the same rules and the same proposal ids (idempotent),
+before roll-forward (the deterministic verdict outranks a carried judgement) and before
+publish-and-mark (a Knowledge read failure defers the row; "could not look" never reads as "no
+proposal"). The one-time pass remains for catch-up after an upgrade that changed a rule.
