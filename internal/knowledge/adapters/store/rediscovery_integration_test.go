@@ -94,3 +94,23 @@ func TestCorrelatedReleaseLedger(t *testing.T) {
 		t.Fatalf("after backfill: %+v, want only rel-scan with no evidence id", got)
 	}
 }
+
+// KN-SANITY-1: a flag upserts per (release, purl) and lists most CVEs first.
+func TestSuspectFanoutRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := store.New(newPool(t))
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	for _, f := range []app.SuspectFanout{
+		{ReleaseID: "rel-1", PURL: "pkg:golang/stdlib@vgo1.27.1", Version: "vgo1.27.1", Ecosystem: "golang", CVEs: 60, Reason: "r1", FlaggedAt: t0},
+		{ReleaseID: "rel-1", PURL: "pkg:pypi/x@latest", Version: "latest", Ecosystem: "pypi", CVEs: 80, Reason: "r2", FlaggedAt: t0},
+		{ReleaseID: "rel-1", PURL: "pkg:golang/stdlib@vgo1.27.1", Version: "vgo1.27.1", Ecosystem: "golang", CVEs: 165, Reason: "r1b", FlaggedAt: t0.Add(time.Hour)},
+	} {
+		if err := s.RecordSuspectFanout(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.SuspectFanouts(ctx)
+	if err != nil || len(got) != 2 || got[0].CVEs != 165 || got[0].Reason != "r1b" || got[1].PURL != "pkg:pypi/x@latest" {
+		t.Fatalf("flags = %+v err=%v, want the re-flag to replace and the order by cves", got, err)
+	}
+}

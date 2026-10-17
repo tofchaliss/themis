@@ -434,3 +434,18 @@ func TestSelectRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestVersionParsable(t *testing.T) {
+	for _, tc := range []struct {
+		eco, v string
+		want   bool
+	}{
+		{"go", "go1.27.1", true}, {"golang", "1.27.1", true}, {"pypi", "v2.0", false}, {"npm", "", false},
+		{"rpm", "0:4.0.9-39.el8_10", true}, {"apk", "1.2.13-r0", true}, {"generic", "latest", false},
+		{"maven", "2.0.0+build.1", true}, {"gem", "  3.1.0  ", true},
+	} {
+		if got := VersionParsable(tc.eco, tc.v); got != tc.want {
+			t.Errorf("VersionParsable(%q, %q) = %v, want %v", tc.eco, tc.v, got, tc.want)
+		}
+	}
+}

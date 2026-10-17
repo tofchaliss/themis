@@ -70,7 +70,7 @@ type config struct {
 	// a suppressed Finding whose decision carried a review_by date now past is re-surfaced on a
 	// clock, not only when its CVE happens to be enriched. Go duration, default 1h; "0" disables.
 	reviewByInterval time.Duration
-	rejudgeRanges bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
+	rejudgeRanges    bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).

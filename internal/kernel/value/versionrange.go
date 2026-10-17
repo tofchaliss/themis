@@ -746,3 +746,13 @@ func SelectRanges(ecosystem string, names []string, statements []RangeStatement,
 	}
 	return append(out, universal...)
 }
+
+// VersionParsable reports whether a component version is one the ecosystem's comparator can
+// read: non-empty after normalization and qualifier stripping, and starting with a digit. A
+// version that fails this is the KN-GO-1 shape (`go1.27.1` before the prefix was taught): a
+// feed asked with it answers with the package's whole history, so a correlation guard treats a
+// large answer for such a version as suspect (KN-SANITY-1). It is a shape test, not a verdict.
+func VersionParsable(ecosystem, version string) bool {
+	v := StripVersionQualifiers(strings.TrimSpace(NormalizeVersion(ecosystem, strings.TrimSpace(version))))
+	return looksLikeVersion(v)
+}

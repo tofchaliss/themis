@@ -86,6 +86,23 @@ if [ -z "${CENSUS_MATCHES_TSV:-}" ]; then
       WHERE f.current_stance IS NOT NULL GROUP BY 1,2" > "$DEC" 2>/dev/null || : > "$DEC"
 fi
 
+# ── 0. the guard's own flags (KN-SANITY-1) ──────────────────────────────────────────────────
+# Written at correlation time by the fan-out guard: a feed answered a version Themis cannot
+# parse with ≥ N distinct CVEs. Read from the knowledge database; the replay seam carries none.
+if [ -z "${CENSUS_MATCHES_TSV:-}" ]; then
+  hdr "0. Sanity flags — the fan-out guard's standing flags (KN-SANITY-1)"
+  SAN="$(psql "$PGBASE/knowledge?sslmode=disable" -AtF $'\t' -c \
+    "SELECT cves, purl, version, left(release_id, 8), to_char(flagged_at, 'YYYY-MM-DD') FROM correlation_sanity ORDER BY cves DESC, purl" 2>/dev/null || true)"
+  if [ -n "$SAN" ]; then
+    printf '  %6s  %-52s %-20s %-9s %s\n' CVEs purl version release flagged
+    printf '%s\n' "$SAN" | while IFS=$'\t' read -r c pu v rel d; do printf '  %6s  %-52s %-20s %-9s %s\n' "$c" "$pu" "$v" "$rel" "$d"; done
+    n="$(printf '%s\n' "$SAN" | wc -l | tr -d ' ')"
+    flag "$n component(s) flagged by the guard — a feed answered an unparseable version with a package's whole history; check the version spelling before trusting those matches"; FLAGS=$((FLAGS+n))
+  else
+    ok "no fan-out flag standing (guard off, table absent, or nothing suspect)"
+  fi
+fi
+
 # ── 1. fan-out ────────────────────────────────────────────────────────────────────────────────
 hdr "1. Fan-out — distinct CVEs per component, split by verdict (top $TOP; flagged at ≥ $FLAG_AT OPEN)"
 # A long history that Rocky has already fixed shows as cleared_vendor_fix and is not a sign of

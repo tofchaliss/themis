@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"fmt"
 	"context"
 	"errors"
 	"strings"
@@ -573,5 +574,82 @@ func TestCorrelate_ForeignProductRangeDoesNotHoldAGoComponent(t *testing.T) {
 	matches2 := newMatches()
 	if n, _ := correlation(t, inv, flat, matches2, newRepo()).Correlate(ctx, "rel-1", "ev-1"); n != 1 {
 		t.Fatalf("flat list: n=%d, want the match kept", n)
+	}
+}
+
+// --- KN-SANITY-1: the fan-out guard ----------------------------------------------------------
+
+type sanityRec struct {
+	flags []app.SuspectFanout
+	err   error
+}
+
+func (r *sanityRec) RecordSuspectFanout(_ context.Context, f app.SuspectFanout) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.flags = append(r.flags, f)
+	return nil
+}
+
+func manyCVEs(t *testing.T, n, offset int) []app.ProposalFor {
+	t.Helper()
+	out := make([]app.ProposalFor, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, app.ProposalFor{CVE: cve(t, fmt.Sprintf("CVE-2020-%d", offset+i)), Proposal: vulnFactsRanged(t, "osv")})
+	}
+	return out
+}
+
+// The KN-GO-1 shape, caught the day it happens: a Go component spelled `toolchain-go1.27.1` (unparseable)
+// draws 60 CVEs → flagged, recorded, every open occurrence's verdict carries the reason; the
+// matches are still recorded (nothing dropped). A parseable version with the same long history
+// is not flagged; below the threshold nothing is flagged; the guard off flags nothing; a
+// recorder failure surfaces.
+func TestCorrelate_FanoutGuardFlagsAnUnparseableVersion(t *testing.T) {
+	ctx := context.Background()
+	odd := app.InventoryComponent{PURL: "pkg:golang/stdlib@toolchain-go1.27.1", Name: "stdlib", Version: "toolchain-go1.27.1", Ecosystem: "golang"}
+	fine := app.InventoryComponent{PURL: "pkg:rpm/rocky/binutils@2.30-128.el8_10", Name: "binutils", Version: "2.30-128.el8_10", Ecosystem: "rpm"}
+	inv := fakeInventory{inv: app.Inventory{Components: []app.InventoryComponent{odd, fine}}}
+	disc := fakeDiscovery{byPURL: map[string][]app.ProposalFor{odd.PURL: manyCVEs(t, 60, 10000), fine.PURL: manyCVEs(t, 60, 20000)}}
+	rec := &sanityRec{}
+	matches := newMatches()
+	s := correlation(t, inv, disc, matches, newRepo()).WithFanoutGuard(50, rec)
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil || n != 120 {
+		t.Fatalf("correlate: n=%d err=%v, want all 120 matches recorded (nothing dropped)", n, err)
+	}
+	if len(rec.flags) != 1 || rec.flags[0].PURL != odd.PURL || rec.flags[0].CVEs != 60 || rec.flags[0].ReleaseID != "rel-1" || !strings.Contains(rec.flags[0].Reason, "cannot read") {
+		t.Fatalf("flags = %+v, want one for the unparseable Go spelling", rec.flags)
+	}
+	if r := matches.byPURL[odd.PURL].Verdict.Reason; !strings.Contains(r, "suspect fan-out") {
+		t.Fatalf("suspect occurrence verdict reason = %q, want the guard's reason", r)
+	}
+	if r := matches.byPURL[fine.PURL].Verdict.Reason; strings.Contains(r, "suspect fan-out") {
+		t.Fatalf("binutils (parseable, long history) must not carry the reason, got %q", r)
+	}
+	// Below the threshold: nothing.
+	rec2 := &sanityRec{}
+	if _, err := correlation(t, inv, fakeDiscovery{byPURL: map[string][]app.ProposalFor{odd.PURL: manyCVEs(t, 10, 30000)}}, newMatches(), newRepo()).WithFanoutGuard(50, rec2).Correlate(ctx, "rel-1", "ev-1"); err != nil || len(rec2.flags) != 0 {
+		t.Fatalf("below threshold: flags=%d err=%v", len(rec2.flags), err)
+	}
+	// Guard off: nothing, even at 60.
+	rec3 := &sanityRec{}
+	if _, err := correlation(t, inv, disc, newMatches(), newRepo()).WithFanoutGuard(0, rec3).Correlate(ctx, "rel-1", "ev-1"); err != nil || len(rec3.flags) != 0 {
+		t.Fatalf("guard off: flags=%d err=%v", len(rec3.flags), err)
+	}
+	// Recorder failure surfaces.
+	if _, err := correlation(t, inv, disc, newMatches(), newRepo()).WithFanoutGuard(50, &sanityRec{err: errors.New("db")}).Correlate(ctx, "rel-1", "ev-1"); err == nil {
+		t.Fatal("a recorder failure must surface")
+	}
+	// The scanner road is guarded the same way.
+	rec4 := &sanityRec{}
+	fold := app.NewFaultlineService(newRepo(), &seqIDs{}, fixedClock{}, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	corr := app.NewCorrelationService(fakeInventory{}, disc, fold, newMatches(), fixedClock{}).WithFanoutGuard(50, rec4)
+	if _, err := corr.DiscoverComponents(ctx, "rel-2", []app.InventoryComponent{odd}, nil); err != nil || len(rec4.flags) != 1 || rec4.flags[0].ReleaseID != "rel-2" {
+		t.Fatalf("scanner road: flags=%+v err=%v", rec4.flags, err)
+	}
+	if _, err := app.NewCorrelationService(fakeInventory{}, disc, fold, newMatches(), fixedClock{}).WithFanoutGuard(50, &sanityRec{err: errors.New("db")}).DiscoverComponents(ctx, "rel-2", []app.InventoryComponent{odd}, nil); err == nil {
+		t.Fatal("scanner road: a recorder failure must surface")
 	}
 }
