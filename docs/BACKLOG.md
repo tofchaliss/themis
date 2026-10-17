@@ -45,7 +45,7 @@ unblocks the most, highest first:
    auto-resolve. **Shipped 2026-10-17** (the loop on the reader path, cycle table 000010,
    decision written on ticket and mail; VM measurement pending: a Critical upload → one rebuild intent).
 8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
-9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW).
+9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
 10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first).
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
 12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order.
@@ -367,18 +367,13 @@ three angles, and two of them proposed fixes that would not have worked.
   answer is probably yes for rpm — then extend `CoversPackage` to `Source` for rpm components
   only, with the fixture that `compat-libtiff3` (its own SRPM) must still not cover `libtiff`.
 
-- [ ] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
-  2026-10-17).** LOW, clarity. The assessment marks a vendor statement `applicable` when its
-  product scope matches the release (family + major); the raise additionally requires the
-  statement's PACKAGE to be one of the Finding's components (`coveringStatement`). Measured on a
-  fresh Rocky 8 release: 18 Findings showed an "applicable" `not_affected` / `fix_deferred`
-  statement about a package the Finding does not carry (`lz4-java` on an `lz4` Finding,
-  `firefox` on an `nss` one) and correctly got no proposal — but the drawer reads as if the
-  vendor had cleared THIS Finding. **Do:** a third applicability facet on `VendorStatement`
-  (`covers_component: true|false`, computed with the same `CoversPackage` test), the chip
-  reading "applies to this release, other package" when scope matches and the package does not,
-  and the vendor-silence sentence counting only covering statements. Design the wording with
-  EDR-VEX-02 D16 before code.
+- [x] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
+  2026-10-17, closed 2026-10-17; EDR-VEX-02 D23).** LOW, clarity. **Done:** `VendorStatement`
+  carries `covers_component` (the raise's own `CoversPackage` test) beside `applicability`; the
+  drawer counts "applies here" only when both hold, shows an applicable statement about another
+  package as "applies to this release, other package" after the covering ones, and the silence
+  sentence names the other-package statements instead of reading as a clearance. **Measure on
+  the VM:** the Rocky 8 `lz4` Finding's drawer reads "other package" on the `lz4-java` row.
 
 - [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,

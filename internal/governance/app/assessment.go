@@ -233,6 +233,12 @@ type VendorStatement struct {
 	// speak about this package and why it did not clear the Finding — the audit trail this whole
 	// arc exists for. `unknown` is epistemic uncertainty, never product mismatch (D4).
 	Applicability string
+	// CoversComponent is the SECOND facet the raise rule asks (EDR-VEX-02 D23): whether the
+	// statement's package is one of this Finding's components (Finding.CoversPackage — the same
+	// test raiseVendorProposal uses, so the drawer and the raise cannot disagree). An
+	// `applicable` statement about another package applies to the release and still clears
+	// nothing here; showing only Applicability made it read as a clearance (VEX-GUI-2).
+	CoversComponent bool
 }
 
 // vendorStatements pairs each statement the card holds with Themis's determination for THIS
@@ -249,7 +255,8 @@ func vendorStatements(f *domain.Finding, release value.ProductScope, apps []Appl
 			Package: a.Package, Status: a.Status, Justification: a.Justification,
 			ScopeFamily: a.Scope.Family, ScopeMajor: a.Scope.Major,
 			Advisory: a.Advisory, FixedVersion: a.FixedVersion,
-			Applicability: string(applicabilityOf(release, a)),
+			Applicability:   string(applicabilityOf(release, a)),
+			CoversComponent: f.CoversPackage(a.Package),
 		})
 	}
 	return out

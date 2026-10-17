@@ -125,6 +125,8 @@ func toFindingAssessment(a app.FindingAssessment) gen.FindingAssessment {
 				ScopeFamily:   strptr(v.ScopeFamily), ScopeMajor: strptr(v.ScopeMajor),
 				Applicability: (*gen.VendorStatementApplicability)(strptr(v.Applicability)),
 			}
+			covers := v.CoversComponent
+			stmt.CoversComponent = &covers
 			if v.Advisory != "" {
 				stmt.Advisory = strptr(v.Advisory)
 			}

@@ -830,3 +830,41 @@ func TestReactToEnrichment_NoFixRaiseWriteFailureSurfaces(t *testing.T) {
 		t.Fatal("the write failure must surface")
 	}
 }
+
+// EDR-VEX-02 D23 (VEX-GUI-2): the projection carries the raise rule's SECOND facet — whether the
+// statement's package is one of this Finding's components — beside applicability, computed with
+// the same CoversPackage test. An applicable statement about another package is `applicable` and
+// `covers_component: false`: it applies to the release and clears nothing here, which is what the
+// measured lz4-java-on-lz4 misreading needed said.
+func TestGetFindingAssessment_VendorStatementCoversComponent(t *testing.T) {
+	repo := newRepo()
+	f := identified(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:rpm/rocky/lz4@1.8.3-3.el8_4", Name: "lz4", Version: "1.8.3-3.el8_4", Ecosystem: "rpm"}); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	repo.seed(f)
+	el := func(pkg, status string) app.Applicability {
+		return app.Applicability{Package: pkg, Status: status, Justification: "Red Hat: " + status, Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"}}
+	}
+	kn := stubKnowledge{k: app.FaultlineKnowledge{FaultlineID: "fl-1", CVE: "CVE-2024-1", Applicabilities: []app.Applicability{
+		el("lz4-java", "fix_deferred"), // same product, OTHER package
+		el("lz4", "not_affected"),      // same product, THIS package
+		{Package: "lz4", Status: "not_affected", Justification: "Red Hat: not affected", Scope: value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "9"}},
+	}}}
+	a, err := app.NewReadService(repo, fakeProjection{}, nil, 0).WithKnowledge(kn).GetFindingAssessment(context.Background(), "fnd-1")
+	if err != nil {
+		t.Fatalf("assessment: %v", err)
+	}
+	want := []struct {
+		applicability string
+		covers        bool
+	}{{"applicable", false}, {"applicable", true}, {"not_applicable", true}}
+	if len(a.VendorStatements) != len(want) {
+		t.Fatalf("statements = %+v", a.VendorStatements)
+	}
+	for i, w := range want {
+		if got := a.VendorStatements[i]; got.Applicability != w.applicability || got.CoversComponent != w.covers {
+			t.Errorf("statement %d (%s) = %s / covers %v, want %s / %v", i, got.Package, got.Applicability, got.CoversComponent, w.applicability, w.covers)
+		}
+	}
+}

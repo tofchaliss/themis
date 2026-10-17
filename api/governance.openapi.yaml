@@ -787,12 +787,20 @@ components:
         scope_major:
           type: string
           description: Major version of that family, e.g. `8`. Empty = no readable scope.
+        covers_component:
+          type: boolean
+          description: >-
+            The SECOND facet the raise rule asks (EDR-VEX-02 D23): whether the statement's
+            `package` is one of this Finding's components, by the same test the raise uses. An
+            `applicable` statement with `covers_component: false` applies to the release and is
+            about another package — it clears nothing here and was never proposed.
         applicability:
           type: string
           enum: [applicable, not_applicable, unknown, not_comparable]
           description: >-
-            THEMIS'S determination for this release. Only `applicable` can have become a
-            Proposal; every other value is non-clearing.
+            THEMIS'S determination for this release's PRODUCT SCOPE. Only `applicable` can have
+            become a Proposal — and only when `covers_component` is also true; every other value
+            is non-clearing.
             `not_applicable` — the vendor's scope was positively established and does not cover
             this release. A product mismatch, never uncertainty.
             `unknown` — the VENDOR'S STATEMENT could not be placed: no CPE, or one that cannot be
