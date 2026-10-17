@@ -40,7 +40,7 @@ unblocks the most, highest first:
    `buildWithParameters` sender, https enforced, max attempts. **Shipped 2026-10-17** (sender, knobs, constraint migration; nothing
    raises the intent until N-M2i).
 6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,
-   `delivery:callback` scope only, evidence on the intent.
+   `delivery:callback` scope only, evidence on the intent. **Shipped 2026-10-17** (route, scope rule, evidence table 000009).
 7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never
    auto-resolve.
 8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).

@@ -24,6 +24,7 @@ type Handler struct {
 	write   *app.PublicationService
 	read    *app.ReadService
 	rollups *app.RollupService // release-scoped VEX rollups (D13); nil = not configured
+	intents *app.DeliveryIntentService // CI rebuild callbacks (N-M2h); nil = outward delivery off
 }
 
 // NewHandler builds a Handler.

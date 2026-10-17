@@ -37,7 +37,12 @@ func (s *intentStore) CreateIntent(_ context.Context, in app.Intent) (app.Intent
 	return in, nil
 }
 
-func (s *intentStore) GetIntent(context.Context, string) (app.Intent, error) {
+func (s *intentStore) GetIntent(_ context.Context, id string) (app.Intent, error) {
+	for _, in := range s.created {
+		if in.ID == id {
+			return in, nil
+		}
+	}
 	return app.Intent{}, app.ErrIntentNotFound
 }
 func (s *intentStore) GetPendingForWork(context.Context, time.Time, int) ([]app.Intent, error) {

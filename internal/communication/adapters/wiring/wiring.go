@@ -38,7 +38,11 @@ const defaultRetentionWindow = 30 * 24 * time.Hour
 // Store, the inbound Governance Position-event consumer, the delivery worker, the outbox
 // relay, the state-based reconciler, and the retention worker.
 type Communication struct {
-	Handler   http.Handler
+	Handler http.Handler
+	// API is the handler behind Handler, kept so WireDelivery can attach the callback route's
+	// intent service after the fact (N-M2h): the router holds the pointer, so a later setter
+	// takes effect.
+	API       *commhttp.Handler
 	Store     *store.Store
 	Consumer  *inbound.Consumer
 	Delivery  *app.DeliveryService
@@ -72,8 +76,10 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey str
 		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
+	api := commhttp.NewHandler(write, read).WithRollups(rollups)
 	return Communication{
-		Handler:   commhttp.NewHandler(write, read).WithRollups(rollups).Router(),
+		Handler:   api.Router(),
+		API:       api,
 		Store:     st,
 		Consumer:  inbound.NewConsumer(write),
 		Delivery:  app.NewDeliveryService(st, deliverer, redactor, clock),
@@ -109,7 +115,10 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		DecisionAudience:   cfg.DecisionAudience,
 		EvaluationAudience: cfg.EvaluationAudience,
 		RebuildDestination: cfg.Jenkins.Job,
-	})
+	}).WithRebuildCallbacks(comm.Store)
+	if comm.API != nil {
+		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
+	}
 	if comm.Posture != nil {
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
 	}

@@ -91,3 +91,54 @@ func TestPostEvaluationOnly_ProducesTicketAndMail(t *testing.T) {
 		t.Errorf("second evaluation sent %d (jira=%d mail=%d), want 2 / 2 / 2", sent, h.jira.Calls(), h.mail.Calls())
 	}
 }
+
+// callbacksMem is the callback port for the worker-level test.
+type callbacksMem struct{ rows []app.RebuildCallback }
+
+func (c *callbacksMem) RecordCallback(_ context.Context, cb app.RebuildCallback) (app.RebuildCallback, error) {
+	c.rows = append(c.rows, cb)
+	return cb, nil
+}
+func (c *callbacksMem) ListCallbacks(context.Context, string) ([]app.RebuildCallback, error) {
+	return c.rows, nil
+}
+
+// N-M2f/N-M2h, worker level: a callback ALONE has no side effects — no intent is created, the
+// worker has nothing new to send, Jira and mail stay untouched. Jira and mail follow the
+// EVALUATION of the SBOM the callback names (step 2 → 4 of M2-8), never the callback (step 1).
+func TestCallbackAlone_NoSideEffects(t *testing.T) {
+	h := newHarness(t, testConfig())
+	cbs := &callbacksMem{}
+	h.svc = h.svc.WithRebuildCallbacks(cbs)
+	ctx := context.Background()
+
+	rebuild, err := h.svc.EnqueueCIRebuild(ctx, app.IntentLineage{}, "", "rel-1", "prod-1", "prj-1", "ev-1", []string{"CVE-2026-1"}, 1, nil)
+	if err != nil {
+		t.Fatalf("enqueue rebuild: %v", err)
+	}
+	if sent := h.runOnce(t); sent != 1 || h.rebuild.Calls() != 1 {
+		t.Fatalf("the rebuild intent itself is sent once, got %d (rebuild sender calls %d)", sent, h.rebuild.Calls())
+	}
+	intentsBefore := len(h.intents.order)
+
+	for i := 0; i < 2; i++ { // the job retries its callback
+		if _, err := h.svc.RecordRebuildCallback(ctx, app.RebuildCallback{IntentID: rebuild.ID, SBOMID: "ev-2", ImageDigest: "sha256:abc", BuildID: "77"}); err != nil {
+			t.Fatalf("callback %d: %v", i, err)
+		}
+	}
+	if sent := h.runOnce(t); sent != 0 {
+		t.Errorf("a callback made the worker send %d intents, want 0", sent)
+	}
+	if len(h.intents.order) != intentsBefore {
+		t.Errorf("a callback created %d intents", len(h.intents.order)-intentsBefore)
+	}
+	if h.jira.Calls() != 0 || h.mail.Calls() != 0 {
+		t.Errorf("jira=%d mail=%d after a callback, want 0/0 — they follow the evaluation, not the build", h.jira.Calls(), h.mail.Calls())
+	}
+	if in := h.intents.get(t, rebuild.ID); in.State != app.IntentDelivered {
+		t.Errorf("the rebuild intent changed state to %s", in.State)
+	}
+	if len(cbs.rows) != 2 || cbs.rows[0].IntentID != rebuild.ID {
+		t.Errorf("callbacks recorded = %+v (the memory port does not deduplicate; the store does)", cbs.rows)
+	}
+}

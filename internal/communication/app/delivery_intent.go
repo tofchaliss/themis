@@ -312,6 +312,8 @@ type DeliveryIntentService struct {
 	clock    Clock
 	cfg      DeliveryIntentConfig
 	renderer IntentPayloadRenderer
+	// callbacks may be nil — RecordRebuildCallback then refuses (N-M2h).
+	callbacks RebuildCallbacks
 }
 
 // NewDeliveryIntentService wires the service over the intent store; empty destination names

@@ -595,6 +595,27 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID1, app.IntentCIRebuild, "env-9", epoch)); err != nil {
 		t.Errorf("ci_rebuild must be admitted: %v", err)
 	}
+	// N-M2h: a callback is evidence ON the intent, idempotent per (intent, sbom); a second SBOM is
+	// a second row; an unknown intent is refused by the FK.
+	cb := app.RebuildCallback{IntentID: rebuildID1, SBOMID: "ev-2", ImageDigest: "sha256:abc", BuildID: "77", GitRef: "main", ReportedBy: "key:k-cb", ReceivedAt: epoch}
+	cb1, err := st.RecordCallback(ctx, cb)
+	if err != nil || cb1.BuildID != "77" || !cb1.ReceivedAt.Equal(epoch) {
+		t.Fatalf("record callback = %+v (err %v)", cb1, err)
+	}
+	cb.BuildID = "78"
+	if again, err := st.RecordCallback(ctx, cb); err != nil || again.BuildID != "77" {
+		t.Errorf("repeat callback = %+v (err %v), want the first row back", again, err)
+	}
+	cb.SBOMID = "ev-3"
+	if _, err := st.RecordCallback(ctx, cb); err != nil {
+		t.Errorf("second sbom: %v", err)
+	}
+	if cbs, err := st.ListCallbacks(ctx, rebuildID1); err != nil || len(cbs) != 2 || cbs[0].SBOMID != "ev-2" || cbs[1].SBOMID != "ev-3" {
+		t.Errorf("callbacks = %+v (err %v)", cbs, err)
+	}
+	if _, err := st.RecordCallback(ctx, app.RebuildCallback{IntentID: rebuildID2, SBOMID: "ev-2", ImageDigest: "x", ReceivedAt: epoch}); err == nil {
+		t.Error("a callback for an intent that does not exist must be refused by the store")
+	}
 	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID2, app.IntentType("ci_build"), "env-10", epoch)); err == nil {
 		t.Error("ci_build is not a delivery kind and must be refused by the constraint")
 	}

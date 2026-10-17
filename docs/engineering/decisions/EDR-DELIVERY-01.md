@@ -993,6 +993,10 @@ model output.** Parameters handed to Jenkins are snapshot facts only.
 
 ### M2-7 — The job uploads, calls back, and the callback is evidence on the INTENT
 
+> **Realized 2026-10-17 (N-M2h):** the route below, `delivery:callback` only (admin refused too),
+> mounted outside the write floor by exact path; evidence in `delivery_callbacks` (migration
+> 000009, idempotent per intent and SBOM). No HMAC variant, as decided.
+
 The Jenkins job builds the image, uploads the new SBOM to Evidence against the same Product /
 Project / Release under a new SBOM id, and then calls Themis back:
 

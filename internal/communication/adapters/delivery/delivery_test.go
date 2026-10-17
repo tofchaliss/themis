@@ -254,6 +254,7 @@ type harness struct {
 	worker  *delivery.Worker
 	jira    *delivery.FakeJiraDeliverer
 	mail    *delivery.FakeMailDeliverer
+	rebuild *delivery.FakeCIRebuildDeliverer
 	logger  *observability.Logger
 	logs    *observer.ObservedLogs
 	now     time.Time
@@ -268,6 +269,7 @@ func newHarness(t *testing.T, cfg delivery.Config) *harness {
 		intents: newMemIntents(),
 		jira:    delivery.NewFakeJiraDeliverer(logger),
 		mail:    delivery.NewFakeMailDeliverer(logger),
+		rebuild: delivery.NewFakeCIRebuildDeliverer(logger),
 		logger:  logger,
 		logs:    logs,
 		now:     epoch,
@@ -278,6 +280,7 @@ func newHarness(t *testing.T, cfg delivery.Config) *harness {
 	h.worker = delivery.NewWorker(cfg, h.intents, h.svc, map[app.IntentType]delivery.IntentDeliverer{
 		app.IntentJiraIssue: h.jira,
 		app.IntentEmail:     h.mail,
+		app.IntentCIRebuild: h.rebuild,
 	}, logger).WithClock(func() time.Time { return h.now })
 	return h
 }

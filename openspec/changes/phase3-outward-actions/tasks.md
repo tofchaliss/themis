@@ -559,12 +559,25 @@ recorded in `proposal.md` and accepted in `design.md`.
       a redundant build of the same parameters. **Nothing raises a `ci_rebuild` intent yet** — the
       loop that does is N-M2i. **Measure on the VM:** configure the job against the estate Jenkins,
       `deliveryctl`-seed nothing; the first intent arrives with N-M2i.
-- [ ] 6.8 **N-M2h** (`themis`; **API CHANGE**) — `POST /api/v1/communication/callbacks/ci-rebuild`
+- [x] 6.8 **N-M2h** (`themis`; **API CHANGE + one table**) — `POST /api/v1/communication/callbacks/ci-rebuild`
       in `api/communication.openapi.yaml` (spec-first), **`delivery:callback` only**, payload
       `{intent_id, build_id, git_ref, image_digest, sbom_id}` schema-enforced with `image_digest` and
       `sbom_id` required. Recorded as governed-external evidence **on the intent**. Tests:
       `TestCIRebuildCallback_AuthAndBodySchema` (every other scope refused, missing members refused)
       and `TestCallback_NoFindingMutation`.
+      **Implemented 2026-10-17.** `POST /callbacks/ci-rebuild` (spec-first, `recordCIRebuildCallback`,
+      202 with `{intent_id, sbom_id, received_at}`); the handler refuses every principal that is not
+      `delivery:callback` — admin and product keys included, two keys not one — and the composition
+      root mounts the route outside the method-based write floor (`commhttp.WriteFloorExcept`, exact
+      path and POST only) because the floor would refuse the one caller the route exists for.
+      Evidence lives in a new table **`delivery_callbacks`** (migration 000009; PK (intent, sbom) so a
+      job's retry adds nothing; FK to the intent) — "on the intent" needed a place, and the intent's
+      delivery outcome is not it. `app.RecordRebuildCallback` validates (intent exists and is a
+      `ci_rebuild`; `sbom_id` + `image_digest` required), creates no intent, renders nothing, sends
+      nothing. Tests: the two named, `TestWriteFloorExcept`, the app matrix, the store idempotence/FK,
+      and 6.6's `TestCallbackAlone_NoSideEffects` at worker level. **Measure on the VM:** mint a
+      `delivery:callback` key, POST a callback for a `ci_rebuild` intent → 202 and one row; the same
+      key on any other POST → 403.
 - [ ] 6.9 **N-M2i** (`themis`; no API, no schema) — stop conditions: success (targeted set closed)
       and exhaustion (stop + mail + Jira update telling a person); **no further `ci_rebuild` intent
       after a stop**; **no Finding is ever auto-resolved**. Tests:
