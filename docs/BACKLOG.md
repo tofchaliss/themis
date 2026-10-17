@@ -312,6 +312,19 @@ three angles, and two of them proposed fixes that would not have worked.
   the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
   2223.
 
+- [ ] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
+  2026-10-17).** LOW, clarity. The assessment marks a vendor statement `applicable` when its
+  product scope matches the release (family + major); the raise additionally requires the
+  statement's PACKAGE to be one of the Finding's components (`coveringStatement`). Measured on a
+  fresh Rocky 8 release: 18 Findings showed an "applicable" `not_affected` / `fix_deferred`
+  statement about a package the Finding does not carry (`lz4-java` on an `lz4` Finding,
+  `firefox` on an `nss` one) and correctly got no proposal — but the drawer reads as if the
+  vendor had cleared THIS Finding. **Do:** a third applicability facet on `VendorStatement`
+  (`covers_component: true|false`, computed with the same `CoversPackage` test), the chip
+  reading "applies to this release, other package" when scope matches and the package does not,
+  and the vendor-silence sentence counting only covering statements. Design the wording with
+  EDR-VEX-02 D16 before code.
+
 - [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,
   `openspec/changes/phase3-correlation-sanity`).** MED, false-positive guard. **Done:** the
