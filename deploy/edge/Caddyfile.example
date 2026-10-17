@@ -1,0 +1,17 @@
+# Themis network edge (VM-NET-1, EDR-GUI-01 D3): TLS in front of the dashboard.
+#
+# The dashboard listens on 127.0.0.1:8090 (THEMIS_DASHBOARD_ADDR). Caddy terminates HTTPS on
+# 443 and proxies to it, setting X-Forwarded-Proto so the session cookie turns Secure. Nothing
+# else is published: the six API nodes stay on loopback and talk to each other on this host.
+#
+# Install: copy to /etc/caddy/Caddyfile and replace the hostname with the VM's own
+# (`hostname -f`). `tls internal` issues a certificate from Caddy's local CA — fine for an
+# office network whose browsers trust that CA (`caddy trust`), or until a real certificate is
+# at hand; for a public name, delete the `tls internal` line and Caddy obtains one from Let's
+# Encrypt. The X-Forwarded-Proto header is added by reverse_proxy automatically.
+
+themis.example.internal {
+	tls internal
+	encode gzip
+	reverse_proxy 127.0.0.1:8090
+}
