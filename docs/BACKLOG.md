@@ -27,7 +27,9 @@ unblocks the most, highest first:
    `release_evaluated`/`new_sbom`, `finding_opened` out of the interest set; VM measurement
    pending: one `jira_issue` intent per changed upload, none after a sweep).
 2. **N-M2d — the release-evaluated event table + cursor read API** (6.4; API + schema). What the
-   runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`.
+   runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`. **Shipped 2026-10-17** (migration 000017, feed row in the
+   publish transaction, cursor read with the paging rules in the app; VM measurement pending:
+   the next upload's evaluation readable with a read key).
 3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the
    targeted set.
 4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail

@@ -346,6 +346,39 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /events/release-evaluated:
+    get:
+      operationId: getReleaseEvaluatedEvents
+      summary: >
+        Cursor read of the release-evaluated event feed (EDR-DELIVERY-01 M2-4). Rows strictly
+        after the `after` sequence, in sequence order; `limit` defaults to 100 and is clamped to
+        500. At-least-once — a subscriber deduplicates on `event_id` and stores `next` as its
+        cursor. Read scope.
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: The sequence cursor; everything later than it is returned. Omitted = from the start.
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          required: false
+          description: Page size; default 100, values above 500 are clamped.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseEvaluatedEventsPage'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/blast-radius:
     get:
       operationId: getBlastRadius
@@ -853,6 +886,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PostureEntry'
+    ReleaseEvaluatedEventsPage:
+      type: object
+      required: [items, next]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseEvaluatedEvent'
+        next:
+          type: integer
+          format: int64
+          description: The cursor for the following call — the last item's seq, or the caller's own cursor when the page is empty.
+    ReleaseEvaluatedEvent:
+      type: object
+      required: [seq, event_id, name, occurred_at, body]
+      properties:
+        seq:
+          type: integer
+          format: int64
+        event_id:
+          type: string
+          description: The bus envelope id of the same fact — the subscriber's dedup key.
+        name:
+          type: string
+          description: governance.release_evaluated
+        occurred_at:
+          type: string
+          format: date-time
+        body:
+          type: object
+          additionalProperties: true
+          description: The governance.release_evaluated.v1 payload exactly as published.
     PostureEntry:
       type: object
       properties:

@@ -99,7 +99,7 @@ func Wire(
 		blast = reg
 	}
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
-	read := app.NewReadService(st, st, blast, blastCap)
+	read := app.NewReadService(st, st, blast, blastCap).WithReleaseEvaluatedEvents(st)
 	// The one configurable stance weight (D14). A zero or out-of-range value keeps the domain
 	// default rather than silently zeroing every mitigated Finding's triage number.
 	if mitigatedWeight > 0 {

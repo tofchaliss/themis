@@ -893,6 +893,11 @@ intent, no attempt increment, no exhaustion notice.
 
 ### M2-4 — The harness subscribes by POLLING a Governance cursor read API
 
+> **Realized 2026-10-17 (N-M2d):** migration 000017 `release_evaluated_events`, written in the
+> worker's publish-and-mark transaction under the outbox envelope id; `GET
+> /api/v1/governance/events/release-evaluated?after=&limit=` as specified below, an unwired feed
+> answering 503 rather than an empty page.
+
 RC-1 deferred the transport. It is decided now, and it is the smallest thing that works:
 
 ```

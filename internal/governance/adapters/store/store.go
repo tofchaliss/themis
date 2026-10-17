@@ -832,7 +832,7 @@ func isUniqueViolation(err error) bool {
 // Purge removes all Governance rows (dev/test only).
 func (s *Store) Purge(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx,
-		`TRUNCATE processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
+		`TRUNCATE processed_events, governance_outbox, release_evaluations_pending, release_evaluated_events, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`)
 	return err
 }
 

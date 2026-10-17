@@ -483,7 +483,7 @@ recorded in `proposal.md` and accepted in `design.md`.
       auth-estate tests re-pointed; `communication/adapters/inbound` 100%. **Measure on the VM:**
       upload a changed SBOM with delivery on and read ONE `jira_issue` intent for the Release, with
       `product_id`/`project_id` set, and none after the next re-discovery sweep.
-- [ ] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
+- [x] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
       `release_evaluated_events` (migration **up/down**, reversibility a gate) and the cursor read
       API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>` in
       `api/governance.openapi.yaml` (spec-first, `make generate-api-governance`). Cursor is the
@@ -493,6 +493,18 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestReleaseEvaluatedEventsCursorRead_AfterLimit_AuthMatrix` (handler table test: auth matrix,
       paging bounds, clamped limit, empty page) + migration up/down reversibility. Coverage: register
       the store/handler packages in `scripts/check-coverage.sh` if new.
+      **Implemented 2026-10-17.** Migration **000017** `release_evaluated_events` (seq BIGSERIAL,
+      event_id UNIQUE = the outbox envelope id, name, release_id, occurred_at, body JSONB); the
+      worker's publish-and-mark writes it in the SAME transaction as the outbox note, so the bus and
+      the feed name one fact. `GET /api/v1/governance/events/release-evaluated` (spec-first,
+      `getReleaseEvaluatedEvents`): `after` int64 cursor, `limit` default 100 / clamped at 500 — the
+      rules live in `app.ReadService.ReleaseEvaluatedEvents`; `next` = last seq or the caller's own
+      cursor on an empty page; an unwired feed is **503**, never an empty page. Read floor: any
+      authenticated key (the matrix covers no key 401, read, admin and the callback class). Tests:
+      the named handler test + `_Failures`, the app paging rules, the store assertions inside
+      `TestPublishEvaluatedAndMark_OneGuardedTransaction`, `TestMigrationDownUp`. No new packages.
+      **Measure on the VM:** after the next upload, `GET …/events/release-evaluated` with a read key
+      returns the evaluation with `cause=new_sbom` and `next` > 0; `?after=<next>` is empty.
 - [ ] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
       **immediately-previous SBOM of the Release by upload order** and detect closure of the targeted
       set. Tests: `TestSelectPreviousSBOM_ByUploadOrder` and
