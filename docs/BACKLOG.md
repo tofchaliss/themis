@@ -341,7 +341,8 @@ three angles, and two of them proposed fixes that would not have worked.
   fan-out guard flags (never drops) a component whose discovery returns ≥
   `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` (50) distinct CVEs for a version
   `value.VersionParsable` cannot read — `correlation_sanity` row, `GET /sanity`, census section
-  0, reason on open verdicts. **Measure on the VM:** `GET /sanity` should be empty today. One Go component spelled
+  0, reason on open verdicts. **Measured on the VM (2026-10-17):** `GET /sanity` 200, empty, guard
+  on; census section 0 clean — nothing on the estate trips it today, as expected. One Go component spelled
   `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
   package's entire history; nothing noticed until a person read the queue. **Do:** at correlation,
   when ONE component's discovery returns more than N distinct CVEs (N configurable, default 50)
