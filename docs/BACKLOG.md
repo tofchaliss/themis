@@ -312,8 +312,13 @@ three angles, and two of them proposed fixes that would not have worked.
   the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
   2223.
 
-- [ ] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
-  (filed 2026-10-16; the shape of KN-GO-1).** MED, false-positive guard. One Go component spelled
+- [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
+  (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,
+  `openspec/changes/phase3-correlation-sanity`).** MED, false-positive guard. **Done:** the
+  fan-out guard flags (never drops) a component whose discovery returns ≥
+  `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` (50) distinct CVEs for a version
+  `value.VersionParsable` cannot read — `correlation_sanity` row, `GET /sanity`, census section
+  0, reason on open verdicts. **Measure on the VM:** `GET /sanity` should be empty today. One Go component spelled
   `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
   package's entire history; nothing noticed until a person read the queue. **Do:** at correlation,
   when ONE component's discovery returns more than N distinct CVEs (N configurable, default 50)

@@ -223,6 +223,10 @@ type VerdictConfig struct {
 	DisableInferredBridge bool
 	// ReverdictBatch bounds one re-verdict sweep (THEMIS_REVERDICT_BATCH; <=0 → default 200).
 	ReverdictBatch int
+	// FanoutSuspectAt is the fan-out guard's threshold (KN-SANITY-1,
+	// THEMIS_CORRELATION_FANOUT_SUSPECT_AT; default 50; 0 disables): a component whose discovery
+	// returns at least this many distinct CVEs for a version Themis cannot parse is flagged.
+	FanoutSuspectAt int
 	// ReclassifyBatch bounds one re-classification sweep (THEMIS_RECLASSIFY_BATCH; <=0 →
 	// default 100). Counted in CARDS, not rows — the stamps live on the card.
 	ReclassifyBatch int
@@ -262,7 +266,10 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		// behaves exactly as before and the event is simply never published — so it is wired
 		// here, where the store is already in hand, rather than left to a toggle.
 		WithCompletion(st).
-		WithInferredBridge(!verdict.DisableInferredBridge)
+		WithInferredBridge(!verdict.DisableInferredBridge).
+		// The fan-out guard (KN-SANITY-1): measures and names a suspect discovery answer; the
+		// matches are still recorded, the flag is readable at GET /sanity and by the census.
+		WithFanoutGuard(verdict.FanoutSuspectAt, st)
 	// Uploaded VEX: the same Evidence client serves the raw document; the OpenVEX parser turns
 	// it into applicability Proposals folded onto the cards (EDR-VEX-01 D2).
 	vexSvc := app.NewVEXApplicabilityService(evClient, vexParserAdapter{}, fold, sysClock{})
@@ -287,7 +294,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	gather := app.NewGatherService(fold,
 		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
 	kn := Knowledge{
-		Handler:  knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).Router(),
+		Handler:  knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).WithSanity(st).Router(),
 		Store:    st,
 		Consumer: inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Relay:    store.NewRelay(pool, pub, 100),

@@ -139,6 +139,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeedHealthReport'
+  /sanity:
+    get:
+      operationId: getSanityFlags
+      summary: The fan-out guard's standing flags (KN-SANITY-1).
+      description: >-
+        Components whose discovery answered a version Themis cannot parse with at least the
+        configured number of distinct CVEs — the shape of a false-positive class. Measurements
+        with a name on them; nothing here was dropped or decided. Empty with header
+        `X-Themis-Sanity: not-wired` when the guard is not configured.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanityFlag'
   /scanner-reports/{evidenceId}/unresolved:
     get:
       operationId: getUnresolvedComponents
@@ -307,6 +325,22 @@ components:
             Canonical ecosystem the fix was published for (rpm, apk, npm, ...). Absent when the
             source did not say; a consumer must treat an absent ecosystem as matching any
             component (only positive evidence of mismatch excludes).
+    SanityFlag:
+      type: object
+      required: [release_id, purl, cves, reason, flagged_at]
+      properties:
+        release_id: { type: string }
+        purl: { type: string }
+        version: { type: string }
+        ecosystem: { type: string }
+        cves:
+          type: integer
+          description: Distinct CVEs the feed returned for this component in one discovery.
+        reason:
+          type: string
+        flagged_at:
+          type: string
+          format: date-time
     RangeStatement:
       type: object
       required: [range]

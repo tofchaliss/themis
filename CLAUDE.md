@@ -395,6 +395,11 @@ OpenVEX / CSAF out.
   would be right the day it was written and silently wrong after (the defect that left the systemd
   installer loading only the first registry migration). Strictly read-only: mutations stay in a
   human's hands. `PGBASE=… ./scripts/vm-verify.sh [RELEASE_ID]`.
+- **The fan-out guard** (EDR-CORRELATION-01 D9, KN-SANITY-1, 2026-10-17): at correlation time a
+  component whose discovery returns ≥ `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` (50; 0 off) distinct
+  CVEs for a version `value.VersionParsable` cannot read is FLAGGED — `correlation_sanity`,
+  `GET /sanity`, census section 0, the reason on its open verdicts — and nothing is dropped or
+  decided. The KN-GO-1 shape, caught on day one.
 - `scripts/match-census.sh` — **read-only census of the match table for the SHAPE of a false-positive
   class** (KN-GO-1 taught this: one Go component spelled `go1.27.1` opened 165 CVEs, 155 false, and
   the shape was visible all along). Four signs: fan-out per component, purl-version vs

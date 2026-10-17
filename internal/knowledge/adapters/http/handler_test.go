@@ -522,3 +522,42 @@ func TestGetFaultlineById_CarriesRangeStatements(t *testing.T) {
 		t.Fatalf("go statement = %+v", v.View.Statements[1])
 	}
 }
+
+type fakeSanity struct {
+	flags []app.SuspectFanout
+	err   error
+}
+
+func (f fakeSanity) SuspectFanouts(context.Context) ([]app.SuspectFanout, error) { return f.flags, f.err }
+
+// KN-SANITY-1: GET /sanity lists the guard's flags; unwired, it answers empty and says so.
+func TestGetSanityFlags(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	h := knhttp.NewHandler(app.NewReadService(fakeRepo{}, fakeProjection{}), app.NewFeedHealthService(fakeFeedStore{}, feedClock{})).
+		WithSanity(fakeSanity{flags: []app.SuspectFanout{{ReleaseID: "rel-1", PURL: "pkg:golang/stdlib@vgo1.27.1", Version: "vgo1.27.1", Ecosystem: "golang", CVEs: 165, Reason: "suspect fan-out", FlaggedAt: at}}})
+	srv := httptest.NewServer(h.Router())
+	defer srv.Close()
+	status, body := get(t, srv.URL+"/sanity")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var flags []map[string]any
+	if err := json.Unmarshal(body, &flags); err != nil || len(flags) != 1 || flags[0]["cves"] != float64(165) || flags[0]["purl"] != "pkg:golang/stdlib@vgo1.27.1" {
+		t.Fatalf("flags = %+v err=%v", flags, err)
+	}
+	bad := httptest.NewServer(knhttp.NewHandler(app.NewReadService(fakeRepo{}, fakeProjection{}), app.NewFeedHealthService(fakeFeedStore{}, feedClock{})).WithSanity(fakeSanity{err: errors.New("db")}).Router())
+	defer bad.Close()
+	if status, _ := get(t, bad.URL+"/sanity"); status != http.StatusInternalServerError {
+		t.Fatalf("store failure status = %d, want 500", status)
+	}
+	none := httptest.NewServer(knhttp.NewHandler(app.NewReadService(fakeRepo{}, fakeProjection{}), app.NewFeedHealthService(fakeFeedStore{}, feedClock{})).Router())
+	defer none.Close()
+	resp, err := http.Get(none.URL + "/sanity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Themis-Sanity") != "not-wired" {
+		t.Fatalf("unwired: status %d header %q", resp.StatusCode, resp.Header.Get("X-Themis-Sanity"))
+	}
+}

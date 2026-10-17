@@ -68,10 +68,14 @@ type config struct {
 	// (EDR-VERDICT-01 D4 strict mode: only explicit SBOM ownership evidence may clear a
 	// language-package occurrence). Default on.
 	verdictInferredBridgeOff bool
-	reverdictInterval        time.Duration // THEMIS_REVERDICT_INTERVAL — catch-up sweep cadence (default 12h; the nudge path is the real latency).
-	reverdictBatch           int           // THEMIS_REVERDICT_BATCH — stale rows re-judged per sweep (default 200); a large estate drains across nudges/ticks.
-	reclassifyInterval       time.Duration // THEMIS_RECLASSIFY_INTERVAL — claim-class catch-up cadence (default 6h); the inline carrier-change trigger carries new evidence, so this drains history and rule changes.
-	reclassifyBatch          int           // THEMIS_RECLASSIFY_BATCH — stale CARDS re-announced per sweep (default 100); the loop keeps sweeping while a batch comes back full.
+	// THEMIS_CORRELATION_FANOUT_SUSPECT_AT — the fan-out guard (KN-SANITY-1): a component whose
+	// discovery returns at least this many distinct CVEs for a version Themis cannot parse is
+	// flagged (GET /sanity, match-census.sh). Default 50; 0 disables. It drops nothing.
+	fanoutSuspectAt    int
+	reverdictInterval  time.Duration // THEMIS_REVERDICT_INTERVAL — catch-up sweep cadence (default 12h; the nudge path is the real latency).
+	reverdictBatch     int           // THEMIS_REVERDICT_BATCH — stale rows re-judged per sweep (default 200); a large estate drains across nudges/ticks.
+	reclassifyInterval time.Duration // THEMIS_RECLASSIFY_INTERVAL — claim-class catch-up cadence (default 6h); the inline carrier-change trigger carries new evidence, so this drains history and rule changes.
+	reclassifyBatch    int           // THEMIS_RECLASSIFY_BATCH — stale CARDS re-announced per sweep (default 100); the loop keeps sweeping while a batch comes back full.
 
 	sigEnabled      bool          // THEMIS_EPSSKEV_ENABLED=1 — enable the scheduled exploit-signal enrichment sweep (EPSS/KEV/ExploitDB → already-carded CVEs; default off).
 	epssURL         string        // THEMIS_EPSS_URL — FIRST.org EPSS gzip-CSV URL (default the current-scores feed; empty skips EPSS).
@@ -135,6 +139,7 @@ func loadConfig() config {
 		rediscoveryLimit: envIntDefault("THEMIS_REDISCOVERY_LIMIT", app.DefaultRediscoveryLimit),
 
 		verdictInferredBridgeOff: os.Getenv("THEMIS_VERDICT_INFERRED_BRIDGE") == "0",
+		fanoutSuspectAt:          envIntDefault("THEMIS_CORRELATION_FANOUT_SUSPECT_AT", 50),
 		reverdictInterval:        parseDurationDefault(os.Getenv("THEMIS_REVERDICT_INTERVAL"), app.DefaultReverdictInterval),
 		reverdictBatch:           envIntDefault("THEMIS_REVERDICT_BATCH", app.DefaultReverdictBatch),
 		reclassifyInterval:       parseDurationDefault(os.Getenv("THEMIS_RECLASSIFY_INTERVAL"), app.DefaultReclassifyInterval),
@@ -258,6 +263,7 @@ func main() {
 		Limit:      cfg.rediscoveryLimit,
 	}, wiring.VerdictConfig{
 		DisableInferredBridge: cfg.verdictInferredBridgeOff,
+		FanoutSuspectAt:       cfg.fanoutSuspectAt,
 		ReverdictBatch:        cfg.reverdictBatch,
 		ReclassifyBatch:       cfg.reclassifyBatch,
 	})

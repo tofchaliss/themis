@@ -122,6 +122,9 @@ type CorrelationService struct {
 	// inferredBridge arms the D4 guess grade of the ownership bridge (default ON; the strict
 	// estate disables it via THEMIS_VERDICT_INFERRED_BRIDGE=0 in the composition root).
 	inferredBridge bool
+	// fanoutAt / sanity are the fan-out guard (KN-SANITY-1); 0 / nil = off.
+	fanoutAt int
+	sanity   SanityRecorder
 }
 
 // NewCorrelationService wires the correlation ports.
@@ -184,6 +187,10 @@ type PlannedMatch struct {
 	Component InventoryComponent
 	CVE       value.CVEID
 	Proposal  domain.Proposal
+	// Suspect, when set, is the fan-out guard's reason (KN-SANITY-1): the feed answered this
+	// component with an unusually long list for a version Themis cannot parse. The match is
+	// still recorded — nothing is dropped — but its open verdict carries the reason.
+	Suspect string
 }
 
 // CorrelationPlan is the output of correlation's read phase (PlanCorrelation): every
@@ -227,11 +234,73 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 		if err != nil {
 			return CorrelationPlan{}, err
 		}
+		suspect, err := s.flagFanout(ctx, releaseID, comp, discovered)
+		if err != nil {
+			return CorrelationPlan{}, err
+		}
 		for _, d := range discovered {
-			plan.Items = append(plan.Items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal})
+			plan.Items = append(plan.Items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal, Suspect: suspect})
 		}
 	}
 	return plan, nil
+}
+
+// SuspectFanout is one component the fan-out guard flagged (KN-SANITY-1): a feed answered a
+// version Themis cannot parse with at least the configured number of distinct CVEs — the shape
+// of a false-positive class (KN-GO-1: one Go component spelled go1.27.1 opened 165 CVEs).
+type SuspectFanout struct {
+	ReleaseID string
+	PURL      string
+	Version   string
+	Ecosystem string
+	CVEs      int
+	Reason    string
+	FlaggedAt time.Time
+}
+
+// SanityReader lists the guard's standing flags for the read API and the census.
+type SanityReader interface {
+	SuspectFanouts(ctx context.Context) ([]SuspectFanout, error)
+}
+
+// SanityRecorder persists the guard's flags so an operator, the census and the read API can see
+// them. The guard classifies nothing: a flag is a measurement with a name on it.
+type SanityRecorder interface {
+	RecordSuspectFanout(ctx context.Context, flag SuspectFanout) error
+}
+
+// WithFanoutGuard switches the fan-out guard on (KN-SANITY-1): a component whose discovery
+// returns at least `at` distinct CVEs AND whose version the ecosystem's comparator cannot read
+// is flagged. Zero or a nil recorder leaves the guard off. A parseable version with a genuinely
+// long history (binutils) never trips it — the guard is on the unparseable-version case only.
+func (s *CorrelationService) WithFanoutGuard(at int, sanity SanityRecorder) *CorrelationService {
+	s.fanoutAt, s.sanity = at, sanity
+	return s
+}
+
+// flagFanout applies the guard to one component's discovery result and returns the reason to
+// stamp on its matches ("" when not suspect). The recorder is written before the matches so the
+// flag exists even if the apply later fails and retries.
+func (s *CorrelationService) flagFanout(ctx context.Context, releaseID string, comp InventoryComponent, discovered []ProposalFor) (string, error) {
+	if s.fanoutAt <= 0 || s.sanity == nil {
+		return "", nil
+	}
+	cves := map[string]struct{}{}
+	for _, d := range discovered {
+		cves[d.CVE.String()] = struct{}{}
+	}
+	if len(cves) < s.fanoutAt || value.VersionParsable(comp.Ecosystem, comp.Version) {
+		return "", nil
+	}
+	reason := fmt.Sprintf("suspect fan-out: the feed returned %d CVEs for version %q, which Themis cannot read as a %s version (KN-SANITY-1)",
+		len(cves), comp.Version, value.CanonicalEcosystem(comp.Ecosystem))
+	if err := s.sanity.RecordSuspectFanout(ctx, SuspectFanout{
+		ReleaseID: releaseID, PURL: comp.PURL, Version: comp.Version, Ecosystem: comp.Ecosystem,
+		CVEs: len(cves), Reason: reason, FlaggedAt: s.clock.Now(),
+	}); err != nil {
+		return "", err
+	}
+	return reason, nil
 }
 
 // ApplyCorrelation runs correlation's WRITE phase inside the caller's transaction (the inbox
@@ -313,11 +382,17 @@ func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID stri
 		// cleared, not dropped: "checked and fine" must be distinguishable from "never looked"
 		// (the two were indistinguishable in the live KN-VERDICT-1 investigation), and a
 		// recorded row is what a later re-judgement can revisit.
+		verdict := judgeOccurrence(f.View(), item.Component, bridge)
+		if item.Suspect != "" && verdict.State.IsOpen() {
+			// The guard's reason rides the open verdict (KN-SANITY-1), so the drawer says why
+			// this occurrence deserves a second look; a clearance stands on its own evidence.
+			verdict.Reason = item.Suspect
+		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: releaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),
 			Component: item.Component, Score: f.View().Score(),
 			Priority: f.View().Priority(), Fixes: append([]domain.FixedVersion(nil), f.View().Fixes...),
-			Verdict:     judgeOccurrence(f.View(), item.Component, bridge),
+			Verdict:     verdict,
 			CardVersion: f.Version(),
 			// What this match MEANS, decided against the reconciled card (D3/D5). The match is
 			// recorded either way — D2 keeps everything, because an old build inside a superseded
@@ -351,8 +426,12 @@ func (s *CorrelationService) DiscoverComponents(ctx context.Context, releaseID s
 		if err != nil {
 			return 0, err
 		}
+		suspect, err := s.flagFanout(ctx, releaseID, comp, discovered)
+		if err != nil {
+			return 0, err
+		}
 		for _, d := range discovered {
-			items = append(items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal})
+			items = append(items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal, Suspect: suspect})
 		}
 	}
 	if len(items) == 0 {

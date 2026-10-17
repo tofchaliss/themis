@@ -24,6 +24,37 @@ type Handler struct {
 	// scanner serves the on-demand unresolved-components query (EDR-IDENTITY-01 D6). nil ⇒ the
 	// endpoint refuses honestly rather than answering "none", which would read as "all clear".
 	scanner *app.ScannerReportService
+	// sanity serves the fan-out guard's flags (KN-SANITY-1). nil ⇒ GET /sanity answers an empty
+	// list with a header saying the guard is not wired, never "all clear" by accident.
+	sanity app.SanityReader
+}
+
+// WithSanity wires the fan-out guard's flag reader (KN-SANITY-1).
+func (h *Handler) WithSanity(r app.SanityReader) *Handler {
+	h.sanity = r
+	return h
+}
+
+// GetSanityFlags lists the fan-out guard's standing flags (KN-SANITY-1).
+func (h *Handler) GetSanityFlags(w http.ResponseWriter, r *http.Request) {
+	if h.sanity == nil {
+		w.Header().Set("X-Themis-Sanity", "not-wired")
+		writeJSON(w, http.StatusOK, []gen.SanityFlag{})
+		return
+	}
+	flags, err := h.sanity.SuspectFanouts(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot read sanity flags", err.Error())
+		return
+	}
+	out := make([]gen.SanityFlag, 0, len(flags))
+	for _, f := range flags {
+		out = append(out, gen.SanityFlag{
+			ReleaseId: f.ReleaseID, Purl: f.PURL, Version: strptr(f.Version), Ecosystem: strptr(f.Ecosystem),
+			Cves: f.CVEs, Reason: f.Reason, FlaggedAt: f.FlaggedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // NewHandler builds a Handler.

@@ -271,3 +271,28 @@ EVENTBUS D9.
 - **EDR-TRUST-01 T8/T10** — why grounding cannot catch this, and why the class must ride the wire rather
   than be re-derived.
 - **PLAN-4 / PLAN-5 / PLAN-6** — plan defects that were real but downstream of this premise.
+
+## Amendment (2026-10-17) — the fan-out guard (KN-SANITY-1)
+
+### D9 — A long discovery answer for a version Themis cannot parse is flagged, never dropped
+
+**Measured reason.** One Go component spelled `go1.27.1` drew 165 CVEs from OSV on 2026-10-14, 155
+of them false, because the feed could not parse the version and answered with the package's whole
+history. The shape was visible on day one — one component, one unreadable version, a three-digit
+answer — and nothing looked. `match-census.sh` was written afterwards to see it by hand.
+
+**Decision.** At correlation time (the SBOM road and the scanner road alike), a component whose
+discovery returns at least `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` distinct CVEs (default 50; 0
+disables) AND whose version the ecosystem's comparator cannot read (`value.VersionParsable`) is
+**flagged**: a row in `correlation_sanity` per (release, purl) with the count and a reason,
+served at `GET /sanity`, listed first by the census, and the reason stamped on every open
+occurrence's verdict so the drawer says it. **Nothing is dropped, held or decided**: the matches
+are recorded exactly as before, because the guard cannot tell a mis-spelled version from a
+genuinely long history and the fail-safe direction is to keep the match. A parseable version with
+a long history (binutils, 79 CVEs) never trips it — the guard is on the unparseable-version case
+only. A recorder failure fails the correlation, as any store failure does; a flag is written before
+the matches so it survives a retry.
+
+**AI/automation lens.** The flag is the deterministic core; a later enhancement may let the AI
+explain a flagged component ("the version is spelled with a toolchain prefix") as an Information
+capability, proposing nothing.
