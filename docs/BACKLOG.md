@@ -312,13 +312,37 @@ three angles, and two of them proposed fixes that would not have worked.
   the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
   2223.
 
+- [ ] **VEX-SRC-1 — a vendor statement about a SOURCE package does not cover its binary
+  sub-packages (filed 2026-10-17).** LOW, precision. Red Hat's `not_affected` for `perl` (the
+  SRPM) sat beside a Finding carrying `perl-Carp`, `perl-Encode`, … (its binary sub-packages,
+  `Source: perl` on each component) and raised nothing, because `CoversPackage` matches purl and
+  name only. The safe side today; a statement covering by `MatchedComponent.Source` would be
+  both more precise and more complete. **Do:** decide (EDR-VEX-02) whether a source-package
+  statement covers every binary built from it — Red Hat's `package_state` is per SRPM, so the
+  answer is probably yes for rpm — then extend `CoversPackage` to `Source` for rpm components
+  only, with the fixture that `compat-libtiff3` (its own SRPM) must still not cover `libtiff`.
+
+- [ ] **VEX-GUI-2 — the drawer's "applies here" chip is coarser than the raise rule (filed
+  2026-10-17).** LOW, clarity. The assessment marks a vendor statement `applicable` when its
+  product scope matches the release (family + major); the raise additionally requires the
+  statement's PACKAGE to be one of the Finding's components (`coveringStatement`). Measured on a
+  fresh Rocky 8 release: 18 Findings showed an "applicable" `not_affected` / `fix_deferred`
+  statement about a package the Finding does not carry (`lz4-java` on an `lz4` Finding,
+  `firefox` on an `nss` one) and correctly got no proposal — but the drawer reads as if the
+  vendor had cleared THIS Finding. **Do:** a third applicability facet on `VendorStatement`
+  (`covers_component: true|false`, computed with the same `CoversPackage` test), the chip
+  reading "applies to this release, other package" when scope matches and the package does not,
+  and the vendor-silence sentence counting only covering statements. Design the wording with
+  EDR-VEX-02 D16 before code.
+
 - [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,
   `openspec/changes/phase3-correlation-sanity`).** MED, false-positive guard. **Done:** the
   fan-out guard flags (never drops) a component whose discovery returns ≥
   `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` (50) distinct CVEs for a version
   `value.VersionParsable` cannot read — `correlation_sanity` row, `GET /sanity`, census section
-  0, reason on open verdicts. **Measure on the VM:** `GET /sanity` should be empty today. One Go component spelled
+  0, reason on open verdicts. **Measured on the VM (2026-10-17):** `GET /sanity` 200, empty, guard
+  on; census section 0 clean — nothing on the estate trips it today, as expected. One Go component spelled
   `go1.27.1` opened 165 CVEs because the feed could not parse the version and answered with the
   package's entire history; nothing noticed until a person read the queue. **Do:** at correlation,
   when ONE component's discovery returns more than N distinct CVEs (N configurable, default 50)
@@ -470,8 +494,12 @@ three angles, and two of them proposed fixes that would not have worked.
   roll-forward and publish-and-mark; a Knowledge read failure defers the row) re-applies the
   version-range rule and the vendor statements to the release's open Findings. The one-time
   pass stays for the catch-up after an upgrade that changed a rule. Needs
-  `THEMIS_KNOWLEDGE_URL` and `THEMIS_REGISTRY_URL` (the worker). **Measure on the VM:** upload
-  a release and read the worker's proposals without running the pass.
+  `THEMIS_KNOWLEDGE_URL` and `THEMIS_REGISTRY_URL` (the worker). **Measured on the VM
+  (2026-10-17):** a fresh release (bot-sbom2, 114 Findings) was judged by the worker a minute
+  after correlation completed (~7 min for 306 matches); roll-forward raised 1; the vendor path
+  evaluated 18 scope-applicable statements and correctly raised none — every one named a package
+  the Finding does not carry (VEX-GUI-2, VEX-SRC-1 filed from that list). The positive case
+  (a `vexwnf:` raise on a fresh release) awaits the next Rocky image upload.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87

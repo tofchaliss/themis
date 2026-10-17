@@ -9,5 +9,5 @@ No `specs/` deltas — archive with `openspec archive phase3-correlation-sanity 
 - [x] 1.3 Store table + upsert/list + integration test; `GET /sanity` [API] + handler test;
   census section 0; config + env template.
 - [x] 1.4 EDR-CORRELATION-01 D9, BACKLOG, CLAUDE.md.
-- [ ] 1.5 VM: deploy knowledge; `GET /sanity` empty on the current estate (go1.27.1 is now
-  parseable); census section 0 reads "no fan-out flag standing".
+- [x] 1.5 VM (2026-10-17): deployed; `GET /sanity` answered 200 with an empty list and no
+  `not-wired` header (guard on, default 50); census section 0 read "no fan-out flag standing".
