@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -283,6 +284,9 @@ func main() {
 	// The D6 ingest reporter (EDR-IDENTITY-01): the app ring never logs, so the per-ingest
 	// outcome counts leave through a port and land here, where the logger lives.
 	kn.Scanner.WithIngestReporter(ingestLogger{logger.Component("scanner-ingest")})
+	// OBS-CORR-1: a long correlation says where it is. The app reports every component; this
+	// reporter turns that into one line per 50 components or 30 s, plus the last.
+	kn.Correlation.WithProgressReporter(newProgressLogger(logger.Component("correlation"), 50, 30*time.Second))
 	go reverdictLoop(kn.Reverdict, cfg.reverdictInterval, logger.Component("reverdict"))
 	go reclassifyLoop(kn.Reclassify, cfg.reclassifyInterval, logger.Component("reclassify"))
 	go retireLoop(kn.Retire, logger.Component("retire"))
@@ -495,6 +499,60 @@ func rediscoveryLoop(rs *app.RediscoveryService, interval time.Duration, logger 
 // (KN-SCAN-OBS-1) — so a report that half-translated looked exactly like one that fully
 // ingested. A non-zero `unresolved` is the headline: those observations named a component whose
 // identity could not be established, they are NOT bystanders, and they do not reach the posture.
+// progressLogger is the correlation progress reporter (OBS-CORR-1). A 555-component SBOM took
+// ~4.5 min to correlate on the estate, and for that whole time the bus cursor stood still —
+// it advances only when Handle returns — so an operator comparing the cursor with max(seq) saw
+// a stall. One line every `every` components or `interval`, whichever first, and always the
+// last component, names the release, the evidence and done/total, so a running correlation
+// reads as running.
+type progressLogger struct {
+	log      *observability.Logger
+	every    int
+	interval time.Duration
+	mu       sync.Mutex
+	last     map[string]time.Time // per (release, evidence): when the last line went out
+	now      func() time.Time
+}
+
+func newProgressLogger(log *observability.Logger, every int, interval time.Duration) *progressLogger {
+	if every <= 0 {
+		every = 50
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	return &progressLogger{log: log, every: every, interval: interval, last: map[string]time.Time{}, now: time.Now}
+}
+
+func (l *progressLogger) CorrelationProgress(p app.CorrelationProgress) {
+	key := p.ReleaseID + "|" + p.EvidenceID
+	now := l.now()
+	l.mu.Lock()
+	first := p.Done == 1
+	due := p.Done == p.Total || p.Done%l.every == 0 || now.Sub(l.last[key]) >= l.interval
+	if first {
+		l.last[key] = now // the first component starts the clock; it is not itself a line
+		due = p.Done == p.Total
+	}
+	if due {
+		l.last[key] = now
+		if p.Done == p.Total {
+			delete(l.last, key)
+		}
+	}
+	l.mu.Unlock()
+	if !due {
+		return
+	}
+	l.log.Info("correlation progress",
+		observability.String("release_id", p.ReleaseID),
+		observability.String("evidence_id", p.EvidenceID),
+		observability.Int("done", p.Done),
+		observability.Int("total", p.Total),
+		observability.Int("matches", p.Matches),
+		observability.Bool("complete", p.Done == p.Total))
+}
+
 type ingestLogger struct{ log *observability.Logger }
 
 func (l ingestLogger) ScannerIngest(releaseID, evidenceID string, recorded, items, skipped, unresolved int) {

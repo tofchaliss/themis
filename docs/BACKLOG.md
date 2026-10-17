@@ -48,7 +48,7 @@ unblocks the most, highest first:
 9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
 10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first). **Shipped 2026-10-17** (D24; rpm source join in `CoversPackage`).
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
-12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order.
+12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line).
 
 Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
 through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
@@ -6092,8 +6092,12 @@ under the 2026-08-07 re-derivation standard.
   443 and SSH; document both in INSTALLATION.md §8. Evidence: `docs/engineering/vm-test-2026-10-12.md`
   (2026-10-13 addendum).
 
-- [ ] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
-  VM round).** LOW, operability. A 555-component SBOM took ~4.5 min to correlate; for that whole
+- [x] **OBS-CORR-1 — a long SBOM correlation is silent, so it looks like a stall (filed 2026-10-12,
+  VM round; closed 2026-10-17).** LOW, operability. **Done:** the correlation service reports every
+  component through a `ProgressReporter` port (the app ring still never logs); the Knowledge
+  composition root turns that into a `correlation progress` line per 50 components or 30 s and
+  always the last one, with release, evidence, done/total and matches so far. **Measure on the
+  VM:** upload a large SBOM and read the lines between the upload and the completion event. A 555-component SBOM took ~4.5 min to correlate; for that whole
   time Knowledge's `stream_cursor` sat still (it advances only after Handle returns) and the log
   showed only the periodic sweeps, so an operator reading the cursor against `max(seq)` saw an
   apparent 5,600-event backlog that was really other streams' events. **Do:** log one progress

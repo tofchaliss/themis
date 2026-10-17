@@ -125,6 +125,40 @@ type CorrelationService struct {
 	// fanoutAt / sanity are the fan-out guard (KN-SANITY-1); 0 / nil = off.
 	fanoutAt int
 	sanity   SanityRecorder
+	// progress is optional (nil = silent): the per-component progress report of a correlation
+	// (OBS-CORR-1). The app ring never logs; the composition root hands in a reporter that does.
+	progress ProgressReporter
+}
+
+// CorrelationProgress is one step of a correlation: how many of the inventory's components have
+// been discovered so far, and how many matches that produced (OBS-CORR-1). A 555-component SBOM
+// takes minutes to correlate, and for that whole time the bus cursor stands still — it advances
+// only when Handle returns — so without this an operator reading the cursor sees a stall.
+type CorrelationProgress struct {
+	ReleaseID  string
+	EvidenceID string // empty for a scanner-report discovery (no inventory)
+	Done       int
+	Total      int
+	Matches    int // planned matches so far
+}
+
+// ProgressReporter receives correlation progress. It is called once per component; whether and
+// how often that becomes a log line is the reporter's decision (the composition root throttles).
+type ProgressReporter interface {
+	CorrelationProgress(p CorrelationProgress)
+}
+
+// WithProgressReporter attaches the progress reporter (OBS-CORR-1); nil leaves correlation silent.
+func (s *CorrelationService) WithProgressReporter(r ProgressReporter) *CorrelationService {
+	s.progress = r
+	return s
+}
+
+func (s *CorrelationService) report(releaseID, evidenceID string, done, total, matches int) {
+	if s.progress == nil {
+		return
+	}
+	s.progress.CorrelationProgress(CorrelationProgress{ReleaseID: releaseID, EvidenceID: evidenceID, Done: done, Total: total, Matches: matches})
 }
 
 // NewCorrelationService wires the correlation ports.
@@ -229,7 +263,7 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 		ReleaseID: releaseID, EvidenceID: evidenceID, Cause: domain.CauseNewSBOM,
 		Bridge: BridgeContext{Siblings: inv.Components, Owners: inv.Owners, InferredBridge: s.inferredBridge},
 	}
-	for _, comp := range inv.Components {
+	for i, comp := range inv.Components {
 		discovered, err := s.discover.VulnsForPackage(ctx, comp)
 		if err != nil {
 			return CorrelationPlan{}, err
@@ -241,6 +275,7 @@ func (s *CorrelationService) PlanCorrelation(ctx context.Context, releaseID, evi
 		for _, d := range discovered {
 			plan.Items = append(plan.Items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal, Suspect: suspect})
 		}
+		s.report(releaseID, evidenceID, i+1, len(inv.Components), len(plan.Items))
 	}
 	return plan, nil
 }
@@ -421,7 +456,7 @@ func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID stri
 // is ever synthesized onto a row (EDR-IDENTITY-01 D3, KN-SCAN-3b rule 4).
 func (s *CorrelationService) DiscoverComponents(ctx context.Context, releaseID string, comps []InventoryComponent, siblings []InventoryComponent) (int, error) {
 	var items []PlannedMatch
-	for _, comp := range comps {
+	for i, comp := range comps {
 		discovered, err := s.discover.VulnsForPackage(ctx, DiscoveryHint(comp, siblings))
 		if err != nil {
 			return 0, err
@@ -433,6 +468,7 @@ func (s *CorrelationService) DiscoverComponents(ctx context.Context, releaseID s
 		for _, d := range discovered {
 			items = append(items, PlannedMatch{Component: comp, CVE: d.CVE, Proposal: d.Proposal, Suspect: suspect})
 		}
+		s.report(releaseID, "", i+1, len(comps), len(items))
 	}
 	if len(items) == 0 {
 		return 0, nil
