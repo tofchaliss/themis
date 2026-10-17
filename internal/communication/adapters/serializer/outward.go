@@ -156,6 +156,7 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 		b.WriteString("\nUnknown means no severity could be read for those Findings. They are reported\n")
 		b.WriteString("separately rather than counted as Low: absence of evidence is not mildness.\n")
 	}
+	writeRebuildSection(&b, in)
 	b.WriteString("\nThis ticket is a PROJECTION of Themis state. No Themis decision follows from a Jira\n")
 	b.WriteString("transition, and resolving a Finding stays a decision taken in Themis by a person.\n")
 
@@ -208,9 +209,42 @@ func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Inten
 			b.WriteString("  " + cve + "\n")
 		}
 	}
+	writeRebuildSection(&b, in)
 	b.WriteString("\nNo Themis decision follows from this mail. The authoritative record is Themis; this\n")
 	b.WriteString("mail carries no attachment and no model output.\n")
 	return subject, []byte(b.String()), nil
+}
+
+// writeRebuildSection states the rebuild loop's decision for this evaluation (M2-8 / N-M2i) when
+// the intent carries one: what the cycle targets, what this rebuild closed, what is still open,
+// and whether the loop goes on, succeeded, or gave up — in which case it says so plainly, because
+// exhaustion is the one outcome that needs a person (M2-8). A clean evaluation carries no section.
+func writeRebuildSection(b *strings.Builder, in app.Intent) {
+	state := in.Snapshot[app.SnapshotRebuildState]
+	if state == "" {
+		return
+	}
+	attempt, limit := in.Snapshot[app.SnapshotRebuildAttempt], in.Snapshot[app.SnapshotRebuildMaxAttempts]
+	b.WriteString("\nRebuild loop\n")
+	switch state {
+	case app.OutcomeOpened:
+		fmt.Fprintf(b, "  Opened: Critical and High Findings remain, so Themis asked the build system for a rebuild (attempt %s of %s).\n", attempt, limit)
+	case app.OutcomeContinuing:
+		fmt.Fprintf(b, "  Continuing: the last rebuild left targeted Findings open, so Themis asked for another (attempt %s of %s).\n", attempt, limit)
+	case app.OutcomeSucceeded:
+		b.WriteString("  Succeeded: every Finding this cycle targeted is closed. No further rebuild is asked for.\n")
+	case app.OutcomeExhausted:
+		fmt.Fprintf(b, "  ATTEMPTS EXHAUSTED (%s of %s): targeted Findings are still open and Themis will not ask for another rebuild in this cycle. A person decides what happens next.\n", attempt, limit)
+	default:
+		fmt.Fprintf(b, "  %s\n", state)
+	}
+	writeFacts(b, []fact{
+		{"Targeted", in.Snapshot[app.SnapshotRebuildTargeted]},
+		{"Closed", in.Snapshot[app.SnapshotRebuildClosed]},
+		{"Still open", in.Snapshot[app.SnapshotRebuildOpen]},
+		{"Compared against", in.Snapshot[app.SnapshotRebuildBaseline]},
+	})
+	b.WriteString("  Findings are never auto-resolved by a rebuild; a closed Finding is one the new SBOM no longer opens.\n")
 }
 
 // RenderCIRebuild renders the rebuild instruction as text (M2-6 / N-M2g): the parameters the

@@ -578,11 +578,29 @@ recorded in `proposal.md` and accepted in `design.md`.
       and 6.6's `TestCallbackAlone_NoSideEffects` at worker level. **Measure on the VM:** mint a
       `delivery:callback` key, POST a callback for a `ci_rebuild` intent → 202 and one row; the same
       key on any other POST → 403.
-- [ ] 6.9 **N-M2i** (`themis`; no API, no schema) — stop conditions: success (targeted set closed)
+- [x] 6.9 **N-M2i** (`themis`; no API, **one table**) — stop conditions: success (targeted set closed)
       and exhaustion (stop + mail + Jira update telling a person); **no further `ci_rebuild` intent
       after a stop**; **no Finding is ever auto-resolved**. Tests:
       `TestStopOnSuccessOrExhaustion_NoFurtherIntents` and `TestNotifyPersonOnExhaustion` (ticket and
       mail wording).
+      **Implemented 2026-10-17.** `app.RebuildLoop` on the reader path (inside the inbox unit of
+      work, so a decision and its intents commit together): `Evaluate` opens a cycle when a `new_sbom`
+      evaluation leaves Critical/High (targeted set captured ONCE — `domain.NewTargetedSet`), compares
+      every later `new_sbom` evaluation of the Release against it (`domain.Closure`), and persists
+      `continuing` (attempts+1) / `succeeded` / `exhausted` (attempts ≥ `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`);
+      `Raise` asks for the rebuild only when the outcome calls for one — a stop raises nothing, and a
+      later new SBOM may open a NEW cycle. State in **`rebuild_cycles`** (migration 000010; at most one
+      open cycle per Release). Order on the consumer: loop decides → ticket → mail (both carry the
+      decision as a "Rebuild loop" section, exhaustion in capitals, "a person decides what happens
+      next") → rebuild intent. Within a loop the baseline is the SBOM Themis judged last
+      (`last_sbom_id`), which is M2-5's immediately-previous SBOM for the loop's own sequence — no
+      Evidence read on the reader path; `domain.SelectPreviousSBOM` stays for an Evidence-backed check
+      later. Rediscovery never reaches the loop (N-M2c). No Finding is touched anywhere. Tests: the two
+      named (worker level), the app loop end to end + failures, the consumer ordering, the renderer
+      section, the store cycle rules, `TargetedSetOf`. **Measure on the VM:** delivery + Jenkins on,
+      upload an SBOM with a Critical → one `ci_rebuild` intent and a ticket whose body says "Opened …
+      attempt 1 of 2"; let the job call back and upload; the next evaluation's ticket says Continuing
+      or Succeeded; after the limit, "ATTEMPTS EXHAUSTED" and no third intent.
 - [ ] 6.10 **N-M2j** (`themis-ai-runtime`; no API, no schema) — the harness poller: poll with
       `after=<sequence>` and `limit`, at-least-once, dedupe by **event id**, filter
       `cause=new_sbom`, persist a local high-water mark. Subscribes only — no Jira, no CI, no mail.

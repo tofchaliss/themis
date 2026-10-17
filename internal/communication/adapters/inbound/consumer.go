@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -64,6 +65,7 @@ var Subscription = eventbus.Subscription{
 type Consumer struct {
 	svc     *app.PublicationService
 	intents *app.DeliveryIntentService
+	loop    *app.RebuildLoop // the rebuild loop (N-M2i); nil = no cycles, no rebuilds
 }
 
 // NewConsumer wires the inbound consumer over the publication service. Outward delivery is
@@ -77,6 +79,14 @@ func NewConsumer(svc *app.PublicationService) *Consumer { return &Consumer{svc: 
 // queue nobody drains.
 func (c *Consumer) WithIntents(intents *app.DeliveryIntentService) *Consumer {
 	c.intents = intents
+	return c
+}
+
+// WithRebuildLoop attaches the rebuild loop (EDR-DELIVERY-01 M2-8 / N-M2i): a new_sbom
+// evaluation then opens, advances or stops the Release's cycle, the ticket and the mail carry
+// the loop's decision, and a continuing cycle asks the build system for the next rebuild.
+func (c *Consumer) WithRebuildLoop(loop *app.RebuildLoop) *Consumer {
+	c.loop = loop
 	return c
 }
 
@@ -134,17 +144,36 @@ func (c *Consumer) recordJiraIntent(ctx context.Context, env event.Envelope) err
 	if dto.Cause != causeNewSBOM {
 		return nil // re-discovery: a posture change with nothing built — no ticket (M2-3)
 	}
+	if strings.TrimSpace(dto.ReleaseID) == "" {
+		return nil // nothing to track a fix for; not a transport failure, so do not retry
+	}
 	snapshot := map[string]string{"sbom_id": dto.SBOMID, "cause": dto.Cause}
-	if _, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, snapshot); err != nil {
-		if errors.Is(err, app.ErrNoSubject) {
-			return nil // nothing to track a fix for; not a transport failure, so do not retry
+	// The loop decides FIRST (M2-8 steps 3 and 5): the cycle is opened, advanced or stopped, and
+	// its decision is stamped on the ticket and the mail below — a person reads what the loop
+	// did where the posture is. The rebuild itself is asked for LAST, after both are recorded.
+	var outcome app.RebuildOutcome
+	if c.loop != nil {
+		var err error
+		if outcome, err = c.loop.Evaluate(ctx, dto.ReleaseID, dto.SBOMID, env.ID); err != nil {
+			return err
 		}
+		for k, v := range outcome.Snapshot(c.loop.MaxAttempts()) {
+			snapshot[k] = v
+		}
+	}
+	if _, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, snapshot); err != nil {
 		return err
 	}
 	// The mail to the governed audience rides the SAME event (M2-8 step 4 / N-M2f): the ticket
 	// and the mail are two channels for one fact, deduplicated per (event, type). It is enqueued
 	// after the ticket so a Release that reaches the mail already has its ticket intent.
-	_, err := c.intents.EnqueueEvaluationMail(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, "", snapshot)
+	if _, err := c.intents.EnqueueEvaluationMail(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, "", snapshot); err != nil {
+		return err
+	}
+	if c.loop == nil {
+		return nil
+	}
+	_, _, err := c.loop.Raise(ctx, lineageOf(env), env.ID, outcome, dto.ProductID, dto.ProjectID)
 	return err
 }
 

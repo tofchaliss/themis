@@ -309,6 +309,49 @@ func TestRenderCIRebuild(t *testing.T) {
 	}
 }
 
+// N-M2i: the loop's decision is a section on the ticket and on the evaluation mail — each state in
+// its own words — and absent when the evaluation carried none.
+func TestRebuildSectionOnTicketAndMail(t *testing.T) {
+	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
+	ctx := context.Background()
+	base := map[string]string{"rebuild_attempt": "2", "rebuild_max_attempts": "2", "rebuild_targeted": "CVE-2026-0100,CVE-2026-0101",
+		"rebuild_closed": "CVE-2026-0101", "rebuild_open": "CVE-2026-0100", "rebuild_baseline_sbom": "ev-2"}
+	for state, want := range map[string]string{
+		"opened":     "Opened: Critical and High Findings remain",
+		"continuing": "Continuing: the last rebuild left targeted Findings open",
+		"succeeded":  "Succeeded: every Finding this cycle targeted is closed",
+		"exhausted":  "ATTEMPTS EXHAUSTED (2 of 2)",
+		"odd":        "  odd",
+	} {
+		snap := map[string]string{"rebuild_state": state}
+		for k, v := range base {
+			snap[k] = v
+		}
+		ticket := app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1", Snapshot: snap}
+		_, body, err := r.RenderJiraIssue(ctx, ticket)
+		if err != nil {
+			t.Fatalf("%s ticket: %v", state, err)
+		}
+		mailIn := app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Snapshot: snap}
+		mailIn.Snapshot["notification"] = "release_evaluated"
+		_, mail, err := r.RenderEvaluationEmail(ctx, mailIn)
+		if err != nil {
+			t.Fatalf("%s mail: %v", state, err)
+		}
+		for _, text := range []string{string(body), string(mail)} {
+			for _, w := range []string{"Rebuild loop", want, "Still open", "CVE-2026-0100", "Compared against", "ev-2", "never auto-resolved"} {
+				if !strings.Contains(text, w) {
+					t.Errorf("%s lacks %q:\n%s", state, w, text)
+				}
+			}
+		}
+	}
+	_, body, err := r.RenderJiraIssue(ctx, app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1"})
+	if err != nil || strings.Contains(string(body), "Rebuild loop") {
+		t.Errorf("a ticket without a loop decision must carry no section (err %v)", err)
+	}
+}
+
 func TestRenderIntentPayloadDispatches(t *testing.T) {
 	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
 	ctx := context.Background()

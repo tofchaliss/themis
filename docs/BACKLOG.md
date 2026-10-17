@@ -42,7 +42,8 @@ unblocks the most, highest first:
 6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,
    `delivery:callback` scope only, evidence on the intent. **Shipped 2026-10-17** (route, scope rule, evidence table 000009).
 7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never
-   auto-resolve.
+   auto-resolve. **Shipped 2026-10-17** (the loop on the reader path, cycle table 000010,
+   decision written on ticket and mail; VM measurement pending: a Critical upload → one rebuild intent).
 8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
 9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW).
 10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first).

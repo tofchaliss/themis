@@ -123,6 +123,11 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
 	}
 	comm.Consumer.WithIntents(intents)
+	// The rebuild loop (N-M2i) needs the posture to decide; without the read seam there is no
+	// loop, and a node without one still tickets and mails.
+	if comm.Posture != nil {
+		comm.Consumer.WithRebuildLoop(app.NewRebuildLoop(comm.Store, comm.Posture, intents, sysClock{}, cfg.RebuildMaxAttempts))
+	}
 	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
 	// Release already has is what keeps one ticket per Release when the project forbids labels on
 	// create (EDR-DELIVERY-01 M1b-4a).

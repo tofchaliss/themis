@@ -102,3 +102,14 @@ func TestTargetedSetClosure_DoesNotGrowMidLoop(t *testing.T) {
 		t.Errorf("empty target closure = %+v", c)
 	}
 }
+
+// A persisted set comes back in the same shape it was captured in.
+func TestTargetedSetOf(t *testing.T) {
+	set := domain.TargetedSetOf([]string{" CVE-2026-2 ", "CVE-2026-1", "", "CVE-2026-2"})
+	if got := set.CVEs(); !reflect.DeepEqual(got, []string{"CVE-2026-1", "CVE-2026-2"}) {
+		t.Errorf("TargetedSetOf = %v", got)
+	}
+	if domain.TargetedSetOf(nil).Len() != 0 {
+		t.Error("an empty record is an empty set")
+	}
+}

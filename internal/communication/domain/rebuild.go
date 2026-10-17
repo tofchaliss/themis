@@ -91,6 +91,23 @@ func NewTargetedSet(start []PostureRow) TargetedSet {
 	return TargetedSet{cves: cves}
 }
 
+// TargetedSetOf rebuilds a set from its recorded CVEs (a cycle row), trimmed, deduplicated and
+// sorted — the same shape NewTargetedSet produces, so a persisted set compares identically.
+func TargetedSetOf(cves []string) TargetedSet {
+	seen := map[string]bool{}
+	var out []string
+	for _, cve := range cves {
+		cve = strings.TrimSpace(cve)
+		if cve == "" || seen[cve] {
+			continue
+		}
+		seen[cve] = true
+		out = append(out, cve)
+	}
+	sort.Strings(out)
+	return TargetedSet{cves: out}
+}
+
 // CVEs returns the targeted CVEs in sorted order (a copy).
 func (t TargetedSet) CVEs() []string { return append([]string(nil), t.cves...) }
 

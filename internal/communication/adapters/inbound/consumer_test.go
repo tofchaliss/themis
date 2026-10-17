@@ -456,3 +456,73 @@ func TestConsumer_UnauthenticatedPostureReadRecordsNothingAndRetries(t *testing.
 		t.Errorf("an intent was recorded from a refused read: %+v", intents.created)
 	}
 }
+
+// --- N-M2i: the rebuild loop on the reader path ---------------------------------------------
+
+type cyclesMem struct{ rows map[string]*app.RebuildCycle }
+
+func (c *cyclesMem) OpenCycle(_ context.Context, releaseID string) (app.RebuildCycle, bool, error) {
+	if r, ok := c.rows[releaseID]; ok && r.State == app.CycleOpen {
+		return *r, true, nil
+	}
+	return app.RebuildCycle{}, false, nil
+}
+func (c *cyclesMem) CreateCycle(_ context.Context, cy app.RebuildCycle) (app.RebuildCycle, error) {
+	cy.ID = int64(len(c.rows) + 1)
+	c.rows[cy.ReleaseID] = &cy
+	return cy, nil
+}
+func (c *cyclesMem) UpdateCycle(_ context.Context, cy app.RebuildCycle) error {
+	c.rows[cy.ReleaseID] = &cy
+	return nil
+}
+
+type postureMem struct{ rows []app.ReleaseSeverityRow }
+
+func (p *postureMem) ReleaseSeverity(context.Context, string) ([]app.ReleaseSeverityRow, error) {
+	return p.rows, nil
+}
+
+// With the loop wired, a new_sbom evaluation that leaves Critical/High Findings records THREE
+// intents in order — ticket, mail (both carrying the loop's decision), then the rebuild — and a
+// clean evaluation records the two with no loop section and no rebuild.
+func TestConsumer_ReleaseEvaluatedDrivesTheRebuildLoop(t *testing.T) {
+	intents := newIntentStore()
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{})
+	posture := &postureMem{rows: []app.ReleaseSeverityRow{{CVE: "CVE-2026-1", BaseScore: 95}, {CVE: "CVE-2026-2", BaseScore: 30}}}
+	loop := app.NewRebuildLoop(&cyclesMem{rows: map[string]*app.RebuildCycle{}}, posture, svc, clk{}, 2)
+	c := consumer(&memRepo{}).WithIntents(svc).WithRebuildLoop(loop)
+
+	if err := c.Handle(context.Background(), govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 3 {
+		t.Fatalf("created %d intents, want ticket + mail + rebuild", len(intents.created))
+	}
+	ticket, mail, rebuild := intents.created[0], intents.created[1], intents.created[2]
+	if ticket.Type != app.IntentJiraIssue || mail.Type != app.IntentEmail || rebuild.Type != app.IntentCIRebuild {
+		t.Fatalf("types = %s %s %s", ticket.Type, mail.Type, rebuild.Type)
+	}
+	for _, in := range []app.Intent{ticket, mail} {
+		if in.Snapshot[app.SnapshotRebuildState] != app.OutcomeOpened || in.Snapshot[app.SnapshotRebuildTargeted] != "CVE-2026-1" || in.Snapshot[app.SnapshotRebuildAttempt] != "1" {
+			t.Errorf("%s snapshot lacks the loop decision: %v", in.Type, in.Snapshot)
+		}
+	}
+	if rebuild.OriginEventID != "env-1" || rebuild.ReleaseID != "rel-1" || rebuild.ProductID != "prod-1" || rebuild.Snapshot[app.SnapshotTargetedCVEs] != "CVE-2026-1" {
+		t.Errorf("rebuild = %+v", rebuild)
+	}
+
+	// Clean evaluation of another Release: two intents, no loop section, no rebuild.
+	posture.rows = []app.ReleaseSeverityRow{{CVE: "CVE-2026-2", BaseScore: 30}}
+	clean := `{"product_id":"prod-1","project_id":"prj-1","release_id":"rel-2","sbom_id":"ev-9","severity_counts":{},"cause":"new_sbom"}`
+	if err := c.Handle(context.Background(), govEnv("env-2", "governance.release_evaluated", []byte(clean))); err != nil {
+		t.Fatalf("handle clean: %v", err)
+	}
+	if len(intents.created) != 5 || intents.created[3].Snapshot[app.SnapshotRebuildState] != "" || intents.created[4].Type != app.IntentEmail {
+		t.Errorf("clean evaluation → %d intents (%v)", len(intents.created), intents.created[3].Snapshot)
+	}
+	// A rediscovery never reaches the loop.
+	if err := c.Handle(context.Background(), govEnv("env-3", "governance.release_evaluated", []byte(rediscoveryPayload))); err != nil || len(intents.created) != 5 {
+		t.Errorf("rediscovery: err %v, intents %d", err, len(intents.created))
+	}
+}

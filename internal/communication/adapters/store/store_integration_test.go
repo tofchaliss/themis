@@ -616,6 +616,33 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	if _, err := st.RecordCallback(ctx, app.RebuildCallback{IntentID: rebuildID2, SBOMID: "ev-2", ImageDigest: "x", ReceivedAt: epoch}); err == nil {
 		t.Error("a callback for an intent that does not exist must be refused by the store")
 	}
+	// N-M2i: cycle state — one open cycle per Release, the targeted set round-trips, an update
+	// moves the mutable half, and a closed cycle is no longer "the open one".
+	if _, found, err := st.OpenCycle(ctx, "rel-1"); err != nil || found {
+		t.Fatalf("open cycle before any = %v / %v", found, err)
+	}
+	cy, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", OriginEventID: "env-1", BaselineSBOMID: "ev-1", LastSBOMID: "ev-1",
+		Targeted: []string{"CVE-2026-1", "CVE-2026-2"}, Attempts: 1, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch})
+	if err != nil || cy.ID == 0 {
+		t.Fatalf("create cycle = %+v (err %v)", cy, err)
+	}
+	if _, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", BaselineSBOMID: "ev-1", LastSBOMID: "ev-1", Targeted: []string{"CVE-2026-1"}, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch}); err == nil {
+		t.Error("a second open cycle for one Release must be refused")
+	}
+	got, found, err := st.OpenCycle(ctx, "rel-1")
+	if err != nil || !found || got.ID != cy.ID || len(got.Targeted) != 2 || got.Targeted[1] != "CVE-2026-2" || got.Attempts != 1 {
+		t.Fatalf("open cycle = %+v / %v / %v", got, found, err)
+	}
+	got.LastSBOMID, got.Attempts, got.State, got.UpdatedAt = "ev-2", 2, app.CycleExhausted, epoch.Add(time.Minute)
+	if err := st.UpdateCycle(ctx, got); err != nil {
+		t.Fatalf("update cycle: %v", err)
+	}
+	if _, found, err := st.OpenCycle(ctx, "rel-1"); err != nil || found {
+		t.Errorf("an exhausted cycle is still reported open: %v / %v", found, err)
+	}
+	if _, err := st.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-1", BaselineSBOMID: "ev-3", LastSBOMID: "ev-3", Targeted: []string{"CVE-2026-9"}, Attempts: 1, State: app.CycleOpen, OpenedAt: epoch, UpdatedAt: epoch}); err != nil {
+		t.Errorf("a new cycle after a closed one must be allowed: %v", err)
+	}
 	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID2, app.IntentType("ci_build"), "env-10", epoch)); err == nil {
 		t.Error("ci_build is not a delivery kind and must be refused by the constraint")
 	}

@@ -1027,10 +1027,13 @@ X-API-Key: <delivery:callback key>
 
 ### M2-8 — The loop: compare after evaluation, one knob, stop and tell a person
 
-> **Realized in part 2026-10-17 (N-M2f):** step 4's ticket update and mail now follow every
-> `new_sbom` evaluation (`EnqueueEvaluationMail`, `RenderEvaluationEmail`, audience
-> `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE`), deduplicated per (event, type) by migration 000007.
-> The comparison wording and the stop rules arrive with N-M2i; the callback with N-M2h.
+> **Realized 2026-10-17 (N-M2f, N-M2i):** step 4's ticket update and mail follow every `new_sbom`
+> evaluation (`EnqueueEvaluationMail`, `RenderEvaluationEmail`, audience
+> `THEMIS_COMMUNICATION_EVALUATION_AUDIENCE`), deduplicated per (event, type) by migration 000007;
+> the loop itself is `app.RebuildLoop` over `rebuild_cycles` (migration 000010): open on
+> Critical/High, compare against the set captured at start, continue / succeed / exhaust at
+> `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`, nothing raised after a stop, exhaustion written on the
+> ticket and the mail. The callback is N-M2h.
 
 The cycle, once per attempt, in this order and no other:
 

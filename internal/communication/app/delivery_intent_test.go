@@ -28,10 +28,11 @@ func (s *intentStore) CreateIntent(_ context.Context, in app.Intent) (app.Intent
 		return app.Intent{}, s.err
 	}
 	if in.OriginEventID != "" {
-		if existing, ok := s.byEvent[in.OriginEventID]; ok {
+		key := in.OriginEventID + "|" + string(in.Type) // one intent per (event, type) — N-M2f
+		if existing, ok := s.byEvent[key]; ok {
 			return existing, nil
 		}
-		s.byEvent[in.OriginEventID] = in
+		s.byEvent[key] = in
 	}
 	s.created = append(s.created, in)
 	return in, nil
