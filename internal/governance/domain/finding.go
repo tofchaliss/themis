@@ -390,7 +390,9 @@ func (f Finding) ActiveComponents() []MatchedComponent {
 // CoversPackage reports whether a vendor VEX statement about `pkg` applies to this Finding —
 // i.e. one of its matched components IS that package (EDR-VEX-01 D4). A VEX product id is
 // matched against a component's full PURL, its bare name, or the PURL without the `@version`
-// suffix (the common vendor form, e.g. "pkg:rpm/openssl" for "pkg:rpm/openssl@1.0.2"). Empty
+// suffix (the common vendor form, e.g. "pkg:rpm/openssl" for "pkg:rpm/openssl@1.0.2"), and —
+// for an rpm component only — against its recorded SOURCE package name (EDR-VEX-02 D24: Red
+// Hat states per SRPM, the inventory carries the binary sub-packages built from it). Empty
 // `pkg` never matches. The match is intentionally conservative: a broader/looser heuristic
 // could suppress the wrong Finding, and suppression is a governed, human-overridable step.
 func (f Finding) CoversPackage(pkg string) bool {
@@ -400,6 +402,9 @@ func (f Finding) CoversPackage(pkg string) bool {
 	}
 	for _, c := range f.components {
 		if c.PURL == pkg || c.Name == pkg || strings.HasPrefix(c.PURL, pkg+"@") {
+			return true
+		}
+		if c.Ecosystem == "rpm" && c.Source != "" && c.Source == pkg {
 			return true
 		}
 	}

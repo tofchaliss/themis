@@ -46,7 +46,7 @@ unblocks the most, highest first:
    decision written on ticket and mail; VM measurement pending: a Critical upload → one rebuild intent).
 8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
 9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
-10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first).
+10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first). **Shipped 2026-10-17** (D24; rpm source join in `CoversPackage`).
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
 12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order.
 
@@ -357,8 +357,13 @@ three angles, and two of them proposed fixes that would not have worked.
   the 1008 accepted_risk signings, not from this change.) Open Findings on the estate afterwards:
   2223.
 
-- [ ] **VEX-SRC-1 — a vendor statement about a SOURCE package does not cover its binary
-  sub-packages (filed 2026-10-17).** LOW, precision. Red Hat's `not_affected` for `perl` (the
+- [x] **VEX-SRC-1 — a vendor statement about a SOURCE package does not cover its binary
+  sub-packages (filed 2026-10-17, closed 2026-10-17; EDR-VEX-02 D24).** LOW, precision. **Done:**
+  `CoversPackage` also matches an rpm component's recorded `Source` (never a name prefix; rpm
+  only), so Red Hat's per-SRPM statements reach the binaries; the raise and `covers_component`
+  share the one test. Fixture: `compat-libtiff3` stays uncovered by `libtiff`. **Measure on the
+  VM:** after the next re-judge pass, the `perl-Carp` Finding shows Red Hat's `perl` statement as
+  "applies here" and carries its proposal. Red Hat's `not_affected` for `perl` (the
   SRPM) sat beside a Finding carrying `perl-Carp`, `perl-Encode`, … (its binary sub-packages,
   `Source: perl` on each component) and raised nothing, because `CoversPackage` matches purl and
   name only. The safe side today; a statement covering by `MatchedComponent.Source` would be
