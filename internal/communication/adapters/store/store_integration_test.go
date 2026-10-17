@@ -504,11 +504,13 @@ func TestRollupStoreRoundTrip(t *testing.T) {
 // --- N-M1a: outward-delivery intents -------------------------------------------------------
 
 const (
-	intentID1 = "11111111-1111-4111-8111-111111111111"
-	mailID1   = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e5f"
-	mailID2   = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e60"
-	intentID2 = "22222222-2222-4222-8222-222222222222"
-	intentID3 = "33333333-3333-4333-8333-333333333333"
+	intentID1  = "11111111-1111-4111-8111-111111111111"
+	mailID1    = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e5f"
+	rebuildID1 = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e61"
+	rebuildID2 = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e62"
+	mailID2    = "8d6f6a2c-1b3e-4c5d-9e7f-0a1b2c3d4e60"
+	intentID2  = "22222222-2222-4222-8222-222222222222"
+	intentID3  = "33333333-3333-4333-8333-333333333333"
 )
 
 // intentPayload is a materialized payload shaped like the serializer's: one Subject line, a blank
@@ -588,6 +590,13 @@ func TestDeliveryIntentIdempotenceOnTheEventID(t *testing.T) {
 	}
 	if n := count(t, pool, `SELECT count(*) FROM delivery_intents WHERE origin_event_id='env-1'`); n != 2 {
 		t.Fatalf("rows for env-1 = %d, want 2 (one per type)", n)
+	}
+	// N-M2g: the type vocabulary admits ci_rebuild (migration 000008) — and still nothing else.
+	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID1, app.IntentCIRebuild, "env-9", epoch)); err != nil {
+		t.Errorf("ci_rebuild must be admitted: %v", err)
+	}
+	if _, err := st.CreateIntent(ctx, pendingIntent(rebuildID2, app.IntentType("ci_build"), "env-10", epoch)); err == nil {
+		t.Error("ci_build is not a delivery kind and must be refused by the constraint")
 	}
 
 	// Worker-sourced intents carry NULL and never collide.

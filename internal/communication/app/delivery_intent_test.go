@@ -421,6 +421,35 @@ func TestPayloadEnvelope(t *testing.T) {
 	}
 }
 
+// N-M2g: the rebuild intent addresses the configured job name, stamps the parameters the job
+// receives into the snapshot (prior SBOM, the targeted set, a 1-based attempt), and refuses
+// without a Release.
+func TestEnqueueCIRebuild(t *testing.T) {
+	store := newIntentStore()
+	in, err := intentSvc(store, app.DeliveryIntentConfig{}).EnqueueCIRebuild(
+		context.Background(), lineage(), "env-7", "rel-1", "prod-1", "prj-1", "ev-1", []string{"CVE-2026-1", "CVE-2026-2"}, 0, nil)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if in.Type != app.IntentCIRebuild || in.Destination != "themis-rebuild" || in.ReleaseID != "rel-1" || in.OriginEventID != "env-7" {
+		t.Errorf("intent = %+v", in)
+	}
+	if in.Snapshot[app.SnapshotPriorSBOMID] != "ev-1" || in.Snapshot[app.SnapshotTargetedCVEs] != "CVE-2026-1,CVE-2026-2" ||
+		in.Snapshot[app.SnapshotAttempt] != "1" || in.Snapshot["product_id"] != "prod-1" || in.Snapshot["project_id"] != "prj-1" {
+		t.Errorf("snapshot = %v", in.Snapshot)
+	}
+	named, err := intentSvc(newIntentStore(), app.DeliveryIntentConfig{RebuildDestination: "team/build-image"}).EnqueueCIRebuild(
+		context.Background(), lineage(), "", "rel-1", "", "", "", nil, 2, nil)
+	if err != nil || named.Destination != "team/build-image" || named.Snapshot[app.SnapshotAttempt] != "2" || named.Snapshot[app.SnapshotTargetedCVEs] != "" {
+		t.Errorf("configured job = %+v (err %v)", named, err)
+	}
+	empty := newIntentStore()
+	if _, err := intentSvc(empty, app.DeliveryIntentConfig{}).EnqueueCIRebuild(
+		context.Background(), lineage(), "", "", "prod-1", "prj-1", "ev-1", nil, 1, nil); !errors.Is(err, app.ErrNoSubject) || len(empty.created) != 0 {
+		t.Errorf("err = %v (created %d), want ErrNoSubject and nothing enqueued", err, len(empty.created))
+	}
+}
+
 // N-M2f: the evaluation mail names its Release, takes the configured evaluation audience when
 // none is given per call, carries the product and project the event supplied, and is marked as
 // the evaluation notification so the renderer can tell it from a decision mail.

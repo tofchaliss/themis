@@ -37,7 +37,8 @@ unblocks the most, highest first:
    goes to the audience; never from the callback. **Shipped 2026-10-17** (evaluation mail beside the ticket, one
    intent per channel per event; the closed/open wording follows with the stop rules in N-M2i).
 5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
-   `buildWithParameters` sender, https enforced, max attempts.
+   `buildWithParameters` sender, https enforced, max attempts. **Shipped 2026-10-17** (sender, knobs, constraint migration; nothing
+   raises the intent until N-M2i).
 6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,
    `delivery:callback` scope only, evidence on the intent.
 7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never

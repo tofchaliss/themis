@@ -290,6 +290,25 @@ func TestRenderEvaluationEmail(t *testing.T) {
 	}
 }
 
+// N-M2g: the rebuild intent is rendered as text an operator can read — the job, the identity,
+// the prior SBOM, the targeted set and the attempt — and nothing a job would not be handed.
+func TestRenderCIRebuild(t *testing.T) {
+	subject, body := serializer.RenderCIRebuild(app.Intent{Type: app.IntentCIRebuild, ReleaseID: "rel-1", ProductID: "prod-1",
+		ProjectID: "prj-1", Destination: "team/build-image",
+		Snapshot: map[string]string{"attempt": "1", "targeted_cves": "CVE-2026-1,CVE-2026-2", "prior_sbom_id": "ev-1"}})
+	if subject != "Themis rebuild - Release rel-1 - attempt 1" {
+		t.Errorf("subject = %q", subject)
+	}
+	for _, want := range []string{"team/build-image", "rel-1", "prod-1", "prj-1", "ev-1", "CVE-2026-1,CVE-2026-2", "changes no Finding"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body lacks %q:\n%s", want, body)
+		}
+	}
+	if s, _ := serializer.RenderCIRebuild(app.Intent{Type: app.IntentCIRebuild, ReleaseID: "rel-2", Snapshot: map[string]string{}}); !strings.HasSuffix(s, "attempt 1") {
+		t.Errorf("a missing attempt reads as the first: %q", s)
+	}
+}
+
 func TestRenderIntentPayloadDispatches(t *testing.T) {
 	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
 	ctx := context.Background()
@@ -309,6 +328,12 @@ func TestRenderIntentPayloadDispatches(t *testing.T) {
 			"evaluation mail",
 			app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Snapshot: map[string]string{"notification": "release_evaluated"}},
 			"Themis evaluated Release rel-1 - Critical 2, High 2",
+		},
+		{
+			"rebuild",
+			app.Intent{Type: app.IntentCIRebuild, ReleaseID: "rel-1", Destination: "team/build-image",
+				Snapshot: map[string]string{"attempt": "2", "targeted_cves": "CVE-2026-1", "prior_sbom_id": "ev-1"}},
+			"Themis rebuild - Release rel-1 - attempt 2",
 		},
 		{
 			"dead-letter mail",

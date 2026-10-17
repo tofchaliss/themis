@@ -960,6 +960,11 @@ excluding it from the target keeps the human's view complete and the machine's g
 
 ### M2-6 — `ci_rebuild` over Jenkins: `buildWithParameters`, HTTPS or refuse at startup
 
+> **Realized 2026-10-17 (N-M2g):** `communication/adapters/delivery/jenkins.go`, the knobs in the
+> table below plus `THEMIS_COMMUNICATION_JENKINS_TIMEOUT`, migration 000008 admitting
+> `ci_rebuild`, `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`. The loop that raises the intent is
+> N-M2i; until then the sender has nothing to send.
+
 RC-3's fourth delivery kind gets a sender. It starts a Jenkins job with
 **`buildWithParameters`** over **HTTP Basic auth (user + API token)** — Jenkins's own documented
 remote-build path, which needs no plugin and no webhook back-channel.

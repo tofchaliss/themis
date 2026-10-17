@@ -92,6 +92,9 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail:
 		subject, body := RenderDecisionEmail(in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentCIRebuild:
+		subject, body := RenderCIRebuild(in)
+		return app.BuildPayload(subject, body), nil
 	default:
 		return nil, fmt.Errorf("communication: no outward renderer for intent type %q", in.Type)
 	}
@@ -208,6 +211,29 @@ func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Inten
 	b.WriteString("\nNo Themis decision follows from this mail. The authoritative record is Themis; this\n")
 	b.WriteString("mail carries no attachment and no model output.\n")
 	return subject, []byte(b.String()), nil
+}
+
+// RenderCIRebuild renders the rebuild instruction as text (M2-6 / N-M2g): the parameters the
+// build job receives, as the operator will read them on the intent. The Jenkins sender takes the
+// parameters from the snapshot, not from this text; the text exists so a rebuild intent is as
+// inspectable as a ticket or a mail, and so the content-address rule (D-N-3) covers it too.
+func RenderCIRebuild(in app.Intent) (string, []byte) {
+	subject := "Themis rebuild - Release " + in.ReleaseID + " - attempt " + firstNonEmpty(in.Snapshot[app.SnapshotAttempt], "1")
+	var b strings.Builder
+	b.WriteString("Themis asks the build system to rebuild this Release so the targeted Findings can be\n")
+	b.WriteString("re-evaluated from a new SBOM. The job uploads the new SBOM and calls Themis back; the\n")
+	b.WriteString("callback changes no Finding - only the evaluation of the new SBOM can (M2-7).\n\n")
+	writeFacts(&b, []fact{
+		{"Job", in.Destination},
+		{"Release", in.ReleaseID},
+		{"Project", in.ProjectID},
+		{"Product", in.ProductID},
+		{"Prior SBOM", in.Snapshot[app.SnapshotPriorSBOMID]},
+		{"Targeted", in.Snapshot[app.SnapshotTargetedCVEs]},
+		{"Attempt", in.Snapshot[app.SnapshotAttempt]},
+		{"Event", eventFact(in)},
+	})
+	return subject, []byte(b.String())
 }
 
 // RenderDecisionEmail renders the notification for an accepted proposal (RC-5): the immutable

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,6 +38,10 @@ const (
 	IntentJiraIssue IntentType = "jira_issue"
 	// IntentEmail notifies a governed audience by plain mail (RC-5).
 	IntentEmail IntentType = "email"
+	// IntentCIRebuild asks the build system to rebuild a Release (RC-3, M2-6 / N-M2g). Its
+	// parameters are snapshot facts only — identity, the prior SBOM, the targeted set, the
+	// attempt index — never a credential and never model output.
+	IntentCIRebuild IntentType = "ci_rebuild"
 )
 
 // IntentState is where an intent is in its delivery life. `pending` is the only state a
@@ -261,6 +266,7 @@ type DeliveryIntentConfig struct {
 	JiraDestination    string // issue-tracker project alias for release remediation tickets
 	DecisionAudience   string // audience notified when a proposal is accepted
 	EvaluationAudience string // audience told a Release's posture after a new SBOM was judged (N-M2f)
+	RebuildDestination string // governed name of the build job a ci_rebuild intent addresses (N-M2g)
 	DeadLetterAudience string // audience told that a delivery gave up
 }
 
@@ -269,6 +275,7 @@ const (
 	defaultJiraDestination    = "themis-remediation"
 	defaultDecisionAudience   = "security-decisions"
 	defaultEvaluationAudience = "security-decisions"
+	defaultRebuildDestination = "themis-rebuild"
 	defaultDeadLetterAudience = "operations"
 )
 
@@ -284,6 +291,9 @@ func (c DeliveryIntentConfig) withDefaults() DeliveryIntentConfig {
 	}
 	if strings.TrimSpace(c.DeadLetterAudience) == "" {
 		c.DeadLetterAudience = defaultDeadLetterAudience
+	}
+	if strings.TrimSpace(c.RebuildDestination) == "" {
+		c.RebuildDestination = defaultRebuildDestination
 	}
 	return c
 }
@@ -374,6 +384,36 @@ func (s *DeliveryIntentService) EnqueueEvaluationMail(ctx context.Context, linea
 	in.Snapshot["release_id"] = releaseID
 	putIfSet(in.Snapshot, "product_id", productID)
 	putIfSet(in.Snapshot, "project_id", projectID)
+	return s.create(ctx, in)
+}
+
+// Snapshot keys of a ci_rebuild intent (M2-6): what the build system is handed, as text.
+const (
+	SnapshotPriorSBOMID  = "prior_sbom_id"
+	SnapshotTargetedCVEs = "targeted_cves" // comma-separated, sorted
+	SnapshotAttempt      = "attempt"       // 1-based attempt index within the cycle
+)
+
+// EnqueueCIRebuild records the instruction to rebuild a Release (RC-3 / M2-6 / N-M2g). It is
+// worker-originated — the loop raises it, no bus event does — so originEventID is the
+// evaluation that opened the cycle when the caller has it and empty otherwise. The targeted
+// set and the prior SBOM are stamped into the snapshot as the parameters the job receives;
+// the attempt index is the loop's own counter, never the delivery retry counter.
+func (s *DeliveryIntentService) EnqueueCIRebuild(ctx context.Context, lineage IntentLineage, originEventID, releaseID, productID, projectID, priorSBOMID string, targeted []string, attempt int, snapshot map[string]string) (Intent, error) {
+	if strings.TrimSpace(releaseID) == "" {
+		return Intent{}, ErrNoSubject
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	in := s.newIntent(IntentCIRebuild, s.cfg.RebuildDestination, lineage, originEventID, snapshot)
+	in.ReleaseID, in.ProductID, in.ProjectID = releaseID, productID, projectID
+	in.Snapshot["release_id"] = releaseID
+	putIfSet(in.Snapshot, "product_id", productID)
+	putIfSet(in.Snapshot, "project_id", projectID)
+	putIfSet(in.Snapshot, SnapshotPriorSBOMID, priorSBOMID)
+	in.Snapshot[SnapshotTargetedCVEs] = strings.Join(targeted, ",")
+	in.Snapshot[SnapshotAttempt] = strconv.Itoa(attempt)
 	return s.create(ctx, in)
 }
 

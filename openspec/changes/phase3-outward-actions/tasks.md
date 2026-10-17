@@ -534,7 +534,7 @@ recorded in `proposal.md` and accepted in `design.md`.
       closed-vs-open wording of the ticket and mail (domain.Closure) lands with N-M2i, where the cycle
       state first exists. **Measure on the VM:** map the audience in `THEMIS_COMMUNICATION_MAIL_AUDIENCES`,
       upload a changed SBOM, read two intents for the event (jira_issue + email) and one mail received.
-- [ ] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
+- [x] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
       `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
       `buildWithParameters` sender (Basic auth, user + API token,
       `THEMIS_COMMUNICATION_JENKINS_{ENABLED,URL,USER,API_TOKEN,JOB}`, off by default and subordinate
@@ -544,6 +544,21 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestCIBuildSender_BasicAuth_Params_HTTPSRefusal` (`httptest`: parameters, Basic auth header,
       `http://` refused), config defaulting/override for the knob, and the per-call timeout
       (M1b-6a). `deploy/node.env.example` gains the six commented, valueless knobs (R2).
+      **Implemented 2026-10-17.** `app.IntentCIRebuild` + `EnqueueCIRebuild` (worker-originated;
+      snapshot `prior_sbom_id`, `targeted_cves`, `attempt`; destination = the configured job name);
+      migration **000008** widens the CHECK to admit `ci_rebuild` (down deletes those rows first —
+      an instruction, not truth — and `ci_build` is still refused, asserted); `adapters/delivery/jenkins.go`
+      posts `buildWithParameters` to `<url>/job/<seg>/job/<seg>/buildWithParameters` over Basic auth
+      with the seven `THEMIS_*` string parameters, records the queue item from `Location`, refuses
+      clear-text at configure time (loopback excepted) with the fake kept and an ERROR naming
+      `THEMIS_COMMUNICATION_JENKINS_URL`; `serializer.RenderCIRebuild` makes the intent inspectable
+      and content-addressed like the others; `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (default 2)
+      on `delivery.Config`. Tests: the named sender test (+ `_PerCallTimeout`), the env
+      defaulting/override, renderer, app and store-constraint assertions. Honest limit recorded in
+      the sender: `buildWithParameters` is not idempotent, so a retry after a landed timeout queues
+      a redundant build of the same parameters. **Nothing raises a `ci_rebuild` intent yet** — the
+      loop that does is N-M2i. **Measure on the VM:** configure the job against the estate Jenkins,
+      `deliveryctl`-seed nothing; the first intent arrives with N-M2i.
 - [ ] 6.8 **N-M2h** (`themis`; **API CHANGE**) — `POST /api/v1/communication/callbacks/ci-rebuild`
       in `api/communication.openapi.yaml` (spec-first), **`delivery:callback` only**, payload
       `{intent_id, build_id, git_ref, image_digest, sbom_id}` schema-enforced with `image_digest` and

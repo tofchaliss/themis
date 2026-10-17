@@ -108,6 +108,7 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		DeadLetterAudience: cfg.DeadLetterAudience,
 		DecisionAudience:   cfg.DecisionAudience,
 		EvaluationAudience: cfg.EvaluationAudience,
+		RebuildDestination: cfg.Jenkins.Job,
 	})
 	if comm.Posture != nil {
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))

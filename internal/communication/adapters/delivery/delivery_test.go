@@ -764,11 +764,16 @@ func TestConfigFromEnvDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE", "oncall")
 	t.Setenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE", "appsec")
 	t.Setenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE", "release-managers")
+	t.Setenv("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", "3")
 	cfg = delivery.ConfigFromEnv()
 	if !cfg.Enabled || cfg.Workers != 4 || cfg.Batch != 7 || cfg.MaxAttempts != 5 ||
 		cfg.BackoffInitial != 2*time.Second || cfg.BackoffMax != time.Minute || cfg.Interval != 3*time.Second ||
-		cfg.DeadLetterAudience != "oncall" || cfg.DecisionAudience != "appsec" || cfg.EvaluationAudience != "release-managers" {
+		cfg.DeadLetterAudience != "oncall" || cfg.DecisionAudience != "appsec" || cfg.EvaluationAudience != "release-managers" ||
+		cfg.RebuildMaxAttempts != 3 {
 		t.Errorf("configured = %s", cfg)
+	}
+	if !strings.Contains(cfg.String(), "rebuild_max_attempts=3") {
+		t.Errorf("String() = %s", cfg.String())
 	}
 	for _, want := range []string{"deadletter_audience=\"oncall\"", "decision_audience=\"appsec\"", "evaluation_audience=\"release-managers\""} {
 		if !strings.Contains(cfg.String(), want) {
@@ -946,8 +951,12 @@ func hasFieldValue(logs *observer.ObservedLogs, substr string) bool {
 // and no secret present in the String() an operator reads at startup.
 func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	cfg := delivery.ConfigFromEnv()
-	if cfg.Jira.Enabled || cfg.Mail.Enabled {
-		t.Error("both real senders must be OFF by default")
+	if cfg.Jira.Enabled || cfg.Mail.Enabled || cfg.Jenkins.Enabled {
+		t.Error("every real sender must be OFF by default")
+	}
+	// M2-8's one loop knob: default 2, estate-wide.
+	if cfg.RebuildMaxAttempts != 2 {
+		t.Errorf("rebuild max attempts = %d, want the documented default 2", cfg.RebuildMaxAttempts)
 	}
 	if cfg.Mail.Port != 587 {
 		t.Errorf("unset defaults = %s / %s", cfg.Jira, cfg.Mail)
@@ -985,8 +994,21 @@ func TestConfigFromEnvReadsTheRealSenders(t *testing.T) {
 	t.Setenv("THEMIS_COMMUNICATION_MAIL_STARTTLS", "0")
 	t.Setenv("THEMIS_COMMUNICATION_MAIL_TIMEOUT", "20s")
 	t.Setenv("THEMIS_COMMUNICATION_MAIL_AUDIENCES", "security-decisions=sec@acme.example;operations=ops@acme.example")
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_ENABLED", "1")
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_URL", "https://ci.acme.example/jenkins/ ")
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_USER", jenkinsUser)
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_API_TOKEN", " "+jenkinsToken+" ")
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_JOB", "/team/build-image/")
+	t.Setenv("THEMIS_COMMUNICATION_JENKINS_TIMEOUT", "25s")
 
 	cfg = delivery.ConfigFromEnv()
+	if !cfg.Jenkins.Enabled || cfg.Jenkins.BaseURL != "https://ci.acme.example/jenkins" || cfg.Jenkins.Job != "team/build-image" ||
+		cfg.Jenkins.APIToken != jenkinsToken || cfg.Jenkins.Timeout != 25*time.Second {
+		t.Errorf("jenkins = %s", cfg.Jenkins)
+	}
+	if strings.Contains(cfg.String(), jenkinsToken) {
+		t.Error("the Jenkins token reached the startup line")
+	}
 	// The trailing slash and the padding an operator cannot see are trimmed, so a pasted value
 	// does not become a 404 or a 401 nobody can explain.
 	if cfg.Jira.BaseURL != "https://acme.atlassian.net" || cfg.Jira.APIToken != jiraToken {
