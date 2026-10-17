@@ -359,6 +359,11 @@ uniqueness — there is no event to dedupe them against.
 
 ### M1a-3 — The trigger is a recorded TEMPORARY PROXY
 
+> **Realized 2026-10-17 (N-M2c):** the proxy is gone from the code. Communication now subscribes
+> to `governance.release_evaluated` and records one ticket intent per evaluation whose `cause` is
+> `new_sbom`, product and project taken from the event; a `rediscovery` evaluation records nothing
+> (M2-3). The text below is kept as the record of the deviation and its cost.
+
 RC-1 / D-N-8 names "release posture evaluated" as the trigger. No such signal exists, so N-M1a
 proxies it with **`governance.finding_opened`** and records the deviation here, in the code
 comment at the mapping, and in the change's tasks. `governance.proposal_accepted` maps to the

@@ -363,8 +363,8 @@ type RealJiraDeliverer struct {
 	http        *http.Client
 	logger      *observability.Logger
 
-	// locks serializes everything per Release, so two intents for one Release — which the
-	// finding_opened proxy produces by the dozen — cannot both look, both miss, and both create.
+	// locks serializes everything per Release, so two intents for one Release — which a
+	// redelivery or a dev-seam POST can produce — cannot both look, both miss, and both create.
 	// The lock is held across lookup AND create: checking first and creating later with no lock in
 	// between is the race, not a fix for it.
 	locks sync.Map // releaseID -> *sync.Mutex

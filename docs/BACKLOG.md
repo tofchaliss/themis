@@ -23,7 +23,9 @@ unblocks the most, highest first:
 
 1. **N-M2c — ticket on `release_evaluated`, not on `finding_opened`** (6.3). Retires the proxy
    trigger; one Release evaluation = one event = one ticket, product and project populated. No
-   API, no schema. *Unblocks every later step.*
+   API, no schema. *Unblocks every later step.* **Shipped 2026-10-17** (`consumer.go` dispatches on
+   `release_evaluated`/`new_sbom`, `finding_opened` out of the interest set; VM measurement
+   pending: one `jira_issue` intent per changed upload, none after a sweep).
 2. **N-M2d — the release-evaluated event table + cursor read API** (6.4; API + schema). What the
    runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`.
 3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the

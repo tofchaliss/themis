@@ -6,8 +6,8 @@
 // consume.
 //
 // Since N-M1a it also records OUTWARD-DELIVERY INTENTS (EDR-DELIVERY-01 Revision 3): a
-// Finding opened on a Release asks for a remediation ticket, an accepted proposal asks for a
-// decision mail. The reader's entire outward job is to PERSIST the intent inside the inbox
+// Release evaluated after a NEW SBOM asks for a remediation ticket (N-M2c, Revision 4 M2-1..M2-3),
+// an accepted proposal asks for a decision mail. The reader's entire outward job is to PERSIST the intent inside the inbox
 // unit of work — it holds no Jira client, no mail client and no HTTP client, so no external
 // system can block, slow or stall the bus reader path. Sending happens later, in the delivery
 // worker.
@@ -30,13 +30,16 @@ import (
 const (
 	eventPositionEstablished = "governance.position_established"
 	eventPositionRevised     = "governance.position_revised"
-	// eventFindingOpened is the TEMPORARY PROXY for "this Release's vulnerabilities are
-	// ready" (EDR-DELIVERY-01 RC-1 / D-N-8): the intended trigger is a dedicated
-	// valuation-complete signal, which does not exist yet. The deviation is recorded rather
-	// than hidden — a ticket raised per opened Finding is deduplicated to one intent per
-	// EVENT, not to one per Release, so a Release with twelve Findings currently asks for
-	// twelve tickets. That is the honest cost of the proxy and is why the proxy is temporary.
-	eventFindingOpened = "governance.finding_opened"
+	// eventReleaseEvaluated is RC-1's "release posture evaluated" signal (EDR-DELIVERY-01
+	// Revision 4, M2-2): one event per Release evaluation, carrying product and project. It
+	// replaced the `governance.finding_opened` proxy of M1a-3 in N-M2c — that proxy fired once
+	// per Finding, so a Release with twelve Findings asked for twelve tickets. Only an evaluation
+	// caused by a NEW SBOM asks for a ticket: a re-discovery sweep changes the posture but builds
+	// nothing, and ticketing it would spend the rebuild loop's attempts on nothing (M2-3).
+	eventReleaseEvaluated = "governance.release_evaluated"
+	// causeNewSBOM restates the one value of the closed `cause` vocabulary this consumer acts
+	// on. The wire contract is the only thing shared with Governance.
+	causeNewSBOM = "new_sbom"
 	// eventProposalAccepted is a DECISION about exposure — told to the governed audience.
 	eventProposalAccepted = "governance.proposal_accepted"
 )
@@ -51,7 +54,7 @@ var Subscription = eventbus.Subscription{
 	Stream:   "governance",
 	Interest: []string{
 		eventPositionEstablished, eventPositionRevised,
-		eventFindingOpened, eventProposalAccepted,
+		eventReleaseEvaluated, eventProposalAccepted,
 	},
 }
 
@@ -66,8 +69,8 @@ type Consumer struct {
 // off until WithIntents is called.
 func NewConsumer(svc *app.PublicationService) *Consumer { return &Consumer{svc: svc} }
 
-// WithIntents attaches the delivery-intent intake, turning on the N-M1a mappings
-// (finding_opened → remediation ticket, proposal_accepted → decision mail). Without it the
+// WithIntents attaches the delivery-intent intake, turning on the delivery mappings
+// (release_evaluated/new_sbom → remediation ticket, proposal_accepted → decision mail). Without it the
 // consumer records no intents at all: outward delivery is opt-in per node
 // (THEMIS_COMMUNICATION_DELIVERY_ENABLED), and a node that cannot SEND must not accumulate a
 // queue nobody drains.
@@ -96,7 +99,7 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 			return err
 		}
 		return c.svc.RecordPublishable(ctx, snap, true)
-	case eventFindingOpened:
+	case eventReleaseEvaluated:
 		return c.recordJiraIntent(ctx, env)
 	case eventProposalAccepted:
 		return c.recordDecisionMailIntent(ctx, env)
@@ -105,14 +108,16 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 	}
 }
 
-// recordJiraIntent persists the remediation-ticket intent for the Release the Finding belongs
-// to. The envelope id is the idempotence key, so a redelivery of the same event yields no
-// second intent. A Finding whose event names no Release records NOTHING: an outward action
-// with an indeterminate subject fails closed (RC-7).
+// recordJiraIntent persists the remediation-ticket intent for an evaluated Release. The
+// envelope id is the idempotence key, so a redelivery of the same event yields no second
+// intent — and because one Release evaluation is one event, this is what realizes RC-2's
+// one-ticket-per-Release. An evaluation whose cause is not a new SBOM records NOTHING and
+// reports no error: the sweep re-evaluated an unchanged build, and there is no rebuild to ask
+// for (M2-3). An event naming no Release records nothing either: an outward action with an
+// indeterminate subject fails closed (RC-7).
 //
-// Product and project are left empty: the finding_opened contract does not carry them, and
-// resolving them would mean a Registry read on the reader path — which is exactly what this
-// reader must never do.
+// Product and project come from the event itself — Governance resolved them when it evaluated
+// the Release — so the reader still performs no Registry read (M1a-1).
 //
 // An envelope carrying NO id (only the dev `/internal/governance-events` seam, which accepts a
 // bare {type,payload}) has no deduplication key, so each POST records an intent. Bus-delivered
@@ -121,12 +126,15 @@ func (c *Consumer) recordJiraIntent(ctx context.Context, env event.Envelope) err
 	if c.intents == nil {
 		return nil // outward delivery not wired on this node
 	}
-	var dto findingOpenedDTO
+	var dto releaseEvaluatedDTO
 	if err := json.Unmarshal(env.Payload, &dto); err != nil {
 		return err
 	}
-	_, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, "", "",
-		map[string]string{"finding_id": dto.FindingID, "faultline_id": dto.FaultlineID, "cve": dto.CVE})
+	if dto.Cause != causeNewSBOM {
+		return nil // re-discovery: a posture change with nothing built — no ticket (M2-3)
+	}
+	_, err := c.intents.EnqueueJiraForRelease(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID,
+		map[string]string{"sbom_id": dto.SBOMID, "cause": dto.Cause})
 	if errors.Is(err, app.ErrNoSubject) {
 		return nil // nothing to track a fix for; not a transport failure, so do not retry
 	}
@@ -164,13 +172,15 @@ func lineageOf(env event.Envelope) app.IntentLineage {
 	}
 }
 
-// findingOpenedDTO mirrors governance.finding_opened.v1 (keys are the exported field names —
-// Governance marshals its domain event structs without tags).
-type findingOpenedDTO struct {
-	FindingID   string `json:"FindingID"`
-	ReleaseID   string `json:"ReleaseID"`
-	FaultlineID string `json:"FaultlineID"`
-	CVE         string `json:"CVE"`
+// releaseEvaluatedDTO mirrors governance.release_evaluated.v1 (EDR-DELIVERY-01 M2-2; this one
+// IS tagged on the producer side, snake_case). The severity counts are not read: the ticket
+// body is rendered from the posture read API at intent time, not from the event.
+type releaseEvaluatedDTO struct {
+	ProductID string `json:"product_id"`
+	ProjectID string `json:"project_id"`
+	ReleaseID string `json:"release_id"`
+	SBOMID    string `json:"sbom_id"`
+	Cause     string `json:"cause"`
 }
 
 // proposalAcceptedDTO mirrors governance.proposal_accepted.v1.

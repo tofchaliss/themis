@@ -166,11 +166,20 @@ func govEnv(id, typ string, payload []byte) event.Envelope {
 	}
 }
 
-const findingOpenedPayload = `{"FindingID":"fnd-1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-2026-1"}`
+// releaseEvaluatedPayload is governance.release_evaluated.v1 for an upload (cause new_sbom).
+const releaseEvaluatedPayload = `{"product_id":"prod-1","project_id":"prj-1","release_id":"rel-1","sbom_id":"ev-1",` +
+	`"severity_counts":{"critical":1,"high":2,"medium":0,"low":0,"unknown":0},"cause":"new_sbom"}`
 
-func TestConsumer_FindingOpenedRecordsOneJiraIntent(t *testing.T) {
+// rediscoveryPayload is the same Release re-evaluated by the re-discovery sweep: a real posture
+// change with nothing built (M2-3).
+const rediscoveryPayload = `{"product_id":"prod-1","project_id":"prj-1","release_id":"rel-1","sbom_id":"ev-1",` +
+	`"severity_counts":{"critical":1,"high":2,"medium":0,"low":0,"unknown":0},"cause":"rediscovery"}`
+
+// N-M2c: ONE Release evaluation after a new SBOM is ONE ticket intent, and it names the product
+// and the project the event carries — the reader still performs no Registry read.
+func TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents(t *testing.T) {
 	intents := newIntentStore()
-	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	env := govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))
 	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -181,25 +190,47 @@ func TestConsumer_FindingOpenedRecordsOneJiraIntent(t *testing.T) {
 	if in.Type != app.IntentJiraIssue || in.ReleaseID != "rel-1" || in.OriginEventID != "env-1" {
 		t.Errorf("intent = %+v", in)
 	}
-	if in.Lineage.EventType != "governance.finding_opened" || in.Lineage.SourceContext != "governance" ||
+	if in.ProductID != "prod-1" || in.ProjectID != "prj-1" {
+		t.Errorf("product/project must come from the event: %+v", in)
+	}
+	if in.Lineage.EventType != "governance.release_evaluated" || in.Lineage.SourceContext != "governance" ||
 		in.Lineage.CorrelationID != "corr-1" || in.Lineage.EventID != "env-1" {
 		t.Errorf("lineage = %+v", in.Lineage)
 	}
-	if in.Snapshot["cve"] != "CVE-2026-1" || in.Snapshot["finding_id"] != "fnd-1" {
+	if in.Snapshot["sbom_id"] != "ev-1" || in.Snapshot["cause"] != "new_sbom" ||
+		in.Snapshot["product_id"] != "prod-1" || in.Snapshot["project_id"] != "prj-1" {
 		t.Errorf("snapshot = %v", in.Snapshot)
 	}
-	// Product/project are NOT resolved here: that would be a Registry read on the reader path.
-	if in.ProductID != "" || in.ProjectID != "" {
-		t.Errorf("reader must not resolve product/project: %+v", in)
+}
+
+// N-M2c: the retired finding_opened proxy and a re-discovery evaluation create NO intent and
+// report no error — one would ticket per Finding again, the other would ticket an unchanged build.
+func TestFindingOpenedAndRediscovery_CreateNoIntents(t *testing.T) {
+	intents := newIntentStore()
+	c := deliveringConsumer(intents)
+	for _, env := range []event.Envelope{
+		govEnv("env-a", "governance.finding_opened",
+			[]byte(`{"FindingID":"fnd-1","ReleaseID":"rel-1","FaultlineID":"fl-1","CVE":"CVE-2026-1"}`)),
+		govEnv("env-b", "governance.release_evaluated", []byte(rediscoveryPayload)),
+	} {
+		if err := c.Handle(context.Background(), env); err != nil {
+			t.Fatalf("%s: %v", env.Type, err)
+		}
+	}
+	if len(intents.created) != 0 {
+		t.Fatalf("created %d intents, want 0: %+v", len(intents.created), intents.created)
+	}
+	if inbound.Subscription.InInterest("governance.finding_opened") {
+		t.Error("finding_opened is still in the interest set; the proxy was retired by N-M2c")
 	}
 }
 
 // Re-delivering the SAME envelope id must not enqueue a second ticket — the transport is
 // at-least-once, so this is the normal case, not an edge case.
-func TestConsumer_FindingOpenedRedeliveryCreatesNoSecondIntent(t *testing.T) {
+func TestConsumer_ReleaseEvaluatedRedeliveryCreatesNoSecondIntent(t *testing.T) {
 	intents := newIntentStore()
 	c := deliveringConsumer(intents)
-	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	env := govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))
 	for i := 0; i < 2; i++ {
 		if err := c.Handle(context.Background(), env); err != nil {
 			t.Fatalf("handle %d: %v", i, err)
@@ -235,11 +266,11 @@ func TestConsumer_ProposalAcceptedRecordsOneDecisionMail(t *testing.T) {
 	}
 }
 
-// A Finding whose event names no Release records nothing and reports no error: there is no
+// An evaluation that names no Release records nothing and reports no error: there is no
 // subject to track a fix for, and a retry would not produce one.
-func TestConsumer_FindingOpenedWithoutReleaseRecordsNothing(t *testing.T) {
+func TestConsumer_ReleaseEvaluatedWithoutReleaseRecordsNothing(t *testing.T) {
 	intents := newIntentStore()
-	env := govEnv("env-3", "governance.finding_opened", []byte(`{"FindingID":"fnd-1","ReleaseID":""}`))
+	env := govEnv("env-3", "governance.release_evaluated", []byte(`{"release_id":"","cause":"new_sbom"}`))
 	if err := deliveringConsumer(intents).Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -261,7 +292,7 @@ func TestConsumer_ProposalAcceptedWithoutSubjectRecordsNothing(t *testing.T) {
 
 func TestConsumer_DeliveryEventsMalformedPayloads(t *testing.T) {
 	c := deliveringConsumer(newIntentStore())
-	for _, evt := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
+	for _, evt := range []string{"governance.release_evaluated", "governance.proposal_accepted"} {
 		if err := c.Handle(context.Background(), govEnv("env-x", evt, []byte("{not json"))); err == nil {
 			t.Errorf("%s: malformed payload should error (so the event is retried, not dropped)", evt)
 		}
@@ -273,8 +304,8 @@ func TestConsumer_DeliveryEventsMalformedPayloads(t *testing.T) {
 func TestConsumer_WithoutIntentsRecordsNoIntents(t *testing.T) {
 	repo := &memRepo{}
 	c := consumer(repo)
-	for _, evt := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
-		if err := c.Handle(context.Background(), govEnv("env-5", evt, []byte(findingOpenedPayload))); err != nil {
+	for _, evt := range []string{"governance.release_evaluated", "governance.proposal_accepted"} {
+		if err := c.Handle(context.Background(), govEnv("env-5", evt, []byte(releaseEvaluatedPayload))); err != nil {
 			t.Errorf("%s: %v", evt, err)
 		}
 	}
@@ -314,7 +345,7 @@ func TestConsumer_NeverDelivers(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- deliveringConsumer(intents).Handle(ctx,
-			govEnv("env-6", "governance.finding_opened", []byte(findingOpenedPayload)))
+			govEnv("env-6", "governance.release_evaluated", []byte(releaseEvaluatedPayload)))
 	}()
 	select {
 	case err := <-done:
@@ -335,7 +366,7 @@ func TestConsumer_NeverDelivers(t *testing.T) {
 // The subscription has to DISPATCH on the new types; an event outside the interest set never
 // reaches Handle, so an undeclared mapping is dead code in production.
 func TestSubscriptionDispatchesOnTheDeliveryTriggers(t *testing.T) {
-	for _, typ := range []string{"governance.finding_opened", "governance.proposal_accepted"} {
+	for _, typ := range []string{"governance.release_evaluated", "governance.proposal_accepted"} {
 		if !inbound.Subscription.InInterest(typ) {
 			t.Errorf("%s is not in the Communication interest set", typ)
 		}
@@ -377,7 +408,7 @@ func TestConsumer_RecordsTheJiraIntentOnAnAuthEnabledEstate(t *testing.T) {
 	srv := authedPostureStub(t, key)
 	intents := newIntentStore()
 
-	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	env := govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))
 	if err := materializingConsumer(intents, srv.URL, key).Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -404,7 +435,7 @@ func TestConsumer_UnauthenticatedPostureReadRecordsNothingAndRetries(t *testing.
 	srv := authedPostureStub(t, "read-scoped-key-abc123")
 	intents := newIntentStore()
 
-	env := govEnv("env-1", "governance.finding_opened", []byte(findingOpenedPayload))
+	env := govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload))
 	err := materializingConsumer(intents, srv.URL, "").Handle(context.Background(), env)
 	if err == nil {
 		t.Fatal("a 401 on the posture read must surface, so the envelope is retried")

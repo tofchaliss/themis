@@ -466,7 +466,7 @@ recorded in `proposal.md` and accepted in `design.md`.
       name blank owners), so rows queue until it is set — and the Governance→Registry read seam
       still sends no API key (task 2.10), so on an auth-enabled estate that seam must be reachable
       unauthenticated or the rows defer with a 401.
-- [ ] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
+- [x] 6.3 **N-M2c** (`themis`; no API, no schema) — Communication switches triggers: retire the
       `governance.finding_opened` → ticket mapping (M1a-3's proxy) and create a ticket intent only on
       `governance.release_evaluated` with `cause=new_sbom`, product and project now populated. This
       is what finally realizes RC-2's one-ticket-per-Release, because one Release evaluation is one
@@ -474,6 +474,15 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestReleaseEvaluatedMapping_OnlyNewSBOM_CreatesIntents` and
       `TestFindingOpenedAndRediscovery_CreateNoIntents`
       (`internal/communication/adapters/inbound`).
+      **Implemented 2026-10-17.** `internal/communication/adapters/inbound/consumer.go` dispatches on
+      `governance.release_evaluated` (snake_case DTO, `cause` read verbatim) and the interest set no
+      longer carries `finding_opened`; a `rediscovery` cause or an empty release records nothing and
+      reports no error; product and project ride the intent from the event (snapshot `sbom_id`,
+      `cause`, `product_id`, `project_id`). The Jira sender's per-Release lock stays — it now guards a
+      redelivery or a dev-seam POST, not a proxy's dozen. Both named tests plus the redelivery and
+      auth-estate tests re-pointed; `communication/adapters/inbound` 100%. **Measure on the VM:**
+      upload a changed SBOM with delivery on and read ONE `jira_issue` intent for the Release, with
+      `product_id`/`project_id` set, and none after the next re-discovery sweep.
 - [ ] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
       `release_evaluated_events` (migration **up/down**, reversibility a gate) and the cursor read
       API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>` in
