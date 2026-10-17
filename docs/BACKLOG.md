@@ -10,6 +10,43 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
+### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
+
+The Jira and mail SENDERS exist and were live-tested on the estate in early October
+(EDR-DELIVERY-01 Revision 4, N-M1b: one ticket per Release in a Data Center project, decision mail
+and dead-letter mail over SMTP, both off by default behind `THEMIS_COMMUNICATION_{JIRA,MAIL}_*`).
+What is NOT built is the chain that makes them a remediation loop — the trigger, the comparison,
+the CI rebuild and its callback, the stop rules — recorded as N-M2c..N-M2j in
+`openspec/changes/phase3-outward-actions/tasks.md` (6.3–6.10). "Image creation tasks" in the
+owner's words = N-M2g/h, the `ci_rebuild` intent over Jenkins and its callback. Ordered by what
+unblocks the most, highest first:
+
+1. **N-M2c — ticket on `release_evaluated`, not on `finding_opened`** (6.3). Retires the proxy
+   trigger; one Release evaluation = one event = one ticket, product and project populated. No
+   API, no schema. *Unblocks every later step.*
+2. **N-M2d — the release-evaluated event table + cursor read API** (6.4; API + schema). What the
+   runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`.
+3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the
+   targeted set.
+4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail
+   goes to the audience; never from the callback.
+5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
+   `buildWithParameters` sender, https enforced, max attempts.
+6. **N-M2h — the CI callback endpoint** (6.8; API): `POST /communication/callbacks/ci-rebuild`,
+   `delivery:callback` scope only, evidence on the intent.
+7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never
+   auto-resolve.
+8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
+9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW).
+10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first).
+11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
+12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order.
+
+Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
+through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
+file before the next is started.
+
+
 > **2026-10-06 — `phase3-harness-integration` (EDR-HARNESS-01) COMPLETE and MERGED to `main` as
 > `552c4e1` (PR #126), CI green.** Commissions, harness-evidence proposals, the intake adapter +
 > `themis-intake` CLI, walls. Every item the 2026-09-26 banner carried as open is now closed and
