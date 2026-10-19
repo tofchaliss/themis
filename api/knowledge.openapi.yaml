@@ -30,6 +30,32 @@ paths:
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/Problem'
+  /faultlines/recent:
+    get:
+      operationId: getRecentFaultlines
+      summary: >
+        The newest CARDED Faultlines by card-creation time, newest first (GUI-16). A pure read
+        over the estate's own cards — never a mirror of the world's CVE feed (EDR-KNOWLEDGE-01
+        D5). `limit` defaults to 50 and is clamped at 200.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecentFaultline'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{id}:
     get:
       operationId: getFaultlineById
@@ -209,6 +235,16 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    RecentFaultline:
+      type: object
+      required: [created_at, card]
+      properties:
+        created_at:
+          type: string
+          format: date-time
+          description: When the card was created — the moment the CVE entered the estate's knowledge.
+        card:
+          $ref: '#/components/schemas/FaultlineView'
     FaultlineView:
       type: object
       properties:

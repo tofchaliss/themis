@@ -242,7 +242,7 @@ type VerdictConfig struct {
 // source tiers), so NVD's watch Proposals become the reconciled headline on cards OSV created.
 func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
 	st := store.New(pool)
-	read := app.NewReadService(st, st)
+	read := app.NewReadService(st, st).WithRecent(st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
 	// the reconcile policy is "distro-authoritative first, then NVD, then others"). Red Hat's
 	// vendor-severity + not_affected statements therefore headline the reconciled distro view.

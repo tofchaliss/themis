@@ -1379,6 +1379,86 @@ async function viewFeeds() {
   }
 }
 
+/* --- What's new (GUI-16, layer 1) ---
+   The newest CARDED Faultlines by card-creation time. A card exists only because something in
+   this estate, a feed sweep or an operator's gather put it there, so this is "the newest things
+   that concern us", read from persisted data — never a page over the world's CVE feed, which
+   would persist uncarded CVEs (EDR-KNOWLEDGE-01 D5) and be a worse copy of NVD. */
+
+const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+
+async function viewNew() {
+  setRail("new");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "What's new" }]);
+  loading("the newest cards");
+  try {
+    const rows = asArray(await apiGET("knowledge", "/faultlines/recent?limit=100"));
+    const sevChip = (s) => {
+      const k = (s || "").toLowerCase();
+      const cls = k === "critical" ? "chip-crit" : k === "high" ? "chip-elevated" : k === "medium" ? "chip-warn" : "";
+      return `<span class="chip ${cls}" title="reconciled severity, the winning source decides">${esc(s || "unknown")}</span>`;
+    };
+    const signals = (v) => [v.kev ? `<span class="chip chip-crit" title="CISA Known Exploited Vulnerabilities">KEV</span>` : "",
+      v.exploit_public ? `<span class="chip chip-warn" title="a public exploit is known">exploit</span>` : "",
+      typeof v.epss === "number" && v.epss > 0 ? `<span class="chip" title="EPSS: probability of exploitation in 30 days">EPSS ${(v.epss * 100).toFixed(1)}%</span>` : ""].join(" ");
+    const fixes = (v) => {
+      const fx = asArray(v.fixed_versions);
+      if (!fx.length) return `<span class="card-sub">none published</span>`;
+      return fx.slice(0, 3).map((f) => `<span class="mono">${esc(typeof f === "string" ? f : (f.package ? f.package + " " : "") + (f.version || ""))}</span>`).join(", ") + (fx.length > 3 ? ` <span class="card-sub">+${fx.length - 3}</span>` : "");
+    };
+    main.innerHTML = `
+      <div class="card">
+        <h2 class="card-title">What's new</h2>
+        <p class="card-sub">The newest CVEs that entered this estate's knowledge, newest first: a card is created when a component carries the CVE, a feed sweep finds it for a component you ship, or an operator gathers it. This is not the world's CVE feed; it is what concerns you. Click a CVE to see the card.</p>
+        ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Entered</th><th>CVE</th><th>Severity</th><th>Signals</th><th>What it is</th><th>Published fix</th><th>Stage</th></tr></thead>
+          <tbody>${rows.map((r) => {
+            const c = r.card || {}; const v = c.view || {};
+            return `<tr>
+              <td title="${esc(r.created_at || "")}">${timeAgo(r.created_at)}</td>
+              <td><a class="mono" href="#/cve/${encodeURIComponent(c.cve || "")}" title="open the card">${esc(c.cve || "")}</a></td>
+              <td>${sevChip(v.severity)}${typeof v.cvss_score === "number" && v.cvss_score > 0 ? ` <span class="card-sub">${v.cvss_score.toFixed(1)}</span>` : ""}</td>
+              <td>${signals(v)}</td>
+              <td class="wrap">${esc((v.summary || "").slice(0, 220))}${(v.summary || "").length > 220 ? "…" : ""}</td>
+              <td>${fixes(v)}</td>
+              <td><span class="chip">${esc(c.stage || "")}</span></td></tr>`; }).join("")}</tbody></table></div>`
+        : `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`}
+      </div>`;
+  } catch (e) {
+    main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+/* The card itself: what Knowledge holds for one CVE, and the releases it touches. Read-only;
+   decisions live on the Findings of each release, reached through the release links. */
+async function viewCVE(cve) {
+  setRail("new");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "What's new", href: "#/new" }, { label: cve }]);
+  loading(cve);
+  try {
+    const c = await apiGET("knowledge", `/faultlines?cve=${encodeURIComponent(cve)}`);
+    const v = (c && c.view) || {};
+    let releases = [];
+    try { releases = asArray(await apiGET("knowledge", `/faultlines/${encodeURIComponent(c.id)}/releases`)); } catch (e) { releases = []; }
+    const list = (xs, f) => { const a = asArray(xs); return a.length ? a.map(f).join(", ") : `<span class="card-sub">none</span>`; };
+    main.innerHTML = `
+      <div class="card">
+        <h2 class="card-title"><span class="mono">${esc(c.cve)}</span> <span class="chip">${esc(c.stage || "")}</span></h2>
+        <p class="card-sub">${esc(v.summary || "No stored summary yet; the next enrichment sweep fills it.")}${v.summary_source ? ` <span class="card-sub">(from ${esc(v.summary_source)})</span>` : ""}</p>
+        <div class="tbl-wrap"><table class="tbl"><tbody>
+          <tr><th>Severity</th><td>${esc(v.severity || "unknown")}${typeof v.cvss_score === "number" && v.cvss_score > 0 ? ` · CVSS ${v.cvss_score.toFixed(1)}` : ""}${v.cvss_vector ? ` <span class="mono">${esc(v.cvss_vector)}</span>` : ""}${v.severity_source ? ` <span class="card-sub">(from ${esc(v.severity_source)})</span>` : ""}</td></tr>
+          <tr><th>Exploit signals</th><td>${v.kev ? `<span class="chip chip-crit">KEV</span> ` : ""}${v.exploit_public ? `<span class="chip chip-warn">public exploit</span> ` : ""}${typeof v.epss === "number" ? `EPSS ${(v.epss * 100).toFixed(1)}%` : ""}${!v.kev && !v.exploit_public && typeof v.epss !== "number" ? `<span class="card-sub">none recorded</span>` : ""}</td></tr>
+          <tr><th>Affected ranges</th><td>${list(v.affected_range_statements && v.affected_range_statements.length ? v.affected_range_statements : v.affected_ranges, (r) => `<span class="mono">${esc(typeof r === "string" ? r : [r.ecosystem, r.package, r.range].filter(Boolean).join(" "))}</span>`)}</td></tr>
+          <tr><th>Published fixes</th><td>${list(v.fixed_versions, (f) => `<span class="mono">${esc(typeof f === "string" ? f : [f.package, f.version].filter(Boolean).join(" "))}</span>`)}</td></tr>
+          <tr><th>Releases touched</th><td>${releases.length ? releases.map((r) => `<a href="#/release/${encodeURIComponent(r)}" class="mono">${esc(r)}</a>`).join(", ") : `<span class="card-sub">none in the estate</span>`}</td></tr>
+          <tr><th>Source proposals</th><td>${asArray(c.proposals).length}</td></tr>
+        </tbody></table></div>
+      </div>`;
+  } catch (e) {
+    main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
 /* --- Admin: the dashboard's own sign-in --- */
 
 async function viewAdmin() {
@@ -2216,6 +2296,9 @@ function route() {
   if (h.startsWith("#/estate")) return viewEstate();
   if (h.startsWith("#/sbom")) return viewSBOM();
   if (h.startsWith("#/compare")) return viewCompare();
+  const cveRoute = h.match(/^#\/cve\/([^?]+)/);
+  if (cveRoute) return viewCVE(decodeURIComponent(cveRoute[1]));
+  if (h.startsWith("#/new")) return viewNew();
   if (h.startsWith("#/feeds")) return viewFeeds();
   if (h.startsWith("#/admin")) return viewAdmin();
   return viewOverview();

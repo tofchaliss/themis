@@ -76,9 +76,68 @@ func server(t *testing.T, repo app.Repository, proj app.ProjectionReader) *httpt
 func feedServer(t *testing.T, repo app.Repository, proj app.ProjectionReader, feeds app.FeedHealthStore) *httptest.Server {
 	t.Helper()
 	health := app.NewFeedHealthService(feeds, feedClock{})
-	srv := httptest.NewServer(knhttp.NewHandler(app.NewReadService(repo, proj), health).Router())
+	read := app.NewReadService(repo, proj)
+	if rl, ok := repo.(app.RecentLister); ok {
+		read = read.WithRecent(rl)
+	}
+	srv := httptest.NewServer(knhttp.NewHandler(read, health).Router())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// recentRepo is a repository that also lists recent cards (GUI-16).
+type recentRepo struct {
+	fakeRepo
+	recent []app.RecentFaultline
+	limit  int
+	rerr   error
+}
+
+func (r *recentRepo) RecentFaultlines(_ context.Context, limit int) ([]app.RecentFaultline, error) {
+	r.limit = limit
+	return r.recent, r.rerr
+}
+
+// GUI-16: the recent list carries the full card beside its creation time, the limit is clamped
+// by the app, an unwired lister is a 503 and a store failure a 500.
+func TestGetRecentFaultlines(t *testing.T) {
+	card := sampleCard(t)
+	repo := &recentRepo{fakeRepo: fakeRepo{card: card, found: true}, recent: []app.RecentFaultline{{Faultline: card, CreatedAt: time.Unix(1_700_000_000, 0).UTC()}}}
+	srv := server(t, repo, fakeProjection{})
+
+	status, body := get(t, srv.URL+"/faultlines/recent?limit=5000")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var rows []struct {
+		CreatedAt time.Time `json:"created_at"`
+		Card      struct {
+			Cve  string `json:"cve"`
+			View struct {
+				Severity string `json:"severity"`
+			} `json:"view"`
+		} `json:"card"`
+	}
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Card.Cve != "CVE-2024-1" || rows[0].Card.View.Severity != "high" || rows[0].CreatedAt.Unix() != 1_700_000_000 {
+		t.Errorf("rows = %+v", rows)
+	}
+	if repo.limit != app.RecentMaxLimit {
+		t.Errorf("limit = %d, want the cap %d", repo.limit, app.RecentMaxLimit)
+	}
+	if status, _ := get(t, srv.URL+"/faultlines/recent"); status != http.StatusOK || repo.limit != app.RecentDefaultLimit {
+		t.Errorf("default: status %d, limit %d", status, repo.limit)
+	}
+	repo.rerr = errors.New("db down")
+	if status, _ := get(t, srv.URL+"/faultlines/recent"); status != http.StatusInternalServerError {
+		t.Errorf("store failure status = %d, want 500", status)
+	}
+	plain := server(t, fakeRepo{card: card, found: true}, fakeProjection{})
+	if status, _ := get(t, plain.URL+"/faultlines/recent"); status != http.StatusServiceUnavailable {
+		t.Errorf("unwired status = %d, want 503", status)
+	}
 }
 
 type feedClock struct{}
@@ -528,7 +587,9 @@ type fakeSanity struct {
 	err   error
 }
 
-func (f fakeSanity) SuspectFanouts(context.Context) ([]app.SuspectFanout, error) { return f.flags, f.err }
+func (f fakeSanity) SuspectFanouts(context.Context) ([]app.SuspectFanout, error) {
+	return f.flags, f.err
+}
 
 // KN-SANITY-1: GET /sanity lists the guard's flags; unwired, it answers empty and says so.
 func TestGetSanityFlags(t *testing.T) {

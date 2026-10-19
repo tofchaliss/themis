@@ -939,7 +939,12 @@ under the 2026-08-07 re-derivation standard.
   serializer, which wants R3's delivery channel anyway. Sequence: after the GUI/scanner track,
   beside R3.
 - [ ] **GUI-16 — "What's new" page: newest CVEs and their details (filed 2026-08-28, user ask;
-  design settled at filing, D5-bounded).** LOW-MED, capability. NOT a world-feed mirror — a page
+  design settled at filing, D5-bounded).** LOW-MED, capability. **Layer 1 shipped 2026-10-19:**
+  `GET /faultlines/recent?limit=` (newest cards by creation time, default 50, clamped 200, each
+  card whole beside its `created_at`; `app.ReadService.Recent` over a `RecentLister` store port)
+  and the dashboard's "What's new" rail page (entered · CVE · severity · KEV/exploit/EPSS ·
+  summary · published fix · stage) with a card view per CVE (`#/cve/<id>`: ranges, fixes, the
+  releases it touches). **Layer 2 (the ephemeral latest-published panel with Gather) stays open.** NOT a world-feed mirror — a page
   listing every CVE published this week would persist uncarded-CVE data, exactly what
   EDR-KNOWLEDGE-01 D5 forbids, and would be a worse copy of NVD/cve.org. Two doctrine-clean
   layers instead: **(1) the page** — newest **carded** Faultlines sorted by card-creation time

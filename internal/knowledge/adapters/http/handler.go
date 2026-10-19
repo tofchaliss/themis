@@ -149,6 +149,29 @@ func (h *Handler) GetFaultlineByCVE(w http.ResponseWriter, r *http.Request, para
 	writeJSON(w, http.StatusOK, toView(f))
 }
 
+// GetRecentFaultlines handles GET /faultlines/recent — the newest cards by creation time
+// (GUI-16). Paging rules are the app's; an unwired lister is a 503, never an empty page.
+func (h *Handler) GetRecentFaultlines(w http.ResponseWriter, r *http.Request, params gen.GetRecentFaultlinesParams) {
+	limit := 0
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	rows, err := h.read.Recent(r.Context(), limit)
+	if err != nil {
+		if errors.Is(err, app.ErrRecentUnavailable) {
+			writeProblem(w, http.StatusServiceUnavailable, "recent faultlines unavailable", err.Error())
+			return
+		}
+		writeProblem(w, http.StatusInternalServerError, "cannot list recent faultlines", err.Error())
+		return
+	}
+	out := make([]gen.RecentFaultline, 0, len(rows))
+	for _, rf := range rows {
+		out = append(out, gen.RecentFaultline{CreatedAt: rf.CreatedAt, Card: toView(rf.Faultline)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // GetFaultlineReleases handles GET /faultlines/{id}/releases.
 func (h *Handler) GetFaultlineReleases(w http.ResponseWriter, r *http.Request, id string) {
 	rels, err := h.read.AffectedReleases(r.Context(), id)
