@@ -540,6 +540,12 @@ recorded in `proposal.md` and accepted in `design.md`.
       closed-vs-open wording of the ticket and mail (domain.Closure) lands with N-M2i, where the cycle
       state first exists. **Measure on the VM:** map the audience in `THEMIS_COMMUNICATION_MAIL_AUDIENCES`,
       upload a changed SBOM, read two intents for the event (jira_issue + email) and one mail received.
+      **Measured on the VM 2026-10-19:** with the real senders on (Data Center Jira, bearer PAT,
+      API v2; an internal port-25 relay, no login, STARTTLS off), one changed upload of release
+      c0c7cce6 produced the Jira ticket in the project AND the evaluation mail in the inbox, plus the
+      fake-delivered `ci_rebuild`. Two estate lessons: a stale PAT reads as 401 on `/rest/api/2/myself`
+      (probe before enabling), and the audience line had the address wrapped in `<>` — stripped, since
+      the sender brackets recipients itself.
 - [x] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
       `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
       `buildWithParameters` sender (Basic auth, user + API token,
