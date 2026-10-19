@@ -546,6 +546,9 @@ recorded in `proposal.md` and accepted in `design.md`.
       fake-delivered `ci_rebuild`. Two estate lessons: a stale PAT reads as 401 on `/rest/api/2/myself`
       (probe before enabling), and the audience line had the address wrapped in `<>` — stripped, since
       the sender brackets recipients itself.
+      Then the raw REST road (no script): `POST /api/v1/intake?product=&project=&version=&create_release=true`
+      with the operator key → new release 23abb83d, 21 findings, event seq 8, ticket ME-4333, mail
+      delivered, `ci_rebuild` opened — the exact sequence a CI job performs.
 - [x] 6.7 **N-M2g** (`themis`; no API; **widens the intent-type CHECK constraint** to admit
       `ci_rebuild` — a constraint migration, up/down) — the `ci_rebuild` kind, the Jenkins
       `buildWithParameters` sender (Basic auth, user + API token,
