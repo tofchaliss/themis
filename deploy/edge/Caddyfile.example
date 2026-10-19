@@ -10,14 +10,17 @@
 # to add a block here, deliberately. reverse_proxy adds X-Forwarded-Proto, so the dashboard's
 # session cookie turns Secure.
 #
-# Install: copy to /etc/caddy/Caddyfile and replace the hostname with the VM's own
-# (`hostname -f`). `tls internal` issues a certificate from Caddy's local CA — browsers and the
+# Install: copy to /etc/caddy/Caddyfile and replace the site names with the VM's own: the full
+# name (`hostname -f`), the short name (`hostname -s`) and its address (`hostname -I`), because
+# Caddy only completes a TLS handshake for a name it holds a certificate for — a browser typing
+# the short name against a Caddyfile that lists only the full one gets ERR_SSL_PROTOCOL_ERROR
+# (measured 2026-10-19). `tls internal` issues a certificate from Caddy's local CA — browsers and the
 # CI host must trust that CA (`caddy trust` on the VM, or import
 # /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt), or replace the line with
 # `tls /etc/ssl/certs/themis.crt /etc/ssl/private/themis.key` for a company certificate. For a
 # public name, delete the line and Caddy obtains one from Let's Encrypt.
 
-themis.example.internal {
+themis.example.internal, themis, 10.0.0.10 {
 	tls internal
 	encode gzip
 	handle_path /evidence/* {
