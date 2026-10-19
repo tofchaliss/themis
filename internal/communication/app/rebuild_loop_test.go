@@ -105,7 +105,7 @@ func TestRebuildLoop_OpensContinuesStops(t *testing.T) {
 	}
 	in, raised, err := loop.Raise(ctx, lineage, "env-1", out, "prod-1", "prj-1")
 	if err != nil || !raised || in.Type != app.IntentCIRebuild || in.Destination != "team/build-image" || in.Snapshot[app.SnapshotAttempt] != "1" ||
-		in.Snapshot[app.SnapshotTargetedCVEs] != "CVE-2026-1,CVE-2026-2" || in.Snapshot[app.SnapshotPriorSBOMID] != "ev-1" || in.Snapshot[app.SnapshotRebuildState] != "opened" {
+		in.Snapshot[app.SnapshotTargetedCVEs] != "CVE-2026-1,CVE-2026-2" || in.Snapshot[app.SnapshotPriorSBOMID] != "ev-1" || in.Snapshot[app.SnapshotRebuildState] != "opened" || in.Snapshot[app.SnapshotRebuildAttempt] != "1" {
 		t.Fatalf("raised = %+v / %v / %v", in, raised, err)
 	}
 	if c := cycles.rows["rel-1"]; c.Attempts != 1 || c.State != app.CycleOpen || c.BaselineSBOMID != "ev-1" || c.OriginEventID != "env-1" {
@@ -116,7 +116,8 @@ func TestRebuildLoop_OpensContinuesStops(t *testing.T) {
 	// still-open target only.
 	posture.rows = rows(map[string]int{"CVE-2026-2": 60, "CVE-2026-7": 99})
 	out, err = loop.Evaluate(ctx, "rel-1", "ev-2", "env-2")
-	if err != nil || out.State != app.OutcomeContinuing || out.NextAttempt != 2 || !reflect.DeepEqual(out.Closed, []string{"CVE-2026-1"}) || !reflect.DeepEqual(out.Open, []string{"CVE-2026-2"}) {
+	if err != nil || out.State != app.OutcomeContinuing || out.NextAttempt != 2 || !reflect.DeepEqual(out.Closed, []string{"CVE-2026-1"}) || !reflect.DeepEqual(out.Open, []string{"CVE-2026-2"}) ||
+		out.BaselineSBO != "ev-1" || out.Snapshot(2)[app.SnapshotRebuildBaseline] != "ev-1" {
 		t.Fatalf("continuing = %+v (err %v)", out, err)
 	}
 	in, raised, err = loop.Raise(ctx, lineage, "env-2", out, "prod-1", "prj-1")
