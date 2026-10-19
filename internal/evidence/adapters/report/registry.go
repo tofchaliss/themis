@@ -30,6 +30,7 @@ var requiredCortexFields = []string{"vulnerability_id", "package_purl", "origin_
 //	| 3 | JSON object with spdxVersion                                     | sbom / spdx              |
 //	| 4 | JSON object with findings: [...]                                 | vuln-report / curated    |
 //	| 5 | JSON object with Results: [...] and SchemaVersion/ArtifactName   | vuln-report / trivy      |
+//	| 5b| JSON object with matches: [...] and descriptor.name "grype"      | vuln-report / grype      |
 //	| 6 | JSON array whose first element carries Cortex's field set        | vuln-report / cortex-json|
 //	| 7 | anything else                                                    | ErrUnrecognisedFormat    |
 //
@@ -90,6 +91,19 @@ func Detect(contentType string, body []byte) (Kind, Dialect, error) {
 			_, hasArtifact := obj["ArtifactName"]
 			if hasSchema || hasArtifact {
 				return KindReport, DialectTrivy, nil
+			}
+		}
+		// Row 5b — Grype (GUI-15): `matches` plus a descriptor naming the tool. The
+		// descriptor is required because `matches` alone is too common a key to claim.
+		if raw, ok := obj["matches"]; ok && isArray(raw) {
+			if d, ok := obj["descriptor"]; ok && isObject(d) {
+				desc, err := decodeObject(d)
+				if err != nil {
+					return "", "", err
+				}
+				if name, isStr := stringValue(desc["name"]); isStr && strings.EqualFold(name, "grype") {
+					return KindReport, DialectGrype, nil
+				}
 			}
 		}
 	case '[':
@@ -154,6 +168,8 @@ func ConverterFor(d Dialect) (Converter, bool) {
 		return cortexJSON{}, true
 	case DialectTrivy:
 		return trivyJSON{}, true
+	case DialectGrype:
+		return grypeJSON{}, true
 	default:
 		return nil, false
 	}

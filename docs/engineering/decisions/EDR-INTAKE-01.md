@@ -309,14 +309,15 @@ deterministic rather than dependent on map iteration:
 | 3 | JSON object with `spdxVersion` | `sbom` / `spdx` |
 | 4 | JSON object with `findings: [...]` | `vuln-report` / `curated` |
 | 5 | JSON object with `Results: [...]` **and** `SchemaVersion` or `ArtifactName` | `vuln-report` / `trivy` |
+| 5b | JSON object with `matches: [...]` **and** `descriptor.name` = `grype` (GUI-15, 2026-10-19) | `vuln-report` / `grype` |
 | 6 | JSON array whose elements carry Cortex's required field set | `vuln-report` / `cortex-json` |
 | 7 | anything else | **refused**, `unrecognised_format` |
 
 **A declared `kind`/`format` that contradicts the body is refused** (`declared_format_mismatch`),
 never silently overridden — the caller's assertion is information, and disagreeing with it quietly
 is how a mis-declared document becomes a mystery later. Invalid *combinations* are refused the same
-way: the matrix is `sbom × {cyclonedx, spdx}` and `vuln-report × {curated, trivy, cortex-json,
-cortex-csv}`, and nothing else. `kind=sbom, format=trivy` fails at identification.
+way: the matrix is `sbom × {cyclonedx, spdx}` and `vuln-report × {curated, trivy, grype,
+cortex-json, cortex-csv}`, and nothing else. `kind=sbom, format=trivy` fails at identification.
 
 Detected values are **echoed in the response** (`detected_kind`, `detected_format`) so the client
 always sees what Themis decided.

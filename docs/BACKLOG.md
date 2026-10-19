@@ -1038,8 +1038,13 @@ under the 2026-08-07 re-derivation standard.
   `detectTranslator` + `translateTrivy` (a pure-function port of the TESTING.md jq recipe,
   including the ecosystem vocabulary map), Kind auto-set to scanner-report, skip count in the
   file note, curated document is what uploads. Phase D stays deferred as recorded.
-- [ ] **GUI-15 — second in-browser scanner translator: Grype first, Xray / Black Duck by demand
-  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. EDR-GUI-01 D16
+- [x] **GUI-15 — second in-browser scanner translator: Grype first, Xray / Black Duck by demand
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. **Grype shipped
+  2026-10-19** as `internal/evidence/adapters/report/grype.go`: D5a row 5b (`matches` + a descriptor
+  naming grype), `converted_by: grype@1`, Trivy's rules exactly (no invented purl, `descriptor.timestamp`
+  or the caller's time and never the clock, counted skips, shape refusals) plus Grype's own: a
+  GHSA-keyed match takes its first related CVE; the 3.x CVSS entry is read. Golden frozen from day
+  one (no prior implementation to equal). Xray / Black Duck stay by demand. EDR-GUI-01 D16
   fixed the shape — one pure translate function + a detector per tool, the curated `{findings:[…]}`
   document staying the only wire contract — and Trivy proved it live. Grype is the closest dialect
   and the most requested; each further tool registers only on demand. ~~**Dep:** GUI-10's test

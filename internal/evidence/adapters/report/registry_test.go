@@ -52,6 +52,18 @@ func TestDetectTruthTable(t *testing.T) {
 			kind:    KindSBOM,
 			dialect: DialectCycloneDX,
 		},
+		// Row 5b (GUI-15).
+		{
+			name:    "Grype",
+			body:    `{"matches":[],"descriptor":{"name":"grype","version":"0.80.0"}}`,
+			kind:    KindReport,
+			dialect: DialectGrype,
+		},
+		{
+			name: "matches without a grype descriptor is not claimed",
+			body: `{"matches":[{"x":1}],"descriptor":{"name":"other"}}`,
+			err:  ErrUnrecognisedFormat,
+		},
 		// Row 3.
 		{
 			name:    "SPDX",
@@ -214,13 +226,13 @@ func TestConvertRefusesAnSBOM(t *testing.T) {
 // (D4). A registration hook is how a second converter for a dialect gets added by
 // accident, so the registry is a switch.
 func TestConverterForIsClosed(t *testing.T) {
-	for _, d := range []Dialect{DialectCurated, DialectCortexCSV, DialectCortexJSON, DialectTrivy} {
+	for _, d := range []Dialect{DialectCurated, DialectCortexCSV, DialectCortexJSON, DialectTrivy, DialectGrype} {
 		conv, ok := ConverterFor(d)
 		if !ok || conv == nil {
 			t.Fatalf("ConverterFor(%s) = %v, %v", d, conv, ok)
 		}
 	}
-	for _, d := range []Dialect{DialectSPDX, DialectCycloneDX, Dialect("grype")} {
+	for _, d := range []Dialect{DialectSPDX, DialectCycloneDX, Dialect("snyk")} {
 		if conv, ok := ConverterFor(d); ok {
 			t.Errorf("ConverterFor(%s) returned %v, want no converter", d, conv)
 		}
