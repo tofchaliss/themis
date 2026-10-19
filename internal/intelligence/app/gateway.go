@@ -225,8 +225,8 @@ type GatewayConfig struct {
 	// the SAME instance to the read handler, so the model and the engineer cannot be served
 	// different answers to "what resembles this?". nil disables precedent grounding.
 	Precedents *PrecedentService
-	Authorizer Authorizer // optional pre-invocation authz (Δ2 C7); nil = allow-all
-	Redactor   Redactor   // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
+	Authorizer Authorizer         // optional pre-invocation authz (Δ2 C7); nil = allow-all
+	Redactor   Redactor           // optional secret/PII scrub of the prompt (Δ2 C7); nil = none
 	Capturer   InvocationCapturer // optional Δ4a replay-harness capture (D-Δ4a-5); nil = no capture
 	// BudgetTokens / BudgetWindow enforce D4's per-capability spend ceiling. Both must be > 0 to
 	// enforce anything; unset = unlimited, which is today's behaviour and the safe default —
@@ -643,6 +643,16 @@ func (g *Gateway) Invoke(
 					"that were not in its grounding, so treat those specifics as unreliable: %s]",
 					strings.Join(warn, ", "))
 			}
+			// AI-CMP-1b: the subject echo. The Decision path refuses a wrong finding_id echo;
+			// the Information path validated nothing, so a capability could not rely on the field
+			// (live-witnessed twice: compare_releases echoed the BASELINE id as subject_id). A
+			// mismatch is a labelling slip, not an ungrounded citation — the prose was graded
+			// against the real subject — so it is a caveat in the text, like the mentions above,
+			// never a refusal.
+			if echoed := firstNonEmpty(out.SubjectID, out.FindingID); echoed != "" && echoed != sel.First() {
+				oc.Information += fmt.Sprintf(" [SUBJECT ECHO — the answer labels itself as being about %s "+
+					"but was asked, and graded, about %s; trust the content, not the label]", echoed, sel.First())
+			}
 			oc.DecidedBy = "llm:information"
 			oc.Reason = ReasonOK
 			return domain.Proposal{}, oc // produced stays FALSE: there is no proposal to record
@@ -715,4 +725,14 @@ func (g *Gateway) buildProposal(out domain.RawOutput, capb domain.Capability, oc
 		DecidedBy:      oc.DecidedBy,
 		PrecedentsUsed: oc.PrecedentsUsed,
 	}, rationaleWarnings...)
+}
+
+// firstNonEmpty returns the first non-empty string.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

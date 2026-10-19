@@ -638,6 +638,37 @@ func TestInvokeOutcomeCarriesTheSelection(t *testing.T) {
 	}
 }
 
+// AI-CMP-1b: an Information answer that labels itself with the wrong subject is delivered with a
+// caveat in the text, never refused — the prose was graded against the real subject. A correct
+// echo, or none, adds nothing.
+func TestInvokeInformationSubjectEchoMismatchIsACaveat(t *testing.T) {
+	info := customCap("explain_vulnerability", domain.ExecutionPlan{{Engine: domain.EngineLLM, Prompt: "p"}})
+	info.Output = domain.OutputInformation
+	for _, tc := range []struct {
+		name, raw string
+		caveat    bool
+	}{
+		{"wrong subject_id", `{"subject_id":"rel-old","finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"x"}`, true},
+		{"wrong finding_id, no subject_id", `{"finding_id":"NOPE","recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"x"}`, true},
+		{"correct echo", `{"subject_id":"F1","finding_id":"F1","recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"x"}`, false},
+		{"no echo at all", `{"recommended_stance":"affected","confidence":0.9,"evidence":[],"reasoning":"x"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := gatewayWith(t, domain.NewRegistry(info), &fakeEngine{replies: []engineReply{{raw: tc.raw}}})
+			_, oc := g.Invoke(context.Background(), "explain_vulnerability", domain.NewSelection(domain.SelectionFinding, "F1"), "corr")
+			if oc.Reason != ReasonOK || oc.Produced {
+				t.Fatalf("reason %q produced %v — a labelling slip must not refuse the answer", oc.Reason, oc.Produced)
+			}
+			if got := strings.Contains(oc.Information, "SUBJECT ECHO"); got != tc.caveat {
+				t.Errorf("caveat present = %v, want %v: %q", got, tc.caveat, oc.Information)
+			}
+			if tc.caveat && !strings.Contains(oc.Information, "about F1") {
+				t.Errorf("the caveat must name the real subject: %q", oc.Information)
+			}
+		})
+	}
+}
+
 // --- Capability classes (EDR-TRUST-01 T7) -----------------------------------------------
 
 // An Information capability produces an EPHEMERAL response and NO proposal. This is the

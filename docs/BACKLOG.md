@@ -1066,8 +1066,11 @@ under the 2026-08-07 re-derivation standard.
   tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
   a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
   engine when a second translator lands. Until then the translator is exercised only live.
-- [ ] **AI-CMP-1b — the Information path never validates `subject_id`; the model can echo the wrong
-  one (filed 2026-08-24, live).** LOW. Live-witnessed twice on `compare_releases`: the prompt tells the
+- [x] **AI-CMP-1b — the Information path never validates `subject_id`; the model can echo the wrong
+  one (filed 2026-08-24, live; closed 2026-10-19).** LOW. **Done:** the Information branch compares
+  the echoed `subject_id` (or `finding_id` when that is all the answer carries) with the Selection's
+  subject and appends a "[SUBJECT ECHO …]" caveat to the text on a mismatch — warning, never a
+  refusal, like the ungrounded-mentions scan; a correct or absent echo adds nothing. Live-witnessed twice on `compare_releases`: the prompt tells the
   model to echo the CANDIDATE release id in `subject_id`, and CyberPal returned the BASELINE id instead
   (`rel-old` on the e2e fixture; the baseline id on the MRF pair). Harmless today — `subject_id` is
   response metadata, the prose and cited CVEs were correct — but the Decision path validates its
