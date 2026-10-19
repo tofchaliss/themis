@@ -483,6 +483,9 @@ recorded in `proposal.md` and accepted in `design.md`.
       auth-estate tests re-pointed; `communication/adapters/inbound` 100%. **Measure on the VM:**
       upload a changed SBOM with delivery on and read ONE `jira_issue` intent for the Release, with
       `product_id`/`project_id` set, and none after the next re-discovery sweep.
+      **Measured on the VM 2026-10-19:** a 4-component pypi SBOM re-uploaded to release c0c7cce6 →
+      event seq 4 (`new_sbom`, high 7) → exactly three intents (jira_issue, email, ci_rebuild), all
+      delivered by the fake senders; with delivery OFF the earlier event (seq 3) recorded nothing.
 - [x] 6.4 **N-M2d** (`themis`; **API CHANGE + SCHEMA CHANGE**) — Governance table
       `release_evaluated_events` (migration **up/down**, reversibility a gate) and the cursor read
       API `GET /api/v1/governance/events/release-evaluated?after=<sequence>&limit=<n>` in
@@ -505,6 +508,9 @@ recorded in `proposal.md` and accepted in `design.md`.
       `TestPublishEvaluatedAndMark_OneGuardedTransaction`, `TestMigrationDownUp`. No new packages.
       **Measure on the VM:** after the next upload, `GET …/events/release-evaluated` with a read key
       returns the evaluation with `cause=new_sbom` and `next` > 0; `?after=<next>` is empty.
+      **Measured on the VM 2026-10-19:** migration 17 present; the feed answered 401 without a key,
+      `{"items": [], "next": 0}` with the operator key before the first upload, and the table held
+      seq 3 and 4 (`new_sbom`, counts high 7 / medium 10 then 14, low 1) after the two uploads.
 - [x] 6.5 **N-M2e** (`themis`; no API, no schema) — the comparison baseline: select the
       **immediately-previous SBOM of the Release by upload order** and detect closure of the targeted
       set. Tests: `TestSelectPreviousSBOM_ByUploadOrder` and
@@ -592,7 +598,16 @@ recorded in `proposal.md` and accepted in `design.md`.
       later new SBOM may open a NEW cycle. State in **`rebuild_cycles`** (migration 000010; at most one
       open cycle per Release). Order on the consumer: loop decides → ticket → mail (both carry the
       decision as a "Rebuild loop" section, exhaustion in capitals, "a person decides what happens
-      next") → rebuild intent. Within a loop the baseline is the SBOM Themis judged last
+      next") → rebuild intent. **Measured on the VM 2026-10-19:** cycle opened on release c0c7cce6
+      at attempt 1 targeting the 7 High CVEs; ticket and mail intents carry `rebuild_state=opened`,
+      `rebuild_attempt=1`; one `ci_rebuild` intent delivered by the fake sender (its own
+      `rebuild_attempt` snapshot key was missing — fixed in the same commit). Two further changed
+      uploads: `continuing`/attempt 2 (cycle attempts 2), then `exhausted` — only ticket + mail
+      recorded, NO third `ci_rebuild`, cycle `exhausted` at 2, the mail body reading "ATTEMPTS
+      EXHAUSTED (2 of 2) … A person decides what happens next" with all 7 targets still open.
+      The "Compared against" line printed the SBOM just evaluated instead of the previous one —
+      fixed in the same commit (`BaselineSBO` = the cycle's previous SBOM, `PriorSBO` = the
+      evaluated one, which the build job receives). Within a loop the baseline is the SBOM Themis judged last
       (`last_sbom_id`), which is M2-5's immediately-previous SBOM for the loop's own sequence — no
       Evidence read on the reader path; `domain.SelectPreviousSBOM` stays for an Evidence-backed check
       later. Rediscovery never reaches the loop (N-M2c). No Finding is touched anywhere. Tests: the two

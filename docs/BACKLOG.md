@@ -24,12 +24,12 @@ unblocks the most, highest first:
 1. **N-M2c — ticket on `release_evaluated`, not on `finding_opened`** (6.3). Retires the proxy
    trigger; one Release evaluation = one event = one ticket, product and project populated. No
    API, no schema. *Unblocks every later step.* **Shipped 2026-10-17** (`consumer.go` dispatches on
-   `release_evaluated`/`new_sbom`, `finding_opened` out of the interest set; VM measurement
-   pending: one `jira_issue` intent per changed upload, none after a sweep).
+   `release_evaluated`/`new_sbom`, `finding_opened` out of the interest set). **VM-verified
+   2026-10-19:** one ticket intent per changed upload, none with delivery off.
 2. **N-M2d — the release-evaluated event table + cursor read API** (6.4; API + schema). What the
    runtime's poller and any subscriber reads; `GET /api/v1/governance/events/release-evaluated`. **Shipped 2026-10-17** (migration 000017, feed row in the
-   publish transaction, cursor read with the paging rules in the app; VM measurement pending:
-   the next upload's evaluation readable with a read key).
+   publish transaction, cursor read with the paging rules in the app; **VM-verified 2026-10-19:** 401 without a
+   key, empty page then seq 3–4 with the operator key.
 3. **N-M2e — the comparison baseline** (6.5): previous SBOM by upload order; closure of the
    targeted set. **Shipped 2026-10-17** (pure domain rules with the two named
    tests; fed by the N-M2f worker).
@@ -43,7 +43,8 @@ unblocks the most, highest first:
    `delivery:callback` scope only, evidence on the intent. **Shipped 2026-10-17** (route, scope rule, evidence table 000009).
 7. **N-M2i — stop conditions** (6.9): success or exhaustion → stop, tell a person, never
    auto-resolve. **Shipped 2026-10-17** (the loop on the reader path, cycle table 000010,
-   decision written on ticket and mail; VM measurement pending: a Critical upload → one rebuild intent).
+   decision written on ticket and mail). **VM-verified 2026-10-19:** opened/1 → continuing/2 →
+   exhausted, no third rebuild, "ATTEMPTS EXHAUSTED (2 of 2)" on the mail.
 8. **N-M2j — the runtime poller** (6.10; `themis-ai-runtime`, not this repo).
 9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
 10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first). **Shipped 2026-10-17** (D24; rpm source join in `CoversPackage`).

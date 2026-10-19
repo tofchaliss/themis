@@ -82,8 +82,14 @@ type RebuildOutcome struct {
 	Targeted    []string
 	Closed      []string
 	Open        []string
-	BaselineSBO string // the SBOM the next rebuild is compared against (prior SBOM)
-	cycle       RebuildCycle
+	// BaselineSBO is the SBOM this evaluation was COMPARED AGAINST — the cycle's previous SBOM
+	// (the opening evaluation has none to compare with, so it names its own). What the ticket
+	// and the mail print as "Compared against".
+	BaselineSBO string
+	// PriorSBO is the SBOM the NEXT rebuild starts from — the one just evaluated — handed to
+	// the build job as THEMIS_PRIOR_SBOM_ID.
+	PriorSBO string
+	cycle    RebuildCycle
 }
 
 // Snapshot renders the outcome as intent snapshot facts; a clean outcome records nothing.
@@ -165,12 +171,13 @@ func (l *RebuildLoop) Evaluate(ctx context.Context, releaseID, sbomID, originEve
 			return RebuildOutcome{}, err
 		}
 		return RebuildOutcome{State: OutcomeOpened, NextAttempt: 1, Targeted: set.CVEs(), Open: set.CVEs(), Closed: []string{},
-			BaselineSBO: sbomID, cycle: stored}, nil
+			BaselineSBO: sbomID, PriorSBO: sbomID, cycle: stored}, nil
 	}
 
 	set := domain.TargetedSetOf(cycle.Targeted)
 	closure := set.Closure(current)
-	out := RebuildOutcome{Attempt: cycle.Attempts, Targeted: set.CVEs(), Closed: closure.Closed, Open: closure.Open, BaselineSBO: sbomID}
+	out := RebuildOutcome{Attempt: cycle.Attempts, Targeted: set.CVEs(), Closed: closure.Closed, Open: closure.Open,
+		BaselineSBO: cycle.LastSBOMID, PriorSBO: sbomID}
 	cycle.LastSBOMID, cycle.UpdatedAt = sbomID, now
 	switch {
 	case closure.Complete:
@@ -197,8 +204,9 @@ func (l *RebuildLoop) Raise(ctx context.Context, lineage IntentLineage, originEv
 		return Intent{}, false, nil
 	}
 	in, err := l.intents.EnqueueCIRebuild(ctx, lineage, originEventID, out.cycle.ReleaseID, productID, projectID,
-		out.BaselineSBO, out.Open, out.NextAttempt, map[string]string{
-			SnapshotRebuildState: out.State, SnapshotRebuildMaxAttempts: strconv.Itoa(l.maxAttempts),
+		out.PriorSBO, out.Open, out.NextAttempt, map[string]string{
+			SnapshotRebuildState: out.State, SnapshotRebuildAttempt: strconv.Itoa(out.NextAttempt),
+			SnapshotRebuildMaxAttempts: strconv.Itoa(l.maxAttempts),
 		})
 	if err != nil {
 		return Intent{}, false, err
