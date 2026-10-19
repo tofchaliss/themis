@@ -49,7 +49,7 @@ unblocks the most, highest first:
 9. **VEX-GUI-2** — the "applies here" chip vs package coverage (clarity, LOW). **Shipped 2026-10-17** (D23; `covers_component` on the wire).
 10. **VEX-SRC-1** — source-package statements cover their binaries (precision, design first). **Shipped 2026-10-17** (D24; rpm source join in `CoversPackage`).
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
-12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line); VM-NET-1 repo half shipped (§7a, `deploy/edge/`), VM apply open.
+12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line); VM-NET-1 **shipped and applied 2026-10-19** (§7a, `deploy/edge/`, ufw + firewalld).
 
 Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
 through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
@@ -6084,12 +6084,15 @@ under the 2026-08-07 re-derivation standard.
   missing or unreadable parent; `POST /products` only returns the key's own product (`200`); customers and
   deployments are admin-only. See EDR-SECURITY-01's 2026-10-13 Registry note and INSTALLATION.md §5b.
 
-- [ ] **VM-NET-1 — the VM serves every node on the network with no host firewall and no TLS (filed
-  2026-10-13, VM round).** MED, operability/security. **Repo half done 2026-10-17:**
+- [x] **VM-NET-1 — the VM serves every node on the network with no host firewall and no TLS (filed
+  2026-10-13, VM round; closed 2026-10-19).** MED, operability/security. **Repo half done 2026-10-17:**
   `deploy/edge/Caddyfile.example` (443 → 127.0.0.1:8090, `X-Forwarded-Proto` ⇒ Secure cookie),
   `deploy/edge/firewall.sh` (firewalld, ssh + https only, dry-run by default), INSTALLATION.md §7a
-  (bind every node to 127.0.0.1 first). **Open: the VM apply** — the three §7a steps, then
-  `ss -ltnp` shows every Themis port on loopback and `firewall-cmd --list-all` shows ssh, https. `ss -ltnp` shows the dashboard on `*:8090` and the
+  (bind every node to 127.0.0.1 first). **VM apply 2026-10-19, all three steps:** `ss -ltnp` shows all seven
+  nodes on 127.0.0.1; Caddy 2.11.7 answers the dashboard (303 to login) and the two CI routes
+  (`/evidence/` → intake reached, `/communication/` → callback reached) on 443 with its local CA;
+  ufw active, deny incoming, OpenSSH + 443 only. The VM is Ubuntu 24.04, so the firewall script
+  gained a ufw branch and the guide names apt beside dnf. `ss -ltnp` shows the dashboard on `*:8090` and the
   six nodes on their ports; neither firewalld nor ufw is active, so 8081–8086 are reachable from the
   office network. Since #156 every node requires `X-API-Key`, so this is no longer an open write surface,
   but the GUI login and every key still cross the network in clear text. **Do:** put Caddy (or nginx) on

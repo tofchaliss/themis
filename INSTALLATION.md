@@ -1015,17 +1015,24 @@ pasted key is a key, and a password is a password. Three steps close it; each is
    `THEMIS_INTELLIGENCE_ADDR=127.0.0.1:8086`, `THEMIS_DASHBOARD_ADDR=127.0.0.1:8090`), then
    `sudo systemctl restart 'themis@*'`. The `*_URL` variables already say `localhost`.
 2. **Put TLS in front of the dashboard.** [`deploy/edge/Caddyfile.example`](deploy/edge/Caddyfile.example)
-   terminates HTTPS on 443 and proxies to `127.0.0.1:8090`; Caddy adds `X-Forwarded-Proto`, so
+   terminates HTTPS on 443 and proxies to `127.0.0.1:8090` (Rocky: `dnf install caddy` from EPEL;
+   Ubuntu: Caddy's own apt repository, `apt-get install caddy`); Caddy adds `X-Forwarded-Proto`, so
    the session cookie turns `Secure` (EDR-GUI-01 D3). `tls internal` uses Caddy's local CA
    (browsers on the office network trust it after `caddy trust`, or install a real certificate
    and delete the line). Copy it to `/etc/caddy/Caddyfile` with the VM's own hostname and
-   `sudo systemctl enable --now caddy`. The API nodes are NOT proxied: scripts and the intake
-   CLI run on the host, and a remote caller that needs an API node is the moment to add a second
-   `reverse_proxy` block for it, deliberately.
+   `sudo systemctl enable --now caddy`. Two API routes ride the same 443 for a build system:
+   `/evidence/` → the intake (a CI job uploads with its product-scoped key) and `/communication/`
+   → the CI callback (`delivery:callback` key); the prefix is stripped, so a job calls
+   `https://<vm>/evidence/api/v1/intake?release_id=…` and
+   `https://<vm>/communication/api/v1/callbacks/ci-rebuild`. The other nodes are NOT published:
+   scripts run on the host, and a remote caller for one of them is the moment to add a block,
+   deliberately. The CI host must trust the certificate: with `tls internal`, import Caddy's
+   local root (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`) there, or use
+   a company certificate instead.
 3. **Allow only SSH and HTTPS in.** [`deploy/edge/firewall.sh`](deploy/edge/firewall.sh) is a
    dry run by default and prints what it would do; `sudo ./deploy/edge/firewall.sh --apply`
-   enables firewalld with `ssh` and `https` only, and removes any earlier opening of
-   8081–8086, 8090 and 5432. Verify with `ss -ltnp` (every Themis port on `127.0.0.1`) and
+   enables the host firewall — firewalld on Rocky/RHEL, ufw on Ubuntu/Debian, whichever the host
+   has — with `ssh` and `https` only, and removes any earlier opening of 8081–8086, 8090 and 5432. Verify with `ss -ltnp` (every Themis port on `127.0.0.1`) and
    `firewall-cmd --list-all`.
 
 `scripts/vm-verify.sh` is unaffected: it reads the nodes over `localhost`.
