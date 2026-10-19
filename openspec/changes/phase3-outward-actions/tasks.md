@@ -593,6 +593,11 @@ recorded in `proposal.md` and accepted in `design.md`.
       and 6.6's `TestCallbackAlone_NoSideEffects` at worker level. **Measure on the VM:** mint a
       `delivery:callback` key, POST a callback for a `ci_rebuild` intent → 202 and one row; the same
       key on any other POST → 403.
+      **Measured on the VM 2026-10-19:** a freshly minted `delivery:callback` key → 202 on the callback
+      and one `delivery_callbacks` row naming the key; the same key on `/publications` → 403; the
+      operator (admin) key on the callback route → 403. Note for operators: authadmin prints the token
+      on an indented line followed by a blank one, so capture it with `awk 'NF{t=$NF} END{print t}'`,
+      not `tail -1`.
 - [x] 6.9 **N-M2i** (`themis`; no API, **one table**) — stop conditions: success (targeted set closed)
       and exhaustion (stop + mail + Jira update telling a person); **no further `ci_rebuild` intent
       after a stop**; **no Finding is ever auto-resolved**. Tests:
