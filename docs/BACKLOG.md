@@ -711,8 +711,19 @@ three angles, and two of them proposed fixes that would not have worked.
 Both were found by reading what the gate did NOT check, not by a failing test. Neither blocks the
 arc; both are recorded so the shortfall is a decision rather than a silent exemption.
 
-- [ ] **HARNESS-COV-1 — close `governance/adapters/harness` to the 90% adapter tier.** LOW,
-  quality. The package is now registered in `scripts/check-coverage.sh` at **80%** and sits at
+- [x] **HARNESS-COV-1 — close `governance/adapters/harness` to the 90% adapter tier.** LOW,
+  quality. **Done 2026-10-19: 92.3%, and the package now sits at the adapter tier (its 80%
+  exception removed from `scripts/check-coverage.sh`).** (a) got its tests two ways: eight more
+  forge alterations through the runtime's own handle (audit decision / tool / registry, missing
+  audit, malformed execution_ref, a second egress witness, another egress address, an egress
+  manifest naming another task, no verification), and direct replay tests over hand-built event
+  streams for the shapes the handle refuses to write (`replay_test.go`: every `replayProduction`
+  and `replayL5` link, the verification-order and writer rules). Two findings: the reconstruction
+  catches a forged audit tool or registry before the intake's own cross-check does, so that
+  cross-check is a second line; and the runtime's durability constitution makes a wrong-writer
+  record unwritable, so those refusals are reachable only through the direct tests. (b), the two
+  dead branches in `anchorStateAtIntake`, stays as it was: a re-read of the registry between two
+  calls is defensive, not dead, and is left with its comment. The package is now registered in `scripts/check-coverage.sh` at **80%** and sits at
   **83.9%** (was 81.0% and *unregistered*, so the gate skipped it entirely — full-repo mode
   iterates the registered lists only). Every admissibility refusal that DECIDES anything is
   covered: verify-A-egress-B, PASS over an invalid report, audit/raw mismatch, dropped egress
@@ -750,8 +761,13 @@ right; what is missing is what the newest history *means* for the Findings the o
 - [ ] **Current SBOM and finding cleanup** (id `EV-CURRENT-SBOM-1`). **DESIGN-GATED** (see the gate
   below). **Cluster: none of R1–R7 fits** — it is a design-blocked correctness item, not a defect
   with a known fix, so it is filed as its own entry per the filing rule at the top of Part 1.
-  **Claim basis: read from code + the 2026-10-12 design review; NOT yet measured on the estate**
-  (how many Findings are in this state is the first thing the design has to count — CONVENTIONS R4).
+  **Measured on the estate 2026-10-19** (read-only: newest SBOM per release via the inventory API
+  against open Findings' active components): 5 releases carry more than one SBOM; on them **1**
+  open Finding sits on components entirely absent from the newest SBOM, **4** have some
+  components absent, **723** are fully present. The one fully-stale case is the smallbox test
+  release after four version bumps of `requests` — the exact openssl 1.1 → 3.0 shape, at tiny
+  volume today. The design stays worth doing (every rebuild loop produces this shape), the
+  urgency is low.
 
   **Acceptance** (verbatim, one line — do not re-word or re-wrap it):
 

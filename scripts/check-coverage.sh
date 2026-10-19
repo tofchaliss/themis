@@ -130,7 +130,6 @@ threshold_for() {
 		# (VerifyAnchorRecord has already loaded and matched the registry). Raising this
 		# to the 90% adapter tier is forge work with its own scope — tracked in
 		# docs/BACKLOG.md as HARNESS-COV-1, not waved away here.
-		governance/adapters/harness) echo 80; return ;;
 		communication/adapters/store) echo 80; return ;;
 		intelligence/adapters/store) echo 80; return ;;
 		# The dashboard's own login table (EDR-GUI-01 D3 amendment): same aggregate-store
