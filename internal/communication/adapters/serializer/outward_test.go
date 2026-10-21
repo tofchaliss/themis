@@ -9,6 +9,7 @@ import (
 
 	"github.com/themis-project/themis/internal/communication/adapters/serializer"
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 )
 
 // --- N-M1b: the outward-delivery payloads ---------------------------------------------------
@@ -404,5 +405,71 @@ func TestRenderIntentPayloadDispatches(t *testing.T) {
 	// A type with no renderer is an error, not an empty payload: the service fails closed on it.
 	if _, err := r.RenderIntentPayload(ctx, app.Intent{Type: "ci_build"}); err == nil {
 		t.Error("an unknown intent type must be refused")
+	}
+}
+
+// --- names, not ids (owner ask 2026-10-21) --------------------------------------------------
+
+type identitySource struct {
+	ref domain.RollupProductRef
+	err error
+}
+
+func (s identitySource) ReleaseIdentity(context.Context, string) (domain.RollupProductRef, error) {
+	return s.ref, s.err
+}
+
+// With the Registry chain wired, the ticket, the evaluation mail and the rebuild instruction say
+// "Product / Project vVersion" in their subject and carry the names in the body with the ids
+// beside them; without the chain, or when it fails, the ids stand alone exactly as before.
+func TestOutwardRenderersNameTheRelease(t *testing.T) {
+	ctx := context.Background()
+	named := serializer.NewOutwardRenderer(&postureSource{rows: estate()}).
+		WithIdentity(identitySource{ref: domain.RollupProductRef{Product: "smallbox", Project: "demo", Version: "1.1.0", ReleaseID: "rel-1"}})
+	in := app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1", ProductID: "prod-1", ProjectID: "prj-1", Snapshot: map[string]string{}}
+
+	summary, body, err := named.RenderJiraIssue(ctx, in)
+	if err != nil {
+		t.Fatalf("ticket: %v", err)
+	}
+	if summary != "Themis remediation - smallbox / demo v1.1.0" {
+		t.Errorf("summary = %q", summary)
+	}
+	for _, want := range []string{"smallbox (prod-1)", "demo (prj-1)", "v1.1.0 (rel-1)"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("ticket body lacks %q:\n%s", want, body)
+		}
+	}
+	mail := in
+	mail.Type, mail.Snapshot = app.IntentEmail, map[string]string{"notification": "release_evaluated"}
+	subject, mbody, err := named.RenderEvaluationEmail(ctx, mail)
+	if err != nil {
+		t.Fatalf("mail: %v", err)
+	}
+	if !strings.HasPrefix(subject, "Themis evaluated smallbox / demo v1.1.0 - Critical ") || !strings.Contains(string(mbody), "smallbox (prod-1)") {
+		t.Errorf("mail = %q / %s", subject, mbody)
+	}
+	rebuild := in
+	rebuild.Type, rebuild.Snapshot = app.IntentCIRebuild, map[string]string{"attempt": "1"}
+	payload, err := named.RenderIntentPayload(ctx, rebuild)
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if rs, rb := app.SplitPayload(payload); rs != "Themis rebuild - smallbox / demo v1.1.0 - attempt 1" || !strings.Contains(string(rb), "demo (prj-1)") {
+		t.Errorf("rebuild = %q / %s", rs, rb)
+	}
+
+	// The chain failing, or absent, leaves the ids: a name is a courtesy, an unsent ticket is not.
+	failing := serializer.NewOutwardRenderer(&postureSource{rows: estate()}).WithIdentity(identitySource{err: errors.New("registry down")})
+	if s, b, err := failing.RenderJiraIssue(ctx, in); err != nil || s != "Themis remediation - Release rel-1" || !strings.Contains(string(b), "Release:") {
+		t.Errorf("failing chain: %q %v", s, err)
+	}
+	if s, _, err := serializer.NewOutwardRenderer(&postureSource{rows: estate()}).RenderJiraIssue(ctx, in); err != nil || s != "Themis remediation - Release rel-1" {
+		t.Errorf("no chain: %q %v", s, err)
+	}
+	// Ids the event never carried read as unknown rather than as an empty bracket.
+	bare := app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1", Snapshot: map[string]string{}}
+	if _, b, err := named.RenderJiraIssue(ctx, bare); err != nil || !strings.Contains(string(b), "smallbox (id unknown)") {
+		t.Errorf("bare ids: %v\n%s", err, b)
 	}
 }

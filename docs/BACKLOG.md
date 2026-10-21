@@ -35,7 +35,10 @@ unblocks the most, highest first:
    tests; fed by the N-M2f worker).
 4. **N-M2f — Jira update + mail AFTER the comparison** (6.6): the ticket says what changed; mail
    goes to the audience; never from the callback. **Shipped 2026-10-17** (evaluation mail beside the ticket, one
-   intent per channel per event; the closed/open wording follows with the stop rules in N-M2i). **VM-verified 2026-10-19 with the real senders:** one upload → the Jira ticket and the mail.
+   intent per channel per event; the closed/open wording follows with the stop rules in N-M2i). **VM-verified 2026-10-19 with the real senders:** one upload → the Jira ticket and the mail. **2026-10-21, owner ask:** the ticket, the evaluation mail and the rebuild instruction
+   now say "Product / Project vVersion" in the subject and carry the names in the body with the
+   ids beside them (Registry chain through `OutwardRenderer.WithIdentity`; ids alone when the
+   chain is unavailable).
 5. **N-M2g — `ci_rebuild` over Jenkins** (6.7; CHECK-constraint migration): the intent kind, the
    `buildWithParameters` sender, https enforced, max attempts. **Shipped 2026-10-17** (sender, knobs, constraint migration; nothing
    raises the intent until N-M2i).
