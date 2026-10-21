@@ -53,6 +53,9 @@ type Communication struct {
 	// can give the outward renderer the severity counts a remediation ticket is made of (N-M1b)
 	// without opening a second client against the same read API.
 	Posture app.ReleaseSeverityReader
+	// Identity is the Registry name chain, carried for the same reason: a ticket or a mail
+	// names the product, project and version, not three UUIDs (owner ask 2026-10-21).
+	Identity app.ReleaseIdentityReader
 }
 
 // Wire builds the Communication components over the given pool, Governance read-API base
@@ -72,7 +75,8 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey str
 	read := app.NewReadService(st, positions, serializers)
 	// The release-scoped VEX rollup (EDR-COMMUNICATION-01 D13): the same Governance client
 	// supplies the posture read, the Registry client the fail-closed name chain (D13.4).
-	rollups := app.NewRollupService(positions, regclient.NewClient(registryBaseURL, nil).WithAPIKey(readAPIKey),
+	identity := regclient.NewClient(registryBaseURL, nil).WithAPIKey(readAPIKey)
+	rollups := app.NewRollupService(positions, identity,
 		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
@@ -87,6 +91,7 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey str
 		Reconcile: app.NewReconcileService(relay),
 		Retention: app.NewRetentionService(st, defaultRetentionWindow, clock),
 		Posture:   positions,
+		Identity:  identity,
 	}
 }
 
@@ -120,7 +125,7 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
 	}
 	if comm.Posture != nil {
-		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture))
+		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture).WithIdentity(comm.Identity))
 	}
 	comm.Consumer.WithIntents(intents)
 	// The rebuild loop (N-M2i) needs the posture to decide; without the read seam there is no

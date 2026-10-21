@@ -59,6 +59,37 @@ var listedSeverities = []string{sevCritical, sevHigh}
 // enqueue time (D-N-3).
 type OutwardRenderer struct {
 	posture app.ReleaseSeverityReader
+	// identity resolves a release to its product, project and version through the Registry
+	// (owner ask 2026-10-21: a mail that says three UUIDs means nothing to its reader). Nil, or
+	// a failed read, leaves the ids in place: a name is a courtesy, an unsent ticket is not.
+	identity app.ReleaseIdentityReader
+}
+
+// WithIdentity attaches the Registry name chain.
+func (r OutwardRenderer) WithIdentity(id app.ReleaseIdentityReader) OutwardRenderer {
+	r.identity = id
+	return r
+}
+
+// releaseLabel names a release for a subject line — "Product / Project v1.2" when the chain
+// resolves, the bare release id otherwise — and the facts that go with it.
+func (r OutwardRenderer) releaseLabel(ctx context.Context, in app.Intent) (label string, facts []fact) {
+	label = "Release " + in.ReleaseID
+	facts = []fact{{"Release", in.ReleaseID}, {"Project", in.ProjectID}, {"Product", in.ProductID}}
+	if r.identity == nil || strings.TrimSpace(in.ReleaseID) == "" {
+		return label, facts
+	}
+	ref, err := r.identity.ReleaseIdentity(ctx, in.ReleaseID)
+	if err != nil {
+		return label, facts
+	}
+	label = ref.Product + " / " + ref.Project + " v" + ref.Version
+	facts = []fact{
+		{"Product", ref.Product + " (" + firstNonEmpty(in.ProductID, "id unknown") + ")"},
+		{"Project", ref.Project + " (" + firstNonEmpty(in.ProjectID, "id unknown") + ")"},
+		{"Release", "v" + ref.Version + " (" + in.ReleaseID + ")"},
+	}
+	return label, facts
 }
 
 // Compile-time proof that the renderer satisfies the app port it exists for.
@@ -93,18 +124,19 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 		subject, body := RenderDecisionEmail(in)
 		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentCIRebuild:
-		subject, body := RenderCIRebuild(in)
+		subject, body := r.renderCIRebuild(ctx, in)
 		return app.BuildPayload(subject, body), nil
 	default:
 		return nil, fmt.Errorf("communication: no outward renderer for intent type %q", in.Type)
 	}
 }
 
-// jiraSummary is the ticket's summary line. It is derived from the Release id ALONE: product and
-// project are recorded when the originating event carried them and absent otherwise, and a summary
-// whose shape changed with them would split one Release's ticket in two.
-func jiraSummary(releaseID string) string {
-	return "Themis remediation - Release " + releaseID
+// jiraSummary is the ticket's summary line. One ticket per Release is kept by the ticket INDEX
+// and the label, never by this text, so the summary may carry the names a reader wants
+// ("Product / Project v1.2") and fall back to the release id when the chain is unavailable;
+// a later update rewrites it in full (M1b-4).
+func jiraSummary(label string) string {
+	return "Themis remediation - " + label
 }
 
 // RenderJiraIssue renders the remediation ticket for the intent's Release: severity counts for
@@ -122,15 +154,11 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 	}
 
 	counts, cves := bucket(rows)
+	label, who := r.releaseLabel(ctx, in)
 	var b strings.Builder
 	b.WriteString("Themis tracks remediation of this Release. One ticket per Release: the unit a\n")
 	b.WriteString("rebuild addresses is a Release, so the unit a tracking ticket addresses is a Release.\n\n")
-	writeFacts(&b, []fact{
-		{"Release", in.ReleaseID},
-		{"Project", in.ProjectID},
-		{"Product", in.ProductID},
-		{"Findings", fmt.Sprintf("%d", len(rows))},
-	})
+	writeFacts(&b, append(who, fact{"Findings", fmt.Sprintf("%d", len(rows))}))
 
 	b.WriteString("\nSeverity counts\n")
 	for _, sev := range severityOrder {
@@ -160,7 +188,7 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 	b.WriteString("\nThis ticket is a PROJECTION of Themis state. No Themis decision follows from a Jira\n")
 	b.WriteString("transition, and resolving a Finding stays a decision taken in Themis by a person.\n")
 
-	return jiraSummary(in.ReleaseID), []byte(b.String()), nil
+	return jiraSummary(label), []byte(b.String()), nil
 }
 
 // RenderEvaluationEmail renders the mail that follows a Release evaluation (M2-8 step 4 / N-M2f):
@@ -180,19 +208,17 @@ func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Inten
 		return "", nil, err
 	}
 	counts, cves := bucket(rows)
-	subject := fmt.Sprintf("Themis evaluated Release %s - Critical %d, High %d", in.ReleaseID, counts[sevCritical], counts[sevHigh])
+	label, who := r.releaseLabel(ctx, in)
+	subject := fmt.Sprintf("Themis evaluated %s - Critical %d, High %d", label, counts[sevCritical], counts[sevHigh])
 
 	var b strings.Builder
 	b.WriteString("Themis has evaluated a new SBOM for this Release. This is the Release's posture as it\n")
 	b.WriteString("stands now; the remediation ticket for the Release carries the same figures.\n\n")
-	writeFacts(&b, []fact{
-		{"Release", in.ReleaseID},
-		{"Project", in.ProjectID},
-		{"Product", in.ProductID},
-		{"SBOM", in.Snapshot["sbom_id"]},
-		{"Findings", fmt.Sprintf("%d", len(rows))},
-		{"Event", eventFact(in)},
-	})
+	writeFacts(&b, append(who,
+		fact{"SBOM", in.Snapshot["sbom_id"]},
+		fact{"Findings", fmt.Sprintf("%d", len(rows))},
+		fact{"Event", eventFact(in)},
+	))
 	b.WriteString("\nSeverity counts\n")
 	for _, sev := range severityOrder {
 		if sev == sevUnknown && counts[sev] == 0 {
@@ -252,21 +278,22 @@ func writeRebuildSection(b *strings.Builder, in app.Intent) {
 // parameters from the snapshot, not from this text; the text exists so a rebuild intent is as
 // inspectable as a ticket or a mail, and so the content-address rule (D-N-3) covers it too.
 func RenderCIRebuild(in app.Intent) (string, []byte) {
-	subject := "Themis rebuild - Release " + in.ReleaseID + " - attempt " + firstNonEmpty(in.Snapshot[app.SnapshotAttempt], "1")
+	return OutwardRenderer{}.renderCIRebuild(context.Background(), in)
+}
+
+func (r OutwardRenderer) renderCIRebuild(ctx context.Context, in app.Intent) (string, []byte) {
+	label, who := r.releaseLabel(ctx, in)
+	subject := "Themis rebuild - " + label + " - attempt " + firstNonEmpty(in.Snapshot[app.SnapshotAttempt], "1")
 	var b strings.Builder
 	b.WriteString("Themis asks the build system to rebuild this Release so the targeted Findings can be\n")
 	b.WriteString("re-evaluated from a new SBOM. The job uploads the new SBOM and calls Themis back; the\n")
 	b.WriteString("callback changes no Finding - only the evaluation of the new SBOM can (M2-7).\n\n")
-	writeFacts(&b, []fact{
-		{"Job", in.Destination},
-		{"Release", in.ReleaseID},
-		{"Project", in.ProjectID},
-		{"Product", in.ProductID},
+	writeFacts(&b, append([]fact{{"Job", in.Destination}}, append(who, []fact{
 		{"Prior SBOM", in.Snapshot[app.SnapshotPriorSBOMID]},
 		{"Targeted", in.Snapshot[app.SnapshotTargetedCVEs]},
 		{"Attempt", in.Snapshot[app.SnapshotAttempt]},
 		{"Event", eventFact(in)},
-	})
+	}...)...))
 	return subject, []byte(b.String())
 }
 
