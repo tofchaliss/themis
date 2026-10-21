@@ -1423,7 +1423,52 @@ async function viewNew() {
               <td>${fixes(v)}</td>
               <td><span class="chip">${esc(c.stage || "")}</span></td></tr>`; }).join("")}</tbody></table></div>`
         : `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`}
+      </div>
+      <div class="card" id="published-card">
+        <h2 class="card-title">Latest published <span class="chip" title="fetched live from NVD when you ask; nothing here is stored until you gather it">live, not stored</span></h2>
+        <p class="card-sub">What the world published in the last days, read live from NVD on request and shown as-is. Themis keeps none of it: a row becomes a card only when you press <b>Gather</b>, which is the explicit act that admits a CVE into the estate's knowledge.</p>
+        <div class="row" style="gap:8px;align-items:center">
+          <label class="card-sub">Days <select id="published-days"><option>3</option><option selected>7</option><option>14</option><option>30</option></select></label>
+          <button class="btn" id="published-load">Load from NVD</button>
+          <span class="card-sub" id="published-note"></span>
+        </div>
+        <div id="published-rows"></div>
       </div>`;
+    const sevChip2 = sevChip;
+    const loadPublished = async () => {
+      const days = document.getElementById("published-days").value;
+      const note = document.getElementById("published-note");
+      const box = document.getElementById("published-rows");
+      note.textContent = "asking NVD…";
+      try {
+        const rows = asArray(await apiGET("knowledge", `/faultlines/published-recently?days=${encodeURIComponent(days)}`));
+        note.textContent = `${rows.length} published in the last ${days} days; ${rows.filter((r) => r.carded).length} already carded`;
+        box.innerHTML = rows.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Published</th><th>CVE</th><th>Severity</th><th>What it is</th><th>In the estate</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr data-cve="${esc(r.cve)}">
+            <td title="${esc(r.published || "")}">${timeAgo(r.published)}</td>
+            <td class="mono">${r.carded ? `<a href="#/cve/${encodeURIComponent(r.cve)}">${esc(r.cve)}</a>` : esc(r.cve)}</td>
+            <td>${sevChip2(r.severity)}${typeof r.cvss_score === "number" && r.cvss_score > 0 ? ` <span class="card-sub">${r.cvss_score.toFixed(1)}</span>` : ""}</td>
+            <td class="wrap">${esc((r.summary || "").slice(0, 200))}${(r.summary || "").length > 200 ? "…" : ""}</td>
+            <td>${r.carded ? `<span class="chip chip-good">carded</span>` : `<button class="btn btn-sm" data-gather="${esc(r.cve)}">Gather</button>`}</td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty"><b>Nothing published in that window</b>NVD answered with no CVEs for these days.</div>`;
+        box.querySelectorAll("button[data-gather]").forEach((b) => b.addEventListener("click", async () => {
+          b.disabled = true; b.textContent = "gathering…";
+          try {
+            await apiPOST("knowledge", "/faultlines/gather", { cve: b.dataset.gather });
+            b.closest("tr").querySelector("td:last-child").innerHTML = `<span class="chip chip-good">carded</span>`;
+            note.textContent = `${b.dataset.gather} gathered; it is in the list above after a reload`;
+          } catch (e) {
+            b.disabled = false; b.textContent = "Gather";
+            note.textContent = `gather failed: ${e.message}`;
+          }
+        }));
+      } catch (e) {
+        note.textContent = "";
+        box.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+      }
+    };
+    document.getElementById("published-load").addEventListener("click", loadPublished);
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }

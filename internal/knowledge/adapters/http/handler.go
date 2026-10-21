@@ -8,6 +8,8 @@ import (
 	"errors"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/themis-project/themis/internal/knowledge/adapters/http/gen"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
@@ -21,6 +23,10 @@ type Handler struct {
 	read   *app.ReadService
 	health *app.FeedHealthService
 	gather *app.GatherService // nil / sourceless ⇒ POST /faultlines/gather refuses honestly
+	// published serves GET /faultlines/published-recently (GUI-16 layer 2); nil ⇒ 503. The
+	// cache keeps a page reload from re-asking NVD: the answer is ephemeral either way.
+	published      *app.PublishedService
+	publishedCache publishedCache
 	// scanner serves the on-demand unresolved-components query (EDR-IDENTITY-01 D6). nil ⇒ the
 	// endpoint refuses honestly rather than answering "none", which would read as "all clear".
 	scanner *app.ScannerReportService
@@ -60,6 +66,95 @@ func (h *Handler) GetSanityFlags(w http.ResponseWriter, r *http.Request) {
 // NewHandler builds a Handler.
 func NewHandler(read *app.ReadService, health *app.FeedHealthService) *Handler {
 	return &Handler{read: read, health: health}
+}
+
+// WithPublished wires the live latest-published read (GUI-16 layer 2).
+func (h *Handler) WithPublished(p *app.PublishedService) *Handler {
+	h.published = p
+	return h
+}
+
+// publishedCache is a per-window memo with a short life (publishedCacheTTL). It lives in the
+// adapter because it is a transport economy, not a rule: the app's answer is unchanged.
+type publishedCache struct {
+	mu   sync.Mutex
+	at   map[int]time.Time
+	rows map[int][]app.PublishedCVE
+	now  func() time.Time
+}
+
+const publishedCacheTTL = 5 * time.Minute
+
+func (c *publishedCache) get(days int) ([]app.PublishedCVE, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	if at, ok := c.at[days]; ok && now().Sub(at) < publishedCacheTTL {
+		return c.rows[days], true
+	}
+	return nil, false
+}
+
+func (c *publishedCache) put(days int, rows []app.PublishedCVE) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	if c.at == nil {
+		c.at, c.rows = map[int]time.Time{}, map[int][]app.PublishedCVE{}
+	}
+	c.at[days], c.rows[days] = now(), rows
+}
+
+// GetPublishedRecently handles GET /faultlines/published-recently (GUI-16 layer 2): a live,
+// unstored read. No source is a 503; a failing source is a 502 (the upstream, not Themis,
+// could not answer).
+func (h *Handler) GetPublishedRecently(w http.ResponseWriter, r *http.Request, params gen.GetPublishedRecentlyParams) {
+	if !h.published.Enabled() {
+		writeProblem(w, http.StatusServiceUnavailable, "no published source wired",
+			"this node has no per-CVE source configured for the latest-published read")
+		return
+	}
+	days := 0
+	if params.Days != nil {
+		days = *params.Days
+	}
+	if days <= 0 {
+		days = app.PublishedDefaultDays
+	}
+	if days > app.PublishedMaxDays {
+		days = app.PublishedMaxDays
+	}
+	rows, hit := h.publishedCache.get(days)
+	if !hit {
+		var err error
+		rows, err = h.published.LatestPublished(r.Context(), days)
+		if err != nil {
+			writeProblem(w, http.StatusBadGateway, "cannot read the latest published CVEs", err.Error())
+			return
+		}
+		h.publishedCache.put(days, rows)
+	}
+	out := make([]gen.PublishedCVE, 0, len(rows))
+	for _, p := range rows {
+		item := gen.PublishedCVE{Cve: p.CVE, Published: p.Published, Carded: p.Carded}
+		if p.Summary != "" {
+			item.Summary = strptr(p.Summary)
+		}
+		if p.Severity != "" {
+			item.Severity = strptr(p.Severity)
+		}
+		if p.Score > 0 {
+			item.CvssScore = f32ptr(p.Score)
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // WithGather wires the on-demand per-CVE gather (G-AI-1) and returns the handler for chaining.
