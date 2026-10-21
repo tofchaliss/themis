@@ -14,9 +14,19 @@ import (
 // the result is displayed, never folded.
 func TestNVDClient_PublishedSince(t *testing.T) {
 	var queries []string
+	resets := 1 // the first request is reset once, as NVD does under load; the retry succeeds
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queries = append(queries, r.URL.RawQuery)
 		start := r.URL.Query().Get("startIndex")
+		if start == "0" && resets > 0 {
+			resets--
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if start == "0" {
 			_, _ = fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
@@ -47,8 +57,9 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 	if r := rows[1]; r.CVE != "CVE-2026-1002" || r.Severity != "" || r.Score != 0 || r.Summary != "Not scored yet." {
 		t.Errorf("unscored = %+v", r)
 	}
-	if len(queries) != 2 || !containsAll(queries[0], "pubStartDate=", "pubEndDate=", "startIndex=0") || !containsAll(queries[1], "startIndex=2") {
-		t.Errorf("queries = %v, want two paged published-window requests", queries)
+	if len(queries) != 3 || !containsAll(queries[0], "pubStartDate=", "pubEndDate=", "startIndex=0", "resultsPerPage=200") ||
+		!containsAll(queries[1], "startIndex=0") || !containsAll(queries[2], "startIndex=2") {
+		t.Errorf("queries = %v, want the reset page retried once, then the second page", queries)
 	}
 
 	// A zero `since` and one older than NVD's maximum span are both bounded to the maximum.

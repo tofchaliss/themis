@@ -492,6 +492,13 @@ func (c *NVDClient) fetchPage(ctx context.Context, start, end time.Time, startIn
 	return c.get(ctx, q, "nvd modified-since")
 }
 
+// nvdPublishedPageSize is the page the live read asks for. Smaller than the watch's 2000 on
+// purpose: measured 2026-10-21 on the estate, a three-day window at the full page size came
+// back as an HTTP/2 stream reset from NVD ("INTERNAL_ERROR; received from peer"), while a one-day
+// window did not. The watch never sees this because it walks 24-hour slices; this read walks
+// the whole window in one span, so it pages smaller and retries one reset per page.
+const nvdPublishedPageSize = 200
+
 // PublishedSince lists the CVEs NVD published in [since, now] — the live, unstored read behind
 // the dashboard's "latest published" panel (GUI-16 layer 2, app.PublishedSource). It is NOT a
 // mirror: nothing it returns is folded, the caller displays it and the operator's Gather is the
@@ -510,11 +517,15 @@ func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.
 		q := url.Values{}
 		q.Set("pubStartDate", since.UTC().Format(nvdTimeLayout))
 		q.Set("pubEndDate", now.Format(nvdTimeLayout))
-		q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPageSize))
+		q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPublishedPageSize))
 		q.Set("startIndex", fmt.Sprintf("%d", startIndex))
 		resp, err := c.get(ctx, q, "nvd published-since")
 		if err != nil {
-			return nil, err
+			// One retry per page: NVD's resets are transient, and a page that fails twice
+			// is reported rather than papered over.
+			if resp, err = c.get(ctx, q, "nvd published-since (retry)"); err != nil {
+				return nil, err
+			}
 		}
 		for _, v := range resp.Vulnerabilities {
 			if strings.EqualFold(v.CVE.VulnStatus, "Rejected") || v.CVE.ID == "" {
