@@ -622,3 +622,75 @@ func TestGetSanityFlags(t *testing.T) {
 		t.Fatalf("unwired: status %d header %q", resp.StatusCode, resp.Header.Get("X-Themis-Sanity"))
 	}
 }
+
+// --- GUI-16 layer 2: the live latest-published read -----------------------------------
+
+type fakePublishedSrc struct {
+	calls int
+	rows  []app.PublishedCVE
+	err   error
+}
+
+func (f *fakePublishedSrc) PublishedSince(context.Context, time.Time) ([]app.PublishedCVE, error) {
+	f.calls++
+	return f.rows, f.err
+}
+
+func publishedServer(t *testing.T, src app.PublishedSource) (*httptest.Server, *fakePublishedSrc) {
+	t.Helper()
+	fs, _ := src.(*fakePublishedSrc)
+	repo := fakeRepo{card: sampleCard(t), found: true}
+	read := app.NewReadService(repo, fakeProjection{})
+	health := app.NewFeedHealthService(fakeFeedStore{}, feedClock{})
+	h := knhttp.NewHandler(read, health)
+	if src != nil {
+		h = h.WithPublished(app.NewPublishedService(src, repo, feedClock{}))
+	}
+	srv := httptest.NewServer(h.Router())
+	t.Cleanup(srv.Close)
+	return srv, fs
+}
+
+// The read is live and unstored, flags the carded CVE, clamps the window, answers 503 with no
+// source and 502 when the source fails, and a repeat within the cache life asks the source once.
+func TestGetPublishedRecently(t *testing.T) {
+	src := &fakePublishedSrc{rows: []app.PublishedCVE{
+		{CVE: "CVE-2024-1", Published: time.Unix(1_700_000_000, 0).UTC(), Summary: "known", Severity: "high", Score: 7.5},
+		{CVE: "CVE-2026-9", Published: time.Unix(1_700_003_600, 0).UTC(), Summary: "fresh"},
+	}}
+	srv, _ := publishedServer(t, src)
+	status, body := get(t, srv.URL+"/faultlines/published-recently?days=99")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var rows []struct {
+		Cve       string   `json:"cve"`
+		Carded    bool     `json:"carded"`
+		Summary   *string  `json:"summary"`
+		Severity  *string  `json:"severity"`
+		CvssScore *float32 `json:"cvss_score"`
+	}
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Cve != "CVE-2026-9" || rows[0].Carded || rows[0].Severity != nil || rows[0].CvssScore != nil ||
+		rows[1].Cve != "CVE-2024-1" || !rows[1].Carded || *rows[1].Severity != "high" || *rows[1].CvssScore != 7.5 {
+		t.Errorf("rows = %+v", rows)
+	}
+	// Cached: a second read within five minutes does not ask the source again.
+	if s, _ := get(t, srv.URL+"/faultlines/published-recently?days=99"); s != http.StatusOK || src.calls != 1 {
+		t.Errorf("second read: status %d, source calls %d (want 1)", s, src.calls)
+	}
+	// A different window is a different entry.
+	if s, _ := get(t, srv.URL+"/faultlines/published-recently"); s != http.StatusOK || src.calls != 2 {
+		t.Errorf("default window: status %d, source calls %d (want 2)", s, src.calls)
+	}
+	failing, _ := publishedServer(t, &fakePublishedSrc{err: errors.New("nvd down")})
+	if s, _ := get(t, failing.URL+"/faultlines/published-recently"); s != http.StatusBadGateway {
+		t.Errorf("source failure status = %d, want 502", s)
+	}
+	none, _ := publishedServer(t, nil)
+	if s, _ := get(t, none.URL+"/faultlines/published-recently"); s != http.StatusServiceUnavailable {
+		t.Errorf("no source status = %d, want 503", s)
+	}
+}

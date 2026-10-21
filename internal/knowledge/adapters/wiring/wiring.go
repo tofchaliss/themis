@@ -296,8 +296,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	// never silent. It reuses the same NVD client + fold path as the backfill sweep.
 	gather := app.NewGatherService(fold,
 		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
+	// The live latest-published read (GUI-16 layer 2) is explicit like the gather — a button
+	// press, never a schedule — so it needs no enable flag either, and it stores nothing.
+	published := app.NewPublishedService(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, sysClock{})
 	kn := Knowledge{
-		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithScanner(scanSvc).WithSanity(st).Router(),
+		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithScanner(scanSvc).WithSanity(st).Router(),
 		Store:       st,
 		Consumer:    inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Correlation: corr,

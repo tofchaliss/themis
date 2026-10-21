@@ -183,6 +183,7 @@ type nvdLiveResponse struct {
 
 type nvdLiveCVE struct {
 	ID           string `json:"id"`
+	Published    string `json:"published"`
 	LastModified string `json:"lastModified"`
 	// VulnStatus is NVD's analysis state. "Rejected" means the CVE was withdrawn upstream —
 	// the signal that retires a card (KN-WITHDRAW-1). It was in every response all along and
@@ -489,6 +490,48 @@ func (c *NVDClient) fetchPage(ctx context.Context, start, end time.Time, startIn
 	q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPageSize))
 	q.Set("startIndex", fmt.Sprintf("%d", startIndex))
 	return c.get(ctx, q, "nvd modified-since")
+}
+
+// PublishedSince lists the CVEs NVD published in [since, now] — the live, unstored read behind
+// the dashboard's "latest published" panel (GUI-16 layer 2, app.PublishedSource). It is NOT a
+// mirror: nothing it returns is folded, the caller displays it and the operator's Gather is the
+// one act that creates a card. The span is bounded to NVD's 120-day maximum and the page budget
+// is the watch's; a withdrawn CVE (vulnStatus Rejected) is left out, since there is nothing to
+// gather. Unscored CVEs ARE returned — a fresh CVE often has no score yet, and the panel is
+// about what is new, not what is graded.
+func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.PublishedCVE, error) {
+	now := time.Now().UTC()
+	if since.IsZero() || since.Before(now.Add(-nvdMaxWindow)) {
+		since = now.Add(-nvdMaxWindow)
+	}
+	var out []app.PublishedCVE
+	startIndex := 0
+	for page := 0; page < nvdMaxPages; page++ {
+		q := url.Values{}
+		q.Set("pubStartDate", since.UTC().Format(nvdTimeLayout))
+		q.Set("pubEndDate", now.Format(nvdTimeLayout))
+		q.Set("resultsPerPage", fmt.Sprintf("%d", nvdPageSize))
+		q.Set("startIndex", fmt.Sprintf("%d", startIndex))
+		resp, err := c.get(ctx, q, "nvd published-since")
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range resp.Vulnerabilities {
+			if strings.EqualFold(v.CVE.VulnStatus, "Rejected") || v.CVE.ID == "" {
+				continue
+			}
+			severity, score, _, _ := extractNVDCVSS(v.CVE.Metrics)
+			out = append(out, app.PublishedCVE{
+				CVE: v.CVE.ID, Published: parseNVDTime(v.CVE.Published),
+				Summary: nvdEnglishDescription(v.CVE), Severity: strings.ToLower(severity), Score: score,
+			})
+		}
+		startIndex += len(resp.Vulnerabilities)
+		if len(resp.Vulnerabilities) == 0 || startIndex >= resp.TotalResults {
+			break
+		}
+	}
+	return out, nil
 }
 
 // fetchKeyword pulls one page of CVEs whose description exactly contains keyword — the
