@@ -1387,6 +1387,49 @@ async function viewFeeds() {
 
 const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
 
+/* A pager for the two What's new tables (owner ask 2026-10-21): ten rows per page, ‹ › buttons,
+   and the left/right arrow keys move the table that was last clicked or focused. State lives in
+   the closure; re-rendering the page resets it. */
+const PAGE_SIZE = 10;
+function makePager(host, rows, renderRow, head, emptyHtml) {
+  let page = 0;
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const draw = () => {
+    if (!rows.length) { host.innerHTML = emptyHtml; return; }
+    page = Math.min(Math.max(page, 0), pages - 1);
+    const from = page * PAGE_SIZE, to = Math.min(from + PAGE_SIZE, rows.length);
+    host.innerHTML = `<div class="tbl-wrap" tabindex="0" title="← → move between pages"><table class="tbl">
+        <thead><tr>${head}</tr></thead>
+        <tbody>${rows.slice(from, to).map(renderRow).join("")}</tbody></table></div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:6px">
+        <span class="card-sub">${from + 1}–${to} of ${rows.length}</span>
+        <span><button class="btn btn-sm" data-pg="-1" ${page === 0 ? "disabled" : ""} title="previous (←)">‹</button>
+        <span class="card-sub" style="margin:0 8px">page ${page + 1} / ${pages}</span>
+        <button class="btn btn-sm" data-pg="1" ${page >= pages - 1 ? "disabled" : ""} title="next (→)">›</button></span>
+      </div>`;
+    host.querySelectorAll("button[data-pg]").forEach((b) => b.addEventListener("click", () => { page += Number(b.dataset.pg); draw(); host.querySelector(".tbl-wrap").focus(); }));
+    const wrap = host.querySelector(".tbl-wrap");
+    wrap.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" && page < pages - 1) { page++; draw(); host.querySelector(".tbl-wrap").focus(); e.preventDefault(); }
+      if (e.key === "ArrowLeft" && page > 0) { page--; draw(); host.querySelector(".tbl-wrap").focus(); e.preventDefault(); }
+    });
+    wrap.addEventListener("click", () => wrap.focus());
+    if (host.dataset.bound) return;
+  };
+  draw();
+  return { draw, focus: () => { const w = host.querySelector(".tbl-wrap"); if (w) w.focus(); } };
+}
+
+/* Severity order for the live NVD list (owner ask 2026-10-21): critical first, then high,
+   medium, low, unknown; ties by score, then newest. */
+function bySeverity(a, b) {
+  const ra = SEV_RANK[(a.severity || "").toLowerCase()] ?? 4, rb = SEV_RANK[(b.severity || "").toLowerCase()] ?? 4;
+  if (ra !== rb) return ra - rb;
+  const sa = a.cvss_score || 0, sb = b.cvss_score || 0;
+  if (sa !== sb) return sb - sa;
+  return String(b.published || "").localeCompare(String(a.published || ""));
+}
+
 async function viewNew() {
   setRail("new");
   crumbs([{ label: "Overview", href: "#/" }, { label: "What's new" }]);
@@ -1410,19 +1453,7 @@ async function viewNew() {
       <div class="card">
         <h2 class="card-title">What's new</h2>
         <p class="card-sub">The newest CVEs that entered this estate's knowledge, newest first: a card is created when a component carries the CVE, a feed sweep finds it for a component you ship, or an operator gathers it. This is not the world's CVE feed; it is what concerns you. Click a CVE to see the card.</p>
-        ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>Entered</th><th>CVE</th><th>Severity</th><th>Signals</th><th>What it is</th><th>Published fix</th><th>Stage</th></tr></thead>
-          <tbody>${rows.map((r) => {
-            const c = r.card || {}; const v = c.view || {};
-            return `<tr>
-              <td title="${esc(r.created_at || "")}">${timeAgo(r.created_at)}</td>
-              <td><a class="mono" href="#/cve/${encodeURIComponent(c.cve || "")}" title="open the card">${esc(c.cve || "")}</a></td>
-              <td>${sevChip(v.severity)}${typeof v.cvss_score === "number" && v.cvss_score > 0 ? ` <span class="card-sub">${v.cvss_score.toFixed(1)}</span>` : ""}</td>
-              <td>${signals(v)}</td>
-              <td class="wrap">${esc((v.summary || "").slice(0, 220))}${(v.summary || "").length > 220 ? "…" : ""}</td>
-              <td>${fixes(v)}</td>
-              <td><span class="chip">${esc(c.stage || "")}</span></td></tr>`; }).join("")}</tbody></table></div>`
-        : `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`}
+        <div id="new-rows"></div>
       </div>
       <div class="card" id="published-card">
         <h2 class="card-title">Latest published <span class="chip" title="fetched live from NVD when you ask; nothing here is stored until you gather it">live, not stored</span></h2>
@@ -1434,6 +1465,19 @@ async function viewNew() {
         </div>
         <div id="published-rows"></div>
       </div>`;
+    const cardsPager = makePager(document.getElementById("new-rows"), rows, (r) => {
+      const c = r.card || {}; const v = c.view || {};
+      return `<tr>
+        <td title="${esc(r.created_at || "")}">${timeAgo(r.created_at)}</td>
+        <td><a class="mono" href="#/cve/${encodeURIComponent(c.cve || "")}" title="open the card">${esc(c.cve || "")}</a></td>
+        <td>${sevChip(v.severity)}${typeof v.cvss_score === "number" && v.cvss_score > 0 ? ` <span class="card-sub">${v.cvss_score.toFixed(1)}</span>` : ""}</td>
+        <td>${signals(v)}</td>
+        <td class="wrap">${esc((v.summary || "").slice(0, 220))}${(v.summary || "").length > 220 ? "…" : ""}</td>
+        <td>${fixes(v)}</td>
+        <td><span class="chip">${esc(c.stage || "")}</span></td></tr>`;
+    }, `<th>Entered</th><th>CVE</th><th>Severity</th><th>Signals</th><th>What it is</th><th>Published fix</th><th>Stage</th>`,
+      `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`);
+    cardsPager.focus();
     const sevChip2 = sevChip;
     const loadPublished = async () => {
       const days = document.getElementById("published-days").value;
@@ -1441,21 +1485,13 @@ async function viewNew() {
       const box = document.getElementById("published-rows");
       note.textContent = "asking NVD…";
       try {
-        const rows = asArray(await apiGET("knowledge", `/faultlines/published-recently?days=${encodeURIComponent(days)}`));
-        note.textContent = `${rows.length} published in the last ${days} days; ${rows.filter((r) => r.carded).length} already carded`;
-        box.innerHTML = rows.length ? `<div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>Published</th><th>CVE</th><th>Severity</th><th>What it is</th><th>In the estate</th></tr></thead>
-          <tbody>${rows.map((r) => `<tr data-cve="${esc(r.cve)}">
-            <td title="${esc(r.published || "")}">${timeAgo(r.published)}</td>
-            <td class="mono">${r.carded ? `<a href="#/cve/${encodeURIComponent(r.cve)}">${esc(r.cve)}</a>` : esc(r.cve)}</td>
-            <td>${sevChip2(r.severity)}${typeof r.cvss_score === "number" && r.cvss_score > 0 ? ` <span class="card-sub">${r.cvss_score.toFixed(1)}</span>` : ""}</td>
-            <td class="wrap">${esc((r.summary || "").slice(0, 200))}${(r.summary || "").length > 200 ? "…" : ""}</td>
-            <td>${r.carded ? `<span class="chip chip-good">carded</span>` : `<button class="btn btn-sm" data-gather="${esc(r.cve)}">Gather</button>`}</td></tr>`).join("")}</tbody></table></div>`
-          : `<div class="empty"><b>Nothing published in that window</b>NVD answered with no CVEs for these days.</div>`;
-        box.querySelectorAll("button[data-gather]").forEach((b) => b.addEventListener("click", async () => {
+        const rows = asArray(await apiGET("knowledge", `/faultlines/published-recently?days=${encodeURIComponent(days)}`)).sort(bySeverity);
+        note.textContent = `${rows.length} published in the last ${days} days, worst first; ${rows.filter((r) => r.carded).length} already carded`;
+        const bindGather = () => box.querySelectorAll("button[data-gather]").forEach((b) => b.addEventListener("click", async () => {
           b.disabled = true; b.textContent = "gathering…";
           try {
             await apiPOST("knowledge", "/faultlines/gather", { cve: b.dataset.gather });
+            const row = rows.find((r) => r.cve === b.dataset.gather); if (row) row.carded = true;
             b.closest("tr").querySelector("td:last-child").innerHTML = `<span class="chip chip-good">carded</span>`;
             note.textContent = `${b.dataset.gather} gathered; it is in the list above after a reload`;
           } catch (e) {
@@ -1463,6 +1499,19 @@ async function viewNew() {
             note.textContent = `gather failed: ${e.message}`;
           }
         }));
+        const pager = makePager(box, rows, (r) => `<tr data-cve="${esc(r.cve)}">
+            <td title="${esc(r.published || "")}">${timeAgo(r.published)}</td>
+            <td class="mono">${r.carded ? `<a href="#/cve/${encodeURIComponent(r.cve)}">${esc(r.cve)}</a>` : esc(r.cve)}</td>
+            <td>${sevChip2(r.severity)}${typeof r.cvss_score === "number" && r.cvss_score > 0 ? ` <span class="card-sub">${r.cvss_score.toFixed(1)}</span>` : ""}</td>
+            <td class="wrap">${esc((r.summary || "").slice(0, 200))}${(r.summary || "").length > 200 ? "…" : ""}</td>
+            <td>${r.carded ? `<span class="chip chip-good">carded</span>` : `<button class="btn btn-sm" data-gather="${esc(r.cve)}">Gather</button>`}</td></tr>`,
+          `<th>Published</th><th>CVE</th><th>Severity</th><th>What it is</th><th>In the estate</th>`,
+          `<div class="empty"><b>Nothing published in that window</b>NVD answered with no CVEs for these days.</div>`);
+        // Gather buttons are re-bound after every page draw: the pager rewrites the rows.
+        bindGather();
+        const observer = new MutationObserver(bindGather);
+        observer.observe(box, { childList: true });
+        pager.focus();
       } catch (e) {
         note.textContent = "";
         box.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;

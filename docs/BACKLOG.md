@@ -949,7 +949,11 @@ under the 2026-08-07 re-derivation standard.
   live, never stored; each row flagged `carded`; a 5-minute adapter cache; 503 without a source,
   502 when NVD fails) and a second card on the page, loaded on a button press, with a **Gather**
   button per uncarded row onto the existing gather endpoint. Explicit like the gather, so no
-  enable flag. NOT a world-feed mirror — a page
+  enable flag. **Measured on the VM 2026-10-21:** a 3-day window = 1,892 CVEs (2 carded), nothing
+  stored, the cached repeat 0.4 s — but the first read took 187 s (ten 200-record pages at NVD's
+  pace); PR #192 took the page from 2000 to 200 after a 3-day window at 2000 came back as an
+  HTTP/2 reset. Open follow-up: measure 500 and 1000 per page and raise the size to the largest
+  that NVD serves without resets. NOT a world-feed mirror — a page
   listing every CVE published this week would persist uncarded-CVE data, exactly what
   EDR-KNOWLEDGE-01 D5 forbids, and would be a worse copy of NVD/cve.org. Two doctrine-clean
   layers instead: **(1) the page** — newest **carded** Faultlines sorted by card-creation time
