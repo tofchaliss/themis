@@ -45,11 +45,21 @@ func TestVerifiedBytesAreNotTheBoundArtifact(t *testing.T) {
 // alteration's. Themis must re-establish, never trust, the record's
 // claims.
 type forge struct {
-	invalidRaw      bool   // PASS claimed over an invalid report; audit and egress agree with the bytes
-	auditResultHash string // audit did not produce the raw bytes
-	dropEgressOp    bool   // omit the l5-op egress witness
-	sealReason      string // seal with another reason
-	refusedDelegation bool // an l8-delegation that did not complete (provider-error), witnessed in the record
+	invalidRaw        bool   // PASS claimed over an invalid report; audit and egress agree with the bytes
+	auditResultHash   string // audit did not produce the raw bytes
+	dropEgressOp      bool   // omit the l5-op egress witness
+	sealReason        string // seal with another reason
+	refusedDelegation bool   // an l8-delegation that did not complete (provider-error), witnessed in the record
+	// HARNESS-COV-1: the deep replay refusals, each one alteration of the real record.
+	auditDecision      string // the verifier audit records another decision than "authorized"
+	auditTool          string // the audit executed another tool than the record names
+	auditRegistryHash  string // the audit was authorized by another registry
+	dropAudit          bool   // no l4-audit at the seq the record's execution_ref names
+	badExecutionRef    bool   // execution_ref is not "l4:<seq>"
+	extraEgressOp      bool   // two acknowledged egress witnesses
+	egressAddr         string // the egress acknowledges another address than the binding
+	egressManifestTask string // the egress manifest names another task
+	dropVerification   bool   // no l10-verification at all
 }
 
 func forgeRecord(t *testing.T, dir string, p provenance, task string, f forge) (*state.Root, Tuple) {
@@ -125,6 +135,15 @@ func forgeRecord(t *testing.T, dir string, p provenance, task string, f forge) (
 	if f.auditResultHash != "" {
 		ab["ResultHash"] = f.auditResultHash
 	}
+	if f.auditDecision != "" {
+		ab["Decision"] = f.auditDecision
+	}
+	if f.auditTool != "" {
+		ab["Tool"] = f.auditTool
+	}
+	if f.auditRegistryHash != "" {
+		ab["RegistryHash"] = f.auditRegistryHash
+	}
 	tr, err := dst.CreateTask(task, state.TaskOptions{GovernedHashes: man.GovernedHashes})
 	if err != nil {
 		t.Fatal(err)
@@ -148,11 +167,19 @@ func forgeRecord(t *testing.T, dir string, p provenance, task string, f forge) (
 		put(r.Class, get(r.ID))
 	}
 	abody, _ := json.Marshal(ab)
-	aev, err := tr.AppendEvent(state.EvL4Audit, "l4", abody, audit.Refs...)
-	if err != nil {
-		t.Fatal(err)
+	var auditSeq int64 = 999
+	if !f.dropAudit {
+		aev, err := tr.AppendEvent(state.EvL4Audit, "l4", abody, audit.Refs...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auditSeq = aev.Seq
 	}
-	record["execution_ref"] = "l4:" + strconv.FormatInt(aev.Seq, 10)
+	record["execution_ref"] = "l4:" + strconv.FormatInt(auditSeq, 10)
+	if f.badExecutionRef {
+		record["execution_ref"] = "bogus"
+	}
+	aev := struct{ Seq int64 }{auditSeq}
 	if f.refusedDelegation {
 		// The runtime's delegation.Event shape (subagents/delegation), by
 		// field name; the L8 writer is the only one the sink admits.
@@ -174,10 +201,15 @@ func forgeRecord(t *testing.T, dir string, p provenance, task string, f forge) (
 	recID := put(state.ObjEvidencePayload, rb)
 	refs := []state.Ref{{ID: contractID, Class: state.ObjEvidencePayload}, {ID: rawID, Class: state.ObjEvidencePayload}, {ID: canonID, Class: state.ObjEvidencePayload}, {ID: recID, Class: state.ObjEvidencePayload}}
 	vb, _ := json.Marshal(map[string]string{"contract": vbody.Contract, "outcome": vbody.Outcome, "record": recID})
-	if _, err := tr.AppendEvent(state.EvVerification, "l10", vb, refs...); err != nil {
-		t.Fatal(err)
+	if !f.dropVerification {
+		if _, err := tr.AppendEvent(state.EvVerification, "l10", vb, refs...); err != nil {
+			t.Fatal(err)
+		}
 	}
 	manifest["task_id"] = task
+	if f.egressManifestTask != "" {
+		manifest["task_id"] = f.egressManifestTask
+	}
 	mb, _ := json.Marshal(manifest)
 	artID, err := tr.StoreObject(state.ObjEgressArtifact, mb)
 	if err != nil {
@@ -207,8 +239,17 @@ func forgeRecord(t *testing.T, dir string, p provenance, task string, f forge) (
 			if f.dropEgressOp {
 				continue
 			}
-			if err := sink.Egress("acknowledged", strings.TrimPrefix(artID, "sha256:"), 1, 1); err != nil {
+			addr := strings.TrimPrefix(artID, "sha256:")
+			if f.egressAddr != "" {
+				addr = f.egressAddr
+			}
+			if err := sink.Egress("acknowledged", addr, 1, 1); err != nil {
 				t.Fatal(err)
+			}
+			if f.extraEgressOp {
+				if err := sink.Egress("acknowledged", addr, 1, 1); err != nil {
+					t.Fatal(err)
+				}
 			}
 			continue
 		}
@@ -306,4 +347,32 @@ func TestForgedRecordsAreRefused(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	})
+	// HARNESS-COV-1: the deep replay refusals. Each alteration is one forged runtime record;
+	// the refusal names the first failed link in causal order.
+	for _, tc := range []struct {
+		name string
+		f    forge
+		kind error
+		want string
+	}{
+		{"audit decision not authorized", forge{auditDecision: "denied"}, ErrVerification, `decision "denied"`},
+		// The reconstruction (the runtime's own verification seam) catches these before the
+		// intake's audit cross-check does — the cross-check is a second line, kept.
+		{"audit executed another tool", forge{auditTool: "other_tool"}, ErrVerification, "executed_capability"},
+		{"audit authorized by another registry", forge{auditRegistryHash: strings.Repeat("ab", 32)}, ErrVerification, "authorizing_registry"},
+		{"no audit at the referenced seq", forge{dropAudit: true}, ErrVerification, "verification evidence unavailable"},
+		{"execution_ref malformed", forge{badExecutionRef: true}, ErrVerification, "verification evidence unavailable"},
+		{"two acknowledged egress witnesses", forge{extraEgressOp: true}, ErrProvenance, "acknowledged egress witnesses"},
+		{"egress acknowledged another address", forge{egressAddr: strings.Repeat("cd", 32)}, ErrProvenance, "egress acknowledged"},
+		{"egress manifest names another task", forge{egressManifestTask: "fx-someone-else"}, ErrProvenance, "egress manifest names task"},
+		{"no verification at all", forge{dropVerification: true}, ErrVerification, "no l10-verification precedes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, tp := forgeRecord(t, dir, p, "fx-forge-"+strings.ReplaceAll(strings.ReplaceAll(tc.name, " ", "-"), "_", "-"), tc.f)
+			_, err := Resolve(root, ck, tp)
+			if !errors.Is(err, tc.kind) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want %v containing %q", err, tc.kind, tc.want)
+			}
+		})
+	}
 }

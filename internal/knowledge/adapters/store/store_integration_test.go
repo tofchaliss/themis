@@ -1439,3 +1439,31 @@ func TestAllFaultlineIDs(t *testing.T) {
 		t.Fatalf("ids = %v err=%v, want [fl-a fl-b]", ids, err)
 	}
 }
+
+// GUI-16: the newest cards first, each loaded whole, the limit honoured.
+func TestRecentFaultlines(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+	for _, c := range []string{"CVE-2024-31", "CVE-2024-32", "CVE-2024-33"} {
+		if _, _, err := svc.FoldProposal(ctx, cveID(t, c), vulnFacts(t, "nvd", value.SeverityHigh)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond) // distinct created_at
+	}
+	rows, err := st.RecentFaultlines(ctx, 2)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows = %d err %v, want 2", len(rows), err)
+	}
+	if rows[0].Faultline.CVE().String() != "CVE-2024-33" || rows[1].Faultline.CVE().String() != "CVE-2024-32" {
+		t.Errorf("order = %s, %s; want newest first", rows[0].Faultline.CVE(), rows[1].Faultline.CVE())
+	}
+	if rows[0].CreatedAt.IsZero() || !rows[0].CreatedAt.After(rows[1].CreatedAt) || len(rows[0].Faultline.Proposals()) != 1 {
+		t.Errorf("row = %+v", rows[0])
+	}
+	all, err := st.RecentFaultlines(ctx, 0)
+	if err != nil || len(all) < 3 {
+		t.Errorf("default limit: %d err %v", len(all), err)
+	}
+}

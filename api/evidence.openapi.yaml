@@ -544,7 +544,7 @@ components:
           description: What the body was identified as (D5a) — `sbom` or `vuln-report`.
         detected_format:
           type: string
-          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `cortex-json`, `cortex-csv`).
+          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `grype`, `cortex-json`, `cortex-csv`).
         findings_total:
           type: integer
           description: >-

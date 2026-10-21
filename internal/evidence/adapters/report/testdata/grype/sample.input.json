@@ -1,0 +1,34 @@
+{
+  "matches": [
+    {
+      "vulnerability": {"id": "GHSA-8q59-q68h-6hv4", "dataSource": "https://github.com/advisories/GHSA-8q59-q68h-6hv4", "severity": "Critical",
+        "fix": {"versions": ["5.4"], "state": "fixed"},
+        "cvss": [{"version": "2.0", "vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P", "metrics": {"baseScore": 7.5}},
+                 {"version": "3.1", "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "metrics": {"baseScore": 9.8}}]},
+      "relatedVulnerabilities": [{"id": "CVE-2020-14343", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2020-14343"}],
+      "artifact": {"name": "PyYAML", "version": "5.3", "type": "python", "purl": "pkg:pypi/pyyaml@5.3"}
+    },
+    {
+      "vulnerability": {"id": "CVE-2023-45803", "severity": "Medium", "fix": {"versions": ["1.26.18", "2.0.7"], "state": "fixed"},
+        "cvss": [{"version": "3.1", "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N", "metrics": {"baseScore": 4.2}}]},
+      "relatedVulnerabilities": [],
+      "artifact": {"name": "urllib3", "version": "1.25.8", "type": "python", "purl": "pkg:pypi/urllib3@1.25.8"}
+    },
+    {
+      "vulnerability": {"id": "CVE-2024-0001", "severity": "Low", "fix": {"versions": [], "state": "not-fixed"}, "cvss": []},
+      "artifact": {"name": "libfoo", "version": "1.0-3.el8", "type": "rpm"}
+    },
+    {
+      "vulnerability": {"id": "", "severity": "High"},
+      "artifact": {"name": "nameless-flaw", "version": "1", "type": "deb", "purl": "pkg:deb/debian/x@1"}
+    },
+    null,
+    {
+      "vulnerability": {"id": "GHSA-zzzz-zzzz-zzzz", "severity": "High", "fix": {"versions": ["2.0"]}, "cvss": [{"version": "3.0", "vector": "CVSS:3.0/AV:N", "metrics": {"baseScore": 0}}]},
+      "relatedVulnerabilities": [{"id": "GHSA-yyyy-yyyy-yyyy"}],
+      "artifact": {"name": "lodash", "version": "4.17.15", "type": "npm", "purl": "pkg:npm/lodash@4.17.15"}
+    }
+  ],
+  "source": {"type": "image", "target": {"userInput": "example/app:1.0"}},
+  "descriptor": {"name": "grype", "version": "0.80.0", "timestamp": "2026-10-19T09:30:00.5Z", "db": {"built": "2026-10-18T01:00:00Z"}}
+}

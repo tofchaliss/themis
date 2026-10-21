@@ -656,3 +656,43 @@ func (s *Store) MatchesForFaultline(ctx context.Context, faultlineID string) ([]
 	}
 	return out, rows.Err()
 }
+
+// RecentFaultlines lists the newest cards by creation time (GUI-16). The ids are read in one
+// query and each card loaded whole through the one loader, so the page carries exactly what
+// GetByCVE would — the same view, the same proposals — rather than a second projection to keep
+// in step. Implements app.RecentLister.
+func (s *Store) RecentFaultlines(ctx context.Context, limit int) ([]app.RecentFaultline, error) {
+	if limit <= 0 {
+		limit = app.RecentDefaultLimit
+	}
+	rows, err := s.pool.Query(ctx, `SELECT cve, created_at FROM faultlines ORDER BY created_at DESC, cve LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	type head struct {
+		cve string
+		at  time.Time
+	}
+	var heads []head
+	for rows.Next() {
+		var h head
+		if err := rows.Scan(&h.cve, &h.at); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		heads = append(heads, h)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]app.RecentFaultline, 0, len(heads))
+	for _, h := range heads {
+		f, err := s.load(ctx, "cve", h.cve)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, app.RecentFaultline{Faultline: f, CreatedAt: h.at})
+	}
+	return out, nil
+}

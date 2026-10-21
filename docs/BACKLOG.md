@@ -711,8 +711,19 @@ three angles, and two of them proposed fixes that would not have worked.
 Both were found by reading what the gate did NOT check, not by a failing test. Neither blocks the
 arc; both are recorded so the shortfall is a decision rather than a silent exemption.
 
-- [ ] **HARNESS-COV-1 — close `governance/adapters/harness` to the 90% adapter tier.** LOW,
-  quality. The package is now registered in `scripts/check-coverage.sh` at **80%** and sits at
+- [x] **HARNESS-COV-1 — close `governance/adapters/harness` to the 90% adapter tier.** LOW,
+  quality. **Done 2026-10-19: 92.3%, and the package now sits at the adapter tier (its 80%
+  exception removed from `scripts/check-coverage.sh`).** (a) got its tests two ways: eight more
+  forge alterations through the runtime's own handle (audit decision / tool / registry, missing
+  audit, malformed execution_ref, a second egress witness, another egress address, an egress
+  manifest naming another task, no verification), and direct replay tests over hand-built event
+  streams for the shapes the handle refuses to write (`replay_test.go`: every `replayProduction`
+  and `replayL5` link, the verification-order and writer rules). Two findings: the reconstruction
+  catches a forged audit tool or registry before the intake's own cross-check does, so that
+  cross-check is a second line; and the runtime's durability constitution makes a wrong-writer
+  record unwritable, so those refusals are reachable only through the direct tests. (b), the two
+  dead branches in `anchorStateAtIntake`, stays as it was: a re-read of the registry between two
+  calls is defensive, not dead, and is left with its comment. The package is now registered in `scripts/check-coverage.sh` at **80%** and sits at
   **83.9%** (was 81.0% and *unregistered*, so the gate skipped it entirely — full-repo mode
   iterates the registered lists only). Every admissibility refusal that DECIDES anything is
   covered: verify-A-egress-B, PASS over an invalid report, audit/raw mismatch, dropped egress
@@ -750,8 +761,13 @@ right; what is missing is what the newest history *means* for the Findings the o
 - [ ] **Current SBOM and finding cleanup** (id `EV-CURRENT-SBOM-1`). **DESIGN-GATED** (see the gate
   below). **Cluster: none of R1–R7 fits** — it is a design-blocked correctness item, not a defect
   with a known fix, so it is filed as its own entry per the filing rule at the top of Part 1.
-  **Claim basis: read from code + the 2026-10-12 design review; NOT yet measured on the estate**
-  (how many Findings are in this state is the first thing the design has to count — CONVENTIONS R4).
+  **Measured on the estate 2026-10-19** (read-only: newest SBOM per release via the inventory API
+  against open Findings' active components): 5 releases carry more than one SBOM; on them **1**
+  open Finding sits on components entirely absent from the newest SBOM, **4** have some
+  components absent, **723** are fully present. The one fully-stale case is the smallbox test
+  release after four version bumps of `requests` — the exact openssl 1.1 → 3.0 shape, at tiny
+  volume today. The design stays worth doing (every rebuild loop produces this shape), the
+  urgency is low.
 
   **Acceptance** (verbatim, one line — do not re-word or re-wrap it):
 
@@ -923,7 +939,12 @@ under the 2026-08-07 re-derivation standard.
   serializer, which wants R3's delivery channel anyway. Sequence: after the GUI/scanner track,
   beside R3.
 - [ ] **GUI-16 — "What's new" page: newest CVEs and their details (filed 2026-08-28, user ask;
-  design settled at filing, D5-bounded).** LOW-MED, capability. NOT a world-feed mirror — a page
+  design settled at filing, D5-bounded).** LOW-MED, capability. **Layer 1 shipped 2026-10-19:**
+  `GET /faultlines/recent?limit=` (newest cards by creation time, default 50, clamped 200, each
+  card whole beside its `created_at`; `app.ReadService.Recent` over a `RecentLister` store port)
+  and the dashboard's "What's new" rail page (entered · CVE · severity · KEV/exploit/EPSS ·
+  summary · published fix · stage) with a card view per CVE (`#/cve/<id>`: ranges, fixes, the
+  releases it touches). **Layer 2 (the ephemeral latest-published panel with Gather) stays open.** NOT a world-feed mirror — a page
   listing every CVE published this week would persist uncarded-CVE data, exactly what
   EDR-KNOWLEDGE-01 D5 forbids, and would be a worse copy of NVD/cve.org. Two doctrine-clean
   layers instead: **(1) the page** — newest **carded** Faultlines sorted by card-creation time
@@ -1017,8 +1038,13 @@ under the 2026-08-07 re-derivation standard.
   `detectTranslator` + `translateTrivy` (a pure-function port of the TESTING.md jq recipe,
   including the ecosystem vocabulary map), Kind auto-set to scanner-report, skip count in the
   file note, curated document is what uploads. Phase D stays deferred as recorded.
-- [ ] **GUI-15 — second in-browser scanner translator: Grype first, Xray / Black Duck by demand
-  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. EDR-GUI-01 D16
+- [x] **GUI-15 — second in-browser scanner translator: Grype first, Xray / Black Duck by demand
+  (filed 2026-08-21 with the tier roadmap, EDR-ENHANCE-T3).** LOW-MED, capability. **Grype shipped
+  2026-10-19** as `internal/evidence/adapters/report/grype.go`: D5a row 5b (`matches` + a descriptor
+  naming grype), `converted_by: grype@1`, Trivy's rules exactly (no invented purl, `descriptor.timestamp`
+  or the caller's time and never the clock, counted skips, shape refusals) plus Grype's own: a
+  GHSA-keyed match takes its first related CVE; the 3.x CVSS entry is read. Golden frozen from day
+  one (no prior implementation to equal). Xray / Black Duck stay by demand. EDR-GUI-01 D16
   fixed the shape — one pure translate function + a detector per tool, the curated `{findings:[…]}`
   document staying the only wire contract — and Trivy proved it live. Grype is the closest dialect
   and the most requested; each further tool registers only on demand. ~~**Dep:** GUI-10's test
@@ -1045,8 +1071,11 @@ under the 2026-08-07 re-derivation standard.
   tested at the Go proxy/handler seam). Adding a node-based dev dependency + Makefile hook is
   a build change ("Must ask") — decide harness vs porting translator tests to Go via a JS
   engine when a second translator lands. Until then the translator is exercised only live.
-- [ ] **AI-CMP-1b — the Information path never validates `subject_id`; the model can echo the wrong
-  one (filed 2026-08-24, live).** LOW. Live-witnessed twice on `compare_releases`: the prompt tells the
+- [x] **AI-CMP-1b — the Information path never validates `subject_id`; the model can echo the wrong
+  one (filed 2026-08-24, live; closed 2026-10-19).** LOW. **Done:** the Information branch compares
+  the echoed `subject_id` (or `finding_id` when that is all the answer carries) with the Selection's
+  subject and appends a "[SUBJECT ECHO …]" caveat to the text on a mismatch — warning, never a
+  refusal, like the ungrounded-mentions scan; a correct or absent echo adds nothing. Live-witnessed twice on `compare_releases`: the prompt tells the
   model to echo the CANDIDATE release id in `subject_id`, and CyberPal returned the BASELINE id instead
   (`rel-old` on the e2e fixture; the baseline id on the MRF pair). Harmless today — `subject_id` is
   response metadata, the prose and cited CVEs were correct — but the Decision path validates its

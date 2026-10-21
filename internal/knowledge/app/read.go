@@ -25,6 +25,8 @@ type StageReconciler interface {
 type ReadService struct {
 	repo Repository
 	proj ProjectionReader
+	// recent may be nil — Recent then refuses (GUI-16).
+	recent RecentLister
 }
 
 // NewReadService wires the read ports.
