@@ -19,7 +19,7 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 		start := r.URL.Query().Get("startIndex")
 		w.Header().Set("Content-Type", "application/json")
 		if start == "0" {
-			fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
+			_, _ = fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
 			  {"cve":{"id":"CVE-2026-1000","published":"2026-10-20T10:00:00.000","vulnStatus":"Analyzed",
 			    "descriptions":[{"lang":"es","value":"no"},{"lang":"en","value":"A flaw in foo."}],
 			    "metrics":{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":9.8,"baseSeverity":"CRITICAL","vectorString":"CVSS:3.1/x"}}]}}},
@@ -27,7 +27,7 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 			]}`)
 			return
 		}
-		fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
+		_, _ = fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
 		  {"cve":{"id":"CVE-2026-1002","published":"2026-10-18T00:00:00.000","vulnStatus":"Awaiting Analysis","descriptions":[{"lang":"en","value":"Not scored yet."}]}}
 		]}`)
 	}))
