@@ -363,6 +363,51 @@ function setRail(view) {
 
 /* ---------- views ---------- */
 
+/* Find a CVE (owner ask 2026-10-21): one box, on the Overview and on What's new. It opens the
+   card view, which lists the products, projects and releases the CVE is filed under. */
+function cveSearchForm(id) {
+  return `<form class="row" id="${id}" style="gap:8px;align-items:center;margin-top:10px" autocomplete="off">
+    <input type="text" name="cve" placeholder="Find a CVE, e.g. CVE-2026-21441" style="min-width:260px" pattern="\\s*[Cc][Vv][Ee]-\\d{4}-\\d{4,}\\s*" title="a CVE id" required>
+    <button class="btn" type="submit">Find</button>
+    <span class="card-sub">lists the products, projects and releases it is filed under</span></form>`;
+}
+function bindCveSearch(id) {
+  const f = document.getElementById(id);
+  if (!f) return;
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const cve = (f.elements.cve.value || "").trim().toUpperCase();
+    if (cve) location.hash = `#/cve/${encodeURIComponent(cve)}`;
+  });
+}
+
+/* releaseIdentity resolves a release id to "Product / Project / vVersion" through the Registry's
+   name chain (DASH-1), memoised per page load. Each hop is optional: a missing name leaves the
+   id in place rather than failing the view. */
+const identityCache = new Map();
+async function releaseIdentity(releaseId) {
+  if (identityCache.has(releaseId)) return identityCache.get(releaseId);
+  const out = { release: releaseId, version: "", project: "", projectId: "", product: "", productId: "" };
+  try {
+    const r = await apiGET("registry", `/releases/${encodeURIComponent(releaseId)}`);
+    out.version = r.version || ""; out.projectId = r.project_id || "";
+    if (out.projectId) {
+      const p = await apiGET("registry", `/projects/${encodeURIComponent(out.projectId)}`);
+      out.project = p.name || ""; out.productId = p.product_id || "";
+      if (out.productId) {
+        const pr = await apiGET("registry", `/products/${encodeURIComponent(out.productId)}`);
+        out.product = pr.name || "";
+      }
+    }
+  } catch { /* the chain is best-effort */ }
+  identityCache.set(releaseId, out);
+  return out;
+}
+function identityLine(i) {
+  const parts = [i.product ? `<b>${esc(i.product)}</b>` : "", i.project ? esc(i.project) : "", i.version ? `v${esc(i.version)}` : ""].filter(Boolean);
+  return parts.length ? parts.join(" <span class=\"muted\">/</span> ") : `<span class="mono">${esc(i.release)}</span>`;
+}
+
 const main = $("#main");
 const loading = (what) => { main.innerHTML = `<div class="loading"><span class="spin"></span>Loading ${esc(what)}…</div>`; };
 const nodeDownCard = (e) => `<div class="err">The ${esc(e.node)} node did not answer. Check its service and the proxy target URL, then click the node dots to re-probe.</div>`;
@@ -391,6 +436,7 @@ async function viewOverview() {
            and the AI only ever proposes.</p>
         <a class="btn btn-primary" href="#/estate">Browse the estate</a>
         <a class="btn" href="#/sbom">Upload an SBOM</a>
+        ${cveSearchForm("cve-search-overview")}
       </div>
       <div class="card">
         <h2 class="card-title">Estate risk</h2>
@@ -418,6 +464,7 @@ async function viewOverview() {
         <a class="qlink" href="#/feeds"><span class="qi">⌁</span><span><b>Feed health</b><span>OSV, NVD, EPSS/KEV, Red Hat, CSAF-VEX — who is delivering</span></span></a>
       </div>
     </div>`;
+  bindCveSearch("cve-search-overview");
 
   renderEstatePie(products);
 }
@@ -1453,6 +1500,7 @@ async function viewNew() {
       <div class="card">
         <h2 class="card-title">What's new</h2>
         <p class="card-sub">The newest CVEs that entered this estate's knowledge, newest first: a card is created when a component carries the CVE, a feed sweep finds it for a component you ship, or an operator gathers it. This is not the world's CVE feed; it is what concerns you. Click a CVE to see the card.</p>
+        ${cveSearchForm("cve-search-new")}
         <div id="new-rows"></div>
       </div>
       <div class="card" id="published-card">
@@ -1477,6 +1525,7 @@ async function viewNew() {
         <td><span class="chip">${esc(c.stage || "")}</span></td></tr>`;
     }, `<th>Entered</th><th>CVE</th><th>Severity</th><th>Signals</th><th>What it is</th><th>Published fix</th><th>Stage</th>`,
       `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`);
+    bindCveSearch("cve-search-new");
     cardsPager.focus();
     const sevChip2 = sevChip;
     const loadPublished = async () => {
@@ -1544,10 +1593,15 @@ async function viewCVE(cve) {
           <tr><th>Exploit signals</th><td>${v.kev ? `<span class="chip chip-crit">KEV</span> ` : ""}${v.exploit_public ? `<span class="chip chip-warn">public exploit</span> ` : ""}${typeof v.epss === "number" ? `EPSS ${(v.epss * 100).toFixed(1)}%` : ""}${!v.kev && !v.exploit_public && typeof v.epss !== "number" ? `<span class="card-sub">none recorded</span>` : ""}</td></tr>
           <tr><th>Affected ranges</th><td>${list(v.affected_range_statements && v.affected_range_statements.length ? v.affected_range_statements : v.affected_ranges, (r) => `<span class="mono">${esc(typeof r === "string" ? r : [r.ecosystem, r.package, r.range].filter(Boolean).join(" "))}</span>`)}</td></tr>
           <tr><th>Published fixes</th><td>${list(v.fixed_versions, (f) => `<span class="mono">${esc(typeof f === "string" ? f : [f.package, f.version].filter(Boolean).join(" "))}</span>`)}</td></tr>
-          <tr><th>Releases touched</th><td>${releases.length ? releases.map((r) => `<a href="#/release/${encodeURIComponent(r)}" class="mono">${esc(r)}</a>`).join(", ") : `<span class="card-sub">none in the estate</span>`}</td></tr>
+          <tr><th>Filed under</th><td id="cve-releases">${releases.length ? `<span class="card-sub">resolving ${releases.length} release${releases.length === 1 ? "" : "s"}…</span>` : `<span class="card-sub">none in the estate</span>`}</td></tr>
           <tr><th>Source proposals</th><td>${asArray(c.proposals).length}</td></tr>
         </tbody></table></div>
       </div>`;
+    if (releases.length) {
+      const ids = await Promise.all(releases.map(releaseIdentity));
+      const cell = document.getElementById("cve-releases");
+      if (cell) cell.innerHTML = `<ul style="margin:0;padding-left:18px">${ids.map((i) => `<li>${identityLine(i)} <a href="#/release/${encodeURIComponent(i.release)}?v=${encodeURIComponent(i.version)}" class="card-sub">open posture →</a></li>`).join("")}</ul>`;
+    }
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }
@@ -2029,9 +2083,13 @@ async function viewSBOM() {
     const host = $("#sb-list");
     if (!releaseId) { host.innerHTML = `<div class="empty">Pick a release to list its evidence.</div>`; return; }
     host.innerHTML = `<div class="loading"><span class="spin"></span></div>`;
+    // Which release this list is about, said plainly (owner ask 2026-10-21): the names come from
+    // the pickers above, the id from the Registry.
+    const label = (s) => (s.selectedOptions && s.selectedOptions[0] ? s.selectedOptions[0].text : "");
+    const where = `<p class="card-sub" style="margin:0 0 8px"><b>${esc(label(sel.product))}</b> <span class="muted">/</span> ${esc(label(sel.project))} <span class="muted">/</span> release ${esc(label(sel.release))} <span class="mono muted">(${esc(releaseId)})</span></p>`;
     try {
       const ev = asArray(await apiGET("evidence", `/evidence?release=${encodeURIComponent(releaseId)}`));
-      host.innerHTML = ev.length ? `<div class="tbl-wrap"><table class="tbl">
+      host.innerHTML = where + (ev.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Kind</th><th>Source</th><th>Evidence id</th><th>Fingerprint</th><th>Filed</th></tr></thead>
         <tbody>${ev.map((e) => `<tr><td>${esc(e.kind)}</td>
           <td>${e.provenance_source ? `<span class="chip chip-accent" title="who produced the document (D14) — labeling only, never authority">${esc(e.provenance_source)}</span>` : "—"}</td>
@@ -2039,8 +2097,8 @@ async function viewSBOM() {
           <td><span class="mono">${esc((e.fingerprint || "").slice(0, 16))}…</span></td>
           <td title="${esc(e.filed_at || "")}">${esc(timeAgo(e.filed_at))}</td></tr>`).join("")}</tbody></table></div>
         <p class="card-sub" style="margin-top:10px"><a href="#/release/${esc(releaseId)}">Open this release's posture →</a></p>`
-        : `<div class="empty"><b>No evidence filed yet</b>Upload the first SBOM above.</div>`;
-    } catch (e) { host.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+        : `<div class="empty"><b>No evidence filed yet</b>Upload the first SBOM above.</div>`);
+    } catch (e) { host.innerHTML = where + `<div class="err">${esc(e.message)}</div>`; }
   }
 }
 
