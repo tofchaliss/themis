@@ -2,12 +2,13 @@
 # routes a build system needs, on 443 and nothing else.
 #
 # Every node listens on loopback (INSTALLATION.md §7a step 1). Caddy terminates HTTPS and
-# publishes exactly three things: the dashboard (default), Evidence's intake under /evidence/
-# (a CI job uploads the new SBOM there with its product-scoped key), and Communication under
-# /communication/ (the CI job's callback, delivery:callback key). handle_path strips the prefix,
-# so the nodes see their own /api/v1/... paths. Governance, Knowledge, Registry and Intelligence
-# are NOT published: scripts run on the host, and a remote caller for one of them is the moment
-# to add a block here, deliberately. reverse_proxy adds X-Forwarded-Proto, so the dashboard's
+# publishes exactly four things: the dashboard (default), Evidence's intake under /evidence/
+# (a CI job uploads the new SBOM there with its product-scoped key), the Registry under
+# /registry/ (the same job finds-or-creates its project with the same key, confined to its own
+# product — EDR-SECURITY-01 D4), and Communication under /communication/ (the CI job's callback,
+# delivery:callback key). handle_path strips the prefix, so the nodes see their own /api/v1/...
+# paths. Governance, Knowledge and Intelligence are NOT published: scripts run on the host, and a
+# remote caller for one of them is the moment to add a block here, deliberately. reverse_proxy adds X-Forwarded-Proto, so the dashboard's
 # session cookie turns Secure.
 #
 # Install: copy to /etc/caddy/Caddyfile and replace the site names with the VM's own: the full
@@ -25,6 +26,9 @@ themis.example.internal, themis, 10.0.0.10 {
 	encode gzip
 	handle_path /evidence/* {
 		reverse_proxy 127.0.0.1:8081
+	}
+	handle_path /registry/* {
+		reverse_proxy 127.0.0.1:8082
 	}
 	handle_path /communication/* {
 		reverse_proxy 127.0.0.1:8084

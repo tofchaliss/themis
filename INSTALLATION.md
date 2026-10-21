@@ -1021,10 +1021,12 @@ pasted key is a key, and a password is a password. Three steps close it; each is
    (browsers on the office network trust it after `caddy trust`, or install a real certificate
    and delete the line). Copy it to `/etc/caddy/Caddyfile` with the VM's own names — full name, short name and
    address, since Caddy answers TLS only for a name it has a certificate for — and
-   `sudo systemctl enable --now caddy`. Two API routes ride the same 443 for a build system:
-   `/evidence/` → the intake (a CI job uploads with its product-scoped key) and `/communication/`
-   → the CI callback (`delivery:callback` key); the prefix is stripped, so a job calls
-   `https://<vm>/evidence/api/v1/intake?release_id=…` and
+   `sudo systemctl enable --now caddy`. Three API routes ride the same 443 for a build system:
+   `/evidence/` → the intake (a CI job uploads with its product-scoped key), `/registry/` → the
+   Registry (the same job finds-or-creates its project and version with the same key, which the
+   Registry confines to the key's own product), and `/communication/` → the CI callback
+   (`delivery:callback` key); the prefix is stripped, so a job calls
+   `https://<vm>/registry/api/v1/projects`, `https://<vm>/evidence/api/v1/intake?…` and
    `https://<vm>/communication/api/v1/callbacks/ci-rebuild`. The other nodes are NOT published:
    scripts run on the host, and a remote caller for one of them is the moment to add a block,
    deliberately. The CI host must trust the certificate: with `tls internal`, import Caddy's
