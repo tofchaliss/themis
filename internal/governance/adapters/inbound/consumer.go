@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/themis-project/themis/internal/kernel/value"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -114,6 +115,8 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnFaultlineEnriched(ctx, app.InboundFaultlineEnriched{
 			FaultlineID: dto.FaultlineID, CVE: dto.CVE, Severity: dto.Severity, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic, Score: dto.Score,
 			EPSS:            dto.EPSS,
+			KEVDue:          derefTime(dto.KEVDue),
+			KEVRansomware:   dto.KEVRansomware,
 			Priority:        dto.Priority,
 			Fixes:           toAppFixes(dto.Fixes),
 			Applicabilities: apps,
@@ -243,6 +246,8 @@ type faultlineEnrichedDTO struct {
 	ExploitPublic   bool               `json:"ExploitPublic"`
 	Score           int                `json:"Score"`           // CVE-intrinsic base priority (C6); 0 when an older payload omits it.
 	EPSS            float64            `json:"EPSS"`            // exploitation probability, for disposition-drift detection (GOV-14b).
+	KEVDue          *time.Time         `json:"KEVDue"`          // CISA's due date (EDR-REMEDIATION-01 D5); nil when not stated.
+	KEVRansomware   bool               `json:"KEVRansomware"`   // CISA ransomware-use flag (D5); a drift premise.
 	Priority        string             `json:"Priority"`        // exploitability band, materialized onto the posture (DASH-2).
 	Fixes           []fixDTO           `json:"Fixes"`           // package-attributed fixes, selected per component (PLAN-3).
 	Applicabilities []applicabilityDTO `json:"Applicabilities"` // vendor VEX statements (EDR-VEX-01 D5); absent on an older payload.
@@ -323,4 +328,12 @@ func rangeStatementsFromDTO(in []rangeStatementDTO) []value.RangeStatement {
 		out = append(out, value.RangeStatement{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
 	}
 	return out
+}
+
+// derefTime reads an optional wire date; nil is "not stated".
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

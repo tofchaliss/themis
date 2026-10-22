@@ -128,6 +128,12 @@ type ExploitSignal struct {
 	EPSS          float64 // 0.0–1.0 probability
 	KEV           bool    // CISA Known-Exploited
 	ExploitPublic bool    // a public exploit exists
+	// KEV detail (EDR-REMEDIATION-01 D5): when CISA listed the CVE, the remediation due date it
+	// set for federal agencies, and whether it is known to be used in ransomware campaigns. Zero
+	// times and false mean "not stated", never "not exploited".
+	KEVAdded      time.Time
+	KEVDue        time.Time
+	KEVRansomware bool
 }
 
 // Applicability is an applicability payload: a vendor VEX statement about a package.

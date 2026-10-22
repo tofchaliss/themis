@@ -11,6 +11,12 @@ type ExploitSignals struct {
 	KEV           bool    // CISA Known-Exploited listing
 	ExploitPublic bool    // a public exploit exists
 	EPSS          float64 // exploitation probability 0.0–1.0
+	// KEVRansomware: CISA marks the CVE as known to be used in ransomware campaigns
+	// (EDR-REMEDIATION-01 D5). A drift premise like KEV itself.
+	KEVRansomware bool
+	// KEVDue is CISA's remediation due date, zero when not stated. Carried for the SLA (D1: the
+	// earlier deadline wins); it is not a drift premise — a date is not a change in threat.
+	KEVDue time.Time
 }
 
 // SuppressesTriage reports whether a stance zeroes a Finding's residual priority — i.e. whether
@@ -49,7 +55,10 @@ func Expired(until, now time.Time) bool {
 type DispositionDrift struct {
 	KEVListed           bool // the CVE entered CISA's Known-Exploited catalog after the decision
 	ExploitBecamePublic bool
-	EPSSRose            bool
+	// RansomwareBecameKnown: CISA began marking the CVE as used in ransomware campaigns after
+	// the decision (EDR-REMEDIATION-01 D5, S3 — it re-surfaces through this watcher like any drift).
+	RansomwareBecameKnown bool
+	EPSSRose              bool
 	// EPSSBefore/After are carried so the re-surfacing says what moved, not merely that
 	// something did. "EPSS 0.03 → 0.71" is actionable; "signals changed" is not.
 	EPSSBefore, EPSSAfter float64
@@ -57,7 +66,7 @@ type DispositionDrift struct {
 
 // Material reports whether anything drifted.
 func (d DispositionDrift) Material() bool {
-	return d.KEVListed || d.ExploitBecamePublic || d.EPSSRose
+	return d.KEVListed || d.ExploitBecamePublic || d.EPSSRose || d.RansomwareBecameKnown
 }
 
 // Reason renders the drift for a human, in the words of what actually changed.
@@ -65,6 +74,8 @@ func (d DispositionDrift) Reason() string {
 	switch {
 	case d.KEVListed:
 		return "the CVE is now listed in CISA's Known Exploited Vulnerabilities catalog"
+	case d.RansomwareBecameKnown:
+		return "CISA now marks this CVE as known to be used in ransomware campaigns"
 	case d.ExploitBecamePublic:
 		return "a public exploit now exists for this CVE"
 	case d.EPSSRose:
@@ -93,9 +104,11 @@ func DetectDispositionDrift(decidedWith, now ExploitSignals, epssThreshold float
 	return DispositionDrift{
 		KEVListed:           now.KEV && !decidedWith.KEV,
 		ExploitBecamePublic: now.ExploitPublic && !decidedWith.ExploitPublic,
-		EPSSRose:            now.EPSS-decidedWith.EPSS >= epssThreshold,
-		EPSSBefore:          decidedWith.EPSS,
-		EPSSAfter:           now.EPSS,
+		// One-directional like the rest: a flag that clears is not drift.
+		RansomwareBecameKnown: now.KEVRansomware && !decidedWith.KEVRansomware,
+		EPSSRose:              now.EPSS-decidedWith.EPSS >= epssThreshold,
+		EPSSBefore:            decidedWith.EPSS,
+		EPSSAfter:             now.EPSS,
 	}
 }
 

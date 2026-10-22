@@ -70,6 +70,9 @@ func TestRegistry_GoldenFiles(t *testing.T) {
 	if !ok || es.EPSS != 0.42 || !es.KEV {
 		t.Errorf("epsskev signal = %+v ok=%v", es, ok)
 	}
+	if !es.KEVRansomware || es.KEVAdded.Format("2006-01-02") != "2024-03-05" || es.KEVDue.Format("2006-01-02") != "2024-03-26" {
+		t.Errorf("epsskev KEV detail = %+v (EDR-REMEDIATION-01 D5)", es)
+	}
 
 	// exploitdb → exploit-signal (public exploit exists).
 	ed := translateOne(t, r, "exploitdb")

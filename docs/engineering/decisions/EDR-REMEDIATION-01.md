@@ -137,6 +137,13 @@ migration, `THEMIS_COMMUNICATION_WEBHOOK_TARGETS` (audience=url pairs, secrets b
 
 ## D5 — KEV detail: date added, due date, ransomware use
 
+> **Realized 2026-10-22.** Knowledge parses `dateAdded`, `dueDate` and
+> `knownRansomwareCampaignUse` (`Known` only) into the exploit signal; reconciliation takes the
+> earliest stated dates and ORs the flag; the card and `FaultlineEnriched` carry them (omitted
+> when not stated). Governance migration 000018 stores `signal_kev_due`, `signal_kev_ransomware`
+> and `decided_kev_ransomware`; `DispositionDrift.RansomwareBecameKnown` re-surfaces through the
+> watcher (S3). The due date is not a drift premise.
+
 **Decision.** The exploit signal carries three more KEV facts from the same CISA catalogue Themis
 already reads: `kev_added` (date), `kev_due` (date) and `kev_ransomware` (`known` / `unknown`).
 

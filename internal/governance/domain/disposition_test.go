@@ -251,3 +251,27 @@ func TestAcceptProposal_ReviewByIsOptional(t *testing.T) {
 		t.Errorf("ReviewBy = %v, want %v", got, until)
 	}
 }
+
+// EDR-REMEDIATION-01 D5 / S3: ransomware use becoming known is drift, one-directional like the
+// others, with its own reason; the KEV due date is NOT a drift premise.
+func TestDetectDispositionDrift_RansomwareBecameKnown(t *testing.T) {
+	before := domain.ExploitSignals{KEV: true}
+	now := domain.ExploitSignals{KEV: true, KEVRansomware: true}
+	d := domain.DetectDispositionDrift(before, now, 0)
+	if !d.RansomwareBecameKnown || !d.Material() || d.KEVListed {
+		t.Fatalf("drift = %+v, want ransomware only", d)
+	}
+	if got := d.Reason(); got != "CISA now marks this CVE as known to be used in ransomware campaigns" {
+		t.Errorf("reason = %q", got)
+	}
+	// Clearing is not drift.
+	if d := domain.DetectDispositionDrift(now, before, 0); d.Material() {
+		t.Errorf("a flag clearing must not re-surface: %+v", d)
+	}
+	// A due date moving is not a change in threat.
+	due := before
+	due.KEVDue = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if d := domain.DetectDispositionDrift(before, due, 0); d.Material() {
+		t.Errorf("a KEV due date is not a drift premise: %+v", d)
+	}
+}

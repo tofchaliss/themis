@@ -18,6 +18,11 @@ The single project backlog. Two parts:
 > · D7 tags on Product/Project/Release. Owner's answers to Q1–Q5 and safeguards S1–S3 recorded
 > 2026-10-22 as D8; **ACCEPTED by the owner 2026-10-22**. Build order: D5 KEV detail → D1 SLA → D2
 > risk acceptance → D3 upload outcomes → D4 webhook → D6 metrics → D7 tags, one PR each.
+> **D5 KEV detail shipped 2026-10-22** (Knowledge: `ExploitSignal.KEVAdded/KEVDue/KEVRansomware`
+> from CISA's catalogue, earliest-date and OR reconciliation, on the card and on
+> `FaultlineEnriched`; Governance: migration 000018, signals on the Finding, the ransomware flag
+> on a Position's premise, drift reason "CISA now marks this CVE as known to be used in
+> ransomware campaigns"). VM check: after the next EPSS/KEV sweep, a KEV card shows the dates.
 
 ### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
 
