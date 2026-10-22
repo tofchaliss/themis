@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -251,3 +252,19 @@ func (c *Client) ReleasePosture(ctx context.Context, releaseID string) ([]app.Ro
 	}
 	return out, nil
 }
+
+// RemediationMetrics reads Governance's remediation metrics (EDR-REMEDIATION-01 D6).
+// Implements app.RemediationMetricsReader.
+func (c *Client) RemediationMetrics(ctx context.Context, product string) (app.RemediationReport, error) {
+	u := c.baseURL + "/api/v1/metrics/remediation"
+	if product != "" {
+		u += "?product=" + url.QueryEscape(product)
+	}
+	var rep app.RemediationReport
+	if err := c.getJSON(ctx, u, &rep); err != nil {
+		return app.RemediationReport{}, fmt.Errorf("governance: remediation metrics: %w", err)
+	}
+	return rep, nil
+}
+
+var _ app.RemediationMetricsReader = (*Client)(nil)

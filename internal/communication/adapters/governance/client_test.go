@@ -375,3 +375,28 @@ func TestReleaseSeverity_Errors(t *testing.T) {
 		t.Error("transport failure must error")
 	}
 }
+
+func TestClient_RemediationMetrics(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/metrics/remediation" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"estate":{"scope":"","open":4,"time_to_decision":{"mean_days":2,"count":3}},"products":[{"scope":"Gateway","open":1}],"unattributed":2}`))
+	}))
+	defer srv.Close()
+	c := governance.NewClient(srv.URL, srv.Client())
+	rep, err := c.RemediationMetrics(context.Background(), "Gate way")
+	if err != nil || rep.Estate.Open != 4 || rep.Estate.TimeToDecision.Count != 3 || len(rep.Products) != 1 || rep.Unattributed != 2 || gotQuery != "product=Gate+way" {
+		t.Fatalf("report = %+v %v (query %q)", rep, err, gotQuery)
+	}
+	if _, err := c.RemediationMetrics(context.Background(), ""); err != nil || gotQuery != "" {
+		t.Fatalf("no product = %v (query %q)", err, gotQuery)
+	}
+	srv.Close()
+	if _, err := c.RemediationMetrics(context.Background(), ""); err == nil {
+		t.Fatal("transport error swallowed")
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/adapters/http/gen"
 	"github.com/themis-project/themis/internal/governance/adapters/store"
@@ -38,6 +39,10 @@ type Handler struct {
 	products ProductResolver
 	// sla serves the SLA policy (EDR-REMEDIATION-01 D1). Nil ⇒ /sla-policy answers 503.
 	sla *app.SLAService
+	// metrics serves the remediation metrics (D6). Nil ⇒ /metrics/remediation answers 503.
+	metrics *app.MetricsService
+	// now stamps generated_at; replaceable in tests.
+	now func() time.Time
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response
 	// deliberately does not (R1; see authorizeGovernanceWrite). Never nil.
 	logger *observability.Logger
@@ -53,7 +58,7 @@ type ProductResolver interface {
 // NewHandler builds a Handler. Logging is off until WithLogger is called (a no-op logger, as in
 // the Intelligence handler), so a test needs no observability wiring.
 func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
-	return &Handler{write: write, read: read, logger: observability.Nop()}
+	return &Handler{write: write, read: read, logger: observability.Nop(), now: func() time.Time { return time.Now().UTC() }}
 }
 
 // WithProductResolver attaches the Registry read seam that confines a `product:<id>` key to its
@@ -61,6 +66,12 @@ func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
 // refusal is deliberate: a scope that cannot be checked must not be honoured.
 func (h *Handler) WithProductResolver(pr ProductResolver) *Handler {
 	h.products = pr
+	return h
+}
+
+// WithMetrics attaches the remediation metrics read (EDR-REMEDIATION-01 D6).
+func (h *Handler) WithMetrics(m *app.MetricsService) *Handler {
+	h.metrics = m
 	return h
 }
 

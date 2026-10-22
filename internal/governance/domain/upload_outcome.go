@@ -17,6 +17,7 @@ import (
 
 // UploadFinding is one Finding as the classifier reads it.
 type UploadFinding struct {
+	ID        FindingID
 	CVE       string
 	Stage     Stage
 	CreatedAt time.Time
@@ -45,6 +46,10 @@ type UploadOutcome struct {
 	GoneCVEs        []string `json:"no_longer_present_cves,omitempty"`
 	// HasBaseline is false on a Release's first SBOM: everything present is `new`.
 	HasBaseline bool `json:"has_baseline"`
+	// PresentIDs / GoneIDs name the Findings this SBOM carries and the open ones it no longer
+	// carries — the input to the time-to-remediation measure (D6). Not part of the event.
+	PresentIDs []FindingID `json:"-"`
+	GoneIDs    []FindingID `json:"-"`
 }
 
 func anyIn(purls []string, set map[string]bool) bool {
@@ -65,6 +70,9 @@ func ClassifyUpload(findings []UploadFinding, current map[string]bool, prev *Upl
 	for _, f := range findings {
 		inCur := anyIn(f.PURLs, current)
 		inPrev := prev != nil && anyIn(f.PURLs, prev.PURLs)
+		if inCur && f.ID != "" {
+			out.PresentIDs = append(out.PresentIDs, f.ID)
+		}
 		switch {
 		case inCur && !inPrev:
 			// Present now, absent before. A Finding created after the baseline was filed did
@@ -81,6 +89,9 @@ func ClassifyUpload(findings []UploadFinding, current map[string]bool, prev *Upl
 		case !inCur && inPrev && stageOpen(f.Stage):
 			out.NoLongerPresent++
 			goneC = append(goneC, f.CVE)
+			if f.ID != "" {
+				out.GoneIDs = append(out.GoneIDs, f.ID)
+			}
 		default:
 			out.NotJudged++
 		}

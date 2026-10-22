@@ -134,7 +134,14 @@ func Wire(
 		read = read.WithEvidence(ev)
 	}
 	relay := store.NewRelay(pool, pub, 100)
-	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla)
+	// Remediation metrics (EDR-REMEDIATION-01 D6): grouped by Product through the Registry
+	// estate walk; without the Registry seam only the estate figures are given.
+	var estate app.EstateReader
+	if reg != nil {
+		estate = reg
+	}
+	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla).
+		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{}))
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
@@ -160,7 +167,7 @@ func Wire(
 		// What a new SBOM changed (EDR-REMEDIATION-01 D3), read from both SBOMs' inventories.
 		// Without the Evidence seam the evaluation simply carries no outcome.
 		if ev != nil {
-			evaluations = evaluations.WithUploadOutcomes(app.NewUploadOutcomes(ev, st))
+			evaluations = evaluations.WithUploadOutcomes(app.NewUploadOutcomes(ev, st).WithPresence(st, sysClock{}))
 		}
 	}
 	return Governance{

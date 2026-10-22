@@ -21,8 +21,8 @@ func TestClassifyUpload_FourBuckets(t *testing.T) {
 	prev := &domain.UploadBaseline{PURLs: set("pkg:a@1", "pkg:b@1", "pkg:d@1", "pkg:r@1"), FiledAt: t0}
 	cur := set("pkg:a@1", "pkg:c@1", "pkg:e@1", "pkg:r@1")
 	findings := []domain.UploadFinding{
-		{CVE: "CVE-A", Stage: domain.StageIdentified, CreatedAt: t0.Add(-time.Hour), PURLs: []string{"pkg:a@1"}},         // unchanged
-		{CVE: "CVE-B", Stage: domain.StagePositionEstablished, CreatedAt: t0.Add(-time.Hour), PURLs: []string{"pkg:b@1"}}, // gone
+		{ID: "f-a", CVE: "CVE-A", Stage: domain.StageIdentified, CreatedAt: t0.Add(-time.Hour), PURLs: []string{"pkg:a@1"}},         // unchanged
+		{ID: "f-b", CVE: "CVE-B", Stage: domain.StagePositionEstablished, CreatedAt: t0.Add(-time.Hour), PURLs: []string{"pkg:b@1"}}, // gone
 		{CVE: "CVE-C", Stage: domain.StageIdentified, CreatedAt: t0.Add(time.Hour), PURLs: []string{"pkg:c@1"}},           // new
 		{CVE: "CVE-E", Stage: domain.StageIdentified, CreatedAt: t0.Add(-48 * time.Hour), PURLs: []string{"pkg:e@1"}},     // reappeared
 		{CVE: "CVE-D", Stage: domain.StageResolved, CreatedAt: t0.Add(-time.Hour), PURLs: []string{"pkg:d@1"}},            // resolved and gone: not judged
@@ -33,6 +33,9 @@ func TestClassifyUpload_FourBuckets(t *testing.T) {
 	got := domain.ClassifyUpload(findings, cur, prev)
 	if got.New != 1 || got.Reappeared != 1 || got.NoLongerPresent != 1 || got.Unchanged != 1 || got.NotJudged != 4 || !got.HasBaseline {
 		t.Fatalf("buckets = %+v", got)
+	}
+	if fmt.Sprint(got.PresentIDs, got.GoneIDs) != "[f-a] [f-b]" {
+		t.Fatalf("ids = %v %v", got.PresentIDs, got.GoneIDs)
 	}
 	if fmt.Sprint(got.NewCVEs, got.ReappearedCVEs, got.GoneCVEs) != "[CVE-C] [CVE-E] [CVE-B]" {
 		t.Fatalf("lists = %v %v %v", got.NewCVEs, got.ReappearedCVEs, got.GoneCVEs)

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
@@ -135,3 +136,40 @@ var (
 	_ app.BlastRadiusReader       = (*Client)(nil)
 	_ app.ReleaseIdentityResolver = (*Client)(nil)
 )
+
+// ReleaseProducts walks the estate — products, their projects, their releases — and maps every
+// release to its product (EDR-REMEDIATION-01 D6). One call per product and per project, never
+// one per release. Any failure is an error: a partial map would silently move Findings out of
+// their product's figures.
+func (c *Client) ReleaseProducts(ctx context.Context) (map[string]app.ProductRef, error) {
+	var products []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := c.get(ctx, "/api/v1/products", &products); err != nil {
+		return nil, fmt.Errorf("registry: list products: %w", err)
+	}
+	out := map[string]app.ProductRef{}
+	for _, p := range products {
+		var projects []struct {
+			ID string `json:"id"`
+		}
+		if err := c.get(ctx, "/api/v1/products/"+url.PathEscape(p.ID)+"/projects", &projects); err != nil {
+			return nil, fmt.Errorf("registry: projects of %s: %w", p.ID, err)
+		}
+		for _, pj := range projects {
+			var releases []struct {
+				ID string `json:"id"`
+			}
+			if err := c.get(ctx, "/api/v1/projects/"+url.PathEscape(pj.ID)+"/releases", &releases); err != nil {
+				return nil, fmt.Errorf("registry: releases of %s: %w", pj.ID, err)
+			}
+			for _, r := range releases {
+				out[r.ID] = app.ProductRef{ID: p.ID, Name: p.Name}
+			}
+		}
+	}
+	return out, nil
+}
+
+var _ app.EstateReader = (*Client)(nil)

@@ -332,3 +332,69 @@ func TestLatestUploadOutcome(t *testing.T) {
 		t.Fatalf("latest = %+v %v %v", rec, found, err)
 	}
 }
+
+// D6: the absence mark is set once by the first SBOM that drops a Finding and cleared when one
+// carries it again; the metrics read returns it with the first human Position before and after it.
+func TestPresenceMarksAndMetricsFindings(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	for _, id := range []string{"fnd-a", "fnd-b"} {
+		if err := st.Save(ctx, newFinding(t, id, "rel-1", "fl-"+id, "CVE-"+id), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t1, t2 := epoch.Add(time.Hour), epoch.Add(2*time.Hour)
+	if err := st.RecordPresence(ctx, []domain.FindingID{"fnd-a"}, []domain.FindingID{"fnd-b"}, t1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordPresence(ctx, []domain.FindingID{"fnd-a"}, nil, t2); err != nil { // already absent: keeps t1
+		t.Fatal(err)
+	}
+	if err := st.RecordPresence(ctx, nil, nil, t2); err != nil {
+		t.Fatal(err)
+	}
+	// A person decides fnd-a after it went absent.
+	f, _, _ := load(t, st, "fnd-a")
+	prev := f.Version()
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceMitigated, "", t2, value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	if _, err := f.AcceptProposal("p1", human, t2); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, f, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.MetricsFindings(ctx)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows = %+v %v", rows, err)
+	}
+	a := rows[0].Finding
+	if !a.AbsentSince.Equal(t1) || a.FirstHumanAt.IsZero() || a.HumanAfterAbsentAt.IsZero() || !a.Open || a.CreatedAt.IsZero() || rows[0].ReleaseID != "rel-1" {
+		t.Fatalf("a = %+v", a)
+	}
+	if b := rows[1].Finding; !b.AbsentSince.IsZero() || !b.FirstHumanAt.IsZero() {
+		t.Fatalf("b = %+v", b)
+	}
+	// Present again: the mark clears.
+	if err := st.RecordPresence(ctx, nil, []domain.FindingID{"fnd-a"}, t2); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = st.MetricsFindings(ctx)
+	if !rows[0].Finding.AbsentSince.IsZero() {
+		t.Fatal("presence did not clear the mark")
+	}
+	// A resolved Finding is not open and carries its resolution time.
+	g, _, _ := load(t, st, "fnd-b")
+	prev = g.Version()
+	if err := g.Resolve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, g, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = st.MetricsFindings(ctx)
+	if rows[1].Finding.Open || rows[1].Finding.ResolvedAt.IsZero() {
+		t.Fatalf("resolved = %+v", rows[1].Finding)
+	}
+}

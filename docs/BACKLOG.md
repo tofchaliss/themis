@@ -62,6 +62,16 @@ The single project backlog. Two parts:
 > Feeds page section, `deliveryctl webhook-health` / `webhook-enable`). Limit: a paused
 > destination's intents dead-letter on the ordinary retry budget and are re-sent with
 > `deliveryctl retry` after re-enabling. VM check: migration 11, then a route to a test receiver.
+> **D6 remediation metrics shipped 2026-10-22** (Governance: pure
+> `domain.ComputeRemediationMetrics`; migration 000021 `findings.absent_since`, set by the upload
+> outcome on the first SBOM that drops an open Finding and cleared when one carries it again;
+> `GET /metrics/remediation[?product=]` — open by age band × severity, within-SLA share, breached
+> now, mean time to decision, time to remediation (absent, THEN decided by a person — Q4) and
+> time to resolution, kept apart; products via one Registry estate walk, estate-only when it
+> fails. Communication: `GET /reports/remediation-metrics?format=markdown|json`, rendered on
+> request. Dashboard: Reports page). Not built: a STORED, versioned metrics Publication and its
+> scheduled delivery — the report is rendered on request; a schedule would ride D4's webhook.
+> Time to remediation counts only absences recorded from this release on (no back-fill).
 > **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
 > not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
 > before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide

@@ -153,3 +153,31 @@ func TestReadService_LatestUploadOutcome(t *testing.T) {
 		t.Fatalf("wired: %+v %v %v", rec, found, err)
 	}
 }
+
+type presenceRec struct {
+	gone, present []domain.FindingID
+	err           error
+}
+
+func (p *presenceRec) RecordPresence(_ context.Context, gone, present []domain.FindingID, _ time.Time) error {
+	p.gone, p.present = gone, present
+	return p.err
+}
+
+func TestUploadOutcomes_RecordsPresence(t *testing.T) {
+	ev, fs := uploadFixture()
+	for i := range fs.fs {
+		fs.fs[i].ID = domain.FindingID("f-" + fs.fs[i].CVE)
+	}
+	rec := &presenceRec{}
+	if _, err := app.NewUploadOutcomes(ev, fs).WithPresence(rec, fixedClock{}).For(context.Background(), "rel-1", "sb-3"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.gone) != 1 || rec.gone[0] != "f-CVE-B" || len(rec.present) != 2 {
+		t.Fatalf("presence = %v %v", rec.gone, rec.present)
+	}
+	rec.err = errors.New("db")
+	if _, err := app.NewUploadOutcomes(ev, fs).WithPresence(rec, fixedClock{}).For(context.Background(), "rel-1", "sb-3"); err == nil {
+		t.Fatal("presence error swallowed")
+	}
+}
