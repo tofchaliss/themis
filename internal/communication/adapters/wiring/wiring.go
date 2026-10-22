@@ -120,12 +120,14 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		DecisionAudience:   cfg.DecisionAudience,
 		EvaluationAudience: cfg.EvaluationAudience,
 		RebuildDestination: cfg.Jenkins.Job,
+		WebhookRoutes:      cfg.WebhookRoutes,
 	}).WithRebuildCallbacks(comm.Store)
 	if comm.API != nil {
 		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
+		comm.API.WithWebhookHealth(comm.Store)  // D4: the Feeds page reads destination health
 	}
 	if comm.Posture != nil {
-		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture).WithIdentity(comm.Identity))
+		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture).WithIdentity(comm.Identity).WithDashboardURL(cfg.DashboardURL))
 	}
 	comm.Consumer.WithIntents(intents)
 	// The rebuild loop (N-M2i) needs the posture to decide; without the read seam there is no
@@ -136,7 +138,11 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
 	// Release already has is what keeps one ticket per Release when the project forbids labels on
 	// create (EDR-DELIVERY-01 M1b-4a).
-	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverers(cfg, comm.Store, logger), logger)
+	// The SLA breach digest (EDR-REMEDIATION-01 D4) collects only while its route is configured.
+	digest := app.NewSLADigest(comm.Store, intents, comm.Identity, idGen{}, sysClock{})
+	comm.Consumer.WithSLADigest(digest)
+	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverersWithHealth(cfg, comm.Store, comm.Store, logger), logger).
+		WithSLADigest(digest)
 }
 
 // The delivery-intent store answers the Jira sender's ticket-index question. Asserted here, at the

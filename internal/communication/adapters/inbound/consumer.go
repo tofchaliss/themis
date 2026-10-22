@@ -20,6 +20,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/themis-project/themis/internal/communication/app"
 	"github.com/themis-project/themis/internal/communication/domain"
@@ -44,6 +45,11 @@ const (
 	causeNewSBOM = "new_sbom"
 	// eventProposalAccepted is a DECISION about exposure — told to the governed audience.
 	eventProposalAccepted = "governance.proposal_accepted"
+	// The webhook-only facts (EDR-REMEDIATION-01 D4): each posts only when its route is
+	// configured, and none changes anything in Communication.
+	eventReviewDueSoon    = "governance.review_due_soon"
+	eventDispositionStale = "governance.disposition_stale"
+	eventSLABreached      = "governance.sla_breached"
 )
 
 // Subscription declares Communication's bus binding (EB-07 / D7): it consumes the Governance
@@ -57,6 +63,7 @@ var Subscription = eventbus.Subscription{
 	Interest: []string{
 		eventPositionEstablished, eventPositionRevised,
 		eventReleaseEvaluated, eventProposalAccepted,
+		eventReviewDueSoon, eventDispositionStale, eventSLABreached,
 	},
 }
 
@@ -66,6 +73,13 @@ type Consumer struct {
 	svc     *app.PublicationService
 	intents *app.DeliveryIntentService
 	loop    *app.RebuildLoop // the rebuild loop (N-M2i); nil = no cycles, no rebuilds
+	digest  *app.SLADigest   // the SLA breach digest (D4); nil = breaches are not collected
+}
+
+// WithSLADigest attaches the per-Product SLA breach digest (EDR-REMEDIATION-01 D4).
+func (c *Consumer) WithSLADigest(d *app.SLADigest) *Consumer {
+	c.digest = d
+	return c
 }
 
 // NewConsumer wires the inbound consumer over the publication service. Outward delivery is
@@ -114,6 +128,10 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.recordJiraIntent(ctx, env)
 	case eventProposalAccepted:
 		return c.recordDecisionMailIntent(ctx, env)
+	case eventReviewDueSoon, eventDispositionStale:
+		return c.recordFindingWebhook(ctx, env)
+	case eventSLABreached:
+		return c.recordSLABreach(ctx, env)
 	default:
 		return nil // not a Communication-consumed event — ignore
 	}
@@ -171,11 +189,82 @@ func (c *Consumer) recordJiraIntent(ctx context.Context, env event.Envelope) err
 	if _, err := c.intents.EnqueueEvaluationMail(ctx, lineageOf(env), env.ID, dto.ReleaseID, dto.ProductID, dto.ProjectID, "", snapshot); err != nil {
 		return err
 	}
+	// The webhook rides the same event (D4): the loop's exhaustion, when that route is set, is
+	// the message; otherwise the evaluation itself is. One event, one webhook.
+	kind := app.WebhookReleaseEvaluated
+	if outcome.State == app.OutcomeExhausted {
+		if _, ok := c.intents.WebhookAudience(app.WebhookRebuildExhausted); ok {
+			kind = app.WebhookRebuildExhausted
+		}
+	}
+	if _, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, kind, dto.ReleaseID, dto.ProductID, dto.ProjectID, "", snapshot); err != nil {
+		return err
+	}
 	if c.loop == nil {
 		return nil
 	}
 	_, _, err := c.loop.Raise(ctx, lineageOf(env), env.ID, outcome, dto.ProductID, dto.ProjectID)
 	return err
+}
+
+// findingFactDTO mirrors the two per-Finding re-surfacing facts' shared fields
+// (governance.review_due_soon.v1 and governance.disposition_stale.v1 — PascalCase keys).
+type findingFactDTO struct {
+	FindingID string    `json:"FindingID"`
+	ReleaseID string    `json:"ReleaseID"`
+	CVE       string    `json:"CVE"`
+	Stance    string    `json:"Stance"`
+	ReviewBy  time.Time `json:"ReviewBy"`
+	Owner     string    `json:"Owner"`
+	Reason    string    `json:"Reason"`
+}
+
+// recordFindingWebhook posts a review warning or a re-surfacing when its route is configured.
+func (c *Consumer) recordFindingWebhook(ctx context.Context, env event.Envelope) error {
+	if c.intents == nil {
+		return nil
+	}
+	var dto findingFactDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	kind := app.WebhookDispositionStale
+	if env.Type == eventReviewDueSoon {
+		kind = app.WebhookReviewDueSoon
+	}
+	snap := map[string]string{app.SnapshotCVE: dto.CVE, app.SnapshotStance: dto.Stance,
+		app.SnapshotOwner: dto.Owner, app.SnapshotReason: dto.Reason}
+	if !dto.ReviewBy.IsZero() {
+		snap[app.SnapshotReviewBy] = dto.ReviewBy.UTC().Format(time.RFC3339)
+	}
+	_, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, kind, dto.ReleaseID, "", "", dto.FindingID, snap)
+	if errors.Is(err, app.ErrNoSubject) {
+		return nil
+	}
+	return err
+}
+
+// slaBreachedDTO mirrors governance.sla_breached.v1.
+type slaBreachedDTO struct {
+	FindingID   string    `json:"FindingID"`
+	ReleaseID   string    `json:"ReleaseID"`
+	CVE         string    `json:"CVE"`
+	Bucket      string    `json:"Bucket"`
+	PeriodStart time.Time `json:"PeriodStart"`
+	Due         time.Time `json:"Due"`
+}
+
+// recordSLABreach collects a breach for the next per-Product digest (never one message each).
+func (c *Consumer) recordSLABreach(ctx context.Context, env event.Envelope) error {
+	if c.digest == nil {
+		return nil
+	}
+	var dto slaBreachedDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	return c.digest.Record(ctx, app.SLABreachRecord{FindingID: dto.FindingID, PeriodStart: dto.PeriodStart.UTC(),
+		ReleaseID: dto.ReleaseID, CVE: dto.CVE, Bucket: dto.Bucket, Due: dto.Due.UTC()})
 }
 
 // recordDecisionMailIntent persists the decision-notification intent for an accepted proposal.

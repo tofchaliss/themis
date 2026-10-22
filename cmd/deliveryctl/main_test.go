@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 )
 
 // fakeOps stands in for the Communication store: the commands are exercised over the same
@@ -21,6 +22,27 @@ type fakeOps struct {
 	since    time.Time
 	limit    int
 	closed   bool
+	health   []domain.WebhookHealth
+	saved    []domain.WebhookHealth
+	hErr     error
+}
+
+func (f *fakeOps) WebhookHealth(_ context.Context, d string) (domain.WebhookHealth, error) {
+	for _, h := range f.health {
+		if h.Destination == d {
+			return h, f.hErr
+		}
+	}
+	return domain.NewWebhookHealth(d), f.hErr
+}
+
+func (f *fakeOps) SaveWebhookHealth(_ context.Context, h domain.WebhookHealth, _ time.Time) error {
+	f.saved = append(f.saved, h)
+	return f.hErr
+}
+
+func (f *fakeOps) ListWebhookHealth(context.Context) ([]domain.WebhookHealth, error) {
+	return f.health, f.hErr
 }
 
 func (f *fakeOps) ListDeadLetters(_ context.Context, since time.Time, limit int) ([]app.Intent, error) {
@@ -187,5 +209,40 @@ func TestOpenStoreRequiresADSN(t *testing.T) {
 	t.Setenv("THEMIS_DATABASE_DSN", "")
 	if _, _, err := openStore(); err == nil {
 		t.Error("want an error without THEMIS_DATABASE_DSN")
+	}
+}
+
+func TestWebhookHealthCommands(t *testing.T) {
+	paused := domain.WebhookHealth{Destination: "slack-sec", State: domain.WebhookInactivePermanent, ConsecutiveFailures: 9,
+		PausedUntil: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC), LastError: "status 404"}
+	ops := &fakeOps{health: []domain.WebhookHealth{paused, {Destination: "teams", State: domain.WebhookActive}}}
+	code, out, _ := exec(t, "webhook-health", nil, ops.opener())
+	if code != 0 || !strings.Contains(out, "slack-sec") || !strings.Contains(out, "inactive_permanent") || !strings.Contains(out, "status 404") || !strings.Contains(out, "2026-10-22") {
+		t.Fatalf("health = %d %q", code, out)
+	}
+	if code, out, _ := exec(t, "webhook-health", nil, (&fakeOps{}).opener()); code != 0 || !strings.Contains(out, "no webhook destination") {
+		t.Fatalf("empty = %d %q", code, out)
+	}
+	code, out, _ = exec(t, "webhook-enable", []string{"--destination", "slack-sec"}, ops.opener())
+	if code != 0 || len(ops.saved) != 1 || ops.saved[0].State != domain.WebhookActive || !strings.Contains(out, "active") {
+		t.Fatalf("enable = %d %q %+v", code, out, ops.saved)
+	}
+	if code, _, _ := exec(t, "webhook-enable", nil, ops.opener()); code != 2 {
+		t.Fatalf("no destination = %d", code)
+	}
+	if code, _, _ := exec(t, "webhook-enable", []string{"--bogus"}, ops.opener()); code != 2 {
+		t.Fatalf("bad flag = %d", code)
+	}
+	failing := &fakeOps{hErr: errors.New("db down")}
+	if code, _, _ := exec(t, "webhook-health", nil, failing.opener()); code != 1 {
+		t.Fatalf("health error = %d", code)
+	}
+	if code, _, _ := exec(t, "webhook-enable", []string{"--destination", "x"}, failing.opener()); code != 1 {
+		t.Fatalf("enable error = %d", code)
+	}
+	for _, cmd := range []string{"webhook-health", "webhook-enable"} {
+		if code, _, _ := exec(t, cmd, []string{"--destination", "x"}, failingOpener(errors.New("no dsn"))); code != 1 {
+			t.Fatalf("%s open error = %d", cmd, code)
+		}
 	}
 }

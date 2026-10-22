@@ -35,6 +35,15 @@ type Worker struct {
 	deliverers map[app.IntentType]IntentDeliverer
 	logger     *observability.Logger
 	now        func() time.Time
+	// digest, when wired, sends the per-Product SLA breach digest on its own cadence (D4).
+	digest *app.SLADigest
+}
+
+// WithSLADigest runs the SLA breach digest beside the delivery loop (EDR-REMEDIATION-01 D4),
+// every cfg.SLADigestInterval.
+func (w *Worker) WithSLADigest(d *app.SLADigest) *Worker {
+	w.digest = d
+	return w
 }
 
 // NewWorker wires the worker over the intent store, the intent service (which it needs to
@@ -68,6 +77,17 @@ func (w *Worker) Run(ctx context.Context) {
 		return
 	}
 	w.logger.Info("outward delivery worker started", observability.String("config", w.cfg.String()))
+	if w.digest != nil {
+		go w.digest.RunEvery(ctx, w.cfg.SLADigestInterval, func(sent int, err error) {
+			if err != nil {
+				w.logger.Error("SLA digest pass failed", observability.Err(err))
+				return
+			}
+			if sent > 0 {
+				w.logger.Info("SLA digest sent", observability.Int("products", sent))
+			}
+		})
+	}
 	ticker := time.NewTicker(w.cfg.Interval)
 	defer ticker.Stop()
 	for {

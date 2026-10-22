@@ -197,6 +197,12 @@ var ErrNoPayload = errors.New("delivery: intent carries no materialized payload"
 // tickets is Themis's own record of which issue a Release already has (nil = fall back to the label
 // search alone).
 func NewDeliverers(cfg Config, tickets ReleaseTicketIndex, logger *observability.Logger) map[app.IntentType]IntentDeliverer {
+	return NewDeliverersWithHealth(cfg, tickets, nil, logger)
+}
+
+// NewDeliverersWithHealth is NewDeliverers with the webhook destination-health store the real
+// webhook sender records into (EDR-REMEDIATION-01 D4). nil records no health.
+func NewDeliverersWithHealth(cfg Config, tickets ReleaseTicketIndex, health app.WebhookHealthStore, logger *observability.Logger) map[app.IntentType]IntentDeliverer {
 	if logger == nil {
 		logger = observability.Nop()
 	}
@@ -204,6 +210,17 @@ func NewDeliverers(cfg Config, tickets ReleaseTicketIndex, logger *observability
 		app.IntentJiraIssue: NewFakeJiraDeliverer(logger),
 		app.IntentEmail:     NewFakeMailDeliverer(logger),
 		app.IntentCIRebuild: NewFakeCIRebuildDeliverer(logger),
+		app.IntentWebhook:   NewFakeWebhookDeliverer(logger),
+	}
+	if cfg.Webhook.Enabled {
+		hook, err := NewRealWebhookDeliverer(cfg.Webhook, health, logger)
+		if err != nil {
+			logger.Error("webhook delivery is ENABLED but its configuration is refused — the FAKE sender stays wired, so NO webhook will be posted",
+				observability.Err(err))
+		} else {
+			out[app.IntentWebhook] = hook
+			logger.Info("real webhook sender wired", observability.String("config", cfg.Webhook.String()))
+		}
 	}
 	if cfg.Jira.Enabled {
 		jira, err := NewRealJiraDeliverer(cfg.Jira, logger)
@@ -283,6 +300,15 @@ type Config struct {
 	Mail MailConfig
 	// Jenkins configures the REAL ci_rebuild sender (N-M2g, M2-6). Off by default.
 	Jenkins JenkinsConfig
+	// Webhook configures the REAL webhook sender (EDR-REMEDIATION-01 D4). Off by default.
+	Webhook WebhookConfig
+	// WebhookRoutes maps a webhook event kind to the audience it posts to (opt-in per kind):
+	// THEMIS_COMMUNICATION_WEBHOOK_ROUTES="release_evaluated=slack-sec;sla_breached=slack-sec".
+	WebhookRoutes map[string]string
+	// SLADigestInterval is the cadence of the per-Product SLA breach digest (default 24h).
+	SLADigestInterval time.Duration
+	// DashboardURL is the base a webhook's link points into (THEMIS_COMMUNICATION_DASHBOARD_URL).
+	DashboardURL string
 	// RebuildMaxAttempts is the rebuild LOOP's one knob (M2-8): how many rebuild cycles a
 	// Release gets before the loop stops and tells a person. Default 2, estate-wide, no
 	// per-Release override. It is not the delivery retry budget (MaxAttempts).
@@ -300,6 +326,8 @@ const (
 	defaultInterval       = 5 * time.Second
 	// defaultRebuildMaxAttempts is M2-8's documented default.
 	defaultRebuildMaxAttempts = 2
+	// defaultSLADigestInterval is D4's daily digest.
+	defaultSLADigestInterval = 24 * time.Hour
 )
 
 // ConfigFromEnv reads the outward-delivery options:
@@ -326,6 +354,10 @@ func ConfigFromEnv() Config {
 		Jira:               jiraFromEnv(),
 		Mail:               mailFromEnv(),
 		Jenkins:            jenkinsFromEnv(),
+		Webhook:            webhookFromEnv(),
+		WebhookRoutes:      ParseWebhookPairs(getenv("THEMIS_COMMUNICATION_WEBHOOK_ROUTES")),
+		SLADigestInterval:  envDuration("THEMIS_COMMUNICATION_SLA_DIGEST_INTERVAL", defaultSLADigestInterval),
+		DashboardURL:       getenv("THEMIS_COMMUNICATION_DASHBOARD_URL"),
 		RebuildMaxAttempts: envInt("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", defaultRebuildMaxAttempts),
 		Workers:            envInt("THEMIS_COMMUNICATION_DELIVERY_WORKERS", defaultWorkers),
 		Batch:              envInt("THEMIS_COMMUNICATION_DELIVERY_BATCH", defaultBatch),
@@ -363,6 +395,9 @@ func (c Config) withDefaults() Config {
 	if c.RebuildMaxAttempts <= 0 {
 		c.RebuildMaxAttempts = defaultRebuildMaxAttempts
 	}
+	if c.SLADigestInterval <= 0 {
+		c.SLADigestInterval = defaultSLADigestInterval
+	}
 	return c
 }
 
@@ -370,9 +405,9 @@ func (c Config) withDefaults() Config {
 // to tell what the node will do. It prints whether each credential is SET, never its value: a
 // startup line is telemetry, and telemetry is not a place a token may appear even once.
 func (c Config) String() string {
-	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q rebuild_max_attempts=%d jira=[%s] mail=[%s] jenkins=[%s]",
+	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q rebuild_max_attempts=%d jira=[%s] mail=[%s] jenkins=[%s] webhook=[%s] webhook_routes=%v sla_digest_interval=%s",
 		c.Enabled, c.Workers, c.Batch, c.MaxAttempts, c.BackoffInitial, c.BackoffMax, c.Interval, c.DeadLetterAudience,
-		c.DecisionAudience, c.EvaluationAudience, c.RebuildMaxAttempts, c.Jira, c.Mail, c.Jenkins)
+		c.DecisionAudience, c.EvaluationAudience, c.RebuildMaxAttempts, c.Jira, c.Mail, c.Jenkins, c.Webhook, c.WebhookRoutes, c.SLADigestInterval)
 }
 
 // envBool reads a "1"/"0" switch; anything unset or unrecognized falls back to def.

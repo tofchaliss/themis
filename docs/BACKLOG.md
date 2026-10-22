@@ -51,6 +51,17 @@ The single project backlog. Two parts:
 > mail, "What this SBOM changed", stating that no-longer-present is still open). Not built: the
 > intake receipt's link to the evaluation event. VM check: upload a changed SBOM to a release
 > that already has one, then `GET /releases/<id>/upload-outcome`.
+> **D4 outbound webhook shipped 2026-10-22** (Communication: intent kind `webhook`, migration
+> 000011 extends the type CHECK and adds `webhook_health` + `sla_breach_digest`; a real HTTPS
+> sender (loopback http excepted), optional HMAC signature per audience, the URL never logged;
+> a stable JSON document `event, product, project, release, release_id, finding_id, summary,
+> link, text`; events opt-in by `THEMIS_COMMUNICATION_WEBHOOK_ROUTES`: release_evaluated,
+> rebuild_exhausted (replaces the evaluation post when the loop gave up), review_due_soon,
+> disposition_stale, and sla_breached as a per-Product digest every 24h; destination health in
+> four states, refusing to call a paused or disabled destination; `GET /webhook-health`, the
+> Feeds page section, `deliveryctl webhook-health` / `webhook-enable`). Limit: a paused
+> destination's intents dead-letter on the ordinary retry budget and are re-sent with
+> `deliveryctl retry` after re-enabling. VM check: migration 11, then a route to a test receiver.
 > **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
 > not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
 > before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide

@@ -151,6 +151,17 @@ listing by release for the baseline. No new table.
 
 ## D4 — Outbound webhook channel, one-way, with recorded health
 
+> **Realized 2026-10-22.** `IntentWebhook` rides the existing intent machinery (payload
+> materialized at enqueue, retries, dead letter). Routing is per event kind
+> (`THEMIS_COMMUNICATION_WEBHOOK_ROUTES`), targets per audience
+> (`THEMIS_COMMUNICATION_WEBHOOK_TARGETS`), signing secrets per audience from the environment.
+> One evaluation event is one webhook: when the rebuild loop is exhausted and that route is set,
+> the exhaustion message replaces the evaluation message. SLA breaches are collected in
+> `sla_breach_digest` (only while routed) and sent per Product by a 24h digest. Health is the
+> four-state ladder in `domain.WebhookHealth` (3 failures pause for 1h; 3 pauses in a row
+> disable); a paused or disabled destination is not called, so its intents dead-letter on the
+> ordinary budget and are re-sent with `deliveryctl retry` after `deliveryctl webhook-enable`.
+
 **Decision.** A delivery intent kind `webhook`: an HTTPS POST of a small JSON document to a
 configured URL per governed *audience name*, so Slack and Teams incoming webhooks work without a
 sender per product. Events it may carry, each opt-in by configuration: release evaluated, SLA

@@ -554,3 +554,83 @@ func TestReleaseEvaluated_CarriesTheUploadOutcome(t *testing.T) {
 		t.Fatal("an event without an outcome produced outcome keys")
 	}
 }
+
+type digestRows struct{ rows []app.SLABreachRecord }
+
+func (d *digestRows) RecordSLABreach(_ context.Context, r app.SLABreachRecord) error {
+	d.rows = append(d.rows, r)
+	return nil
+}
+func (d *digestRows) PendingSLABreaches(context.Context) ([]app.SLABreachRecord, error) { return nil, nil }
+func (d *digestRows) MarkSLABreachesDigested(context.Context, []app.SLABreachRecord, string) error {
+	return nil
+}
+
+func webhookConsumer(intents *intentStore, digest *digestRows) *inbound.Consumer {
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{WebhookRoutes: map[string]string{
+		app.WebhookReleaseEvaluated: "slack-sec", app.WebhookReviewDueSoon: "slack-sec",
+		app.WebhookDispositionStale: "slack-sec", app.WebhookSLABreachDigest: "teams",
+	}})
+	return consumer(&memRepo{}).WithIntents(svc).WithSLADigest(app.NewSLADigest(digest, svc, nil, &intentIDs{}, clk{}))
+}
+
+// EDR-REMEDIATION-01 D4: with routes configured, a release evaluation also posts a webhook, the
+// two per-Finding facts post one each, and an SLA breach is COLLECTED for the digest — never
+// posted on its own.
+func TestConsumer_WebhookEvents(t *testing.T) {
+	ctx := context.Background()
+	intents := newIntentStore()
+	digest := &digestRows{}
+	c := webhookConsumer(intents, digest)
+	for _, env := range []event.Envelope{
+		govEnv("env-1", "governance.release_evaluated", []byte(releaseEvaluatedPayload)),
+		govEnv("env-2", "governance.review_due_soon", []byte(`{"FindingID":"fnd-1","ReleaseID":"rel-1","CVE":"CVE-1","Stance":"accepted_risk","ReviewBy":"2026-11-05T00:00:00Z","Owner":"jane"}`)),
+		govEnv("env-3", "governance.disposition_stale", []byte(`{"FindingID":"fnd-2","ReleaseID":"rel-1","CVE":"CVE-2","Stance":"not_affected","Reason":"KEV"}`)),
+		govEnv("env-4", "governance.sla_breached", []byte(`{"FindingID":"fnd-3","ReleaseID":"rel-1","CVE":"CVE-3","Bucket":"critical","PeriodStart":"2026-10-01T00:00:00Z","Due":"2026-10-08T00:00:00Z"}`)),
+		govEnv("env-5", "governance.review_due_soon", []byte(`{"CVE":"CVE-9"}`)), // no subject: recorded nothing, no error
+	} {
+		if err := c.Handle(ctx, env); err != nil {
+			t.Fatalf("%s: %v", env.Type, err)
+		}
+	}
+	var hooks []app.Intent
+	for _, in := range intents.created {
+		if in.Type == app.IntentWebhook {
+			hooks = append(hooks, in)
+		}
+	}
+	if len(hooks) != 3 {
+		t.Fatalf("webhooks = %d: %+v", len(hooks), hooks)
+	}
+	if hooks[0].Snapshot[app.SnapshotWebhookEvent] != app.WebhookReleaseEvaluated || hooks[0].ReleaseID != "rel-1" {
+		t.Fatalf("evaluated hook = %+v", hooks[0])
+	}
+	if h := hooks[1]; h.Snapshot[app.SnapshotWebhookEvent] != app.WebhookReviewDueSoon || h.FindingID != "fnd-1" ||
+		h.Snapshot[app.SnapshotOwner] != "jane" || h.Snapshot[app.SnapshotReviewBy] != "2026-11-05T00:00:00Z" {
+		t.Fatalf("review hook = %+v", h)
+	}
+	if h := hooks[2]; h.Snapshot[app.SnapshotWebhookEvent] != app.WebhookDispositionStale || h.Snapshot[app.SnapshotReason] != "KEV" || h.Snapshot[app.SnapshotReviewBy] != "" {
+		t.Fatalf("stale hook = %+v", h)
+	}
+	if len(digest.rows) != 1 || digest.rows[0].Bucket != "critical" || digest.rows[0].FindingID != "fnd-3" {
+		t.Fatalf("digest rows = %+v", digest.rows)
+	}
+	// Malformed payloads are real errors (retried), not drops.
+	for _, typ := range []string{"governance.review_due_soon", "governance.sla_breached"} {
+		if err := c.Handle(ctx, govEnv("env-x", typ, []byte(`{not json`))); err == nil {
+			t.Fatalf("%s malformed payload accepted", typ)
+		}
+	}
+	// Delivery off: the per-Finding facts and breaches record nothing.
+	off := consumer(&memRepo{})
+	for _, typ := range []string{"governance.review_due_soon", "governance.sla_breached"} {
+		if err := off.Handle(ctx, govEnv("env-y", typ, []byte(`{}`))); err != nil {
+			t.Fatalf("%s with delivery off: %v", typ, err)
+		}
+	}
+	for _, typ := range []string{"governance.review_due_soon", "governance.disposition_stale", "governance.sla_breached"} {
+		if !inbound.Subscription.InInterest(typ) {
+			t.Errorf("%s is not in the interest set", typ)
+		}
+	}
+}
