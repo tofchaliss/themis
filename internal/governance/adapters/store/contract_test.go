@@ -76,6 +76,7 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 		// and the schema admits them, because they are the success case.
 		{app.EventReleaseEvaluated, domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", "ev-1", domain.CauseNewSBOM, domain.SeverityCounts{})},
 		{app.EventDispositionStale, domain.DispositionStale{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceNotAffected), PositionVersion: 1, Reason: "a public exploit now exists for this CVE", OccurredAt: now}},
+		{app.EventSLABreached, domain.SLABreachedEvent{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Bucket: domain.SLABucketCritical, PeriodStart: now, Due: now.Add(7 * 24 * time.Hour), OccurredAt: now}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {

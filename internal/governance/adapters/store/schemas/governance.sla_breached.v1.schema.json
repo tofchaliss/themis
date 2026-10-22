@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.sla_breached.v1.schema.json",
+  "title": "governance.sla_breached.v1",
+  "description": "Integration-contract v1 for the SLA breach fact (EDR-REMEDIATION-01 D1). One Finding's current SLA period ran past its due date. Emitted once per period. It is a FACT, never a transition: no Position, stage or proposal changes because of it (S1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ReleaseID", "FaultlineID", "CVE", "Bucket", "PeriodStart", "Due", "KEVDueApplied", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "Bucket": { "type": "string", "enum": ["critical", "high", "medium", "low", ""], "description": "The severity bucket frozen when the Finding first had a score. Empty when only a CISA KEV due date set the deadline." },
+    "PeriodStart": { "type": "string", "format": "date-time", "description": "When this SLA period began: creation, or the moment the Finding returned to the queue after an acceptance." },
+    "Due": { "type": "string", "format": "date-time" },
+    "KEVDueApplied": { "type": "boolean", "description": "CISA's KEV due date was earlier than the policy's and is the deadline." },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}
