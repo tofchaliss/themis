@@ -47,6 +47,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventFindingCommissioned: "governance.finding_commissioned.v1",
 	app.EventCommissionWithdrawn: "governance.commission_withdrawn.v1",
 	app.EventReleaseEvaluated:    "governance.release_evaluated.v1",
+	app.EventSLABreached:         "governance.sla_breached.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped
@@ -290,7 +291,10 @@ func (s *Store) Save(ctx context.Context, f domain.Finding, created bool, prevVe
 	} else {
 		ct, err := tx.Exec(ctx, `
 			UPDATE findings SET stage=$1, version=$2, current_stance=$3, current_position_version=$4, updated_at=$5,
-			       stale_since=$8, stale_reason=$9
+			       stale_since=$8, stale_reason=$9,
+			       -- The SLA's stage stop (EDR-REMEDIATION-01 D1): the FIRST time it reached
+			       -- resolved/archived; cleared on a reopen so the next stop is its own.
+			       stage_stopped_at = CASE WHEN $1 IN ('resolved', 'archived') THEN COALESCE(stage_stopped_at, $5) ELSE NULL END
 			WHERE id=$6 AND version=$7`,
 			string(f.Stage()), f.Version(), curStance, curVersion, now, string(f.ID()), prevVersion, staleSince, staleReason)
 		if err != nil {
@@ -739,9 +743,12 @@ func (s *Store) attachComponents(ctx context.Context, releaseID string, entries 
 
 // SetBaseScore materializes Knowledge's CVE-intrinsic base score onto every Finding for a
 // Faultline (C6). It is a denormalized read-column update, independent of aggregate version.
+// The first score a Finding receives also freezes its SLA bucket (EDR-REMEDIATION-01 Q1).
 func (s *Store) SetBaseScore(ctx context.Context, faultlineID string, score int) error {
 	_, err := s.exec(ctx).Exec(ctx,
-		`UPDATE findings SET base_score = $2 WHERE faultline_id = $1`, faultlineID, score)
+		`UPDATE findings SET base_score = $2,
+		        sla_bucket = CASE WHEN sla_bucket = '' THEN $3 ELSE sla_bucket END
+		 WHERE faultline_id = $1`, faultlineID, score, domain.SLABucketOf(score))
 	return err
 }
 

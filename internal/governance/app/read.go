@@ -98,6 +98,9 @@ type PostureEntry struct {
 	// priorities below read 0 and the Finding leaves the ranked queue — that is where the
 	// noise reduction comes from, never from discounting live occurrences.
 	OpenCarriers int
+	// SLA is the Finding's remediation clock (EDR-REMEDIATION-01 D1); nil when the SLA seam is
+	// not wired or could not be read — the posture never fails over a deadline.
+	SLA *domain.SLAStatus
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads
@@ -120,6 +123,14 @@ type ReadService struct {
 	// Seeded to domain.DefaultMitigatedWeight by the constructor so a zero value can never be
 	// mistaken for "suppress everything mitigated".
 	mitigatedWeight float64
+	// sla may be nil — posture rows then carry no SLA reading.
+	sla *SLAService
+}
+
+// WithSLA wires the SLA clock onto the posture rollup (EDR-REMEDIATION-01 D1).
+func (s *ReadService) WithSLA(sla *SLAService) *ReadService {
+	s.sla = sla
+	return s
 }
 
 // WithMitigatedWeight overrides the `mitigated` stance weight (THEMIS_MITIGATED_WEIGHT, D14)
@@ -201,7 +212,15 @@ func (s *ReadService) ReleasePosture(ctx context.Context, releaseID string) ([]P
 			mult = domain.BlastMultiplier(customers, s.blastCap)
 		}
 	}
+	var clocks map[domain.FindingID]domain.SLAStatus
+	if s.sla != nil {
+		// Best-effort: an unreadable SLA table leaves the rows without a deadline, never errors.
+		clocks, _ = s.sla.ReleaseStatus(ctx, releaseID)
+	}
 	for i := range entries {
+		if st, ok := clocks[entries[i].FindingID]; ok {
+			entries[i].SLA = &st
+		}
 		entries[i].Multiplier = mult
 		entries[i].EffectivePriority = domain.EffectivePriority(entries[i].BaseScore, mult)
 		// The disposition-aware triage number (D14). A Finding with no Position weighs 1.0,

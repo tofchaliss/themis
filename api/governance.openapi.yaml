@@ -379,6 +379,48 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /sla-policy:
+    get:
+      operationId: getSLAPolicy
+      summary: >-
+        The SLA policy (EDR-REMEDIATION-01 D1) - days to fix per severity bucket with an enforce
+        switch, for the estate and any per-Product overrides. With nothing stored the estate
+        reads the shipped defaults (7 / 30 / 90 / 180 days, all enforced). Read scope.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicySet'
+        '500':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putSLAPolicy
+      summary: >-
+        Store the estate SLA policy (scope omitted or empty) or one Product's override (scope =
+        the Product id). Admin scope only. A deadline already running for a Finding moves with
+        the policy, because the due date is derived, never stored; the frozen severity bucket
+        does not move (D8 Q1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SLAPolicyPut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/blast-radius:
     get:
       operationId: getBlastRadius
@@ -926,6 +968,129 @@ components:
           type: object
           additionalProperties: true
           description: The governance.release_evaluated.v1 payload exactly as published.
+    SLATarget:
+      type: object
+      required: [days, enforce]
+      properties:
+        days:
+          type: integer
+          minimum: 0
+          description: Days to fix, counted from the start of the SLA period.
+        enforce:
+          type: boolean
+          description: When false the bucket has no deadline (state not_applicable).
+    SLAPolicyPut:
+      type: object
+      required: [critical, high, medium, low, updated_by]
+      properties:
+        scope:
+          type: string
+          description: Empty or omitted = the estate policy; otherwise the Product id this override is for.
+        critical:
+          $ref: '#/components/schemas/SLATarget'
+        high:
+          $ref: '#/components/schemas/SLATarget'
+        medium:
+          $ref: '#/components/schemas/SLATarget'
+        low:
+          $ref: '#/components/schemas/SLATarget'
+        updated_by:
+          type: string
+          description: The person changing the policy, recorded beside it.
+    SLAPolicyRecord:
+      type: object
+      required: [scope, critical, high, medium, low]
+      properties:
+        scope:
+          type: string
+        critical:
+          $ref: '#/components/schemas/SLATarget'
+        high:
+          $ref: '#/components/schemas/SLATarget'
+        medium:
+          $ref: '#/components/schemas/SLATarget'
+        low:
+          $ref: '#/components/schemas/SLATarget'
+        updated_at:
+          type: string
+          format: date-time
+          description: Absent for the shipped defaults (nothing stored yet).
+        updated_by:
+          type: string
+    SLAPolicySet:
+      type: object
+      required: [estate, overrides]
+      properties:
+        estate:
+          $ref: '#/components/schemas/SLAPolicyRecord'
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAPolicyRecord'
+    SLAAcceptancePeriod:
+      type: object
+      required: [start, position_version]
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+          description: Absent while the acceptance still holds.
+        position_version:
+          type: integer
+    SLAStatus:
+      type: object
+      description: >-
+        The Finding's remediation clock (EDR-REMEDIATION-01 D1). Derived on every read, never
+        stored; a breach changes nothing about the Finding (S1). Restarting after an acceptance
+        never hides elapsed time: age_days and days_under_acceptance count from creation (S2).
+      required: [state, bucket, bucket_changed, period_start, kev_due_applied, age_days, days_under_acceptance]
+      properties:
+        state:
+          type: string
+          enum: [within, due_soon, breached, paused, met, missed, not_applicable]
+          description: >-
+            within / due_soon (inside 7 days) / breached while running; paused under a valid
+            accepted_risk or deferred Position; met / missed once a not_affected or mitigated
+            Position, or the resolved / archived stage, stopped it; not_applicable with no
+            severity and no CISA date, or an unenforced bucket.
+        bucket:
+          type: string
+          description: The severity bucket frozen when the Finding first had a score (D8 Q1).
+        current_bucket:
+          type: string
+          description: Today's bucket from the current base score.
+        bucket_changed:
+          type: boolean
+          description: Severity changed since the clock started; the deadline still follows `bucket`.
+        period_start:
+          type: string
+          format: date-time
+        due:
+          type: string
+          format: date-time
+          description: Absent when paused or not applicable.
+        days_left:
+          type: integer
+          description: Whole days to `due`; negative when breached.
+        kev_due_applied:
+          type: boolean
+          description: CISA's KEV due date was earlier than the policy's and is the deadline.
+        stopped_at:
+          type: string
+          format: date-time
+        age_days:
+          type: integer
+          description: Whole days since the Finding was created.
+        days_under_acceptance:
+          type: integer
+          description: Whole days spent under a valid acceptance, all periods summed.
+        acceptance_periods:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAAcceptancePeriod'
     PostureEntry:
       type: object
       properties:
@@ -954,6 +1119,8 @@ components:
             rollup's statements as status notes (EDR-COMMUNICATION-01 D13).
         disposition_stale:
           $ref: '#/components/schemas/DispositionStale'
+        sla:
+          $ref: '#/components/schemas/SLAStatus'
         components:
           type: array
           description: >-

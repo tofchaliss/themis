@@ -37,6 +37,8 @@ type Handler struct {
 	// seam is unconfigured, and a product-scoped key can then write NOTHING (fail-closed);
 	// admin is unaffected, so a node without the Registry seam still operates.
 	products ProductResolver
+	// sla serves the SLA policy (EDR-REMEDIATION-01 D1). Nil ⇒ /sla-policy answers 503.
+	sla *app.SLAService
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response
 	// deliberately does not (R1; see authorizeGovernanceWrite). Never nil.
 	logger *observability.Logger
@@ -60,6 +62,12 @@ func NewHandler(write *app.FindingService, read *app.ReadService) *Handler {
 // refusal is deliberate: a scope that cannot be checked must not be honoured.
 func (h *Handler) WithProductResolver(pr ProductResolver) *Handler {
 	h.products = pr
+	return h
+}
+
+// WithSLA attaches the SLA policy service behind /sla-policy.
+func (h *Handler) WithSLA(sla *app.SLAService) *Handler {
+	h.sla = sla
 	return h
 }
 
@@ -784,6 +792,10 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if e.PositionRationale != "" {
 		pr := e.PositionRationale
 		out.PositionRationale = &pr
+	}
+	if e.SLA != nil {
+		sla := toSLAStatus(*e.SLA)
+		out.Sla = &sla
 	}
 	if len(e.Components) > 0 {
 		comps := toComponents(e.Components)

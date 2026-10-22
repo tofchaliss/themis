@@ -23,6 +23,13 @@ The single project backlog. Two parts:
 > `FaultlineEnriched`; Governance: migration 000018, signals on the Finding, the ransomware flag
 > on a Position's premise, drift reason "CISA now marks this CVE as known to be used in
 > ransomware campaigns"). VM check: after the next EPSS/KEV sweep, a KEV card shows the dates.
+> **D1 SLA shipped 2026-10-22** (Governance: pure `domain.EvaluateSLA`, migration 000019 with
+> `findings.sla_bucket` frozen at the first score, `stage_stopped_at`, `sla_policies`,
+> `sla_breaches`; `sla` on every posture row; `GET/PUT /api/v1/sla-policy`, admin to change,
+> 7/30/90/180 default; breach sweep on the review-by cadence emits `governance.sla_breached.v1`
+> once per period and writes only the breach log and the outbox — S1 and S2 have named tests;
+> dashboard: Due column, SLA-breached tile and filter). VM check: migration 19, then
+> `GET /sla-policy` answers the defaults and a release's posture rows carry `sla`.
 
 ### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
 

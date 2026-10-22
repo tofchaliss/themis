@@ -66,7 +66,8 @@ type config struct {
 	epssDriftThreshold float64
 	mitigatedWeight    float64 // THEMIS_MITIGATED_WEIGHT — stance weight for `mitigated` in residual_priority (EDR-GOVERNANCE-01 D14). Default 0.5; must be in (0,1]. The other weights are structural and not configurable: not_affected/accepted_risk 0, deferred 0.9, everything open 1.0.
 
-	// THEMIS_REVIEW_BY_INTERVAL — cadence of the review-by timer (EDR-GOVERNANCE-01 D14, RF-2):
+	// THEMIS_REVIEW_BY_INTERVAL — cadence of the review-by timer (EDR-GOVERNANCE-01 D14, RF-2)
+	// and of the SLA breach sweep beside it (EDR-REMEDIATION-01 D1):
 	// a suppressed Finding whose decision carried a review_by date now past is re-surfaced on a
 	// clock, not only when its CVE happens to be enriched. Go duration, default 1h; "0" disables.
 	reviewByInterval time.Duration
@@ -217,8 +218,20 @@ func main() {
 			}
 		})
 		logger.Info("review-by timer enabled", observability.String("interval", cfg.reviewByInterval.String()))
+		// The SLA breach sweep (EDR-REMEDIATION-01 D1) rides the same cadence: it announces
+		// governance.sla_breached.v1 once per Finding per SLA period and changes nothing else.
+		sl := logger.Component("sla")
+		go gov.SLA.RunEvery(ctx, cfg.reviewByInterval, func(checked, breached int, err error) {
+			if err != nil {
+				sl.Error("SLA breach sweep failed", observability.Err(err), observability.Int("checked", checked), observability.Int("breached", breached))
+				return
+			}
+			if breached > 0 {
+				sl.Info("SLA breach sweep", observability.Int("checked", checked), observability.Int("breached", breached))
+			}
+		})
 	} else {
-		logger.Warn("review-by timer DISABLED (THEMIS_REVIEW_BY_INTERVAL=0) — an expired review_by date re-surfaces a Finding only when its CVE is next enriched")
+		logger.Warn("review-by timer DISABLED (THEMIS_REVIEW_BY_INTERVAL=0) — an expired review_by date re-surfaces a Finding only when its CVE is next enriched, and no SLA breach is announced (deadlines still show on the posture)")
 	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)

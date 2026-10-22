@@ -23,6 +23,19 @@ The ideas are DefectDojo's; the rules are Themis's. Four Themis rules bind every
 
 ## D1 — SLA policy: days to fix per severity, a clock per Finding, breach re-surfaces
 
+> **Realized 2026-10-22.** The clock is `domain.EvaluateSLA` (pure, 100% covered), reading the
+> Finding's creation time, its frozen bucket, its whole Position history with review-by dates,
+> the stale mark, the stage stop and CISA's due date — so nothing about the clock is stored and a
+> policy change applies at the next read. Migration 000019 adds `findings.sla_bucket` (frozen by
+> the first `SetBaseScore`, back-filled from the current score), `findings.stage_stopped_at`
+> (first resolve/archive, cleared on reopen; NULL for older stops reads `not_applicable`, never a
+> guess), `sla_policies` (scope `''` = estate) and `sla_breaches` (one row per Finding per period).
+> States add `paused`, `met` and `missed` to the four above, so a stopped clock still says whether
+> it stopped in time. The sweep runs on `THEMIS_REVIEW_BY_INTERVAL`; an unresolvable Product
+> reads the estate policy. Named tests: `TestSLABreachNeverChangesGovernanceStateS1`,
+> `TestSLAService_BreachWritesOnlyTheBreachLogS1`, `TestSLARestartNeverErasesElapsedTimeS2`, and
+> the S1 half of `TestSLAStore`.
+
 **Decision.** An SLA policy is a table of *days to fix* per severity bucket (Critical, High, Medium,
 Low), each with an *enforce* switch. One estate-wide default policy; an optional override per
 Product. Each Finding gets a derived **SLA due date** and a state: `within`, `due_soon` (inside a

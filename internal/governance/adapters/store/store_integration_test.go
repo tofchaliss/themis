@@ -95,7 +95,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -1002,5 +1002,152 @@ func TestKEVDetailSignalsRoundTrip(t *testing.T) {
 	cleared, _, _ := load(t, st, "fnd-1")
 	if s := cleared.Signals(); s.KEVRansomware || !s.KEVDue.IsZero() {
 		t.Errorf("cleared signals = %+v", s)
+	}
+}
+
+// EDR-REMEDIATION-01 D1: the SLA store — the frozen bucket (Q1), the stage stop, the policy
+// table, the facts the clock reads, and the breach log written once per period with its outbox
+// note and nothing else (S1).
+func TestSLAStore(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	// Policies: none stored, then the estate and one override, then a replace.
+	if recs, err := st.SLAPolicies(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("empty policies = %v %v", recs, err)
+	}
+	strict := domain.DefaultSLAPolicy()
+	strict.Critical.Days = 3
+	for _, r := range []app.SLAPolicyRecord{
+		{Scope: "", Policy: domain.DefaultSLAPolicy(), UpdatedAt: epoch, UpdatedBy: "alice"},
+		{Scope: "prod-1", Policy: domain.DefaultSLAPolicy(), UpdatedAt: epoch, UpdatedBy: "alice"},
+		{Scope: "prod-1", Policy: strict, UpdatedAt: epoch.Add(time.Hour), UpdatedBy: "bob"},
+	} {
+		if err := st.PutSLAPolicy(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recs, err := st.SLAPolicies(ctx)
+	if err != nil || len(recs) != 2 || recs[0].Scope != "" || recs[1].Policy != strict || recs[1].UpdatedBy != "bob" {
+		t.Fatalf("policies = %+v %v", recs, err)
+	}
+
+	// Q1: the first score freezes the bucket; a later one moves only the current bucket.
+	for _, id := range []string{"a", "b"} {
+		if err := st.Save(ctx, newFinding(t, id, "rel-1", "fl-"+id, "CVE-2026-"+id), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetBaseScore(ctx, "fl-a", 75); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetBaseScore(ctx, "fl-a", 95); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := st.SLAFactsForRelease(ctx, "rel-1")
+	if err != nil || len(facts) != 2 {
+		t.Fatalf("facts = %+v %v", facts, err)
+	}
+	a := facts[0]
+	if a.FindingID != "a" || a.Input.Bucket != "high" || a.Input.CurrentBucket != "critical" || a.CVE != "CVE-2026-a" || a.Input.CreatedAt.IsZero() {
+		t.Fatalf("frozen bucket = %+v", a)
+	}
+
+	// Positions ride the facts in version order, review-by included.
+	f, _, _ := load(t, st, "a")
+	prev := f.Version()
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAcceptedRisk, "", epoch, value.TrustAsserted)
+	_ = f.RaiseProposal(p)
+	if _, err := f.AcceptProposal("p1", human, epoch, epoch.Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, f, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	facts, _ = st.SLAFactsForRelease(ctx, "rel-1")
+	if ps := facts[0].Input.Positions; len(ps) != 1 || ps[0].Stance != domain.StanceAcceptedRisk || !ps[0].ReviewBy.Equal(epoch.Add(48*time.Hour)) {
+		t.Fatalf("positions = %+v", ps)
+	}
+
+	// The running lister: b has no score and no KEV date, so it has no clock; a has one.
+	running, err := st.RunningSLAFacts(ctx, "", 10)
+	if err != nil || len(running) != 1 || running[0].FindingID != "a" {
+		t.Fatalf("running = %+v %v", running, err)
+	}
+	if after, _ := st.RunningSLAFacts(ctx, "a", 10); len(after) != 0 {
+		t.Fatalf("paging past a = %+v", after)
+	}
+
+	// The stage stop is stamped once, kept through archive, cleared on reopen.
+	b, _, _ := load(t, st, "b")
+	prev = b.Version()
+	if err := b.Resolve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, b, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	stopped := func() *time.Time {
+		var at *time.Time
+		if err := pool.QueryRow(ctx, `SELECT stage_stopped_at FROM findings WHERE id = 'b'`).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	first := stopped()
+	if first == nil {
+		t.Fatal("resolve did not stamp the stage stop")
+	}
+	b, _, _ = load(t, st, "b")
+	prev = b.Version()
+	if err := b.Reopen(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, b, false, prev, nil); err != nil {
+		t.Fatal(err)
+	}
+	if stopped() != nil {
+		t.Fatal("reopen kept the stage stop")
+	}
+
+	// S1: a breach writes the breach row and its outbox note, once per period, and no Finding
+	// column moves.
+	var beforeVersion int
+	var beforeUpdated time.Time
+	_ = pool.QueryRow(ctx, `SELECT version, updated_at FROM findings WHERE id = 'a'`).Scan(&beforeVersion, &beforeUpdated)
+	outboxBefore := count(t, pool, `SELECT count(*) FROM governance_outbox`)
+	ev := domain.SLABreachedEvent{FindingID: "a", ReleaseID: "rel-1", FaultlineID: "fl-a", CVE: "CVE-2026-a", Bucket: "high",
+		PeriodStart: epoch, Due: epoch.Add(30 * 24 * time.Hour), OccurredAt: epoch.Add(31 * 24 * time.Hour)}
+	note := app.OutboxNote{EventType: app.EventSLABreached, Event: ev, OccurredAt: ev.OccurredAt}
+	if ok, err := st.RecordSLABreach(ctx, "a", epoch, note); err != nil || !ok {
+		t.Fatalf("first breach = %v %v", ok, err)
+	}
+	if ok, err := st.RecordSLABreach(ctx, "a", epoch, note); err != nil || ok {
+		t.Fatalf("repeat breach = %v %v", ok, err)
+	}
+	// S2: a restarted period is its own breach.
+	if ok, err := st.RecordSLABreach(ctx, "a", epoch.Add(40*24*time.Hour), note); err != nil || !ok {
+		t.Fatalf("new period breach = %v %v", ok, err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM sla_breaches WHERE finding_id = 'a'`); n != 2 {
+		t.Fatalf("breach rows = %d", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM governance_outbox WHERE event_type = $1 AND schema_ref = 'governance.sla_breached.v1'`, app.EventSLABreached); n != 2 || outboxBefore+2 != count(t, pool, `SELECT count(*) FROM governance_outbox`) {
+		t.Fatalf("breach outbox rows = %d", n)
+	}
+	var afterVersion int
+	var afterUpdated time.Time
+	_ = pool.QueryRow(ctx, `SELECT version, updated_at FROM findings WHERE id = 'a'`).Scan(&afterVersion, &afterUpdated)
+	if afterVersion != beforeVersion || !afterUpdated.Equal(beforeUpdated) {
+		t.Fatal("S1: the breach path wrote the Finding")
+	}
+	// A payload that cannot marshal writes nothing.
+	if _, err := st.RecordSLABreach(ctx, "a", epoch.Add(time.Hour), app.OutboxNote{EventType: app.EventSLABreached, Event: make(chan int)}); err == nil {
+		t.Fatal("unmarshalable payload accepted")
+	}
+	// A breach for an unknown Finding is refused by the foreign key.
+	if _, err := st.RecordSLABreach(ctx, "ghost", epoch, note); err == nil {
+		t.Fatal("breach for an unknown Finding accepted")
 	}
 }

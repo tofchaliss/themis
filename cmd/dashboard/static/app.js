@@ -195,6 +195,25 @@ function staleChip(ds) {
   return ` <span class="chip chip-warn" title="${esc(ds.reason || "")}">re-surfaced</span>`;
 }
 
+/* EDR-REMEDIATION-01 D1: the remediation clock. The deadline is derived on every read and a
+   breach changes nothing about the Finding; this cell only shows it. */
+function slaCell(sla) {
+  if (!sla || sla.state === "not_applicable") return `<span class="card-sub">—</span>`;
+  const due = sla.due ? fmtWhen(sla.due) : "";
+  const kev = sla.kev_due_applied ? ` <span class="chip chip-crit" title="CISA's KEV due date is earlier than the policy's and is the deadline">KEV date</span>` : "";
+  const moved = sla.bucket_changed ? ` <span class="chip chip-info" title="severity is now ${esc(sla.current_bucket || "unknown")}; the deadline still follows the ${esc(sla.bucket)} bucket it started with">severity changed</span>` : "";
+  const age = `${sla.age_days} day${sla.age_days === 1 ? "" : "s"} old${sla.days_under_acceptance ? `, ${sla.days_under_acceptance} under acceptance` : ""}`;
+  const chip = {
+    breached: `<span class="chip chip-crit" title="${esc(age)}">breached ${Math.abs(sla.days_left || 0)}d ago</span>`,
+    due_soon: `<span class="chip chip-warn" title="${esc(age)}">due in ${sla.days_left}d</span>`,
+    within: `<span class="chip" title="${esc(age)}">${sla.days_left}d left</span>`,
+    paused: `<span class="chip chip-info" title="paused under a valid acceptance; a new period starts when it expires or is re-surfaced. ${esc(age)}">paused</span>`,
+    met: `<span class="chip chip-good" title="${esc(age)}">met</span>`,
+    missed: `<span class="chip chip-elevated" title="${esc(age)}">missed</span>`,
+  }[sla.state] || `<span class="chip">${esc(sla.state)}</span>`;
+  return `${chip}${due && sla.state !== "paused" ? ` <span class="mono card-sub">${esc(due)}</span>` : ""}${kev}${moved}`;
+}
+
 const stanceChip = (stance, hasPosition) => {
   if (!hasPosition) return `<span class="chip"><i></i>undecided</span>`;
   const cls = { affected: "chip-crit", not_affected: "chip-good", accepted_risk: "chip-warn", mitigated: "chip-elevated" }[stance] || "";
@@ -652,6 +671,7 @@ async function viewRelease(releaseId, version) {
   const mult = posture.length ? Math.max(...posture.map((p) => p.blast_multiplier || 1)) : 1;
   const bandCounts = BANDS.map(([b]) => [b, posture.filter((p) => p.band === b).length]);
   const unbanded = posture.length - bandCounts.reduce((s, [, n]) => s + n, 0);
+  const breached = posture.filter((p) => p.sla && p.sla.state === "breached");
 
   main.innerHTML = `
     <div class="grid-tiles">
@@ -666,6 +686,8 @@ async function viewRelease(releaseId, version) {
       <div class="tile tile-d"><div class="tile-value">${gaps.length}<span style="font-size:14px;color:var(--ink2)"> · ${gapCleared} cleared</span></div>
         <div class="tile-label">Attribution gap</div>
         <div class="tile-note" title="the card names carrier products and none matched a component here, so Themis cannot attribute the carrier to anything installed. An OBSERVATION, not a verdict: it says nothing about whether these components are affected. The cleared half is verified vendor fixes that the Cleared tile cannot count, because counting them there would assert these components are carriers.">carrier named, none matched — not a verdict</div></div>
+      <div class="tile tile-d"><div class="tile-value">${breached.length}</div><div class="tile-label">SLA breached</div>
+        <div class="tile-note">past the days-to-fix for their severity</div></div>
       <div class="tile tile-a"><div class="tile-value">${blast ? blast.unique_customers : "—"}<span style="font-size:14px;color:var(--ink2)"> · ×${mult.toFixed(1)}</span></div>
         <div class="tile-label">Blast radius</div><div class="tile-note">unique customers · priority multiplier</div></div>
     </div>
@@ -678,8 +700,10 @@ async function viewRelease(releaseId, version) {
 
     <div class="card">
       <h2 class="card-title">Posture <span class="chip chip-accent">sorted by residual priority</span></h2>
-      <p class="card-sub">Residual = effective × stance weight — what still deserves attention after decisions. The bar keeps the effective track visible: a suppressed Finding is dispositioned, not deleted.</p>
-      ${postureTable(posture)}
+      <p class="card-sub">Residual = effective × stance weight — what still deserves attention after decisions. The bar keeps the effective track visible: a suppressed Finding is dispositioned, not deleted.
+        Due is the SLA deadline (days to fix per severity, GET /sla-policy); a breach is shown, it never changes a decision.</p>
+      ${breached.length ? `<button class="btn" id="btn-sla-breached" aria-pressed="false">Show only SLA breached (${breached.length})</button>` : ""}
+      <div id="posture-host">${postureTable(posture)}</div>
     </div>
 
     ${scans.length ? `<div class="card">
@@ -721,6 +745,17 @@ async function viewRelease(releaseId, version) {
     const entry = posture.find((p) => p.finding_id === tr.dataset.id);
     openDrawer(entry);
   }));
+  const breachedBtn = main.querySelector("#btn-sla-breached");
+  if (breachedBtn) breachedBtn.addEventListener("click", () => {
+    const only = breachedBtn.getAttribute("aria-pressed") !== "true";
+    breachedBtn.setAttribute("aria-pressed", String(only));
+    breachedBtn.textContent = only ? `Show all ${posture.length} findings` : `Show only SLA breached (${breached.length})`;
+    const host = main.querySelector("#posture-host");
+    host.innerHTML = postureTable(only ? breached : posture);
+    host.querySelectorAll("tr.rowlink").forEach((tr) => tr.addEventListener("click", () => {
+      openDrawer(posture.find((p) => p.finding_id === tr.dataset.id));
+    }));
+  });
   main.querySelectorAll(".q-preview").forEach((btn) => btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
     openPreview(queue[Number(btn.dataset.qi)]);
@@ -1003,7 +1038,7 @@ function postureTable(posture) {
   if (!posture.length) return `<div class="empty"><b>No findings</b>Either nothing correlates yet, or this release is genuinely clean.</div>`;
   return `<div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>CVE</th><th>Band</th><th class="num">Base</th><th class="num">Blast</th>
-    <th>Priority — residual over effective</th><th>Stance</th><th>Component</th><th>Fix</th></tr></thead>
+    <th>Priority — residual over effective</th><th>Stance</th><th>Due</th><th>Component</th><th>Fix</th></tr></thead>
     <tbody>${posture.map((p) => `
       <tr class="rowlink" data-id="${esc(p.finding_id)}" title="Open finding detail">
         <td class="cve"><span class="mono">${esc(p.cve)}</span>${p.reservation ? ` <span class="chip chip-warn" title="a reservation is recorded on this position">⚑ ${esc(p.reservation)}</span>` : ""}</td>
@@ -1012,6 +1047,7 @@ function postureTable(posture) {
         <td class="num">×${(p.blast_multiplier || 1).toFixed(1)}</td>
         <td>${pbar(p.effective_priority, p.residual_priority)}</td>
         <td>${stanceChip(p.stance, p.has_position)}${staleChip(p.disposition_stale)}</td>
+        <td>${slaCell(p.sla)}</td>
         <td>${componentCell(p.components)}</td>
         <td>${(p.fixes || []).length ? `<span class="mono">${esc(p.fixes[0].version)}</span>${p.fixes.length > 1 ? ` <span class="chip chip-info">+${p.fixes.length - 1}</span>` : ""}` : `<span class="chip chip-info">none attributed</span>`}</td>
       </tr>`).join("")}</tbody></table></div>`;

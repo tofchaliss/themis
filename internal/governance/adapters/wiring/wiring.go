@@ -60,6 +60,10 @@ type Governance struct {
 	// ReviewBy is the review-by timer (EDR-GOVERNANCE-01 D14, RF-2): the composition root runs it
 	// on THEMIS_REVIEW_BY_INTERVAL. Always wired; the cadence (or 0) is the switch.
 	ReviewBy *app.ReviewBySweep
+	// SLA is the remediation clock (EDR-REMEDIATION-01 D1): it serves the deadline on the
+	// posture and /sla-policy, and its breach sweep runs on the review-by cadence. Always wired;
+	// without a Registry seam every Finding reads the estate policy.
+	SLA *app.SLAService
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -98,8 +102,15 @@ func Wire(
 		reg = registry.NewClient(registryURL, readClient(readAPIKey))
 		blast = reg
 	}
+	// The SLA clock. The Registry hop picks a Product's override; with no seam (a nil
+	// *registry.Client must not become a non-nil interface) the estate policy applies.
+	var productOf app.ProductOfRelease
+	if reg != nil {
+		productOf = reg
+	}
+	sla := app.NewSLAService(st, productOf, sysClock{})
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
-	read := app.NewReadService(st, st, blast, blastCap).WithReleaseEvaluatedEvents(st)
+	read := app.NewReadService(st, st, blast, blastCap).WithReleaseEvaluatedEvents(st).WithSLA(sla)
 	// The one configurable stance weight (D14). A zero or out-of-range value keeps the domain
 	// default rather than silently zeroing every mitigated Finding's triage number.
 	if mitigatedWeight > 0 {
@@ -121,7 +132,7 @@ func Wire(
 		read = read.WithEvidence(evidence.NewClient(evidenceURL, readClient(readAPIKey)))
 	}
 	relay := store.NewRelay(pool, pub, 100)
-	handler := govhttp.NewHandler(write, read).WithLogger(logger)
+	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla)
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
@@ -154,6 +165,7 @@ func Wire(
 		Evaluations: evaluations,
 		Rejudge:     rejudge,
 		ReviewBy:    app.NewReviewBySweep(write, st, sysClock{}),
+		SLA:         sla,
 	}
 }
 
