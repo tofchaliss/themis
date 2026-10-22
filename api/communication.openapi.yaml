@@ -204,6 +204,27 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /webhook-health:
+    get:
+      operationId: getWebhookHealth
+      summary: >
+        Health of each webhook destination that has been sent to (EDR-REMEDIATION-01 D4):
+        active, active_tmp (a failure, retrying), inactive_tmp (paused after repeated failures,
+        tried again after paused_until) or inactive_permanent (an operator re-enables it with
+        `deliveryctl webhook-enable`). Destinations are audience names; URLs are never returned.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookHealth'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /publishable-positions:
     get:
       operationId: getPublishableQueue
@@ -228,6 +249,28 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    WebhookHealth:
+      type: object
+      required: [destination, state, consecutive_failures]
+      properties:
+        destination:
+          type: string
+        state:
+          type: string
+          enum: [active, active_tmp, inactive_tmp, inactive_permanent]
+        consecutive_failures:
+          type: integer
+        paused_until:
+          type: string
+          format: date-time
+        last_success_at:
+          type: string
+          format: date-time
+        last_failure_at:
+          type: string
+          format: date-time
+        last_error:
+          type: string
     CIRebuildCallback:
       type: object
       required: [intent_id, sbom_id, image_digest]

@@ -94,7 +94,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE delivery_attempts, delivery_intents, processed_events, publishable_positions,
+		`TRUNCATE webhook_health, sla_breach_digest, delivery_attempts, delivery_intents, processed_events, publishable_positions,
 			communication_outbox, publications RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -921,5 +921,63 @@ func TestPurgeClearsDeliveryIntents(t *testing.T) {
 	}
 	if n := count(t, pool, `SELECT count(*) FROM delivery_attempts`); n != 0 {
 		t.Errorf("attempts after purge = %d", n)
+	}
+}
+
+// EDR-REMEDIATION-01 D4: a webhook intent is admitted by the type constraint; destination health
+// round-trips (unknown reads active); SLA breaches are stored once per period and leave the
+// pending set when digested.
+func TestWebhookStore(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	if _, err := st.CreateIntent(ctx, pendingIntent("00000000-0000-0000-0000-0000000000a1", app.IntentWebhook, "env-w", epoch)); err != nil {
+		t.Fatalf("webhook intent refused: %v", err)
+	}
+
+	h, err := st.WebhookHealth(ctx, "slack-sec")
+	if err != nil || h.State != domain.WebhookActive {
+		t.Fatalf("unknown destination = %+v %v", h, err)
+	}
+	paused := h.Failed(epoch, "500").Failed(epoch, "500").Failed(epoch, "boom")
+	if err := st.SaveWebhookHealth(ctx, paused, epoch); err != nil {
+		t.Fatal(err)
+	}
+	back, err := st.WebhookHealth(ctx, "slack-sec")
+	if err != nil || back.State != domain.WebhookInactiveTmp || back.ConsecutiveFailures != 3 || back.Pauses != 1 ||
+		!back.PausedUntil.Equal(epoch.Add(domain.WebhookPause)) || back.LastError != "boom" || !back.LastSuccessAt.IsZero() {
+		t.Fatalf("round-trip = %+v %v", back, err)
+	}
+	if err := st.SaveWebhookHealth(ctx, back.Succeeded(epoch.Add(time.Hour)), epoch.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveWebhookHealth(ctx, domain.NewWebhookHealth("teams"), epoch); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListWebhookHealth(ctx)
+	if err != nil || len(list) != 2 || list[0].Destination != "slack-sec" || list[0].State != domain.WebhookActive || list[0].LastSuccessAt.IsZero() {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+
+	r := app.SLABreachRecord{FindingID: "fnd-1", PeriodStart: epoch, ReleaseID: "rel-1", CVE: "CVE-1", Bucket: "high", Due: epoch.Add(30 * 24 * time.Hour), RecordedAt: epoch}
+	for i := 0; i < 2; i++ {
+		if err := st.RecordSLABreach(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r2 := r
+	r2.PeriodStart, r2.RecordedAt = epoch.Add(time.Hour), epoch.Add(time.Hour)
+	if err := st.RecordSLABreach(ctx, r2); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := st.PendingSLABreaches(ctx)
+	if err != nil || len(pending) != 2 || pending[0].CVE != "CVE-1" || !pending[0].Due.Equal(r.Due) {
+		t.Fatalf("pending = %+v %v", pending, err)
+	}
+	if err := st.MarkSLABreachesDigested(ctx, pending[:1], "sla-digest:1"); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := st.PendingSLABreaches(ctx); len(left) != 1 || !left[0].PeriodStart.Equal(r2.PeriodStart) {
+		t.Fatalf("after digest = %+v", left)
 	}
 }

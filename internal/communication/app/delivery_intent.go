@@ -42,7 +42,22 @@ const (
 	// parameters are snapshot facts only — identity, the prior SBOM, the targeted set, the
 	// attempt index — never a credential and never model output.
 	IntentCIRebuild IntentType = "ci_rebuild"
+	// IntentWebhook posts a small JSON document to the URL configured for a governed audience
+	// name (EDR-REMEDIATION-01 D4) — Slack, Teams or any receiver. One-way: no callback route.
+	IntentWebhook IntentType = "webhook"
 )
+
+// Webhook event kinds (D4). Each is opt-in: a kind with no configured route sends nothing.
+const (
+	WebhookReleaseEvaluated = "release_evaluated"
+	WebhookRebuildExhausted = "rebuild_exhausted"
+	WebhookReviewDueSoon    = "review_due_soon"
+	WebhookDispositionStale = "disposition_stale"
+	WebhookSLABreachDigest  = "sla_breached"
+)
+
+// SnapshotWebhookEvent is the snapshot key naming a webhook's event kind.
+const SnapshotWebhookEvent = "webhook_event"
 
 // IntentState is where an intent is in its delivery life. `pending` is the only state a
 // worker acts on; `delivered` and `cancelled` are terminal; `dead_letter` is terminal until
@@ -268,6 +283,9 @@ type DeliveryIntentConfig struct {
 	EvaluationAudience string // audience told a Release's posture after a new SBOM was judged (N-M2f)
 	RebuildDestination string // governed name of the build job a ci_rebuild intent addresses (N-M2g)
 	DeadLetterAudience string // audience told that a delivery gave up
+	// WebhookRoutes maps a webhook event kind to the governed audience it posts to (D4). A kind
+	// absent from the map is not sent.
+	WebhookRoutes map[string]string
 }
 
 // Default destination names, used for any field left empty.
@@ -417,6 +435,36 @@ func (s *DeliveryIntentService) EnqueueCIRebuild(ctx context.Context, lineage In
 	in.Snapshot[SnapshotTargetedCVEs] = strings.Join(targeted, ",")
 	in.Snapshot[SnapshotAttempt] = strconv.Itoa(attempt)
 	return s.create(ctx, in)
+}
+
+// WebhookAudience returns the audience a webhook event kind is routed to, if any.
+func (s *DeliveryIntentService) WebhookAudience(kind string) (string, bool) {
+	a := strings.TrimSpace(s.cfg.WebhookRoutes[kind])
+	return a, a != ""
+}
+
+// EnqueueWebhook records one webhook post for an event kind that has a route (D4). It returns
+// (Intent{}, false, nil) when the kind is not routed — opt-in, nothing recorded. The subject is
+// the release, the finding, or (for a digest) the product; with none it fails closed.
+// originEventID deduplicates per (event, type) like every other intent; a digest passes its
+// own digest id.
+func (s *DeliveryIntentService) EnqueueWebhook(ctx context.Context, lineage IntentLineage, originEventID, kind, releaseID, productID, projectID, findingID string, snapshot map[string]string) (Intent, bool, error) {
+	audience, ok := s.WebhookAudience(kind)
+	if !ok {
+		return Intent{}, false, nil
+	}
+	if strings.TrimSpace(releaseID) == "" && strings.TrimSpace(findingID) == "" && strings.TrimSpace(productID) == "" {
+		return Intent{}, false, ErrNoSubject
+	}
+	in := s.newIntent(IntentWebhook, audience, lineage, originEventID, snapshot)
+	in.ReleaseID, in.ProductID, in.ProjectID, in.FindingID = releaseID, productID, projectID, findingID
+	in.Snapshot[SnapshotWebhookEvent] = kind
+	putIfSet(in.Snapshot, "release_id", releaseID)
+	putIfSet(in.Snapshot, "product_id", productID)
+	putIfSet(in.Snapshot, "project_id", projectID)
+	putIfSet(in.Snapshot, "finding_id", findingID)
+	in2, err := s.create(ctx, in)
+	return in2, err == nil, err
 }
 
 // EnqueueDeadLetterMail records the notification intent for an intent that gave up. It is

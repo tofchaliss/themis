@@ -25,6 +25,13 @@ type Handler struct {
 	read    *app.ReadService
 	rollups *app.RollupService // release-scoped VEX rollups (D13); nil = not configured
 	intents *app.DeliveryIntentService // CI rebuild callbacks (N-M2h); nil = outward delivery off
+	health  app.WebhookHealthStore     // webhook destination health (D4); nil = 503
+}
+
+// WithWebhookHealth wires the webhook destination-health read (EDR-REMEDIATION-01 D4).
+func (h *Handler) WithWebhookHealth(s app.WebhookHealthStore) *Handler {
+	h.health = s
+	return h
 }
 
 // NewHandler builds a Handler.

@@ -1466,6 +1466,10 @@ async function viewFeeds() {
   try {
     const feeds = await apiGET("knowledge", "/feeds");
     const entries = feeds ? asArray(feeds.feeds) : [];
+    // EDR-REMEDIATION-01 D4: outbound webhook destinations beside the inbound feeds.
+    let hooks = null;
+    try { hooks = asArray(await apiGET("communication", "/webhook-health")); } catch { /* delivery off, or an older node */ }
+    const hookChip = (s) => `<span class="chip ${s === "active" ? "chip-good" : (s === "inactive_permanent" ? "chip-crit" : "chip-warn")}"><i></i>${esc(s)}</span>`;
     main.innerHTML = `
       ${feeds && feeds.signals_stale ? `<div class="err">⚠ Signals are STALE — a tier-1 feed has gone quiet, so exploitability data may be out of date.</div>` : ""}
       <div class="card">
@@ -1479,7 +1483,17 @@ async function viewFeeds() {
             <td class="num">${f.consecutive_failures || 0}</td>
             <td>${timeAgo(f.last_success_at)}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty"><b>No feed activity recorded</b>Feeds record health per poll — enable one and it appears here.</div>`}
-      </div>`;
+      </div>
+      ${hooks ? `<div class="card">
+        <h2 class="card-title">Outbound webhooks</h2>
+        <p class="card-sub">One-way posts to Slack, Teams or another receiver, by audience name. A paused destination is tried again after its pause; a disabled one waits for <span class="mono">deliveryctl webhook-enable</span>.</p>
+        ${hooks.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Destination</th><th>Status</th><th class="num">Consecutive failures</th><th>Last success</th><th>Paused until</th><th>Last error</th></tr></thead>
+          <tbody>${hooks.map((h) => `<tr><td><b>${esc(h.destination)}</b></td><td>${hookChip(h.state)}</td>
+            <td class="num">${h.consecutive_failures || 0}</td><td>${h.last_success_at ? timeAgo(h.last_success_at) : "never"}</td>
+            <td>${h.paused_until ? esc(fmtWhen(h.paused_until)) : "—"}</td><td class="card-sub">${esc(h.last_error || "")}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><b>No webhook sent yet</b>A destination appears here after its first post.</div>`}
+      </div>` : ""}`;
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }

@@ -63,6 +63,8 @@ type OutwardRenderer struct {
 	// (owner ask 2026-10-21: a mail that says three UUIDs means nothing to its reader). Nil, or
 	// a failed read, leaves the ids in place: a name is a courtesy, an unsent ticket is not.
 	identity app.ReleaseIdentityReader
+	// dashboard is the base URL a webhook's link points into (D4); empty = no link.
+	dashboard string
 }
 
 // WithIdentity attaches the Registry name chain.
@@ -126,6 +128,12 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentCIRebuild:
 		subject, body := r.renderCIRebuild(ctx, in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentWebhook:
+		summary, body, err := r.RenderWebhook(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return app.BuildPayload(summary, body), nil
 	default:
 		return nil, fmt.Errorf("communication: no outward renderer for intent type %q", in.Type)
 	}

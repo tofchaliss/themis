@@ -32,6 +32,7 @@ import (
 
 	"github.com/themis-project/themis/internal/communication/adapters/store"
 	"github.com/themis-project/themis/internal/communication/app"
+	"github.com/themis-project/themis/internal/communication/domain"
 )
 
 // intentOps is the slice of the delivery-intent store this CLI needs. Declaring it here keeps
@@ -40,6 +41,10 @@ type intentOps interface {
 	ListDeadLetters(ctx context.Context, since time.Time, limit int) ([]app.Intent, error)
 	RetryIntent(ctx context.Context, id string) error
 	CancelIntent(ctx context.Context, id string) error
+	// Webhook destination health (EDR-REMEDIATION-01 D4).
+	WebhookHealth(ctx context.Context, destination string) (domain.WebhookHealth, error)
+	SaveWebhookHealth(ctx context.Context, h domain.WebhookHealth, at time.Time) error
+	ListWebhookHealth(ctx context.Context) ([]domain.WebhookHealth, error)
 }
 
 // opener yields the ops seam and a cleanup; swapped in tests.
@@ -61,6 +66,10 @@ func run(cmd string, args []string, out, errOut io.Writer, open opener) int {
 		return mutate("retry", args, out, errOut, open)
 	case "cancel":
 		return mutate("cancel", args, out, errOut, open)
+	case "webhook-health":
+		return webhookHealth(out, errOut, open)
+	case "webhook-enable":
+		return webhookEnable(args, out, errOut, open)
 	default:
 		usage(errOut)
 		return 2
@@ -79,9 +88,13 @@ func usage(w io.Writer) {
 	pln(w, "  deliveryctl list-deadletters [--limit 50] [--since 168h]")
 	pln(w, "  deliveryctl retry  --id <intent-id>")
 	pln(w, "  deliveryctl cancel --id <intent-id>")
+	pln(w, "  deliveryctl webhook-health")
+	pln(w, "  deliveryctl webhook-enable --destination <audience>")
 	pln(w, "\nlist-deadletters  deliveries that gave up, newest first")
 	pln(w, "retry             reset one to pending (attempts 0, error cleared, due now)")
 	pln(w, "cancel            abandon one; changes no Finding and no Position")
+	pln(w, "webhook-health    each webhook destination's health (active, active_tmp, inactive_tmp, inactive_permanent)")
+	pln(w, "webhook-enable    set a paused or disabled webhook destination back to active")
 	pln(w, "\nreads THEMIS_DATABASE_DSN (the Communication database)")
 }
 
@@ -174,4 +187,61 @@ func openStore() (intentOps, func(), error) {
 		return nil, nil, err
 	}
 	return store.New(pool), pool.Close, nil
+}
+
+func webhookHealth(out, errOut io.Writer, open opener) int {
+	ops, closeOps, err := open()
+	if err != nil {
+		pln(errOut, "webhook-health:", err)
+		return 1
+	}
+	defer closeOps()
+	hs, err := ops.ListWebhookHealth(context.Background())
+	if err != nil {
+		pln(errOut, "webhook-health:", err)
+		return 1
+	}
+	if len(hs) == 0 {
+		pln(out, "no webhook destination has been sent to yet")
+		return 0
+	}
+	pf(out, "%-24s %-19s %-9s %-21s %s\n", "DESTINATION", "STATE", "FAILURES", "PAUSED UNTIL", "LAST ERROR")
+	for _, h := range hs {
+		until := "-"
+		if !h.PausedUntil.IsZero() {
+			until = h.PausedUntil.Format(time.RFC3339)
+		}
+		pf(out, "%-24s %-19s %-9d %-21s %s\n", h.Destination, h.State, h.ConsecutiveFailures, until, h.LastError)
+	}
+	return 0
+}
+
+func webhookEnable(args []string, out, errOut io.Writer, open opener) int {
+	fs := flag.NewFlagSet("webhook-enable", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	dest := fs.String("destination", "", "webhook audience name (required)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *dest == "" {
+		pln(errOut, "webhook-enable: --destination is required")
+		return 2
+	}
+	ops, closeOps, err := open()
+	if err != nil {
+		pln(errOut, "webhook-enable:", err)
+		return 1
+	}
+	defer closeOps()
+	ctx := context.Background()
+	h, err := ops.WebhookHealth(ctx, *dest)
+	if err == nil {
+		err = ops.SaveWebhookHealth(ctx, h.Reenabled(), time.Now().UTC())
+	}
+	if err != nil {
+		pln(errOut, "webhook-enable:", err)
+		return 1
+	}
+	pf(out, "webhook destination %s: active (dead-lettered intents can be re-sent with deliveryctl retry)\n", *dest)
+	return 0
 }
