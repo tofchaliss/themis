@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -51,7 +52,9 @@ type InboundFaultlineEnriched struct {
 	Severity        string
 	KEV             bool
 	ExploitPublic   bool
-	Score           int // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
+	KEVDue          time.Time // CISA's due date (EDR-REMEDIATION-01 D5); zero when not stated
+	KEVRansomware   bool      // CISA ransomware-use flag (D5)
+	Score           int       // CVE-intrinsic base priority 0–100 (C6); Governance scales it by the blast multiplier (C2).
 	Applicabilities []Applicability
 	// Per-field-group trust from Knowledge's reconciled view (EDR-TRUST-01 T2/T3). Unset
 	// on a payload predating the field; value.MaxTrust reads unset as Inferred, so a
@@ -204,9 +207,10 @@ func (c *Coordinator) OnFaultlineEnriched(ctx context.Context, e InboundFaultlin
 		SignalTrust:     e.SignalTrust,
 		AffectedRanges:  e.AffectedRanges,
 		RangeStatements: e.RangeStatements,
-		Signals:         domain.ExploitSignals{KEV: e.KEV, ExploitPublic: e.ExploitPublic, EPSS: e.EPSS},
-		Band:            e.Priority,
-		Fixes:           e.Fixes,
+		Signals: domain.ExploitSignals{KEV: e.KEV, ExploitPublic: e.ExploitPublic, EPSS: e.EPSS,
+			KEVRansomware: e.KEVRansomware, KEVDue: e.KEVDue},
+		Band:  e.Priority,
+		Fixes: e.Fixes,
 	})
 }
 

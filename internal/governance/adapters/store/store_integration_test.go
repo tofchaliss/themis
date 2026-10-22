@@ -961,3 +961,46 @@ func TestUndecidedFaultlinesByRelease(t *testing.T) {
 		t.Fatalf("rel-1 = %v err=%v, want [fl-1 fl-2]", got, err)
 	}
 }
+
+// EDR-REMEDIATION-01 D5: the KEV due date and ransomware flag round-trip on the Finding's
+// signals (migration 000018), and a Position records the ransomware flag it was decided with.
+func TestKEVDetailSignalsRoundTrip(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	f := newFinding(t, "fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	if err := st.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Date(2024, 3, 26, 0, 0, 0, 0, time.UTC)
+	if err := st.SetSignals(ctx, "fl-1", domain.ExploitSignals{KEV: true, KEVRansomware: true, KEVDue: due, EPSS: 0.5}); err != nil {
+		t.Fatalf("set signals: %v", err)
+	}
+	got, _, _ := load(t, st, "fnd-1")
+	if s := got.Signals(); !s.KEV || !s.KEVRansomware || !s.KEVDue.Equal(due) || s.EPSS != 0.5 {
+		t.Fatalf("signals = %+v", s)
+	}
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAcceptedRisk, "compensating control", epoch, value.TrustAsserted)
+	if err := got.RaiseProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := got.AcceptProposal("p1", human, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, got, false, 0, nil); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	again, _, _ := load(t, st, "fnd-1")
+	cur, ok := again.CurrentPosition()
+	if !ok || !cur.Inputs().DecidedWith.KEVRansomware || !cur.Inputs().DecidedWith.KEV {
+		t.Errorf("position decided with = %+v", cur.Inputs().DecidedWith)
+	}
+	// Clearing the due date stores NULL and reads back as not stated.
+	if err := st.SetSignals(ctx, "fl-1", domain.ExploitSignals{KEV: true}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, _, _ := load(t, st, "fnd-1")
+	if s := cleared.Signals(); s.KEVRansomware || !s.KEVDue.IsZero() {
+		t.Errorf("cleared signals = %+v", s)
+	}
+}

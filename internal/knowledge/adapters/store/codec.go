@@ -32,11 +32,16 @@ type viewDTO struct {
 	CarrierProducts []string `json:"carrier_products,omitempty"`
 	// Fixes is the authoritative, package-attributed form; FixedVersions is its flat union,
 	// retained so a card written before KN-FIX-1 still decodes and so the wire shape is unchanged.
-	Fixes           []fixedVersionDTO  `json:"fixes,omitempty"`
-	FixedVersions   []string           `json:"fixed_versions"`
-	EPSS            float64            `json:"epss"`
-	KEV             bool               `json:"kev"`
-	ExploitPublic   bool               `json:"exploit_public"`
+	Fixes         []fixedVersionDTO `json:"fixes,omitempty"`
+	FixedVersions []string          `json:"fixed_versions"`
+	EPSS          float64           `json:"epss"`
+	KEV           bool              `json:"kev"`
+	ExploitPublic bool              `json:"exploit_public"`
+	// KEV detail (EDR-REMEDIATION-01 D5): omitempty, so a card stored before this decodes to
+	// "not stated" and its bytes are unchanged until a KEV proposal restates it.
+	KEVAdded        string             `json:"kev_added,omitempty"`
+	KEVDue          string             `json:"kev_due,omitempty"`
+	KEVRansomware   bool               `json:"kev_ransomware,omitempty"`
 	Applicabilities []applicabilityDTO `json:"applicabilities"`
 
 	// Per-field-group trust (EDR-TRUST-01 T3). These MUST round-trip: the view is
@@ -82,6 +87,7 @@ func marshalView(v domain.EnterpriseView) ([]byte, error) {
 		CarrierProducts: v.CarrierProducts,
 		Fixes:           fixesToDTO(v.Fixes), FixedVersions: v.FixedVersions,
 		EPSS: v.EPSS, KEV: v.KEV, ExploitPublic: v.ExploitPublic,
+		KEVAdded: dateOut(v.KEVAdded), KEVDue: dateOut(v.KEVDue), KEVRansomware: v.KEVRansomware,
 		HeadlineTrust: string(v.HeadlineTrust), RangeTrust: string(v.RangeTrust), SignalTrust: string(v.SignalTrust),
 	}
 	for _, a := range v.Applicabilities {
@@ -113,6 +119,7 @@ func unmarshalView(raw []byte) (domain.EnterpriseView, error) {
 		Fixes:           fixesFromDTO(dto.Fixes, dto.FixedVersions),
 		FixedVersions:   dto.FixedVersions,
 		EPSS:            dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
+		KEVAdded: dateIn(dto.KEVAdded), KEVDue: dateIn(dto.KEVDue), KEVRansomware: dto.KEVRansomware,
 		HeadlineTrust: value.TrustClass(dto.HeadlineTrust),
 		RangeTrust:    value.TrustClass(dto.RangeTrust),
 		SignalTrust:   value.TrustClass(dto.SignalTrust),
@@ -144,6 +151,9 @@ type proposalPayloadDTO struct {
 	EPSS          float64  `json:"epss,omitempty"`
 	KEV           bool     `json:"kev,omitempty"`
 	ExploitPublic bool     `json:"exploit_public,omitempty"`
+	KEVAdded      string   `json:"kev_added,omitempty"`
+	KEVDue        string   `json:"kev_due,omitempty"`
+	KEVRansomware bool     `json:"kev_ransomware,omitempty"`
 	Package       string   `json:"package,omitempty"`
 	Status        string   `json:"status,omitempty"`
 	Justification string   `json:"justification,omitempty"`
@@ -176,6 +186,7 @@ func marshalProposalPayload(p domain.Proposal) ([]byte, error) {
 		dto.EPSS = s.EPSS
 		dto.KEV = s.KEV
 		dto.ExploitPublic = s.ExploitPublic
+		dto.KEVAdded, dto.KEVDue, dto.KEVRansomware = dateOut(s.KEVAdded), dateOut(s.KEVDue), s.KEVRansomware
 	case domain.KindApplicability:
 		a, _ := p.Applicability()
 		dto.Package = a.Package
@@ -212,7 +223,8 @@ func unmarshalProposal(source string, observedAt time.Time, kind string, payload
 			Fixes: stampFixEcosystems(source, fixesFromDTO(dto.Fixes, dto.FixedVersions)),
 		})
 	case domain.KindExploitSignal:
-		return domain.NewExploitSignalProposal(source, observedAt, domain.ExploitSignal{EPSS: dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic})
+		return domain.NewExploitSignalProposal(source, observedAt, domain.ExploitSignal{EPSS: dto.EPSS, KEV: dto.KEV, ExploitPublic: dto.ExploitPublic,
+			KEVAdded: dateIn(dto.KEVAdded), KEVDue: dateIn(dto.KEVDue), KEVRansomware: dto.KEVRansomware})
 	case domain.KindApplicability:
 		return domain.NewApplicabilityProposal(source, observedAt, domain.Applicability{
 			Package: dto.Package, Status: dto.Status, Justification: dto.Justification,
@@ -320,4 +332,21 @@ func statementsFromDTO(in []rangeStatementDTO) []value.RangeStatement {
 		out = append(out, value.RangeStatement{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
 	}
 	return out
+}
+
+// dateOut writes a KEV date as YYYY-MM-DD, or nothing for "not stated".
+func dateOut(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
+// dateIn reads a stored KEV date; an empty or unreadable value is "not stated".
+func dateIn(s string) time.Time {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

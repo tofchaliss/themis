@@ -91,19 +91,21 @@ func (s *Store) load(ctx context.Context, where string, args ...any) (domain.Fin
 	)
 	var sig domain.ExploitSignals
 	row := s.querier(ctx).QueryRow(ctx,
-		"SELECT id, release_id, faultline_id, cve, stage, version, signal_kev, signal_exploit_public, signal_epss, stale_since, stale_reason "+
+		"SELECT id, release_id, faultline_id, cve, stage, version, signal_kev, signal_exploit_public, signal_epss, signal_kev_ransomware, signal_kev_due, stale_since, stale_reason "+
 			"FROM findings WHERE "+where, args...)
 	var (
 		staleSince  *time.Time
 		staleReason string
+		kevDue      *time.Time
 	)
 	if err := row.Scan(&id, &releaseID, &faultlineID, &cve, &stage, &version,
-		&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &staleSince, &staleReason); err != nil {
+		&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &sig.KEVRansomware, &kevDue, &staleSince, &staleReason); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Finding{}, ErrNotFound
 		}
 		return domain.Finding{}, err
 	}
+	sig.KEVDue = derefTime(kevDue)
 
 	components, err := s.loadComponents(ctx, id)
 	if err != nil {
@@ -210,7 +212,7 @@ func (s *Store) loadProposals(ctx context.Context, id string) ([]domain.Governan
 func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position, error) {
 	rows, err := s.querier(ctx).Query(ctx, `
 		SELECT version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
-		       decided_kev, decided_exploit_public, decided_epss, review_by
+		       decided_kev, decided_exploit_public, decided_epss, decided_kev_ransomware, review_by
 		FROM finding_positions WHERE finding_id = $1 ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -227,7 +229,7 @@ func (s *Store) loadPositions(ctx context.Context, id string) ([]domain.Position
 			reviewBy                                                  *time.Time
 		)
 		if err := rows.Scan(&version, &stance, &rationale, &actorKind, &actorID, &acceptedPID, &flRef, &establishedAt,
-			&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &reviewBy); err != nil {
+			&sig.KEV, &sig.ExploitPublic, &sig.EPSS, &sig.KEVRansomware, &reviewBy); err != nil {
 			return nil, err
 		}
 		out = append(out, domain.ReconstitutePosition(version, domain.Stance(stance), rationale,
@@ -410,13 +412,13 @@ func (s *Store) savePositions(ctx context.Context, tx pgx.Tx, f domain.Finding) 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO finding_positions
 			  (finding_id, version, stance, rationale, actor_kind, actor_id, accepted_proposal_id, faultline_ref, established_at,
-			   decided_kev, decided_exploit_public, decided_epss, review_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (finding_id, version) DO NOTHING`,
+			   decided_kev, decided_exploit_public, decided_epss, review_by, decided_kev_ransomware)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (finding_id, version) DO NOTHING`,
 			string(f.ID()), pos.Version(), string(pos.Stance()), pos.Rationale(),
 			string(pos.Actor().Kind), pos.Actor().ID,
 			string(pos.Inputs().AcceptedProposalID), pos.Inputs().FaultlineRef, pos.EstablishedAt(),
 			pos.Inputs().DecidedWith.KEV, pos.Inputs().DecidedWith.ExploitPublic, pos.Inputs().DecidedWith.EPSS,
-			nullableTime(pos.Inputs().ReviewBy)); err != nil {
+			nullableTime(pos.Inputs().ReviewBy), pos.Inputs().DecidedWith.KEVRansomware); err != nil {
 			return err
 		}
 	}
@@ -797,8 +799,9 @@ func (s *Store) SetBandAndFixes(ctx context.Context, findingID, band string, fix
 // premise it rested on without a live cross-context read.
 func (s *Store) SetSignals(ctx context.Context, faultlineID string, sig domain.ExploitSignals) error {
 	_, err := s.exec(ctx).Exec(ctx,
-		`UPDATE findings SET signal_kev = $2, signal_exploit_public = $3, signal_epss = $4
-		 WHERE faultline_id = $1`, faultlineID, sig.KEV, sig.ExploitPublic, sig.EPSS)
+		`UPDATE findings SET signal_kev = $2, signal_exploit_public = $3, signal_epss = $4,
+		        signal_kev_ransomware = $5, signal_kev_due = $6
+		 WHERE faultline_id = $1`, faultlineID, sig.KEV, sig.ExploitPublic, sig.EPSS, sig.KEVRansomware, nullableTime(sig.KEVDue))
 	return err
 }
 

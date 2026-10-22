@@ -35,6 +35,12 @@ type FaultlineEnriched struct {
 	// payload stays byte-identical and reads as 0, which is the conservative direction (any later
 	// rise looks like drift and re-surfaces the Finding).
 	EPSS float64 `json:"EPSS,omitempty"`
+	// KEV detail (EDR-REMEDIATION-01 D5). Additive and omitempty, so a pre-change payload is
+	// byte-identical: KEVDue feeds Governance's SLA (the earlier deadline wins), KEVRansomware is
+	// a drift premise for the disposition watcher.
+	KEVAdded      *time.Time `json:"KEVAdded,omitempty"`
+	KEVDue        *time.Time `json:"KEVDue,omitempty"`
+	KEVRansomware bool       `json:"KEVRansomware,omitempty"`
 	// Priority is the reconciled EXPLOITABILITY band (critical | high+ | high | elevated |
 	// informational). Carried so a Governance rollup can answer "which of these are critical?"
 	// without one Knowledge call per Faultline (DASH-2) — measured: rendering one posture table
@@ -253,6 +259,9 @@ func NewFaultlineEnriched(f Faultline, at time.Time) FaultlineEnriched {
 		ExploitPublic:   v.ExploitPublic,
 		Score:           v.Score(),
 		EPSS:            v.EPSS,
+		KEVAdded:        timePtr(v.KEVAdded),
+		KEVDue:          timePtr(v.KEVDue),
+		KEVRansomware:   v.KEVRansomware,
 		Priority:        v.Priority(),
 		Fixes:           append([]FixedVersion(nil), v.Fixes...),
 		Applicabilities: append([]Applicability(nil), v.Applicabilities...),
@@ -365,4 +374,13 @@ func rangeStatementsWire(in []value.RangeStatement) []RangeStatementWire {
 		out = append(out, RangeStatementWire{Ecosystem: st.Ecosystem, Package: st.Package, Range: st.Range})
 	}
 	return out
+}
+
+// timePtr is nil for a zero time, so an unstated date is omitted from the wire.
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }

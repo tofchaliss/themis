@@ -525,3 +525,43 @@ func TestFixesFor_NormalizedNameEquality(t *testing.T) {
 		t.Errorf("FixesFor(python3-pip) = %v, want none — a -wheel bound must not clear pip", got)
 	}
 }
+
+// EDR-REMEDIATION-01 D5: KEV detail reconciles to the most demanding reading — the EARLIEST
+// stated added and due dates (zero is "not stated", never the earliest), and ransomware use as
+// a logical OR — and a change in it is a view change (so FaultlineEnriched fires and carries it).
+func TestReconcile_KEVDetail(t *testing.T) {
+	prec := domain.NewPrecedence("nvd")
+	d := func(s string) time.Time { tt, _ := time.Parse("2006-01-02", s); return tt }
+	kev := func(src string, added, due time.Time, ransom bool) domain.Proposal {
+		p, err := domain.NewExploitSignalProposal(src, time.Unix(1_700_000_000, 0), domain.ExploitSignal{KEV: true, KEVAdded: added, KEVDue: due, KEVRansomware: ransom})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	v := domain.Reconcile([]domain.Proposal{
+		kev("kev", d("2024-03-05"), d("2024-03-26"), false),
+		kev("mirror", d("2024-03-01"), time.Time{}, true),
+		kev("late", time.Time{}, d("2024-04-30"), false),
+	}, prec, domain.NewTrustPolicy(nil))
+	if !v.KEVAdded.Equal(d("2024-03-01")) || !v.KEVDue.Equal(d("2024-03-26")) || !v.KEVRansomware {
+		t.Errorf("view = added %v due %v ransomware %v, want 2024-03-01 / 2024-03-26 / true", v.KEVAdded, v.KEVDue, v.KEVRansomware)
+	}
+	f, err := domain.NewFaultline("fl-1", cve(t, "CVE-2024-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FoldProposal(kev("kev", d("2024-03-05"), d("2024-03-26"), false), prec, domain.NewTrustPolicy(nil))
+	if r := f.FoldProposal(kev("kev2", d("2024-03-05"), d("2024-03-26"), true), prec, domain.NewTrustPolicy(nil)); !r.ViewChanged {
+		t.Error("a ransomware flag turning on must count as a view change")
+	}
+	ev := domain.NewFaultlineEnriched(f, time.Unix(1_700_000_100, 0))
+	if !ev.KEVRansomware || ev.KEVDue == nil || ev.KEVDue.Format("2006-01-02") != "2024-03-26" || ev.KEVAdded == nil {
+		t.Errorf("event = %+v", ev)
+	}
+	bare, _ := domain.NewFaultline("fl-2", cve(t, "CVE-2024-2"))
+	empty := domain.NewFaultlineEnriched(bare, time.Unix(1, 0))
+	if empty.KEVAdded != nil || empty.KEVDue != nil || empty.KEVRansomware {
+		t.Errorf("an unstated KEV detail must be omitted from the event: %+v", empty)
+	}
+}

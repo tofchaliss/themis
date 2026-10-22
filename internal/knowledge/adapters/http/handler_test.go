@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -692,5 +693,42 @@ func TestGetPublishedRecently(t *testing.T) {
 	none, _ := publishedServer(t, nil)
 	if s, _ := get(t, none.URL+"/faultlines/published-recently"); s != http.StatusServiceUnavailable {
 		t.Errorf("no source status = %d, want 503", s)
+	}
+}
+
+// EDR-REMEDIATION-01 D5: the card shows KEV detail when stated and omits it otherwise.
+func TestGetFaultline_KEVDetail(t *testing.T) {
+	cv, _ := value.NewCVEID("CVE-2024-9")
+	f, err := domain.NewFaultline("fl-k", cv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := domain.NewExploitSignalProposal("epsskev", time.Unix(1_700_000_000, 0), domain.ExploitSignal{KEV: true,
+		KEVAdded: time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC), KEVDue: time.Date(2024, 3, 26, 0, 0, 0, 0, time.UTC), KEVRansomware: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FoldProposal(p, domain.NewPrecedence("nvd"), domain.NewTrustPolicy(nil))
+	srv := server(t, fakeRepo{card: f, found: true}, fakeProjection{})
+	status, body := get(t, srv.URL+"/faultlines?cve=CVE-2024-9")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var v struct {
+		View struct {
+			KevAdded      string `json:"kev_added"`
+			KevDue        string `json:"kev_due"`
+			KevRansomware bool   `json:"kev_ransomware"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.View.KevAdded != "2024-03-05" || v.View.KevDue != "2024-03-26" || !v.View.KevRansomware {
+		t.Errorf("view = %+v", v.View)
+	}
+	plain := server(t, fakeRepo{card: sampleCard(t), found: true}, fakeProjection{})
+	if _, body := get(t, plain.URL+"/faultlines?cve=CVE-2024-1"); strings.Contains(string(body), "kev_due") || strings.Contains(string(body), "kev_ransomware") {
+		t.Errorf("unstated KEV detail must be omitted: %s", body)
 	}
 }

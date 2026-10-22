@@ -192,3 +192,48 @@ func TestCodec_RoundTripsRangeStatements(t *testing.T) {
 		t.Fatalf("pre-field view = %+v err=%v, want ranges only", old, err)
 	}
 }
+
+// EDR-REMEDIATION-01 D5: KEV detail survives the proposal and view round trips, and a card
+// stored before it decodes to "not stated".
+func TestCodec_RoundTripsKEVDetail(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	added := time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC)
+	due := time.Date(2024, 3, 26, 0, 0, 0, 0, time.UTC)
+	p, err := domain.NewExploitSignalProposal("epsskev", at, domain.ExploitSignal{KEV: true, KEVAdded: added, KEVDue: due, KEVRansomware: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := marshalProposalPayload(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := unmarshalProposal("epsskev", at, string(p.Kind()), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := back.ExploitSignal()
+	if !s.KEV || !s.KEVRansomware || !s.KEVAdded.Equal(added) || !s.KEVDue.Equal(due) {
+		t.Fatalf("proposal round trip = %+v", s)
+	}
+	vraw, err := marshalView(domain.EnterpriseView{KEV: true, KEVAdded: added, KEVDue: due, KEVRansomware: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := unmarshalView(vraw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.KEVRansomware || !v.KEVAdded.Equal(added) || !v.KEVDue.Equal(due) {
+		t.Fatalf("view round trip = %+v", v)
+	}
+	old, err := unmarshalView([]byte(`{"kev":true,"fixed_versions":[],"applicabilities":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.KEVAdded.IsZero() || !old.KEVDue.IsZero() || old.KEVRansomware {
+		t.Errorf("a pre-D5 card must decode to not stated: %+v", old)
+	}
+	if dateOut(time.Time{}) != "" || !dateIn("garbage").IsZero() {
+		t.Error("zero writes nothing; garbage reads as not stated")
+	}
+}

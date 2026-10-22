@@ -6,6 +6,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/themis-project/themis/internal/kernel/value"
 	"net/http"
 	"sync"
@@ -328,6 +329,9 @@ func toView(f domain.Faultline) gen.FaultlineView {
 		Fixes:                   fixesOut(v.Fixes),
 		Epss:                    f32ptr(v.EPSS),
 		Kev:                     &kev,
+		KevAdded:                dateptr(v.KEVAdded),
+		KevDue:                  dateptr(v.KEVDue),
+		KevRansomware:           boolptrIf(v.KEVRansomware),
 		ExploitPublic:           &pub,
 		Priority:                strptr(v.Priority()),
 		Score:                   intptr(v.Score()),
@@ -488,4 +492,20 @@ func statementsOut(in []value.RangeStatement) *[]gen.RangeStatement {
 		out = append(out, rs)
 	}
 	return &out
+}
+
+// dateptr renders a KEV date for the wire; zero (not stated) is omitted.
+func dateptr(t time.Time) *openapi_types.Date {
+	if t.IsZero() {
+		return nil
+	}
+	return &openapi_types.Date{Time: t.UTC()}
+}
+
+// boolptrIf omits a false flag, so "not stated" and "not known" share the absent shape.
+func boolptrIf(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
 }

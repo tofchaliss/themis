@@ -361,6 +361,17 @@ components:
           type: number
         kev:
           type: boolean
+        kev_added:
+          type: string
+          format: date
+          description: When CISA listed the CVE in its Known Exploited Vulnerabilities catalogue (EDR-REMEDIATION-01 D5). Absent when not stated.
+        kev_due:
+          type: string
+          format: date
+          description: CISA's remediation due date for the CVE. Absent when not stated. Governance's SLA takes the earlier of this and its own deadline.
+        kev_ransomware:
+          type: boolean
+          description: CISA marks the CVE as known to be used in ransomware campaigns.
         exploit_public:
           type: boolean
         priority:

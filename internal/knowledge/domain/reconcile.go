@@ -45,6 +45,11 @@ type EnterpriseView struct {
 	EPSS          float64
 	KEV           bool
 	ExploitPublic bool
+	// KEV detail (EDR-REMEDIATION-01 D5). Added and due take the EARLIEST stated date across
+	// sources (the most demanding reading); ransomware use is a logical OR like KEV itself.
+	KEVAdded      time.Time
+	KEVDue        time.Time
+	KEVRansomware bool
 
 	// Trust is tracked per field-group, not for the view as a whole (EDR-TRUST-01 T3).
 	// A single view-level class would be actively wrong: one vendor VEX statement
@@ -184,6 +189,9 @@ func Reconcile(proposals []Proposal, prec Precedence, trust TrustPolicy) Enterpr
 			s := p.exploitSignal
 			view.KEV = view.KEV || s.KEV
 			view.ExploitPublic = view.ExploitPublic || s.ExploitPublic
+			view.KEVRansomware = view.KEVRansomware || s.KEVRansomware
+			view.KEVAdded = earliestStated(view.KEVAdded, s.KEVAdded)
+			view.KEVDue = earliestStated(view.KEVDue, s.KEVDue)
 			view.SignalTrust = foldTrust(view.SignalTrust, trust.ClassOf(p.source))
 			// EPSS: latest observation wins; equal timestamps → higher value (deterministic).
 			if !epssChosen || p.observedAt.After(epssTime) ||
@@ -315,7 +323,8 @@ func severityRank(s value.Severity) int {
 func (v EnterpriseView) equal(o EnterpriseView) bool {
 	if v.Severity != o.Severity || v.CVSS != o.CVSS || v.SeveritySource != o.SeveritySource ||
 		v.Summary != o.Summary || v.SummarySource != o.SummarySource ||
-		v.EPSS != o.EPSS || v.KEV != o.KEV || v.ExploitPublic != o.ExploitPublic {
+		v.EPSS != o.EPSS || v.KEV != o.KEV || v.ExploitPublic != o.ExploitPublic ||
+		!v.KEVAdded.Equal(o.KEVAdded) || !v.KEVDue.Equal(o.KEVDue) || v.KEVRansomware != o.KEVRansomware {
 		return false
 	}
 	// A trust change is a view change: evidence getting weaker or stronger is exactly
@@ -657,4 +666,19 @@ func sortedStatements(set map[value.RangeStatement]struct{}) []value.RangeStatem
 // Governance's version-range rule — must read ranges through this, never AffectedRanges.
 func (v EnterpriseView) RangesFor(ecosystem string, names ...string) []string {
 	return value.SelectRanges(ecosystem, names, v.RangeStatements, v.AffectedRanges)
+}
+
+// earliestStated returns the earlier of two dates, treating zero as "not stated" rather than as
+// the earliest possible date.
+func earliestStated(a, b time.Time) time.Time {
+	switch {
+	case a.IsZero():
+		return b
+	case b.IsZero():
+		return a
+	case b.Before(a):
+		return b
+	default:
+		return a
+	}
 }

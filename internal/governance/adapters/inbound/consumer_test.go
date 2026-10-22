@@ -393,3 +393,25 @@ func TestConsumer_FaultlineEnriched_RangeStatementsReachTheRule(t *testing.T) {
 		t.Fatalf("no version-range not_affected proposal; proposals = %+v", repo.byID["fnd-1"].Proposals())
 	}
 }
+
+// EDR-REMEDIATION-01 D5: the enrichment's KEV due date and ransomware flag reach the Finding's
+// signals; an older payload without them reads as not stated.
+func TestConsumer_FaultlineEnriched_KEVDetail(t *testing.T) {
+	repo := newMemRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-1")
+	repo.seed(f)
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"high","KEV":true,"KEVDue":"2024-03-26T00:00:00Z","KEVRansomware":true}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if s := repo.lastSignals; !s.KEV || !s.KEVRansomware || s.KEVDue.Format("2006-01-02") != "2024-03-26" {
+		t.Errorf("signals = %+v", s)
+	}
+	old := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-1","Severity":"high","KEV":true}`)
+	if err := consumer(repo).Handle(context.Background(), mkEnv("knowledge.faultline_enriched", old)); err != nil {
+		t.Fatalf("handle old: %v", err)
+	}
+	if s := repo.lastSignals; s.KEVRansomware || !s.KEVDue.IsZero() {
+		t.Errorf("an older payload must read as not stated: %+v", s)
+	}
+}
