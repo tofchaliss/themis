@@ -1,8 +1,8 @@
 # EDR-REMEDIATION-01 — Remediation policy: SLA, risk acceptance, upload outcomes, outbound webhooks, KEV detail, metrics, tags
 
-Status: **PROPOSED 2026-10-22; owner's answers to Q1–Q5 recorded 2026-10-22 (below); awaiting
-explicit approval of this updated record. Not authorized for implementation until then** — the
-answers being written down is not the approval. Nothing here is implemented. Origin: the owner's pick
+Status: **ACCEPTED 2026-10-22 by the owner** (proposed and answered the same day; Q1–Q5 and the
+safeguards S1–S3 are recorded in D8). Implementation is authorized in the order below, one PR per
+decision. Nothing is implemented yet. Origin: the owner's pick
 of ports 1, 2, 3, 4, 5, 7 and 8 from [`DEFECTDOJO-COMPARISON.md`](../DEFECTDOJO-COMPARISON.md)
 (port 6, more intake dialects, is deferred "as we go on"). Every decision below is a domain-model,
 API or schema change, so each needs the owner's approval before code (CLAUDE.md, "Must ask").
