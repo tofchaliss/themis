@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.review_due_soon.v1.schema.json",
+  "title": "governance.review_due_soon.v1",
+  "description": "Integration-contract v1 for the review warning (EDR-REMEDIATION-01 D2). A decision's review-by date is near; emitted once per Position version. It is a FACT, not a state change: the Position is untouched, and when the date passes the Finding is re-surfaced exactly as before (governance.disposition_stale.v1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FindingID", "ReleaseID", "FaultlineID", "CVE", "Stance", "PositionVersion", "ReviewBy", "Owner", "OccurredAt"],
+  "properties": {
+    "FindingID": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "Stance": { "type": "string", "description": "The decision still in force." },
+    "PositionVersion": { "type": "integer" },
+    "ReviewBy": { "type": "string", "format": "date-time" },
+    "Owner": { "type": "string", "description": "The accountable owner named on the acceptance; empty when none was named (not_affected, or an older acceptance)." },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -47,7 +47,7 @@ func suppressedUntil(t *testing.T, stance domain.Stance, decidedWith domain.Expl
 	if err := f.RaiseProposal(p); err != nil {
 		t.Fatalf("raise: %v", err)
 	}
-	if _, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "analyst"}, at, reviewBy); err != nil {
+	if _, err := f.AcceptProposalWith("p1", domain.Actor{Kind: domain.ActorHuman, ID: "analyst"}, at, domain.AcceptanceTerms{ReviewBy: reviewBy, Owner: ownerFor(stance)}); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
 	pos, ok := f.CurrentPosition()
@@ -481,4 +481,13 @@ func TestWatchDispositions_ReSurfacesOnAnExpiredReviewDate(t *testing.T) {
 			t.Errorf("reason = %q, want the KEV drift to win over the date", r)
 		}
 	})
+}
+
+// ownerFor is the accountable owner a person must name on an accepted risk (EDR-REMEDIATION-01
+// Q3); every other stance carries none.
+func ownerFor(s domain.Stance) string {
+	if s == domain.StanceAcceptedRisk {
+		return "risk-owner@example.test"
+	}
+	return ""
 }

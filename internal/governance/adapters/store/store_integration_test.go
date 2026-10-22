@@ -95,7 +95,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE review_warnings, sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -856,9 +856,9 @@ func TestDispositionStaleRoundTripAndExpiredLister(t *testing.T) {
 		}
 		var err error
 		if reviewBy.IsZero() {
-			_, err = f.AcceptProposal("p1", human, epoch)
+			_, err = f.AcceptProposalWith("p1", human, epoch, domain.AcceptanceTerms{Owner: ownerFor(stance)})
 		} else {
-			_, err = f.AcceptProposal("p1", human, epoch, reviewBy)
+			_, err = f.AcceptProposalWith("p1", human, epoch, domain.AcceptanceTerms{ReviewBy: reviewBy, Owner: ownerFor(stance)})
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -984,7 +984,7 @@ func TestKEVDetailSignalsRoundTrip(t *testing.T) {
 	if err := got.RaiseProposal(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := got.AcceptProposal("p1", human, epoch); err != nil {
+	if _, err := got.AcceptProposalWith("p1", human, epoch, domain.AcceptanceTerms{Owner: "risk-owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Save(ctx, got, false, 0, nil); err != nil {
@@ -1059,7 +1059,7 @@ func TestSLAStore(t *testing.T) {
 	prev := f.Version()
 	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAcceptedRisk, "", epoch, value.TrustAsserted)
 	_ = f.RaiseProposal(p)
-	if _, err := f.AcceptProposal("p1", human, epoch, epoch.Add(48*time.Hour)); err != nil {
+	if _, err := f.AcceptProposalWith("p1", human, epoch, domain.AcceptanceTerms{ReviewBy: epoch.Add(48 * time.Hour), Owner: "risk-owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Save(ctx, f, false, prev, nil); err != nil {
@@ -1149,5 +1149,78 @@ func TestSLAStore(t *testing.T) {
 	// A breach for an unknown Finding is refused by the foreign key.
 	if _, err := st.RecordSLABreach(ctx, "ghost", epoch, note); err == nil {
 		t.Fatal("breach for an unknown Finding accepted")
+	}
+}
+
+func ownerFor(s domain.Stance) string {
+	if s == domain.StanceAcceptedRisk {
+		return "risk-owner"
+	}
+	return ""
+}
+
+// EDR-REMEDIATION-01 D2: the acceptance terms round-trip on the Position, and the review warning
+// lists a decision once per version inside the window, never a passed or far date.
+func TestRiskAcceptanceTermsAndReviewWarnings(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	decide := func(id string, stance domain.Stance, terms domain.AcceptanceTerms) {
+		t.Helper()
+		if err := st.Save(ctx, newFinding(t, id, "rel-1", "fl-"+id, "CVE-2026-"+id), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		f, _, _ := load(t, st, domain.FindingID(id))
+		prev := f.Version()
+		p, _ := domain.NewGovernanceProposal("p1", human, stance, "", epoch, value.TrustAsserted)
+		_ = f.RaiseProposal(p)
+		if _, err := f.AcceptProposalWith("p1", human, epoch, terms); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Save(ctx, f, false, prev, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := epoch.Add(time.Hour)
+	decide("near", domain.StanceAcceptedRisk, domain.AcceptanceTerms{ReviewBy: now.Add(5 * 24 * time.Hour), Owner: "owner@example.test",
+		Treatment: domain.TreatmentTransfer, Proof: "https://wiki.example.test/risk/42"})
+	decide("deferred", domain.StanceDeferred, domain.AcceptanceTerms{ReviewBy: now.Add(10 * 24 * time.Hour), Treatment: domain.TreatmentMitigateLater})
+	decide("far", domain.StanceAcceptedRisk, domain.AcceptanceTerms{ReviewBy: now.Add(60 * 24 * time.Hour), Owner: "o"})
+	decide("passed", domain.StanceNotAffected, domain.AcceptanceTerms{ReviewBy: epoch})
+	decide("affected", domain.StanceAffected, domain.AcceptanceTerms{ReviewBy: now.Add(24 * time.Hour)})
+
+	got, _, _ := load(t, st, "near")
+	pos, _ := got.CurrentPosition()
+	if in := pos.Inputs(); in.Owner != "owner@example.test" || in.Treatment != domain.TreatmentTransfer || in.Proof != "https://wiki.example.test/risk/42" {
+		t.Fatalf("terms round-trip = %+v", in)
+	}
+
+	window := now.Add(domain.DefaultReviewWarning)
+	due, err := st.ReviewsDueSoon(ctx, now, window, 10)
+	if err != nil || len(due) != 2 || due[0] != "near" || due[1] != "deferred" {
+		t.Fatalf("due soon = %v %v, want [near deferred]", due, err)
+	}
+	if one, _ := st.ReviewsDueSoon(ctx, now, window, 1); len(one) != 1 {
+		t.Fatalf("limit = %v", one)
+	}
+	ev := domain.NewReviewDueSoon(got, pos, now)
+	note := app.OutboxNote{EventType: app.EventReviewDueSoon, Event: ev, OccurredAt: now}
+	if ok, err := st.RecordReviewWarning(ctx, "near", pos.Version(), pos.Inputs().ReviewBy, note); err != nil || !ok {
+		t.Fatalf("record = %v %v", ok, err)
+	}
+	if ok, err := st.RecordReviewWarning(ctx, "near", pos.Version(), pos.Inputs().ReviewBy, note); err != nil || ok {
+		t.Fatalf("repeat = %v %v", ok, err)
+	}
+	if left, _ := st.ReviewsDueSoon(ctx, now, window, 10); len(left) != 1 || left[0] != "deferred" {
+		t.Fatalf("after warning = %v", left)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM governance_outbox WHERE schema_ref = 'governance.review_due_soon.v1'`); n != 1 {
+		t.Fatalf("warning outbox rows = %d", n)
+	}
+	if _, err := st.RecordReviewWarning(ctx, "near", 9, epoch, app.OutboxNote{EventType: app.EventReviewDueSoon, Event: make(chan int)}); err == nil {
+		t.Fatal("unmarshalable payload accepted")
+	}
+	if _, err := st.RecordReviewWarning(ctx, "ghost", 1, epoch, note); err == nil {
+		t.Fatal("warning for an unknown Finding accepted")
 	}
 }

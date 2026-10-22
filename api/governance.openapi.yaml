@@ -614,6 +614,20 @@ components:
         established_at:
           type: string
           format: date-time
+        review_by:
+          type: string
+          format: date-time
+          description: The date this decision asked to be revisited; absent when none was agreed.
+        owner:
+          type: string
+          description: The accountable owner of an accepted risk (EDR-REMEDIATION-01 D2); absent when none.
+        treatment:
+          type: string
+          enum: [accept, transfer, avoid, mitigate_later]
+          description: How an accepted risk is handled (D2); absent when not stated.
+        proof:
+          type: string
+          description: Reference (URL or document id) to the justification (D2). Stored as text, never fetched.
     ProposalView:
       type: object
       properties:
@@ -1236,6 +1250,24 @@ components:
             thereby still acceptable: the compensating control may be gone, the component may have
             moved, the person who accepted it may have left. Absent means NO date was agreed, which
             is not the same as "never expires" — nothing invents a deadline the decider did not set.
+            Fourteen days before it, governance.review_due_soon.v1 is announced once.
+        owner:
+          type: string
+          description: >-
+            The accountable owner of the risk (EDR-REMEDIATION-01 D2) — often not the person
+            accepting it. REQUIRED when a person accepts an accepted_risk proposal (D8 Q3; 400
+            otherwise). Allowed only on accepted_risk and deferred.
+        treatment:
+          type: string
+          enum: [accept, transfer, avoid, mitigate_later]
+          description: How the accepted risk is being handled (D2). Allowed only on accepted_risk and deferred.
+        proof:
+          type: string
+          description: >-
+            A reference (URL or document id) to the justification (D2). Stored as text, never
+            fetched. Allowed only on accepted_risk and deferred. Changing the owner, treatment or
+            proof later is a new Position version: raise a proposal with the same stance and
+            accept it with the new terms.
     Problem:
       type: object
       properties:

@@ -2302,6 +2302,16 @@ async function openDrawer(entry) {
           <textarea id="dc-rationale" rows="2" placeholder="e.g. vulnerable function unreachable; loader is SafeLoader throughout"></textarea></label>
         <label id="dc-review-wrap" hidden>Review by — when this suppression should resurface (optional; empty means no date was agreed)
           <input type="date" id="dc-review"></label>
+        <div id="dc-terms-wrap" hidden>
+          <label>Owner — who is accountable for this risk (required for accepted_risk; often not you)
+            <input type="text" id="dc-owner" placeholder="e.g. jane.doe@example.com"></label>
+          <label>Treatment
+            <select id="dc-treatment"><option value="">not stated</option><option value="accept">accept — carry it as is</option>
+              <option value="transfer">transfer — someone else carries it</option><option value="avoid">avoid — remove the exposure</option>
+              <option value="mitigate_later">mitigate later — fix in a later release</option></select></label>
+          <label>Proof — link or document id for the justification (optional; stored, never fetched)
+            <input type="text" id="dc-proof" placeholder="https://…"></label>
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="dc-raise">Raise proposal</button>
           <button class="btn btn-primary" id="dc-raise-accept">Raise &amp; accept</button>
@@ -2352,10 +2362,13 @@ async function openDrawer(entry) {
   const fid = entry.finding_id;
   const reload = () => { drawerDirty = true; openDrawer(entry); };
 
-  const suppressing = (st) => st === "not_affected" || st === "accepted_risk";
+  const suppressing = (st) => st === "not_affected" || st === "accepted_risk" || st === "deferred";
+  // EDR-REMEDIATION-01 D2: an acceptance names its owner, treatment and proof.
+  const acceptance = (st) => st === "accepted_risk" || st === "deferred";
   const stanceSel = $("#dc-stance");
   stanceSel.addEventListener("change", () => {
     $("#dc-review-wrap").hidden = !suppressing(stanceSel.value);
+    $("#dc-terms-wrap").hidden = !acceptance(stanceSel.value);
   });
 
   async function raiseProposal() {
@@ -2375,6 +2388,17 @@ async function openDrawer(entry) {
     const body = { actor_id: WHO, actor_kind: "human" };
     if (suppressing(stance) && $("#dc-review").value) {
       body.review_by = new Date($("#dc-review").value + "T00:00:00Z").toISOString();
+    }
+    if (acceptance(stance)) {
+      const owner = $("#dc-owner").value.trim();
+      if (stance === "accepted_risk" && !owner) {
+        $("#dc-terms-wrap").hidden = false;
+        $("#dc-review-wrap").hidden = false;
+        throw new Error("Name the accountable owner in the decision form above, then accept again.");
+      }
+      if (owner) body.owner = owner;
+      if ($("#dc-treatment").value) body.treatment = $("#dc-treatment").value;
+      if ($("#dc-proof").value.trim()) body.proof = $("#dc-proof").value.trim();
     }
     const r = await apiPOST("governance",
       `/findings/${encodeURIComponent(fid)}/proposals/${encodeURIComponent(pid)}/accept`, body);

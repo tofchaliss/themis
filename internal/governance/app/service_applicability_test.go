@@ -751,7 +751,11 @@ func TestReactToEnrichment_VendorFixResurfacesAnAcceptedNoFix(t *testing.T) {
 			t.Fatal(err)
 		}
 		pid := repo.byID["fnd-1"].Proposals()[0].ID()
-		if err := s.AcceptProposal(ctx, "fnd-1", pid, human, reviewBy...); err != nil {
+		var rb time.Time
+		if len(reviewBy) > 0 {
+			rb = reviewBy[0]
+		}
+		if err := s.AcceptProposalWith(ctx, "fnd-1", pid, human, domain.AcceptanceTerms{ReviewBy: rb, Owner: "risk-owner@example.test"}); err != nil {
 			t.Fatal(err)
 		}
 		return repo, s

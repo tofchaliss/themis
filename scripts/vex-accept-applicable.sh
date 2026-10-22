@@ -26,6 +26,11 @@
 # auth disabled it records `dev:<THEMIS_ACTOR_ID>`. A placeholder-looking actor is refused, for
 # the measured reason in vex-reject-inapplicable.sh.
 #
+# WHO OWNS THE RISK. Accepting a will-not-fix proposal establishes an accepted_risk, and a person
+# accepting one must name its accountable owner (EDR-REMEDIATION-01 D8 Q3). So
+# --include-will-not-fix --apply also requires THEMIS_RISK_OWNER, sent as `owner` on those
+# acceptances only; the same placeholder check applies.
+#
 # Usage:
 #   PGBASE="postgres://themis:PASSWORD@localhost:5432" ./scripts/vex-accept-applicable.sh
 #   PGBASE=... THEMIS_ACTOR_ID=you@example.com ./scripts/vex-accept-applicable.sh --apply
@@ -35,6 +40,7 @@ set -uo pipefail
 
 GOVERNANCE="${THEMIS_GOVERNANCE_URL:-http://localhost:8083}"
 ACTOR="${THEMIS_ACTOR_ID:-}"
+OWNER="${THEMIS_RISK_OWNER:-}"
 APPLY=0
 WNF=0
 for arg in "$@"; do
@@ -59,6 +65,15 @@ fi
 case "$(printf '%s' "${ACTOR:-}" | tr '[:upper:]' '[:lower:]')" in
   *example.com*|*your.name*|*changeme*|*placeholder*|*'<'*|*'>'*|"api"|"admin"|"test"|"user")
     echo "vex-accept: THEMIS_ACTOR_ID=\"$ACTOR\" looks like a placeholder, not a person." >&2
+    exit 2 ;;
+esac
+if [ "$APPLY" = "1" ] && [ "$WNF" = "1" ] && [ -z "$OWNER" ]; then
+  echo "vex-accept: --include-will-not-fix --apply needs THEMIS_RISK_OWNER — an accepted risk names its accountable owner" >&2
+  exit 2
+fi
+case "$(printf '%s' "${OWNER:-}" | tr '[:upper:]' '[:lower:]')" in
+  *example.com*|*your.name*|*changeme*|*placeholder*|*'<'*|*'>'*|"api"|"admin"|"test"|"user")
+    echo "vex-accept: THEMIS_RISK_OWNER=\"$OWNER\" looks like a placeholder, not a person." >&2
     exit 2 ;;
 esac
 
@@ -120,7 +135,8 @@ while IFS='|' read -r finding proposal pkg cve stance vstatus; do
   ACCEPT=$((ACCEPT + 1))
   [ "$APPLY" = "1" ] || continue
   if ! api -X POST -o /dev/null -H 'Content-Type: application/json' \
-        --data "$(jq -nc --arg a "$ACTOR" '{actor_id: $a, actor_kind: "human"}')" \
+        --data "$(jq -nc --arg a "$ACTOR" --arg st "$stance" --arg o "$OWNER" \
+            '{actor_id: $a, actor_kind: "human"} + (if $st == "accepted_risk" then {owner: $o} else {} end)')" \
         "$GOVERNANCE/api/v1/findings/$finding/proposals/$proposal/accept" >/dev/null 2>&1; then
     printf '      \033[31m✗\033[0m accept failed for %s\n' "$proposal"
     FAIL=$((FAIL + 1))

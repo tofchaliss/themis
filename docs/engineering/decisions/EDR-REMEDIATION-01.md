@@ -72,6 +72,18 @@ ago, fix published in X" when it already explains a Finding.
 
 ## D2 — Risk acceptance: owner, treatment, proof, and a warning before the review date
 
+> **Realized 2026-10-22.** `domain.AcceptanceTerms` rides `Finding.AcceptProposalWith`; the terms
+> land on `PositionInputs` (immutable with the version). Q3 is enforced in the domain:
+> `ErrOwnerRequired` for a human accepting `accepted_risk` with no owner; policy and system
+> accepts are not asked. Owner, treatment or proof on any other stance is refused
+> (`ErrTermsNotApplicable`). The warning runs on the review-by timer: current Positions
+> (accepted_risk, deferred, not_affected) whose review date falls in the next
+> `THEMIS_REVIEW_WARNING` (default 336h), not yet warned for that version, get one
+> `governance.review_due_soon.v1` carrying the owner; the `review_warnings` table makes it
+> once-only and the Finding is never written. The mail to the owner is not built here: the
+> event is on the bus for D4's webhook, and a Communication mail is a recorded follow-up. The
+> AI angle (suggesting a treatment) is not built.
+
 **Decision.** An `accepted_risk` or `deferred` Position gains three optional, structured inputs
 beside the existing `review_by`:
 

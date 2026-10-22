@@ -789,11 +789,22 @@ func (s *FindingService) RaiseProposal(
 // it, and the disposition sweep re-surfaces the Finding once it passes. Suppressing a Finding
 // forever is a choice; suppressing it until a stated date is a different and usually better one.
 func (s *FindingService) AcceptProposal(ctx context.Context, findingID domain.FindingID, proposalID domain.ProposalID, decider domain.Actor, reviewBy ...time.Time) error {
+	var rb time.Time
+	if len(reviewBy) > 0 {
+		rb = reviewBy[0]
+	}
+	return s.AcceptProposalWith(ctx, findingID, proposalID, decider, domain.AcceptanceTerms{ReviewBy: rb})
+}
+
+// AcceptProposalWith is AcceptProposal with the full acceptance terms (EDR-REMEDIATION-01 D2):
+// for accepted_risk / deferred, the accountable owner (required from a person on accepted_risk,
+// Q3), the treatment and a proof reference.
+func (s *FindingService) AcceptProposalWith(ctx context.Context, findingID domain.FindingID, proposalID domain.ProposalID, decider domain.Actor, terms domain.AcceptanceTerms) error {
 	if err := requireDecider(decider); err != nil {
 		return err
 	}
 	return s.mutate(ctx, findingID, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
-		pos, err := f.AcceptProposal(proposalID, decider, now, reviewBy...)
+		pos, err := f.AcceptProposalWith(proposalID, decider, now, terms)
 		if err != nil {
 			return nil, err
 		}

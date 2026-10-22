@@ -71,6 +71,10 @@ type config struct {
 	// a suppressed Finding whose decision carried a review_by date now past is re-surfaced on a
 	// clock, not only when its CVE happens to be enriched. Go duration, default 1h; "0" disables.
 	reviewByInterval time.Duration
+	// THEMIS_REVIEW_WARNING — how far ahead of a decision's review-by date the review-by sweep
+	// announces governance.review_due_soon.v1, once per Position version (EDR-REMEDIATION-01 D2).
+	// Go duration, default 336h (14 days); "0" turns the warning off (expiry still re-surfaces).
+	reviewWarning time.Duration
 	rejudgeRanges    bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
@@ -103,6 +107,7 @@ func loadConfig() config {
 		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
 		rejudgeRanges:     os.Getenv("THEMIS_GOVERNANCE_REJUDGE_RANGES") == "1",
 		reviewByInterval:  envDurationDefault("THEMIS_REVIEW_BY_INTERVAL", time.Hour),
+		reviewWarning:     envDurationDefault("THEMIS_REVIEW_WARNING", domain.DefaultReviewWarning),
 		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
@@ -207,14 +212,15 @@ func main() {
 	// The review-by timer (RF-2): asks "has anyone looked at this lately?" on a clock. It marks
 	// and announces; it decides nothing.
 	if cfg.reviewByInterval > 0 {
+		gov.ReviewBy.WithWarnings(gov.Store, cfg.reviewWarning)
 		rb := logger.Component("review-by")
-		go gov.ReviewBy.RunEvery(ctx, cfg.reviewByInterval, func(checked, resurfaced int, err error) {
+		go gov.ReviewBy.RunEvery(ctx, cfg.reviewByInterval, func(checked, resurfaced, warned int, err error) {
 			if err != nil {
-				rb.Error("review-by sweep failed", observability.Err(err), observability.Int("checked", checked), observability.Int("resurfaced", resurfaced))
+				rb.Error("review-by sweep failed", observability.Err(err), observability.Int("checked", checked), observability.Int("resurfaced", resurfaced), observability.Int("warned", warned))
 				return
 			}
-			if checked > 0 {
-				rb.Info("review-by sweep", observability.Int("checked", checked), observability.Int("resurfaced", resurfaced))
+			if checked > 0 || warned > 0 {
+				rb.Info("review-by sweep", observability.Int("checked", checked), observability.Int("resurfaced", resurfaced), observability.Int("warned", warned))
 			}
 		})
 		logger.Info("review-by timer enabled", observability.String("interval", cfg.reviewByInterval.String()))
