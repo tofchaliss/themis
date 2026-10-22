@@ -106,3 +106,19 @@ func TestSchemaRefFor_UnmappedFallsBackToRawType(t *testing.T) {
 		t.Errorf("unmapped schemaRefFor = %q, want raw type", got)
 	}
 }
+
+// EDR-REMEDIATION-01 D3: the additive upload_outcome object validates against the frozen v1
+// schema, with and without its CVE lists, and its absence still validates (older payloads).
+func TestIntegrationContractV1_ReleaseEvaluatedUploadOutcome(t *testing.T) {
+	ev := domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", "ev-2", domain.CauseNewSBOM, domain.SeverityCounts{High: 2})
+	ev.UploadOutcome = &domain.UploadOutcome{New: 1, Reappeared: 0, NoLongerPresent: 3, Unchanged: 7, NotJudged: 1,
+		NewCVEs: []string{"CVE-2026-1"}, GoneCVEs: []string{"CVE-2025-1", "CVE-2025-2", "CVE-2025-3"}, HasBaseline: true}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertValidContract(t, schemaRefFor(app.EventReleaseEvaluated), raw)
+	ev.UploadOutcome = &domain.UploadOutcome{}
+	raw, _ = json.Marshal(ev)
+	assertValidContract(t, schemaRefFor(app.EventReleaseEvaluated), raw)
+}

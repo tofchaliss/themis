@@ -96,6 +96,9 @@ type ReleaseEvaluated struct {
 	// from "did the SBOM id change" would be guessing — a wrong guess silently spends the rebuild
 	// loop's attempt budget (M2-3).
 	Cause string `json:"cause"`
+	// UploadOutcome is what this SBOM changed (EDR-REMEDIATION-01 D3) — set only for a new SBOM
+	// whose inventories could be read. Absent means not computed, never "nothing changed".
+	UploadOutcome *UploadOutcome `json:"upload_outcome,omitempty"`
 }
 
 // NewReleaseEvaluated builds the per-Release evaluation fact.

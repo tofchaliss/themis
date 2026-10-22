@@ -41,6 +41,16 @@ The single project backlog. Two parts:
 > in this PR: mailing the owner — the event rides the bus and D4's webhook can carry it; a
 > Communication mail for it is a follow-up. VM check: migration 20, then accepting an
 > accepted_risk without an owner answers 400.
+> **D3 upload outcome shipped 2026-10-22** (Governance: pure `domain.ClassifyUpload` over the
+> release's Findings and the two SBOM inventories by purl; the release-evaluation worker reads
+> this SBOM and the one filed before it from Evidence for a `new_sbom` evaluation and adds
+> `upload_outcome {new, reappeared, no_longer_present, unchanged, not_judged, lists ≤ 50}` to
+> `governance.release_evaluated.v1` — an Evidence failure publishes the event without it, never
+> defers it; `GET /releases/{id}/upload-outcome` reads the latest from the feed, no new table;
+> dashboard card on the release page; Communication copies it onto the ticket and evaluation
+> mail, "What this SBOM changed", stating that no-longer-present is still open). Not built: the
+> intake receipt's link to the evaluation event. VM check: upload a changed SBOM to a release
+> that already has one, then `GET /releases/<id>/upload-outcome`.
 > **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
 > not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
 > before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide

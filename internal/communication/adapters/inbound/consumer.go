@@ -148,6 +148,7 @@ func (c *Consumer) recordJiraIntent(ctx context.Context, env event.Envelope) err
 		return nil // nothing to track a fix for; not a transport failure, so do not retry
 	}
 	snapshot := map[string]string{"sbom_id": dto.SBOMID, "cause": dto.Cause}
+	dto.UploadOutcome.snapshot(snapshot)
 	// The loop decides FIRST (M2-8 steps 3 and 5): the cycle is opened, advanced or stopped, and
 	// its decision is stamped on the ticket and the mail below — a person reads what the loop
 	// did where the posture is. The rebuild itself is asked for LAST, after both are recorded.
@@ -212,11 +213,41 @@ func lineageOf(env event.Envelope) app.IntentLineage {
 // IS tagged on the producer side, snake_case). The severity counts are not read: the ticket
 // body is rendered from the posture read API at intent time, not from the event.
 type releaseEvaluatedDTO struct {
-	ProductID string `json:"product_id"`
-	ProjectID string `json:"project_id"`
-	ReleaseID string `json:"release_id"`
-	SBOMID    string `json:"sbom_id"`
-	Cause     string `json:"cause"`
+	ProductID     string            `json:"product_id"`
+	ProjectID     string            `json:"project_id"`
+	ReleaseID     string            `json:"release_id"`
+	SBOMID        string            `json:"sbom_id"`
+	Cause         string            `json:"cause"`
+	UploadOutcome *uploadOutcomeDTO `json:"upload_outcome,omitempty"`
+}
+
+// uploadOutcomeDTO mirrors governance.release_evaluated.v1's upload_outcome (EDR-REMEDIATION-01 D3).
+type uploadOutcomeDTO struct {
+	New             int      `json:"new"`
+	Reappeared      int      `json:"reappeared"`
+	NoLongerPresent int      `json:"no_longer_present"`
+	Unchanged       int      `json:"unchanged"`
+	NotJudged       int      `json:"not_judged"`
+	NewCVEs         []string `json:"new_cves"`
+	ReappearedCVEs  []string `json:"reappeared_cves"`
+	GoneCVEs        []string `json:"no_longer_present_cves"`
+	HasBaseline     bool     `json:"has_baseline"`
+}
+
+// snapshot copies the outcome onto an intent's snapshot.
+func (o *uploadOutcomeDTO) snapshot(into map[string]string) {
+	if o == nil {
+		return
+	}
+	into[app.SnapshotOutcomeNew] = strconv.Itoa(o.New)
+	into[app.SnapshotOutcomeReappeared] = strconv.Itoa(o.Reappeared)
+	into[app.SnapshotOutcomeNoLongerPresent] = strconv.Itoa(o.NoLongerPresent)
+	into[app.SnapshotOutcomeUnchanged] = strconv.Itoa(o.Unchanged)
+	into[app.SnapshotOutcomeNotJudged] = strconv.Itoa(o.NotJudged)
+	into[app.SnapshotOutcomeNewCVEs] = strings.Join(o.NewCVEs, ",")
+	into[app.SnapshotOutcomeReappearedCVEs] = strings.Join(o.ReappearedCVEs, ",")
+	into[app.SnapshotOutcomeGoneCVEs] = strings.Join(o.GoneCVEs, ",")
+	into[app.SnapshotOutcomeHasBaseline] = strconv.FormatBool(o.HasBaseline)
 }
 
 // proposalAcceptedDTO mirrors governance.proposal_accepted.v1.

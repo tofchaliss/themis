@@ -262,3 +262,73 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 	}
 	return reflect.DeepEqual(x, y)
 }
+
+// EDR-REMEDIATION-01 D3: the upload reader returns every Finding of the release with its
+// ACTIVE purls (retired ones left out), and a Finding with no components still appears.
+func TestUploadFindings(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	f := newFinding(t, "fnd-a", "rel-1", "fl-a", "CVE-2026-1")
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a@1", Name: "a", Version: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: "pkg:a2@1", Name: "a2", Version: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, f, true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RetireComponent(ctx, "rel-1", "fl-a", "pkg:a2@1", "twin", epoch); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, newFinding(t, "fnd-b", "rel-1", "fl-b", "CVE-2026-2"), true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, newFinding(t, "fnd-c", "rel-2", "fl-c", "CVE-2026-3"), true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.UploadFindings(ctx, "rel-1")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("upload findings = %+v %v", got, err)
+	}
+	if got[0].CVE != "CVE-2026-1" || len(got[0].PURLs) != 1 || got[0].PURLs[0] != "pkg:a@1" || got[0].CreatedAt.IsZero() || got[0].Stage != domain.StageIdentified {
+		t.Fatalf("first = %+v", got[0])
+	}
+	if got[1].CVE != "CVE-2026-2" || len(got[1].PURLs) != 0 {
+		t.Fatalf("second = %+v", got[1])
+	}
+}
+
+// D3: the latest outcome is read back from the feed — the newest event that carries one, so a
+// later re-discovery (no outcome) does not hide it — and a release without one is not found.
+func TestLatestUploadOutcome(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	if _, found, err := st.LatestUploadOutcome(ctx, "rel-1"); err != nil || found {
+		t.Fatalf("empty = %v %v", found, err)
+	}
+	publish := func(sbom, cause string, out *domain.UploadOutcome) {
+		t.Helper()
+		if err := st.EnqueuePendingReleaseEvaluation(ctx, "rel-1", sbom, cause); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := st.ListPendingReleaseEvaluations(ctx, 10)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("pending = %+v %v", rows, err)
+		}
+		ev := domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", sbom, cause, domain.SeverityCounts{})
+		ev.UploadOutcome = out
+		if err := st.PublishEvaluatedAndMark(ctx, rows[0], ev, epoch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("sb-1", domain.CauseNewSBOM, &domain.UploadOutcome{New: 4})
+	publish("sb-2", domain.CauseNewSBOM, &domain.UploadOutcome{New: 1, NoLongerPresent: 2, GoneCVEs: []string{"CVE-1", "CVE-2"}, HasBaseline: true})
+	publish("sb-2", domain.CauseRediscovery, nil)
+	rec, found, err := st.LatestUploadOutcome(ctx, "rel-1")
+	if err != nil || !found || rec.SBOMID != "sb-2" || rec.Outcome.NoLongerPresent != 2 || len(rec.Outcome.GoneCVEs) != 2 || !rec.Outcome.HasBaseline || rec.EvaluatedAt.IsZero() {
+		t.Fatalf("latest = %+v %v %v", rec, found, err)
+	}
+}

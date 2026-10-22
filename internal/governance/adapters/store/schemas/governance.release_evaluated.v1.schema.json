@@ -27,6 +27,23 @@
       "type": "string",
       "enum": ["new_sbom", "rediscovery"],
       "description": "Why correlation ran, copied VERBATIM from the Knowledge event (M2-3). A closed vocabulary: `new_sbom` is an upload, `rediscovery` is the KN-RECOR-1 sweep — a real posture change that never starts or advances the rebuild loop. A third value is refused at the inbound seam, so it can never appear here."
+    },
+    "upload_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["new", "reappeared", "no_longer_present", "unchanged", "not_judged", "has_baseline"],
+      "description": "What THIS SBOM changed on the Release against the immediately-previous SBOM of the same Release (EDR-REMEDIATION-01 D3). Present only for cause new_sbom when both inventories could be read; absent means not computed, never 'nothing changed'. A REPORT, not a state: no_longer_present closes nothing and reappeared re-opens nothing. Presence is by component purl; a Finding none of whose components is in either SBOM (e.g. one opened from a scanner report) is counted in not_judged. CVE lists are sorted and capped at 50; the counts are complete.",
+      "properties": {
+        "new": { "type": "integer", "minimum": 0, "description": "Present now, and created after the previous SBOM was filed (or this is the first SBOM)." },
+        "reappeared": { "type": "integer", "minimum": 0, "description": "Present now, absent from the previous SBOM, and older than it." },
+        "no_longer_present": { "type": "integer", "minimum": 0, "description": "Open, in the previous SBOM, in none of this SBOM's components." },
+        "unchanged": { "type": "integer", "minimum": 0, "description": "Open and present in both." },
+        "not_judged": { "type": "integer", "minimum": 0, "description": "In neither SBOM, or resolved / archived." },
+        "new_cves": { "type": "array", "items": { "type": "string" } },
+        "reappeared_cves": { "type": "array", "items": { "type": "string" } },
+        "no_longer_present_cves": { "type": "array", "items": { "type": "string" } },
+        "has_baseline": { "type": "boolean", "description": "False on a Release's first SBOM." }
+      }
     }
   }
 }

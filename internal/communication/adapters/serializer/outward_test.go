@@ -473,3 +473,41 @@ func TestOutwardRenderersNameTheRelease(t *testing.T) {
 		t.Errorf("bare ids: %v\n%s", err, b)
 	}
 }
+
+// EDR-REMEDIATION-01 D3: the ticket and the mail state what the SBOM changed when the event
+// carried it, say plainly that "no longer present" is still open, and say nothing otherwise.
+func TestRenderUploadOutcomeSection(t *testing.T) {
+	r := serializer.NewOutwardRenderer(&postureSource{rows: estate()})
+	snap := map[string]string{"notification": "release_evaluated", "sbom_id": "ev-9",
+		app.SnapshotOutcomeNew: "1", app.SnapshotOutcomeReappeared: "0", app.SnapshotOutcomeNoLongerPresent: "2",
+		app.SnapshotOutcomeUnchanged: "5", app.SnapshotOutcomeNotJudged: "0", app.SnapshotOutcomeNewCVEs: "CVE-2026-1",
+		app.SnapshotOutcomeGoneCVEs: "CVE-2025-1,CVE-2025-2", app.SnapshotOutcomeHasBaseline: "true"}
+	_, mail, err := r.RenderEvaluationEmail(context.Background(), app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Snapshot: snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ticket, err := r.RenderJiraIssue(context.Background(), app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1", Snapshot: snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"mail": string(mail), "ticket": string(ticket)} {
+		for _, want := range []string{"What this SBOM changed", "New:", "1 (CVE-2026-1)", "No longer present:", "2 (CVE-2025-1, CVE-2025-2)",
+			"Unchanged:", "still open, with its decision"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, text)
+			}
+		}
+		if strings.Contains(text, "first SBOM") {
+			t.Errorf("%s calls a release with a baseline its first SBOM", name)
+		}
+	}
+	snap[app.SnapshotOutcomeHasBaseline] = "false"
+	_, first, _ := r.RenderEvaluationEmail(context.Background(), app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Snapshot: snap})
+	if !strings.Contains(string(first), "first SBOM") {
+		t.Errorf("first-SBOM wording missing:\n%s", first)
+	}
+	_, none, _ := r.RenderJiraIssue(context.Background(), app.Intent{Type: app.IntentJiraIssue, ReleaseID: "rel-1"})
+	if strings.Contains(string(none), "What this SBOM changed") {
+		t.Error("an intent without an outcome rendered the section")
+	}
+}

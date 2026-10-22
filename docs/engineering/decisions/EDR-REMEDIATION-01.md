@@ -113,6 +113,17 @@ form; the warning on the existing review-by sweep.
 
 ## D3 — Upload outcome: what one SBOM changed, in four buckets
 
+> **Realized 2026-10-22.** `domain.ClassifyUpload` reads presence by component purl (the purl
+> Knowledge matched, verbatim from the inventory). `new` vs `reappeared` is decided by the
+> Finding's creation time against the baseline's filing time. A Finding in neither SBOM (e.g.
+> opened from a scanner report) and a resolved or archived one land in a fifth count,
+> `not_judged`, so the totals add up without the two SBOMs being made to speak for a Finding they
+> say nothing about. Only `new_sbom` evaluations get an outcome: a re-discovery would repeat the
+> last upload's. An Evidence failure publishes the evaluation WITHOUT the outcome rather than
+> deferring it — the rebuild loop runs on that event and a report must not hold it back. Read
+> back by `GET /releases/{id}/upload-outcome` from `release_evaluated_events`. The intake
+> receipt's link to the event is not built.
+
 **Decision.** For each new SBOM evaluated on a Release, Governance computes, against the
 immediately-previous SBOM of the same Release (the N-M2e baseline rule):
 

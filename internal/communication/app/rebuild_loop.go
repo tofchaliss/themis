@@ -47,6 +47,22 @@ const (
 	SnapshotRebuildBaseline    = "rebuild_baseline_sbom"
 )
 
+// Snapshot keys of the upload outcome (EDR-REMEDIATION-01 D3), copied from the evaluation
+// event onto the ticket and mail intents. Counts are decimal strings; the CVE lists are
+// comma-separated, already sorted and capped by Governance. Absent keys mean the event carried
+// no outcome, which the renderer states by writing no section at all.
+const (
+	SnapshotOutcomeNew             = "outcome_new"
+	SnapshotOutcomeReappeared      = "outcome_reappeared"
+	SnapshotOutcomeNoLongerPresent = "outcome_no_longer_present"
+	SnapshotOutcomeUnchanged       = "outcome_unchanged"
+	SnapshotOutcomeNotJudged       = "outcome_not_judged"
+	SnapshotOutcomeNewCVEs         = "outcome_new_cves"
+	SnapshotOutcomeReappearedCVEs  = "outcome_reappeared_cves"
+	SnapshotOutcomeGoneCVEs        = "outcome_no_longer_present_cves"
+	SnapshotOutcomeHasBaseline     = "outcome_has_baseline"
+)
+
 // ErrLoopUnavailable — the loop has no posture reader; it cannot decide and says so.
 var ErrLoopUnavailable = errors.New("rebuild loop: no posture reader wired")
 
