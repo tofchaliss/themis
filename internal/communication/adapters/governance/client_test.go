@@ -388,15 +388,15 @@ func TestClient_RemediationMetrics(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := governance.NewClient(srv.URL, srv.Client())
-	rep, err := c.RemediationMetrics(context.Background(), "Gate way")
-	if err != nil || rep.Estate.Open != 4 || rep.Estate.TimeToDecision.Count != 3 || len(rep.Products) != 1 || rep.Unattributed != 2 || gotQuery != "product=Gate+way" {
+	rep, err := c.RemediationMetrics(context.Background(), "Gate way", "env:prod")
+	if err != nil || rep.Estate.Open != 4 || rep.Estate.TimeToDecision.Count != 3 || len(rep.Products) != 1 || rep.Unattributed != 2 || gotQuery != "product=Gate+way&tag=env%3Aprod" {
 		t.Fatalf("report = %+v %v (query %q)", rep, err, gotQuery)
 	}
-	if _, err := c.RemediationMetrics(context.Background(), ""); err != nil || gotQuery != "" {
+	if _, err := c.RemediationMetrics(context.Background(), "", ""); err != nil || gotQuery != "" {
 		t.Fatalf("no product = %v (query %q)", err, gotQuery)
 	}
 	srv.Close()
-	if _, err := c.RemediationMetrics(context.Background(), ""); err == nil {
+	if _, err := c.RemediationMetrics(context.Background(), "", ""); err == nil {
 		t.Fatal("transport error swallowed")
 	}
 }

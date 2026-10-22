@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/themis-project/themis/internal/governance/adapters/registry"
@@ -227,13 +228,13 @@ func TestClient_ReleaseProducts(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v1/products":
-			_, _ = w.Write([]byte(`[{"id":"p1","name":"Gateway"},{"id":"p2","name":"Portal"}]`))
+			_, _ = w.Write([]byte(`[{"id":"p1","name":"Gateway","tags":["team:payments"]},{"id":"p2","name":"Portal"}]`))
 		case "/api/v1/products/p1/projects":
-			_, _ = w.Write([]byte(`[{"id":"j1"},{"id":"j2"}]`))
+			_, _ = w.Write([]byte(`[{"id":"j1","tags":["env:prod"]},{"id":"j2"}]`))
 		case "/api/v1/products/p2/projects":
 			_, _ = w.Write([]byte(`[]`))
 		case "/api/v1/projects/j1/releases":
-			_, _ = w.Write([]byte(`[{"id":"r1"},{"id":"r2"}]`))
+			_, _ = w.Write([]byte(`[{"id":"r1","tags":["env:prod","customer-facing"]},{"id":"r2"}]`))
 		case "/api/v1/projects/j2/releases":
 			_, _ = w.Write([]byte(`[{"id":"r3"}]`))
 		default:
@@ -243,7 +244,8 @@ func TestClient_ReleaseProducts(t *testing.T) {
 	defer srv.Close()
 	c := registry.NewClient(srv.URL, srv.Client())
 	got, err := c.ReleaseProducts(context.Background())
-	if err != nil || len(got) != 3 || got["r3"].Name != "Gateway" || got["r1"].ID != "p1" {
+	if err != nil || len(got) != 3 || got["r3"].Name != "Gateway" || got["r1"].ID != "p1" ||
+		strings.Join(got["r1"].Tags, ",") != "customer-facing,env:prod,team:payments" || strings.Join(got["r3"].Tags, ",") != "team:payments" {
 		t.Fatalf("estate = %v %v", got, err)
 	}
 	for _, path := range []string{"/api/v1/products", "/api/v1/products/p1/projects", "/api/v1/projects/j2/releases"} {

@@ -321,10 +321,22 @@ func (h *Handler) ListProducts(w http.ResponseWriter, r *http.Request, params ge
 		writeProblem(w, http.StatusInternalServerError, "cannot list products", err.Error())
 		return
 	}
+	ids := make([]string, len(prods))
+	for i, p := range prods {
+		ids[i] = string(p.ID())
+	}
+	own, keep, err := h.tagFilter(r, domain.TagProduct, ids, nil, strval(params.Tag))
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot list products", err.Error())
+		return
+	}
 	out := make([]gen.ProductView, 0, len(prods))
 	for _, p := range prods {
 		id, name := string(p.ID()), p.Name()
-		out = append(out, gen.ProductView{Id: &id, Name: &name})
+		if !keep[id] {
+			continue
+		}
+		out = append(out, gen.ProductView{Id: &id, Name: &name, Tags: tagsPtr(own[id])})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -342,10 +354,27 @@ func (h *Handler) ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, 
 		writeProblem(w, http.StatusInternalServerError, "cannot list projects", err.Error())
 		return
 	}
+	ids := make([]string, len(projs))
+	for i, p := range projs {
+		ids[i] = string(p.ID())
+	}
+	parent, err := h.svc.Tags(r.Context(), domain.TagProduct, id)
+	var own map[string][]string
+	var keep map[string]bool
+	if err == nil {
+		own, keep, err = h.tagFilter(r, domain.TagProject, ids, parent.Effective, strval(params.Tag))
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot list projects", err.Error())
+		return
+	}
 	out := make([]gen.ProjectView, 0, len(projs))
 	for _, p := range projs {
 		pid, prod, name := string(p.ID()), string(p.ProductID()), p.Name()
-		out = append(out, gen.ProjectView{Id: &pid, ProductId: &prod, Name: &name})
+		if !keep[pid] {
+			continue
+		}
+		out = append(out, gen.ProjectView{Id: &pid, ProductId: &prod, Name: &name, Tags: tagsPtr(own[pid])})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -365,13 +394,30 @@ func (h *Handler) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, 
 	// a list the store already returns whole, and pushing it down would add a second query shape
 	// for no gain at this cardinality (a project has tens of releases, not millions).
 	want := strval(params.Version)
+	ids := make([]string, len(rels))
+	for i, rel := range rels {
+		ids[i] = string(rel.ID())
+	}
+	parent, err := h.svc.Tags(r.Context(), domain.TagProject, id)
+	var own map[string][]string
+	var keep map[string]bool
+	if err == nil {
+		own, keep, err = h.tagFilter(r, domain.TagRelease, ids, parent.Effective, strval(params.Tag))
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot list releases", err.Error())
+		return
+	}
 	out := make([]gen.ReleaseView, 0, len(rels))
 	for _, rel := range rels {
 		if want != "" && rel.Version() != want {
 			continue
 		}
 		rid, proj, ver := string(rel.ID()), string(rel.ProjectID()), rel.Version()
-		out = append(out, gen.ReleaseView{Id: &rid, ProjectId: &proj, Version: &ver})
+		if !keep[rid] {
+			continue
+		}
+		out = append(out, gen.ReleaseView{Id: &rid, ProjectId: &proj, Version: &ver, Tags: tagsPtr(own[rid])})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
@@ -143,8 +144,9 @@ var (
 // their product's figures.
 func (c *Client) ReleaseProducts(ctx context.Context) (map[string]app.ProductRef, error) {
 	var products []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string   `json:"id"`
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
 	}
 	if err := c.get(ctx, "/api/v1/products", &products); err != nil {
 		return nil, fmt.Errorf("registry: list products: %w", err)
@@ -152,20 +154,23 @@ func (c *Client) ReleaseProducts(ctx context.Context) (map[string]app.ProductRef
 	out := map[string]app.ProductRef{}
 	for _, p := range products {
 		var projects []struct {
-			ID string `json:"id"`
+			ID   string   `json:"id"`
+			Tags []string `json:"tags"`
 		}
 		if err := c.get(ctx, "/api/v1/products/"+url.PathEscape(p.ID)+"/projects", &projects); err != nil {
 			return nil, fmt.Errorf("registry: projects of %s: %w", p.ID, err)
 		}
 		for _, pj := range projects {
 			var releases []struct {
-				ID string `json:"id"`
+				ID   string   `json:"id"`
+				Tags []string `json:"tags"`
 			}
 			if err := c.get(ctx, "/api/v1/projects/"+url.PathEscape(pj.ID)+"/releases", &releases); err != nil {
 				return nil, fmt.Errorf("registry: releases of %s: %w", pj.ID, err)
 			}
 			for _, r := range releases {
-				out[r.ID] = app.ProductRef{ID: p.ID, Name: p.Name}
+				// A release's effective tags: its own, its project's and its product's (D7).
+				out[r.ID] = app.ProductRef{ID: p.ID, Name: p.Name, Tags: unionTags(r.Tags, pj.Tags, p.Tags)}
 			}
 		}
 	}
@@ -173,3 +178,18 @@ func (c *Client) ReleaseProducts(ctx context.Context) (map[string]app.ProductRef
 }
 
 var _ app.EstateReader = (*Client)(nil)
+
+func unionTags(sets ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range sets {
+		for _, t := range s {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}

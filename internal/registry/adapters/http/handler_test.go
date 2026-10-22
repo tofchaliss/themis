@@ -38,6 +38,33 @@ type fakeRepo struct {
 	projectIDs map[string]string
 	releaseIDs map[string]string
 	rows       int
+
+	tags    map[string][]string // "kind/id" → own tags (EDR-REMEDIATION-01 D7)
+	tagsErr error
+}
+
+func (r *fakeRepo) SetTags(_ context.Context, kind domain.TagEntity, id string, tags []string) error {
+	if r.tagsErr != nil {
+		return r.tagsErr
+	}
+	if r.tags == nil {
+		r.tags = map[string][]string{}
+	}
+	r.tags[string(kind)+"/"+id] = tags
+	return nil
+}
+
+func (r *fakeRepo) TagsOf(_ context.Context, kind domain.TagEntity, ids []string) (map[string][]string, error) {
+	if r.tagsErr != nil {
+		return nil, r.tagsErr
+	}
+	out := map[string][]string{}
+	for _, id := range ids {
+		if t, ok := r.tags[string(kind)+"/"+id]; ok {
+			out[id] = t
+		}
+	}
+	return out, nil
 }
 
 func newFakeRepo() *fakeRepo {
@@ -45,6 +72,7 @@ func newFakeRepo() *fakeRepo {
 		products: map[string]bool{}, projects: map[string]bool{}, releases: map[string]domain.Release{},
 		microservices: map[string]bool{}, customers: map[string]bool{},
 		productIDs: map[string]string{}, projectIDs: map[string]string{}, releaseIDs: map[string]string{},
+		projectObjs: map[string]domain.Project{},
 	}
 }
 
@@ -81,6 +109,12 @@ func (r *fakeRepo) UpsertProject(_ context.Context, productID, name string) (str
 	id, created := r.findOrCreate(r.projectIDs, productID+"\x00"+strings.ToLower(name))
 	if created {
 		r.projects[id] = true
+		// The upward hop (and the tag inheritance that rides it) sees what the upsert wrote.
+		if r.projectObjs != nil {
+			if p, err := domain.NewProject(domain.ProjectID(id), domain.ProductID(productID), name); err == nil {
+				r.projectObjs[id] = p
+			}
+		}
 	}
 	return id, created, nil
 }

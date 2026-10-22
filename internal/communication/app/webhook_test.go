@@ -214,3 +214,54 @@ func TestSLADigest_RunEvery(t *testing.T) {
 	defer cancel2()
 	d.RunEvery(ctx2, time.Millisecond, nil)
 }
+
+type tagReader struct {
+	tags []string
+	err  error
+}
+
+func (r tagReader) ReleaseTags(context.Context, string) ([]string, error) { return r.tags, r.err }
+
+// D7: a "kind#tag" route sends a tagged Release's event to its own audience, before the plain
+// route; a release without the tag, or a tag read failure, falls back to the plain route.
+func TestEnqueueWebhook_TagRouting(t *testing.T) {
+	ctx := context.Background()
+	cfg := app.DeliveryIntentConfig{WebhookRoutes: map[string]string{
+		app.WebhookReleaseEvaluated:                    "slack-sec",
+		app.WebhookReleaseEvaluated + "#team:payments": "slack-payments",
+		app.WebhookReleaseEvaluated + "#a-first":       "slack-a",
+		app.WebhookReviewDueSoon + "#team:payments":    "slack-payments",
+	}}
+	store := newIntentStore()
+	svc := intentSvc(store, cfg).WithReleaseTags(tagReader{tags: []string{"team:payments", "env:prod"}})
+	in, ok, err := svc.EnqueueWebhook(ctx, lineage(), "env-1", app.WebhookReleaseEvaluated, "rel-1", "", "", "", nil)
+	if err != nil || !ok || in.Destination != "slack-payments" || in.Snapshot[app.SnapshotWebhookRoutedByTag] != "team:payments" {
+		t.Fatalf("tagged = %+v %v %v", in, ok, err)
+	}
+	// Only a tag route exists for review_due_soon: a tagged release posts, an untagged one does not.
+	if in, ok, _ := svc.EnqueueWebhook(ctx, lineage(), "env-2", app.WebhookReviewDueSoon, "rel-1", "", "", "f", nil); !ok || in.Destination != "slack-payments" {
+		t.Fatalf("tag-only route = %+v %v", in, ok)
+	}
+	untagged := intentSvc(newIntentStore(), cfg).WithReleaseTags(tagReader{tags: []string{"env:prod"}})
+	if in, _, _ := untagged.EnqueueWebhook(ctx, lineage(), "env-3", app.WebhookReleaseEvaluated, "rel-2", "", "", "", nil); in.Destination != "slack-sec" || in.Snapshot[app.SnapshotWebhookRoutedByTag] != "" {
+		t.Fatalf("untagged = %+v", in)
+	}
+	if _, ok, _ := untagged.EnqueueWebhook(ctx, lineage(), "env-4", app.WebhookReviewDueSoon, "rel-2", "", "", "f", nil); ok {
+		t.Fatal("untagged release posted on a tag-only route")
+	}
+	failing := intentSvc(newIntentStore(), cfg).WithReleaseTags(tagReader{err: errors.New("registry down")})
+	if in, _, _ := failing.EnqueueWebhook(ctx, lineage(), "env-5", app.WebhookReleaseEvaluated, "rel-1", "", "", "", nil); in.Destination != "slack-sec" {
+		t.Fatalf("tag read failure = %+v", in)
+	}
+	// A kind with no tag routes never reads tags.
+	plainOnly := intentSvc(newIntentStore(), app.DeliveryIntentConfig{WebhookRoutes: map[string]string{app.WebhookDispositionStale: "slack-sec"}}).
+		WithReleaseTags(tagReader{err: errors.New("must not be called")})
+	if in, ok, _ := plainOnly.EnqueueWebhook(ctx, lineage(), "env-7", app.WebhookDispositionStale, "rel-1", "", "", "f", nil); !ok || in.Destination != "slack-sec" {
+		t.Fatalf("plain only = %+v %v", in, ok)
+	}
+	// Sorted tags decide between two matching tag routes.
+	both := intentSvc(newIntentStore(), cfg).WithReleaseTags(tagReader{tags: []string{"team:payments", "a-first"}})
+	if in, _, _ := both.EnqueueWebhook(ctx, lineage(), "env-6", app.WebhookReleaseEvaluated, "rel-1", "", "", "", nil); in.Destination != "slack-a" {
+		t.Fatalf("two matches = %+v", in)
+	}
+}

@@ -1,9 +1,11 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/themis-project/themis/internal/governance/adapters/http/gen"
+	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
 )
 
@@ -13,11 +15,18 @@ func (h *Handler) GetRemediationMetrics(w http.ResponseWriter, r *http.Request, 
 		writeProblem(w, http.StatusServiceUnavailable, "metrics unavailable", "the metrics read is not wired on this node")
 		return
 	}
-	product := ""
+	product, tag := "", ""
 	if params.Product != nil {
 		product = *params.Product
 	}
-	rep, err := h.metrics.Remediation(r.Context(), product)
+	if params.Tag != nil {
+		tag = *params.Tag
+	}
+	rep, err := h.metrics.Remediation(r.Context(), product, tag)
+	if errors.Is(err, app.ErrTagFilterUnavailable) {
+		writeProblem(w, http.StatusServiceUnavailable, "tag filter unavailable", err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, "compute remediation metrics", err)
 		return

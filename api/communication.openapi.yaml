@@ -219,6 +219,12 @@ paths:
           description: Keep only this Product (id or name); the estate figures are always included.
           schema:
             type: string
+        - name: tag
+          in: query
+          required: false
+          description: Keep only Findings on releases carrying this tag (EDR-REMEDIATION-01 D7), estate figures included.
+          schema:
+            type: string
         - name: format
           in: query
           required: false

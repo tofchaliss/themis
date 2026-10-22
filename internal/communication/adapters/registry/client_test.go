@@ -147,3 +147,22 @@ func TestReleaseIdentityWithoutTheAPIKeyFailsClosedAndSaysWhy(t *testing.T) {
 		t.Errorf("err = %v leaked the credential", err)
 	}
 }
+
+func TestReleaseTags(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/releases/rel-1/tags" {
+			_, _ = w.Write([]byte(`{"tags":["a"],"effective":["a","team:payments"]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+	got, err := c.ReleaseTags(context.Background(), "rel-1")
+	if err != nil || len(got) != 2 || got[1] != "team:payments" {
+		t.Fatalf("tags = %v %v", got, err)
+	}
+	if _, err := c.ReleaseTags(context.Background(), "ghost"); err == nil {
+		t.Fatal("404 swallowed")
+	}
+}

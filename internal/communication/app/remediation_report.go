@@ -42,7 +42,7 @@ type RemediationReport struct {
 
 // RemediationMetricsReader reads the figures from Governance.
 type RemediationMetricsReader interface {
-	RemediationMetrics(ctx context.Context, product string) (RemediationReport, error)
+	RemediationMetrics(ctx context.Context, product, tag string) (RemediationReport, error)
 }
 
 // RemediationRenderer renders a report in one format.
@@ -65,7 +65,7 @@ func NewRemediationReports(reader RemediationMetricsReader, renderer Remediation
 }
 
 // Render reads the figures and renders them; it returns the bytes and their content type.
-func (r *RemediationReports) Render(ctx context.Context, product, format string) ([]byte, string, error) {
+func (r *RemediationReports) Render(ctx context.Context, product, tag, format string) ([]byte, string, error) {
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "" {
 		format = "markdown"
@@ -73,7 +73,7 @@ func (r *RemediationReports) Render(ctx context.Context, product, format string)
 	if format != "markdown" && format != "json" {
 		return nil, "", ErrUnknownReportFormat
 	}
-	rep, err := r.reader.RemediationMetrics(ctx, product)
+	rep, err := r.reader.RemediationMetrics(ctx, product, tag)
 	if err != nil {
 		return nil, "", err
 	}

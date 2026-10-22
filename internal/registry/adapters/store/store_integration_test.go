@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -150,6 +151,11 @@ func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), "TRUNCATE deployments, microservices, customers, releases, projects, products RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
+	}
+	// registry_tags (migration 4) is absent while a migration test holds the schema below it.
+	if _, err := pool.Exec(context.Background(),
+		`DO $$ BEGIN IF to_regclass('registry_tags') IS NOT NULL THEN TRUNCATE registry_tags; END IF; END $$`); err != nil {
+		t.Fatalf("truncate tags: %v", err)
 	}
 }
 
@@ -748,5 +754,31 @@ func TestEstateExists(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// EDR-REMEDIATION-01 D7: a tag set is replaced whole, read back sorted, and absent for an
+// entity never tagged; kinds do not mix.
+func TestTagsRoundTrip(t *testing.T) {
+	st := store.New(newPool(t))
+	ctx := context.Background()
+	if err := st.SetTags(ctx, domain.TagProduct, "p1", []string{"env:prod", "team:a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTags(ctx, domain.TagProduct, "p1", []string{"team:b", "env:prod"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTags(ctx, domain.TagProject, "p1", []string{"other-kind"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.TagsOf(ctx, domain.TagProduct, []string{"p1", "p2"})
+	if err != nil || len(got) != 1 || strings.Join(got["p1"], ",") != "env:prod,team:b" {
+		t.Fatalf("tags = %v %v", got, err)
+	}
+	if empty, err := st.TagsOf(ctx, domain.TagProduct, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("no ids = %v %v", empty, err)
+	}
+	if err := st.SetTags(ctx, "customer", "c1", []string{"x"}); err == nil {
+		t.Fatal("an unknown entity kind passed the CHECK")
 	}
 }

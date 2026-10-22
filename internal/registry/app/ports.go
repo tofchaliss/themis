@@ -48,6 +48,11 @@ type Repository interface {
 	MicroserviceExists(ctx context.Context, microserviceID string) (bool, error)
 	CustomerExists(ctx context.Context, customerID string) (bool, error)
 	BlastRadiusCustomers(ctx context.Context, releaseID string) (int, error)
+
+	// Tags (EDR-REMEDIATION-01 D7). SetTags replaces one entity's own tag set; TagsOf reads the
+	// own sets of many entities of one kind in one query (absent ids have no tags).
+	SetTags(ctx context.Context, kind domain.TagEntity, id string, tags []string) error
+	TagsOf(ctx context.Context, kind domain.TagEntity, ids []string) (map[string][]string, error)
 }
 
 // IDGenerator assigns new opaque aggregate identities (backed by kernel/id in the

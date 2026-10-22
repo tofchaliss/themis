@@ -255,10 +255,17 @@ func (c *Client) ReleasePosture(ctx context.Context, releaseID string) ([]app.Ro
 
 // RemediationMetrics reads Governance's remediation metrics (EDR-REMEDIATION-01 D6).
 // Implements app.RemediationMetricsReader.
-func (c *Client) RemediationMetrics(ctx context.Context, product string) (app.RemediationReport, error) {
-	u := c.baseURL + "/api/v1/metrics/remediation"
+func (c *Client) RemediationMetrics(ctx context.Context, product, tag string) (app.RemediationReport, error) {
+	q := url.Values{}
 	if product != "" {
-		u += "?product=" + url.QueryEscape(product)
+		q.Set("product", product)
+	}
+	if tag != "" {
+		q.Set("tag", tag)
+	}
+	u := c.baseURL + "/api/v1/metrics/remediation"
+	if len(q) > 0 {
+		u += "?" + q.Encode()
 	}
 	var rep app.RemediationReport
 	if err := c.getJSON(ctx, u, &rep); err != nil {
