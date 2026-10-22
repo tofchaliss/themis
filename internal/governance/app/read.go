@@ -125,6 +125,8 @@ type ReadService struct {
 	mitigatedWeight float64
 	// sla may be nil — posture rows then carry no SLA reading.
 	sla *SLAService
+	// outcomes may be nil — LatestUploadOutcome then refuses (EDR-REMEDIATION-01 D3).
+	outcomes UploadOutcomeReader
 }
 
 // WithSLA wires the SLA clock onto the posture rollup (EDR-REMEDIATION-01 D1).

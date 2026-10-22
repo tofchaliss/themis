@@ -312,6 +312,32 @@ paths:
                   $ref: '#/components/schemas/PostureEntry'
         '500':
           $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/upload-outcome:
+    get:
+      operationId: getReleaseUploadOutcome
+      summary: >-
+        What the Release's most recent new SBOM changed (EDR-REMEDIATION-01 D3) — new,
+        reappeared, no longer present and unchanged, against the SBOM filed immediately before
+        it. A report, never a state. 404 when no outcome has been stated for this Release yet.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadOutcome'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /releases/{releaseId}/compare/{candidateId}:
     get:
       operationId: compareReleases
@@ -982,6 +1008,43 @@ components:
           type: object
           additionalProperties: true
           description: The governance.release_evaluated.v1 payload exactly as published.
+    UploadOutcome:
+      type: object
+      required: [sbom_id, evaluated_at, new, reappeared, no_longer_present, unchanged, not_judged, has_baseline]
+      properties:
+        sbom_id:
+          type: string
+          description: The SBOM this outcome describes.
+        evaluated_at:
+          type: string
+          format: date-time
+        new:
+          type: integer
+        reappeared:
+          type: integer
+        no_longer_present:
+          type: integer
+          description: Open Findings none of whose components is in this SBOM. They stay open with their Positions.
+        unchanged:
+          type: integer
+        not_judged:
+          type: integer
+          description: Findings in neither SBOM (e.g. from a scanner report), or resolved / archived.
+        new_cves:
+          type: array
+          items:
+            type: string
+        reappeared_cves:
+          type: array
+          items:
+            type: string
+        no_longer_present_cves:
+          type: array
+          items:
+            type: string
+        has_baseline:
+          type: boolean
+          description: False on the Release's first SBOM, where everything present is new.
     SLATarget:
       type: object
       required: [days, enforce]

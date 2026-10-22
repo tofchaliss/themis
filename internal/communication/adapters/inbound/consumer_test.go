@@ -526,3 +526,31 @@ func TestConsumer_ReleaseEvaluatedDrivesTheRebuildLoop(t *testing.T) {
 		t.Errorf("rediscovery: err %v, intents %d", err, len(intents.created))
 	}
 }
+
+// EDR-REMEDIATION-01 D3: the upload outcome on the event is copied onto both intents' snapshots,
+// and an event without one adds no outcome keys (the renderer then writes no section).
+func TestReleaseEvaluated_CarriesTheUploadOutcome(t *testing.T) {
+	payload := `{"product_id":"prod-1","project_id":"prj-1","release_id":"rel-1","sbom_id":"ev-1","cause":"new_sbom",
+		"severity_counts":{"critical":0,"high":0,"medium":0,"low":0},
+		"upload_outcome":{"new":2,"reappeared":0,"no_longer_present":3,"unchanged":9,"not_judged":1,
+			"new_cves":["CVE-1","CVE-2"],"no_longer_present_cves":["CVE-7","CVE-8","CVE-9"],"has_baseline":true}}`
+	intents := newIntentStore()
+	if err := deliveringConsumer(intents).Handle(context.Background(), govEnv("env-o", "governance.release_evaluated", []byte(payload))); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range intents.created {
+		s := in.Snapshot
+		if s[app.SnapshotOutcomeNew] != "2" || s[app.SnapshotOutcomeNoLongerPresent] != "3" || s[app.SnapshotOutcomeUnchanged] != "9" ||
+			s[app.SnapshotOutcomeNotJudged] != "1" || s[app.SnapshotOutcomeReappeared] != "0" || s[app.SnapshotOutcomeGoneCVEs] != "CVE-7,CVE-8,CVE-9" ||
+			s[app.SnapshotOutcomeNewCVEs] != "CVE-1,CVE-2" || s[app.SnapshotOutcomeHasBaseline] != "true" {
+			t.Fatalf("%s snapshot = %v", in.Type, s)
+		}
+	}
+	plain := newIntentStore()
+	if err := deliveringConsumer(plain).Handle(context.Background(), govEnv("env-p", "governance.release_evaluated", []byte(releaseEvaluatedPayload))); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain.created[0].Snapshot[app.SnapshotOutcomeNew]; ok {
+		t.Fatal("an event without an outcome produced outcome keys")
+	}
+}

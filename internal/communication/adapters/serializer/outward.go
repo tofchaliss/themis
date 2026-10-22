@@ -184,6 +184,7 @@ func (r OutwardRenderer) RenderJiraIssue(ctx context.Context, in app.Intent) (st
 		b.WriteString("\nUnknown means no severity could be read for those Findings. They are reported\n")
 		b.WriteString("separately rather than counted as Low: absence of evidence is not mildness.\n")
 	}
+	writeUploadOutcomeSection(&b, in)
 	writeRebuildSection(&b, in)
 	b.WriteString("\nThis ticket is a PROJECTION of Themis state. No Themis decision follows from a Jira\n")
 	b.WriteString("transition, and resolving a Finding stays a decision taken in Themis by a person.\n")
@@ -235,10 +236,41 @@ func (r OutwardRenderer) RenderEvaluationEmail(ctx context.Context, in app.Inten
 			b.WriteString("  " + cve + "\n")
 		}
 	}
+	writeUploadOutcomeSection(&b, in)
 	writeRebuildSection(&b, in)
 	b.WriteString("\nNo Themis decision follows from this mail. The authoritative record is Themis; this\n")
 	b.WriteString("mail carries no attachment and no model output.\n")
 	return subject, []byte(b.String()), nil
+}
+
+// writeUploadOutcomeSection states what this SBOM changed against the one filed before it
+// (EDR-REMEDIATION-01 D3), when the evaluation carried an outcome. It is a report: the wording
+// says plainly that a Finding no longer present is still open, because a reader skimming
+// "3 no longer present" would otherwise take them as closed.
+func writeUploadOutcomeSection(b *strings.Builder, in app.Intent) {
+	if _, ok := in.Snapshot[app.SnapshotOutcomeNew]; !ok {
+		return
+	}
+	b.WriteString("\nWhat this SBOM changed\n")
+	if in.Snapshot[app.SnapshotOutcomeHasBaseline] != "true" {
+		b.WriteString("  This is the Release's first SBOM, so every Finding present is new.\n")
+	}
+	writeFacts(b, []fact{
+		{"New", withCVEs(in.Snapshot[app.SnapshotOutcomeNew], in.Snapshot[app.SnapshotOutcomeNewCVEs])},
+		{"Reappeared", withCVEs(in.Snapshot[app.SnapshotOutcomeReappeared], in.Snapshot[app.SnapshotOutcomeReappearedCVEs])},
+		{"No longer present", withCVEs(in.Snapshot[app.SnapshotOutcomeNoLongerPresent], in.Snapshot[app.SnapshotOutcomeGoneCVEs])},
+		{"Unchanged", in.Snapshot[app.SnapshotOutcomeUnchanged]},
+		{"Not judged", in.Snapshot[app.SnapshotOutcomeNotJudged]},
+	})
+	b.WriteString("  A Finding no longer present in this build is still open, with its decision, until a person resolves it.\n")
+}
+
+// withCVEs is "3 (CVE-1, CVE-2, CVE-3)", or the bare count when there is no list.
+func withCVEs(count, cves string) string {
+	if cves == "" {
+		return count
+	}
+	return count + " (" + strings.ReplaceAll(cves, ",", ", ") + ")"
 }
 
 // writeRebuildSection states the rebuild loop's decision for this evaluation (M2-8 / N-M2i) when

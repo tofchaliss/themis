@@ -650,6 +650,8 @@ async function viewRelease(releaseId, version) {
   try { queue = asArray(await apiGET("communication", "/publishable-positions")).filter((q) => q.release_id === releaseId); } catch { /* optional */ }
   let scans = [];
   try { scans = asArray(await apiGET("evidence", `/evidence?release=${encodeURIComponent(releaseId)}`)).filter((e) => e.kind === "scanner-report"); } catch { /* optional */ }
+  let outcome = null;
+  try { outcome = await apiGET("governance", `/releases/${encodeURIComponent(releaseId)}/upload-outcome`); } catch { /* none yet, or an older node */ }
 
   posture.sort((a, b) => (b.residual_priority - a.residual_priority) || (b.effective_priority - a.effective_priority));
 
@@ -697,6 +699,8 @@ async function viewRelease(releaseId, version) {
       <p class="card-sub">Knowledge's deterministic band, not raw CVSS — critical means CVSS ≥ 9 <em>and</em> KEV-listed.</p>
       ${segBar(bandCounts, unbanded, posture.length)}
     </div>
+
+    ${uploadOutcomeCard(outcome)}
 
     <div class="card">
       <h2 class="card-title">Posture <span class="chip chip-accent">sorted by residual priority</span></h2>
@@ -1032,6 +1036,25 @@ function componentCell(components) {
     + (gap ? ` <span class="chip chip-warn" title="the card names carrier products and none matched a component here — Themis cannot attribute the carrier to anything installed. This says NOTHING about whether these components are affected; it is an attribution observation, not a verdict.">attribution gap</span>` : "")
     + (gapAllCleared ? ` <span class="chip chip-info" title="every recorded copy provably carries its vendor fix, but the carrier itself could not be attributed — so this is NOT counted as an identified false positive">✓ cleared · unattributed</span>` : "")
     + (more > 0 ? ` <span class="chip chip-info">+${more} more</span>` : "");
+}
+
+/* EDR-REMEDIATION-01 D3: what the latest SBOM changed against the one before it. A report, never
+   a state — "no longer present" closes nothing; those Findings stay open with their decisions. */
+function uploadOutcomeCard(o) {
+  if (!o) return "";
+  const list = (cves) => (cves || []).length ? `<div class="card-sub mono">${(cves || []).map(esc).join(", ")}</div>` : "";
+  return `<div class="card">
+      <h2 class="card-title">What the latest SBOM changed</h2>
+      <p class="card-sub">SBOM <span class="mono">${esc(o.sbom_id)}</span>, evaluated ${esc(fmtWhen(o.evaluated_at))}${o.has_baseline ? ", against the SBOM filed before it" : " — the first SBOM of this release, so everything present is new"}.
+        "No longer present" closes nothing: those findings stay open with their decisions until someone resolves them.</p>
+      <div class="grid-tiles">
+        <div class="tile tile-d"><div class="tile-value">${o.new}</div><div class="tile-label">New</div>${list(o.new_cves)}</div>
+        <div class="tile tile-d"><div class="tile-value">${o.reappeared}</div><div class="tile-label">Reappeared</div>${list(o.reappeared_cves)}</div>
+        <div class="tile tile-c"><div class="tile-value">${o.no_longer_present}</div><div class="tile-label">No longer present</div>${list(o.no_longer_present_cves)}</div>
+        <div class="tile tile-b"><div class="tile-value">${o.unchanged}</div><div class="tile-label">Unchanged</div>
+          <div class="tile-note">${o.not_judged} not judged (in neither SBOM, or closed)</div></div>
+      </div>
+    </div>`;
 }
 
 function postureTable(posture) {

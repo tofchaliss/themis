@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/themis-project/themis/internal/governance/app"
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -173,3 +175,68 @@ func (s *Store) ListReleaseEvaluatedEvents(ctx context.Context, after int64, lim
 	}
 	return out, rows.Err()
 }
+
+// UploadFindings reads a Release's Findings with their ACTIVE component purls, for the upload
+// outcome (EDR-REMEDIATION-01 D3). Implements app.UploadFindingsReader.
+func (s *Store) UploadFindings(ctx context.Context, releaseID string) ([]domain.UploadFinding, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.id, f.cve, f.stage, f.created_at, c.purl
+		FROM findings f
+		LEFT JOIN finding_components c ON c.finding_id = f.id AND c.retired_at IS NULL
+		WHERE f.release_id = $1
+		ORDER BY f.id, c.purl`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.UploadFinding
+	last := ""
+	for rows.Next() {
+		var (
+			id, cve, stage string
+			created        time.Time
+			purl           *string
+		)
+		if err := rows.Scan(&id, &cve, &stage, &created, &purl); err != nil {
+			return nil, err
+		}
+		if id != last {
+			out = append(out, domain.UploadFinding{CVE: cve, Stage: domain.Stage(stage), CreatedAt: created.UTC()})
+			last = id
+		}
+		if purl != nil {
+			out[len(out)-1].PURLs = append(out[len(out)-1].PURLs, *purl)
+		}
+	}
+	return out, rows.Err()
+}
+
+var _ app.UploadFindingsReader = (*Store)(nil)
+
+// LatestUploadOutcome reads the newest release-evaluated event of a Release that carries an
+// upload outcome (EDR-REMEDIATION-01 D3). Implements app.UploadOutcomeReader.
+func (s *Store) LatestUploadOutcome(ctx context.Context, releaseID string) (app.UploadOutcomeRecord, bool, error) {
+	var (
+		sbomID string
+		at     time.Time
+		raw    []byte
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT body->>'sbom_id', occurred_at, body->'upload_outcome'
+		FROM release_evaluated_events
+		WHERE release_id = $1 AND body ? 'upload_outcome'
+		ORDER BY seq DESC LIMIT 1`, releaseID).Scan(&sbomID, &at, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.UploadOutcomeRecord{}, false, nil
+	}
+	if err != nil {
+		return app.UploadOutcomeRecord{}, false, err
+	}
+	rec := app.UploadOutcomeRecord{SBOMID: sbomID, EvaluatedAt: at.UTC()}
+	if err := json.Unmarshal(raw, &rec.Outcome); err != nil {
+		return app.UploadOutcomeRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
+var _ app.UploadOutcomeReader = (*Store)(nil)

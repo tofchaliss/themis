@@ -110,7 +110,7 @@ func Wire(
 	}
 	sla := app.NewSLAService(st, productOf, sysClock{})
 	// blastCap normalization (< 2 ⇒ domain.DefaultBlastRadiusCap) is owned by NewReadService.
-	read := app.NewReadService(st, st, blast, blastCap).WithReleaseEvaluatedEvents(st).WithSLA(sla)
+	read := app.NewReadService(st, st, blast, blastCap).WithReleaseEvaluatedEvents(st).WithSLA(sla).WithUploadOutcomeReader(st)
 	// The one configurable stance weight (D14). A zero or out-of-range value keeps the domain
 	// default rather than silently zeroing every mitigated Finding's triage number.
 	if mitigatedWeight > 0 {
@@ -128,8 +128,10 @@ func Wire(
 	}
 	// The Evidence presence seam under the compare read (D16). Empty ⇒ CompareReleases refuses —
 	// fail-CLOSED, unlike the two seams above: a degraded compare would over-claim "fixed".
+	var ev *evidence.Client
 	if evidenceURL != "" {
-		read = read.WithEvidence(evidence.NewClient(evidenceURL, readClient(readAPIKey)))
+		ev = evidence.NewClient(evidenceURL, readClient(readAPIKey))
+		read = read.WithEvidence(ev)
 	}
 	relay := store.NewRelay(pool, pub, 100)
 	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla)
@@ -154,6 +156,11 @@ func Wire(
 		// same worker. Needs the Knowledge read seam.
 		if kn != nil {
 			evaluations = evaluations.WithReleaseRejudge(app.NewReleaseRejudge(write, st, kn))
+		}
+		// What a new SBOM changed (EDR-REMEDIATION-01 D3), read from both SBOMs' inventories.
+		// Without the Evidence seam the evaluation simply carries no outcome.
+		if ev != nil {
+			evaluations = evaluations.WithUploadOutcomes(app.NewUploadOutcomes(ev, st))
 		}
 	}
 	return Governance{

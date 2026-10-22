@@ -104,6 +104,10 @@ type ReleaseEvaluationWorker struct {
 	// once correlation completes; same posture as roll-forward: before publish-and-mark, a
 	// failure defers the row.
 	rejudge *ReleaseRejudge
+	// outcomes, when wired, states what a NEW SBOM changed (EDR-REMEDIATION-01 D3). Unlike the
+	// passes above it never defers the row: the outcome is a report, and an Evidence outage must
+	// not hold back the evaluation the rebuild loop runs on — the event goes out without it.
+	outcomes *UploadOutcomes
 	// retry is the per-row backoff schedule, keyed by queue row id. Entries are dropped on a
 	// successful publish; a row in backoff is skipped, never removed from the queue.
 	retry map[int64]retrySchedule
@@ -128,6 +132,12 @@ func (w *ReleaseEvaluationWorker) WithRollForward(rf *RollForward) *ReleaseEvalu
 // WithReleaseRejudge wires the per-release judgement against the cards (VEX-RAISE-2).
 func (w *ReleaseEvaluationWorker) WithReleaseRejudge(r *ReleaseRejudge) *ReleaseEvaluationWorker {
 	w.rejudge = r
+	return w
+}
+
+// WithUploadOutcomes wires the four-bucket upload outcome (EDR-REMEDIATION-01 D3).
+func (w *ReleaseEvaluationWorker) WithUploadOutcomes(u *UploadOutcomes) *ReleaseEvaluationWorker {
+	w.outcomes = u
 	return w
 }
 
@@ -201,6 +211,15 @@ func (w *ReleaseEvaluationWorker) publish(ctx context.Context, row PendingEvalua
 		return err
 	}
 	ev := domain.NewReleaseEvaluated(productID, projectID, row.ReleaseID, row.SBOMID, row.Cause, counts)
+	if w.outcomes != nil && row.Cause == domain.CauseNewSBOM {
+		// A re-discovery re-correlated an SBOM already reported on; its outcome would repeat the
+		// last upload's, so only a new SBOM gets one.
+		if out, err := w.outcomes.For(ctx, row.ReleaseID, row.SBOMID); err == nil {
+			ev.UploadOutcome = &out
+		} else {
+			w.report("upload outcome not computed — the evaluation is published without it", row.ReleaseID, err)
+		}
+	}
 	return w.store.PublishEvaluatedAndMark(ctx, row, ev, w.clock.Now())
 }
 
