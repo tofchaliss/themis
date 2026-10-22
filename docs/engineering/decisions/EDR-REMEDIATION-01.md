@@ -1,6 +1,8 @@
 # EDR-REMEDIATION-01 — Remediation policy: SLA, risk acceptance, upload outcomes, outbound webhooks, KEV detail, metrics, tags
 
-Status: **PROPOSED 2026-10-22**, for review. Nothing here is implemented. Origin: the owner's pick
+Status: **ACCEPTED 2026-10-22 by the owner** (proposed and answered the same day; Q1–Q5 and the
+safeguards S1–S3 are recorded in D8). Implementation is authorized in the order below, one PR per
+decision. Nothing is implemented yet. Origin: the owner's pick
 of ports 1, 2, 3, 4, 5, 7 and 8 from [`DEFECTDOJO-COMPARISON.md`](../DEFECTDOJO-COMPARISON.md)
 (port 6, more intake dialects, is deferred "as we go on"). Every decision below is a domain-model,
 API or schema change, so each needs the owner's approval before code (CLAUDE.md, "Must ask").
@@ -31,14 +33,14 @@ warning window, default 7 days), `breached`, or `not_applicable`.
 - **The severity is the Finding's `base_score` bucket** (the M1b-5 ladder the tickets already use),
   read at Finding creation and **frozen on the Finding**. A later score change does not move the due
   date; it is shown as "severity changed since the clock started". Recommended because a moving
-  deadline is a deadline nobody can plan against. *(Open question Q1.)*
+  deadline is a deadline nobody can plan against. *(Q1: answered, see D8.)*
 - **A KEV CVE takes CISA's due date when that is earlier** (D5 supplies it).
 - **The clock stops** when the Finding leaves the queue by a human decision: a `not_affected` or
   `mitigated` Position, or the Finding moving to the `resolved` or `archived` stage. It **pauses** under an
   unexpired `accepted_risk` or `deferred` Position and **restarts from zero** when that acceptance
   expires or is re-surfaced (`disposition_stale`). Recommended over "keeps running": an accepted risk
   is a decision with its own review date (D2), and a breach during it would double-count.
-  *(Open question Q2.)*
+  *(Q2: answered, see D8.)*
 - **A breach changes nothing.** It is a projection field on the Finding and the posture, plus an
   event `governance.sla_breached.v1` that Communication can deliver (D4). Never a Position, never a
   stage change (R-A).
@@ -77,7 +79,7 @@ effective).
 - **No "expire silently"**: DefectDojo's `reactivate_expired=false` is not offered. An expired
   acceptance always comes back to the queue.
 - **Required when?** Recommended: `owner` is **required** for a new `accepted_risk` Position from a
-  person; optional for policy and vendor-raised proposals until signed. *(Open question Q3.)*
+  person; optional for policy and vendor-raised proposals until signed. *(Q3: answered, see D8.)*
 
 **Where.** Governance `PositionInputs` + migration; decision API body fields; dashboard decision
 form; the warning on the existing review-by sweep.
@@ -160,7 +162,7 @@ schedule through D4), per Product and estate-wide:
 - **mean time to remediation**, defined as Finding creation to the first evaluated SBOM in which it
   is `no_longer_present` *and* a person has since resolved or decided it — so the metric never counts
   absence alone as a fix (R-B). Recommended; the honest alternative, "until a person resolved it", is
-  shown beside it. *(Open question Q4.)*
+  shown beside it. *(Q4: answered, see D8.)*
 
 Rendered as a Publication (JSON + markdown), like the existing reports, and as a dashboard page. It
 is the first concrete piece of REP-1; the other REP-1 reports keep their own grill.
@@ -185,23 +187,61 @@ parameter on the reads that list them.
 
 ---
 
-## Open questions for the owner
+## D8 — The owner's answers (2026-10-22) and two explicit safeguards
 
-1. **Q1 — does a later severity change move the SLA due date?** Recommended: no, the severity is
-   frozen at creation and the change is shown.
-2. **Q2 — does the SLA clock pause during an accepted risk?** Recommended: pause, restart from zero
-   when the acceptance expires or is re-surfaced.
-3. **Q3 — is an owner required on a person's `accepted_risk`?** Recommended: yes for people, optional
-   for proposals raised by policy or vendor statements until a person signs them.
-4. **Q4 — what counts as "remediated" for mean time to fix?** Recommended: no longer present in an
-   evaluated SBOM *and* a person resolved or decided it; "until resolved" shown beside it.
-5. **Q5 — the default days per severity.** Recommended starting table: Critical 7, High 30,
-   Medium 90, Low 180, all enforced; KEV takes CISA's date when earlier.
+**Q1 — severity changes later: keep the original due date.** The severity bucket is frozen when the
+Finding is created. A later change is shown, with a flag that it differs from the bucket the deadline
+was computed from. The deadline is never silently reset.
+
+**Q2 — during an accepted risk: pause, then restart from zero.** The SLA clock pauses while an
+`accepted_risk` or `deferred` Position remains valid. When it expires or becomes stale and the
+Finding returns to the queue, a new SLA period starts. The Finding's creation time and the
+acceptance history are retained (see S2).
+
+**Q3 — owner on accepted risk: required for human acceptance.** A person creating an `accepted_risk`
+Position must name an accountable owner, kept distinct from the decider. A policy- or vendor-raised
+proposal may omit the owner until a person accepts it, and accepting it then requires one.
+
+**Q4 — what counts as remediated: evidence plus a human decision.** Disappearing from an evaluated
+SBOM is not proof of a fix. The primary remediation metric requires both that the Finding is no
+longer present in an evaluated SBOM and that a person subsequently resolved or decided it. Time to
+human resolution is reported as a separate measure, labelled so the two cannot be confused.
+
+**Q5 — default days to fix: all four enforced.**
+
+| Severity | Default SLA |
+| --- | --- |
+| Critical | 7 days |
+| High | 30 days |
+| Medium | 90 days |
+| Low | 180 days |
+
+The earlier deadline wins when a CISA KEV due date applies. These are initial defaults: one
+estate-wide policy with optional per-Product overrides.
+
+**S1 — an SLA breach never changes governance state.** A breach may update a derived status, emit an
+event, appear in reports and trigger notifications. It must not mark a Finding affected, accept a
+risk, change a stage, or create, edit or retract a Position. This is R-A applied to D1, stated so a
+test can hold it: the breach path writes no Finding aggregate field other than the derived SLA
+projection.
+
+**S2 — restarting the SLA never erases elapsed time.** The active clock may restart after an
+acceptance expires, but the record keeps the original Finding creation time and every period spent
+under acceptance (start, end, Position version). Metrics (D6) report the Finding's total age from
+creation and its total time under acceptance beside the current SLA period, so a long-running risk
+is never understated.
+
+**S3 — ransomware re-surfacing follows the existing path.** An accepted risk that becomes stale because
+ransomware use becomes known (D5) is re-surfaced by the disposition watcher, which records
+`disposition_stale {since, reason}` on the Finding exactly like the KEV and EPSS drifts (RF-2). A
+notification of it (D4, mail) is a consequence of that state, never a substitute for it.
 
 ## Order of work, once approved
 
-D5 (small, feeds D1) → D1 → D2 → D3 → D4 → D6 → D7. Each lands alone with its tests, the
-coverage tiers, a reversible migration, and a VM check recorded in the backlog.
+D5 (small, feeds D1) → D1 → D2 → D3 → D4 → D6 → D7, agreed by the owner. Each lands alone in its own
+PR with focused tests, the coverage tiers, a reversible migration verified up and down, and a VM
+check recorded in the backlog. S1, S2 and S3 each get a named test in the PR that implements the
+decision they constrain.
 
 ## What was considered and not adopted
 

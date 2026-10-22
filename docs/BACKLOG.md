@@ -10,13 +10,14 @@ The single project backlog. Two parts:
 
 ## Part 1 — Greenfield (go-forward, ACTIVE)
 
-> **2026-10-22 — remediation policy design PROPOSED** (owner pick from
+> **2026-10-22 — remediation policy design ACCEPTED** (owner pick from
 > `docs/engineering/DEFECTDOJO-COMPARISON.md`, ports 1–5, 7, 8; port 6, more intake dialects,
 > deferred): [`EDR-REMEDIATION-01`](engineering/decisions/EDR-REMEDIATION-01.md) D1 SLA policy ·
 > D2 risk-acceptance owner/treatment/proof + review warning · D3 upload outcome buckets · D4
 > one-way webhook channel with health · D5 KEV date-added/due/ransomware · D6 remediation metrics
-> · D7 tags on Product/Project/Release. Five open questions (Q1–Q5) for the owner; no code before
-> approval.
+> · D7 tags on Product/Project/Release. Owner's answers to Q1–Q5 and safeguards S1–S3 recorded
+> 2026-10-22 as D8; **ACCEPTED by the owner 2026-10-22**. Build order: D5 KEV detail → D1 SLA → D2
+> risk acceptance → D3 upload outcomes → D4 webhook → D6 metrics → D7 tags, one PR each.
 
 ### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
 
