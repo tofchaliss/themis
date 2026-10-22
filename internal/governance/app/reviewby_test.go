@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -148,7 +149,7 @@ func TestReviewBySweep_RunEveryReports(t *testing.T) {
 	lister := &expiredLister{repo: repo}
 	ctx, cancel := context.WithCancel(context.Background())
 	reports := make(chan int, 8)
-	go app.NewReviewBySweep(writeSvc(repo), lister, fixedClock{}).RunEvery(ctx, 5*time.Millisecond, func(_, resurfaced int, err error) {
+	go app.NewReviewBySweep(writeSvc(repo), lister, fixedClock{}).RunEvery(ctx, 5*time.Millisecond, func(_, resurfaced, _ int, err error) {
 		if err == nil {
 			reports <- resurfaced
 		}
@@ -214,5 +215,171 @@ func TestReactToEnrichment_DriftMarksTheFindingOnce(t *testing.T) {
 	}
 	if repo.saveCalls != 0 {
 		t.Fatalf("saves = %d, want 0 when the mark was set under the write", repo.saveCalls)
+	}
+}
+
+// fakeWarnings lists the fake repo's current Positions due within the window, once per version.
+type fakeWarnings struct {
+	repo      *fakeRepo
+	ids       []domain.FindingID // when set, listed verbatim (to exercise the re-check)
+	listErr   error
+	recordErr error
+	warned    map[string]bool
+	notes     []app.OutboxNote
+}
+
+func (w *fakeWarnings) ReviewsDueSoon(_ context.Context, now, until time.Time, limit int) ([]domain.FindingID, error) {
+	if w.listErr != nil {
+		return nil, w.listErr
+	}
+	if w.ids != nil {
+		return w.ids, nil
+	}
+	var out []domain.FindingID
+	for _, id := range w.repo.order {
+		pos, ok := w.repo.byID[id].CurrentPosition()
+		if ok && domain.ReviewDueWithin(pos, now, until.Sub(now)) && !w.warned[fmt.Sprintf("%s/%d", id, pos.Version())] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+func (w *fakeWarnings) RecordReviewWarning(_ context.Context, id domain.FindingID, v int, _ time.Time, note app.OutboxNote) (bool, error) {
+	if w.recordErr != nil {
+		return false, w.recordErr
+	}
+	if w.warned == nil {
+		w.warned = map[string]bool{}
+	}
+	key := fmt.Sprintf("%s/%d", id, v)
+	if w.warned[key] {
+		return false, nil
+	}
+	w.warned[key] = true
+	w.notes = append(w.notes, note)
+	return true, nil
+}
+
+// D2: a decision whose review date is near is warned once per version, naming the owner, and
+// the Finding is not touched (no save, no version bump).
+func TestReviewBySweep_WarnsBeforeTheDateOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	repo.seed(suppressedUntil(t, domain.StanceAcceptedRisk, domain.ExploitSignals{}, fixedNow.Add(5*24*time.Hour)))
+	before := repo.byID["fnd-1"].Version()
+	w := &fakeWarnings{repo: repo}
+	sweep := app.NewReviewBySweep(writeSvc(repo), &expiredLister{repo: repo}, fixedClock{}).WithWarnings(w, domain.DefaultReviewWarning)
+	if n, err := sweep.Warn(ctx); err != nil || n != 1 {
+		t.Fatalf("warn = %d %v", n, err)
+	}
+	ev, ok := w.notes[0].Event.(domain.ReviewDueSoon)
+	if w.notes[0].EventType != app.EventReviewDueSoon || !ok || ev.Owner != "risk-owner@example.test" || ev.PositionVersion != 1 {
+		t.Fatalf("note = %+v", w.notes[0])
+	}
+	if n, _ := sweep.Warn(ctx); n != 0 {
+		t.Fatalf("second pass warned %d", n)
+	}
+	if repo.byID["fnd-1"].Version() != before || len(repo.lastNotes) != 0 {
+		t.Fatal("a warning wrote the Finding")
+	}
+	// Listed but no longer due under the re-check (re-decided with no date): skipped.
+	repo2 := newRepo()
+	repo2.seed(suppressed(t, domain.StanceNotAffected, domain.ExploitSignals{}))
+	w2 := &fakeWarnings{repo: repo2, ids: []domain.FindingID{"fnd-1"}}
+	if n, err := app.NewReviewBySweep(writeSvc(repo2), &expiredLister{repo: repo2}, fixedClock{}).WithWarnings(w2, domain.DefaultReviewWarning).Warn(ctx); err != nil || n != 0 {
+		t.Fatalf("re-check = %d %v", n, err)
+	}
+	// Not wired, or a zero window: nothing.
+	if n, err := app.NewReviewBySweep(writeSvc(repo), &expiredLister{repo: repo}, fixedClock{}).WithWarnings(w, 0).Warn(ctx); err != nil || n != 0 {
+		t.Fatalf("off = %d %v", n, err)
+	}
+}
+
+func TestReviewBySweep_WarningFailuresSurface(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	repo.seed(suppressedUntil(t, domain.StanceAcceptedRisk, domain.ExploitSignals{}, fixedNow.Add(5*24*time.Hour)))
+	sweep := func(w *fakeWarnings) *app.ReviewBySweep {
+		return app.NewReviewBySweep(writeSvc(repo), &expiredLister{repo: repo}, fixedClock{}).WithWarnings(w, domain.DefaultReviewWarning)
+	}
+	if _, err := sweep(&fakeWarnings{listErr: errors.New("db")}).Warn(ctx); err == nil {
+		t.Fatal("list failure swallowed")
+	}
+	if _, err := sweep(&fakeWarnings{repo: repo, recordErr: errors.New("db")}).Warn(ctx); err == nil {
+		t.Fatal("record failure swallowed")
+	}
+	if _, err := sweep(&fakeWarnings{repo: repo, ids: []domain.FindingID{"ghost"}}).Warn(ctx); err == nil {
+		t.Fatal("read failure swallowed")
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := sweep(&fakeWarnings{repo: repo}).Warn(cctx); err == nil {
+		t.Fatal("cancellation ignored")
+	}
+}
+
+// RunEvery runs the warning pass after the expiry pass and reports both.
+func TestReviewBySweep_RunEveryReportsWarnings(t *testing.T) {
+	repo := newRepo()
+	repo.seed(suppressedUntil(t, domain.StanceAcceptedRisk, domain.ExploitSignals{}, fixedNow.Add(5*24*time.Hour)))
+	w := &fakeWarnings{repo: repo}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go app.NewReviewBySweep(writeSvc(repo), &expiredLister{repo: repo}, fixedClock{}).WithWarnings(w, domain.DefaultReviewWarning).
+		RunEvery(ctx, 5*time.Millisecond, func(_, _, warned int, err error) {
+			if err == nil && warned == 1 {
+				select {
+				case done <- warned:
+				default:
+				}
+				cancel()
+			}
+		})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("no warning reported")
+	}
+	// A failing expiry pass skips the warning pass and reports the error.
+	errs := make(chan error, 1)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	go app.NewReviewBySweep(writeSvc(repo), &expiredLister{err: errors.New("db")}, fixedClock{}).WithWarnings(w, domain.DefaultReviewWarning).
+		RunEvery(ctx2, 5*time.Millisecond, func(_, _, _ int, err error) {
+			select {
+			case errs <- err:
+			default:
+			}
+			cancel2()
+		})
+	if err := <-errs; err == nil {
+		t.Fatal("expiry failure not reported")
+	}
+}
+
+// The service's variadic review-by path still records the date (callers predating D2).
+func TestAcceptProposal_ReviewByStillRecorded(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo()
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "", fixedNow, value.TrustObserved)
+	_ = f.RaiseProposal(p)
+	repo.seed(f)
+	rb := fixedNow.Add(30 * 24 * time.Hour)
+	if err := writeSvc(repo).AcceptProposal(ctx, "fnd-1", "p1", human, rb); err != nil {
+		t.Fatal(err)
+	}
+	if pos, _ := repo.byID["fnd-1"].CurrentPosition(); !pos.Inputs().ReviewBy.Equal(rb) {
+		t.Fatalf("review_by = %v", pos.Inputs().ReviewBy)
+	}
+	// And a person's accepted_risk without an owner is refused through the service too (Q3).
+	g, _ := domain.NewFinding("fnd-2", "rel-1", "fl-2", "CVE-2024-2")
+	q, _ := domain.NewGovernanceProposal("p1", human, domain.StanceAcceptedRisk, "", fixedNow, value.TrustObserved)
+	_ = g.RaiseProposal(q)
+	repo.seed(g)
+	if err := writeSvc(repo).AcceptProposal(ctx, "fnd-2", "p1", human); !errors.Is(err, domain.ErrOwnerRequired) {
+		t.Fatalf("no owner: %v", err)
 	}
 }

@@ -125,7 +125,7 @@ func TestNewDispositionStale(t *testing.T) {
 	if err := f.RaiseProposal(p); err != nil {
 		t.Fatalf("raise: %v", err)
 	}
-	pos, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at)
+	pos, err := f.AcceptProposalWith("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at, domain.AcceptanceTerms{Owner: "risk-owner"})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
@@ -236,7 +236,11 @@ func TestAcceptProposal_ReviewByIsOptional(t *testing.T) {
 		if err := f.RaiseProposal(p); err != nil {
 			t.Fatalf("raise: %v", err)
 		}
-		pos, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at, reviewBy...)
+		terms := domain.AcceptanceTerms{Owner: "risk-owner"}
+		if len(reviewBy) > 0 {
+			terms.ReviewBy = reviewBy[0]
+		}
+		pos, err := f.AcceptProposalWith("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at, terms)
 		if err != nil {
 			t.Fatalf("accept: %v", err)
 		}

@@ -30,6 +30,22 @@ The single project backlog. Two parts:
 > once per period and writes only the breach log and the outbox — S1 and S2 have named tests;
 > dashboard: Due column, SLA-breached tile and filter). VM check: migration 19, then
 > `GET /sla-policy` answers the defaults and a release's posture rows carry `sla`.
+> **D2 risk acceptance shipped 2026-10-22** (Governance: `AcceptanceTerms` — owner, treatment
+> `accept|transfer|avoid|mitigate_later`, proof — on `PositionInputs`; a person accepting an
+> `accepted_risk` must name the owner (Q3, 400 otherwise), policy/system accepts may omit it;
+> terms refused on stances other than accepted_risk/deferred; migration 000020 adds the three
+> columns and `review_warnings`; the review-by timer announces `governance.review_due_soon.v1`
+> once per Position version `THEMIS_REVIEW_WARNING` (default 14 days) ahead; `owner`, `treatment`,
+> `proof`, `review_by` on the Position view; dashboard decision form fields;
+> `vex-accept-applicable.sh --include-will-not-fix --apply` now needs `THEMIS_RISK_OWNER`). Not
+> in this PR: mailing the owner — the event rides the bus and D4's webhook can carry it; a
+> Communication mail for it is a follow-up. VM check: migration 20, then accepting an
+> accepted_risk without an owner answers 400.
+> **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
+> not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
+> before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide
+> whether deferred belongs in `SuppressesTriage`'s expiry path (its stance weight is 0.9, so it
+> was never suppressed out of the queue).
 
 ### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
 

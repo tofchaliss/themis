@@ -192,6 +192,13 @@ func (f *Finding) RaiseProposal(p GovernanceProposal) error {
 // reviewBy is optional and variadic so every existing caller is untouched: a decision taken with no
 // stated shelf life records none, and nothing invents a deadline the decider did not agree to.
 func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time, reviewBy ...time.Time) (Position, error) {
+	return f.AcceptProposalWith(id, by, at, AcceptanceTerms{ReviewBy: firstTime(reviewBy)})
+}
+
+// AcceptProposalWith is AcceptProposal with the full acceptance terms (EDR-REMEDIATION-01 D2):
+// review-by, and for accepted_risk / deferred the owner, treatment and proof. A person accepting
+// an accepted_risk must name the owner (Q3); terms on any other stance are refused.
+func (f *Finding) AcceptProposalWith(id ProposalID, by Actor, at time.Time, terms AcceptanceTerms) (Position, error) {
 	if err := validActor(by); err != nil {
 		return Position{}, err
 	}
@@ -208,6 +215,10 @@ func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time, reviewBy
 	if !f.proposals[idx].IsOpen() {
 		return Position{}, ErrProposalNotOpen
 	}
+	terms, err := checkTerms(f.proposals[idx].stance, by, terms)
+	if err != nil {
+		return Position{}, err
+	}
 	f.proposals[idx].decide(StatusAccepted, by, at)
 	pos := Position{
 		version:   len(f.positions) + 1,
@@ -219,7 +230,8 @@ func (f *Finding) AcceptProposal(id ProposalID, by Actor, at time.Time, reviewBy
 		// the policy path does — a decision's premise must not depend on who took it.
 		inputs: PositionInputs{
 			AcceptedProposalID: id, FaultlineRef: f.faultlineID,
-			DecidedWith: f.signals, ReviewBy: firstTime(reviewBy),
+			DecidedWith: f.signals, ReviewBy: terms.ReviewBy,
+			Owner: terms.Owner, Treatment: terms.Treatment, Proof: terms.Proof,
 		},
 		establishedAt: at.UTC(),
 	}

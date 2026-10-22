@@ -29,6 +29,67 @@ type ReviewBySweep struct {
 	svc    *FindingService
 	lister ExpiredReviewLister
 	clock  Clock
+	// warnings, when wired, warns before the date instead of only after it (EDR-REMEDIATION-01
+	// D2): governance.review_due_soon.v1 once per Position version, `window` ahead.
+	warnings ReviewWarnings
+	window   time.Duration
+}
+
+// ReviewWarnings is the review-warning seam: which current Positions have a review-by date
+// inside the window and have not been warned for that version, and the once-only record of a
+// warning with its outbox note. Recording a warning writes no Finding (it decides nothing).
+type ReviewWarnings interface {
+	ReviewsDueSoon(ctx context.Context, now, until time.Time, limit int) ([]domain.FindingID, error)
+	RecordReviewWarning(ctx context.Context, id domain.FindingID, positionVersion int, reviewBy time.Time, note OutboxNote) (bool, error)
+}
+
+// EventReviewDueSoon announces that a decision's review-by date is near (D2). A fact: the
+// Position is untouched, and expiry still re-surfaces the Finding exactly as before.
+const EventReviewDueSoon = "governance.review_due_soon"
+
+// WithWarnings wires the pre-expiry warning `window` ahead of each review-by date. A window
+// <= 0 leaves warnings off.
+func (r *ReviewBySweep) WithWarnings(w ReviewWarnings, window time.Duration) *ReviewBySweep {
+	if window > 0 {
+		r.warnings, r.window = w, window
+	}
+	return r
+}
+
+// Warn performs one warning pass and reports how many warnings it recorded. A Finding re-decided
+// since it was listed (its current Position no longer due within the window) is skipped.
+func (r *ReviewBySweep) Warn(ctx context.Context) (warned int, err error) {
+	if r.warnings == nil {
+		return 0, nil
+	}
+	now := r.clock.Now()
+	ids, err := r.warnings.ReviewsDueSoon(ctx, now, now.Add(r.window), ReviewBySweepBatch)
+	if err != nil {
+		return 0, fmt.Errorf("list reviews due soon: %w", err)
+	}
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return warned, err
+		}
+		f, err := r.svc.repo.GetByID(ctx, id)
+		if err != nil {
+			return warned, fmt.Errorf("read %s: %w", id, err)
+		}
+		pos, ok := f.CurrentPosition()
+		if !ok || !domain.ReviewDueWithin(pos, now, r.window) {
+			continue
+		}
+		ev := domain.NewReviewDueSoon(f, pos, now)
+		recorded, err := r.warnings.RecordReviewWarning(ctx, id, pos.Version(), pos.Inputs().ReviewBy,
+			OutboxNote{EventType: EventReviewDueSoon, Event: ev, OccurredAt: now})
+		if err != nil {
+			return warned, fmt.Errorf("record review warning %s: %w", id, err)
+		}
+		if recorded {
+			warned++
+		}
+	}
+	return warned, nil
 }
 
 // NewReviewBySweep builds the sweep over the write service and the lister.
@@ -60,9 +121,9 @@ func (r *ReviewBySweep) Run(ctx context.Context) (checked, resurfaced int, err e
 	return checked, resurfaced, nil
 }
 
-// RunEvery runs the sweep on a cadence until ctx is cancelled, reporting each pass through
-// report (nil = silent).
-func (r *ReviewBySweep) RunEvery(ctx context.Context, every time.Duration, report func(checked, resurfaced int, err error)) {
+// RunEvery runs the sweep (expiry, then the warning pass) on a cadence until ctx is cancelled,
+// reporting each pass through report (nil = silent).
+func (r *ReviewBySweep) RunEvery(ctx context.Context, every time.Duration, report func(checked, resurfaced, warned int, err error)) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -71,8 +132,12 @@ func (r *ReviewBySweep) RunEvery(ctx context.Context, every time.Duration, repor
 			return
 		case <-ticker.C:
 			c, n, err := r.Run(ctx)
+			w := 0
+			if err == nil {
+				w, err = r.Warn(ctx)
+			}
 			if report != nil {
-				report(c, n, err)
+				report(c, n, w, err)
 			}
 		}
 	}

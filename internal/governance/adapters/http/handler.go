@@ -18,7 +18,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/themis-project/themis/internal/governance/adapters/http/gen"
 	"github.com/themis-project/themis/internal/governance/adapters/store"
@@ -549,11 +548,11 @@ func (h *Handler) AcceptProposal(w http.ResponseWriter, r *http.Request, id, pro
 	if !h.authorizeGovernanceWrite(w, r, id) {
 		return
 	}
-	decider, reviewBy, ok := decisionFrom(w, r)
+	decider, terms, ok := decisionFrom(w, r)
 	if !ok {
 		return
 	}
-	if err := h.write.AcceptProposal(r.Context(), domain.FindingID(id), domain.ProposalID(proposalID), decider, reviewBy...); err != nil {
+	if err := h.write.AcceptProposalWith(r.Context(), domain.FindingID(id), domain.ProposalID(proposalID), decider, terms); err != nil {
 		writeErr(w, "cannot accept proposal", err)
 		return
 	}
@@ -691,7 +690,7 @@ func toFindingView(f domain.Finding) gen.FindingView {
 func toPositionView(p domain.Position) gen.PositionView {
 	version := p.Version()
 	at := p.EstablishedAt()
-	return gen.PositionView{
+	v := gen.PositionView{
 		Version:            &version,
 		Stance:             strptr(string(p.Stance())),
 		Rationale:          strptr(p.Rationale()),
@@ -701,6 +700,22 @@ func toPositionView(p domain.Position) gen.PositionView {
 		FaultlineRef:       strptr(p.Inputs().FaultlineRef),
 		EstablishedAt:      &at,
 	}
+	in := p.Inputs()
+	if !in.ReviewBy.IsZero() {
+		rb := in.ReviewBy
+		v.ReviewBy = &rb
+	}
+	if in.Owner != "" {
+		v.Owner = strptr(in.Owner)
+	}
+	if in.Treatment != "" {
+		tr := gen.PositionViewTreatment(in.Treatment)
+		v.Treatment = &tr
+	}
+	if in.Proof != "" {
+		v.Proof = strptr(in.Proof)
+	}
+	return v
 }
 
 func toProposalView(p domain.GovernanceProposal) gen.ProposalView {
@@ -903,20 +918,30 @@ func deciderFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, bool) {
 	return actor, ok
 }
 
-// decisionFrom decodes the decider AND the optional review-by date. Kept separate from
-// deciderFrom so the reject path — which has no shelf life to state — is not handed a field it
-// would have to ignore.
-func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, []time.Time, bool) {
+// decisionFrom decodes the decider AND the acceptance terms: the optional review-by date, and
+// for an acceptance the owner, treatment and proof (EDR-REMEDIATION-01 D2). Kept separate from
+// deciderFrom so the reject path — which has no shelf life to state — is not handed fields it
+// would have to ignore. The domain judges the terms; this only carries them.
+func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, domain.AcceptanceTerms, bool) {
 	var body gen.DecisionRequest
 	if !decode(w, r, &body) {
-		return domain.Actor{}, nil, false
+		return domain.Actor{}, domain.AcceptanceTerms{}, false
 	}
-	var reviewBy []time.Time
+	var terms domain.AcceptanceTerms
 	if body.ReviewBy != nil && !body.ReviewBy.IsZero() {
-		reviewBy = append(reviewBy, body.ReviewBy.UTC())
+		terms.ReviewBy = body.ReviewBy.UTC()
+	}
+	if body.Owner != nil {
+		terms.Owner = *body.Owner
+	}
+	if body.Treatment != nil {
+		terms.Treatment = domain.Treatment(*body.Treatment)
+	}
+	if body.Proof != nil {
+		terms.Proof = *body.Proof
 	}
 	actor, ok := deciderActorFrom(w, r, &body)
-	return actor, reviewBy, ok
+	return actor, terms, ok
 }
 
 func deciderActorFrom(w http.ResponseWriter, r *http.Request, body *gen.DecisionRequest) (domain.Actor, bool) {
@@ -962,6 +987,9 @@ func writeErr(w http.ResponseWriter, title string, err error) {
 		writeProblem(w, http.StatusNotFound, title, err.Error())
 	case errors.Is(err, app.ErrUnauthorized):
 		writeProblem(w, http.StatusForbidden, title, err.Error())
+	case errors.Is(err, domain.ErrOwnerRequired), errors.Is(err, domain.ErrInvalidTreatment),
+		errors.Is(err, domain.ErrTermsNotApplicable):
+		writeProblem(w, http.StatusBadRequest, title, err.Error())
 	case errors.Is(err, domain.ErrIllegalTransition),
 		errors.Is(err, domain.ErrProposalNotOpen),
 		errors.Is(err, domain.ErrDuplicateProposal):

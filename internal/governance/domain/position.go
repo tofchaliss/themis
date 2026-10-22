@@ -20,6 +20,12 @@ type PositionInputs struct {
 	// It sits beside DecidedWith for the same reason: both are inputs the decision RESTED on, and
 	// both are unanswerable later from current state alone.
 	ReviewBy time.Time
+	// Owner, Treatment and Proof are the risk-acceptance terms (EDR-REMEDIATION-01 D2): who is
+	// accountable, how it is handled, where the justification is. Empty on every stance other
+	// than accepted_risk and deferred.
+	Owner     string
+	Treatment Treatment
+	Proof     string
 }
 
 // Position is one immutable version of an Enterprise Position — the authoritative,
