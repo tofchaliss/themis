@@ -204,6 +204,43 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /reports/remediation-metrics:
+    get:
+      operationId: getRemediationMetricsReport
+      summary: >
+        The remediation-metrics report (EDR-REMEDIATION-01 D6), rendered on request from
+        Governance's figures — markdown for people (default) or JSON for tools. Stored nowhere.
+        Time to remediation and time to resolution are reported as two labelled measures, never
+        merged (D8 Q4).
+      parameters:
+        - name: product
+          in: query
+          required: false
+          description: Keep only this Product (id or name); the estate figures are always included.
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: false
+          description: markdown (default) or json.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            text/markdown:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/Problem'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /webhook-health:
     get:
       operationId: getWebhookHealth

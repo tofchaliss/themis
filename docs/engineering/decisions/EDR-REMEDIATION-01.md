@@ -207,6 +207,15 @@ already reads: `kev_added` (date), `kev_due` (date) and `kev_ransomware` (`known
 
 ## D6 — Estate remediation metrics as a Publication
 
+> **Realized 2026-10-22, in part.** The numbers are Governance's (`GET /metrics/remediation`,
+> one query over the Findings plus one Registry estate walk, never one call per Finding); the
+> report is Communication's (`GET /reports/remediation-metrics`, markdown or JSON) and the
+> dashboard's Reports page. Time to remediation reads a new projection column,
+> `findings.absent_since`, kept by the D3 upload outcome; it starts counting from this release —
+> earlier absences were never recorded and are not reconstructed. The report is rendered on
+> request and NOT stored as a versioned Publication yet; that, and a scheduled send through D4,
+> remain open.
+
 **Decision.** A Communication report, `remediation-metrics`, materialized on request (and later on a
 schedule through D4), per Product and estate-wide:
 

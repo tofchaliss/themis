@@ -80,7 +80,8 @@ func Wire(pool *pgxpool.Pool, governanceBaseURL, registryBaseURL, readAPIKey str
 		st, serializers, idGen{}, clock)
 	relay := store.NewRelay(pool, pub, 100)
 
-	api := commhttp.NewHandler(write, read).WithRollups(rollups)
+	api := commhttp.NewHandler(write, read).WithRollups(rollups).
+		WithRemediationReports(app.NewRemediationReports(positions, serializer.RemediationRenderer{}))
 	return Communication{
 		Handler:   api.Router(),
 		API:       api,

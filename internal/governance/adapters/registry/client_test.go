@@ -217,3 +217,39 @@ func TestClient_ProductOfRelease_TransportAndDecodeErrors(t *testing.T) {
 		t.Error("transport error must propagate")
 	}
 }
+
+func TestClient_ReleaseProducts(t *testing.T) {
+	fail := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/products":
+			_, _ = w.Write([]byte(`[{"id":"p1","name":"Gateway"},{"id":"p2","name":"Portal"}]`))
+		case "/api/v1/products/p1/projects":
+			_, _ = w.Write([]byte(`[{"id":"j1"},{"id":"j2"}]`))
+		case "/api/v1/products/p2/projects":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/projects/j1/releases":
+			_, _ = w.Write([]byte(`[{"id":"r1"},{"id":"r2"}]`))
+		case "/api/v1/projects/j2/releases":
+			_, _ = w.Write([]byte(`[{"id":"r3"}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+	got, err := c.ReleaseProducts(context.Background())
+	if err != nil || len(got) != 3 || got["r3"].Name != "Gateway" || got["r1"].ID != "p1" {
+		t.Fatalf("estate = %v %v", got, err)
+	}
+	for _, path := range []string{"/api/v1/products", "/api/v1/products/p1/projects", "/api/v1/projects/j2/releases"} {
+		fail = path
+		if _, err := c.ReleaseProducts(context.Background()); err == nil {
+			t.Fatalf("failure at %s swallowed", path)
+		}
+	}
+}

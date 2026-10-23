@@ -35,10 +35,25 @@ type UploadFindingsReader interface {
 // chosen and no outcome is stated.
 var ErrSBOMNotListed = errors.New("governance: the evaluated SBOM is not listed for its release")
 
+// UploadPresenceRecorder keeps each Finding's "no longer present since" mark (D6): set on the
+// first evaluated SBOM that does not carry an open Finding, cleared when one carries it again.
+// A projection column, never a decision.
+type UploadPresenceRecorder interface {
+	RecordPresence(ctx context.Context, gone, present []domain.FindingID, at time.Time) error
+}
+
 // UploadOutcomes computes the four buckets for one (Release, SBOM).
 type UploadOutcomes struct {
 	evidence UploadEvidence
 	findings UploadFindingsReader
+	presence UploadPresenceRecorder // may be nil: no presence marks kept
+	clock    Clock
+}
+
+// WithPresence keeps the presence marks the time-to-remediation measure needs (D6).
+func (u *UploadOutcomes) WithPresence(p UploadPresenceRecorder, clock Clock) *UploadOutcomes {
+	u.presence, u.clock = p, clock
+	return u
 }
 
 // NewUploadOutcomes wires the outcome over the Evidence seam and the Finding reader.
@@ -92,7 +107,13 @@ func (u *UploadOutcomes) For(ctx context.Context, releaseID, sbomID string) (dom
 	if err != nil {
 		return domain.UploadOutcome{}, err
 	}
-	return domain.ClassifyUpload(fs, current, baseline), nil
+	out := domain.ClassifyUpload(fs, current, baseline)
+	if u.presence != nil {
+		if err := u.presence.RecordPresence(ctx, out.GoneIDs, out.PresentIDs, u.clock.Now()); err != nil {
+			return domain.UploadOutcome{}, err
+		}
+	}
+	return out, nil
 }
 
 // UploadOutcomeRecord is the latest stated outcome of a Release, as published.

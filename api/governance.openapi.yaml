@@ -405,6 +405,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /metrics/remediation:
+    get:
+      operationId: getRemediationMetrics
+      summary: >-
+        Remediation metrics (EDR-REMEDIATION-01 D6), estate-wide and per Product: open Findings by
+        age band and severity, the share within SLA and the number breached now, mean time to
+        decision, and two remediation measures kept apart — time to remediation (creation to the
+        first evaluated SBOM that no longer carried it, counted only when a person decided
+        afterwards, D8 Q4) and time to resolution (creation to a person resolving it). Read scope.
+      parameters:
+        - name: product
+          in: query
+          required: false
+          description: Keep only this Product (id or name, case-insensitive). The estate figures always cover everything.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemediationReport'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /sla-policy:
     get:
       operationId: getSLAPolicy
@@ -1045,6 +1072,64 @@ components:
         has_baseline:
           type: boolean
           description: False on the Release's first SBOM, where everything present is new.
+    MeanDays:
+      type: object
+      required: [mean_days, count]
+      properties:
+        mean_days:
+          type: number
+        count:
+          type: integer
+          description: How many Findings the mean is over; 0 means no sample (mean_days is then 0).
+    RemediationMetrics:
+      type: object
+      required: [scope, open, open_by_age, sla_applicable, within_sla, breached_now, within_sla_share, time_to_decision, time_to_remediation, time_to_resolution]
+      properties:
+        scope:
+          type: string
+          description: The Product name; empty for the estate.
+        open:
+          type: integer
+        open_by_age:
+          type: object
+          description: Age band (0-7, 8-30, 31-90, over-90 days) to severity bucket to count.
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: integer
+        sla_applicable:
+          type: integer
+        within_sla:
+          type: integer
+        breached_now:
+          type: integer
+        within_sla_share:
+          type: number
+        time_to_decision:
+          $ref: '#/components/schemas/MeanDays'
+        time_to_remediation:
+          $ref: '#/components/schemas/MeanDays'
+        time_to_resolution:
+          $ref: '#/components/schemas/MeanDays'
+    RemediationReport:
+      type: object
+      required: [estate, products, products_unavailable, unattributed, generated_at]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        estate:
+          $ref: '#/components/schemas/RemediationMetrics'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemediationMetrics'
+        products_unavailable:
+          type: boolean
+          description: The Registry could not be read; only the estate figures are given.
+        unattributed:
+          type: integer
+          description: Findings whose release the Registry estate does not list.
     SLATarget:
       type: object
       required: [days, enforce]

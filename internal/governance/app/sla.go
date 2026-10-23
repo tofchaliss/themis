@@ -148,6 +148,37 @@ func (s *SLAService) ReleaseStatus(ctx context.Context, releaseID string) (map[d
 	return out, nil
 }
 
+// States reads the clock of every running Finding (EDR-REMEDIATION-01 D6's "within SLA" share),
+// paging the same population the sweep reads. A Finding not listed has no running clock.
+func (s *SLAService) States(ctx context.Context) (map[domain.FindingID]domain.SLAState, error) {
+	set, err := s.Policies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policies := map[string]domain.SLAPolicy{}
+	out := map[domain.FindingID]domain.SLAState{}
+	now := s.clock.Now()
+	after := ""
+	for {
+		page, err := s.store.RunningSLAFacts(ctx, after, SLASweepBatch)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range page {
+			p, ok := policies[f.ReleaseID]
+			if !ok {
+				p = s.policyFor(ctx, set, f.ReleaseID)
+				policies[f.ReleaseID] = p
+			}
+			out[f.FindingID] = domain.EvaluateSLA(f.Input, p, now).State
+		}
+		if len(page) < SLASweepBatch {
+			return out, nil
+		}
+		after = string(page[len(page)-1].FindingID)
+	}
+}
+
 // SLASweepBatch bounds one page of the sweep.
 const SLASweepBatch = 500
 

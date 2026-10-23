@@ -201,7 +201,7 @@ func (s *Store) UploadFindings(ctx context.Context, releaseID string) ([]domain.
 			return nil, err
 		}
 		if id != last {
-			out = append(out, domain.UploadFinding{CVE: cve, Stage: domain.Stage(stage), CreatedAt: created.UTC()})
+			out = append(out, domain.UploadFinding{ID: domain.FindingID(id), CVE: cve, Stage: domain.Stage(stage), CreatedAt: created.UTC()})
 			last = id
 		}
 		if purl != nil {
@@ -240,3 +240,28 @@ func (s *Store) LatestUploadOutcome(ctx context.Context, releaseID string) (app.
 }
 
 var _ app.UploadOutcomeReader = (*Store)(nil)
+
+// RecordPresence keeps the "no longer present since" marks (EDR-REMEDIATION-01 D6): the first
+// absence sets it, a later presence clears it. Implements app.UploadPresenceRecorder.
+func (s *Store) RecordPresence(ctx context.Context, gone, present []domain.FindingID, at time.Time) error {
+	ids := func(fs []domain.FindingID) []string {
+		out := make([]string, len(fs))
+		for i, f := range fs {
+			out[i] = string(f)
+		}
+		return out
+	}
+	if len(gone) > 0 {
+		if _, err := s.pool.Exec(ctx, `UPDATE findings SET absent_since = $2 WHERE id = ANY($1) AND absent_since IS NULL`, ids(gone), at); err != nil {
+			return err
+		}
+	}
+	if len(present) > 0 {
+		if _, err := s.pool.Exec(ctx, `UPDATE findings SET absent_since = NULL WHERE id = ANY($1) AND absent_since IS NOT NULL`, ids(present)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ app.UploadPresenceRecorder = (*Store)(nil)

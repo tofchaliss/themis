@@ -1459,6 +1459,50 @@ async function viewCompare() {
 
 /* --- Feeds --- */
 
+/* EDR-REMEDIATION-01 D6: remediation metrics, estate-wide and per product. Time to remediation
+   (no longer in an evaluated SBOM, THEN decided by a person) and time to resolution are two
+   separate measures and are never shown as one. */
+async function viewReports() {
+  setRail("reports");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "Reports" }]);
+  loading("remediation metrics");
+  try {
+    const rep = await apiGET("governance", "/metrics/remediation");
+    if (!rep) { main.innerHTML = `<div class="empty"><b>No metrics</b>This Governance node does not serve them yet.</div>`; return; }
+    const bands = ["0-7", "8-30", "31-90", "over-90"], sevs = ["critical", "high", "medium", "low", "unknown"];
+    const meanCell = (m) => m && m.count ? `${m.mean_days.toFixed(1)} d <span class="card-sub">(n=${m.count})</span>` : `<span class="card-sub">no sample</span>`;
+    const share = (m) => m.sla_applicable ? `${Math.round(m.within_sla_share * 100)}% <span class="card-sub">(${m.within_sla}/${m.sla_applicable})</span>` : `<span class="card-sub">—</span>`;
+    const row = (m) => `<tr><td><b>${esc(m.scope || "Estate")}</b></td><td class="num">${m.open}</td><td>${share(m)}</td>
+      <td class="num">${m.breached_now}</td><td>${meanCell(m.time_to_decision)}</td><td>${meanCell(m.time_to_remediation)}</td><td>${meanCell(m.time_to_resolution)}</td></tr>`;
+    const e = rep.estate;
+    main.innerHTML = `
+      <div class="grid-tiles">
+        <div class="tile tile-b"><div class="tile-value">${e.open}</div><div class="tile-label">Open findings</div><div class="tile-note">estate-wide</div></div>
+        <div class="tile tile-c"><div class="tile-value">${e.sla_applicable ? Math.round(e.within_sla_share * 100) + "%" : "—"}</div><div class="tile-label">Within SLA</div><div class="tile-note">${e.within_sla} of ${e.sla_applicable} running clocks</div></div>
+        <div class="tile tile-d"><div class="tile-value">${e.breached_now}</div><div class="tile-label">Breached now</div><div class="tile-note">a breach changes no decision</div></div>
+        <div class="tile tile-a"><div class="tile-value">${e.time_to_decision.count ? e.time_to_decision.mean_days.toFixed(1) : "—"}</div><div class="tile-label">Days to decision</div><div class="tile-note">creation to first human position</div></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">By product</h2>
+        <p class="card-sub">Time to remediation counts a finding only when an evaluated SBOM stopped carrying it <em>and</em> a person decided afterwards; time to resolution is creation to a person resolving it. ${rep.products_unavailable ? "<b>Per-product figures are unavailable: the product list could not be read.</b>" : ""}
+          ${rep.unattributed ? `${rep.unattributed} finding(s) sit on releases the product list does not include.` : ""}
+          <a href="/api/communication/reports/remediation-metrics" target="_blank" rel="noopener">Markdown report</a> ·
+          <a href="/api/communication/reports/remediation-metrics?format=json" target="_blank" rel="noopener">JSON</a></p>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Scope</th><th class="num">Open</th><th>Within SLA</th><th class="num">Breached</th><th>To decision</th><th>To remediation</th><th>To resolution</th></tr></thead>
+          <tbody>${row(e)}${asArray(rep.products).map(row).join("")}</tbody></table></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Open findings by age (estate)</h2>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Days open</th>${sevs.map((s) => `<th class="num">${esc(s)}</th>`).join("")}</tr></thead>
+          <tbody>${bands.map((b) => `<tr><td>${b}</td>${sevs.map((s) => `<td class="num">${(e.open_by_age[b] || {})[s] || 0}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      </div>`;
+  } catch (err) {
+    main.innerHTML = err instanceof NodeDown ? nodeDownCard(err) : `<div class="err">${esc(err.message)}</div>`;
+  }
+}
+
 async function viewFeeds() {
   setRail("feeds");
   crumbs([{ label: "Overview", href: "#/" }, { label: "Feed health" }]);
@@ -2548,6 +2592,7 @@ function route() {
   const cveRoute = h.match(/^#\/cve\/([^?]+)/);
   if (cveRoute) return viewCVE(decodeURIComponent(cveRoute[1]));
   if (h.startsWith("#/new")) return viewNew();
+  if (h.startsWith("#/reports")) return viewReports();
   if (h.startsWith("#/feeds")) return viewFeeds();
   if (h.startsWith("#/admin")) return viewAdmin();
   return viewOverview();
