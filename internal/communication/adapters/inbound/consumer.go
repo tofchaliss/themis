@@ -241,6 +241,14 @@ func (c *Consumer) recordFindingWebhook(ctx context.Context, env event.Envelope)
 	if errors.Is(err, app.ErrNoSubject) {
 		return nil
 	}
+	if err != nil || kind != app.WebhookReviewDueSoon {
+		return err
+	}
+	// The review warning is also mailed to the review audience, naming the owner (D2).
+	_, err = c.intents.EnqueueReviewDueMail(ctx, lineageOf(env), env.ID, dto.FindingID, dto.ReleaseID, snap)
+	if errors.Is(err, app.ErrNoSubject) {
+		return nil
+	}
 	return err
 }
 

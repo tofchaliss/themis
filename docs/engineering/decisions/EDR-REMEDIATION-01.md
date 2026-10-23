@@ -213,8 +213,8 @@ already reads: `kev_added` (date), `kev_due` (date) and `kev_ransomware` (`known
 > dashboard's Reports page. Time to remediation reads a new projection column,
 > `findings.absent_since`, kept by the D3 upload outcome; it starts counting from this release —
 > earlier absences were never recorded and are not reconstructed. The report is rendered on
-> request and NOT stored as a versioned Publication yet; that, and a scheduled send through D4,
-> remain open.
+> request and NOT stored as a versioned Publication yet. A weekly summary goes out through D4
+> (`remediation_metrics` route, 2026-10-23); the stored Publication remains open.
 
 **Decision.** A Communication report, `remediation-metrics`, materialized on request (and later on a
 schedule through D4), per Product and estate-wide:

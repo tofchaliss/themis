@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,4 +80,81 @@ func (r *RemediationReports) Render(ctx context.Context, product, tag, format st
 		return nil, "", err
 	}
 	return r.renderer.RenderRemediation(rep, format)
+}
+
+// Snapshot keys of the scheduled metrics webhook.
+const (
+	SnapshotMetricsOpen       = "metrics_open"
+	SnapshotMetricsWithin     = "metrics_within_sla"
+	SnapshotMetricsApplicable = "metrics_sla_applicable"
+	SnapshotMetricsBreached   = "metrics_breached_now"
+	SnapshotMetricsDecision   = "metrics_days_to_decision"
+	SnapshotMetricsWorst      = "metrics_most_breached" // "Gateway=4,Portal=1", worst first, at most 5
+)
+
+// MetricsSchedule posts the remediation-metrics summary through the webhook channel on a
+// cadence (EDR-REMEDIATION-01 D6 "later on a schedule through D4"). It runs only while the
+// remediation_metrics route is configured, and sends one summary per pass; the full report stays
+// one click away at /reports/remediation-metrics.
+type MetricsSchedule struct {
+	reader  RemediationMetricsReader
+	intents *DeliveryIntentService
+	ids     IDGenerator
+}
+
+// NewMetricsSchedule wires the schedule.
+func NewMetricsSchedule(reader RemediationMetricsReader, intents *DeliveryIntentService, ids IDGenerator) *MetricsSchedule {
+	return &MetricsSchedule{reader: reader, intents: intents, ids: ids}
+}
+
+// Run sends one summary when the route is configured; it reports whether it sent.
+func (m *MetricsSchedule) Run(ctx context.Context) (bool, error) {
+	if _, ok := m.intents.WebhookAudience(WebhookRemediationMetrics); !ok {
+		return false, nil
+	}
+	rep, err := m.reader.RemediationMetrics(ctx, "", "")
+	if err != nil {
+		return false, err
+	}
+	products := append([]RemediationMetrics(nil), rep.Products...)
+	sort.SliceStable(products, func(i, j int) bool { return products[i].BreachedNow > products[j].BreachedNow })
+	var worst []string
+	for _, p := range products {
+		if p.BreachedNow == 0 || len(worst) == 5 {
+			break
+		}
+		worst = append(worst, p.Scope+"="+strconv.Itoa(p.BreachedNow))
+	}
+	e := rep.Estate
+	snap := map[string]string{
+		SnapshotMetricsOpen:       strconv.Itoa(e.Open),
+		SnapshotMetricsWithin:     strconv.Itoa(e.WithinSLA),
+		SnapshotMetricsApplicable: strconv.Itoa(e.SLAApplicable),
+		SnapshotMetricsBreached:   strconv.Itoa(e.BreachedNow),
+		SnapshotMetricsWorst:      strings.Join(worst, ","),
+	}
+	if e.TimeToDecision.Count > 0 {
+		snap[SnapshotMetricsDecision] = strconv.FormatFloat(e.TimeToDecision.MeanDays, 'f', 1, 64)
+	}
+	id := "metrics:" + m.ids.NewID()
+	_, sent, err := m.intents.EnqueueWebhook(ctx, IntentLineage{EventType: "communication.remediation_metrics", EventID: id},
+		id, WebhookRemediationMetrics, "", "estate", "", "", snap)
+	return sent, err
+}
+
+// RunEvery runs the schedule until ctx is cancelled.
+func (m *MetricsSchedule) RunEvery(ctx context.Context, every time.Duration, report func(sent bool, err error)) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sent, err := m.Run(ctx)
+			if report != nil {
+				report(sent, err)
+			}
+		}
+	}
 }

@@ -261,7 +261,7 @@ func (f Finding) DispositionStale() (since time.Time, reason string, ok bool) {
 // rewrite the record of why somebody was first asked to look again.
 func (f *Finding) MarkDispositionStale(reason string, at time.Time) bool {
 	pos, ok := f.CurrentPosition()
-	if !ok || !SuppressesTriage(pos.Stance()) || !f.staleSince.IsZero() || at.IsZero() {
+	if !ok || !ExpiresOnReview(pos.Stance()) || !f.staleSince.IsZero() || at.IsZero() {
 		return false
 	}
 	f.staleSince, f.staleReason = at.UTC(), strings.TrimSpace(reason)

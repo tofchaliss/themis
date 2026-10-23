@@ -80,11 +80,14 @@ The single project backlog. Two parts:
 > webhook routes `kind#tag=audience`. Dashboard: tag chips and a filter on Estate, a tag filter
 > on Reports). Tags never weight priority and Findings carry none. Not built: a tag filter on
 > What's new, tag editing in the dashboard (API only), tag routing for the SLA digest.
-> **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
-> not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
-> before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide
-> whether deferred belongs in `SuppressesTriage`'s expiry path (its stance weight is 0.9, so it
-> was never suppressed out of the queue).
+> **Remediation follow-ups shipped 2026-10-23:** REVIEW-DEFER-1 DONE — `domain.ExpiresOnReview`
+> (suppressing stances + `deferred`): a deferral past its review date is re-surfaced by the
+> review-by sweep (the drift watcher stays with the suppressing stances). D2 owner mail DONE —
+> `governance.review_due_soon.v1` also mails `THEMIS_COMMUNICATION_REVIEW_AUDIENCE` (default the
+> decision audience), naming the owner. D7 dashboard tag editor on Estate and the What's new tag
+> filter DONE (Registry `GET /tagged-releases?tag=`). D6 schedule DONE — a weekly
+> `remediation_metrics` webhook summary (`THEMIS_COMMUNICATION_METRICS_REPORT_INTERVAL`). Still
+> open: a STORED, versioned metrics Publication; tag routing for the SLA digest.
 
 ### Work order (set 2026-10-17, by owner ask: "add Jira and email with all the moving parts, then reprioritize")
 

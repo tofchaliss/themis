@@ -55,6 +55,8 @@ const (
 	WebhookReviewDueSoon    = "review_due_soon"
 	WebhookDispositionStale = "disposition_stale"
 	WebhookSLABreachDigest  = "sla_breached"
+	// WebhookRemediationMetrics is the scheduled remediation-metrics summary (D6 through D4).
+	WebhookRemediationMetrics = "remediation_metrics"
 )
 
 // SnapshotWebhookEvent is the snapshot key naming a webhook's event kind.
@@ -92,6 +94,10 @@ const notificationDeadLetter = "dead_letter"
 // Release evaluation (EDR-DELIVERY-01 M2-8 step 4 / N-M2f): what the Release's posture is now
 // that the new SBOM has been judged.
 const notificationReleaseEvaluated = "release_evaluated"
+
+// notificationReviewDue marks the mail that warns a decision's review date is near
+// (EDR-REMEDIATION-01 D2).
+const notificationReviewDue = "review_due_soon"
 
 // IntentLineage is the originating envelope's identity, recorded so an outward effect can
 // always be traced back to the fact that caused it. EventSeq is deliberately absent: the bus
@@ -142,6 +148,11 @@ type Intent struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// IsReviewDueNotification reports whether this mail warns that a review date is near (D2).
+func (i Intent) IsReviewDueNotification() bool {
+	return i.Snapshot[snapshotKeyNotification] == notificationReviewDue
 }
 
 // IsDeadLetterNotification reports whether this intent exists to tell a person that another
@@ -284,6 +295,10 @@ type DeliveryIntentConfig struct {
 	EvaluationAudience string // audience told a Release's posture after a new SBOM was judged (N-M2f)
 	RebuildDestination string // governed name of the build job a ci_rebuild intent addresses (N-M2g)
 	DeadLetterAudience string // audience told that a delivery gave up
+	// ReviewAudience is told that a decision's review date is near (D2). The owner is NAMED in
+	// the mail, never mailed directly: an intent addresses a governed audience, not a free-text
+	// identity a decider typed. Empty = the decision audience.
+	ReviewAudience string
 	// WebhookRoutes maps a webhook event kind to the governed audience it posts to (D4). A kind
 	// absent from the map is not sent.
 	WebhookRoutes map[string]string
@@ -310,6 +325,9 @@ func (c DeliveryIntentConfig) withDefaults() DeliveryIntentConfig {
 	}
 	if strings.TrimSpace(c.DeadLetterAudience) == "" {
 		c.DeadLetterAudience = defaultDeadLetterAudience
+	}
+	if strings.TrimSpace(c.ReviewAudience) == "" {
+		c.ReviewAudience = c.DecisionAudience
 	}
 	if strings.TrimSpace(c.RebuildDestination) == "" {
 		c.RebuildDestination = defaultRebuildDestination
@@ -480,6 +498,21 @@ func (s *DeliveryIntentService) EnqueueCIRebuild(ctx context.Context, lineage In
 	putIfSet(in.Snapshot, SnapshotPriorSBOMID, priorSBOMID)
 	in.Snapshot[SnapshotTargetedCVEs] = strings.Join(targeted, ",")
 	in.Snapshot[SnapshotAttempt] = strconv.Itoa(attempt)
+	return s.create(ctx, in)
+}
+
+// EnqueueReviewDueMail records the mail that warns a decision's review date is near
+// (EDR-REMEDIATION-01 D2), to the review audience, naming the accountable owner. No Finding is
+// no subject.
+func (s *DeliveryIntentService) EnqueueReviewDueMail(ctx context.Context, lineage IntentLineage, originEventID, findingID, releaseID string, snapshot map[string]string) (Intent, error) {
+	if strings.TrimSpace(findingID) == "" {
+		return Intent{}, ErrNoSubject
+	}
+	in := s.newIntent(IntentEmail, s.cfg.ReviewAudience, lineage, originEventID, snapshot)
+	in.FindingID, in.ReleaseID = findingID, releaseID
+	in.Snapshot[snapshotKeyNotification] = notificationReviewDue
+	in.Snapshot["finding_id"] = findingID
+	putIfSet(in.Snapshot, "release_id", releaseID)
 	return s.create(ctx, in)
 }
 

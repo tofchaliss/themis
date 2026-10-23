@@ -120,6 +120,7 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		DeadLetterAudience: cfg.DeadLetterAudience,
 		DecisionAudience:   cfg.DecisionAudience,
 		EvaluationAudience: cfg.EvaluationAudience,
+		ReviewAudience:     cfg.ReviewAudience,
 		RebuildDestination: cfg.Jenkins.Job,
 		WebhookRoutes:      cfg.WebhookRoutes,
 	}).WithRebuildCallbacks(comm.Store)
@@ -147,8 +148,13 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	// The SLA breach digest (EDR-REMEDIATION-01 D4) collects only while its route is configured.
 	digest := app.NewSLADigest(comm.Store, intents, comm.Identity, idGen{}, sysClock{})
 	comm.Consumer.WithSLADigest(digest)
-	return delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverersWithHealth(cfg, comm.Store, comm.Store, logger), logger).
+	worker := delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverersWithHealth(cfg, comm.Store, comm.Store, logger), logger).
 		WithSLADigest(digest)
+	// The scheduled remediation summary (D6 through D4) reads the same Governance client.
+	if reader, ok := comm.Posture.(app.RemediationMetricsReader); ok {
+		worker = worker.WithMetricsSchedule(app.NewMetricsSchedule(reader, intents, idGen{}))
+	}
+	return worker
 }
 
 // The delivery-intent store answers the Jira sender's ticket-index question. Asserted here, at the

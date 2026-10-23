@@ -130,3 +130,24 @@ func TestTags_RefusalsAndErrors(t *testing.T) {
 	}
 	_ = domain.TagProduct
 }
+
+func TestListTaggedReleases(t *testing.T) {
+	e := seedEstate(t)
+	admin := serverAs(t, e.repo, auth.Principal{KeyID: "k-a", Name: "admin", Scopes: []string{auth.ScopeAdmin}})
+	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "1.0"})
+	rel := idOf(t, raw)
+	if code, _ := put(t, admin.URL+"/releases/"+rel+"/tags", gen.TagsPut{Tags: []string{"env:prod"}}); code != 200 {
+		t.Fatal(code)
+	}
+	var rels []gen.ReleaseView
+	if code := getJSON(t, admin.URL+"/tagged-releases?tag=env:prod", &rels); code != 200 || len(rels) != 1 || *rels[0].Id != rel {
+		t.Fatalf("tagged = %d %+v", code, rels)
+	}
+	if code := getJSON(t, admin.URL+"/tagged-releases?tag=bad%20tag", nil); code != http.StatusBadRequest {
+		t.Fatalf("bad tag = %d", code)
+	}
+	e.repo.tagsErr2 = errors.New("db")
+	if code := getJSON(t, admin.URL+"/tagged-releases?tag=env:prod", nil); code != http.StatusInternalServerError {
+		t.Fatalf("store error = %d", code)
+	}
+}

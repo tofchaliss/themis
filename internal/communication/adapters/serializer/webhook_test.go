@@ -118,3 +118,44 @@ func TestRenderWebhook_UnknownKind(t *testing.T) {
 		t.Fatal("missing kind rendered")
 	}
 }
+
+func TestRenderReviewDueEmail(t *testing.T) {
+	r := serializer.NewOutwardRenderer(nil).WithIdentity(identitySource{ref: domain.RollupProductRef{Product: "smallbox", Project: "demo", Version: "1.1.0", ReleaseID: "rel-1"}})
+	in := app.Intent{Type: app.IntentEmail, FindingID: "fnd-1", ReleaseID: "rel-1", Snapshot: map[string]string{
+		"notification": "review_due_soon", app.SnapshotCVE: "CVE-1", app.SnapshotOwner: "jane", app.SnapshotStance: "accepted_risk",
+		app.SnapshotReviewBy: "2026-11-05T00:00:00Z"}}
+	payload, err := r.RenderIntentPayload(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, body := app.SplitPayload(payload)
+	if subject != "Themis review due 2026-11-05 - CVE-1 on smallbox / demo v1.1.0" {
+		t.Fatalf("subject = %q", subject)
+	}
+	for _, want := range []string{"Owner:", "jane", "accepted_risk", "comes back to the queue", "No Themis\ndecision follows"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body lacks %q:\n%s", want, body)
+		}
+	}
+	bare := app.Intent{Type: app.IntentEmail, FindingID: "fnd-2", Snapshot: map[string]string{"notification": "review_due_soon"}}
+	payload, _ = serializer.NewOutwardRenderer(nil).RenderIntentPayload(context.Background(), bare)
+	if subject, body := app.SplitPayload(payload); subject != "Themis review due soon - Finding fnd-2 on Release unknown" || !strings.Contains(string(body), "none named") {
+		t.Fatalf("bare = %q\n%s", subject, body)
+	}
+}
+
+func TestRenderWebhook_RemediationMetrics(t *testing.T) {
+	in := hook(app.WebhookRemediationMetrics, map[string]string{app.SnapshotMetricsOpen: "9", app.SnapshotMetricsWithin: "5",
+		app.SnapshotMetricsApplicable: "7", app.SnapshotMetricsBreached: "2", app.SnapshotMetricsDecision: "3.2", app.SnapshotMetricsWorst: "Gateway=4,Portal=1"})
+	in.ReleaseID = ""
+	doc := renderHook(t, serializer.NewOutwardRenderer(nil).WithDashboardURL("https://themis.example"), in)
+	if doc.Summary != "Remediation: 9 open findings; 5 of 7 running SLA clocks within SLA, 2 breached; 3.2 days to a first decision on average. Most breached: Gateway 4, Portal 1." ||
+		doc.Link != "https://themis.example/#/reports" {
+		t.Fatalf("metrics = %+v", doc)
+	}
+	bare := hook(app.WebhookRemediationMetrics, nil)
+	bare.ReleaseID = ""
+	if d := renderHook(t, serializer.NewOutwardRenderer(nil), bare); d.Summary != "Remediation: 0 open findings; 0 of 0 running SLA clocks within SLA, 0 breached." || d.Link != "" {
+		t.Fatalf("bare = %+v", d)
+	}
+}

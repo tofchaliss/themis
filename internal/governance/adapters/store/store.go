@@ -516,7 +516,7 @@ func (s *Store) SuppressedWithExpiredReview(ctx context.Context, now time.Time, 
 		SELECT f.id
 		FROM findings f
 		JOIN finding_positions po ON po.finding_id = f.id AND po.version = f.current_position_version
-		WHERE f.current_stance IN ('not_affected', 'accepted_risk')
+		WHERE f.current_stance IN ('not_affected', 'accepted_risk', 'deferred')
 		  AND f.stale_since IS NULL
 		  AND po.review_by IS NOT NULL AND po.review_by < $1
 		ORDER BY po.review_by, f.id

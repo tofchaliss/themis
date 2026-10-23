@@ -279,3 +279,26 @@ func TestDetectDispositionDrift_RansomwareBecameKnown(t *testing.T) {
 		t.Errorf("a KEV due date is not a drift premise: %+v", d)
 	}
 }
+
+// REVIEW-DEFER-1: a deferral's review date brings the Finding back like a suppression's does;
+// affected and mitigated never expire.
+func TestExpiresOnReview(t *testing.T) {
+	for s, want := range map[domain.Stance]bool{
+		domain.StanceNotAffected: true, domain.StanceAcceptedRisk: true, domain.StanceDeferred: true,
+		domain.StanceAffected: false, domain.StanceMitigated: false, domain.StanceUnderInvestigation: false,
+	} {
+		if got := domain.ExpiresOnReview(s); got != want {
+			t.Errorf("ExpiresOnReview(%s) = %v", s, got)
+		}
+	}
+	f, _ := domain.NewFinding("fnd-1", "rel-1", "fl-1", "CVE-2024-1")
+	at := time.Unix(1_700_000_000, 0).UTC()
+	p, _ := domain.NewGovernanceProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, domain.StanceDeferred, "", at, value.TrustObserved)
+	_ = f.RaiseProposal(p)
+	if _, err := f.AcceptProposal("p1", domain.Actor{Kind: domain.ActorHuman, ID: "a"}, at, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if !f.MarkDispositionStale("the review-by date on this decision has passed", at.Add(2*time.Hour)) {
+		t.Fatal("a deferred decision past its review date was not re-surfaced")
+	}
+}

@@ -116,6 +116,9 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail && in.IsDeadLetterNotification():
 		subject, body := RenderOpsDeadLetterEmail(in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentEmail && in.IsReviewDueNotification():
+		subject, body := r.RenderReviewDueEmail(ctx, in)
+		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentEmail && in.IsEvaluationNotification():
 		subject, body, err := r.RenderEvaluationEmail(ctx, in)
 		if err != nil {
@@ -358,6 +361,36 @@ func RenderDecisionEmail(in app.Intent) (string, []byte) {
 	})
 	b.WriteString("\nThese are the facts as they stood when the decision was taken. The authoritative\n")
 	b.WriteString("record is Themis; this mail carries no attachment and no model output.\n")
+	return subject, []byte(b.String())
+}
+
+// RenderReviewDueEmail renders the warning that a decision's review date is near
+// (EDR-REMEDIATION-01 D2). It names the accountable owner and says what happens on the date:
+// the Finding comes back to the queue; nothing changes before then, and nothing changes because
+// of this mail.
+func (r OutwardRenderer) RenderReviewDueEmail(ctx context.Context, in app.Intent) (string, []byte) {
+	s := in.Snapshot
+	label := "Release " + firstNonEmpty(in.ReleaseID, "unknown")
+	if in.ReleaseID != "" {
+		label, _ = r.releaseLabel(ctx, in)
+	}
+	due := dateOnly(s[app.SnapshotReviewBy])
+	subject := "Themis review due " + firstNonEmpty(due, "soon") + " - " + firstNonEmpty(s[app.SnapshotCVE], "Finding "+in.FindingID) + " on " + label
+
+	var b strings.Builder
+	b.WriteString("A decision recorded in Themis asked to be reviewed by the date below. When that date\n")
+	b.WriteString("passes, the Finding comes back to the queue for someone to re-decide.\n\n")
+	writeFacts(&b, []fact{
+		{"Review by", due},
+		{"Owner", firstNonEmpty(s[app.SnapshotOwner], "none named")},
+		{"Decision", s[app.SnapshotStance]},
+		{"CVE", s[app.SnapshotCVE]},
+		{"Release", label},
+		{"Finding", in.FindingID},
+		{"Event", eventFact(in)},
+	})
+	b.WriteString("\nTo keep the decision, record it again in Themis with a new review date. No Themis\n")
+	b.WriteString("decision follows from this mail.\n")
 	return subject, []byte(b.String())
 }
 
