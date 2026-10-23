@@ -235,6 +235,14 @@ Communication serializer; dashboard "Reports" page.
 
 ## D7 — Tags on Product, Project and Release
 
+> **Realized 2026-10-22, in part.** Registry stores tags in `registry_tags`; tags are lower-cased,
+> 1–64 characters of `a-z 0-9 : . _ / -`, at most 20 per entity, and a PUT replaces the set. The
+> filters are on the Registry list reads, the remediation metrics (D6, estate figures included)
+> and webhook routing (D4: a route `kind#tag=audience` wins over the plain `kind` route; a tag
+> read failure falls back to the plain route, so a filter never costs the message). Not built:
+> the What's new filter, editing in the dashboard, and tag routing for the per-product SLA
+> digest (it groups releases, so no single release's tags apply).
+
 **Decision.** Registry stores a small set of free-form tags per Product, Project and Release
 (`team:payments`, `env:prod`, `customer-facing`), editable by an admin or the product's own key.
 They are **filters only**: on the estate page, What's new, the metrics (D6) and webhook routing (D4,

@@ -563,22 +563,42 @@ function wireDonutTips(host) {
 
 const estate = { productId: null, projectId: null };
 
+/* EDR-REMEDIATION-01 D7: tags are filters only — a chip beside a name, and a filter that keeps
+   the entries carrying the tag in their effective set (own plus parents'). */
+let estateTag = "";
+const tagQuery = (sep) => estateTag ? `${sep}tag=${encodeURIComponent(estateTag)}` : "";
+const tagChips = (tags) => (tags || []).map((t) => ` <span class="chip chip-info">${esc(t)}</span>`).join("");
+
 async function viewEstate() {
   setRail("estate");
   crumbs([{ label: "Overview", href: "#/" }, { label: "Estate" }]);
   loading("estate");
   try {
-    const products = asArray(await apiGET("registry", "/products"));
+    const products = asArray(await apiGET("registry", `/products${tagQuery("?")}`));
     main.innerHTML = `
+      <form class="card" id="estate-tag-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label for="estate-tag" class="card-sub">Filter by tag</label>
+        <input id="estate-tag" class="mono" placeholder="e.g. team:payments" value="${esc(estateTag)}" autocomplete="off">
+        <button class="btn" type="submit">Apply</button>
+        ${estateTag ? `<button class="btn" type="button" id="estate-tag-clear">Clear</button>` : ""}
+        <span class="card-sub">A release carries its project's and product's tags too.</span>
+      </form>
       <div class="cascade">
         <div class="card"><h2 class="card-title">Products</h2><div class="list" id="col-products"></div></div>
         <div class="card"><h2 class="card-title">Projects</h2><div class="list" id="col-projects"><div class="empty">Pick a product</div></div></div>
         <div class="card"><h2 class="card-title">Releases</h2><div class="list" id="col-releases"><div class="empty">Pick a project</div></div></div>
       </div>`;
+    $("#estate-tag-form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      estateTag = $("#estate-tag").value.trim().toLowerCase();
+      viewEstate();
+    });
+    const clear = $("#estate-tag-clear");
+    if (clear) clear.addEventListener("click", () => { estateTag = ""; viewEstate(); });
     const col = $("#col-products");
     col.innerHTML = products.length ? products.map((p) =>
-      `<div class="list-row" data-id="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}<span class="mono">${esc(p.id.slice(0, 8))}</span></div>`
-    ).join("") : `<div class="empty"><b>No products yet</b>Upload the first SBOM via the <a href="#/sbom">SBOM manager</a> (“＋ New product…” registers the chain), or run scripts/gf-upload-sbom.sh.</div>`;
+      `<div class="list-row" data-id="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}${tagChips(p.tags)}<span class="mono">${esc(p.id.slice(0, 8))}</span></div>`
+    ).join("") : estateTag ? `<div class="empty"><b>No product carries ${esc(estateTag)}</b>Tags are set with PUT /products/{id}/tags (or on a project or release).</div>` : `<div class="empty"><b>No products yet</b>Upload the first SBOM via the <a href="#/sbom">SBOM manager</a> (“＋ New product…” registers the chain), or run scripts/gf-upload-sbom.sh.</div>`;
     col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
       col.querySelectorAll(".list-row").forEach((r) => r.classList.remove("active"));
       row.classList.add("active");
@@ -593,9 +613,9 @@ async function loadProjects(productId, productName) {
   const col = $("#col-projects");
   $("#col-releases").innerHTML = `<div class="empty">Pick a project</div>`;
   col.innerHTML = `<div class="loading"><span class="spin"></span></div>`;
-  const projects = asArray(await apiGET("registry", `/products/${encodeURIComponent(productId)}/projects`));
+  const projects = asArray(await apiGET("registry", `/products/${encodeURIComponent(productId)}/projects${tagQuery("?")}`));
   col.innerHTML = projects.length ? projects.map((p) =>
-    `<div class="list-row" data-id="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}<span class="mono">${esc(p.id.slice(0, 8))}</span></div>`
+    `<div class="list-row" data-id="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}${tagChips(p.tags)}<span class="mono">${esc(p.id.slice(0, 8))}</span></div>`
   ).join("") : `<div class="empty"><b>No projects</b>under ${esc(productName)}</div>`;
   col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
     col.querySelectorAll(".list-row").forEach((r) => r.classList.remove("active"));
@@ -607,9 +627,9 @@ async function loadProjects(productId, productName) {
 async function loadReleases(projectId, projectName) {
   const col = $("#col-releases");
   col.innerHTML = `<div class="loading"><span class="spin"></span></div>`;
-  const releases = asArray(await apiGET("registry", `/projects/${encodeURIComponent(projectId)}/releases`));
+  const releases = asArray(await apiGET("registry", `/projects/${encodeURIComponent(projectId)}/releases${tagQuery("?")}`));
   col.innerHTML = releases.length ? releases.map((r) =>
-    `<div class="list-row" data-id="${esc(r.id)}" data-v="${esc(r.version)}">v${esc(r.version)}<span class="mono">${esc(r.id.slice(0, 8))}</span></div>`
+    `<div class="list-row" data-id="${esc(r.id)}" data-v="${esc(r.version)}">v${esc(r.version)}${tagChips(r.tags)}<span class="mono">${esc(r.id.slice(0, 8))}</span></div>`
   ).join("") : `<div class="empty"><b>No releases</b>under ${esc(projectName)} — register one, then upload its SBOM.</div>`;
   col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
     location.hash = `#/release/${row.dataset.id}?v=${encodeURIComponent(row.dataset.v)}`;
@@ -1462,12 +1482,14 @@ async function viewCompare() {
 /* EDR-REMEDIATION-01 D6: remediation metrics, estate-wide and per product. Time to remediation
    (no longer in an evaluated SBOM, THEN decided by a person) and time to resolution are two
    separate measures and are never shown as one. */
+let reportsTag = "";
 async function viewReports() {
   setRail("reports");
   crumbs([{ label: "Overview", href: "#/" }, { label: "Reports" }]);
   loading("remediation metrics");
   try {
-    const rep = await apiGET("governance", "/metrics/remediation");
+    const q = reportsTag ? `?tag=${encodeURIComponent(reportsTag)}` : "";
+    const rep = await apiGET("governance", `/metrics/remediation${q}`);
     if (!rep) { main.innerHTML = `<div class="empty"><b>No metrics</b>This Governance node does not serve them yet.</div>`; return; }
     const bands = ["0-7", "8-30", "31-90", "over-90"], sevs = ["critical", "high", "medium", "low", "unknown"];
     const meanCell = (m) => m && m.count ? `${m.mean_days.toFixed(1)} d <span class="card-sub">(n=${m.count})</span>` : `<span class="card-sub">no sample</span>`;
@@ -1476,6 +1498,12 @@ async function viewReports() {
       <td class="num">${m.breached_now}</td><td>${meanCell(m.time_to_decision)}</td><td>${meanCell(m.time_to_remediation)}</td><td>${meanCell(m.time_to_resolution)}</td></tr>`;
     const e = rep.estate;
     main.innerHTML = `
+      <form class="card" id="reports-tag-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label for="reports-tag" class="card-sub">Only releases tagged</label>
+        <input id="reports-tag" class="mono" placeholder="e.g. env:prod" value="${esc(reportsTag)}" autocomplete="off">
+        <button class="btn" type="submit">Apply</button>
+        <span class="card-sub">${reportsTag ? `Every figure below, estate included, covers only releases tagged <b>${esc(reportsTag)}</b>.` : "Tags filter; they never change a priority."}</span>
+      </form>
       <div class="grid-tiles">
         <div class="tile tile-b"><div class="tile-value">${e.open}</div><div class="tile-label">Open findings</div><div class="tile-note">estate-wide</div></div>
         <div class="tile tile-c"><div class="tile-value">${e.sla_applicable ? Math.round(e.within_sla_share * 100) + "%" : "—"}</div><div class="tile-label">Within SLA</div><div class="tile-note">${e.within_sla} of ${e.sla_applicable} running clocks</div></div>
@@ -1486,8 +1514,8 @@ async function viewReports() {
         <h2 class="card-title">By product</h2>
         <p class="card-sub">Time to remediation counts a finding only when an evaluated SBOM stopped carrying it <em>and</em> a person decided afterwards; time to resolution is creation to a person resolving it. ${rep.products_unavailable ? "<b>Per-product figures are unavailable: the product list could not be read.</b>" : ""}
           ${rep.unattributed ? `${rep.unattributed} finding(s) sit on releases the product list does not include.` : ""}
-          <a href="/api/communication/reports/remediation-metrics" target="_blank" rel="noopener">Markdown report</a> ·
-          <a href="/api/communication/reports/remediation-metrics?format=json" target="_blank" rel="noopener">JSON</a></p>
+          <a href="/api/communication/reports/remediation-metrics${q}" target="_blank" rel="noopener">Markdown report</a> ·
+          <a href="/api/communication/reports/remediation-metrics?format=json${reportsTag ? `&tag=${encodeURIComponent(reportsTag)}` : ""}" target="_blank" rel="noopener">JSON</a></p>
         <div class="tbl-wrap"><table class="tbl">
           <thead><tr><th>Scope</th><th class="num">Open</th><th>Within SLA</th><th class="num">Breached</th><th>To decision</th><th>To remediation</th><th>To resolution</th></tr></thead>
           <tbody>${row(e)}${asArray(rep.products).map(row).join("")}</tbody></table></div>
@@ -1498,6 +1526,11 @@ async function viewReports() {
           <thead><tr><th>Days open</th>${sevs.map((s) => `<th class="num">${esc(s)}</th>`).join("")}</tr></thead>
           <tbody>${bands.map((b) => `<tr><td>${b}</td>${sevs.map((s) => `<td class="num">${(e.open_by_age[b] || {})[s] || 0}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
       </div>`;
+    $("#reports-tag-form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      reportsTag = $("#reports-tag").value.trim().toLowerCase();
+      viewReports();
+    });
   } catch (err) {
     main.innerHTML = err instanceof NodeDown ? nodeDownCard(err) : `<div class="err">${esc(err.message)}</div>`;
   }

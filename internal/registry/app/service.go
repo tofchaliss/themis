@@ -15,6 +15,7 @@ var (
 	ErrUnknownProject      = errors.New("registry: unknown project")
 	ErrUnknownMicroservice = errors.New("registry: unknown microservice")
 	ErrUnknownCustomer     = errors.New("registry: unknown customer")
+	ErrUnknownRelease      = errors.New("registry: unknown release")
 )
 
 // RegistryService orchestrates the registry use cases over its ports.

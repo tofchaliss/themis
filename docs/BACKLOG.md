@@ -72,6 +72,14 @@ The single project backlog. Two parts:
 > request. Dashboard: Reports page). Not built: a STORED, versioned metrics Publication and its
 > scheduled delivery — the report is rendered on request; a schedule would ride D4's webhook.
 > Time to remediation counts only absences recorded from this release on (no back-fill).
+> **D7 tags shipped 2026-10-22** (Registry: migration 000004 `registry_tags`; `GET/PUT
+> /{products,projects,releases}/{id}/tags` — own and effective (a release adds its project's and
+> product's), admin or the owning product's key; `?tag=` on the three list reads, which also
+> return each entry's own tags. Governance: `GET /metrics/remediation?tag=` (estate figures
+> included; 503 when the Registry estate cannot be read). Communication: report `?tag=`,
+> webhook routes `kind#tag=audience`. Dashboard: tag chips and a filter on Estate, a tag filter
+> on Reports). Tags never weight priority and Findings carry none. Not built: a tag filter on
+> What's new, tag editing in the dashboard (API only), tag routing for the SLA digest.
 > **REVIEW-DEFER-1 (LOW, surfaced by D2):** the review-by EXPIRY sweep re-surfaces only
 > not_affected / accepted_risk, so a `deferred` Position whose review date passed is warned
 > before it (D2) and restarts its SLA period (D1) but is not marked `disposition_stale`. Decide

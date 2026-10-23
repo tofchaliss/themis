@@ -421,6 +421,15 @@ paths:
           description: Keep only this Product (id or name, case-insensitive). The estate figures always cover everything.
           schema:
             type: string
+        - name: tag
+          in: query
+          required: false
+          description: >-
+            Keep only Findings on releases carrying this tag in their effective tags (EDR-REMEDIATION-01
+            D7: tags filter, never weight). Applies to the estate figures too. 503 when the Registry
+            estate cannot be read.
+          schema:
+            type: string
       responses:
         '200':
           description: OK.

@@ -15,14 +15,17 @@ func (h *Handler) GetRemediationMetricsReport(w http.ResponseWriter, r *http.Req
 		writeProblem(w, http.StatusServiceUnavailable, "report unavailable", "the remediation report is not wired on this node")
 		return
 	}
-	product, format := "", ""
+	product, tag, format := "", "", ""
 	if params.Product != nil {
 		product = *params.Product
+	}
+	if params.Tag != nil {
+		tag = *params.Tag
 	}
 	if params.Format != nil {
 		format = *params.Format
 	}
-	body, contentType, err := h.reports.Render(r.Context(), product, format)
+	body, contentType, err := h.reports.Render(r.Context(), product, tag, format)
 	switch {
 	case errors.Is(err, app.ErrUnknownReportFormat):
 		writeProblem(w, http.StatusBadRequest, "unknown format", err.Error())

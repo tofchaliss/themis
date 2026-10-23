@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -332,6 +333,51 @@ type DeliveryIntentService struct {
 	renderer IntentPayloadRenderer
 	// callbacks may be nil — RecordRebuildCallback then refuses (N-M2h).
 	callbacks RebuildCallbacks
+	// tags may be nil — webhook routes by tag ("kind#tag") are then never consulted (D7).
+	tags ReleaseTagReader
+}
+
+// ReleaseTagReader reads a Release's effective tags from the Registry (EDR-REMEDIATION-01 D7).
+type ReleaseTagReader interface {
+	ReleaseTags(ctx context.Context, releaseID string) ([]string, error)
+}
+
+// WithReleaseTags turns on tag routing for webhooks: a route "kind#tag=audience" sends that kind
+// of event for a Release carrying the tag to its own audience, before the plain "kind" route.
+func (s *DeliveryIntentService) WithReleaseTags(r ReleaseTagReader) *DeliveryIntentService {
+	s.tags = r
+	return s
+}
+
+// SnapshotWebhookRoutedByTag records which tag chose a webhook's audience, when one did.
+const SnapshotWebhookRoutedByTag = "webhook_routed_by_tag"
+
+// webhookRoute picks the audience for kind on releaseID: the first tag route (tags sorted) whose
+// tag the Release carries, else the plain route. A tag read failure falls back to the plain
+// route — a filter must never cost the message.
+func (s *DeliveryIntentService) webhookRoute(ctx context.Context, kind, releaseID string) (audience, byTag string, ok bool) {
+	if s.tags != nil && strings.TrimSpace(releaseID) != "" && s.hasTagRoutes(kind) {
+		if tags, err := s.tags.ReleaseTags(ctx, releaseID); err == nil {
+			sorted := append([]string(nil), tags...)
+			sort.Strings(sorted)
+			for _, t := range sorted {
+				if a := strings.TrimSpace(s.cfg.WebhookRoutes[kind+"#"+t]); a != "" {
+					return a, t, true
+				}
+			}
+		}
+	}
+	a, ok := s.WebhookAudience(kind)
+	return a, "", ok
+}
+
+func (s *DeliveryIntentService) hasTagRoutes(kind string) bool {
+	for k := range s.cfg.WebhookRoutes {
+		if strings.HasPrefix(k, kind+"#") {
+			return true
+		}
+	}
+	return false
 }
 
 // NewDeliveryIntentService wires the service over the intent store; empty destination names
@@ -449,7 +495,7 @@ func (s *DeliveryIntentService) WebhookAudience(kind string) (string, bool) {
 // originEventID deduplicates per (event, type) like every other intent; a digest passes its
 // own digest id.
 func (s *DeliveryIntentService) EnqueueWebhook(ctx context.Context, lineage IntentLineage, originEventID, kind, releaseID, productID, projectID, findingID string, snapshot map[string]string) (Intent, bool, error) {
-	audience, ok := s.WebhookAudience(kind)
+	audience, byTag, ok := s.webhookRoute(ctx, kind, releaseID)
 	if !ok {
 		return Intent{}, false, nil
 	}
@@ -459,6 +505,7 @@ func (s *DeliveryIntentService) EnqueueWebhook(ctx context.Context, lineage Inte
 	in := s.newIntent(IntentWebhook, audience, lineage, originEventID, snapshot)
 	in.ReleaseID, in.ProductID, in.ProjectID, in.FindingID = releaseID, productID, projectID, findingID
 	in.Snapshot[SnapshotWebhookEvent] = kind
+	putIfSet(in.Snapshot, SnapshotWebhookRoutedByTag, byTag)
 	putIfSet(in.Snapshot, "release_id", releaseID)
 	putIfSet(in.Snapshot, "product_id", productID)
 	putIfSet(in.Snapshot, "project_id", projectID)

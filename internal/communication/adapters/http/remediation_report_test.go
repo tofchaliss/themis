@@ -19,7 +19,7 @@ type reportSource struct {
 	err error
 }
 
-func (r reportSource) RemediationMetrics(context.Context, string) (app.RemediationReport, error) {
+func (r reportSource) RemediationMetrics(context.Context, string, string) (app.RemediationReport, error) {
 	return r.rep, r.err
 }
 
@@ -48,7 +48,7 @@ func get(t *testing.T, url string) (int, string, string) {
 
 func TestGetRemediationMetricsReport(t *testing.T) {
 	srv := reportServer(t, reportSource{rep: app.RemediationReport{Estate: app.RemediationMetrics{Open: 7}}})
-	code, ct, body := get(t, srv.URL+"/reports/remediation-metrics?product=Gateway")
+	code, ct, body := get(t, srv.URL+"/reports/remediation-metrics?product=Gateway&tag=env:prod")
 	if code != 200 || !strings.HasPrefix(ct, "text/markdown") || !strings.Contains(body, "Open findings: 7") {
 		t.Fatalf("markdown = %d %s %s", code, ct, body)
 	}

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -123,3 +124,17 @@ func (c *Client) credentialHint(status int) string {
 	}
 	return " — this read sent an X-API-Key Registry refused; check THEMIS_API_KEY is current and has read scope"
 }
+
+// ReleaseTags reads a Release's effective tags (its own plus its project's and product's —
+// EDR-REMEDIATION-01 D7). Implements app.ReleaseTagReader.
+func (c *Client) ReleaseTags(ctx context.Context, releaseID string) ([]string, error) {
+	var ts struct {
+		Effective []string `json:"effective"`
+	}
+	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID)+"/tags", &ts); err != nil {
+		return nil, fmt.Errorf("registry: tags of release %s: %w", releaseID, err)
+	}
+	return ts.Effective, nil
+}
+
+var _ app.ReleaseTagReader = (*Client)(nil)

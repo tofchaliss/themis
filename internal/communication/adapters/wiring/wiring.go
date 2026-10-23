@@ -123,6 +123,11 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		RebuildDestination: cfg.Jenkins.Job,
 		WebhookRoutes:      cfg.WebhookRoutes,
 	}).WithRebuildCallbacks(comm.Store)
+	// Webhook routes by tag ("kind#tag=audience", EDR-REMEDIATION-01 D7) read the release's
+	// effective tags over the same Registry client the names come from.
+	if tags, ok := comm.Identity.(app.ReleaseTagReader); ok {
+		intents = intents.WithReleaseTags(tags)
+	}
 	if comm.API != nil {
 		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
 		comm.API.WithWebhookHealth(comm.Store)  // D4: the Feeds page reads destination health

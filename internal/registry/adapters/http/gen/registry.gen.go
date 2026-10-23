@@ -42,15 +42,17 @@ type Problem struct {
 
 // ProductView defines model for ProductView.
 type ProductView struct {
-	Id   *string `json:"id,omitempty"`
-	Name *string `json:"name,omitempty"`
+	Id   *string   `json:"id,omitempty"`
+	Name *string   `json:"name,omitempty"`
+	Tags *[]string `json:"tags,omitempty"`
 }
 
 // ProjectView defines model for ProjectView.
 type ProjectView struct {
-	Id        *string `json:"id,omitempty"`
-	Name      *string `json:"name,omitempty"`
-	ProductId *string `json:"product_id,omitempty"`
+	Id        *string   `json:"id,omitempty"`
+	Name      *string   `json:"name,omitempty"`
+	ProductId *string   `json:"product_id,omitempty"`
+	Tags      *[]string `json:"tags,omitempty"`
 }
 
 // RegisterCustomerRequest defines model for RegisterCustomerRequest.
@@ -100,27 +102,52 @@ type Release struct {
 
 // ReleaseView defines model for ReleaseView.
 type ReleaseView struct {
-	Id        *string `json:"id,omitempty"`
-	ProjectId *string `json:"project_id,omitempty"`
-	Version   *string `json:"version,omitempty"`
+	Id        *string   `json:"id,omitempty"`
+	ProjectId *string   `json:"project_id,omitempty"`
+	Tags      *[]string `json:"tags,omitempty"`
+	Version   *string   `json:"version,omitempty"`
+}
+
+// TagSet defines model for TagSet.
+type TagSet struct {
+	// Effective Own tags plus the parents' (a release adds its project's and product's).
+	Effective []string `json:"effective"`
+
+	// Tags The entity's own tags.
+	Tags []string `json:"tags"`
+}
+
+// TagsPut defines model for TagsPut.
+type TagsPut struct {
+	// Tags Lower-cased, 1–64 characters of a-z, 0-9 and the marks colon, dot, underscore, slash, hyphen; at most 20. Replaces the set.
+	Tags []string `json:"tags"`
 }
 
 // ListProductsParams defines parameters for ListProducts.
 type ListProductsParams struct {
 	// Name Exact product name. Absent = all products.
 	Name *string `form:"name,omitempty" json:"name,omitempty"`
+
+	// Tag Keep only entries carrying this tag in their effective tags (own plus parents'). EDR-REMEDIATION-01 D7.
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
 // ListProjectsOfProductParams defines parameters for ListProjectsOfProduct.
 type ListProjectsOfProductParams struct {
 	// Name Exact project name.
 	Name *string `form:"name,omitempty" json:"name,omitempty"`
+
+	// Tag Keep only entries carrying this tag in their effective tags (own plus parents'). EDR-REMEDIATION-01 D7.
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
 // ListReleasesOfProjectParams defines parameters for ListReleasesOfProject.
 type ListReleasesOfProjectParams struct {
 	// Version Exact release version — completes the product/project/version traversal a human actually has.
 	Version *string `form:"version,omitempty" json:"version,omitempty"`
+
+	// Tag Keep only entries carrying this tag in their effective tags (own plus parents'). EDR-REMEDIATION-01 D7.
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
 // ListReleasesParams defines parameters for ListReleases.
@@ -140,11 +167,20 @@ type RegisterProductJSONRequestBody = RegisterProductRequest
 // RegisterMicroserviceJSONRequestBody defines body for RegisterMicroservice for application/json ContentType.
 type RegisterMicroserviceJSONRequestBody = RegisterMicroserviceRequest
 
+// PutProductTagsJSONRequestBody defines body for PutProductTags for application/json ContentType.
+type PutProductTagsJSONRequestBody = TagsPut
+
 // RegisterProjectJSONRequestBody defines body for RegisterProject for application/json ContentType.
 type RegisterProjectJSONRequestBody = RegisterProjectRequest
 
+// PutProjectTagsJSONRequestBody defines body for PutProjectTags for application/json ContentType.
+type PutProjectTagsJSONRequestBody = TagsPut
+
 // RegisterReleaseJSONRequestBody defines body for RegisterRelease for application/json ContentType.
 type RegisterReleaseJSONRequestBody = RegisterReleaseRequest
+
+// PutReleaseTagsJSONRequestBody defines body for PutReleaseTags for application/json ContentType.
+type PutReleaseTagsJSONRequestBody = TagsPut
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -169,6 +205,12 @@ type ServerInterface interface {
 	// List the projects under a product.
 	// (GET /products/{id}/projects)
 	ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, id string, params ListProjectsOfProductParams)
+	// A product's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+	// (GET /products/{id}/tags)
+	GetProductTags(w http.ResponseWriter, r *http.Request, id string)
+	// Replace a product's own tags. Admin, or a key scoped to the owning product.
+	// (PUT /products/{id}/tags)
+	PutProductTags(w http.ResponseWriter, r *http.Request, id string)
 	// Register a project under a product; returns a stable Project ID.
 	// (POST /projects)
 	RegisterProject(w http.ResponseWriter, r *http.Request)
@@ -178,6 +220,12 @@ type ServerInterface interface {
 	// List the releases under a project.
 	// (GET /projects/{id}/releases)
 	ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams)
+	// A project's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+	// (GET /projects/{id}/tags)
+	GetProjectTags(w http.ResponseWriter, r *http.Request, id string)
+	// Replace a project's own tags. Admin, or a key scoped to the owning product.
+	// (PUT /projects/{id}/tags)
+	PutProjectTags(w http.ResponseWriter, r *http.Request, id string)
 	// List the releases of a project.
 	// (GET /releases)
 	ListReleases(w http.ResponseWriter, r *http.Request, params ListReleasesParams)
@@ -190,6 +238,12 @@ type ServerInterface interface {
 	// Count the unique customers a release reaches through the estate graph.
 	// (GET /releases/{id}/blast-radius)
 	GetBlastRadius(w http.ResponseWriter, r *http.Request, id string)
+	// A release's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+	// (GET /releases/{id}/tags)
+	GetReleaseTags(w http.ResponseWriter, r *http.Request, id string)
+	// Replace a release's own tags. Admin, or a key scoped to the owning product.
+	// (PUT /releases/{id}/tags)
+	PutReleaseTags(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -238,6 +292,18 @@ func (_ Unimplemented) ListProjectsOfProduct(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// A product's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+// (GET /products/{id}/tags)
+func (_ Unimplemented) GetProductTags(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replace a product's own tags. Admin, or a key scoped to the owning product.
+// (PUT /products/{id}/tags)
+func (_ Unimplemented) PutProductTags(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Register a project under a product; returns a stable Project ID.
 // (POST /projects)
 func (_ Unimplemented) RegisterProject(w http.ResponseWriter, r *http.Request) {
@@ -253,6 +319,18 @@ func (_ Unimplemented) GetProject(w http.ResponseWriter, r *http.Request, id str
 // List the releases under a project.
 // (GET /projects/{id}/releases)
 func (_ Unimplemented) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A project's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+// (GET /projects/{id}/tags)
+func (_ Unimplemented) GetProjectTags(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replace a project's own tags. Admin, or a key scoped to the owning product.
+// (PUT /projects/{id}/tags)
+func (_ Unimplemented) PutProjectTags(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -277,6 +355,18 @@ func (_ Unimplemented) GetRelease(w http.ResponseWriter, r *http.Request, id str
 // Count the unique customers a release reaches through the estate graph.
 // (GET /releases/{id}/blast-radius)
 func (_ Unimplemented) GetBlastRadius(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A release's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
+// (GET /releases/{id}/tags)
+func (_ Unimplemented) GetReleaseTags(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replace a release's own tags. Admin, or a key scoped to the owning product.
+// (PUT /releases/{id}/tags)
+func (_ Unimplemented) PutReleaseTags(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -347,6 +437,19 @@ func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.R
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
 		}
 		return
 	}
@@ -459,8 +562,73 @@ func (siw *ServerInterfaceWrapper) ListProjectsOfProduct(w http.ResponseWriter, 
 		return
 	}
 
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListProjectsOfProduct(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProductTags operation middleware
+func (siw *ServerInterfaceWrapper) GetProductTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProductTags(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutProductTags operation middleware
+func (siw *ServerInterfaceWrapper) PutProductTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutProductTags(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -541,8 +709,73 @@ func (siw *ServerInterfaceWrapper) ListReleasesOfProject(w http.ResponseWriter, 
 		return
 	}
 
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListReleasesOfProject(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProjectTags operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectTags(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutProjectTags operation middleware
+func (siw *ServerInterfaceWrapper) PutProjectTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutProjectTags(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -642,6 +875,58 @@ func (siw *ServerInterfaceWrapper) GetBlastRadius(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBlastRadius(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseTags operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseTags(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutReleaseTags operation middleware
+func (siw *ServerInterfaceWrapper) PutReleaseTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutReleaseTags(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -786,6 +1071,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/products/{id}/projects", wrapper.ListProjectsOfProduct)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/products/{id}/tags", wrapper.GetProductTags)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/products/{id}/tags", wrapper.PutProductTags)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/projects", wrapper.RegisterProject)
 	})
 	r.Group(func(r chi.Router) {
@@ -793,6 +1084,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/projects/{id}/releases", wrapper.ListReleasesOfProject)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/projects/{id}/tags", wrapper.GetProjectTags)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/projects/{id}/tags", wrapper.PutProjectTags)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases", wrapper.ListReleases)
@@ -806,6 +1103,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}/blast-radius", wrapper.GetBlastRadius)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/tags", wrapper.GetReleaseTags)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/releases/{id}/tags", wrapper.PutReleaseTags)
+	})
 
 	return r
 }
@@ -815,46 +1118,53 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"yUZ9xaDWUmXROBqygg+vjqLr99f/HgA=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

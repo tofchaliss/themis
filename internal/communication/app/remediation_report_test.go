@@ -14,8 +14,8 @@ type repReader struct {
 	product string
 }
 
-func (r *repReader) RemediationMetrics(_ context.Context, product string) (app.RemediationReport, error) {
-	r.product = product
+func (r *repReader) RemediationMetrics(_ context.Context, product, tag string) (app.RemediationReport, error) {
+	r.product = product + "|" + tag
 	return r.rep, r.err
 }
 
@@ -30,17 +30,17 @@ func TestRemediationReports_Render(t *testing.T) {
 	ctx := context.Background()
 	reader, renderer := &repReader{}, &repRenderer{}
 	reps := app.NewRemediationReports(reader, renderer)
-	if b, ct, err := reps.Render(ctx, "Gateway", ""); err != nil || string(b) != "markdown" || ct != "text/markdown" || reader.product != "Gateway" {
+	if b, ct, err := reps.Render(ctx, "Gateway", "env:prod", ""); err != nil || string(b) != "markdown" || ct != "text/markdown" || reader.product != "Gateway|env:prod" {
 		t.Fatalf("default = %s %s %v", b, ct, err)
 	}
-	if b, _, err := reps.Render(ctx, "", " JSON "); err != nil || string(b) != "json" {
+	if b, _, err := reps.Render(ctx, "", "", " JSON "); err != nil || string(b) != "json" {
 		t.Fatalf("json = %s %v", b, err)
 	}
-	if _, _, err := reps.Render(ctx, "", "pdf"); !errors.Is(err, app.ErrUnknownReportFormat) {
+	if _, _, err := reps.Render(ctx, "", "", "pdf"); !errors.Is(err, app.ErrUnknownReportFormat) {
 		t.Fatalf("pdf = %v", err)
 	}
 	reader.err = errors.New("governance down")
-	if _, _, err := reps.Render(ctx, "", "json"); err == nil {
+	if _, _, err := reps.Render(ctx, "", "", "json"); err == nil {
 		t.Fatal("read error swallowed")
 	}
 }

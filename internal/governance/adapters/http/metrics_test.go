@@ -61,6 +61,12 @@ func TestGetRemediationMetrics(t *testing.T) {
 	if code, _ := do(t, http.MethodGet, metricsServer(t, app.NewMetricsService(metricsSource{err: errors.New("db")}, nil, nil, fixedClock{})).URL+"/metrics/remediation", nil); code != http.StatusInternalServerError {
 		t.Fatalf("error = %d", code)
 	}
+	if code, body := do(t, http.MethodGet, metricsServer(t, m).URL+"/metrics/remediation?tag=env:prod", nil); code != http.StatusOK || json.Unmarshal(body, &rep) != nil || rep.Estate.Open != 0 {
+		t.Fatalf("tag filter = %d %s", code, body)
+	}
+	if code, _ := do(t, http.MethodGet, metricsServer(t, app.NewMetricsService(metricsSource{rows: rows}, nil, nil, fixedClock{})).URL+"/metrics/remediation?tag=x", nil); code != http.StatusServiceUnavailable {
+		t.Fatalf("tag without estate = %d", code)
+	}
 	if code, _ := do(t, http.MethodGet, metricsServer(t, nil).URL+"/metrics/remediation", nil); code != http.StatusServiceUnavailable {
 		t.Fatalf("unwired = %d", code)
 	}

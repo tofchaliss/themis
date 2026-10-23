@@ -43,6 +43,32 @@ type fakeRepo struct {
 	errSaveDeployment     error
 	blast                 int
 	errBlast              error
+	tags                  map[string][]string // "kind/id" → tags
+	errTags               error
+}
+
+func (r *fakeRepo) SetTags(_ context.Context, kind domain.TagEntity, id string, tags []string) error {
+	if r.errTags != nil {
+		return r.errTags
+	}
+	if r.tags == nil {
+		r.tags = map[string][]string{}
+	}
+	r.tags[string(kind)+"/"+id] = tags
+	return nil
+}
+
+func (r *fakeRepo) TagsOf(_ context.Context, kind domain.TagEntity, ids []string) (map[string][]string, error) {
+	if r.errTags != nil {
+		return nil, r.errTags
+	}
+	out := map[string][]string{}
+	for _, id := range ids {
+		if t, ok := r.tags[string(kind)+"/"+id]; ok {
+			out[id] = t
+		}
+	}
+	return out, nil
 }
 
 func newFakeRepo() *fakeRepo {
