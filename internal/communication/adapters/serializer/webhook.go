@@ -102,6 +102,21 @@ func (r OutwardRenderer) RenderWebhook(ctx context.Context, in app.Intent) (stri
 			doc.Summary += " across " + n + " release(s)"
 		}
 		doc.Summary += ". A breach changes no decision."
+	case app.WebhookRemediationMetrics:
+		doc.Product = ""
+		doc.Summary = fmt.Sprintf("Remediation: %s open findings; %s of %s running SLA clocks within SLA, %s breached",
+			firstNonEmpty(s[app.SnapshotMetricsOpen], "0"), firstNonEmpty(s[app.SnapshotMetricsWithin], "0"),
+			firstNonEmpty(s[app.SnapshotMetricsApplicable], "0"), firstNonEmpty(s[app.SnapshotMetricsBreached], "0"))
+		if d := s[app.SnapshotMetricsDecision]; d != "" {
+			doc.Summary += "; " + d + " days to a first decision on average"
+		}
+		if w := s[app.SnapshotMetricsWorst]; w != "" {
+			doc.Summary += ". Most breached: " + strings.ReplaceAll(strings.ReplaceAll(w, "=", " "), ",", ", ")
+		}
+		doc.Summary += "."
+		if r.dashboard != "" {
+			doc.Link = r.dashboard + "/#/reports"
+		}
 	default:
 		return "", nil, fmt.Errorf("communication: no webhook rendering for event %q", kind)
 	}

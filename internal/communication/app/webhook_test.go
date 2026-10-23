@@ -265,3 +265,26 @@ func TestEnqueueWebhook_TagRouting(t *testing.T) {
 		t.Fatalf("two matches = %+v", in)
 	}
 }
+
+// D2: the review warning is mailed to the review audience (default: the decision audience),
+// naming the owner; no Finding is no subject.
+func TestEnqueueReviewDueMail(t *testing.T) {
+	ctx := context.Background()
+	store := newIntentStore()
+	svc := intentSvc(store, app.DeliveryIntentConfig{DecisionAudience: "security-decisions"})
+	in, err := svc.EnqueueReviewDueMail(ctx, lineage(), "env-1", "fnd-1", "rel-1", map[string]string{app.SnapshotOwner: "jane"})
+	if err != nil || in.Type != app.IntentEmail || in.Destination != "security-decisions" || !in.IsReviewDueNotification() ||
+		in.Snapshot[app.SnapshotOwner] != "jane" || in.FindingID != "fnd-1" || in.Snapshot["release_id"] != "rel-1" {
+		t.Fatalf("mail = %+v %v", in, err)
+	}
+	own := intentSvc(newIntentStore(), app.DeliveryIntentConfig{ReviewAudience: "risk-owners"})
+	if in, _ := own.EnqueueReviewDueMail(ctx, lineage(), "env-2", "fnd-1", "", nil); in.Destination != "risk-owners" || in.Snapshot["release_id"] != "" {
+		t.Fatalf("configured audience = %+v", in)
+	}
+	if _, err := svc.EnqueueReviewDueMail(ctx, lineage(), "env-3", " ", "rel-1", nil); !errors.Is(err, app.ErrNoSubject) {
+		t.Fatalf("no subject = %v", err)
+	}
+	if (app.Intent{}).IsReviewDueNotification() {
+		t.Fatal("an empty intent is a review notification")
+	}
+}

@@ -53,6 +53,8 @@ type Repository interface {
 	// own sets of many entities of one kind in one query (absent ids have no tags).
 	SetTags(ctx context.Context, kind domain.TagEntity, id string, tags []string) error
 	TagsOf(ctx context.Context, kind domain.TagEntity, ids []string) (map[string][]string, error)
+	// TaggedReleases lists the releases whose effective tags carry tag (own, project's or product's).
+	TaggedReleases(ctx context.Context, tag string) ([]domain.Release, error)
 }
 
 // IDGenerator assigns new opaque aggregate identities (backed by kernel/id in the

@@ -28,6 +28,14 @@ func SuppressesTriage(s Stance) bool {
 	return s == StanceNotAffected || s == StanceAcceptedRisk
 }
 
+// ExpiresOnReview reports whether a stance's review-by date brings the Finding back when it
+// passes: the two suppressing stances, and `deferred` (REVIEW-DEFER-1). A deferral is a decision
+// to look again LATER, so its date passing is the same question re-opened; the drift watcher
+// stays with the suppressing stances, since a deferral never hid the Finding from the queue.
+func ExpiresOnReview(s Stance) bool {
+	return SuppressesTriage(s) || s == StanceDeferred
+}
+
 // DefaultEPSSDriftThreshold is the EPSS increase that counts as material drift.
 //
 // Absolute, not relative: 0.02 → 0.25 matters (a fringe CVE became a likely one) while 0.60 → 0.75

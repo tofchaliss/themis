@@ -62,6 +62,17 @@ async function apiPOST(node, path, body) {
   return r;
 }
 
+async function apiPUT(node, path, body) {
+  const r = await fetch(`/api/${node}${path}`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { sessionGone(); throw new Error("session expired"); }
+  if (r.status === 502) throw new NodeDown(node);
+  return r;
+}
+
 async function problemDetail(r) {
   const j = await r.json().catch(() => ({}));
   return j.detail || j.title || `status ${r.status}`;
@@ -587,6 +598,16 @@ async function viewEstate() {
         <div class="card"><h2 class="card-title">Products</h2><div class="list" id="col-products"></div></div>
         <div class="card"><h2 class="card-title">Projects</h2><div class="list" id="col-projects"><div class="empty">Pick a product</div></div></div>
         <div class="card"><h2 class="card-title">Releases</h2><div class="list" id="col-releases"><div class="empty">Pick a project</div></div></div>
+      </div>
+      <div class="card" id="tag-editor" hidden>
+        <h2 class="card-title">Tags — <span id="tag-editor-name"></span></h2>
+        <p class="card-sub">Filters only: tags never change a priority. A release also carries its project's and product's tags (<span id="tag-editor-inherited">none</span>).
+          Lower-case letters, digits and <span class="mono">: . _ / -</span>; up to 20. Needs a write-capable key.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="tag-editor-input" class="mono" style="min-width:320px" placeholder="team:payments, env:prod" autocomplete="off">
+          <button class="btn btn-primary" id="tag-editor-save">Save tags</button>
+          <span class="card-sub" id="tag-editor-note"></span>
+        </div>
       </div>`;
     $("#estate-tag-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
@@ -602,8 +623,10 @@ async function viewEstate() {
     col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
       col.querySelectorAll(".list-row").forEach((r) => r.classList.remove("active"));
       row.classList.add("active");
+      editTags("product", row.dataset.id, row.dataset.name);
       loadProjects(row.dataset.id, row.dataset.name);
     }));
+    $("#tag-editor-save").addEventListener("click", saveTags);
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }
@@ -620,6 +643,7 @@ async function loadProjects(productId, productName) {
   col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
     col.querySelectorAll(".list-row").forEach((r) => r.classList.remove("active"));
     row.classList.add("active");
+    editTags("project", row.dataset.id, row.dataset.name);
     loadReleases(row.dataset.id, row.dataset.name);
   }));
 }
@@ -631,9 +655,46 @@ async function loadReleases(projectId, projectName) {
   col.innerHTML = releases.length ? releases.map((r) =>
     `<div class="list-row" data-id="${esc(r.id)}" data-v="${esc(r.version)}">v${esc(r.version)}${tagChips(r.tags)}<span class="mono">${esc(r.id.slice(0, 8))}</span></div>`
   ).join("") : `<div class="empty"><b>No releases</b>under ${esc(projectName)} — register one, then upload its SBOM.</div>`;
-  col.querySelectorAll(".list-row").forEach((row) => row.addEventListener("click", () => {
-    location.hash = `#/release/${row.dataset.id}?v=${encodeURIComponent(row.dataset.v)}`;
-  }));
+  col.querySelectorAll(".list-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      location.hash = `#/release/${row.dataset.id}?v=${encodeURIComponent(row.dataset.v)}`;
+    });
+    // A double purpose would be a trap: the row opens the release, the small link edits its tags.
+    const tagLink = document.createElement("a");
+    tagLink.href = "#"; tagLink.className = "card-sub"; tagLink.textContent = " tags…";
+    tagLink.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); editTags("release", row.dataset.id, "v" + row.dataset.v); });
+    row.appendChild(tagLink);
+  });
+}
+
+/* EDR-REMEDIATION-01 D7: the tag editor follows the last product or project picked, or the
+   release whose "tags…" link was clicked. A PUT replaces the entity's own set. */
+let tagTarget = null;
+async function editTags(kind, id, name) {
+  tagTarget = { kind, id };
+  const card = $("#tag-editor");
+  if (!card) return;
+  card.hidden = false;
+  $("#tag-editor-name").textContent = `${kind} ${name}`;
+  $("#tag-editor-note").textContent = "";
+  try {
+    const ts = await apiGET("registry", `/${kind}s/${encodeURIComponent(id)}/tags`);
+    $("#tag-editor-input").value = asArray(ts && ts.tags).join(", ");
+    const own = new Set(asArray(ts && ts.tags));
+    const inherited = asArray(ts && ts.effective).filter((t) => !own.has(t));
+    $("#tag-editor-inherited").textContent = inherited.length ? inherited.join(", ") : "none";
+  } catch (e) { $("#tag-editor-note").textContent = `could not read tags: ${e.message}`; }
+}
+async function saveTags() {
+  if (!tagTarget) return;
+  const tags = $("#tag-editor-input").value.split(",").map((t) => t.trim()).filter(Boolean);
+  const note = $("#tag-editor-note");
+  note.textContent = "saving…";
+  const r = await apiPUT("registry", `/${tagTarget.kind}s/${encodeURIComponent(tagTarget.id)}/tags`, { tags });
+  if (r.status !== 200) { note.textContent = `not saved: ${await problemDetail(r)}`; return; }
+  const ts = await r.json();
+  $("#tag-editor-input").value = asArray(ts.tags).join(", ");
+  note.textContent = "saved";
 }
 
 /* --- Release posture --- */
@@ -1627,12 +1688,31 @@ function bySeverity(a, b) {
   return String(b.published || "").localeCompare(String(a.published || ""));
 }
 
+/* EDR-REMEDIATION-01 D7: a tag narrows What's new to the cards whose Findings sit on releases
+   carrying it (one Registry read for the tagged releases, one blast-radius read per card). */
+let newTag = "";
+async function filterByTag(rows, tag) {
+  const tagged = new Set(asArray(await apiGET("registry", `/tagged-releases?tag=${encodeURIComponent(tag)}`)).map((r) => r.id));
+  if (!tagged.size) return [];
+  const keep = await Promise.all(rows.map(async (r) => {
+    const id = (r.card || {}).id;
+    if (!id) return false;
+    try {
+      const rels = asArray(await apiGET("governance", `/faultlines/${encodeURIComponent(id)}/blast-radius`));
+      return rels.some((rel) => tagged.has(rel));
+    } catch { return false; }
+  }));
+  return rows.filter((_, i) => keep[i]);
+}
+
 async function viewNew() {
   setRail("new");
   crumbs([{ label: "Overview", href: "#/" }, { label: "What's new" }]);
   loading("the newest cards");
   try {
-    const rows = asArray(await apiGET("knowledge", "/faultlines/recent?limit=100"));
+    let rows = asArray(await apiGET("knowledge", "/faultlines/recent?limit=100"));
+    const unfiltered = rows.length;
+    if (newTag) rows = await filterByTag(rows, newTag);
     const sevChip = (s) => {
       const k = (s || "").toLowerCase();
       const cls = k === "critical" ? "chip-crit" : k === "high" ? "chip-elevated" : k === "medium" ? "chip-warn" : "";
@@ -1651,6 +1731,12 @@ async function viewNew() {
         <h2 class="card-title">What's new</h2>
         <p class="card-sub">The newest CVEs that entered this estate's knowledge, newest first: a card is created when a component carries the CVE, a feed sweep finds it for a component you ship, or an operator gathers it. This is not the world's CVE feed; it is what concerns you. Click a CVE to see the card.</p>
         ${cveSearchForm("cve-search-new")}
+        <form id="new-tag-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
+          <label for="new-tag" class="card-sub">Only CVEs on releases tagged</label>
+          <input id="new-tag" class="mono" placeholder="e.g. team:payments" value="${esc(newTag)}" autocomplete="off">
+          <button class="btn" type="submit">Apply</button>
+          <span class="card-sub" id="new-tag-note"></span>
+        </form>
         <div id="new-rows"></div>
       </div>
       <div class="card" id="published-card">
@@ -1676,6 +1762,12 @@ async function viewNew() {
     }, `<th>Entered</th><th>CVE</th><th>Severity</th><th>Signals</th><th>What it is</th><th>Published fix</th><th>Stage</th>`,
       `<div class="empty"><b>No cards yet</b>Upload an SBOM, or gather a CVE, and it appears here.</div>`);
     bindCveSearch("cve-search-new");
+    if (newTag) document.getElementById("new-tag-note").textContent = `${rows.length} of the newest ${unfiltered} cards are on releases tagged ${newTag}`;
+    document.getElementById("new-tag-form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      newTag = document.getElementById("new-tag").value.trim().toLowerCase();
+      viewNew();
+    });
     cardsPager.focus();
     const sevChip2 = sevChip;
     const loadPublished = async () => {

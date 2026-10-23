@@ -104,3 +104,19 @@ func tagsPtr(t []string) *[]string {
 	}
 	return &t
 }
+
+// ListTaggedReleases handles GET /tagged-releases?tag= — every release whose effective tags carry
+// the tag, in one read (EDR-REMEDIATION-01 D7, the What's new filter).
+func (h *Handler) ListTaggedReleases(w http.ResponseWriter, r *http.Request, params gen.ListTaggedReleasesParams) {
+	rels, err := h.svc.TaggedReleases(r.Context(), params.Tag)
+	if err != nil {
+		writeTagError(w, err)
+		return
+	}
+	out := make([]gen.ReleaseView, 0, len(rels))
+	for _, rel := range rels {
+		rid, proj, ver := string(rel.ID()), string(rel.ProjectID()), rel.Version()
+		out = append(out, gen.ReleaseView{Id: &rid, ProjectId: &proj, Version: &ver})
+	}
+	writeJSON(w, http.StatusOK, out)
+}

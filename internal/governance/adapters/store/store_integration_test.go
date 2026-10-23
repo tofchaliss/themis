@@ -872,13 +872,14 @@ func TestDispositionStaleRoundTripAndExpiredLister(t *testing.T) {
 	decide("fnd-ahead", domain.StanceNotAffected, epoch.Add(240*time.Hour)) // not yet
 	decide("fnd-nodate", domain.StanceNotAffected, time.Time{})             // no date agreed
 	decide("fnd-affected", domain.StanceAffected, epoch.Add(time.Hour))     // not suppressing
+	decide("fnd-deferred", domain.StanceDeferred, epoch.Add(30*time.Minute)) // REVIEW-DEFER-1: expires too
 
 	now := epoch.Add(3 * time.Hour)
 	got, err := st.SuppressedWithExpiredReview(ctx, now, 10)
-	if err != nil || len(got) != 2 || got[0] != "fnd-late" || got[1] != "fnd-later" {
-		t.Fatalf("expired = %v err=%v, want [fnd-late fnd-later]", got, err)
+	if err != nil || len(got) != 3 || got[0] != "fnd-deferred" || got[1] != "fnd-late" || got[2] != "fnd-later" {
+		t.Fatalf("expired = %v err=%v, want [fnd-deferred fnd-late fnd-later]", got, err)
 	}
-	if one, _ := st.SuppressedWithExpiredReview(ctx, now, 1); len(one) != 1 || one[0] != "fnd-late" {
+	if one, _ := st.SuppressedWithExpiredReview(ctx, now, 1); len(one) != 1 || one[0] != "fnd-deferred" {
 		t.Fatalf("limit 1 = %v", one)
 	}
 
@@ -895,8 +896,8 @@ func TestDispositionStaleRoundTripAndExpiredLister(t *testing.T) {
 	if since, reason, ok := back.DispositionStale(); !ok || !since.Equal(now) || reason == "" {
 		t.Fatalf("round-trip mark = %v %q ok=%v", since, reason, ok)
 	}
-	if rest, _ := st.SuppressedWithExpiredReview(ctx, now, 10); len(rest) != 1 || rest[0] != "fnd-later" {
-		t.Fatalf("after mark = %v, want [fnd-later]", rest)
+	if rest, _ := st.SuppressedWithExpiredReview(ctx, now, 10); len(rest) != 2 || rest[1] != "fnd-later" {
+		t.Fatalf("after mark = %v, want [fnd-deferred fnd-later]", rest)
 	}
 	posture, err := st.ReleasePosture(ctx, "rel-1")
 	if err != nil {

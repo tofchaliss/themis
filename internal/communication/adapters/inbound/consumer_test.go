@@ -612,6 +612,15 @@ func TestConsumer_WebhookEvents(t *testing.T) {
 	if h := hooks[2]; h.Snapshot[app.SnapshotWebhookEvent] != app.WebhookDispositionStale || h.Snapshot[app.SnapshotReason] != "KEV" || h.Snapshot[app.SnapshotReviewBy] != "" {
 		t.Fatalf("stale hook = %+v", h)
 	}
+	mails := 0
+	for _, in := range intents.created {
+		if in.IsReviewDueNotification() && in.FindingID == "fnd-1" && in.Snapshot[app.SnapshotOwner] == "jane" {
+			mails++
+		}
+	}
+	if mails != 1 {
+		t.Fatalf("review mails = %d, want 1", mails)
+	}
 	if len(digest.rows) != 1 || digest.rows[0].Bucket != "critical" || digest.rows[0].FindingID != "fnd-3" {
 		t.Fatalf("digest rows = %+v", digest.rows)
 	}

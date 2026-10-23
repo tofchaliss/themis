@@ -129,3 +129,22 @@ func (r *tagFailRepo) TagsOf(ctx context.Context, kind domain.TagEntity, ids []s
 	}
 	return r.fakeRepo.TagsOf(ctx, kind, ids)
 }
+
+func TestTaggedReleases(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _, _, rel := estateFixture(t)
+	if _, err := svc.SetTags(ctx, domain.TagRelease, rel, []string{"env:prod"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.TaggedReleases(ctx, " ENV:prod ")
+	if err != nil || len(got) != 1 || string(got[0].ID()) != rel {
+		t.Fatalf("tagged = %v %v", got, err)
+	}
+	if _, err := svc.TaggedReleases(ctx, "bad tag"); !errors.Is(err, domain.ErrInvalidTag) {
+		t.Fatalf("bad tag = %v", err)
+	}
+	repo.tagsErr2 = errors.New("db")
+	if _, err := svc.TaggedReleases(ctx, "env:prod"); err == nil {
+		t.Fatal("store error swallowed")
+	}
+}

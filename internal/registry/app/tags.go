@@ -101,3 +101,13 @@ func (s *RegistryService) Tags(ctx context.Context, kind domain.TagEntity, id st
 func (s *RegistryService) OwnTags(ctx context.Context, kind domain.TagEntity, ids []string) (map[string][]string, error) {
 	return s.repo.TagsOf(ctx, kind, ids)
 }
+
+// TaggedReleases lists every release whose effective tags carry tag — one query, for a filter
+// that spans the estate (What's new).
+func (s *RegistryService) TaggedReleases(ctx context.Context, tag string) ([]domain.Release, error) {
+	norm, err := domain.NormalizeTags([]string{tag})
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.TaggedReleases(ctx, norm[0])
+}

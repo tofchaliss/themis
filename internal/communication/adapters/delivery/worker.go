@@ -37,6 +37,15 @@ type Worker struct {
 	now        func() time.Time
 	// digest, when wired, sends the per-Product SLA breach digest on its own cadence (D4).
 	digest *app.SLADigest
+	// metrics, when wired, posts the remediation-metrics summary on its own cadence (D6).
+	metrics *app.MetricsSchedule
+}
+
+// WithMetricsSchedule posts the remediation-metrics summary every cfg.MetricsReportInterval
+// (EDR-REMEDIATION-01 D6 through D4); it sends only while that webhook route is configured.
+func (w *Worker) WithMetricsSchedule(m *app.MetricsSchedule) *Worker {
+	w.metrics = m
+	return w
 }
 
 // WithSLADigest runs the SLA breach digest beside the delivery loop (EDR-REMEDIATION-01 D4),
@@ -77,6 +86,17 @@ func (w *Worker) Run(ctx context.Context) {
 		return
 	}
 	w.logger.Info("outward delivery worker started", observability.String("config", w.cfg.String()))
+	if w.metrics != nil {
+		go w.metrics.RunEvery(ctx, w.cfg.MetricsReportInterval, func(sent bool, err error) {
+			if err != nil {
+				w.logger.Error("remediation metrics summary failed", observability.Err(err))
+				return
+			}
+			if sent {
+				w.logger.Info("remediation metrics summary sent")
+			}
+		})
+	}
 	if w.digest != nil {
 		go w.digest.RunEvery(ctx, w.cfg.SLADigestInterval, func(sent int, err error) {
 			if err != nil {

@@ -782,3 +782,28 @@ func TestTagsRoundTrip(t *testing.T) {
 		t.Fatal("an unknown entity kind passed the CHECK")
 	}
 }
+
+// D7: tagged releases follow the effective set — a tag on the product reaches every release.
+func TestTaggedReleases(t *testing.T) {
+	st := store.New(newPool(t))
+	ctx := context.Background()
+	prod, proj, rel := seed(t, st)
+	if got, err := st.TaggedReleases(ctx, "env:prod"); err != nil || len(got) != 0 {
+		t.Fatalf("untagged = %v %v", got, err)
+	}
+	for _, c := range []struct {
+		kind domain.TagEntity
+		id   string
+	}{{domain.TagProduct, string(prod)}, {domain.TagProject, string(proj)}, {domain.TagRelease, string(rel)}} {
+		if err := st.SetTags(ctx, c.kind, c.id, []string{"env:prod"}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.TaggedReleases(ctx, "env:prod")
+		if err != nil || len(got) != 1 || got[0].ID() != rel {
+			t.Fatalf("%s tag = %v %v", c.kind, got, err)
+		}
+		if err := st.SetTags(ctx, c.kind, c.id, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -150,7 +150,7 @@ func (s *FindingService) ResurfaceExpiredReview(ctx context.Context, id domain.F
 	marked := false
 	err := s.mutate(ctx, id, func(f *domain.Finding, now time.Time) ([]OutboxNote, error) {
 		pos, ok := f.CurrentPosition()
-		if !ok || !domain.SuppressesTriage(pos.Stance()) || !domain.Expired(pos.Inputs().ReviewBy, now) {
+		if !ok || !domain.ExpiresOnReview(pos.Stance()) || !domain.Expired(pos.Inputs().ReviewBy, now) {
 			return nil, errNoop
 		}
 		if !f.MarkDispositionStale(reviewByExpiredReason, now) {

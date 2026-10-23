@@ -383,3 +383,34 @@ func TestAcceptProposal_ReviewByStillRecorded(t *testing.T) {
 		t.Fatalf("no owner: %v", err)
 	}
 }
+
+// REVIEW-DEFER-1: the sweep re-surfaces a deferral whose review date passed, the Position stands.
+func TestReviewBySweep_ResurfacesExpiredDeferral(t *testing.T) {
+	repo := newRepo()
+	repo.seed(suppressedUntil(t, domain.StanceDeferred, domain.ExploitSignals{}, fixedNow.Add(-time.Hour)))
+	sweep := app.NewReviewBySweep(writeSvc(repo), &deferralLister{repo: repo}, fixedClock{})
+	if _, n, err := sweep.Run(context.Background()); err != nil || n != 1 {
+		t.Fatalf("run = %d %v", n, err)
+	}
+	f := repo.byID["fnd-1"]
+	if _, _, ok := f.DispositionStale(); !ok {
+		t.Fatal("deferral not marked")
+	}
+	if pos, _ := f.CurrentPosition(); pos.Stance() != domain.StanceDeferred {
+		t.Fatal("the deferral must stand")
+	}
+}
+
+// deferralLister lists by the same rule as the store: expiring stances past their date.
+type deferralLister struct{ repo *fakeRepo }
+
+func (l *deferralLister) SuppressedWithExpiredReview(_ context.Context, now time.Time, _ int) ([]domain.FindingID, error) {
+	var out []domain.FindingID
+	for _, id := range l.repo.order {
+		pos, ok := l.repo.byID[id].CurrentPosition()
+		if ok && domain.ExpiresOnReview(pos.Stance()) && domain.Expired(pos.Inputs().ReviewBy, now) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}

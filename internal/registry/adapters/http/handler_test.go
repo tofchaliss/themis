@@ -39,8 +39,9 @@ type fakeRepo struct {
 	releaseIDs map[string]string
 	rows       int
 
-	tags    map[string][]string // "kind/id" → own tags (EDR-REMEDIATION-01 D7)
-	tagsErr error
+	tags     map[string][]string // "kind/id" → own tags (EDR-REMEDIATION-01 D7)
+	tagsErr  error
+	tagsErr2 error
 }
 
 func (r *fakeRepo) SetTags(_ context.Context, kind domain.TagEntity, id string, tags []string) error {
@@ -649,4 +650,19 @@ func TestGetProjectAndProduct_StoreFaults(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 	}
+}
+
+func (r *fakeRepo) TaggedReleases(_ context.Context, tag string) ([]domain.Release, error) {
+	if r.tagsErr2 != nil {
+		return nil, r.tagsErr2
+	}
+	var out []domain.Release
+	for id, rel := range r.releases {
+		for _, t := range r.tags["release/"+id] {
+			if t == tag {
+				out = append(out, rel)
+			}
+		}
+	}
+	return out, nil
 }

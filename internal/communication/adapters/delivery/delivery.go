@@ -289,6 +289,9 @@ type Config struct {
 	// EvaluationAudience is the governed audience told a Release's posture after a new SBOM was
 	// judged (M2-8 step 4 / N-M2f).
 	EvaluationAudience string
+	// ReviewAudience is the governed audience told a decision's review date is near
+	// (EDR-REMEDIATION-01 D2); empty = the decision audience.
+	ReviewAudience string
 	// Interval is the worker loop's cadence.
 	Interval time.Duration
 
@@ -307,6 +310,9 @@ type Config struct {
 	WebhookRoutes map[string]string
 	// SLADigestInterval is the cadence of the per-Product SLA breach digest (default 24h).
 	SLADigestInterval time.Duration
+	// MetricsReportInterval is the cadence of the remediation-metrics summary webhook (D6,
+	// default 168h — weekly). It sends only while the remediation_metrics route is configured.
+	MetricsReportInterval time.Duration
 	// DashboardURL is the base a webhook's link points into (THEMIS_COMMUNICATION_DASHBOARD_URL).
 	DashboardURL string
 	// RebuildMaxAttempts is the rebuild LOOP's one knob (M2-8): how many rebuild cycles a
@@ -328,6 +334,8 @@ const (
 	defaultRebuildMaxAttempts = 2
 	// defaultSLADigestInterval is D4's daily digest.
 	defaultSLADigestInterval = 24 * time.Hour
+	// defaultMetricsReportInterval is a weekly remediation summary.
+	defaultMetricsReportInterval = 7 * 24 * time.Hour
 )
 
 // ConfigFromEnv reads the outward-delivery options:
@@ -350,24 +358,26 @@ const (
 // none may (R2).
 func ConfigFromEnv() Config {
 	return Config{
-		Enabled:            os.Getenv("THEMIS_COMMUNICATION_DELIVERY_ENABLED") == "1",
-		Jira:               jiraFromEnv(),
-		Mail:               mailFromEnv(),
-		Jenkins:            jenkinsFromEnv(),
-		Webhook:            webhookFromEnv(),
-		WebhookRoutes:      ParseWebhookPairs(getenv("THEMIS_COMMUNICATION_WEBHOOK_ROUTES")),
-		SLADigestInterval:  envDuration("THEMIS_COMMUNICATION_SLA_DIGEST_INTERVAL", defaultSLADigestInterval),
-		DashboardURL:       getenv("THEMIS_COMMUNICATION_DASHBOARD_URL"),
-		RebuildMaxAttempts: envInt("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", defaultRebuildMaxAttempts),
-		Workers:            envInt("THEMIS_COMMUNICATION_DELIVERY_WORKERS", defaultWorkers),
-		Batch:              envInt("THEMIS_COMMUNICATION_DELIVERY_BATCH", defaultBatch),
-		MaxAttempts:        envInt("THEMIS_COMMUNICATION_DELIVERY_MAX_ATTEMPTS", defaultMaxAttempts),
-		BackoffInitial:     envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_INITIAL", defaultBackoffInitial),
-		BackoffMax:         envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX", defaultBackoffMax),
-		Interval:           envDuration("THEMIS_COMMUNICATION_DELIVERY_INTERVAL", defaultInterval),
-		DeadLetterAudience: os.Getenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE"),
-		DecisionAudience:   os.Getenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE"),
-		EvaluationAudience: os.Getenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE"),
+		Enabled:               os.Getenv("THEMIS_COMMUNICATION_DELIVERY_ENABLED") == "1",
+		Jira:                  jiraFromEnv(),
+		Mail:                  mailFromEnv(),
+		Jenkins:               jenkinsFromEnv(),
+		Webhook:               webhookFromEnv(),
+		WebhookRoutes:         ParseWebhookPairs(getenv("THEMIS_COMMUNICATION_WEBHOOK_ROUTES")),
+		SLADigestInterval:     envDuration("THEMIS_COMMUNICATION_SLA_DIGEST_INTERVAL", defaultSLADigestInterval),
+		MetricsReportInterval: envDuration("THEMIS_COMMUNICATION_METRICS_REPORT_INTERVAL", defaultMetricsReportInterval),
+		DashboardURL:          getenv("THEMIS_COMMUNICATION_DASHBOARD_URL"),
+		RebuildMaxAttempts:    envInt("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", defaultRebuildMaxAttempts),
+		Workers:               envInt("THEMIS_COMMUNICATION_DELIVERY_WORKERS", defaultWorkers),
+		Batch:                 envInt("THEMIS_COMMUNICATION_DELIVERY_BATCH", defaultBatch),
+		MaxAttempts:           envInt("THEMIS_COMMUNICATION_DELIVERY_MAX_ATTEMPTS", defaultMaxAttempts),
+		BackoffInitial:        envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_INITIAL", defaultBackoffInitial),
+		BackoffMax:            envDuration("THEMIS_COMMUNICATION_DELIVERY_BACKOFF_MAX", defaultBackoffMax),
+		Interval:              envDuration("THEMIS_COMMUNICATION_DELIVERY_INTERVAL", defaultInterval),
+		DeadLetterAudience:    os.Getenv("THEMIS_COMMUNICATION_DEADLETTER_AUDIENCE"),
+		DecisionAudience:      os.Getenv("THEMIS_COMMUNICATION_DECISION_AUDIENCE"),
+		EvaluationAudience:    os.Getenv("THEMIS_COMMUNICATION_EVALUATION_AUDIENCE"),
+		ReviewAudience:        os.Getenv("THEMIS_COMMUNICATION_REVIEW_AUDIENCE"),
 	}
 }
 
@@ -397,6 +407,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SLADigestInterval <= 0 {
 		c.SLADigestInterval = defaultSLADigestInterval
+	}
+	if c.MetricsReportInterval <= 0 {
+		c.MetricsReportInterval = defaultMetricsReportInterval
 	}
 	return c
 }
