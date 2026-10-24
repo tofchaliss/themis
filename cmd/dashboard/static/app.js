@@ -1962,11 +1962,15 @@ async function viewAdmin() {
    what proves the Go converter reproduces it byte for byte. --- */
 
 /* intakeContentType names the request ENCODING, which is all a content type is here:
-   `text/csv` is decisive at the door (a body declared CSV is never tried as JSON), and
-   everything else rides as JSON. It says nothing about what the document IS — that is
+   `text/csv` is decisive at the door (a body declared CSV is never tried as JSON), a
+   .nessus/.xml file rides as XML (the door reads its root element), and everything else
+   rides as JSON. It says nothing about what the document IS — that is
    `detected_kind` / `detected_format` on the receipt (EDR-INTAKE-01 D2/D5a). */
 function intakeContentType(f) {
-  return /\.csv$/i.test(f && f.name ? f.name : "") ? "text/csv" : "application/json";
+  const name = f && f.name ? f.name : "";
+  if (/\.csv$/i.test(name)) return "text/csv";
+  if (/\.(nessus|xml)$/i.test(name)) return "application/xml";
+  return "application/json";
 }
 
 /* The intake refusal taxonomy (EDR-INTAKE-01 D11 + the 2026-10-12 amendment's last
@@ -2021,7 +2025,7 @@ async function viewSBOM() {
         release (and, if needed, its product/project) is registered on upload, the same
         Product→Project→Release chain scripts/gf-upload-sbom.sh drives. SBOMs and scanner reports go
         through the one <b>intake door</b>, which detects the format itself and converts vendor dialects
-        server-side (EDR-INTAKE-01): raw <b>Trivy JSON</b>, <b>Cortex JSON</b> and <b>Cortex CSV</b> upload
+        server-side (EDR-INTAKE-01): raw <b>Trivy JSON</b>, <b>Grype JSON</b>, <b>Cortex JSON</b>, <b>Cortex CSV</b> and <b>Nessus (.nessus)</b> upload
         as they came out of the tool — no jq recipe, no in-browser translation. A report needs its
         release's SBOM filed first, and is refused by name if it is missing. Byte-identical re-uploads to
         the same release dedup to the same evidence id, and the same bytes pointed at a different release
@@ -2041,8 +2045,8 @@ async function viewSBOM() {
         <label>Kind
           <select id="sb-kind"><option value="sbom">SBOM or scanner report</option><option value="vex">VEX</option></select></label>
         <label>Document
-          <input type="file" id="sb-file" accept=".json,.csv,application/json,text/csv">
-          <span class="file-note" id="sb-detect">Pick a .json or .csv file — the intake door identifies it (CycloneDX · SPDX · Trivy · Cortex · already-curated).</span></label>
+          <input type="file" id="sb-file" accept=".json,.csv,.nessus,.xml,application/json,text/csv,application/xml">
+          <span class="file-note" id="sb-detect">Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Trivy · Grype · Cortex · Nessus · already-curated).</span></label>
         <div><button class="btn btn-primary" id="sb-upload" disabled>Upload</button></div>
       </div>
       <div id="sb-outcome"></div>
@@ -2124,7 +2128,7 @@ async function viewSBOM() {
     outcome.innerHTML = "";
     detect.textContent = file
       ? `${file.name} · ${(file.size / 1024).toFixed(0)} KB · sent as ${intakeContentType(file)} — the door identifies it`
-      : "Pick a .json or .csv file — the intake door identifies it (CycloneDX · SPDX · Trivy · Cortex · already-curated).";
+      : "Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Trivy · Grype · Cortex · Nessus · already-curated).";
     gate();
   });
 

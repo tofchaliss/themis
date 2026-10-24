@@ -64,6 +64,45 @@ func TestDetectTruthTable(t *testing.T) {
 			body: `{"matches":[{"x":1}],"descriptor":{"name":"other"}}`,
 			err:  ErrUnrecognisedFormat,
 		},
+		// Row 1b (2026-10-24 amendment N1): the XML root decides, whatever the content type.
+		{
+			name:        "a Nessus export declared as XML",
+			contentType: "application/xml",
+			body:        `<?xml version="1.0" encoding="UTF-8"?>` + "\n<NessusClientData_v2><Report/></NessusClientData_v2>",
+			kind:        KindReport, dialect: DialectNessus,
+		},
+		{
+			name: "a Nessus export with a BOM, a comment and no content type",
+			body: "\xEF\xBB\xBF  <!-- exported --><NessusClientData_v2/>",
+			kind: KindReport, dialect: DialectNessus,
+		},
+		{
+			name: "other XML is refused by its root",
+			body: `<?xml version="1.0"?><NessusClientData><Report/></NessusClientData>`,
+			err:  ErrUnrecognisedFormat,
+		},
+		{
+			name: "XML that does not parse",
+			body: `<NessusClientData_v2`,
+			err:  ErrMalformedBody,
+		},
+		{
+			name: "XML declaring an entity",
+			body: `<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "boom">]><NessusClientData_v2>&e;</NessusClientData_v2>`,
+			err:  ErrMalformedBody,
+		},
+		{
+			name: "XML with no root element",
+			body: `<?xml version="1.0"?><!-- nothing -->`,
+			err:  ErrMalformedBody,
+		},
+		{
+			// Row 1 still wins: a body declared CSV is never tried as anything else.
+			name:        "a Nessus export declared text/csv",
+			contentType: "text/csv",
+			body:        `<NessusClientData_v2/>`,
+			err:         ErrUnrecognisedFormat,
+		},
 		// Row 3.
 		{
 			name:    "SPDX",
@@ -226,7 +265,7 @@ func TestConvertRefusesAnSBOM(t *testing.T) {
 // (D4). A registration hook is how a second converter for a dialect gets added by
 // accident, so the registry is a switch.
 func TestConverterForIsClosed(t *testing.T) {
-	for _, d := range []Dialect{DialectCurated, DialectCortexCSV, DialectCortexJSON, DialectTrivy, DialectGrype} {
+	for _, d := range []Dialect{DialectCurated, DialectCortexCSV, DialectCortexJSON, DialectTrivy, DialectGrype, DialectNessus} {
 		conv, ok := ConverterFor(d)
 		if !ok || conv == nil {
 			t.Fatalf("ConverterFor(%s) = %v, %v", d, conv, ok)
