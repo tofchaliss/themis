@@ -59,14 +59,15 @@ const (
 type Dialect string
 
 // The closed dialect set. The valid matrix is `sbom × {cyclonedx, spdx}` and
-// `vuln-report × {curated, trivy, grype, cortex-json, cortex-csv}`, and nothing else (D5a;
-// grype added by GUI-15, 2026-10-19).
+// `vuln-report × {curated, trivy, grype, nessus, cortex-json, cortex-csv}`, and nothing else
+// (D5a; grype added by GUI-15, 2026-10-19; nessus by the 2026-10-24 amendment).
 const (
 	DialectCurated    Dialect = "curated"
 	DialectCortexCSV  Dialect = "cortex-csv"
 	DialectCortexJSON Dialect = "cortex-json"
 	DialectTrivy      Dialect = "trivy"
 	DialectGrype      Dialect = "grype"
+	DialectNessus     Dialect = "nessus"
 	DialectCycloneDX  Dialect = "cyclonedx"
 	DialectSPDX       Dialect = "spdx"
 )

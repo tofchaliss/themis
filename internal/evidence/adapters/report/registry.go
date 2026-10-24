@@ -26,6 +26,7 @@ var requiredCortexFields = []string{"vulnerability_id", "package_purl", "origin_
 //
 //	| # | body                                                            | identified as            |
 //	| 1 | Content-Type text/csv + a recognised Cortex header row           | vuln-report / cortex-csv |
+//	| 1b| XML body whose root element is NessusClientData_v2               | vuln-report / nessus     |
 //	| 2 | JSON object with bomFormat: "CycloneDX"                          | sbom / cyclonedx         |
 //	| 3 | JSON object with spdxVersion                                     | sbom / spdx              |
 //	| 4 | JSON object with findings: [...]                                 | vuln-report / curated    |
@@ -63,6 +64,22 @@ func Detect(contentType string, body []byte) (Kind, Dialect, error) {
 	}
 	if opener == 0 && hasCortexHeader(body) {
 		return KindReport, DialectCortexCSV, nil
+	}
+
+	// Row 1b — Nessus (2026-10-24 amendment N1). The root element decides, not the content
+	// type: Nessus exports go up as application/xml, text/xml or curl's default alike. Any
+	// other XML is refused by the root it names, so the operator learns what was sent.
+	if opener == 0 {
+		root, isXML, err := xmlRoot(body)
+		if err != nil {
+			return "", "", err
+		}
+		if isXML {
+			if root == nessusRoot {
+				return KindReport, DialectNessus, nil
+			}
+			return "", "", fmt.Errorf("%w: the body is XML with root <%s>; the only XML dialect is a Nessus export (<%s>)", ErrUnrecognisedFormat, root, nessusRoot)
+		}
 	}
 
 	switch opener {
@@ -170,6 +187,8 @@ func ConverterFor(d Dialect) (Converter, bool) {
 		return trivyJSON{}, true
 	case DialectGrype:
 		return grypeJSON{}, true
+	case DialectNessus:
+		return nessusXML{}, true
 	default:
 		return nil, false
 	}

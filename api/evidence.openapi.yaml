@@ -231,6 +231,14 @@ paths:
             schema:
               type: string
               description: A Cortex CSV export. CSV is a REQUEST encoding, never an evidence document (D2).
+          application/xml:
+            schema:
+              type: string
+              description: >-
+                A Nessus `.nessus` export (root element `NessusClientData_v2`). Only vendor
+                advisory checks with package lines become findings; every other result
+                carrying a CVE is counted in `findings_skipped` (EDR-INTAKE-01, 2026-10-24
+                amendment). Nothing about the scanned hosts is filed.
           application/octet-stream:
             schema:
               type: string
@@ -544,7 +552,7 @@ components:
           description: What the body was identified as (D5a) — `sbom` or `vuln-report`.
         detected_format:
           type: string
-          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `grype`, `cortex-json`, `cortex-csv`).
+          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `grype`, `nessus`, `cortex-json`, `cortex-csv`).
         findings_total:
           type: integer
           description: >-
