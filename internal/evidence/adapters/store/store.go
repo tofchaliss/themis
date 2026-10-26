@@ -65,6 +65,25 @@ func (s *Store) Save(ctx context.Context, e domain.Evidence, raw []byte, event d
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// A converted document filed before EDR-INTAKE-01 D3b carries the plain content fingerprint.
+	// The same source re-sent to the same release must still dedup onto it rather than file a
+	// second copy under the new identity. Another release's row is not this source's: two
+	// different scans with identical output are exactly what D3b stopped calling duplicates.
+	if content := value.NewContentFingerprint(raw); !content.Equal(e.Fingerprint()) {
+		var legacyID string
+		err := tx.QueryRow(ctx, `SELECT id FROM evidence WHERE fingerprint = $1 AND subject_release_id = $2`,
+			content.String(), e.Subject().ReleaseID).Scan(&legacyID)
+		switch {
+		case err == nil:
+			if err := tx.Commit(ctx); err != nil {
+				return SaveResult{}, err
+			}
+			return SaveResult{ID: domain.EvidenceID(legacyID), Created: false}, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return SaveResult{}, fmt.Errorf("evidence: resolve pre-D3b dedup: %w", err)
+		}
+	}
+
 	var insertedID string
 	provSource, provDigest, provBuildID := provenanceColumns(e.Provenance())
 	err = tx.QueryRow(ctx, `

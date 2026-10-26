@@ -1333,3 +1333,37 @@ finding resolves onto its inventory twin by exact name + version (P3).
 | P-G1 | **Coverage against a real SBOM.** On one host, compare the CVEs Themis finds from this inventory with those from a syft (or vendor) SBOM of the same host | the missing source package (P5) and the missing `arch` can lose matches; the size of the loss decides whether a source-name table is needed |
 | P-G2 | **Other vendors' RPMs** (a database vendor's repo, EPEL) | real CVE surface; needs a vendor → purl-namespace rule per vendor, decided per vendor |
 | P-G3 | **Hand-installed software** (the 2026-10-24 gate G3) | next design; plugin outputs carry `Associated Package` / `Managed by OS`, which tells managed from unmanaged installs |
+
+## Amendment 2026-10-26 (b) — D3b: a converted document's identity names its source
+
+**Status:** Accepted (owner decision, 2026-10-26, VM round of SCAN-NESSUS-2).
+
+**What happened.** Evidence's dedup key was the SHA-256 of the **filed** bytes (D3, backed by
+`UNIQUE (fingerprint)`). A converted report keeps only the findings that pass its rules, and on a
+fully patched host it keeps none, so every such report files the same bytes: `{"findings":[]}`.
+On the VM the release-B upload of a `.nessus` report (456 of 456 skipped) was refused
+`409 duplicate_other_release`, because release A's CSV report (also 456 of 456 skipped) already
+held those bytes. With patched hosts, every clean report after the first, for any other
+release, would be refused.
+
+**D3b.** For a **converted** document — one whose source digest differs from its content
+fingerprint — the evidence fingerprint is
+`SHA-256("themis-converted-v1\n" + source_digest + "\n" + SHA-256(filed bytes))`.
+
+- A standards SBOM that was not converted, and a curated report passed through unchanged
+  (source digest = content fingerprint), keep the plain content fingerprint. The old
+  `POST /evidence` door and intake still agree on their identity.
+- The same source to the same release still dedups (`200`, `created=false`).
+- The same source to **another** release is still refused `409 duplicate_other_release`
+  (EDR-EVIDENCE-01 D3).
+- Two **different** scans with identical output are now two documents.
+- A supplied `observed_at` is not hashed separately: whenever a finding is kept it is in the
+  filed bytes; when none is kept, two uploads of one file differing only in the date both say
+  "nothing found in this file" and dedup.
+- The tag versions the rule, so a later rule cannot collide with this one.
+
+**Rows filed before D3b** carry the plain content fingerprint. The store first looks for that
+plain fingerprint **on the same release**; if found, the upload dedups onto it rather than
+filing a second copy. A plain-fingerprint row on another release is not treated as this
+source's (that was exactly the false duplicate). Nothing stored is rewritten: evidence stays
+immutable.

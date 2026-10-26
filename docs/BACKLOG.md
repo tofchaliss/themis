@@ -1206,6 +1206,14 @@ under the 2026-08-07 re-derivation standard.
   unlabeled record is kept, so the filter can only remove what it can read. **Not done:** the wrong
   matches already stored for RHEL releases correlated before this fix stay until a cleanup is
   decided (a one-time re-judgement or retirement pass; owner decision).
+- [x] **EV-DEDUP-EMPTY-1 — every clean converted report after the first was refused on another
+  release (found and fixed 2026-10-26, VM round of SCAN-NESSUS-2).** A converted report that
+  keeps no finding files `{"findings":[]}`, and Evidence deduped on the filed bytes alone, so a
+  second fully patched scan for another release came back `409 duplicate_other_release`
+  (measured: release B's `.nessus` report collided with release A's empty CSV report).
+  EDR-INTAKE-01 amendment D3b: a converted document's identity also names its source digest;
+  uploads that were not converted keep the plain fingerprint, pre-D3b rows still dedup on the
+  same release, and nothing stored is rewritten.
 - [ ] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** One VM
   card holds 2136 proposals (average 87 over 1348 cards). KN-PROPOSAL-BLOAT-1 drops a proposal
   only when it equals the LATEST one from the same source and kind. Suspected cause, not yet
