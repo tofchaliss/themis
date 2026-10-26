@@ -305,6 +305,7 @@ deterministic rather than dependent on map iteration:
 | # | body | identified as |
 | --- | --- | --- |
 | 1 | `Content-Type: text/csv` + a recognised Cortex header row | `vuln-report` / `cortex-csv` |
+| 1b | XML body whose root element is `<NessusClientData_v2>` (2026-10-24 amendment, N1) | `vuln-report` / `nessus` |
 | 2 | JSON object with `bomFormat: "CycloneDX"` | `sbom` / `cyclonedx` |
 | 3 | JSON object with `spdxVersion` | `sbom` / `spdx` |
 | 4 | JSON object with `findings: [...]` | `vuln-report` / `curated` |
@@ -316,7 +317,7 @@ deterministic rather than dependent on map iteration:
 **A declared `kind`/`format` that contradicts the body is refused** (`declared_format_mismatch`),
 never silently overridden — the caller's assertion is information, and disagreeing with it quietly
 is how a mis-declared document becomes a mystery later. Invalid *combinations* are refused the same
-way: the matrix is `sbom × {cyclonedx, spdx}` and `vuln-report × {curated, trivy, grype,
+way: the matrix is `sbom × {cyclonedx, spdx}` and `vuln-report × {curated, trivy, grype, nessus,
 cortex-json, cortex-csv}`, and nothing else. `kind=sbom, format=trivy` fails at identification.
 
 Detected values are **echoed in the response** (`detected_kind`, `detected_format`) so the client
@@ -1044,3 +1045,145 @@ Implementation loci, so the next reader does not have to re-find them: `internal
 `internal/evidence/domain/evidence.go`'s `Provenance` (the new `build_id` field) plus the intake
 receipt. The change is scaffolded as `openspec/changes/phase3-bot-intake`. **Scope is the `themis`
 repository only; `themis-ai-runtime` needs no change.**
+
+**2026-10-24 — Nessus (`.nessus` XML) becomes a vuln-report dialect.**
+
+Driver: the owner's scan team produces Nessus reports, and there was no road for them. Intake reads
+JSON and Cortex CSV only, so a `.nessus` file is refused `unrecognised_format`, and the HTML report
+Nessus also produces is a page for people, with no schema. Two real samples were read before this
+was written (one HTML report, one `.nessus` export of a different scan; neither is committed — both
+carry host addresses and site names). DefectDojo's Tenable parser was read too: it takes only
+`.nessus`/`.csv`, keeps one finding per plugin, keeps only the **first** `<cve>` of a plugin, and
+never reads the package lines. Themis needs the opposite on the last two points, because a Themis
+finding is CVE × component.
+
+**What the `.nessus` sample measured** (credentialed, RHEL 8, four hosts of one build; numbers are
+host 1, the other three within a few results):
+
+| result class | how it is recognised | results | distinct CVEs |
+| --- | --- | --- | --- |
+| **A. vendor advisory check** | `pluginFamily` ends in `Local Security Checks`, `plugin_output` carries `Remote package installed : <nvr>` / `Should be : <nvr>` | 3 | 4 |
+| **B. upstream version check on a package-manager file** | `Installed version` / `Reported version` + a path or banner, usually `Potential Vulnerability : Managed` | ~104 | most of 250 |
+| **C. upstream version check on software no package manager owns** | same shape, path outside the RPM database (a hand-installed Tomcat, vendored gems) | a handful | few |
+| no CVE (ports, ciphers, users, inventory) | no `<cve>` element | ~150 | 0 |
+
+Class B is the trap. Nessus compares `openssl 1.1.1k` with upstream OpenSSL and reports every CVE
+fixed after it — but RHEL backports the fixes and keeps the version string, and Nessus itself says
+"has not tested for this issue but has instead relied only on the self-reported version number".
+Filed as findings, ~250 mostly-false CVEs would open per release, on components Themis already
+judges correctly from the SBOM and the vendor feed, and the version-range rule could never clear
+them (an upstream range does not speak for an RPM — EDR-KNOWLEDGE-01 D13). It is KN-GO-1's shape
+through a new door.
+
+The owner's decisions (2026-10-24) are recorded as **N1–N10**.
+
+### N1 — `vuln-report × nessus` joins the matrix; detection is by root element
+
+The matrix becomes `vuln-report × {curated, trivy, grype, cortex-json, cortex-csv, nessus}`. D5a
+gains one row, **1b**: after the CSV row (a body declared `text/csv` is still never tried as
+anything else) and before the JSON rows, because the body does not open as JSON:
+
+| # | body | identified as |
+| --- | --- | --- |
+| 1b | body whose first element (after an optional XML declaration, BOM, comments and whitespace) is `<NessusClientData_v2>` | `vuln-report` / `nessus` |
+
+Content-Type is informational for XML (`application/xml`, `text/xml` and
+`application/octet-stream` are all accepted); the root element decides. Any other XML root, or a
+`NessusClientData` (v1) root, is `unrecognised_format` naming the root it found.
+
+The XML reader is the standard library's `encoding/xml`, which does not resolve external entities
+or fetch DTDs, so a hostile `.nessus` cannot reach the network or the filesystem. A `<!DOCTYPE>`
+carrying an internal entity declaration is refused `malformed_body` rather than expanded.
+
+### N2 — One file, many hosts, one release
+
+A `.nessus` file names one or more `ReportHost`s. **All of them are filed under the one release the
+request names** — the owner's case is several hosts running one build. Uploading a multi-host file
+to a release is the caller's assertion that every host in it runs that release; Themis cannot check
+it and does not try. No `host=` filter in v1: a scan of mixed builds is split in Nessus before
+export.
+
+### N3 — Only class A is converted; everything else is counted
+
+| source | converter behaviour |
+| --- | --- |
+| ReportItem with no `<cve>` | not a finding; **not counted** (it is not a vulnerability record) |
+| class A item, per `<cve>` × per `Remote package installed` line | **one curated finding** |
+| class A item whose package lines do not parse (N4) | **SKIP + count**, per `<cve>` |
+| class B or C item, per `<cve>` | **SKIP + count** |
+
+So `findings_total` = every (host, plugin, CVE[, package]) unit considered and `findings_skipped`
+the class B/C and unparseable units, and the curated document carries exactly the difference (the
+`Stats` invariant). On the sample: ~800 considered across four hosts, almost all skipped — and the
+receipt says so, which is the point (KN-SCAN-OBS-1). Identical findings from several hosts are
+**not** de-duplicated in the converter: they collapse at the match key
+`(release_id, faultline_id, component_purl)` downstream, and keeping them keeps the count honest.
+
+Class B/C are not thrown away for ever; they are out of v1 (see the gates below).
+
+### N4 — The component is name + version + `rpm`, never a purl
+
+`Remote package installed : <nvr>` is split by the RPM rule — the last two `-` separate version and
+release, the rest is the name — into `component.name` and `component.version` (`<version>-<release>`,
+with an `E:` epoch kept as written when Nessus prints one). `component.ecosystem` is `rpm`.
+**No purl is built.** The finding's identity is resolved onto its SBOM twin by the existing
+purl-less path (EDR-IDENTITY-01 D2, `ResolveIdentity`, exact name + version), and an observation
+with no twin is reported as unresolved by the existing unresolved query — never guessed. D6
+(SBOM first) is what gives it twins to resolve onto.
+
+### N5 — `Should be` is the fixed version, kept unattributed
+
+The `Should be : <nvr>` version goes into the finding's `fixed` list. Like every scanner's fix it
+stays unattributed for per-component verdicts (KN-FIX-1); the vendor feed remains the authority on
+whether a build is fixed.
+
+### N6 — `observed_at` is the host's own end time
+
+Each finding's `observed_at` is its host's `HOST_END_TIMESTAMP` (unix seconds) as RFC 3339, falling
+back to parsing `HOST_END` (`Tue Aug 11 19:35:12 2026`). The document's derived timestamp is the
+latest host's. No host time and none supplied is `observed_at_underivable` (D3) — never `now`.
+
+### N7 — Severity, scores and names
+
+`scanner` = `nessus`; `converted_by` = `nessus@1`. `cvss_score` / `cvss_vector` from
+`cvss3_base_score` / `cvss3_vector`; `severity` from `risk_factor` (`None` → empty, so the CVSS band
+decides). `cisa-known-exploited`, `epss_score` and `vpr_score` are **not** carried: the curated
+contract has no field for them and Knowledge has its own EPSS/KEV feeds. Adding them is a curated
+contract change, not this amendment.
+
+### N8 — The converter emits nothing about the host
+
+The curated document carries CVE, component, versions, scores, scanner name and time. **No IP,
+hostname, FQDN, MAC, BIOS UUID, user name or `plugin_output` text** reaches it. The raw body is never
+stored (D2: only its digest is), so a host's identity never becomes evidence. Test fixtures are
+synthesized or scrubbed; no real export is committed.
+
+### N9 — GUI and REST
+
+Same endpoint, `POST /api/v1/intake`, `Content-Type: application/xml`. The dashboard's upload
+picker accepts `.nessus` and `.xml` and sends them as `application/xml`. No Jenkins road in v1: the
+owner uploads by GUI or REST, naming the release by its triple as today.
+
+### N10 — Bounds
+
+D13's body bound applies unchanged: 64 MiB (`THEMIS_INTAKE_MAX_BYTES`) fits about thirty hosts of
+the sample's size. D13's record, depth and field bounds are not wired for any dialect yet, and this
+amendment does not wire them for one; `encoding/xml` carries its own nesting limit, which is enough
+for a document the reader never recurses on.
+
+### Open gates (not decided here)
+
+| # | gate | why it is open |
+| --- | --- | --- |
+| G1 | **Version spelling.** Measure on the VM whether Nessus `<version>-<release>` equals the SBOM inventory's `version` for the same RPMs (epoch is the risk). If not, N4 needs a stated normalisation, decided then, not guessed now | `ResolveIdentity` is exact-match; a systematic spelling difference turns every class A finding into an unresolved one |
+| G2 | **Class B as information.** Whether "Nessus saw `openssl 1.1.1k` and believes these CVEs apply" should be shown anywhere at all, below the finding line | it is mostly noise on RHEL, but it is the scanner's honest claim |
+| G3 | **Class C (v2).** Hand-installed software is a real blind spot of an RPM SBOM. It needs a plugin → package-identity rule that never guesses | worth doing; not safe to rush |
+| G4 | **A fix is an absence.** Next week's scan simply omits a fixed issue, and nothing closes a scanner Finding on absence | same design as "Current SBOM and finding cleanup" (`docs/BACKLOG.md`) |
+
+### What this amendment does NOT touch
+
+- No new evidence kind: a Nessus report is filed as the curated `scanner-report` document, so
+  Knowledge, Governance and the receipt shape are unchanged.
+- No new receipt fields. A host count in the receipt would be useful and is a separate, small ask.
+- D6 (SBOM first), D7/B2 (release resolution and `create_release`), D3 (idempotency on the source
+  digest) apply to `.nessus` exactly as to every other dialect.

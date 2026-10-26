@@ -1146,6 +1146,27 @@ under the 2026-08-07 re-derivation standard.
   born tested by construction (its tier is 90% coverage and the registry's detection table is a
   closed, tested enum), which is why GUI-10 closed by removal rather than by harness.
   **Scope:** SMALL per tool.
+- [x] **SCAN-NESSUS-1 — Nessus `.nessus` reports through the intake door (filed and shipped
+  2026-10-24, by owner ask).** `internal/evidence/adapters/report/nessus.go`: D5a row 1b (XML root
+  `NessusClientData_v2`, after the CSV row and before the JSON rows), `converted_by: nessus@1`,
+  decided in EDR-INTAKE-01's 2026-10-24 amendment (N1–N10). Only vendor advisory checks
+  (`… Local Security Checks` with `Remote package installed` lines) become findings, one per CVE ×
+  package; the component is name + version + `rpm` and **no purl is built**, so it resolves onto its
+  SBOM twin or shows as unresolved. Upstream version checks are counted in `findings_skipped`: on a
+  real RHEL 8 export they were ~250 of ~254 CVEs per host, mostly backport false positives. Every
+  host in a file is filed under the one release named; nothing about the hosts is kept. Dashboard
+  picker takes `.nessus` / `.xml`. Measured on the owner's real 4-host export: 56 kept of 1613
+  considered. **Open follow-ups, each its own decision (amendment gates G1–G4):**
+  - [ ] **G1 — version spelling.** The owner assumed Nessus `<version>-<release>` equals the SBOM
+    inventory's version for the same RPM (epoch is the risk); to be confirmed with a matching SBOM +
+    `.nessus` pair on the VM. If it differs, every finding shows as unresolved, and N4 needs a stated
+    normalisation.
+  - [ ] **G2 — upstream version checks as information**, below the finding line, if at all.
+  - [ ] **G3 — software no package manager owns** (a hand-installed Tomcat, vendored gems): a real
+    blind spot of an RPM SBOM; needs a plugin → package-identity rule that never guesses.
+  - [ ] **G4 — a fix is an absence**: next week's scan omits a fixed issue and nothing closes the
+    scanner Finding. Same design as "Current SBOM and finding cleanup" (`EV-CURRENT-SBOM-1`).
+  - [ ] A host count on the receipt (small; receipt shape change).
 - [x] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** ✅ **CLOSED
   2026-10-12** — by removal, which is the better answer than the harness this item was asking
   for. EDR-INTAKE-01 D4 moved the one converter per dialect server-side

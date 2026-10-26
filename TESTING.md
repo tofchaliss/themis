@@ -355,7 +355,17 @@ curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" 
   --data-binary @trivy.json | jq .
 ```
 
-An already-curated `{"findings":[…]}` document passes through unconverted. All four answer with
+```sh
+# Nessus .nessus export (EDR-INTAKE-01, 2026-10-24 amendment). Every host in the file is filed
+# under this one release. Only vendor advisory checks (Red Hat/Rocky "Local Security Checks"
+# with "Remote package installed" lines) become findings; the upstream version checks are
+# counted in findings_skipped, never filed. Nothing about the hosts is kept.
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: application/xml' -H "X-API-Key: $KEY" \
+  --data-binary @scan.nessus | jq .
+```
+
+An already-curated `{"findings":[…]}` document passes through unconverted. All of them answer with
 a **receipt** (D9) that says what the body was taken to be and what came of it:
 
 ```json
