@@ -328,17 +328,17 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		newState = domain.VerdictOpen // an unjudged caller records a live match, exactly as before
 	}
 
-	var oldState string
+	var oldState, oldReason string
 	var oldStamp int64
 	var oldGeneration int
 	var oldName, oldVersion, oldEco, oldSource string
 	err = tx.QueryRow(ctx, `
-		SELECT verdict_state, verdict_card_version, verdict_generation,
+		SELECT verdict_state, verdict_reason, verdict_card_version, verdict_generation,
 		       component_name, component_version, component_ecosystem, component_source
 		FROM faultline_matches
 		WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3 FOR UPDATE`,
 		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).
-		Scan(&oldState, &oldStamp, &oldGeneration, &oldName, &oldVersion, &oldEco, &oldSource)
+		Scan(&oldState, &oldReason, &oldStamp, &oldGeneration, &oldName, &oldVersion, &oldEco, &oldSource)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// New occurrence: insert with its verdict and stamp, advance the card, emit the event.
@@ -384,7 +384,8 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
 				return false, qerr
 			}
-		} else if int64(m.CardVersion) > oldStamp || oldGeneration < domain.VerdictGeneration || detailChanged {
+		} else if reasonChanged := m.Verdict.Reason != oldReason; reasonChanged ||
+			int64(m.CardVersion) > oldStamp || oldGeneration < domain.VerdictGeneration || detailChanged {
 			// Same conclusion: refresh the stamps so the catch-up sweep does not re-judge a
 			// current row, and persist any corrected detail. A detail-only correction resets
 			// them to 0 instead — the corrected identity may judge differently against
@@ -410,14 +411,30 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 				// would keep the sweep away just as effectively as a current version stamp.
 				stamp, generation = 0, 0
 			}
+			// The premise is refreshed with the stamps (D10): a same-state re-judgement under
+			// new logic, or against a card that learned a bound, can change WHY a row is open
+			// or cleared without changing WHETHER. Governance mirrors the three verdict
+			// columns verbatim, so a new premise travels as the same event a state change
+			// does — otherwise the drawer, which reads Governance, keeps showing the old text
+			// (or none: every pre-D10 open row carries an empty reason).
 			if _, uerr := tx.Exec(ctx, `
 				UPDATE faultline_matches
 				SET verdict_card_version=$4, verdict_generation=$5,
-				    component_name=$6, component_version=$7, component_ecosystem=$8, component_source=$9
+				    component_name=$6, component_version=$7, component_ecosystem=$8, component_source=$9,
+				    verdict_reason=$10
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
 				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, stamp, generation,
-				name, version, eco, source); uerr != nil {
+				name, version, eco, source, m.Verdict.Reason); uerr != nil {
 				return false, uerr
+			}
+			if reasonChanged {
+				changed := domain.ComponentVerdictChanged{
+					FaultlineID: m.FaultlineID, CVE: m.CVE, ReleaseID: m.ReleaseID,
+					Component: matchedComponentOf(m), OccurredAt: m.OccurredAt.UTC(),
+				}
+				if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
+					return false, qerr
+				}
 			}
 		}
 		if own {

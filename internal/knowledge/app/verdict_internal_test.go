@@ -177,3 +177,105 @@ func TestRPMUpstreamVersion(t *testing.T) {
 		}
 	}
 }
+
+// D10 / KN-OPEN-REASON-1 (2026-10-26): an open rpm verdict states its premise. The fixtures are
+// the measured fully-patched RHEL 8 host: mysql 8.0 and ruby 2.5 module streams whose el8 fixes
+// are all 8.4 / 3.x module builds.
+func TestOpenReason_Shapes(t *testing.T) {
+	view := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "mysql-libs", Version: "0:8.4.11-1.module+el8.10.0+24662+2d989aa9", Ecosystem: "rpm"},
+		{Package: "mysql-libs", Version: "0:8.4.11-1.module+el9.8.0+24663+27effc5a", Ecosystem: "rpm"},
+		{Package: "ruby-libs", Version: "0:3.1.5-6.module+el8.10.0+24567+c4e5368e", Ecosystem: "rpm"},
+		{Package: "ruby-libs", Version: "0:3.3.12-8.module+el8.10.0+24568+2bbebe96", Ecosystem: "rpm"},
+		{Package: "httpd", Version: "0:2.4.37-65.module+el8.10.0+40257+286895ef.9", Ecosystem: "rpm"},
+		{Package: "openssl", Version: "1:1.1.1k-14.el8_6", Ecosystem: "rpm"},
+		{Package: "kernel", Version: "0:5.14.0-570.el9_6", Ecosystem: "rpm"},
+	}}
+	rpm := func(name, version string) InventoryComponent {
+		return InventoryComponent{PURL: "pkg:rpm/redhat/" + name + "@" + version, Name: name, Version: version, Ecosystem: "rpm"}
+	}
+	cases := []struct {
+		name string
+		comp InventoryComponent
+		want []string // every substring the reason must carry
+		not  []string // substrings it must not
+	}{
+		{"another module stream, one series", rpm("mysql-libs", "8.0.46-1.module+el8.10.0+24370+d5a391f0"),
+			[]string{"below every el8 fix for mysql-libs", "0:8.4.11-1.module+el8.10.0", "another series (8.4, installed 8.0)", "likely another module stream"},
+			[]string{"el9.8.0"}},
+		{"another module stream, two series", rpm("ruby-libs", "2.5.9-116.module+el8.10.0+24853+52b5af56"),
+			[]string{"below every el8 fix for ruby-libs", "another series (3.1, 3.3, installed 2.5)"}, nil},
+		{"same stream, simply behind", rpm("httpd", "2.4.37-30.module+el8.3.0+1234+abcd"),
+			[]string{"installed 2.4.37-30.module+el8.3.0+1234+abcd is below every el8 fix for httpd"}, []string{"another series"}},
+		{"plain build behind a plain fix", rpm("openssl", "1:1.1.1k-12.el8_5"),
+			[]string{"below every el8 fix for openssl: 1:1.1.1k-14.el8_6"}, []string{"module"}},
+		{"fixes only for other majors", rpm("kernel", "4.18.0-553.el8_10"),
+			[]string{"no el8 fix on record for kernel", "1 fix bound(s) known for other EL streams"}, nil},
+		{"no fix at all", rpm("curl", "7.61.1-34.el8"), []string{"no vendor fix on record for curl"}, nil},
+		{"no EL marker on the install", rpm("openssl", "1.1.1k-12"), []string{"names no EL stream"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := judgeOccurrence(view, c.comp, BridgeContext{})
+			if !v.State.IsOpen() {
+				t.Fatalf("state = %q, want open", v.State)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(v.Reason, w) {
+					t.Errorf("reason %q must contain %q", v.Reason, w)
+				}
+			}
+			for _, n := range c.not {
+				if strings.Contains(v.Reason, n) {
+					t.Errorf("reason %q must not contain %q", v.Reason, n)
+				}
+			}
+		})
+	}
+}
+
+// Only the rpm world gets a premise; a cleared row keeps its own; a language row stays as
+// before — "open" there already means exactly "not cleared".
+func TestOpenReason_ScopeAndClearance(t *testing.T) {
+	if v := judgeOccurrence(cardView, pypiShadow, BridgeContext{}); v.Reason != "" || !v.State.IsOpen() {
+		t.Errorf("a non-rpm open row carries no premise, got %q / %q", v.State, v.Reason)
+	}
+	if v := judgeOccurrence(cardView, patchedRPM, BridgeContext{}); v.State.IsOpen() || !strings.Contains(v.Reason, "vendor fix") {
+		t.Errorf("a cleared row keeps its clearance premise, got %q / %q", v.State, v.Reason)
+	}
+	if v := judgeOccurrence(cardView, unpatchedRPM, BridgeContext{}); !v.State.IsOpen() || !strings.Contains(v.Reason, "below every el8 fix for python-setuptools") {
+		t.Errorf("an open rpm row says what it was compared against, got %q / %q", v.State, v.Reason)
+	}
+}
+
+func TestListBoundsAndJoinReasons(t *testing.T) {
+	if got := listBounds([]string{"a", "b", "c", "d", "e"}); got != "a, b, c (+2 more)" {
+		t.Errorf("listBounds = %q", got)
+	}
+	if got := listBounds([]string{"a"}); got != "a" {
+		t.Errorf("listBounds one = %q", got)
+	}
+	for _, c := range [][3]string{{"", "p", "p"}, {"f", "", "f"}, {"f", "p", "f; p"}, {"", "", ""}} {
+		if got := joinReasons(c[0], c[1]); got != c[2] {
+			t.Errorf("joinReasons(%q,%q) = %q, want %q", c[0], c[1], got, c[2])
+		}
+	}
+	if s := upstreamSeries("15-1.module+el8.6.0+1+a"); s != "15" {
+		t.Errorf("single-segment series = %q", s)
+	}
+	// A plain build on either side, or a fix in the install's own series, is "simply behind".
+	if otherStreamSeries("8.0.46-1.module+el8.10.0+1+a", []string{"0:8.4.11-1.el8"}) != nil {
+		t.Error("a plain fix must not read as another stream")
+	}
+	if otherStreamSeries("8.0.46-1.module+el8.10.0+1+a", []string{"0:8.4.11-1.module+el8.10.0+2+b", "0:8.0.50-1.module+el8.10.0+3+c"}) != nil {
+		t.Error("a fix in the install's own series means the install is behind, not on another stream")
+	}
+	// A build whose upstream segment cannot be read (nothing before the first hyphen) names no
+	// series on either side, so no stream claim is made.
+	if otherStreamSeries("-1.module+el8.10.0+1+a", []string{"0:8.4.11-1.module+el8.10.0+2+b"}) != nil {
+		t.Error("an unreadable installed series must not read as another stream")
+	}
+	if otherStreamSeries("8.0.46-1.module+el8.10.0+1+a", []string{"-1.module+el8.10.0+2+b"}) != nil {
+		t.Error("an unreadable fix series must not read as another stream")
+	}
+}

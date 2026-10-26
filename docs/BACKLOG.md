@@ -1214,6 +1214,17 @@ under the 2026-08-07 re-derivation standard.
   EDR-INTAKE-01 amendment D3b: a converted document's identity also names its source digest;
   uploads that were not converted keep the plain fingerprint, pre-D3b rows still dedup on the
   same release, and nothing stored is rewritten.
+- [x] **KN-OPEN-REASON-1 — an open occurrence never said why it was open (filed and fixed
+  2026-10-26, by owner ask).** EDR-VERDICT-01 D10. Measured on the Nessus VM round: a fully
+  patched RHEL 8 host kept ~1,300 open rpm rows with an empty `verdict_reason`; the inspected ones
+  were real and unreachable by `dnf update` (mysql 8.0 / ruby 2.5 streams, fixes only as 8.4 / 3.x
+  module builds), and nothing on the page distinguished that from "no fix exists". The open verdict
+  of an rpm occurrence now states what it was compared against (no fix · no fix for this EL major ·
+  below every same-major bound, naming up to three) and flags fixes that are module builds of
+  another upstream series as *likely another module stream*. Audit text; nothing branches on it.
+  `VerdictGeneration` 3 rewrites history through the catch-up sweep, and a premise-only change now
+  reaches Governance as `ComponentVerdictChanged`. **Deferred:** a structured hint beside the text
+  (needs migrations on both contexts and an API change; nothing reads it yet).
 - [ ] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** One VM
   card holds 2136 proposals (average 87 over 1348 cards). KN-PROPOSAL-BLOAT-1 drops a proposal
   only when it equals the LATEST one from the same source and kind. Suspected cause, not yet

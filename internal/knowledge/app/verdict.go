@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -81,7 +82,126 @@ func judgeOccurrence(view domain.EnterpriseView, comp InventoryComponent, bridge
 		}
 	}
 
-	return domain.OpenVerdict()
+	// An open verdict states its premise too (EDR-VERDICT-01 D10, KN-OPEN-REASON-1). Until
+	// 2026-10-26 only a clearance said why; an open row said nothing, and the operator was left
+	// to compare versions by hand. Measured on a fully patched RHEL 8 host: ~1,300 open rows
+	// whose el8 fixes are all mysql 8.4 / ruby 3.x module builds while the host runs the 8.0 /
+	// 2.5 streams — real, not reachable by `dnf update`, and indistinguishable on the page from
+	// "the vendor shipped nothing". The text is audit prose: nothing branches on it.
+	open := domain.OpenVerdict()
+	open.Reason = openReason(view, comp, pkg)
+	return open
+}
+
+// openReason explains why an rpm-class occurrence stays open, in the vocabulary of the direct
+// rpm verdict above: which same-stream bounds the install was compared against and where it
+// fell. Three honest shapes, and nothing else:
+//
+//   - no fix for this package on the card at all;
+//   - fixes exist, but none in the install's EL major (RPMFixedByStream never compares across
+//     majors — a RHEL 9 bound says nothing about a RHEL 8 install);
+//   - same-major fixes exist and the install is below every one of them. When the install and
+//     all of those fixes are module-stream builds of a DIFFERENT upstream series, the reason says
+//     so: a module stream pins its series, so a plain update inside the stream cannot reach a fix
+//     published for another one (mysql:8.0 never receives the mysql:8.4 build). Phrased as
+//     "likely", deliberately — a rolling stream (container-tools:rhel8) does move its series,
+//     and the install's version names no stream the rule could read.
+//
+// Only the rpm class gets a premise: it is the one world where the open verdict rests on an
+// actual comparison. Elsewhere "open" still means "not cleared", which is already honest.
+func openReason(view domain.EnterpriseView, comp InventoryComponent, pkg string) string {
+	if value.ClassifyEcosystem(comp.Ecosystem) != value.VersionClassRPM || pkg == "" {
+		return ""
+	}
+	fixes := view.FixesFor(pkg, comp.Ecosystem)
+	if len(fixes) == 0 {
+		return fmt.Sprintf("no vendor fix on record for %s", pkg)
+	}
+	major := value.RPMReleaseMajor(comp.Version)
+	if major == "" {
+		return fmt.Sprintf("installed %s names no EL stream, so no vendor fix can be compared against it", comp.Version)
+	}
+	var same []string
+	for _, fix := range fixes {
+		if value.RPMReleaseMajor(fix) == major {
+			same = append(same, fix)
+		}
+	}
+	if len(same) == 0 {
+		return fmt.Sprintf("no el%s fix on record for %s (%d fix bound(s) known for other EL streams)", major, pkg, len(fixes))
+	}
+	reason := fmt.Sprintf("installed %s is below every el%s fix for %s: %s", comp.Version, major, pkg, listBounds(same))
+	if series := otherStreamSeries(comp.Version, same); len(series) > 0 {
+		reason += fmt.Sprintf("; those fixes are module builds of another series (%s, installed %s) — likely another module stream, which a plain update inside the installed stream never reaches",
+			strings.Join(series, ", "), upstreamSeries(comp.Version))
+	}
+	return reason
+}
+
+// listBounds renders at most three bounds and counts the rest, so a card with thirteen el8
+// rebuilds does not turn the premise into a wall.
+func listBounds(bounds []string) string {
+	const show = 3
+	if len(bounds) <= show {
+		return strings.Join(bounds, ", ")
+	}
+	return fmt.Sprintf("%s (+%d more)", strings.Join(bounds[:show], ", "), len(bounds)-show)
+}
+
+// otherStreamSeries returns the distinct upstream series of the given same-major fixes when the
+// install AND every fix are module-stream builds and NONE shares the install's series — the
+// shape of "the fix lives in another stream". Any plain (non-modular) build on either side, or
+// one fix in the install's own series, returns nil: then the install is simply behind.
+func otherStreamSeries(installed string, fixes []string) []string {
+	if !value.IsRPMModuleStream(installed) {
+		return nil
+	}
+	mine := upstreamSeries(installed)
+	if mine == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, fix := range fixes {
+		if !value.IsRPMModuleStream(fix) {
+			return nil
+		}
+		s := upstreamSeries(fix)
+		if s == "" || s == mine {
+			return nil
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// upstreamSeries is the first two dot-segments of an rpm build's upstream version — the part a
+// RHEL module stream is named by ("8.0.46-1.module+el8.10.0+…" -> "8.0", "2.5.9-116.module+…" ->
+// "2.5"). A single-segment version is its own series ("15-1.module+el8…" -> "15").
+func upstreamSeries(v string) string {
+	up := rpmUpstreamVersion(v)
+	parts := strings.SplitN(up, ".", 3)
+	if len(parts) >= 2 {
+		return parts[0] + "." + parts[1]
+	}
+	return up
+}
+
+// joinReasons prefixes an open verdict's premise with the fan-out guard's flag (KN-SANITY-1)
+// when both apply: the guard says "look twice", the premise says what was compared.
+func joinReasons(flag, premise string) string {
+	switch {
+	case flag == "":
+		return premise
+	case premise == "":
+		return flag
+	default:
+		return flag + "; " + premise
+	}
 }
 
 // bridgeObserved is the D3 Observed hop: the SBOM states which component OWNS this one
