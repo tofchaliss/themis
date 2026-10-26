@@ -151,3 +151,52 @@ func TestAdmit_Errors(t *testing.T) {
 		t.Error("invalid kind: want error")
 	}
 }
+
+// TestIdentityFingerprint_ConvertedNamesItsSource pins EDR-INTAKE-01 D3b (2026-10-26). Every
+// converted report with zero kept findings is `{"findings":[]}`, so with a bytes-only identity
+// the second clean scan of ANOTHER release was refused as duplicate_other_release.
+func TestIdentityFingerprint_ConvertedNamesItsSource(t *testing.T) {
+	empty := value.NewContentFingerprint([]byte(`{"findings":[]}`))
+	scanA := value.NewContentFingerprint([]byte("scan A")).String()
+	scanB := value.NewContentFingerprint([]byte("scan B")).String()
+
+	if got := trust.IdentityFingerprint(empty, ""); !got.Equal(empty) {
+		t.Error("a document that was not converted must keep its plain content fingerprint")
+	}
+	if got := trust.IdentityFingerprint(empty, empty.String()); !got.Equal(empty) {
+		t.Error("a pass-through (source digest == content) must keep the plain fingerprint, so the old door and intake agree")
+	}
+	a, b := trust.IdentityFingerprint(empty, scanA), trust.IdentityFingerprint(empty, scanB)
+	if a.Equal(empty) || b.Equal(empty) {
+		t.Error("a converted document's identity must differ from its bare content fingerprint")
+	}
+	if a.Equal(b) {
+		t.Error("two different scans with identical output must not share an identity")
+	}
+	if !a.Equal(trust.IdentityFingerprint(empty, scanA)) {
+		t.Error("the same source and output must give the same identity, or a re-upload stops deduping")
+	}
+	other := value.NewContentFingerprint([]byte(`{"findings":[{"cve":"CVE-2026-1"}]}`))
+	if trust.IdentityFingerprint(other, scanA).Equal(a) {
+		t.Error("the same source with a different output (a new converter version) must be a new identity")
+	}
+}
+
+func TestAdmit_ConvertedDocumentUsesItsIdentity(t *testing.T) {
+	raw := []byte(`{"findings":[]}`)
+	src := value.NewContentFingerprint([]byte("the submitted .nessus bytes")).String()
+	res, err := trust.Gate{}.Admit(trust.Artifact{
+		Raw: raw, Kind: domain.KindScannerReport,
+		Provenance: domain.Provenance{SourceDigest: src, ConvertedBy: "nessus@1"},
+	})
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if res.Status != domain.TrustAccepted {
+		t.Fatalf("status = %q (%s), want accepted", res.Status, res.Reason)
+	}
+	want := trust.IdentityFingerprint(value.NewContentFingerprint(raw), src)
+	if !res.Fingerprint.Equal(want) {
+		t.Errorf("fingerprint = %s, want the converted identity %s", res.Fingerprint, want)
+	}
+}

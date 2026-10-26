@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/evidence/adapters/store"
+	"github.com/themis-project/themis/internal/evidence/adapters/trust"
 	"github.com/themis-project/themis/internal/evidence/app"
 	"github.com/themis-project/themis/internal/evidence/domain"
 	"github.com/themis-project/themis/internal/kernel/event"
@@ -172,6 +173,91 @@ func TestSave_Idempotent(t *testing.T) {
 	}
 	if got := count(t, pool, "SELECT count(*) FROM evidence"); got != 1 {
 		t.Errorf("evidence rows after refusal = %d, want 1 (nothing stored)", got)
+	}
+}
+
+// convertedEvidence builds a scanner-report aggregate the way intake files a converted
+// document: the fingerprint is the D3b identity (source digest + content), not the bytes alone.
+func convertedEvidence(t *testing.T, id, releaseID string, raw []byte, source string) (domain.Evidence, domain.EvidenceRegistered) {
+	t.Helper()
+	src := value.NewContentFingerprint([]byte(source)).String()
+	e, err := domain.NewEvidence(domain.EvidenceID(id), domain.KindScannerReport,
+		trust.IdentityFingerprint(value.NewContentFingerprint(raw), src),
+		domain.SubjectRef{ReleaseID: releaseID}, domain.Provenance{Source: "nessus", SourceDigest: src, ConvertedBy: "nessus@1"},
+		domain.TrustAccepted, domain.NewInventory(nil, nil), time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("evidence: %v", err)
+	}
+	return e, domain.NewEvidenceRegistered(e, time.Unix(1_700_000_001, 0))
+}
+
+// TestSave_CleanReportsOfDifferentScansAreBothFiled pins EDR-INTAKE-01 D3b, measured on the VM
+// 2026-10-26: two fully patched scans both convert to `{"findings":[]}`, and the second, for
+// another release, was refused as duplicate_other_release.
+func TestSave_CleanReportsOfDifferentScansAreBothFiled(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	empty := []byte(`{"findings":[]}`)
+
+	e1, ev1 := convertedEvidence(t, "ev-a", "rel-a", empty, "scan of host A")
+	r1, err := s.Save(ctx, e1, empty, ev1)
+	if err != nil || !r1.Created {
+		t.Fatalf("first clean report: created=%v err=%v", r1.Created, err)
+	}
+	e2, ev2 := convertedEvidence(t, "ev-b", "rel-b", empty, "scan of host B")
+	r2, err := s.Save(ctx, e2, empty, ev2)
+	if err != nil || !r2.Created {
+		t.Fatalf("second clean report, another scan and release: created=%v err=%v, want filed", r2.Created, err)
+	}
+
+	// The same scan again, same release: still a benign dedup.
+	e3, ev3 := convertedEvidence(t, "ev-c", "rel-b", empty, "scan of host B")
+	r3, err := s.Save(ctx, e3, empty, ev3)
+	if err != nil || r3.Created || r3.ID != r2.ID {
+		t.Errorf("same scan, same release: id=%s created=%v err=%v, want dedup onto %s", r3.ID, r3.Created, err, r2.ID)
+	}
+	// The same scan sent to ANOTHER release: still refused loudly (EDR-EVIDENCE-01 D3).
+	e4, ev4 := convertedEvidence(t, "ev-d", "rel-a", empty, "scan of host B")
+	_, err = s.Save(ctx, e4, empty, ev4)
+	var cfe *app.ContentFiledElsewhereError
+	if !errors.As(err, &cfe) || cfe.ReleaseID != "rel-b" {
+		t.Errorf("same scan, another release: err = %v, want ContentFiledElsewhereError naming rel-b", err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM evidence"); got != 2 {
+		t.Errorf("evidence rows = %d, want 2", got)
+	}
+}
+
+// TestSave_ConvertedDedupsOntoAPreD3bRow: a converted document filed before D3b carries the
+// plain content fingerprint. Re-sending it to the same release must dedup onto that row, not
+// file a second copy under the new identity; another release's old row is not this scan's.
+func TestSave_ConvertedDedupsOntoAPreD3bRow(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	doc := []byte(`{"findings":[{"cve":"CVE-2026-1"}]}`)
+
+	// The pre-D3b row: same bytes, plain fingerprint (what sampleEvidence files).
+	old, oldEv := sampleEvidence(t, "ev-old", "rel-1", doc)
+	r0, err := s.Save(ctx, old, doc, oldEv)
+	if err != nil || !r0.Created {
+		t.Fatalf("pre-D3b row: created=%v err=%v", r0.Created, err)
+	}
+
+	again, againEv := convertedEvidence(t, "ev-new", "rel-1", doc, "the same scan")
+	r1, err := s.Save(ctx, again, doc, againEv)
+	if err != nil || r1.Created || r1.ID != r0.ID {
+		t.Errorf("same release: id=%s created=%v err=%v, want dedup onto the pre-D3b row %s", r1.ID, r1.Created, err, r0.ID)
+	}
+
+	other, otherEv := convertedEvidence(t, "ev-other", "rel-2", doc, "a different scan")
+	r2, err := s.Save(ctx, other, doc, otherEv)
+	if err != nil || !r2.Created {
+		t.Errorf("another release: created=%v err=%v, want filed under its own identity", r2.Created, err)
+	}
+	if got := count(t, pool, "SELECT count(*) FROM evidence"); got != 2 {
+		t.Errorf("evidence rows = %d, want 2", got)
 	}
 }
 

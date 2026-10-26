@@ -74,7 +74,27 @@ func (Gate) Admit(a Artifact) (Result, error) {
 		}
 	}
 
-	return Result{Fingerprint: fp, Status: domain.TrustAccepted, Provenance: a.Provenance}, nil
+	return Result{Fingerprint: IdentityFingerprint(fp, a.Provenance.SourceDigest), Status: domain.TrustAccepted, Provenance: a.Provenance}, nil
+}
+
+// convertedIdentityTag versions the identity rule below, so a later change of rule cannot
+// produce a fingerprint that collides with this one.
+const convertedIdentityTag = "themis-converted-v1"
+
+// IdentityFingerprint is the dedup identity of a filed document (EDR-INTAKE-01, 2026-10-26
+// amendment D3b). A standards SBOM that was not converted keeps the plain content fingerprint:
+// its bytes ARE the evidence. A CONVERTED document also names the file it came from, because
+// two different scans can convert to the same bytes — every report with zero kept findings is
+// `{"findings":[]}`, so the second clean scan of another release was refused as
+// `duplicate_other_release`. The same source to the same release still dedups, and the same
+// source to another release is still refused: both inputs of the hash are equal. A curated
+// report passed through unchanged has a source digest equal to its content fingerprint, and
+// keeps the plain one, so the old door and intake still agree on its identity.
+func IdentityFingerprint(content value.ContentFingerprint, sourceDigest string) value.ContentFingerprint {
+	if sourceDigest == "" || sourceDigest == content.String() {
+		return content
+	}
+	return value.NewContentFingerprint([]byte(convertedIdentityTag + "\n" + sourceDigest + "\n" + content.String()))
 }
 
 // curatedShapeFault is the cheap half of E1: a scanner report filed here is read by
