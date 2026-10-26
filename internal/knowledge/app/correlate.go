@@ -421,7 +421,8 @@ func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID stri
 		if item.Suspect != "" && verdict.State.IsOpen() {
 			// The guard's reason rides the open verdict (KN-SANITY-1), so the drawer says why
 			// this occurrence deserves a second look; a clearance stands on its own evidence.
-			verdict.Reason = item.Suspect
+			// It leads the verdict's own premise (D10) rather than replacing it.
+			verdict.Reason = joinReasons(item.Suspect, verdict.Reason)
 		}
 		created, err := s.matches.RecordMatch(ctx, Match{
 			ReleaseID: releaseID, FaultlineID: f.ID(), CVE: item.CVE.String(),

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1509,5 +1510,68 @@ func TestRecentFaultlines(t *testing.T) {
 	all, err := st.RecentFaultlines(ctx, 0)
 	if err != nil || len(all) < 3 {
 		t.Errorf("default limit: %d err %v", len(all), err)
+	}
+}
+
+// D10 / KN-OPEN-REASON-1 (2026-10-26): a re-judgement that keeps the STATE but changes the
+// PREMISE writes the new reason and emits ComponentVerdictChanged, so Governance — which the
+// drawer reads — mirrors it. Before this, the same-conclusion branch wrote only the stamps:
+// every pre-D10 open row would have kept its empty reason forever, and the generation bump
+// that exists precisely to rewrite history would have rewritten nothing visible.
+func TestRecordMatch_ReasonOnlyChangeIsWrittenAndMirrored(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, "CVE-2025-47273"), vulnFacts(t, "osv", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := app.InventoryComponent{
+		PURL: "pkg:rpm/redhat/mysql-libs@8.0.46-1.module+el8.10.0+1+a", Name: "mysql-libs",
+		Version: "8.0.46-1.module+el8.10.0+1+a", Ecosystem: "rpm",
+	}
+	record := func(reason string) {
+		t.Helper()
+		v := domain.OpenVerdict()
+		v.Reason = reason
+		if _, err := st.RecordMatch(ctx, app.Match{
+			ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: "CVE-2025-47273",
+			Component: comp, Verdict: v, OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("") // a pre-D10 row: open, no premise
+	before := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventComponentVerdictChanged)
+
+	record("installed 8.0.46-1.module+el8.10.0+1+a is below every el8 fix for mysql-libs: 0:8.4.11-1.module+el8.10.0+2+b")
+
+	var gotState, gotReason string
+	if err := pool.QueryRow(ctx,
+		"SELECT verdict_state, verdict_reason FROM faultline_matches WHERE faultline_id=$1", string(f.ID())).Scan(&gotState, &gotReason); err != nil {
+		t.Fatal(err)
+	}
+	if gotState != string(domain.VerdictOpen) || !strings.Contains(gotReason, "below every el8 fix") {
+		t.Errorf("row = %q / %q, want still open with the new premise written", gotState, gotReason)
+	}
+	after := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventComponentVerdictChanged)
+	if after != before+1 {
+		t.Errorf("verdict-changed events = %d, want %d — a new premise must reach Governance", after, before+1)
+	}
+	var payload string
+	if err := pool.QueryRow(ctx, "SELECT payload::text FROM knowledge_outbox WHERE event_type=$1 ORDER BY occurred_at DESC LIMIT 1",
+		app.EventComponentVerdictChanged).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, "below every el8 fix") || !strings.Contains(payload, `"VerdictState"`) || !strings.Contains(payload, `"open"`) {
+		t.Errorf("the event must carry the open state and the premise, got %s", payload)
+	}
+
+	// The same premise again is a plain dedup: no write, no event.
+	record("installed 8.0.46-1.module+el8.10.0+1+a is below every el8 fix for mysql-libs: 0:8.4.11-1.module+el8.10.0+2+b")
+	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventComponentVerdictChanged); n != after {
+		t.Errorf("an unchanged premise emitted %d extra event(s)", n-after)
 	}
 }

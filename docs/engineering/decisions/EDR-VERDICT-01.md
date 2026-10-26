@@ -154,6 +154,42 @@ label, plain-language reason, and per-occurrence fix advice — the measured cas
 `setuptools 70.3.0 · open — below upstream fix 78.1.1, pip-installed`. Cleared rows sit in a quiet
 section below open ones.
 
+### D10 — An open verdict states its premise too (amendment 2026-10-26, KN-OPEN-REASON-1)
+
+**Measured:** the Nessus VM round (SCAN-NESSUS-2), a fully patched RHEL 8 host. After KN-RHEL-MAJOR-1 the
+host still held ~1,300 open rpm occurrences, all with an empty `verdict_reason`; Nessus reported no
+missing update. The two inspected (CVE-2026-61109 on `mysql-libs`, CVE-2026-47242 on `ruby-libs`) were
+real and unreachable by `dnf update`: the host runs the `mysql:8.0` and `ruby:2.5` module streams, and
+every el8 fix on both cards is an `8.4` / `3.x` module build. Nothing on the page said so; a person had
+to read the version strings side by side to find out. D2 gave a cleared row its premise and left an
+open row mute — "open" was carrying "below the fix", "fix is in another stream", "no fix exists" and
+"never compared" under one empty string.
+
+**Decision.** `judgeOccurrence` writes a reason on the open verdict of every **rpm-class** occurrence,
+in the vocabulary of the direct rpm verdict (the comparison it actually ran): *no vendor fix on record
+for `<pkg>`* · *installed `<v>` names no EL stream* · *no el`N` fix on record for `<pkg>`* (bounds exist
+for other majors only; `RPMFixedByStream` never compares across them) · *installed `<v>` is below every
+el`N` fix for `<pkg>`: `<up to three bounds>`*. When the install and every same-major fix are
+module-stream builds and none shares the install's upstream series (first two dot-segments —
+the part a RHEL stream is named by), the reason adds *those fixes are module builds of another
+series (8.4, installed 8.0) — likely another module stream*. "Likely", deliberately: a rolling
+stream (`container-tools:rhel8`) does move its series, and an installed build names no stream the
+rule could read. The KN-SANITY-1 fan-out flag, when present, leads the premise instead of replacing it.
+
+**What does not change.** The reason is audit prose; nothing branches on it (D2 holds — `Reason` is
+"never a decision input"). No state moves: the host's 1,300 rows stay open, now saying why. Non-rpm
+worlds get no premise — there "open" already means exactly "not cleared", with no comparison behind it
+to describe. A structured hint (`other_stream` / `below_fix` / `no_fix`) was considered and deferred:
+it needs a migration on both Knowledge and Governance plus an API change, and nothing reads it yet.
+
+**Mechanics.** (a) `VerdictGeneration` 2 → 3, so the D6 catch-up sweep re-judges every row once and
+history gets its premise. (b) `RecordMatch`'s same-conclusion branch now writes `verdict_reason` and
+emits `ComponentVerdictChanged` when the premise text changed — before D10 it refreshed only the
+stamps, so the sweep would have rewritten nothing visible; Governance mirrors the three verdict
+columns verbatim, and the drawer reads Governance. A one-time burst of one small event per re-judged
+row follows the upgrade (~30k on the measured estate), after which an unchanged premise is a plain
+dedup. (c) The drawer renders the reason under open rows as it already did under cleared ones.
+
 ## Validation criterion (from the measured case — binding on every phase)
 
 The fix is validated on CVE-2025-47273 / MRF only when: the 39.2.0 occurrence is **cleared with its
