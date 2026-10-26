@@ -1194,6 +1194,18 @@ under the 2026-08-07 re-derivation standard.
   transaction EDR-EVENTBUS-01 D7 keeps discovery out of. Now a save inserts only the proposals
   above the stored `MAX(seq)`, and a restatement (not recorded, not created, no note) is not
   saved at all. Pinned by `TestSaveWritesOnlyTheNewTail` and `TestFoldProposal_EnrichAndNoOp`.
+- [x] **KN-RHEL-MAJOR-1 — OSV answers a RHEL 8 package with RHEL 9/10 advisories (found and fixed
+  2026-10-26, VM round of SCAN-NESSUS-2).** Discovery queries OSV's single `Red Hat` ecosystem,
+  which holds every product release. For a patched RHEL 8 host kernel (`4.18.0-553.177.1.el8_10`)
+  OSV returned 415 records, ALL naming `enterprise_linux:9`, `rhel_eus:9.x` or
+  `enterprise_linux:10.x`; their `<0:5.14.0-…el9` bounds read as "not yet fixed" next to an el8
+  `4.18.0`, so each kernel package opened ~3,490 CVEs (28,551 open matches on one release, 4163
+  informational Findings). Rocky and Alma were never affected: OSV keys them per major. Now the
+  OSV client keeps a Red Hat record only when one of its affected entries names the component's
+  major (`Red Hat:<product>:<N>[.x]`), or when none names a readable release at all — an
+  unlabeled record is kept, so the filter can only remove what it can read. **Not done:** the wrong
+  matches already stored for RHEL releases correlated before this fix stay until a cleanup is
+  decided (a one-time re-judgement or retirement pass; owner decision).
 - [ ] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** One VM
   card holds 2136 proposals (average 87 over 1348 cards). KN-PROPOSAL-BLOAT-1 drops a proposal
   only when it equals the LATEST one from the same source and kind. Suspected cause, not yet

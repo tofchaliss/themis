@@ -99,8 +99,22 @@ func (c *OSVClient) VulnsForPackage(ctx context.Context, comp app.InventoryCompo
 		return nil, fmt.Errorf("osv query %s/%s: decode: %w", eco, name, err)
 	}
 
+	// OSV keeps every Red Hat product in ONE query ecosystem, so a RHEL 8 package is answered
+	// with the RHEL 9 and 10 advisories too — and `5.14.0-…el9` reads as "not yet fixed" next to
+	// an el8 `4.18.0`. Measured on a VM 2026-10-26: all 415 records returned for a patched RHEL 8
+	// kernel were RHEL 9/10, and opened ~3,490 CVEs on every kernel package (KN-RHEL-MAJOR-1).
+	major := ""
+	if eco == osvRedHat {
+		if _, ver := distroNameVersion(comp.PURL); ver != "" {
+			major = distroMajor(ver)
+		}
+	}
+
 	var out []app.ProposalFor
 	for _, rec := range qr.Vulns {
+		if major != "" && !redHatRecordSpeaksFor(rec, major) {
+			continue
+		}
 		translated, terr := c.acl.Translate(rec)
 		if terr != nil {
 			// No canonical CVE (GHSA-only) or an unparseable record — skip and continue.
@@ -111,6 +125,50 @@ func (c *OSVClient) VulnsForPackage(ctx context.Context, comp app.InventoryCompo
 		}
 	}
 	return out, nil
+}
+
+// osvRedHat is OSV's single query ecosystem for every Red Hat product and release.
+const osvRedHat = "Red Hat"
+
+// redHatRecordSpeaksFor reports whether an OSV Red Hat record covers RHEL `major`. Each affected
+// entry names its product as `Red Hat:<product>:<release>[::<stream>]` — `enterprise_linux:9`,
+// `rhel_eus:9.4`, `enterprise_linux:10.0`. A record is kept when any entry names `major`, and
+// also when no entry names a release at all: a record whose product cannot be read is kept, so a
+// gap in the feed's labels never hides a live vulnerability. Only a record whose every readable
+// entry names ANOTHER release is dropped.
+func redHatRecordSpeaksFor(raw []byte, major string) bool {
+	var rec struct {
+		Affected []osvAffected `json:"affected"`
+	}
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return true // the ACL reports the malformed record; this filter only removes what it can read
+	}
+	readable := false
+	for _, aff := range rec.Affected {
+		m := redHatEcosystemMajor(aff.Package.Ecosystem)
+		if m == "" {
+			continue
+		}
+		if m == major {
+			return true
+		}
+		readable = true
+	}
+	return !readable
+}
+
+// redHatEcosystemMajor returns the RHEL major an OSV Red Hat ecosystem names
+// ("Red Hat:rhel_eus:9.4::baseos" -> "9"), or "" when the label carries no numeric release.
+func redHatEcosystemMajor(eco string) string {
+	parts := strings.Split(eco, ":")
+	if len(parts) < 3 || !strings.EqualFold(strings.TrimSpace(parts[0]), osvRedHat) {
+		return ""
+	}
+	m := distroMajor(strings.TrimSpace(parts[2]))
+	if m == "" || strings.Trim(m, "0123456789") != "" {
+		return ""
+	}
+	return m
 }
 
 // osvEcosystem maps a component to its OSV ecosystem name, preferring the PURL type
@@ -212,7 +270,7 @@ func osvDistroEcosystem(purl string) string {
 	case "alma", "almalinux":
 		return "AlmaLinux:" + distroMajor(ver)
 	case "rhel", "redhat":
-		return "Red Hat"
+		return osvRedHat
 	case "debian":
 		return "Debian:" + distroMajor(ver)
 	case "alpine":

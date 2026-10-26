@@ -333,3 +333,92 @@ func TestOSVClient_RangesCarryTheirWorld(t *testing.T) {
 		t.Fatalf("packaged entry: statements = %+v, want pypi/urllib3 >=0,<2.0", vf.RangeStatements)
 	}
 }
+
+// osvRedHatRecord builds a synthetic OSV Red Hat advisory naming one CVE for the given products.
+func osvRedHatRecord(id, cve, fixed string, ecosystems ...string) string {
+	affected := make([]map[string]any, 0, len(ecosystems))
+	for _, eco := range ecosystems {
+		affected = append(affected, map[string]any{
+			"package": map[string]string{"ecosystem": eco, "name": "kernel"},
+			"ranges":  []any{map[string]any{"events": []any{map[string]string{"introduced": "0"}, map[string]string{"fixed": fixed}}}},
+		})
+	}
+	b, _ := json.Marshal(map[string]any{
+		"id": id, "modified": "2026-01-02T00:00:00Z", "upstream": []string{cve}, "affected": affected,
+	})
+	return string(b)
+}
+
+// TestOSVClient_RedHatRecordsOfAnotherMajorAreDropped pins KN-RHEL-MAJOR-1. OSV answers a
+// "Red Hat" query with every product release; on a VM all 415 records returned for a patched
+// RHEL 8 kernel were RHEL 9/10, and each opened its CVEs on the el8 kernel because `5.14.0-…el9`
+// sorts above `4.18.0`. A record is kept only when it names the component's major — or names
+// no readable release at all, so an unlabeled record is never the one that goes missing.
+func TestOSVClient_RedHatRecordsOfAnotherMajorAreDropped(t *testing.T) {
+	srv, _ := osvServer(t,
+		osvRedHatRecord("RHSA-9", "CVE-2026-0009", "0:5.14.0-362.8.1.el9_3", "Red Hat:enterprise_linux:9::baseos", "Red Hat:rhel_eus:9.4::baseos"),
+		osvRedHatRecord("RHSA-10", "CVE-2026-0010", "0:6.12.0-55.el10", "Red Hat:enterprise_linux:10.0"),
+		osvRedHatRecord("RHSA-8", "CVE-2026-0008", "0:4.18.0-553.200.1.el8_10", "Red Hat:enterprise_linux:8::baseos"),
+		osvRedHatRecord("RHSA-8EUS", "CVE-2026-0081", "0:4.18.0-477.90.1.el8_8", "Red Hat:rhel_eus:8.8::baseos", "Red Hat:enterprise_linux:9::baseos"),
+		osvRedHatRecord("RHSA-NOLABEL", "CVE-2026-0001", "0:4.18.0-553.200.1.el8_10", "Red Hat"),
+	)
+	c := feed.NewOSVClient(srv.URL, srv.Client())
+
+	got, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL: "pkg:rpm/redhat/kernel@4.18.0-553.177.1.el8_10?distro=rhel-8.10", Name: "kernel",
+		Version: "4.18.0-553.177.1.el8_10", Source: "kernel",
+	})
+	if err != nil {
+		t.Fatalf("VulnsForPackage: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, p := range got {
+		seen[p.CVE.String()] = true
+	}
+	for _, want := range []string{"CVE-2026-0008", "CVE-2026-0081", "CVE-2026-0001"} {
+		if !seen[want] {
+			t.Errorf("%s missing: a record naming RHEL 8 (or no release) must be kept; got %v", want, seen)
+		}
+	}
+	for _, drop := range []string{"CVE-2026-0009", "CVE-2026-0010"} {
+		if seen[drop] {
+			t.Errorf("%s kept: a record naming only RHEL 9/10 does not speak about a RHEL 8 package", drop)
+		}
+	}
+}
+
+// TestOSVClient_RedHatFilterNeedsAReadableMajor: with no release on the purl there is nothing
+// to compare, so every record is kept — the filter never guesses a major.
+func TestOSVClient_RedHatFilterNeedsAReadableMajor(t *testing.T) {
+	srv, _ := osvServer(t,
+		osvRedHatRecord("RHSA-9", "CVE-2026-0009", "0:5.14.0-362.8.1.el9_3", "Red Hat:enterprise_linux:9::baseos"),
+		`{"id":"RHSA-BAD","modified":"2026-01-02T00:00:00Z","upstream":["CVE-2026-0002"],"affected":"not-a-list"}`,
+	)
+	c := feed.NewOSVClient(srv.URL, srv.Client())
+
+	got, err := c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL: "pkg:rpm/redhat/kernel@4.18.0-553.177.1.el8_10?distro=rhel", Name: "kernel",
+		Version: "4.18.0-553.177.1.el8_10", Source: "kernel",
+	})
+	if err != nil {
+		t.Fatalf("VulnsForPackage: %v", err)
+	}
+	if len(got) != 0 {
+		// distro=rhel has no release, so osvDistroEcosystem resolves nothing and nothing is
+		// queried — the filter is not what decides here, and it must not start deciding.
+		t.Errorf("got %d proposals for an unversioned distro, want 0 (no query)", len(got))
+	}
+
+	got, err = c.VulnsForPackage(context.Background(), app.InventoryComponent{
+		PURL: "pkg:rpm/redhat/kernel@4.18.0-553.177.1.el8_10?distro=rhel-8.10", Name: "kernel",
+		Version: "4.18.0-553.177.1.el8_10", Source: "kernel",
+	})
+	if err != nil {
+		t.Fatalf("VulnsForPackage: %v", err)
+	}
+	for _, p := range got {
+		if p.CVE.String() == "CVE-2026-0009" {
+			t.Error("the RHEL 9 record was kept next to a malformed one")
+		}
+	}
+}
