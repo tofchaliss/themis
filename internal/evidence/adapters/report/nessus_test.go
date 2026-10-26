@@ -7,11 +7,13 @@ import (
 	"time"
 )
 
-// The Nessus dialect (EDR-INTAKE-01, 2026-10-24 amendment), born tested: there is no earlier
-// implementation to be byte-equal with, so the committed golden freezes THIS converter's bytes.
+// The Nessus report road (EDR-INTAKE-01, 2026-10-24 amendment), born tested: there is no
+// earlier implementation to be byte-equal with, so the committed golden freezes THIS
+// converter's bytes. Since the 2026-10-26 amendment a `.nessus` body is an SBOM by default,
+// so these tests call the report converter directly — the road `kind=vuln-report` selects.
 func TestNessusConvertMatchesGolden(t *testing.T) {
 	body := readFixture(t, "nessus", "sample.input.nessus")
-	got, stats, err := Convert(body, time.Time{})
+	got, stats, err := nessusXML{}.Convert(body, time.Time{})
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -28,7 +30,7 @@ func TestNessusConvertMatchesGolden(t *testing.T) {
 
 // The judgements byte-equality cannot see.
 func TestNessusSemanticInvariants(t *testing.T) {
-	findings := decodeFindings(t, convert(t, readFixture(t, "nessus", "sample.input.nessus"), time.Time{}))
+	findings := decodeFindings(t, nessusReport(t, readFixture(t, "nessus", "sample.input.nessus")))
 	if len(findings) != 6 {
 		t.Fatalf("got %d findings, want 6 kept of 11 considered", len(findings))
 	}
@@ -66,7 +68,7 @@ func TestNessusSemanticInvariants(t *testing.T) {
 
 // N8: nothing about the host reaches the curated document.
 func TestNessusEmitsNothingAboutTheHost(t *testing.T) {
-	out := string(convert(t, readFixture(t, "nessus", "sample.input.nessus"), time.Time{}))
+	out := string(nessusReport(t, readFixture(t, "nessus", "sample.input.nessus")))
 	for _, leak := range []string{"192.0.2.", "example.test", "00:00:5e", "NOTE:", "OpenSSH", "synthetic"} {
 		if strings.Contains(out, leak) {
 			t.Errorf("curated document contains %q", leak)
@@ -169,4 +171,14 @@ func TestNessusPackagesPairing(t *testing.T) {
 	if bad != 0 || len(pkgs) != 2 || pkgs[0].fixed != "" || pkgs[1].fixed != "2-1" {
 		t.Errorf("pkgs = %+v bad = %d", pkgs, bad)
 	}
+}
+
+// nessusReport converts through the report road, failing the test on a refusal.
+func nessusReport(t *testing.T, body []byte) []byte {
+	t.Helper()
+	out, _, err := nessusXML{}.Convert(body, time.Time{})
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	return out
 }

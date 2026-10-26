@@ -228,11 +228,7 @@ func splitNVR(nvr string) (name, version string, ok bool) {
 // nessusScore takes the CVSS 3 base score and vector. An absent or unparseable score is
 // the integer zero, as every other converter writes it.
 func nessusScore(it nessusItem) (score, string) {
-	f, err := strconv.ParseFloat(strings.TrimSpace(it.CVSS3Score), 64)
-	if err != nil || f <= 0 || f > 10 {
-		return zeroScore, strings.TrimSpace(it.CVSS3Vector)
-	}
-	return floatScore(f), strings.TrimSpace(it.CVSS3Vector)
+	return nessusCSVScore(strings.TrimSpace(it.CVSS3Score)), strings.TrimSpace(it.CVSS3Vector)
 }
 
 // nessusSeverity passes Nessus's risk factor through, except `None`, which would otherwise

@@ -1167,6 +1167,24 @@ under the 2026-08-07 re-derivation standard.
   - [ ] **G4 — a fix is an absence**: next week's scan omits a fixed issue and nothing closes the
     scanner Finding. Same design as "Current SBOM and finding cleanup" (`EV-CURRENT-SBOM-1`).
   - [ ] A host count on the receipt (small; receipt shape change).
+- [x] **SCAN-NESSUS-2 — `.nessus` is the SBOM, the Nessus CSV is the scan report (filed and shipped
+  2026-10-26, by owner ask).** EDR-INTAKE-01's 2026-10-26 amendment (P1–P9, C1–C6). The owner's
+  teams have no SBOM; they keep two exports per scan. A `.nessus` upload is now `sbom / nessus` by
+  default: `nessus-inventory@1` turns plugin 22869's package list into a CycloneDX 1.5 document
+  (OS-vendor packages only, purl `pkg:rpm/<ns>/<name>@<ver>-<rel>?distro=<os>-<x.y>[&epoch=N]`),
+  filed as `format=cyclonedx` with `converted_by` / `source_digest`; the rest is counted in the new
+  receipt field `components_skipped` (migration 000005). `kind=vuln-report` (new declared-kind
+  parameter) keeps the 2026-10-24 findings road. A Nessus CSV is `vuln-report / nessus-csv`
+  (`nessus-csv@1`, same class-A rules, `observed_at` required); the dashboard asks for a scan date
+  for a `.csv`. Measured on the owner's real export: 1249 packages kept, 42 skipped.
+  **Open gates:**
+  - [ ] **P-G1 — coverage against a real SBOM.** No source RPM and no arch in plugin 22869; compare
+    CVEs found from this inventory with a syft/vendor SBOM of one host.
+  - [ ] **P-G2 — other vendors' RPMs** (database vendor repo, EPEL): a vendor → namespace rule each.
+  - [ ] **P-G3 — hand-installed software** (= G3 above). Next design.
+  - [ ] **Epoch spelling on the report road.** The inventory version has no epoch (the form every
+    real advisory line seen so far used); if Nessus ever prints `1:` in `Remote package installed`,
+    that finding will not resolve onto its inventory twin. Check on the VM round.
 - [x] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** ✅ **CLOSED
   2026-10-12** — by removal, which is the better answer than the harness this item was asking
   for. EDR-INTAKE-01 D4 moved the one converter per dialect server-side

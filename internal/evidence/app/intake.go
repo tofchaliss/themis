@@ -27,6 +27,10 @@ const defaultIntakeMaxBytes int64 = 64 << 20
 // IntakeCommand is one submission at the single intake door (D1): the artifact as raw
 // bytes, plus the metadata that used to be envelope fields.
 type IntakeCommand struct {
+	// DeclaredKind is the caller's `kind` (`sbom` / `vuln-report`), empty when none
+	// was declared. It is checked against the body, never obeyed over it; on a Nessus
+	// export, which is both, it picks the road (EDR-INTAKE-01, 2026-10-26 P1).
+	DeclaredKind string
 	// ContentType is the submitted header. It is decisive for CSV and otherwise only
 	// a hint — the body is the evidence of what the body is.
 	ContentType string
@@ -241,7 +245,7 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	_ = r.StartValidating()
 
 	// 2. Detect (D5a).
-	kind, dialect, err := s.reports.Detect(cmd.ContentType, cmd.Body)
+	kind, dialect, err := s.reports.Detect(cmd.ContentType, cmd.Body, cmd.DeclaredKind)
 	if err != nil {
 		return refusedByPort(r, domain.ReasonUnrecognisedFormat, err)
 	}
@@ -290,10 +294,12 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 		_ = r.RecordRelease(res.ReleaseID)
 	}
 
-	// 4. Convert (D2/D3). An SBOM is identified, never converted: it is already a
-	// standards document, its bytes ARE the evidence document, and re-serializing it
-	// would change the fingerprint that dedups a re-upload.
-	curated, stats := cmd.Body, ReportStats{}
+	// 4. Convert (D2/D3). A CycloneDX or SPDX SBOM is identified, never converted: it
+	// is already a standards document, its bytes ARE the evidence document, and
+	// re-serializing it would change the fingerprint that dedups a re-upload. The
+	// ACL hands it back untouched with no converter named. Any other dialect —
+	// a vendor report, or a Nessus export's package list (2026-10-26 P2) — is converted.
+	//
 	// `BuildID` is artifact provenance and travels with the other two labels (B5):
 	// which pipeline run produced the document, recorded beside who produced it and
 	// which image it was about. It is deliberately inert — nothing downstream reads it
@@ -303,15 +309,19 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 		ImageDigest: cmd.ProvenanceImageDigest,
 		BuildID:     cmd.BuildID,
 	}
-	if filedKind != domain.KindSBOM {
-		_ = r.StartConverting()
-		out, st, convertedBy, sourceDigest, cerr := s.reports.Convert(dialect, cmd.Body, cmd.ObservedAt)
-		if cerr != nil {
-			return refusedByPort(r, domain.ReasonConversionFailed, cerr)
-		}
-		curated, stats = out, st
-		prov.ConvertedBy, prov.SourceDigest = convertedBy, sourceDigest
-		_ = r.RecordConversion(convertedBy, sourceDigest, st.FindingsTotal, st.FindingsSkipped)
+	_ = r.StartConverting()
+	conv, cerr := s.reports.Convert(kind, dialect, cmd.Body, cmd.ObservedAt)
+	if cerr != nil {
+		return refusedByPort(r, domain.ReasonConversionFailed, cerr)
+	}
+	curated, stats := conv.Document, conv.Stats
+	// A standards SBOM comes back with no source digest: nothing was converted, so
+	// there is no conversion to record. Every other road — including a curated
+	// report's pass-through, which names no converter — records one.
+	if conv.SourceDigest != "" {
+		prov.ConvertedBy, prov.SourceDigest = conv.ConvertedBy, conv.SourceDigest
+		_ = r.RecordConversion(conv.ConvertedBy, conv.SourceDigest, stats.FindingsTotal, stats.FindingsSkipped)
+		_ = r.RecordComponentsSkipped(stats.ComponentsSkipped)
 	}
 
 	// 5. Validate what will be filed — E1, the decision that closes the 2026-10-05
@@ -366,7 +376,7 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 	filed, err := s.registrar.Register(ctx, RegisterCommand{
 		Raw:              curated,
 		Kind:             filedKind,
-		Format:           dialect,
+		Format:           conv.Format,
 		SubjectReleaseID: releaseID,
 		Provenance:       prov,
 	})

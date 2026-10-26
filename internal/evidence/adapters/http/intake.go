@@ -220,6 +220,7 @@ func (i *Intake) submit(w http.ResponseWriter, r *http.Request, params gen.Submi
 		AllowWithoutSBOM:      params.AllowWithoutSbom != nil && *params.AllowWithoutSbom,
 		ProvenanceSource:      strval(params.ProvenanceSource),
 		ProvenanceImageDigest: strval(params.ProvenanceImageDigest),
+		DeclaredKind:          declaredKind(params.Kind),
 		// The caller's product confinement, read from the authenticated principal
 		// here — the only ring that may read a credential — and carried on the
 		// command so the overflow worker's detached context authorizes identically.
@@ -333,6 +334,16 @@ func (i *Intake) submit(w http.ResponseWriter, r *http.Request, params gen.Submi
 	i.respond(w, saved, receipt.Created(), 0)
 }
 
+// declaredKind reads the optional `kind` parameter. The value is not checked here: a
+// value outside the enum is a declaration the body cannot meet, and the ACL refuses it
+// as `declared_format_mismatch` like any other.
+func declaredKind(k *gen.SubmitIntakeParamsKind) string {
+	if k == nil {
+		return ""
+	}
+	return string(*k)
+}
+
 // merge copies a finished attempt's outcome onto the receipt row, names the filing
 // step's typed refusals, and reads back the component count for a filed SBOM so the
 // receipt reports what actually landed.
@@ -358,6 +369,7 @@ func (i *Intake) merge(ctx context.Context, rec store.IntakeReceipt, rc *domain.
 	rec.DetectedFormat = rc.DetectedFormat()
 	rec.FindingsTotal = rc.FindingsTotal()
 	rec.FindingsSkipped = rc.FindingsSkipped()
+	rec.ComponentsSkipped = rc.ComponentsSkipped()
 	rec.ConvertedBy = rc.ConvertedBy()
 	if rc.SourceDigest() != "" {
 		rec.SourceDigest = rc.SourceDigest()
@@ -534,21 +546,22 @@ func (i *Intake) respond(w http.ResponseWriter, rec store.IntakeReceipt, created
 // view renders a receipt on the wire.
 func (i *Intake) view(rec store.IntakeReceipt, created bool, retryAfter int) gen.IntakeReceipt {
 	out := gen.IntakeReceipt{
-		IntakeId:        rec.IntakeID,
-		Status:          gen.ReceiptStatus(rec.Status),
-		StatusUrl:       "/api/v1/intake/" + rec.IntakeID,
-		Detail:          strptr(rec.Detail),
-		ReleaseId:       strptr(rec.ReleaseID),
-		DetectedKind:    strptr(rec.DetectedKind),
-		DetectedFormat:  strptr(rec.DetectedFormat),
-		FindingsTotal:   intptr(rec.FindingsTotal),
-		FindingsSkipped: intptr(rec.FindingsSkipped),
-		Components:      intptr(rec.Components),
-		SourceDigest:    strptr(rec.SourceDigest),
-		ConvertedBy:     strptr(rec.ConvertedBy),
-		BuildId:         strptr(rec.BuildID),
-		CreatedAt:       timeptr(rec.CreatedAt),
-		UpdatedAt:       timeptr(rec.UpdatedAt),
+		IntakeId:          rec.IntakeID,
+		Status:            gen.ReceiptStatus(rec.Status),
+		StatusUrl:         "/api/v1/intake/" + rec.IntakeID,
+		Detail:            strptr(rec.Detail),
+		ReleaseId:         strptr(rec.ReleaseID),
+		DetectedKind:      strptr(rec.DetectedKind),
+		DetectedFormat:    strptr(rec.DetectedFormat),
+		FindingsTotal:     intptr(rec.FindingsTotal),
+		FindingsSkipped:   intptr(rec.FindingsSkipped),
+		Components:        intptr(rec.Components),
+		ComponentsSkipped: intptr(rec.ComponentsSkipped),
+		SourceDigest:      strptr(rec.SourceDigest),
+		ConvertedBy:       strptr(rec.ConvertedBy),
+		BuildId:           strptr(rec.BuildID),
+		CreatedAt:         timeptr(rec.CreatedAt),
+		UpdatedAt:         timeptr(rec.UpdatedAt),
 	}
 	if rec.Reason != "" {
 		out.Reason = reasonPtr(rec.Reason)

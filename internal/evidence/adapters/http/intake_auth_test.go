@@ -110,10 +110,13 @@ func (a *authRegistry) ProductOfRelease(_ context.Context, releaseID string) (st
 // converter is never involved and the chain is the one under test and nothing else.
 type sbomReports struct{}
 
-func (sbomReports) Detect(string, []byte) (string, string, error) { return "sbom", "cyclonedx", nil }
+func (sbomReports) Detect(string, []byte, string) (string, string, error) {
+	return "sbom", "cyclonedx", nil
+}
 
-func (sbomReports) Convert(string, []byte, time.Time) ([]byte, app.ReportStats, string, string, error) {
-	return nil, app.ReportStats{}, "", "", errors.New("an SBOM is never converted")
+// Convert passes the SBOM through, as the ACL does for a standards SBOM.
+func (sbomReports) Convert(_, dialect string, body []byte, _ time.Time) (app.Conversion, error) {
+	return app.Conversion{Document: body, Format: dialect}, nil
 }
 
 type hasInventory struct{}

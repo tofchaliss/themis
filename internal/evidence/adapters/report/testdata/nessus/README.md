@@ -17,3 +17,22 @@ host name and MAC is from a documentation range (`192.0.2.0/24`, `example.test`,
 `sample.golden.json` is the converter's own output, frozen on the day the dialect was added:
 there was no earlier implementation to be byte-equal with, so the golden IS the fingerprint
 contract.
+
+## 2026-10-26 amendment: the package list (P1–P9) and the CSV (C1–C6)
+
+`inventory.input.nessus` is a hand-built export for the SBOM road (`nessus-inventory@1`),
+documentation ranges only. Plugin 22869 ("Software Enumeration (SSH)") on:
+
+- host 1, RHEL 8.10: four Red Hat packages (one with epoch 1, one module build), one package
+  from a made-up vendor, one from Fedora/EPEL, and `gpg-pubkey`, which does not split
+  (3 skipped);
+- host 2, RHEL 8.10: the same `zlib` (collapses) and a NEWER kernel (kept: real drift);
+- host 3, Windows: one package line (skipped — the OS is not mapped).
+
+`inventory.golden.json` is the CycloneDX document it produces: 5 components, 4 skipped.
+
+`sample.input.csv` is a hand-built Nessus CSV with the real export's column order, for the
+report road (`nessus-csv@1`): an advisory row with two package lines, one with an epoch and
+`Risk` `None`, one whose package line does not split, two upstream version checks and an
+informational row with no CVE. `sample.csv.golden.json` is its output for
+`observed_at=2026-10-15T21:30:00Z`: 3 kept of 6 considered.

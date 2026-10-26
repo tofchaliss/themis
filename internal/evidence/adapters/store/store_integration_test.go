@@ -574,6 +574,7 @@ func TestIntakeReceipts_SaveLoadAdvance(t *testing.T) {
 
 	advanced := got
 	advanced.Status, advanced.EvidenceID, advanced.Components = domain.ReceiptFiled, "ev-9", 1184
+	advanced.ComponentsSkipped = 42
 	advanced.Reason, advanced.Detail = "", ""
 	if err := s.SaveIntakeReceipt(ctx, advanced); err != nil {
 		t.Fatal(err)
@@ -582,7 +583,7 @@ func TestIntakeReceipts_SaveLoadAdvance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Status != domain.ReceiptFiled || after.EvidenceID != "ev-9" || after.Components != 1184 {
+	if after.Status != domain.ReceiptFiled || after.EvidenceID != "ev-9" || after.Components != 1184 || after.ComponentsSkipped != 42 {
 		t.Errorf("advanced receipt = %+v", after)
 	}
 	if !after.CreatedAt.Equal(got.CreatedAt) {
@@ -862,8 +863,9 @@ func TestBuildIDMigrationReversible(t *testing.T) {
 		}
 	})
 
-	if err := m.Steps(-1); err != nil {
-		t.Fatalf("down one step: %v", err)
+	// To version 3, not one step: later migrations sit on top of 000004.
+	if err := m.Migrate(3); err != nil {
+		t.Fatalf("down to 000003: %v", err)
 	}
 	for table, column := range map[string]string{"evidence": "provenance_build_id", "intake_receipts": "build_id"} {
 		if hasColumn(t, table, column) {
@@ -905,6 +907,50 @@ func TestBuildIDMigrationReversible(t *testing.T) {
 	}
 	if rec.SourceDigest != "abc" || rec.BuildID != "" {
 		t.Errorf("receipt after up/down/up = %+v", rec)
+	}
+}
+
+// TestComponentsSkippedMigrationReversible — 000005 up → down → up with a receipt in the
+// table: only the column moves, the receipt survives, and the re-up defaults it to 0.
+func TestComponentsSkippedMigrationReversible(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	if err := store.New(pool).SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-cs", Status: domain.ReceiptFiled, EvidenceID: "ev-cs", ComponentsSkipped: 42, SourceDigest: "abc",
+	}); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+	m, err := migrate.New(migrationsDir(), testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		upErr := m.Up()
+		m.Close()
+		if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+			t.Fatalf("restore: %v", upErr)
+		}
+	})
+	if err := m.Migrate(4); err != nil {
+		t.Fatalf("down to 000004: %v", err)
+	}
+	if hasColumn(t, "intake_receipts", "components_skipped") {
+		t.Error("intake_receipts.components_skipped survived the down migration")
+	}
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("up again: %v", err)
+	}
+	after, err := pgxpool.New(ctx, testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Close()
+	rec, err := store.New(after).LoadIntakeReceipt(ctx, "in-cs")
+	if err != nil {
+		t.Fatalf("receipt after up/down/up: %v", err)
+	}
+	if rec.SourceDigest != "abc" || rec.ComponentsSkipped != 0 {
+		t.Errorf("receipt after up/down/up = %+v, want it kept with the column defaulted", rec)
 	}
 }
 

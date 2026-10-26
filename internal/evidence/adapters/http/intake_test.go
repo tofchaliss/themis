@@ -503,6 +503,51 @@ func TestIntakeFiled_SBOMReportsItsComponentCount(t *testing.T) {
 	}
 }
 
+// TestIntakeFiled_ANessusSBOMReportsItsSkippedComponents — 2026-10-26 P1/P4: the
+// declared `kind` reaches the use case, and a converted SBOM reports both the
+// components it filed and the package lines it left out.
+func TestIntakeFiled_ANessusSBOMReportsItsSkippedComponents(t *testing.T) {
+	purl, err := value.NewPURL("pkg:rpm/redhat/zlib@1.2.11-25.el8?distro=rhel-8.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := domain.NewInventory([]domain.Component{{PURL: purl, Name: "zlib", Version: "1.2.11-25.el8", Ecosystem: "rpm"}}, nil)
+	var declared string
+	runner := &fakeRunner{build: func(cmd app.IntakeCommand) *domain.Receipt {
+		declared = cmd.DeclaredKind
+		r := &domain.Receipt{}
+		must(t, r.Accept())
+		must(t, r.StartValidating())
+		must(t, r.RecordDetected("sbom", "nessus"))
+		must(t, r.RecordRelease(releaseOf(cmd)))
+		must(t, r.StartConverting())
+		must(t, r.RecordConversion("nessus-inventory@1", "d1ge57", 0, 0))
+		must(t, r.RecordComponentsSkipped(42))
+		must(t, r.StartRegistering())
+		must(t, r.Filed("ev-nessus", true))
+		return r
+	}}
+	f := newIntakeFixture(t, evhttp.IntakeConfig{}, runner, fakeInventory{inv: inv})
+
+	rec := post(t, f.handler, "/intake?release_id=rel-1&kind=sbom", `<NessusClientData_v2/>`, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if declared != "sbom" {
+		t.Errorf("declared kind = %q, want it carried to the use case", declared)
+	}
+	view := decodeReceipt(t, rec)
+	if view.Components == nil || *view.Components != 1 || view.ComponentsSkipped == nil || *view.ComponentsSkipped != 42 {
+		t.Errorf("components = %v, skipped = %v, want 1 and 42", view.Components, view.ComponentsSkipped)
+	}
+
+	// No `kind` is no declaration.
+	_ = post(t, f.handler, "/intake?release_id=rel-1", `<NessusClientData_v2/>`, nil)
+	if declared != "" {
+		t.Errorf("declared kind = %q with no parameter, want empty", declared)
+	}
+}
+
 // TestIntakeFiled_AnUnreadableInventoryCountIsStillFiled — the document landed; a
 // count we could not read is a gap in the receipt, never a reason to call the filing
 // anything but filed.

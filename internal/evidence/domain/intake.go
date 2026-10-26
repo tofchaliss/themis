@@ -227,6 +227,9 @@ type Receipt struct {
 	sourceDigest    string
 	findingsTotal   int
 	findingsSkipped int
+	// componentsSkipped is an inventory conversion's abstentions (EDR-INTAKE-01,
+	// 2026-10-26 P4): package lines left out because no identity could be read.
+	componentsSkipped int
 }
 
 // Status returns where the attempt has got to.
@@ -273,6 +276,11 @@ func (r *Receipt) FindingsTotal() int { return r.findingsTotal }
 // FindingsSkipped returns how many source records the converter skipped.
 func (r *Receipt) FindingsSkipped() int { return r.findingsSkipped }
 
+// ComponentsSkipped returns how many package lines an inventory conversion left out
+// for want of an identity — "1249 of 1249" and "1249 of 1291" must not look alike.
+// Zero for everything but a converted SBOM.
+func (r *Receipt) ComponentsSkipped() int { return r.componentsSkipped }
+
 // IsTerminal reports whether the attempt has reached an outcome. A terminal receipt
 // is immutable: it is the record of what happened, and a record that can still change
 // is not one.
@@ -291,8 +299,8 @@ func (r *Receipt) Accept() error { return r.advance(ReceiptAccepted) }
 // StartValidating enters identification and validation (D5 stages 1-2).
 func (r *Receipt) StartValidating() error { return r.advance(ReceiptValidating) }
 
-// StartConverting enters conversion (D2/D3). Skipped for an SBOM, which is already a
-// standards document.
+// StartConverting enters conversion (D2/D3). A CycloneDX or SPDX SBOM passes through
+// it unchanged; the stage may still be skipped, which the rank ladder allows.
 func (r *Receipt) StartConverting() error { return r.advance(ReceiptConverting) }
 
 // StartRegistering enters the one step that writes.
@@ -377,6 +385,16 @@ func (r *Receipt) RecordConversion(convertedBy, sourceDigest string, findingsTot
 	}
 	r.convertedBy, r.sourceDigest = convertedBy, sourceDigest
 	r.findingsTotal, r.findingsSkipped = findingsTotal, findingsSkipped
+	return nil
+}
+
+// RecordComponentsSkipped notes an inventory conversion's abstentions (2026-10-26 P4).
+// Like [Receipt.RecordConversion] it is recorded before the outcome is known.
+func (r *Receipt) RecordComponentsSkipped(n int) error {
+	if r.IsTerminal() {
+		return r.terminalError("recording skipped components")
+	}
+	r.componentsSkipped = n
 	return nil
 }
 
