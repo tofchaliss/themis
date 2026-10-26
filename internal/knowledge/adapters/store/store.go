@@ -231,7 +231,20 @@ func (s *Store) Save(ctx context.Context, f domain.Faultline, created bool, prev
 		}
 	}
 
-	for seq, p := range f.Proposals() {
+	// Only the new tail is written. Proposals are append-only and `seq` is their index, so
+	// everything below the stored maximum is already there. Re-sending the whole history made
+	// every fold cost one round trip per proposal the card had ever held.
+	start := 0
+	if !created {
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(MAX(seq) + 1, 0) FROM faultline_proposals WHERE faultline_id = $1`,
+			string(f.ID())).Scan(&start); err != nil {
+			return err
+		}
+	}
+	proposals := f.Proposals()
+	for seq := start; seq < len(proposals); seq++ {
+		p := proposals[seq]
 		payload, err := marshalProposalPayload(p)
 		if err != nil {
 			return err

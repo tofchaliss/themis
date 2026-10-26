@@ -193,12 +193,21 @@ func TestFoldProposal_EnrichAndNoOp(t *testing.T) {
 	if got := noteTypes(repo.lastNotes); len(got) != 1 || got[0] != app.EventFaultlineEnriched {
 		t.Errorf("notes = %v, want [enriched]", got)
 	}
-	// Re-folding an identical proposal changes nothing → no events.
-	if _, _, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical)); err != nil {
+	// Re-folding an identical proposal changes nothing → no events, and no write at all: a
+	// restatement saved anyway cost one full card write per correlated (component, CVE) pair.
+	saves := repo.saveCalls
+	f, recorded, err := s.FoldProposal(ctx, c, vulnFacts(t, "redhat", value.SeverityCritical))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := noteTypes(repo.lastNotes); len(got) != 0 {
-		t.Errorf("duplicate fold notes = %v, want none", got)
+	if recorded {
+		t.Error("an identical proposal was reported as recorded")
+	}
+	if repo.saveCalls != saves {
+		t.Errorf("restatement saved the card: saves %d → %d, want unchanged", saves, repo.saveCalls)
+	}
+	if f.ID() == "" || f.View().Severity != value.SeverityCritical {
+		t.Errorf("restatement must still return the current card, got id=%q severity=%v", f.ID(), f.View().Severity)
 	}
 }
 
