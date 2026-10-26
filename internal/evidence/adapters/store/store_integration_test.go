@@ -475,9 +475,12 @@ func TestIntakeReceipts_TableShape(t *testing.T) {
 		"converted_by":     "NO",
 		// What THIS attempt submitted (B5). NOT NULL DEFAULT '': a build id nobody
 		// asserted is the fact "none", not an unknown.
-		"build_id":   "NO",
-		"created_at": "NO",
-		"updated_at": "NO",
+		"build_id": "NO",
+		// Package lines a converted SBOM left out (2026-10-26 P4). NOT NULL DEFAULT 0:
+		// nothing filed as submitted skipped a component.
+		"components_skipped": "NO",
+		"created_at":         "NO",
+		"updated_at":         "NO",
 	}
 	for name, nullable := range want {
 		if got[name] == "" {
