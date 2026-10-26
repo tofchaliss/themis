@@ -2025,8 +2025,10 @@ async function viewSBOM() {
         release (and, if needed, its product/project) is registered on upload, the same
         Product→Project→Release chain scripts/gf-upload-sbom.sh drives. SBOMs and scanner reports go
         through the one <b>intake door</b>, which detects the format itself and converts vendor dialects
-        server-side (EDR-INTAKE-01): raw <b>Trivy JSON</b>, <b>Grype JSON</b>, <b>Cortex JSON</b>, <b>Cortex CSV</b> and <b>Nessus (.nessus)</b> upload
-        as they came out of the tool — no jq recipe, no in-browser translation. A report needs its
+        server-side (EDR-INTAKE-01): raw <b>Trivy JSON</b>, <b>Grype JSON</b>, <b>Cortex JSON</b>, <b>Cortex CSV</b> and <b>Nessus CSV</b> upload
+        as they came out of the tool — no jq recipe, no in-browser translation. A <b>Nessus .nessus</b> export is
+        filed as the release's <b>SBOM</b> (its installed-package list); the Nessus CSV of the same scan is its
+        scan report, and needs the scan date below, because the CSV does not carry one. A report needs its
         release's SBOM filed first, and is refused by name if it is missing. Byte-identical re-uploads to
         the same release dedup to the same evidence id, and the same bytes pointed at a different release
         are refused — a new build needs its own document.</p>
@@ -2046,7 +2048,10 @@ async function viewSBOM() {
           <select id="sb-kind"><option value="sbom">SBOM or scanner report</option><option value="vex">VEX</option></select></label>
         <label>Document
           <input type="file" id="sb-file" accept=".json,.csv,.nessus,.xml,application/json,text/csv,application/xml">
-          <span class="file-note" id="sb-detect">Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Trivy · Grype · Cortex · Nessus · already-curated).</span></label>
+          <span class="file-note" id="sb-detect">Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Nessus · Trivy · Grype · Cortex · already-curated).</span></label>
+        <label id="sb-observed-wrap" style="display:none">Scan date
+          <input type="date" id="sb-observed">
+          <span class="file-note">When the scan ran. A CSV export does not say, and Themis never stamps “now” — a Nessus CSV is refused without it.</span></label>
         <div><button class="btn btn-primary" id="sb-upload" disabled>Upload</button></div>
       </div>
       <div id="sb-outcome"></div>
@@ -2059,6 +2064,7 @@ async function viewSBOM() {
   const sel = { product: $("#sb-product"), project: $("#sb-project"), release: $("#sb-release") };
   const inp = { product: $("#sb-product-new"), project: $("#sb-project-new"), release: $("#sb-release-new") };
   const fileInput = $("#sb-file"), detect = $("#sb-detect"), uploadBtn = $("#sb-upload");
+  const observedWrap = $("#sb-observed-wrap"), observedInput = $("#sb-observed");
   const outcome = $("#sb-outcome");
   // The picked File is kept as-is and sent as the request body: the door wants the
   // artifact, not a transcription of it (EDR-INTAKE-01 D1/D2).
@@ -2128,7 +2134,11 @@ async function viewSBOM() {
     outcome.innerHTML = "";
     detect.textContent = file
       ? `${file.name} · ${(file.size / 1024).toFixed(0)} KB · sent as ${intakeContentType(file)} — the door identifies it`
-      : "Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Trivy · Grype · Cortex · Nessus · already-curated).";
+      : "Pick a .json, .csv or .nessus file — the intake door identifies it (CycloneDX · SPDX · Nessus · Trivy · Grype · Cortex · already-curated).";
+    // The scan date is asked for a CSV only: every other format carries its own time.
+    const csv = !!file && /\.csv$/i.test(file.name);
+    observedWrap.style.display = csv ? "" : "none";
+    if (!csv) observedInput.value = "";
     gate();
   });
 
@@ -2206,7 +2216,11 @@ async function viewSBOM() {
   // between them. It goes through the dashboard's own proxy (EDR-GUI-01 D1/D4), so the
   // browser never talks to Evidence directly and never holds a node key.
   async function uploadIntake(releaseId) {
-    const r = await fetch(`/api/evidence/intake?release_id=${encodeURIComponent(releaseId)}`, {
+    // A picked scan date is the caller's assertion about WHICH observation this is (D3),
+    // sent as midnight UTC of that day; nothing picked sends nothing.
+    let query = `release_id=${encodeURIComponent(releaseId)}`;
+    if (observedInput.value) query += `&observed_at=${encodeURIComponent(`${observedInput.value}T00:00:00Z`)}`;
+    const r = await fetch(`/api/evidence/intake?${query}`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": intakeContentType(file) },
       body: file,
@@ -2262,8 +2276,10 @@ async function viewSBOM() {
       return followReceipt(rec);
     }
     if (rec.status === "rejected" || rec.status === "failed") return showRefusal(status, rec);
+    // A converted SBOM (a .nessus package list) also says what it left out — "1249 of
+    // 1249" and "1249 of 1291" must not look alike either.
     const counts = rec.detected_kind === "sbom"
-      ? `${rec.components ?? "?"} components`
+      ? `${rec.components ?? "?"} components${rec.components_skipped ? `, ${rec.components_skipped} packages skipped (no identity)` : ""}`
       : `${rec.findings_total ?? "?"} findings considered, ${rec.findings_skipped ?? 0} skipped`;
     const parts = [
       `${esc(rec.detected_kind || "?")} / <b>${esc(rec.detected_format || "?")}</b>`,

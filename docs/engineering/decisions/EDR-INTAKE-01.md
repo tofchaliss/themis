@@ -317,7 +317,7 @@ deterministic rather than dependent on map iteration:
 **A declared `kind`/`format` that contradicts the body is refused** (`declared_format_mismatch`),
 never silently overridden — the caller's assertion is information, and disagreeing with it quietly
 is how a mis-declared document becomes a mystery later. Invalid *combinations* are refused the same
-way: the matrix is `sbom × {cyclonedx, spdx}` and `vuln-report × {curated, trivy, grype, nessus,
+way: the matrix is `sbom × {cyclonedx, spdx, nessus}` (2026-10-26 P1) and `vuln-report × {curated, trivy, grype, nessus, nessus-csv,
 cortex-json, cortex-csv}`, and nothing else. `kind=sbom, format=trivy` fails at identification.
 
 Detected values are **echoed in the response** (`detected_kind`, `detected_format`) so the client
@@ -1187,3 +1187,149 @@ for a document the reader never recurses on.
 - No new receipt fields. A host count in the receipt would be useful and is a separate, small ask.
 - D6 (SBOM first), D7/B2 (release resolution and `create_release`), D3 (idempotency on the source
   digest) apply to `.nessus` exactly as to every other dialect.
+
+**2026-10-26 — A `.nessus` export is the release's SBOM; a Nessus CSV is its scan report.**
+
+Driver: the owner's teams work with **two** exports of each Nessus scan, and give them two roles:
+the `.nessus` file is their SBOM (it lists the installed packages) and the CSV is their scan report
+(one row per finding). Themis takes them in those roles. The 2026-10-24 amendment had read the
+`.nessus` file for its **findings**; the first real pair showed how little that gives on a patched
+host — a fully patched RHEL 8.10 host produced **0 findings of 456 considered**, correctly, because
+every CVE in it was an upstream version guess. What the `.nessus` file does carry is the host's
+full package list: plugin **22869** ("Software Enumeration (SSH)") prints every installed RPM as
+`name-version-release|epoch installdate|vendor|packager` — **1291 packages, 1249 of them from the
+OS vendor** — with the OS stated in `HostProperties` (`operating-system`, `cpe-0`). Filed as an
+inventory, Themis's own correlation (OSV + the Red Hat feed, which judge backports correctly)
+finds the real CVEs, exactly as for any SBOM. The CSV of the same scan was checked against the
+`.nessus`: same host, same 245 plugins, same 300 CVEs, one row per (plugin, host, port, CVE).
+
+The decisions are **P1–P9** (the `.nessus` inventory) and **C1–C6** (the CSV report).
+
+### P1 — A `.nessus` upload is an SBOM by default
+
+`POST /api/v1/intake` with a `.nessus` body files its package list as an SBOM: the receipt says
+`detected_kind: sbom`, `detected_format: nessus`. The matrix becomes `sbom × {cyclonedx, spdx,
+nessus}`. The 2026-10-24 report road stays, but only when asked for: `kind=vuln-report` on a
+`.nessus` body converts its findings as N1–N10 describe. This is the first use of D5's declared
+`kind`; a declared kind that the body cannot be is `declared_format_mismatch` (the reason already
+exists). One request still files ONE artifact (B1).
+
+### P2 — What is filed is a CycloneDX document, built server-side
+
+D2/D5 say an SBOM is identified, never converted. This is the one exception, and it is bounded:
+the converter `nessus-inventory@1` turns plugin 22869 into a **CycloneDX 1.5 JSON** document, and
+that document is filed as `kind=sbom`, `format=cyclonedx`, with `converted_by` and `source_digest`
+recorded exactly as for a converted report. Evidence's existing CycloneDX parser reads it, so
+there is still exactly **one** SBOM reader and the inventory invariant (non-empty) applies
+unchanged. The filed document is a real standards SBOM: it exports and re-imports like any other.
+
+It is deterministic in the source bytes (D3): components sorted by purl, no generated serial
+number, `metadata.timestamp` = the latest host's end time (2026-10-24 N6), never the clock. A
+re-upload of the same `.nessus` produces the same bytes and dedups.
+
+### P3 — Identity comes from the scan, and only where the scan states it
+
+A package line becomes a component **with a purl** only when all of these hold:
+
+1. the host's OS is one Themis maps (`Red Hat Enterprise Linux` → `redhat` / `rhel`, `Rocky
+   Linux` → `rocky`, `AlmaLinux` → `almalinux`), with its version read from `operating-system`
+   (`… release 8.10` → `distro=rhel-8.10`);
+2. the line's **vendor is that OS's own vendor** (`Red Hat, Inc.` on RHEL);
+3. the name-version-release splits by the RPM rule (2026-10-24 N4).
+
+The purl is `pkg:rpm/<namespace>/<name>@<version>-<release>?distro=<os>-<x.y>`, plus `&epoch=N`
+when the line carries a numeric epoch. The version field carries **no** epoch, which is the form
+the Nessus advisory lines used in every sample seen, so a report from the same scan resolves onto
+these components by exact name + version (2026-10-24 gate G1, for this road). This is not an
+invented identity: the namespace, distro and version are each read from the scan, the way an SBOM
+generator reads them from the RPM database.
+
+Every other line — another vendor (EPEL, a database vendor's repo, in-house builds), an OS Themis
+does not map, a line that does not split — is **counted and not filed** (no purl, no component).
+Abstaining keeps EDR-IDENTITY-01 D3: a purl namespace is an ecosystem claim, and a guessed one
+would correlate the wrong advisories.
+
+### P4 — The receipt counts what was left out
+
+The receipt's `components` is the kept count. A new field `components_skipped` carries the
+abstentions, so "1249 of 1249" and "1249 of 1291" do not look alike (KN-SCAN-OBS-1's rule, applied
+to an inventory). It is 0 for every other SBOM, which converts nothing.
+
+### P5 — No source package, and what that costs
+
+Plugin 22869 does not print the source RPM, so `Component.Source` stays empty. Knowledge already
+falls back to the binary name (`componentPackage`) for range and statement lookups. That is right
+for most packages and loses matches where the distro feed keys only on the source name (the
+`openssl-libs` ← `openssl` shape). Measured, not guessed: gate **P-G1** below.
+
+### P6 — Many hosts, one inventory
+
+All hosts' lists are merged into one document; identical purls collapse. Two hosts reporting two
+versions of one package keep **both** components — they are the same release by the caller's
+assertion (2026-10-24 N2), so a difference is real drift and must stay visible. No host name,
+address or MAC is written (2026-10-24 N8).
+
+### P7 — A release with a real SBOM too
+
+If a release already has a CycloneDX/SPDX SBOM, a Nessus inventory is filed beside it as a second
+SBOM, like any other second SBOM (B6). Which inventory is "current" is EV-CURRENT-SBOM-1's design,
+not this amendment's.
+
+### P8 — The plugin must be there
+
+A `.nessus` with no plugin 22869 output (uncredentialed scan, plugin disabled), or with no host
+whose OS is mapped, is refused `source_invalid` with the detail naming which, rather than filed as
+an empty SBOM (which the domain forbids anyway).
+
+### P9 — GUI and REST
+
+REST: the same endpoint and `Content-Type: application/xml`. Dashboard: a `.nessus` file is sent
+as before and now files as the SBOM.
+
+### C1 — A Nessus CSV is identified by its header row
+
+D5a row 1 (CSV) recognises a second header set beside Cortex's. A CSV whose header row carries
+`Plugin ID`, `CVE`, `Host`, `Name` and `Plugin Output` is `vuln-report / nessus-csv`. A header
+carrying both sets is refused `unrecognised_format` rather than guessed at. The matrix gains
+`vuln-report × nessus-csv`.
+
+### C2 — Same rules as the `.nessus` report road
+
+The converter `nessus-csv@1` applies N3–N5 row by row: a row whose `CVE` is empty is not a finding
+and not counted; a row whose `Plugin Output` carries `Remote package installed : <nvr>` lines
+gives one finding per package line (the CSV has no plugin family column, so the package lines
+alone mark a vendor advisory check — only local checks print them); every other row with a CVE is
+counted in `findings_skipped`. Component = name + version + `rpm`, no purl; `Should be` is the
+unattributed fix. On the owner's pair this gives **0 kept of 456**, the same as the `.nessus` road
+— which is the point: the CSV is the same scan.
+
+### C3 — The scan date is supplied, because the CSV has none
+
+No column of a Nessus CSV says when the scan ran (`Plugin Publication Date` is the plugin's, not
+the scan's). D3 forbids stamping `now`, so a Nessus CSV without `observed_at` on the request is
+refused `observed_at_underivable`, exactly as a Cortex CSV with no `last_observed` column is. The
+dashboard's upload card gains an "observed at" date field, shown for a `.csv` file.
+
+### C4 — Severity and score
+
+`severity` from the `Risk` column (`None` → empty, N7); `cvss_score` from `CVSS v3.0 Base Score`.
+The CSV carries no CVSS vector, so none is written.
+
+### C5 — Nothing about the host
+
+`Host`, `Port`, `Protocol` and the free text are read and dropped (N8). Only the curated document
+is stored.
+
+### C6 — Order of the two uploads
+
+The `.nessus` (SBOM) first, the CSV (report) second, both to the same release — D6 enforces it by
+name. Because the CSV's package lines and the `.nessus` package list come from one scan, a
+finding resolves onto its inventory twin by exact name + version (P3).
+
+### Open gates
+
+| # | gate | why it is open |
+| --- | --- | --- |
+| P-G1 | **Coverage against a real SBOM.** On one host, compare the CVEs Themis finds from this inventory with those from a syft (or vendor) SBOM of the same host | the missing source package (P5) and the missing `arch` can lose matches; the size of the loss decides whether a source-name table is needed |
+| P-G2 | **Other vendors' RPMs** (a database vendor's repo, EPEL) | real CVE surface; needs a vendor → purl-namespace rule per vendor, decided per vendor |
+| P-G3 | **Hand-installed software** (the 2026-10-24 gate G3) | next design; plugin outputs carry `Associated Package` / `Managed by OS`, which tells managed from unmanaged installs |

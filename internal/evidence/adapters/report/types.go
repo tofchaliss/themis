@@ -58,9 +58,10 @@ const (
 // Dialect is the concrete format inside a Kind, echoed as `detected_format`.
 type Dialect string
 
-// The closed dialect set. The valid matrix is `sbom × {cyclonedx, spdx}` and
-// `vuln-report × {curated, trivy, grype, nessus, cortex-json, cortex-csv}`, and nothing else
-// (D5a; grype added by GUI-15, 2026-10-19; nessus by the 2026-10-24 amendment).
+// The closed dialect set. The valid matrix is `sbom × {cyclonedx, spdx, nessus}` and
+// `vuln-report × {curated, trivy, grype, nessus, nessus-csv, cortex-json, cortex-csv}`, and
+// nothing else (D5a; grype added by GUI-15, 2026-10-19; nessus by the 2026-10-24 amendment;
+// nessus as an SBOM and nessus-csv by the 2026-10-26 amendment).
 const (
 	DialectCurated    Dialect = "curated"
 	DialectCortexCSV  Dialect = "cortex-csv"
@@ -68,6 +69,7 @@ const (
 	DialectTrivy      Dialect = "trivy"
 	DialectGrype      Dialect = "grype"
 	DialectNessus     Dialect = "nessus"
+	DialectNessusCSV  Dialect = "nessus-csv"
 	DialectCycloneDX  Dialect = "cyclonedx"
 	DialectSPDX       Dialect = "spdx"
 )
@@ -80,9 +82,14 @@ const (
 //
 // Both are reported, never just the kept count: "427 of 427" and "427 of 500" must
 // not look alike, which is the whole of the silent-skip class (KN-SCAN-OBS-1).
+//
+// ComponentsSkipped is the same rule for an inventory conversion (2026-10-26 P4): the
+// package lines a converted SBOM left out because no identity could be read for them.
+// It is zero for every report conversion.
 type Stats struct {
-	FindingsTotal   int
-	FindingsSkipped int
+	FindingsTotal     int
+	FindingsSkipped   int
+	ComponentsSkipped int
 }
 
 // The refusal taxonomy (EDR-INTAKE-01 D5/D11). Each sentinel is one reason the
@@ -111,6 +118,11 @@ var (
 	// ErrObservedAtUnderivable is D3's refusal: no timestamp could be derived from
 	// the submitted data and none was supplied. Never `now` — see the package doc.
 	ErrObservedAtUnderivable = errors.New("observed_at_underivable")
+
+	// ErrDeclaredFormatMismatch is D5a's refusal of a declared `kind` the body cannot
+	// be (2026-10-26 P1): the caller's assertion is information, and overriding it
+	// silently is how a mis-declared document becomes a mystery later.
+	ErrDeclaredFormatMismatch = errors.New("declared_format_mismatch")
 )
 
 // Converter turns one vendor dialect into the curated document. Implementations are

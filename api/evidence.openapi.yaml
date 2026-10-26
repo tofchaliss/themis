@@ -177,11 +177,23 @@ paths:
             state says so.
           schema:
             type: boolean
+        - name: kind
+          in: query
+          description: >-
+            The kind the caller declares the body to be (D5a). Checked against the
+            body, never obeyed over it: a body that cannot be the declared kind is
+            `declared_format_mismatch`. A Nessus `.nessus` export is both, so this
+            picks the road (2026-10-26 P1): omitted or `sbom` files its package list
+            as the release's SBOM; `vuln-report` files its findings.
+          schema:
+            type: string
+            enum: [sbom, vuln-report]
         - name: observed_at
           in: query
           description: >-
             RFC 3339 assertion about WHICH observation this is (D3). Omitted, the
             timestamp is derived from the submitted data; it is never the upload time.
+            A Nessus CSV carries no scan date, so it needs this (2026-10-26 C3).
           schema:
             type: string
         - name: expected_checksum
@@ -552,7 +564,7 @@ components:
           description: What the body was identified as (D5a) — `sbom` or `vuln-report`.
         detected_format:
           type: string
-          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `grype`, `nessus`, `cortex-json`, `cortex-csv`).
+          description: The dialect (`spdx`, `cyclonedx`, `curated`, `trivy`, `grype`, `nessus`, `nessus-csv`, `cortex-json`, `cortex-csv`). A `nessus` SBOM is filed as the CycloneDX document it converts to.
         findings_total:
           type: integer
           description: >-
@@ -564,6 +576,13 @@ components:
         components:
           type: integer
           description: Components the filed SBOM's canonical inventory carries.
+        components_skipped:
+          type: integer
+          description: >-
+            Package lines a converted SBOM left out because no identity could be read
+            for them (another vendor's package, an OS Themis does not map, a name that
+            does not split) — EDR-INTAKE-01 2026-10-26 P4. Zero for an SBOM filed as
+            submitted.
         source_digest:
           type: string
           description: Lowercase-hex SHA-256 of the SUBMITTED bytes (which, for a converted submission, are not the filed bytes).

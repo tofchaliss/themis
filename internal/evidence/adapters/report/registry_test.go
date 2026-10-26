@@ -65,16 +65,40 @@ func TestDetectTruthTable(t *testing.T) {
 			err:  ErrUnrecognisedFormat,
 		},
 		// Row 1b (2026-10-24 amendment N1): the XML root decides, whatever the content type.
+		// An SBOM by default since the 2026-10-26 amendment (P1).
 		{
 			name:        "a Nessus export declared as XML",
 			contentType: "application/xml",
 			body:        `<?xml version="1.0" encoding="UTF-8"?>` + "\n<NessusClientData_v2><Report/></NessusClientData_v2>",
-			kind:        KindReport, dialect: DialectNessus,
+			kind:        KindSBOM, dialect: DialectNessus,
 		},
 		{
 			name: "a Nessus export with a BOM, a comment and no content type",
 			body: "\xEF\xBB\xBF  <!-- exported --><NessusClientData_v2/>",
-			kind: KindReport, dialect: DialectNessus,
+			kind: KindSBOM, dialect: DialectNessus,
+		},
+		// Row 1, Nessus header (2026-10-26 amendment C1).
+		{
+			name:        "a Nessus CSV declared text/csv",
+			contentType: "text/csv; charset=utf-8",
+			body:        nessusCSVHeader + "\n",
+			kind:        KindReport, dialect: DialectNessusCSV,
+		},
+		{
+			name: "a Nessus CSV with no content type",
+			body: nessusCSVHeader + "\n",
+			kind: KindReport, dialect: DialectNessusCSV,
+		},
+		{
+			name:        "a CSV header carrying both the Cortex and the Nessus column sets",
+			contentType: "text/csv",
+			body:        nessusCSVHeader + ",vulnerability_id,package_purl,origin_package_name\n",
+			err:         ErrUnrecognisedFormat,
+		},
+		{
+			name: "both column sets with no content type",
+			body: nessusCSVHeader + ",vulnerability_id,package_purl,origin_package_name\n",
+			err:  ErrUnrecognisedFormat,
 		},
 		{
 			name: "other XML is refused by its root",

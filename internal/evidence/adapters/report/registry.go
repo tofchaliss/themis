@@ -26,7 +26,8 @@ var requiredCortexFields = []string{"vulnerability_id", "package_purl", "origin_
 //
 //	| # | body                                                            | identified as            |
 //	| 1 | Content-Type text/csv + a recognised Cortex header row           | vuln-report / cortex-csv |
-//	| 1b| XML body whose root element is NessusClientData_v2               | vuln-report / nessus     |
+//	| 1 | Content-Type text/csv + a recognised Nessus header row           | vuln-report / nessus-csv |
+//	| 1b| XML body whose root element is NessusClientData_v2               | sbom / nessus            |
 //	| 2 | JSON object with bomFormat: "CycloneDX"                          | sbom / cyclonedx         |
 //	| 3 | JSON object with spdxVersion                                     | sbom / spdx              |
 //	| 4 | JSON object with findings: [...]                                 | vuln-report / curated    |
@@ -55,20 +56,27 @@ var requiredCortexFields = []string{"vulnerability_id", "package_purl", "origin_
 func Detect(contentType string, body []byte) (Kind, Dialect, error) {
 	opener := jsonOpener(body)
 
-	// Row 1 — CSV.
+	// Row 1 — CSV. Two header sets are recognised (Cortex, and Nessus since the
+	// 2026-10-26 amendment C1); a header carrying BOTH is refused rather than guessed at.
 	if isCSVContentType(contentType) {
-		if hasCortexHeader(body) {
-			return KindReport, DialectCortexCSV, nil
+		if d, err := csvDialect(body); err != nil || d != "" {
+			return KindReport, d, err
 		}
-		return "", "", fmt.Errorf("%w: Content-Type is text/csv but the header row carries no recognised Cortex column set", ErrUnrecognisedFormat)
+		return "", "", fmt.Errorf("%w: Content-Type is text/csv but the header row carries no recognised Cortex or Nessus column set", ErrUnrecognisedFormat)
 	}
-	if opener == 0 && hasCortexHeader(body) {
-		return KindReport, DialectCortexCSV, nil
+	if opener == 0 {
+		if d, err := csvDialect(body); err != nil || d != "" {
+			return KindReport, d, err
+		}
 	}
 
 	// Row 1b — Nessus (2026-10-24 amendment N1). The root element decides, not the content
 	// type: Nessus exports go up as application/xml, text/xml or curl's default alike. Any
 	// other XML is refused by the root it names, so the operator learns what was sent.
+	//
+	// It is an SBOM by default (2026-10-26 P1): the export's package list is what gets
+	// filed. Its findings are read only when the caller declares `kind=vuln-report` — see
+	// [DeclareKind].
 	if opener == 0 {
 		root, isXML, err := xmlRoot(body)
 		if err != nil {
@@ -76,7 +84,7 @@ func Detect(contentType string, body []byte) (Kind, Dialect, error) {
 		}
 		if isXML {
 			if root == nessusRoot {
-				return KindReport, DialectNessus, nil
+				return KindSBOM, DialectNessus, nil
 			}
 			return "", "", fmt.Errorf("%w: the body is XML with root <%s>; the only XML dialect is a Nessus export (<%s>)", ErrUnrecognisedFormat, root, nessusRoot)
 		}
@@ -149,6 +157,21 @@ func Detect(contentType string, body []byte) (Kind, Dialect, error) {
 	return "", "", fmt.Errorf("%w: the body matches no known SBOM or vulnerability-report dialect", ErrUnrecognisedFormat)
 }
 
+// DeclareKind applies a caller's declared kind to what Detect found (D5a; 2026-10-26 P1).
+// An empty declaration, or one that agrees, changes nothing. The one dialect that is
+// both kinds is a Nessus export: its package list by default, its findings when
+// `vuln-report` is declared. Any other disagreement is [ErrDeclaredFormatMismatch] —
+// never a silent override in either direction.
+func DeclareKind(detected Kind, dialect Dialect, declared Kind) (Kind, error) {
+	if declared == "" || declared == detected {
+		return detected, nil
+	}
+	if dialect == DialectNessus && declared == KindReport {
+		return KindReport, nil
+	}
+	return "", fmt.Errorf("%w: kind=%s was declared, but the body is a %s %s", ErrDeclaredFormatMismatch, declared, dialect, detected)
+}
+
 // Convert identifies the body and converts it with the dialect's own converter. It
 // is the package-level form of the [Converter] port: pure in (body, observedAt),
 // with no content type available, so it leans on Detect's row-1 tolerance for CSV.
@@ -189,6 +212,21 @@ func ConverterFor(d Dialect) (Converter, bool) {
 		return grypeJSON{}, true
 	case DialectNessus:
 		return nessusXML{}, true
+	case DialectNessusCSV:
+		return nessusCSV{}, true
+	default:
+		return nil, false
+	}
+}
+
+// InventoryConverterFor returns the converter that turns an SBOM dialect into the
+// CycloneDX document Evidence's parser reads (2026-10-26 P2). Only a dialect that is NOT
+// already a standards SBOM has one: CycloneDX and SPDX are filed as submitted, because
+// re-serializing them would change the fingerprint that dedups a re-upload.
+func InventoryConverterFor(d Dialect) (Converter, bool) {
+	switch d {
+	case DialectNessus:
+		return nessusInventory{}, true
 	default:
 		return nil, false
 	}
@@ -230,23 +268,43 @@ func isCSVContentType(contentType string) bool {
 	return mt == "text/csv"
 }
 
-// hasCortexHeader reads ONLY the header row and reports whether it carries the
-// required Cortex columns. It never errors: an unreadable header row is simply not a
-// Cortex header, which keeps identification from reporting a validation fault.
-// Duplicate or conflicting headers likewise do not prevent identification — they are
-// a stage-2 refusal (D5b), because knowing which rules apply is what lets us say the
-// headers are wrong.
-func hasCortexHeader(body []byte) bool {
+// requiredNessusCSVFields identifies a Nessus CSV export (2026-10-26 C1): the columns
+// the converter reads for identity, which every Nessus CSV layout carries.
+var requiredNessusCSVFields = []string{"Plugin ID", "CVE", "Host", "Name", "Plugin Output"}
+
+// csvDialect names a CSV body by its header row: Cortex, Nessus, or "" for neither. A
+// header carrying BOTH column sets is refused, because which rules apply would be a guess.
+//
+// It reads ONLY the header row. An unreadable header row is simply not a recognised
+// header, which keeps identification from reporting a validation fault; duplicate or
+// conflicting headers likewise do not prevent identification — they are a stage-2
+// refusal (D5b), because knowing which rules apply is what lets us say the headers are
+// wrong.
+func csvDialect(body []byte) (Dialect, error) {
 	header, err := readCSVHeader(body)
 	if err != nil {
-		return false
+		return "", nil
 	}
+	cortex, nessus := hasColumns(header, requiredCortexFields), hasColumns(header, requiredNessusCSVFields)
+	switch {
+	case cortex && nessus:
+		return "", fmt.Errorf("%w: the CSV header row carries both the Cortex and the Nessus column sets, so which rules apply would be a guess", ErrUnrecognisedFormat)
+	case cortex:
+		return DialectCortexCSV, nil
+	case nessus:
+		return DialectNessusCSV, nil
+	default:
+		return "", nil
+	}
+}
+
+func hasColumns(header, want []string) bool {
 	present := make(map[string]struct{}, len(header))
 	for _, h := range header {
 		present[h] = struct{}{}
 	}
-	for _, want := range requiredCortexFields {
-		if _, ok := present[want]; !ok {
+	for _, w := range want {
+		if _, ok := present[w]; !ok {
 			return false
 		}
 	}

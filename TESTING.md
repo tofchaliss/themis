@@ -356,11 +356,25 @@ curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" 
 ```
 
 ```sh
-# Nessus .nessus export (EDR-INTAKE-01, 2026-10-24 amendment). Every host in the file is filed
-# under this one release. Only vendor advisory checks (Red Hat/Rocky "Local Security Checks"
-# with "Remote package installed" lines) become findings; the upstream version checks are
-# counted in findings_skipped, never filed. Nothing about the hosts is kept.
+# Nessus .nessus export = the release's SBOM (EDR-INTAKE-01, 2026-10-26 amendment P1-P9).
+# Plugin 22869 (Software Enumeration, credentialed scan) lists the installed RPMs; Themis turns
+# the OS vendor's packages into a CycloneDX SBOM (converted_by nessus-inventory@1) with purls like
+# pkg:rpm/redhat/zlib@1.2.11-25.el8?distro=rhel-8.10. Other vendors' packages are counted in
+# components_skipped. All hosts in the file go into the one release. Nothing about the hosts is kept.
 curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
+  -H 'Content-Type: application/xml' -H "X-API-Key: $KEY" \
+  --data-binary @scan.nessus | jq .
+
+# Nessus CSV of the same scan = the scan report (C1-C6). The CSV has no scan date, so
+# observed_at is required (422 observed_at_underivable without it). Only vendor advisory rows
+# ("Remote package installed" lines) become findings; upstream version guesses are counted in
+# findings_skipped.
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID&observed_at=2026-10-15T00:00:00Z" \
+  -H 'Content-Type: text/csv' -H "X-API-Key: $KEY" \
+  --data-binary @scan.csv | jq .
+
+# The old road: the .nessus findings instead of its package list (2026-10-24 N1-N10).
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID&kind=vuln-report" \
   -H 'Content-Type: application/xml' -H "X-API-Key: $KEY" \
   --data-binary @scan.nessus | jq .
 ```

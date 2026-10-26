@@ -94,19 +94,40 @@ type fakeReports struct {
 	convertedBy, sourceDigest string
 	convertErr                error
 
+	// format is the Format a conversion reports; empty means the dialect.
+	format string
+
 	convertCalls  int
+	gotDeclared   string
+	gotKind       string
 	gotDialect    string
 	gotObservedAt time.Time
 }
 
-func (f *fakeReports) Detect(string, []byte) (string, string, error) {
+func (f *fakeReports) Detect(_ string, _ []byte, declared string) (string, string, error) {
+	f.gotDeclared = declared
 	return f.kind, f.dialect, f.detectErr
 }
 
-func (f *fakeReports) Convert(dialect string, _ []byte, observedAt time.Time) ([]byte, app.ReportStats, string, string, error) {
+// Convert mirrors the ACL's one structural rule: a CycloneDX or SPDX SBOM comes back
+// untouched with no converter named. Everything else is the configured conversion.
+func (f *fakeReports) Convert(kind, dialect string, body []byte, observedAt time.Time) (app.Conversion, error) {
 	f.convertCalls++
-	f.gotDialect, f.gotObservedAt = dialect, observedAt
-	return f.curated, f.stats, f.convertedBy, f.sourceDigest, f.convertErr
+	f.gotKind, f.gotDialect, f.gotObservedAt = kind, dialect, observedAt
+	if f.convertErr != nil {
+		return app.Conversion{}, f.convertErr
+	}
+	if kind == "sbom" && (dialect == "spdx" || dialect == "cyclonedx") {
+		return app.Conversion{Document: body, Format: dialect}, nil
+	}
+	format := f.format
+	if format == "" {
+		format = dialect
+	}
+	return app.Conversion{
+		Document: f.curated, Format: format, Stats: f.stats,
+		ConvertedBy: f.convertedBy, SourceDigest: f.sourceDigest,
+	}, nil
 }
 
 type fakeRegistrar struct {
@@ -710,8 +731,8 @@ func TestIntake_SBOM_PassesThroughUnconverted(t *testing.T) {
 	if r.Status() != domain.ReceiptFiled {
 		t.Fatalf("status = %q, want filed (detail=%q)", r.Status(), r.Detail())
 	}
-	if rig.reports.convertCalls != 0 {
-		t.Error("an SBOM was converted")
+	if r.ConvertedBy() != "" || r.SourceDigest() != "" {
+		t.Errorf("an SBOM was converted: converted_by=%q source_digest=%q", r.ConvertedBy(), r.SourceDigest())
 	}
 	if rig.inventory.calls != 0 {
 		t.Error("an SBOM was required to have an inventory before it could create one")
@@ -725,6 +746,41 @@ func TestIntake_SBOM_PassesThroughUnconverted(t *testing.T) {
 	}
 	if cmd.Provenance.ConvertedBy != "" || cmd.Provenance.SourceDigest != "" {
 		t.Errorf("a pass-through records no conversion: %+v", cmd.Provenance)
+	}
+}
+
+// TestIntake_AConvertedSBOMIsFiledInTheFormatTheConverterWrote — 2026-10-26 P2/P4: a
+// Nessus export's package list is converted into CycloneDX and filed AS CycloneDX, with
+// the conversion's provenance and the abstentions on the receipt. It is still an SBOM:
+// no inventory is asked of it.
+func TestIntake_AConvertedSBOMIsFiledInTheFormatTheConverterWrote(t *testing.T) {
+	rig := newRig(1 << 20)
+	rig.reports.kind, rig.reports.dialect = "sbom", "nessus"
+	rig.reports.format = "cyclonedx"
+	rig.reports.curated = []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","components":[]}`)
+	rig.reports.stats = app.ReportStats{ComponentsSkipped: 42}
+	rig.reports.convertedBy = "nessus-inventory@1"
+	rig.inventory.has = false
+
+	r := rig.intake(t, app.IntakeCommand{Body: []byte(`<NessusClientData_v2/>`), ReleaseID: "rel-1", DeclaredKind: "sbom"})
+	if r.Status() != domain.ReceiptFiled {
+		t.Fatalf("status = %q, want filed (detail=%q)", r.Status(), r.Detail())
+	}
+	if rig.reports.gotDeclared != "sbom" || rig.reports.gotKind != "sbom" {
+		t.Errorf("declared=%q kind=%q did not reach the ACL", rig.reports.gotDeclared, rig.reports.gotKind)
+	}
+	cmd := rig.registrar.got
+	if cmd.Kind != domain.KindSBOM || cmd.Format != "cyclonedx" || string(cmd.Raw) != string(rig.reports.curated) {
+		t.Errorf("filed kind=%q format=%q raw=%s, want the converted CycloneDX document", cmd.Kind, cmd.Format, cmd.Raw)
+	}
+	if cmd.Provenance.ConvertedBy != "nessus-inventory@1" || cmd.Provenance.SourceDigest != "sha256:abc" {
+		t.Errorf("provenance = %+v, want the conversion recorded", cmd.Provenance)
+	}
+	if r.ComponentsSkipped() != 42 || r.ConvertedBy() != "nessus-inventory@1" {
+		t.Errorf("receipt components_skipped=%d converted_by=%q", r.ComponentsSkipped(), r.ConvertedBy())
+	}
+	if rig.inventory.calls != 0 {
+		t.Error("an SBOM was required to have an inventory before it could create one")
 	}
 }
 

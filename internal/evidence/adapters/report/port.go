@@ -21,39 +21,60 @@ type Port struct{}
 
 var _ app.ReportRegistry = Port{}
 
-// Detect names the body (D5a's closed, ordered table) and reports the kind and
-// dialect as the ACL's own strings, which the intake echoes to the client as
-// `detected_kind` / `detected_format`.
-func (Port) Detect(contentType string, body []byte) (string, string, error) {
+// Detect names the body (D5a's closed, ordered table), applies the caller's declared
+// kind (2026-10-26 P1), and reports the kind and dialect as the ACL's own strings, which
+// the intake echoes to the client as `detected_kind` / `detected_format`.
+func (Port) Detect(contentType string, body []byte, declaredKind string) (string, string, error) {
 	kind, dialect, err := Detect(contentType, body)
 	if err != nil {
 		return "", "", asReject(err, domain.ReasonUnrecognisedFormat)
 	}
+	if kind, err = DeclareKind(kind, dialect, Kind(declaredKind)); err != nil {
+		return "", "", asReject(err, domain.ReasonDeclaredFormatMismatch)
+	}
 	return string(kind), string(dialect), nil
 }
 
-// Convert produces the curated document plus the provenance of the conversion.
+// Convert produces the document to file plus the provenance of the conversion.
+//
+// A CycloneDX or SPDX SBOM passes through untouched and records no conversion: its
+// bytes ARE the evidence document. Any other SBOM dialect is converted into CycloneDX
+// (2026-10-26 P2), and a report into the curated document.
 //
 // The source digest is computed HERE, over the submitted bytes, because for a
 // converted submission those are not the bytes that get filed (D2) — and it is the
-// digest that makes the provenance verifiable at all. A pass-through still carries
-// one: the source is then also the document, and recording it costs nothing.
-func (Port) Convert(dialect string, body []byte, suppliedObservedAt time.Time) ([]byte, app.ReportStats, string, string, error) {
+// digest that makes the provenance verifiable at all. A pass-through report still
+// carries one: the source is then also the document, and recording it costs nothing.
+func (Port) Convert(kind, dialect string, body []byte, suppliedObservedAt time.Time) (app.Conversion, error) {
+	format := dialect
 	conv, ok := ConverterFor(Dialect(dialect))
+	if Kind(kind) == KindSBOM {
+		if Dialect(dialect) == DialectCycloneDX || Dialect(dialect) == DialectSPDX {
+			return app.Conversion{Document: body, Format: dialect}, nil
+		}
+		conv, ok = InventoryConverterFor(Dialect(dialect))
+		format = string(DialectCycloneDX)
+	}
 	if !ok {
 		// The dialect came from Detect, so a miss here is a defect in this package
 		// rather than a fault in the document — refused by name all the same,
 		// because converting with a converter nobody chose is how an unreadable
 		// document lands.
-		return nil, app.ReportStats{}, "", "", domain.Reject(domain.ReasonUnrecognisedFormat,
-			fmt.Sprintf("no converter is registered for dialect %q", dialect))
+		return app.Conversion{}, domain.Reject(domain.ReasonUnrecognisedFormat,
+			fmt.Sprintf("no %s converter is registered for dialect %q", kind, dialect))
 	}
 	sourceDigest := value.NewContentFingerprint(body).String()
-	curated, stats, err := conv.Convert(body, suppliedObservedAt)
+	doc, stats, err := conv.Convert(body, suppliedObservedAt)
 	if err != nil {
-		return nil, app.ReportStats{}, "", "", asReject(err, domain.ReasonConversionFailed)
+		return app.Conversion{}, asReject(err, domain.ReasonConversionFailed)
 	}
-	return curated, app.ReportStats(stats), conv.Version(), sourceDigest, nil
+	return app.Conversion{
+		Document:     doc,
+		Format:       format,
+		Stats:        app.ReportStats(stats),
+		ConvertedBy:  conv.Version(),
+		SourceDigest: sourceDigest,
+	}, nil
 }
 
 // reasonFor maps this ACL's sentinels onto the domain's closed refusal taxonomy
@@ -67,6 +88,7 @@ var reasonFor = []struct {
 	{ErrMalformedBody, domain.ReasonMalformedBody},
 	{ErrSourceInvalid, domain.ReasonSourceInvalid},
 	{ErrObservedAtUnderivable, domain.ReasonObservedAtUnderivable},
+	{ErrDeclaredFormatMismatch, domain.ReasonDeclaredFormatMismatch},
 }
 
 // asReject translates an ACL error into a reason-carrying refusal, and strips the

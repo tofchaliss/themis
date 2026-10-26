@@ -205,16 +205,38 @@ type InventoryReader interface {
 // FindingsSkipped of them refused by the converter's row-level skip rule. Both are
 // carried, never just the kept count — "427 of 427" and "427 of 500" must not look
 // alike, which is the whole of the silent-skip class (KN-SCAN-OBS-1).
+//
+// ComponentsSkipped is the same rule for an inventory conversion (EDR-INTAKE-01,
+// 2026-10-26 P4): the package lines a converted SBOM left out for want of an identity.
 type ReportStats struct {
-	FindingsTotal   int
-	FindingsSkipped int
+	FindingsTotal     int
+	FindingsSkipped   int
+	ComponentsSkipped int
+}
+
+// Conversion is what [ReportRegistry.Convert] hands back: the document to file, the
+// format it is in, and the provenance of the conversion.
+//
+// SourceDigest (and ConvertedBy) are empty when the submitted bytes ARE the document —
+// a CycloneDX or SPDX SBOM, which is identified and never re-serialized, because that
+// would change the fingerprint that dedups a re-upload. A curated report passes
+// through too, but carries a digest and its counts: its source is then also the
+// document, and only ConvertedBy is empty. Format is what Evidence's parser is told the
+// document is; for a converted SBOM it is the standards format the converter wrote,
+// not the dialect that arrived.
+type Conversion struct {
+	Document     []byte
+	Format       string
+	Stats        ReportStats
+	ConvertedBy  string
+	SourceDigest string
 }
 
 // ReportRegistry is the converter ACL as the app ring sees it (EDR-INTAKE-01
 // D4/D5): identification and conversion of a submitted vendor dialect into the one
-// curated document Themis files. It is implemented by `adapters/report`, which the
-// app must not import — a vendor shape never reaches these rings, and neither does
-// the package that understands one.
+// document Themis files. It is implemented by `adapters/report`, which the app must
+// not import — a vendor shape never reaches these rings, and neither does the package
+// that understands one.
 //
 // Kind and dialect cross as plain strings for the same reason: they are the ACL's
 // vocabulary (`sbom` / `vuln-report`, `spdx` / `cortex-csv` / …) echoed back to the
@@ -228,17 +250,23 @@ type ReportRegistry interface {
 	// Detect names the body: D5a's closed, ordered table, first match wins.
 	// Identification is not admission — a named body has only earned the right to be
 	// validated against its dialect's rules.
-	Detect(contentType string, body []byte) (kind, dialect string, err error)
+	//
+	// declaredKind is the caller's `kind` (empty when none was declared). One that
+	// agrees changes nothing, one the body cannot be is `declared_format_mismatch`, and
+	// on the one dialect that is both kinds — a Nessus export — it chooses which of
+	// the two is read (2026-10-26 P1).
+	Detect(contentType string, body []byte, declaredKind string) (kind, dialect string, err error)
 
-	// Convert produces the curated document plus the provenance of the conversion:
+	// Convert produces the document to file plus the provenance of the conversion:
 	// which converter version produced it, and the digest of the bytes that arrived
-	// (which, for a converted submission, are not the bytes filed).
+	// (which, for a converted submission, are not the bytes filed). A standards SBOM
+	// passes through unchanged.
 	//
 	// It is pure in (body, suppliedObservedAt) — no clock. A supplied timestamp is
 	// the caller's assertion about WHICH observation this is and wins over
 	// derivation; with neither available the refusal is `observed_at_underivable`,
 	// never the upload time (D3).
-	Convert(dialect string, body []byte, suppliedObservedAt time.Time) (curated []byte, stats ReportStats, convertedBy, sourceDigest string, err error)
+	Convert(kind, dialect string, body []byte, suppliedObservedAt time.Time) (Conversion, error)
 }
 
 // EvidenceRegistrar is the one write intake performs, and it is deliberately the

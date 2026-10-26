@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NessusClientData_v2>
+<Policy><policyName>synthetic-policy</policyName></Policy>
+<Report name="synthetic-scan">
+<ReportHost name="192.0.2.10"><HostProperties>
+<tag name="HOST_END_TIMESTAMP">1786457112</tag>
+<tag name="HOST_START_TIMESTAMP">1786455840</tag>
+<tag name="operating-system">Linux Kernel 4.18.0-553.151.1.el8_10.x86_64 on Red Hat Enterprise Linux release 8.10 (Ootpa)</tag>
+<tag name="cpe-0">cpe:/o:redhat:enterprise_linux:8:update10</tag>
+<tag name="host-ip">192.0.2.10</tag>
+<tag name="host-fqdn">host-a.example.test</tag>
+<tag name="mac-address">00:00:5e:00:53:01</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="22869" pluginName="Software Enumeration (SSH)" pluginFamily="General">
+<risk_factor>None</risk_factor>
+<plugin_output>
+Here is the list of packages installed on the remote Red Hat Linux system :
+
+  zlib-1.2.11-25.el8|(none) Thu 15 Oct 2026 09:03:14 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+  openssl-libs-1.1.1k-14.el8_6|1 Thu 15 Oct 2026 09:16:07 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+  perl-HTTP-Cookies-6.04-2.module+el8.3.0+6498+9eecfe51|(none) Thu 15 Oct 2026 09:03:14 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+  kernel-4.18.0-553.151.1.el8_10|(none) Thu 15 Oct 2026 09:02:56 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+  example-agent-2.10.3-75.el8|(none) Thu 15 Oct 2026 09:13:39 PM UTC|Example Corp|(none)
+  htop-3.2.1-1.el8|(none) Thu 15 Oct 2026 09:13:39 PM UTC|Fedora Project|Fedora Project
+  gpg-pubkey|(none) Thu 15 Oct 2026 09:01:52 PM UTC|Red Hat, Inc.|(none)
+</plugin_output>
+</ReportItem>
+<ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
+<plugin_output>SSH version : OpenSSH_8.0</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="192.0.2.11"><HostProperties>
+<tag name="HOST_END_TIMESTAMP">1786460000</tag>
+<tag name="operating-system">Linux Kernel 4.18.0-553.151.1.el8_10.x86_64 on Red Hat Enterprise Linux release 8.10 (Ootpa)</tag>
+<tag name="host-ip">192.0.2.11</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="22869" pluginName="Software Enumeration (SSH)" pluginFamily="General">
+<plugin_output>
+Here is the list of packages installed on the remote Red Hat Linux system :
+
+  zlib-1.2.11-25.el8|(none) Thu 15 Oct 2026 09:03:14 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+  kernel-4.18.0-553.154.1.el8_10|(none) Thu 15 Oct 2026 09:02:56 PM UTC|Red Hat, Inc.|Red Hat, Inc. &lt;http://bugzilla.redhat.com/bugzilla&gt;
+</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="192.0.2.12"><HostProperties>
+<tag name="HOST_END_TIMESTAMP">1786450000</tag>
+<tag name="operating-system">Microsoft Windows Server 2019</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="22869" pluginName="Software Enumeration (SSH)" pluginFamily="General">
+<plugin_output>
+  bash-4.4.20-5.el8|(none) Thu 15 Oct 2026 09:03:14 PM UTC|Red Hat, Inc.|Red Hat, Inc.
+</plugin_output>
+</ReportItem>
+</ReportHost>
+</Report>
+</NessusClientData_v2>
