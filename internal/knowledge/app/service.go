@@ -202,6 +202,12 @@ func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p 
 			notes = append(notes, more...)
 		}
 
+		// A restatement of an existing card changed nothing: no proposal, no view, no note.
+		// Saving it anyway was a full write per fold, and correlation folds once per
+		// (component, CVE) pair — 51,641 times for one RHEL host — all inside one transaction.
+		if !created && !res.Recorded && len(notes) == 0 {
+			return f, false, nil
+		}
 		switch err := s.repo.Save(ctx, f, created, prevVersion, notes); {
 		case err == nil:
 			return f, res.Recorded, nil

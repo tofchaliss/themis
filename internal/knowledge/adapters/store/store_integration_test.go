@@ -253,6 +253,50 @@ func TestSaveAndReload(t *testing.T) {
 	}
 }
 
+// TestSaveWritesOnlyTheNewTail pins the save-path cost (KN-SAVE-TAIL-1): every fold used to
+// re-send the card's whole proposal history, so a fold cost one round trip per proposal ever
+// held — measured on the VM as one RHEL host's correlation holding a write transaction for more
+// than 13 minutes. A save now writes only the proposals above the stored maximum seq, so the
+// history must still reload complete, in order, with contiguous seqs.
+func TestSaveWritesOnlyTheNewTail(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	s := service(pool)
+	st := store.New(pool)
+	c := cveID(t, "CVE-2024-7")
+
+	sources := []struct {
+		src string
+		sev value.Severity
+	}{{"nvd", value.SeverityLow}, {"osv", value.SeverityMedium}, {"redhat", value.SeverityHigh}, {"nvd", value.SeverityCritical}}
+	for _, p := range sources {
+		if _, _, err := s.FoldProposal(ctx, c, vulnFacts(t, p.src, p.sev)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A restatement of the latest nvd value writes nothing at all.
+	if _, recorded, err := s.FoldProposal(ctx, c, vulnFacts(t, "nvd", value.SeverityCritical)); err != nil || recorded {
+		t.Fatalf("restatement: recorded=%v err=%v", recorded, err)
+	}
+
+	got, found, err := st.GetByCVE(ctx, c.String())
+	if err != nil || !found {
+		t.Fatalf("GetByCVE: found=%v err=%v", found, err)
+	}
+	ps := got.Proposals()
+	if len(ps) != len(sources) {
+		t.Fatalf("proposals reloaded = %d, want %d", len(ps), len(sources))
+	}
+	for i, p := range ps {
+		if p.Source() != sources[i].src {
+			t.Errorf("proposal %d source = %q, want %q (order lost)", i, p.Source(), sources[i].src)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM faultline_proposals WHERE seq BETWEEN 0 AND $1", len(sources)-1); n != len(sources) {
+		t.Errorf("seqs not contiguous from 0: %d rows in [0,%d]", n, len(sources)-1)
+	}
+}
+
 func TestViewChangeEmitsOneEvent(t *testing.T) {
 	pool := newPool(t)
 	ctx := context.Background()

@@ -1185,6 +1185,25 @@ under the 2026-08-07 re-derivation standard.
   - [ ] **Epoch spelling on the report road.** The inventory version has no epoch (the form every
     real advisory line seen so far used); if Nessus ever prints `1:` in `Remote package installed`,
     that finding will not resolve onto its inventory twin. Check on the VM round.
+- [x] **KN-SAVE-TAIL-1 — a card save re-sent the card's whole proposal history (found and fixed
+  2026-10-26, VM round of SCAN-NESSUS-2).** The first full RHEL host SBOM (1249 packages from a
+  `.nessus` file) planned 51,641 (component, CVE) folds. `Store.Save` wrote every proposal of the
+  card on every fold (`ON CONFLICT DO NOTHING`, one round trip each), and `FoldProposal` saved even
+  a verbatim restatement that changed nothing. Cards on the VM averaged 87 proposals (max 2136),
+  so the apply phase ran as ONE write transaction for well over 13 minutes — exactly the long
+  transaction EDR-EVENTBUS-01 D7 keeps discovery out of. Now a save inserts only the proposals
+  above the stored `MAX(seq)`, and a restatement (not recorded, not created, no note) is not
+  saved at all. Pinned by `TestSaveWritesOnlyTheNewTail` and `TestFoldProposal_EnrichAndNoOp`.
+- [ ] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** One VM
+  card holds 2136 proposals (average 87 over 1348 cards). KN-PROPOSAL-BLOAT-1 drops a proposal
+  only when it equals the LATEST one from the same source and kind. Suspected cause, not yet
+  measured: OSV discovery folds one `vulnFacts` per OSV record, and one CVE is named by several
+  records (each RHSA/RLSA/ALSA that rebuilt it), so the latest `osv` proposal on a card is
+  usually another record's and every re-correlation appends again. Measure first: distinct
+  payloads vs rows per card, as BLOAT-1 did. `KindApplicability` already compares against ANY
+  earlier statement from the source; extending that to `vulnFacts` changes what counts as a new
+  observation (a domain rule) and needs the owner's OK. KN-SAVE-TAIL-1 removed the write cost;
+  this is the remaining read/reconcile cost, which grows with every correlation.
 - [x] **GUI-10 — D16 translators have no unit-test harness (filed 2026-08-14).** ✅ **CLOSED
   2026-10-12** — by removal, which is the better answer than the harness this item was asking
   for. EDR-INTAKE-01 D4 moved the one converter per dialect server-side
