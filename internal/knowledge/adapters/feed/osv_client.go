@@ -332,27 +332,8 @@ func osvVersion(comp app.InventoryComponent) string {
 	if v == "" || purlType(comp.PURL) != "rpm" {
 		return v
 	}
-	if hasEpochPrefix(v) {
-		return v
-	}
-	if ep := value.PURLQualifier(comp.PURL, "epoch"); ep != "" && ep != "0" {
-		return ep + ":" + v
-	}
-	return v
-}
-
-// hasEpochPrefix reports whether an rpm version already carries an "N:" epoch prefix.
-func hasEpochPrefix(v string) bool {
-	i := strings.IndexByte(v, ':')
-	if i <= 0 {
-		return false
-	}
-	for _, r := range v[:i] {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
+	// One rule for every rpm reader (KN-EPOCH-1): the verdict compares the same spelling.
+	return value.RPMInstalledVersion("rpm", v, comp.PURL)
 }
 
 // purlType returns the PURL type (the token between "pkg:" and the first "/").

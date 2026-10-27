@@ -1214,6 +1214,22 @@ under the 2026-08-07 re-derivation standard.
   EDR-INTAKE-01 amendment D3b: a converted document's identity also names its source digest;
   uploads that were not converted keep the plain fingerprint, pre-D3b rows still dedup on the
   same release, and nothing stored is rewritten.
+- [x] **KN-EPOCH-1 — an rpm install whose epoch lives only on the purl read as below every
+  bound of its own build (found and fixed 2026-10-27, first day of KN-OPEN-REASON-1 on the
+  VM).** The new premise made it visible at once: 280 of 849 "behind" rows on a fully patched
+  RHEL 8 host were `java-21-openjdk 21.0.12.1.1-1.1.el8 is below … 1:21.0.12.1.1-1.1.el8` — the
+  same build. The Nessus inventory converter keeps the epoch on the purl (`epoch=1`, P3, so an
+  advisory line resolves onto the component) and not in the version; Trivy and Syft spell it in
+  both; every Red Hat/OSV bound carries it; rpm ordering compares the epoch first. OSV discovery
+  already restored it from the purl for its query (`osvVersion`) — the fixed-verdict and the
+  range gate did not, so two readers of one component disagreed. Fix: `value.RPMInstalledVersion`
+  is THE rule (rpm only; version wins when it already carries `N:`; `epoch=0`/non-numeric
+  ignored), used by discovery, `judgeOccurrence` (and both bridge hops) and the correlation
+  range gate; `VerdictGeneration` 4 re-judges history. The other 569 "behind" rows were a second
+  honest shape — RHEL 8's base-repository perl 5.26 against fixes that exist only as
+  `perl:5.30`/`5.32` stream rebuilds — and the premise now names it ("fixes are module-stream
+  builds and the installed package is not"). Nothing is cleared by the wording; the epoch fix
+  clears exactly the rows whose build satisfies its bound.
 - [x] **KN-OPEN-REASON-1 — an open occurrence never said why it was open (filed and fixed
   2026-10-26, by owner ask).** EDR-VERDICT-01 D10. Measured on the Nessus VM round: a fully
   patched RHEL 8 host kept ~1,300 open rpm rows with an empty `verdict_reason`; the inspected ones

@@ -174,7 +174,17 @@ module-stream builds and none shares the install's upstream series (first two do
 the part a RHEL stream is named by), the reason adds *those fixes are module builds of another
 series (8.4, installed 8.0) — likely another module stream*. "Likely", deliberately: a rolling
 stream (`container-tools:rhel8`) does move its series, and an installed build names no stream the
-rule could read. The KN-SANITY-1 fan-out flag, when present, leads the premise instead of replacing it.
+rule could read. A NON-modular install whose same-major bounds are all module builds (RHEL 8's base
+perl 5.26 against `perl:5.32` rebuilds — 569 rows on the measured host, 2026-10-27) gets the
+base-repository wording instead: the fix was published only for a stream the host does not run.
+The KN-SANITY-1 fan-out flag, when present, leads the premise instead of replacing it.
+
+**First-day yield (2026-10-27, KN-EPOCH-1).** The premise exposed a defect on its first VM run:
+280 rows read `installed 21.0.12.1.1-1.1.el8 is below … 1:21.0.12.1.1-1.1.el8` — the same build,
+compared without its epoch because the Nessus inventory keeps the epoch on the purl only. The
+install is now compared through `value.RPMInstalledVersion` everywhere (discovery already did), and
+`VerdictGeneration` 4 re-judges history. That is what the premise is for: a verdict that shows its
+comparison can be checked by a reader; one that only says "open" cannot.
 
 **What does not change.** The reason is audit prose; nothing branches on it (D2 holds — `Reason` is
 "never a decision input"). No state moves: the host's 1,300 rows stay open, now saying why. Non-rpm

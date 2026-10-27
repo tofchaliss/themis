@@ -188,6 +188,8 @@ func TestOpenReason_Shapes(t *testing.T) {
 		{Package: "ruby-libs", Version: "0:3.1.5-6.module+el8.10.0+24567+c4e5368e", Ecosystem: "rpm"},
 		{Package: "ruby-libs", Version: "0:3.3.12-8.module+el8.10.0+24568+2bbebe96", Ecosystem: "rpm"},
 		{Package: "httpd", Version: "0:2.4.37-65.module+el8.10.0+40257+286895ef.9", Ecosystem: "rpm"},
+		{Package: "perl-File-Path", Version: "0:2.16-439.module+el8.10.0+1616+0d20cc68", Ecosystem: "rpm"},
+		{Package: "perl-File-Path", Version: "0:2.16-439.module+el8.10.0+21354+3ad137bb", Ecosystem: "rpm"},
 		{Package: "openssl", Version: "1:1.1.1k-14.el8_6", Ecosystem: "rpm"},
 		{Package: "kernel", Version: "0:5.14.0-570.el9_6", Ecosystem: "rpm"},
 	}}
@@ -205,6 +207,8 @@ func TestOpenReason_Shapes(t *testing.T) {
 			[]string{"el9.8.0"}},
 		{"another module stream, two series", rpm("ruby-libs", "2.5.9-116.module+el8.10.0+24853+52b5af56"),
 			[]string{"below every el8 fix for ruby-libs", "another series (3.1, 3.3, installed 2.5)"}, nil},
+		{"base-repo install, module-only fixes", rpm("perl-File-Path", "2.15-2.el8"),
+			[]string{"below every el8 fix for perl-File-Path", "installed package is not (base repository)", "published only for a module stream"}, []string{"another series"}},
 		{"same stream, simply behind", rpm("httpd", "2.4.37-30.module+el8.3.0+1234+abcd"),
 			[]string{"installed 2.4.37-30.module+el8.3.0+1234+abcd is below every el8 fix for httpd"}, []string{"another series"}},
 		{"plain build behind a plain fix", rpm("openssl", "1:1.1.1k-12.el8_5"),
@@ -277,5 +281,35 @@ func TestListBoundsAndJoinReasons(t *testing.T) {
 	}
 	if otherStreamSeries("8.0.46-1.module+el8.10.0+1+a", []string{"-1.module+el8.10.0+2+b"}) != nil {
 		t.Error("an unreadable fix series must not read as another stream")
+	}
+}
+
+// KN-EPOCH-1 (2026-10-27): the Nessus inventory keeps the epoch on the purl only. The verdict
+// must compare the install WITH it, or a fully patched epoch-1 package reads as behind forever.
+func TestJudgeOccurrence_EpochRestoredFromPURL(t *testing.T) {
+	view := domain.EnterpriseView{Fixes: []domain.FixedVersion{
+		{Package: "java-21-openjdk", Version: "1:21.0.12.1.1-1.1.el8", Ecosystem: "rpm"},
+	}}
+	nessus := InventoryComponent{
+		PURL:    "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?distro=rhel-8.10&epoch=1",
+		Name:    "java-21-openjdk", Version: "21.0.12.1.1-1.1.el8", Ecosystem: "rpm",
+	}
+	v := judgeOccurrence(view, nessus, BridgeContext{})
+	if v.State.IsOpen() || !strings.Contains(v.Reason, "installed 1:21.0.12.1.1-1.1.el8") {
+		t.Errorf("the same build must clear, and the premise must show the epoch it was compared with; got %q / %q", v.State, v.Reason)
+	}
+	// Without the qualifier nothing is invented: the row stays open and says so.
+	bare := nessus
+	bare.PURL = "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?distro=rhel-8.10"
+	if v := judgeOccurrence(view, bare, BridgeContext{}); !v.State.IsOpen() || !strings.Contains(v.Reason, "installed 21.0.12.1.1-1.1.el8 is below") {
+		t.Errorf("no epoch anywhere: open, compared as written; got %q / %q", v.State, v.Reason)
+	}
+	// The bridge hops read their rpm the same way.
+	owner := InventoryComponent{PURL: "pkg:rpm/redhat/java-21-openjdk-headless@21.0.12.1.1-1.1.el8?epoch=1",
+		Name: "java-21-openjdk-headless", Version: "21.0.12.1.1-1.1.el8", Ecosystem: "rpm", Source: "java-21-openjdk"}
+	shadow := InventoryComponent{PURL: "pkg:maven/openjdk@21.0.12", Name: "openjdk", Version: "21.0.12", Ecosystem: "maven"}
+	v = judgeOccurrence(view, shadow, BridgeContext{Siblings: []InventoryComponent{owner}, Owners: map[string]string{shadow.PURL: owner.PURL}})
+	if v.State.IsOpen() || v.Grade != domain.VerdictGradeObserved {
+		t.Errorf("observed hop through an epoch-on-purl owner must clear; got %q / %q / %q", v.State, v.Grade, v.Reason)
 	}
 }
