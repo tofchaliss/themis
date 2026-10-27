@@ -205,3 +205,28 @@ func TestCarrierProductsChangeIsNotARestatement(t *testing.T) {
 		t.Error("an identical carrier set is a restatement")
 	}
 }
+
+// Restates is the exported face of the restatement rule (KN-PROPOSAL-BLOAT-2): same source,
+// same kind, same payload; observed-at and the card's order play no part.
+func TestProposalRestates(t *testing.T) {
+	c, _ := value.NewCVSS(7.5, "")
+	facts := domain.VulnFacts{Severity: value.SeverityHigh, CVSS: c}
+	at := func(s int64) time.Time { return time.Unix(s, 0) }
+	osv, _ := domain.NewVulnFactsProposal("osv", at(1), facts)
+	osvLater, _ := domain.NewVulnFactsProposal("osv", at(2), facts)
+	nvd, _ := domain.NewVulnFactsProposal("nvd", at(1), facts)
+	osvOther, _ := domain.NewVulnFactsProposal("osv", at(1), domain.VulnFacts{Severity: value.SeverityCritical, CVSS: c})
+	sig, _ := domain.NewExploitSignalProposal("osv", at(1), domain.ExploitSignal{EPSS: 0.5})
+	if !osvLater.Restates(osv) {
+		t.Error("same source/kind/payload, later observation: want restatement")
+	}
+	if nvd.Restates(osv) {
+		t.Error("another source is another observation")
+	}
+	if osvOther.Restates(osv) {
+		t.Error("another payload is another observation")
+	}
+	if sig.Restates(osv) {
+		t.Error("another kind is another observation")
+	}
+}

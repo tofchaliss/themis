@@ -1241,7 +1241,22 @@ under the 2026-08-07 re-derivation standard.
   `VerdictGeneration` 3 rewrites history through the catch-up sweep, and a premise-only change now
   reaches Governance as `ComponentVerdictChanged`. **Deferred:** a structured hint beside the text
   (needs migrations on both contexts and an API change; nothing reads it yet).
-- [ ] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** One VM
+- [x] **KN-PROPOSAL-BLOAT-2 — cards still grow on every correlation (filed 2026-10-26).** ✅
+  **CLOSED 2026-10-27** (option A, owner's choice). **Measured first** on the estate: 206,475
+  proposal rows for 94,657 distinct facts, and the whole excess is ONE source — OSV vuln-facts,
+  80,986 rows for 12,749 facts (6.4 copies each); every other source sits at ~1.0. The biggest
+  card (a setuptools CVE, 2,155 rows) holds two distinct OSV facts written 679 times each on
+  one day. **Cause:** discovery returns the same OSV record once per component it names, and
+  `applyDiscovered` folded every copy; the CVE has two OSV records (a GHSA and a PYSEC) that
+  alternate down the plan, so the domain's latest-only restatement rule never matched. **Fix:**
+  `applyDiscovered` folds each distinct (CVE, source, kind, payload) ONCE per run and hands the
+  later copies the card the run's latest fold returned, so every component is still judged
+  against this run's reconciled card; `domain.Proposal.Restates` exports the comparison the
+  rule already owned. **No domain rule changed:** a re-run still records a record the card does
+  not hold LAST (the ~2-rows-per-record-per-run tail named below), and a reverted feed value is
+  still recorded twice; the any-earlier rule (option B) stays an owner decision. Existing
+  duplicate rows are NOT cleaned up — a separate decision. Original filing follows.
+  One VM
   card holds 2136 proposals (average 87 over 1348 cards). KN-PROPOSAL-BLOAT-1 drops a proposal
   only when it equals the LATEST one from the same source and kind. Suspected cause, not yet
   measured: OSV discovery folds one `vulnFacts` per OSV record, and one CVE is named by several
