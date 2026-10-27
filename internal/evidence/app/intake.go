@@ -322,6 +322,7 @@ func (s *IntakeService) Intake(ctx context.Context, cmd IntakeCommand) (*domain.
 		prov.ConvertedBy, prov.SourceDigest = conv.ConvertedBy, conv.SourceDigest
 		_ = r.RecordConversion(conv.ConvertedBy, conv.SourceDigest, stats.FindingsTotal, stats.FindingsSkipped)
 		_ = r.RecordComponentsSkipped(stats.ComponentsSkipped)
+		_ = r.RecordComponentsUnmanaged(stats.ComponentsUnmanaged)
 	}
 
 	// 5. Validate what will be filed — E1, the decision that closes the 2026-10-05

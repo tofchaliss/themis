@@ -28,6 +28,94 @@ Here is the list of packages installed on the remote Red Hat Linux system :
 <ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
 <plugin_output>SSH version : OpenSSH_8.0</plugin_output>
 </ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="130175" pluginName="Apache Tomcat Installed (Linux/Unix)" pluginFamily="Web Servers">
+<cpe>cpe:/a:apache:tomcat</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+  Path    : /var/lib/apache-tomcat-latest
+  Version : 10.1.55
+
+  Configs detected :
+    - /var/lib/apache-tomcat-latest/conf/server.xml
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="168364" pluginName="PostgreSQL JDBC Driver Installed" pluginFamily="Databases">
+<cpe>cpe:/a:postgresql:postgresql_jdbc_driver</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+Nessus detected 2 installs of PostgreSQL JDBC Driver:
+
+  Path    : /var/lib/apache-tomcat-latest/webapps/app/WEB-INF/lib/postgresql-42.7.13.jar
+  Version : 42.7.13
+  Product : PostgreSQL JDBC Driver
+
+  Path    : /opt/app/lib/postgresql-42.7.13.jar
+  Version : 42.7.13
+  Product : PostgreSQL JDBC Driver
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="168007" pluginName="OpenSSL Installed (Linux)" pluginFamily="Misc.">
+<cpe>cpe:/a:openssl:openssl</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+Nessus detected 2 installs of OpenSSL:
+
+  Path               : /usr/lib64/libssl.so.1.1.1k
+  Version            : 1.1.1k
+  Associated Package : openssl-libs-1.1.1k-14.el8_6.x86_64
+
+  Path          : /usr/bin/openssl
+  Version       : 1.1.1k
+  Managed by OS : True
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="189731" pluginName="Vim Installed (Linux)" pluginFamily="Misc.">
+<cpe>cpe:/a:vim:vim</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+  Path    : /usr/bin/vim
+  Version : 8.0.1763
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="900101" pluginName="Example Agent Installed (Linux)" pluginFamily="Misc.">
+<cpe>cpe:/a:example:example-agent</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+  Path    : /opt/example-agent/bin/agent
+  Version : 2.10.3
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="900102" pluginName="Mystery Tool Installed (Linux)" pluginFamily="Misc.">
+<risk_factor>None</risk_factor>
+<plugin_output>
+  Path    : /opt/mystery/bin/mystery
+  Version : 1.0
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="164122" pluginName="Python Installed Packages" pluginFamily="Misc.">
+<risk_factor>None</risk_factor>
+<plugin_output>
+2 Python Packages were Found on the System :
+
+name: babel
+version: 2.5.1
+path: /usr/lib/python3.6/site-packages/Babel-2.5.1-py3.6.egg-info
+
+name: requests
+version: 2.31.0
+path: /opt/app/venv/lib/python3.9/site-packages/requests-2.31.0.dist-info
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="207584" pluginName="Ruby Gem Modules Installed (Linux)" pluginFamily="Misc.">
+<risk_factor>None</risk_factor>
+<plugin_output>
+1 Ruby Gems were Found on the System :
+
+name: rack
+version: 2.2.20
+path: /opt/app/vendor/bundle/specifications/rack-2.2.20.gemspec
+</plugin_output>
+</ReportItem>
 </ReportHost>
 <ReportHost name="192.0.2.11"><HostProperties>
 <tag name="HOST_END_TIMESTAMP">1786460000</tag>

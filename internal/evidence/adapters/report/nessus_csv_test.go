@@ -24,9 +24,10 @@ func TestNessusCSVConvertMatchesGolden(t *testing.T) {
 		t.Fatalf("Convert: %v", err)
 	}
 	// 2 package lines on CVE-0001 + 1 on CVE-0002 (one host each) + 1 unsplittable line
-	// + 2 upstream checks = 6 considered, 3 skipped; the row with no CVE is not counted.
-	if stats.FindingsTotal != 6 || stats.FindingsSkipped != 3 {
-		t.Errorf("stats = %+v, want total=6 skipped=3", stats)
+	// + 2 upstream checks + 1 Tomcat class C (kept — H3) = 7 considered, 3 skipped; the rows
+	// with no CVE are not counted.
+	if stats.FindingsTotal != 7 || stats.FindingsSkipped != 3 {
+		t.Errorf("stats = %+v, want total=7 skipped=3", stats)
 	}
 	if want := readFixture(t, "nessus", "sample.csv.golden.json"); string(got) != string(want) {
 		g, w := firstDiff(string(got), string(want))
@@ -40,8 +41,8 @@ func TestNessusCSVSemanticInvariants(t *testing.T) {
 		t.Fatalf("Convert: %v", err)
 	}
 	findings := decodeFindings(t, out)
-	if len(findings) != 3 {
-		t.Fatalf("got %d findings, want 3", len(findings))
+	if len(findings) != 4 {
+		t.Fatalf("got %d findings, want 4", len(findings))
 	}
 	// Name + version by the RPM rule, no purl (N4), `Should be` is the fix (N5), the
 	// supplied time (C3), Risk -> severity and the v3.0 score with no vector (C4).
@@ -58,6 +59,12 @@ func TestNessusCSVSemanticInvariants(t *testing.T) {
 	// `None` is no severity; no score is the integer zero.
 	if f := findings[2]; f.CVE != "CVE-2026-0002" || f.Severity != "" || f.CVSSScore != 0 {
 		t.Errorf("third = %+v", f)
+	}
+	// Class C on the CSV road (H3): the detection row of the same host — no CPE column, so
+	// the product comes from the plugin's name — makes the Tomcat check a finding.
+	if f := findings[3]; f.CVE != "CVE-2026-0005" || f.Component.Name != "Apache Tomcat" || f.Component.Version != "10.1.55" ||
+		f.Component.PURL != "" || f.Component.Ecosystem != "" || len(f.Fixed) != 1 || f.Fixed[0] != "10.1.56" || f.CVSSScore != 7.5 {
+		t.Errorf("fourth = %+v", f)
 	}
 	// C5: nothing about the host.
 	for _, leak := range []string{"192.0.2.", "example.test", "tcp", "Synopsis"} {
@@ -110,7 +117,7 @@ func TestNessusCSVMinimalHeader(t *testing.T) {
 	if stats.FindingsTotal != 1 || len(f) != 1 || f[0].Component.Name != "a" || f[0].CVSSScore != 0 || f[0].Severity != "" {
 		t.Errorf("stats=%+v findings=%+v", stats, f)
 	}
-	if (nessusCSV{}).Version() != "nessus-csv@1" {
+	if (nessusCSV{}).Version() != "nessus-csv@2" {
 		t.Error("version")
 	}
 }

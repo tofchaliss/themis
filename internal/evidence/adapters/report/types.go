@@ -86,10 +86,15 @@ const (
 // ComponentsSkipped is the same rule for an inventory conversion (2026-10-26 P4): the
 // package lines a converted SBOM left out because no identity could be read for them.
 // It is zero for every report conversion.
+//
+// ComponentsUnmanaged counts the hand-installed components an inventory conversion filed
+// beside the packages (2026-10-27 H5): software no package manager owns, found by the H1 rule.
+// Reported so a host with a hand-installed Tomcat and one without do not look alike.
 type Stats struct {
-	FindingsTotal     int
-	FindingsSkipped   int
-	ComponentsSkipped int
+	FindingsTotal       int
+	FindingsSkipped     int
+	ComponentsSkipped   int
+	ComponentsUnmanaged int
 }
 
 // The refusal taxonomy (EDR-INTAKE-01 D5/D11). Each sentinel is one reason the

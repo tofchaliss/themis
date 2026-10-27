@@ -583,6 +583,13 @@ components:
             for them (another vendor's package, an OS Themis does not map, a name that
             does not split) — EDR-INTAKE-01 2026-10-26 P4. Zero for an SBOM filed as
             submitted.
+        components_unmanaged:
+          type: integer
+          description: >-
+            Hand-installed components a converted SBOM filed beside the packages —
+            software no package manager owns, found by the scanner's detection plugins
+            under the EDR-INTAKE-01 2026-10-27 H1 rule (a path outside the rpm trees,
+            no package mark, no RPM of that product). Zero for every other submission.
         source_digest:
           type: string
           description: Lowercase-hex SHA-256 of the SUBMITTED bytes (which, for a converted submission, are not the filed bytes).

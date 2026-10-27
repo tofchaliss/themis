@@ -358,7 +358,7 @@ curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" 
 ```sh
 # Nessus .nessus export = the release's SBOM (EDR-INTAKE-01, 2026-10-26 amendment P1-P9).
 # Plugin 22869 (Software Enumeration, credentialed scan) lists the installed RPMs; Themis turns
-# the OS vendor's packages into a CycloneDX SBOM (converted_by nessus-inventory@1) with purls like
+# the OS vendor's packages into a CycloneDX SBOM (converted_by nessus-inventory@2) with purls like
 # pkg:rpm/redhat/zlib@1.2.11-25.el8?distro=rhel-8.10. Other vendors' packages are counted in
 # components_skipped. All hosts in the file go into the one release. Nothing about the hosts is kept.
 curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \

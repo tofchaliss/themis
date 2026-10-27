@@ -565,8 +565,10 @@ func TestIntakeReceipts_TableShape(t *testing.T) {
 		// Package lines a converted SBOM left out (2026-10-26 P4). NOT NULL DEFAULT 0:
 		// nothing filed as submitted skipped a component.
 		"components_skipped": "NO",
-		"created_at":         "NO",
-		"updated_at":         "NO",
+		// Hand-installed components a converted SBOM filed (2026-10-27 H5). Same default.
+		"components_unmanaged": "NO",
+		"created_at":           "NO",
+		"updated_at":           "NO",
 	}
 	for name, nullable := range want {
 		if got[name] == "" {
@@ -663,7 +665,7 @@ func TestIntakeReceipts_SaveLoadAdvance(t *testing.T) {
 
 	advanced := got
 	advanced.Status, advanced.EvidenceID, advanced.Components = domain.ReceiptFiled, "ev-9", 1184
-	advanced.ComponentsSkipped = 42
+	advanced.ComponentsSkipped, advanced.ComponentsUnmanaged = 42, 4
 	advanced.Reason, advanced.Detail = "", ""
 	if err := s.SaveIntakeReceipt(ctx, advanced); err != nil {
 		t.Fatal(err)
@@ -672,7 +674,7 @@ func TestIntakeReceipts_SaveLoadAdvance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Status != domain.ReceiptFiled || after.EvidenceID != "ev-9" || after.Components != 1184 || after.ComponentsSkipped != 42 {
+	if after.Status != domain.ReceiptFiled || after.EvidenceID != "ev-9" || after.Components != 1184 || after.ComponentsSkipped != 42 || after.ComponentsUnmanaged != 4 {
 		t.Errorf("advanced receipt = %+v", after)
 	}
 	if !after.CreatedAt.Equal(got.CreatedAt) {
@@ -1039,6 +1041,50 @@ func TestComponentsSkippedMigrationReversible(t *testing.T) {
 		t.Fatalf("receipt after up/down/up: %v", err)
 	}
 	if rec.SourceDigest != "abc" || rec.ComponentsSkipped != 0 {
+		t.Errorf("receipt after up/down/up = %+v, want it kept with the column defaulted", rec)
+	}
+}
+
+// TestComponentsUnmanagedMigrationReversible — 000006 up → down → up with a receipt in the
+// table: only the column moves, the receipt survives, and the re-up defaults it to 0.
+func TestComponentsUnmanagedMigrationReversible(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	if err := store.New(pool).SaveIntakeReceipt(ctx, store.IntakeReceipt{
+		IntakeID: "in-cu", Status: domain.ReceiptFiled, EvidenceID: "ev-cu", ComponentsUnmanaged: 4, SourceDigest: "abc",
+	}); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+	m, err := migrate.New(migrationsDir(), testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		upErr := m.Up()
+		m.Close()
+		if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+			t.Fatalf("restore: %v", upErr)
+		}
+	})
+	if err := m.Migrate(5); err != nil {
+		t.Fatalf("down to 000005: %v", err)
+	}
+	if hasColumn(t, "intake_receipts", "components_unmanaged") {
+		t.Error("intake_receipts.components_unmanaged survived the down migration")
+	}
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("up again: %v", err)
+	}
+	after, err := pgxpool.New(ctx, testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Close()
+	rec, err := store.New(after).LoadIntakeReceipt(ctx, "in-cu")
+	if err != nil {
+		t.Fatalf("receipt after up/down/up: %v", err)
+	}
+	if rec.SourceDigest != "abc" || rec.ComponentsUnmanaged != 0 {
 		t.Errorf("receipt after up/down/up = %+v, want it kept with the column defaulted", rec)
 	}
 }

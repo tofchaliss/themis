@@ -523,6 +523,7 @@ func TestIntakeFiled_ANessusSBOMReportsItsSkippedComponents(t *testing.T) {
 		must(t, r.StartConverting())
 		must(t, r.RecordConversion("nessus-inventory@1", "d1ge57", 0, 0))
 		must(t, r.RecordComponentsSkipped(42))
+		must(t, r.RecordComponentsUnmanaged(4))
 		must(t, r.StartRegistering())
 		must(t, r.Filed("ev-nessus", true))
 		return r
@@ -537,8 +538,9 @@ func TestIntakeFiled_ANessusSBOMReportsItsSkippedComponents(t *testing.T) {
 		t.Errorf("declared kind = %q, want it carried to the use case", declared)
 	}
 	view := decodeReceipt(t, rec)
-	if view.Components == nil || *view.Components != 1 || view.ComponentsSkipped == nil || *view.ComponentsSkipped != 42 {
-		t.Errorf("components = %v, skipped = %v, want 1 and 42", view.Components, view.ComponentsSkipped)
+	if view.Components == nil || *view.Components != 1 || view.ComponentsSkipped == nil || *view.ComponentsSkipped != 42 ||
+		view.ComponentsUnmanaged == nil || *view.ComponentsUnmanaged != 4 {
+		t.Errorf("components = %v, skipped = %v, unmanaged = %v, want 1, 42 and 4", view.Components, view.ComponentsSkipped, view.ComponentsUnmanaged)
 	}
 
 	// No `kind` is no declaration.

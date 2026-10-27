@@ -1367,3 +1367,119 @@ plain fingerprint **on the same release**; if found, the upload dedups onto it r
 filing a second copy. A plain-fingerprint row on another release is not treated as this
 source's (that was exactly the false duplicate). Nothing stored is rewritten: evidence stays
 immutable.
+
+## Amendment 2026-10-27 — Hand-installed software (H1–H6; closes gates G3 / P-G3)
+
+**Status:** Accepted (owner decision, 2026-10-27, option A: full design).
+
+**Driver.** An RPM inventory (plugin 22869) cannot see software no package manager owns: a
+Tomcat unpacked under `/var/lib`, an application under `/opt` with its JARs, a gem or a wheel
+installed by hand. Those are exactly the installs where Nessus's upstream version check is
+RIGHT — nobody backports fixes into a hand-installed Tomcat, so "10.1.55 < 10.1.56" is a real
+finding — and the 2026-10-24 amendment skipped them with class B.
+
+**What the real export says** (4 RHEL 8 hosts of one build; host 1 counted):
+
+| what | count |
+| --- | --- |
+| results carrying a `Path :` block | 220 |
+| blocks Nessus marks package-owned (`Managed by OS : True`, `Associated Package`, `(via package manager)`) | 27 |
+| unmarked blocks under `/usr`, `/bin`, `/lib64` … (the rpm trees) | 181 |
+| unmarked blocks outside the rpm trees | 12 |
+
+Three lessons. **A missing mark is not evidence of a hand install**: the 181 unmarked `/usr`
+paths (vim, sqlite, libgcrypt, every Python egg and vendored gem) all have their RPM in plugin
+22869; "unmarked = hand-installed" would invent ~180 phantom components per host. **The real
+hand installs are where FHS says they are**: outside the rpm trees host 1 has Tomcat 10.1.55
+(`/var/lib`, no `tomcat` RPM) and an application under `/opt` with three JARs, and Nessus has
+3 class-C results (9 CVEs) on that Tomcat. **Identity is in the file**: every detection plugin
+("X Installed", 0 CVEs) carries Nessus's own `<cpe>` beside `Path` and `Version`, and the gem /
+Python list plugins (207584, 164122) print `name / version / path`.
+
+### H1 — What counts as a hand-installed component (the rule abstains, never guesses)
+
+A `Path` block is a hand-installed component only when ALL hold:
+
+1. it comes from a **detection** plugin (no `<cve>`) whose name has a detection shape
+   (`<Product> Installed (…)`, `<Product> JAR Detection`, `<Product> Detection and
+   Identification (…)`), or from the gem / Python list plugins;
+2. the block carries **no** package mark (`Managed by OS : True`, `Associated Package`,
+   `(via package manager)`, `Version Source : Package`, or the plugin's "reported by the
+   package manager" sentence);
+3. the path is **outside the rpm trees** — not under `/usr` (except `/usr/local`), `/bin`,
+   `/sbin`, `/lib`, `/lib64`, `/etc`, `/boot`;
+4. plugin 22869 lists **no** RPM named like the product (the CPE product, the product name
+   hyphenated, its last word, `python3-`/`rubygem-` + name): a third-party RPM that installs to
+   `/opt` would show here, and then Themis does not know who owns the path.
+
+Everything else is left out. An unmarked block under `/usr` is **undecidable**: Themis has no
+`rpm -qf` and will not guess. Those blocks are **not** counted on the receipt — the receipt
+counts packages, and an unmarked path is not a package Themis refused. The blind spot stays,
+named and measured.
+
+### H2 — Identity: the plugin's product, the scanner's CPE, a purl from a closed table
+
+Component `name` is the product read from the detection plugin's name (the one identity the
+`.nessus` export and the CSV share: the CSV has no CPE column) — "Apache Tomcat", "PostgreSQL
+JDBC Driver"; `version` is the block's. The CycloneDX `cpe` field carries Nessus's CPE verbatim.
+The **purl** comes from a closed table, one line per CPE, each a decision like `nessusOSes`:
+
+| CPE | purl |
+| --- | --- |
+| `cpe:/a:postgresql:postgresql_jdbc_driver` | `pkg:maven/org.postgresql/postgresql@<v>` |
+| `cpe:/a:apache:commons_text` | `pkg:maven/org.apache.commons/commons-text@<v>` |
+| `cpe:/a:apache:commons_fileupload` | `pkg:maven/commons-fileupload/commons-fileupload@<v>` |
+| gem list plugin | `pkg:gem/<name>@<v>` |
+| Python list plugin | `pkg:pypi/<name>@<v>` |
+
+A CPE with no line gets **`pkg:generic/<vendor>/<product>@<v>`** — a purl that claims NO
+ecosystem, derived from the CPE and nothing else. Tomcat is such a component on purpose:
+OSV/GHSA records it under several Maven artifacts (`org.apache.tomcat.embed:tomcat-embed-core`,
+`…:tomcat-catalina`) and picking one would be a guess. No feed discovers a `generic` component,
+so it is judged by the scanner's own findings (H3) until a table line is added. A detection with
+no CPE at all names no vendor and is not filed. (The design note had proposed a cpe-only
+component with no purl; Evidence's CycloneDX reader files no purl-less component, so `generic`
+is the honest form of the same decision.)
+
+### H3 — Class C findings are kept on both report roads
+
+On `kind=vuln-report` (`.nessus`, `nessus@2`) and on the CSV (`nessus-csv@2`), a result with
+CVEs whose `Path` block names a hand-installed component of the SAME host — the index is built
+from that host's detection results in the same file; the CSV carries them as rows with no CVE,
+grouped by `Host`, which is read for the grouping and dropped — becomes one finding per CVE:
+component = H2 name + the version Nessus compared, fix = the `Fixed version` line
+(unattributed, as class A's `Should be`), no purl and no ecosystem, so it resolves onto its
+inventory twin by name + version exactly as class A does. Trust stays scanner / Asserted.
+Class B stays skipped; so does a banner-only check (OpenSSH, `Version source : SSH-2.0-…`,
+no path). Counting: a result with no path block is one record per CVE as before; one with
+blocks is one record per CVE per block, so the pair of counts says how many paths were judged
+and how many were filed.
+
+### H4 — The inventory road files them beside the RPMs
+
+`nessus-inventory@2`: the CycloneDX document gains the H1 components of every mapped host,
+`type: library`, with `cpe`, `purl` and one `themis:install-path` property per path the
+component was found at — the person fixing a hand-installed Tomcat needs to know WHICH Tomcat,
+and the same JAR deployed twice is one component with two paths. A path names no host (N8
+holds); the owner accepted that it may carry an application's directory name. Merged across
+hosts by purl like P6.
+
+### H5 — The receipt counts them
+
+`components_unmanaged` (the H1 components filed) joins `components` and `components_skipped`:
+receipt field, Evidence migration 000006, dashboard line "N components (M hand-installed)".
+Without it a host with a hand-installed Tomcat and one without look alike. One field, not the
+two the design note proposed: with H2's `generic` purl there is no cpe-only class to count.
+
+### H6 — What this does NOT do
+
+- No `rpm -qf`, no path-ownership guess under `/usr`.
+- No CPE discovery in Knowledge: a `generic` component is judged by the scanner's findings
+  only. If Tomcat-class components are to be judged by Themis's own feeds, that is a separate
+  design (`docs/BACKLOG.md`, KN-CPE-1).
+- No change to Knowledge, Governance or the GUI beyond the receipt line: Maven / gem / PyPI
+  purls already discover via OSV, and a finding on a `generic` component rides the scanner path.
+
+**Yield on the real export (host 1):** components 1249 → 1253 (Tomcat `generic`, three JARs
+with Maven purls); findings from the report 0 → 9 (Tomcat, class C), still 0 class B; phantom
+components 0 — the 181 unmarked `/usr` paths abstained.

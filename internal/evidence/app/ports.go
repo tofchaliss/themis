@@ -208,10 +208,14 @@ type InventoryReader interface {
 //
 // ComponentsSkipped is the same rule for an inventory conversion (EDR-INTAKE-01,
 // 2026-10-26 P4): the package lines a converted SBOM left out for want of an identity.
+//
+// ComponentsUnmanaged is the hand-installed components a converted SBOM filed beside the
+// packages (EDR-INTAKE-01, 2026-10-27 H5).
 type ReportStats struct {
-	FindingsTotal     int
-	FindingsSkipped   int
-	ComponentsSkipped int
+	FindingsTotal       int
+	FindingsSkipped     int
+	ComponentsSkipped   int
+	ComponentsUnmanaged int
 }
 
 // Conversion is what [ReportRegistry.Convert] hands back: the document to file, the

@@ -230,6 +230,9 @@ type Receipt struct {
 	// componentsSkipped is an inventory conversion's abstentions (EDR-INTAKE-01,
 	// 2026-10-26 P4): package lines left out because no identity could be read.
 	componentsSkipped int
+	// componentsUnmanaged is the hand-installed components an inventory conversion filed
+	// beside the packages (EDR-INTAKE-01, 2026-10-27 H5).
+	componentsUnmanaged int
 }
 
 // Status returns where the attempt has got to.
@@ -280,6 +283,11 @@ func (r *Receipt) FindingsSkipped() int { return r.findingsSkipped }
 // for want of an identity — "1249 of 1249" and "1249 of 1291" must not look alike.
 // Zero for everything but a converted SBOM.
 func (r *Receipt) ComponentsSkipped() int { return r.componentsSkipped }
+
+// ComponentsUnmanaged returns how many hand-installed components an inventory conversion
+// filed beside the packages (2026-10-27 H5) — software no package manager owns, found by the
+// scanner's detection plugins. Zero for everything but a converted SBOM.
+func (r *Receipt) ComponentsUnmanaged() int { return r.componentsUnmanaged }
 
 // IsTerminal reports whether the attempt has reached an outcome. A terminal receipt
 // is immutable: it is the record of what happened, and a record that can still change
@@ -395,6 +403,16 @@ func (r *Receipt) RecordComponentsSkipped(n int) error {
 		return r.terminalError("recording skipped components")
 	}
 	r.componentsSkipped = n
+	return nil
+}
+
+// RecordComponentsUnmanaged notes the hand-installed components an inventory conversion
+// filed (2026-10-27 H5). Recorded before the outcome is known, like the skipped count.
+func (r *Receipt) RecordComponentsUnmanaged(n int) error {
+	if r.IsTerminal() {
+		return r.terminalError("recording unmanaged components")
+	}
+	r.componentsUnmanaged = n
 	return nil
 }
 

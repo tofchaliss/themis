@@ -13,7 +13,7 @@ import (
 )
 
 // nessusCSVVersion is the CSV converter's identity in provenance (`converted_by`).
-const nessusCSVVersion = "nessus-csv@1"
+const nessusCSVVersion = "nessus-csv@2"
 
 // nessusCSV converts a Tenable Nessus CSV export into the curated document
 // (EDR-INTAKE-01, 2026-10-26 amendment C1–C6).
@@ -63,6 +63,7 @@ func (nessusCSV) Convert(body []byte, observedAt time.Time) ([]byte, Stats, erro
 	var (
 		stats    Stats
 		findings []curatedFinding
+		rows     [][]string
 	)
 	// Logical, 1-based row numbers with the header as row 1, as a spreadsheet shows
 	// them: `Plugin Output` and `Description` span lines.
@@ -79,27 +80,69 @@ func (nessusCSV) Convert(body []byte, observedAt time.Time) ([]byte, Stats, erro
 		if len(rec) != len(header) {
 			return nil, Stats{}, fmt.Errorf("%w: CSV row %d has %d columns, the header has %d", ErrSourceInvalid, line, len(rec), len(header))
 		}
-		field := func(name string) string {
-			i, ok := columns[name]
-			if !ok {
-				return ""
-			}
-			return strings.TrimSpace(rec[i])
+		rows = append(rows, rec)
+	}
+	field := func(rec []string, name string) string {
+		i, ok := columns[name]
+		if !ok {
+			return ""
 		}
+		return strings.TrimSpace(rec[i])
+	}
+	// The hand-install rule (H1) reads a host's detection rows — the rows with no CVE —
+	// against its package-list row, so it needs every row before the first finding is
+	// judged. The rows are grouped by the `Host` column and the value is used for nothing
+	// else (C5): it is read and dropped.
+	installs := map[string]nessusInstallIndex{}
+	{
+		byHost := map[string][]nessusDetection{}
+		rpms := map[string]map[string]struct{}{}
+		for _, rec := range rows {
+			host := field(rec, "Host")
+			if field(rec, "Plugin ID") == nessusSoftwarePlugin {
+				rpms[host] = nessusRPMNames(field(rec, "Plugin Output"))
+			}
+			var cves []string
+			if cve := field(rec, "CVE"); cve != "" {
+				cves = []string{cve}
+			}
+			byHost[host] = append(byHost[host], nessusDetection{
+				pluginID: field(rec, "Plugin ID"), pluginName: field(rec, "Name"),
+				output: field(rec, "Plugin Output"), cves: cves,
+			})
+		}
+		for host, items := range byHost {
+			installs[host] = nessusInstalls(items, rpms[host])
+		}
+	}
+	for _, rec := range rows {
+		field := func(name string) string { return field(rec, name) }
 		cve := field("CVE")
 		if cve == "" {
 			continue
 		}
 		pkgs, bad := nessusPackages(field("Plugin Output"))
+		if len(pkgs) == 0 && bad == 0 {
+			// No package line: an upstream version check or a remote check. A block naming
+			// a hand-installed component of this host is filed (H3); the rest is counted,
+			// never filed.
+			sc := nessusCSVScore(field("CVSS v3.0 Base Score"))
+			kept, total := nessusClassC(field("Plugin Output"), installs[field("Host")], []string{cve},
+				func(cve string, inst nessusInstall, fixed []string) {
+					findings = append(findings, curatedFinding{
+						CVE: cve, ObservedAt: observed, Scanner: "nessus",
+						Severity: nessusSeverity(field("Risk")), Score: sc, Fixed: fixed,
+						Component: curatedComponent{Name: inst.product, Version: inst.version},
+					})
+				})
+			stats.FindingsTotal += total
+			stats.FindingsSkipped += total - kept
+			continue
+		}
 		if len(pkgs) == 0 {
-			// No package line: an upstream version check or a remote check — counted,
-			// never filed. Unsplittable package lines are each a skip, not a guess (N4).
-			n := bad
-			if n == 0 {
-				n = 1
-			}
-			stats.FindingsTotal += n
-			stats.FindingsSkipped += n
+			// Unsplittable package lines are each a skip, not a guess (N4).
+			stats.FindingsTotal += bad
+			stats.FindingsSkipped += bad
 			continue
 		}
 		stats.FindingsTotal += len(pkgs) + bad

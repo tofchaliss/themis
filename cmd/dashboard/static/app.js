@@ -2279,7 +2279,7 @@ async function viewSBOM() {
     // A converted SBOM (a .nessus package list) also says what it left out — "1249 of
     // 1249" and "1249 of 1291" must not look alike either.
     const counts = rec.detected_kind === "sbom"
-      ? `${rec.components ?? "?"} components${rec.components_skipped ? `, ${rec.components_skipped} packages skipped (no identity)` : ""}`
+      ? `${rec.components ?? "?"} components${rec.components_unmanaged ? ` (${rec.components_unmanaged} hand-installed)` : ""}${rec.components_skipped ? `, ${rec.components_skipped} packages skipped (no identity)` : ""}`
       : `${rec.findings_total ?? "?"} findings considered, ${rec.findings_skipped ?? 0} skipped`;
     const parts = [
       `${esc(rec.detected_kind || "?")} / <b>${esc(rec.detected_format || "?")}</b>`,

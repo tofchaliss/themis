@@ -167,6 +167,9 @@ func TestReceipt_RecordsWhatTheAttemptSaw_EvenWhenItIsThenRefused(t *testing.T) 
 	if err := r.RecordComponentsSkipped(42); err != nil {
 		t.Fatalf("record components skipped: %v", err)
 	}
+	if err := r.RecordComponentsUnmanaged(4); err != nil {
+		t.Fatalf("record components unmanaged: %v", err)
+	}
 	if err := r.Rejected(domain.ReasonSchemaInvalid, "findings[2] is not an object"); err != nil {
 		t.Fatalf("rejected: %v", err)
 	}
@@ -180,8 +183,8 @@ func TestReceipt_RecordsWhatTheAttemptSaw_EvenWhenItIsThenRefused(t *testing.T) 
 	if r.FindingsTotal() != 500 || r.FindingsSkipped() != 73 {
 		t.Errorf("counts = %d total / %d skipped, want both reported", r.FindingsTotal(), r.FindingsSkipped())
 	}
-	if r.ComponentsSkipped() != 42 {
-		t.Errorf("components skipped = %d, want 42 reported on a refused receipt too", r.ComponentsSkipped())
+	if r.ComponentsSkipped() != 42 || r.ComponentsUnmanaged() != 4 {
+		t.Errorf("components skipped = %d, unmanaged = %d, want 42 and 4 reported on a refused receipt too", r.ComponentsSkipped(), r.ComponentsUnmanaged())
 	}
 }
 
@@ -305,6 +308,7 @@ func TestReceipt_TerminalImmutability_FiledRefuseFurther(t *testing.T) {
 				"release":     func() error { return r.RecordRelease("rel-other") },
 				"conversion":  func() error { return r.RecordConversion("cortex@2", "deadbeef", 1, 0) },
 				"skipped":     func() error { return r.RecordComponentsSkipped(3) },
+				"unmanaged":   func() error { return r.RecordComponentsUnmanaged(1) },
 			}
 			for what, attempt := range attempts {
 				if err := attempt(); err == nil {

@@ -219,7 +219,7 @@ func TestPortConvert_ANessusSBOMIsFiledAsCycloneDX(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if conv.Format != "cyclonedx" || conv.ConvertedBy != "nessus-inventory@1" || conv.Stats.ComponentsSkipped != 4 {
+	if conv.Format != "cyclonedx" || conv.ConvertedBy != "nessus-inventory@2" || conv.Stats.ComponentsSkipped != 4 || conv.Stats.ComponentsUnmanaged != 4 {
 		t.Errorf("conversion = format %q, by %q, stats %+v", conv.Format, conv.ConvertedBy, conv.Stats)
 	}
 	sum := sha256.Sum256(body)
@@ -229,7 +229,7 @@ func TestPortConvert_ANessusSBOMIsFiledAsCycloneDX(t *testing.T) {
 
 	// The same export, declared a report, reads its findings instead.
 	rep, err := Port{}.Convert(string(KindReport), string(DialectNessus), readFixture(t, "nessus", "sample.input.nessus"), time.Time{})
-	if err != nil || rep.ConvertedBy != "nessus@1" || rep.Format != "nessus" {
+	if err != nil || rep.ConvertedBy != "nessus@2" || rep.Format != "nessus" {
 		t.Errorf("report road = %+v / %v", rep, err)
 	}
 }
