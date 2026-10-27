@@ -408,7 +408,8 @@ func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID stri
 		// must neither clear nor keep a component it never spoke about.
 		affected := value.AffectedRange{Ecosystem: item.Component.Ecosystem,
 			Groups: f.View().RangesFor(item.Component.Ecosystem, item.Component.Name, item.Component.Source)}
-		if affected.Applicability(item.Component.Version) == value.RangeOutOfRange {
+		if affected.Applicability(value.RPMInstalledVersion(
+			item.Component.Ecosystem, item.Component.Version, item.Component.PURL)) == value.RangeOutOfRange {
 			continue
 		}
 		// The occurrence verdict (EDR-VERDICT-01 D2): the vendor fixed-verdicts — the rpm

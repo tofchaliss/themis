@@ -45,6 +45,9 @@ type BridgeContext struct {
 // wins; the grades exist so a reader can always see WHICH kind of evidence cleared a row.
 func judgeOccurrence(view domain.EnterpriseView, comp InventoryComponent, bridge BridgeContext) domain.OccurrenceVerdict {
 	pkg := componentPackage(comp)
+	// Compared WITH its epoch (KN-EPOCH-1): a producer that keeps the epoch on the purl only
+	// (the Nessus inventory) must not read as "below" every epoch-carrying bound of the same build.
+	comp.Version = value.RPMInstalledVersion(comp.Ecosystem, comp.Version, comp.PURL)
 
 	// Vendor fixed-verdict for rpm-class components (EDR-VEX-01 Phase 3): the installed build
 	// at/above a same-EL-stream vendor fix carries the backported fix. FixesFor aggregates every
@@ -131,11 +134,28 @@ func openReason(view domain.EnterpriseView, comp InventoryComponent, pkg string)
 		return fmt.Sprintf("no el%s fix on record for %s (%d fix bound(s) known for other EL streams)", major, pkg, len(fixes))
 	}
 	reason := fmt.Sprintf("installed %s is below every el%s fix for %s: %s", comp.Version, major, pkg, listBounds(same))
-	if series := otherStreamSeries(comp.Version, same); len(series) > 0 {
+	switch series := otherStreamSeries(comp.Version, same); {
+	case len(series) > 0:
 		reason += fmt.Sprintf("; those fixes are module builds of another series (%s, installed %s) — likely another module stream, which a plain update inside the installed stream never reaches",
 			strings.Join(series, ", "), upstreamSeries(comp.Version))
+	case !value.IsRPMModuleStream(comp.Version) && allModuleBuilds(same):
+		// The base-repository shape (measured 2026-10-27: RHEL 8's base perl 5.26 against
+		// fixes that exist only as perl:5.30 / perl:5.32 stream rebuilds). The install names
+		// no stream at all, so no series compare is possible — but every bound does, and that
+		// is the fact the operator needs: enabling the stream, not updating, reaches the fix.
+		reason += "; those fixes are module-stream builds and the installed package is not (base repository) — likely a fix published only for a module stream, which a plain update never reaches"
 	}
 	return reason
+}
+
+// allModuleBuilds reports whether every bound is a module-stream rebuild.
+func allModuleBuilds(bounds []string) bool {
+	for _, b := range bounds {
+		if !value.IsRPMModuleStream(b) {
+			return false
+		}
+	}
+	return len(bounds) > 0
 }
 
 // listBounds renders at most three bounds and counts the rest, so a card with thirteen el8
@@ -218,6 +238,7 @@ func bridgeObserved(view domain.EnterpriseView, comp InventoryComponent, bridge 
 		if owner.PURL != ownerPURL || value.ClassifyEcosystem(owner.Ecosystem) != value.VersionClassRPM {
 			continue
 		}
+		owner.Version = value.RPMInstalledVersion(owner.Ecosystem, owner.Version, owner.PURL)
 		ownerPkg := componentPackage(owner)
 		for _, fix := range view.FixesFor(ownerPkg, owner.Ecosystem) {
 			if value.RPMFixedByStream(owner.Ecosystem, owner.Version, []string{fix}) {
@@ -254,6 +275,7 @@ func bridgeInferred(view domain.EnterpriseView, comp InventoryComponent, bridge 
 		if sib.PURL == comp.PURL || value.ClassifyEcosystem(sib.Ecosystem) != value.VersionClassRPM {
 			continue
 		}
+		sib.Version = value.RPMInstalledVersion(sib.Ecosystem, sib.Version, sib.PURL)
 		sibPkg := componentPackage(sib)
 		if domain.NormalizeProduct(sibPkg) != want && domain.NormalizeProduct(sib.Name) != want {
 			continue

@@ -228,3 +228,34 @@ func IsRPMModuleStream(version string) bool {
 	_, ok := moduleNEVRAName(strings.TrimSpace(version))
 	return ok
 }
+
+// RPMInstalledVersion is the version an rpm-class component is COMPARED as: its version field
+// with the epoch restored from the purl's `epoch=` qualifier when the field omits it. Returns
+// the version unchanged for any other ecosystem, for a version that already carries a numeric
+// "N:" prefix, or when the purl states no epoch (or epoch 0).
+//
+// It exists because producers disagree on where the epoch lives. Trivy and Syft spell the
+// version "1:21.0.12.1.1-1.1.el8" and ALSO put `epoch=1` on the purl; the Nessus inventory
+// converter puts it on the purl only (so a Nessus advisory line, which never prints the epoch,
+// still resolves onto the component). Red Hat and OSV state every fix bound WITH its epoch, and
+// rpm ordering compares the epoch first — so a version read without it sits below every bound
+// of an epoch-1 package however new its build. Measured 2026-10-27 on a fully patched RHEL 8
+// host: java-21-openjdk 21.0.12.1.1-1.1.el8 "below" 1:21.0.12.1.1-1.1.el8, the same build.
+// OSV discovery already restored the epoch this way for its query; the fixed-verdict did not,
+// and the two read the same component differently (KN-EPOCH-1).
+func RPMInstalledVersion(ecosystem, version, purl string) string {
+	v := strings.TrimSpace(version)
+	if v == "" || ClassifyEcosystem(ecosystem) != VersionClassRPM || HasRPMEpoch(v) {
+		return v
+	}
+	if ep := PURLQualifier(purl, "epoch"); ep != "" && ep != "0" && strings.TrimLeft(ep, "0123456789") == "" {
+		return ep + ":" + v
+	}
+	return v
+}
+
+// HasRPMEpoch reports whether an rpm version already carries a numeric "N:" epoch prefix.
+func HasRPMEpoch(v string) bool {
+	i := strings.IndexByte(v, ':')
+	return i > 0 && strings.TrimLeft(v[:i], "0123456789") == ""
+}
