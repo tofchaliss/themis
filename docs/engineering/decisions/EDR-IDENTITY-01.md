@@ -217,9 +217,11 @@ On the measured MRF document, after this EDR ships:
 
 The D2 candidate set was read through the KN-RECOR-1 ledger alone, which names a release's
 inventory only once correlation has COMPLETED. A full-host SBOM correlates for ~14 minutes, so a
-scanner report filed inside that window resolved against nothing: every purl-less observation
-abstained as `no_candidate` — correct abstention on a wrong premise, since the SBOM was filed and
-readable all along. `releaseCandidates` now asks the ledger first and otherwise reads the
+scanner report queried inside that window resolved against nothing: the D5 on-demand query
+(recomputed, not stored) answered `no_candidate` for every purl-less observation — correct
+abstention on a wrong premise, since the SBOM was filed and readable all along. The stored
+ingest was not affected on the bus path (one envelope at a time, so it ran after correlation),
+but the direct `Ingest` entry point and the query were. `releaseCandidates` now asks the ledger first and otherwise reads the
 release's newest filed SBOM from Evidence (`SBOMForRelease`, over the list read). D3 is
 unchanged: a release with no filed SBOM still has no candidates and still abstains. A report
 filed before its SBOM is not re-ingested when the SBOM arrives; it is re-uploaded.
