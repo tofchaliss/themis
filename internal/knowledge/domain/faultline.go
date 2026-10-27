@@ -168,6 +168,16 @@ func (f *Faultline) repeatsLatestFrom(p Proposal) bool {
 	return false
 }
 
+// Restates reports whether p says exactly what other said — same source, same kind, same
+// payload, observed-at ignored. It is the one definition of "the same observation", exported so
+// a caller that sees many copies of one feed record in a single unit of work can fold it once
+// (KN-PROPOSAL-BLOAT-2): correlation discovers the same OSV record once per matched component,
+// and folding each copy is the growth the latest-only rule above cannot see when two records
+// for one CVE alternate. The caller decides scope; the comparison stays here.
+func (p Proposal) Restates(other Proposal) bool {
+	return p.source == other.source && p.kind == other.kind && p.sameContentAs(other)
+}
+
 // sameContentAs compares two Proposals of the same kind by payload, ignoring observed-at.
 func (p Proposal) sameContentAs(other Proposal) bool {
 	switch {

@@ -692,3 +692,59 @@ func TestCorrelation_ReportsProgressPerComponent(t *testing.T) {
 		t.Errorf("no reporter must stay silent, not fail: %v", err)
 	}
 }
+
+// One feed record is folded ONCE per run, however many components it names
+// (KN-PROPOSAL-BLOAT-2). Discovery hands back the same OSV record for every component it
+// covers, and a CVE named by two records alternates them, so the domain's latest-only
+// restatement rule never fires: six folds, six proposals. Within one run the copies are one
+// observation; a different record, or another source, is still folded.
+func TestCorrelate_FoldsEachRecordOncePerRun(t *testing.T) {
+	ctx := context.Background()
+	comps := []string{"pkg:pypi/setuptools@65.5.0", "pkg:pypi/setuptools@68.0.0", "pkg:pypi/setuptools@70.0.0"}
+	inv := fakeInventory{inv: inventoryOf(comps...)}
+	id := cve(t, "CVE-2024-1")
+	ghsa := vulnFacts(t, "osv", value.SeverityHigh)
+	pysec := vulnFacts(t, "osv", value.SeverityCritical)
+	byPURL := map[string][]app.ProposalFor{}
+	for _, c := range comps {
+		byPURL[c] = []app.ProposalFor{{CVE: id, Proposal: ghsa}, {CVE: id, Proposal: pysec}}
+	}
+	// Another source's record on the same CVE is a different observation and is kept.
+	byPURL[comps[0]] = append(byPURL[comps[0]], app.ProposalFor{CVE: id, Proposal: vulnFacts(t, "nvd", value.SeverityHigh)})
+	matches := newMatches()
+	repo := newRepo()
+	s := correlation(t, inv, fakeDiscovery{byPURL: byPURL}, matches, repo)
+
+	n, err := s.Correlate(ctx, "rel-1", "ev-1")
+	if err != nil {
+		t.Fatalf("correlate: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("new matches = %d, want 3 (every component still judged and recorded)", n)
+	}
+	f, _, _ := repo.GetByCVE(ctx, "CVE-2024-1")
+	if got := len(f.Proposals()); got != 3 {
+		t.Errorf("card holds %d proposals, want 3 (osv ghsa, osv pysec, nvd) — the copies were folded", got)
+	}
+	if repo.saveCalls != 3 {
+		t.Errorf("saves = %d, want 3 (one per distinct record)", repo.saveCalls)
+	}
+	// Each component read the run's reconciled card, including the one folded after the first
+	// copy of a record it was matched through.
+	for _, c := range comps {
+		if m, ok := matches.byPURL[c]; !ok || m.Score == 0 {
+			t.Errorf("%s: match missing or unscored (%v)", c, ok)
+		}
+	}
+
+	// A second run sees the same records again. The domain's latest-only rule drops the copy of
+	// the record the card holds LAST (nvd) and records the earlier ones once more — that is the
+	// rule, unchanged; what this change removes is the once-per-component multiplier.
+	if _, err := s.Correlate(ctx, "rel-1", "ev-1"); err != nil {
+		t.Fatal(err)
+	}
+	f, _, _ = repo.GetByCVE(ctx, "CVE-2024-1")
+	if got := len(f.Proposals()); got != 5 {
+		t.Errorf("after re-run the card holds %d proposals, want 5 (3 + ghsa + pysec, not +6)", got)
+	}
+}

@@ -389,12 +389,29 @@ func (s *CorrelationService) ApplyCorrelation(ctx context.Context, plan Correlat
 // reconciled range provably excludes, and records the rest at discovery origin. It is the write
 // half shared by SBOM correlation and by scanner-component discovery (KN-SCAN-5), so a component
 // that only a scanner named is judged by exactly the rule an SBOM component is.
+//
+// Each distinct feed record is folded ONCE per run (KN-PROPOSAL-BLOAT-2). Discovery returns the
+// same OSV record for every component the record names, so a plan holds N copies of one
+// proposal — 679 for one setuptools CVE on a RHEL host — and folding each copy is what grew the
+// cards: the domain drops a restatement only of the LATEST proposal from that source and kind,
+// and a CVE named by two records (a GHSA and a PYSEC) alternates them, so the latest never
+// matches. Measured 2026-10-27: 206,475 proposal rows for 94,657 distinct facts, all of the
+// excess from OSV vuln-facts. The domain rule is untouched — what changes is that one unit of
+// work presents each observation once, which is what it is. The card read for the later copies
+// is the one the first fold (or the latest fold of another record for the same CVE) returned,
+// so every component is still judged against the reconciled card of THIS run.
 func (s *CorrelationService) applyDiscovered(ctx context.Context, releaseID string, items []PlannedMatch, bridge BridgeContext) (int, error) {
 	newMatches := 0
+	folded := newRunFolds()
 	for _, item := range items {
-		f, _, err := s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
-		if err != nil {
-			return newMatches, err
+		f, seen := folded.card(item.CVE, item.Proposal)
+		if !seen {
+			var err error
+			f, _, err = s.fold.FoldProposal(ctx, item.CVE, item.Proposal)
+			if err != nil {
+				return newMatches, err
+			}
+			folded.record(item.CVE, item.Proposal, f)
 		}
 		// Apply Knowledge's OWN reconciled (backport-aware) affected-range knowledge (D3):
 		// record a match unless the component's version is provably OUT of the reconciled
@@ -476,6 +493,36 @@ func (s *CorrelationService) DiscoverComponents(ctx context.Context, releaseID s
 		return 0, nil
 	}
 	return s.applyDiscovered(ctx, releaseID, items, BridgeContext{Siblings: siblings, InferredBridge: s.inferredBridge})
+}
+
+// runFolds remembers, for one applyDiscovered call, which proposals were already folded into
+// which card, so a copy of a record the run has seen reads the card instead of folding again.
+type runFolds struct {
+	cards     map[string]domain.Faultline // CVE → the card as the run's latest fold left it
+	proposals map[string][]domain.Proposal
+}
+
+func newRunFolds() runFolds {
+	return runFolds{cards: map[string]domain.Faultline{}, proposals: map[string][]domain.Proposal{}}
+}
+
+// card returns the run's current card for cve when p restates a proposal already folded this
+// run. A proposal the run has not seen — or one whose content cannot be proven equal, which
+// Restates reports as different — is folded by the caller as before.
+func (r runFolds) card(cve value.CVEID, p domain.Proposal) (domain.Faultline, bool) {
+	key := cve.String()
+	for _, prev := range r.proposals[key] {
+		if p.Restates(prev) {
+			return r.cards[key], true
+		}
+	}
+	return domain.Faultline{}, false
+}
+
+func (r runFolds) record(cve value.CVEID, p domain.Proposal, f domain.Faultline) {
+	key := cve.String()
+	r.cards[key] = f
+	r.proposals[key] = append(r.proposals[key], p)
 }
 
 // DiscoveryHint returns the component to QUERY a feed with for comp. A distro package purl
