@@ -212,3 +212,14 @@ On the measured MRF document, after this EDR ships:
 - **The producer-side note:** in the observed case the `app:` strings came from an external CSV→JSON
   converter that passed them through unchanged; that converter now rewrites rpm-shaped rows and reports
   the rest. The Themis-side asymmetry is filed and fixed on its own merits, independent of that.
+
+## Realization note — 2026-10-27 (KN-SCAN-RACE-1)
+
+The D2 candidate set was read through the KN-RECOR-1 ledger alone, which names a release's
+inventory only once correlation has COMPLETED. A full-host SBOM correlates for ~14 minutes, so a
+scanner report filed inside that window resolved against nothing: every purl-less observation
+abstained as `no_candidate` — correct abstention on a wrong premise, since the SBOM was filed and
+readable all along. `releaseCandidates` now asks the ledger first and otherwise reads the
+release's newest filed SBOM from Evidence (`SBOMForRelease`, over the list read). D3 is
+unchanged: a release with no filed SBOM still has no candidates and still abstains. A report
+filed before its SBOM is not re-ingested when the SBOM arrives; it is re-uploaded.

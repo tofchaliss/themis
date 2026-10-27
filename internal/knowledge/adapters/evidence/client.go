@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
@@ -191,4 +193,48 @@ func (c *Client) EvidenceFacts(ctx context.Context, evidenceID string) (kind, re
 		return "", "", false, jerr
 	}
 	return body.Kind, body.SubjectReleaseID, true, nil
+}
+
+type evidenceSummary struct {
+	ID      string    `json:"id"`
+	Kind    string    `json:"kind"`
+	FiledAt time.Time `json:"filed_at"`
+}
+
+// SBOMForRelease resolves a release to its most recently filed SBOM via Evidence's list read
+// (KN-SCAN-RACE-1) — the identity-candidate fallback for a scanner report that arrives before
+// the SBOM's correlation has completed. found=false when the release has no SBOM at all.
+//
+// It picks the newest by `filed_at` itself rather than trusting the list's order, so the
+// answer does not depend on how Evidence happens to sort.
+func (c *Client) SBOMForRelease(ctx context.Context, releaseID string) (string, bool, error) {
+	u := c.baseURL + "/api/v1/evidence?release=" + url.QueryEscape(releaseID)
+	req, err := c.newRequest(ctx, u)
+	if err != nil {
+		return "", false, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("evidence: list for release %s: status %d%s",
+			releaseID, resp.StatusCode, c.credentialHint(resp.StatusCode))
+	}
+	var list []evidenceSummary
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return "", false, err
+	}
+	var best evidenceSummary
+	found := false
+	for _, e := range list {
+		if e.Kind != "sbom" {
+			continue
+		}
+		if !found || e.FiledAt.After(best.FiledAt) {
+			best, found = e, true
+		}
+	}
+	return best.ID, found, nil
 }

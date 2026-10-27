@@ -628,6 +628,26 @@ three angles, and two of them proposed fixes that would not have worked.
   evaluated 18 scope-applicable statements and correctly raised none — every one named a package
   the Finding does not carry (VEX-GUI-2, VEX-SRC-1 filed from that list). The positive case
   (a `vexwnf:` raise on a fresh release) awaits the next Rocky image upload.
+- [x] **KN-SCAN-RACE-1 — a scanner report uploaded before its SBOM's correlation completes resolves
+  against NO candidates, so every purl-less finding abstains as `no_candidate` and nothing is
+  recorded (filed and closed 2026-10-27).** HIGH, correctness. Found on the first VM check of
+  PR #216: a Nessus CSV uploaded one minute after the host's `.nessus` SBOM (1254 components)
+  reported all 16 Tomcat findings unresolved, `no_candidate`, although the inventory carried
+  `Apache Tomcat 10.1.59`. `ScannerReportService.releaseCandidates` resolved the release
+  through the KN-RECOR-1 ledger (`correlated_releases`), which has a row only when the SBOM's
+  correlation has COMPLETED — ~14 minutes for a full host — so for that whole window the
+  candidate set was the report alone. The write phase recorded nothing, and the on-demand
+  unresolved query (recomputed, not stored) would later disagree with the match table once the
+  ledger row appeared. Latent for every scanner finding without a purl, on every road; never
+  seen before because earlier scanner uploads either carried purls or were filed after
+  correlation. **Fix:** `releaseEvidence` asks the ledger first and, when it is silent, reads
+  the release's newest filed SBOM from Evidence's own list read (`GET /evidence?release=`,
+  new client method `SBOMForRelease`) — the authority on what the release contains, correlated
+  or not. Only a release with NO filed SBOM is a scanner-only release and still abstains.
+  Tests: app (fallback used, not used when the ledger answers, abstains with no SBOM or an
+  unreachable Evidence) + client (newest SBOM by `filed_at`, not by list position). **Not
+  done:** a report filed BEFORE its SBOM still abstains and is not re-ingested when the SBOM
+  arrives; re-upload the report (changed bytes) after the SBOM — same operator rule as before.
 - [x] **KN-SCAN-5 — a component that only a scanner report named gets no feed discovery, so its
   matches can never clear (filed and closed 2026-10-14).** HIGH, correctness/operability. The first
   `match-census.sh` run (4941 matches) showed a second class beside KN-GO-1: `binutils` 87

@@ -518,3 +518,69 @@ func TestScannerReport_RediscoverComponentsEdges(t *testing.T) {
 		t.Fatalf("scanner-only set = %+v, want the one usable, deduplicated purl", got)
 	}
 }
+
+type identitySBOMs struct {
+	ev    string
+	found bool
+	err   error
+	calls int
+}
+
+func (s *identitySBOMs) SBOMForRelease(context.Context, string) (string, bool, error) {
+	s.calls++
+	return s.ev, s.found, s.err
+}
+
+// KN-SCAN-RACE-1: a scanner report uploaded a minute after its SBOM found NO candidates — the
+// ledger has a row only once the SBOM's correlation completes (~14 min for a full host), so
+// every purl-less finding abstained as `no_candidate` and nothing was recorded. The SBOM is
+// in Evidence from the moment it is filed, so that is where the candidates come from when the
+// ledger is still silent.
+func TestScannerReport_CandidatesFallBackToTheFiledSBOMBeforeCorrelation(t *testing.T) {
+	obs := app.ScannerProposal{
+		CVE: cve(t, "CVE-2025-1"), Proposal: vulnFacts(t, "scanner", value.SeverityHigh),
+		Component: app.InventoryComponent{Name: "Apache Tomcat", Version: "10.1.59"},
+		Origin:    "scanner/nessus",
+	}
+	twin := app.InventoryComponent{PURL: "pkg:generic/apache/tomcat@10.1.59", Name: "Apache Tomcat", Version: "10.1.59"}
+	inv := identityInventory{comps: []app.InventoryComponent{twin}}
+
+	// Ledger silent, SBOM filed: the fallback supplies the twin.
+	sboms := &identitySBOMs{ev: "ev-sbom", found: true}
+	matches := newMatches()
+	svc := scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs}}, matches, newRepo()).
+		WithIdentityCandidates(identityLedger{}, inv).WithReleaseSBOMs(sboms)
+	if n, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil || n != 1 {
+		t.Fatalf("Ingest = %d, %v; want 1 resolved onto the filed SBOM's component", n, err)
+	}
+	if _, ok := matches.byPURL[twin.PURL]; !ok {
+		t.Errorf("the finding did not land on the SBOM twin; recorded %v", matches.byPURL)
+	}
+
+	// Ledger answers: the fallback is never consulted — the correlated inventory stays the
+	// authority once there is one.
+	sboms = &identitySBOMs{ev: "ev-other", found: true}
+	svc = scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs}}, newMatches(), newRepo()).
+		WithIdentityCandidates(identityLedger{ev: "ev-sbom", found: true}, inv).WithReleaseSBOMs(sboms)
+	if _, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil {
+		t.Fatal(err)
+	}
+	if sboms.calls != 0 {
+		t.Errorf("the Evidence fallback was read %d times although the ledger answered", sboms.calls)
+	}
+
+	// No SBOM anywhere, or the fallback failing: a scanner-only release still ABSTAINS.
+	for name, src := range map[string]*identitySBOMs{
+		"no sbom filed": {}, "evidence unreachable": {err: errors.New("down")},
+	} {
+		report := &capturedIngest{}
+		svc = scannerService(t, fakeScannerSource{props: []app.ScannerProposal{obs}}, newMatches(), newRepo()).
+			WithIdentityCandidates(identityLedger{}, inv).WithReleaseSBOMs(src).WithIngestReporter(report)
+		if n, err := svc.Ingest(context.Background(), "rel-1", "ev-report"); err != nil || n != 0 {
+			t.Errorf("%s: Ingest = %d, %v; want 0 recorded, nil", name, n, err)
+		}
+		if report.unresolved != 1 {
+			t.Errorf("%s: unresolved = %d, want 1 (abstained, counted)", name, report.unresolved)
+		}
+	}
+}
