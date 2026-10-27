@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
 )
 
@@ -189,7 +190,7 @@ func TestOSVDistro_FormatParity(t *testing.T) {
 		if got := osvPackageName(c); got != "openssl" {
 			t.Errorf("name = %q, want openssl", got)
 		}
-		if got := osvVersion(c); !hasEpochPrefix(got) {
+		if got := osvVersion(c); !value.HasRPMEpoch(got) {
 			t.Errorf("version %q lacks the rpm epoch", got)
 		}
 	}

@@ -301,3 +301,35 @@ func TestRLSABoundClearsThePatchedModularBuild(t *testing.T) {
 		t.Error("an el9 bound must never clear an el8 install")
 	}
 }
+
+// KN-EPOCH-1 (2026-10-27): the install is compared with its epoch, restored from the purl when
+// the version field omits it. Measured: java-21-openjdk 21.0.12.1.1-1.1.el8 (purl epoch=1) read
+// as below 1:21.0.12.1.1-1.1.el8 — the same build.
+func TestRPMInstalledVersion(t *testing.T) {
+	cases := []struct{ eco, version, purl, want string }{
+		{"rpm", "21.0.12.1.1-1.1.el8", "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?distro=rhel-8.10&epoch=1", "1:21.0.12.1.1-1.1.el8"},
+		{"rpm", "1:21.0.12.1.1-1.1.el8", "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?epoch=1", "1:21.0.12.1.1-1.1.el8"}, // Trivy/Syft spelling: unchanged
+		{"rpm", "1.45.6-5.el8", "pkg:rpm/redhat/e2fsprogs-libs@1.45.6-5.el8?distro=rhel-8.10", "1.45.6-5.el8"},                  // no epoch anywhere
+		{"rpm", "1.45.6-5.el8", "pkg:rpm/redhat/e2fsprogs-libs@1.45.6-5.el8?epoch=0", "1.45.6-5.el8"},                           // epoch 0 is the default
+		{"rpm", "1.2-3.el8", "pkg:rpm/redhat/x@1.2-3.el8?epoch=abc", "1.2-3.el8"},                                               // not a number: ignored
+		{"pypi", "39.2.0", "pkg:pypi/setuptools@39.2.0?epoch=1", "39.2.0"},                                                      // not rpm: untouched
+		{"rpm", "  ", "pkg:rpm/redhat/x@1?epoch=1", ""},
+	}
+	for _, c := range cases {
+		if got := value.RPMInstalledVersion(c.eco, c.version, c.purl); got != c.want {
+			t.Errorf("value.RPMInstalledVersion(%q, %q, %q) = %q, want %q", c.eco, c.version, c.purl, got, c.want)
+		}
+	}
+	// The measured consequence: with the epoch restored the install satisfies the bound.
+	if !value.RPMFixedByStream("rpm", "1:21.0.12.1.1-1.1.el8", []string{"1:21.0.12.1.1-1.1.el8"}) {
+		t.Error("the same build with its epoch must satisfy its own bound")
+	}
+	if value.RPMFixedByStream("rpm", "21.0.12.1.1-1.1.el8", []string{"1:21.0.12.1.1-1.1.el8"}) {
+		t.Error("without the epoch the same build reads as below the bound — the defect this pins")
+	}
+	for v, want := range map[string]bool{"1:1.2-3": true, "0:1.2-3": true, "1.2-3": false, ":1.2": false, "a:1.2": false, "httpd:2.4-80": false} {
+		if got := value.HasRPMEpoch(v); got != want {
+			t.Errorf("value.HasRPMEpoch(%q) = %v, want %v", v, got, want)
+		}
+	}
+}

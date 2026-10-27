@@ -15,8 +15,9 @@ package domain
 // Generations: 1 = the pre-stamp baseline (everything through 2026-09-16) ·
 // 2 = versioned interpreter wrappers reach the fix lookup and the bridge (2026-09-17, KN-FIX-5) ·
 // 3 = an open rpm verdict states its premise (2026-10-26, D10 / KN-OPEN-REASON-1) — no state
-// moves, but every open row's reason is new text, and only the sweep can write it onto history.
-const VerdictGeneration = 3
+// moves, but every open row's reason is new text, and only the sweep can write it onto history ·
+// 4 = an rpm install is compared with its epoch restored from the purl (2026-10-27, KN-EPOCH-1).
+const VerdictGeneration = 4
 
 // Occurrence verdict state (EDR-VERDICT-01 D2). An occurrence is one component row matched to a
 // card on one release. Its verdict records what the vendor-fix machinery concluded about THIS
