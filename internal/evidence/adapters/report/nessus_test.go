@@ -17,10 +17,11 @@ func TestNessusConvertMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
-	// 4 + (1 kept, 1 unsplittable) + 3 upstream + 1 no-package + 1 on host 2 = 11 considered,
-	// 5 skipped; the informational plugin carries no CVE and is not counted (N3).
-	if stats.FindingsTotal != 11 || stats.FindingsSkipped != 5 {
-		t.Errorf("stats = %+v, want total=11 skipped=5", stats)
+	// 4 + (1 kept, 1 unsplittable) + 3 upstream + 1 no-package + 2 Tomcat (class C, kept — H3)
+	// + 1 vim under /usr (undecidable, skipped) + 1 on host 2 = 14 considered, 6 skipped; the
+	// informational and detection plugins carry no CVE and are not counted (N3).
+	if stats.FindingsTotal != 14 || stats.FindingsSkipped != 6 {
+		t.Errorf("stats = %+v, want total=14 skipped=6", stats)
 	}
 	if want := readFixture(t, "nessus", "sample.golden.json"); string(got) != string(want) {
 		g, w := firstDiff(string(got), string(want))
@@ -31,8 +32,8 @@ func TestNessusConvertMatchesGolden(t *testing.T) {
 // The judgements byte-equality cannot see.
 func TestNessusSemanticInvariants(t *testing.T) {
 	findings := decodeFindings(t, nessusReport(t, readFixture(t, "nessus", "sample.input.nessus")))
-	if len(findings) != 6 {
-		t.Fatalf("got %d findings, want 6 kept of 11 considered", len(findings))
+	if len(findings) != 8 {
+		t.Fatalf("got %d findings, want 8 kept of 14 considered", len(findings))
 	}
 	// CVE × package, in document order; the name/version split is the RPM rule; no purl is
 	// ever built (N4); the fix is the `Should be` line (N5); the time is the host's own (N6).
@@ -54,9 +55,20 @@ func TestNessusSemanticInvariants(t *testing.T) {
 		f.Fixed[0] != "1:1.1.1k-15.el8_6" || f.Severity != "" || f.CVSSScore != 0 {
 		t.Errorf("fifth = %+v", f)
 	}
-	// Host 2 is kept, not merged, and timed by HOST_END read as UTC.
-	if f := findings[5]; f.CVE != "CVE-2026-0001" || f.ObservedAt != "2026-08-11T19:23:46.000Z" {
+	// Class C (H3): the Tomcat the host's detection plugin established as hand-installed —
+	// named by the plugin's product, versioned by what Nessus compared, fixed by the
+	// `Fixed version` line, no purl and no ecosystem (it resolves onto its inventory twin).
+	if f := findings[5]; f.CVE != "CVE-2026-0005" || f.Component.Name != "Apache Tomcat" || f.Component.Version != "10.1.55" ||
+		f.Component.PURL != "" || f.Component.Ecosystem != "" || len(f.Fixed) != 1 || f.Fixed[0] != "10.1.56" ||
+		f.Severity != "High" || f.CVSSScore != 7.5 {
 		t.Errorf("sixth = %+v", f)
+	}
+	if f := findings[6]; f.CVE != "CVE-2026-0006" || f.Component.Name != "Apache Tomcat" {
+		t.Errorf("seventh = %+v, want the second Tomcat CVE", f)
+	}
+	// Host 2 is kept, not merged, and timed by HOST_END read as UTC.
+	if f := findings[7]; f.CVE != "CVE-2026-0001" || f.ObservedAt != "2026-08-11T19:23:46.000Z" {
+		t.Errorf("eighth = %+v", f)
 	}
 	// No upstream version check becomes a finding (N3).
 	for _, f := range findings {
@@ -138,7 +150,7 @@ func TestNessusRefusals(t *testing.T) {
 	if err != nil || stats.FindingsTotal != 0 || string(out) != `{"findings":[]}` {
 		t.Fatalf("supplied: %q %+v %v", out, stats, err)
 	}
-	if (nessusXML{}).Version() != "nessus@1" {
+	if (nessusXML{}).Version() != "nessus@2" {
 		t.Error("version")
 	}
 }

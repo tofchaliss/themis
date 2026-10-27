@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 )
 
 // nessusInventoryVersion is the inventory converter's identity in provenance.
-const nessusInventoryVersion = "nessus-inventory@1"
+const nessusInventoryVersion = "nessus-inventory@2"
 
 // nessusSoftwarePlugin is "Software Enumeration (SSH)": the plugin whose output is the host's
 // installed-package list (EDR-INTAKE-01, 2026-10-26 amendment).
@@ -45,8 +46,11 @@ type nessusInventoryDoc struct {
 				Value string `xml:",chardata"`
 			} `xml:"HostProperties>tag"`
 			Items []struct {
-				PluginID string `xml:"pluginID,attr"`
-				Output   string `xml:"plugin_output"`
+				PluginID   string   `xml:"pluginID,attr"`
+				PluginName string   `xml:"pluginName,attr"`
+				CVEs       []string `xml:"cve"`
+				CPEs       []string `xml:"cpe"`
+				Output     string   `xml:"plugin_output"`
 			} `xml:"ReportItem"`
 		} `xml:"ReportHost"`
 	} `xml:"Report"`
@@ -76,8 +80,22 @@ type cdxComponent struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	PURL    string `json:"purl,omitempty"`
+	// CPE is the scanner's own identity for a hand-installed component (H2), kept verbatim.
+	CPE  string `json:"cpe,omitempty"`
+	PURL string `json:"purl,omitempty"`
+	// Properties carries `themis:install-path`, one per path the component was found at
+	// (H4): the person fixing a hand-installed Tomcat needs to know WHICH Tomcat. A path
+	// names no host.
+	Properties []cdxProperty `json:"properties,omitempty"`
 }
+
+type cdxProperty struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// installPathProperty is the CycloneDX property name an install path rides under.
+const installPathProperty = "themis:install-path"
 
 // nessusInventory turns a `.nessus` export's package list into a CycloneDX SBOM
 // (EDR-INTAKE-01, 2026-10-26 amendment P1–P8).
@@ -111,6 +129,9 @@ func (nessusInventory) Convert(body []byte, observedAt time.Time) ([]byte, Stats
 		mappedOS bool
 		seen     = map[string]struct{}{}
 		kept     []cdxComponent
+		// installs are the hand-installed components (H1), keyed by purl so the same JAR
+		// found at two paths, or on two hosts, is one component with every path (H4).
+		installs = map[string]*cdxComponent{}
 	)
 	for _, r := range doc.Reports {
 		for _, h := range r.Hosts {
@@ -123,6 +144,41 @@ func (nessusInventory) Convert(body []byte, observedAt time.Time) ([]byte, Stats
 			}
 			os, release, ok := nessusHostOS(props["operating-system"])
 			mappedOS = mappedOS || ok
+			var (
+				detections []nessusDetection
+				rpms       map[string]struct{}
+			)
+			for _, it := range h.Items {
+				if it.PluginID == nessusSoftwarePlugin {
+					rpms = nessusRPMNames(it.Output)
+				}
+				detections = append(detections, nessusDetection{
+					pluginID: it.PluginID, pluginName: it.PluginName, output: it.Output, cves: it.CVEs, cpes: it.CPEs,
+				})
+			}
+			if ok {
+				// Only a host whose OS is mapped: the rule reads the package list of an
+				// Enterprise Linux host, and the rpm trees are that host's.
+				idx := nessusInstalls(detections, rpms)
+				for _, path := range idx.sortedPaths() {
+					inst := idx[path]
+					purl, good := nessusInstallPURL(inst)
+					if !good {
+						continue // a detection with no CPE names no vendor; not an identity
+					}
+					if c, dup := installs[purl]; dup {
+						// The same path on another host of the same build (P6) is one path.
+						if !slices.ContainsFunc(c.Properties, func(p cdxProperty) bool { return p.Value == path }) {
+							c.Properties = append(c.Properties, cdxProperty{Name: installPathProperty, Value: path})
+						}
+						continue
+					}
+					installs[purl] = &cdxComponent{
+						Type: "library", Name: inst.product, Version: inst.version, CPE: inst.cpe, PURL: purl,
+						Properties: []cdxProperty{{Name: installPathProperty, Value: path}},
+					}
+				}
+			}
 			for _, it := range h.Items {
 				if it.PluginID != nessusSoftwarePlugin {
 					continue
@@ -161,6 +217,11 @@ func (nessusInventory) Convert(body []byte, observedAt time.Time) ([]byte, Stats
 		return nil, Stats{}, err
 	}
 
+	for _, c := range installs {
+		sort.Slice(c.Properties, func(i, j int) bool { return c.Properties[i].Value < c.Properties[j].Value })
+		kept = append(kept, *c)
+		stats.ComponentsUnmanaged++
+	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].PURL < kept[j].PURL })
 	name, version, _ := strings.Cut(nessusInventoryVersion, "@")
 	var out bytes.Buffer

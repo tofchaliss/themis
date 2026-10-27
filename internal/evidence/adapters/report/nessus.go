@@ -14,7 +14,7 @@ import (
 )
 
 // nessusVersion is this converter's identity in provenance (`converted_by`).
-const nessusVersion = "nessus@1"
+const nessusVersion = "nessus@2"
 
 // nessusRoot is the root element a `.nessus` export carries (EDR-INTAKE-01, 2026-10-24
 // amendment N1). The v1 schema (`NessusClientData`) is not admitted: it is long retired and
@@ -49,8 +49,11 @@ type nessusHost struct {
 }
 
 type nessusItem struct {
+	PluginID     string   `xml:"pluginID,attr"`
+	PluginName   string   `xml:"pluginName,attr"`
 	PluginFamily string   `xml:"pluginFamily,attr"`
 	CVEs         []string `xml:"cve"`
+	CPEs         []string `xml:"cpe"`
 	RiskFactor   string   `xml:"risk_factor"`
 	CVSS3Score   string   `xml:"cvss3_base_score"`
 	CVSS3Vector  string   `xml:"cvss3_vector"`
@@ -129,6 +132,7 @@ func (nessusXML) Convert(body []byte, observedAt time.Time) ([]byte, Stats, erro
 			at = hostTimes[i]
 		}
 		observed := at.Format("2006-01-02T15:04:05.000Z")
+		installs := nessusHostInstalls(h)
 		for _, it := range h.Items {
 			cves := nessusCVEs(it.CVEs)
 			if len(cves) == 0 {
@@ -136,9 +140,21 @@ func (nessusXML) Convert(body []byte, observedAt time.Time) ([]byte, Stats, erro
 			}
 			pkgs, bad := nessusPackages(it.Output)
 			if !strings.HasSuffix(strings.TrimSpace(it.PluginFamily), nessusLocalChecks) || (len(pkgs) == 0 && bad == 0) {
-				// Class B/C, or a local check with no package line: counted, never filed.
-				stats.FindingsTotal += len(cves)
-				stats.FindingsSkipped += len(cves)
+				// Class B/C, or a local check with no package line. A class C block — the
+				// path of a hand-installed component this host's detection plugins
+				// established (H1) — is filed (H3); every other such result is counted,
+				// never filed.
+				sc, vector := nessusScore(it)
+				kept, total := nessusClassC(it.Output, installs, cves, func(cve string, inst nessusInstall, fixed []string) {
+					findings = append(findings, curatedFinding{
+						CVE: cve, ObservedAt: observed, Scanner: "nessus",
+						Severity: nessusSeverity(it.RiskFactor), Score: sc, CVSSVector: vector,
+						Fixed:     fixed,
+						Component: curatedComponent{Name: inst.product, Version: inst.version},
+					})
+				})
+				stats.FindingsTotal += total
+				stats.FindingsSkipped += total - kept
 				continue
 			}
 			stats.FindingsTotal += len(cves) * (len(pkgs) + bad)
@@ -169,6 +185,53 @@ func (nessusXML) Convert(body []byte, observedAt time.Time) ([]byte, Stats, erro
 		}
 	}
 	return encodeDocument(findings, encodingJS), stats, nil
+}
+
+// nessusHostInstalls applies the hand-install rule (H1) to one host of the export: its
+// detection plugins, read against its package list.
+func nessusHostInstalls(h nessusHost) nessusInstallIndex {
+	var (
+		items []nessusDetection
+		rpms  map[string]struct{}
+	)
+	for _, it := range h.Items {
+		if it.PluginID == nessusSoftwarePlugin {
+			rpms = nessusRPMNames(it.Output)
+		}
+		items = append(items, nessusDetection{
+			pluginID: it.PluginID, pluginName: it.PluginName, output: it.Output, cves: it.CVEs, cpes: it.CPEs,
+		})
+	}
+	return nessusInstalls(items, rpms)
+}
+
+// nessusClassC files the blocks of an upstream version check that name a hand-installed
+// component (H3) and counts the rest. A result with no path block (a banner check) is one
+// skipped record per CVE, as before; a result with blocks is one record per CVE per block, so
+// the pair of counts says exactly how many paths were judged and how many were filed.
+func nessusClassC(output string, installs nessusInstallIndex, cves []string, file func(cve string, inst nessusInstall, fixed []string)) (kept, total int) {
+	blocks := nessusVulnBlocks(output)
+	if len(blocks) == 0 {
+		return 0, len(cves)
+	}
+	for _, b := range blocks {
+		inst, ok := installs[b.path]
+		if !ok {
+			continue
+		}
+		var fixed []string
+		if b.fixed != "" {
+			fixed = []string{b.fixed}
+		}
+		if b.version != "" {
+			inst.version = b.version // the version Nessus compared, which is what the fix is relative to
+		}
+		for _, cve := range cves {
+			file(cve, inst, fixed)
+		}
+		kept += len(cves)
+	}
+	return kept, len(cves) * len(blocks)
 }
 
 // nessusCVEs keeps the non-empty CVE elements, trimmed, in document order.

@@ -19,8 +19,12 @@ func TestNessusInventoryMatchesGolden(t *testing.T) {
 	}
 	// Skipped: another vendor (2), a line that does not split (1), and a host whose OS is
 	// not mapped (1). The duplicate zlib on host 2 collapses and is not a skip (P6).
-	if stats.ComponentsSkipped != 4 || stats.FindingsTotal != 0 || stats.FindingsSkipped != 0 {
-		t.Errorf("stats = %+v, want components_skipped=4 and no finding counts", stats)
+	// Unmanaged (H1): Tomcat (generic purl), the JDBC JAR at two paths (one Maven component),
+	// a gem and a Python distribution under /opt. NOT filed: the OpenSSL blocks with package
+	// marks, the unmarked vim under /usr, the agent whose RPM is on the host, and the tool
+	// with no CPE — and none of those is counted as skipped either (the receipt counts packages).
+	if stats.ComponentsSkipped != 4 || stats.ComponentsUnmanaged != 4 || stats.FindingsTotal != 0 || stats.FindingsSkipped != 0 {
+		t.Errorf("stats = %+v, want components_skipped=4 unmanaged=4 and no finding counts", stats)
 	}
 	if want := readFixture(t, "nessus", "inventory.golden.json"); string(got) != string(want) {
 		g, w := firstDiff(string(got), string(want))
@@ -43,17 +47,26 @@ func TestNessusInventoryIsReadByTheCycloneDXParser(t *testing.T) {
 		t.Errorf("warnings = %v, want none", res.Warnings)
 	}
 	comps := res.Inventory.Components()
-	if len(comps) != 5 {
-		t.Fatalf("got %d components, want 5", len(comps))
+	if len(comps) != 9 {
+		t.Fatalf("got %d components, want 5 packages + 4 hand-installed", len(comps))
 	}
 	byPURL := map[string]bool{}
 	for _, c := range comps {
 		byPURL[c.PURL.String()] = true
-		if c.Ecosystem != "rpm" || c.Name == "" || c.Version == "" {
-			t.Errorf("component = %+v, want an rpm with name and version", c)
+		if c.Name == "" || c.Version == "" {
+			t.Errorf("component = %+v, want a name and version", c)
+		}
+		if eco := c.Ecosystem; eco != "rpm" && eco != "generic" && eco != "maven" && eco != "pypi" && eco != "gem" {
+			t.Errorf("component = %+v, want an rpm or a hand-installed ecosystem", c)
 		}
 	}
 	for _, want := range []string{
+		// Hand-installed (H2): the scanner's CPE through the closed table, or `generic`
+		// when the table has no line (Tomcat); a list plugin names its own ecosystem.
+		"pkg:generic/apache/tomcat@10.1.55",
+		"pkg:maven/org.postgresql/postgresql@42.7.13",
+		"pkg:pypi/requests@2.31.0",
+		"pkg:gem/rack@2.2.20",
 		"pkg:rpm/redhat/zlib@1.2.11-25.el8?distro=rhel-8.10",
 		"pkg:rpm/redhat/openssl-libs@1.1.1k-14.el8_6?distro=rhel-8.10&epoch=1",
 		// Two hosts, two kernels: real drift, kept visible (P6).
@@ -147,7 +160,7 @@ func TestNessusInventoryRefusals(t *testing.T) {
 			}
 		})
 	}
-	if (nessusInventory{}).Version() != "nessus-inventory@1" {
+	if (nessusInventory{}).Version() != "nessus-inventory@2" {
 		t.Error("version")
 	}
 }

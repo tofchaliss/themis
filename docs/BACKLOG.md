@@ -1162,8 +1162,9 @@ under the 2026-08-07 re-derivation standard.
     `.nessus` pair on the VM. If it differs, every finding shows as unresolved, and N4 needs a stated
     normalisation.
   - [ ] **G2 — upstream version checks as information**, below the finding line, if at all.
-  - [ ] **G3 — software no package manager owns** (a hand-installed Tomcat, vendored gems): a real
+  - [x] **G3 — software no package manager owns** (a hand-installed Tomcat, vendored gems): a real
     blind spot of an RPM SBOM; needs a plugin → package-identity rule that never guesses.
+    ✅ **CLOSED 2026-10-27** — EDR-INTAKE-01's 2026-10-27 amendment (H1–H6), see P-G3 below.
   - [ ] **G4 — a fix is an absence**: next week's scan omits a fixed issue and nothing closes the
     scanner Finding. Same design as "Current SBOM and finding cleanup" (`EV-CURRENT-SBOM-1`).
   - [ ] A host count on the receipt (small; receipt shape change).
@@ -1181,7 +1182,22 @@ under the 2026-08-07 re-derivation standard.
   - [ ] **P-G1 — coverage against a real SBOM.** No source RPM and no arch in plugin 22869; compare
     CVEs found from this inventory with a syft/vendor SBOM of one host.
   - [ ] **P-G2 — other vendors' RPMs** (database vendor repo, EPEL): a vendor → namespace rule each.
-  - [ ] **P-G3 — hand-installed software** (= G3 above). Next design.
+  - [x] **P-G3 — hand-installed software** (= G3 above). ✅ **CLOSED 2026-10-27** (owner chose
+    the full design). EDR-INTAKE-01 amendment H1–H6: a detection plugin's `Path` block is a
+    hand-installed component only when it carries no package mark, lies outside the rpm trees
+    and no RPM of that product is on the host (H1 — measured first: 181 of 193 unmarked paths on
+    a real host were RPM-owned, so "unmarked = hand-installed" would have invented 180 phantom
+    components); identity = the plugin's product + Nessus's CPE, purl from a closed CPE table
+    (Maven JARs) else `pkg:generic/<vendor>/<product>` (H2); Nessus's class C results on those
+    paths become findings on both report roads (H3, `nessus@2` / `nessus-csv@2`); the inventory
+    files them with `cpe` and `themis:install-path` (H4, `nessus-inventory@2`); receipt
+    `components_unmanaged` + migration 000006 (H5). Yield on the real host: +4 components,
+    +9 real CVEs (Tomcat), 0 phantoms. **Open follow-up:**
+    - [ ] **KN-CPE-1 — judge a `generic` component by Themis's own feeds.** A hand-installed
+      Tomcat is `pkg:generic/apache/tomcat@<v>` with its CPE on the component; no feed discovers
+      by CPE (NVD only enriches cards that exist), so it is judged by the scanner's findings
+      alone. Either a CPE → Maven table line per product (a decision each) or a CPE-keyed NVD
+      discovery seam. Decide when a second such product appears.
   - [ ] **Epoch spelling on the report road.** The inventory version has no epoch (the form every
     real advisory line seen so far used); if Nessus ever prints `1:` in `Remote package installed`,
     that finding will not resolve onto its inventory twin. Check on the VM round.

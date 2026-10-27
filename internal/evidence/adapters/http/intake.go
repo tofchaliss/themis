@@ -370,6 +370,7 @@ func (i *Intake) merge(ctx context.Context, rec store.IntakeReceipt, rc *domain.
 	rec.FindingsTotal = rc.FindingsTotal()
 	rec.FindingsSkipped = rc.FindingsSkipped()
 	rec.ComponentsSkipped = rc.ComponentsSkipped()
+	rec.ComponentsUnmanaged = rc.ComponentsUnmanaged()
 	rec.ConvertedBy = rc.ConvertedBy()
 	if rc.SourceDigest() != "" {
 		rec.SourceDigest = rc.SourceDigest()
@@ -546,22 +547,23 @@ func (i *Intake) respond(w http.ResponseWriter, rec store.IntakeReceipt, created
 // view renders a receipt on the wire.
 func (i *Intake) view(rec store.IntakeReceipt, created bool, retryAfter int) gen.IntakeReceipt {
 	out := gen.IntakeReceipt{
-		IntakeId:          rec.IntakeID,
-		Status:            gen.ReceiptStatus(rec.Status),
-		StatusUrl:         "/api/v1/intake/" + rec.IntakeID,
-		Detail:            strptr(rec.Detail),
-		ReleaseId:         strptr(rec.ReleaseID),
-		DetectedKind:      strptr(rec.DetectedKind),
-		DetectedFormat:    strptr(rec.DetectedFormat),
-		FindingsTotal:     intptr(rec.FindingsTotal),
-		FindingsSkipped:   intptr(rec.FindingsSkipped),
-		Components:        intptr(rec.Components),
-		ComponentsSkipped: intptr(rec.ComponentsSkipped),
-		SourceDigest:      strptr(rec.SourceDigest),
-		ConvertedBy:       strptr(rec.ConvertedBy),
-		BuildId:           strptr(rec.BuildID),
-		CreatedAt:         timeptr(rec.CreatedAt),
-		UpdatedAt:         timeptr(rec.UpdatedAt),
+		IntakeId:            rec.IntakeID,
+		Status:              gen.ReceiptStatus(rec.Status),
+		StatusUrl:           "/api/v1/intake/" + rec.IntakeID,
+		Detail:              strptr(rec.Detail),
+		ReleaseId:           strptr(rec.ReleaseID),
+		DetectedKind:        strptr(rec.DetectedKind),
+		DetectedFormat:      strptr(rec.DetectedFormat),
+		FindingsTotal:       intptr(rec.FindingsTotal),
+		FindingsSkipped:     intptr(rec.FindingsSkipped),
+		Components:          intptr(rec.Components),
+		ComponentsSkipped:   intptr(rec.ComponentsSkipped),
+		ComponentsUnmanaged: intptr(rec.ComponentsUnmanaged),
+		SourceDigest:        strptr(rec.SourceDigest),
+		ConvertedBy:         strptr(rec.ConvertedBy),
+		BuildId:             strptr(rec.BuildID),
+		CreatedAt:           timeptr(rec.CreatedAt),
+		UpdatedAt:           timeptr(rec.UpdatedAt),
 	}
 	if rec.Reason != "" {
 		out.Reason = reasonPtr(rec.Reason)

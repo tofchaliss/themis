@@ -22,4 +22,13 @@ Remote package installed : notannvr
   Fixed version     : 9.3
 ",,,,9.8,,,,,,,,,,,,,
 900005,CVE-2023-2222,,High,host-a.example.test,tcp,443,Apache httpd < 2.4.58,,,,,Installed version : 2.4.37,,,,,,,,,,,,,,,,,
+130175,,,None,192.0.2.10,tcp,0,Apache Tomcat Installed (Linux/Unix),,,,,"
+  Path    : /var/lib/apache-tomcat-latest
+  Version : 10.1.55
+",,,,,,,,,,,,,,,,,
+900006,CVE-2026-0005,,High,192.0.2.10,tcp,8080,Apache Tomcat 10.1.0.M1 < 10.1.56 multiple vulnerabilities,,,,,"
+  Path              : /var/lib/apache-tomcat-latest
+  Installed version : 10.1.55
+  Fixed version     : 10.1.56
+",,,,7.5,,,,,High,,,,2026/01/02,,,,
 19506,,,None,192.0.2.10,tcp,0,Nessus Scan Information,,,,,Scan info,,,,,,,,,,,,,,,,,

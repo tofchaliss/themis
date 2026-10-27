@@ -55,6 +55,35 @@ package versions of the affected packages from this advisory. host-a.example.tes
 <risk_factor>Medium</risk_factor>
 <plugin_output>The remote host is missing a vendor patch.</plugin_output>
 </ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="130175" pluginName="Apache Tomcat Installed (Linux/Unix)" pluginFamily="Web Servers">
+<cpe>cpe:/a:apache:tomcat</cpe>
+<risk_factor>None</risk_factor>
+<plugin_output>
+  Path    : /var/lib/apache-tomcat-latest
+  Version : 10.1.55
+</plugin_output>
+</ReportItem>
+<ReportItem port="8080" svc_name="www" protocol="tcp" severity="3" pluginID="900005" pluginName="Apache Tomcat 10.1.0.M1 &lt; 10.1.56 multiple vulnerabilities" pluginFamily="Web Servers">
+<cve>CVE-2026-0005</cve>
+<cve>CVE-2026-0006</cve>
+<cvss3_base_score>7.5</cvss3_base_score>
+<cvss3_vector>CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H</cvss3_vector>
+<risk_factor>High</risk_factor>
+<plugin_output>
+  Path              : /var/lib/apache-tomcat-latest
+  Installed version : 10.1.55
+  Fixed version     : 10.1.56
+</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="2" pluginID="900006" pluginName="Vim &lt; 9.0.2106" pluginFamily="Misc.">
+<cve>CVE-2023-0004</cve>
+<risk_factor>Medium</risk_factor>
+<plugin_output>
+  Path              : /usr/bin/vim
+  Installed version : 8.0.1763
+  Fixed version     : 9.0.2106
+</plugin_output>
+</ReportItem>
 <ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="19506" pluginName="Nessus Scan Information" pluginFamily="Settings">
 <risk_factor>None</risk_factor>
 <plugin_output>Scanner IP : 192.0.2.1</plugin_output>

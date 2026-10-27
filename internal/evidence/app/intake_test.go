@@ -758,7 +758,7 @@ func TestIntake_AConvertedSBOMIsFiledInTheFormatTheConverterWrote(t *testing.T) 
 	rig.reports.kind, rig.reports.dialect = "sbom", "nessus"
 	rig.reports.format = "cyclonedx"
 	rig.reports.curated = []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","components":[]}`)
-	rig.reports.stats = app.ReportStats{ComponentsSkipped: 42}
+	rig.reports.stats = app.ReportStats{ComponentsSkipped: 42, ComponentsUnmanaged: 4}
 	rig.reports.convertedBy = "nessus-inventory@1"
 	rig.inventory.has = false
 
@@ -776,8 +776,8 @@ func TestIntake_AConvertedSBOMIsFiledInTheFormatTheConverterWrote(t *testing.T) 
 	if cmd.Provenance.ConvertedBy != "nessus-inventory@1" || cmd.Provenance.SourceDigest != "sha256:abc" {
 		t.Errorf("provenance = %+v, want the conversion recorded", cmd.Provenance)
 	}
-	if r.ComponentsSkipped() != 42 || r.ConvertedBy() != "nessus-inventory@1" {
-		t.Errorf("receipt components_skipped=%d converted_by=%q", r.ComponentsSkipped(), r.ConvertedBy())
+	if r.ComponentsSkipped() != 42 || r.ComponentsUnmanaged() != 4 || r.ConvertedBy() != "nessus-inventory@1" {
+		t.Errorf("receipt components_skipped=%d unmanaged=%d converted_by=%q", r.ComponentsSkipped(), r.ComponentsUnmanaged(), r.ConvertedBy())
 	}
 	if rig.inventory.calls != 0 {
 		t.Error("an SBOM was required to have an inventory before it could create one")
