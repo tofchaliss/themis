@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -166,7 +167,10 @@ func (nessusInventory) Convert(body []byte, observedAt time.Time) ([]byte, Stats
 						continue // a detection with no CPE names no vendor; not an identity
 					}
 					if c, dup := installs[purl]; dup {
-						c.Properties = append(c.Properties, cdxProperty{Name: installPathProperty, Value: path})
+						// The same path on another host of the same build (P6) is one path.
+						if !slices.ContainsFunc(c.Properties, func(p cdxProperty) bool { return p.Value == path }) {
+							c.Properties = append(c.Properties, cdxProperty{Name: installPathProperty, Value: path})
+						}
 						continue
 					}
 					installs[purl] = &cdxComponent{

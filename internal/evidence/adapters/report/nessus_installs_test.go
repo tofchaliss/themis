@@ -145,3 +145,28 @@ func TestNessusReport_HostInstallsReadThePackageList(t *testing.T) {
 		t.Errorf("stats = %+v, want total=14 skipped=8 once the host owns a tomcat RPM", stats)
 	}
 }
+
+// H4 across hosts: the same hand install on every host of a build is one component with
+// each path once — measured on the real 4-host export, where the first cut listed the
+// Tomcat path three times.
+func TestNessusInventory_SamePathOnTwoHostsIsOnePath(t *testing.T) {
+	tomcat := `<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="130175" pluginName="Apache Tomcat Installed (Linux/Unix)" pluginFamily="Web Servers">
+<cpe>cpe:/a:apache:tomcat</cpe><plugin_output>
+  Path    : /var/lib/apache-tomcat-latest
+  Version : 10.1.55
+</plugin_output></ReportItem>`
+	host := func(ip string) string {
+		return `<ReportHost name="` + ip + `"><HostProperties><tag name="HOST_END_TIMESTAMP">1786457112</tag><tag name="operating-system">` + rhel810 + `</tag></HostProperties>` +
+			`<ReportItem pluginID="22869" pluginName="Software Enumeration (SSH)" pluginFamily="General"><plugin_output>
+  zlib-1.2.11-25.el8|(none) x|Red Hat, Inc.|x
+</plugin_output></ReportItem>` + tomcat + `</ReportHost>`
+	}
+	doc := `<?xml version="1.0"?><NessusClientData_v2><Report name="r">` + host("192.0.2.10") + host("192.0.2.11") + `</Report></NessusClientData_v2>`
+	out, stats, err := nessusInventory{}.Convert([]byte(doc), time.Time{})
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if stats.ComponentsUnmanaged != 1 || strings.Count(string(out), "/var/lib/apache-tomcat-latest") != 1 {
+		t.Errorf("stats = %+v, document = %s; want one Tomcat with its path once", stats, out)
+	}
+}
