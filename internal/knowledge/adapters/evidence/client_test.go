@@ -33,6 +33,23 @@ func fakeEvidence(t *testing.T) *httptest.Server {
 		case "/api/v1/evidence/ev-1":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"kind":"scanner-report","subject_release_id":"rel-1"}`))
+		case "/api/v1/evidence":
+			switch r.URL.Query().Get("release") {
+			case "rel-1":
+				// Deliberately OLDEST first and with a non-SBOM newest, so the pick is by
+				// kind + filed_at, not by list position.
+				_, _ = w.Write([]byte(`[
+					{"id":"ev-old","kind":"sbom","filed_at":"2026-10-01T00:00:00Z"},
+					{"id":"ev-new","kind":"sbom","filed_at":"2026-10-27T00:00:00Z"},
+					{"id":"ev-report","kind":"scanner-report","filed_at":"2026-10-28T00:00:00Z"}
+				]`))
+			case "rel-scan-only":
+				_, _ = w.Write([]byte(`[{"id":"ev-report","kind":"scanner-report","filed_at":"2026-10-28T00:00:00Z"}]`))
+			case "malformed":
+				_, _ = w.Write([]byte(`{not json`))
+			default:
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 		case "/api/v1/evidence/malformed":
 			_, _ = w.Write([]byte(`{not json`))
 		case "/api/v1/evidence/broken":
@@ -241,5 +258,31 @@ func TestClientCredentialHintOnlyOnAuthFailures(t *testing.T) {
 		GetInventory(context.Background(), "missing")
 	if err == nil || strings.Contains(err.Error(), "THEMIS_API_KEY") {
 		t.Errorf("err = %v, want a plain 404 with no credential advice", err)
+	}
+}
+
+// SBOMForRelease (KN-SCAN-RACE-1) names the release's newest filed SBOM from Evidence's list
+// read, so a scanner report that arrives before correlation completes still has candidates.
+func TestClient_SBOMForRelease(t *testing.T) {
+	srv := fakeEvidence(t)
+	defer srv.Close()
+	c := evidence.NewClient(srv.URL, srv.Client())
+
+	id, found, err := c.SBOMForRelease(context.Background(), "rel-1")
+	if err != nil || !found || id != "ev-new" {
+		t.Fatalf("SBOMForRelease = %q/%v/%v, want ev-new (newest SBOM, not the newest document)", id, found, err)
+	}
+	// A release with only a scanner report is NOT an error: found=false is the scanner-only case.
+	if _, found, err := c.SBOMForRelease(context.Background(), "rel-scan-only"); err != nil || found {
+		t.Errorf("scanner-only release = %v/%v, want found=false with no error", found, err)
+	}
+	if _, _, err := c.SBOMForRelease(context.Background(), "malformed"); err == nil {
+		t.Error("a malformed body must surface as an error")
+	}
+	if _, _, err := c.SBOMForRelease(context.Background(), "broken"); err == nil {
+		t.Error("a 500 from Evidence must surface as an error")
+	}
+	if _, _, err := evidence.NewClient("http://127.0.0.1:1", nil).SBOMForRelease(context.Background(), "rel-1"); err == nil {
+		t.Error("unreachable evidence: expected error")
 	}
 }

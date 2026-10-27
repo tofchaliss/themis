@@ -286,6 +286,10 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		// inventory — the same two ports the D6 re-verdict bridge uses. Without them the
 		// candidate set is the report alone, which ABSTAINS rather than guessing.
 		WithIdentityCandidates(st, evClient).
+		// KN-SCAN-RACE-1: until the SBOM's correlation completes the ledger has no row, so
+		// the candidate SBOM is read from Evidence's own list — the report must not resolve
+		// against nothing because it arrived a minute after the SBOM it describes.
+		WithReleaseSBOMs(evClient).
 		WithDiscovery(corr, st, st).
 		// The on-demand unresolved query (D6) resolves an evidence id to its release through
 		// Evidence's own facts endpoint, so an operator needs only the id the upload returned.

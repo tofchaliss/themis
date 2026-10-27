@@ -54,6 +54,9 @@ type ScannerReportService struct {
 	// therefore ABSTAINS — it never synthesizes an identity.
 	ledger    ReleaseEvidenceSource
 	inventory InventoryReader
+	// sboms is the KN-SCAN-RACE-1 fallback: the release's filed SBOM read straight from
+	// Evidence, for the window between the SBOM's upload and the end of its correlation.
+	sboms ReleaseSBOMSource
 	// facts resolves an evidence id to its release, for the on-demand unresolved query.
 	facts EvidenceFactsSource
 	// report receives the per-ingest outcome counts. The app ring never logs (CONVENTIONS R1),
@@ -111,6 +114,24 @@ func NewScannerReportService(src ScannerReportSource, fold *FaultlineService, ma
 // is the report alone, which is the correct degradation rather than a missing feature.
 func (s *ScannerReportService) WithIdentityCandidates(ledger ReleaseEvidenceSource, inv InventoryReader) *ScannerReportService {
 	s.ledger, s.inventory = ledger, inv
+	return s
+}
+
+// ReleaseSBOMSource resolves a release to its most recently FILED SBOM, read from Evidence
+// itself rather than from the correlation ledger (KN-SCAN-RACE-1). found=false means no SBOM
+// was ever filed for the release (a scanner-only release).
+type ReleaseSBOMSource interface {
+	SBOMForRelease(ctx context.Context, releaseID string) (evidenceID string, found bool, err error)
+}
+
+// WithReleaseSBOMs wires the Evidence-side fallback for the identity candidate set
+// (KN-SCAN-RACE-1). The ledger answers only once the SBOM's correlation has COMPLETED, and a
+// full-host SBOM correlates for ~14 minutes (measured 2026-10-27, 1249 packages) — so a scanner
+// report uploaded a minute after its SBOM found no candidates at all, every purl-less finding
+// abstained as `no_candidate`, and nothing was recorded. Evidence has the SBOM from the moment
+// it is filed; that is the authority on what the release contains, correlated or not.
+func (s *ScannerReportService) WithReleaseSBOMs(src ReleaseSBOMSource) *ScannerReportService {
+	s.sboms = src
 	return s
 }
 
@@ -274,12 +295,17 @@ func (s *ScannerReportService) PlanIngest(ctx context.Context, releaseID, eviden
 // Every one of those narrows the candidates and so tends toward ABSTENTION, never toward a
 // synthesized identity. It is the same rule the D6 re-verdict sweep applies per release: a
 // poorer context must never be stamped as an answer.
+//
+// The ledger is asked first — it is local and names the inventory correlation actually used.
+// When it has no row yet, the SBOM is read from Evidence (KN-SCAN-RACE-1): a report that
+// arrives while its SBOM is still correlating must resolve against the SBOM, not against
+// nothing. Only a release with NO filed SBOM is a scanner-only release.
 func (s *ScannerReportService) releaseCandidates(ctx context.Context, releaseID string) []InventoryComponent {
-	if s.ledger == nil || s.inventory == nil {
+	if s.inventory == nil {
 		return nil
 	}
-	evidenceID, found, err := s.ledger.EvidenceForRelease(ctx, releaseID)
-	if err != nil || !found {
+	evidenceID, found := s.releaseEvidence(ctx, releaseID)
+	if !found {
 		return nil
 	}
 	inv, err := s.inventory.GetInventory(ctx, evidenceID)
@@ -287,6 +313,22 @@ func (s *ScannerReportService) releaseCandidates(ctx context.Context, releaseID 
 		return nil
 	}
 	return inv.Components
+}
+
+// releaseEvidence names the SBOM document the candidate set is read from: the ledger's
+// correlated evidence when there is one, else the release's latest filed SBOM.
+func (s *ScannerReportService) releaseEvidence(ctx context.Context, releaseID string) (string, bool) {
+	if s.ledger != nil {
+		if evidenceID, found, err := s.ledger.EvidenceForRelease(ctx, releaseID); err == nil && found {
+			return evidenceID, true
+		}
+	}
+	if s.sboms != nil {
+		if evidenceID, found, err := s.sboms.SBOMForRelease(ctx, releaseID); err == nil && found {
+			return evidenceID, true
+		}
+	}
+	return "", false
 }
 
 // ApplyIngest runs the WRITE phase inside the caller's transaction: fold every finding and
