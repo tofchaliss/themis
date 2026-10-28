@@ -5,6 +5,97 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-28
+
+274 commits since 0.4.2 (2026-08-21 → 2026-10-27). The release the team's beta runs on from
+2026-11-01. Grouped by theme; each item names its decision record or backlog id.
+
+### Added
+- **One intake door for everything** (EDR-INTAKE-01): `POST /intake` on Evidence takes an SBOM
+  (CycloneDX/SPDX), a curated scanner report, raw Trivy/Cortex/Grype JSON, a Nessus `.nessus`
+  export (read as the release's SBOM, SCAN-NESSUS-1/2) or a Nessus CSV (read as its scan report),
+  detects the kind itself, converts, files, and answers a receipt. A CI bot can name the release
+  by product/project/version with `create_release=true` and a `build_id`; a product-scoped key
+  may file only under its own product (B1–B7). Hand-installed software a Nessus scan detected
+  outside the package manager (Tomcat, Log4j, JARs, gems, eggs) is filed as components with
+  `themis:install-path` and counted as `components_unmanaged` (H1–H6, P-G3).
+- **Remediation workflow** (EDR-REMEDIATION-01 D1–D7): SLA policy and the remediation clock
+  (7/30/90/180 days, KEV earlier; the severity bucket freezes at first sight; the clock pauses on
+  accepted risk); risk acceptance with owner, treatment, proof and review warning; what each SBOM
+  upload changed; a one-way outbound webhook with recorded health; KEV date added, due date and
+  ransomware use; remediation metrics estate-wide and per product, a weekly report; tags on
+  Product, Project and Release as filters.
+- **Outward delivery** (EDR-DELIVERY-01, the remediation chain N-M0…N-M2i): Jira tickets and mail
+  for a new release's findings, naming product, project and version; the CI rebuild callback;
+  delivery attempts recorded (open → continuing → exhausted). Verified live against Jira Data
+  Center and a mail relay 2026-10-19.
+- **Occurrence verdicts** (EDR-VERDICT-01): every matched component carries a verdict (open,
+  cleared by vendor fix, cleared by range…) judged through one seam for the discovery and the
+  scanner roads, re-judged by a sweep when the card learns something, with a verdict-logic
+  generation stamp; an open rpm verdict now states its premise (D10, KN-OPEN-REASON-1: "fix only
+  in a newer module stream", "base repo build vs module fix", EUS-bound).
+- **Vendor statements kept whole** (EDR-VEX-02): the full Red Hat record per RHEL major with
+  scope and Themis's own applicability determination; `will_not_fix` / `fix_deferred` /
+  `out_of_support` propose `accepted_risk` (VEX-WNF-1); a new release is judged against its
+  cards when its correlation completes (VEX-RAISE-2); accept/reject scripts for the standing
+  vendor proposals.
+- **Component identity at intake** (EDR-IDENTITY-01): a purl-less scanner observation resolves
+  onto its SBOM twin by name + version or abstains and is counted
+  (`GET /scanner-reports/{id}/unresolved`); marked component retirement (KN-SCAN-4b).
+- **Carrier attribution** (EDR-CORRELATION-01, EDR-ATTRIBUTION-01): a distro advisory's package
+  list is scope, not N claims; each match carries `claim_class` (carrier / scope / unknown), the
+  attribution gap is shown and gates the AI; a re-classification sweep with a rule generation.
+- **Roll-forward proposes, never copies** (EDR-ROLLFORWARD-01); review-by timer and the Finding
+  records its re-surfacing (RF-2); a range keeps the world it was published for (KN-RANGE-ECO-1).
+- **Feeds**: Red Hat modified-since gate and the Rocky RXSA feed; RLSA per-CVE fix bounds and
+  module-stream placement (KN-MODULE-2…5); apk fixed-verdict (EDR-VEX-01 D9); OSV keeps only the
+  Red Hat records of the package's RHEL major (KN-RHEL-MAJOR-1); live "latest published" NVD
+  read with Gather (GUI-16); the fan-out guard flags a long discovery answer for an unparseable
+  version (KN-SANITY-1).
+- **Intelligence**: `compare_releases@v1` narration; delta-aware precedent ranking; LLMOps store
+  with redacted invocation capture and an eval replay command (Δ4a); the autonomous analyst with
+  an un-erodable authority bar and a capped sweep (Δ4b, AUTO-VOL-1); on-demand CVE gather;
+  deterministic decline reasons on `X-Themis-AI-Reason` + `X-Themis-AI-Detail`.
+- **Communication**: release-scoped VEX rollup (COMM-VEX-1) and its Customer VEX card.
+- **Dashboard**: password login and an Admin tab; find a CVE; What's new (paged, tag filter);
+  Cleared tile; Scans view; SBOM manager uploads through `/intake`; "(N hand-installed)".
+- **Platform/ops**: `/healthz` + `/readyz` on every node; every node sends `THEMIS_API_KEY`, so
+  inbound auth can be ON everywhere (#156); the network edge — loopback nodes, Caddy TLS on 443,
+  ufw (VM-NET-1); three VM runbooks at the top of INSTALLATION.md (R1 fresh install, R2 restart,
+  R3 pull + restart); `scripts/vm-verify.sh`, `match-census.sh`, the attribution census and
+  Red Hat probe; `release-posture.sh`.
+
+### Fixed
+- Knowledge: a card save writes only its new proposals (KN-SAVE-TAIL-1: one host SBOM took
+  >13 min in a single transaction); each discovered feed record folds once per correlation run
+  (KN-PROPOSAL-BLOAT-2: 6.4 copies per fact measured); an rpm install is compared with its epoch
+  restored from the purl (KN-EPOCH-1); Go versions spelled `go1.27.1` (KN-GO-1), OSV range
+  events paired and graded by their contributors (KN-GO-3/4); the re-verdict loop drains on one
+  wake-up; scanner-only components get feed discovery (KN-SCAN-5/5b); a scanner report read
+  before its SBOM's correlation completes resolves against the filed SBOM (KN-SCAN-RACE-1).
+- Evidence: a converted document's identity names its source, so an empty report is no longer a
+  duplicate of every other empty report (EV-DEDUP-EMPTY-1, D3b).
+- Governance: the release's product scope comes from the release; the authenticated principal
+  becomes the audit actor; a policy's decision and a system proposal are not AI precedent
+  (AI-RF-4/4b); priority unclamped to 0–200 (GOV-15).
+- Registry: a product key registers only under its own product (#158); name lookups abstain and
+  say ambiguous.
+- Intelligence: invocation capture survives a cancelled context and non-JSON redaction (Δ4a).
+
+### Docs
+- EDRs: INTAKE-01, REMEDIATION-01, DELIVERY-01, VERDICT-01, VEX-02, IDENTITY-01,
+  CORRELATION-01, ATTRIBUTION-01, ROLLFORWARD-01, HARNESS-01; DefectDojo comparison; VM test
+  logs 2026-10-12/14/17/19 and the Nessus round; the Confluence user guide and the architecture
+  diagram (project files).
+
+### Known limits for the beta
+- Hand-installed software gets no CVE feed discovery of its own (KN-CPE-1); only what the scan
+  report says about it is shown.
+- EUS-bound packages (OSV `rhel_eus`) show open (KN-EUS-1, 45 rows measured).
+- A scan report filed BEFORE its SBOM is not re-ingested when the SBOM arrives; re-upload it.
+- Nessus findings whose version is a guess are skipped and counted, never filed.
+- Duplicate proposal rows written before KN-PROPOSAL-BLOAT-2 stay until an owner cleanup.
+
 ## [0.4.2] - 2026-08-21
 ### Added
 - Governance (EDR-GOVERNANCE-01 D16, IDEA-1): the **release-comparison read** —
