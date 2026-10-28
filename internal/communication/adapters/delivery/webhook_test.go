@@ -82,8 +82,8 @@ func TestWebhookConfigFromEnv(t *testing.T) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 	line := cfg.String()
-	if strings.Contains(line, "secretpath") || strings.Contains(line, "s3cr3t") || !strings.Contains(line, "slack-sec->hooks.example(secret=set)") ||
-		!strings.Contains(line, "teams->t.example(secret=unset)") {
+	if strings.Contains(line, "secretpath") || strings.Contains(line, "s3cr3t") || !strings.Contains(line, "slack-sec->hooks.example(format=json,secret=set)") ||
+		!strings.Contains(line, "teams->t.example(format=json,secret=unset)") {
 		t.Fatalf("startup line leaks or omits: %s", line)
 	}
 }
