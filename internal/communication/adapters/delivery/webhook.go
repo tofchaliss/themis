@@ -46,6 +46,10 @@ type WebhookConfig struct {
 	// Secrets maps an audience to its signing secret (SECRET — environment only, from
 	// THEMIS_COMMUNICATION_WEBHOOK_SECRET_<AUDIENCE>, the name upper-cased with - turned to _).
 	Secrets map[string]string
+	// Formats maps an audience to its receiver format (THEMIS_COMMUNICATION_WEBHOOK_FORMATS,
+	// "audience=teams;…"): json (default) posts the Themis document; teams wraps it in an
+	// Adaptive Card message, the only shape a Teams Workflows webhook accepts.
+	Formats map[string]string
 	// Timeout bounds one POST (default 10s).
 	Timeout time.Duration
 }
@@ -81,6 +85,7 @@ func webhookFromEnv() WebhookConfig {
 		Enabled: envBool("THEMIS_COMMUNICATION_WEBHOOK_ENABLED", false),
 		Targets: targets,
 		Secrets: secrets,
+		Formats: ParseWebhookPairs(getenv("THEMIS_COMMUNICATION_WEBHOOK_FORMATS")),
 		Timeout: envDuration("THEMIS_COMMUNICATION_WEBHOOK_TIMEOUT", defaultWebhookTimeout),
 	}
 }
@@ -105,7 +110,7 @@ func (c WebhookConfig) checkTargets() error {
 			return fmt.Errorf("delivery: webhook target %q scheme %q is not supported (use https)", name, u.Scheme)
 		}
 	}
-	return nil
+	return c.checkFormats()
 }
 
 // String names the audiences and whether each has a secret — never a URL path or a secret,
@@ -122,7 +127,7 @@ func (c WebhookConfig) String() string {
 		if u, err := url.Parse(c.Targets[n]); err == nil {
 			host = u.Host
 		}
-		parts[i] = fmt.Sprintf("%s->%s(secret=%s)", n, host, secretState(c.Secrets[n]))
+		parts[i] = fmt.Sprintf("%s->%s(format=%s,secret=%s)", n, host, c.format(n), secretState(c.Secrets[n]))
 	}
 	return fmt.Sprintf("enabled=%t targets=[%s] timeout=%s", c.Enabled, strings.Join(parts, " "), c.Timeout)
 }
@@ -183,8 +188,14 @@ func (d *RealWebhookDeliverer) DeliverIntent(ctx context.Context, in app.Intent)
 		return Result{Excerpt: "webhook: destination " + string(h.State)},
 			fmt.Errorf("webhook: destination %q is %s — not called (re-enable with deliveryctl webhook-enable)", in.Destination, h.State)
 	}
-	_, body := app.SplitPayload(in.PayloadBytes)
-	res, sendErr := d.post(ctx, target, in.Destination, []byte(body))
+	_, stored := app.SplitPayload(in.PayloadBytes)
+	body, sendErr := d.cfg.shapeBody(in.Destination, stored)
+	var res Result
+	if sendErr != nil {
+		res = Result{Excerpt: excerpt(sendErr.Error())}
+	} else {
+		res, sendErr = d.post(ctx, target, in.Destination, body)
+	}
 	if d.health != nil {
 		next := h.Succeeded(now)
 		if sendErr != nil {

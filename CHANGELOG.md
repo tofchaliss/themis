@@ -5,6 +5,14 @@ All notable changes to Themis are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- Communication (EDR-REMEDIATION-01 D4): per-audience webhook **format** —
+  `THEMIS_COMMUNICATION_WEBHOOK_FORMATS="teams-sec=teams"` wraps the Themis document in the
+  Adaptive Card message a Microsoft Teams "Workflows" incoming webhook accepts (title, summary,
+  product/project/release facts, "Open in Themis" button). `json` (default) is unchanged, so
+  Slack and generic receivers see no difference. The signature covers the bytes sent.
+
 ## [0.5.0] - 2026-10-28
 
 274 commits since 0.4.2 (2026-08-21 → 2026-10-27). The release the team's beta runs on from

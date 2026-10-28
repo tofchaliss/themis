@@ -178,6 +178,14 @@ stale, rebuild loop exhausted.
 - **Payload shape**: a stable Themis schema (`event`, `product`, `project`, `release`, `summary`,
   `link`), plus an optional Slack/Teams text field so the message renders without a relay.
   Recommended over raw event bodies, which would make every internal field a public contract.
+  > **Realization note (2026-10-28).** The `text` field was enough for Slack and is NOT enough
+  > for Teams: the Office 365 connector that read `text` is retired, and a Teams "Workflows"
+  > incoming webhook accepts only a message carrying an Adaptive Card. So the receiver FORMAT
+  > is a per-audience setting read beside the URL — `THEMIS_COMMUNICATION_WEBHOOK_FORMATS`
+  > (`json`, the default, or `teams`) — and the Teams shape is a re-shaping of the same stored
+  > document at the moment of sending (title, summary, the identifying facts, an "Open in
+  > Themis" button). The frozen field set stays the one contract; the signature covers the
+  > bytes sent; an unknown format or one for an audience with no target fails the node's start.
 
 **Where.** Communication: `IntentWebhook`, a sender in `adapters/delivery/`, a CHECK-constraint
 migration, `THEMIS_COMMUNICATION_WEBHOOK_TARGETS` (audience=url pairs, secrets by reference).
