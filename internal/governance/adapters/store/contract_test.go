@@ -77,6 +77,12 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 		{app.EventReleaseEvaluated, domain.NewReleaseEvaluated("prod-1", "prj-1", "rel-1", "ev-1", domain.CauseNewSBOM, domain.SeverityCounts{})},
 		{app.EventDispositionStale, domain.DispositionStale{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceNotAffected), PositionVersion: 1, Reason: "a public exploit now exists for this CVE", OccurredAt: now}},
 		{app.EventSLABreached, domain.SLABreachedEvent{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Bucket: domain.SLABucketCritical, PeriodStart: now, Due: now.Add(7 * 24 * time.Hour), OccurredAt: now}},
+		// EDR-INCIDENT-01 D1: one announcement per release, every optional field set.
+		{app.EventFixAvailable, domain.NewFixAvailable("rel-1", []domain.FixAvailableItem{
+			{FindingID: "fnd-1", CVE: "CVE-2026-1", Package: "kernel", Ecosystem: "rpm",
+				Fixes: []string{"0:4.18.0-553.80.1.el8_10"}, Advisories: []string{"RHSA-2026:0001"}},
+			{FindingID: "", CVE: "CVE-2026-2", Package: "openssl", Ecosystem: "rpm", Fixes: []string{"1:1.1.1k-14.el8_6"}},
+		}, now)},
 		{app.EventReviewDueSoon, domain.ReviewDueSoon{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceAcceptedRisk), PositionVersion: 2, ReviewBy: now.Add(24 * time.Hour), Owner: "risk-owner@example.test", OccurredAt: now}},
 	}
 	for _, tc := range cases {

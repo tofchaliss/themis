@@ -1225,3 +1225,87 @@ func TestRiskAcceptanceTermsAndReviewWarnings(t *testing.T) {
 		t.Fatal("warning for an unknown Finding accepted")
 	}
 }
+
+// The fix-notice store (EDR-INCIDENT-01 D1): a notice is recorded once per (release, card,
+// purl, fix); pending lists the unannounced ones with their Finding joined, keeping out a
+// release whose Finding rests on not_affected (an accepted risk IS told); marking writes the
+// release's announcement to the outbox with the release as subject and stamps exactly the
+// listed notices, so the next listing is empty.
+func TestFixNoticeStore(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	// Three Findings: undecided, accepted risk, not affected — and one notice for a release
+	// Governance has no Finding for yet.
+	seed := func(id, rel, fl string, stance domain.Stance) {
+		f := newFinding(t, id, rel, fl, "CVE-2026-"+id)
+		if stance != "" {
+			p, _ := domain.NewGovernanceProposal(domain.ProposalID("p-"+id), human, stance, "x", epoch, value.TrustAsserted)
+			_ = f.RaiseProposal(p)
+			_, _ = f.AcceptProposalWith(domain.ProposalID("p-"+id), human, epoch, domain.AcceptanceTerms{Owner: ownerFor(stance)})
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed("open", "rel-1", "fl-1", "")
+	seed("risk", "rel-1", "fl-2", domain.StanceAcceptedRisk)
+	seed("na", "rel-2", "fl-3", domain.StanceNotAffected)
+
+	at := epoch.Add(time.Hour)
+	notices := []app.FixNotice{
+		{ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2026-open", PURL: "pkg:rpm/redhat/kernel@1", Package: "kernel", Ecosystem: "rpm", Fix: "0:2.el8", Advisories: []string{"RHSA-2026:1"}, LearnedAt: at},
+		{ReleaseID: "rel-1", FaultlineID: "fl-2", CVE: "CVE-2026-risk", PURL: "pkg:rpm/redhat/openssl@1", Package: "openssl", Ecosystem: "rpm", Fix: "1:1.1.1k-14.el8_6", LearnedAt: at.Add(time.Minute)},
+		{ReleaseID: "rel-2", FaultlineID: "fl-3", CVE: "CVE-2026-na", PURL: "pkg:rpm/redhat/curl@1", Package: "curl", Ecosystem: "rpm", Fix: "0:7.61.1-34.el8", LearnedAt: at},
+		{ReleaseID: "rel-3", FaultlineID: "fl-1", CVE: "CVE-2026-open", PURL: "pkg:rpm/redhat/kernel@1", Package: "kernel", Ecosystem: "rpm", Fix: "0:2.el8", LearnedAt: at.Add(2 * time.Minute)},
+	}
+	if err := st.RecordFixNotices(ctx, notices); err != nil {
+		t.Fatal(err)
+	}
+	// A re-delivery records nothing new.
+	if err := st.RecordFixNotices(ctx, notices[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM fix_notices"); n != 4 {
+		t.Fatalf("notice rows = %d, want 4", n)
+	}
+
+	pending, err := st.PendingFixNotices(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 3 {
+		t.Fatalf("pending = %+v, want 3 (the not_affected release is not news)", pending)
+	}
+	if pending[0].FindingID != "open" || pending[0].CVE != "CVE-2026-open" || len(pending[0].Advisories) != 1 || !pending[0].LearnedAt.Equal(at) {
+		t.Errorf("first pending = %+v", pending[0])
+	}
+	if pending[1].FindingID != "risk" || pending[2].FindingID != "" || pending[2].ReleaseID != "rel-3" {
+		t.Errorf("pending order/join = %+v", pending)
+	}
+
+	// Announce rel-1 (its two notices).
+	ev := domain.NewFixAvailable("rel-1", []domain.FixAvailableItem{{FindingID: "open", CVE: "CVE-2026-open", Package: "kernel", Ecosystem: "rpm", Fixes: []string{"0:2.el8"}}}, at)
+	if err := st.MarkFixNoticesAnnounced(ctx, "rel-1", pending[:2], app.OutboxNote{EventType: app.EventFixAvailable, Event: ev, OccurredAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	var subject, schemaRef string
+	if err := pool.QueryRow(ctx, "SELECT subject, schema_ref FROM governance_outbox WHERE event_type=$1", app.EventFixAvailable).Scan(&subject, &schemaRef); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "rel-1" || schemaRef != "governance.fix_available.v1" {
+		t.Errorf("outbox note = %s / %s", subject, schemaRef)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM fix_notices WHERE announced_at IS NOT NULL AND announcement <> ''"); n != 2 {
+		t.Errorf("announced rows = %d, want exactly rel-1's two", n)
+	}
+	pending, err = st.PendingFixNotices(ctx, 100)
+	if err != nil || len(pending) != 1 || pending[0].ReleaseID != "rel-3" {
+		t.Errorf("pending after announce = %+v err=%v, want only rel-3", pending, err)
+	}
+	// A bounded listing.
+	if p, err := st.PendingFixNotices(ctx, 0); err != nil || len(p) != 0 {
+		t.Errorf("limit 0 = %+v err=%v", p, err)
+	}
+}

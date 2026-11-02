@@ -204,6 +204,30 @@ type ComponentVerdictChanged struct {
 	OccurredAt  time.Time
 }
 
+// FixPublished records that a vendor fix the estate did not have before is now on record for a
+// package an OPEN occurrence carries — the occurrence was re-judged against the card that learned
+// the bound and is still behind it (EDR-INCIDENT-01 D1). It is emitted per occurrence, once per
+// (occurrence, bound): a bound already recorded on the row announces nothing, and the first
+// judgement under the generation that introduced the record writes the bounds silently (they
+// were not news). It decides nothing and changes no verdict — the row is open before and after;
+// Governance groups these per release and tells a person.
+type FixPublished struct {
+	FaultlineID FaultlineID
+	CVE         string
+	ReleaseID   string
+	Component   MatchedComponent
+	// Package is the fix-attribution key the bounds were selected by (the source package for a
+	// distro component, else the name); Ecosystem the component's.
+	Package   string
+	Ecosystem string
+	// Fixes are the NEW bounds — the ones this re-judgement found the install below that the
+	// previous judgement did not know. Never empty.
+	Fixes []string
+	// Advisories names the vendor advisories that shipped them, when the card's statements say.
+	Advisories []string `json:"Advisories,omitempty"`
+	OccurredAt time.Time
+}
+
 // ComponentRetired announces that a recorded occurrence does NOT denote an additional component
 // and has been withdrawn from the active projection (KN-SCAN-4(b)).
 //

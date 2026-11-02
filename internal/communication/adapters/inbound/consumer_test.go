@@ -643,3 +643,71 @@ func TestConsumer_WebhookEvents(t *testing.T) {
 		}
 	}
 }
+
+// EDR-INCIDENT-01 D1: a fix-available fact posts one webhook when routed and one mail to the
+// evaluation audience, with the counts whole and the lists capped; no release is no subject;
+// delivery off records nothing; a malformed payload is an error.
+func TestConsumer_FixAvailable(t *testing.T) {
+	ctx := context.Background()
+	intents := newIntentStore()
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{
+		WebhookRoutes: map[string]string{app.WebhookFixAvailable: "teams-sec"}, EvaluationAudience: "release-managers"})
+	c := consumer(&memRepo{}).WithIntents(svc)
+	var items []string
+	for i := 0; i < 25; i++ {
+		items = append(items, fmt.Sprintf(`{"FindingID":"fnd-%d","CVE":"CVE-2026-%04d","Package":"kernel","Ecosystem":"rpm","Fixes":["0:4.18.0-553.80.1.el8_10"],"Advisories":["RHSA-2026:0001"]}`, i, i))
+	}
+	items = append(items, `{"FindingID":"fnd-x","CVE":"CVE-2026-9999","Package":"openssl","Ecosystem":"rpm","Fixes":["1:1.1.1k-14.el8_6","1:1.1.1k-15.el8_6"],"Advisories":["RHSA-2026:0002","RHSA-2026:0001"]}`)
+	payload := []byte(`{"ReleaseID":"rel-1","CVECount":26,"PackageCount":2,"Items":[` + strings.Join(items, ",") + `],"OccurredAt":"2026-11-02T10:00:00Z"}`)
+	if err := c.Handle(ctx, govEnv("env-fa", "governance.fix_available", payload)); err != nil {
+		t.Fatal(err)
+	}
+	var hook, mail *app.Intent
+	for i := range intents.created {
+		in := &intents.created[i]
+		switch {
+		case in.Type == app.IntentWebhook:
+			hook = in
+		case in.IsFixAvailableNotification():
+			mail = in
+		}
+	}
+	if hook == nil || mail == nil {
+		t.Fatalf("intents = %+v, want a webhook and a fix-available mail", intents.created)
+	}
+	if hook.Snapshot[app.SnapshotWebhookEvent] != app.WebhookFixAvailable || hook.ReleaseID != "rel-1" || hook.Destination != "teams-sec" {
+		t.Errorf("hook = %+v", hook)
+	}
+	s := hook.Snapshot
+	if s[app.SnapshotFixCVECount] != "26" || s[app.SnapshotFixPackageCount] != "2" || s[app.SnapshotFixAdvisories] != "RHSA-2026:0001,RHSA-2026:0002" {
+		t.Errorf("counts/advisories = %q %q %q", s[app.SnapshotFixCVECount], s[app.SnapshotFixPackageCount], s[app.SnapshotFixAdvisories])
+	}
+	if cves := strings.Split(s[app.SnapshotFixCVEs], ","); len(cves) != 20 || cves[0] != "CVE-2026-0000" {
+		t.Errorf("cve list = %v, want the first 20 sorted", cves)
+	}
+	if s[app.SnapshotFixPackages] != "kernel 0:4.18.0-553.80.1.el8_10;openssl 1:1.1.1k-14.el8_6;openssl 1:1.1.1k-15.el8_6" {
+		t.Errorf("packages = %q", s[app.SnapshotFixPackages])
+	}
+	if mail.Destination != "release-managers" || mail.ReleaseID != "rel-1" || mail.Snapshot[app.SnapshotFixCVECount] != "26" {
+		t.Errorf("mail = %+v", mail)
+	}
+	// No release: nothing recorded, no error. Unrouted: the mail still goes.
+	before := len(intents.created)
+	if err := c.Handle(ctx, govEnv("env-fb", "governance.fix_available", []byte(`{"CVECount":1}`))); err != nil || len(intents.created) != before {
+		t.Errorf("no subject: err=%v created=%d, want nothing new", err, len(intents.created)-before)
+	}
+	unrouted := newIntentStore()
+	uc := consumer(&memRepo{}).WithIntents(app.NewDeliveryIntentService(unrouted, &intentIDs{}, clk{}, app.DeliveryIntentConfig{}))
+	if err := uc.Handle(ctx, govEnv("env-fc", "governance.fix_available", []byte(`{"ReleaseID":"rel-1","CVECount":1,"PackageCount":1,"Items":[]}`))); err != nil {
+		t.Fatal(err)
+	}
+	if len(unrouted.created) != 1 || !unrouted.created[0].IsFixAvailableNotification() {
+		t.Errorf("unrouted: created = %+v, want only the mail", unrouted.created)
+	}
+	if err := c.Handle(ctx, govEnv("env-fd", "governance.fix_available", []byte(`{nope`))); err == nil {
+		t.Error("malformed payload must be an error")
+	}
+	if err := consumer(&memRepo{}).Handle(ctx, govEnv("env-fe", "governance.fix_available", []byte(`{}`))); err != nil {
+		t.Errorf("delivery off: %v", err)
+	}
+}

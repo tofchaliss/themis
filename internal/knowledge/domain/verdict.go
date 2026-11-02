@@ -16,8 +16,12 @@ package domain
 // 2 = versioned interpreter wrappers reach the fix lookup and the bridge (2026-09-17, KN-FIX-5) ·
 // 3 = an open rpm verdict states its premise (2026-10-26, D10 / KN-OPEN-REASON-1) — no state
 // moves, but every open row's reason is new text, and only the sweep can write it onto history ·
-// 4 = an rpm install is compared with its epoch restored from the purl (2026-10-27, KN-EPOCH-1).
-const VerdictGeneration = 4
+// 4 = an rpm install is compared with its epoch restored from the purl (2026-10-27, KN-EPOCH-1) ·
+// 5 = an open verdict records the vendor bounds it is BEHIND (2026-11-02, EDR-INCIDENT-01 D1) —
+// no state moves; the first judgement under this generation writes the bounds onto every open
+// row silently, so that a bound arriving AFTER it can be told apart from one that was already
+// there and announced as news.
+const VerdictGeneration = 5
 
 // Occurrence verdict state (EDR-VERDICT-01 D2). An occurrence is one component row matched to a
 // card on one release. Its verdict records what the vendor-fix machinery concluded about THIS
@@ -59,6 +63,37 @@ type OccurrenceVerdict struct {
 	State  VerdictState
 	Grade  VerdictGrade
 	Reason string
+	// Behind are the vendor fix bounds this OPEN occurrence is below — the same-stream rpm
+	// bounds, or the strict apk bounds, the install was compared against and fell short of
+	// (EDR-INCIDENT-01 D1). Nil for a clearance, and nil when nothing comparable is on record
+	// (no fix for the package, a fix only for another EL major, a version that names no
+	// stream). It is the structured half of the open premise: a bound that appears here for
+	// the first time on a row already judged is a fix PUBLISHED for something the estate has
+	// open — the fact the fix-available alert announces. Sorted, deduplicated.
+	Behind []string
+	// Advisories names the vendor advisories that shipped the Behind bounds, where the card's
+	// vendor statements say (EDR-VEX-02 D14: a `fixed` statement carries its RHSA). Best
+	// effort, display only; empty when no statement names one.
+	Advisories []string
+}
+
+// NewlyBehind returns the bounds in Behind that were not in prev — the fixes published since
+// the occurrence was last judged. Order follows Behind; an empty prev returns all of Behind.
+func (v OccurrenceVerdict) NewlyBehind(prev []string) []string {
+	if len(v.Behind) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(prev))
+	for _, b := range prev {
+		seen[b] = struct{}{}
+	}
+	var out []string
+	for _, b := range v.Behind {
+		if _, ok := seen[b]; !ok {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // OpenVerdict is the default judgement: a live occurrence, no grade, no premise.

@@ -98,6 +98,21 @@ func TestIntegrationContractV1_KnowledgeEvents(t *testing.T) {
 			},
 			OccurredAt: now,
 		}},
+		// EDR-INCIDENT-01 D1: the fix-available fact. Every optional field set so the schema
+		// validates it; Fixes is never empty (an event with nothing new is not emitted).
+		{app.EventFixPublished, domain.FixPublished{
+			FaultlineID: "fl-1", CVE: "CVE-2024-1", ReleaseID: "rel-1",
+			Component: domain.MatchedComponent{
+				PURL: "pkg:rpm/redhat/kernel@4.18.0-553.el8_10", Name: "kernel", Version: "4.18.0-553.el8_10",
+				Ecosystem: "rpm", Source: "kernel", ClaimClass: domain.ClaimCarrier, DetectionOrigin: "discovery",
+				VerdictState:  domain.VerdictOpen,
+				VerdictReason: "installed 4.18.0-553.el8_10 is below every el8 fix for kernel: 0:4.18.0-553.80.1.el8_10",
+			},
+			Package: "kernel", Ecosystem: "rpm",
+			Fixes:      []string{"0:4.18.0-553.80.1.el8_10"},
+			Advisories: []string{"RHSA-2026:0001"},
+			OccurredAt: now,
+		}},
 		// KN-SCAN-4(b). Narrow on purpose: the PURL identifies the exact row, and there is NO
 		// superseded-by field — the canonical row exists independently and needs no relationship
 		// to one that never denoted a distinct component. The schema forbids additional

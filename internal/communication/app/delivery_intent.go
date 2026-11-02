@@ -57,6 +57,10 @@ const (
 	WebhookSLABreachDigest  = "sla_breached"
 	// WebhookRemediationMetrics is the scheduled remediation-metrics summary (D6 through D4).
 	WebhookRemediationMetrics = "remediation_metrics"
+	// WebhookFixAvailable — a vendor fix is newly on record for CVEs one release has open
+	// (EDR-INCIDENT-01 D1): one per release per Governance sweep. "Fix available" is the
+	// vendor's statement; "patched" is proven only by new evidence for the release (D5).
+	WebhookFixAvailable = "fix_available"
 )
 
 // SnapshotWebhookEvent is the snapshot key naming a webhook's event kind.
@@ -98,6 +102,10 @@ const notificationReleaseEvaluated = "release_evaluated"
 // notificationReviewDue marks the mail that warns a decision's review date is near
 // (EDR-REMEDIATION-01 D2).
 const notificationReviewDue = "review_due_soon"
+
+// notificationFixAvailable marks the mail that says a vendor fix is newly on record for things
+// a Release has open (EDR-INCIDENT-01 D1).
+const notificationFixAvailable = "fix_available"
 
 // IntentLineage is the originating envelope's identity, recorded so an outward effect can
 // always be traced back to the fact that caused it. EventSeq is deliberately absent: the bus
@@ -153,6 +161,12 @@ type Intent struct {
 // IsReviewDueNotification reports whether this mail warns that a review date is near (D2).
 func (i Intent) IsReviewDueNotification() bool {
 	return i.Snapshot[snapshotKeyNotification] == notificationReviewDue
+}
+
+// IsFixAvailableNotification reports whether this mail says a vendor fix is newly available for
+// things a Release has open (EDR-INCIDENT-01 D1).
+func (i Intent) IsFixAvailableNotification() bool {
+	return i.Snapshot[snapshotKeyNotification] == notificationFixAvailable
 }
 
 // IsDeadLetterNotification reports whether this intent exists to tell a person that another
@@ -513,6 +527,20 @@ func (s *DeliveryIntentService) EnqueueReviewDueMail(ctx context.Context, lineag
 	in.Snapshot[snapshotKeyNotification] = notificationReviewDue
 	in.Snapshot["finding_id"] = findingID
 	putIfSet(in.Snapshot, "release_id", releaseID)
+	return s.create(ctx, in)
+}
+
+// EnqueueFixAvailableMail records the mail that tells the evaluation audience a vendor fix is
+// newly on record for CVEs a Release has open (EDR-INCIDENT-01 D1). Same audience as the
+// evaluation mail: it is the same readers' release. No Release is no subject.
+func (s *DeliveryIntentService) EnqueueFixAvailableMail(ctx context.Context, lineage IntentLineage, originEventID, releaseID string, snapshot map[string]string) (Intent, error) {
+	if strings.TrimSpace(releaseID) == "" {
+		return Intent{}, ErrNoSubject
+	}
+	in := s.newIntent(IntentEmail, s.cfg.EvaluationAudience, lineage, originEventID, snapshot)
+	in.ReleaseID = releaseID
+	in.Snapshot[snapshotKeyNotification] = notificationFixAvailable
+	in.Snapshot["release_id"] = releaseID
 	return s.create(ctx, in)
 }
 

@@ -313,3 +313,61 @@ func TestJudgeOccurrence_EpochRestoredFromPURL(t *testing.T) {
 		t.Errorf("observed hop through an epoch-on-purl owner must clear; got %q / %q / %q", v.State, v.Grade, v.Reason)
 	}
 }
+
+// The bounds an open verdict is behind (EDR-INCIDENT-01 D1): the same-EL-major rpm bounds and
+// the strict apk bounds, nothing for the other shapes — a row that is open because nothing
+// comparable is on record is behind no fix, so a later first bound IS news for it. Advisories
+// come from the card's `fixed` statements naming the bound (EDR-VEX-02 D14), display only.
+func TestBehindBounds(t *testing.T) {
+	view := domain.EnterpriseView{
+		Fixes: []domain.FixedVersion{
+			{Package: "kernel", Version: "0:4.18.0-553.80.1.el8_10", Ecosystem: "rpm"},
+			{Package: "kernel", Version: "0:4.18.0-553.80.1.el8_10", Ecosystem: "rpm"}, // a restatement dedups
+			{Package: "kernel", Version: "0:4.18.0-553.72.1.el8_10", Ecosystem: "rpm"},
+			{Package: "kernel", Version: "0:5.14.0-570.el9_6", Ecosystem: "rpm"},
+			{Package: "openssl", Version: "3.1.4-r5", Ecosystem: "apk"},
+		},
+		Applicabilities: []domain.Applicability{
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0002", FixedVersion: "0:4.18.0-553.80.1.el8_10"},
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0001", FixedVersion: "0:4.18.0-553.72.1.el8_10"},
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0009", FixedVersion: "0:5.14.0-570.el9_6"}, // another major: not behind it
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0002", FixedVersion: "0:4.18.0-553.80.1.el8_10"}, // restated: one advisory
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "", FixedVersion: "0:4.18.0-553.72.1.el8_10"},             // no advisory recorded: nothing to name
+			{Package: "kernel", Status: domain.StatusNotAffected},
+		},
+	}
+	rpm := InventoryComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-553.el8_10", Name: "kernel", Version: "4.18.0-553.el8_10", Ecosystem: "rpm"}
+	v := judgeOccurrence(view, rpm, BridgeContext{})
+	if !v.State.IsOpen() {
+		t.Fatalf("state = %q, want open", v.State)
+	}
+	if want := []string{"0:4.18.0-553.72.1.el8_10", "0:4.18.0-553.80.1.el8_10"}; strings.Join(v.Behind, "|") != strings.Join(want, "|") {
+		t.Errorf("Behind = %v, want the sorted, deduplicated el8 bounds %v", v.Behind, want)
+	}
+	if want := []string{"RHSA-2026:0001", "RHSA-2026:0002"}; strings.Join(v.Advisories, "|") != strings.Join(want, "|") {
+		t.Errorf("Advisories = %v, want %v", v.Advisories, want)
+	}
+	if v := judgeOccurrence(view, InventoryComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-553.el8_10", Name: "kernel", Version: "4.18.0-553.el8_10", Ecosystem: "rpm", Source: "kernel"}, BridgeContext{}); len(v.Behind) != 2 {
+		t.Errorf("source-package key: Behind = %v, want 2", v.Behind)
+	}
+	// Patched: cleared, behind nothing.
+	if v := judgeOccurrence(view, InventoryComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-553.80.1.el8_10", Name: "kernel", Version: "4.18.0-553.80.1.el8_10", Ecosystem: "rpm"}, BridgeContext{}); v.State.IsOpen() || v.Behind != nil {
+		t.Errorf("a cleared row is behind nothing, got %q / %v", v.State, v.Behind)
+	}
+	// Fixes only for another major, no EL marker, no fix at all, a non-rpm/apk row: open, behind nothing.
+	for name, comp := range map[string]InventoryComponent{
+		"other major only": {PURL: "pkg:rpm/redhat/kernel@3.10.0-1160.el7", Name: "kernel", Version: "3.10.0-1160.el7", Ecosystem: "rpm"},
+		"no EL marker":     {PURL: "pkg:rpm/redhat/kernel@4.18.0-553", Name: "kernel", Version: "4.18.0-553", Ecosystem: "rpm"},
+		"no fix at all":    {PURL: "pkg:rpm/redhat/curl@7.61.1-34.el8", Name: "curl", Version: "7.61.1-34.el8", Ecosystem: "rpm"},
+		"language row":     {PURL: "pkg:pypi/kernel@1.0", Name: "kernel", Version: "1.0", Ecosystem: "pypi"},
+	} {
+		if v := judgeOccurrence(view, comp, BridgeContext{}); !v.State.IsOpen() || v.Behind != nil || v.Advisories != nil {
+			t.Errorf("%s: want open and behind nothing, got %q / %v / %v", name, v.State, v.Behind, v.Advisories)
+		}
+	}
+	// apk: the strict bounds.
+	apk := InventoryComponent{PURL: "pkg:apk/alpine/openssl@3.1.4-r3", Name: "openssl", Version: "3.1.4-r3", Ecosystem: "apk"}
+	if v := judgeOccurrence(view, apk, BridgeContext{}); !v.State.IsOpen() || strings.Join(v.Behind, "|") != "3.1.4-r5" {
+		t.Errorf("apk: Behind = %v, want [3.1.4-r5] (state %q)", v.Behind, v.State)
+	}
+}

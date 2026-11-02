@@ -119,6 +119,9 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail && in.IsReviewDueNotification():
 		subject, body := r.RenderReviewDueEmail(ctx, in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentEmail && in.IsFixAvailableNotification():
+		subject, body := r.RenderFixAvailableEmail(ctx, in)
+		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentEmail && in.IsEvaluationNotification():
 		subject, body, err := r.RenderEvaluationEmail(ctx, in)
 		if err != nil {
@@ -391,6 +394,41 @@ func (r OutwardRenderer) RenderReviewDueEmail(ctx context.Context, in app.Intent
 	})
 	b.WriteString("\nTo keep the decision, record it again in Themis with a new review date. No Themis\n")
 	b.WriteString("decision follows from this mail.\n")
+	return subject, []byte(b.String())
+}
+
+// RenderFixAvailableEmail renders the mail that says a vendor fix is newly on record for CVEs a
+// Release has open (EDR-INCIDENT-01 D1): the counts, the package builds, the advisories, and the
+// one sentence that keeps "available" apart from "patched" (D5).
+func (r OutwardRenderer) RenderFixAvailableEmail(ctx context.Context, in app.Intent) (string, []byte) {
+	s := in.Snapshot
+	label, who := r.releaseLabel(ctx, in)
+	subject := fmt.Sprintf("Themis: vendor fix available for %s CVE(s) on %s", firstNonEmpty(s[app.SnapshotFixCVECount], "0"), label)
+
+	var b strings.Builder
+	b.WriteString("A vendor fix is now on record for vulnerabilities this release has open. Themis compared\n")
+	b.WriteString("the installed builds against the published fix and found them below it.\n\n")
+	writeFacts(&b, append(who,
+		fact{"CVEs", firstNonEmpty(s[app.SnapshotFixCVECount], "0")},
+		fact{"Packages", firstNonEmpty(s[app.SnapshotFixPackageCount], "0")},
+		fact{"Advisories", strings.ReplaceAll(s[app.SnapshotFixAdvisories], ",", ", ")},
+		fact{"Event", eventFact(in)},
+	))
+	if p := s[app.SnapshotFixPackages]; p != "" {
+		b.WriteString("\nFixed builds (package, then the build that carries the fix)\n")
+		for _, line := range strings.Split(p, ";") {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	if c := s[app.SnapshotFixCVEs]; c != "" {
+		b.WriteString("\nCVEs\n")
+		for _, cve := range strings.Split(c, ",") {
+			b.WriteString("  " + cve + "\n")
+		}
+	}
+	b.WriteString("\n" + FixAvailableLimit + "\n")
+	b.WriteString("Upload the patched host's scan or SBOM to the same release and Themis clears what the fix\n")
+	b.WriteString("covers. No Themis decision follows from this mail.\n")
 	return subject, []byte(b.String())
 }
 

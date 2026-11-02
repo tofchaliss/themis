@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,9 @@ const (
 	eventReviewDueSoon    = "governance.review_due_soon"
 	eventDispositionStale = "governance.disposition_stale"
 	eventSLABreached      = "governance.sla_breached"
+	// eventFixAvailable — a vendor fix is newly on record for CVEs one release has open
+	// (EDR-INCIDENT-01 D1): a webhook when routed, and a mail to the evaluation audience.
+	eventFixAvailable = "governance.fix_available"
 )
 
 // Subscription declares Communication's bus binding (EB-07 / D7): it consumes the Governance
@@ -64,6 +68,7 @@ var Subscription = eventbus.Subscription{
 		eventPositionEstablished, eventPositionRevised,
 		eventReleaseEvaluated, eventProposalAccepted,
 		eventReviewDueSoon, eventDispositionStale, eventSLABreached,
+		eventFixAvailable,
 	},
 }
 
@@ -132,6 +137,8 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.recordFindingWebhook(ctx, env)
 	case eventSLABreached:
 		return c.recordSLABreach(ctx, env)
+	case eventFixAvailable:
+		return c.recordFixAvailable(ctx, env)
 	default:
 		return nil // not a Communication-consumed event — ignore
 	}
@@ -250,6 +257,88 @@ func (c *Consumer) recordFindingWebhook(ctx context.Context, env event.Envelope)
 		return nil
 	}
 	return err
+}
+
+// fixAvailableDTO mirrors governance.fix_available.v1 (EDR-INCIDENT-01 D1, PascalCase keys).
+type fixAvailableDTO struct {
+	ReleaseID    string `json:"ReleaseID"`
+	CVECount     int    `json:"CVECount"`
+	PackageCount int    `json:"PackageCount"`
+	Items        []struct {
+		FindingID  string   `json:"FindingID"`
+		CVE        string   `json:"CVE"`
+		Package    string   `json:"Package"`
+		Ecosystem  string   `json:"Ecosystem"`
+		Fixes      []string `json:"Fixes"`
+		Advisories []string `json:"Advisories"`
+	} `json:"Items"`
+}
+
+// fixAvailableListLimit caps the lists a fix-available snapshot carries; the counts stay whole.
+const fixAvailableListLimit = 20
+
+// recordFixAvailable posts the fix-available fact when its route is configured and mails the
+// evaluation audience. The snapshot carries the counts whole and the lists capped; nothing is
+// re-read later, so a retry says what was true when the fact arrived.
+func (c *Consumer) recordFixAvailable(ctx context.Context, env event.Envelope) error {
+	if c.intents == nil {
+		return nil
+	}
+	var dto fixAvailableDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	if strings.TrimSpace(dto.ReleaseID) == "" {
+		return nil // no subject: nothing to tell anyone about, and nothing to retry
+	}
+	cves, advisories := map[string]bool{}, map[string]bool{}
+	var packages []string
+	seenPkg := map[string]bool{}
+	for _, it := range dto.Items {
+		if it.CVE != "" {
+			cves[it.CVE] = true
+		}
+		for _, a := range it.Advisories {
+			if a != "" {
+				advisories[a] = true
+			}
+		}
+		for _, fix := range it.Fixes {
+			line := strings.TrimSpace(it.Package + " " + fix)
+			if line != "" && !seenPkg[line] {
+				seenPkg[line] = true
+				packages = append(packages, line)
+			}
+		}
+	}
+	cveList, advList := sortedKeys(cves), sortedKeys(advisories)
+	if len(cveList) > fixAvailableListLimit {
+		cveList = cveList[:fixAvailableListLimit]
+	}
+	if len(packages) > fixAvailableListLimit {
+		packages = packages[:fixAvailableListLimit]
+	}
+	snap := map[string]string{
+		app.SnapshotFixCVECount:     strconv.Itoa(dto.CVECount),
+		app.SnapshotFixPackageCount: strconv.Itoa(dto.PackageCount),
+		app.SnapshotFixCVEs:         strings.Join(cveList, ","),
+		app.SnapshotFixPackages:     strings.Join(packages, ";"),
+		app.SnapshotFixAdvisories:   strings.Join(advList, ","),
+	}
+	if _, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, app.WebhookFixAvailable, dto.ReleaseID, "", "", "", snap); err != nil {
+		return err
+	}
+	_, err := c.intents.EnqueueFixAvailableMail(ctx, lineageOf(env), env.ID, dto.ReleaseID, snap)
+	return err
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // slaBreachedDTO mirrors governance.sla_breached.v1.

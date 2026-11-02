@@ -133,10 +133,11 @@ unblocks the most, highest first:
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
 12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line); VM-NET-1 **shipped and applied 2026-10-19** (§7a, `deploy/edge/`, ufw + firewalld).
 
-13. **INC-1 — behaviour during a vulnerability wave** (EDR-INCIDENT-01, **PROPOSED 2026-11-02**,
-    owner-agreed order A → B → C; beta-period change, ships only on explicit go). A: a vendor fix
-    learned for an open occurrence becomes `fix_available` on the webhook / Jira / mail routes, and
-    Red Hat joins `POST /faultlines/gather`. B: a Watch (CVE ids and/or RHSA ids in → one
+13. **INC-1 — behaviour during a vulnerability wave** (EDR-INCIDENT-01, **ACCEPTED 2026-11-02**,
+    owner-agreed order A → B → C; beta-period change, each step on explicit go). **A BUILT
+    2026-11-02** (realization note in the EDR; VM measurement pending): a vendor fix learned for an
+    open occurrence becomes `fix_available` on the webhook / mail routes (Jira comment deferred to
+    B), and Red Hat joins `POST /faultlines/gather`. B: a Watch (CVE ids and/or RHSA ids in → one
     per-(release, CVE) state table out: not_affected · open_no_fix · open_fix_available · fixed ·
     accepted · unknown), page + API. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
     (7d) with no newer evidence. Patched is proven only by new evidence; nothing auto-decides.
@@ -2195,7 +2196,7 @@ under the 2026-08-07 re-derivation standard.
 
 - [ ] **G-AI-1 — On-demand "fresh-CVE" gathering: the AI asks, the feeds gather.**
   **✅ HALF (a) LANDED 2026-08-23 (T5 chain): the on-demand gather exists.**
-  `POST /faultlines/gather {cve}` on Knowledge consults the wired per-CVE sources (NVD today,
+  `POST /faultlines/gather {cve}` on Knowledge consults the wired per-CVE sources (NVD, and since EDR-INCIDENT-01 D4 Red Hat,
   via the same `VulnsForCVE` + fold path as the backfill sweep) and folds ordinary source
   Proposals — same ACL, same precedence, "Gathering Is Not Knowing" intact. Needs no enable
   flag: the scheduled watch's opt-in guards SILENT outbound calls, and an authenticated

@@ -511,3 +511,31 @@ func TestRenderUploadOutcomeSection(t *testing.T) {
 		t.Error("an intent without an outcome rendered the section")
 	}
 }
+
+// EDR-INCIDENT-01 D1/D5: the fix-available mail names the release, the counts, the builds and
+// the advisories, and carries the sentence that keeps "available" apart from "patched".
+func TestRenderFixAvailableEmail(t *testing.T) {
+	r := serializer.NewOutwardRenderer(nil).WithIdentity(identitySource{ref: domain.RollupProductRef{Product: "smallbox", Project: "demo", Version: "1.1.0", ReleaseID: "rel-1"}})
+	in := app.Intent{Type: app.IntentEmail, ReleaseID: "rel-1", Lineage: app.IntentLineage{EventType: "governance.fix_available", EventID: "ev-1"}, Snapshot: map[string]string{
+		"notification": "fix_available", app.SnapshotFixCVECount: "2", app.SnapshotFixPackageCount: "1",
+		app.SnapshotFixPackages: "kernel 0:4.18.0-553.80.1.el8_10", app.SnapshotFixAdvisories: "RHSA-2026:0001,RHSA-2026:0002", app.SnapshotFixCVEs: "CVE-2026-1,CVE-2026-2"}}
+	payload, err := r.RenderIntentPayload(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, body := app.SplitPayload(payload)
+	if subject != "Themis: vendor fix available for 2 CVE(s) on smallbox / demo v1.1.0" {
+		t.Fatalf("subject = %q", subject)
+	}
+	for _, want := range []string{"CVEs:", "Packages:", "RHSA-2026:0001, RHSA-2026:0002", "  kernel 0:4.18.0-553.80.1.el8_10", "  CVE-2026-2",
+		"governance.fix_available (ev-1)", serializer.FixAvailableLimit, "No Themis decision follows"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body lacks %q:\n%s", want, body)
+		}
+	}
+	// Bare: no identity, no lists.
+	subject, body = serializer.NewOutwardRenderer(nil).RenderFixAvailableEmail(context.Background(), app.Intent{Type: app.IntentEmail, ReleaseID: "rel-9", Snapshot: map[string]string{"notification": "fix_available"}})
+	if subject != "Themis: vendor fix available for 0 CVE(s) on Release rel-9" || strings.Contains(string(body), "Fixed builds") || strings.Contains(string(body), "\nCVEs\n") {
+		t.Errorf("bare = %q\n%s", subject, body)
+	}
+}

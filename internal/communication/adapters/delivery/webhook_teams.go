@@ -82,6 +82,7 @@ var teamsEventTitles = map[string]string{
 	"disposition_stale":   "Decision needs another look",
 	"sla_breached":        "SLA breached",
 	"remediation_metrics": "Remediation metrics",
+	"fix_available":       "Vendor fix available",
 }
 
 // teamsMessage wraps a Themis webhook document in the message shape a Teams Workflows

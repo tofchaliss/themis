@@ -26,6 +26,13 @@ const (
 	SnapshotDigestBuckets  = "digest_buckets" // "critical=1,high=3"
 	SnapshotDigestCVEs     = "digest_cves"    // comma-separated, sorted, capped
 	SnapshotDigestReleases = "digest_releases"
+	// The fix-available facts (EDR-INCIDENT-01 D1), written by the inbound consumer from
+	// governance.fix_available.v1 and read by the webhook and mail renderers.
+	SnapshotFixCVECount     = "fix_cve_count"
+	SnapshotFixPackageCount = "fix_package_count"
+	SnapshotFixCVEs         = "fix_cves"       // comma-separated, sorted, capped
+	SnapshotFixPackages     = "fix_packages"   // "package fix" entries, ";"-separated, capped
+	SnapshotFixAdvisories   = "fix_advisories" // comma-separated, sorted, distinct
 )
 
 // WebhookHealthStore records per-destination health.

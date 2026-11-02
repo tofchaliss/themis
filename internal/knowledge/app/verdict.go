@@ -93,7 +93,82 @@ func judgeOccurrence(view domain.EnterpriseView, comp InventoryComponent, bridge
 	// "the vendor shipped nothing". The text is audit prose: nothing branches on it.
 	open := domain.OpenVerdict()
 	open.Reason = openReason(view, comp, pkg)
+	// The structured half of the premise (EDR-INCIDENT-01 D1): WHICH bounds the install is
+	// below, so a bound that is new since the last judgement can be announced as a published fix.
+	open.Behind = behindBounds(view, comp, pkg)
+	open.Advisories = advisoriesFor(view, open.Behind)
 	return open
+}
+
+// behindBounds lists the vendor fix bounds an open occurrence was compared against and fell
+// short of: for the rpm class the same-EL-major bounds (RPMFixedByStream never compares across
+// majors, so a bound for another major is not something the install is "behind"), for the apk
+// class the strict bounds. Nil for any other ecosystem and whenever nothing comparable is on
+// record — then "open" means "not cleared", and there is no fix to be behind. Sorted and
+// deduplicated so a stored set compares by value.
+func behindBounds(view domain.EnterpriseView, comp InventoryComponent, pkg string) []string {
+	if pkg == "" {
+		return nil
+	}
+	var bounds []string
+	switch value.ClassifyEcosystem(comp.Ecosystem) {
+	case value.VersionClassRPM:
+		major := value.RPMReleaseMajor(comp.Version)
+		if major == "" {
+			return nil
+		}
+		for _, fix := range view.FixesFor(pkg, comp.Ecosystem) {
+			if value.RPMReleaseMajor(fix) == major {
+				bounds = append(bounds, fix)
+			}
+		}
+	case value.VersionClassAPK:
+		bounds = append(bounds, view.StrictFixesFor(pkg, comp.Ecosystem)...)
+	default:
+		return nil
+	}
+	if len(bounds) == 0 {
+		return nil
+	}
+	sort.Strings(bounds)
+	out := bounds[:1]
+	for _, b := range bounds[1:] {
+		if b != out[len(out)-1] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// advisoriesFor names the vendor advisories whose `fixed` statement shipped one of the bounds
+// (EDR-VEX-02 D14 records the advisory beside the build). Display only; nil when no statement
+// names one. Sorted and deduplicated.
+func advisoriesFor(view domain.EnterpriseView, bounds []string) []string {
+	if len(bounds) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{}, len(bounds))
+	for _, b := range bounds {
+		want[b] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, a := range view.Applicabilities {
+		if a.Status != domain.StatusFixed || strings.TrimSpace(a.Advisory) == "" {
+			continue
+		}
+		if _, ok := want[strings.TrimSpace(a.FixedVersion)]; !ok {
+			continue
+		}
+		adv := strings.TrimSpace(a.Advisory)
+		if _, dup := seen[adv]; dup {
+			continue
+		}
+		seen[adv] = struct{}{}
+		out = append(out, adv)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // openReason explains why an rpm-class occurrence stays open, in the vocabulary of the direct

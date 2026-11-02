@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/knowledge/knowledge.fix_published.v1.schema.json",
+  "title": "knowledge.fix_published.v1",
+  "description": "Integration-contract v1 for the FixPublished event payload (EDR-INCIDENT-01 D1): a vendor fix the estate did not have before is now on record for a package an OPEN occurrence carries — the occurrence was re-judged against the card that learned the bound and is still behind it. Per occurrence, once per (occurrence, bound). It decides nothing and changes no verdict; Governance digests these per release and tells a person.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["FaultlineID", "CVE", "ReleaseID", "Component", "Package", "Ecosystem", "Fixes", "OccurredAt"],
+  "properties": {
+    "FaultlineID": { "type": "string" },
+    "CVE": { "type": "string" },
+    "ReleaseID": { "type": "string" },
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["PURL", "Name", "Version", "Ecosystem"],
+      "properties": {
+        "PURL": { "type": "string" },
+        "Name": { "type": "string" },
+        "Version": { "type": "string" },
+        "Ecosystem": { "type": "string" },
+        "Source": { "type": "string" },
+        "ClaimClass": { "type": "string", "enum": ["carrier", "scope"] },
+        "DetectionOrigin": { "type": "string" },
+        "VerdictState": { "type": "string", "enum": ["open", "cleared_vendor_fix"], "description": "Always open on this event." },
+        "VerdictGrade": { "type": "string", "enum": ["observed", "inferred"] },
+        "VerdictReason": { "type": "string" }
+      }
+    },
+    "Package": { "type": "string", "description": "The fix-attribution key the bounds were selected by: the source package for a distro component, else the name." },
+    "Ecosystem": { "type": "string" },
+    "Fixes": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "The NEW bounds this re-judgement found the install below that the previous judgement did not know." },
+    "Advisories": { "type": "array", "items": { "type": "string" }, "description": "The vendor advisories that shipped them, when the card's statements say (EDR-VEX-02 D14)." },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -29,6 +29,9 @@ const (
 	// is the word this codebase already uses in prose for a terminal, relationship-free exit
 	// (see Finding.Archive), as distinct from `superseded`, which names a replacement.
 	EventComponentRetired = "knowledge.component_retired"
+	// EventFixPublished — a vendor fix is newly on record for a package an open occurrence
+	// carries (EDR-INCIDENT-01 D1). Per occurrence and per new bound; Governance digests it.
+	EventFixPublished = "knowledge.fix_published"
 	// EventReleaseCorrelationCompleted — Knowledge finished correlating one SBOM
 	// (EDR-DELIVERY-01 M2-1). Unlike every other event here it is about a RELEASE, not a card,
 	// so its subject is the release id; it is the only Knowledge event a consumer may read as

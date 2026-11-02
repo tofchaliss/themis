@@ -1,6 +1,6 @@
 # EDR-INCIDENT-01 — What Themis does during a vulnerability wave
 
-Status: **PROPOSED — 2026-11-02, awaiting owner acceptance before any code**
+Status: **ACCEPTED — 2026-11-02 (owner: "accepted"; step A started the same day, during the beta period, on the owner's explicit go)**
 Date: 2026-11-02
 Author: the beta-readiness discussion of 2026-11-02 (thread "Nessus report intake")
 
@@ -143,6 +143,36 @@ Each step: OpenSpec change `phase3-incident-<step>`, `make check-ci` green, VM-v
 scripted scenario (upload SBOM → gather a CVE whose advisory is newer than the SBOM → message
 arrives → re-upload patched inventory → row turns `fixed`). Step A is a **beta-period change**;
 per the 2026-10-28 freeze it ships only with the owner's explicit go.
+
+## Realization notes
+
+### Step A (D1 + D4) — built 2026-11-02
+
+- **Emission point.** The "behind" set is now part of the verdict: `OccurrenceVerdict.Behind`
+  lists the same-EL-major RPM bounds (or the strict Alpine bounds) the open install sits below,
+  and `Advisories` the RHSA ids the Red Hat `fixed` statements carry for those bounds. The
+  store persists it as `faultline_matches.verdict_behind` (migration 000012) and emits
+  `knowledge.fix_published.v1` from `RecordMatch` when a row that stays open gains a bound it
+  did not have — **one event per open occurrence**, not one per card: the card-level grouping
+  D1 described happens in Governance, which is release-scoped anyway. A restatement of a bound
+  already stored emits nothing. `VerdictGeneration` went 4 → 5 so the re-judge sweep backfills
+  the column; a row whose stored generation is older than 5 is backfilled silently — an upgrade
+  never announces history as news.
+- **Digest.** Governance records each notice in `fix_notices` keyed
+  `(release, card, purl, fix)` and a sweep on `THEMIS_FIX_AVAILABLE_INTERVAL` (default 10m,
+  `0` off) announces one `governance.fix_available.v1` per release with un-announced notices:
+  items merged per (Finding, package), capped at 100 items, counts always complete. A
+  `not_affected` Finding is left out (the fix is irrelevant to it); an `accepted_risk` one is
+  kept (the acceptance rested on "no fix" and the owner should hear there is one).
+- **Communication.** Webhook kind `fix_available` (Teams title "Vendor fix available"),
+  mail to the evaluation audience, the D5 sentence on both. **The Jira comment on the release's
+  ticket is NOT part of A:** the ticket body is a posture projection re-rendered from the
+  Finding set, and a one-off comment path does not exist yet; it is the first candidate for
+  step B's delivery work.
+- **Gather.** `POST /faultlines/gather` consults Red Hat beside NVD whenever the Red Hat base
+  URL is set (it always is; the explicit POST is the opt-in, the scheduled sweep stays behind
+  `THEMIS_REDHAT_ENABLED`). `THEMIS_REDHAT_POLL_INTERVAL=1h` is documented as the incident
+  setting in `deploy/node.env.example`.
 
 ## What this record does NOT decide
 

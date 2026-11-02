@@ -127,7 +127,9 @@ paths:
       summary: On-demand fetch of ONE CVE's facts through the wired per-CVE sources (G-AI-1).
       description: >-
         The explicit, operator-triggered half of "the AI asks, the feeds gather": consults each
-        wired per-CVE source (NVD today) for a CVE the scheduled feeds may not have ingested
+        wired per-CVE source (NVD, and Red Hat's Security Data since EDR-INCIDENT-01 D4 — so
+        today's advisory bounds reach a card now, not after the next sweep) for a CVE the
+        scheduled feeds may not have ingested
         yet, and folds what they return as ORDINARY source Proposals - same ACLs, same
         reconciliation precedence, same "Gathering Is Not Knowing" boundary as any feed. Unlike
         the scheduled sweeps this needs no enable flag: the authenticated POST is the opt-in.

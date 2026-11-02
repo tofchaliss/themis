@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1573,5 +1574,130 @@ func TestRecordMatch_ReasonOnlyChangeIsWrittenAndMirrored(t *testing.T) {
 	record("installed 8.0.46-1.module+el8.10.0+1+a is below every el8 fix for mysql-libs: 0:8.4.11-1.module+el8.10.0+2+b")
 	if n := count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type = $1", app.EventComponentVerdictChanged); n != after {
 		t.Errorf("an unchanged premise emitted %d extra event(s)", n-after)
+	}
+}
+
+// The fix-available fact end-to-end on a real store (EDR-INCIDENT-01 D1): an open occurrence
+// judged under the current logic records the bounds it is behind; when the card later learns a
+// bound the row is still below, the sweep's re-judgement announces exactly that bound, once; a
+// restatement announces nothing; and a row that predates the recording (an older logic
+// generation) has its bounds written silently — the upgrade must not announce history.
+func TestRecordMatch_FixPublishedOnNewBound(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+	const cve = "CVE-2026-31337"
+
+	f, _, err := svc.FoldProposal(ctx, cveID(t, cve), vulnFacts(t, "osv", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kernel := app.InventoryComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-553.el8_10", Name: "kernel", Version: "4.18.0-553.el8_10", Ecosystem: "rpm"}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-1", FaultlineID: f.ID(), CVE: cve, Component: kernel,
+		Verdict: domain.OpenVerdict(), CardVersion: f.Version(), OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertCorrelatedRelease(ctx, "rel-1", "ev-1", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	rs := app.NewReverdictService(st, st, st, stubInventory{inv: app.Inventory{Components: []app.InventoryComponent{kernel}}}, st, st, realClock{}, 0)
+	published := func() int {
+		return count(t, pool, "SELECT count(*) FROM knowledge_outbox WHERE event_type=$1", app.EventFixPublished)
+	}
+	behind := func() []string {
+		t.Helper()
+		var b []string
+		if err := pool.QueryRow(ctx, "SELECT verdict_behind FROM faultline_matches WHERE component_purl=$1", kernel.PURL).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	// The vendor ships the first fix; the install is below it → announced, once, naming it.
+	if _, _, err := svc.FoldProposal(ctx, cveID(t, cve), vulnFactsFixedFor(t, "redhat", "kernel", "0:4.18.0-553.72.1.el8_10")); err != nil {
+		t.Fatal(err)
+	}
+	if rejudged, changed, _, err := rs.Sweep(ctx); err != nil || rejudged != 1 || changed != 0 {
+		t.Fatalf("sweep after first fix = %d/%d/%v, want 1 re-judged, 0 changed (still open)", rejudged, changed, err)
+	}
+	if got := behind(); len(got) != 1 || got[0] != "0:4.18.0-553.72.1.el8_10" {
+		t.Errorf("behind after first fix = %v", got)
+	}
+	if n := published(); n != 1 {
+		t.Fatalf("FixPublished after first fix = %d, want 1", n)
+	}
+	var payload string
+	if err := pool.QueryRow(ctx, "SELECT payload FROM knowledge_outbox WHERE event_type=$1 ORDER BY occurred_at DESC LIMIT 1", app.EventFixPublished).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var ev domain.FixPublished
+	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.ReleaseID != "rel-1" || ev.CVE != cve || ev.Package != "kernel" || ev.Ecosystem != "rpm" ||
+		len(ev.Fixes) != 1 || ev.Fixes[0] != "0:4.18.0-553.72.1.el8_10" || ev.Component.PURL != kernel.PURL || !ev.Component.VerdictState.IsOpen() {
+		t.Errorf("FixPublished payload = %+v", ev)
+	}
+
+	// A second, newer bound: announced, and only the NEW one is named.
+	if _, _, err := svc.FoldProposal(ctx, cveID(t, cve), vulnFactsFixedFor(t, "redhat", "kernel", "0:4.18.0-553.80.1.el8_10")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := rs.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := published(); n != 2 {
+		t.Fatalf("FixPublished after second fix = %d, want 2", n)
+	}
+	if err := pool.QueryRow(ctx, "SELECT payload FROM knowledge_outbox WHERE event_type=$1 ORDER BY occurred_at DESC LIMIT 1", app.EventFixPublished).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.Fixes) != 1 || ev.Fixes[0] != "0:4.18.0-553.80.1.el8_10" {
+		t.Errorf("second FixPublished names %v, want only the new bound", ev.Fixes)
+	}
+	if got := behind(); len(got) != 2 {
+		t.Errorf("behind after second fix = %v, want both", got)
+	}
+
+	// Nothing new: a confirming re-judgement announces nothing.
+	if _, _, _, err := rs.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := published(); n != 2 {
+		t.Errorf("FixPublished after a confirming sweep = %d, want still 2", n)
+	}
+
+	// The upgrade shape: a row judged under the previous logic generation never recorded its
+	// bounds. Its first judgement under this one writes them and announces NOTHING.
+	if _, err := pool.Exec(ctx, "UPDATE faultline_matches SET verdict_generation=$1, verdict_behind='{}' WHERE component_purl=$2",
+		domain.VerdictGeneration-1, kernel.PURL); err != nil {
+		t.Fatal(err)
+	}
+	if rejudged, _, _, err := rs.Sweep(ctx); err != nil || rejudged != 1 {
+		t.Fatalf("upgrade sweep = %d/%v, want the one generation-stale row", rejudged, err)
+	}
+	if got := behind(); len(got) != 2 {
+		t.Errorf("behind after the upgrade sweep = %v, want both bounds recorded", got)
+	}
+	if n := published(); n != 2 {
+		t.Errorf("FixPublished after the upgrade sweep = %d, want still 2 — history is not news", n)
+	}
+	// And a cleared row records the empty set.
+	patched := app.InventoryComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-553.80.1.el8_10", Name: "kernel", Version: "4.18.0-553.80.1.el8_10", Ecosystem: "rpm"}
+	if _, err := st.RecordMatch(ctx, app.Match{
+		ReleaseID: "rel-2", FaultlineID: f.ID(), CVE: cve, Component: patched,
+		Verdict: domain.ClearedVendorFix(domain.VerdictGradeObserved, "vendor fix present"), CardVersion: 9, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var b []string
+	if err := pool.QueryRow(ctx, "SELECT verdict_behind FROM faultline_matches WHERE component_purl=$1", patched.PURL).Scan(&b); err != nil || len(b) != 0 {
+		t.Errorf("cleared row behind = %v/%v, want the empty set", b, err)
 	}
 }
