@@ -133,6 +133,14 @@ unblocks the most, highest first:
 11. **EV-CURRENT-SBOM-1** — current SBOM and finding cleanup (design-gated).
 12. **OBS-CORR-1**, **VM-NET-1**, and the rest of this part in their filed order. OBS-CORR-1 **shipped 2026-10-17** (progress line); VM-NET-1 **shipped and applied 2026-10-19** (§7a, `deploy/edge/`, ufw + firewalld).
 
+13. **INC-1 — behaviour during a vulnerability wave** (EDR-INCIDENT-01, **PROPOSED 2026-11-02**,
+    owner-agreed order A → B → C; beta-period change, ships only on explicit go). A: a vendor fix
+    learned for an open occurrence becomes `fix_available` on the webhook / Jira / mail routes, and
+    Red Hat joins `POST /faultlines/gather`. B: a Watch (CVE ids and/or RHSA ids in → one
+    per-(release, CVE) state table out: not_affected · open_no_fix · open_fix_available · fixed ·
+    accepted · unknown), page + API. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
+    (7d) with no newer evidence. Patched is proven only by new evidence; nothing auto-decides.
+
 Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
 through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
 file before the next is started.
