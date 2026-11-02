@@ -102,6 +102,16 @@ func (r OutwardRenderer) RenderWebhook(ctx context.Context, in app.Intent) (stri
 			doc.Summary += " across " + n + " release(s)"
 		}
 		doc.Summary += ". A breach changes no decision."
+	case app.WebhookFixAvailable:
+		doc.Summary = fmt.Sprintf("Vendor fix now available for %s CVE(s) in %s package(s) on %s",
+			firstNonEmpty(s[app.SnapshotFixCVECount], "0"), firstNonEmpty(s[app.SnapshotFixPackageCount], "0"), label)
+		if p := listedSep(s[app.SnapshotFixPackages], ";"); p != "" {
+			doc.Summary += ": " + p
+		}
+		if a := listed(s[app.SnapshotFixAdvisories]); a != "" {
+			doc.Summary += " (" + a + ")"
+		}
+		doc.Summary += ". " + FixAvailableLimit
 	case app.WebhookRemediationMetrics:
 		doc.Product = ""
 		doc.Summary = fmt.Sprintf("Remediation: %s open findings; %s of %s running SLA clocks within SLA, %s breached",
@@ -131,12 +141,19 @@ func (r OutwardRenderer) RenderWebhook(ctx context.Context, in app.Intent) (stri
 	return doc.Summary, body, nil
 }
 
+// FixAvailableLimit is the sentence every fix-available surface carries (EDR-INCIDENT-01 D5):
+// Themis never infers a patch from an advisory existing or from time passed.
+const FixAvailableLimit = "Fix available is the vendor's statement. Patched is proven only by a new scan or SBOM of this release."
+
 // listed renders a comma list as "a, b, c (+N more)" capped for a one-line message.
-func listed(csv string) string {
-	if strings.TrimSpace(csv) == "" {
+func listed(csv string) string { return listedSep(csv, ",") }
+
+// listedSep is listed for another separator.
+func listedSep(list, sep string) string {
+	if strings.TrimSpace(list) == "" {
 		return ""
 	}
-	parts := strings.Split(csv, ",")
+	parts := strings.Split(list, sep)
 	if len(parts) <= webhookSummaryCVELimit {
 		return strings.Join(parts, ", ")
 	}

@@ -15,6 +15,16 @@ type GatherSource struct {
 	Src  CVEVulnSource
 }
 
+// GatherVendorSource is a per-CVE VENDOR source the gather may consult — the RedHatCVESource
+// shape the Red Hat sweep uses, which answers with several Proposals per CVE (vendor severity,
+// applicability statements, fixed builds) rather than one (EDR-INCIDENT-01 D4). Wired beside the
+// CVEVulnSources so an operator can pull today's advisory bounds NOW instead of waiting out the
+// sweep interval.
+type GatherVendorSource struct {
+	Name string
+	Src  RedHatCVESource
+}
+
 // SourceGather is one source's outcome for one gathered CVE.
 type SourceGather struct {
 	Source    string
@@ -49,7 +59,15 @@ var ErrInvalidCVE = fmt.Errorf("knowledge: not a valid CVE id")
 // reading an `insufficient` with a thin-grounding detail is the loop until then.
 type GatherService struct {
 	sources []GatherSource
+	vendors []GatherVendorSource
 	fold    *FaultlineService
+}
+
+// WithVendorSources adds per-CVE vendor sources (D4). They are consulted after the CVE sources,
+// in the order given, and report independently like them.
+func (s *GatherService) WithVendorSources(vendors ...GatherVendorSource) *GatherService {
+	s.vendors = append(s.vendors, vendors...)
+	return s
 }
 
 // NewGatherService wires the on-demand gather. No sources means the endpoint honestly refuses
@@ -59,7 +77,7 @@ func NewGatherService(fold *FaultlineService, sources ...GatherSource) *GatherSe
 }
 
 // Enabled reports whether any source is wired.
-func (s *GatherService) Enabled() bool { return s != nil && len(s.sources) > 0 }
+func (s *GatherService) Enabled() bool { return s != nil && (len(s.sources) > 0 || len(s.vendors) > 0) }
 
 // GatherCVE consults every wired source for one CVE and folds what they return. Per-source
 // failures are reported, not fatal; a store failure is fatal (the gather cannot claim to have
@@ -98,6 +116,29 @@ func (s *GatherService) GatherCVE(ctx context.Context, raw string) (GatherResult
 		}
 		sg.Recorded = recorded
 		out.FaultlineID = string(f.ID())
+		out.Sources = append(out.Sources, sg)
+	}
+	for _, v := range s.vendors {
+		sg := SourceGather{Source: v.Name}
+		props, ferr := v.Src.FetchCVE(ctx, cve.String())
+		if ferr != nil {
+			sg.Err = ferr.Error()
+			out.Sources = append(out.Sources, sg)
+			continue
+		}
+		if len(props) == 0 {
+			out.Sources = append(out.Sources, sg) // the vendor does not track this CVE: honest, not a failure
+			continue
+		}
+		sg.Found = true
+		for _, p := range props {
+			f, recorded, serr := s.fold.FoldProposal(ctx, p.CVE, p.Proposal)
+			if serr != nil {
+				return out, serr
+			}
+			sg.Recorded = sg.Recorded || recorded
+			out.FaultlineID = string(f.ID())
+		}
 		out.Sources = append(out.Sources, sg)
 	}
 	return out, nil

@@ -49,6 +49,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventReleaseEvaluated:    "governance.release_evaluated.v1",
 	app.EventSLABreached:         "governance.sla_breached.v1",
 	app.EventReviewDueSoon:       "governance.review_due_soon.v1",
+	app.EventFixAvailable:        "governance.fix_available.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped

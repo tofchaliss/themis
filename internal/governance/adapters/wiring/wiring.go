@@ -64,6 +64,10 @@ type Governance struct {
 	// posture and /sla-policy, and its breach sweep runs on the review-by cadence. Always wired;
 	// without a Registry seam every Finding reads the estate policy.
 	SLA *app.SLAService
+	// FixAvailable is the fix-available sweep (EDR-INCIDENT-01 D1): it gathers Knowledge's
+	// fix-published notices and announces one governance.fix_available.v1 per release. Always
+	// wired; the composition root runs it on THEMIS_FIX_AVAILABLE_INTERVAL (0 disables).
+	FixAvailable *app.FixAvailableSweep
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -171,15 +175,16 @@ func Wire(
 		}
 	}
 	return Governance{
-		Handler:     handler.Router(),
-		Store:       st,
-		Consumer:    inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st)).WithLogger(logger),
-		Relay:       relay,
-		Reconcile:   app.NewReconcileService(relay),
-		Evaluations: evaluations,
-		Rejudge:     rejudge,
-		ReviewBy:    app.NewReviewBySweep(write, st, sysClock{}),
-		SLA:         sla,
+		Handler:      handler.Router(),
+		Store:        st,
+		Consumer:     inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
+		Relay:        relay,
+		Reconcile:    app.NewReconcileService(relay),
+		Evaluations:  evaluations,
+		Rejudge:      rejudge,
+		ReviewBy:     app.NewReviewBySweep(write, st, sysClock{}),
+		SLA:          sla,
+		FixAvailable: app.NewFixAvailableSweep(st, sysClock{}),
 	}
 }
 

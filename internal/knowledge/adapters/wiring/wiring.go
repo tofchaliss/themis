@@ -298,8 +298,12 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	// The on-demand per-CVE gather (G-AI-1): explicit operator POSTs only, so it needs no
 	// enable flag — the scheduled watch's opt-in guards SILENT outbound calls, and this one is
 	// never silent. It reuses the same NVD client + fold path as the backfill sweep.
+	// Red Hat rides the gather too (EDR-INCIDENT-01 D4), whatever the sweep's switch says: during
+	// a wave the operator wants TODAY's advisory bounds on a card now, not after the next
+	// THEMIS_REDHAT_POLL_INTERVAL. Same client, same fold, same "gathered, not obeyed" boundary.
 	gather := app.NewGatherService(fold,
-		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)})
+		app.GatherSource{Name: "nvd", Src: feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP)}).
+		WithVendorSources(app.GatherVendorSource{Name: "redhat", Src: feed.NewRedHatClient(redhat.BaseURL, redhat.HTTP)})
 	// The live latest-published read (GUI-16 layer 2) is explicit like the gather — a button
 	// press, never a schedule — so it needs no enable flag either, and it stores nothing.
 	published := app.NewPublishedService(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, sysClock{})

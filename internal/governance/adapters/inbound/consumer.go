@@ -26,8 +26,11 @@ const (
 	eventComponentMatched        = "knowledge.component_matched"
 	eventComponentVerdictChanged = "knowledge.component_verdict_changed"
 	eventComponentRetired        = "knowledge.component_retired"
-	eventFaultlineEnriched       = "knowledge.faultline_enriched"
-	eventFaultlineSuperseded     = "knowledge.faultline_superseded"
+	// eventFixPublished — a vendor fix is newly on record for a package an OPEN occurrence
+	// carries (EDR-INCIDENT-01 D1). Recorded as a notice; the fix-available sweep announces.
+	eventFixPublished        = "knowledge.fix_published"
+	eventFaultlineEnriched   = "knowledge.faultline_enriched"
+	eventFaultlineSuperseded = "knowledge.faultline_superseded"
 	// eventReleaseCorrelationCompleted — Knowledge finished correlating one SBOM
 	// (EDR-DELIVERY-01 M2-1). Unlike the five above it is about a RELEASE, not a card, and it
 	// arrives AFTER every other Knowledge event for that SBOM, so handling it means every
@@ -43,7 +46,7 @@ var Subscription = eventbus.Subscription{
 	Consumer: "governance",
 	Stream:   "knowledge",
 	Interest: []string{eventComponentMatched, eventComponentVerdictChanged, eventComponentRetired,
-		eventFaultlineEnriched, eventFaultlineSuperseded, eventReleaseCorrelationCompleted},
+		eventFaultlineEnriched, eventFaultlineSuperseded, eventReleaseCorrelationCompleted, eventFixPublished},
 }
 
 // Consumer translates raw Knowledge events into coordinator calls.
@@ -95,6 +98,16 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnComponentRetired(ctx, app.InboundComponentRetired{
 			FaultlineID: dto.FaultlineID, ReleaseID: dto.ReleaseID,
 			PURL: dto.PURL, Reason: dto.Reason,
+		})
+	case eventFixPublished:
+		var dto fixPublishedDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return err
+		}
+		return c.coord.OnFixPublished(ctx, app.InboundFixPublished{
+			FaultlineID: dto.FaultlineID, CVE: dto.CVE, ReleaseID: dto.ReleaseID, PURL: dto.Component.PURL,
+			Package: dto.Package, Ecosystem: dto.Ecosystem, Fixes: dto.Fixes, Advisories: dto.Advisories,
+			OccurredAt: dto.OccurredAt,
 		})
 	case eventFaultlineEnriched:
 		var dto faultlineEnrichedDTO
@@ -224,6 +237,20 @@ type componentVerdictChangedDTO struct {
 	CVE         string       `json:"CVE"`
 	ReleaseID   string       `json:"ReleaseID"`
 	Component   componentDTO `json:"Component"`
+}
+
+// fixPublishedDTO mirrors knowledge.fix_published.v1 (EDR-INCIDENT-01 D1): one open occurrence,
+// the package key its bounds were selected by, and the NEW bounds it is below.
+type fixPublishedDTO struct {
+	FaultlineID string       `json:"FaultlineID"`
+	CVE         string       `json:"CVE"`
+	ReleaseID   string       `json:"ReleaseID"`
+	Component   componentDTO `json:"Component"`
+	Package     string       `json:"Package"`
+	Ecosystem   string       `json:"Ecosystem"`
+	Fixes       []string     `json:"Fixes"`
+	Advisories  []string     `json:"Advisories"`
+	OccurredAt  time.Time    `json:"OccurredAt"`
 }
 
 // componentRetiredDTO decodes knowledge.component_retired.v1 (KN-SCAN-4(b)). Narrow on purpose:

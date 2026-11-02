@@ -415,3 +415,46 @@ func TestConsumer_FaultlineEnriched_KEVDetail(t *testing.T) {
 		t.Errorf("an older payload must read as not stated: %+v", s)
 	}
 }
+
+// fixNotices records what the coordinator handed the notice store (EDR-INCIDENT-01 D1).
+type fixNotices struct{ recorded []app.FixNotice }
+
+func (f *fixNotices) RecordFixNotices(_ context.Context, n []app.FixNotice) error {
+	f.recorded = append(f.recorded, n...)
+	return nil
+}
+func (f *fixNotices) PendingFixNotices(context.Context, int) ([]app.FixNotice, error) {
+	return nil, nil
+}
+func (f *fixNotices) MarkFixNoticesAnnounced(context.Context, string, []app.FixNotice, app.OutboxNote) error {
+	return nil
+}
+
+// knowledge.fix_published.v1 is decoded onto the notice store: the occurrence's key, the package
+// the bounds were selected by, one notice per new bound, the advisories, and when.
+func TestConsumer_FixPublished(t *testing.T) {
+	notices := &fixNotices{}
+	c := inbound.NewConsumer(app.NewCoordinator(app.NewFindingService(newMemRepo(), &ids{}, clk{})).WithFixNotices(notices))
+	payload := []byte(`{"FaultlineID":"fl-1","CVE":"CVE-2026-1","ReleaseID":"rel-1",
+		"Component":{"PURL":"pkg:rpm/redhat/kernel@4.18.0-553.el8_10","Name":"kernel","Version":"4.18.0-553.el8_10","Ecosystem":"rpm","VerdictState":"open"},
+		"Package":"kernel","Ecosystem":"rpm","Fixes":["0:4.18.0-553.72.1.el8_10","0:4.18.0-553.80.1.el8_10"],
+		"Advisories":["RHSA-2026:0001"],"OccurredAt":"2026-11-02T10:00:00Z"}`)
+	if err := c.Handle(context.Background(), mkEnv("knowledge.fix_published", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(notices.recorded) != 2 {
+		t.Fatalf("notices = %+v, want 2", notices.recorded)
+	}
+	n := notices.recorded[1]
+	if n.ReleaseID != "rel-1" || n.FaultlineID != "fl-1" || n.CVE != "CVE-2026-1" || n.PURL != "pkg:rpm/redhat/kernel@4.18.0-553.el8_10" ||
+		n.Package != "kernel" || n.Ecosystem != "rpm" || n.Fix != "0:4.18.0-553.80.1.el8_10" || len(n.Advisories) != 1 ||
+		!n.LearnedAt.Equal(time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("notice = %+v", n)
+	}
+	if err := c.Handle(context.Background(), mkEnv("knowledge.fix_published", []byte(`{nope`))); err == nil {
+		t.Error("malformed payload must be an error (retried), not a drop")
+	}
+	if !inbound.Subscription.InInterest("knowledge.fix_published") {
+		t.Error("fix_published must be in the interest set")
+	}
+}

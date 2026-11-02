@@ -106,6 +106,8 @@ type Coordinator struct {
 	// evaluations is the release-evaluation queue (N-M2b). Optional like the other seams: a
 	// Coordinator without one ignores the completion fact, which is the pre-N-M2b behaviour.
 	evaluations PendingEvaluations
+	// fixes records the fix-published notices (EDR-INCIDENT-01 D1); nil ignores the fact.
+	fixes FixNoticeStore
 }
 
 // NewCoordinator wires the coordinator over the Finding service.

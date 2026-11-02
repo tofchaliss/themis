@@ -18,6 +18,7 @@ func TestSubscription(t *testing.T) {
 		"knowledge.component_retired", // KN-SCAN-4(b)
 		"knowledge.faultline_enriched", "knowledge.faultline_superseded",
 		"knowledge.release_correlation_completed", // EDR-DELIVERY-01 M2-1 / N-M2b
+		"knowledge.fix_published",                 // EDR-INCIDENT-01 D1
 	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)
@@ -25,8 +26,8 @@ func TestSubscription(t *testing.T) {
 	}
 	// The COUNT is asserted deliberately: adding a type to Handle without adding it here means
 	// the stream reader filters the event out and the dispatch is dead code, which is silent.
-	if len(s.Interest) != 6 {
-		t.Errorf("interest set = %v, want 6 types", s.Interest)
+	if len(s.Interest) != 7 {
+		t.Errorf("interest set = %v, want 7 types", s.Interest)
 	}
 	// A Knowledge event Governance does not consume is out of interest.
 	if s.InInterest("knowledge.faultline_created") {

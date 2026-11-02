@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.fix_available.v1.schema.json",
+  "title": "governance.fix_available.v1",
+  "description": "Integration-contract v1 for the fix-available announcement (EDR-INCIDENT-01 D1): a vendor fix is newly on record for CVEs one release has OPEN. One event per release per sweep, gathering Knowledge's per-occurrence knowledge.fix_published.v1 notices. A FACT, not a state change: no Finding, Position or proposal changes. 'Fix available' is the vendor's statement; 'patched' is proven only by new evidence for the release (D5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ReleaseID", "CVECount", "PackageCount", "Items", "OccurredAt"],
+  "properties": {
+    "ReleaseID": { "type": "string" },
+    "CVECount": { "type": "integer", "description": "Distinct CVEs over ALL notices of this announcement, not only the carried items." },
+    "PackageCount": { "type": "integer", "description": "Distinct packages over ALL notices." },
+    "Items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["FindingID", "CVE", "Package", "Ecosystem", "Fixes"],
+        "properties": {
+          "FindingID": { "type": "string", "description": "Empty when Governance holds no Finding for (release, faultline) yet." },
+          "CVE": { "type": "string" },
+          "Package": { "type": "string" },
+          "Ecosystem": { "type": "string" },
+          "Fixes": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "Advisories": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "OccurredAt": { "type": "string", "format": "date-time" }
+  }
+}

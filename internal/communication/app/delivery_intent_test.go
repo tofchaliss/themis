@@ -500,3 +500,22 @@ func TestEnqueueEvaluationMail(t *testing.T) {
 		t.Error("an evaluation mail without a Release must not be enqueued")
 	}
 }
+
+// EDR-INCIDENT-01 D1: the fix-available mail goes to the evaluation audience and is marked as
+// that notification; no Release is no subject.
+func TestEnqueueFixAvailableMail(t *testing.T) {
+	store := newIntentStore()
+	in, err := intentSvc(store, app.DeliveryIntentConfig{EvaluationAudience: "release-managers"}).EnqueueFixAvailableMail(
+		context.Background(), lineage(), "env-7", "rel-1", map[string]string{app.SnapshotFixCVECount: "3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Type != app.IntentEmail || in.Destination != "release-managers" || in.ReleaseID != "rel-1" ||
+		!in.IsFixAvailableNotification() || in.IsEvaluationNotification() || in.Snapshot["release_id"] != "rel-1" || in.Snapshot[app.SnapshotFixCVECount] != "3" {
+		t.Fatalf("intent = %+v", in)
+	}
+	if _, err := intentSvc(newIntentStore(), app.DeliveryIntentConfig{}).EnqueueFixAvailableMail(
+		context.Background(), lineage(), "env-8", " ", nil); !errors.Is(err, app.ErrNoSubject) {
+		t.Fatalf("err = %v, want ErrNoSubject", err)
+	}
+}

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **Fix-available alert** (EDR-INCIDENT-01 D1, INC-1 step A): when an open row learns a vendor
+  fix it is behind (a same-major RPM bound or an Alpine bound), Knowledge announces
+  `knowledge.fix_published.v1`; Governance collects the notices and every
+  `THEMIS_FIX_AVAILABLE_INTERVAL` (10m) announces ONE `governance.fix_available.v1` per release
+  — "N CVEs in M packages now have a vendor fix" with the RHSA ids when the feed carried them.
+  Communication routes it as webhook kind `fix_available` (Teams title "Vendor fix available")
+  and mails the evaluation audience. Every message ends with "Fix available is the vendor's
+  statement. Patched is proven only by a new scan or SBOM of this release." Nothing is decided.
+  The verdict stamps the bound (`verdict_behind`, VerdictGeneration 5); an upgrade backfills
+  the column silently and announces nothing for history.
+- **Red Hat gather source** (EDR-INCIDENT-01 D4): `POST /faultlines/gather {cve}` consults Red
+  Hat's per-CVE security data beside NVD, so one call pulls today's advisory bounds for a CVE.
+  `THEMIS_REDHAT_POLL_INTERVAL=1h` is documented as the incident setting for the sweep.
 - Communication (EDR-REMEDIATION-01 D4): per-audience webhook **format** —
   `THEMIS_COMMUNICATION_WEBHOOK_FORMATS="teams-sec=teams"` wraps the Themis document in the
   Adaptive Card message a Microsoft Teams "Workflows" incoming webhook accepts (title, summary,

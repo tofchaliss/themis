@@ -44,6 +44,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventComponentMatched:        "knowledge.component_matched.v1",
 	app.EventComponentVerdictChanged: "knowledge.component_verdict_changed.v1",
 	app.EventComponentRetired:        "knowledge.component_retired.v1",
+	app.EventFixPublished:            "knowledge.fix_published.v1",
 
 	app.EventReleaseCorrelationCompleted: "knowledge.release_correlation_completed.v1",
 }
@@ -332,13 +333,16 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 	var oldStamp int64
 	var oldGeneration int
 	var oldName, oldVersion, oldEco, oldSource string
+	var oldBehind []string
 	err = tx.QueryRow(ctx, `
 		SELECT verdict_state, verdict_reason, verdict_card_version, verdict_generation,
-		       component_name, component_version, component_ecosystem, component_source
+		       component_name, component_version, component_ecosystem, component_source,
+		       verdict_behind
 		FROM faultline_matches
 		WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3 FOR UPDATE`,
 		m.ReleaseID, string(m.FaultlineID), m.Component.PURL).
-		Scan(&oldState, &oldReason, &oldStamp, &oldGeneration, &oldName, &oldVersion, &oldEco, &oldSource)
+		Scan(&oldState, &oldReason, &oldStamp, &oldGeneration, &oldName, &oldVersion, &oldEco, &oldSource, &oldBehind)
+	behind := behindOf(m.Verdict)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// New occurrence: insert with its verdict and stamp, advance the card, emit the event.
@@ -369,12 +373,13 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 				UPDATE faultline_matches
 				SET verdict_state=$4, verdict_grade=$5, verdict_reason=$6, verdict_card_version=$7,
 				    verdict_generation=$8,
-				    component_name=$9, component_version=$10, component_ecosystem=$11, component_source=$12
+				    component_name=$9, component_version=$10, component_ecosystem=$11, component_source=$12,
+				    verdict_behind=$13
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
 				m.ReleaseID, string(m.FaultlineID), m.Component.PURL,
 				string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion,
 				domain.VerdictGeneration,
-				name, version, eco, source); uerr != nil {
+				name, version, eco, source, behind); uerr != nil {
 				return false, uerr
 			}
 			changed := domain.ComponentVerdictChanged{
@@ -384,8 +389,12 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 			if qerr := s.queueOutbox(ctx, tx, app.EventComponentVerdictChanged, string(m.FaultlineID), changed, m.OccurredAt); qerr != nil {
 				return false, qerr
 			}
+			// A re-opened row (cleared → open again) is behind whatever it is behind NOW, and the
+			// bounds it was behind before it was cleared were announced then (or were never
+			// news); so the fix alert fires only on the same-state path below.
 		} else if reasonChanged := m.Verdict.Reason != oldReason; reasonChanged ||
-			int64(m.CardVersion) > oldStamp || oldGeneration < domain.VerdictGeneration || detailChanged {
+			int64(m.CardVersion) > oldStamp || oldGeneration < domain.VerdictGeneration || detailChanged ||
+			!equalStrings(behind, oldBehind) {
 			// Same conclusion: refresh the stamps so the catch-up sweep does not re-judge a
 			// current row, and persist any corrected detail. A detail-only correction resets
 			// them to 0 instead — the corrected identity may judge differently against
@@ -421,11 +430,29 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 				UPDATE faultline_matches
 				SET verdict_card_version=$4, verdict_generation=$5,
 				    component_name=$6, component_version=$7, component_ecosystem=$8, component_source=$9,
-				    verdict_reason=$10
+				    verdict_reason=$10, verdict_behind=$11
 				WHERE release_id=$1 AND faultline_id=$2 AND component_purl=$3`,
 				m.ReleaseID, string(m.FaultlineID), m.Component.PURL, stamp, generation,
-				name, version, eco, source, m.Verdict.Reason); uerr != nil {
+				name, version, eco, source, m.Verdict.Reason, behind); uerr != nil {
 				return false, uerr
+			}
+			// A published fix (EDR-INCIDENT-01 D1): the row stays open, but it is now behind a
+			// bound the previous judgement did not know. Announced only when the previous
+			// judgement COULD have known it — a row judged under an older logic generation
+			// never recorded its bounds, so its first recording is history, not news (the
+			// 2026-11-02 upgrade would otherwise announce every open row on the estate).
+			if newState.IsOpen() && oldGeneration >= domain.VerdictGeneration {
+				if added := m.Verdict.NewlyBehind(oldBehind); len(added) > 0 {
+					published := domain.FixPublished{
+						FaultlineID: m.FaultlineID, CVE: m.CVE, ReleaseID: m.ReleaseID,
+						Component: matchedComponentOf(m),
+						Package:   componentPackageOf(m.Component), Ecosystem: m.Component.Ecosystem,
+						Fixes: added, Advisories: m.Verdict.Advisories, OccurredAt: m.OccurredAt.UTC(),
+					}
+					if qerr := s.queueOutbox(ctx, tx, app.EventFixPublished, string(m.FaultlineID), published, m.OccurredAt); qerr != nil {
+						return false, qerr
+					}
+				}
 			}
 			if reasonChanged {
 				changed := domain.ComponentVerdictChanged{
@@ -447,12 +474,13 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		INSERT INTO faultline_matches
 			(release_id, faultline_id, component_purl, matched_at,
 			 component_name, component_version, component_ecosystem, component_source,
-			 verdict_state, verdict_grade, verdict_reason, verdict_card_version, verdict_generation)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+			 verdict_state, verdict_grade, verdict_reason, verdict_card_version, verdict_generation,
+			 verdict_behind)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		m.ReleaseID, string(m.FaultlineID), m.Component.PURL, m.OccurredAt,
 		m.Component.Name, m.Component.Version, m.Component.Ecosystem, m.Component.Source,
 		string(newState), string(m.Verdict.Grade), m.Verdict.Reason, m.CardVersion,
-		domain.VerdictGeneration); err != nil {
+		domain.VerdictGeneration, behindOf(m.Verdict)); err != nil {
 		return false, err
 	}
 
@@ -481,6 +509,39 @@ func (s *Store) RecordMatch(ctx context.Context, m app.Match) (bool, error) {
 		return true, tx.Commit(ctx)
 	}
 	return true, nil // the inbox unit of work owns the commit
+}
+
+// behindOf is the stored form of a verdict's Behind set: never NULL (the column is NOT NULL and
+// the empty set is a value), so a cleared verdict stores {}.
+func behindOf(v domain.OccurrenceVerdict) []string {
+	if len(v.Behind) == 0 {
+		return []string{}
+	}
+	return v.Behind
+}
+
+// equalStrings compares two string sets stored in order (behindBounds sorts; a stored set reads
+// back as it was written).
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// componentPackageOf is the fix-attribution key of a component — the source package for a
+// distro component, else its name — restated here because the app ring's helper is unexported
+// and the event must name the key the bounds were selected by.
+func componentPackageOf(c app.InventoryComponent) string {
+	if s := strings.TrimSpace(c.Source); s != "" {
+		return s
+	}
+	return strings.TrimSpace(c.Name)
 }
 
 // queueOutbox marshals one integration event into the knowledge outbox inside the caller's

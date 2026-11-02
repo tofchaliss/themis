@@ -75,7 +75,13 @@ type config struct {
 	// announces governance.review_due_soon.v1, once per Position version (EDR-REMEDIATION-01 D2).
 	// Go duration, default 336h (14 days); "0" turns the warning off (expiry still re-surfaces).
 	reviewWarning time.Duration
-	rejudgeRanges    bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
+	// THEMIS_FIX_AVAILABLE_INTERVAL — cadence of the fix-available sweep (EDR-INCIDENT-01 D1):
+	// Knowledge's per-occurrence "a vendor fix is newly on record for something this release
+	// has open" notices are gathered per release and announced as ONE governance.fix_available.v1
+	// each; the interval is also the gathering window. Go duration, default 10m; "0" disables
+	// (notices are still recorded, nothing announces them).
+	fixAvailableInterval time.Duration
+	rejudgeRanges        bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -104,12 +110,13 @@ func loadConfig() config {
 		mitigatedWeight:     envFloatDefault("THEMIS_MITIGATED_WEIGHT", domain.DefaultMitigatedWeight),
 		epssDriftThreshold:  envFloatDefault("THEMIS_EPSS_DRIFT_THRESHOLD", domain.DefaultEPSSDriftThreshold),
 
-		busDSN:            os.Getenv("THEMIS_BUS_DATABASE_DSN"),
-		rejudgeRanges:     os.Getenv("THEMIS_GOVERNANCE_REJUDGE_RANGES") == "1",
-		reviewByInterval:  envDurationDefault("THEMIS_REVIEW_BY_INTERVAL", time.Hour),
-		reviewWarning:     envDurationDefault("THEMIS_REVIEW_WARNING", domain.DefaultReviewWarning),
-		busMigrate:        os.Getenv("THEMIS_BUS_MIGRATE") == "1",
-		busMigrationsPath: envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
+		busDSN:               os.Getenv("THEMIS_BUS_DATABASE_DSN"),
+		rejudgeRanges:        os.Getenv("THEMIS_GOVERNANCE_REJUDGE_RANGES") == "1",
+		reviewByInterval:     envDurationDefault("THEMIS_REVIEW_BY_INTERVAL", time.Hour),
+		reviewWarning:        envDurationDefault("THEMIS_REVIEW_WARNING", domain.DefaultReviewWarning),
+		fixAvailableInterval: envDurationDefault("THEMIS_FIX_AVAILABLE_INTERVAL", app.DefaultFixAvailableInterval),
+		busMigrate:           os.Getenv("THEMIS_BUS_MIGRATE") == "1",
+		busMigrationsPath:    envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
 		authDSN:      os.Getenv("THEMIS_AUTH_DATABASE_DSN"),
 		authRequired: os.Getenv("THEMIS_AUTH_REQUIRED") == "1",
@@ -238,6 +245,23 @@ func main() {
 		})
 	} else {
 		logger.Warn("review-by timer DISABLED (THEMIS_REVIEW_BY_INTERVAL=0) — an expired review_by date re-surfaces a Finding only when its CVE is next enriched, and no SLA breach is announced (deadlines still show on the posture)")
+	}
+	// The fix-available sweep (EDR-INCIDENT-01 D1): one message per release when a vendor fix is
+	// newly on record for something it has open. It announces; it decides nothing.
+	if cfg.fixAvailableInterval > 0 {
+		fa := logger.Component("fix-available")
+		go gov.FixAvailable.RunEvery(ctx, cfg.fixAvailableInterval, func(announced int, err error) {
+			if err != nil {
+				fa.Error("fix-available sweep failed", observability.Err(err), observability.Int("announced", announced))
+				return
+			}
+			if announced > 0 {
+				fa.Info("fix-available sweep", observability.Int("releases_announced", announced))
+			}
+		})
+		logger.Info("fix-available sweep enabled", observability.String("interval", cfg.fixAvailableInterval.String()))
+	} else {
+		logger.Warn("fix-available sweep DISABLED (THEMIS_FIX_AVAILABLE_INTERVAL=0) — a vendor fix published for an open component is recorded but never announced")
 	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)

@@ -65,6 +65,9 @@ func TestRenderWebhook_Kinds(t *testing.T) {
 			[]string{"Review due 2026-11-05 for CVE-1 (accepted_risk)", "owner jane", "comes back to the queue"}},
 		app.WebhookDispositionStale: {map[string]string{app.SnapshotCVE: "CVE-2", app.SnapshotReason: "the CVE entered KEV", app.SnapshotStance: "not_affected"},
 			[]string{"CVE-2 on smallbox / demo v1.1.0 needs another look: the CVE entered KEV", "not_affected decision still stands"}},
+		app.WebhookFixAvailable: {map[string]string{app.SnapshotFixCVECount: "3", app.SnapshotFixPackageCount: "2",
+			app.SnapshotFixPackages: "kernel 0:4.18.0-553.80.1.el8_10;openssl 1:1.1.1k-14.el8_6", app.SnapshotFixAdvisories: "RHSA-2026:0001,RHSA-2026:0002", app.SnapshotFixCVEs: "CVE-1,CVE-2,CVE-3"},
+			[]string{"Vendor fix now available for 3 CVE(s) in 2 package(s) on smallbox / demo v1.1.0: kernel 0:4.18.0-553.80.1.el8_10, openssl 1:1.1.1k-14.el8_6 (RHSA-2026:0001, RHSA-2026:0002)", serializer.FixAvailableLimit}},
 		app.WebhookSLABreachDigest: {map[string]string{app.SnapshotDigestProduct: "Gateway", app.SnapshotDigestCount: "3", app.SnapshotDigestBuckets: "critical=1,high=2",
 			app.SnapshotDigestCVEs: "CVE-1,CVE-2", app.SnapshotDigestReleases: "2"},
 			[]string{"Gateway: 3 finding(s) passed their SLA deadline (critical=1, high=2): CVE-1, CVE-2 across 2 release(s)", "changes no decision"}},
@@ -101,6 +104,10 @@ func TestRenderWebhook_Kinds(t *testing.T) {
 	d = renderHook(t, serializer.NewOutwardRenderer(&postureSource{err: errors.New("down")}).WithIdentity(identitySource{err: errors.New("down")}), hook(app.WebhookReleaseEvaluated, nil))
 	if d.Product != "" || d.Summary != "Themis evaluated Release rel-1." {
 		t.Fatalf("degraded evaluated = %+v", d)
+	}
+	d = renderHook(t, bare, hook(app.WebhookFixAvailable, nil))
+	if d.Summary != "Vendor fix now available for 0 CVE(s) in 0 package(s) on Release rel-1. "+serializer.FixAvailableLimit {
+		t.Fatalf("bare fix available = %+v", d)
 	}
 	d = renderHook(t, bare, hook(app.WebhookDispositionStale, map[string]string{app.SnapshotReviewBy: "x"}))
 	if !strings.Contains(d.Summary, "A finding on Release rel-1 needs another look: its premise changed") {

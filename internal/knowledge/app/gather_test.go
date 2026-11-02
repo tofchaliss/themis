@@ -113,3 +113,62 @@ func TestGatherCVE_StoreFailuresAreFatal(t *testing.T) {
 		t.Error("supersede store failure must be fatal")
 	}
 }
+
+// vendorSrc is a per-CVE vendor source (the Red Hat shape): several Proposals per CVE, or none.
+type vendorSrc struct {
+	props []app.ProposalFor
+	err   error
+	calls int
+}
+
+func (v *vendorSrc) FetchCVE(context.Context, string) ([]app.ProposalFor, error) {
+	v.calls++
+	return v.props, v.err
+}
+
+// EDR-INCIDENT-01 D4: a vendor source rides the gather. Several Proposals fold as one found
+// source (recorded while any of them is new); an empty answer is "not tracked", not a failure; a
+// dead vendor is reported, not fatal; a store fault IS fatal; and vendor sources alone enable it.
+func TestGatherCVE_VendorSources(t *testing.T) {
+	repo := newRepo()
+	redhat := &vendorSrc{props: []app.ProposalFor{proposalFor(t, "CVE-2026-0010", "redhat"), proposalFor(t, "CVE-2026-0010", "redhat-vex")}}
+	s := app.NewGatherService(foldSvc(repo), app.GatherSource{Name: "nvd", Src: &gatherSrc{}}).
+		WithVendorSources(app.GatherVendorSource{Name: "redhat", Src: redhat},
+			app.GatherVendorSource{Name: "quiet", Src: &vendorSrc{}},
+			app.GatherVendorSource{Name: "dead", Src: &vendorSrc{err: errors.New("hydra down")}})
+	res, err := s.GatherCVE(context.Background(), "CVE-2026-0010")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Sources) != 4 || res.FaultlineID == "" {
+		t.Fatalf("result = %+v, want 4 sources and a card", res)
+	}
+	if rh := res.Sources[1]; rh.Source != "redhat" || !rh.Found || !rh.Recorded || rh.Err != "" {
+		t.Errorf("redhat = %+v", rh)
+	}
+	if q := res.Sources[2]; q.Found || q.Recorded || q.Err != "" {
+		t.Errorf("quiet vendor = %+v, want an honest nothing", q)
+	}
+	if d := res.Sources[3]; d.Err == "" || d.Found {
+		t.Errorf("dead vendor = %+v, want the error reported", d)
+	}
+	// A restatement: found, not recorded.
+	res2, err := s.GatherCVE(context.Background(), "CVE-2026-0010")
+	if err != nil || !res2.Sources[1].Found || res2.Sources[1].Recorded {
+		t.Errorf("restatement = %+v err=%v", res2.Sources[1], err)
+	}
+	if redhat.calls != 2 {
+		t.Errorf("vendor consulted %d times, want 2", redhat.calls)
+	}
+	// Vendor sources alone enable the gather.
+	if !app.NewGatherService(foldSvc(newRepo())).WithVendorSources(app.GatherVendorSource{Name: "redhat", Src: redhat}).Enabled() {
+		t.Error("a vendor-only gather must be enabled")
+	}
+	// A store fault is fatal.
+	broken := newRepo()
+	broken.saveErr = errors.New("db down")
+	if _, err := app.NewGatherService(foldSvc(broken)).WithVendorSources(app.GatherVendorSource{Name: "redhat", Src: redhat}).
+		GatherCVE(context.Background(), "CVE-2026-0010"); err == nil {
+		t.Error("fold store failure must be fatal")
+	}
+}

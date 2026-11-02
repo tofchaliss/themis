@@ -51,3 +51,23 @@ func TestClearedVendorFix(t *testing.T) {
 		t.Error("a clearance must not read as open")
 	}
 }
+
+// The structured half of an open premise (EDR-INCIDENT-01 D1): NewlyBehind is the set difference
+// against what the previous judgement recorded — the fixes published since. A clearance (no
+// Behind) is never "newly behind" anything, and an empty previous set makes every bound new.
+func TestOccurrenceVerdict_NewlyBehind(t *testing.T) {
+	v := domain.OccurrenceVerdict{State: domain.VerdictOpen, Behind: []string{"0:1.0-1.el8", "0:1.0-2.el8"}}
+	if got := v.NewlyBehind([]string{"0:1.0-1.el8"}); len(got) != 1 || got[0] != "0:1.0-2.el8" {
+		t.Errorf("NewlyBehind(one known) = %v, want [0:1.0-2.el8]", got)
+	}
+	if got := v.NewlyBehind(nil); len(got) != 2 {
+		t.Errorf("NewlyBehind(nothing known) = %v, want both bounds", got)
+	}
+	if got := v.NewlyBehind(v.Behind); got != nil {
+		t.Errorf("NewlyBehind(everything known) = %v, want nil", got)
+	}
+	cleared := domain.ClearedVendorFix(domain.VerdictGradeObserved, "fixed")
+	if got := cleared.NewlyBehind(nil); got != nil {
+		t.Errorf("a clearance is behind nothing, got %v", got)
+	}
+}
