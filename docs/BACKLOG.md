@@ -142,6 +142,15 @@ unblocks the most, highest first:
     accepted · unknown), page + API. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
     (7d) with no newer evidence. Patched is proven only by new evidence; nothing auto-decides.
 
+14. **SYNC-1 — one decision, chosen scope** (EDR-SYNC-01, **PROPOSED 2026-11-03**; owner picked
+    "scope at decision time" over auto-copy and proposals-only). A decision carries a scope
+    (`release` default · `project` · `product`); Themis establishes the same Position, recorded
+    against the same person, on every same-CVE same-component Finding in scope — now, on a 1m
+    sweep and the release worker, and for Findings born later. A different component is never
+    synced (roll-forward proposal instead); a local decision is never overwritten; two scoped
+    decisions that disagree apply nothing and are flagged. S1 API+domain+worker, S2 GUI picker +
+    preview, S3 re-decision follow + flags. Beta-period change; each step on explicit go.
+
 Owner-side, not Themis work: the Go toolchain upgrade (13 real stdlib CVEs), one real VAMS pair
 through intake (audit C1). Each delivered step records its VM measurement here and in the tasks
 file before the next is started.
