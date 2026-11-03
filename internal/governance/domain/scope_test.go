@@ -102,7 +102,7 @@ func TestAcceptProposalWith_ScopeAndPropagation(t *testing.T) {
 		}
 	}
 	// A resolved label replaces the bare release id — the line reads like the GUI, not the DB.
-	if r := domain.ScopedRationale(f, " oamp 20.1.0.0-180 ", pos, domain.LevelComponent); !strings.Contains(r, "from oamp 20.1.0.0-180 (Finding fnd-1)") || strings.Contains(r, "rel-1") {
+	if r := domain.ScopedRationale(f, " alpha 1.0.0-7 ", pos, domain.LevelComponent); !strings.Contains(r, "from alpha 1.0.0-7 (Finding fnd-1)") || strings.Contains(r, "rel-1") {
 		t.Errorf("labelled rationale = %q", r)
 	}
 	bare := domain.ReconstitutePosition(2, domain.StanceAffected, "  ", human, domain.PositionInputs{Scope: domain.ScopeProject}, epoch)

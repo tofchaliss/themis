@@ -259,14 +259,14 @@ func TestClient_ReleaseProducts(t *testing.T) {
 func TestClient_ReleaseOwners(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := map[string]string{
-			"/api/v1/releases/rel-1":       `{"id":"rel-1","project_id":"proj-1","version":"20.1.0.0-180"}`,
+			"/api/v1/releases/rel-1":       `{"id":"rel-1","project_id":"proj-1","version":"1.0.0-7"}`,
 			"/api/v1/releases/rel-noproj":  `{"id":"rel-noproj","project_id":""}`,
 			"/api/v1/releases/rel-2":       `{"id":"rel-2","project_id":"proj-noprod"}`,
 			"/api/v1/releases/rel-3":       `{"id":"rel-3","project_id":"proj-2"}`,
-			"/api/v1/projects/proj-1":      `{"id":"proj-1","product_id":"prod-1","name":"oamp"}`,
+			"/api/v1/projects/proj-1":      `{"id":"proj-1","product_id":"prod-1","name":"alpha"}`,
 			"/api/v1/projects/proj-noprod": `{"id":"proj-noprod","product_id":""}`,
 			"/api/v1/projects/proj-2":      `{"id":"proj-2","product_id":"prod-missing","name":"x"}`,
-			"/api/v1/products/prod-1":      `{"id":"prod-1","name":"MRF"}`,
+			"/api/v1/products/prod-1":      `{"id":"prod-1","name":"P1"}`,
 		}[r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -281,7 +281,7 @@ func TestClient_ReleaseOwners(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseOwners: %v", err)
 	}
-	if own.ProductID != "prod-1" || own.ProjectID != "proj-1" || own.ProductName != "MRF" || own.ProjectName != "oamp" || own.Version != "20.1.0.0-180" {
+	if own.ProductID != "prod-1" || own.ProjectID != "proj-1" || own.ProductName != "P1" || own.ProjectName != "alpha" || own.Version != "1.0.0-7" {
 		t.Errorf("owners = %+v", own)
 	}
 	// Every hop fails closed: no id, a missing release, a blank project id, a blank product id,

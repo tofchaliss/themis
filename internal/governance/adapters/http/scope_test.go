@@ -124,8 +124,8 @@ func TestGetScopeTargets(t *testing.T) {
 	repo.seed(withPURL(t, identified(t, "b1", "rel-b1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1"))
 	repo.seed(withPURL(t, identified(t, "c1", "rel-c1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1"))
 	owners := stubOwners{
-		owners: map[string][2]string{"rel-a1": {"MRF", "A"}, "rel-a2": {"MRF", "A"}, "rel-b1": {"MRF", "B"}, "rel-c1": {"OTHER", "C"}},
-		names:  map[string][3]string{"rel-a1": {"Media", "oamp", "1.0"}, "rel-a2": {"Media", "oamp", "1.1"}, "rel-b1": {"Media", "mrfp", "1.0"}},
+		owners: map[string][2]string{"rel-a1": {"P1", "A"}, "rel-a2": {"P1", "A"}, "rel-b1": {"P1", "B"}, "rel-c1": {"OTHER", "C"}},
+		names:  map[string][3]string{"rel-a1": {"Product One", "alpha", "1.0"}, "rel-a2": {"Product One", "alpha", "1.1"}, "rel-b1": {"Product One", "beta", "1.0"}},
 	}
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
 	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
@@ -162,8 +162,8 @@ func TestGetScopeTargets(t *testing.T) {
 	var raw map[string]any
 	_ = json.Unmarshal(body, &raw)
 	tg := raw["targets"].([]any)[0].(map[string]any)
-	if tg["finding_id"] != "a2" || tg["level"] != "component" || tg["project_id"] != "A" || tg["product_id"] != "MRF" || tg["release_id"] != "rel-a2" ||
-		tg["product_name"] != "Media" || tg["project_name"] != "oamp" || tg["version"] != "1.1" {
+	if tg["finding_id"] != "a2" || tg["level"] != "component" || tg["project_id"] != "A" || tg["product_id"] != "P1" || tg["release_id"] != "rel-a2" ||
+		tg["product_name"] != "Product One" || tg["project_name"] != "alpha" || tg["version"] != "1.1" {
 		t.Errorf("target = %v", tg)
 	}
 	if status, body := do(t, http.MethodGet, srv.URL+"/findings/src/scope-targets?scope=release", nil); status != http.StatusOK || !json.Valid(body) {

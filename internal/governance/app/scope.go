@@ -58,7 +58,7 @@ func (o ReleaseOwners) Label() string {
 }
 
 // ReleaseOwnerResolver is the Registry hop scope needs: release → owners WITH their names, so
-// the rationale and the preview say "oamp 20.1.0.0-180", not a UUID (owner ask, 2026-11-03).
+// the rationale and the preview say "<project> <version>", not a UUID (owner ask, 2026-11-03).
 type ReleaseOwnerResolver interface {
 	ReleaseOwners(ctx context.Context, releaseID string) (ReleaseOwners, error)
 }
