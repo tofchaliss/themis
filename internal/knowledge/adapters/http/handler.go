@@ -245,6 +245,29 @@ func (h *Handler) GetFaultlineByCVE(w http.ResponseWriter, r *http.Request, para
 	writeJSON(w, http.StatusOK, toView(f))
 }
 
+// GetFaultlinesByAdvisory handles GET /faultlines/by-advisory?id= (EDR-INCIDENT-01 D2): the
+// cards whose vendor statements carry the advisory. A blank id is a 400, an unwired lookup a
+// 503, nothing found an empty list.
+func (h *Handler) GetFaultlinesByAdvisory(w http.ResponseWriter, r *http.Request, params gen.GetFaultlinesByAdvisoryParams) {
+	cards, err := h.read.ByAdvisory(r.Context(), params.Id)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrInvalidAdvisory):
+			writeProblem(w, http.StatusBadRequest, "invalid advisory id", err.Error())
+		case errors.Is(err, app.ErrAdvisoryUnavailable):
+			writeProblem(w, http.StatusServiceUnavailable, "advisory lookup unavailable", err.Error())
+		default:
+			writeProblem(w, http.StatusInternalServerError, "cannot read faultlines by advisory", err.Error())
+		}
+		return
+	}
+	out := make([]gen.FaultlineView, 0, len(cards))
+	for _, f := range cards {
+		out = append(out, toView(f))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // GetRecentFaultlines handles GET /faultlines/recent — the newest cards by creation time
 // (GUI-16). Paging rules are the app's; an unwired lister is a 503, never an empty page.
 func (h *Handler) GetRecentFaultlines(w http.ResponseWriter, r *http.Request, params gen.GetRecentFaultlinesParams) {

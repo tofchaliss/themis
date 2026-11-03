@@ -153,6 +153,21 @@ func Wire(
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
+	// Watches (EDR-INCIDENT-01 D2): the list is kept whatever is wired; the table needs the
+	// Knowledge seam to resolve identifiers (503 without it), names come from Registry and
+	// "last proof" from Evidence when those are wired. A nil *Client must not become a non-nil
+	// interface, hence the three guards.
+	watches := app.NewWatchService(st, st, nil, idGen{}, sysClock{})
+	if kn != nil {
+		watches = app.NewWatchService(st, st, kn, idGen{}, sysClock{})
+	}
+	if reg != nil {
+		watches = watches.WithOwners(reg)
+	}
+	if ev != nil {
+		watches = watches.WithEvidence(ev)
+	}
+	handler = handler.WithWatches(watches)
 	// The release-evaluation worker (N-M2b) — the half of the path that may fail. The inbound
 	// consumer only records a pending row; this resolves the Release's owners, counts its
 	// Findings and publishes. Without a Registry seam there is nothing to resolve them WITH, so

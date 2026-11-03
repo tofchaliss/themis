@@ -174,6 +174,31 @@ per the 2026-10-28 freeze it ships only with the owner's explicit go.
   `THEMIS_REDHAT_ENABLED`). `THEMIS_REDHAT_POLL_INTERVAL=1h` is documented as the incident
   setting in `deploy/node.env.example`.
 
+### Step B (D2) — built 2026-11-03
+
+- **The Watch is a list, the table is a read.** `watches` (governance migration 000024) holds
+  name, creator, identifiers (append-only), the `notify` flag and the CVE set the identifiers
+  resolved to at the last read. `GET /watches/{id}/status` computes the D2 table every time:
+  identifiers → cards (CVE by `GET /faultlines?cve=`, advisory by the new
+  `GET /faultlines/by-advisory?id=`, a JSONB scan of the reconciled view's `fixed` statements
+  for the D14 `advisory`), cards → Findings, each Finding → `domain.WatchStateOf`. The
+  classification order is the fail-safe one: a standing `not_affected` or accepting Position
+  first, then the mirrored verdicts (all cleared ⇒ `fixed`, any open ⇒ open), then "no active
+  component". `open_fix_available` is `selectFixesFor` non-empty — the posture's own fix
+  selection, so the drawer and the table cannot disagree.
+- **Every (release, CVE) is a row.** The release set is the union over the watched cards'
+  Findings; a release with no Finding for one CVE gets `not_affected` ("no component
+  matches"); a carded CVE with no Finding anywhere is one row with no release; an unresolved
+  identifier is one `unknown` row. Names come from Registry's three-hop `ReleaseOwners`, last
+  proof from Evidence's newest filed document of any kind; both blank when that seam is down,
+  ids always present. Knowledge down is a 500, no Knowledge seam a 503 — never an empty table.
+- **Authority.** Reads any key; create / add write-capable; delete admin. The creator is the
+  key's name (its id when unnamed); an auth-off node requires `created_by`.
+- **D2a deferred.** `notify` round-trips through the store; no evaluation runs on
+  `release_evaluated` / `fix_available` and nothing emits `watch_changed` yet.
+- **GUI.** Rail page Watches: create (rejected tokens reported), list, table with state chips
+  and counts as filters, CSV export of what is shown, add identifiers, delete (admin).
+
 ## What this record does NOT decide
 
 - Automatic acceptance of anything. A `fixed` row is a display state; the Finding closes through

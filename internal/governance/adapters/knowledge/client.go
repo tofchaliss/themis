@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
@@ -102,6 +103,11 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return app.FaultlineKnowledge{}, err
 	}
+	return toKnowledge(body), nil
+}
+
+// toKnowledge maps the wire shape into Governance's own view type.
+func toKnowledge(body faultlineResponse) app.FaultlineKnowledge {
 	fixes := make([]app.FixedVersion, 0, len(body.View.Fixes))
 	for _, f := range body.View.Fixes {
 		fixes = append(fixes, app.FixedVersion{Package: f.Package, Version: f.Version, Ecosystem: f.Ecosystem})
@@ -134,5 +140,59 @@ func (c *Client) GetFaultline(ctx context.Context, faultlineID string) (app.Faul
 		Fixes:           fixes,
 		RangeTrust:      value.TrustClass(body.View.RangeTrust),
 		Applicabilities: apps,
-	}, nil
+	}
+}
+
+// --- Watch resolution (EDR-INCIDENT-01 D2) ------------------------------------------------
+
+var _ app.WatchKnowledge = (*Client)(nil)
+
+// FaultlineByCVE fetches the card for a CVE; found=false on 404 (no card).
+func (c *Client) FaultlineByCVE(ctx context.Context, cve string) (app.FaultlineKnowledge, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/faultlines?cve="+url.QueryEscape(cve), nil)
+	if err != nil {
+		return app.FaultlineKnowledge{}, false, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return app.FaultlineKnowledge{}, false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return app.FaultlineKnowledge{}, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return app.FaultlineKnowledge{}, false, fmt.Errorf("knowledge: faultline by cve %s: status %d", cve, resp.StatusCode)
+	}
+	var body faultlineResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return app.FaultlineKnowledge{}, false, err
+	}
+	return toKnowledge(body), true, nil
+}
+
+// FaultlinesByAdvisory fetches the cards whose vendor statements carry the advisory; an advisory
+// Knowledge has not seen is an empty list.
+func (c *Client) FaultlinesByAdvisory(ctx context.Context, advisory string) ([]app.FaultlineKnowledge, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/faultlines/by-advisory?id="+url.QueryEscape(advisory), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("knowledge: faultlines by advisory %s: status %d", advisory, resp.StatusCode)
+	}
+	var bodies []faultlineResponse
+	if err := json.NewDecoder(resp.Body).Decode(&bodies); err != nil {
+		return nil, err
+	}
+	out := make([]app.FaultlineKnowledge, 0, len(bodies))
+	for _, b := range bodies {
+		out = append(out, toKnowledge(b))
+	}
+	return out, nil
 }

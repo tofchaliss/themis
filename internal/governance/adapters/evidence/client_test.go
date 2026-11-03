@@ -95,3 +95,30 @@ func TestClient_SBOMsAndInventory(t *testing.T) {
 		t.Fatal("decode error swallowed")
 	}
 }
+
+// EDR-INCIDENT-01 D2: the newest evidence of ANY kind, a blank id skipped, none filed = not
+// found, a non-200 an error.
+func TestClient_LatestEvidence(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("release") {
+		case "rel-1":
+			_, _ = w.Write([]byte(`[{"id":"sb-1","kind":"sbom","filed_at":"2026-10-01T00:00:00Z"},{"id":"sr-1","kind":"scanner-report","filed_at":"2026-10-02T00:00:00Z"},{"id":"","kind":"sbom","filed_at":"2026-10-03T00:00:00Z"}]`))
+		case "rel-empty":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	c := evidence.NewClient(srv.URL, srv.Client())
+	ev, ok, err := c.LatestEvidence(context.Background(), "rel-1")
+	if err != nil || !ok || ev.ID != "sr-1" || ev.Kind != "scanner-report" || ev.FiledAt.Day() != 2 {
+		t.Fatalf("latest = %+v ok %v err %v", ev, ok, err)
+	}
+	if _, ok, err := c.LatestEvidence(context.Background(), "rel-empty"); err != nil || ok {
+		t.Errorf("empty: ok %v err %v", ok, err)
+	}
+	if _, _, err := c.LatestEvidence(context.Background(), "rel-err"); err == nil {
+		t.Error("non-200 must be an error")
+	}
+}

@@ -82,6 +82,13 @@ async function apiPUT(node, path, body) {
   return r;
 }
 
+async function apiDELETE(node, path) {
+  const r = await fetch(`/api/${node}${path}`, { method: "DELETE", headers: { Accept: "application/json" } });
+  if (r.status === 401) { sessionGone(); throw new Error("session expired"); }
+  if (r.status === 502) throw new NodeDown(node);
+  return r;
+}
+
 async function problemDetail(r) {
   const j = await r.json().catch(() => ({}));
   return j.detail || j.title || `status ${r.status}`;
@@ -2789,6 +2796,167 @@ async function openDrawer(entry) {
   loadExplain(entry.finding_id, body);
 }
 
+/* --- Watches (EDR-INCIDENT-01 D2) ---
+   A Watch is a named list of CVE and advisory ids an operator pastes during a vulnerability
+   wave. Its table is computed by Governance on every read from the Findings, the Positions and
+   the cards — this page stores nothing and decides nothing. "Fix available" is the vendor's
+   statement; "fixed" is an occurrence cleared by evidence; "patched" is never inferred. */
+
+const WATCH_STATES = [
+  ["open_fix_available", "chip-crit", "open, a vendor fix is on record for the package — re-scan to prove it applied"],
+  ["open_no_fix", "chip-warn", "open, no vendor fix known for the package"],
+  ["accepted", "chip-elevated", "a person accepted, mitigated or deferred it; the Position stands"],
+  ["fixed", "chip-good", "every occurrence is cleared by evidence newer than the fix"],
+  ["not_affected", "", "no component of the release matches, or a not_affected Position stands"],
+  ["unknown", "chip-info", "no card for the CVE, or the advisory names nothing Themis has seen"],
+];
+const watchStateChip = (state) => {
+  const [, cls, title] = WATCH_STATES.find(([k]) => k === state) || ["", "", ""];
+  return `<span class="chip ${cls}" title="${esc(title)}"><i></i>${esc((state || "").replace(/_/g, " "))}</span>`;
+};
+
+async function viewWatches() {
+  setRail("watches");
+  crumbs([{ label: "Overview", href: "#/" }, { label: "Watches" }]);
+  loading("watches");
+  try {
+    const r = await apiRaw("governance", "/watches");
+    if (r.status === 503) {
+      main.innerHTML = `<div class="err">This Governance node does not serve watches yet (older build).</div>`;
+      return;
+    }
+    if (!r.ok) throw new Error(`governance /watches → ${r.status}`);
+    const list = asArray(await r.json());
+    main.innerHTML = `
+      <div class="card">
+        <h2 class="card-title">Watches</h2>
+        <p class="card-sub">Paste the CVE and Red Hat advisory ids of a wave (RHSA-, RHBA-, RHEA-), name the list, and read one table: every release that has any of them, with its state now. The table is computed from what Themis already knows on every open; it stores nothing and decides nothing. <b>Fix available is the vendor's statement. Patched is proven only by a new scan or SBOM of this release.</b></p>
+        <form id="watch-new" class="form-grid">
+          <label>Name <input type="text" id="watch-name" placeholder="e.g. wave 2026-11" required autocomplete="off"></label>
+          <label>Identifiers <textarea id="watch-ids" rows="4" placeholder="CVE-2026-1234 CVE-2026-2345 RHSA-2026:1234 — any separator" required></textarea></label>
+          <div><button class="btn btn-primary" type="submit">Create watch</button> <span id="watch-new-msg" class="card-sub"></span></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Your watches</h2>
+        ${list.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Name</th><th class="num">Identifiers</th><th class="num">Resolved CVEs</th><th>Created</th><th>By</th></tr></thead>
+          <tbody>${list.map((w) => `<tr class="rowlink" data-id="${esc(w.id)}">
+            <td><b>${esc(w.name)}</b></td><td class="num">${asArray(w.identifiers).length}</td>
+            <td class="num">${w.resolved_at ? asArray(w.resolved_cves).length : "—"}</td>
+            <td>${timeAgo(w.created_at)}</td><td>${esc(w.created_by)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><b>No watch yet</b>Create one above; it appears here and opens as a table.</div>`}
+      </div>`;
+    main.querySelectorAll("tr.rowlink").forEach((row) => row.addEventListener("click", () => { location.hash = `#/watches/${encodeURIComponent(row.dataset.id)}`; }));
+    $("#watch-new").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const msg = $("#watch-new-msg");
+      msg.textContent = "Creating…";
+      try {
+        const res = await apiPOST("governance", "/watches", { name: $("#watch-name").value, identifiers: $("#watch-ids").value, created_by: WHO });
+        if (!res.ok) { msg.textContent = await problemDetail(res); return; }
+        const out = await res.json();
+        const rej = asArray(out.rejected);
+        toast(`Watch created: ${out.added} identifier(s)${rej.length ? `, ${rej.length} not understood` : ""}`);
+        location.hash = `#/watches/${encodeURIComponent(out.watch.id)}`;
+      } catch (e) { msg.textContent = e.message; }
+    });
+  } catch (e) {
+    main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+/* The table of one Watch. Filter chips narrow by state; CSV export writes what is shown. */
+let watchFilter = "";
+async function viewWatch(id) {
+  setRail("watches");
+  loading("the watch");
+  try {
+    const r = await apiRaw("governance", `/watches/${encodeURIComponent(id)}/status`);
+    if (r.status === 404) { main.innerHTML = `<div class="empty"><b>No such watch</b>It may have been deleted. <a href="#/watches">Back to watches</a>.</div>`; return; }
+    if (r.status === 503) { main.innerHTML = `<div class="err">${esc(await problemDetail(r))}</div>`; return; }
+    if (!r.ok) throw new Error(await problemDetail(r));
+    const st = await r.json();
+    const w = st.watch || {};
+    crumbs([{ label: "Overview", href: "#/" }, { label: "Watches", href: "#/watches" }, { label: w.name || id }]);
+    const rows = asArray(st.rows), idents = asArray(st.identifiers), counts = st.counts || {};
+    const unresolved = idents.filter((i) => !i.resolved);
+    const shown = watchFilter ? rows.filter((x) => x.state === watchFilter) : rows;
+    const relName = (x) => x.release_id ? `${esc(x.project_name || x.project_id || "")} ${esc(x.version || "")}`.trim() || `<span class="mono">${esc(x.release_id)}</span>` : `<span class="card-sub">—</span>`;
+    const proof = (x) => x.last_evidence_at ? `${esc(x.last_evidence_kind || "evidence")} ${esc(fmtWhen(x.last_evidence_at))}` : (x.release_id ? `<span class="card-sub">none filed</span>` : "");
+    main.innerHTML = `
+      <div class="card">
+        <h2 class="card-title">${esc(w.name || "")} <span class="card-sub">watch · ${idents.length} identifier(s) · ${asArray(w.resolved_cves).length} CVE(s) · created ${timeAgo(w.created_at)} by ${esc(w.created_by || "")}</span></h2>
+        <p class="card-sub">${esc(st.note || "")} Computed ${timeAgo(st.generated_at)}.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn ${watchFilter ? "" : "btn-primary"}" data-filter="">all ${rows.length}</button>
+          ${WATCH_STATES.map(([k, cls]) => `<button class="btn ${watchFilter === k ? "btn-primary" : ""}" data-filter="${k}"><span class="chip ${cls}"><i></i>${esc(k.replace(/_/g, " "))}</span> ${counts[k] || 0}</button>`).join("")}
+          <span style="flex:1"></span>
+          <button class="btn" id="watch-csv">Export CSV</button>
+          <button class="btn" id="watch-delete" title="admin only; the Findings are untouched">Delete watch</button>
+        </div>
+        ${unresolved.length ? `<p class="card-sub" style="margin-top:10px">Not resolved: ${unresolved.map((i) => `<span class="mono">${esc(i.id)}</span>`).join(", ")} — ${unresolved.some((i) => i.kind === "advisory") ? "an advisory resolves through the cards' recorded RHSA ids; one Themis has not seen on any card names nothing." : "no card exists for it yet; gather it from the CVE page."}</p>` : ""}
+      </div>
+      <div class="card">
+        ${shown.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Product</th><th>Project · version</th><th>CVE</th><th>State</th><th>Stance</th><th>Packages</th><th>Vendor fix</th><th>Last proof</th></tr></thead>
+          <tbody>${shown.map((x) => `<tr>
+            <td>${esc(x.product_name || x.product_id || "")}</td><td>${relName(x)}</td>
+            <td><a href="#/cve/${encodeURIComponent(x.cve)}" class="mono">${esc(x.cve)}</a></td>
+            <td>${watchStateChip(x.state)}</td><td>${x.stance ? stanceChip(x.stance, true) : `<span class="card-sub">undecided</span>`}</td>
+            <td>${asArray(x.packages).map((p) => `<span class="mono">${esc(p)}</span>`).join(", ")}</td>
+            <td>${asArray(x.fixes).map((f) => `<span class="mono">${esc(f)}</span>`).join(", ")}</td>
+            <td>${proof(x)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><b>${rows.length ? "Nothing in this state" : "Nothing to show"}</b>${rows.length ? "Pick another filter." : "No release in the estate has a finding for these identifiers."}</div>`}
+      </div>
+      <div class="card">
+        <h2 class="card-title">Add identifiers</h2>
+        <p class="card-sub">A watch only grows: paste more ids, nothing already listed is dropped.</p>
+        <form id="watch-add" class="form-grid">
+          <label>Identifiers <textarea id="watch-add-ids" rows="3" required></textarea></label>
+          <div><button class="btn" type="submit">Add</button> <span id="watch-add-msg" class="card-sub"></span></div>
+        </form>
+      </div>`;
+    main.querySelectorAll("button[data-filter]").forEach((b) => b.addEventListener("click", () => { watchFilter = b.dataset.filter; viewWatch(id); }));
+    $("#watch-csv").addEventListener("click", () => {
+      const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const head = ["product", "project", "version", "release_id", "cve", "state", "stance", "packages", "vendor_fixes", "last_evidence_kind", "last_evidence_at", "finding_id"];
+      const lines = [head.join(",")].concat(shown.map((x) => [x.product_name || x.product_id, x.project_name || x.project_id, x.version, x.release_id, x.cve, x.state, x.stance,
+        asArray(x.packages).join(" "), asArray(x.fixes).join(" "), x.last_evidence_kind, x.last_evidence_at, x.finding_id].map(q).join(",")));
+      const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+      const dl = document.createElement("a");
+      dl.href = URL.createObjectURL(blob);
+      dl.download = `watch-${(w.name || id).replace(/[^A-Za-z0-9_-]+/g, "_")}${watchFilter ? "-" + watchFilter : ""}.csv`;
+      dl.click();
+      setTimeout(() => URL.revokeObjectURL(dl.href), 1000);
+    });
+    $("#watch-delete").addEventListener("click", async () => {
+      if (!confirm(`Delete the watch "${w.name}"? Nothing else changes.`)) return;
+      try {
+        const res = await apiDELETE("governance", `/watches/${encodeURIComponent(id)}`);
+        if (!res.ok) { toast(await problemDetail(res)); return; }
+        toast("Watch deleted");
+        location.hash = "#/watches";
+      } catch (e) { toast(e.message); }
+    });
+    $("#watch-add").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const msg = $("#watch-add-msg");
+      msg.textContent = "Adding…";
+      try {
+        const res = await apiPOST("governance", `/watches/${encodeURIComponent(id)}/identifiers`, { identifiers: $("#watch-add-ids").value });
+        if (!res.ok) { msg.textContent = await problemDetail(res); return; }
+        const out = await res.json();
+        const rej = asArray(out.rejected);
+        toast(`${out.added} identifier(s) added${rej.length ? `, not understood: ${rej.join(", ")}` : ""}`);
+        viewWatch(id);
+      } catch (e) { msg.textContent = e.message; }
+    });
+  } catch (e) {
+    main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
 /* ---------- router ---------- */
 
 function route() {
@@ -2806,6 +2974,9 @@ function route() {
   if (h.startsWith("#/new")) return viewNew();
   if (h.startsWith("#/reports")) return viewReports();
   if (h.startsWith("#/feeds")) return viewFeeds();
+  const watch = h.match(/^#\/watches\/([^?]+)/);
+  if (watch) return viewWatch(decodeURIComponent(watch[1]));
+  if (h.startsWith("#/watches")) return viewWatches();
   if (h.startsWith("#/admin")) return viewAdmin();
   return viewOverview();
 }

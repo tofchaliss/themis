@@ -136,10 +136,12 @@ unblocks the most, highest first:
 13. **INC-1 — behaviour during a vulnerability wave** (EDR-INCIDENT-01, **ACCEPTED 2026-11-02**,
     owner-agreed order A → B → C; beta-period change, each step on explicit go). **A BUILT
     2026-11-02** (realization note in the EDR; VM measurement pending): a vendor fix learned for an
-    open occurrence becomes `fix_available` on the webhook / mail routes (Jira comment deferred to
-    B), and Red Hat joins `POST /faultlines/gather`. B: a Watch (CVE ids and/or RHSA ids in → one
-    per-(release, CVE) state table out: not_affected · open_no_fix · open_fix_available · fixed ·
-    accepted · unknown), page + API. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
+    open occurrence becomes `fix_available` on the webhook / mail routes (Jira comment deferred),
+    and Red Hat joins `POST /faultlines/gather`; **VM PASS 2026-11-03** (forced re-verdict →
+    one Teams card). **B BUILT 2026-11-03** (realization note in the EDR; VM pending): a Watch
+    (CVE ids and/or RHSA ids in → one per-(release, CVE) state table out: not_affected ·
+    open_no_fix · open_fix_available · fixed · accepted · unknown), `/watches` API, Knowledge
+    `by-advisory` lookup, Watches GUI page with CSV export; D2a `notify` stored, not emitted. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
     (7d) with no newer evidence. Patched is proven only by new evidence; nothing auto-decides.
 
 14. **SYNC-1 — one decision, chosen scope** (EDR-SYNC-01, **ACCEPTED 2026-11-03; S1 BUILT

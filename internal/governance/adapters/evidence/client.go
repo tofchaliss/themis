@@ -115,3 +115,30 @@ func (c *Client) getJSON(ctx context.Context, path string, v any) error {
 }
 
 var _ app.UploadEvidence = (*Client)(nil)
+
+var _ app.WatchEvidence = (*Client)(nil)
+
+// LatestEvidence returns the newest evidence of any kind filed against a release — "last proof"
+// on a Watch's table (EDR-INCIDENT-01 D2); found=false when nothing is filed.
+func (c *Client) LatestEvidence(ctx context.Context, releaseID string) (app.EvidenceRef, bool, error) {
+	var rows []struct {
+		ID      string    `json:"id"`
+		Kind    string    `json:"kind"`
+		FiledAt time.Time `json:"filed_at"`
+	}
+	if err := c.getJSON(ctx, "/api/v1/evidence?release="+url.QueryEscape(releaseID), &rows); err != nil {
+		return app.EvidenceRef{}, false, err
+	}
+	var best app.EvidenceRef
+	found := false
+	for _, r := range rows {
+		if r.ID == "" {
+			continue
+		}
+		if !found || r.FiledAt.After(best.FiledAt) {
+			best = app.EvidenceRef{ID: r.ID, Kind: r.Kind, FiledAt: r.FiledAt.UTC()}
+			found = true
+		}
+	}
+	return best, found, nil
+}

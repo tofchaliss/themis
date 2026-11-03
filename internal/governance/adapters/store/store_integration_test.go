@@ -1378,3 +1378,59 @@ func TestDecisionScopeRoundTripAndPendingQueue(t *testing.T) {
 		t.Errorf("after mark = %+v", left)
 	}
 }
+
+// EDR-INCIDENT-01 D2: a Watch round-trips whole (identifiers in order, the recorded resolution,
+// the notify flag), the list is newest first, and a delete removes it — twice is not found.
+func TestWatchRoundTrip(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	w, err := domain.NewWatch("w-1", "wave", "alice", []string{"CVE-2026-0001", "RHSA-2026:0001"}, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveWatch(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetWatch(ctx, "w-1")
+	if err != nil || got.Name() != "wave" || got.CreatedBy() != "alice" || !got.CreatedAt().Equal(epoch) ||
+		len(got.Identifiers()) != 2 || got.Identifiers()[1] != "RHSA-2026:0001" || !got.ResolvedAt().IsZero() || len(got.ResolvedCVEs()) != 0 || got.Notify() {
+		t.Fatalf("loaded = %+v err %v", got, err)
+	}
+
+	// Grow, resolve, flag; the upsert replaces the row.
+	got.AddIdentifiers([]string{"CVE-2026-0002"})
+	got.RecordResolution([]string{"CVE-2026-0002", "CVE-2026-0001"}, epoch.Add(time.Hour))
+	got.SetNotify(true)
+	if err := st.SaveWatch(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := st.GetWatch(ctx, "w-1")
+	if err != nil || len(again.Identifiers()) != 3 || again.Identifiers()[2] != "CVE-2026-0002" ||
+		len(again.ResolvedCVEs()) != 2 || again.ResolvedCVEs()[0] != "CVE-2026-0001" || !again.ResolvedAt().Equal(epoch.Add(time.Hour)) || !again.Notify() {
+		t.Fatalf("reloaded = %+v err %v", again, err)
+	}
+
+	w2, _ := domain.NewWatch("w-2", "later", "bob", []string{"CVE-2026-0009"}, epoch.Add(2*time.Hour))
+	if err := st.SaveWatch(ctx, w2); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListWatches(ctx)
+	if err != nil || len(list) != 2 || list[0].ID() != "w-2" || list[1].ID() != "w-1" {
+		t.Fatalf("list = %+v err %v", list, err)
+	}
+
+	if _, err := st.GetWatch(ctx, "ghost"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("ghost get: %v", err)
+	}
+	if err := st.DeleteWatch(ctx, "w-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteWatch(ctx, "w-2"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("second delete: %v", err)
+	}
+	if list, _ := st.ListWatches(ctx); len(list) != 1 {
+		t.Errorf("after delete = %d", len(list))
+	}
+}

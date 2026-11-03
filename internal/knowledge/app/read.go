@@ -27,6 +27,8 @@ type ReadService struct {
 	proj ProjectionReader
 	// recent may be nil — Recent then refuses (GUI-16).
 	recent RecentLister
+	// advisory may be nil — ByAdvisory then refuses (EDR-INCIDENT-01 D2).
+	advisory AdvisoryLister
 }
 
 // NewReadService wires the read ports.
