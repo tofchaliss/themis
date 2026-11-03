@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluated. The target carries `propagated_from_finding_id` / `_version`; the proposal is in
   the person's name (`scoped:<target>:<source>:v<n>`, Asserted). A local decision is never
   overwritten; two scoped decisions that disagree apply nothing; a propagated Position never
-  propagates further. `GET /findings/{id}/scope-targets?scope=` previews what a scope reaches.
-  Governance migration 000023. Needs the Registry seam; without it the feature is off.
+  propagates further. `GET /findings/{id}/scope-targets?scope=` previews what a scope reaches,
+  each target with its `product_name`, `project_name` and `version` beside the ids, and the
+  propagated rationale names the source as "<project> <version>", not a release UUID (owner
+  ask, 2026-11-03 VM round). Governance migration 000023. Needs the Registry seam; without it
+  the feature is off.
 - **Fix-available alert** (EDR-INCIDENT-01 D1, INC-1 step A): when an open row learns a vendor
   fix it is behind (a same-major RPM bound or an Alpine bound), Knowledge announces
   `knowledge.fix_published.v1`; Governance collects the notices and every

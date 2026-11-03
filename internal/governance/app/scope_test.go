@@ -19,17 +19,18 @@ import (
 // with a per-release outage and a per-release blank answer.
 type ownersByRelease struct {
 	owners map[string][2]string
+	names  map[string][3]string // optional: product name, project name, version
 	fail   map[string]bool
 	calls  int
 }
 
-func (o *ownersByRelease) ProductAndProjectOfRelease(_ context.Context, releaseID string) (string, string, error) {
+func (o *ownersByRelease) ReleaseOwners(_ context.Context, releaseID string) (app.ReleaseOwners, error) {
 	o.calls++
 	if o.fail[releaseID] {
-		return "", "", errors.New("registry: connection refused")
+		return app.ReleaseOwners{}, errors.New("registry: connection refused")
 	}
-	own := o.owners[releaseID]
-	return own[0], own[1], nil
+	own, n := o.owners[releaseID], o.names[releaseID]
+	return app.ReleaseOwners{ProductID: own[0], ProjectID: own[1], ProductName: n[0], ProjectName: n[1], Version: n[2]}, nil
 }
 
 // scopeQueue is the pending-scoped-positions seam in memory: it answers from the repo (a scoped,
@@ -92,9 +93,12 @@ func decidedScoped(t *testing.T, f domain.Finding, pid domain.ProposalID, stance
 
 // The owner's estate: product MRF with projects A and B, product OTHER with project C.
 func scopeOwners() *ownersByRelease {
-	return &ownersByRelease{owners: map[string][2]string{
-		"rel-a1": {"MRF", "A"}, "rel-a2": {"MRF", "A"}, "rel-b1": {"MRF", "B"}, "rel-c1": {"OTHER", "C"},
-	}}
+	return &ownersByRelease{
+		owners: map[string][2]string{"rel-a1": {"MRF", "A"}, "rel-a2": {"MRF", "A"}, "rel-b1": {"MRF", "B"}, "rel-c1": {"OTHER", "C"}},
+		// Only rel-a1 has names: a rationale from it reads "oamp 1.0", one from the others
+		// falls back to the release id.
+		names: map[string][3]string{"rel-a1": {"Media", "oamp", "1.0"}},
+	}
 }
 
 func scopeProduct() domain.AcceptanceTerms { return domain.AcceptanceTerms{Scope: domain.ScopeProduct} }
@@ -125,7 +129,7 @@ func TestScopePropagation_Targets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].FindingID != "a2" || got[0].Level != domain.LevelComponent || got[0].ProjectID != "A" ||
+	if len(got) != 2 || got[0].FindingID != "a2" || got[0].Level != domain.LevelComponent || got[0].ProjectID != "A" || got[0].ProjectName != "" ||
 		got[1].FindingID != "b1" || got[1].Level != domain.LevelArtifact || got[1].ProductID != "MRF" || got[1].ReleaseID != "rel-b1" {
 		t.Fatalf("product targets = %+v", got)
 	}
@@ -203,7 +207,7 @@ func TestScopePropagation_SweepAppliesThePersonsDecision(t *testing.T) {
 	if !in.ReviewBy.Equal(terms.ReviewBy) || in.Owner != terms.Owner || in.Treatment != terms.Treatment || in.Proof != terms.Proof {
 		t.Errorf("terms not carried: %+v", in)
 	}
-	if !strings.Contains(pos.Rationale(), "compensated by the WAF") || !strings.Contains(pos.Rationale(), "applied by scope product from release rel-a1") {
+	if !strings.Contains(pos.Rationale(), "compensated by the WAF") || !strings.Contains(pos.Rationale(), "applied by scope product from oamp 1.0 (Finding src)") {
 		t.Errorf("rationale = %q", pos.Rationale())
 	}
 	if ps := b1.Proposals(); len(ps) != 1 || ps[0].Proposer() != human || ps[0].EvidenceTrust() != value.TrustAsserted || ps[0].IsOpen() {
@@ -287,6 +291,10 @@ func TestScopePropagation_SweepFailuresLeaveTheRowPending(t *testing.T) {
 	sp := app.NewScopePropagation(writeSvc(repo), q, undecidedByRelease{repo: repo}, owners)
 	if _, err := sp.Sweep(ctx); err == nil || len(q.marked) != 0 {
 		t.Fatalf("Registry outage: err=%v marked=%v, want error and nothing marked", err, q.marked)
+	}
+	owners.fail = map[string]bool{"rel-a1": true} // the SOURCE release unresolvable: same answer
+	if _, err := sp.Sweep(ctx); err == nil || len(q.marked) != 0 {
+		t.Fatalf("Registry outage on the source: err=%v marked=%v", err, q.marked)
 	}
 	owners.fail = nil
 	if res, err := sp.Sweep(ctx); err != nil || res.Applied != 1 || len(q.marked) != 1 {

@@ -171,6 +171,16 @@ change: each step ships only on the owner's explicit go.
   sources apply nothing and are counted (`conflicts` in the sweep report); the D5
   `scope_conflict` flag on the Finding is S3.
 - No Registry seam ⇒ no scope: the node logs it at startup and the preview answers 503.
+- **Names, not UUIDs** (owner, first VM round 2026-11-03): the Registry hop scope uses
+  (`ReleaseOwnerResolver`) returns the product and project NAMES and the release version beside
+  the ids. The ids decide scope; the names go into the propagated rationale ("applied by scope
+  product from oamp 20.1.0.0-180 (Finding …)") and onto every preview target. A blank name falls
+  back to the id, never to nothing.
+- VM round 2026-11-03 (S1 PASS): decided once on project A with scope `product`; the one
+  undecided sibling (a third project, artifact level) carried the Position within a minute,
+  same person, `propagated_from` set; the sibling the owner had decided the day before kept its
+  own Position (D5) — the owner read that as correct. A test stance was then corrected by hand
+  on both Findings, because a re-decision does not yet follow (S3).
 - Still open: S2 (GUI picker, preview count, "applied from" line), S3 (re-decision follow,
   `scope_withdrawn`, `scope_conflict` flags).
 

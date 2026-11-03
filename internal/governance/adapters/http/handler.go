@@ -277,7 +277,9 @@ func (h *Handler) GetScopeTargets(w http.ResponseWriter, r *http.Request, id str
 		level := gen.ScopeTargetViewLevel(t.Level)
 		out = append(out, gen.ScopeTargetView{
 			FindingId: strptr(string(t.FindingID)), ReleaseId: strptr(t.ReleaseID),
-			ProductId: strptr(t.ProductID), ProjectId: strptr(t.ProjectID), Level: &level,
+			ProductId: strptr(t.ProductID), ProjectId: strptr(t.ProjectID),
+			ProductName: strptr(t.ProductName), ProjectName: strptr(t.ProjectName), Version: strptr(t.Version),
+			Level: &level,
 		})
 	}
 	count, nProjects := len(out), len(projects)

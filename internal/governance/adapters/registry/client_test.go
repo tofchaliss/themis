@@ -255,3 +255,40 @@ func TestClient_ReleaseProducts(t *testing.T) {
 		}
 	}
 }
+
+func TestClient_ReleaseOwners(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := map[string]string{
+			"/api/v1/releases/rel-1":       `{"id":"rel-1","project_id":"proj-1","version":"20.1.0.0-180"}`,
+			"/api/v1/releases/rel-noproj":  `{"id":"rel-noproj","project_id":""}`,
+			"/api/v1/releases/rel-2":       `{"id":"rel-2","project_id":"proj-noprod"}`,
+			"/api/v1/releases/rel-3":       `{"id":"rel-3","project_id":"proj-2"}`,
+			"/api/v1/projects/proj-1":      `{"id":"proj-1","product_id":"prod-1","name":"oamp"}`,
+			"/api/v1/projects/proj-noprod": `{"id":"proj-noprod","product_id":""}`,
+			"/api/v1/projects/proj-2":      `{"id":"proj-2","product_id":"prod-missing","name":"x"}`,
+			"/api/v1/products/prod-1":      `{"id":"prod-1","name":"MRF"}`,
+		}[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+
+	own, err := c.ReleaseOwners(context.Background(), "rel-1")
+	if err != nil {
+		t.Fatalf("ReleaseOwners: %v", err)
+	}
+	if own.ProductID != "prod-1" || own.ProjectID != "proj-1" || own.ProductName != "MRF" || own.ProjectName != "oamp" || own.Version != "20.1.0.0-180" {
+		t.Errorf("owners = %+v", own)
+	}
+	// Every hop fails closed: no id, a missing release, a blank project id, a blank product id,
+	// a product Registry cannot serve.
+	for _, id := range []string{"", "missing", "rel-noproj", "rel-2", "rel-3"} {
+		if _, err := c.ReleaseOwners(context.Background(), id); err == nil {
+			t.Errorf("release %q: want an error, got owners", id)
+		}
+	}
+}

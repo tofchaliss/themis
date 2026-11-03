@@ -765,6 +765,14 @@ components:
           type: string
         project_id:
           type: string
+        product_name:
+          type: string
+          description: The product's name as Registry holds it (blank when unknown) — what a person reads; the ids above are what scope is decided on.
+        project_name:
+          type: string
+        version:
+          type: string
+          description: The target release's version.
         level:
           type: string
           enum: [artifact, component]
