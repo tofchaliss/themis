@@ -832,7 +832,7 @@ func TestBuildIDPersistsAndReadsBack(t *testing.T) {
 	ctx := context.Background()
 	s := store.New(pool)
 
-	const filedBuild = "Jenkins/OAMP-core/1917"
+	const filedBuild = "Jenkins/ALPHA-core/1917"
 	raw := []byte("sbom-with-a-build-id")
 	e, ev := buildEvidence(t, "ev-build", "rel-build", raw, filedBuild)
 	if _, err := s.Save(ctx, e, raw, ev); err != nil {
@@ -849,7 +849,7 @@ func TestBuildIDPersistsAndReadsBack(t *testing.T) {
 		t.Errorf("the new column disturbed its neighbours: %+v", got.Provenance())
 	}
 
-	const retryBuild = "Jenkins/OAMP-core/1918"
+	const retryBuild = "Jenkins/ALPHA-core/1918"
 	if err := s.SaveIntakeReceipt(ctx, store.IntakeReceipt{
 		IntakeID: "in-build", Status: domain.ReceiptFiled, EvidenceID: "ev-build",
 		ReleaseID: "rel-build", BuildID: retryBuild,

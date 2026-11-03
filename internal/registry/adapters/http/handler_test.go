@@ -314,18 +314,18 @@ func assertFindOrCreate(t *testing.T, url string, body map[string]string) string
 
 func TestCreateProductIs201NewAnd200Existing(t *testing.T) {
 	srv := newServer(t, newFakeRepo())
-	assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
 }
 
 func TestCreateProjectIs201NewAnd200Existing(t *testing.T) {
 	srv := newServer(t, newFakeRepo())
-	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
 	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": prodID, "name": "core"})
 }
 
 func TestCreateReleaseIs201NewAnd200Existing(t *testing.T) {
 	srv := newServer(t, newFakeRepo())
-	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	prodID := assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
 	projID := assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": prodID, "name": "core"})
 	assertFindOrCreate(t, srv.URL+"/releases", map[string]string{"project_id": projID, "version": "R1917.256"})
 }
@@ -496,7 +496,7 @@ func TestGetReleaseNotFound(t *testing.T) {
 //
 // Before this, a release's posture was reachable only by a caller that already held the UUID
 // `POST /releases` printed. Every runbook in the repo worked around it by capturing that id, and an
-// operator who knew "product mrf, release 20.1.0" had to query Postgres directly — exactly the
+// operator who knew "product p1, release 20.1.0" had to query Postgres directly — exactly the
 // coupling a read API exists to remove.
 func TestTraversalEndpoints(t *testing.T) {
 	srv := newServer(t, newFakeRepo())
@@ -542,7 +542,7 @@ func TestTraversalEndpoints(t *testing.T) {
 	if code, list := getJSON("/projects/" + projID + "/releases"); code != http.StatusOK || len(list) != 1 {
 		t.Errorf("GET releases = %d %v", code, list)
 	}
-	// The version filter completes the traversal: "product mrf, release 20.1.0" becomes reachable
+	// The version filter completes the traversal: "product p1, release 20.1.0" becomes reachable
 	// without anyone holding a UUID.
 	if code, list := getJSON("/projects/" + projID + "/releases?version=1.0.0"); code != http.StatusOK || len(list) != 1 {
 		t.Errorf("GET releases?version = %d %v", code, list)
@@ -584,11 +584,11 @@ func TestTraversalEndpoints_StoreFailure(t *testing.T) {
 // and surface store faults as 500s.
 func TestGetProjectAndProduct(t *testing.T) {
 	repo := newFakeRepo()
-	proj, err := domain.NewProject("proj-1", "prod-1", "cdmrf-oamp")
+	proj, err := domain.NewProject("proj-1", "prod-1", "project-alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
-	prod, err := domain.NewProduct("prod-1", "MRF")
+	prod, err := domain.NewProduct("prod-1", "P1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestGetProjectAndProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if pv.ID != "proj-1" || pv.ProductID != "prod-1" || pv.Name != "cdmrf-oamp" {
+	if pv.ID != "proj-1" || pv.ProductID != "prod-1" || pv.Name != "project-alpha" {
 		t.Errorf("project view = %+v", pv)
 	}
 
@@ -624,7 +624,7 @@ func TestGetProjectAndProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if prv.Name != "MRF" {
+	if prv.Name != "P1" {
 		t.Errorf("product view = %+v", prv)
 	}
 

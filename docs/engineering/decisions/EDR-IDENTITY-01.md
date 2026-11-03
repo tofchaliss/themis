@@ -23,7 +23,7 @@ It exists as its own horizontal because the 2026-07-31 parity audit's root-cause
 per-context EDRs leave exactly this kind of concern ownerless: the identity decision is made in Evidence's
 parsers, consumed in Knowledge's correlation, and enforced as an invariant in Governance's domain.
 
-**Evidence base (measured on one real document, not read from code).** MRF/cdmrf-oamp, 2026-09-16:
+**Evidence base (measured on one real document, not read from code).** P1/project-alpha, 2026-09-16:
 
 - One SPDX document contains the SAME package **twice** — once `primaryPackagePurpose: LIBRARY` with a
   proper `pkg:rpm/rocky/httpd@…` external ref, once `APPLICATION` with `supplier: NOASSERTION` and **no
@@ -180,7 +180,7 @@ the very thing in question, and this EDR is *about* identity. Count the subjects
 
 ## Validation criterion (binding on every phase)
 
-On the measured MRF document, after this EDR ships:
+On the measured P1 document, after this EDR ships:
 
 1. The purl-less httpd twin resolves onto `pkg:rpm/rocky/httpd@…` — **one** component, not two subjects.
 2. No component is recorded with `component_purl = ''` on any path.

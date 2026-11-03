@@ -7,7 +7,7 @@ with a proper `pkg:rpm/rocky/httpd@…` external ref, once `APPLICATION` with `s
 **no `externalRefs` at all**. Same name, same `versionInfo`. The duplicate originates upstream; Themis did
 not invent it.
 
-**Two intake doors gave opposite answers on that one input** (measured live on MRF/cdmrf-oamp,
+**Two intake doors gave opposite answers on that one input** (measured live on P1/project-alpha,
 2026-09-16): the SPDX parser dropped the purl-less twin (`canonical_inventory` = 489 components, exactly
 **1** httpd), while the scanner path admitted its analogue — which then became a security subject on
 **60+ cards**. Those are the same rows GOV-MIRROR-1 found diverged.

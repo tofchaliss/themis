@@ -279,7 +279,7 @@ counterexample that motivated the rule, not a broad success or failure condition
       - converter change that **alters** purl or ecosystem derivation → occurrence count **rises**,
         old rows stay active, both identities live on the same card and release.
       Record the before/after counts of `faultline_matches` and `COUNT(DISTINCT component_purl)`
-      per `(release, faultline)`. The second case is KN-SCAN-4(b)'s shape — 87 of 87 rows on MRF
+      per `(release, faultline)`. The second case is KN-SCAN-4(b)'s shape — 87 of 87 rows on P1
       2026-09-17 — and is the *usual* reason a converter gets bumped, so it is the case that must be
       measured rather than the comfortable one.
 - [ ] 8.4 **Nothing is retired implicitly.** Assert that a reconversion sets no

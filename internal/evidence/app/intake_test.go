@@ -225,7 +225,7 @@ func TestCreateReleaseWithReleaseIDIsRefused(t *testing.T) {
 		Body:          []byte(`[{"vulnerability_id":"CVE-1"}]`),
 		ReleaseID:     "rel-1",
 		CreateRelease: true,
-		Product:       "OAMP", Project: "oamp-core", Version: "R1917.256",
+		Product:       "ALPHA", Project: "alpha-core", Version: "R1917.256",
 	})
 	rig.assertRefused(t, r, domain.ReasonCreateReleaseConflict)
 	if rig.resolver.calls != 0 {
@@ -239,9 +239,9 @@ func TestCreateReleaseWithReleaseIDIsRefused(t *testing.T) {
 // two of the three branches missing.
 func TestCreateReleaseNeedsTheWholeTriple(t *testing.T) {
 	for _, tc := range []struct{ name, product, project, version string }{
-		{"no product", "", "oamp-core", "R1917.256"},
-		{"no project", "OAMP", "", "R1917.256"},
-		{"no version", "OAMP", "oamp-core", ""},
+		{"no product", "", "alpha-core", "R1917.256"},
+		{"no project", "ALPHA", "", "R1917.256"},
+		{"no version", "ALPHA", "alpha-core", ""},
 		{"nothing at all", "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,7 +270,7 @@ func TestIncompleteTripleWithoutCreateReleaseIsUnchanged(t *testing.T) {
 
 	r := rig.intake(t, app.IntakeCommand{
 		Body:    []byte(`[{"vulnerability_id":"CVE-1"}]`),
-		Product: "OAMP", Version: "R1917.256", // no project
+		Product: "ALPHA", Version: "R1917.256", // no project
 	})
 	rig.assertRefused(t, r, domain.ReasonUnknownRelease)
 	if rig.resolver.calls != 1 {
@@ -394,7 +394,7 @@ func TestCreateReleaseReachesResolutionAndTheCreateWaits(t *testing.T) {
 
 	r := rig.intake(t, app.IntakeCommand{
 		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), CreateRelease: true,
-		Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+		Product: "ALPHA", Project: "alpha-core", Version: "R1917.256",
 	})
 	rig.assertRefused(t, r, domain.ReasonUnknownRelease)
 	if !rig.resolver.gotCreateRelease {
@@ -480,16 +480,16 @@ func TestIntake_DetectedKindEvidenceCannotFile_Refused(t *testing.T) {
 
 func TestIntake_UnknownRelease_Refused(t *testing.T) {
 	rig := newRig(1 << 20)
-	rig.resolver.err = domain.Reject(domain.ReasonUnknownRelease, `no project named "oamp-core" under product "OAMP"`)
+	rig.resolver.err = domain.Reject(domain.ReasonUnknownRelease, `no project named "alpha-core" under product "ALPHA"`)
 
 	r := rig.intake(t, app.IntakeCommand{
-		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+		Body: []byte(`[{"vulnerability_id":"CVE-1"}]`), Product: "ALPHA", Project: "alpha-core", Version: "R1917.256",
 	})
 	rig.assertRefused(t, r, domain.ReasonUnknownRelease)
 	if rig.reports.convertCalls != 0 {
 		t.Error("converted for a release that does not exist — wasted work on the common typo")
 	}
-	if rig.resolver.gotProduct != "OAMP" || rig.resolver.gotProject != "oamp-core" || rig.resolver.gotVersion != "R1917.256" {
+	if rig.resolver.gotProduct != "ALPHA" || rig.resolver.gotProject != "alpha-core" || rig.resolver.gotVersion != "R1917.256" {
 		t.Errorf("the triple did not reach the resolver: %+v", rig.resolver)
 	}
 }
@@ -849,7 +849,7 @@ func newCreateRig() *intakeRig {
 func createCmd(body string) app.IntakeCommand {
 	return app.IntakeCommand{
 		Body: []byte(body), CreateRelease: true,
-		Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+		Product: "ALPHA", Project: "alpha-core", Version: "R1917.256",
 	}
 }
 

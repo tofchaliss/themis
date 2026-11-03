@@ -66,8 +66,8 @@ func (f *fakeRegistry) ProductOfRelease(_ context.Context, releaseID string) (st
 func estate() *fakeRegistry {
 	return &fakeRegistry{
 		releases: map[string]bool{"rel-1": true},
-		products: map[string]string{"OAMP": "prod-1"},
-		projects: map[string]map[string]string{"prod-1": {"oamp-core": "proj-1"}},
+		products: map[string]string{"ALPHA": "prod-1"},
+		projects: map[string]map[string]string{"prod-1": {"alpha-core": "proj-1"}},
 		versions: map[string]map[string]string{"proj-1": {"R1917.256": "rel-1"}},
 		owners:   map[string]string{"rel-1": "prod-1"},
 	}
@@ -97,7 +97,7 @@ func TestResolve_BothRoadsReachTheSameRelease(t *testing.T) {
 	if err != nil || byRelease.ReleaseID != "rel-1" || byRelease.ToCreate() {
 		t.Fatalf("by id = %+v, %v", byRelease, err)
 	}
-	byName, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
+	byName, err := r.Resolve(context.Background(), byTriple("ALPHA", "alpha-core", "R1917.256"))
 	if err != nil || byName.ReleaseID != "rel-1" || byName.ToCreate() {
 		t.Fatalf("by triple = %+v, %v", byName, err)
 	}
@@ -110,7 +110,7 @@ func TestResolve_ReleaseIDWinsOverTheTriple(t *testing.T) {
 	reg := estate()
 	reg.products = map[string]string{} // the triple would not resolve at all
 	got, err := subjectref.NewResolver(reg).Resolve(context.Background(),
-		app.ResolveRequest{Product: "OAMP", Project: "oamp-core", Version: "R1917.256", ReleaseID: "rel-1"})
+		app.ResolveRequest{Product: "ALPHA", Project: "alpha-core", Version: "R1917.256", ReleaseID: "rel-1"})
 	if err != nil || got.ReleaseID != "rel-1" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
@@ -126,11 +126,11 @@ func TestResolve_RefusalsNameWhichPartMissed(t *testing.T) {
 		wantIn                           string
 	}{
 		{"unregistered release id", "", "", "", "rel-nope", `"rel-nope"`},
-		{"unknown product", "NOPE", "oamp-core", "R1917.256", "", `product named "NOPE"`},
-		{"unknown project", "OAMP", "nope", "R1917.256", "", `project named "nope"`},
-		{"unknown version", "OAMP", "oamp-core", "R0.0", "", `release version named "R0.0"`},
+		{"unknown product", "NOPE", "alpha-core", "R1917.256", "", `product named "NOPE"`},
+		{"unknown project", "ALPHA", "nope", "R1917.256", "", `project named "nope"`},
+		{"unknown version", "ALPHA", "alpha-core", "R0.0", "", `release version named "R0.0"`},
 		{"nothing named at all", "", "", "", "", "release_id"},
-		{"a partial triple", "OAMP", "", "R1917.256", "", "triple"},
+		{"a partial triple", "ALPHA", "", "R1917.256", "", "triple"},
 	}
 	r := subjectref.NewResolver(estate())
 	for _, c := range cases {
@@ -166,9 +166,9 @@ func TestResolve_ALookupThatFailedIsNotAnUnknownRelease(t *testing.T) {
 		product, project, version, relID string
 	}{
 		{"exists", "", "", "", "rel-1"},
-		{"product", "OAMP", "oamp-core", "R1917.256", ""},
-		{"project", "OAMP", "oamp-core", "R1917.256", ""},
-		{"release", "OAMP", "oamp-core", "R1917.256", ""},
+		{"product", "ALPHA", "alpha-core", "R1917.256", ""},
+		{"project", "ALPHA", "alpha-core", "R1917.256", ""},
+		{"release", "ALPHA", "alpha-core", "R1917.256", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.failOn, func(t *testing.T) {
@@ -197,8 +197,8 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 		failOn string
 		wantIn string
 	}{
-		{"product", `product "OAMP"`},
-		{"project", `project "oamp-core"`},
+		{"product", `product "ALPHA"`},
+		{"project", `project "alpha-core"`},
 		{"release", `release version "R1917.256"`},
 	}
 	for _, c := range cases {
@@ -206,7 +206,7 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 			reg := estate()
 			reg.err, reg.failOn = subjectref.ErrAmbiguousName, c.failOn
 
-			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1917.256"))
+			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), byTriple("ALPHA", "alpha-core", "R1917.256"))
 			if got != (app.Resolution{}) {
 				t.Errorf("resolved %+v, want nothing", got)
 			}
@@ -234,7 +234,7 @@ func TestResolveAmbiguousNameIsNotReportedAsNotRegistered(t *testing.T) {
 // matches keeps the reason and the wording it has always had. The ambiguous branch is a
 // third answer beside it, not a replacement for it.
 func TestResolve_NotFoundWordingIsUnchanged(t *testing.T) {
-	_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), byTriple("NOPE", "oamp-core", "R1917.256"))
+	_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), byTriple("NOPE", "alpha-core", "R1917.256"))
 	re, ok := domain.AsReject(err)
 	if !ok {
 		t.Fatalf("error = %v, want a refusal", err)
@@ -257,7 +257,7 @@ func TestResolve_NotFoundWordingIsUnchanged(t *testing.T) {
 func TestResolveToCreateOnMissingVersion(t *testing.T) {
 	ctx := context.Background()
 	newVersion := func() app.ResolveRequest {
-		return app.ResolveRequest{Product: "OAMP", Project: "oamp-core", Version: "R1918.001", CreateRelease: true}
+		return app.ResolveRequest{Product: "ALPHA", Project: "alpha-core", Version: "R1918.001", CreateRelease: true}
 	}
 
 	got, err := subjectref.NewResolver(estate()).Resolve(ctx, newVersion())
@@ -292,8 +292,8 @@ func TestResolveToCreateOnMissingVersion(t *testing.T) {
 
 	t.Run("a missing product or project is still a refusal, never a creation", func(t *testing.T) {
 		for _, tc := range []struct{ name, product, project, wantIn string }{
-			{"product", "NOPE", "oamp-core", `product named "NOPE"`},
-			{"project", "OAMP", "nope", `project named "nope"`},
+			{"product", "NOPE", "alpha-core", `product named "NOPE"`},
+			{"project", "ALPHA", "nope", `project named "nope"`},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				req := newVersion()
@@ -340,7 +340,7 @@ func TestStub_KnowsIDsAndNoNames(t *testing.T) {
 	if got, err := r.Resolve(context.Background(), byID("rel-dev")); err != nil || got.ReleaseID != "rel-dev" {
 		t.Fatalf("by id = %+v, %v", got, err)
 	}
-	if _, err := r.Resolve(context.Background(), byTriple("OAMP", "oamp-core", "R1")); err == nil {
+	if _, err := r.Resolve(context.Background(), byTriple("ALPHA", "alpha-core", "R1")); err == nil {
 		t.Error("the stub resolved a triple it cannot know")
 	}
 
@@ -351,8 +351,8 @@ func TestStub_KnowsIDsAndNoNames(t *testing.T) {
 		name string
 		call func() (string, error)
 	}{
-		{"product", func() (string, error) { return stub.ProductIDByName(context.Background(), "OAMP") }},
-		{"project", func() (string, error) { return stub.ProjectIDByName(context.Background(), "prod-1", "oamp-core") }},
+		{"product", func() (string, error) { return stub.ProductIDByName(context.Background(), "ALPHA") }},
+		{"project", func() (string, error) { return stub.ProjectIDByName(context.Background(), "prod-1", "alpha-core") }},
 		{"release", func() (string, error) { return stub.ReleaseIDByVersion(context.Background(), "proj-1", "R1") }},
 	} {
 		id, err := lookup.call()

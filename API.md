@@ -98,7 +98,7 @@ the normal case, not the exotic one, and they get **one row** — `INSERT … ON
 unique index per level, never a `SELECT`-then-`INSERT`.
 
 Case-folding is deliberately asymmetric: product and project names are human-typed labels and
-fold case (`OAMP` and `oamp` are one product, and **the stored casing is the first caller's**),
+fold case (`ALPHA` and `alpha` are one product, and **the stored casing is the first caller's**),
 while a **version is matched exactly** — a build string's case is not Themis's to fold, and
 folding it would merge two builds.
 

@@ -2,7 +2,7 @@
 --
 -- A recorded occurrence can turn out not to denote an additional component: a scanner report
 -- named one under a raw identifier while the SBOM path had already recorded the same component
--- under its canonical purl. Measured on MRF 2026-09-17 -- 87 such rows, all one component, and
+-- under its canonical purl. Measured on P1 2026-09-17 -- 87 such rows, all one component, and
 -- in 87 of 87 cases the canonical row ALREADY existed on the same (release, card).
 --
 -- Retirement is a PROJECTION change, not an erasure. The row stays, so the audit trail keeps

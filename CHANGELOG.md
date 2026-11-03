@@ -143,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JSON translated in the browser, the curated shape staying the only wire contract (Phase C).
 - GUI: the **Compare** tab — fixed / new / persisting between two releases by CVE, rendered from the
   Governance comparison read (the client-side join it specified is retired). Live-verified
-  2026-08-19 (MRF v20.1.0.0-109 vs -118).
+  2026-08-19 (P1 v20.1.0.0-109 vs -118).
 - GUI (GUI-13): the SBOM manager can file a **new build** — "＋ New…" on each selector registers the
   Product→Project→Release chain on upload; typing an existing name is refused (reuse is a pick,
   never a duplicate registration).

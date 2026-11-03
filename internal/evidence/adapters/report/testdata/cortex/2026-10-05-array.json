@@ -1,6 +1,6 @@
 [
   {
-    "asset_name": "oamp-core:R1917.256",
+    "asset_name": "alpha-core:R1917.256",
     "vulnerability_id": "CVE-2024-2961",
     "package_purl": "pkg:rpm/redhat/glibc@2.28-251.el8_10.1",
     "origin_package_name": "glibc",
@@ -12,7 +12,7 @@
     "last_observed": 1759130602123
   },
   {
-    "asset_name": "oamp-core:R1917.256",
+    "asset_name": "alpha-core:R1917.256",
     "vulnerability_id": "CVE-2024-38476",
     "package_purl": "app:httpd@2.4.37-65.module+el8.10.0+22289+a2a65e82",
     "origin_package_name": "httpd",
@@ -27,7 +27,7 @@
     "last_observed": 1759216800000
   },
   {
-    "asset_name": "oamp-core:R1917.256",
+    "asset_name": "alpha-core:R1917.256",
     "vulnerability_id": "CVE-2024-38475",
     "package_purl": null,
     "origin_package_name": "mod_ssl",
@@ -39,7 +39,7 @@
     "last_observed": 1759130602123
   },
   {
-    "asset_name": "oamp-core:R1917.256",
+    "asset_name": "alpha-core:R1917.256",
     "vulnerability_id": "",
     "package_purl": "pkg:rpm/redhat/curl@7.61.1-30.el8",
     "origin_package_name": "curl",
@@ -51,7 +51,7 @@
     "last_observed": 1759130602123
   },
   {
-    "asset_name": "oamp-core:R1917.256",
+    "asset_name": "alpha-core:R1917.256",
     "vulnerability_id": "CVE-2025-9999",
     "package_purl": null,
     "origin_package_name": null,

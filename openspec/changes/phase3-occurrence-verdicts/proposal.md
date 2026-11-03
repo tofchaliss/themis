@@ -3,7 +3,7 @@
 ## Why
 
 A vendor-backported fix that Themis had **fully ingested** could not clear a live finding
-(CVE-2025-47273 on MRF, measured live 2026-09-02): the card held the exact Red Hat bound
+(CVE-2025-47273 on P1, measured live 2026-09-02): the card held the exact Red Hat bound
 (`python-setuptools 0:39.2.0-9.el8_10`), every feed was honestly healthy, the image carried the patched
 RPM — and the finding stayed open because its component is the Python-package shadow
 (`setuptools@39.2.0`, pypi, empty source) of files the RPM owns, and no bridge exists between the two

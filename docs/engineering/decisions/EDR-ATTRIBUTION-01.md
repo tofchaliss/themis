@@ -22,7 +22,7 @@ The agreed design was: *when carriers are known but none relates to any componen
 module-stream cluster was protected, because `python3` on those same cards would match and make them
 partial rather than whole-card misses.
 
-**That claim is false.** Measured 2026-09-17 on MRF, post-retirement — the all-scope findings are:
+**That claim is false.** Measured 2026-09-17 on P1, post-retirement — the all-scope findings are:
 
 | component | rows | correct class |
 | --- | --- | --- |

@@ -662,7 +662,7 @@ func (s stubInventory) GetInventory(context.Context, string) (app.Inventory, err
 }
 
 // The KN-VERDICT-1 healing loop end-to-end on a real store (EDR-VERDICT-01 D6): a match
-// recorded BEFORE its card had any fix bounds — the measured MRF shape — is found by the
+// recorded BEFORE its card had any fix bounds — the measured P1 shape — is found by the
 // stale query after the bounds fold, re-judged through the bridge, cleared in place with the
 // change event queued, and the second sweep finds nothing. This is the integration-level half
 // of the binding validation criterion.
@@ -1310,7 +1310,7 @@ func TestRecordMatch_ConfirmingRejudgementAdvancesTheLogicGeneration(t *testing.
 	}
 }
 
-// KN-SCAN-4(b) on a real store: the duplicate-identity repair, reproducing the measured MRF
+// KN-SCAN-4(b) on a real store: the duplicate-identity repair, reproducing the measured P1
 // shape — a scanner report recorded httpd under `app:httpd@<version>` while the SBOM path had
 // already recorded the same component under its canonical rpm purl on the same (release, card).
 // Measured 2026-09-17: 87 such rows, and in 87 of 87 cases the canonical row already existed.

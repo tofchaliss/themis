@@ -4,7 +4,7 @@
 -- correlation time when the fixed-verdict said the installed build carried the fix. That made
 -- "checked and fine" indistinguishable from "never looked", left scanner-path matches entirely
 -- unjudged, and gave the verdict exactly one chance to fire — bounds folding onto the card an
--- hour after correlation changed nothing, ever (measured: CVE-2025-47273 / MRF).
+-- hour after correlation changed nothing, ever (measured: CVE-2025-47273 / P1).
 --
 -- Now every examined occurrence is recorded WITH its verdict:
 --   verdict_state        'open' | 'cleared_vendor_fix'; anything else reads as open (fail-safe).

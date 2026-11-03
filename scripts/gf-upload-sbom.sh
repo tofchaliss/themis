@@ -57,11 +57,11 @@ Prints the Release id at the end so you can query posture:
 
 Examples:
   # a human registering the whole chain, then uploading
-  ./scripts/gf-upload-sbom.sh -f scripts/oamp.json -p oamp -j oamp-app -v 1.0.0
+  ./scripts/gf-upload-sbom.sh -f scripts/sample-sbom.json -p alpha -j alpha-app -v 1.0.0
   # a CI bot: the version is created by intake, under identity a human already owns
-  ./scripts/gf-upload-sbom.sh -f sbom.json -p oamp -j oamp-core -v R1917.256 -c -b "$CI_PIPELINE_ID"
+  ./scripts/gf-upload-sbom.sh -f sbom.json -p alpha -j alpha-core -v R1917.256 -c -b "$CI_PIPELINE_ID"
   # the same with the key in the environment (env VAR=value cmd — never VAR=value cmd)
-  env THEMIS_API_KEY=key-… ./scripts/gf-upload-sbom.sh -f sbom.json -p oamp -j oamp-core -v R20.1 -c
+  env THEMIS_API_KEY=key-… ./scripts/gf-upload-sbom.sh -f sbom.json -p alpha -j alpha-core -v R20.1 -c
 EOF
 }
 

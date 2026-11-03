@@ -4,10 +4,10 @@
   "specVersion": "1.6",
   "metadata": {
     "component": {
-      "bom-ref": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp",
+      "bom-ref": "pkg:oci/alpha@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Falpha",
       "type": "container",
-      "name": "registry.example.com/oamp:1.0",
-      "purl": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp"
+      "name": "registry.example.com/alpha:1.0",
+      "purl": "pkg:oci/alpha@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Falpha"
     }
   },
   "components": [
@@ -88,7 +88,7 @@
   ],
   "dependencies": [
     {
-      "ref": "pkg:oci/oamp@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Foamp",
+      "ref": "pkg:oci/alpha@sha256%3Adeadbeef?arch=amd64&repository_url=registry.example.com%2Falpha",
       "dependsOn": [
         "u-spring-1",
         "pkg:maven/com.example/kafka@0.1.0",

@@ -26,7 +26,7 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
 - [x] 1.7 Governance queue derivation (D7): `OpenCarriers` per posture entry; one live carrier →
       FULL priority; components present + zero open carriers → effective/residual 0 (off the
       ranked queue); no component rows → untouched (missing evidence never clears).
-      `TestReleasePosture_QueueDerivesFromOpenCarriers` encodes the measured MRF shape.
+      `TestReleasePosture_QueueDerivesFromOpenCarriers` encodes the measured P1 shape.
 - [x] 1.8 Read API: governance Component gains `verdict_state`/`verdict_grade`/`verdict_reason`,
       PostureEntry gains `open_carriers` (spec-first, regenerated). CORRECTION to the scaffold:
       Knowledge's read API exposes no matches/components surface, so there is nothing to extend
@@ -49,7 +49,7 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
       (equality, one distro-wrapper strip — the guard that keeps version equality from clearing
       strangers) + exact upstream-version match + sibling at/above the bound. Gated by
       `THEMIS_VERDICT_INFERRED_BRIDGE` (default on; wiring `VerdictConfig.DisableInferredBridge`
-      so the zero value keeps the default). Tests: the measured MRF case, the pip-copy-below-fix
+      so the zero value keeps the default). Tests: the measured P1 case, the pip-copy-below-fix
       bound (must stay open), the pinned exact-distro-version wrong-clear limit, name-affinity
       guard, strict mode at service level through both doors.
 - [x] 2.3 Reason strings distinct per grade ("owned by X (SBOM ownership): …" vs "matched to X at
@@ -81,7 +81,7 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
       update + `ComponentVerdictChanged`; confirmation → silent stamp).
       `THEMIS_REVERDICT_INTERVAL` (12h backstop) / `THEMIS_REVERDICT_BATCH` (200); loop in
       `cmd/knowledge` selects ticker + nudge.
-- [x] 3.3 Integration test `TestReverdictSweep_FullLoop`: the measured MRF shape on a real
+- [x] 3.3 Integration test `TestReverdictSweep_FullLoop`: the measured P1 shape on a real
       store — row recorded pre-bounds, redhat fold bumps the card, sweep clears it (inferred,
       reason, stamp current, ONE change event), second sweep reads and writes nothing.
 - [x] 3.4 `scripts/vm-verify.sh`: `verdicts: cleared/inferred/stale` line (stale = the sweep's
@@ -111,7 +111,7 @@ Source of truth: `docs/engineering/decisions/EDR-VERDICT-01.md`. Every group end
 
 ## Live validation (binding, EDR "Validation criterion")
 
-- [x] V.1 ✅ **PASSED LIVE 2026-09-02 (~15:55 IST, MRF estate).** All three legs measured:
+- [x] V.1 ✅ **PASSED LIVE 2026-09-02 (~15:55 IST, P1 estate).** All three legs measured:
       (1) `setuptools@39.2.0` cleared on BOTH releases — `cleared_vendor_fix`/`inferred`, reason
       "matched to platform-python-setuptools 39.2.0-9.el8_10 at the distro ve…", Governance
       mirror agreeing; (2) `setuptools@70.3.0` still open (both spellings); (3) the Finding

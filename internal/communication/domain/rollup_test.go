@@ -10,10 +10,10 @@ import (
 
 var (
 	rollupAt      = time.Date(2026, 9, 2, 16, 0, 0, 0, time.UTC)
-	rollupProduct = domain.RollupProductRef{Product: "MRF", Project: "cdmrf-oamp", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
+	rollupProduct = domain.RollupProductRef{Product: "P1", Project: "project-alpha", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
 )
 
-// The measured MRF shape (D13.1/D13.3): a decided finding speaks its stance; the undecided
+// The measured P1 shape (D13.1/D13.3): a decided finding speaks its stance; the undecided
 // mixed finding is under_investigation carrying the clearance as an annotation and only the
 // OPEN copy as a subcomponent; entries sort deterministically; the input set records every
 // finding with its position version and annotation fingerprint.
@@ -59,7 +59,7 @@ func TestMaterializeRollup(t *testing.T) {
 			t.Errorf("input record = %+v", in)
 		}
 	}
-	if art.Product.PURL() != "pkg:generic/MRF/cdmrf-oamp@20.1.0.0-118" {
+	if art.Product.PURL() != "pkg:generic/P1/project-alpha@20.1.0.0-118" {
 		t.Errorf("purl = %q", art.Product.PURL())
 	}
 }
@@ -71,7 +71,7 @@ func TestMaterializeRollup_Validation(t *testing.T) {
 		asOf    time.Time
 		entries []domain.RollupEntry
 	}{
-		"incomplete product (fail-closed D13.4)": {domain.RollupProductRef{Product: "MRF", ReleaseID: "rel-1"}, rollupAt, ok},
+		"incomplete product (fail-closed D13.4)": {domain.RollupProductRef{Product: "P1", ReleaseID: "rel-1"}, rollupAt, ok},
 		"zero as-of":                             {rollupProduct, time.Time{}, ok},
 		"entry without identity":                 {rollupProduct, rollupAt, []domain.RollupEntry{{CVE: "CVE-1"}}},
 		"decided entry with invalid stance":      {rollupProduct, rollupAt, []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1", HasPosition: true, Stance: "nonsense"}}},
@@ -161,9 +161,18 @@ func TestRollupPublicationLifecycle(t *testing.T) {
 
 	// Constructor validation.
 	for name, run := range map[string]func() error{
-		"empty id":      func() error { _, e := domain.NewRollupPublication("", art, "openvex", "", []byte(`{}`), "", rollupAt); return e },
-		"empty format":  func() error { _, e := domain.NewRollupPublication("rp", art, "", "", []byte(`{}`), "", rollupAt); return e },
-		"empty payload": func() error { _, e := domain.NewRollupPublication("rp", art, "openvex", "", nil, "", rollupAt); return e },
+		"empty id": func() error {
+			_, e := domain.NewRollupPublication("", art, "openvex", "", []byte(`{}`), "", rollupAt)
+			return e
+		},
+		"empty format": func() error {
+			_, e := domain.NewRollupPublication("rp", art, "", "", []byte(`{}`), "", rollupAt)
+			return e
+		},
+		"empty payload": func() error {
+			_, e := domain.NewRollupPublication("rp", art, "openvex", "", nil, "", rollupAt)
+			return e
+		},
 		"incomplete product": func() error {
 			_, e := domain.NewRollupPublication("rp", domain.RollupArtifact{AsOf: rollupAt}, "openvex", "", []byte(`{}`), "", rollupAt)
 			return e

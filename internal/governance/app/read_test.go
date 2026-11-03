@@ -94,7 +94,7 @@ func TestReadService_GetPosition(t *testing.T) {
 }
 
 // TestReleasePosture_QueueDerivesFromOpenCarriers is the EDR-VERDICT-01 D7 rule on the shape
-// the arc was measured on (CVE-2025-47273 / MRF): one cleared carrier beside one open carrier
+// the arc was measured on (CVE-2025-47273 / P1): one cleared carrier beside one open carrier
 // keeps FULL urgency — a live occurrence is never discounted by its cleared neighbours — and
 // only a Finding whose every carrier is cleared reads 0 and leaves the ranked queue. The
 // binding validation criterion is "the finding must NOT disappear", and this test is its

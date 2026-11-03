@@ -725,13 +725,13 @@ func TestIntakeParameters_RefusedAtTheDoor(t *testing.T) {
 			name: "create_release together with release_id",
 			query: url.Values{
 				"release_id": {"rel-1"}, "create_release": {"true"},
-				"product": {"OAMP"}, "project": {"oamp-core"}, "version": {"R1917.256"},
+				"product": {"ALPHA"}, "project": {"alpha-core"}, "version": {"R1917.256"},
 			},
 			reason: gen.CreateReleaseConflict, wantIn: "release_id",
 		},
 		{
 			name:   "create_release without the whole triple",
-			query:  url.Values{"create_release": {"true"}, "product": {"OAMP"}, "version": {"R1917.256"}},
+			query:  url.Values{"create_release": {"true"}, "product": {"ALPHA"}, "version": {"R1917.256"}},
 			reason: gen.IncompleteReleaseTriple, wantIn: "triple",
 		},
 		{
@@ -963,7 +963,7 @@ func TestIntakeObservedAt_SuppliedValueReachesTheUseCase(t *testing.T) {
 	}}
 	f := newIntakeFixture(t, evhttp.IntakeConfig{}, runner, nil)
 
-	post(t, f.handler, "/intake?release_id=rel-1&observed_at=2026-09-29T07:23:22Z&allow_without_sbom=true&product=OAMP&project=core&version=R1&provenance_source=cortex&provenance_image_digest=sha256:abc",
+	post(t, f.handler, "/intake?release_id=rel-1&observed_at=2026-09-29T07:23:22Z&allow_without_sbom=true&product=ALPHA&project=core&version=R1&provenance_source=cortex&provenance_image_digest=sha256:abc",
 		`{"findings":[{"cve":"CVE-1"}]}`, nil)
 
 	want := time.Date(2026, 9, 29, 7, 23, 22, 0, time.UTC)
@@ -973,7 +973,7 @@ func TestIntakeObservedAt_SuppliedValueReachesTheUseCase(t *testing.T) {
 	if !seen.AllowWithoutSBOM {
 		t.Error("allow_without_sbom did not reach the use case; D6's override would be silently ignored")
 	}
-	if seen.Product != "OAMP" || seen.Project != "core" || seen.Version != "R1" || seen.ReleaseID != "rel-1" {
+	if seen.Product != "ALPHA" || seen.Project != "core" || seen.Version != "R1" || seen.ReleaseID != "rel-1" {
 		t.Errorf("release metadata = %+v", seen)
 	}
 	if seen.ProvenanceSource != "cortex" || seen.ProvenanceImageDigest != "sha256:abc" {

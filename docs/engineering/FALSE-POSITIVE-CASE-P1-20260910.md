@@ -1,11 +1,11 @@
-# Case file — why MRF/cdmrf-oamp/20.1.0.0-125 shows 634 open findings and zero clearances
+# Case file — why P1/project-alpha/20.1.0.0-125 shows 634 open findings and zero clearances
 
 **Status:** **RESOLVED 2026-09-10** (main `c14b721`) — 189 occurrences cleared; the stale
 siblings healed (one-time repair + KN-SCAN-4a); **CVE-2019-0211/0220 at `residual_priority: 0`
 on the posture** — the KEV CVE is out of the triage queue on vendor-grade evidence. Residual
 work: §8c.
 **Date:** 2026-09-10 · **Release under investigation:** `7bc21a1b-e898-47e4-b784-f2242fa983a4`
-(MRF → cdmrf-oamp → 20.1.0.0-125) · **Estate:** Rocky 8 container image, Cortex + SPDX evidence
+(P1 → project-alpha → 20.1.0.0-125) · **Estate:** Rocky 8 container image, Cortex + SPDX evidence
 **Related:** KN-VERDICT-1 · KN-MODULE-4 (fixed) · **KN-MODULE-5 (open — the blocker)** · KN-SCAN-3b
 
 > **If you read one paragraph.** The verdict machinery is healthy and running. It clears nothing on

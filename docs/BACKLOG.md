@@ -1346,7 +1346,7 @@ under the 2026-08-07 re-derivation standard.
   subject and appends a "[SUBJECT ECHO …]" caveat to the text on a mismatch — warning, never a
   refusal, like the ungrounded-mentions scan; a correct or absent echo adds nothing. Live-witnessed twice on `compare_releases`: the prompt tells the
   model to echo the CANDIDATE release id in `subject_id`, and CyberPal returned the BASELINE id instead
-  (`rel-old` on the e2e fixture; the baseline id on the MRF pair). Harmless today — `subject_id` is
+  (`rel-old` on the e2e fixture; the baseline id on the P1 pair). Harmless today — `subject_id` is
   response metadata, the prose and cited CVEs were correct — but the Decision path validates its
   `finding_id` echo and the Information path validates nothing, so a capability cannot rely on the field.
   **Fix shape:** a cheap subject-echo check on the Information branch (the expected id is known — it is the
@@ -1452,8 +1452,8 @@ under the 2026-08-07 re-derivation standard.
   the field/preamble slot are plumbed, always 0 until Governance exposes it; **rollup
   delivery-channel integration + outbox events deferred** (the delivery worker keys on
   per-Finding publications; follow-up when a channel needs rollups). **LIVE-VALIDATED
-  2026-09-02 (~17:57 IST, MRF estate):** preview rendered 120 statements with the product
-  purl `pkg:generic/MRF/cdmrf-oamp@20.1.0.0-118` on each; a decided finding SPOKE
+  2026-09-02 (~17:57 IST, P1 estate):** preview rendered 120 statements with the product
+  purl `pkg:generic/P1/project-alpha@20.1.0.0-118` on each; a decided finding SPOKE
   (CVE-2017-18342 `fixed`, subcomponent pyyaml@3.12) beside honest `under_investigation`
   rows with scope-sized annotations; publish 201 → status `found:true stale:false
   statements:120 "current"`. BONUS validation en route: the first attempt hit the D13.4
@@ -1547,7 +1547,7 @@ under the 2026-08-07 re-derivation standard.
   `pypi` for the same package.
 - [ ] **KN-VERDICT-1 — a vendor-backported fix cannot clear a live finding: the rpm fixed-verdict
   never reaches it across any of its three links (filed 2026-09-02, MEASURED live on
-  MRF/cdmrf-oamp/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
+  P1/project-alpha/R20.1.0.0-118, CVE-2025-47273).** HIGH for the estate's trust in the queue;
   cluster EDR-VEX-01 / EDR-CORRELATION-01; link (a) is design-first. The estate flags setuptools
   vulnerable while Red Hat backported the fix into RHEL 8.10 (RHSA-2025:11044,
   `python-setuptools-0:39.2.0-9.el8_10`; Rocky's RLSA-2025:11044 is the 1:1 clone the `rocky`
@@ -1577,7 +1577,7 @@ under the 2026-08-07 re-derivation standard.
   not_affected overlay — never a silent match delete.
   Recorded honestly: if the deployed image's RPM is OLDER than `-9.el8_10` the finding is REAL
   and Themis is right — the VM check (match row's component shape + installed NEVRA) decides
-  which link is live for MRF; (b) and (c) are code facts either way.
+  which link is live for P1; (b) and (c) are code facts either way.
   **VM-VERIFIED 2026-09-02 — the feed side is FULLY working; link (a) is the live defect.** The
   card holds the exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)` (plus el9/el10 and the
   python39-module rebuild set); the `redhat` vuln-facts proposal folded; feed health green,
@@ -1621,7 +1621,7 @@ under the 2026-08-07 re-derivation standard.
   (drawer per-occurrence view with state pills/grade labels/reasons/per-world fix advice +
   quiet cleared section; plan grouping by (package, canonical world) with cleared occurrences
   contributing nothing; `FixedVersion.ecosystem` on the wire; closed KN-SCAN-3 as a dependency).
-  **✅ V.1 LIVE-VALIDATED 2026-09-02 — the arc is DONE end-to-end on the MRF estate.** All
+  **✅ V.1 LIVE-VALIDATED 2026-09-02 — the arc is DONE end-to-end on the P1 estate.** All
   three binding legs measured: 39.2.0 cleared inferred-with-reason on both releases · 70.3.0
   still open · Finding queued at FULL urgency (posture: effective 80 / residual 80 /
   open_carriers 1). Drain: 1080 re-judgements to stale=0; estate-wide cleared=17 (6 inferred +
@@ -1644,7 +1644,7 @@ under the 2026-08-07 re-derivation standard.
   version number; ground `affected` on OPEN components only") → `GroundingThinness` gains the
   all-carriers-cleared class so a Decision on a fully-cleared Finding is diagnosably thin.
   Prompt hashes change (prompt_versions is designed for it). **LIVE-VERIFIED 2026-09-02
-  (same day, MRF finding re-asked):** "affected (0.90): The release includes setuptools
+  (same day, P1 finding re-asked):** "affected (0.90): The release includes setuptools
   version 70.3.0, which is an open component and falls within the affected range … does not
   include the fix introduced in version 78.1.1" — grounded on the open copy alone, the model
   even adopting the OPEN label vocabulary; the cleared 39.2.0 no longer appears as evidence.
@@ -1798,7 +1798,7 @@ under the 2026-08-07 re-derivation standard.
   `reactToApplicability`): the 1st `mutate`'s `Save` bumps `version` V->V+1 uncommitted in the tx, the 2nd
   `mutate`'s `GetByID` reads the pool (still committed V), so `Save ... WHERE version=V` hits 0 rows ->
   `ErrConcurrent`, and every retry re-reads the pool at V -> never converges -> 5 fails -> D8 halt. **SCOPE
-  CONFIRMED:** a 542-component `oamp.json` correlation (211 shared-CVE findings, NO VEX) did NOT halt -> the
+  CONFIRMED:** a 542-component `sample-sbom.json` correlation (211 shared-CVE findings, NO VEX) did NOT halt -> the
   trigger needs the applicability's 2nd same-tx write, not a plain shared-CVE flood. **Fix (mirror PR #59):**
   make aggregate reads join the ambient inbox tx (a ctx `querier(ctx)` seam behind
   `load`/`loadProposals`/`loadPositions`/`GetByID`) so the 2nd in-tx read sees the in-flight version and
@@ -2862,7 +2862,7 @@ under the 2026-08-07 re-derivation standard.
   `GET /releases/{id}/posture` is a good rollup and is sorted-by-`residual_priority` away from being a
   triage dashboard. What is missing is everything *before* it: Registry exposes only `POST /products`,
   `POST /projects`, `POST /releases` and `GET /releases/{id}` — **no list, no lookup by name, no
-  product→projects→releases traversal**. So an operator who knows "product mrf, release 20.1.0" cannot get
+  product→projects→releases traversal**. So an operator who knows "product p1, release 20.1.0" cannot get
   to the posture at all without querying Postgres directly, which is exactly the coupling the read APIs
   exist to avoid. Every runbook in the repo works around it by capturing the id `gf-upload-sbom.sh` prints.
   **Fix:** read endpoints on Registry — `GET /products`, `GET /products/{id}/projects`,
@@ -2881,7 +2881,7 @@ under the 2026-08-07 re-derivation standard.
   own length cannot serve a dashboard.
   **Still open:** the product/project ROLLUP itself. DASH-1 now makes the traversal possible, so a
   caller can enumerate releases and merge client-side; a server-side rollup is a separate endpoint.
-  _(Same conversation.)_ "Show me everything critical across product `mrf`" has no answer: `posture` is
+  _(Same conversation.)_ "Show me everything critical across product `p1`" has no answer: `posture` is
   keyed by a single release id, so a caller must enumerate releases (which DASH-1 makes impossible over
   the API) and merge client-side. The estate graph for the *blast* direction already exists (C1:
   Product→Microservice→Deployment→Customer), so the model supports the traversal — the read surface does
@@ -4133,11 +4133,11 @@ under the 2026-08-07 re-derivation standard.
   Safety tests mirror KN-MODULE-4: the live pair (installed `-65` clears against resolved
   `-11`; pre-fix `-9` does not; the bare module identifier clears NOTHING), fail-open on
   csaf 500/invalid-json, no fetch for RHBA, one fetch per advisory. CSAF document types reused
-  from the csaf.go ACL. **Live verification pending on the MRF estate (87 httpd CVEs).**
+  from the csaf.go ACL. **Live verification pending on the P1 estate (87 httpd CVEs).**
   Original re-scope note follows.
   ~~RE-SCOPED + PROMOTED 2026-09-10~~ — see the case file
-  [`engineering/FALSE-POSITIVE-CASE-MRF-20260910.md`](engineering/FALSE-POSITIVE-CASE-MRF-20260910.md).**
-  MED→**HIGH** (87 live false positives on MRF/cdmrf-oamp/20.1.0.0-125, incl. a KEV CVE topping the
+  [`engineering/FALSE-POSITIVE-CASE-P1-20260910.md`](engineering/FALSE-POSITIVE-CASE-P1-20260910.md).**
+  MED→**HIGH** (87 live false positives on P1/project-alpha/20.1.0.0-125, incl. a KEV CVE topping the
   queue). **The "same shape, different base URL" assumption below is WRONG, measured 2026-09-10:**
   Red Hat's Hydra CVE endpoint restates the SAME module stream
   (`httpd:2.4-8000020190405071959.55190bc5`), so swapping the base URL buys nothing. The real NEVRA
@@ -5040,7 +5040,7 @@ under the 2026-08-07 re-derivation standard.
   and 9 keeps all three. Roughly two products per package across the estate is the doubling.
 
 - [x] **VEX-SCOPE-1 — a vendor `not_affected` statement is stored with NO product scope, and the
-  surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on MRF; found by the
+  surviving statement is chosen by DOCUMENT ORDER (filed 2026-09-17, MEASURED on P1; found by the
   user reading a drawer).** **MED-HIGH, false-negative path**; EDR-VEX-01 Phase 2/3.
   **The symptom:** the drawer on a **Rocky 8.10** estate shows the vendor proposal
   *"not_affected for httpd (Red Hat: not affected in Red Hat Enterprise Linux 7)"*. RHEL 7 is not
@@ -5349,7 +5349,7 @@ under the 2026-08-07 re-derivation standard.
   (phase B); closed.
 
 - [ ] **KN-IDENT-1 — two ENCODINGS of one purl are two identities, so identity comparison is
-  string equality over a non-canonical form (filed 2026-09-17, measured on MRF).** LOW,
+  string equality over a non-canonical form (filed 2026-09-17, measured on P1).** LOW,
   precision; EDR-IDENTITY-01 follow-up. The same rpm is present in the estate under two
   spellings: `pkg:rpm/rocky/httpd@2.4.37-65.module%2Bel8.10.0%2B40257%2B286895ef.9?arch=x86_64&distro=rocky-8.10&upstream=…`
   (percent-encoded `+`, with qualifiers) and
@@ -5551,7 +5551,7 @@ under the 2026-08-07 re-derivation standard.
   D12**: `FixesFor`/`StrictFixesFor` now match by exact equality first, then
   `NormalizeProduct`-EQUALITY under a wrapper-family guard — never `relatedProduct` containment
   (a `-wheel` bound must not clear pip; wrong clearance = false negative). Measured driver
-  (MRF case §6–§7): the card held `python-setuptools 0:39.2.0-9.el8_10` while the SBOM says
+  (P1 case §6–§7): the card held `python-setuptools 0:39.2.0-9.el8_10` while the SBOM says
   `python3-setuptools` — `FixesFor` returned empty beside the exact bound, blocking both the
   direct verdict and the D3 ownership bridge for every pypi shadow (~100 occurrences), plus the
   `libcurl`→`curl`/`libnghttp2`/`libattr` class (3 CVEs, all correctly below-bound). The
@@ -5572,14 +5572,14 @@ under the 2026-08-07 re-derivation standard.
   `(product_id, projects.name)`, not on `(project_id, releases.version)`. `RegisterProduct` /
   `RegisterProject` / `RegisterRelease` are unconditional inserts (no find-or-create), so
   `scripts/gf-upload-sbom.sh` mints a fresh hierarchy on every run that does not pass `-r`.
-  **Measured:** one estate carried **three** Products named `MRF` — one real (`cdmrf-oamp`,
-  3 releases, 1 microservice), one holding an empty duplicate `cdmrf-sidecar` project, one
-  holding nothing at all — plus **two** Projects named `cdmrf-sidecar` under different parents,
+  **Measured:** one estate carried **three** Products named `P1` — one real (`project-alpha`,
+  3 releases, 1 microservice), one holding an empty duplicate `project-gamma` project, one
+  holding nothing at all — plus **two** Projects named `project-gamma` under different parents,
   each with its own release (`20.0` and `20.0-refix`). Nothing in the GUI or the read APIs
   distinguished them.
   **Why it bites twice.** (1) The DASH-1 name traversal (`GET /products` →
   `/products/{id}/projects` → `/projects/{id}/releases`) is ambiguous by construction: two
-  Products share a name and only an id tells them apart, so "the posture for MRF" has no single
+  Products share a name and only an id tells them apart, so "the posture for P1" has no single
   answer. (2) Diagnostic reads that `GROUP BY name` — the obvious shape, and the one used during
   this cleanup — **sum across duplicates and report them as one row**, which is how the duplicate
   hierarchy stayed hidden through several passes. A delete scoped `WHERE name = …` would then hit
@@ -5594,7 +5594,7 @@ under the 2026-08-07 re-derivation standard.
 
 - [ ] **KN-CLAIM-1 — an upstream project name that is not a substring of the distro package
   name classifies the REAL carrier as `scope`, and a scope-only Finding silently leaves the
-  triage queue (filed 2026-09-16, MEASURED live on MRF/cdmrf-oamp/20.1.0.0-125).** **HIGH,
+  triage queue (filed 2026-09-16, MEASURED live on P1/project-alpha/20.1.0.0-125).** **HIGH,
   false-negative generator**; EDR-CORRELATION-01 D3/D4. `relatedProduct` accepts equality OR
   substring containment, which cannot bridge NVD's registered PROJECT name and the distro's
   BINARY package name when neither contains the other.
@@ -5878,7 +5878,7 @@ under the 2026-08-07 re-derivation standard.
   re-polling an existing card cannot shrink what the union already holds. Cleaning historical
   bundler pollution would need a card-level rebuild, which is a separate decision from this one.
 
-  **LIVE-VERIFIED 2026-09-17** on MRF/cdmrf-oamp (859 cards · 1569 matches · 797 findings).
+  **LIVE-VERIFIED 2026-09-17** on P1/project-alpha (859 cards · 1569 matches · 797 findings).
   The re-classification sweep drained **626 cards / 1571 occurrences in 7 batches** (6×100 + 26)
   and converged, no errors, in about four seconds — the `full`-batch re-sweep doing exactly what
   it was added for, instead of waiting out six hourly ticks.
@@ -5933,7 +5933,7 @@ under the 2026-08-07 re-derivation standard.
 
 - [ ] **GOV-MIRROR-1 — Governance's occurrence-verdict mirror has no reconciliation, and no
   path at all for corrected component identity (filed 2026-09-16, MEASURED live on
-  MRF/cdmrf-oamp/20.1.0.0-125; found by opening ONE drawer and asking why a badge was
+  P1/project-alpha/20.1.0.0-125; found by opening ONE drawer and asking why a badge was
   missing).** **MED-HIGH, silent divergence**; EDR-VERDICT-01 D5/D6. Two parts, one seam.
 
   **(a) Nothing ever checks that the mirror agrees with its source.** Governance holds a
@@ -5999,7 +5999,7 @@ under the 2026-08-07 re-derivation standard.
   evidence it does not own. What replaced it is a harder constraint the entry did not name, plus
   a measurement that dissolves most of the difficulty.
 
-  **Measured on MRF, 2026-09-17:**
+  **Measured on P1, 2026-09-17:**
 
   | | |
   | --- | --- |
@@ -6056,7 +6056,7 @@ under the 2026-08-07 re-derivation standard.
   **The repair loop runs ONCE at startup, not on a ticker**: this is a bounded measured
   population, and the forward fix (EDR-IDENTITY-01) means no new duplicates of this shape are
   created, so a recurring sweep would query for work that cannot appear.
-  **LIVE-VERIFIED 2026-09-17 on MRF — every predicted number, first run, no repair needed.**
+  **LIVE-VERIFIED 2026-09-17 on P1 — every predicted number, first run, no repair needed.**
 
   | check | result |
   | --- | --- |
@@ -6092,7 +6092,7 @@ under the 2026-08-07 re-derivation standard.
   and `python3x-` but NOT the versioned form: `python3.12-pip` fails `HasPrefix("python3-")`
   (dot vs hyphen at position 7), so `NormalizeProduct` returns it unstripped, the D3 bridge's
   name affinity fails, and `MatchesFixPackage("pip","python3.12-pip")` compares bare roots
-  `pip` vs `python3.12-pip` → false. Measured: on the MRF release the KN-FIX-4 pass cleared
+  `pip` vs `python3.12-pip` → false. Measured: on the P1 release the KN-FIX-4 pass cleared
   the `setuptools@39.2.0` shadow (sibling `python3-setuptools`) but left every
   `pip@23.2.1` shadow open beside its at-version sibling `python3.12-pip@23.2.1-4.el8`.
   **SHIPPED 2026-09-17** as the pattern rule the entry recommended. `versionedInterpreterPrefix`
@@ -6175,7 +6175,7 @@ under the 2026-08-07 re-derivation standard.
   KN-VERDICT-2; SHIPPED 2026-09-17).** LOW-MED, operability. The generation stamp exists so a shipped verdict-rule
   change re-judges promptly. But `reverdictLoop` sweeps only on its ticker or a feed nudge, 200
   rows at a time, and the shipped default is `THEMIS_REVERDICT_INTERVAL=12h` — so a generation
-  bump drains 400 rows a day. The 1569-row MRF estate would take **~4 days**; a real estate far
+  bump drains 400 rows a day. The 1569-row P1 estate would take **~4 days**; a real estate far
   longer, and the whole point of the stamp is lost in the interval.
   **Measured 2026-09-17:** the VM runs a 2m interval, which masked it entirely — the full drain
   took ~14 minutes there. On the default it would not have been visibly draining at all.
@@ -6213,7 +6213,7 @@ under the 2026-08-07 re-derivation standard.
   drift cannot mint eternal duplicates; cosmetic after (a) + the repair, so LOW-MED now.
   Original filing follows.
   MED-HIGH for queue truth, **design-first** (touches "overlays, never
-  deletes" and the RecordMatch dedup). **Measured live on MRF/cdmrf-oamp/20.1.0.0-125, minutes
+  deletes" and the RecordMatch dedup). **Measured live on P1/project-alpha/20.1.0.0-125, minutes
   after KN-MODULE-5 cleared 96 occurrences:** the earlier converter defect had recorded scanner
   occurrences with a poisoned `component_source` (the CSV's file_path — the literal "Managed by
   the Package Manager" on 492 rpm rows, `/usr/sbin/httpd` on 87). `componentPackage()` prefers
@@ -7712,7 +7712,7 @@ NVD CVSS parse to `v3.1 → v3.0 → v2.0` but **never added v4.0**. NVD/CNAs ar
 `risk_score=0`, even though NVD/OSV **do** carry a valid CVSS 4.0 base score. They do **not** self-heal via the
 NVD-by-CVE backfill (see "Why it won't self-heal").
 
-**Found:** 2026-07-23, ingesting a real Trivy CycloneDX 1.6 SBOM (the `oamp` container). Of the 228 findings,
+**Found:** 2026-07-23, ingesting a real Trivy CycloneDX 1.6 SBOM (the `alpha` container). Of the 228 findings,
 the only remaining `unknown`-severity ones were **5 distinct CVEs / 7 findings**, all PyPI (pip, aiosmtplib):
 `CVE-2025-8869`, `CVE-2026-1703`, `CVE-2026-3219`, `CVE-2026-6357`, `CVE-2026-53533`. A bucket query confirmed
 **100%** of the unknowns carry a `CVSS:4.0/...` vector (no "missing data" cases).
@@ -7761,7 +7761,7 @@ resolves to a real severity.
 
 **v0.3.x monolith:** ✅ the **NVD side is now fixed too** (2026-07-23) — `internal/adapter/nvd/client.go`
 `extractNVDCVSS` reads `cvssMetricV40` in precedence `v3.1 → v3.0 → v4.0 → v2` (test `TestClientFetchCVSSv40`).
-Verified live: 4/5 v4.0-only CVEs in the oamp scan resolved (`unknown → medium/low`); findings `unknown` 7 → 1
+Verified live: 4/5 v4.0-only CVEs in the alpha scan resolved (`unknown → medium/low`); findings `unknown` 7 → 1
 (the 1 residual is a CVE NVD has not scored, not a code gap). Only the harder OSV vector-computation path
 (`internal/adapter/osv/cvss.go`) is left, and it is **not needed for NVD-scored CVEs** — the backfill supplies
 the score.

@@ -497,7 +497,7 @@ func TestFixesForSeesTheEl8ModuleFix(t *testing.T) {
 	}
 }
 
-// D12 end-to-end at the lookup: the measured MRF card shape — the fix filed under the source
+// D12 end-to-end at the lookup: the measured P1 card shape — the fix filed under the source
 // name answers the binary-name query, in both the fail-open and the fail-closed (verdict-grade)
 // selection, and the collision guard holds inside a real Fixes set.
 func TestFixesFor_NormalizedNameEquality(t *testing.T) {

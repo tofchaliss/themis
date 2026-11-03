@@ -34,10 +34,10 @@ Intake resolves but never creates (D7). First time only:
 # a release is Product -> Project -> Release; capture the release id
 PID=$(curl -sf -X POST localhost:8082/api/v1/products \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  -d '{"name":"OAMP"}' | jq -r .id)
+  -d '{"name":"ALPHA"}' | jq -r .id)
 JID=$(curl -sf -X POST localhost:8082/api/v1/projects \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  -d "{\"product_id\":\"$PID\",\"name\":\"oamp-core\"}" | jq -r .id)
+  -d "{\"product_id\":\"$PID\",\"name\":\"alpha-core\"}" | jq -r .id)
 RID=$(curl -sf -X POST localhost:8082/api/v1/releases \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   -d "{\"project_id\":\"$JID\",\"version\":\"R1917.256\"}" | jq -r .id)
@@ -60,7 +60,7 @@ curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
 # ...or named by the Product/Project/Release triple, resolved read-only
 curl -sf -X POST localhost:8081/api/v1/intake \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  -G --data-urlencode 'product=OAMP' --data-urlencode 'project=oamp-core' \
+  -G --data-urlencode 'product=ALPHA' --data-urlencode 'project=alpha-core' \
      --data-urlencode 'version=R1917.256' \
   --data-binary @sbom.spdx.json | jq .
 ```
@@ -92,7 +92,7 @@ curl -sf -X POST localhost:8081/api/v1/intake \
 ```sh
 curl -sf -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  --data-binary @R1917.256.OAMP_Scan_Report.json | jq .
+  --data-binary @R1917.256.Scan_Report.json | jq .
 ```
 
 **Cortex CSV** — same endpoint, the content type is the whole difference:

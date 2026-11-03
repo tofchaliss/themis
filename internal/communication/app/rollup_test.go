@@ -88,12 +88,12 @@ type rollupClock struct{}
 
 func (rollupClock) Now() time.Time { return time.Date(2026, 9, 2, 17, 0, 0, 0, time.UTC) }
 
-var mrfIdentity = fakeIdentity{ref: domain.RollupProductRef{
-	Product: "MRF", Project: "cdmrf-oamp", Version: "20.1.0.0-118", ReleaseID: "rel-1"}}
+var p1Identity = fakeIdentity{ref: domain.RollupProductRef{
+	Product: "P1", Project: "project-alpha", Version: "20.1.0.0-118", ReleaseID: "rel-1"}}
 
-// The measured MRF posture: a decided finding, and the mixed finding whose cleared copy must
+// The measured P1 posture: a decided finding, and the mixed finding whose cleared copy must
 // annotate while its open copy is the subcomponent (D13.1).
-func mrfRows() []app.RollupPostureRow {
+func p1Rows() []app.RollupPostureRow {
 	return []app.RollupPostureRow{
 		{FindingID: "f1", FaultlineID: "fl1", CVE: "CVE-2020-1747", HasPosition: true,
 			Stance: "not_affected", PositionVersion: 2, PositionRationale: "not reachable",
@@ -121,7 +121,7 @@ func rollupSvc(posture fakePosture, identity fakeIdentity, st *fakeRollupStore, 
 func TestCreateRollup(t *testing.T) {
 	st := &fakeRollupStore{}
 	sz := &fakeRollupSerializers{payload: []byte(`{"doc":true}`)}
-	id, err := rollupSvc(fakePosture{rows: mrfRows()}, mrfIdentity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", "customer")
+	id, err := rollupSvc(fakePosture{rows: p1Rows()}, p1Identity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", "customer")
 	if err != nil || id == "" {
 		t.Fatalf("create: id=%q err=%v", id, err)
 	}
@@ -157,12 +157,12 @@ func TestCreateRollup(t *testing.T) {
 }
 
 func TestCreateRollup_SupersedesAndRetries(t *testing.T) {
-	art, _ := domain.MaterializeRollup(mrfIdentity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
+	art, _ := domain.MaterializeRollup(p1Identity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
 	prior, _ := domain.NewRollupPublication("rp-old", art, "openvex", "customer", []byte(`{}`), "", rollupClock{}.Now())
 	st := &fakeRollupStore{current: prior, hasCurrent: true, saveErrs: []error{app.ErrConcurrent}}
 	sz := &fakeRollupSerializers{payload: []byte(`{}`)}
 
-	id, err := rollupSvc(fakePosture{rows: mrfRows()}, mrfIdentity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", "customer")
+	id, err := rollupSvc(fakePosture{rows: p1Rows()}, p1Identity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", "customer")
 	if err != nil || id == "" {
 		t.Fatalf("create: %v", err)
 	}
@@ -177,17 +177,17 @@ func TestCreateRollup_SupersedesAndRetries(t *testing.T) {
 		saveErrs: []error{app.ErrConcurrent, app.ErrConcurrent, app.ErrConcurrent, app.ErrConcurrent, app.ErrConcurrent}}
 	// A fresh prior per attempt (Supersede mutates); the fake returns the same value copy each
 	// call, which is what the service reloads.
-	if _, err := rollupSvc(fakePosture{rows: mrfRows()}, mrfIdentity, exhausted, &fakeRollupSerializers{payload: []byte(`{}`)}).
+	if _, err := rollupSvc(fakePosture{rows: p1Rows()}, p1Identity, exhausted, &fakeRollupSerializers{payload: []byte(`{}`)}).
 		CreateRollup(context.Background(), "rel-1", "openvex", ""); !errors.Is(err, app.ErrConcurrent) {
 		t.Errorf("exhausted retries err = %v, want ErrConcurrent", err)
 	}
 }
 
 func TestCreateRollup_Errors(t *testing.T) {
-	rows := fakePosture{rows: mrfRows()}
+	rows := fakePosture{rows: p1Rows()}
 	for name, run := range map[string]func() error{
 		"posture read fails": func() error {
-			_, e := rollupSvc(fakePosture{err: errors.New("gov down")}, mrfIdentity, &fakeRollupStore{}, &fakeRollupSerializers{payload: []byte(`{}`)}).
+			_, e := rollupSvc(fakePosture{err: errors.New("gov down")}, p1Identity, &fakeRollupStore{}, &fakeRollupSerializers{payload: []byte(`{}`)}).
 				CreateRollup(context.Background(), "rel-1", "openvex", "")
 			return e
 		},
@@ -197,22 +197,22 @@ func TestCreateRollup_Errors(t *testing.T) {
 			return e
 		},
 		"serializer fails": func() error {
-			_, e := rollupSvc(rows, mrfIdentity, &fakeRollupStore{}, &fakeRollupSerializers{err: errors.New("no such format")}).
+			_, e := rollupSvc(rows, p1Identity, &fakeRollupStore{}, &fakeRollupSerializers{err: errors.New("no such format")}).
 				CreateRollup(context.Background(), "rel-1", "nope", "")
 			return e
 		},
 		"current read fails": func() error {
-			_, e := rollupSvc(rows, mrfIdentity, &fakeRollupStore{currentErr: errors.New("db down")}, &fakeRollupSerializers{payload: []byte(`{}`)}).
+			_, e := rollupSvc(rows, p1Identity, &fakeRollupStore{currentErr: errors.New("db down")}, &fakeRollupSerializers{payload: []byte(`{}`)}).
 				CreateRollup(context.Background(), "rel-1", "openvex", "")
 			return e
 		},
 		"empty payload refused": func() error {
-			_, e := rollupSvc(rows, mrfIdentity, &fakeRollupStore{}, &fakeRollupSerializers{payload: nil}).
+			_, e := rollupSvc(rows, p1Identity, &fakeRollupStore{}, &fakeRollupSerializers{payload: nil}).
 				CreateRollup(context.Background(), "rel-1", "openvex", "")
 			return e
 		},
 		"save fails hard": func() error {
-			_, e := rollupSvc(rows, mrfIdentity, &fakeRollupStore{saveErrs: []error{errors.New("disk full")}}, &fakeRollupSerializers{payload: []byte(`{}`)}).
+			_, e := rollupSvc(rows, p1Identity, &fakeRollupStore{saveErrs: []error{errors.New("disk full")}}, &fakeRollupSerializers{payload: []byte(`{}`)}).
 				CreateRollup(context.Background(), "rel-1", "openvex", "")
 			return e
 		},
@@ -224,16 +224,16 @@ func TestCreateRollup_Errors(t *testing.T) {
 	// A posture row claiming a decision with a nonsense stance fails materialization — the
 	// projection is trusted but still validated (garbage in must not become a document).
 	bad := fakePosture{rows: []app.RollupPostureRow{{FindingID: "f1", CVE: "CVE-1", HasPosition: true, Stance: "nonsense"}}}
-	if _, err := rollupSvc(bad, mrfIdentity, &fakeRollupStore{}, &fakeRollupSerializers{payload: []byte(`{}`)}).
+	if _, err := rollupSvc(bad, p1Identity, &fakeRollupStore{}, &fakeRollupSerializers{payload: []byte(`{}`)}).
 		CreateRollup(context.Background(), "rel-1", "openvex", ""); err == nil {
 		t.Error("invalid posture stance: expected an error")
 	}
 	// A prior that is ALREADY superseded (the chain raced past us entirely) fails the
 	// Supersede call itself — surfaced, not retried blindly.
-	art, _ := domain.MaterializeRollup(mrfIdentity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
+	art, _ := domain.MaterializeRollup(p1Identity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
 	stalePrior, _ := domain.NewRollupPublication("rp-old", art, "openvex", "", []byte(`{}`), "", rollupClock{}.Now())
 	_ = stalePrior.Supersede("rp-mid")
-	if _, err := rollupSvc(rows, mrfIdentity, &fakeRollupStore{current: stalePrior, hasCurrent: true}, &fakeRollupSerializers{payload: []byte(`{}`)}).
+	if _, err := rollupSvc(rows, p1Identity, &fakeRollupStore{current: stalePrior, hasCurrent: true}, &fakeRollupSerializers{payload: []byte(`{}`)}).
 		CreateRollup(context.Background(), "rel-1", "openvex", ""); !errors.Is(err, domain.ErrAlreadySuperseded) {
 		t.Errorf("already-superseded prior err = %v", err)
 	}
@@ -249,39 +249,39 @@ func TestCreateRollup_Errors(t *testing.T) {
 func TestPreviewRollup(t *testing.T) {
 	sz := &fakeRollupSerializers{payload: []byte(`{"preview":true}`)}
 	st := &fakeRollupStore{}
-	got, err := rollupSvc(fakePosture{rows: mrfRows()}, mrfIdentity, st, sz).PreviewRollup(context.Background(), "rel-1", "openvex")
+	got, err := rollupSvc(fakePosture{rows: p1Rows()}, p1Identity, st, sz).PreviewRollup(context.Background(), "rel-1", "openvex")
 	if err != nil || string(got) != `{"preview":true}` {
 		t.Fatalf("preview = %q err=%v", got, err)
 	}
 	if len(st.saved) != 0 || st.currentCalls != 0 {
 		t.Error("preview must record nothing and consult no store")
 	}
-	if _, err := rollupSvc(fakePosture{err: errors.New("down")}, mrfIdentity, st, sz).PreviewRollup(context.Background(), "rel-1", "openvex"); err == nil {
+	if _, err := rollupSvc(fakePosture{err: errors.New("down")}, p1Identity, st, sz).PreviewRollup(context.Background(), "rel-1", "openvex"); err == nil {
 		t.Error("preview posture error must surface")
 	}
 }
 
 func TestRollupStatus(t *testing.T) {
 	// No rollup yet.
-	got, err := rollupSvc(fakePosture{rows: mrfRows()}, mrfIdentity, &fakeRollupStore{}, &fakeRollupSerializers{}).
+	got, err := rollupSvc(fakePosture{rows: p1Rows()}, p1Identity, &fakeRollupStore{}, &fakeRollupSerializers{}).
 		Status(context.Background(), "rel-1", "openvex", "")
 	if err != nil || got.Found || got.Summary != "no rollup published" {
 		t.Fatalf("no-rollup status = %+v err=%v", got, err)
 	}
 
 	// A current rollup whose recorded inputs match the live posture: current, not stale.
-	rows := mrfRows()
+	rows := p1Rows()
 	entriesArt := func(rs []app.RollupPostureRow) domain.RollupArtifact {
 		st := &fakeRollupStore{}
 		sz := &fakeRollupSerializers{payload: []byte(`{}`)}
-		if _, err := rollupSvc(fakePosture{rows: rs}, mrfIdentity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", ""); err != nil {
+		if _, err := rollupSvc(fakePosture{rows: rs}, p1Identity, st, sz).CreateRollup(context.Background(), "rel-1", "openvex", ""); err != nil {
 			t.Fatal(err)
 		}
 		return sz.art
 	}
 	pub, _ := domain.NewRollupPublication("rp-1", entriesArt(rows), "openvex", "", []byte(`{}`), "", rollupClock{}.Now())
 	current := &fakeRollupStore{current: pub, hasCurrent: true}
-	got, err = rollupSvc(fakePosture{rows: rows}, mrfIdentity, current, &fakeRollupSerializers{}).Status(context.Background(), "rel-1", "openvex", "")
+	got, err = rollupSvc(fakePosture{rows: rows}, p1Identity, current, &fakeRollupSerializers{}).Status(context.Background(), "rel-1", "openvex", "")
 	if err != nil || !got.Found || got.Stale || got.Summary != "current" || got.PublicationID != "rp-1" || got.Statements != 3 || got.AsOf == "" {
 		t.Fatalf("current status = %+v err=%v", got, err)
 	}
@@ -290,7 +290,7 @@ func TestRollupStatus(t *testing.T) {
 	moved := append([]app.RollupPostureRow{}, rows...)
 	moved[0].PositionVersion = 3
 	moved = append(moved, app.RollupPostureRow{FindingID: "f4", CVE: "CVE-2026-9"})
-	got, err = rollupSvc(fakePosture{rows: moved}, mrfIdentity, current, &fakeRollupSerializers{}).Status(context.Background(), "rel-1", "openvex", "")
+	got, err = rollupSvc(fakePosture{rows: moved}, p1Identity, current, &fakeRollupSerializers{}).Status(context.Background(), "rel-1", "openvex", "")
 	if err != nil || !got.Stale || got.Drift.ChangedDecisions != 1 || got.Drift.NewFindings != 1 {
 		t.Fatalf("stale status = %+v err=%v", got, err)
 	}
@@ -299,21 +299,21 @@ func TestRollupStatus(t *testing.T) {
 	}
 
 	// Errors surface.
-	if _, err := rollupSvc(fakePosture{rows: rows}, mrfIdentity, &fakeRollupStore{currentErr: errors.New("db")}, &fakeRollupSerializers{}).
+	if _, err := rollupSvc(fakePosture{rows: rows}, p1Identity, &fakeRollupStore{currentErr: errors.New("db")}, &fakeRollupSerializers{}).
 		Status(context.Background(), "rel-1", "openvex", ""); err == nil {
 		t.Error("store error must surface")
 	}
-	if _, err := rollupSvc(fakePosture{err: errors.New("gov")}, mrfIdentity, current, &fakeRollupSerializers{}).
+	if _, err := rollupSvc(fakePosture{err: errors.New("gov")}, p1Identity, current, &fakeRollupSerializers{}).
 		Status(context.Background(), "rel-1", "openvex", ""); err == nil {
 		t.Error("posture error must surface")
 	}
 }
 
 func TestRollupPassthroughReads(t *testing.T) {
-	art, _ := domain.MaterializeRollup(mrfIdentity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
+	art, _ := domain.MaterializeRollup(p1Identity.ref, rollupClock{}.Now(), []domain.RollupEntry{{FindingID: "f1", CVE: "CVE-1"}}, 0)
 	pub, _ := domain.NewRollupPublication("rp-9", art, "openvex", "", []byte(`{}`), "", rollupClock{}.Now())
 	st := &fakeRollupStore{got: pub, listed: []domain.RollupPublication{pub}}
-	s := rollupSvc(fakePosture{}, mrfIdentity, st, &fakeRollupSerializers{})
+	s := rollupSvc(fakePosture{}, p1Identity, st, &fakeRollupSerializers{})
 	if got, err := s.GetRollup(context.Background(), "rp-9"); err != nil || got.ID() != "rp-9" {
 		t.Errorf("get = %v %v", got.ID(), err)
 	}

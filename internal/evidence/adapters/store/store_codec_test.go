@@ -75,7 +75,7 @@ func TestInventoryCodec_Invalid(t *testing.T) {
 // look identical to a working one until an operator asked which build produced a
 // document.
 func TestEvidenceCodecRoundTripsBuildID(t *testing.T) {
-	const buildID = "Jenkins/OAMP-core/1917"
+	const buildID = "Jenkins/ALPHA-core/1917"
 	in := domain.Provenance{Source: "trivy", ImageDigest: "sha256:deadbeef", BuildID: buildID}
 
 	source, digest, stored := provenanceColumns(in)

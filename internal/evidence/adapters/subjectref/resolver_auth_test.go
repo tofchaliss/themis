@@ -33,16 +33,16 @@ func TestResolve_ProductScopedKeyCannotDistinguishTheProductLookupsOutcomes(t *t
 		product string
 		seed    func(*fakeRegistry)
 	}{
-		{name: "resolves to another product", product: "OAMP"},
+		{name: "resolves to another product", product: "ALPHA"},
 		{name: "resolves to nothing", product: "acquisition-target"},
 		{
 			name:    "is ambiguous",
-			product: "OAMP",
+			product: "ALPHA",
 			seed:    func(f *fakeRegistry) { f.err, f.failOn = subjectref.ErrAmbiguousName, "product" },
 		},
 		{
 			name:    "could not be read at all",
-			product: "OAMP",
+			product: "ALPHA",
 			seed:    func(f *fakeRegistry) { f.err, f.failOn = errors.New("connection refused"), "product" },
 		},
 	} {
@@ -52,7 +52,7 @@ func TestResolve_ProductScopedKeyCannotDistinguishTheProductLookupsOutcomes(t *t
 				tc.seed(reg)
 			}
 			got, err := subjectref.NewResolver(reg).Resolve(context.Background(), app.ResolveRequest{
-				Product: tc.product, Project: "oamp-core", Version: "R1917.256",
+				Product: tc.product, Project: "alpha-core", Version: "R1917.256",
 				Authorize: scopedTo("prod-other"),
 			})
 			if got != (app.Resolution{}) {
@@ -88,7 +88,7 @@ func TestResolve_ProductScopedKeyCannotDistinguishTheProductLookupsOutcomes(t *t
 func TestResolve_AuthorizationPrecedesTheProjectLookup(t *testing.T) {
 	reg := estate()
 	_, err := subjectref.NewResolver(reg).Resolve(context.Background(), app.ResolveRequest{
-		Product: "OAMP", Project: "oamp-core", Version: "R1917.256",
+		Product: "ALPHA", Project: "alpha-core", Version: "R1917.256",
 		Authorize: scopedTo("prod-other"),
 	})
 	if re, ok := domain.AsReject(err); !ok || re.Reason != domain.ReasonUnauthorized {
@@ -106,7 +106,7 @@ func TestResolve_AnAuthorizedProductKeyGetsTheAnswersAnAdminGets(t *testing.T) {
 	mine := scopedTo("prod-1")
 
 	got, err := subjectref.NewResolver(estate()).Resolve(context.Background(), app.ResolveRequest{
-		Product: "OAMP", Project: "oamp-core", Version: "R1917.256", Authorize: mine,
+		Product: "ALPHA", Project: "alpha-core", Version: "R1917.256", Authorize: mine,
 	})
 	if err != nil || got.ReleaseID != "rel-1" {
 		t.Fatalf("own product = %+v, %v, want the release", got, err)
@@ -118,11 +118,11 @@ func TestResolve_AnAuthorizedProductKeyGetsTheAnswersAnAdminGets(t *testing.T) {
 		wantIn                 string
 	}{
 		{"a missing project", "nope", "R1917.256", domain.ReasonUnknownRelease, `project named "nope"`},
-		{"a missing version", "oamp-core", "R0.0", domain.ReasonUnknownRelease, `release version named "R0.0"`},
+		{"a missing version", "alpha-core", "R0.0", domain.ReasonUnknownRelease, `release version named "R0.0"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := subjectref.NewResolver(estate()).Resolve(context.Background(), app.ResolveRequest{
-				Product: "OAMP", Project: tc.project, Version: tc.version, Authorize: mine,
+				Product: "ALPHA", Project: tc.project, Version: tc.version, Authorize: mine,
 			})
 			re, ok := domain.AsReject(err)
 			if !ok || re.Reason != tc.wantReason {

@@ -40,7 +40,7 @@ Name the release through the environment (it must already be registered — inta
 resolves identity read-only and never creates it):
 
   RELEASE_ID=<uuid>                       ./scripts/cortex-csv-to-scan-report.sh scan.csv
-  PRODUCT=OAMP PROJECT=oamp-core VERSION=R1917.256 \
+  PRODUCT=ALPHA PROJECT=alpha-core VERSION=R1917.256 \
                                           ./scripts/cortex-csv-to-scan-report.sh scan.csv
 
   THEMIS_EVIDENCE_URL   Evidence base URL (default http://localhost:8081)

@@ -178,7 +178,7 @@ and the resume pointer, never item state.
 >
 > **`/tmp/scan-report-new.json` (the good 427-finding conversion) is almost certainly gone** — `/tmp`
 > clears on reboot. The source export survives at
-> `scripts/R1917.256.OAMP_Scan_Report.json`; regenerate with the seven-column shim + the maintained
+> `scripts/R1917.256.Scan_Report.json`; regenerate with the seven-column shim + the maintained
 > converter (GUI-16b in BACKLOG has the exact commands, and `observed_at` must be
 > `2026-09-29T07:23:22Z` — derived from `max(last_observed)`, so a regeneration is byte-identical and
 > dedups).
@@ -690,7 +690,7 @@ and the resume pointer, never item state.
 > ## ⏭ CHECKPOINT 2026-09-17 — the carrier arc closed and LIVE-VERIFIED on the VM
 >
 > **`main` = `d3833c6`, CI GREEN.** Everything is merged; no branch holds work. The 2026-09-16
-> checkpoint below opened the arc; this one closes it, and the numbers are measured on the MRF
+> checkpoint below opened the arc; this one closes it, and the numbers are measured on the P1
 > estate (859 cards · 1569 matches · 797 findings), not inferred.
 >
 > ### Shipped, merged, and verified live
@@ -711,7 +711,7 @@ and the resume pointer, never item state.
 > - **KN-VERDICT-2** (migration 000009) — `domain.VerdictGeneration` folded into the D6 staleness
 >   predicate, so a shipped verdict-logic change re-judges instead of waiting on feed drift.
 >
-> ### The live numbers (2026-09-17, MRF/cdmrf-oamp)
+> ### The live numbers (2026-09-17, P1/project-alpha)
 >
 > | | before | after |
 > | --- | --- | --- |
@@ -881,7 +881,7 @@ and the resume pointer, never item state.
 >   changed:74` → both sides converged at **192/721**. The DEFECT (no reconciliation) is still
 >   open; only this instance is repaired.
 > - **Estate cleanup** — 5 test releases, 3 projects, 2 products removed (459 occurrences, 405
->   findings). Estate is now one product, MRF, with `cdmrf-oamp` holding three real builds.
+>   findings). Estate is now one product, P1, with `project-alpha` holding three real builds.
 >
 > ### Filed, not started
 > **KN-CLAIM-1** (vocabulary gap — the one structural defect; spans BOTH packaging worlds, since
@@ -1027,7 +1027,7 @@ go-forward**; the current architecture is **frozen at v0.3.x**.
 >
 > **Update (2026-07-30): deployed end-to-end on a Linux VM + first parity cluster closed.** The full
 > post-M5 stack was brought up from scratch on Ubuntu 24.04 — all six services under **systemd**, a real
-> 542/556-component OAMP image SBOM driven through to a published OpenVEX, and **cyberpal (Ollama)** as the
+> 542/556-component ALPHA image SBOM driven through to a published OpenVEX, and **cyberpal (Ollama)** as the
 > reactive AI plane. Landed on `main` this session:
 > - **PR #59 — post-M5 deployment hardening.** `INSTALLATION.md` Part A rewritten for the real M5 world
 >   (the `THEMIS_BUS_DATABASE_DSN` switch, database-per-context + `bus`, ordered 6-service runbook, the
