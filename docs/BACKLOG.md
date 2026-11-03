@@ -144,7 +144,8 @@ unblocks the most, highest first:
 
 14. **SYNC-1 — one decision, chosen scope** (EDR-SYNC-01, **ACCEPTED 2026-11-03; S1 BUILT
     2026-11-03** — scope on the decision, sweep + worker propagation, `scope-targets` preview,
-    governance migration 23; S2 GUI and S3 follow/flags open; owner picked
+    governance migration 23; **S2 GUI BUILT 2026-11-03** — scope picker, preview, chips;
+    S3 follow/flags open; owner picked
     "scope at decision time" over auto-copy and proposals-only). A decision carries a scope
     (`release` default · `project` · `product`); Themis establishes the same Position, recorded
     against the same person, on every same-CVE same-component Finding in scope — now, on a 1m
