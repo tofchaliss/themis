@@ -51,6 +51,15 @@ async function apiGET(node, path) {
   return r.json();
 }
 
+/* apiRaw returns the response itself for callers that read a non-200 status as an answer
+   (a 503 scope preview means "no Registry seam", not "nothing"). */
+async function apiRaw(node, path) {
+  const r = await fetch(`/api/${node}${path}`, { headers: { Accept: "application/json" } });
+  if (r.status === 401) { sessionGone(); throw new Error("session expired"); }
+  if (r.status === 502) throw new NodeDown(node);
+  return r;
+}
+
 async function apiPOST(node, path, body) {
   const r = await fetch(`/api/${node}${path}`, {
     method: "POST",
@@ -231,6 +240,25 @@ const stanceChip = (stance, hasPosition) => {
   return `<span class="chip ${cls}"><i></i>${esc(stance || "decided")}</span>`;
 };
 
+/* EDR-SYNC-01 D7: after the click the page says how wide the decision was and, on a propagated
+   target, where it came from. The names live in the rationale ("applied by scope product from
+   <project> <version>"); the chips state the fact. */
+const scopeChips = (pos) => {
+  if (!pos) return "";
+  const out = [];
+  if (pos.propagated_from_finding_id) {
+    out.push(`<span class="chip chip-accent" title="this Position was applied from a decision taken with scope ${esc(pos.scope || "")} on Finding ${esc(pos.propagated_from_finding_id)} (v${esc(pos.propagated_from_version ?? "?")}); the rationale below names the source release. It is the same person's decision, recorded here, never a rule's">applied from another release</span>`);
+  } else if (pos.scope && pos.scope !== "release") {
+    out.push(`<span class="chip chip-accent" title="decided once for the whole ${esc(pos.scope)}: Themis applies it to every undecided same-CVE same-package finding in scope, now and for releases uploaded later">decided for ${esc(pos.scope)}</span>`);
+  }
+  return out.join(" ");
+};
+const proposalOriginChip = (id) => {
+  if (!id) return "";
+  if (id.startsWith("scoped:")) return `<span class="chip chip-accent" title="raised in the decider's own name by scope propagation (EDR-SYNC-01) and accepted at once">applied by scope</span>`;
+  if (id.startsWith("rollforward:")) return `<span class="chip" title="proposed from a sibling release's judged decision (EDR-ROLLFORWARD-01); a person decides">roll-forward</span>`;
+  return "";
+};
 const trustChip = (t) => t ? `<span class="chip ${t === "inferred" ? "chip-warn" : ""}" title="evidence trust (EDR-TRUST-01): an inferred proposal can never be auto-accepted">${esc(t)}</span>` : "";
 
 const claimNote = (c) => c === "scope"
@@ -2512,6 +2540,7 @@ async function openDrawer(entry) {
       <h3 class="section-h">Decide</h3>
       ${f.current_position ? `<p class="card-sub" style="margin:0 0 10px">Current position:
         ${stanceChip(f.current_position.stance, true)} <span class="chip chip-info">v${esc(f.current_position.version ?? "?")}</span>
+        ${scopeChips(f.current_position)}
         — a new accepted proposal appends the next immutable version; nothing is ever overwritten.</p>` : ""}
       ${f.disposition_stale ? `<p class="attr-note"><b>Re-surfaced ${esc(fmtWhen(f.disposition_stale.since))}:</b> ${esc(f.disposition_stale.reason)}. The decision still stands; it is back in the queue because its premise moved or its review date passed. Accepting a new proposal clears this.</p>` : ""}
       <div class="form-grid">
@@ -2526,6 +2555,13 @@ async function openDrawer(entry) {
           </select></label>
         <label>Rationale — why, in your words (this becomes the audit record)
           <textarea id="dc-rationale" rows="2" placeholder="e.g. vulnerable function unreachable; loader is SafeLoader throughout"></textarea></label>
+        <label>Scope — how wide the subject of this decision is (EDR-SYNC-01)
+          <select id="dc-scope">
+            <option value="release">this release only</option>
+            <option value="project">every release of this project</option>
+            <option value="product">every project and release of this product</option>
+          </select></label>
+        <div id="dc-scope-preview" class="card-sub" style="margin:-4px 0 0"></div>
         <label id="dc-review-wrap" hidden>Review by — when this suppression should resurface (optional; empty means no date was agreed)
           <input type="date" id="dc-review"></label>
         <div id="dc-terms-wrap" hidden>
@@ -2550,7 +2586,7 @@ async function openDrawer(entry) {
       <h3 class="section-h">Proposals on record</h3>
       ${proposals.length ? proposals.map((p) => `<div class="prec" data-pid="${esc(p.id)}">
           <div class="prec-top">${stanceChip(p.stance, true)}
-            <span class="chip">${esc(p.proposer_kind)}</span>${trustChip(p.evidence_trust)}
+            <span class="chip">${esc(p.proposer_kind)}</span>${trustChip(p.evidence_trust)}${proposalOriginChip(p.id)}
             <span class="chip ${p.status === "accepted" ? "chip-good" : (p.status === "rejected" ? "chip-crit" : "")}">${esc(p.status)}</span>
             <span class="act-when">${timeAgo(p.raised_at)}</span></div>
           ${p.rationale ? `<div class="prec-rationale">${esc(p.rationale)}</div>` : ""}
@@ -2597,6 +2633,36 @@ async function openDrawer(entry) {
     $("#dc-terms-wrap").hidden = !acceptance(stanceSel.value);
   });
 
+  /* EDR-SYNC-01 D7: the preview says what a scope reaches BEFORE the click — the same list the
+     sweep will apply, from the same endpoint — so the person knows what they are signing.
+     "Nobody" and "cannot tell" are different answers: a Registry outage shows as an error, never
+     as zero. */
+  const scopeSel = $("#dc-scope");
+  const scopePreview = $("#dc-scope-preview");
+  let previewSeq = 0;
+  async function previewScope() {
+    const scope = scopeSel.value;
+    const seq = ++previewSeq;
+    if (scope === "release") { scopePreview.innerHTML = ""; return; }
+    scopePreview.innerHTML = `<span class="spin"></span> Checking what ${esc(scope)} scope reaches…`;
+    try {
+      const r = await apiRaw("governance", `/findings/${encodeURIComponent(fid)}/scope-targets?scope=${encodeURIComponent(scope)}`);
+      if (seq !== previewSeq) return;
+      if (r.status === 503) { scopePreview.innerHTML = `<span class="err">Scope preview unavailable: Governance has no Registry seam, so a wider scope would not be applied either.</span>`; return; }
+      if (r.status !== 200) { scopePreview.innerHTML = `<span class="err">Scope preview failed (${r.status}): ${esc(await problemDetail(r))}</span>`; return; }
+      const j = await r.json();
+      const targets = j.targets || [];
+      if (!targets.length) { scopePreview.innerHTML = `Reaches <b>no other finding</b> right now — every same-package sibling is decided or absent. A release uploaded later still gets this decision.`; return; }
+      scopePreview.innerHTML = `Will also apply to <b>${esc(j.count)} finding${j.count === 1 ? "" : "s"} in ${esc(j.projects)} project${j.projects === 1 ? "" : "s"}</b>, recorded in your name:
+        ${targets.slice(0, 8).map((t) => `<span class="chip" title="${esc(t.level)} level — ${esc(t.product_name || t.product_id || "")}">${esc(t.project_name || t.project_id || "?")} ${esc(t.version || "")}</span>`).join(" ")}
+        ${targets.length > 8 ? `<span class="chip chip-info">+${targets.length - 8} more</span>` : ""}
+        A finding already decided by someone keeps its decision.`;
+    } catch (e) {
+      if (seq === previewSeq) scopePreview.innerHTML = `<span class="err">Scope preview failed: ${esc(e.message)}</span>`;
+    }
+  }
+  scopeSel.addEventListener("change", previewScope);
+
   async function raiseProposal() {
     const body = {
       stance: stanceSel.value,
@@ -2612,6 +2678,7 @@ async function openDrawer(entry) {
 
   async function acceptProposal(pid, stance) {
     const body = { actor_id: WHO, actor_kind: "human" };
+    if (scopeSel.value !== "release") body.scope = scopeSel.value; // EDR-SYNC-01 D1
     if (suppressing(stance) && $("#dc-review").value) {
       body.review_by = new Date($("#dc-review").value + "T00:00:00Z").toISOString();
     }
@@ -2647,7 +2714,7 @@ async function openDrawer(entry) {
       const pid = await raiseProposal();
       if (!pid) throw new Error("raise returned no proposal id");
       await acceptProposal(pid, stanceSel.value);
-      toast(`Position established: ${stanceSel.value} (decided by ${WHO}).`);
+      toast(`Position established: ${stanceSel.value} (decided by ${WHO})${scopeSel.value !== "release" ? ` for the whole ${scopeSel.value} — siblings follow within a minute` : ""}.`);
       reload();
     } catch (e) { toast(e.message); b.disabled = false; }
   });
@@ -2656,7 +2723,7 @@ async function openDrawer(entry) {
     btn.disabled = true;
     try {
       await acceptProposal(btn.dataset.pid, btn.dataset.stance);
-      toast(`Position established: ${btn.dataset.stance} (decided by ${WHO}).`);
+      toast(`Position established: ${btn.dataset.stance} (decided by ${WHO})${scopeSel.value !== "release" ? ` for the whole ${scopeSel.value} — siblings follow within a minute` : ""}.`);
       reload();
     } catch (e) { toast(e.message); btn.disabled = false; }
   }));

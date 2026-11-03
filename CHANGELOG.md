@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **GUI: scope on the decision** (EDR-SYNC-01 D7, SYNC-1 step S2): the Decide form in the
+  finding drawer has a Scope picker (this release · every release of this project · every
+  project and release of this product). Choosing a wider scope previews, from
+  `GET /findings/{id}/scope-targets`, how many findings in how many projects it will reach,
+  named by project and version, before the click; a Registry outage shows as an error, never as
+  zero. After the click the Current position line says "decided for product/project", a
+  propagated target says "applied from another release", and a `scoped:` proposal is marked
+  "applied by scope" (roll-forward proposals get their own chip).
 - **One decision, chosen scope** (EDR-SYNC-01 D1–D8, SYNC-1 step S1): a decision carries a
   `scope` — `release` (default, unchanged) · `project` · `product`. Themis then establishes the
   same Position, recorded against the same person, on every undecided same-CVE same-component

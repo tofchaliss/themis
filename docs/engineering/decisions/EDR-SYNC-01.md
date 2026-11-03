@@ -181,8 +181,24 @@ change: each step ships only on the owner's explicit go.
   same person, `propagated_from` set; the sibling the owner had decided the day before kept its
   own Position (D5) — the owner read that as correct. A test stance was then corrected by hand
   on both Findings, because a re-decision does not yet follow (S3).
-- Still open: S2 (GUI picker, preview count, "applied from" line), S3 (re-decision follow,
-  `scope_withdrawn`, `scope_conflict` flags).
+- Still open after S1: S3 (re-decision follow, `scope_withdrawn`, `scope_conflict` flags).
+
+### Step S2 (2026-11-03) — the GUI tells the truth before and after the click (D7)
+
+- Decide form: a Scope picker, default `release` (today's behaviour, nothing new to click).
+  Choosing `project` or `product` fetches the preview from the same endpoint the sweep's
+  target list comes from and says "Will also apply to N findings in M projects", each target
+  as `<project> <version>` (level on hover); "reaches no other finding right now" when every
+  sibling is decided or absent; a Registry outage or a node without the seam shows as an
+  error, never as zero (D2's "nobody" vs "cannot tell").
+- The accept carries `scope`; the toast says the decision was taken for the whole product or
+  project and that siblings follow within a minute.
+- After the click: the Current position line shows "decided for product/project" on the source
+  and "applied from another release" on a propagated target (the rationale, shown with the
+  proposal, names the source project and version); a `scoped:` proposal carries the chip
+  "applied by scope", a `rollforward:` proposal "roll-forward". No link to the source Finding
+  yet: the drawer opens from a posture row, and a cross-release jump is a later GUI step.
+- Nothing in the GUI decides: the picker widens the subject of the person's own decision.
 
 ## What this record does NOT decide
 

@@ -35,3 +35,14 @@ No `specs/` deltas — archive with `openspec archive phase3-decision-scope-s1 -
 - [x] 3.6 Names beside ids (owner ask on the VM round): `ReleaseOwnerResolver` (registry client
   `ReleaseOwners`, three hops), `ScopeTarget.ProductName/ProjectName/Version`, preview fields
   `product_name`/`project_name`/`version`, rationale "from <project> <version>".
+
+## Group 4 — S2, the GUI (D7; owner "work on last 3 items", 2026-11-03)
+
+- [x] 4.1 `cmd/dashboard/static/app.js`: Scope picker in the Decide form (default release),
+  preview from `GET /findings/{id}/scope-targets` with names and counts, 503 and errors shown
+  as such; `scope` on the accept body; toast names the scope.
+- [x] 4.2 Current position chips "decided for <scope>" / "applied from another release";
+  proposal chips "applied by scope" / "roll-forward". `make js-check` green.
+- [ ] 4.3 VM: open a finding on a release whose CVE is open on other projects; pick scope
+  product; the preview lists the sibling projects by name; Raise & accept; the sibling's drawer
+  shows "applied from another release" and the scoped proposal within a minute.
