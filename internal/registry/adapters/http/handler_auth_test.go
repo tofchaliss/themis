@@ -13,11 +13,11 @@ import (
 	"github.com/themis-project/themis/internal/registry/domain"
 )
 
-// estate is a two-product Registry: the key under test owns MRF, and OAMP is someone else's.
+// estate is a two-product Registry: the key under test owns P1, and ALPHA is someone else's.
 type estate struct {
 	repo                    *fakeRepo
-	mrf, oamp               string // product ids
-	mrfProject, oampProject string
+	p1, alpha               string // product ids
+	p1Project, alphaProject string
 }
 
 // seedEstate registers both products and one project under each, then mirrors them into the
@@ -30,23 +30,23 @@ func seedEstate(t *testing.T) estate {
 	srv := newServer(t, repo)
 
 	e := estate{repo: repo}
-	_, raw := post(t, srv.URL+"/products", map[string]string{"name": "MRF"})
-	e.mrf = idOf(t, raw)
-	_, raw = post(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
-	e.oamp = idOf(t, raw)
-	_, raw = post(t, srv.URL+"/projects", map[string]string{"product_id": e.mrf, "name": "cdmrf-oamp"})
-	e.mrfProject = idOf(t, raw)
-	_, raw = post(t, srv.URL+"/projects", map[string]string{"product_id": e.oamp, "name": "core"})
-	e.oampProject = idOf(t, raw)
+	_, raw := post(t, srv.URL+"/products", map[string]string{"name": "P1"})
+	e.p1 = idOf(t, raw)
+	_, raw = post(t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
+	e.alpha = idOf(t, raw)
+	_, raw = post(t, srv.URL+"/projects", map[string]string{"product_id": e.p1, "name": "project-alpha"})
+	e.p1Project = idOf(t, raw)
+	_, raw = post(t, srv.URL+"/projects", map[string]string{"product_id": e.alpha, "name": "core"})
+	e.alphaProject = idOf(t, raw)
 
-	for id, name := range map[string]string{e.mrf: "MRF", e.oamp: "OAMP"} {
+	for id, name := range map[string]string{e.p1: "P1", e.alpha: "ALPHA"} {
 		p, err := domain.NewProduct(domain.ProductID(id), name)
 		if err != nil {
 			t.Fatal(err)
 		}
 		repo.productObjs[id] = p
 	}
-	for id, prod := range map[string]string{e.mrfProject: e.mrf, e.oampProject: e.oamp} {
+	for id, prod := range map[string]string{e.p1Project: e.p1, e.alphaProject: e.alpha} {
 		p, err := domain.NewProject(domain.ProjectID(id), domain.ProductID(prod), "p-"+id)
 		if err != nil {
 			t.Fatal(err)
@@ -79,27 +79,27 @@ func wantForbidden(t *testing.T, what string, status int, raw []byte) {
 	}
 }
 
-// TestProductKeyRegistersOnlyUnderItsOwnProduct is the gap this closes: a product:<MRF> key
+// TestProductKeyRegistersOnlyUnderItsOwnProduct is the gap this closes: a product:<P1> key
 // could create projects, releases and microservices under ANY product, because Registry
 // checked only that the key could write at all.
 func TestProductKeyRegistersOnlyUnderItsOwnProduct(t *testing.T) {
 	e := seedEstate(t)
-	srv := serverAs(t, e.repo, productKey(e.mrf))
+	srv := serverAs(t, e.repo, productKey(e.p1))
 
 	// Its own product: find-or-create works exactly as for an admin.
-	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": e.mrf, "name": "new-image"})
-	assertFindOrCreate(t, srv.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "oamp_1917_258_1"})
-	if status, raw := post(t, srv.URL+"/products/"+e.mrf+"/microservices", map[string]string{"name": "oamp-svc"}); status != http.StatusCreated {
+	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": e.p1, "name": "new-image"})
+	assertFindOrCreate(t, srv.URL+"/releases", map[string]string{"project_id": e.p1Project, "version": "alpha_1917_258_1"})
+	if status, raw := post(t, srv.URL+"/products/"+e.p1+"/microservices", map[string]string{"name": "alpha-svc"}); status != http.StatusCreated {
 		t.Fatalf("own microservice = %d, want 201: %s", status, raw)
 	}
 
 	// Someone else's product: refused, and nothing is written.
 	rows := e.repo.rows
-	status, raw := post(t, srv.URL+"/projects", map[string]string{"product_id": e.oamp, "name": "sneaky"})
+	status, raw := post(t, srv.URL+"/projects", map[string]string{"product_id": e.alpha, "name": "sneaky"})
 	wantForbidden(t, "project under a foreign product", status, raw)
-	status, raw = post(t, srv.URL+"/releases", map[string]string{"project_id": e.oampProject, "version": "R1"})
+	status, raw = post(t, srv.URL+"/releases", map[string]string{"project_id": e.alphaProject, "version": "R1"})
 	wantForbidden(t, "release under a foreign project", status, raw)
-	status, raw = post(t, srv.URL+"/products/"+e.oamp+"/microservices", map[string]string{"name": "sneaky"})
+	status, raw = post(t, srv.URL+"/products/"+e.alpha+"/microservices", map[string]string{"name": "sneaky"})
 	wantForbidden(t, "microservice under a foreign product", status, raw)
 	if e.repo.rows != rows {
 		t.Fatalf("a refused write created %d row(s)", e.repo.rows-rows)
@@ -111,16 +111,16 @@ func TestProductKeyRegistersOnlyUnderItsOwnProduct(t *testing.T) {
 // the intake door already keeps (EDR-INTAKE-01 B3).
 func TestProductKeyRefusalLeaksNoExistence(t *testing.T) {
 	e := seedEstate(t)
-	srv := serverAs(t, e.repo, productKey(e.mrf))
+	srv := serverAs(t, e.repo, productKey(e.p1))
 
-	_, foreign := post(t, srv.URL+"/projects", map[string]string{"product_id": e.oamp, "name": "x"})
+	_, foreign := post(t, srv.URL+"/projects", map[string]string{"product_id": e.alpha, "name": "x"})
 	status, missing := post(t, srv.URL+"/projects", map[string]string{"product_id": "no-such-product", "name": "x"})
 	wantForbidden(t, "project under a missing product", status, missing)
 	if string(foreign) != string(missing) {
 		t.Fatalf("foreign and missing product differ:\n%s\n%s", foreign, missing)
 	}
 
-	_, foreignProj := post(t, srv.URL+"/releases", map[string]string{"project_id": e.oampProject, "version": "R1"})
+	_, foreignProj := post(t, srv.URL+"/releases", map[string]string{"project_id": e.alphaProject, "version": "R1"})
 	status, missingProj := post(t, srv.URL+"/releases", map[string]string{"project_id": "no-such-project", "version": "R1"})
 	wantForbidden(t, "release under a missing project", status, missingProj)
 	if string(foreignProj) != string(missingProj) {
@@ -139,16 +139,16 @@ func TestProductKeyRefusalLeaksNoExistence(t *testing.T) {
 // name is 403 whether or not it exists, and nothing is created.
 func TestProductKeyNeverCreatesAProduct(t *testing.T) {
 	e := seedEstate(t)
-	srv := serverAs(t, e.repo, productKey(e.mrf))
+	srv := serverAs(t, e.repo, productKey(e.p1))
 
-	status, raw := post(t, srv.URL+"/products", map[string]string{"name": " mrf "})
+	status, raw := post(t, srv.URL+"/products", map[string]string{"name": " p1 "})
 	id, created := createdOf(t, raw)
-	if status != http.StatusOK || created || id != e.mrf {
-		t.Fatalf("own product = %d created=%v id=%q, want 200 created=false id=%q: %s", status, created, id, e.mrf, raw)
+	if status != http.StatusOK || created || id != e.p1 {
+		t.Fatalf("own product = %d created=%v id=%q, want 200 created=false id=%q: %s", status, created, id, e.p1, raw)
 	}
 
 	rows := e.repo.rows
-	_, foreign := post(t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	_, foreign := post(t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
 	status, missing := post(t, srv.URL+"/products", map[string]string{"name": "Brand-New"})
 	wantForbidden(t, "a new product", status, missing)
 	if string(foreign) != string(missing) {
@@ -160,7 +160,7 @@ func TestProductKeyNeverCreatesAProduct(t *testing.T) {
 
 	// A key whose product cannot be read is refused, not waved through.
 	e.repo.prodErr = errors.New("db down")
-	status, raw = post(t, srv.URL+"/products", map[string]string{"name": "MRF"})
+	status, raw = post(t, srv.URL+"/products", map[string]string{"name": "P1"})
 	wantForbidden(t, "own product while the store is failing", status, raw)
 }
 
@@ -168,7 +168,7 @@ func TestProductKeyNeverCreatesAProduct(t *testing.T) {
 // product, so only an admin key may write them.
 func TestProductKeyIsRefusedEstateWideWrites(t *testing.T) {
 	e := seedEstate(t)
-	srv := serverAs(t, e.repo, productKey(e.mrf))
+	srv := serverAs(t, e.repo, productKey(e.p1))
 
 	status, raw := post(t, srv.URL+"/customers", map[string]string{"name": "acme"})
 	wantForbidden(t, "customer", status, raw)
@@ -186,7 +186,7 @@ func TestAdminKeyIsUnconfined(t *testing.T) {
 	srv := serverAs(t, e.repo, auth.Principal{KeyID: "k-0", Scopes: []string{auth.ScopeAdmin}})
 
 	assertFindOrCreate(t, srv.URL+"/products", map[string]string{"name": "Third"})
-	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": e.oamp, "name": "admin-made"})
+	assertFindOrCreate(t, srv.URL+"/projects", map[string]string{"product_id": e.alpha, "name": "admin-made"})
 	if status, raw := post(t, srv.URL+"/projects", map[string]string{"product_id": "no-such-product", "name": "x"}); status != http.StatusUnprocessableEntity {
 		t.Fatalf("admin, missing product = %d, want 422: %s", status, raw)
 	}

@@ -59,7 +59,7 @@ func TestRealWebhookDeliverer_TeamsShapesTheBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := `{"event":"release_evaluated","product":"MRF","project":"MRFC","release":"1.2.3","release_id":"rel-1","summary":"Themis evaluated MRF / MRFC v1.2.3: Critical 1, High 2, Medium 0, Low 0.","link":"https://themis.example/#/release/rel-1","text":"x"}`
+	doc := `{"event":"release_evaluated","product":"P1","project":"P1C","release":"1.2.3","release_id":"rel-1","summary":"Themis evaluated P1 / P1C v1.2.3: Critical 1, High 2, Medium 0, Low 0.","link":"https://themis.example/#/release/rel-1","text":"x"}`
 	in := app.Intent{ID: "int-t", Type: app.IntentWebhook, Destination: "teams-sec",
 		Snapshot:     map[string]string{app.SnapshotWebhookEvent: app.WebhookReleaseEvaluated},
 		PayloadBytes: app.BuildPayload("summary", []byte(doc))}
@@ -91,11 +91,11 @@ func TestRealWebhookDeliverer_TeamsShapesTheBody(t *testing.T) {
 	if card.Type != "AdaptiveCard" || card.Version != "1.4" || len(card.Body) != 3 {
 		t.Fatalf("card = %+v", card)
 	}
-	if card.Body[0]["text"] != "Themis: Release evaluated" || !strings.HasPrefix(card.Body[1]["text"].(string), "Themis evaluated MRF") {
+	if card.Body[0]["text"] != "Themis: Release evaluated" || !strings.HasPrefix(card.Body[1]["text"].(string), "Themis evaluated P1") {
 		t.Errorf("title/summary = %v / %v", card.Body[0]["text"], card.Body[1]["text"])
 	}
 	facts := card.Body[2]["facts"].([]any)
-	if len(facts) != 4 || facts[0].(map[string]any)["value"] != "MRF" {
+	if len(facts) != 4 || facts[0].(map[string]any)["value"] != "P1" {
 		t.Errorf("facts = %v", facts)
 	}
 	if len(card.Actions) != 1 || card.Actions[0]["url"] != "https://themis.example/#/release/rel-1" {

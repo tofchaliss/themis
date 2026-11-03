@@ -176,7 +176,7 @@ CREATE UNIQUE INDEX registry_releases_project_version_key ON releases (project_i
 ```
 
 Case-folding is asymmetric on purpose (B4): product and project names are human-typed labels, so
-`"OAMP"` and `"oamp"` are one row; a **version** is a machine build string whose case Themis does not
+`"ALPHA"` and `"alpha"` are one row; a **version** is a machine build string whose case Themis does not
 own, so release uniqueness is **exact**. Folding versions would merge two builds.
 
 **Trap 1 — an expression index needs the expression restated.** `ON CONFLICT (name)` does **not**
@@ -195,7 +195,7 @@ RETURNING id
 and `ErrNoRows` means "someone else won" → read the winner back by `lower(name)` and return it with
 `created=false`. So the service must **not** publish, log or return the id it generated before the
 insert resolves, and a caller must never assume the id it sees is the one this process minted. The
-stored **casing is the first caller's** (B4): a later `"oamp"` gets the existing `"OAMP"` row and no
+stored **casing is the first caller's** (B4): a later `"alpha"` gets the existing `"ALPHA"` row and no
 indication its own spelling was not used.
 
 **The migration refuses; it never repairs.** The up migration's first statement is a pre-flight that

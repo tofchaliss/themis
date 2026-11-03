@@ -115,7 +115,7 @@ func TestNormalizeProductKeepsRoleSuffixesWhole(t *testing.T) {
 
 // D12 (KN-FIX-4): the fix-lookup name rule — exact first, then normalized EQUALITY under the
 // wrapper-family guard, never containment. Every pair below is either measured from the
-// 2026-09-10 MRF case or the collision that guard exists to forbid.
+// 2026-09-10 P1 case or the collision that guard exists to forbid.
 func TestMatchesFixPackage(t *testing.T) {
 	cases := []struct {
 		fix, query string

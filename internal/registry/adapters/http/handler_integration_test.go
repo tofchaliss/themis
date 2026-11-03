@@ -210,7 +210,7 @@ func TestConcurrentCreateStatusAgreesWithCreatedFlag(t *testing.T) {
 
 	srv, pool := liveRegistry(t)
 
-	productID := mustCreate(ctx, t, srv.URL+"/products", map[string]string{"name": "OAMP"})
+	productID := mustCreate(ctx, t, srv.URL+"/products", map[string]string{"name": "ALPHA"})
 	projectID := mustCreate(ctx, t, srv.URL+"/projects",
 		map[string]string{"product_id": productID, "name": "core"})
 

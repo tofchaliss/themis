@@ -74,7 +74,7 @@ func judgeOccurrence(view domain.EnterpriseView, comp InventoryComponent, bridge
 	// The ownership bridge (EDR-VERDICT-01 D3): a language-package occurrence — the .egg-info
 	// shadow of files an rpm installed — can be cleared only THROUGH its owning rpm, because
 	// the language row's bare version (39.2.0, no build release) can never satisfy an rpm
-	// compare on its own. Measured on CVE-2025-47273/MRF: the patched rpm sat in the same
+	// compare on its own. Measured on CVE-2025-47273/P1: the patched rpm sat in the same
 	// inventory while its pypi shadow stayed flagged forever.
 	if v, ok := bridgeObserved(view, comp, bridge); ok {
 		return v

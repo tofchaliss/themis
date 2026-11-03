@@ -93,7 +93,7 @@ recorded in place — it needs a persisted row (which D5 avoids) or an API chang
 
 ## Validation criterion (binding — from EDR-IDENTITY-01)
 
-On the measured MRF document, after Groups 1+2:
+On the measured P1 document, after Groups 1+2:
 
 - [x] V1 The purl-less httpd twin resolves onto `pkg:rpm/rocky/httpd@…` — **one** component, not two
       security subjects.

@@ -7,7 +7,7 @@ import (
 	"pgregory.net/rapid"
 )
 
-// The ANY-match contract, characterized from real data (CVE-2026-29167 on MRF 2026-09-17).
+// The ANY-match contract, characterized from real data (CVE-2026-29167 on P1 2026-09-17).
 //
 // RPMFixedByStream asks *"did a published same-major fix ship at or below this install?"* — NOT
 // *"is the install at least the highest published bound?"* It clears between a low and a high

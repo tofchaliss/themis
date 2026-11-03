@@ -287,21 +287,21 @@ func waitForLockWait(ctx context.Context, t *testing.T, pool *pgxpool.Pool, pid 
 	}
 }
 
-// TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts: "OAMP" and "oamp" are one
+// TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts: "ALPHA" and "alpha" are one
 // product (B4 folds case on human-typed labels), so migrate-up must refuse — naming BOTH ids,
 // because an operator cannot resolve a duplicate the message does not identify.
 func TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts(t *testing.T) {
 	pool := newPool(t)
 	withoutUniquenessIndexes(t, pool)
 
-	mustExec(t, pool, insertProductSQL, "prod-oamp-upper", "OAMP")
-	mustExec(t, pool, insertProductSQL, "prod-oamp-lower", "oamp")
+	mustExec(t, pool, insertProductSQL, "prod-alpha-upper", "ALPHA")
+	mustExec(t, pool, insertProductSQL, "prod-alpha-lower", "alpha")
 
 	err := migrateToErr(t, uniquenessVersion)
 	if err == nil {
 		t.Fatal("migrate-up succeeded over a case-insensitive duplicate product")
 	}
-	for _, want := range []string{"products", "oamp", "rows=2", "prod-oamp-upper", "prod-oamp-lower"} {
+	for _, want := range []string{"products", "alpha", "rows=2", "prod-alpha-upper", "prod-alpha-lower"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("the refusal does not name %q:\n%v", want, err)
 		}
@@ -311,7 +311,7 @@ func TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts(t *testing.T
 	if n := countRows(t, pool, `SELECT count(*) FROM products`); n != 2 {
 		t.Fatalf("the refused migration changed the data: %d products, want 2", n)
 	}
-	if n := countRows(t, pool, `SELECT count(*) FROM products WHERE name IN ('OAMP', 'oamp')`); n != 2 {
+	if n := countRows(t, pool, `SELECT count(*) FROM products WHERE name IN ('ALPHA', 'alpha')`); n != 2 {
 		t.Fatalf("the refused migration rewrote a name: %d of the seeded casings survive, want 2", n)
 	}
 	if indexExists(t, pool, productsNameIndex) {
@@ -396,8 +396,8 @@ func TestRegistryUniquenessConstraintsEnforced(t *testing.T) {
 		}
 	}
 
-	mustExec(t, pool, insertProductSQL, "prod-1", "OAMP")
-	_, err := pool.Exec(ctx, insertProductSQL, "prod-2", "oamp")
+	mustExec(t, pool, insertProductSQL, "prod-1", "ALPHA")
+	_, err := pool.Exec(ctx, insertProductSQL, "prod-2", "alpha")
 	assertUniqueViolation(t, err, productsNameIndex)
 
 	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "Svc")

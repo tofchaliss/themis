@@ -48,7 +48,7 @@ func TestPlanActions_CollapsesFindingsIntoUpgrades(t *testing.T) {
 	}
 }
 
-// The EDR-VERDICT-01 D8 rules on the measured MRF shape: a CLEARED occurrence adds no action
+// The EDR-VERDICT-01 D8 rules on the measured P1 shape: a CLEARED occurrence adds no action
 // (its files already carry the fix), the open pip copy beside it still does, and the two
 // worlds group canonically — `python-pkg` and `pypi` are one job while rpm work stays its own.
 func TestPlanActions_ClearedOccurrencesAndCanonicalWorlds(t *testing.T) {

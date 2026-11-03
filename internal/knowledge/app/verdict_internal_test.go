@@ -7,7 +7,7 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
-// The fixtures are the measured KN-VERDICT-1 estate (CVE-2025-47273 / MRF, 2026-09-02):
+// The fixtures are the measured KN-VERDICT-1 estate (CVE-2025-47273 / P1, 2026-09-02):
 // a card holding the Red Hat bound attributed to the SOURCE package, an rpm owner at the
 // patched build, and its pypi .egg-info shadow reporting the bare upstream version.
 var (
@@ -69,7 +69,7 @@ func TestBridgeObserved(t *testing.T) {
 	}
 }
 
-// The Inferred hop is the measured MRF case: no ownership edge, but the same inventory holds
+// The Inferred hop is the measured P1 case: no ownership edge, but the same inventory holds
 // the patched rpm whose fix-attribution key normalizes to the language row's name and whose
 // upstream version equals it exactly. Cleared — labeled as Themis's own match.
 func TestBridgeInferred_TheMeasuredCase(t *testing.T) {
@@ -77,7 +77,7 @@ func TestBridgeInferred_TheMeasuredCase(t *testing.T) {
 
 	v := judgeOccurrence(cardView, pypiShadow, bridge)
 	if v.State != domain.VerdictClearedVendorFix || v.Grade != domain.VerdictGradeInferred {
-		t.Fatalf("MRF shape: verdict = %+v, want an INFERRED clearance", v)
+		t.Fatalf("P1 shape: verdict = %+v, want an INFERRED clearance", v)
 	}
 	if !strings.Contains(v.Reason, "inferred") || !strings.Contains(v.Reason, "0:39.2.0-9.el8_10") {
 		t.Errorf("reason must be labeled inferred and name the bound, got %q", v.Reason)
@@ -165,8 +165,8 @@ func TestBridgeInferred_Guards(t *testing.T) {
 
 func TestRPMUpstreamVersion(t *testing.T) {
 	for in, want := range map[string]string{
-		"0:39.2.0-9.el8_10":                  "39.2.0",
-		"39.2.0-9.el8_10":                    "39.2.0",
+		"0:39.2.0-9.el8_10": "39.2.0",
+		"39.2.0-9.el8_10":   "39.2.0",
 		"platform-python-setuptools-39.2.0-9.el8_10.noarch": "39.2.0",
 		"3.9-9.el8": "3.9",
 		"1.0.2k":    "1.0.2k",
@@ -291,8 +291,8 @@ func TestJudgeOccurrence_EpochRestoredFromPURL(t *testing.T) {
 		{Package: "java-21-openjdk", Version: "1:21.0.12.1.1-1.1.el8", Ecosystem: "rpm"},
 	}}
 	nessus := InventoryComponent{
-		PURL:    "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?distro=rhel-8.10&epoch=1",
-		Name:    "java-21-openjdk", Version: "21.0.12.1.1-1.1.el8", Ecosystem: "rpm",
+		PURL: "pkg:rpm/redhat/java-21-openjdk@21.0.12.1.1-1.1.el8?distro=rhel-8.10&epoch=1",
+		Name: "java-21-openjdk", Version: "21.0.12.1.1-1.1.el8", Ecosystem: "rpm",
 	}
 	v := judgeOccurrence(view, nessus, BridgeContext{})
 	if v.State.IsOpen() || !strings.Contains(v.Reason, "installed 1:21.0.12.1.1-1.1.el8") {
@@ -330,9 +330,9 @@ func TestBehindBounds(t *testing.T) {
 		Applicabilities: []domain.Applicability{
 			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0002", FixedVersion: "0:4.18.0-553.80.1.el8_10"},
 			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0001", FixedVersion: "0:4.18.0-553.72.1.el8_10"},
-			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0009", FixedVersion: "0:5.14.0-570.el9_6"}, // another major: not behind it
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0009", FixedVersion: "0:5.14.0-570.el9_6"},       // another major: not behind it
 			{Package: "kernel", Status: domain.StatusFixed, Advisory: "RHSA-2026:0002", FixedVersion: "0:4.18.0-553.80.1.el8_10"}, // restated: one advisory
-			{Package: "kernel", Status: domain.StatusFixed, Advisory: "", FixedVersion: "0:4.18.0-553.72.1.el8_10"},             // no advisory recorded: nothing to name
+			{Package: "kernel", Status: domain.StatusFixed, Advisory: "", FixedVersion: "0:4.18.0-553.72.1.el8_10"},               // no advisory recorded: nothing to name
 			{Package: "kernel", Status: domain.StatusNotAffected},
 		},
 	}

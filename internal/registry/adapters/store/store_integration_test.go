@@ -472,12 +472,12 @@ func TestUpsertProductReturnsExistingIDAndFirstCasing(t *testing.T) {
 	ctx := context.Background()
 	s := store.New(pool)
 
-	first, created, err := s.UpsertProduct(ctx, "OAMP")
+	first, created, err := s.UpsertProduct(ctx, "ALPHA")
 	if err != nil || !created || first == "" {
 		t.Fatalf("first UpsertProduct = %q, created=%v, err=%v; want a new id and created=true", first, created, err)
 	}
 
-	again, created, err := s.UpsertProduct(ctx, "oamp")
+	again, created, err := s.UpsertProduct(ctx, "alpha")
 	if err != nil {
 		t.Fatalf("second UpsertProduct: %v", err)
 	}
@@ -488,15 +488,15 @@ func TestUpsertProductReturnsExistingIDAndFirstCasing(t *testing.T) {
 		t.Error("second UpsertProduct reported created=true; the row already existed")
 	}
 	if n := countRows(t, pool, `SELECT count(*) FROM products`); n != 1 {
-		t.Errorf("products = %d, want 1 ('OAMP' and 'oamp' are one product)", n)
+		t.Errorf("products = %d, want 1 ('ALPHA' and 'alpha' are one product)", n)
 	}
 
 	var name string
 	if err := pool.QueryRow(ctx, `SELECT name FROM products WHERE id = $1`, first).Scan(&name); err != nil {
 		t.Fatal(err)
 	}
-	if name != "OAMP" {
-		t.Errorf("stored name = %q, want %q — the first caller's casing, never renamed", name, "OAMP")
+	if name != "ALPHA" {
+		t.Errorf("stored name = %q, want %q — the first caller's casing, never renamed", name, "ALPHA")
 	}
 }
 
@@ -636,11 +636,11 @@ func TestUpsertConcurrentCallersConvergeOnOneRow(t *testing.T) {
 	const callers = 25
 
 	products := upsertConcurrently(ctx, callers, func(ctx context.Context) (string, bool, error) {
-		return s.UpsertProduct(ctx, "OAMP")
+		return s.UpsertProduct(ctx, "ALPHA")
 	})
 	productID := assertConverged(t, "product", products)
-	if n := countRows(t, pool, `SELECT count(*) FROM products WHERE lower(name) = lower($1)`, "OAMP"); n != 1 {
-		t.Errorf("products named OAMP = %d, want exactly 1", n)
+	if n := countRows(t, pool, `SELECT count(*) FROM products WHERE lower(name) = lower($1)`, "ALPHA"); n != 1 {
+		t.Errorf("products named ALPHA = %d, want exactly 1", n)
 	}
 
 	projects := upsertConcurrently(ctx, callers, func(ctx context.Context) (string, bool, error) {

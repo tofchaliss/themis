@@ -49,14 +49,14 @@ func getJSON(t *testing.T, url string, into any) int {
 func TestTags_SetReadAndFilter(t *testing.T) {
 	e := seedEstate(t)
 	admin := serverAs(t, e.repo, auth.Principal{KeyID: "k-a", Name: "admin", Scopes: []string{auth.ScopeAdmin}})
-	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "1.0"})
+	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.p1Project, "version": "1.0"})
 	rel := idOf(t, raw)
-	_, raw = post(t, admin.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "2.0"})
+	_, raw = post(t, admin.URL+"/releases", map[string]string{"project_id": e.p1Project, "version": "2.0"})
 	rel2 := idOf(t, raw)
-	if code, body := put(t, admin.URL+"/products/"+e.mrf+"/tags", gen.TagsPut{Tags: []string{"Team:Payments"}}); code != 200 || !strings.Contains(string(body), "team:payments") {
+	if code, body := put(t, admin.URL+"/products/"+e.p1+"/tags", gen.TagsPut{Tags: []string{"Team:Payments"}}); code != 200 || !strings.Contains(string(body), "team:payments") {
 		t.Fatalf("product tags = %d %s", code, body)
 	}
-	if code, _ := put(t, admin.URL+"/projects/"+e.mrfProject+"/tags", gen.TagsPut{Tags: []string{"env:prod"}}); code != 200 {
+	if code, _ := put(t, admin.URL+"/projects/"+e.p1Project+"/tags", gen.TagsPut{Tags: []string{"env:prod"}}); code != 200 {
 		t.Fatalf("project tags = %d", code)
 	}
 	code, body := put(t, admin.URL+"/releases/"+rel+"/tags", gen.TagsPut{Tags: []string{"customer-facing"}})
@@ -66,22 +66,22 @@ func TestTags_SetReadAndFilter(t *testing.T) {
 		t.Fatalf("release tags = %d %s", code, body)
 	}
 	var got gen.TagSet
-	if code := getJSON(t, admin.URL+"/projects/"+e.mrfProject+"/tags", &got); code != 200 || strings.Join(got.Effective, ",") != "env:prod,team:payments" {
+	if code := getJSON(t, admin.URL+"/projects/"+e.p1Project+"/tags", &got); code != 200 || strings.Join(got.Effective, ",") != "env:prod,team:payments" {
 		t.Fatalf("project read = %d %+v", code, got)
 	}
 	var prods []gen.ProductView
-	if getJSON(t, admin.URL+"/products?tag=team:payments", &prods); len(prods) != 1 || *prods[0].Id != e.mrf || prods[0].Tags == nil {
+	if getJSON(t, admin.URL+"/products?tag=team:payments", &prods); len(prods) != 1 || *prods[0].Id != e.p1 || prods[0].Tags == nil {
 		t.Fatalf("product filter = %+v", prods)
 	}
 	var projs []gen.ProjectView
-	if getJSON(t, admin.URL+"/products/"+e.mrf+"/projects?tag=env:prod", &projs); len(projs) != 1 || *projs[0].Id != e.mrfProject {
+	if getJSON(t, admin.URL+"/products/"+e.p1+"/projects?tag=env:prod", &projs); len(projs) != 1 || *projs[0].Id != e.p1Project {
 		t.Fatalf("project filter = %+v", projs)
 	}
 	var rels []gen.ReleaseView
-	if getJSON(t, admin.URL+"/projects/"+e.mrfProject+"/releases?tag=customer-facing", &rels); len(rels) != 1 || *rels[0].Id != rel {
+	if getJSON(t, admin.URL+"/projects/"+e.p1Project+"/releases?tag=customer-facing", &rels); len(rels) != 1 || *rels[0].Id != rel {
 		t.Fatalf("release filter = %+v", rels)
 	}
-	if getJSON(t, admin.URL+"/projects/"+e.mrfProject+"/releases?tag=env:prod", &rels); len(rels) != 2 {
+	if getJSON(t, admin.URL+"/projects/"+e.p1Project+"/releases?tag=env:prod", &rels); len(rels) != 2 {
 		t.Fatalf("release filter (inherited) = %+v", rels)
 	}
 	_ = rel2
@@ -93,24 +93,24 @@ func TestTags_SetReadAndFilter(t *testing.T) {
 func TestTags_RefusalsAndErrors(t *testing.T) {
 	e := seedEstate(t)
 	admin := serverAs(t, e.repo, auth.Principal{KeyID: "k-a", Name: "admin", Scopes: []string{auth.ScopeAdmin}})
-	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "1.0"})
+	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.p1Project, "version": "1.0"})
 	rel := idOf(t, raw)
 	// A key for the other product may not tag this one, at any level.
-	other := serverAs(t, e.repo, productKey(e.oamp))
-	for _, url := range []string{"/products/" + e.mrf + "/tags", "/projects/" + e.mrfProject + "/tags", "/releases/" + rel + "/tags", "/releases/ghost/tags"} {
+	other := serverAs(t, e.repo, productKey(e.alpha))
+	for _, url := range []string{"/products/" + e.p1 + "/tags", "/projects/" + e.p1Project + "/tags", "/releases/" + rel + "/tags", "/releases/ghost/tags"} {
 		if code, _ := put(t, other.URL+url, gen.TagsPut{Tags: []string{"x"}}); code != http.StatusForbidden {
 			t.Errorf("%s by a foreign product key = %d", url, code)
 		}
 	}
 	// Its own product's key may.
-	own := serverAs(t, e.repo, productKey(e.mrf))
+	own := serverAs(t, e.repo, productKey(e.p1))
 	if code, _ := put(t, own.URL+"/releases/"+rel+"/tags", gen.TagsPut{Tags: []string{"x"}}); code != 200 {
 		t.Fatalf("own product key = %d", code)
 	}
-	if code, _ := put(t, admin.URL+"/products/"+e.mrf+"/tags", gen.TagsPut{Tags: []string{"bad tag"}}); code != http.StatusBadRequest {
+	if code, _ := put(t, admin.URL+"/products/"+e.p1+"/tags", gen.TagsPut{Tags: []string{"bad tag"}}); code != http.StatusBadRequest {
 		t.Fatalf("bad tag = %d", code)
 	}
-	if code, _ := put(t, admin.URL+"/products/"+e.mrf+"/tags", "{not json"); code != http.StatusBadRequest {
+	if code, _ := put(t, admin.URL+"/products/"+e.p1+"/tags", "{not json"); code != http.StatusBadRequest {
 		t.Fatalf("bad json = %d", code)
 	}
 	if code, _ := put(t, admin.URL+"/products/ghost/tags", gen.TagsPut{Tags: []string{"x"}}); code != http.StatusNotFound {
@@ -120,10 +120,10 @@ func TestTags_RefusalsAndErrors(t *testing.T) {
 		t.Fatalf("unknown release read = %d", code)
 	}
 	e.repo.tagsErr = errors.New("db")
-	if code := getJSON(t, admin.URL+"/products/"+e.mrf+"/tags", nil); code != http.StatusInternalServerError {
+	if code := getJSON(t, admin.URL+"/products/"+e.p1+"/tags", nil); code != http.StatusInternalServerError {
 		t.Fatalf("store error read = %d", code)
 	}
-	for _, url := range []string{"/products", "/products/" + e.mrf + "/projects", "/projects/" + e.mrfProject + "/releases"} {
+	for _, url := range []string{"/products", "/products/" + e.p1 + "/projects", "/projects/" + e.p1Project + "/releases"} {
 		if code := getJSON(t, admin.URL+url, nil); code != http.StatusInternalServerError {
 			t.Errorf("%s with a tag store error = %d", url, code)
 		}
@@ -134,7 +134,7 @@ func TestTags_RefusalsAndErrors(t *testing.T) {
 func TestListTaggedReleases(t *testing.T) {
 	e := seedEstate(t)
 	admin := serverAs(t, e.repo, auth.Principal{KeyID: "k-a", Name: "admin", Scopes: []string{auth.ScopeAdmin}})
-	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.mrfProject, "version": "1.0"})
+	_, raw := post(t, admin.URL+"/releases", map[string]string{"project_id": e.p1Project, "version": "1.0"})
 	rel := idOf(t, raw)
 	if code, _ := put(t, admin.URL+"/releases/"+rel+"/tags", gen.TagsPut{Tags: []string{"env:prod"}}); code != 200 {
 		t.Fatal(code)

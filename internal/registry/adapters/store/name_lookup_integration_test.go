@@ -22,7 +22,7 @@ import (
 	"github.com/themis-project/themis/internal/registry/app"
 )
 
-// TestProductIDByNameAbstainsOnMoreThanOneMatch — "OAMP" and "oamp" are one product name under
+// TestProductIDByNameAbstainsOnMoreThanOneMatch — "ALPHA" and "alpha" are one product name under
 // B4's case folding, so a registry holding both cannot answer which one an intake meant.
 // Returning either would be inventing the operator's intent; returning "not found" would be a
 // false statement about a product that is registered twice.
@@ -31,10 +31,10 @@ func TestProductIDByNameAbstainsOnMoreThanOneMatch(t *testing.T) {
 	withoutUniquenessIndexes(t, pool)
 	s := store.New(pool)
 
-	mustExec(t, pool, insertProductSQL, "prod-oamp-upper", "OAMP")
-	mustExec(t, pool, insertProductSQL, "prod-oamp-lower", "oamp")
+	mustExec(t, pool, insertProductSQL, "prod-alpha-upper", "ALPHA")
+	mustExec(t, pool, insertProductSQL, "prod-alpha-lower", "alpha")
 
-	id, err := s.ProductIDByName(context.Background(), "OAMP")
+	id, err := s.ProductIDByName(context.Background(), "ALPHA")
 	if !errors.Is(err, app.ErrAmbiguousName) {
 		t.Fatalf("err = %v, want ErrAmbiguousName", err)
 	}
@@ -52,16 +52,16 @@ func TestProjectIDByNameAbstainsWithinItsProduct(t *testing.T) {
 	s := store.New(pool)
 	ctx := context.Background()
 
-	mustExec(t, pool, insertProductSQL, "prod-1", "OAMP")
+	mustExec(t, pool, insertProductSQL, "prod-1", "ALPHA")
 	mustExec(t, pool, insertProductSQL, "prod-2", "Other")
-	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "oamp-core")
-	mustExec(t, pool, insertProjectSQL, "proj-2", "prod-1", "OAMP-Core")
-	mustExec(t, pool, insertProjectSQL, "proj-3", "prod-2", "oamp-core")
+	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "alpha-core")
+	mustExec(t, pool, insertProjectSQL, "proj-2", "prod-1", "ALPHA-Core")
+	mustExec(t, pool, insertProjectSQL, "proj-3", "prod-2", "alpha-core")
 
-	if id, err := s.ProjectIDByName(ctx, "prod-1", "oamp-core"); !errors.Is(err, app.ErrAmbiguousName) || id != "" {
+	if id, err := s.ProjectIDByName(ctx, "prod-1", "alpha-core"); !errors.Is(err, app.ErrAmbiguousName) || id != "" {
 		t.Errorf("duplicated under its product = %q, %v; want an abstention", id, err)
 	}
-	if id, err := s.ProjectIDByName(ctx, "prod-2", "oamp-core"); err != nil || id != "proj-3" {
+	if id, err := s.ProjectIDByName(ctx, "prod-2", "alpha-core"); err != nil || id != "proj-3" {
 		t.Errorf("the other product's project = %q, %v; want proj-3 — the name is scoped, not shared", id, err)
 	}
 }
@@ -74,8 +74,8 @@ func TestReleaseIDByVersionAbstainsInsteadOfPickingTheFirst(t *testing.T) {
 	withoutUniquenessIndexes(t, pool)
 	s := store.New(pool)
 
-	mustExec(t, pool, insertProductSQL, "prod-1", "OAMP")
-	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "oamp-core")
+	mustExec(t, pool, insertProductSQL, "prod-1", "ALPHA")
+	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "alpha-core")
 	mustExec(t, pool, insertReleaseSQL, "rel-first", "proj-1", "R1917.256")
 	mustExec(t, pool, insertReleaseSQL, "rel-second", "proj-1", "R1917.256")
 
@@ -130,17 +130,17 @@ func TestNameLookupMatchesNamesCaseInsensitivelyAndVersionsExactly(t *testing.T)
 	s := store.New(pool)
 	ctx := context.Background()
 
-	mustExec(t, pool, insertProductSQL, "prod-1", "OAMP")
-	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "oamp-core")
+	mustExec(t, pool, insertProductSQL, "prod-1", "ALPHA")
+	mustExec(t, pool, insertProjectSQL, "proj-1", "prod-1", "alpha-core")
 	mustExec(t, pool, insertReleaseSQL, "rel-1", "proj-1", "R1917.256")
 
 	for _, c := range []struct {
 		name, want string
 		call       func() (string, error)
 	}{
-		{"product, as stored", "prod-1", func() (string, error) { return s.ProductIDByName(ctx, "OAMP") }},
-		{"product, other casing", "prod-1", func() (string, error) { return s.ProductIDByName(ctx, "oAmP") }},
-		{"project, other casing", "proj-1", func() (string, error) { return s.ProjectIDByName(ctx, "prod-1", "OAMP-CORE") }},
+		{"product, as stored", "prod-1", func() (string, error) { return s.ProductIDByName(ctx, "ALPHA") }},
+		{"product, other casing", "prod-1", func() (string, error) { return s.ProductIDByName(ctx, "aLpHa") }},
+		{"project, other casing", "proj-1", func() (string, error) { return s.ProjectIDByName(ctx, "prod-1", "ALPHA-CORE") }},
 		{"version, exact", "rel-1", func() (string, error) { return s.ReleaseIDByVersion(ctx, "proj-1", "R1917.256") }},
 		{"version, other casing", "", func() (string, error) { return s.ReleaseIDByVersion(ctx, "proj-1", "r1917.256") }},
 		{"version, a prefix of it", "", func() (string, error) { return s.ReleaseIDByVersion(ctx, "proj-1", "R1917.25") }},

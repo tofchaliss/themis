@@ -27,7 +27,7 @@ read-only; stores nothing; no new truth.
 
 **Consumers, known so far:**
 1. **Operator fix-verification** — the release-procedure loop measured live 2026-08-14 with
-   MRF `v20.1.0.0-118` (the motivating session: SBOM + Trivy scan uploaded, fix-verification
+   P1 `v20.1.0.0-118` (the motivating session: SBOM + Trivy scan uploaded, fix-verification
    was answerable only by hand-diffing two posture calls).
 2. **G-AI-3's open remainder** (`../BACKLOG.md`) — delta-aware precedent ranking explicitly
    needs "release-comparison machinery that does not exist yet"; this is that machinery.
@@ -49,7 +49,7 @@ need the server-side read — the endpoint half of this idea stays open, and the
 its working spec: what the browser joins by hand is exactly what the endpoint must return.
 
 **Status 2026-08-19 — the endpoint half SHIPPED (EDR-GOVERNANCE-01 D16) and LIVE-VERIFIED the
-same day: IDEA-1 is REALIZED.** Witnessed on the VM: MRF v20.1.0.0-109 vs v20.1.0.0-118 diffed
+same day: IDEA-1 is REALIZED.** Witnessed on the VM: P1 v20.1.0.0-109 vs v20.1.0.0-118 diffed
 through the Compare tab over the Governance read (104-Finding candidate posture); the honesty
 guard earned its keep on the way there — it is what surfaced the silently-swallowed duplicate
 upload (EV-DEDUP-1) and the >1 MiB proxy truncation (GUI-14).

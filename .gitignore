@@ -27,7 +27,7 @@
 /themis.yaml
 
 # local tooling artifact (large, generated) — never versioned
-/scripts/oamp.json
+/scripts/sample-sbom.json
 
 # spike-era strays — never commit
 /dashboard
@@ -44,7 +44,7 @@
 # paths, not trusting a guard.
 #
 # JSON is ignored for the same reason and it is the COMMON case, not an edge one: the scripts
-# themselves name `scripts/oamp.json` as the default SBOM (release-smoke-test.sh, and the
+# themselves name `scripts/sample-sbom.json` as the default SBOM (release-smoke-test.sh, and the
 # gf-upload-sbom.sh usage example), and that file has always been a local drop — a real customer
 # SBOM, never committed. Sidecar reports and scanner output land here too.
 #

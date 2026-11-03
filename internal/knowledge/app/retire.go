@@ -9,7 +9,7 @@ import (
 
 // The duplicate-identity repair (KN-SCAN-4(b)).
 //
-// Measured on MRF 2026-09-17, and the numbers decided the design rather than the other way
+// Measured on P1 2026-09-17, and the numbers decided the design rather than the other way
 // round: 87 of 1569 match rows carried an unusable purl, all of them ONE component
 // (`app:httpd@2.4.37-65.module+el8.10.0+40257+286895ef.9`), zero rows had an EMPTY purl — and in
 // **87 of 87** cases the canonical `pkg:rpm/rocky/httpd@…` row was ALREADY recorded on the same

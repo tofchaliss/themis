@@ -61,7 +61,7 @@ intake can create one.
   waiting); (4) A runs the index statements and commits; (5) assert B's **original** insert completes
   successfully within a bounded deadline (e.g. 5 s) and the row is present. Every wait is bounded by
   a test context so a regression fails instead of hanging the suite;
-  `TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts` — seed `"OAMP"` + `"oamp"`,
+  `TestUniquenessMigrationRefusesCaseInsensitiveDuplicateProducts` — seed `"ALPHA"` + `"alpha"`,
   assert migrate-up fails and the message names **both** ids;
   `TestUniquenessMigrationRefusalNamesEveryLevel` — one duplicate per level, all three named.
 
@@ -83,8 +83,8 @@ intake can create one.
   restated in `ON CONFLICT` (design §5, trap 1) and the generated id is discarded on a conflict
   (trap 2).
   *Package:* `internal/registry/adapters/store`.
-  *Tests:* `TestUpsertProductReturnsExistingIDAndFirstCasing` — insert `"OAMP"`, upsert `"oamp"`,
-  assert same id, `created=false`, stored name still `"OAMP"`.
+  *Tests:* `TestUpsertProductReturnsExistingIDAndFirstCasing` — insert `"ALPHA"`, upsert `"alpha"`,
+  assert same id, `created=false`, stored name still `"ALPHA"`.
 
 - [x] **1.4 — Project find-or-create.** `UpsertProject`, `ON CONFLICT (product_id, lower(name))`.
   Same shape as 1.3; the same project name under a **different** product is a different row.

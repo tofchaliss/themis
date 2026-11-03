@@ -241,7 +241,7 @@ func TestCorrelate_RecordsAPKFixedAsCleared(t *testing.T) {
 	}
 }
 
-// The ownership bridge through the correlation door (EDR-VERDICT-01 D3/D4): the measured MRF
+// The ownership bridge through the correlation door (EDR-VERDICT-01 D3/D4): the measured P1
 // shape — a pypi setuptools shadow beside its patched rpm on one inventory — clears at the
 // INFERRED grade by default, and stays open when the operator arms strict mode. This is the
 // service-level proof that the D4 switch actually reaches the judge.

@@ -34,8 +34,8 @@ import (
 // owns `rel-other`; `twins` is a name that matches more than one product, which is
 // reachable on an un-migrated estate and is B3's third indistinguishable outcome.
 const (
-	fxProduct     = "OAMP"
-	fxProject     = "oamp-core"
+	fxProduct     = "ALPHA"
+	fxProject     = "alpha-core"
 	fxVersion     = "R1917.256"
 	fxProductID   = "prod-1"
 	fxOtherProdID = "prod-other"
@@ -181,7 +181,7 @@ func newAuthFixture(t *testing.T) authFixture {
 	authn := auth.Authenticator{
 		Keys: fakeKeys{keys: []auth.APIKey{
 			{ID: "k-admin", Name: "ci-admin", KeyHash: "hash-admin", Scopes: []string{auth.ScopeAdmin}},
-			{ID: "k-mine", Name: "ci-oamp", KeyHash: "hash-mine", Scopes: []string{auth.ProductScopePrefix + fxProductID}},
+			{ID: "k-mine", Name: "ci-alpha", KeyHash: "hash-mine", Scopes: []string{auth.ProductScopePrefix + fxProductID}},
 			{ID: "k-read", Name: "viewer", KeyHash: "hash-read", Scopes: []string{auth.ScopeRead}},
 			{ID: "k-cb", Name: "delivery", KeyHash: "hash-callback", Scopes: []string{auth.ScopeDeliveryCallback}},
 		}},

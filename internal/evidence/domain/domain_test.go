@@ -141,7 +141,7 @@ func TestNewEvidence_Accessors(t *testing.T) {
 // `NewEvidence` keeps the value verbatim — no normalization, no bound (the bound is
 // the intake door's, not the domain's), nothing read from it.
 func TestProvenanceCarriesBuildIDAsData(t *testing.T) {
-	const buildID = "  Jenkins/OAMP-core/1917 · é  "
+	const buildID = "  Jenkins/ALPHA-core/1917 · é  "
 	e, err := domain.NewEvidence(
 		"ev-build",
 		domain.KindSBOM,

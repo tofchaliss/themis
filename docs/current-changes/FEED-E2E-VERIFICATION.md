@@ -1,7 +1,7 @@
 # Feed End-to-End Verification (v0.3.x)
 
 **Run:** 2026-07-23 · **Instance:** local `./bin/themis` (:8080) + PostgreSQL `themis` ·
-**Fixture:** `oamp` container SBOM (`scripts/oamp.json`, Trivy CycloneDX 1.6, 542 components →
+**Fixture:** `alpha` container SBOM (`scripts/sample-sbom.json`, Trivy CycloneDX 1.6, 542 components →
 **228 findings / 86 distinct CVEs**).
 
 Purpose: confirm the original goal — *list open vulnerabilities **correctly*** — actually holds, i.e. every

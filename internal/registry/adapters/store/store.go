@@ -56,9 +56,9 @@ func (s *Store) SaveRelease(ctx context.Context, r domain.Release) error {
 
 // UpsertProduct finds or creates the Product named name and reports whether it created it.
 //
-// Case is folded (registry_products_name_key is UNIQUE on lower(name)), so "OAMP" and "oamp"
+// Case is folded (registry_products_name_key is UNIQUE on lower(name)), so "ALPHA" and "alpha"
 // are one Product — a human-typed label must not fork on a shift key. The stored casing is the
-// FIRST caller's: a later "oamp" gets the existing "OAMP" row, with its spelling, and nothing
+// FIRST caller's: a later "alpha" gets the existing "ALPHA" row, with its spelling, and nothing
 // is renamed or normalized (B4).
 func (s *Store) UpsertProduct(ctx context.Context, name string) (string, bool, error) {
 	return s.findOrCreate(ctx,

@@ -598,15 +598,15 @@ func TestListProductsAndProjects(t *testing.T) {
 // The upward name-chain passthroughs (D13.4).
 func TestGetProjectAndProductPassthrough(t *testing.T) {
 	repo := newFakeRepo()
-	proj, _ := domain.NewProject("proj-1", "prod-1", "cdmrf-oamp")
-	prod, _ := domain.NewProduct("prod-1", "MRF")
+	proj, _ := domain.NewProject("proj-1", "prod-1", "project-alpha")
+	prod, _ := domain.NewProduct("prod-1", "P1")
 	repo.projectObjs = map[string]domain.Project{"proj-1": proj}
 	repo.productObjs = map[string]domain.Product{"prod-1": prod}
 	svc := newService(repo)
-	if got, err := svc.GetProject(context.Background(), "proj-1"); err != nil || got.Name() != "cdmrf-oamp" {
+	if got, err := svc.GetProject(context.Background(), "proj-1"); err != nil || got.Name() != "project-alpha" {
 		t.Errorf("GetProject = %v %v", got, err)
 	}
-	if got, err := svc.GetProduct(context.Background(), "prod-1"); err != nil || got.Name() != "MRF" {
+	if got, err := svc.GetProduct(context.Background(), "prod-1"); err != nil || got.Name() != "P1" {
 		t.Errorf("GetProduct = %v %v", got, err)
 	}
 	if _, err := svc.GetProject(context.Background(), "ghost"); err == nil {

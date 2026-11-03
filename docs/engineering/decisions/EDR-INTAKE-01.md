@@ -223,7 +223,7 @@ Three properties, stated because each is a way this could have gone wrong:
 
 The second row is the honest hazard, and it is the *usual* reason to bump a converter — the `.el8`
 RPM inference and the purl-derived ecosystem are exactly the kind of rule a new version changes.
-This is KN-SCAN-4(b)'s measured shape: on MRF 2026-09-17, 87 rows named one component under a raw
+This is KN-SCAN-4(b)'s measured shape: on P1 2026-09-17, 87 rows named one component under a raw
 identifier while the canonical row already existed, in **87 of 87** cases.
 
 Themis has a mechanism for it and it is **not automatic**: `faultline_matches.retired_at`
@@ -680,7 +680,7 @@ and throughout the change.
 | # | change | driver |
 | --- | --- | --- |
 | **D3** | Conflict-resolution path specified as SQL behaviour: dispatch on `PgError.ConstraintName`, plus the partial-index `ON CONFLICT` inference requirement and a **named** index as part of the contract | Verified gap, not hypothetical: `Save` resolves the benign case on `pgx.ErrNoRows` (`store.go:82`) and sends everything else to `case err != nil` (`store.go:97`). A `23505` on the new constraint would surface as `"evidence: insert: …"` — **a 500 where the contract requires `200 created=false`**. A single statement cannot name two conflict targets |
-| **D3a** | Downstream occurrence cardinality stated as a two-case table, with the hazard named and `force_reconvert` placed **outside routine remediation** | `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no evidence id** (`000001_knowledge.up.sql:53`). So a reconversion is occurrence-neutral **iff** identity derivation is unchanged — and altering identity derivation is the usual reason to bump a converter, in which case occurrences rise and both identities stay live. KN-SCAN-4(b)'s shape: 87 of 87 rows, MRF 2026-09-17. `retired_at` exists but is *asserted, never inferred*, so nothing is superseded automatically |
+| **D3a** | Downstream occurrence cardinality stated as a two-case table, with the hazard named and `force_reconvert` placed **outside routine remediation** | `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no evidence id** (`000001_knowledge.up.sql:53`). So a reconversion is occurrence-neutral **iff** identity derivation is unchanged — and altering identity derivation is the usual reason to bump a converter, in which case occurrences rise and both identities stay live. KN-SCAN-4(b)'s shape: 87 of 87 rows, P1 2026-09-17. `retired_at` exists but is *asserted, never inferred*, so nothing is superseded automatically |
 
 Both are recorded as **open approval gates** (`tasks.md` group 8), not as satisfied claims. Neither
 blocks M1, which does not ship `force_reconvert`.
@@ -845,13 +845,13 @@ accelerates a query while a constraint enforces an identity. Two bots building t
 the same moment is the normal case, not the exotic one.
 
 Case-folding is **deliberately asymmetric**. `Product` and `Project` names are human-typed labels, so
-`"OAMP"` and `"oamp"` are one product and uniqueness folds case. A **version** is a machine-generated
+`"ALPHA"` and `"alpha"` are one product and uniqueness folds case. A **version** is a machine-generated
 build string where case can be meaningful (`R1917.256-RC1` vs `r1917.256-rc1` may genuinely differ in
 a tagging scheme Themis does not own), so release uniqueness is exact. Folding versions would merge
 two builds; not folding names would fork a product on a shift key.
 
-**The stored casing is the FIRST caller's.** A later caller writing `"oamp"` against a stored
-`"OAMP"` gets the existing row, with the existing casing, and no indication that its own spelling was
+**The stored casing is the FIRST caller's.** A later caller writing `"alpha"` against a stored
+`"ALPHA"` gets the existing row, with the existing casing, and no indication that its own spelling was
 not used. That is the right trade — one product, one row — and it is recorded here because it is
 otherwise a surprise.
 

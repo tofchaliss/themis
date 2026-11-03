@@ -3,7 +3,7 @@
 Status: **Accepted — grilled and confirmed 2026-09-02** (all eight decisions taken with the user in one
 session; evidence measured live before any decision)
 Date: 2026-09-02
-Author: KN-VERDICT-1 case session (CVE-2025-47273 / MRF investigation → grill)
+Author: KN-VERDICT-1 case session (CVE-2025-47273 / P1 investigation → grill)
 
 ## Purpose
 
@@ -15,7 +15,7 @@ queue semantics, remediation selection, and the GUI shape — as one cross-cutti
 because the 2026-07-31 parity audit's root-cause finding was that per-context EDRs leave exactly this kind
 of horizontal concern ownerless.
 
-**Evidence base (measured, not read from code):** CVE-2025-47273 on MRF/cdmrf-oamp/R20.1.0.0-118,
+**Evidence base (measured, not read from code):** CVE-2025-47273 on P1/project-alpha/R20.1.0.0-118,
 verified live 2026-09-02 — the card held the exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)`,
 the `redhat` proposal had folded, feed health was honestly green, the image carried the patched
 `platform-python-setuptools-39.2.0-9.el8_10` (changelog names the CVE) — and the finding stayed open
@@ -124,7 +124,7 @@ inventory).
   matched to that card — a direct index lookup, nothing else touched.
 - **Catch-up:** every match record carries a stamp, "verdict checked against card version N", written at
   record time. A bounded, interval-configured sweep (the KN-RECOR-1 / KN-FIX-2 pattern) picks records
-  whose stamp is missing (all pre-existing rows — the MRF finding IS history) or behind their card,
+  whose stamp is missing (all pre-existing rows — the P1 finding IS history) or behind their card,
   re-verdicts, stamps. Idempotent; a completed sweep writes nothing; downtime self-heals because stamps
   lag. **Rejected:** trigger-only (never heals history — the motivating finding would stay flagged
   forever); sweep-only (hours of latency for news whose arrival moment is precisely known).
@@ -202,7 +202,7 @@ dedup. (c) The drawer renders the reason under open rows as it already did under
 
 ## Validation criterion (from the measured case — binding on every phase)
 
-The fix is validated on CVE-2025-47273 / MRF only when: the 39.2.0 occurrence is **cleared with its
+The fix is validated on CVE-2025-47273 / P1 only when: the 39.2.0 occurrence is **cleared with its
 stated reason and grade**, the 70.3.0 occurrence is **still open** with the upstream-fix advice, and the
 Finding is **still in the queue** at full urgency. A validation that celebrates "the CVE went away" has
 validated the wrong outcome.
@@ -214,7 +214,7 @@ validated the wrong outcome.
    D5, D7).
 2. **The bridge** — both grades + the strict-mode switch, applied at record time; per-occurrence fix
    selection on the read path (D3, D4, D8 read side).
-3. **The re-verdict** — fold-change trigger + catch-up sweep with stamps. *This phase clears the MRF
+3. **The re-verdict** — fold-change trigger + catch-up sweep with stamps. *This phase clears the P1
    finding's historical rows* (D6).
 4. **The face** — drawer per-occurrence view + labels; plan grouping by (package, world) (D8 plan side,
    D9).

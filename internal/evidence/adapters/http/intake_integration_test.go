@@ -272,7 +272,7 @@ func TestIntake_RefusalLeavesAReceiptAndNoEvidence(t *testing.T) {
 	// `json.Valid`, was filed unreadable through the old door, and halted
 	// Knowledge's evidence stream for 31 hours.
 	rec := submitIntake(t, handler, "release_id="+intakeRelease, "application/json",
-		`[{"asset_name":"oamp","package_purl":"pkg:rpm/redhat/zlib@1.2.11"}]`)
+		`[{"asset_name":"alpha","package_purl":"pkg:rpm/redhat/zlib@1.2.11"}]`)
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status = %d, want 415 (the body matches no dialect): %s", rec.Code, rec.Body)
 	}
@@ -397,7 +397,7 @@ func TestBuildIDIsEchoedOnTheReceiptAndStoredOnTheEvidence(t *testing.T) {
 	handler, st, _ := liveIntake(t, 5*time.Second, "", "")
 	ctx := context.Background()
 
-	const buildID = "Jenkins/OAMP-core/1917"
+	const buildID = "Jenkins/ALPHA-core/1917"
 	posted := submitSBOM(t, handler, "release_id="+intakeRelease+"&build_id="+url.QueryEscape(buildID),
 		sbomFixture(t, "cyclonedx.json"), http.StatusCreated)
 
@@ -469,7 +469,7 @@ func TestDedupKeepsTheFirstBuildIDAndTheRetryReceiptCarriesItsOwn(t *testing.T) 
 	ctx := context.Background()
 	sbom := sbomFixture(t, "cyclonedx.json")
 
-	const firstBuild, retryBuild = "Jenkins/OAMP-core/1917", "Jenkins/OAMP-core/1918"
+	const firstBuild, retryBuild = "Jenkins/ALPHA-core/1917", "Jenkins/ALPHA-core/1918"
 	first := submitSBOM(t, handler, "release_id="+intakeRelease+"&build_id="+firstBuild, sbom, http.StatusCreated)
 	retry := submitSBOM(t, handler, "release_id="+intakeRelease+"&build_id="+retryBuild, sbom, http.StatusOK)
 

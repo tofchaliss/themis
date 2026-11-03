@@ -8,7 +8,7 @@
 #   3. DROP + recreate the database (remove old values) and migrate
 #   4. run themis (left running in the background)
 #   5. provision an admin API key
-#   6. register a product + artifact from the sample SBOM (scripts/oamp.json)
+#   6. register a product + artifact from the sample SBOM (scripts/sample-sbom.json)
 #   7. upload the SBOM and poll the ingestion to a terminal state
 #   8. verify components are registered
 #   9. list the open vulnerabilities (and drop a baseline snapshot)
@@ -27,7 +27,7 @@ set -euo pipefail
 
 DSN="${THEMIS_DATABASE_DSN:-postgres://themis:themis-dev-password@localhost:5432/themis?sslmode=disable}"
 BASE_URL="${THEMIS_BASE_URL:-http://localhost:8080}"
-SBOM="${THEMIS_SBOM:-scripts/oamp.json}"
+SBOM="${THEMIS_SBOM:-scripts/sample-sbom.json}"
 DB="${THEMIS_DB_NAME:-themis}"
 SUPERUSER="${THEMIS_PG_SUPERUSER:-$USER}"
 OWNER="${THEMIS_DB_OWNER:-themis}"

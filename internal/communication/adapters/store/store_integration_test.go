@@ -435,7 +435,7 @@ func TestRollupStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st := store.New(pool)
 
-	product := domain.RollupProductRef{Product: "MRF", Project: "cdmrf-oamp", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
+	product := domain.RollupProductRef{Product: "P1", Project: "project-alpha", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
 	asOf := time.Date(2026, 9, 2, 17, 0, 0, 0, time.UTC)
 	art, err := domain.MaterializeRollup(product, asOf, []domain.RollupEntry{
 		{FindingID: "f1", CVE: "CVE-2025-47273", OpenComponents: []string{"pkg:pypi/setuptools@70.3.0"},

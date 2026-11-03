@@ -283,7 +283,7 @@ every feed (`THEMIS_ROCKY_ENABLED=1`, `_URL`, `_POLL_INTERVAL`), health row `roc
 that entry — by **`NormalizeProduct` equality guarded by wrapper-family compatibility**. Never
 by `relatedProduct` containment.
 
-**Measured evidence (2026-09-10, MRF case file §6–§7).** The card for CVE-2025-47273 held the
+**Measured evidence (2026-09-10, P1 case file §6–§7).** The card for CVE-2025-47273 held the
 exact bound `python-setuptools 0:39.2.0-9.el8_10 (rpm)` while the SBOM's installed rpm is
 `python3-setuptools` — `FixesFor("python3-setuptools","rpm")` returned nothing (reproduced by
 executing the real function), so neither the direct verdict nor the D3 ownership bridge could

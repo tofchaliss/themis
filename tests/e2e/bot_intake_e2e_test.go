@@ -156,8 +156,8 @@ func TestBotIntakeCreateReleaseThenScanReport(t *testing.T) {
 	node := startBotNode(t, "bot_intake_create")
 
 	const (
-		product = "OAMP-bot"
-		project = "oamp-core"
+		product = "ALPHA-bot"
+		project = "alpha-core"
 		version = "R2026.001"
 	)
 	productID := node.registerProduct(t, product)

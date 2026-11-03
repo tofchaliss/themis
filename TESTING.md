@@ -321,7 +321,7 @@ curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" 
 # EVERY --data* argument into the query string — including the --data-binary carrying the
 # document. (Measured: curl then refuses outright, "URL rejected: Malformed input to a URL
 # function". The design's sketch of this command has that defect; this is the working form.)
-curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256" \
+curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R1917.256" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq .
 ```
@@ -334,7 +334,7 @@ difference between the CSV and JSON roads:
 # now a named, converted dialect
 curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  --data-binary @R1917.256.OAMP_Scan_Report.json | jq .
+  --data-binary @R1917.256.Scan_Report.json | jq .
 ```
 
 ```sh
@@ -425,7 +425,7 @@ curl -s --fail-with-body -X POST "localhost:8081/api/v1/intake?release_id=$RID&a
 ```
 
 **ONE converter per dialect, and it is server-side.** The 2026-09-10 false-positive case
-(docs/engineering/FALSE-POSITIVE-CASE-MRF-20260910.md) traced 579 permanently-unclearable
+(docs/engineering/FALSE-POSITIVE-CASE-P1-20260910.md) traced 579 permanently-unclearable
 occurrences to an ad-hoc converter variant: **a second converter is a defect, not a
 convenience**. That is why the CSV road's Python and the browser's `translateTrivy` are both
 gone — the only copies left are frozen as byte-equality **test oracles** under
@@ -540,30 +540,30 @@ then the version is created.
 # request 1 of 2 — the SBOM, with the triple and create_release=true. --fail-with-body, never -f:
 # on a refusal the BODY is the useful part (reason + detail, two fields, never concatenated).
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&create_release=true&build_id=ci-4711" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R1917.256&create_release=true&build_id=ci-4711" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq '{status, release_id, build_id, created, components}'
 
 # request 2 of 2 — the report, the SAME triple, WITHOUT create_release (the version now exists)
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&build_id=ci-4711" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R1917.256&build_id=ci-4711" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, release_id, findings_total, findings_skipped}'
+  --data-binary @R1917.256.Scan_Report.json | jq '{status, release_id, findings_total, findings_skipped}'
 ```
 
 ```sh
 # the two refusals to prove, in order. (a) the report FIRST, against a version that does not exist:
 # no_inventory_for_release, and NOTHING is created — assert the version is still absent in Registry.
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R-does-not-exist&create_release=true" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R-does-not-exist&create_release=true" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, reason, detail}'
+  --data-binary @R1917.256.Scan_Report.json | jq '{status, reason, detail}'
 
 # (b) the same report with the deliberate override — now it files, and the version IS created
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R-standalone&create_release=true&allow_without_sbom=true" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R-standalone&create_release=true&allow_without_sbom=true" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
-  --data-binary @R1917.256.OAMP_Scan_Report.json | jq '{status, reason, release_id}'
+  --data-binary @R1917.256.Scan_Report.json | jq '{status, reason, release_id}'
 ```
 
 ```sh
@@ -577,7 +577,7 @@ curl -s --fail-with-body -X POST \
 # Without create_release the same partial name keeps today's 404 unknown_release — see the note
 # under the table; that distinction is deliberate.
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&version=R1917.256&create_release=true" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&version=R1917.256&create_release=true" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq '{status, reason, detail}'
 
@@ -600,7 +600,7 @@ evidence row, and the dedup keeps the **first** one while the retry's receipt ca
 # re-send request 1 byte-identical with a different build_id → 200 created=false, the SAME
 # evidence_id, and a receipt whose build_id is the NEW one. That is not a bug.
 curl -s --fail-with-body -X POST \
-  "http://localhost:8081/api/v1/intake?product=OAMP&project=oamp-core&version=R1917.256&create_release=true&build_id=ci-4712" \
+  "http://localhost:8081/api/v1/intake?product=ALPHA&project=alpha-core&version=R1917.256&create_release=true&build_id=ci-4712" \
   -H 'Content-Type: application/json' -H "X-API-Key: $KEY" \
   --data-binary @sbom.spdx.json | jq '{status, created, evidence_id, build_id}'
 
@@ -751,7 +751,7 @@ Exercises the frozen `cmd/themis` monolith (setup in [INSTALLATION.md § Part B]
 Reuse the shell variables across steps.
 
 > **One-command release smoke test:** [`scripts/release-smoke-test.sh`](scripts/release-smoke-test.sh) runs
-> this whole flow automatically — build → **fresh DB** → run → register + upload `scripts/oamp.json` → poll
+> this whole flow automatically — build → **fresh DB** → run → register + upload `scripts/sample-sbom.json` → poll
 > ingestion → verify components → list vulnerabilities (baseline snapshot). It is destructive (drops the
 > database) and long-running (~1–3 min); run it in the background. Then re-run
 > [`scripts/list-open-vulns.sh`](scripts/list-open-vulns.sh) after a delay to watch CVE severities enrich over

@@ -77,11 +77,11 @@ func (m *memRollups) ListRollups(_ context.Context, releaseID string) ([]domain.
 	return out, nil
 }
 
-func mrfRef() domain.RollupProductRef {
-	return domain.RollupProductRef{Product: "MRF", Project: "cdmrf-oamp", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
+func p1Ref() domain.RollupProductRef {
+	return domain.RollupProductRef{Product: "P1", Project: "project-alpha", Version: "20.1.0.0-118", ReleaseID: "rel-1"}
 }
 
-func mrfPosture() []app.RollupPostureRow {
+func p1Posture() []app.RollupPostureRow {
 	return []app.RollupPostureRow{
 		{FindingID: "f1", CVE: "CVE-2020-1747", HasPosition: true, Stance: "not_affected",
 			PositionVersion: 2, PositionRationale: "not reachable"},
@@ -99,7 +99,7 @@ func rollupServer(t *testing.T, identity stubIdentity, store *memRollups) *httpt
 	pos := fakePositions{}
 	write := app.NewPublicationService(repo, pos, serializer.Default(), &ids{}, clk{})
 	read := app.NewReadService(repo, pos, serializer.Default())
-	rollups := app.NewRollupService(stubPosture{rows: mrfPosture()}, identity, store, serializer.Default(), &ids{}, clk{})
+	rollups := app.NewRollupService(stubPosture{rows: p1Posture()}, identity, store, serializer.Default(), &ids{}, clk{})
 	srv := httptest.NewServer(commhttp.NewHandler(write, read).WithRollups(rollups).Router())
 	t.Cleanup(srv.Close)
 	return srv
@@ -111,12 +111,12 @@ func rollupServer(t *testing.T, identity stubIdentity, store *memRollups) *httpt
 // the full read loop — status, list, get with payload — hangs together.
 func TestRollupCreateAndReadLoop(t *testing.T) {
 	store := newMemRollups()
-	srv := rollupServer(t, stubIdentity{ref: mrfRef()}, store)
+	srv := rollupServer(t, stubIdentity{ref: p1Ref()}, store)
 
 	// Preview first: renders, records nothing.
 	status, body := do(t, http.MethodPost, srv.URL+"/previews",
 		map[string]any{"release_id": "rel-1", "artifact_type": "vex", "format": "openvex"})
-	if status != http.StatusOK || !strings.Contains(string(body), "pkg:generic/MRF/cdmrf-oamp@20.1.0.0-118") {
+	if status != http.StatusOK || !strings.Contains(string(body), "pkg:generic/P1/project-alpha@20.1.0.0-118") {
 		t.Fatalf("preview: %d %s", status, body)
 	}
 	if len(store.order) != 0 {
@@ -162,7 +162,7 @@ func TestRollupCreateAndReadLoop(t *testing.T) {
 // artifact types, an unresolved name chain is the D13.4 422, an unsupported rollup format a
 // 400, and a node without the service says so.
 func TestRollupRefusals(t *testing.T) {
-	srv := rollupServer(t, stubIdentity{ref: mrfRef()}, newMemRollups())
+	srv := rollupServer(t, stubIdentity{ref: p1Ref()}, newMemRollups())
 
 	cases := []struct {
 		name string
@@ -224,7 +224,7 @@ func TestRollupRefusals(t *testing.T) {
 // the D13.2 loop at the HTTP surface.
 func TestRollupSupersedeAndStaleness(t *testing.T) {
 	store := newMemRollups()
-	srv := rollupServer(t, stubIdentity{ref: mrfRef()}, store)
+	srv := rollupServer(t, stubIdentity{ref: p1Ref()}, store)
 
 	if status, _ := do(t, http.MethodPost, srv.URL+"/publications",
 		map[string]any{"release_id": "rel-1", "artifact_type": "vex", "format": "openvex"}); status != http.StatusCreated {
