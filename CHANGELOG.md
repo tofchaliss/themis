@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **Watches — a wave's identifiers in, one state table out** (EDR-INCIDENT-01 D2, INC-1 step
+  B): a Watch is a named list of CVE ids and Red Hat advisory ids (RHSA-/RHBA-/RHEA-) an
+  operator pastes; `GET /watches/{id}/status` computes, on every read, one row per (release,
+  CVE) over every release holding any of them — `not_affected` · `open_no_fix` ·
+  `open_fix_available` · `fixed` · `accepted` · `unknown` — with the open packages, the
+  recorded fix versions that apply, the standing stance and the release's newest evidence as
+  "last proof". Nothing is stored but the list and the CVE set it last resolved to; nothing
+  decides. API `GET/POST /watches`, `GET/DELETE /watches/{id}` (delete admin),
+  `POST /watches/{id}/identifiers` (append-only), governance migration 000024. Knowledge gains
+  `GET /faultlines/by-advisory?id=` (the cards whose `fixed` vendor statements carry the
+  advisory; an unseen advisory resolves to nothing). GUI: a Watches rail page — paste, name,
+  table with state filter chips and counts, CSV export, add identifiers, delete. D2a
+  (`notify` → `watch_changed`) is stored, not yet emitted.
 - **GUI: scope on the decision** (EDR-SYNC-01 D7, SYNC-1 step S2): the Decide form in the
   finding drawer has a Scope picker (this release · every release of this project · every
   project and release of this product). Choosing a wider scope previews, from

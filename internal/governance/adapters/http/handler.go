@@ -44,6 +44,8 @@ type Handler struct {
 	// scope previews who a scoped decision reaches (EDR-SYNC-01 D7). Nil ⇒ no Registry seam, and
 	// /findings/{id}/scope-targets answers 503: "nobody" must not stand in for "cannot tell".
 	scope *app.ScopePropagation
+	// watches serves the Watch list and its table (EDR-INCIDENT-01 D2). Nil ⇒ /watches answers 503.
+	watches *app.WatchService
 	// now stamps generated_at; replaceable in tests.
 	now func() time.Time
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response

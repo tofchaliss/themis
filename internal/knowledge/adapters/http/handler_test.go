@@ -81,6 +81,9 @@ func feedServer(t *testing.T, repo app.Repository, proj app.ProjectionReader, fe
 	if rl, ok := repo.(app.RecentLister); ok {
 		read = read.WithRecent(rl)
 	}
+	if al, ok := repo.(app.AdvisoryLister); ok {
+		read = read.WithAdvisory(al)
+	}
 	srv := httptest.NewServer(knhttp.NewHandler(read, health).Router())
 	t.Cleanup(srv.Close)
 	return srv
@@ -730,5 +733,52 @@ func TestGetFaultline_KEVDetail(t *testing.T) {
 	plain := server(t, fakeRepo{card: sampleCard(t), found: true}, fakeProjection{})
 	if _, body := get(t, plain.URL+"/faultlines?cve=CVE-2024-1"); strings.Contains(string(body), "kev_due") || strings.Contains(string(body), "kev_ransomware") {
 		t.Errorf("unstated KEV detail must be omitted: %s", body)
+	}
+}
+
+// advisoryRepo is a repository that also answers advisory lookups (EDR-INCIDENT-01 D2).
+type advisoryRepo struct {
+	fakeRepo
+	asked string
+	cards []domain.Faultline
+	aerr  error
+}
+
+func (r *advisoryRepo) FaultlinesByAdvisory(_ context.Context, id string) ([]domain.Faultline, error) {
+	r.asked = id
+	return r.cards, r.aerr
+}
+
+// EDR-INCIDENT-01 D2: the by-advisory read returns the cards whole, an empty list for an unseen
+// advisory, 400 for a blank id, 503 unwired and 500 on a store failure.
+func TestGetFaultlinesByAdvisory(t *testing.T) {
+	card := sampleCard(t)
+	repo := &advisoryRepo{fakeRepo: fakeRepo{card: card, found: true}, cards: []domain.Faultline{card}}
+	srv := server(t, repo, fakeProjection{})
+
+	status, body := get(t, srv.URL+"/faultlines/by-advisory?id=rhsa-2026:0001")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var cards []struct {
+		Cve string `json:"cve"`
+	}
+	if err := json.Unmarshal(body, &cards); err != nil || len(cards) != 1 || cards[0].Cve != "CVE-2024-1" || repo.asked != "RHSA-2026:0001" {
+		t.Errorf("cards = %+v err %v asked %q", cards, err, repo.asked)
+	}
+	repo.cards = nil
+	if status, body := get(t, srv.URL+"/faultlines/by-advisory?id=RHSA-2026:0002"); status != http.StatusOK || string(body) != "[]\n" {
+		t.Errorf("unseen = %d %q", status, body)
+	}
+	if status, _ := get(t, srv.URL+"/faultlines/by-advisory?id=%20"); status != http.StatusBadRequest {
+		t.Errorf("blank id status = %d", status)
+	}
+	repo.aerr = errors.New("db down")
+	if status, _ := get(t, srv.URL+"/faultlines/by-advisory?id=RHSA-2026:0001"); status != http.StatusInternalServerError {
+		t.Errorf("store failure status = %d", status)
+	}
+	plain := server(t, fakeRepo{card: card, found: true}, fakeProjection{})
+	if status, _ := get(t, plain.URL+"/faultlines/by-advisory?id=RHSA-2026:0001"); status != http.StatusServiceUnavailable {
+		t.Errorf("unwired status = %d", status)
 	}
 }

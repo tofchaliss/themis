@@ -76,6 +76,141 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /watches:
+    get:
+      operationId: listWatches
+      summary: >-
+        Every Watch (EDR-INCIDENT-01 D2), newest first. A Watch is a named, operator-owned list of
+        CVE and vendor advisory ids whose per-(release, CVE) state is computed on read. Read scope.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatchView'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createWatch
+      summary: >-
+        Create a Watch from a name and pasted identifiers (CVE-… and RHSA-/RHBA-/RHEA-… ids,
+        any separator, any case). Write scope. Tokens not recognised are returned, never silently
+        dropped; a text with none recognised is refused. The creator is the authenticated key,
+        or `created_by` when the node runs without auth.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchCreate'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchCreated'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /watches/{watchId}:
+    get:
+      operationId: getWatch
+      summary: One Watch as stored (its identifiers and the CVE set they last resolved to).
+      parameters:
+        - $ref: '#/components/parameters/WatchId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteWatch
+      summary: Delete a Watch whole. Admin scope. Nothing else changes - a Watch holds no truth.
+      parameters:
+        - $ref: '#/components/parameters/WatchId'
+      responses:
+        '204':
+          description: Deleted.
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /watches/{watchId}/identifiers:
+    post:
+      operationId: addWatchIdentifiers
+      summary: >-
+        Append identifiers to a Watch (append-only: add, never drop). Write scope. Returns the
+        Watch with how many were new and which tokens were not recognised.
+      parameters:
+        - $ref: '#/components/parameters/WatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchIdentifiersAdd'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchCreated'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /watches/{watchId}/status:
+    get:
+      operationId: getWatchStatus
+      summary: >-
+        The Watch's table, computed NOW (EDR-INCIDENT-01 D2): one row per (release, CVE) over
+        every release that has a Finding for any watched CVE. State: not_affected (no component
+        matches, or a not_affected Position stands) · open_no_fix · open_fix_available · fixed
+        (every occurrence cleared by evidence) · accepted (accepted_risk / mitigated / deferred
+        stands) · unknown (no card for the CVE, or the advisory resolved to nothing). Nothing is
+        stored but the CVE set the identifiers resolved to. Read scope. 503 when the Knowledge
+        seam is not configured: "cannot tell" must not read as "nothing is affected".
+      parameters:
+        - $ref: '#/components/parameters/WatchId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchStatusView'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /findings/{id}/scope-targets:
     get:
       operationId: getScopeTargets
@@ -537,6 +672,12 @@ paths:
           $ref: '#/components/responses/Problem'
 components:
   parameters:
+    WatchId:
+      name: watchId
+      in: path
+      required: true
+      schema:
+        type: string
     FindingId:
       name: id
       in: path
@@ -1468,6 +1609,152 @@ components:
       properties:
         proposal_id:
           type: string
+    WatchCreate:
+      type: object
+      required: [name, identifiers]
+      properties:
+        name:
+          type: string
+        identifiers:
+          type: string
+          description: Pasted text - CVE and advisory ids separated by whitespace, commas or semicolons.
+        created_by:
+          type: string
+          description: Who creates it, used only when the node runs without auth (the key wins otherwise).
+        notify:
+          type: boolean
+          description: The D2a flag; recorded, not yet acted on.
+    WatchIdentifiersAdd:
+      type: object
+      required: [identifiers]
+      properties:
+        identifiers:
+          type: string
+    WatchView:
+      type: object
+      required: [id, name, created_by, created_at, identifiers, resolved_cves, notify]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        identifiers:
+          type: array
+          items:
+            type: string
+        resolved_cves:
+          type: array
+          items:
+            type: string
+          description: The CVE set the identifiers resolved to at the last status read.
+        resolved_at:
+          type: string
+          format: date-time
+        notify:
+          type: boolean
+    WatchCreated:
+      type: object
+      required: [watch, added, rejected]
+      properties:
+        watch:
+          $ref: '#/components/schemas/WatchView'
+        added:
+          type: integer
+          description: How many identifiers were new.
+        rejected:
+          type: array
+          items:
+            type: string
+          description: Tokens that are neither a CVE nor a known advisory id form.
+    WatchIdentifierView:
+      type: object
+      required: [id, kind, cves, resolved]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [cve, advisory, '']
+        cves:
+          type: array
+          items:
+            type: string
+        resolved:
+          type: boolean
+    WatchRowView:
+      type: object
+      required: [cve, state, packages, fixes]
+      properties:
+        release_id:
+          type: string
+        product_id:
+          type: string
+        project_id:
+          type: string
+        product_name:
+          type: string
+        project_name:
+          type: string
+        version:
+          type: string
+        cve:
+          type: string
+        faultline_id:
+          type: string
+        finding_id:
+          type: string
+        state:
+          type: string
+          enum: [not_affected, open_no_fix, open_fix_available, fixed, accepted, unknown]
+        stance:
+          type: string
+          description: The standing Position's stance, blank when undecided.
+        packages:
+          type: array
+          items:
+            type: string
+          description: The open components' package names.
+        fixes:
+          type: array
+          items:
+            type: string
+          description: The recorded fix versions that apply to those packages.
+        last_evidence_at:
+          type: string
+          format: date-time
+          description: When the release's newest evidence was filed - the last proof.
+        last_evidence_kind:
+          type: string
+    WatchStatusView:
+      type: object
+      required: [watch, generated_at, identifiers, rows, counts]
+      properties:
+        watch:
+          $ref: '#/components/schemas/WatchView'
+        generated_at:
+          type: string
+          format: date-time
+        identifiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchIdentifierView'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchRowView'
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Rows per state.
+        note:
+          type: string
+          description: The D5 sentence - fix available is the vendor's statement; patched is proven only by new evidence.
     DecisionRequest:
       type: object
       required: [actor_id]

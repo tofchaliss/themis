@@ -138,3 +138,72 @@ func TestGetFaultlineCarriesRangeStatements(t *testing.T) {
 		t.Fatalf("statements = %+v", got.RangeStatements)
 	}
 }
+
+// EDR-INCIDENT-01 D2: a CVE resolves to its card or to "no card" (404), an advisory to the
+// cards carrying it (an unseen one is an empty list); other statuses and bad bodies are errors.
+func TestWatchResolution(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path + "?" + r.URL.RawQuery {
+		case "/api/v1/faultlines?cve=CVE-2026-0001":
+			_, _ = w.Write([]byte(`{"id":"fl-1","cve":"CVE-2026-0001","view":{"fixes":[{"package":"kernel","version":"0:3.el8","ecosystem":"rpm"}]}}`))
+		case "/api/v1/faultlines?cve=CVE-2026-0404":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/v1/faultlines?cve=CVE-2026-0500":
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/v1/faultlines?cve=CVE-2026-0666":
+			_, _ = w.Write([]byte(`{not-json`))
+		case "/api/v1/faultlines/by-advisory?id=RHSA-2026%3A0001":
+			_, _ = w.Write([]byte(`[{"id":"fl-1","cve":"CVE-2026-0001","view":{}},{"id":"fl-2","cve":"CVE-2026-0002","view":{}}]`))
+		case "/api/v1/faultlines/by-advisory?id=RHSA-2026%3A0000":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/faultlines/by-advisory?id=RHSA-2026%3A0666":
+			_, _ = w.Write([]byte(`{not-json`))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	card, ok, err := c.FaultlineByCVE(ctx, "CVE-2026-0001")
+	if err != nil || !ok || card.FaultlineID != "fl-1" || len(card.Fixes) != 1 || card.Fixes[0].Package != "kernel" {
+		t.Errorf("by cve = %+v ok %v err %v", card, ok, err)
+	}
+	if _, ok, err := c.FaultlineByCVE(ctx, "CVE-2026-0404"); err != nil || ok {
+		t.Errorf("no card: ok %v err %v", ok, err)
+	}
+	if _, _, err := c.FaultlineByCVE(ctx, "CVE-2026-0500"); err == nil {
+		t.Error("500 swallowed")
+	}
+	if _, _, err := c.FaultlineByCVE(ctx, "CVE-2026-0666"); err == nil {
+		t.Error("bad body swallowed")
+	}
+	cards, err := c.FaultlinesByAdvisory(ctx, "RHSA-2026:0001")
+	if err != nil || len(cards) != 2 || cards[1].CVE != "CVE-2026-0002" {
+		t.Errorf("by advisory = %+v err %v", cards, err)
+	}
+	if cards, err := c.FaultlinesByAdvisory(ctx, "RHSA-2026:0000"); err != nil || len(cards) != 0 {
+		t.Errorf("unseen = %+v err %v", cards, err)
+	}
+	if _, err := c.FaultlinesByAdvisory(ctx, "RHSA-2026:0503"); err == nil {
+		t.Error("503 swallowed")
+	}
+	if _, err := c.FaultlinesByAdvisory(ctx, "RHSA-2026:0666"); err == nil {
+		t.Error("bad body swallowed")
+	}
+	bad := NewClient("http://127.0.0.1:1", nil)
+	if _, _, err := bad.FaultlineByCVE(ctx, "CVE-2026-0001"); err == nil {
+		t.Error("transport error swallowed")
+	}
+	if _, err := bad.FaultlinesByAdvisory(ctx, "RHSA-2026:0001"); err == nil {
+		t.Error("transport error swallowed")
+	}
+	broken := NewClient("://bad", nil)
+	if _, _, err := broken.FaultlineByCVE(ctx, "CVE-2026-0001"); err == nil {
+		t.Error("bad URL swallowed")
+	}
+	if _, err := broken.FaultlinesByAdvisory(ctx, "RHSA-2026:0001"); err == nil {
+		t.Error("bad URL swallowed")
+	}
+}

@@ -787,3 +787,40 @@ func (s *Store) RecentFaultlines(ctx context.Context, limit int) ([]app.RecentFa
 	}
 	return out, nil
 }
+
+// FaultlinesByAdvisory lists the cards whose reconciled vendor statements carry the advisory
+// (EDR-INCIDENT-01 D2), in CVE order. Implements app.AdvisoryLister. The alias lives on the
+// `fixed` statements of the persisted view (EDR-VEX-02 D14), so the match is a JSONB scan of
+// `view -> 'applicabilities'`; an advisory no card carries is an empty list, not an error.
+func (s *Store) FaultlinesByAdvisory(ctx context.Context, advisory string) ([]domain.Faultline, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id FROM faultlines
+		WHERE jsonb_typeof(view -> 'applicabilities') = 'array'
+		  AND EXISTS (SELECT 1 FROM jsonb_array_elements(view -> 'applicabilities') a WHERE upper(a ->> 'advisory') = $1)
+		ORDER BY cve`, advisory)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]domain.Faultline, 0, len(ids))
+	for _, id := range ids {
+		f, err := s.load(ctx, "id", id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}

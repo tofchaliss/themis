@@ -1701,3 +1701,41 @@ func TestRecordMatch_FixPublishedOnNewBound(t *testing.T) {
 		t.Errorf("cleared row behind = %v/%v, want the empty set", b, err)
 	}
 }
+
+// EDR-INCIDENT-01 D2: an advisory names the cards whose `fixed` statements carry it, in CVE
+// order, matched case-insensitively; an advisory no card carries is an empty list.
+func TestFaultlinesByAdvisory(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+	svc := service(pool)
+	fixed := func(pkg, advisory string) domain.Proposal {
+		p, err := domain.NewApplicabilityProposal("redhat", time.Unix(1_700_000_000, 0), domain.Applicability{
+			Package: pkg, Status: "fixed", Justification: "fixed in " + pkg,
+			Scope:    value.ProductScope{Family: value.FamilyEnterpriseLinux, Major: "8"},
+			Advisory: advisory, FixedVersion: pkg + "-0:1-1.el8",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for cve, adv := range map[string]string{"CVE-2026-9002": "RHSA-2026:7001", "CVE-2026-9001": "RHSA-2026:7001", "CVE-2026-9003": "RHSA-2026:7002"} {
+		if _, _, err := svc.FoldProposal(ctx, cveID(t, cve), fixed("kernel", adv)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.FaultlinesByAdvisory(ctx, "RHSA-2026:7001")
+	if err != nil || len(got) != 2 || got[0].CVE().String() != "CVE-2026-9001" || got[1].CVE().String() != "CVE-2026-9002" {
+		t.Fatalf("by advisory = %d err %v", len(got), err)
+	}
+	if len(got[0].Proposals()) != 1 || got[0].View().Applicabilities[0].Advisory != "RHSA-2026:7001" {
+		t.Errorf("card not loaded whole: %+v", got[0])
+	}
+	if got, err := st.FaultlinesByAdvisory(ctx, "RHSA-2026:7002"); err != nil || len(got) != 1 {
+		t.Errorf("second advisory = %d err %v", len(got), err)
+	}
+	if got, err := st.FaultlinesByAdvisory(ctx, "RHSA-2026:0000"); err != nil || len(got) != 0 {
+		t.Errorf("unseen advisory = %d err %v", len(got), err)
+	}
+}
