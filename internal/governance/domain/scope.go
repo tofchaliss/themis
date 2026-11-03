@@ -81,9 +81,16 @@ func ScopedProposalID(target, source FindingID, version int) ProposalID {
 // ScopedRationale is the rationale of a propagated Position: the original verbatim, then one
 // line naming the scope, the source release and Finding, the Position version and how alike the
 // two Findings are (D3, D7) — so the audit reads where this stance came from without a lookup.
-func ScopedRationale(source Finding, pos Position, level RollForwardLevel) string {
-	suffix := fmt.Sprintf("applied by scope %s from release %s (Finding %s), Position v%d, %s level",
-		pos.Scope(), source.ReleaseID(), source.ID(), pos.Version(), level)
+// sourceLabel is the source release as a person knows it ("<project> <version>", resolved by
+// the caller through Registry); blank falls back to the release id, so the line is never
+// nameless.
+func ScopedRationale(source Finding, sourceLabel string, pos Position, level RollForwardLevel) string {
+	from := strings.TrimSpace(sourceLabel)
+	if from == "" {
+		from = "release " + source.ReleaseID()
+	}
+	suffix := fmt.Sprintf("applied by scope %s from %s (Finding %s), Position v%d, %s level",
+		pos.Scope(), from, source.ID(), pos.Version(), level)
 	if r := strings.TrimSpace(pos.Rationale()); r != "" {
 		return r + " — " + suffix
 	}

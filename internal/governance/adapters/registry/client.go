@@ -63,10 +63,48 @@ func (c *Client) BlastRadius(ctx context.Context, releaseID string) (int, error)
 
 type releaseView struct {
 	ProjectID string `json:"project_id"`
+	Version   string `json:"version"`
 }
 
 type projectView struct {
 	ProductID string `json:"product_id"`
+	Name      string `json:"name"`
+}
+
+type productView struct {
+	Name string `json:"name"`
+}
+
+// ReleaseOwners walks release → project → product and returns the ids AND the names (the
+// app.ReleaseOwnerResolver port): scope decides on the ids, a person reads the names. Fails
+// CLOSED on a transport failure, a non-200 or a blank id, like ProductAndProjectOfRelease;
+// a blank name is not an error — the caller falls back to the id.
+func (c *Client) ReleaseOwners(ctx context.Context, releaseID string) (app.ReleaseOwners, error) {
+	if releaseID == "" {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: release-owners: no release id")
+	}
+	var rel releaseView
+	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID), &rel); err != nil {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: release %s: %w", releaseID, err)
+	}
+	if rel.ProjectID == "" {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: release %s: no project id", releaseID)
+	}
+	var proj projectView
+	if err := c.get(ctx, "/api/v1/projects/"+url.PathEscape(rel.ProjectID), &proj); err != nil {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: project %s: %w", rel.ProjectID, err)
+	}
+	if proj.ProductID == "" {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: project %s: no product id", rel.ProjectID)
+	}
+	var prod productView
+	if err := c.get(ctx, "/api/v1/products/"+url.PathEscape(proj.ProductID), &prod); err != nil {
+		return app.ReleaseOwners{}, fmt.Errorf("registry: product %s: %w", proj.ProductID, err)
+	}
+	return app.ReleaseOwners{
+		ProductID: proj.ProductID, ProjectID: rel.ProjectID,
+		ProductName: prod.Name, ProjectName: proj.Name, Version: rel.Version,
+	}, nil
 }
 
 // ProductOfRelease walks the two upward hops of Registry's identity chain — release →
@@ -136,6 +174,7 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 var (
 	_ app.BlastRadiusReader       = (*Client)(nil)
 	_ app.ReleaseIdentityResolver = (*Client)(nil)
+	_ app.ReleaseOwnerResolver    = (*Client)(nil)
 )
 
 // ReleaseProducts walks the estate — products, their projects, their releases — and maps every

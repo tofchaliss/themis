@@ -14,18 +14,20 @@ import (
 	"github.com/themis-project/themis/internal/kernel/value"
 )
 
-// stubOwners is the Registry identity seam: release → (product, project).
+// stubOwners is the Registry owners seam: release → (product, project) plus the names a
+// person reads, when known.
 type stubOwners struct {
 	owners map[string][2]string
+	names  map[string][3]string
 	err    error
 }
 
-func (s stubOwners) ProductAndProjectOfRelease(_ context.Context, rel string) (string, string, error) {
+func (s stubOwners) ReleaseOwners(_ context.Context, rel string) (app.ReleaseOwners, error) {
 	if s.err != nil {
-		return "", "", s.err
+		return app.ReleaseOwners{}, s.err
 	}
-	o := s.owners[rel]
-	return o[0], o[1], nil
+	o, n := s.owners[rel], s.names[rel]
+	return app.ReleaseOwners{ProductID: o[0], ProjectID: o[1], ProductName: n[0], ProjectName: n[1], Version: n[2]}, nil
 }
 
 // stubUndecided answers UndecidedFindingsByRelease from the repo.
@@ -121,7 +123,10 @@ func TestGetScopeTargets(t *testing.T) {
 	repo.seed(withPURL(t, identified(t, "a2", "rel-a2", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@2"))
 	repo.seed(withPURL(t, identified(t, "b1", "rel-b1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1"))
 	repo.seed(withPURL(t, identified(t, "c1", "rel-c1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1"))
-	owners := stubOwners{owners: map[string][2]string{"rel-a1": {"MRF", "A"}, "rel-a2": {"MRF", "A"}, "rel-b1": {"MRF", "B"}, "rel-c1": {"OTHER", "C"}}}
+	owners := stubOwners{
+		owners: map[string][2]string{"rel-a1": {"P1", "A"}, "rel-a2": {"P1", "A"}, "rel-b1": {"P1", "B"}, "rel-c1": {"OTHER", "C"}},
+		names:  map[string][3]string{"rel-a1": {"Product One", "alpha", "1.0"}, "rel-a2": {"Product One", "alpha", "1.1"}, "rel-b1": {"Product One", "beta", "1.0"}},
+	}
 	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
 	read := app.NewReadService(repo, fakeProjection{}, nil, 0)
 	newSrv := func(sp *app.ScopePropagation) *httptest.Server {
@@ -157,7 +162,8 @@ func TestGetScopeTargets(t *testing.T) {
 	var raw map[string]any
 	_ = json.Unmarshal(body, &raw)
 	tg := raw["targets"].([]any)[0].(map[string]any)
-	if tg["finding_id"] != "a2" || tg["level"] != "component" || tg["project_id"] != "A" || tg["product_id"] != "MRF" || tg["release_id"] != "rel-a2" {
+	if tg["finding_id"] != "a2" || tg["level"] != "component" || tg["project_id"] != "A" || tg["product_id"] != "P1" || tg["release_id"] != "rel-a2" ||
+		tg["product_name"] != "Product One" || tg["project_name"] != "alpha" || tg["version"] != "1.1" {
 		t.Errorf("target = %v", tg)
 	}
 	if status, body := do(t, http.MethodGet, srv.URL+"/findings/src/scope-targets?scope=release", nil); status != http.StatusOK || !json.Valid(body) {

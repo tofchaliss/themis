@@ -95,14 +95,18 @@ func TestAcceptProposalWith_ScopeAndPropagation(t *testing.T) {
 	if prop.Scope() != domain.ScopeProduct || prop.IsScopedSource() {
 		t.Errorf("a propagated Position must carry the scope but never be a source: %q %v", prop.Scope(), prop.IsScopedSource())
 	}
-	r := domain.ScopedRationale(f, pos, domain.LevelComponent)
+	r := domain.ScopedRationale(f, "", pos, domain.LevelComponent)
 	for _, want := range []string{"because", "applied by scope product", "release rel-1", "Finding fnd-1", "Position v1", "component level"} {
 		if !strings.Contains(r, want) {
 			t.Errorf("rationale %q lacks %q", r, want)
 		}
 	}
+	// A resolved label replaces the bare release id — the line reads like the GUI, not the DB.
+	if r := domain.ScopedRationale(f, " alpha 1.0.0-7 ", pos, domain.LevelComponent); !strings.Contains(r, "from alpha 1.0.0-7 (Finding fnd-1)") || strings.Contains(r, "rel-1") {
+		t.Errorf("labelled rationale = %q", r)
+	}
 	bare := domain.ReconstitutePosition(2, domain.StanceAffected, "  ", human, domain.PositionInputs{Scope: domain.ScopeProject}, epoch)
-	if r := domain.ScopedRationale(f, bare, domain.LevelArtifact); strings.HasPrefix(r, " —") || !strings.HasPrefix(r, "applied by scope project") {
+	if r := domain.ScopedRationale(f, "", bare, domain.LevelArtifact); strings.HasPrefix(r, " —") || !strings.HasPrefix(r, "applied by scope project") {
 		t.Errorf("bare rationale = %q", r)
 	}
 }

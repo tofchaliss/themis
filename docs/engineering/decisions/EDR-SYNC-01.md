@@ -9,7 +9,7 @@ Author: the design discussion of 2026-11-03 (thread "Nessus report intake"); own
 
 Engineering Decision Record for **how one person's assessment of a CVE reaches the other projects
 of the same product that carry the same CVE in the same component**. The owner's case: product
-`MRF` has several projects (one per deliverable) built from the same base, each with a release of
+A product has several projects (one per deliverable) built from the same base, each with a release of
 the same version. A person decides `CVE-2026-111497` on project A's release; project B's release
 of the same version holds the same CVE in the same package and today shows it undecided. The
 owner wants it updated "automatically, soft-realtime" — minutes, not seconds, and without a
@@ -54,7 +54,7 @@ gains the picker, pre-selected from `THEMIS_GOVERNANCE_DEFAULT_DECISION_SCOPE` (
 `release`; the owner's estate sets `product`, so the one-click case needs no extra click). The
 scope is recorded as a **PositionInput** — the decision rested on it — beside `ReviewBy`,
 `Owner`, `Treatment` and `Proof`, and is shown wherever the Position is shown ("decided by
-<person> for product MRF").
+<person> for product <product>").
 
 ### D2 — "The same" means the same CVE in the same component; a different component is never synced
 
@@ -122,7 +122,7 @@ product still says nothing about another.
 Before: the decision form shows the scope picker and, beside it, the **preview count** from
 `GET /findings/{id}/scope-targets?scope=` — "will also apply to 7 Findings in 3 projects", with
 the list on demand — so the person knows what they are signing. After: the Finding page shows
-"decided by <person> for product MRF" and, on a propagated target, "applied from release
+"decided by <person> for product <product>" and, on a propagated target, "applied from release
 <version> of project <name>" with the link. Vulnerability-level siblings show the roll-forward
 proposal with the reason "component differs".
 
@@ -171,6 +171,16 @@ change: each step ships only on the owner's explicit go.
   sources apply nothing and are counted (`conflicts` in the sweep report); the D5
   `scope_conflict` flag on the Finding is S3.
 - No Registry seam ⇒ no scope: the node logs it at startup and the preview answers 503.
+- **Names, not UUIDs** (owner, first VM round 2026-11-03): the Registry hop scope uses
+  (`ReleaseOwnerResolver`) returns the product and project NAMES and the release version beside
+  the ids. The ids decide scope; the names go into the propagated rationale ("applied by scope
+  product from <project> <version> (Finding …)") and onto every preview target. A blank name falls
+  back to the id, never to nothing.
+- VM round 2026-11-03 (S1 PASS): decided once on project A with scope `product`; the one
+  undecided sibling (a third project, artifact level) carried the Position within a minute,
+  same person, `propagated_from` set; the sibling the owner had decided the day before kept its
+  own Position (D5) — the owner read that as correct. A test stance was then corrected by hand
+  on both Findings, because a re-decision does not yet follow (S3).
 - Still open: S2 (GUI picker, preview count, "applied from" line), S3 (re-decision follow,
   `scope_withdrawn`, `scope_conflict` flags).
 

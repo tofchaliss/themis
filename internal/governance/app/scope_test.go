@@ -19,17 +19,18 @@ import (
 // with a per-release outage and a per-release blank answer.
 type ownersByRelease struct {
 	owners map[string][2]string
+	names  map[string][3]string // optional: product name, project name, version
 	fail   map[string]bool
 	calls  int
 }
 
-func (o *ownersByRelease) ProductAndProjectOfRelease(_ context.Context, releaseID string) (string, string, error) {
+func (o *ownersByRelease) ReleaseOwners(_ context.Context, releaseID string) (app.ReleaseOwners, error) {
 	o.calls++
 	if o.fail[releaseID] {
-		return "", "", errors.New("registry: connection refused")
+		return app.ReleaseOwners{}, errors.New("registry: connection refused")
 	}
-	own := o.owners[releaseID]
-	return own[0], own[1], nil
+	own, n := o.owners[releaseID], o.names[releaseID]
+	return app.ReleaseOwners{ProductID: own[0], ProjectID: own[1], ProductName: n[0], ProjectName: n[1], Version: n[2]}, nil
 }
 
 // scopeQueue is the pending-scoped-positions seam in memory: it answers from the repo (a scoped,
@@ -90,11 +91,14 @@ func decidedScoped(t *testing.T, f domain.Finding, pid domain.ProposalID, stance
 	return f
 }
 
-// The owner's estate: product MRF with projects A and B, product OTHER with project C.
+// The owner's estate: product P1 with projects A and B, product OTHER with project C.
 func scopeOwners() *ownersByRelease {
-	return &ownersByRelease{owners: map[string][2]string{
-		"rel-a1": {"MRF", "A"}, "rel-a2": {"MRF", "A"}, "rel-b1": {"MRF", "B"}, "rel-c1": {"OTHER", "C"},
-	}}
+	return &ownersByRelease{
+		owners: map[string][2]string{"rel-a1": {"P1", "A"}, "rel-a2": {"P1", "A"}, "rel-b1": {"P1", "B"}, "rel-c1": {"OTHER", "C"}},
+		// Only rel-a1 has names: a rationale from it reads "alpha 1.0", one from the others
+		// falls back to the release id.
+		names: map[string][3]string{"rel-a1": {"Product One", "alpha", "1.0"}},
+	}
 }
 
 func scopeProduct() domain.AcceptanceTerms { return domain.AcceptanceTerms{Scope: domain.ScopeProduct} }
@@ -125,8 +129,8 @@ func TestScopePropagation_Targets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].FindingID != "a2" || got[0].Level != domain.LevelComponent || got[0].ProjectID != "A" ||
-		got[1].FindingID != "b1" || got[1].Level != domain.LevelArtifact || got[1].ProductID != "MRF" || got[1].ReleaseID != "rel-b1" {
+	if len(got) != 2 || got[0].FindingID != "a2" || got[0].Level != domain.LevelComponent || got[0].ProjectID != "A" || got[0].ProjectName != "" ||
+		got[1].FindingID != "b1" || got[1].Level != domain.LevelArtifact || got[1].ProductID != "P1" || got[1].ReleaseID != "rel-b1" {
 		t.Fatalf("product targets = %+v", got)
 	}
 	if owners.calls != 4 { // the source, then one hop per qualifying target (a2, b1, c1) — never the rejected ones
@@ -155,7 +159,7 @@ func TestScopePropagation_Targets(t *testing.T) {
 	if _, err := sp.Targets(ctx, "src", domain.ScopeProduct); !errors.Is(err, app.ErrUnresolvedReleaseIdentity) {
 		t.Errorf("blank owner = %v, want unresolved", err)
 	}
-	owners.owners["rel-a1"] = [2]string{"MRF", "A"}
+	owners.owners["rel-a1"] = [2]string{"P1", "A"}
 	repo.byFaultlineErr = errors.New("db down")
 	if _, err := sp.Targets(ctx, "src", domain.ScopeProduct); err == nil {
 		t.Error("an unlistable Faultline must surface")
@@ -203,7 +207,7 @@ func TestScopePropagation_SweepAppliesThePersonsDecision(t *testing.T) {
 	if !in.ReviewBy.Equal(terms.ReviewBy) || in.Owner != terms.Owner || in.Treatment != terms.Treatment || in.Proof != terms.Proof {
 		t.Errorf("terms not carried: %+v", in)
 	}
-	if !strings.Contains(pos.Rationale(), "compensated by the WAF") || !strings.Contains(pos.Rationale(), "applied by scope product from release rel-a1") {
+	if !strings.Contains(pos.Rationale(), "compensated by the WAF") || !strings.Contains(pos.Rationale(), "applied by scope product from alpha 1.0 (Finding src)") {
 		t.Errorf("rationale = %q", pos.Rationale())
 	}
 	if ps := b1.Proposals(); len(ps) != 1 || ps[0].Proposer() != human || ps[0].EvidenceTrust() != value.TrustAsserted || ps[0].IsOpen() {
@@ -288,6 +292,10 @@ func TestScopePropagation_SweepFailuresLeaveTheRowPending(t *testing.T) {
 	if _, err := sp.Sweep(ctx); err == nil || len(q.marked) != 0 {
 		t.Fatalf("Registry outage: err=%v marked=%v, want error and nothing marked", err, q.marked)
 	}
+	owners.fail = map[string]bool{"rel-a1": true} // the SOURCE release unresolvable: same answer
+	if _, err := sp.Sweep(ctx); err == nil || len(q.marked) != 0 {
+		t.Fatalf("Registry outage on the source: err=%v marked=%v", err, q.marked)
+	}
 	owners.fail = nil
 	if res, err := sp.Sweep(ctx); err != nil || res.Applied != 1 || len(q.marked) != 1 {
 		t.Fatalf("after recovery = %+v %v marked=%v", res, err, q.marked)
@@ -349,7 +357,7 @@ func TestScopePropagation_ForRelease(t *testing.T) {
 	owners := scopeOwners()
 	sp := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners)
 
-	res, err := sp.ForRelease(ctx, "rel-b1", "MRF", "B")
+	res, err := sp.ForRelease(ctx, "rel-b1", "P1", "B")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +377,7 @@ func TestScopePropagation_ForRelease(t *testing.T) {
 	// already, so a fresh target shows it.
 	repo.seed(decidedScoped(t, withPURL(t, identified(t, "src-a2", "rel-a2", "fl-1", "CVE-2026-1"), tiff38, "carrier"), "p", domain.StanceAffected, "", t0.Add(time.Hour), scopeProduct()))
 	repo.seed(withPURL(t, identified(t, "new-5", "rel-b1", "fl-1", "CVE-2026-1"), tiff38, "carrier"))
-	res, err = sp.ForRelease(ctx, "rel-b1", "MRF", "B")
+	res, err = sp.ForRelease(ctx, "rel-b1", "P1", "B")
 	if err != nil || res.Conflicts != 1 || res.Applied != 0 {
 		t.Fatalf("conflict run = %+v %v", res, err)
 	}
@@ -382,7 +390,7 @@ func TestScopePropagation_ForRelease(t *testing.T) {
 	repo.seed(decidedScoped(t, withPURL(t, identified(t, "newer", "rel-a2", "fl-1", "CVE-2026-1"), tiff38, "carrier"), "p", domain.StanceNotAffected, "", t0.Add(time.Hour), scopeProduct()))
 	repo.seed(withPURL(t, identified(t, "new-1", "rel-b1", "fl-1", "CVE-2026-1"), tiff38, "carrier"))
 	sp = app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, scopeOwners())
-	if res, err := sp.ForRelease(ctx, "rel-b1", "MRF", "B"); err != nil || res.Applied != 1 {
+	if res, err := sp.ForRelease(ctx, "rel-b1", "P1", "B"); err != nil || res.Applied != 1 {
 		t.Fatalf("agreeing run = %+v %v", res, err)
 	}
 	if pos, _ := repo.byID["new-1"].CurrentPosition(); pos.Inputs().PropagatedFrom.FindingID != "newer" {
@@ -392,13 +400,13 @@ func TestScopePropagation_ForRelease(t *testing.T) {
 	if _, err := sp.ForRelease(ctx, "rel-b1", "", "B"); !errors.Is(err, app.ErrUnresolvedReleaseIdentity) {
 		t.Errorf("blank product = %v", err)
 	}
-	if _, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo, err: errors.New("db")}, scopeOwners()).ForRelease(ctx, "rel-b1", "MRF", "B"); err == nil {
+	if _, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo, err: errors.New("db")}, scopeOwners()).ForRelease(ctx, "rel-b1", "P1", "B"); err == nil {
 		t.Error("lister failure swallowed")
 	}
 	repo.seed(withPURL(t, identified(t, "new-9", "rel-b1", "fl-1", "CVE-2026-1"), tiff38, "carrier"))
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := sp.ForRelease(cancelled, "rel-b1", "MRF", "B"); !errors.Is(err, context.Canceled) {
+	if _, err := sp.ForRelease(cancelled, "rel-b1", "P1", "B"); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled = %v", err)
 	}
 }
@@ -415,7 +423,7 @@ func TestScopePropagation_ForReleaseFailures(t *testing.T) {
 		return repo, scopeOwners()
 	}
 	run := func(repo *fakeRepo, owners *ownersByRelease) error {
-		_, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "MRF", "B")
+		_, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "P1", "B")
 		return err
 	}
 	repo, owners := seed()
@@ -451,7 +459,7 @@ func TestScopePropagation_ForReleaseFailures(t *testing.T) {
 		}
 		return f
 	}
-	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "MRF", "B"); err != nil || res.Applied != 0 {
+	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "P1", "B"); err != nil || res.Applied != 0 {
 		t.Errorf("decided under the write = %+v %v", res, err)
 	}
 	// the pair already on the target (a crash between the write and the mark): nothing twice
@@ -461,7 +469,7 @@ func TestScopePropagation_ForReleaseFailures(t *testing.T) {
 	_ = tgt.RaiseProposal(p)
 	_ = tgt.RejectProposal(p.ID(), human, t0)
 	repo.seed(tgt)
-	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "MRF", "B"); err != nil || res.Applied != 0 {
+	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "P1", "B"); err != nil || res.Applied != 0 {
 		t.Errorf("duplicate pair = %+v %v", res, err)
 	}
 	// the domain refuses: an archived target cannot take a proposal
@@ -472,7 +480,7 @@ func TestScopePropagation_ForReleaseFailures(t *testing.T) {
 	repo.seed(tgt)
 	repo.byID["new-1"] = tgt
 	und := undecidedByRelease{repo: repo}
-	if _, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), und, owners).ForRelease(ctx, "rel-b1", "MRF", "B"); err == nil {
+	if _, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), und, owners).ForRelease(ctx, "rel-b1", "P1", "B"); err == nil {
 		t.Error("refused proposal swallowed")
 	}
 	// decided between listing and the first read: left alone, no error
@@ -483,7 +491,7 @@ func TestScopePropagation_ForReleaseFailures(t *testing.T) {
 		}
 		return f
 	}
-	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "MRF", "B"); err != nil || res.Applied != 0 || res.Decisions != 1 {
+	if res, err := app.NewScopePropagation(writeSvc(repo), newScopeQueue(repo), undecidedByRelease{repo: repo}, owners).ForRelease(ctx, "rel-b1", "P1", "B"); err != nil || res.Applied != 0 || res.Decisions != 1 {
 		t.Errorf("decided before the read = %+v %v", res, err)
 	}
 	// a source Position whose terms the domain refuses on the target (an accepted risk with no
@@ -540,7 +548,7 @@ func TestScopePropagation_RunEvery(t *testing.T) {
 // Position is applied BEFORE roll-forward runs, so the target carries no proposal.
 func TestWorker_ScopeFailureDefersTheRow(t *testing.T) {
 	ctx := context.Background()
-	q, worker, _, _ := evaluationWorker(t, "MRF", "B")
+	q, worker, _, _ := evaluationWorker(t, "P1", "B")
 	record(t, q, "rel-b1", "ev-1", domain.CauseNewSBOM)
 
 	repo := newRepo()

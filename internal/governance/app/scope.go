@@ -44,14 +44,36 @@ type ScopedPositions interface {
 	MarkScopeApplied(ctx context.Context, findingID domain.FindingID, version int) error
 }
 
-// ScopeTarget is one Finding a scoped decision reaches: where it lives and how alike it is to
-// the source (the level, D2). The preview (D7) and the application share this list.
+// ReleaseOwners is a release as Registry knows it: the ids that decide scope and the names a
+// person reads. The ids are mandatory (fail closed); the names are a courtesy and may be blank.
+type ReleaseOwners struct {
+	ProductID, ProjectID              string
+	ProductName, ProjectName, Version string
+}
+
+// Label is the release as a person says it — "<project> <version>" — or blank when Registry
+// gave no name, in which case callers fall back to the id.
+func (o ReleaseOwners) Label() string {
+	return strings.TrimSpace(strings.TrimSpace(o.ProjectName) + " " + strings.TrimSpace(o.Version))
+}
+
+// ReleaseOwnerResolver is the Registry hop scope needs: release → owners WITH their names, so
+// the rationale and the preview say "<project> <version>", not a UUID (owner ask, 2026-11-03).
+type ReleaseOwnerResolver interface {
+	ReleaseOwners(ctx context.Context, releaseID string) (ReleaseOwners, error)
+}
+
+// ScopeTarget is one Finding a scoped decision reaches: where it lives (ids and names) and how
+// alike it is to the source (the level, D2). The preview (D7) and the application share this list.
 type ScopeTarget struct {
-	FindingID domain.FindingID
-	ReleaseID string
-	ProductID string
-	ProjectID string
-	Level     domain.RollForwardLevel
+	FindingID   domain.FindingID
+	ReleaseID   string
+	ProductID   string
+	ProjectID   string
+	ProductName string
+	ProjectName string
+	Version     string
+	Level       domain.RollForwardLevel
 }
 
 // ScopeResult counts one pass.
@@ -68,12 +90,12 @@ type ScopePropagation struct {
 	svc       *FindingService
 	pending   ScopedPositions
 	undecided UndecidedFindingLister
-	identity  ReleaseIdentityResolver
+	registry  ReleaseOwnerResolver
 }
 
 // NewScopePropagation builds the pass.
-func NewScopePropagation(svc *FindingService, pending ScopedPositions, undecided UndecidedFindingLister, identity ReleaseIdentityResolver) *ScopePropagation {
-	return &ScopePropagation{svc: svc, pending: pending, undecided: undecided, identity: identity}
+func NewScopePropagation(svc *FindingService, pending ScopedPositions, undecided UndecidedFindingLister, registry ReleaseOwnerResolver) *ScopePropagation {
+	return &ScopePropagation{svc: svc, pending: pending, undecided: undecided, registry: registry}
 }
 
 // Targets lists the Findings a decision of `scope` on `source` reaches NOW (D2): the same
@@ -86,14 +108,14 @@ func (p *ScopePropagation) Targets(ctx context.Context, sourceID domain.FindingI
 	if err != nil {
 		return nil, err
 	}
-	return p.targetsOf(ctx, source, scope, p.owners(map[string][2]string{}))
+	return p.targetsOf(ctx, source, scope, p.owners(map[string]ReleaseOwners{}))
 }
 
 func (p *ScopePropagation) targetsOf(ctx context.Context, source domain.Finding, scope domain.DecisionScope, ownersOf ownerLookup) ([]ScopeTarget, error) {
 	if !scope.Propagates() {
 		return nil, nil
 	}
-	product, project, err := ownersOf(ctx, source.ReleaseID())
+	src, err := ownersOf(ctx, source.ReleaseID())
 	if err != nil {
 		return nil, err
 	}
@@ -121,14 +143,19 @@ func (p *ScopePropagation) targetsOf(ctx context.Context, source domain.Finding,
 			continue // a different component is never synced (D2)
 		}
 		// The identity hop runs LAST, only for a target that qualifies on every other count.
-		tp, tj, err := ownersOf(ctx, target.ReleaseID())
+		own, err := ownersOf(ctx, target.ReleaseID())
 		if err != nil {
 			return nil, err
 		}
-		if !scope.Covers(product, project, tp, tj) {
+		if !scope.Covers(src.ProductID, src.ProjectID, own.ProductID, own.ProjectID) {
 			continue
 		}
-		out = append(out, ScopeTarget{FindingID: sid, ReleaseID: target.ReleaseID(), ProductID: tp, ProjectID: tj, Level: level})
+		out = append(out, ScopeTarget{
+			FindingID: sid, ReleaseID: target.ReleaseID(),
+			ProductID: own.ProductID, ProjectID: own.ProjectID,
+			ProductName: own.ProductName, ProjectName: own.ProjectName, Version: own.Version,
+			Level: level,
+		})
 	}
 	return out, nil
 }
@@ -145,7 +172,12 @@ func (p *ScopePropagation) Apply(ctx context.Context, sp ScopedPosition) (int, e
 	if !ok || pos.Version() != sp.Version || !pos.IsScopedSource() {
 		return 0, nil
 	}
-	targets, err := p.targetsOf(ctx, source, pos.Scope(), p.owners(map[string][2]string{}))
+	ownersOf := p.owners(map[string]ReleaseOwners{})
+	src, err := ownersOf(ctx, source.ReleaseID()) // names the source in every rationale; cached for targetsOf
+	if err != nil {
+		return 0, err
+	}
+	targets, err := p.targetsOf(ctx, source, pos.Scope(), ownersOf)
 	if err != nil {
 		return 0, err
 	}
@@ -154,7 +186,7 @@ func (p *ScopePropagation) Apply(ctx context.Context, sp ScopedPosition) (int, e
 		if err := ctx.Err(); err != nil {
 			return applied, err
 		}
-		ok, err := p.svc.ApplyScopedPosition(ctx, t.FindingID, source, pos, t.Level)
+		ok, err := p.svc.ApplyScopedPosition(ctx, t.FindingID, source, src.Label(), pos, t.Level)
 		if err != nil {
 			return applied, fmt.Errorf("apply scope to %s: %w", t.FindingID, err)
 		}
@@ -204,7 +236,7 @@ func (p *ScopePropagation) ForRelease(ctx context.Context, releaseID, productID,
 	if err != nil {
 		return res, err
 	}
-	ownersOf := p.owners(map[string][2]string{releaseID: {productID, projectID}})
+	ownersOf := p.owners(map[string]ReleaseOwners{releaseID: {ProductID: productID, ProjectID: projectID}})
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -243,6 +275,7 @@ func (p *ScopePropagation) applyStanding(ctx context.Context, id domain.FindingI
 		best      domain.Finding
 		bestPos   domain.Position
 		bestLevel domain.RollForwardLevel
+		bestOwner ReleaseOwners
 		found     bool
 	)
 	for _, sid := range siblings {
@@ -264,24 +297,24 @@ func (p *ScopePropagation) applyStanding(ctx context.Context, id domain.FindingI
 		if level == "" {
 			continue
 		}
-		sp, sj, err := ownersOf(ctx, sib.ReleaseID())
+		own, err := ownersOf(ctx, sib.ReleaseID())
 		if err != nil {
 			return false, false, err
 		}
-		if !pos.Scope().Covers(sp, sj, productID, projectID) {
+		if !pos.Scope().Covers(own.ProductID, own.ProjectID, productID, projectID) {
 			continue
 		}
 		if found && pos.Stance() != bestPos.Stance() {
 			conflict = true
 		}
 		if !found || pos.EstablishedAt().After(bestPos.EstablishedAt()) {
-			best, bestPos, bestLevel, found = sib, pos, level, true
+			best, bestPos, bestLevel, bestOwner, found = sib, pos, level, own, true
 		}
 	}
 	if !found || conflict {
 		return false, conflict, nil
 	}
-	applied, err = p.svc.ApplyScopedPosition(ctx, id, best, bestPos, bestLevel)
+	applied, err = p.svc.ApplyScopedPosition(ctx, id, best, bestOwner.Label(), bestPos, bestLevel)
 	return applied, false, err
 }
 
@@ -303,24 +336,24 @@ func (p *ScopePropagation) RunEvery(ctx context.Context, every time.Duration, re
 	}
 }
 
-// ownerLookup is the release → (product, project) hop with a per-pass cache: one Registry call
-// per release, however many Findings share it. A blank answer is an error (fail closed).
-type ownerLookup func(ctx context.Context, releaseID string) (product, project string, err error)
+// ownerLookup is the release → owners hop with a per-pass cache: one Registry call per release,
+// however many Findings share it. A blank id is an error (fail closed); blank names are not.
+type ownerLookup func(ctx context.Context, releaseID string) (ReleaseOwners, error)
 
-func (p *ScopePropagation) owners(cache map[string][2]string) ownerLookup {
-	return func(ctx context.Context, releaseID string) (string, string, error) {
+func (p *ScopePropagation) owners(cache map[string]ReleaseOwners) ownerLookup {
+	return func(ctx context.Context, releaseID string) (ReleaseOwners, error) {
 		if o, ok := cache[releaseID]; ok {
-			return o[0], o[1], nil
+			return o, nil
 		}
-		product, project, err := p.identity.ProductAndProjectOfRelease(ctx, releaseID)
+		own, err := p.registry.ReleaseOwners(ctx, releaseID)
 		if err != nil {
-			return "", "", err
+			return ReleaseOwners{}, err
 		}
-		if product == "" || project == "" {
-			return "", "", ErrUnresolvedReleaseIdentity
+		if own.ProductID == "" || own.ProjectID == "" {
+			return ReleaseOwners{}, ErrUnresolvedReleaseIdentity
 		}
-		cache[releaseID] = [2]string{product, project}
-		return product, project, nil
+		cache[releaseID] = own
+		return own, nil
 	}
 }
 
@@ -330,9 +363,10 @@ func (p *ScopePropagation) owners(cache map[string][2]string) ownerLookup {
 // ones, so Jira, mail, the SLA clock and the watcher see a Position like any other. Returns
 // whether a Position was established; a target decided meanwhile, or already carrying this
 // pair, gets nothing.
-func (s *FindingService) ApplyScopedPosition(ctx context.Context, targetID domain.FindingID, source domain.Finding, pos domain.Position, level domain.RollForwardLevel) (bool, error) {
+// sourceLabel names the source release for the rationale ("<project> <version>"; blank → id).
+func (s *FindingService) ApplyScopedPosition(ctx context.Context, targetID domain.FindingID, source domain.Finding, sourceLabel string, pos domain.Position, level domain.RollForwardLevel) (bool, error) {
 	pid := domain.ScopedProposalID(targetID, source.ID(), pos.Version())
-	rationale := domain.ScopedRationale(source, pos, level)
+	rationale := domain.ScopedRationale(source, sourceLabel, pos, level)
 	in := pos.Inputs()
 	terms := domain.AcceptanceTerms{
 		ReviewBy: in.ReviewBy, Owner: in.Owner, Treatment: in.Treatment, Proof: in.Proof,

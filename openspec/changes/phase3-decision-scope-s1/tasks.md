@@ -28,7 +28,10 @@ No `specs/` deltas — archive with `openspec archive phase3-decision-scope-s1 -
   500 Registry outage, 503 no seam).
 - [x] 3.3 Wiring under the Registry seam; `THEMIS_SCOPE_SWEEP_INTERVAL` on `cmd/governance`.
 - [x] 3.4 `node.env.example`, CHANGELOG, EDR-SYNC-01 status + realization note, BACKLOG SYNC-1.
-- [ ] 3.5 VM: migration governance 23; decide with `scope=product` on project A; the sibling
-  project's Finding shows the Position within a sweep, same person, `propagated_from_*` set;
-  `scope-targets` preview count matches; a later upload of a third project gets it at
-  evaluation.
+- [x] 3.5 VM (2026-11-03): migration governance 23; decided with `scope=product` on project
+  A; the one undecided sibling (third project, artifact level) showed the Position within a
+  sweep, same person, `propagated_from_*` set; the sibling decided the day before kept its own
+  Position; preview count 1 matched. Later-upload case not yet exercised.
+- [x] 3.6 Names beside ids (owner ask on the VM round): `ReleaseOwnerResolver` (registry client
+  `ReleaseOwners`, three hops), `ScopeTarget.ProductName/ProjectName/Version`, preview fields
+  `product_name`/`project_name`/`version`, rationale "from <project> <version>".
