@@ -68,6 +68,10 @@ type Governance struct {
 	// fix-published notices and announces one governance.fix_available.v1 per release. Always
 	// wired; the composition root runs it on THEMIS_FIX_AVAILABLE_INTERVAL (0 disables).
 	FixAvailable *app.FixAvailableSweep
+	// Scope applies scoped decisions (EDR-SYNC-01): the composition root runs its sweep on
+	// THEMIS_SCOPE_SWEEP_INTERVAL. Nil without a Registry seam — the owners of a release cannot
+	// be resolved, so a scoped decision stays pending, visibly, rather than guessed at.
+	Scope *app.ScopePropagation
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -154,11 +158,16 @@ func Wire(
 	// Findings and publishes. Without a Registry seam there is nothing to resolve them WITH, so
 	// no worker is wired and the queue simply holds.
 	var evaluations *app.ReleaseEvaluationWorker
+	var scope *app.ScopePropagation
 	if reg != nil {
 		// Same-CVE roll-forward (EDR-ROLLFORWARD-01) rides the worker: it needs the same
 		// release → project hop, and the same "defer and retry" posture when Registry is down.
 		rollForward := app.NewRollForward(write, st, reg)
-		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger}).WithRollForward(rollForward)
+		// Scoped decisions (EDR-SYNC-01) ride it too, BEFORE roll-forward: a Finding the person
+		// decided for the whole product should carry no sibling's proposal.
+		scope = app.NewScopePropagation(write, st, st, reg)
+		handler = handler.WithScopePropagation(scope)
+		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger}).WithScopePropagation(scope).WithRollForward(rollForward)
 		if rejudge != nil {
 			rejudge = rejudge.WithRollForward(rollForward)
 		}
@@ -185,6 +194,7 @@ func Wire(
 		ReviewBy:     app.NewReviewBySweep(write, st, sysClock{}),
 		SLA:          sla,
 		FixAvailable: app.NewFixAvailableSweep(st, sysClock{}),
+		Scope:        scope,
 	}
 }
 

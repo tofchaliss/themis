@@ -41,6 +41,9 @@ type Handler struct {
 	sla *app.SLAService
 	// metrics serves the remediation metrics (D6). Nil ⇒ /metrics/remediation answers 503.
 	metrics *app.MetricsService
+	// scope previews who a scoped decision reaches (EDR-SYNC-01 D7). Nil ⇒ no Registry seam, and
+	// /findings/{id}/scope-targets answers 503: "nobody" must not stand in for "cannot tell".
+	scope *app.ScopePropagation
 	// now stamps generated_at; replaceable in tests.
 	now func() time.Time
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response
@@ -72,6 +75,12 @@ func (h *Handler) WithProductResolver(pr ProductResolver) *Handler {
 // WithMetrics attaches the remediation metrics read (EDR-REMEDIATION-01 D6).
 func (h *Handler) WithMetrics(m *app.MetricsService) *Handler {
 	h.metrics = m
+	return h
+}
+
+// WithScopePropagation attaches the scope preview behind /findings/{id}/scope-targets.
+func (h *Handler) WithScopePropagation(sp *app.ScopePropagation) *Handler {
+	h.scope = sp
 	return h
 }
 
@@ -240,6 +249,42 @@ func (h *Handler) GetPosition(w http.ResponseWriter, r *http.Request, id string,
 		return
 	}
 	writeJSON(w, http.StatusOK, toPositionView(pos))
+}
+
+// GetScopeTargets handles GET /findings/{id}/scope-targets — the preview of who a decision of
+// the given scope on this Finding would reach now (EDR-SYNC-01 D7). Read-only; the same list
+// the sweep applies to.
+func (h *Handler) GetScopeTargets(w http.ResponseWriter, r *http.Request, id string, params gen.GetScopeTargetsParams) {
+	scope, err := domain.ParseDecisionScope(string(params.Scope))
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid scope", err.Error())
+		return
+	}
+	if h.scope == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "scope preview unavailable",
+			"no Registry seam is configured (THEMIS_REGISTRY_URL), so the owners of the releases cannot be resolved")
+		return
+	}
+	targets, err := h.scope.Targets(r.Context(), domain.FindingID(id), scope)
+	if err != nil {
+		writeErr(w, "cannot preview scope targets", err)
+		return
+	}
+	out := make([]gen.ScopeTargetView, 0, len(targets))
+	projects := map[string]bool{}
+	for _, t := range targets {
+		projects[t.ProjectID] = true
+		level := gen.ScopeTargetViewLevel(t.Level)
+		out = append(out, gen.ScopeTargetView{
+			FindingId: strptr(string(t.FindingID)), ReleaseId: strptr(t.ReleaseID),
+			ProductId: strptr(t.ProductID), ProjectId: strptr(t.ProjectID), Level: &level,
+		})
+	}
+	count, nProjects := len(out), len(projects)
+	sc := gen.ScopeTargetsViewScope(scope)
+	writeJSON(w, http.StatusOK, gen.ScopeTargetsView{
+		FindingId: strptr(id), Scope: &sc, Count: &count, Projects: &nProjects, Targets: &out,
+	})
 }
 
 // GetReleasePosture handles GET /releases/{releaseId}/posture.
@@ -726,6 +771,13 @@ func toPositionView(p domain.Position) gen.PositionView {
 	if in.Proof != "" {
 		v.Proof = strptr(in.Proof)
 	}
+	scope := gen.PositionViewScope(p.Scope())
+	v.Scope = &scope
+	if src, ok := p.PropagatedFrom(); ok {
+		v.PropagatedFromFindingId = strptr(string(src.FindingID))
+		ver := src.Version
+		v.PropagatedFromVersion = &ver
+	}
 	return v
 }
 
@@ -951,6 +1003,11 @@ func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, domain.
 	if body.Proof != nil {
 		terms.Proof = *body.Proof
 	}
+	if body.Scope != nil {
+		// Validated by the domain (ErrInvalidScope → 400): the wire enum is advisory, the closed
+		// set is the aggregate's.
+		terms.Scope = domain.DecisionScope(*body.Scope)
+	}
 	actor, ok := deciderActorFrom(w, r, &body)
 	return actor, terms, ok
 }
@@ -999,7 +1056,7 @@ func writeErr(w http.ResponseWriter, title string, err error) {
 	case errors.Is(err, app.ErrUnauthorized):
 		writeProblem(w, http.StatusForbidden, title, err.Error())
 	case errors.Is(err, domain.ErrOwnerRequired), errors.Is(err, domain.ErrInvalidTreatment),
-		errors.Is(err, domain.ErrTermsNotApplicable):
+		errors.Is(err, domain.ErrTermsNotApplicable), errors.Is(err, domain.ErrInvalidScope):
 		writeProblem(w, http.StatusBadRequest, title, err.Error())
 	case errors.Is(err, domain.ErrIllegalTransition),
 		errors.Is(err, domain.ErrProposalNotOpen),

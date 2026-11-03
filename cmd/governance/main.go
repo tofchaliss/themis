@@ -81,7 +81,13 @@ type config struct {
 	// each; the interval is also the gathering window. Go duration, default 10m; "0" disables
 	// (notices are still recorded, nothing announces them).
 	fixAvailableInterval time.Duration
-	rejudgeRanges        bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
+	// THEMIS_SCOPE_SWEEP_INTERVAL — cadence of the scoped-decision sweep (EDR-SYNC-01 D4): a
+	// decision taken with scope project / product is applied to the Findings it reaches on this
+	// clock (the person asked for minutes, not seconds). Findings born later are reached on the
+	// release-evaluation worker regardless. Go duration, default 1m; "0" disables the sweep
+	// (decisions stay pending; nothing is lost).
+	scopeSweepInterval time.Duration
+	rejudgeRanges      bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
 	busMigrate        bool   // THEMIS_BUS_MIGRATE=1 — apply the bus migrations to THEMIS_BUS_DATABASE_DSN on startup (dev convenience).
@@ -115,6 +121,7 @@ func loadConfig() config {
 		reviewByInterval:     envDurationDefault("THEMIS_REVIEW_BY_INTERVAL", time.Hour),
 		reviewWarning:        envDurationDefault("THEMIS_REVIEW_WARNING", domain.DefaultReviewWarning),
 		fixAvailableInterval: envDurationDefault("THEMIS_FIX_AVAILABLE_INTERVAL", app.DefaultFixAvailableInterval),
+		scopeSweepInterval:   envDurationDefault("THEMIS_SCOPE_SWEEP_INTERVAL", app.DefaultScopeSweepInterval),
 		busMigrate:           os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath:    envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
@@ -262,6 +269,26 @@ func main() {
 		logger.Info("fix-available sweep enabled", observability.String("interval", cfg.fixAvailableInterval.String()))
 	} else {
 		logger.Warn("fix-available sweep DISABLED (THEMIS_FIX_AVAILABLE_INTERVAL=0) — a vendor fix published for an open component is recorded but never announced")
+	}
+	// The scoped-decision sweep (EDR-SYNC-01 D4): a person's project- or product-wide decision
+	// reaches the Findings it covers. It applies the person's own decision; it decides nothing.
+	switch {
+	case gov.Scope == nil:
+		logger.Warn("scope sweep DISABLED (no Registry seam) — a decision taken with scope project/product stays pending until THEMIS_REGISTRY_URL is set")
+	case cfg.scopeSweepInterval > 0:
+		sc := logger.Component("scope")
+		go gov.Scope.RunEvery(ctx, cfg.scopeSweepInterval, func(res app.ScopeResult, err error) {
+			if err != nil {
+				sc.Error("scope sweep failed", observability.Err(err), observability.Int("decisions", res.Decisions), observability.Int("applied", res.Applied))
+				return
+			}
+			if res.Decisions > 0 {
+				sc.Info("scope sweep", observability.Int("decisions", res.Decisions), observability.Int("applied", res.Applied))
+			}
+		})
+		logger.Info("scope sweep enabled", observability.String("interval", cfg.scopeSweepInterval.String()))
+	default:
+		logger.Warn("scope sweep DISABLED (THEMIS_SCOPE_SWEEP_INTERVAL=0) — scoped decisions reach Findings born later only")
 	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)

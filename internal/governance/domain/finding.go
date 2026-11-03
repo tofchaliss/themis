@@ -232,6 +232,7 @@ func (f *Finding) AcceptProposalWith(id ProposalID, by Actor, at time.Time, term
 			AcceptedProposalID: id, FaultlineRef: f.faultlineID,
 			DecidedWith: f.signals, ReviewBy: terms.ReviewBy,
 			Owner: terms.Owner, Treatment: terms.Treatment, Proof: terms.Proof,
+			Scope: terms.Scope, PropagatedFrom: terms.PropagatedFrom,
 		},
 		establishedAt: at.UTC(),
 	}

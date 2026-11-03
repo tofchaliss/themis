@@ -43,6 +43,11 @@ type AcceptanceTerms struct {
 	// Proof is a reference (URL or document id) to the justification. Stored as text, never
 	// fetched.
 	Proof string
+	// Scope is how wide the decision reaches (EDR-SYNC-01 D1): blank or release is this Finding
+	// only. PropagatedFrom is set only by Governance itself when it applies a scoped decision to
+	// a target (D3); a person's own decision names no source.
+	Scope          DecisionScope
+	PropagatedFrom PropagationSource
 }
 
 var (
@@ -67,6 +72,14 @@ func checkTerms(stance Stance, by Actor, t AcceptanceTerms) (AcceptanceTerms, er
 	if !ValidTreatment(t.Treatment) {
 		return t, ErrInvalidTreatment
 	}
+	scope, err := ParseDecisionScope(string(t.Scope))
+	if err != nil {
+		return t, err
+	}
+	if scope == ScopeRelease {
+		scope = "" // the pre-record spelling: a release-scoped decision carries no scope mark
+	}
+	t.Scope = scope
 	if !carriesAcceptance(stance) {
 		if t.Owner != "" || t.Treatment != "" || t.Proof != "" {
 			return t, ErrTermsNotApplicable

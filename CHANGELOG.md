@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **One decision, chosen scope** (EDR-SYNC-01 D1–D8, SYNC-1 step S1): a decision carries a
+  `scope` — `release` (default, unchanged) · `project` · `product`. Themis then establishes the
+  same Position, recorded against the same person, on every undecided same-CVE same-component
+  Finding in scope (artifact or component level, never a different package): on a sweep every
+  `THEMIS_SCOPE_SWEEP_INTERVAL` (1m) and, for Findings born later, when their release is
+  evaluated. The target carries `propagated_from_finding_id` / `_version`; the proposal is in
+  the person's name (`scoped:<target>:<source>:v<n>`, Asserted). A local decision is never
+  overwritten; two scoped decisions that disagree apply nothing; a propagated Position never
+  propagates further. `GET /findings/{id}/scope-targets?scope=` previews what a scope reaches.
+  Governance migration 000023. Needs the Registry seam; without it the feature is off.
 - **Fix-available alert** (EDR-INCIDENT-01 D1, INC-1 step A): when an open row learns a vendor
   fix it is behind (a same-major RPM bound or an Alpine bound), Knowledge announces
   `knowledge.fix_published.v1`; Governance collects the notices and every
